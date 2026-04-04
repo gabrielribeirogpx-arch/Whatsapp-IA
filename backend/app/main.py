@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 
-from app.routers.webhook import router as webhook_router
+from backend.app.routers.webhook import router as webhook_router
 
 app = FastAPI(title="WhatsApp SaaS API")
 

@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Request
 
-from app.services.message_service import process_message
+from backend.app.services.message_service import process_message
 
 router = APIRouter(tags=["webhook"])
 
