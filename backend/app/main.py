@@ -1,4 +1,4 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 
 app = FastAPI(title="WhatsApp SaaS API")
 
@@ -9,3 +9,10 @@ def root():
 @app.get("/health")
 def health():
     return {"status": "healthy"}
+
+
+@app.post("/webhook")
+async def webhook(request: Request):
+    payload = await request.json()
+    print("Webhook recebido:", payload)
+    return {"status": "received"}
