@@ -1,11 +1,17 @@
 import logging
+import re
 from typing import Any
 
 logger = logging.getLogger(__name__)
 
 
-def generate_response(message: str) -> str:
-    return "Recebi sua mensagem"
+def sanitize_text(value: str) -> str:
+    sanitized = re.sub(r"[\x00-\x08\x0B\x0C\x0E-\x1F]", "", value)
+    return sanitized.strip()
+
+
+def sanitize_phone(value: str) -> str:
+    return re.sub(r"\D", "", value)
 
 
 def extract_whatsapp_messages(payload: dict[str, Any]) -> list[dict[str, str]]:
@@ -19,28 +25,23 @@ def extract_whatsapp_messages(payload: dict[str, Any]) -> list[dict[str, str]]:
             messages = value.get("messages", [])
             contacts = value.get("contacts", [])
             fallback_phone = ""
+            fallback_name = "Cliente"
             if contacts:
                 fallback_phone = contacts[0].get("wa_id", "")
+                fallback_name = contacts[0].get("profile", {}).get("name", "Cliente")
 
             for message in messages:
-                phone = message.get("from") or fallback_phone
-                text = message.get("text", {}).get("body")
+                phone = sanitize_phone(message.get("from") or fallback_phone)
+                text = sanitize_text(message.get("text", {}).get("body", ""))
                 if not phone or not text:
                     continue
 
-                messages_data.append({"phone": phone, "text": text})
+                messages_data.append(
+                    {
+                        "phone": phone,
+                        "text": text,
+                        "name": sanitize_text(fallback_name) or "Cliente",
+                    }
+                )
 
     return messages_data
-
-
-def process_message(payload: dict[str, Any]) -> list[dict[str, str]]:
-    extracted_messages = extract_whatsapp_messages(payload)
-
-    for message in extracted_messages:
-        logger.info(
-            "Mensagem recebida. phone=%s text=%s",
-            message["phone"],
-            message["text"],
-        )
-
-    return extracted_messages
