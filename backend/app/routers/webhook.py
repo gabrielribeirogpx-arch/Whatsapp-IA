@@ -8,10 +8,10 @@ from sqlalchemy.orm import Session
 
 from backend.app.database import get_db
 from backend.app.models import Conversation, Message
-from backend.app.services.ai_service import generate_ai_response
+from backend.app.services.ai_service import gerar_resposta
 from backend.app.services.message_service import extract_whatsapp_messages
 from backend.app.services.realtime_service import sse_broker
-from backend.app.services.whatsapp_service import send_whatsapp_message
+from backend.app.services.whatsapp_service import enviar_mensagem
 
 logger = logging.getLogger(__name__)
 
@@ -37,19 +37,33 @@ async def webhook(request: Request, db: Session = Depends(get_db)):
     payload = await request.json()
     logger.info("📩 Evento recebido do WhatsApp: %s", json.dumps(payload, ensure_ascii=False))
 
+    # Eventos de status (entregue/lido/falhou) não devem gerar resposta.
+    if any(change.get("value", {}).get("statuses") for entry in payload.get("entry", []) for change in entry.get("changes", [])):
+        return {"status": "ignored_status_event"}
+
     inbound_messages = extract_whatsapp_messages(payload)
 
     for inbound in inbound_messages:
         phone = inbound["phone"]
         text = inbound["text"]
         name = inbound["name"]
+        message_id = inbound.get("message_id")
+
+        # Evita respostas duplicadas em retries do webhook.
+        if message_id:
+            already_processed = db.execute(
+                select(Message).where(Message.whatsapp_message_id == message_id)
+            ).scalar_one_or_none()
+            if already_processed:
+                logger.info("Mensagem duplicada ignorada. message_id=%s", message_id)
+                continue
 
         conversation = db.execute(select(Conversation).where(Conversation.phone == phone)).scalar_one_or_none()
         if not conversation:
             conversation = Conversation(phone=phone, name=name, assigned_to="IA")
             db.add(conversation)
 
-        message = Message(phone=phone, content=text, from_me=False)
+        message = Message(phone=phone, whatsapp_message_id=message_id, content=text, from_me=False)
         db.add(message)
         conversation.last_message = text
         if name:
@@ -63,8 +77,8 @@ async def webhook(request: Request, db: Session = Depends(get_db)):
         )
 
         if conversation.assigned_to == "IA":
-            response = generate_ai_response(text)
-            send_whatsapp_message(phone, response)
+            response = gerar_resposta(text)
+            enviar_mensagem(phone, response)
 
             ai_message = Message(phone=phone, content=response, from_me=True)
             db.add(ai_message)

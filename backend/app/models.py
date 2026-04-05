@@ -21,6 +21,7 @@ class Message(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     phone: Mapped[str] = mapped_column(String(32), index=True)
+    whatsapp_message_id: Mapped[str | None] = mapped_column(String(128), unique=True, index=True, nullable=True)
     content: Mapped[str] = mapped_column(Text)
     from_me: Mapped[bool] = mapped_column(Boolean, default=False)
     timestamp: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
