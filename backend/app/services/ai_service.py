@@ -15,21 +15,26 @@ DEFAULT_SYSTEM_PROMPT = (
 )
 
 
-def _build_context_messages(history: Sequence[Message], inbound_text: str, system_prompt: str) -> list[dict[str, str]]:
-    context: list[dict[str, str]] = [{"role": "system", "content": system_prompt}]
-    for item in history:
-        role = "assistant" if item.from_me else "user"
-        context.append({"role": role, "content": item.content})
-    context.append({"role": "user", "content": inbound_text})
-    return context
+def _to_openai_messages(contexto: Sequence[Message], prompt: str, system_prompt: str) -> list[dict[str, str]]:
+    messages: list[dict[str, str]] = [{"role": "system", "content": system_prompt}]
+    for item in contexto:
+        role = item.role or ("assistant" if item.from_me else "user")
+        content = item.message or item.content
+        messages.append({"role": role, "content": content})
+    messages.append({"role": "user", "content": prompt})
+    return messages
 
 
-def gerar_resposta(texto: str, history: Sequence[Message] | None = None, ai_config: AIConfig | None = None) -> str:
+def gerar_resposta(
+    contexto: Sequence[Message] | None,
+    prompt: str,
+    ai_config: AIConfig | None = None,
+) -> str:
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
         return "Olá! Recebi sua mensagem e já vou te ajudar da melhor forma possível."
 
-    prompt = ai_config.system_prompt if ai_config and ai_config.system_prompt else DEFAULT_SYSTEM_PROMPT
+    system_prompt = ai_config.system_prompt if ai_config and ai_config.system_prompt else DEFAULT_SYSTEM_PROMPT
     model = ai_config.model if ai_config and ai_config.model else os.getenv("OPENAI_MODEL", "gpt-4o-mini")
     temperature = ai_config.temperature if ai_config else 0.4
 
@@ -37,7 +42,7 @@ def gerar_resposta(texto: str, history: Sequence[Message] | None = None, ai_conf
         client = OpenAI(api_key=api_key)
         completion = client.chat.completions.create(
             model=model,
-            messages=_build_context_messages(history or [], texto, prompt),
+            messages=_to_openai_messages(contexto or [], prompt, system_prompt),
             temperature=temperature,
         )
         content = completion.choices[0].message.content
@@ -48,4 +53,4 @@ def gerar_resposta(texto: str, history: Sequence[Message] | None = None, ai_conf
 
 
 def generate_ai_response(message: str) -> str:
-    return gerar_resposta(message)
+    return gerar_resposta([], message)

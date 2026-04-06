@@ -1,15 +1,16 @@
 import json
 import logging
-import os
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from backend.app.core.config import settings
 from backend.app.database import get_db
 from backend.app.models import AIConfig, Conversation, Message
 from backend.app.services.ai_service import gerar_resposta
+from backend.app.services.context_service import build_context
 from backend.app.services.message_service import extract_whatsapp_messages
 from backend.app.services.realtime_service import sse_broker
 from backend.app.services.tenant_service import (
@@ -17,9 +18,9 @@ from backend.app.services.tenant_service import (
     assert_tenant_can_send,
     consume_usage,
     get_or_create_default_tenant,
-    resolve_tenant_by_phone_number_id,
+    get_tenant_by_phone_number_id,
 )
-from backend.app.services.whatsapp_service import WhatsAppConfigError, enviar_mensagem
+from backend.app.services.whatsapp_service import WhatsAppConfigError, send_message
 
 logger = logging.getLogger(__name__)
 
@@ -32,13 +33,11 @@ def _channel(tenant_id: int, phone: str) -> str:
 
 @router.get("/webhook")
 async def verify(request: Request):
-    verify_token = os.getenv("VERIFY_TOKEN")
-
     mode = request.query_params.get("hub.mode")
     token = request.query_params.get("hub.verify_token")
     challenge = request.query_params.get("hub.challenge")
 
-    if mode == "subscribe" and token == verify_token and challenge:
+    if mode == "subscribe" and token == settings.verify_token and challenge:
         return int(challenge)
 
     raise HTTPException(status_code=403, detail="verification failed")
@@ -61,7 +60,7 @@ async def webhook(request: Request, db: Session = Depends(get_db)):
         message_id = inbound.get("message_id")
         phone_number_id = inbound.get("phone_number_id")
 
-        tenant = resolve_tenant_by_phone_number_id(db, phone_number_id) or get_or_create_default_tenant(db)
+        tenant = get_tenant_by_phone_number_id(db, phone_number_id) or get_or_create_default_tenant(db)
 
         if message_id:
             already_processed = db.execute(select(Message).where(Message.whatsapp_message_id == message_id)).scalar_one_or_none()
@@ -82,6 +81,9 @@ async def webhook(request: Request, db: Session = Depends(get_db)):
             phone=phone,
             conversation_id=conversation.id,
             whatsapp_message_id=message_id,
+            role="user",
+            message=text,
+            created_at=datetime.utcnow(),
             content=text,
             from_me=False,
         )
@@ -116,25 +118,11 @@ async def webhook(request: Request, db: Session = Depends(get_db)):
                 db.commit()
                 continue
 
-            history = (
-                db.execute(
-                    select(Message)
-                    .where(Message.tenant_id == tenant.id, Message.conversation_id == conversation.id)
-                    .order_by(Message.timestamp.desc(), Message.id.desc())
-                    .limit(20)
-                )
-                .scalars()
-                .all()
-            )
+            context = build_context(db, tenant.id, phone)
             ai_config = db.execute(select(AIConfig).where(AIConfig.tenant_id == tenant.id)).scalar_one_or_none()
-            response = gerar_resposta(text, list(reversed(history)), ai_config)
+            response = gerar_resposta(context, text, ai_config)
             try:
-                enviar_mensagem(
-                    phone,
-                    response,
-                    token=tenant.whatsapp_token,
-                    phone_number_id=tenant.phone_number_id,
-                )
+                send_message(tenant.whatsapp_token or "", tenant.phone_number_id, phone, response)
             except WhatsAppConfigError:
                 logger.warning("WhatsApp não configurado para tenant=%s. Resposta IA salva sem envio externo.", tenant.slug)
 
@@ -142,6 +130,9 @@ async def webhook(request: Request, db: Session = Depends(get_db)):
                 tenant_id=tenant.id,
                 phone=phone,
                 conversation_id=conversation.id,
+                role="assistant",
+                message=response,
+                created_at=datetime.utcnow(),
                 content=response,
                 from_me=True,
             )

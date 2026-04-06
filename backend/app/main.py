@@ -4,6 +4,7 @@ from sqlalchemy import inspect, text
 
 from backend.app.database import Base, engine
 from backend.app.routers.chat import router as chat_router
+from backend.app.routers.internal_api import router as internal_router
 from backend.app.routers.webhook import router as webhook_router
 
 Base.metadata.create_all(bind=engine)
@@ -23,6 +24,7 @@ def _run_lightweight_migrations() -> None:
                         name VARCHAR(150) NOT NULL,
                         slug VARCHAR(80) UNIQUE,
                         phone_number_id VARCHAR(64) UNIQUE,
+                        verify_token VARCHAR(255),
                         whatsapp_token VARCHAR(512),
                         plan VARCHAR(32) DEFAULT 'starter',
                         max_monthly_messages INTEGER DEFAULT 1000,
@@ -60,6 +62,11 @@ def _run_lightweight_migrations() -> None:
                 )
             )
 
+        if "tenants" in tables:
+            tenant_columns = {column["name"] for column in inspector.get_columns("tenants")}
+            if "verify_token" not in tenant_columns:
+                connection.execute(text("ALTER TABLE tenants ADD COLUMN verify_token VARCHAR(255)"))
+
         if "conversations" in tables:
             columns = {column["name"] for column in inspector.get_columns("conversations")}
             if "tenant_id" not in columns:
@@ -77,6 +84,15 @@ def _run_lightweight_migrations() -> None:
                 connection.execute(text("ALTER TABLE messages ADD COLUMN tenant_id INTEGER DEFAULT 1"))
             if "conversation_id" not in msg_columns:
                 connection.execute(text("ALTER TABLE messages ADD COLUMN conversation_id INTEGER"))
+            if "role" not in msg_columns:
+                connection.execute(text("ALTER TABLE messages ADD COLUMN role VARCHAR(16)"))
+                connection.execute(text("UPDATE messages SET role=CASE WHEN from_me=1 THEN 'assistant' ELSE 'user' END WHERE role IS NULL"))
+            if "message" not in msg_columns:
+                connection.execute(text("ALTER TABLE messages ADD COLUMN message TEXT"))
+                connection.execute(text("UPDATE messages SET message=content WHERE message IS NULL"))
+            if "created_at" not in msg_columns:
+                connection.execute(text("ALTER TABLE messages ADD COLUMN created_at DATETIME"))
+                connection.execute(text("UPDATE messages SET created_at=timestamp WHERE created_at IS NULL"))
 
         if "conversations" in tables and "messages" in tables:
             connection.execute(
@@ -123,6 +139,7 @@ app.add_middleware(
 
 app.include_router(webhook_router)
 app.include_router(chat_router)
+app.include_router(internal_router)
 
 
 @app.get("/")
