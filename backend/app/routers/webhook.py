@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import select
@@ -11,7 +12,7 @@ from backend.app.models import Conversation, Message
 from backend.app.services.ai_service import gerar_resposta
 from backend.app.services.message_service import extract_whatsapp_messages
 from backend.app.services.realtime_service import sse_broker
-from backend.app.services.whatsapp_service import enviar_mensagem
+from backend.app.services.whatsapp_service import WhatsAppConfigError, enviar_mensagem
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +38,6 @@ async def webhook(request: Request, db: Session = Depends(get_db)):
     payload = await request.json()
     logger.info("📩 Evento recebido do WhatsApp: %s", json.dumps(payload, ensure_ascii=False))
 
-    # Eventos de status (entregue/lido/falhou) não devem gerar resposta.
     if any(change.get("value", {}).get("statuses") for entry in payload.get("entry", []) for change in entry.get("changes", [])):
         return {"status": "ignored_status_event"}
 
@@ -49,7 +49,6 @@ async def webhook(request: Request, db: Session = Depends(get_db)):
         name = inbound["name"]
         message_id = inbound.get("message_id")
 
-        # Evita respostas duplicadas em retries do webhook.
         if message_id:
             already_processed = db.execute(
                 select(Message).where(Message.whatsapp_message_id == message_id)
@@ -60,12 +59,20 @@ async def webhook(request: Request, db: Session = Depends(get_db)):
 
         conversation = db.execute(select(Conversation).where(Conversation.phone == phone)).scalar_one_or_none()
         if not conversation:
-            conversation = Conversation(phone=phone, name=name, assigned_to="IA")
+            conversation = Conversation(phone=phone, name=name, status="bot")
             db.add(conversation)
+            db.flush()
 
-        message = Message(phone=phone, whatsapp_message_id=message_id, content=text, from_me=False)
+        message = Message(
+            phone=phone,
+            conversation_id=conversation.id,
+            whatsapp_message_id=message_id,
+            content=text,
+            from_me=False,
+        )
         db.add(message)
         conversation.last_message = text
+        conversation.updated_at = datetime.utcnow()
         if name:
             conversation.name = name
         db.commit()
@@ -76,13 +83,27 @@ async def webhook(request: Request, db: Session = Depends(get_db)):
             {"event": "message", "message": {"id": message.id, "phone": message.phone, "content": message.content, "from_me": message.from_me, "timestamp": message.timestamp.isoformat()}},
         )
 
-        if conversation.assigned_to == "IA":
-            response = gerar_resposta(text)
-            enviar_mensagem(phone, response)
+        if conversation.status == "bot":
+            history = (
+                db.execute(
+                    select(Message)
+                    .where(Message.conversation_id == conversation.id)
+                    .order_by(Message.timestamp.desc(), Message.id.desc())
+                    .limit(20)
+                )
+                .scalars()
+                .all()
+            )
+            response = gerar_resposta(text, list(reversed(history)))
+            try:
+                enviar_mensagem(phone, response)
+            except WhatsAppConfigError:
+                logger.warning("WhatsApp não configurado. Resposta IA salva sem envio externo.")
 
-            ai_message = Message(phone=phone, content=response, from_me=True)
+            ai_message = Message(phone=phone, conversation_id=conversation.id, content=response, from_me=True)
             db.add(ai_message)
             conversation.last_message = response
+            conversation.updated_at = datetime.utcnow()
             db.commit()
             db.refresh(ai_message)
 

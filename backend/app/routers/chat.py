@@ -16,14 +16,14 @@ from backend.app.schemas.chat import (
 )
 from backend.app.services.message_service import sanitize_phone, sanitize_text
 from backend.app.services.realtime_service import sse_broker
-from backend.app.services.whatsapp_service import send_whatsapp_message
+from backend.app.services.whatsapp_service import WhatsAppConfigError, send_whatsapp_message
 
 router = APIRouter(prefix="/api", tags=["chat"])
 
 
 @router.get("/conversations", response_model=list[ConversationOut])
 def list_conversations(db: Session = Depends(get_db)):
-    items = db.execute(select(Conversation).order_by(desc(Conversation.id))).scalars().all()
+    items = db.execute(select(Conversation).order_by(desc(Conversation.updated_at), desc(Conversation.id))).scalars().all()
     return items
 
 
@@ -42,7 +42,7 @@ def get_messages(phone: str, db: Session = Depends(get_db)):
     return items
 
 
-@router.post("/send", response_model=MessageOut)
+@router.post("/send-message", response_model=MessageOut)
 async def send_message(payload: SendMessageRequest, db: Session = Depends(get_db)):
     phone = sanitize_phone(payload.phone)
     message_text = sanitize_text(payload.message)
@@ -51,19 +51,36 @@ async def send_message(payload: SendMessageRequest, db: Session = Depends(get_db
 
     conversation = db.execute(select(Conversation).where(Conversation.phone == phone)).scalar_one_or_none()
     if not conversation:
-        conversation = Conversation(phone=phone, name=sanitize_text(payload.name or "Cliente"))
+        conversation = Conversation(phone=phone, name=sanitize_text(payload.name or "Cliente"), status="human")
         db.add(conversation)
+        db.flush()
 
-    send_whatsapp_message(phone, message_text)
+    try:
+        send_whatsapp_message(phone, message_text)
+    except WhatsAppConfigError:
+        # Permite uso em ambiente local sem integração ativa com WhatsApp.
+        pass
 
-    message = Message(phone=phone, content=message_text, from_me=True, timestamp=datetime.utcnow())
+    message = Message(
+        phone=phone,
+        conversation_id=conversation.id,
+        content=message_text,
+        from_me=True,
+        timestamp=datetime.utcnow(),
+    )
     db.add(message)
     conversation.last_message = message_text
+    conversation.updated_at = datetime.utcnow()
     db.commit()
     db.refresh(message)
 
     await sse_broker.publish(phone, {"event": "message", "message": MessageOut.model_validate(message).model_dump(mode="json")})
     return message
+
+
+@router.post("/send", response_model=MessageOut)
+async def send_message_legacy(payload: SendMessageRequest, db: Session = Depends(get_db)):
+    return await send_message(payload, db)
 
 
 @router.post("/take-over/{phone}", response_model=ToggleAssignmentResponse)
@@ -73,10 +90,11 @@ def take_over(phone: str, db: Session = Depends(get_db)):
     if not conversation:
         raise HTTPException(status_code=404, detail="Conversa não encontrada")
 
-    conversation.assigned_to = "HUMANO" if conversation.assigned_to == "IA" else "IA"
+    conversation.status = "human" if conversation.status == "bot" else "bot"
+    conversation.updated_at = datetime.utcnow()
     db.commit()
 
-    return ToggleAssignmentResponse(phone=sanitized_phone, assigned_to=conversation.assigned_to)
+    return ToggleAssignmentResponse(phone=sanitized_phone, status=conversation.status)
 
 
 @router.get("/stream/messages/{phone}")

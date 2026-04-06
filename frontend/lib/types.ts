@@ -2,8 +2,9 @@ export type Conversation = {
   id: number;
   phone: string;
   name: string;
+  status: 'bot' | 'human' | string;
   last_message: string;
-  assigned_to: 'IA' | 'HUMANO' | string;
+  updated_at: string;
 };
 
 export type Message = {
