@@ -57,10 +57,14 @@ def get_or_create_default_tenant(db: Session) -> Tenant:
     return tenant
 
 
-def resolve_tenant_by_phone_number_id(db: Session, phone_number_id: str | None) -> Tenant | None:
-    if not phone_number_id:
+def get_tenant_by_phone_number_id(db: Session, phone_id: str | None) -> Tenant | None:
+    if not phone_id:
         return None
-    return db.execute(select(Tenant).where(Tenant.phone_number_id == phone_number_id)).scalar_one_or_none()
+    return db.execute(select(Tenant).where(Tenant.phone_number_id == phone_id)).scalar_one_or_none()
+
+
+def resolve_tenant_by_phone_number_id(db: Session, phone_number_id: str | None) -> Tenant | None:
+    return get_tenant_by_phone_number_id(db, phone_number_id)
 
 
 def get_current_tenant(
