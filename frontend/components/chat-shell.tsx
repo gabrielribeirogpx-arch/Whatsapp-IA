@@ -2,10 +2,18 @@
 
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 
-import { getConversations, getMessages, sendMessage, streamMessagesUrl, toggleTakeOver } from '../lib/api';
-import { Conversation, Message } from '../lib/types';
+import { getConversations, getMessages, sendMessage, streamMessagesUrl, tenantLogin, toggleTakeOver } from '../lib/api';
+import { Conversation, Message, TenantAuth, TenantSession } from '../lib/types';
+
+const STORAGE_KEY = 'tenant_auth';
 
 export default function ChatShell() {
+  const [auth, setAuth] = useState<TenantAuth | null>(null);
+  const [session, setSession] = useState<TenantSession | null>(null);
+  const [slugInput, setSlugInput] = useState('default');
+  const [passwordInput, setPasswordInput] = useState('admin123');
+  const [loginError, setLoginError] = useState('');
+
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [selectedPhone, setSelectedPhone] = useState<string>('');
   const [messages, setMessages] = useState<Message[]>([]);
@@ -16,44 +24,100 @@ export default function ChatShell() {
     [conversations, selectedPhone]
   );
 
-  async function refreshConversations() {
-    const data = await getConversations();
+  useEffect(() => {
+    const saved = localStorage.getItem(STORAGE_KEY);
+    if (!saved) return;
+    try {
+      const parsed = JSON.parse(saved) as TenantAuth;
+      setAuth(parsed);
+      tenantLogin(parsed).then(setSession).catch(() => localStorage.removeItem(STORAGE_KEY));
+    } catch {
+      localStorage.removeItem(STORAGE_KEY);
+    }
+  }, []);
+
+  async function onLogin(event: FormEvent) {
+    event.preventDefault();
+    const nextAuth = { slug: slugInput.trim(), password: passwordInput.trim() };
+    try {
+      const tenantSession = await tenantLogin(nextAuth);
+      setAuth(nextAuth);
+      setSession(tenantSession);
+      setLoginError('');
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(nextAuth));
+    } catch {
+      setLoginError('Credenciais inválidas para tenant.');
+    }
+  }
+
+  async function refreshConversations(currentAuth: TenantAuth) {
+    const data = await getConversations(currentAuth);
     setConversations(data);
     if (!selectedPhone && data[0]?.phone) setSelectedPhone(data[0].phone);
   }
 
   useEffect(() => {
-    refreshConversations();
-  }, []);
+    if (!auth) return;
+    refreshConversations(auth).catch(console.error);
+  }, [auth]);
 
   useEffect(() => {
-    if (!selectedPhone) return;
-    getMessages(selectedPhone).then(setMessages).catch(console.error);
+    if (!selectedPhone || !auth) return;
+    getMessages(selectedPhone, auth).then(setMessages).catch(console.error);
 
-    const source = new EventSource(streamMessagesUrl(selectedPhone));
+    const source = new EventSource(streamMessagesUrl(selectedPhone, auth));
     source.onmessage = (event) => {
       const data = JSON.parse(event.data);
       if (data?.event === 'message') {
         setMessages((prev) => [...prev, data.message]);
-        refreshConversations();
+        refreshConversations(auth).catch(console.error);
       }
     };
 
     return () => source.close();
-  }, [selectedPhone]);
+  }, [selectedPhone, auth]);
 
   async function onSend(event: FormEvent) {
     event.preventDefault();
-    if (!selectedPhone || !text.trim()) return;
-    await sendMessage(selectedPhone, text);
+    if (!selectedPhone || !text.trim() || !auth) return;
+    await sendMessage(selectedPhone, text, auth);
     setText('');
-    await refreshConversations();
+    await refreshConversations(auth);
   }
 
   async function onTakeOver() {
-    if (!selectedPhone) return;
-    await toggleTakeOver(selectedPhone);
-    await refreshConversations();
+    if (!selectedPhone || !auth) return;
+    await toggleTakeOver(selectedPhone, auth);
+    await refreshConversations(auth);
+  }
+
+  function onLogout() {
+    localStorage.removeItem(STORAGE_KEY);
+    setAuth(null);
+    setSession(null);
+    setConversations([]);
+    setMessages([]);
+    setSelectedPhone('');
+  }
+
+  if (!auth || !session) {
+    return (
+      <div className="login-screen">
+        <form className="login-card" onSubmit={onLogin}>
+          <h2>Login do Tenant</h2>
+          <p className="muted">Entre com slug e senha do seu tenant SaaS.</p>
+          <input value={slugInput} onChange={(event) => setSlugInput(event.target.value)} placeholder="slug do tenant" />
+          <input
+            value={passwordInput}
+            onChange={(event) => setPasswordInput(event.target.value)}
+            placeholder="senha"
+            type="password"
+          />
+          {loginError ? <div className="error-text">{loginError}</div> : null}
+          <button type="submit" className="primary">Entrar</button>
+        </form>
+      </div>
+    );
   }
 
   const statusLabel = selectedConversation?.status === 'human' ? 'Humano' : 'Bot IA';
@@ -62,7 +126,9 @@ export default function ChatShell() {
     <div className="layout">
       <aside className="sidebar">
         <div className="sidebar-header">
-          <strong>Painel de Atendimento</strong>
+          <strong>{session.name}</strong>
+          <div className="muted">Plano: {session.usage.plan} • Uso: {session.usage.messages_used_month}/{session.usage.max_monthly_messages}</div>
+          <button onClick={onLogout}>Sair</button>
         </div>
         {conversations.map((conv) => (
           <div

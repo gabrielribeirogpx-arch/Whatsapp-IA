@@ -12,12 +12,60 @@ Base.metadata.create_all(bind=engine)
 def _run_lightweight_migrations() -> None:
     inspector = inspect(engine)
     tables = set(inspector.get_table_names())
+
     with engine.begin() as connection:
+        if "tenants" not in tables:
+            connection.execute(
+                text(
+                    """
+                    CREATE TABLE tenants (
+                        id INTEGER PRIMARY KEY,
+                        name VARCHAR(150) NOT NULL,
+                        slug VARCHAR(80) UNIQUE,
+                        phone_number_id VARCHAR(64) UNIQUE,
+                        whatsapp_token VARCHAR(512),
+                        plan VARCHAR(32) DEFAULT 'starter',
+                        max_monthly_messages INTEGER DEFAULT 1000,
+                        usage_month VARCHAR(7),
+                        messages_used_month INTEGER DEFAULT 0,
+                        is_blocked BOOLEAN DEFAULT 0,
+                        admin_password VARCHAR(255) DEFAULT 'admin123',
+                        created_at DATETIME
+                    )
+                    """
+                )
+            )
+            connection.execute(
+                text(
+                    """
+                    INSERT INTO tenants (name, slug, phone_number_id, plan, max_monthly_messages, usage_month, messages_used_month, is_blocked, admin_password, created_at)
+                    VALUES ('Tenant Default', 'default', 'default-phone-id', 'starter', 1000, strftime('%Y-%m', 'now'), 0, 0, 'admin123', CURRENT_TIMESTAMP)
+                    """
+                )
+            )
+
+        if "ai_config" not in tables:
+            connection.execute(
+                text(
+                    """
+                    CREATE TABLE ai_config (
+                        id INTEGER PRIMARY KEY,
+                        tenant_id INTEGER UNIQUE,
+                        system_prompt TEXT,
+                        model VARCHAR(64) DEFAULT 'gpt-4o-mini',
+                        temperature FLOAT DEFAULT 0.4,
+                        FOREIGN KEY (tenant_id) REFERENCES tenants(id)
+                    )
+                    """
+                )
+            )
+
         if "conversations" in tables:
             columns = {column["name"] for column in inspector.get_columns("conversations")}
+            if "tenant_id" not in columns:
+                connection.execute(text("ALTER TABLE conversations ADD COLUMN tenant_id INTEGER DEFAULT 1"))
             if "status" not in columns:
                 connection.execute(text("ALTER TABLE conversations ADD COLUMN status VARCHAR(16) DEFAULT 'bot'"))
-                connection.execute(text("UPDATE conversations SET status='human' WHERE lower(assigned_to)='humano'"))
                 connection.execute(text("UPDATE conversations SET status='bot' WHERE status IS NULL OR status=''"))
             if "updated_at" not in columns:
                 connection.execute(text("ALTER TABLE conversations ADD COLUMN updated_at DATETIME"))
@@ -25,6 +73,8 @@ def _run_lightweight_migrations() -> None:
 
         if "messages" in tables:
             msg_columns = {column["name"] for column in inspector.get_columns("messages")}
+            if "tenant_id" not in msg_columns:
+                connection.execute(text("ALTER TABLE messages ADD COLUMN tenant_id INTEGER DEFAULT 1"))
             if "conversation_id" not in msg_columns:
                 connection.execute(text("ALTER TABLE messages ADD COLUMN conversation_id INTEGER"))
 
@@ -34,12 +84,29 @@ def _run_lightweight_migrations() -> None:
                     """
                     UPDATE messages
                     SET conversation_id = (
-                        SELECT conversations.id FROM conversations WHERE conversations.phone = messages.phone
+                        SELECT conversations.id
+                        FROM conversations
+                        WHERE conversations.phone = messages.phone
+                          AND conversations.tenant_id = messages.tenant_id
                     )
                     WHERE conversation_id IS NULL
                     """
                 )
             )
+
+        connection.execute(
+            text(
+                """
+                INSERT INTO ai_config (tenant_id, system_prompt, model, temperature)
+                SELECT id,
+                       'Você é um atendente profissional de WhatsApp para uma empresa de tecnologia. Responda de forma objetiva e cordial.',
+                       'gpt-4o-mini',
+                       0.4
+                FROM tenants t
+                WHERE NOT EXISTS (SELECT 1 FROM ai_config cfg WHERE cfg.tenant_id = t.id)
+                """
+            )
+        )
 
 
 _run_lightweight_migrations()
