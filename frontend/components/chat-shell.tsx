@@ -56,18 +56,25 @@ export default function ChatShell() {
     await refreshConversations();
   }
 
+  const statusLabel = selectedConversation?.status === 'human' ? 'Humano' : 'Bot IA';
+
   return (
     <div className="layout">
       <aside className="sidebar">
+        <div className="sidebar-header">
+          <strong>Painel de Atendimento</strong>
+        </div>
         {conversations.map((conv) => (
           <div
             key={conv.phone}
             className={`conversation-item ${conv.phone === selectedPhone ? 'active' : ''}`}
             onClick={() => setSelectedPhone(conv.phone)}
           >
-            <div><strong>{conv.name || conv.phone}</strong></div>
+            <div className="conversation-title">
+              <strong>{conv.name || conv.phone}</strong>
+              <span className={`badge ${conv.status === 'human' ? 'human' : ''}`}>{conv.status === 'human' ? 'Humano' : 'Bot'}</span>
+            </div>
             <div className="muted">{conv.last_message || 'Sem mensagens ainda'}</div>
-            <span className={`badge ${conv.assigned_to === 'HUMANO' ? 'human' : ''}`}>{conv.assigned_to}</span>
           </div>
         ))}
       </aside>
@@ -76,9 +83,11 @@ export default function ChatShell() {
         <header className="chat-header">
           <div>
             <strong>{selectedConversation?.name || 'Selecione uma conversa'}</strong>
-            <div className="muted">{selectedConversation?.phone}</div>
+            <div className="muted">{selectedConversation?.phone} • {statusLabel}</div>
           </div>
-          <button onClick={onTakeOver}>Assumir atendimento</button>
+          <button onClick={onTakeOver}>
+            {selectedConversation?.status === 'human' ? 'Retomar com IA' : 'Assumir atendimento'}
+          </button>
         </header>
 
         <div className="messages">

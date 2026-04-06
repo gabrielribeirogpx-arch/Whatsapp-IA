@@ -15,7 +15,7 @@ export async function getMessages(phone: string): Promise<Message[]> {
 }
 
 export async function sendMessage(phone: string, message: string) {
-  const res = await fetch(`${API_BASE}/api/send`, {
+  const res = await fetch(`${API_BASE}/api/send-message`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ phone, message })

@@ -7,8 +7,9 @@ class ConversationOut(BaseModel):
     id: int
     phone: str
     name: str
+    status: str
     last_message: str
-    assigned_to: str
+    updated_at: datetime
 
     class Config:
         from_attributes = True
@@ -33,4 +34,4 @@ class SendMessageRequest(BaseModel):
 
 class ToggleAssignmentResponse(BaseModel):
     phone: str
-    assigned_to: str
+    status: str

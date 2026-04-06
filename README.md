@@ -1,11 +1,11 @@
 # WhatsApp IA SaaS
 
-Sistema completo de atendimento WhatsApp com IA + humano.
+Sistema profissional de atendimento WhatsApp com IA + humano + painel web estilo WhatsApp.
 
 ## Stack
 - **Backend:** FastAPI + SQLAlchemy + SSE
 - **Frontend:** Next.js 14 (App Router)
-- **Banco padrão:** SQLite (pode usar `DATABASE_URL` no Railway)
+- **Banco padrão:** SQLite (pode usar `DATABASE_URL` no Railway/PostgreSQL)
 
 ## Variáveis de ambiente
 Backend:
@@ -19,13 +19,20 @@ Backend:
 Frontend:
 - `NEXT_PUBLIC_API_URL` (ex: `http://localhost:8000`)
 
+## Fluxo principal
+1. `POST /webhook` recebe mensagem da Meta.
+2. Mensagem é salva em `messages` e a conversa em `conversations` é atualizada.
+3. Se `conversation.status == "bot"`, a IA responde usando histórico recente da conversa.
+4. Resposta é enviada via WhatsApp Cloud API e também salva no banco.
+5. Se `conversation.status == "human"`, a IA é pausada.
+
 ## Endpoints principais
 - `GET /webhook` verificação Meta
-- `POST /webhook` recebe mensagens, salva no banco e responde via IA quando `assigned_to == "IA"`
+- `POST /webhook`
 - `GET /api/conversations`
 - `GET /api/messages/{phone}`
-- `POST /api/send`
-- `POST /api/take-over/{phone}`
+- `POST /api/send-message`
+- `POST /api/take-over/{phone}` (alterna `bot`/`human`)
 - `GET /api/stream/messages/{phone}` (SSE)
 
 ## Rodando localmente
