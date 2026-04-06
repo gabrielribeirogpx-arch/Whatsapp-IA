@@ -12,10 +12,16 @@ class WhatsAppConfigError(RuntimeError):
     """Erro de configuração para integração com WhatsApp Cloud API."""
 
 
-def enviar_mensagem(numero: str, mensagem: str) -> dict[str, Any]:
+def enviar_mensagem(
+    numero: str,
+    mensagem: str,
+    *,
+    token: str | None = None,
+    phone_number_id: str | None = None,
+) -> dict[str, Any]:
     """Envia uma mensagem de texto para um número via WhatsApp Cloud API."""
-    token = os.getenv("WHATSAPP_TOKEN")
-    phone_number_id = os.getenv("PHONE_NUMBER_ID")
+    token = token or os.getenv("WHATSAPP_TOKEN")
+    phone_number_id = phone_number_id or os.getenv("PHONE_NUMBER_ID")
 
     if not token or not phone_number_id:
         missing_vars = [
@@ -27,9 +33,7 @@ def enviar_mensagem(numero: str, mensagem: str) -> dict[str, Any]:
             if not value
         ]
         missing = ", ".join(missing_vars)
-        raise WhatsAppConfigError(
-            f"Variáveis de ambiente obrigatórias ausentes: {missing}"
-        )
+        raise WhatsAppConfigError(f"Variáveis de configuração obrigatórias ausentes: {missing}")
 
     url = f"https://graph.facebook.com/v18.0/{phone_number_id}/messages"
     payload = {
@@ -69,5 +73,4 @@ def enviar_mensagem(numero: str, mensagem: str) -> dict[str, Any]:
 
 
 def send_whatsapp_message(phone: str, message: str) -> dict[str, Any]:
-    """Compatibilidade retroativa com código existente."""
     return enviar_mensagem(phone, message)

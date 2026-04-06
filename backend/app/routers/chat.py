@@ -7,33 +7,82 @@ from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
 from backend.app.database import get_db
-from backend.app.models import Conversation, Message
+from backend.app.models import Conversation, Message, Tenant
 from backend.app.schemas.chat import (
     ConversationOut,
     MessageOut,
     SendMessageRequest,
+    TenantLoginRequest,
+    TenantLoginResponse,
+    TenantUsageOut,
     ToggleAssignmentResponse,
 )
 from backend.app.services.message_service import sanitize_phone, sanitize_text
 from backend.app.services.realtime_service import sse_broker
-from backend.app.services.whatsapp_service import WhatsAppConfigError, send_whatsapp_message
+from backend.app.services.tenant_service import (
+    TenantLimitError,
+    assert_tenant_can_send,
+    consume_usage,
+    get_current_tenant,
+    login_tenant,
+)
+from backend.app.services.whatsapp_service import WhatsAppConfigError, enviar_mensagem
 
 router = APIRouter(prefix="/api", tags=["chat"])
 
 
+def _usage_response(tenant: Tenant) -> TenantUsageOut:
+    return TenantUsageOut(
+        plan=tenant.plan,
+        is_blocked=tenant.is_blocked,
+        max_monthly_messages=tenant.max_monthly_messages,
+        messages_used_month=tenant.messages_used_month,
+        usage_month=tenant.usage_month,
+    )
+
+
+@router.post("/auth/login", response_model=TenantLoginResponse)
+def tenant_login(payload: TenantLoginRequest, db: Session = Depends(get_db)):
+    tenant = login_tenant(db, payload.slug.strip(), payload.password.strip())
+    if not tenant:
+        raise HTTPException(status_code=401, detail="Credenciais inválidas")
+
+    return TenantLoginResponse(
+        tenant_id=tenant.id,
+        name=tenant.name,
+        slug=tenant.slug,
+        usage=_usage_response(tenant),
+    )
+
+
 @router.get("/conversations", response_model=list[ConversationOut])
-def list_conversations(db: Session = Depends(get_db)):
-    items = db.execute(select(Conversation).order_by(desc(Conversation.updated_at), desc(Conversation.id))).scalars().all()
+def list_conversations(
+    tenant: Tenant = Depends(get_current_tenant),
+    db: Session = Depends(get_db),
+):
+    items = (
+        db.execute(
+            select(Conversation)
+            .where(Conversation.tenant_id == tenant.id)
+            .order_by(desc(Conversation.updated_at), desc(Conversation.id))
+        )
+        .scalars()
+        .all()
+    )
     return items
 
 
 @router.get("/messages/{phone}", response_model=list[MessageOut])
-def get_messages(phone: str, db: Session = Depends(get_db)):
+def get_messages(
+    phone: str,
+    tenant: Tenant = Depends(get_current_tenant),
+    db: Session = Depends(get_db),
+):
     sanitized_phone = sanitize_phone(phone)
     items = (
         db.execute(
             select(Message)
-            .where(Message.phone == sanitized_phone)
+            .where(Message.tenant_id == tenant.id, Message.phone == sanitized_phone)
             .order_by(Message.timestamp.asc(), Message.id.asc())
         )
         .scalars()
@@ -43,25 +92,41 @@ def get_messages(phone: str, db: Session = Depends(get_db)):
 
 
 @router.post("/send-message", response_model=MessageOut)
-async def send_message(payload: SendMessageRequest, db: Session = Depends(get_db)):
+async def send_message(
+    payload: SendMessageRequest,
+    tenant: Tenant = Depends(get_current_tenant),
+    db: Session = Depends(get_db),
+):
     phone = sanitize_phone(payload.phone)
     message_text = sanitize_text(payload.message)
     if not phone or not message_text:
         raise HTTPException(status_code=400, detail="Dados inválidos")
 
-    conversation = db.execute(select(Conversation).where(Conversation.phone == phone)).scalar_one_or_none()
+    try:
+        assert_tenant_can_send(tenant)
+    except TenantLimitError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+
+    conversation = db.execute(
+        select(Conversation).where(Conversation.tenant_id == tenant.id, Conversation.phone == phone)
+    ).scalar_one_or_none()
     if not conversation:
-        conversation = Conversation(phone=phone, name=sanitize_text(payload.name or "Cliente"), status="human")
+        conversation = Conversation(
+            tenant_id=tenant.id,
+            phone=phone,
+            name=sanitize_text(payload.name or "Cliente"),
+            status="human",
+        )
         db.add(conversation)
         db.flush()
 
     try:
-        send_whatsapp_message(phone, message_text)
+        enviar_mensagem(phone, message_text, token=tenant.whatsapp_token, phone_number_id=tenant.phone_number_id)
     except WhatsAppConfigError:
-        # Permite uso em ambiente local sem integração ativa com WhatsApp.
         pass
 
     message = Message(
+        tenant_id=tenant.id,
         phone=phone,
         conversation_id=conversation.id,
         content=message_text,
@@ -69,24 +134,31 @@ async def send_message(payload: SendMessageRequest, db: Session = Depends(get_db
         timestamp=datetime.utcnow(),
     )
     db.add(message)
+    consume_usage(tenant, 1)
     conversation.last_message = message_text
     conversation.updated_at = datetime.utcnow()
     db.commit()
     db.refresh(message)
 
-    await sse_broker.publish(phone, {"event": "message", "message": MessageOut.model_validate(message).model_dump(mode="json")})
+    await sse_broker.publish(f"{tenant.id}:{phone}", {"event": "message", "message": MessageOut.model_validate(message).model_dump(mode="json")})
     return message
 
 
 @router.post("/send", response_model=MessageOut)
-async def send_message_legacy(payload: SendMessageRequest, db: Session = Depends(get_db)):
-    return await send_message(payload, db)
+async def send_message_legacy(payload: SendMessageRequest, tenant: Tenant = Depends(get_current_tenant), db: Session = Depends(get_db)):
+    return await send_message(payload, tenant, db)
 
 
 @router.post("/take-over/{phone}", response_model=ToggleAssignmentResponse)
-def take_over(phone: str, db: Session = Depends(get_db)):
+def take_over(
+    phone: str,
+    tenant: Tenant = Depends(get_current_tenant),
+    db: Session = Depends(get_db),
+):
     sanitized_phone = sanitize_phone(phone)
-    conversation = db.execute(select(Conversation).where(Conversation.phone == sanitized_phone)).scalar_one_or_none()
+    conversation = db.execute(
+        select(Conversation).where(Conversation.tenant_id == tenant.id, Conversation.phone == sanitized_phone)
+    ).scalar_one_or_none()
     if not conversation:
         raise HTTPException(status_code=404, detail="Conversa não encontrada")
 
@@ -98,9 +170,10 @@ def take_over(phone: str, db: Session = Depends(get_db)):
 
 
 @router.get("/stream/messages/{phone}")
-async def stream_messages(phone: str):
+async def stream_messages(phone: str, tenant: Tenant = Depends(get_current_tenant)):
     sanitized_phone = sanitize_phone(phone)
-    queue = await sse_broker.subscribe(sanitized_phone)
+    channel = f"{tenant.id}:{sanitized_phone}"
+    queue = await sse_broker.subscribe(channel)
 
     async def event_generator():
         try:
@@ -111,6 +184,6 @@ async def stream_messages(phone: str):
                 except asyncio.TimeoutError:
                     yield ": ping\n\n"
         finally:
-            sse_broker.unsubscribe(sanitized_phone, queue)
+            sse_broker.unsubscribe(channel, queue)
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")

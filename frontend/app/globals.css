@@ -20,3 +20,8 @@ body { margin: 0; font-family: Arial, sans-serif; background: #e9edef; color: #1
 button { border: none; border-radius: 8px; padding: 10px 14px; cursor: pointer; }
 button.primary { background: #00a884; color: #fff; }
 @media (max-width: 900px) { .layout { grid-template-columns: 1fr; } .sidebar { height: 35vh; } }
+
+.login-screen { min-height: 100vh; display: grid; place-items: center; background: #e9edef; }
+.login-card { width: min(420px, 92vw); background: #fff; border-radius: 12px; padding: 20px; display: flex; flex-direction: column; gap: 10px; box-shadow: 0 8px 20px rgba(0,0,0,0.08); }
+.login-card input { border: 1px solid #d1d7db; border-radius: 8px; padding: 10px; }
+.error-text { color: #b42318; font-size: 0.9rem; }

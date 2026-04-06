@@ -22,6 +22,9 @@ def extract_whatsapp_messages(payload: dict[str, Any]) -> list[dict[str, str]]:
         changes = entry.get("changes", [])
         for change in changes:
             value = change.get("value", {})
+            metadata = value.get("metadata", {})
+            phone_number_id = sanitize_text(metadata.get("phone_number_id", ""))
+
             messages = value.get("messages", [])
             contacts = value.get("contacts", [])
             fallback_phone = ""
@@ -31,8 +34,7 @@ def extract_whatsapp_messages(payload: dict[str, Any]) -> list[dict[str, str]]:
                 fallback_name = contacts[0].get("profile", {}).get("name", "Cliente")
 
             for message in messages:
-                message_type = message.get("type")
-                if message_type != "text":
+                if message.get("type") != "text":
                     continue
 
                 phone = sanitize_phone(message.get("from") or fallback_phone)
@@ -47,6 +49,7 @@ def extract_whatsapp_messages(payload: dict[str, Any]) -> list[dict[str, str]]:
                         "text": text,
                         "message_id": message_id,
                         "name": sanitize_text(fallback_name) or "Cliente",
+                        "phone_number_id": phone_number_id,
                     }
                 )
 
