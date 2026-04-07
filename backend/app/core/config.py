@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class Settings:
-    database_url: str = os.getenv("DATABASE_URL", "sqlite:///./whatsapp_ia.db")
+    database_url: str = os.getenv("DATABASE_URL", "")
     verify_token: str = os.getenv("VERIFY_TOKEN", "")
     openai_api_key: str = os.getenv("OPENAI_API_KEY", "")
     openai_model: str = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
