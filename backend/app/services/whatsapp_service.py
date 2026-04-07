@@ -1,9 +1,8 @@
-import json
 import logging
 import os
 from typing import Any
-from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
+
+import requests
 
 logger = logging.getLogger(__name__)
 
@@ -25,23 +24,26 @@ def send_message(token: str, phone_id: str, to: str, message: str) -> dict[str, 
         "type": "text",
         "text": {"body": message},
     }
-    request = Request(
-        url=url,
-        data=json.dumps(payload).encode("utf-8"),
-        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
-        method="POST",
-    )
-
     try:
-        with urlopen(request, timeout=15) as response:
-            response_data = json.loads(response.read().decode("utf-8"))
-            logger.info("Mensagem enviada para %s", to)
-            return response_data
-    except HTTPError as exc:
-        error_body = exc.read().decode("utf-8", errors="ignore")
-        logger.exception("Erro HTTP ao enviar mensagem para %s. status=%s body=%s", to, exc.code, error_body)
+        response = requests.post(
+            url,
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+            json=payload,
+            timeout=15,
+        )
+        response.raise_for_status()
+        response_data = response.json()
+        logger.info("Mensagem enviada para %s", to)
+        return response_data
+    except requests.HTTPError:
+        logger.exception(
+            "Erro HTTP ao enviar mensagem para %s. status=%s body=%s",
+            to,
+            response.status_code if 'response' in locals() else None,
+            response.text if 'response' in locals() else None,
+        )
         raise
-    except URLError:
+    except requests.RequestException:
         logger.exception("Erro de conexão ao enviar mensagem para %s", to)
         raise
 
@@ -59,4 +61,6 @@ def enviar_mensagem(
 
 
 def send_whatsapp_message(phone: str, message: str) -> dict[str, Any]:
-    return enviar_mensagem(phone, message)
+    token = os.getenv("WHATSAPP_TOKEN")
+    phone_number_id = os.getenv("PHONE_NUMBER_ID")
+    return send_message(token or "", phone_number_id or "", phone, message)
