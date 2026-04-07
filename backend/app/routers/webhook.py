@@ -68,9 +68,11 @@ async def webhook(request: Request, db: Session = Depends(get_db)):
 
             conversation = db.execute(select(Conversation).where(Conversation.phone_number == phone)).scalar_one_or_none()
             if not conversation:
-                conversation = Conversation(phone_number=phone)
+                conversation = Conversation(phone_number=phone, message=incoming_message)
                 db.add(conversation)
                 db.flush()
+            else:
+                conversation.message = incoming_message
 
             db.add(
                 Message(
