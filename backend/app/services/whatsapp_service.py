@@ -13,9 +13,10 @@ class WhatsAppConfigError(RuntimeError):
 
 def send_message(token: str, phone_id: str, to: str, message: str) -> dict[str, Any]:
     """Envia uma mensagem usando a API oficial do WhatsApp Cloud."""
-    if not token or not phone_id:
-        missing_vars = [name for name, value in {"WHATSAPP_TOKEN": token, "PHONE_NUMBER_ID": phone_id}.items() if not value]
-        raise WhatsAppConfigError(f"Variáveis de configuração obrigatórias ausentes: {', '.join(missing_vars)}")
+    if not token:
+        raise WhatsAppConfigError("WHATSAPP_TOKEN não configurado")
+    if not phone_id:
+        raise Exception("PHONE_NUMBER_ID não configurado")
 
     url = f"https://graph.facebook.com/v18.0/{phone_id}/messages"
     payload = {
