@@ -53,7 +53,7 @@ def get_or_create_default_tenant(db: Session) -> Tenant:
     db.flush()
     system_prompt = DEFAULT_SYSTEM_PROMPT
     if not system_prompt:
-        system_prompt = "Você é um assistente de vendas altamente persuasivo, especializado em converter leads em clientes."
+        system_prompt = "Você é um assistente de vendas altamente persuasivo. Seu objetivo é responder clientes de forma natural e converter em venda."
     db.add(AIConfig(tenant_id=tenant.id, system_prompt=system_prompt))
     db.commit()
     db.refresh(tenant)
