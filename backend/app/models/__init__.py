@@ -7,6 +7,8 @@ from backend.app.core.database import Base
 from backend.app.models.conversation import Conversation
 from backend.app.models.message import Message
 
+DEFAULT_SYSTEM_PROMPT = "Você é um assistente de vendas altamente persuasivo, especializado em converter leads em clientes."
+
 
 class Tenant(Base):
     __tablename__ = "tenants"
@@ -32,7 +34,7 @@ class AIConfig(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     tenant_id: Mapped[int] = mapped_column(ForeignKey("tenants.id", ondelete="CASCADE"), unique=True, index=True)
-    system_prompt: Mapped[str] = mapped_column(Text)
+    system_prompt: Mapped[str] = mapped_column(Text, default=DEFAULT_SYSTEM_PROMPT)
     model: Mapped[str] = mapped_column(String(64), default="gpt-4o-mini")
     temperature: Mapped[float] = mapped_column(Float, default=0.4)
 
