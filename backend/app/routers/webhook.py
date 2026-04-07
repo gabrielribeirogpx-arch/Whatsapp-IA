@@ -3,7 +3,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Request
 from sqlalchemy import desc, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, load_only
 
 from backend.app.database import SessionLocal, get_db
 from backend.app.models import Conversation, Message
@@ -66,7 +66,11 @@ async def webhook(request: Request, db: Session = Depends(get_db)):
             phone_number_id = incoming.get("phone_number_id")
             tenant = resolve_tenant_by_phone_number_id(db, phone_number_id) or get_or_create_default_tenant(db)
 
-            conversation = db.execute(select(Conversation).where(Conversation.phone_number == phone)).scalar_one_or_none()
+            conversation = db.execute(
+                select(Conversation)
+                .options(load_only(Conversation.id, Conversation.phone_number, Conversation.message, Conversation.created_at))
+                .where(Conversation.phone_number == phone)
+            ).scalar_one_or_none()
             if not conversation:
                 conversation = Conversation(phone_number=phone, message=incoming_message)
                 db.add(conversation)
@@ -127,7 +131,11 @@ async def webhook(request: Request, db: Session = Depends(get_db)):
 
 @router.get("/conversations")
 def list_conversations(db: Session = Depends(get_db)):
-    conversations = db.execute(select(Conversation).order_by(desc(Conversation.created_at), desc(Conversation.id))).scalars().all()
+    conversations = db.execute(
+        select(Conversation)
+        .options(load_only(Conversation.id, Conversation.phone_number, Conversation.created_at))
+        .order_by(desc(Conversation.created_at), desc(Conversation.id))
+    ).scalars().all()
 
     response: list[dict[str, str | None]] = []
     for conversation in conversations:
