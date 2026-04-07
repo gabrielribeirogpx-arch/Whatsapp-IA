@@ -1,6 +1,7 @@
-import { Conversation, Message, TenantAuth, TenantSession } from './types';
+import { Conversation, Message, SendMessagePayload, TenantAuth, TenantSession } from './types';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
+const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL ?? 'https://SEU_BACKEND_URL';
 
 function tenantHeaders(auth: TenantAuth) {
   return {
@@ -66,4 +67,20 @@ export function streamMessagesUrl(phone: string, auth: TenantAuth) {
     tenant_password: auth.password
   });
   return `${API_BASE}/api/stream/messages/${phone}?${params.toString()}`;
+}
+
+export async function sendMessageToBackend(payload: SendMessagePayload) {
+  const response = await fetch(`${BACKEND_URL}/send-message`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify(payload)
+  });
+
+  if (!response.ok) {
+    throw new Error('Não foi possível enviar mensagem para o backend.');
+  }
+
+  return response.json();
 }

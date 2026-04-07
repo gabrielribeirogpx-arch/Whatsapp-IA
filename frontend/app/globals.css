@@ -357,3 +357,147 @@ input {
     align-items: flex-start;
   }
 }
+
+.wa-layout {
+  display: grid;
+  grid-template-columns: minmax(280px, 360px) 1fr;
+  height: 100vh;
+  background: #efeae2;
+}
+
+.wa-sidebar {
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid #d8dfe3;
+  background: #ffffff;
+}
+
+.wa-sidebar-header {
+  padding: 1rem;
+  border-bottom: 1px solid #e5e7eb;
+  background: #f0f2f5;
+}
+
+.wa-sidebar-header h2 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.wa-contact-list {
+  flex: 1;
+  overflow-y: auto;
+}
+
+.wa-contact-item {
+  width: 100%;
+  border: 0;
+  text-align: left;
+  padding: 0.9rem 1rem;
+  background: transparent;
+  border-bottom: 1px solid #f1f5f9;
+  cursor: pointer;
+}
+
+.wa-contact-item:hover,
+.wa-contact-item.active {
+  background: #f0f2f5;
+}
+
+.wa-contact-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.wa-contact-row span {
+  color: #64748b;
+  font-size: 0.75rem;
+}
+
+.wa-contact-item p {
+  margin: 0.4rem 0 0;
+  color: #475569;
+  font-size: 0.85rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.wa-chat-window {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.wa-chat-header {
+  padding: 1rem;
+  border-bottom: 1px solid #e5e7eb;
+  background: #f0f2f5;
+}
+
+.wa-chat-header h1 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.wa-chat-header p {
+  margin: 0.25rem 0 0;
+  color: #64748b;
+}
+
+.wa-messages-panel {
+  flex: 1;
+  overflow-y: auto;
+  padding: 1rem 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  background: #e5ddd5;
+}
+
+.wa-message-bubble {
+  max-width: min(75%, 560px);
+  border-radius: 8px;
+  padding: 0.6rem 0.75rem;
+  box-shadow: 0 1px 0.5px rgba(11, 20, 26, 0.13);
+}
+
+.wa-message-bubble p {
+  margin: 0;
+}
+
+.wa-message-bubble time {
+  display: block;
+  margin-top: 0.2rem;
+  text-align: right;
+  font-size: 0.7rem;
+  color: #64748b;
+}
+
+.wa-message-bubble.mine {
+  align-self: flex-end;
+  background: #d9fdd3;
+}
+
+.wa-message-bubble.theirs {
+  align-self: flex-start;
+  background: #fff;
+}
+
+.wa-message-composer {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  gap: 0.5rem;
+  padding: 0.75rem 1rem;
+  border-top: 1px solid #d8dfe3;
+  background: #f0f2f5;
+}
+
+.wa-message-composer input {
+  flex: 1;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  padding: 0.7rem 0.9rem;
+}
