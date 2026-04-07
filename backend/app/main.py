@@ -1,5 +1,5 @@
 from fastapi import FastAPI
-from app.routers import webhook
+from backend.app.routers import webhook
 
 app = FastAPI()
 
