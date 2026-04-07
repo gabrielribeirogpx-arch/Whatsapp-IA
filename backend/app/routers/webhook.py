@@ -1,6 +1,5 @@
 import json
 import logging
-import os
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -27,15 +26,15 @@ def _channel(tenant_id: int, phone: str) -> str:
     return f"{tenant_id}:{phone}"
 
 
-def generate_response(text: str) -> str:
-    return f"Recebi sua mensagem: {text}. Em breve um atendente irá falar com você."
+def generate_response() -> str:
+    return "Recebi sua mensagem 🚀"
 
 
-def send_whatsapp_message(to: str, message: str):
-    url = f"https://graph.facebook.com/v18.0/{os.getenv('ID_DO_NUMERO_DE_TELEFONE')}/messages"
+def send_whatsapp_message(to: str, message: str, phone_number_id: str):
+    url = f"https://graph.facebook.com/v18.0/{phone_number_id}/messages"
 
     headers = {
-        "Authorization": f"Bearer {os.getenv('WHATSAPP_TOKEN')}",
+        "Authorization": f"Bearer {settings.whatsapp_token}",
         "Content-Type": "application/json",
     }
 
@@ -46,7 +45,10 @@ def send_whatsapp_message(to: str, message: str):
         "text": {"body": message},
     }
 
-    requests.post(url, headers=headers, json=data, timeout=15)
+    logger.info("Enviando resposta automática para %s via phone_number_id=%s", to, phone_number_id)
+    response = requests.post(url, headers=headers, json=data, timeout=15)
+    response.raise_for_status()
+    logger.info("Resposta automática enviada com sucesso para %s (status=%s)", to, response.status_code)
 
 
 @router.get("/webhook")
@@ -76,7 +78,17 @@ async def webhook(request: Request, db: Session = Depends(get_db)):
         text = inbound["text"]
         name = inbound["name"]
         message_id = inbound.get("message_id")
-        phone_number_id = inbound.get("phone_number_id")
+        phone_number_id = inbound.get("phone_number_id") or settings.phone_number_id
+        logger.info(
+            "Mensagem recebida. from=%s text=%s phone_number_id=%s",
+            phone,
+            text,
+            phone_number_id,
+        )
+
+        if not phone_number_id:
+            logger.warning("PHONE_NUMBER_ID ausente. Não foi possível responder mensagem de %s", phone)
+            continue
 
         tenant = get_tenant_by_phone_number_id(db, phone_number_id) or get_or_create_default_tenant(db)
 
@@ -128,9 +140,9 @@ async def webhook(request: Request, db: Session = Depends(get_db)):
             },
         )
 
-        auto_response = generate_response(text)
+        auto_response = generate_response()
         try:
-            send_whatsapp_message(phone, auto_response)
+            send_whatsapp_message(phone, auto_response, phone_number_id)
         except requests.RequestException as exc:
             logger.warning("Falha ao enviar mensagem WhatsApp para %s: %s", phone, exc)
 
