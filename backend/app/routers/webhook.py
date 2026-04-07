@@ -5,8 +5,9 @@ from fastapi import APIRouter, Depends, Request
 from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
-from backend.app.database import get_db
+from backend.app.database import SessionLocal, get_db
 from backend.app.models import Conversation, Message
+from backend.app.services.conversation_service import save_conversation
 from backend.app.services.tenant_service import get_or_create_default_tenant, resolve_tenant_by_phone_number_id
 from backend.app.services.whatsapp_service import enviar_mensagem
 
@@ -99,6 +100,20 @@ async def webhook(request: Request, db: Session = Depends(get_db)):
 
             print(f"Evento processado (telefone={phone}, conteúdo={incoming_message})")
             print(f"Resposta automática enviada para {phone}")
+
+            persistence_db = SessionLocal()
+            try:
+                save_conversation(
+                    db=persistence_db,
+                    phone=phone,
+                    message=incoming_message,
+                    response=auto_reply,
+                )
+            except Exception as persistence_error:
+                persistence_db.rollback()
+                print("Falha ao persistir conversa:", str(persistence_error))
+            finally:
+                persistence_db.close()
 
         db.commit()
     except Exception as e:
