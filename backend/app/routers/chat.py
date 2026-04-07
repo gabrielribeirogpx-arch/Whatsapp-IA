@@ -108,12 +108,12 @@ async def send_message(
         raise HTTPException(status_code=403, detail=str(exc)) from exc
 
     conversation = db.execute(
-        select(Conversation).where(Conversation.tenant_id == tenant.id, Conversation.phone == phone)
+        select(Conversation).where(Conversation.tenant_id == tenant.id, Conversation.phone_number == phone)
     ).scalar_one_or_none()
     if not conversation:
         conversation = Conversation(
             tenant_id=tenant.id,
-            phone=phone,
+            phone_number=phone,
             name=sanitize_text(payload.name or "Cliente"),
             status="human",
         )
@@ -160,7 +160,7 @@ def take_over(
 ):
     sanitized_phone = sanitize_phone(phone)
     conversation = db.execute(
-        select(Conversation).where(Conversation.tenant_id == tenant.id, Conversation.phone == sanitized_phone)
+        select(Conversation).where(Conversation.tenant_id == tenant.id, Conversation.phone_number == sanitized_phone)
     ).scalar_one_or_none()
     if not conversation:
         raise HTTPException(status_code=404, detail="Conversa não encontrada")
