@@ -5,7 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from backend.app.database import get_db
-from backend.app.models import AIConfig, Tenant
+from backend.app.models import AIConfig, DEFAULT_SYSTEM_PROMPT, Tenant
 
 
 class TenantLimitError(RuntimeError):
@@ -51,7 +51,10 @@ def get_or_create_default_tenant(db: Session) -> Tenant:
     )
     db.add(tenant)
     db.flush()
-    db.add(AIConfig(tenant_id=tenant.id))
+    system_prompt = DEFAULT_SYSTEM_PROMPT
+    if not system_prompt:
+        system_prompt = "Você é um assistente de vendas altamente persuasivo, especializado em converter leads em clientes."
+    db.add(AIConfig(tenant_id=tenant.id, system_prompt=system_prompt))
     db.commit()
     db.refresh(tenant)
     return tenant

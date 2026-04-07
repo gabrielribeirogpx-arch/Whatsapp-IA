@@ -9,9 +9,7 @@ from backend.app.models import AIConfig, Message
 logger = logging.getLogger(__name__)
 
 DEFAULT_SYSTEM_PROMPT = (
-    "Você é um atendente profissional de WhatsApp para uma empresa de tecnologia. "
-    "Responda de forma objetiva, cordial e com foco em resolver o problema do cliente. "
-    "Se faltar contexto, faça perguntas curtas para avançar no atendimento."
+    "Você é um assistente de vendas altamente persuasivo, especializado em converter leads em clientes."
 )
 
 
