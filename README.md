@@ -65,4 +65,4 @@ Acesse:
 Ao iniciar com banco vazio, é criado automaticamente:
 - `slug`: `default`
 - `password`: `admin123`
-- `phone_number_id`: `default-phone-id`
+- `phone_number_id`: valor definido em `PHONE_NUMBER_ID` no ambiente
