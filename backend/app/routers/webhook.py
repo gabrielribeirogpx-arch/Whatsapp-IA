@@ -70,12 +70,15 @@ async def webhook(request: Request, db: Session = Depends(get_db)):
                 select(Conversation)
                 .options(load_only(Conversation.id, Conversation.phone_number, Conversation.message, Conversation.created_at))
                 .where(Conversation.phone_number == phone)
-            ).scalar_one_or_none()
+                .order_by(desc(Conversation.created_at), desc(Conversation.id))
+            ).scalars().first()
             if not conversation:
+                print(f"Nenhuma conversa encontrada, criando nova para {phone}")
                 conversation = Conversation(phone_number=phone, message=incoming_message)
                 db.add(conversation)
                 db.flush()
             else:
+                print(f"Conversa encontrada: {conversation.id}")
                 conversation.message = incoming_message
 
             db.add(
@@ -144,7 +147,7 @@ def list_conversations(db: Session = Depends(get_db)):
             .where(Message.conversation_id == conversation.id)
             .order_by(desc(Message.created_at), desc(Message.id))
             .limit(1)
-        ).scalar_one_or_none()
+        ).scalars().first()
         response.append(
             {
                 "id": str(conversation.id),
