@@ -65,6 +65,7 @@ class Conversation(Base):
     name: Mapped[str] = mapped_column(String(150), default="Cliente")
     status: Mapped[str] = mapped_column(String(16), default="bot", index=True)
     last_message: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, index=True)
 
     tenant: Mapped[Tenant] = relationship(back_populates="conversations")
