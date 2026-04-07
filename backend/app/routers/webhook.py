@@ -1,4 +1,5 @@
 from datetime import datetime
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, Request
 from sqlalchemy import desc, select
@@ -64,32 +65,20 @@ async def webhook(request: Request, db: Session = Depends(get_db)):
             phone_number_id = incoming.get("phone_number_id")
             tenant = resolve_tenant_by_phone_number_id(db, phone_number_id) or get_or_create_default_tenant(db)
 
-            conversation = db.execute(
-                select(Conversation).where(Conversation.tenant_id == tenant.id, Conversation.phone == phone)
-            ).scalar_one_or_none()
+            conversation = db.execute(select(Conversation).where(Conversation.phone_number == phone)).scalar_one_or_none()
             if not conversation:
-                conversation = Conversation(
-                    tenant_id=tenant.id,
-                    phone=phone,
-                    name=incoming.get("name") or "Cliente",
-                    status="bot",
-                )
+                conversation = Conversation(phone_number=phone)
                 db.add(conversation)
                 db.flush()
 
-            inbound = Message(
-                tenant_id=tenant.id,
-                phone=phone,
-                conversation_id=conversation.id,
-                whatsapp_message_id=incoming.get("message_id"),
-                role="user",
-                message=incoming_message,
-                content=incoming_message,
-                from_me=False,
-                created_at=datetime.utcnow(),
-                timestamp=datetime.utcnow(),
+            db.add(
+                Message(
+                    conversation_id=conversation.id,
+                    text=incoming_message,
+                    from_me=False,
+                    created_at=datetime.utcnow(),
+                )
             )
-            db.add(inbound)
 
             auto_reply = "🔥 Olá! Aqui é a IA. Como posso te ajudar?"
             enviar_mensagem(
@@ -99,21 +88,14 @@ async def webhook(request: Request, db: Session = Depends(get_db)):
                 phone_number_id=tenant.phone_number_id,
             )
 
-            outbound = Message(
-                tenant_id=tenant.id,
-                phone=phone,
-                conversation_id=conversation.id,
-                role="assistant",
-                message=auto_reply,
-                content=auto_reply,
-                from_me=True,
-                created_at=datetime.utcnow(),
-                timestamp=datetime.utcnow(),
+            db.add(
+                Message(
+                    conversation_id=conversation.id,
+                    text=auto_reply,
+                    from_me=True,
+                    created_at=datetime.utcnow(),
+                )
             )
-            db.add(outbound)
-
-            conversation.last_message = auto_reply
-            conversation.updated_at = datetime.utcnow()
 
             print(f"Evento processado (telefone={phone}, conteúdo={incoming_message})")
             print(f"Resposta automática enviada para {phone}")
@@ -128,44 +110,41 @@ async def webhook(request: Request, db: Session = Depends(get_db)):
 
 @router.get("/conversations")
 def list_conversations(db: Session = Depends(get_db)):
-    conversations = db.execute(
-        select(Conversation).order_by(desc(Conversation.updated_at), desc(Conversation.id))
-    ).scalars().all()
+    conversations = db.execute(select(Conversation).order_by(desc(Conversation.created_at), desc(Conversation.id))).scalars().all()
 
-    response: list[dict[str, str | int | None]] = []
+    response: list[dict[str, str | None]] = []
     for conversation in conversations:
         last_message = db.execute(
             select(Message)
             .where(Message.conversation_id == conversation.id)
-            .order_by(desc(Message.timestamp), desc(Message.id))
+            .order_by(desc(Message.created_at), desc(Message.id))
             .limit(1)
         ).scalar_one_or_none()
         response.append(
             {
-                "conversation_id": conversation.id,
-                "phone_number": conversation.phone,
-                "created_at": conversation.created_at.isoformat(),
-                "last_message": (last_message.content if last_message else None),
+                "id": str(conversation.id),
+                "phone_number": conversation.phone_number,
+                "last_message": (last_message.text if last_message else None),
             }
         )
     return response
 
 
 @router.get("/messages/{conversation_id}")
-def list_messages(conversation_id: int, db: Session = Depends(get_db)):
+def list_messages(conversation_id: UUID, db: Session = Depends(get_db)):
     messages = db.execute(
         select(Message)
         .where(Message.conversation_id == conversation_id)
-        .order_by(Message.timestamp.asc(), Message.id.asc())
+        .order_by(Message.created_at.asc(), Message.id.asc())
     ).scalars().all()
 
     return [
         {
-            "id": item.id,
-            "conversation_id": item.conversation_id,
+            "id": str(item.id),
+            "conversation_id": str(item.conversation_id),
             "from_me": item.from_me,
-            "text": item.content,
-            "created_at": (item.created_at or item.timestamp).isoformat(),
+            "text": item.text,
+            "created_at": item.created_at.isoformat(),
         }
         for item in messages
     ]
