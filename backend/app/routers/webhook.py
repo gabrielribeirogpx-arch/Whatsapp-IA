@@ -1,26 +1,22 @@
 import json
 import logging
+import os
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+import requests
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from backend.app.core.config import settings
 from backend.app.database import get_db
-from backend.app.models import AIConfig, Conversation, Message
-from backend.app.services.ai_service import gerar_resposta
-from backend.app.services.context_service import build_context
+from backend.app.models import Conversation, Message
 from backend.app.services.message_service import extract_whatsapp_messages
 from backend.app.services.realtime_service import sse_broker
 from backend.app.services.tenant_service import (
-    TenantLimitError,
-    assert_tenant_can_send,
-    consume_usage,
     get_or_create_default_tenant,
     get_tenant_by_phone_number_id,
 )
-from backend.app.services.whatsapp_service import WhatsAppConfigError, send_message
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +25,28 @@ router = APIRouter(tags=["webhook"])
 
 def _channel(tenant_id: int, phone: str) -> str:
     return f"{tenant_id}:{phone}"
+
+
+def generate_response(text: str) -> str:
+    return f"Recebi sua mensagem: {text}. Em breve um atendente irá falar com você."
+
+
+def send_whatsapp_message(to: str, message: str):
+    url = f"https://graph.facebook.com/v18.0/{os.getenv('ID_DO_NUMERO_DE_TELEFONE')}/messages"
+
+    headers = {
+        "Authorization": f"Bearer {os.getenv('WHATSAPP_TOKEN')}",
+        "Content-Type": "application/json",
+    }
+
+    data = {
+        "messaging_product": "whatsapp",
+        "to": to,
+        "type": "text",
+        "text": {"body": message},
+    }
+
+    requests.post(url, headers=headers, json=data, timeout=15)
 
 
 @router.get("/webhook")
@@ -110,52 +128,41 @@ async def webhook(request: Request, db: Session = Depends(get_db)):
             },
         )
 
-        if conversation.status == "bot":
-            try:
-                assert_tenant_can_send(tenant)
-            except TenantLimitError:
-                logger.warning("Tenant %s bloqueado/sem limite. IA não responderá.", tenant.slug)
-                db.commit()
-                continue
+        auto_response = generate_response(text)
+        try:
+            send_whatsapp_message(phone, auto_response)
+        except requests.RequestException as exc:
+            logger.warning("Falha ao enviar mensagem WhatsApp para %s: %s", phone, exc)
 
-            context = build_context(db, tenant.id, phone)
-            ai_config = db.execute(select(AIConfig).where(AIConfig.tenant_id == tenant.id)).scalar_one_or_none()
-            response = gerar_resposta(context, text, ai_config)
-            try:
-                send_message(tenant.whatsapp_token or "", tenant.phone_number_id, phone, response)
-            except WhatsAppConfigError:
-                logger.warning("WhatsApp não configurado para tenant=%s. Resposta IA salva sem envio externo.", tenant.slug)
+        ai_message = Message(
+            tenant_id=tenant.id,
+            phone=phone,
+            conversation_id=conversation.id,
+            role="assistant",
+            message=auto_response,
+            created_at=datetime.utcnow(),
+            content=auto_response,
+            from_me=True,
+        )
+        db.add(ai_message)
+        conversation.last_message = auto_response
+        conversation.updated_at = datetime.utcnow()
+        db.commit()
+        db.refresh(ai_message)
 
-            ai_message = Message(
-                tenant_id=tenant.id,
-                phone=phone,
-                conversation_id=conversation.id,
-                role="assistant",
-                message=response,
-                created_at=datetime.utcnow(),
-                content=response,
-                from_me=True,
-            )
-            db.add(ai_message)
-            consume_usage(tenant, 1)
-            conversation.last_message = response
-            conversation.updated_at = datetime.utcnow()
-            db.commit()
-            db.refresh(ai_message)
-
-            await sse_broker.publish(
-                _channel(tenant.id, phone),
-                {
-                    "event": "message",
-                    "message": {
-                        "id": ai_message.id,
-                        "tenant_id": tenant.id,
-                        "phone": ai_message.phone,
-                        "content": ai_message.content,
-                        "from_me": ai_message.from_me,
-                        "timestamp": ai_message.timestamp.isoformat(),
-                    },
+        await sse_broker.publish(
+            _channel(tenant.id, phone),
+            {
+                "event": "message",
+                "message": {
+                    "id": ai_message.id,
+                    "tenant_id": tenant.id,
+                    "phone": ai_message.phone,
+                    "content": ai_message.content,
+                    "from_me": ai_message.from_me,
+                    "timestamp": ai_message.timestamp.isoformat(),
                 },
-            )
+            },
+        )
 
     return {"status": "received"}
