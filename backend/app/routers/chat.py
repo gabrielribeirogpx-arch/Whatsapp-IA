@@ -4,7 +4,7 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from sqlalchemy import desc, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, load_only
 
 from backend.app.database import get_db
 from backend.app.models import Conversation, Message, Tenant
@@ -63,6 +63,13 @@ def list_conversations(
     items = (
         db.execute(
             select(Conversation)
+            .options(
+                load_only(
+                    Conversation.id,
+                    Conversation.tenant_id,
+                    Conversation.updated_at,
+                )
+            )
             .where(Conversation.tenant_id == tenant.id)
             .order_by(desc(Conversation.updated_at), desc(Conversation.id))
         )
@@ -108,7 +115,9 @@ async def send_message(
         raise HTTPException(status_code=403, detail=str(exc)) from exc
 
     conversation = db.execute(
-        select(Conversation).where(Conversation.tenant_id == tenant.id, Conversation.phone_number == phone)
+        select(Conversation)
+        .options(load_only(Conversation.id, Conversation.tenant_id, Conversation.phone_number, Conversation.status))
+        .where(Conversation.tenant_id == tenant.id, Conversation.phone_number == phone)
     ).scalar_one_or_none()
     if not conversation:
         conversation = Conversation(
@@ -160,7 +169,9 @@ def take_over(
 ):
     sanitized_phone = sanitize_phone(phone)
     conversation = db.execute(
-        select(Conversation).where(Conversation.tenant_id == tenant.id, Conversation.phone_number == sanitized_phone)
+        select(Conversation)
+        .options(load_only(Conversation.id, Conversation.tenant_id, Conversation.phone_number, Conversation.status))
+        .where(Conversation.tenant_id == tenant.id, Conversation.phone_number == sanitized_phone)
     ).scalar_one_or_none()
     if not conversation:
         raise HTTPException(status_code=404, detail="Conversa não encontrada")
