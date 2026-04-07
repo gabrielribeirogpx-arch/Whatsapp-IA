@@ -34,3 +34,22 @@ export type TenantSession = {
     usage_month: string;
   };
 };
+
+export type Contact = {
+  id: string;
+  name: string;
+  phone: string;
+  lastMessage: string;
+};
+
+export type ChatMessage = {
+  id: string;
+  text: string;
+  fromMe: boolean;
+  time: string;
+};
+
+export type SendMessagePayload = {
+  to: string;
+  message: string;
+};
