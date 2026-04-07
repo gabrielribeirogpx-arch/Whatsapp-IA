@@ -1,4 +1,5 @@
 from datetime import datetime
+import os
 
 from fastapi import Depends, Header, HTTPException, Query
 from sqlalchemy import select
@@ -44,7 +45,7 @@ def get_or_create_default_tenant(db: Session) -> Tenant:
     tenant = Tenant(
         name="Tenant Default",
         slug="default",
-        phone_number_id="default-phone-id",
+        phone_number_id=os.getenv("PHONE_NUMBER_ID", ""),
         plan="starter",
         max_monthly_messages=1000,
         admin_password="admin123",
