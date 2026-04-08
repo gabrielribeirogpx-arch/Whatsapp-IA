@@ -60,37 +60,30 @@ def gerar_resposta(
 
 
 async def generate_ai_response(user_message: str) -> str:
-    import google.generativeai as genai
+    from google import genai
 
-    genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
+    api_key = os.getenv("GEMINI_API_KEY")
+    if not api_key:
+        return "Olá! Recebi sua mensagem e já vou te ajudar da melhor forma possível."
 
-    model = genai.GenerativeModel("gemini-1.5-flash")
-    print("MODELO USADO:", "gemini-1.5-flash")
+    client = genai.Client(api_key=api_key)
 
     prompt = f"""
-    Você é um atendente comercial especialista em vendas via WhatsApp.
+    Você é um atendente comercial via WhatsApp.
 
     Cliente disse:
     "{user_message}"
 
-    Responda de forma:
-    - natural
-    - curta
-    - humana
-    - persuasiva
-
-    Sempre faça uma pergunta para continuar a conversa.
+    Responda de forma natural, humana e persuasiva.
     """
 
-    response = model.generate_content(prompt)
-
-    print("RAW RESPONSE:", response)
-
     try:
-        if response and hasattr(response, "candidates"):
-            text = response.candidates[0].content.parts[0].text
-            return text.strip()
-    except Exception as e:
-        print("Erro ao extrair texto:", str(e))
-
-    return "Não consegui responder agora, tenta de novo?"
+        response = client.models.generate_content(
+            model="gemini-2.0-flash",
+            contents=prompt,
+        )
+        text = getattr(response, "text", None)
+        return text.strip() if text else "Não consegui responder agora, tenta de novo?"
+    except Exception:
+        logger.exception("Erro ao gerar resposta de IA com Gemini")
+        return "Não consegui responder agora, tenta de novo?"

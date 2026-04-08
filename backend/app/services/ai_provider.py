@@ -1,29 +1,28 @@
 import os
-import google.generativeai as genai
 
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-
-if not GEMINI_API_KEY:
-    raise Exception("GEMINI_API_KEY não configurada")
-
-genai.configure(api_key=GEMINI_API_KEY)
-
-model = genai.GenerativeModel("gemini-1.5-flash")
+from google import genai
 
 
 def generate_response(message: str) -> str:
-    try:
-        response = model.generate_content(
-            f"""
-            Você é um atendente comercial profissional.
-            Seja direto, educado e focado em conversão.
+    api_key = os.getenv("GEMINI_API_KEY")
+    if not api_key:
+        return "Olá! Recebi sua mensagem, já vou te responder."
 
-            Cliente: {message}
-            """
+    client = genai.Client(api_key=api_key)
+
+    prompt = f"""
+    Você é um atendente comercial profissional.
+    Seja direto, educado e focado em conversão.
+
+    Cliente: {message}
+    """
+
+    try:
+        response = client.models.generate_content(
+            model="gemini-2.0-flash",
+            contents=prompt,
         )
-        if response and hasattr(response, "text"):
-            return response.text.strip()
-        return "Não consegui responder agora, tenta de novo?"
-    except Exception as e:
-        print("Erro Gemini:", e)
+        text = getattr(response, "text", None)
+        return text.strip() if text else "Não consegui responder agora, tenta de novo?"
+    except Exception:
         return "Olá! Recebi sua mensagem, já vou te responder."
