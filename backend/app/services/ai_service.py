@@ -65,6 +65,7 @@ async def generate_ai_response(user_message: str) -> str:
     genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
 
     model = genai.GenerativeModel("gemini-1.5-flash")
+    print("MODELO USADO:", "gemini-1.5-flash")
 
     prompt = f"""
     Você é um atendente comercial especialista em vendas via WhatsApp.
@@ -82,5 +83,7 @@ async def generate_ai_response(user_message: str) -> str:
     """
 
     response = model.generate_content(prompt)
+    if response and hasattr(response, "text"):
+        return response.text.strip()
 
-    return response.text.strip()
+    return "Não consegui responder agora, tenta de novo?"

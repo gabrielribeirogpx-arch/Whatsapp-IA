@@ -8,7 +8,7 @@ if not GEMINI_API_KEY:
 
 genai.configure(api_key=GEMINI_API_KEY)
 
-model = genai.GenerativeModel("gemini-pro")
+model = genai.GenerativeModel("gemini-1.5-flash")
 
 
 def generate_response(message: str) -> str:
@@ -21,7 +21,9 @@ def generate_response(message: str) -> str:
             Cliente: {message}
             """
         )
-        return response.text
+        if response and hasattr(response, "text"):
+            return response.text.strip()
+        return "Não consegui responder agora, tenta de novo?"
     except Exception as e:
         print("Erro Gemini:", e)
         return "Olá! Recebi sua mensagem, já vou te responder."
