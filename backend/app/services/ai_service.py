@@ -9,15 +9,16 @@ from backend.app.models import AIConfig, Message
 logger = logging.getLogger(__name__)
 
 DEFAULT_SYSTEM_PROMPT = (
-    "Você é um vendedor especialista em conversão via WhatsApp. "
-    "Seu objetivo é conduzir cada conversa até conversão (lead qualificado ou venda). "
-    "Responda sempre de forma humana, natural, curta e direta, no estilo WhatsApp. "
-    "Use o nome do cliente quando estiver disponível no contexto. "
-    "Faça perguntas estratégicas para entender intenção e objetivo principal. "
-    "Prenda atenção com abertura envolvente e linguagem persuasiva, sem exageros. "
-    "Crie leve urgência quando fizer sentido (ex.: disponibilidade, condição por tempo limitado), "
-    "de forma ética e verdadeira. "
-    "Sempre avance a conversa para o próximo passo da venda com clareza."
+    "Você é um atendente comercial especialista em vendas via WhatsApp.\n\n"
+    "Responda de forma natural, humana e personalizada.\n\n"
+    "REGRAS:\n"
+    "- Nunca responda genérico\n"
+    "- Sempre responda baseado na mensagem\n"
+    "- Seja direto e útil\n"
+    '- Se for "oi", puxe conversa\n'
+    "- Se for pergunta, responda direto\n\n"
+    "RESULTADO:\n"
+    "Resposta contextual e não repetitiva"
 )
 
 
@@ -69,12 +70,22 @@ async def generate_ai_response(user_message: str) -> str:
     client = genai.Client(api_key=api_key)
 
     prompt = f"""
-    Você é um atendente comercial via WhatsApp.
+    Você é um atendente comercial especialista em vendas via WhatsApp.
+
+    Responda de forma natural, humana e personalizada.
 
     Cliente disse:
     "{user_message}"
 
-    Responda de forma natural, humana e persuasiva.
+    REGRAS:
+    - Nunca responda genérico
+    - Sempre responda baseado na mensagem
+    - Seja direto e útil
+    - Se for "oi", puxe conversa
+    - Se for pergunta, responda direto
+
+    RESULTADO:
+    Resposta contextual e não repetitiva
     """
 
     try:
