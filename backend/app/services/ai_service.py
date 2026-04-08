@@ -59,5 +59,29 @@ def gerar_resposta(
         return "Obrigado pela mensagem! Nosso time está avaliando sua solicitação."
 
 
-def generate_ai_response(message: str) -> str:
-    return gerar_resposta([], message)
+async def generate_ai_response(user_message: str) -> str:
+    import google.generativeai as genai
+
+    genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
+
+    model = genai.GenerativeModel("gemma-3-2b")
+
+    prompt = f"""
+    Você é um atendente especialista em vendas via WhatsApp.
+
+    Cliente disse:
+    "{user_message}"
+
+    Responda de forma:
+    - natural
+    - humana
+    - objetiva
+    - persuasiva
+    - estilo WhatsApp
+
+    Sempre tente conduzir a conversa.
+    """
+
+    response = model.generate_content(prompt)
+
+    return response.text.strip()

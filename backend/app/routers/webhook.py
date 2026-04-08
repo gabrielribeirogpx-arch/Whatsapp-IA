@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session, load_only
 
 from backend.app.database import SessionLocal, get_db
 from backend.app.models import Conversation, Message
+from backend.app.services.ai_service import generate_ai_response
 from backend.app.services.conversation_service import save_conversation
 from backend.app.services.tenant_service import get_or_create_default_tenant, resolve_tenant_by_phone_number_id
 from backend.app.services.whatsapp_service import enviar_mensagem
@@ -90,7 +91,13 @@ async def webhook(request: Request, db: Session = Depends(get_db)):
                 )
             )
 
-            auto_reply = "🔥 Olá! Aqui é a IA. Como posso te ajudar?"
+            try:
+                auto_reply = await generate_ai_response(incoming_message)
+            except Exception as e:
+                print(f"Erro IA: {e}")
+                auto_reply = "Desculpa, tive um erro aqui. Pode repetir?"
+
+            print(f"IA respondeu: {auto_reply}")
             enviar_mensagem(
                 phone,
                 auto_reply,
