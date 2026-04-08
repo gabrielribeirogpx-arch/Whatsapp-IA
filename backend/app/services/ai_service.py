@@ -83,7 +83,14 @@ async def generate_ai_response(user_message: str) -> str:
     """
 
     response = model.generate_content(prompt)
-    if response and hasattr(response, "text"):
-        return response.text.strip()
+
+    print("RAW RESPONSE:", response)
+
+    try:
+        if response and hasattr(response, "candidates"):
+            text = response.candidates[0].content.parts[0].text
+            return text.strip()
+    except Exception as e:
+        print("Erro ao extrair texto:", str(e))
 
     return "Não consegui responder agora, tenta de novo?"
