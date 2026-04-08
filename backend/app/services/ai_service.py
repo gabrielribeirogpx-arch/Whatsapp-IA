@@ -64,22 +64,21 @@ async def generate_ai_response(user_message: str) -> str:
 
     genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
 
-    model = genai.GenerativeModel("gemma-3-2b")
+    model = genai.GenerativeModel("gemini-1.5-flash")
 
     prompt = f"""
-    Você é um atendente especialista em vendas via WhatsApp.
+    Você é um atendente comercial especialista em vendas via WhatsApp.
 
     Cliente disse:
     "{user_message}"
 
     Responda de forma:
     - natural
+    - curta
     - humana
-    - objetiva
     - persuasiva
-    - estilo WhatsApp
 
-    Sempre tente conduzir a conversa.
+    Sempre faça uma pergunta para continuar a conversa.
     """
 
     response = model.generate_content(prompt)
