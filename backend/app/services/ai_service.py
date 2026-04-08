@@ -79,7 +79,7 @@ async def generate_ai_response(user_message: str) -> str:
 
     try:
         response = client.models.generate_content(
-            model="gemma-3-2b-it",
+            model="gemini-2.5-flash",
             contents=prompt,
         )
         text = getattr(response, "text", None)
