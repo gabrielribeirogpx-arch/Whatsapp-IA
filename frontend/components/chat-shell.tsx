@@ -168,15 +168,22 @@ export default function ChatShell() {
   }, [selectedContactId, stopTypingIndicator]);
 
   useEffect(() => {
-    const interval = setInterval(() => {
+    const conversationsInterval = setInterval(() => {
       fetchConversations().catch(() => undefined);
-      if (selectedContactId) {
-        fetchMessages(selectedContactId).catch(() => undefined);
-      }
+    }, 5000);
+
+    return () => clearInterval(conversationsInterval);
+  }, [fetchConversations]);
+
+  useEffect(() => {
+    if (!selectedContactId) return;
+
+    const messagesInterval = setInterval(() => {
+      fetchMessages(selectedContactId).catch(() => undefined);
     }, 3000);
 
-    return () => clearInterval(interval);
-  }, [selectedContactId, fetchConversations, fetchMessages]);
+    return () => clearInterval(messagesInterval);
+  }, [selectedContactId, fetchMessages]);
 
   function onSelectContact(contactId: string) {
     stopTypingIndicator();

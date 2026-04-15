@@ -62,65 +62,69 @@ def get_pipeline(
     tenant: Tenant = Depends(get_current_tenant),
     db: Session = Depends(get_db),
 ):
-    stages = ensure_pipeline_stages(db, tenant.id)
+    try:
+        stages = ensure_pipeline_stages(db, tenant.id)
 
-    leads = db.execute(
-        select(
-            Lead.id,
-            Lead.name,
-            Lead.phone,
-            Lead.last_message,
-            Lead.temperature,
-            Lead.score,
-            Lead.last_interaction,
-            Lead.stage,
-        )
-        .where(Lead.tenant_id == tenant.id)
-        .order_by(desc(Lead.score), desc(Lead.last_interaction), desc(Lead.created_at))
-    ).all()
-
-    grouped: dict[uuid.UUID, list[PipelineLeadOut]] = {stage.id: [] for stage in stages}
-    fallback_stage_id = stages[0].id if stages else None
-
-    stage_name_to_id = {stage.name.casefold(): stage.id for stage in stages}
-    stage_aliases = {
-        "lead": "novo",
-        "qualificado": "qualificado",
-        "proposta": "proposta",
-        "fechado": "fechamento",
-        "perdido": "ganho",
-    }
-
-    for lead in leads:
-        lead_stage = (lead.stage or "").casefold()
-        normalized_stage = stage_aliases.get(lead_stage, lead_stage)
-        target_stage_id = stage_name_to_id.get(normalized_stage) or fallback_stage_id
-        if not target_stage_id:
-            continue
-        if target_stage_id not in grouped:
-            grouped[target_stage_id] = []
-        grouped[target_stage_id].append(
-            PipelineLeadOut(
-                id=lead.id,
-                name=lead.name,
-                phone=lead.phone,
-                last_message=lead.last_message,
-                temperature=lead.temperature,
-                score=lead.score,
-                stage_id=target_stage_id,
-                last_interaction=lead.last_interaction,
+        leads = db.execute(
+            select(
+                Lead.id,
+                Lead.name,
+                Lead.phone,
+                Lead.last_message,
+                Lead.temperature,
+                Lead.score,
+                Lead.last_interaction,
+                Lead.stage,
             )
-        )
+            .where(Lead.tenant_id == tenant.id)
+            .order_by(desc(Lead.score), desc(Lead.last_interaction), desc(Lead.created_at))
+        ).all()
 
-    return [
-        PipelineStageOut(
-            id=stage.id,
-            name=stage.name,
-            position=stage.position,
-            leads=grouped.get(stage.id, []),
-        )
-        for stage in sorted(stages, key=lambda item: item.position)
-    ]
+        grouped: dict[uuid.UUID, list[PipelineLeadOut]] = {stage.id: [] for stage in stages}
+        fallback_stage_id = stages[0].id if stages else None
+
+        stage_name_to_id = {stage.name.casefold(): stage.id for stage in stages}
+        stage_aliases = {
+            "lead": "novo",
+            "qualificado": "qualificado",
+            "proposta": "proposta",
+            "fechado": "fechamento",
+            "perdido": "ganho",
+        }
+
+        for lead in leads:
+            lead_stage = (lead.stage or "").casefold()
+            normalized_stage = stage_aliases.get(lead_stage, lead_stage)
+            target_stage_id = stage_name_to_id.get(normalized_stage) or fallback_stage_id
+            if not target_stage_id:
+                continue
+            if target_stage_id not in grouped:
+                grouped[target_stage_id] = []
+            grouped[target_stage_id].append(
+                PipelineLeadOut(
+                    id=lead.id,
+                    name=lead.name,
+                    phone=lead.phone,
+                    last_message=lead.last_message,
+                    temperature=lead.temperature,
+                    score=lead.score,
+                    stage_id=target_stage_id,
+                    last_interaction=lead.last_interaction,
+                )
+            )
+
+        return [
+            PipelineStageOut(
+                id=stage.id,
+                name=stage.name,
+                position=stage.position,
+                leads=grouped.get(stage.id, []),
+            )
+            for stage in sorted(stages, key=lambda item: item.position)
+        ]
+    except Exception as e:
+        print("PIPELINE ERROR:", str(e))
+        raise HTTPException(status_code=500, detail="Erro ao carregar pipeline") from e
 
 
 @router.post("/leads/{lead_id}/move", response_model=LeadOut)
