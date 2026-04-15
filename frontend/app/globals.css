@@ -540,8 +540,16 @@ input {
   color: #059669;
 }
 
-.wa-contact-status.away {
+.wa-contact-status.online {
+  color: #16a34a;
+}
+
+.wa-contact-status.recent {
   color: #ca8a04;
+}
+
+.wa-contact-status.offline {
+  color: #6b7280;
 }
 
 .wa-chat-window {
