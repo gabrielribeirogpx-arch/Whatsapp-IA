@@ -13,6 +13,7 @@ from backend.app.services.conversation_service import save_conversation
 from backend.app.models import Tenant
 from backend.app.services.tenant_service import get_or_create_default_tenant
 from backend.app.services.whatsapp_service import enviar_mensagem
+from backend.app.utils.phone import normalize_phone
 
 router = APIRouter()
 
@@ -116,6 +117,7 @@ async def webhook(request: Request, db: Session = Depends(get_db)):
 
         for incoming in messages_data:
             phone = incoming["phone"]
+            normalized_phone = normalize_phone(phone)
             incoming_message = incoming["text"]
             phone_number_id = incoming.get("phone_number_id")
 
@@ -138,12 +140,12 @@ async def webhook(request: Request, db: Session = Depends(get_db)):
             conversation = db.execute(
                 select(Conversation)
                 .options(load_only(Conversation.id, Conversation.phone_number, Conversation.message, Conversation.created_at))
-                .where(Conversation.tenant_id == tenant_id, Conversation.phone_number == phone)
+                .where(Conversation.tenant_id == tenant_id, Conversation.phone_number == normalized_phone)
                 .order_by(desc(Conversation.created_at), desc(Conversation.id))
             ).scalars().first()
             if not conversation:
-                print(f"Nenhuma conversa encontrada, criando nova para {phone}")
-                conversation = Conversation(phone_number=phone, message=incoming_message, tenant_id=tenant_id)
+                print(f"Nenhuma conversa encontrada, criando nova para {normalized_phone}")
+                conversation = Conversation(phone_number=normalized_phone, message=incoming_message, tenant_id=tenant_id)
                 db.add(conversation)
                 db.flush()
             else:
