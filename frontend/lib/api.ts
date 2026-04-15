@@ -33,18 +33,24 @@ export async function registerTenant(name: string, phone_number_id: string): Pro
     body: JSON.stringify({ name, phone_number_id })
   });
 
-  if (!res.ok) throw new Error(await res.text());
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`HTTP ${res.status}: ${body}`);
+  }
   return res.json();
 }
 
-export async function tenantLogin(slug: string): Promise<TenantSession> {
+export async function tenantLogin(phone_number_id: string): Promise<TenantSession> {
   const res = await fetch(`${BASE_URL}/api/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ slug })
+    body: JSON.stringify({ phone_number_id })
   });
 
-  if (!res.ok) throw new Error('Falha de autenticação do tenant');
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`HTTP ${res.status}: ${body}`);
+  }
   return res.json();
 }
 

@@ -273,6 +273,22 @@ input {
   margin: 0.6rem 0;
 }
 
+.notice-text {
+  color: #0f766e;
+  margin: 0.6rem 0;
+}
+
+.helper-text {
+  margin: 0.9rem 0 0;
+  color: #6b7280;
+  font-size: 0.9rem;
+}
+
+.helper-text a {
+  color: #0f766e;
+  font-weight: 600;
+}
+
 .empty-state {
   color: #6b7280;
   font-size: 0.9rem;

@@ -21,7 +21,7 @@ class RegisterRequest(BaseModel):
 
 
 class LoginRequest(BaseModel):
-    slug: str = Field(min_length=2, max_length=80)
+    phone_number_id: str = Field(min_length=2, max_length=64)
 
 
 def _slugify(value: str) -> str:
@@ -68,7 +68,8 @@ def register(payload: RegisterRequest, db: Session = Depends(get_db)):
 
 @router.post("/login", response_model=TenantAuthResponse)
 def login(payload: LoginRequest, db: Session = Depends(get_db)):
-    tenant = db.execute(select(Tenant).where(Tenant.slug == payload.slug.strip())).scalar_one_or_none()
+    phone_number_id = payload.phone_number_id.strip()
+    tenant = db.execute(select(Tenant).where(Tenant.phone_number_id == phone_number_id)).scalar_one_or_none()
     if not tenant:
         raise HTTPException(status_code=404, detail="Tenant não encontrado")
 
