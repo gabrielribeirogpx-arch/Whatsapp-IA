@@ -1,9 +1,9 @@
 'use client';
 
 import Link from 'next/link';
-import { FormEvent, useEffect, useState } from 'react';
+import { DragEvent, FormEvent, useEffect, useState } from 'react';
 
-import { createKnowledge, deleteKnowledge, getKnowledge } from '../../lib/api';
+import { createKnowledge, deleteKnowledge, getKnowledge, uploadKnowledgePdf } from '../../lib/api';
 import { KnowledgeItem } from '../../lib/types';
 
 export default function KnowledgePage() {
@@ -11,7 +11,10 @@ export default function KnowledgePage() {
   const [title, setTitle] = useState('');
   const [content, setContent] = useState('');
   const [error, setError] = useState('');
+  const [info, setInfo] = useState('');
   const [saving, setSaving] = useState(false);
+  const [uploadingPdf, setUploadingPdf] = useState(false);
+  const [dragActive, setDragActive] = useState(false);
 
   async function loadKnowledge() {
     const data = await getKnowledge();
@@ -57,6 +60,29 @@ export default function KnowledgePage() {
     }
   }
 
+  async function processPdf(file: File) {
+    setError('');
+    setInfo('');
+    setUploadingPdf(true);
+    try {
+      const result = await uploadKnowledgePdf(file);
+      setInfo(`PDF "${result.source}" processado com ${result.chunks_created} chunks.`);
+    } catch {
+      setError('Falha ao processar PDF.');
+    } finally {
+      setUploadingPdf(false);
+    }
+  }
+
+  function handleDrop(event: DragEvent<HTMLDivElement>) {
+    event.preventDefault();
+    setDragActive(false);
+    const file = event.dataTransfer.files?.[0];
+    if (file) {
+      processPdf(file).catch(() => setError('Falha ao processar PDF.'));
+    }
+  }
+
   return (
     <main className="dashboard-page">
       <section className="dashboard-hero">
@@ -75,10 +101,45 @@ export default function KnowledgePage() {
       </section>
 
       {error ? <p className="error-text">{error}</p> : null}
+      {info ? <p>{info}</p> : null}
 
       <section className="products-layout">
         <article className="products-form-card">
           <h2>Adicionar conteúdo</h2>
+          <div
+            onDragOver={(event) => {
+              event.preventDefault();
+              setDragActive(true);
+            }}
+            onDragLeave={() => setDragActive(false)}
+            onDrop={handleDrop}
+            style={{
+              border: '1px dashed #6b7280',
+              borderRadius: 12,
+              padding: 16,
+              marginBottom: 16,
+              backgroundColor: dragActive ? 'rgba(59, 130, 246, 0.1)' : 'transparent'
+            }}
+          >
+            <strong>Upload PDF</strong>
+            <p>Arraste e solte um PDF aqui para processar automaticamente no RAG.</p>
+            <label htmlFor="pdf-upload" className="secondary-button" style={{ display: 'inline-block', cursor: 'pointer' }}>
+              Upload PDF
+            </label>
+            <input
+              id="pdf-upload"
+              type="file"
+              accept="application/pdf"
+              style={{ display: 'none' }}
+              onChange={(event) => {
+                const selected = event.target.files?.[0];
+                if (selected) {
+                  processPdf(selected).catch(() => setError('Falha ao processar PDF.'));
+                }
+              }}
+            />
+            {uploadingPdf ? <p>Processando documento...</p> : null}
+          </div>
           <form className="products-form" onSubmit={handleSubmit}>
             <label htmlFor="knowledge-title">Título</label>
             <input id="knowledge-title" value={title} onChange={(event) => setTitle(event.target.value)} required />

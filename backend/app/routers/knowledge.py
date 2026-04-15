@@ -1,12 +1,17 @@
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from sqlalchemy.orm import Session
 
 from backend.app.database import get_db
 from backend.app.models import Tenant
-from backend.app.schemas.knowledge import KnowledgeCreate, KnowledgeOut
-from backend.app.services.knowledge_service import create_knowledge_item, delete_knowledge_item, list_knowledge_items
+from backend.app.schemas.knowledge import KnowledgeCreate, KnowledgeOut, KnowledgeUploadOut
+from backend.app.services.knowledge_service import (
+    create_knowledge_item,
+    delete_knowledge_item,
+    list_knowledge_items,
+    process_pdf_knowledge,
+)
 from backend.app.services.tenant_service import get_current_tenant
 
 router = APIRouter(prefix="/api/knowledge", tags=["knowledge"])
@@ -39,3 +44,28 @@ def remove_knowledge(
     if not deleted:
         raise HTTPException(status_code=404, detail="Conteúdo não encontrado")
     return {"deleted": True}
+
+
+@router.post("/upload-pdf", response_model=KnowledgeUploadOut)
+async def upload_pdf_knowledge(
+    file: UploadFile = File(...),
+    tenant: Tenant = Depends(get_current_tenant),
+    db: Session = Depends(get_db),
+):
+    if not file.filename or not file.filename.lower().endswith(".pdf"):
+        raise HTTPException(status_code=400, detail="Envie um arquivo PDF válido")
+
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=400, detail="Arquivo vazio")
+
+    chunks_created = process_pdf_knowledge(
+        db=db,
+        tenant_id=tenant.id,
+        source=file.filename,
+        pdf_bytes=content,
+    )
+    if chunks_created == 0:
+        raise HTTPException(status_code=400, detail="Não foi possível extrair texto do PDF")
+
+    return KnowledgeUploadOut(source=file.filename, chunks_created=chunks_created)

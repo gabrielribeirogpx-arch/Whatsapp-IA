@@ -18,3 +18,8 @@ class KnowledgeOut(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class KnowledgeUploadOut(BaseModel):
+    source: str
+    chunks_created: int
