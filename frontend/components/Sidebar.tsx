@@ -87,9 +87,13 @@ export default function Sidebar({
       </header>
 
       <div className="wa-contact-list">
-        <div className="wa-unanswered-box">
-          <h3>Não respondidas ({unansweredCount})</h3>
-        </div>
+        {unansweredCount > 0 ? (
+          <div className="wa-unanswered-box">
+            <h3>Não respondidas ({unansweredCount})</h3>
+          </div>
+        ) : (
+          <p className="wa-inbox-synced">Todas as conversas estão em dia ✓</p>
+        )}
 
         {contacts.map((contact) => {
           const isActive = contact.id === selectedContactId;

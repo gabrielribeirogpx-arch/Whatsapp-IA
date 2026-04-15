@@ -362,6 +362,13 @@ input {
   color: #92400e;
 }
 
+.wa-inbox-synced {
+  margin: 0;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: #16a34a;
+}
+
 .wa-contact-item {
   width: 100%;
   border: 0;
