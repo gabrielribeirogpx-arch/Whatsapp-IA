@@ -30,9 +30,14 @@ export default function DashboardPage() {
           <h1>Painel WhatsApp IA</h1>
           <p>Monitore atendimento e acesse rapidamente a operação de mensagens em tempo real.</p>
         </div>
-        <Link href="/chat" className="primary-button">
-          Abrir chat
-        </Link>
+        <div style={{ display: 'flex', gap: '0.5rem' }}>
+          <Link href="/crm" className="secondary-button">
+            Abrir CRM
+          </Link>
+          <Link href="/chat" className="primary-button">
+            Abrir chat
+          </Link>
+        </div>
       </section>
 
       <section className="dashboard-grid">

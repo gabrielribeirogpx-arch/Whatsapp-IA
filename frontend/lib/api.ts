@@ -1,4 +1,4 @@
-import { Conversation, Message, SendMessagePayload, TenantSession } from './types';
+import { CRMContact, Conversation, Message, SendMessagePayload, TenantSession } from './types';
 
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL;
 const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL ?? 'https://SEU_BACKEND_URL';
@@ -81,12 +81,24 @@ export async function getMessages(phone: string) {
   return res.json();
 }
 
-export async function sendMessage(phone: string, message: string) {
+export async function getMessagesByContact(contactId: string) {
+  const res = await fetch(`${BASE_URL}/api/messages/by-contact/${contactId}`, { headers: tenantHeaders() });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function sendMessage(phone: string, message: string, contact_id?: string) {
   const res = await fetch(`${BASE_URL}/api/send-message`, {
     method: 'POST',
     headers: tenantHeaders(),
-    body: JSON.stringify({ phone, message })
+    body: JSON.stringify({ phone, message, contact_id })
   });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function getContacts(): Promise<CRMContact[]> {
+  const res = await fetch(`${BASE_URL}/api/contacts`, { headers: tenantHeaders() });
   if (!res.ok) throw new Error(await res.text());
   return res.json();
 }

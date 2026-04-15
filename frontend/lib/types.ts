@@ -1,9 +1,12 @@
 export type Conversation = {
   id: string;
   tenant_id: string;
+  contact_id?: string | null;
   phone: string;
   name: string | null;
   avatar_url?: string | null;
+  stage?: string;
+  score?: number;
   status: 'bot' | 'human' | string;
   last_message: string;
   updated_at: string;
@@ -25,9 +28,13 @@ export type TenantSession = {
 
 export type Contact = {
   id: string;
+  tenant_id?: string;
   name: string | null;
   phone: string;
   avatarUrl?: string | null;
+  stage?: string;
+  score?: number;
+  lastMessageAt?: string | null;
   lastMessage: string;
 };
 
@@ -41,4 +48,16 @@ export type ChatMessage = {
 export type SendMessagePayload = {
   to: string;
   message: string;
+};
+
+export type CRMContact = {
+  id: string;
+  tenant_id: string;
+  phone: string;
+  name: string | null;
+  avatar_url?: string | null;
+  stage: string;
+  score: number;
+  last_message_at?: string | null;
+  created_at: string;
 };

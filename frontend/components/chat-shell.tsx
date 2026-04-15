@@ -4,7 +4,7 @@ import { FormEvent, useEffect, useMemo, useState } from 'react';
 
 import ChatWindow from './ChatWindow';
 import Sidebar from './Sidebar';
-import { getConversations, getMessages, sendMessage } from '../lib/api';
+import { getConversations, getMessages, getMessagesByContact, sendMessage } from '../lib/api';
 import { ChatMessage, Contact, Conversation, Message } from '../lib/types';
 
 function toChatMessage(message: Message): ChatMessage {
@@ -43,10 +43,12 @@ export default function ChatShell() {
   const contacts = useMemo<Contact[]>(
     () =>
       conversations.map((conversation) => ({
-        id: String(conversation.id),
+        id: String(conversation.contact_id ?? conversation.id),
         name: conversation.name,
         phone: conversation.phone,
         avatarUrl: conversation.avatar_url,
+        stage: conversation.stage,
+        score: conversation.score,
         lastMessage: conversation.last_message
       })),
     [conversations]
@@ -59,14 +61,18 @@ export default function ChatShell() {
 
   function onSelectContact(contactId: string) {
     setSelectedContactId(contactId);
-    const conversation = conversations.find((item) => String(item.id) === contactId);
+    const conversation = conversations.find((item) => String(item.contact_id ?? item.id) === contactId);
 
     if (!conversation) {
       setMessages([]);
       return;
     }
 
-    getMessages(conversation.phone).then((realMessages: Message[]) => {
+    const loadMessages = conversation.contact_id
+      ? getMessagesByContact(conversation.contact_id)
+      : getMessages(conversation.phone);
+
+    loadMessages.then((realMessages: Message[]) => {
       setMessages(realMessages.map(toChatMessage));
     });
   }
@@ -88,7 +94,7 @@ export default function ChatShell() {
     setInputValue('');
 
     try {
-      await sendMessage(selectedContact.phone, text);
+      await sendMessage(selectedContact.phone, text, selectedContact.id);
     } catch (error) {
       console.error('Falha ao enviar para backend:', error);
     }
