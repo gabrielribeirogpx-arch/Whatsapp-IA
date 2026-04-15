@@ -9,14 +9,9 @@ from backend.app.routers import auth
 
 app = FastAPI()
 
-origins = [
-    "http://localhost:3000",
-    "https://whatsapp-ia-three.vercel.app",
-]
-
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
