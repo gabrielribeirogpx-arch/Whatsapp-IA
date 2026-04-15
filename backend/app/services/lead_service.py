@@ -5,9 +5,9 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from backend.app.models.lead import Lead, LeadStage, LeadTemperature
-from backend.app.services.pipeline_service import ensure_pipeline_stages
-from backend.app.utils.phone import normalize_phone
+from app.models.lead import Lead, LeadStage, LeadTemperature
+from app.services.pipeline_service import ensure_pipeline_stages
+from app.utils.phone import normalize_phone
 
 
 def get_or_create_lead(
