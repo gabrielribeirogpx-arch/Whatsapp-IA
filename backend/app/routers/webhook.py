@@ -67,6 +67,21 @@ REGRAS:
 - Pareça humano"""
 
 
+def _looks_like_name(text: str) -> bool:
+    if not text:
+        return False
+
+    cleaned = text.strip()
+    if not cleaned or len(cleaned) > 40:
+        return False
+
+    if any(char.isdigit() for char in cleaned):
+        return False
+
+    words = cleaned.split()
+    return len(words) <= 4
+
+
 @router.get("/webhook")
 async def verify():
     return {"status": "webhook ativo"}
@@ -148,7 +163,7 @@ async def webhook(request: Request, db: Session = Depends(get_db)):
                 print(f"Nenhuma conversa encontrada, criando nova para {normalized_phone}")
                 conversation = Conversation(
                     phone_number=normalized_phone,
-                    name=contact_name,
+                    name=None,
                     message=incoming_message,
                     tenant_id=tenant_id,
                 )
@@ -159,6 +174,10 @@ async def webhook(request: Request, db: Session = Depends(get_db)):
                 if contact_name and not conversation.name:
                     conversation.name = contact_name
                 conversation.message = incoming_message
+
+            if conversation.name is None and _looks_like_name(incoming_message):
+                conversation.name = incoming_message.strip()
+            print("NOME CLIENTE:", conversation.name)
 
             db.add(
                 Message(
