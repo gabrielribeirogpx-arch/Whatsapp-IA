@@ -1,3 +1,5 @@
+import sys
+import time
 import traceback
 
 from fastapi import FastAPI, Request
@@ -13,7 +15,18 @@ from backend.app.routers import products
 from backend.app.routers import knowledge
 from backend.app.routers import leads
 
+print("🚀 APP STARTED - DEBUG MODE")
+
+
+def handle_exception(exc_type, exc_value, exc_traceback):
+    print("🔥 EXCEPTION GLOBAL:")
+    traceback.print_exception(exc_type, exc_value, exc_traceback)
+
+
+sys.excepthook = handle_exception
+
 app = FastAPI()
+START_TIME = time.monotonic()
 
 app.add_middleware(
     CORSMiddleware,
@@ -46,9 +59,32 @@ app.include_router(leads.router)
 
 @app.on_event("startup")
 def on_startup() -> None:
+    print("🔥 STARTUP EVENT EXECUTADO")
     Base.metadata.create_all(bind=engine)
 
 
 @app.get("/")
 def root():
     return {"status": "ok"}
+
+
+@app.on_event("startup")
+async def test_db() -> None:
+    try:
+        from backend.app.core.database import engine as core_engine
+
+        conn = core_engine.connect()
+        print("✅ DB CONNECTED")
+        conn.close()
+    except Exception as e:
+        print("💣 DB ERROR NO STARTUP:", str(e))
+
+
+@app.on_event("shutdown")
+async def shutdown_event() -> None:
+    print("💀 SHUTDOWN EVENT EXECUTADO")
+
+
+@app.get("/health")
+def health():
+    return {"status": "ok", "uptime_seconds": round(time.monotonic() - START_TIME, 2)}
