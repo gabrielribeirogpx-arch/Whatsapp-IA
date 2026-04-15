@@ -64,26 +64,53 @@ def get_pipeline(
 ):
     stages = ensure_pipeline_stages(db, tenant.id)
 
-    leads = (
-        db.execute(
-            select(Lead)
-            .where(Lead.tenant_id == tenant.id)
-            .order_by(desc(Lead.score), desc(Lead.last_interaction), desc(Lead.created_at))
+    leads = db.execute(
+        select(
+            Lead.id,
+            Lead.name,
+            Lead.phone,
+            Lead.last_message,
+            Lead.temperature,
+            Lead.score,
+            Lead.last_interaction,
+            Lead.stage,
         )
-        .scalars()
-        .all()
-    )
+        .where(Lead.tenant_id == tenant.id)
+        .order_by(desc(Lead.score), desc(Lead.last_interaction), desc(Lead.created_at))
+    ).all()
 
     grouped: dict[uuid.UUID, list[PipelineLeadOut]] = {stage.id: [] for stage in stages}
     fallback_stage_id = stages[0].id if stages else None
 
+    stage_name_to_id = {stage.name.casefold(): stage.id for stage in stages}
+    stage_aliases = {
+        "lead": "novo",
+        "qualificado": "qualificado",
+        "proposta": "proposta",
+        "fechado": "fechamento",
+        "perdido": "ganho",
+    }
+
     for lead in leads:
-        target_stage_id = lead.stage_id or fallback_stage_id
+        lead_stage = (lead.stage or "").casefold()
+        normalized_stage = stage_aliases.get(lead_stage, lead_stage)
+        target_stage_id = stage_name_to_id.get(normalized_stage) or fallback_stage_id
         if not target_stage_id:
             continue
         if target_stage_id not in grouped:
             grouped[target_stage_id] = []
-        grouped[target_stage_id].append(PipelineLeadOut.model_validate(lead))
+        grouped[target_stage_id].append(
+            PipelineLeadOut(
+                id=lead.id,
+                name=lead.name,
+                phone=lead.phone,
+                last_message=lead.last_message,
+                temperature=lead.temperature,
+                score=lead.score,
+                stage_id=target_stage_id,
+                last_interaction=lead.last_interaction,
+            )
+        )
 
     return [
         PipelineStageOut(
