@@ -1,9 +1,10 @@
 type AvatarProps = {
   name?: string | null;
   avatarUrl?: string | null;
+  phone?: string | null;
 };
 
-export default function Avatar({ name, avatarUrl }: AvatarProps) {
+export default function Avatar({ name, avatarUrl, phone }: AvatarProps) {
   if (avatarUrl) {
     return <img src={avatarUrl} alt={`Avatar de ${name || 'contato'}`} className="wa-avatar-image" />;
   }
@@ -14,5 +15,7 @@ export default function Avatar({ name, avatarUrl }: AvatarProps) {
     return <div className="wa-avatar-fallback wa-avatar-fallback-initial">{firstLetter}</div>;
   }
 
-  return <div className="wa-avatar-fallback wa-avatar-fallback-icon">👤</div>;
+  const phoneSuffix = phone?.slice(-2) || '--';
+
+  return <div className="wa-avatar-fallback wa-avatar-fallback-phone">{phoneSuffix}</div>;
 }
