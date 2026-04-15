@@ -50,6 +50,9 @@ export default function DashboardPage() {
           <Link href="/products" className="secondary-button">
             Produtos
           </Link>
+          <Link href="/knowledge" className="secondary-button">
+            Knowledge
+          </Link>
           <Link href="/chat" className="primary-button">
             Abrir Inbox
           </Link>

@@ -8,6 +8,7 @@ from backend.app.routers import webhook
 from backend.app.routers import chat
 from backend.app.routers import auth
 from backend.app.routers import products
+from backend.app.routers import knowledge
 
 app = FastAPI()
 
@@ -23,6 +24,7 @@ app.include_router(webhook.router)
 app.include_router(chat.router)
 app.include_router(auth.router, prefix="/api")
 app.include_router(products.router)
+app.include_router(knowledge.router)
 
 
 @app.on_event("startup")
