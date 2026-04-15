@@ -118,3 +118,24 @@ export type KnowledgeCrawlResult = {
   pages_collected: number;
   chunks_created: number;
 };
+
+
+export type PipelineTemperature = 'hot' | 'warm' | 'cold';
+
+export type PipelineLead = {
+  id: string;
+  name: string | null;
+  phone: string;
+  last_message: string | null;
+  temperature: PipelineTemperature;
+  score: number;
+  stage_id: string | null;
+  last_interaction: string | null;
+};
+
+export type PipelineStage = {
+  id: string;
+  name: string;
+  position: number;
+  leads: PipelineLead[];
+};

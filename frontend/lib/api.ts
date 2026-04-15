@@ -10,7 +10,8 @@ import {
   Product,
   ProductPayload,
   SendMessagePayload,
-  TenantSession
+  TenantSession,
+  PipelineStage
 } from './types';
 
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL;
@@ -224,6 +225,23 @@ export async function crawlKnowledgeSite(payload: KnowledgeCrawlPayload): Promis
     method: 'POST',
     headers: tenantHeaders(),
     body: JSON.stringify(payload)
+  });
+
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function getPipeline(): Promise<PipelineStage[]> {
+  const res = await fetch(`${BASE_URL}/api/pipeline`, { headers: tenantHeaders() });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function moveLeadToStage(leadId: string, stageId: string) {
+  const res = await fetch(`${BASE_URL}/api/leads/${leadId}/move`, {
+    method: 'POST',
+    headers: tenantHeaders(),
+    body: JSON.stringify({ stage_id: stageId })
   });
 
   if (!res.ok) throw new Error(await res.text());

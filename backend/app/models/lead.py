@@ -17,6 +17,12 @@ class LeadStage(StrEnum):
     PERDIDO = "perdido"
 
 
+class LeadTemperature(StrEnum):
+    COLD = "cold"
+    WARM = "warm"
+    HOT = "hot"
+
+
 class Lead(Base):
     __tablename__ = "leads"
     __table_args__ = (UniqueConstraint("tenant_id", "phone", name="uq_leads_tenant_phone"),)
@@ -26,7 +32,10 @@ class Lead(Base):
     phone: Mapped[str] = mapped_column(String, nullable=False, index=True)
     name: Mapped[str | None] = mapped_column(String, nullable=True)
     stage: Mapped[str] = mapped_column(String, nullable=False, default=LeadStage.LEAD.value)
+    stage_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("pipeline_stages.id"), nullable=True, index=True)
+    temperature: Mapped[str] = mapped_column(String(16), nullable=False, default=LeadTemperature.COLD.value)
     score: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     last_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    last_interaction: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     last_contact_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
