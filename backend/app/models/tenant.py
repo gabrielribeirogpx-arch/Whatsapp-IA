@@ -5,7 +5,7 @@ from sqlalchemy import CheckConstraint, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.core.database import Base
+from backend.app.core.database import Base
 
 DEFAULT_SYSTEM_PROMPT = "Você é um assistente de vendas altamente persuasivo, especializado em converter leads em clientes."
 
@@ -46,6 +46,6 @@ class AIConfig(Base):
     tenant: Mapped[Tenant] = relationship(back_populates="ai_config")
 
 
-from app.models.product import Product  # noqa: E402
-from app.models.knowledge_base import KnowledgeBase  # noqa: E402
-from app.models.knowledge_chunk import KnowledgeChunk  # noqa: E402
+from backend.app.models.product import Product  # noqa: E402
+from backend.app.models.knowledge_base import KnowledgeBase  # noqa: E402
+from backend.app.models.knowledge_chunk import KnowledgeChunk  # noqa: E402

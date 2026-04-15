@@ -1,7 +1,7 @@
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import PipelineStage
+from backend.app.models import PipelineStage
 
 DEFAULT_PIPELINE_STAGES = [
     "Novo",
