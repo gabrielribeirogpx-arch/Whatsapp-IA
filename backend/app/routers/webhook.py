@@ -11,6 +11,7 @@ from backend.app.services.ai_provider import classificar_lead
 from backend.app.services.ai_service import generate_ai_response
 from backend.app.services.contact_sync_service import ensure_conversation_contact_link, upsert_contact_for_phone
 from backend.app.services.conversation_service import save_conversation
+from backend.app.services.knowledge_service import build_rag_context, search_relevant_knowledge
 from backend.app.models import Tenant
 from backend.app.services.tenant_service import get_or_create_default_tenant
 from backend.app.services.whatsapp_service import enviar_mensagem
@@ -300,6 +301,13 @@ Cliente disse:
 """
 
                 prompt = _join_prompt_with_products(products_context, prompt)
+                knowledge_items = search_relevant_knowledge(
+                    db=db,
+                    tenant_id=tenant_id,
+                    query_text=incoming_message,
+                    top_k=3,
+                )
+                prompt = build_rag_context(prompt, knowledge_items)
 
                 try:
                     auto_reply = await generate_ai_response(prompt)

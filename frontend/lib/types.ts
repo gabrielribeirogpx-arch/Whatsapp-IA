@@ -87,3 +87,16 @@ export type ProductPayload = {
   objections?: string;
   target_customer?: string;
 };
+
+export type KnowledgeItem = {
+  id: string;
+  tenant_id: string;
+  title: string;
+  content: string;
+  created_at: string;
+};
+
+export type KnowledgePayload = {
+  title: string;
+  content: string;
+};
