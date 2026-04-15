@@ -19,6 +19,7 @@ export default function LoginPage() {
     try {
       const tenant = await tenantLogin(phoneNumberId.trim());
       localStorage.setItem('tenant', JSON.stringify(tenant));
+      localStorage.setItem('tenant_id', tenant.tenant_id);
       router.push('/chat');
     } catch {
       setError('Não foi possível autenticar o tenant. Verifique os dados e tente novamente.');
