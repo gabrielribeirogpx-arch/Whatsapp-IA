@@ -8,6 +8,7 @@ type SidebarProps = {
   onSelectContact: (contactId: string) => void;
   sidebarOpen: boolean;
   onToggleSidebar: () => void;
+  unansweredCount: number;
 };
 
 export default function Sidebar({
@@ -15,7 +16,8 @@ export default function Sidebar({
   selectedContactId,
   onSelectContact,
   sidebarOpen,
-  onToggleSidebar
+  onToggleSidebar,
+  unansweredCount
 }: SidebarProps) {
   function formatPhone(phone: string) {
     const digits = phone.replace(/\D/g, '');
@@ -39,6 +41,39 @@ export default function Sidebar({
     return phone;
   }
 
+  function formatRelativeTime(isoDate?: string | null) {
+    if (!isoDate) return 'agora';
+
+    const date = new Date(isoDate);
+    if (Number.isNaN(date.getTime())) return 'agora';
+
+    const diffInSeconds = Math.max(0, Math.floor((Date.now() - date.getTime()) / 1000));
+    if (diffInSeconds < 60) return 'agora';
+
+    const diffInMinutes = Math.floor(diffInSeconds / 60);
+    if (diffInMinutes < 60) return `há ${diffInMinutes} min`;
+
+    const diffInHours = Math.floor(diffInMinutes / 60);
+    if (diffInHours < 24) return `há ${diffInHours} h`;
+
+    const diffInDays = Math.floor(diffInHours / 24);
+    return `há ${diffInDays} d`;
+  }
+
+  function getBadge(status?: string) {
+    const normalizedStatus = status?.toLowerCase();
+
+    if (normalizedStatus === 'human') {
+      return { label: '👤 Humano', className: 'human' };
+    }
+
+    if (normalizedStatus === 'bot' || normalizedStatus === 'ai') {
+      return { label: '🤖 IA', className: 'ai' };
+    }
+
+    return { label: '⏳ Aguardando', className: 'pending' };
+  }
+
   return (
     <aside className={`wa-sidebar ${sidebarOpen ? 'open' : ''}`}>
       <header className="wa-sidebar-header">
@@ -52,10 +87,15 @@ export default function Sidebar({
       </header>
 
       <div className="wa-contact-list">
+        <div className="wa-unanswered-box">
+          <h3>Não respondidas ({unansweredCount})</h3>
+        </div>
+
         {contacts.map((contact) => {
           const isActive = contact.id === selectedContactId;
           const displayName = contact.name || formatPhone(contact.phone);
-          const statusText = contact.isTyping ? 'digitando' : 'online';
+          const badge = getBadge(contact.status);
+          const relativeTime = formatRelativeTime(contact.lastMessageAt);
 
           return (
             <button
@@ -75,9 +115,10 @@ export default function Sidebar({
                 <div className="wa-contact-body">
                   <div className="wa-contact-row">
                     <strong>{displayName}</strong>
-                    <span className={`wa-contact-status ${contact.isTyping ? 'typing' : 'online'}`}>{statusText}</span>
+                    <span className="wa-contact-time">{relativeTime}</span>
                   </div>
-                  <p>{contact.lastMessage || 'Sem mensagens ainda.'}</p>
+                  <p className="wa-contact-preview">{contact.lastMessage || 'Sem mensagens ainda.'}</p>
+                  <div className={`wa-contact-badge ${badge.className}`}>{badge.label}</div>
                 </div>
               </div>
             </button>
