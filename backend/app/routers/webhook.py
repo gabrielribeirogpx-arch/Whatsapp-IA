@@ -6,9 +6,10 @@ from sqlalchemy import desc, select
 from sqlalchemy.orm import Session, load_only
 
 from backend.app.database import SessionLocal, get_db
-from backend.app.models import Contact, Conversation, Message
+from backend.app.models import Conversation, Message
 from backend.app.services.ai_provider import classificar_lead
 from backend.app.services.ai_service import generate_ai_response
+from backend.app.services.contact_sync_service import ensure_conversation_contact_link, upsert_contact_for_phone
 from backend.app.services.conversation_service import save_conversation
 from backend.app.models import Tenant
 from backend.app.services.tenant_service import get_or_create_default_tenant
@@ -178,23 +179,12 @@ async def webhook(request: Request, db: Session = Depends(get_db)):
                 .order_by(desc(Conversation.created_at), desc(Conversation.id))
             ).scalars().first()
 
-            contact = db.execute(
-                select(Contact).where(Contact.tenant_id == tenant_id, Contact.phone == normalized_phone)
-            ).scalars().first()
-            if not contact:
-                contact = Contact(
-                    tenant_id=tenant_id,
-                    phone=normalized_phone,
-                    name=contact_name,
-                    stage="novo",
-                    score=0,
-                    last_message_at=datetime.utcnow(),
-                )
-                db.add(contact)
-                db.flush()
-            elif contact_name and not contact.name:
-                contact.name = contact_name
-            contact.last_message_at = datetime.utcnow()
+            contact = upsert_contact_for_phone(
+                db,
+                tenant_id=tenant_id,
+                phone=normalized_phone,
+                name=contact_name,
+            )
 
             if not conversation:
                 print(f"Nenhuma conversa encontrada, criando nova para {normalized_phone}")
@@ -211,15 +201,16 @@ async def webhook(request: Request, db: Session = Depends(get_db)):
                 print(f"Conversa encontrada: {conversation.id}")
                 if contact_name and not conversation.name:
                     conversation.name = contact_name
-                if not conversation.contact_id:
-                    conversation.contact_id = contact.id
+                ensure_conversation_contact_link(conversation, contact)
                 conversation.message = incoming_message
 
             if conversation.name is None and _looks_like_name(incoming_message):
                 conversation.name = incoming_message.strip()
-            if not contact.name and conversation.name:
+            if conversation.name and (not contact.name or contact.name == "Cliente"):
                 contact.name = conversation.name
             print("NOME CLIENTE:", conversation.name)
+
+            contact.last_message_at = datetime.utcnow()
 
             db.add(
                 Message(

@@ -61,5 +61,6 @@ export type CRMContact = {
   stage: string;
   score: number;
   last_message_at?: string | null;
+  last_message?: string | null;
   created_at: string;
 };

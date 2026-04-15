@@ -5,7 +5,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from sqlalchemy import desc, select
-from sqlalchemy.orm import Session, load_only
+from sqlalchemy.orm import Session, load_only, selectinload
 
 from backend.app.database import get_db
 from backend.app.models import Contact, Conversation, Message, Tenant
@@ -19,6 +19,7 @@ from backend.app.schemas.chat import (
     TenantUsageOut,
     ToggleAssignmentResponse,
 )
+from backend.app.services.contact_sync_service import ensure_conversation_contact_link, upsert_contact_for_phone
 from backend.app.services.message_service import sanitize_phone, sanitize_text
 from backend.app.services.realtime_service import sse_broker
 from backend.app.services.tenant_service import (
@@ -194,6 +195,7 @@ def list_contacts(
     return (
         db.execute(
             select(Contact)
+            .options(selectinload(Contact.conversations))
             .where(Contact.tenant_id == tenant.id)
             .order_by(desc(Contact.last_message_at), desc(Contact.created_at), desc(Contact.id))
         )
@@ -230,20 +232,12 @@ async def send_message(
             phone = sanitize_phone(contact.phone)
 
     if not contact:
-        contact = db.execute(
-            select(Contact).where(Contact.tenant_id == tenant_id, Contact.phone == phone)
-        ).scalars().first()
-    if not contact:
-        contact = Contact(
+        contact = upsert_contact_for_phone(
+            db,
             tenant_id=tenant_id,
             phone=phone,
             name=payload.name,
-            stage="novo",
-            score=0,
-            last_message_at=datetime.utcnow(),
         )
-        db.add(contact)
-        db.flush()
 
     conversation = (
         db.query(Conversation)
@@ -260,14 +254,14 @@ async def send_message(
         )
         db.add(conversation)
         db.flush()
-    elif not conversation.contact_id:
-        conversation.contact_id = contact.id
+    else:
+        ensure_conversation_contact_link(conversation, contact)
 
-    if payload.name and not contact.name:
+    if payload.name and payload.name.strip() and payload.name.strip() != contact.name:
         contact.name = payload.name.strip()
     if conversation.name is None and _looks_like_name(message_text):
         conversation.name = message_text.strip()
-        if not contact.name:
+        if not contact.name or contact.name == "Cliente":
             contact.name = conversation.name
     print("NOME CLIENTE:", conversation.name)
 
