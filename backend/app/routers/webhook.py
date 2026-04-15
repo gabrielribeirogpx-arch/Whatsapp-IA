@@ -5,12 +5,11 @@ from fastapi import APIRouter, Depends, Request
 from sqlalchemy import desc, select
 from sqlalchemy.orm import Session, load_only
 
-from backend.app.database import SessionLocal, get_db
+from backend.app.database import get_db
 from backend.app.models import Conversation, Message, Product
 from backend.app.services.ai_provider import classificar_lead
 from backend.app.services.ai_service import generate_ai_response
 from backend.app.services.contact_sync_service import ensure_conversation_contact_link, upsert_contact_for_phone
-from backend.app.services.conversation_service import save_conversation
 from backend.app.services.lead_service import get_or_create_lead
 from backend.app.services.knowledge_service import build_rag_context, search_relevant_knowledge
 from backend.app.models import Tenant
@@ -212,7 +211,7 @@ async def webhook(request: Request, db: Session = Depends(get_db)):
                     )
                 )
                 .where(Conversation.tenant_id == tenant_id, Conversation.phone_number == normalized_phone)
-                .order_by(desc(Conversation.created_at), desc(Conversation.id))
+                .order_by(desc(Conversation.updated_at), desc(Conversation.id))
             ).scalars().first()
 
             contact = upsert_contact_for_phone(
@@ -247,6 +246,7 @@ async def webhook(request: Request, db: Session = Depends(get_db)):
             print("NOME CLIENTE:", conversation.name)
 
             contact.last_message_at = datetime.utcnow()
+
             print("LEAD_SYNC:", normalized_phone, tenant.id)
             get_or_create_lead(
                 db=db,
@@ -256,15 +256,17 @@ async def webhook(request: Request, db: Session = Depends(get_db)):
                 last_message=incoming_message,
             )
 
-            db.add(
-                Message(
-                    tenant_id=conversation.tenant_id,
-                    conversation_id=conversation.id,
-                    text=incoming_message,
-                    from_me=False,
-                    created_at=datetime.utcnow(),
-                )
+            print("SALVANDO_MSG:", normalized_phone, incoming_message)
+            inbound_message = Message(
+                tenant_id=conversation.tenant_id,
+                conversation_id=conversation.id,
+                text=incoming_message,
+                from_me=False,
+                created_at=datetime.utcnow(),
             )
+            db.add(inbound_message)
+            print("CONVERSA_ID:", conversation.id)
+            print("MSG_SALVA:", inbound_message.text)
 
             recent_messages = db.execute(
                 select(Message)
@@ -333,15 +335,20 @@ Cliente disse:
                 phone_number_id=tenant.phone_number_id,
             )
 
-            db.add(
-                Message(
-                    tenant_id=conversation.tenant_id,
-                    conversation_id=conversation.id,
-                    text=auto_reply,
-                    from_me=True,
-                    created_at=datetime.utcnow(),
-                )
+            print("SALVANDO_MSG:", normalized_phone, auto_reply)
+            outbound_message = Message(
+                tenant_id=conversation.tenant_id,
+                conversation_id=conversation.id,
+                text=auto_reply,
+                from_me=True,
+                created_at=datetime.utcnow(),
             )
+            db.add(outbound_message)
+            print("CONVERSA_ID:", conversation.id)
+            print("MSG_SALVA:", outbound_message.text)
+            conversation.message = auto_reply
+            conversation.updated_at = datetime.utcnow()
+
             print("LEAD_SYNC:", normalized_phone, tenant.id)
             get_or_create_lead(
                 db=db,
@@ -353,21 +360,6 @@ Cliente disse:
 
             print(f"Evento processado (telefone={normalized_phone}, conteúdo={incoming_message})")
             print(f"Resposta automática enviada para {normalized_phone}")
-
-            persistence_db = SessionLocal()
-            try:
-                save_conversation(
-                    db=persistence_db,
-                    phone=normalized_phone,
-                    message=incoming_message,
-                    response=auto_reply,
-                    tenant_id=tenant_id,
-                )
-            except Exception as persistence_error:
-                persistence_db.rollback()
-                print("Falha ao persistir conversa:", str(persistence_error))
-            finally:
-                persistence_db.close()
 
         db.commit()
     except Exception as e:
@@ -382,7 +374,7 @@ def list_conversations(db: Session = Depends(get_db)):
     conversations = db.execute(
         select(Conversation)
         .options(load_only(Conversation.id, Conversation.phone_number, Conversation.created_at))
-        .order_by(desc(Conversation.created_at), desc(Conversation.id))
+        .order_by(desc(Conversation.updated_at), desc(Conversation.id))
     ).scalars().all()
 
     response: list[dict[str, str | None]] = []

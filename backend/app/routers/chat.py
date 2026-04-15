@@ -128,7 +128,7 @@ def list_conversations(
                 stage=conversation.contact.stage if conversation.contact else "novo",
                 score=conversation.contact.score if conversation.contact else 0,
                 status=getattr(conversation, "status", None) or "human",
-                last_message=(last_message_item.text if last_message_item else conversation.message or ""),
+                last_message=(last_message_item.text if last_message_item else ""),
                 updated_at=conversation.updated_at,
             )
         )
@@ -148,6 +148,7 @@ def get_messages(
         select(Conversation)
         .options(load_only(Conversation.id))
         .where(Conversation.tenant_id == tenant.id, Conversation.phone_number == sanitized_phone)
+        .order_by(desc(Conversation.updated_at), desc(Conversation.id))
     ).scalars().first()
     if not conversation:
         return []
@@ -164,6 +165,25 @@ def get_messages(
     return items
 
 
+
+
+@router.get("/messages/conversation/{conversation_id}", response_model=list[MessageOut])
+def get_messages_by_conversation(
+    conversation_id: UUID,
+    tenant: Tenant = Depends(get_current_tenant),
+    db: Session = Depends(get_db),
+):
+    items = (
+        db.execute(
+            select(Message)
+            .where(Message.tenant_id == tenant.id, Message.conversation_id == conversation_id)
+            .order_by(Message.created_at.asc(), Message.id.asc())
+        )
+        .scalars()
+        .all()
+    )
+    return items
+
 @router.get("/messages/by-contact/{contact_id}", response_model=list[MessageOut])
 def get_messages_by_contact(
     contact_id: UUID,
@@ -174,6 +194,7 @@ def get_messages_by_contact(
         select(Conversation)
         .options(load_only(Conversation.id))
         .where(Conversation.tenant_id == tenant.id, Conversation.contact_id == contact_id)
+        .order_by(desc(Conversation.updated_at), desc(Conversation.id))
     ).scalars().first()
     if not conversation:
         return []
@@ -248,6 +269,7 @@ async def send_message(
         db.query(Conversation)
         .options(load_only(Conversation.id, Conversation.tenant_id, Conversation.phone_number, Conversation.updated_at, Conversation.contact_id))
         .filter(Conversation.tenant_id == tenant_id, Conversation.phone_number == phone)
+        .order_by(desc(Conversation.updated_at), desc(Conversation.id))
         .first()
     )
     if not conversation:
@@ -275,6 +297,7 @@ async def send_message(
     except WhatsAppConfigError:
         pass
 
+    print("SALVANDO_MSG:", phone, message_text)
     message = Message(
         tenant_id=conversation.tenant_id,
         conversation_id=conversation.id,
@@ -283,6 +306,8 @@ async def send_message(
         from_me=True,
     )
     db.add(message)
+    print("CONVERSA_ID:", conversation.id)
+    print("MSG_SALVA:", message.text)
     print("LEAD_SYNC:", phone, tenant.id)
     get_or_create_lead(
         db=db,
