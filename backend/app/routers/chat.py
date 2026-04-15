@@ -20,6 +20,7 @@ from backend.app.schemas.chat import (
     ToggleAssignmentResponse,
 )
 from backend.app.services.contact_sync_service import ensure_conversation_contact_link, upsert_contact_for_phone
+from backend.app.services.lead_service import get_or_create_lead
 from backend.app.services.message_service import sanitize_phone, sanitize_text
 from backend.app.services.realtime_service import sse_broker
 from backend.app.services.tenant_service import (
@@ -278,6 +279,14 @@ async def send_message(
         from_me=True,
     )
     db.add(message)
+    print("LEAD_SYNC:", phone, tenant.id)
+    get_or_create_lead(
+        db=db,
+        tenant_id=tenant.id,
+        phone=conversation.phone_number or phone,
+        name=conversation.name,
+        last_message=message_text,
+    )
     consume_usage(tenant, 1)
     contact.last_message_at = datetime.utcnow()
     conversation.message = message_text

@@ -11,6 +11,7 @@ from backend.app.services.ai_provider import classificar_lead
 from backend.app.services.ai_service import generate_ai_response
 from backend.app.services.contact_sync_service import ensure_conversation_contact_link, upsert_contact_for_phone
 from backend.app.services.conversation_service import save_conversation
+from backend.app.services.lead_service import get_or_create_lead
 from backend.app.services.knowledge_service import build_rag_context, search_relevant_knowledge
 from backend.app.models import Tenant
 from backend.app.services.tenant_service import get_or_create_default_tenant
@@ -245,6 +246,14 @@ async def webhook(request: Request, db: Session = Depends(get_db)):
             print("NOME CLIENTE:", conversation.name)
 
             contact.last_message_at = datetime.utcnow()
+            print("LEAD_SYNC:", normalized_phone, tenant.id)
+            get_or_create_lead(
+                db=db,
+                tenant_id=tenant.id,
+                phone=conversation.phone_number or normalized_phone,
+                name=conversation.name,
+                last_message=incoming_message,
+            )
 
             db.add(
                 Message(
@@ -331,6 +340,14 @@ Cliente disse:
                     from_me=True,
                     created_at=datetime.utcnow(),
                 )
+            )
+            print("LEAD_SYNC:", normalized_phone, tenant.id)
+            get_or_create_lead(
+                db=db,
+                tenant_id=tenant.id,
+                phone=conversation.phone_number or normalized_phone,
+                name=conversation.name,
+                last_message=auto_reply,
             )
 
             print(f"Evento processado (telefone={phone}, conteúdo={incoming_message})")
