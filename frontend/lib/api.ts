@@ -3,6 +3,7 @@ import {
   Conversation,
   KnowledgeItem,
   KnowledgePayload,
+  KnowledgeUploadResult,
   Message,
   Product,
   ProductPayload,
@@ -41,6 +42,14 @@ function tenantHeaders() {
   console.log('TENANT_ID:', tenant?.tenant_id ?? null);
   return {
     'Content-Type': 'application/json',
+    'x-tenant-slug': tenant?.slug ?? '',
+    'x-tenant-id': tenant?.tenant_id ?? ''
+  };
+}
+
+function tenantAuthHeaders() {
+  const tenant = getTenantSessionFromStorage();
+  return {
     'x-tenant-slug': tenant?.slug ?? '',
     'x-tenant-id': tenant?.tenant_id ?? ''
   };
@@ -191,4 +200,18 @@ export async function deleteKnowledge(knowledgeId: string): Promise<void> {
   });
 
   if (!res.ok) throw new Error(await res.text());
+}
+
+export async function uploadKnowledgePdf(file: File): Promise<KnowledgeUploadResult> {
+  const formData = new FormData();
+  formData.append('file', file);
+
+  const res = await fetch(`${BASE_URL}/api/knowledge/upload-pdf`, {
+    method: 'POST',
+    headers: tenantAuthHeaders(),
+    body: formData
+  });
+
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
 }

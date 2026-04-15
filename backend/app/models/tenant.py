@@ -31,6 +31,7 @@ class Tenant(Base):
     ai_config: Mapped["AIConfig | None"] = relationship(back_populates="tenant", uselist=False, cascade="all, delete-orphan")
     products: Mapped[list["Product"]] = relationship(back_populates="tenant", cascade="all, delete-orphan")
     knowledge_items: Mapped[list["KnowledgeBase"]] = relationship(back_populates="tenant", cascade="all, delete-orphan")
+    knowledge_chunks: Mapped[list["KnowledgeChunk"]] = relationship(back_populates="tenant", cascade="all, delete-orphan")
 
 
 class AIConfig(Base):
@@ -47,3 +48,4 @@ class AIConfig(Base):
 
 from backend.app.models.product import Product  # noqa: E402
 from backend.app.models.knowledge_base import KnowledgeBase  # noqa: E402
+from backend.app.models.knowledge_chunk import KnowledgeChunk  # noqa: E402

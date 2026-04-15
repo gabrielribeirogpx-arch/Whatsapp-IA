@@ -100,3 +100,8 @@ export type KnowledgePayload = {
   title: string;
   content: string;
 };
+
+export type KnowledgeUploadResult = {
+  source: string;
+  chunks_created: number;
+};
