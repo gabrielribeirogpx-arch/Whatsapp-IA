@@ -1,13 +1,12 @@
+import re
+
+
 def normalize_phone(phone: str) -> str:
-    import re
+    # remover espaços, +, -, ()
+    phone = re.sub(r"\D", "", phone or "")
 
-    phone = re.sub(r"\D", "", phone)
-
-    # garante padrão internacional sem +
-    if phone.startswith("0"):
-        phone = phone[1:]
-
-    if not phone.startswith("55"):
+    # garantir padrão brasileiro
+    if phone and not phone.startswith("55"):
         phone = "55" + phone
 
     return phone

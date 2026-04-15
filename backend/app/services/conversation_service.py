@@ -2,9 +2,12 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from backend.app.models.conversation import Conversation
+from backend.app.utils.phone import normalize_phone
 
 
 def save_conversation(db: Session, phone: str, message: str, response: str, tenant_id):
+    phone = normalize_phone(phone)
+    print("PHONE_NORMALIZED:", phone)
     conv = (
         db.query(Conversation)
         .filter(Conversation.phone_number == phone, Conversation.tenant_id == tenant_id)

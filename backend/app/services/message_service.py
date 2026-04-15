@@ -2,6 +2,8 @@ import logging
 import re
 from typing import Any
 
+from backend.app.utils.phone import normalize_phone
+
 logger = logging.getLogger(__name__)
 
 
@@ -11,7 +13,7 @@ def sanitize_text(value: str) -> str:
 
 
 def sanitize_phone(value: str) -> str:
-    return re.sub(r"\D", "", value)
+    return normalize_phone(value)
 
 
 def extract_whatsapp_messages(payload: dict[str, Any]) -> list[dict[str, str]]:
