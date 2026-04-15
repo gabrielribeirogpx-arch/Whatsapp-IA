@@ -114,11 +114,12 @@ async def send_message(
     except TenantLimitError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
 
-    conversation = db.execute(
-        select(Conversation)
+    conversation = (
+        db.query(Conversation)
         .options(load_only(Conversation.id, Conversation.tenant_id, Conversation.phone_number, Conversation.status))
-        .where(Conversation.tenant_id == tenant.id, Conversation.phone_number == phone)
-    ).scalar_one_or_none()
+        .filter(Conversation.tenant_id == tenant.id, Conversation.phone_number == phone)
+        .first()
+    )
     if not conversation:
         conversation = Conversation(
             tenant_id=tenant.id,
