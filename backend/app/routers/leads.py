@@ -62,23 +62,32 @@ def get_pipeline(
     tenant: Tenant = Depends(get_current_tenant),
     db: Session = Depends(get_db),
 ):
+    print("➡️ GET /api/pipeline START")
+    tenant_id = getattr(tenant, "id", None)
+    print("TENANT DEBUG:", tenant_id)
+    if tenant_id is None:
+        print("🚨 TENANT NÃO IDENTIFICADO")
     try:
         stages = ensure_pipeline_stages(db, tenant.id)
 
-        leads = db.execute(
-            select(
-                Lead.id,
-                Lead.name,
-                Lead.phone,
-                Lead.last_message,
-                Lead.temperature,
-                Lead.score,
-                Lead.last_interaction,
-                Lead.stage,
-            )
-            .where(Lead.tenant_id == tenant.id)
-            .order_by(desc(Lead.score), desc(Lead.last_interaction), desc(Lead.created_at))
-        ).all()
+        try:
+            leads = db.execute(
+                select(
+                    Lead.id,
+                    Lead.name,
+                    Lead.phone,
+                    Lead.last_message,
+                    Lead.temperature,
+                    Lead.score,
+                    Lead.last_interaction,
+                    Lead.stage,
+                )
+                .where(Lead.tenant_id == tenant.id)
+                .order_by(desc(Lead.score), desc(Lead.last_interaction), desc(Lead.created_at))
+            ).all()
+        except Exception as e:
+            print("💣 DB ERROR:", str(e))
+            raise
 
         grouped: dict[uuid.UUID, list[PipelineLeadOut]] = {stage.id: [] for stage in stages}
         fallback_stage_id = stages[0].id if stages else None
@@ -113,7 +122,7 @@ def get_pipeline(
                 )
             )
 
-        return [
+        response = [
             PipelineStageOut(
                 id=stage.id,
                 name=stage.name,
@@ -122,9 +131,11 @@ def get_pipeline(
             )
             for stage in sorted(stages, key=lambda item: item.position)
         ]
+        print("✅ GET /api/pipeline OK")
+        return response
     except Exception as e:
-        print("PIPELINE ERROR:", str(e))
-        raise HTTPException(status_code=500, detail="Erro ao carregar pipeline") from e
+        print("❌ GET /api/pipeline ERROR:", str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.post("/leads/{lead_id}/move", response_model=LeadOut)
