@@ -46,6 +46,7 @@ export default function ChatShell() {
         id: String(conversation.id),
         name: conversation.name,
         phone: conversation.phone,
+        avatarUrl: conversation.avatar_url,
         lastMessage: conversation.last_message
       })),
     [conversations]

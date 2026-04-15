@@ -9,6 +9,7 @@ class ConversationOut(BaseModel):
     tenant_id: uuid.UUID
     phone: str
     name: str
+    avatar_url: str | None = None
     status: str
     last_message: str
     updated_at: datetime
