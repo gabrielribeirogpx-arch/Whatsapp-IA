@@ -14,6 +14,31 @@ from backend.app.services.whatsapp_service import enviar_mensagem
 
 router = APIRouter()
 
+ATENDENTE_PROMPT = """Você é um atendente profissional via WhatsApp.
+
+Seu objetivo é:
+- Ajudar o cliente
+- Responder dúvidas
+- Ser claro e educado
+
+REGRAS:
+- Não force venda
+- Seja direto
+- Seja útil"""
+
+VENDEDOR_PROMPT = """Você é um especialista em vendas via WhatsApp.
+
+Seu objetivo é:
+- Engajar
+- Identificar interesse
+- Conduzir para compra
+
+REGRAS:
+- Sempre faça perguntas
+- Use gatilhos mentais
+- Seja persuasivo
+- Leve o cliente para ação"""
+
 
 @router.get("/webhook")
 async def verify():
@@ -66,6 +91,7 @@ async def webhook(request: Request, db: Session = Depends(get_db)):
             incoming_message = incoming["text"]
             phone_number_id = incoming.get("phone_number_id")
             tenant = resolve_tenant_by_phone_number_id(db, phone_number_id) or get_or_create_default_tenant(db)
+            ai_mode = tenant.ai_mode if tenant.ai_mode in {"atendente", "vendedor"} else "atendente"
 
             conversation = db.execute(
                 select(Conversation)
@@ -103,23 +129,15 @@ async def webhook(request: Request, db: Session = Depends(get_db)):
                 role = "Cliente" if not msg.from_me else "Atendente"
                 history += f"{role}: {msg.text}\n"
 
+            system_prompt = VENDEDOR_PROMPT if ai_mode == "vendedor" else ATENDENTE_PROMPT
             prompt = f"""
-Você é um especialista em vendas via WhatsApp.
+{system_prompt}
 
-Histórico da conversa:
+Histórico:
 {history}
 
-Cliente acabou de dizer:
-\"{incoming_message}\"
-
-Responda de forma natural, humana e estratégica.
-
-REGRAS:
-- Seja direto
-- Não seja genérico
-- Conduza a conversa
-- Sempre faça uma pergunta
-- Pense como vendedor
+Cliente disse:
+"{incoming_message}"
 """
 
             try:

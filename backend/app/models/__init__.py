@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import Float, ForeignKey, Integer, String, Text
+from sqlalchemy import CheckConstraint, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from backend.app.core.database import Base
@@ -12,6 +12,7 @@ DEFAULT_SYSTEM_PROMPT = "Você é um assistente de vendas altamente persuasivo, 
 
 class Tenant(Base):
     __tablename__ = "tenants"
+    __table_args__ = (CheckConstraint("ai_mode IN ('atendente', 'vendedor')", name="ck_tenants_ai_mode"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     name: Mapped[str] = mapped_column(String(150), nullable=False)
@@ -25,6 +26,7 @@ class Tenant(Base):
     messages_used_month: Mapped[int] = mapped_column(Integer, default=0)
     is_blocked: Mapped[bool] = mapped_column(default=False)
     admin_password: Mapped[str] = mapped_column(String(255), default="admin123")
+    ai_mode: Mapped[str] = mapped_column(String(32), default="atendente", server_default="atendente")
 
     ai_config: Mapped["AIConfig | None"] = relationship(back_populates="tenant", uselist=False, cascade="all, delete-orphan")
 
