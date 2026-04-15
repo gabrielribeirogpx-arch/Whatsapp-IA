@@ -439,10 +439,20 @@ input {
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #fff;
+  box-shadow: 0 6px 14px rgba(15, 23, 42, 0.12);
+}
+
+.wa-avatar-fallback-initial {
+  background: #d1d5db;
+  color: #374151;
   font-weight: 700;
   letter-spacing: 0.02em;
-  box-shadow: 0 6px 14px rgba(15, 23, 42, 0.12);
+}
+
+.wa-avatar-fallback-icon {
+  background: #e5e7eb;
+  color: #6b7280;
+  font-size: 1rem;
 }
 
 .wa-avatar-image {
