@@ -23,3 +23,14 @@ class Contact(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
 
     conversations = relationship("Conversation", back_populates="contact")
+
+    @property
+    def last_message(self) -> str | None:
+        if not self.conversations:
+            return None
+
+        latest = max(
+            self.conversations,
+            key=lambda item: item.updated_at or item.created_at,
+        )
+        return latest.message

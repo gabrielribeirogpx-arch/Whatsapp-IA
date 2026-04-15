@@ -49,6 +49,7 @@ class ContactOut(BaseModel):
     stage: str
     score: int
     last_message_at: datetime | None = None
+    last_message: str | None = None
     created_at: datetime
 
     class Config:

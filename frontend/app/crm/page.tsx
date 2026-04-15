@@ -48,7 +48,7 @@ export default function CRMPage() {
                   <span className={`crm-stage crm-stage-${contact.stage.toLowerCase()}`}>{contact.stage}</span>
                 </td>
                 <td>{contact.score}</td>
-                <td>{contact.last_message_at ? new Date(contact.last_message_at).toLocaleString('pt-BR') : '-'}</td>
+                <td>{contact.last_message || '-'}</td>
               </tr>
             ))}
             {!contacts.length ? (
