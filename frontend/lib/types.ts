@@ -105,3 +105,15 @@ export type KnowledgeUploadResult = {
   source: string;
   chunks_created: number;
 };
+
+
+export type KnowledgeCrawlPayload = {
+  url: string;
+  depth?: 1 | 2;
+};
+
+export type KnowledgeCrawlResult = {
+  source: string;
+  pages_collected: number;
+  chunks_created: number;
+};

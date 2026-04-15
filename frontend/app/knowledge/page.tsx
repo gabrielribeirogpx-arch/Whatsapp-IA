@@ -3,17 +3,20 @@
 import Link from 'next/link';
 import { DragEvent, FormEvent, useEffect, useState } from 'react';
 
-import { createKnowledge, deleteKnowledge, getKnowledge, uploadKnowledgePdf } from '../../lib/api';
+import { crawlKnowledgeSite, createKnowledge, deleteKnowledge, getKnowledge, uploadKnowledgePdf } from '../../lib/api';
 import { KnowledgeItem } from '../../lib/types';
 
 export default function KnowledgePage() {
   const [items, setItems] = useState<KnowledgeItem[]>([]);
   const [title, setTitle] = useState('');
   const [content, setContent] = useState('');
+  const [crawlUrl, setCrawlUrl] = useState('');
   const [error, setError] = useState('');
   const [info, setInfo] = useState('');
   const [saving, setSaving] = useState(false);
   const [uploadingPdf, setUploadingPdf] = useState(false);
+  const [crawlLoading, setCrawlLoading] = useState(false);
+  const [crawlStage, setCrawlStage] = useState('');
   const [dragActive, setDragActive] = useState(false);
 
   async function loadKnowledge() {
@@ -67,10 +70,41 @@ export default function KnowledgePage() {
     try {
       const result = await uploadKnowledgePdf(file);
       setInfo(`PDF "${result.source}" processado com ${result.chunks_created} chunks.`);
+      await loadKnowledge();
     } catch {
       setError('Falha ao processar PDF.');
     } finally {
       setUploadingPdf(false);
+    }
+  }
+
+  async function handleCrawlSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError('');
+    setInfo('');
+
+    if (!crawlUrl.trim()) {
+      setError('Informe uma URL para iniciar o treinamento por site.');
+      return;
+    }
+
+    setCrawlLoading(true);
+    setCrawlStage('Coletando páginas...');
+
+    try {
+      const crawlPromise = crawlKnowledgeSite({ url: crawlUrl.trim(), depth: 2 });
+      setCrawlStage('Processando conteúdo...');
+      const result = await crawlPromise;
+      setInfo(
+        `Treinamento concluído. ${result.pages_collected} páginas coletadas e ${result.chunks_created} chunks criados.`
+      );
+      setCrawlUrl('');
+      await loadKnowledge();
+    } catch {
+      setError('Falha ao treinar com site. Verifique se a URL é pública e válida.');
+    } finally {
+      setCrawlLoading(false);
+      setCrawlStage('');
     }
   }
 
@@ -106,6 +140,24 @@ export default function KnowledgePage() {
       <section className="products-layout">
         <article className="products-form-card">
           <h2>Adicionar conteúdo</h2>
+
+          <form className="products-form" onSubmit={handleCrawlSubmit} style={{ marginBottom: 16 }}>
+            <label htmlFor="knowledge-url">URL do site</label>
+            <input
+              id="knowledge-url"
+              type="url"
+              placeholder="https://site.com"
+              value={crawlUrl}
+              onChange={(event) => setCrawlUrl(event.target.value)}
+            />
+            <div className="products-form-actions">
+              <button type="submit" className="primary-button" disabled={crawlLoading}>
+                {crawlLoading ? 'Treinando...' : 'Treinar com site'}
+              </button>
+            </div>
+            {crawlLoading && crawlStage ? <p>{crawlStage}</p> : null}
+          </form>
+
           <div
             onDragOver={(event) => {
               event.preventDefault();
@@ -140,6 +192,7 @@ export default function KnowledgePage() {
             />
             {uploadingPdf ? <p>Processando documento...</p> : null}
           </div>
+
           <form className="products-form" onSubmit={handleSubmit}>
             <label htmlFor="knowledge-title">Título</label>
             <input id="knowledge-title" value={title} onChange={(event) => setTitle(event.target.value)} required />

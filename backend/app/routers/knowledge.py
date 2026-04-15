@@ -5,12 +5,19 @@ from sqlalchemy.orm import Session
 
 from backend.app.database import get_db
 from backend.app.models import Tenant
-from backend.app.schemas.knowledge import KnowledgeCreate, KnowledgeOut, KnowledgeUploadOut
+from backend.app.schemas.knowledge import (
+    KnowledgeCreate,
+    KnowledgeCrawlOut,
+    KnowledgeCrawlRequest,
+    KnowledgeOut,
+    KnowledgeUploadOut,
+)
 from backend.app.services.knowledge_service import (
     create_knowledge_item,
     delete_knowledge_item,
     list_knowledge_items,
     process_pdf_knowledge,
+    process_site_knowledge,
 )
 from backend.app.services.tenant_service import get_current_tenant
 
@@ -69,3 +76,29 @@ async def upload_pdf_knowledge(
         raise HTTPException(status_code=400, detail="Não foi possível extrair texto do PDF")
 
     return KnowledgeUploadOut(source=file.filename, chunks_created=chunks_created)
+
+
+@router.post("/crawl", response_model=KnowledgeCrawlOut)
+def crawl_knowledge_site(
+    payload: KnowledgeCrawlRequest,
+    tenant: Tenant = Depends(get_current_tenant),
+    db: Session = Depends(get_db),
+):
+    try:
+        pages_collected, chunks_created = process_site_knowledge(
+            db=db,
+            tenant_id=tenant.id,
+            url=payload.url,
+            depth=payload.depth,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    if chunks_created == 0:
+        raise HTTPException(status_code=400, detail="Nenhum conteúdo relevante foi encontrado no site")
+
+    return KnowledgeCrawlOut(
+        source=payload.url,
+        pages_collected=pages_collected,
+        chunks_created=chunks_created,
+    )
