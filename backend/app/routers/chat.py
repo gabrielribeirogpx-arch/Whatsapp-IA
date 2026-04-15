@@ -31,6 +31,21 @@ from backend.app.services.whatsapp_service import WhatsAppConfigError, enviar_me
 router = APIRouter(prefix="/api", tags=["chat"])
 
 
+def _looks_like_name(text: str) -> bool:
+    if not text:
+        return False
+
+    cleaned = text.strip()
+    if not cleaned or len(cleaned) > 40:
+        return False
+
+    if any(char.isdigit() for char in cleaned):
+        return False
+
+    words = cleaned.split()
+    return len(words) <= 4
+
+
 def _usage_response(tenant: Tenant) -> TenantUsageOut:
     return TenantUsageOut(
         plan=tenant.plan,
@@ -99,7 +114,7 @@ def list_conversations(
                 id=conversation.id,
                 tenant_id=conversation.tenant_id,
                 phone=getattr(conversation, "phone", None) or conversation.phone_number or "",
-                name=(conversation.name if hasattr(conversation, "name") else None) or "Cliente",
+                name=(conversation.name if hasattr(conversation, "name") else None) or conversation.phone_number or "Cliente",
                 status=getattr(conversation, "status", None) or "human",
                 last_message=(last_message_item.text if last_message_item else conversation.message or ""),
                 updated_at=conversation.updated_at,
@@ -165,10 +180,14 @@ async def send_message(
         conversation = Conversation(
             tenant_id=tenant_id,
             phone_number=phone,
-            name=sanitize_text(payload.name or "Cliente"),
+            name=None,
         )
         db.add(conversation)
         db.flush()
+
+    if conversation.name is None and _looks_like_name(message_text):
+        conversation.name = message_text.strip()
+    print("NOME CLIENTE:", conversation.name)
 
     try:
         enviar_mensagem(phone, message_text, token=tenant.whatsapp_token, phone_number_id=tenant.phone_number_id)
