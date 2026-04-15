@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session, load_only
 
 from backend.app.database import get_db
 from backend.app.models import Conversation, Message, Product
+from backend.app.models.lead import LeadTemperature
 from backend.app.services.ai_provider import classificar_lead
 from backend.app.services.ai_service import generate_ai_response
 from backend.app.services.contact_sync_service import ensure_conversation_contact_link, upsert_contact_for_phone
@@ -118,13 +119,51 @@ def _looks_like_name(text: str) -> bool:
     return len(words) <= 4
 
 
-def _lead_to_updates(lead_level: str, current_score: int) -> tuple[str, int]:
+def _keyword_score(message: str) -> int:
+    normalized = (message or "").strip().lower()
+    if not normalized:
+        return 0
+
+    hot_keywords = ["comprar", "fechar", "agendar", "hoje", "urgente", "preço", "valor"]
+    warm_keywords = ["interesse", "detalhes", "planos", "benefícios", "como funciona"]
+    cold_keywords = ["depois", "talvez", "sem interesse", "não quero"]
+
+    score = 0
+    for keyword in hot_keywords:
+        if keyword in normalized:
+            score += 12
+    for keyword in warm_keywords:
+        if keyword in normalized:
+            score += 6
+    for keyword in cold_keywords:
+        if keyword in normalized:
+            score -= 10
+
+    if "?" in normalized:
+        score += 3
+
+    return score
+
+
+def _lead_to_updates(lead_level: str, current_score: int, incoming_message: str) -> tuple[str, int, str]:
     normalized = (lead_level or "").strip().lower()
+    keyword_delta = _keyword_score(incoming_message)
+
     if normalized == "quente":
-        return "quente", min(100, current_score + 20)
-    if normalized == "frio":
-        return "frio", max(0, current_score - 5)
-    return "morno", min(100, current_score + 10)
+        temperature = LeadTemperature.HOT.value
+        base_delta = 15
+        stage = "quente"
+    elif normalized == "frio":
+        temperature = LeadTemperature.COLD.value
+        base_delta = -5
+        stage = "frio"
+    else:
+        temperature = LeadTemperature.WARM.value
+        base_delta = 8
+        stage = "morno"
+
+    score = max(0, min(100, current_score + base_delta + keyword_delta))
+    return stage, score, temperature
 
 
 @router.get("/webhook")
@@ -233,7 +272,7 @@ async def webhook(request: Request, db: Session = Depends(get_db)):
             contact.last_message_at = datetime.utcnow()
 
             print("LEAD_SYNC:", normalized_phone, tenant.id)
-            get_or_create_lead(
+            lead = get_or_create_lead(
                 db=db,
                 tenant_id=tenant.id,
                 phone=conversation.phone_number or normalized_phone,
@@ -265,6 +304,13 @@ async def webhook(request: Request, db: Session = Depends(get_db)):
                 role = "Cliente" if not msg.from_me else "Atendente"
                 history += f"{role}: {msg.text}\n"
 
+            lead_level = classificar_lead(incoming_message)
+            contact.stage, contact.score, lead.temperature = _lead_to_updates(lead_level, contact.score, incoming_message)
+            lead.score = contact.score
+            lead.last_message = incoming_message
+            lead.last_interaction = datetime.utcnow()
+            lead.last_contact_at = datetime.utcnow()
+
             products = (
                 db.execute(select(Product).where(Product.tenant_id == tenant_id).order_by(Product.created_at.asc(), Product.id.asc()))
                 .scalars()
@@ -277,16 +323,12 @@ async def webhook(request: Request, db: Session = Depends(get_db)):
                 products_context = _build_products_context(products)
 
                 if ai_mode == "vendedor":
-                    lead_level = classificar_lead(incoming_message)
-                    contact.stage, contact.score = _lead_to_updates(lead_level, contact.score)
                     prompt = VENDEDOR_PROMPT.format(
                         incoming_message=incoming_message,
                         history=history,
                         lead_level=lead_level.upper(),
                     )
                 else:
-                    lead_level = classificar_lead(incoming_message)
-                    contact.stage, contact.score = _lead_to_updates(lead_level, contact.score)
                     prompt = f"""
 {ATENDENTE_PROMPT}
 
@@ -335,7 +377,7 @@ Cliente disse:
             conversation.updated_at = datetime.utcnow()
 
             print("LEAD_SYNC:", normalized_phone, tenant.id)
-            get_or_create_lead(
+            lead = get_or_create_lead(
                 db=db,
                 tenant_id=tenant.id,
                 phone=conversation.phone_number or normalized_phone,
