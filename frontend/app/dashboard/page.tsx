@@ -3,34 +3,19 @@
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 
-import { getConversations, tenantLogin } from '../../lib/api';
-import { Conversation, TenantAuth, TenantSession } from '../../lib/types';
-
-const STORAGE_KEY = 'tenant_auth';
+import { getConversations, getTenantSessionFromStorage } from '../../lib/api';
+import { Conversation, TenantSession } from '../../lib/types';
 
 export default function DashboardPage() {
-  const [auth, setAuth] = useState<TenantAuth | null>(null);
   const [session, setSession] = useState<TenantSession | null>(null);
   const [conversations, setConversations] = useState<Conversation[]>([]);
 
   useEffect(() => {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    if (!saved) return;
+    const tenant = getTenantSessionFromStorage();
+    if (!tenant) return;
 
-    try {
-      const parsed = JSON.parse(saved) as TenantAuth;
-      setAuth(parsed);
-
-      tenantLogin(parsed)
-        .then((tenantSession) => {
-          setSession(tenantSession);
-          return getConversations();
-        })
-        .then(setConversations)
-        .catch(() => localStorage.removeItem(STORAGE_KEY));
-    } catch {
-      localStorage.removeItem(STORAGE_KEY);
-    }
+    setSession(tenant);
+    getConversations().then(setConversations).catch(() => localStorage.removeItem('tenant'));
   }, []);
 
   const humanInProgress = useMemo(
@@ -53,8 +38,8 @@ export default function DashboardPage() {
       <section className="dashboard-grid">
         <article className="dashboard-card">
           <h2>Tenant</h2>
-          <p>{session?.name || 'Não autenticado'}</p>
-          <small>{auth ? `slug: ${auth.slug}` : 'Faça login em /chat para carregar os dados.'}</small>
+          <p>{session?.slug || 'Não autenticado'}</p>
+          <small>{session ? `slug: ${session.slug}` : 'Faça login em /login para carregar os dados.'}</small>
         </article>
 
         <article className="dashboard-card">

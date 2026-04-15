@@ -73,25 +73,22 @@ def resolve_tenant_by_phone_number_id(db: Session, phone_number_id: str | None) 
 
 def get_current_tenant(
     x_tenant_slug: str = Header(default="", alias="X-Tenant-Slug"),
-    x_tenant_password: str = Header(default="", alias="X-Tenant-Password"),
     tenant_slug: str = Query(default=""),
-    tenant_password: str = Query(default=""),
     db: Session = Depends(get_db),
 ) -> Tenant:
     slug = (x_tenant_slug or tenant_slug).strip()
-    password = (x_tenant_password or tenant_password).strip()
-    if not slug or not password:
+    if not slug:
         raise HTTPException(status_code=401, detail="Tenant não autenticado")
 
     tenant = db.execute(select(Tenant).where(Tenant.slug == slug)).scalar_one_or_none()
-    if not tenant or tenant.admin_password != password:
+    if not tenant:
         raise HTTPException(status_code=401, detail="Credenciais inválidas")
 
     return tenant
 
 
-def login_tenant(db: Session, slug: str, password: str) -> Tenant | None:
+def login_tenant(db: Session, slug: str) -> Tenant | None:
     tenant = db.execute(select(Tenant).where(Tenant.slug == slug)).scalar_one_or_none()
-    if tenant and tenant.admin_password == password:
+    if tenant:
         return tenant
     return None

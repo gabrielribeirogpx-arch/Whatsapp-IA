@@ -43,7 +43,7 @@ def _usage_response(tenant: Tenant) -> TenantUsageOut:
 
 @router.post("/auth/login", response_model=TenantLoginResponse)
 def tenant_login(payload: TenantLoginRequest, db: Session = Depends(get_db)):
-    tenant = login_tenant(db, payload.slug.strip(), payload.password.strip())
+    tenant = login_tenant(db, payload.slug.strip())
     if not tenant:
         raise HTTPException(status_code=401, detail="Credenciais inválidas")
 
