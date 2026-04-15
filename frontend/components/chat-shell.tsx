@@ -28,7 +28,16 @@ export default function ChatShell() {
   const [inputValue, setInputValue] = useState('');
 
   useEffect(() => {
-    getConversations().then(setConversations);
+    getConversations().then((conversationsResponse: Conversation[]) => {
+      const unique = Object.values(
+        conversationsResponse.reduce<Record<string, Conversation>>((acc, conversation) => {
+          acc[conversation.phone] = conversation;
+          return acc;
+        }, {})
+      );
+
+      setConversations(unique);
+    });
   }, []);
 
   const contacts = useMemo<Contact[]>(
