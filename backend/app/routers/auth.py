@@ -61,7 +61,7 @@ def register(payload: RegisterRequest, db: Session = Depends(get_db)):
     db.refresh(tenant)
 
     return TenantAuthResponse(
-        tenant_id=str(tenant.id),  # 🔥 importante
+        tenant_id=tenant.id,
         slug=tenant.slug,
     )
 
@@ -73,6 +73,6 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Tenant não encontrado")
 
     return TenantAuthResponse(
-        tenant_id=str(tenant.id),  # 🔥 importante
+        tenant_id=tenant.id,
         slug=tenant.slug,
     )
