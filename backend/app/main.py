@@ -1,4 +1,6 @@
-from fastapi import FastAPI
+import traceback
+
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 from backend.app.db.base import Base
@@ -20,6 +22,19 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def catch_exceptions_middleware(request: Request, call_next):
+    try:
+        response = await call_next(request)
+        return response
+    except Exception as e:
+        print("🔥 ERRO GLOBAL:")
+        print(str(e))
+        traceback.print_exc()
+        raise e
+
 
 app.include_router(webhook.router)
 app.include_router(chat.router)

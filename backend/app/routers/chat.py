@@ -81,63 +81,64 @@ def list_conversations(
     tenant: Tenant = Depends(get_current_tenant),
     db: Session = Depends(get_db),
 ):
-    print("TENANT ID:", tenant.id)
-    items = (
-        db.execute(
-            select(Conversation)
-            .options(
-                load_only(
-                    Conversation.id,
-                    Conversation.tenant_id,
-                    Conversation.contact_id,
-                    Conversation.phone_number,
-                    Conversation.name,
-                    Conversation.avatar_url,
-                    Conversation.message,
-                    Conversation.updated_at,
-                )
-            )
-            .where(Conversation.tenant_id == tenant.id)
-            .order_by(desc(Conversation.updated_at), desc(Conversation.id))
-        )
-        .scalars()
-        .all()
-    )
-    print("CONVERSAS:", items)
-
-    response: list[ConversationOut] = []
-    seen_phones: set[str] = set()
-    for conversation in items:
-        phone = getattr(conversation, "phone", None) or conversation.phone_number or ""
-        if phone in seen_phones:
-            continue
-        seen_phones.add(phone)
-
-        last_message_item = (
+    print("➡️ GET /api/conversations START")
+    tenant_id = getattr(tenant, "id", None)
+    print("TENANT DEBUG:", tenant_id)
+    if tenant_id is None:
+        print("🚨 TENANT NÃO IDENTIFICADO")
+    try:
+        items = (
             db.execute(
-                select(Message)
-                .where(Message.conversation_id == conversation.id)
-                .order_by(desc(Message.created_at), desc(Message.id))
-                .limit(1)
+                select(Conversation)
+                .options(
+                    load_only(
+                        Conversation.id,
+                        Conversation.tenant_id,
+                        Conversation.contact_id,
+                        Conversation.phone_number,
+                        Conversation.name,
+                        Conversation.avatar_url,
+                        Conversation.message,
+                        Conversation.updated_at,
+                    )
+                )
+                .where(Conversation.tenant_id == tenant.id)
+                .order_by(desc(Conversation.updated_at), desc(Conversation.id))
             )
             .scalars()
-            .first()
+            .all()
         )
+    except Exception as e:
+        print("💣 DB ERROR:", str(e))
+        print("❌ GET /api/conversations ERROR:", str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
-        response.append(
-            ConversationOut(
-                id=conversation.id,
-                tenant_id=conversation.tenant_id,
-                contact_id=conversation.contact_id,
-                phone=phone,
-                name=(conversation.name if hasattr(conversation, "name") else None) or conversation.phone_number or "",
-                avatar_url=conversation.avatar_url,
-                stage=conversation.contact.stage if conversation.contact else "novo",
-                score=conversation.contact.score if conversation.contact else 0,
-                status=getattr(conversation, "status", None) or "human",
-                last_message=(last_message_item.text if last_message_item else ""),
-                updated_at=conversation.updated_at,
-                last_interaction=(
+    try:
+        response: list[ConversationOut] = []
+        seen_phones: set[str] = set()
+        for conversation in items:
+            phone = getattr(conversation, "phone", None) or conversation.phone_number or ""
+            if phone in seen_phones:
+                continue
+            seen_phones.add(phone)
+
+            try:
+                last_message_item = (
+                    db.execute(
+                        select(Message)
+                        .where(Message.conversation_id == conversation.id)
+                        .order_by(desc(Message.created_at), desc(Message.id))
+                        .limit(1)
+                    )
+                    .scalars()
+                    .first()
+                )
+            except Exception as e:
+                print("💣 DB ERROR:", str(e))
+                raise
+
+            try:
+                last_interaction = (
                     db.execute(
                         select(Lead.last_interaction)
                         .where(Lead.tenant_id == tenant.id, Lead.phone == phone)
@@ -146,11 +147,33 @@ def list_conversations(
                     )
                     .scalars()
                     .first()
-                ),
-            )
-        )
+                )
+            except Exception as e:
+                print("💣 DB ERROR:", str(e))
+                raise
 
-    return response
+            response.append(
+                ConversationOut(
+                    id=conversation.id,
+                    tenant_id=conversation.tenant_id,
+                    contact_id=conversation.contact_id,
+                    phone=phone,
+                    name=(conversation.name if hasattr(conversation, "name") else None) or conversation.phone_number or "",
+                    avatar_url=conversation.avatar_url,
+                    stage=conversation.contact.stage if conversation.contact else "novo",
+                    score=conversation.contact.score if conversation.contact else 0,
+                    status=getattr(conversation, "status", None) or "human",
+                    last_message=(last_message_item.text if last_message_item else ""),
+                    updated_at=conversation.updated_at,
+                    last_interaction=last_interaction,
+                )
+            )
+
+        print("✅ GET /api/conversations OK")
+        return response
+    except Exception as e:
+        print("❌ GET /api/conversations ERROR:", str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.get("/messages/{phone}", response_model=list[MessageOut])
@@ -159,27 +182,46 @@ def get_messages(
     tenant: Tenant = Depends(get_current_tenant),
     db: Session = Depends(get_db),
 ):
-    sanitized_phone = normalize_phone(phone)
-    print("PHONE_NORMALIZED:", sanitized_phone)
-    conversation = db.execute(
-        select(Conversation)
-        .options(load_only(Conversation.id))
-        .where(Conversation.tenant_id == tenant.id, Conversation.phone_number == sanitized_phone)
-        .order_by(desc(Conversation.updated_at), desc(Conversation.id))
-    ).scalars().first()
-    if not conversation:
-        return []
+    print("➡️ GET /api/messages START")
+    tenant_id = getattr(tenant, "id", None)
+    print("TENANT DEBUG:", tenant_id)
+    if tenant_id is None:
+        print("🚨 TENANT NÃO IDENTIFICADO")
+    try:
+        sanitized_phone = normalize_phone(phone)
+        print("PHONE_NORMALIZED:", sanitized_phone)
+        try:
+            conversation = db.execute(
+                select(Conversation)
+                .options(load_only(Conversation.id))
+                .where(Conversation.tenant_id == tenant.id, Conversation.phone_number == sanitized_phone)
+                .order_by(desc(Conversation.updated_at), desc(Conversation.id))
+            ).scalars().first()
+        except Exception as e:
+            print("💣 DB ERROR:", str(e))
+            raise
+        if not conversation:
+            print("✅ GET /api/messages OK")
+            return []
 
-    items = (
-        db.execute(
-            select(Message)
-            .where(Message.conversation_id == conversation.id)
-            .order_by(Message.created_at.asc(), Message.id.asc())
-        )
-        .scalars()
-        .all()
-    )
-    return items
+        try:
+            items = (
+                db.execute(
+                    select(Message)
+                    .where(Message.conversation_id == conversation.id)
+                    .order_by(Message.created_at.asc(), Message.id.asc())
+                )
+                .scalars()
+                .all()
+            )
+        except Exception as e:
+            print("💣 DB ERROR:", str(e))
+            raise
+        print("✅ GET /api/messages OK")
+        return items
+    except Exception as e:
+        print("❌ GET /api/messages ERROR:", str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 
