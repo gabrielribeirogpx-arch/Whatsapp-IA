@@ -1,6 +1,5 @@
 import { useMemo, useState } from 'react';
 import Avatar from './Avatar';
-import { IconClose, IconMenu } from './icons';
 import { Contact } from '../lib/types';
 
 type SidebarProps = {
@@ -113,16 +112,6 @@ export default function Sidebar({
 
   return (
     <aside className={`wa-sidebar ${sidebarOpen ? 'open' : ''}`}>
-      <header className="wa-sidebar-header">
-        <div>
-          <h2>Inbox</h2>
-          <p>Conversas em tempo real</p>
-        </div>
-        <button type="button" className="wa-sidebar-toggle" onClick={onToggleSidebar} aria-label="Alternar sidebar">
-          {sidebarOpen ? <IconClose width={20} /> : <IconMenu width={20} />}
-        </button>
-      </header>
-
       <div className="wa-contact-list">
         <div className="wa-sidebar-search-wrapper">
           <span className="wa-sidebar-search-icon" aria-hidden="true">
