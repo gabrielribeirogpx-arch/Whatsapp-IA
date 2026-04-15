@@ -5,5 +5,6 @@ from backend.app.models.tenant import AIConfig, Tenant
 from backend.app.models.product import Product
 from backend.app.models.knowledge_base import KnowledgeBase
 from backend.app.models.knowledge_chunk import KnowledgeChunk
+from backend.app.models.lead import Lead
 
-__all__ = ["Tenant", "AIConfig", "Conversation", "Contact", "Message", "Product", "KnowledgeBase", "KnowledgeChunk"]
+__all__ = ["Tenant", "AIConfig", "Conversation", "Contact", "Message", "Product", "KnowledgeBase", "KnowledgeChunk", "Lead"]
