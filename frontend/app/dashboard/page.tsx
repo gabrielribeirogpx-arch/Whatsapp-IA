@@ -24,7 +24,7 @@ export default function DashboardPage() {
       tenantLogin(parsed)
         .then((tenantSession) => {
           setSession(tenantSession);
-          return getConversations(parsed);
+          return getConversations();
         })
         .then(setConversations)
         .catch(() => localStorage.removeItem(STORAGE_KEY));
