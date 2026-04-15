@@ -91,8 +91,39 @@ async def webhook(request: Request, db: Session = Depends(get_db)):
                 )
             )
 
+            recent_messages = db.execute(
+                select(Message)
+                .where(Message.conversation_id == conversation.id)
+                .order_by(desc(Message.created_at), desc(Message.id))
+                .limit(10)
+            ).scalars().all()
+
+            history = ""
+            for msg in reversed(recent_messages):
+                role = "Cliente" if not msg.from_me else "Atendente"
+                history += f"{role}: {msg.text}\n"
+
+            prompt = f"""
+Você é um especialista em vendas via WhatsApp.
+
+Histórico da conversa:
+{history}
+
+Cliente acabou de dizer:
+\"{incoming_message}\"
+
+Responda de forma natural, humana e estratégica.
+
+REGRAS:
+- Seja direto
+- Não seja genérico
+- Conduza a conversa
+- Sempre faça uma pergunta
+- Pense como vendedor
+"""
+
             try:
-                auto_reply = await generate_ai_response(incoming_message)
+                auto_reply = await generate_ai_response(prompt)
             except Exception as e:
                 print(f"Erro IA: {e}")
                 auto_reply = "Desculpa, tive um erro aqui. Pode repetir?"
