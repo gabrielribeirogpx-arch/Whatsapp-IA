@@ -1,5 +1,6 @@
 import asyncio
 from datetime import datetime
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
@@ -7,8 +8,9 @@ from sqlalchemy import desc, select
 from sqlalchemy.orm import Session, load_only
 
 from backend.app.database import get_db
-from backend.app.models import Conversation, Message, Tenant
+from backend.app.models import Contact, Conversation, Message, Tenant
 from backend.app.schemas.chat import (
+    ContactOut,
     ConversationOut,
     MessageOut,
     SendMessageRequest,
@@ -83,6 +85,7 @@ def list_conversations(
                 load_only(
                     Conversation.id,
                     Conversation.tenant_id,
+                    Conversation.contact_id,
                     Conversation.phone_number,
                     Conversation.name,
                     Conversation.avatar_url,
@@ -115,9 +118,12 @@ def list_conversations(
             ConversationOut(
                 id=conversation.id,
                 tenant_id=conversation.tenant_id,
+                contact_id=conversation.contact_id,
                 phone=getattr(conversation, "phone", None) or conversation.phone_number or "",
                 name=(conversation.name if hasattr(conversation, "name") else None) or conversation.phone_number or "",
                 avatar_url=conversation.avatar_url,
+                stage=conversation.contact.stage if conversation.contact else "novo",
+                score=conversation.contact.score if conversation.contact else 0,
                 status=getattr(conversation, "status", None) or "human",
                 last_message=(last_message_item.text if last_message_item else conversation.message or ""),
                 updated_at=conversation.updated_at,
@@ -154,6 +160,48 @@ def get_messages(
     return items
 
 
+@router.get("/messages/by-contact/{contact_id}", response_model=list[MessageOut])
+def get_messages_by_contact(
+    contact_id: UUID,
+    tenant: Tenant = Depends(get_current_tenant),
+    db: Session = Depends(get_db),
+):
+    conversation = db.execute(
+        select(Conversation)
+        .options(load_only(Conversation.id))
+        .where(Conversation.tenant_id == tenant.id, Conversation.contact_id == contact_id)
+    ).scalars().first()
+    if not conversation:
+        return []
+
+    items = (
+        db.execute(
+            select(Message)
+            .where(Message.conversation_id == conversation.id)
+            .order_by(Message.created_at.asc(), Message.id.asc())
+        )
+        .scalars()
+        .all()
+    )
+    return items
+
+
+@router.get("/contacts", response_model=list[ContactOut])
+def list_contacts(
+    tenant: Tenant = Depends(get_current_tenant),
+    db: Session = Depends(get_db),
+):
+    return (
+        db.execute(
+            select(Contact)
+            .where(Contact.tenant_id == tenant.id)
+            .order_by(desc(Contact.last_message_at), desc(Contact.created_at), desc(Contact.id))
+        )
+        .scalars()
+        .all()
+    )
+
+
 @router.post("/send-message", response_model=MessageOut)
 async def send_message(
     payload: SendMessageRequest,
@@ -173,23 +221,54 @@ async def send_message(
     tenant_id = tenant.id
     print("TENANT ID:", tenant_id, type(tenant_id))
 
+    contact = None
+    if payload.contact_id:
+        contact = db.execute(
+            select(Contact).where(Contact.tenant_id == tenant_id, Contact.id == payload.contact_id)
+        ).scalars().first()
+        if contact:
+            phone = sanitize_phone(contact.phone)
+
+    if not contact:
+        contact = db.execute(
+            select(Contact).where(Contact.tenant_id == tenant_id, Contact.phone == phone)
+        ).scalars().first()
+    if not contact:
+        contact = Contact(
+            tenant_id=tenant_id,
+            phone=phone,
+            name=payload.name,
+            stage="novo",
+            score=0,
+            last_message_at=datetime.utcnow(),
+        )
+        db.add(contact)
+        db.flush()
+
     conversation = (
         db.query(Conversation)
-        .options(load_only(Conversation.id, Conversation.tenant_id, Conversation.phone_number, Conversation.updated_at))
+        .options(load_only(Conversation.id, Conversation.tenant_id, Conversation.phone_number, Conversation.updated_at, Conversation.contact_id))
         .filter(Conversation.tenant_id == tenant_id, Conversation.phone_number == phone)
         .first()
     )
     if not conversation:
         conversation = Conversation(
             tenant_id=tenant_id,
+            contact_id=contact.id,
             phone_number=phone,
             name=None,
         )
         db.add(conversation)
         db.flush()
+    elif not conversation.contact_id:
+        conversation.contact_id = contact.id
 
+    if payload.name and not contact.name:
+        contact.name = payload.name.strip()
     if conversation.name is None and _looks_like_name(message_text):
         conversation.name = message_text.strip()
+        if not contact.name:
+            contact.name = conversation.name
     print("NOME CLIENTE:", conversation.name)
 
     try:
@@ -206,6 +285,7 @@ async def send_message(
     )
     db.add(message)
     consume_usage(tenant, 1)
+    contact.last_message_at = datetime.utcnow()
     conversation.message = message_text
     conversation.updated_at = datetime.utcnow()
     db.commit()

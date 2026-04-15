@@ -353,6 +353,60 @@ input {
   color: #6b7280;
 }
 
+.crm-table-wrap {
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 14px;
+  overflow: auto;
+}
+
+.crm-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.crm-table th,
+.crm-table td {
+  padding: 0.8rem 0.9rem;
+  border-bottom: 1px solid #f1f5f9;
+  text-align: left;
+}
+
+.crm-table th {
+  background: #f8fafc;
+  font-size: 0.86rem;
+  color: #475569;
+}
+
+.crm-stage {
+  display: inline-flex;
+  padding: 0.2rem 0.6rem;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: capitalize;
+}
+
+.crm-stage-novo {
+  background: #e0f2fe;
+  color: #075985;
+}
+
+.crm-stage-frio {
+  background: #ede9fe;
+  color: #5b21b6;
+}
+
+.crm-stage-morno {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.crm-stage-quente {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
 @media (max-width: 900px) {
   .chat-layout {
     grid-template-columns: 1fr;

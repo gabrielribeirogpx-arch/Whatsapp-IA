@@ -6,7 +6,7 @@ from sqlalchemy import desc, select
 from sqlalchemy.orm import Session, load_only
 
 from backend.app.database import SessionLocal, get_db
-from backend.app.models import Conversation, Message
+from backend.app.models import Contact, Conversation, Message
 from backend.app.services.ai_provider import classificar_lead
 from backend.app.services.ai_service import generate_ai_response
 from backend.app.services.conversation_service import save_conversation
@@ -82,6 +82,15 @@ def _looks_like_name(text: str) -> bool:
     return len(words) <= 4
 
 
+def _lead_to_updates(lead_level: str, current_score: int) -> tuple[str, int]:
+    normalized = (lead_level or "").strip().lower()
+    if normalized == "quente":
+        return "quente", min(100, current_score + 20)
+    if normalized == "frio":
+        return "frio", max(0, current_score - 5)
+    return "morno", min(100, current_score + 10)
+
+
 @router.get("/webhook")
 async def verify():
     return {"status": "webhook ativo"}
@@ -155,13 +164,42 @@ async def webhook(request: Request, db: Session = Depends(get_db)):
 
             conversation = db.execute(
                 select(Conversation)
-                .options(load_only(Conversation.id, Conversation.phone_number, Conversation.name, Conversation.message, Conversation.created_at))
+                .options(
+                    load_only(
+                        Conversation.id,
+                        Conversation.contact_id,
+                        Conversation.phone_number,
+                        Conversation.name,
+                        Conversation.message,
+                        Conversation.created_at,
+                    )
+                )
                 .where(Conversation.tenant_id == tenant_id, Conversation.phone_number == normalized_phone)
                 .order_by(desc(Conversation.created_at), desc(Conversation.id))
             ).scalars().first()
+
+            contact = db.execute(
+                select(Contact).where(Contact.tenant_id == tenant_id, Contact.phone == normalized_phone)
+            ).scalars().first()
+            if not contact:
+                contact = Contact(
+                    tenant_id=tenant_id,
+                    phone=normalized_phone,
+                    name=contact_name,
+                    stage="novo",
+                    score=0,
+                    last_message_at=datetime.utcnow(),
+                )
+                db.add(contact)
+                db.flush()
+            elif contact_name and not contact.name:
+                contact.name = contact_name
+            contact.last_message_at = datetime.utcnow()
+
             if not conversation:
                 print(f"Nenhuma conversa encontrada, criando nova para {normalized_phone}")
                 conversation = Conversation(
+                    contact_id=contact.id,
                     phone_number=normalized_phone,
                     name=None,
                     message=incoming_message,
@@ -173,10 +211,14 @@ async def webhook(request: Request, db: Session = Depends(get_db)):
                 print(f"Conversa encontrada: {conversation.id}")
                 if contact_name and not conversation.name:
                     conversation.name = contact_name
+                if not conversation.contact_id:
+                    conversation.contact_id = contact.id
                 conversation.message = incoming_message
 
             if conversation.name is None and _looks_like_name(incoming_message):
                 conversation.name = incoming_message.strip()
+            if not contact.name and conversation.name:
+                contact.name = conversation.name
             print("NOME CLIENTE:", conversation.name)
 
             db.add(
@@ -203,12 +245,15 @@ async def webhook(request: Request, db: Session = Depends(get_db)):
 
             if ai_mode == "vendedor":
                 lead_level = classificar_lead(incoming_message)
+                contact.stage, contact.score = _lead_to_updates(lead_level, contact.score)
                 prompt = VENDEDOR_PROMPT.format(
                     incoming_message=incoming_message,
                     history=history,
                     lead_level=lead_level.upper(),
                 )
             else:
+                lead_level = classificar_lead(incoming_message)
+                contact.stage, contact.score = _lead_to_updates(lead_level, contact.score)
                 prompt = f"""
 {ATENDENTE_PROMPT}
 
