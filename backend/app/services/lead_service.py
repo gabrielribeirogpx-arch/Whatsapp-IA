@@ -5,6 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from backend.app.models.lead import Lead
+from backend.app.utils.phone import normalize_phone
 
 
 def get_or_create_lead(
@@ -14,6 +15,9 @@ def get_or_create_lead(
     name: str | None = None,
     last_message: str | None = None,
 ) -> Lead:
+    phone = normalize_phone(phone)
+    print("PHONE_NORMALIZED:", phone)
+
     lead = db.execute(
         select(Lead).where(Lead.tenant_id == tenant_id, Lead.phone == phone)
     ).scalars().first()

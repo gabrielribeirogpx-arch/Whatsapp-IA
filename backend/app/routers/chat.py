@@ -21,7 +21,8 @@ from backend.app.schemas.chat import (
 )
 from backend.app.services.contact_sync_service import ensure_conversation_contact_link, upsert_contact_for_phone
 from backend.app.services.lead_service import get_or_create_lead
-from backend.app.services.message_service import sanitize_phone, sanitize_text
+from backend.app.services.message_service import sanitize_text
+from backend.app.utils.phone import normalize_phone
 from backend.app.services.realtime_service import sse_broker
 from backend.app.services.tenant_service import (
     TenantLimitError,
@@ -141,7 +142,8 @@ def get_messages(
     tenant: Tenant = Depends(get_current_tenant),
     db: Session = Depends(get_db),
 ):
-    sanitized_phone = sanitize_phone(phone)
+    sanitized_phone = normalize_phone(phone)
+    print("PHONE_NORMALIZED:", sanitized_phone)
     conversation = db.execute(
         select(Conversation)
         .options(load_only(Conversation.id))
@@ -211,7 +213,8 @@ async def send_message(
     tenant: Tenant = Depends(get_current_tenant),
     db: Session = Depends(get_db),
 ):
-    phone = sanitize_phone(payload.phone)
+    phone = normalize_phone(payload.phone)
+    print("PHONE_NORMALIZED:", phone)
     message_text = sanitize_text(payload.message)
     if not phone or not message_text:
         raise HTTPException(status_code=400, detail="Dados inválidos")
@@ -230,7 +233,8 @@ async def send_message(
             select(Contact).where(Contact.tenant_id == tenant_id, Contact.id == payload.contact_id)
         ).scalars().first()
         if contact:
-            phone = sanitize_phone(contact.phone)
+            phone = normalize_phone(contact.phone)
+            print("PHONE_NORMALIZED:", phone)
 
     if not contact:
         contact = upsert_contact_for_phone(
@@ -309,7 +313,8 @@ def take_over(
     tenant: Tenant = Depends(get_current_tenant),
     db: Session = Depends(get_db),
 ):
-    sanitized_phone = sanitize_phone(phone)
+    sanitized_phone = normalize_phone(phone)
+    print("PHONE_NORMALIZED:", sanitized_phone)
     conversation = db.execute(
         select(Conversation)
         .options(load_only(Conversation.id, Conversation.tenant_id, Conversation.phone_number))
@@ -326,7 +331,8 @@ def take_over(
 
 @router.get("/stream/messages/{phone}")
 async def stream_messages(phone: str, tenant: Tenant = Depends(get_current_tenant)):
-    sanitized_phone = sanitize_phone(phone)
+    sanitized_phone = normalize_phone(phone)
+    print("PHONE_NORMALIZED:", sanitized_phone)
     channel = f"{tenant.id}:{sanitized_phone}"
     queue = await sse_broker.subscribe(channel)
 

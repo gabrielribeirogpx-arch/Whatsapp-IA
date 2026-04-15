@@ -1,6 +1,6 @@
 'use client';
 
-import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
 
 import ChatWindow from './ChatWindow';
 import Sidebar from './Sidebar';
@@ -28,21 +28,43 @@ export default function ChatShell() {
   const [inputValue, setInputValue] = useState('');
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
-  useEffect(() => {
-    getConversations().then((conversationsResponse: Conversation[]) => {
-      const unique = Object.values(
-        conversationsResponse.reduce<Record<string, Conversation>>((acc, conversation) => {
-          acc[conversation.phone] = conversation;
-          return acc;
-        }, {})
-      );
+  const fetchConversations = useCallback(async () => {
+    const conversationsResponse = await getConversations();
+    const unique = Object.values(
+      conversationsResponse.reduce<Record<string, Conversation>>((acc, conversation) => {
+        acc[conversation.phone] = conversation;
+        return acc;
+      }, {})
+    );
 
-      setConversations(unique);
-      if (unique.length && !selectedContactId) {
-        setSelectedContactId(String(unique[0].contact_id ?? unique[0].id));
-      }
-    });
+    setConversations(unique);
+    if (unique.length && !selectedContactId) {
+      setSelectedContactId(String(unique[0].contact_id ?? unique[0].id));
+    }
   }, [selectedContactId]);
+
+  const fetchMessages = useCallback(
+    async (conversationId: string) => {
+      const conversation = conversations.find((item) => String(item.contact_id ?? item.id) === conversationId);
+
+      if (!conversation) {
+        setMessages([]);
+        return;
+      }
+
+      const loadMessages = conversation.contact_id
+        ? getMessagesByContact(conversation.contact_id)
+        : getMessages(conversation.phone);
+
+      const realMessages: Message[] = await loadMessages;
+      setMessages(realMessages.map(toChatMessage));
+    },
+    [conversations]
+  );
+
+  useEffect(() => {
+    fetchConversations().catch(() => undefined);
+  }, [fetchConversations]);
 
   const contacts = useMemo<Contact[]>(
     () =>
@@ -106,21 +128,19 @@ export default function ChatShell() {
   useEffect(() => {
     if (!selectedContactId) return;
 
-    const conversation = conversations.find((item) => String(item.contact_id ?? item.id) === selectedContactId);
+    fetchMessages(selectedContactId).catch(() => undefined);
+  }, [selectedContactId, fetchMessages]);
 
-    if (!conversation) {
-      setMessages([]);
-      return;
-    }
+  useEffect(() => {
+    const interval = setInterval(() => {
+      fetchConversations().catch(() => undefined);
+      if (selectedContactId) {
+        fetchMessages(selectedContactId).catch(() => undefined);
+      }
+    }, 3000);
 
-    const loadMessages = conversation.contact_id
-      ? getMessagesByContact(conversation.contact_id)
-      : getMessages(conversation.phone);
-
-    loadMessages.then((realMessages: Message[]) => {
-      setMessages(realMessages.map(toChatMessage));
-    });
-  }, [conversations, selectedContactId]);
+    return () => clearInterval(interval);
+  }, [selectedContactId, fetchConversations, fetchMessages]);
 
   function onSelectContact(contactId: string) {
     setSelectedContactId(contactId);

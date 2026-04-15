@@ -178,6 +178,7 @@ async def webhook(request: Request, db: Session = Depends(get_db)):
         for incoming in messages_data:
             phone = incoming["phone"]
             normalized_phone = normalize_phone(phone)
+            print("PHONE_NORMALIZED:", normalized_phone)
             incoming_message = incoming["text"]
             contact_name = incoming.get("name")
             phone_number_id = incoming.get("phone_number_id")
@@ -326,7 +327,7 @@ Cliente disse:
 
             print(f"IA respondeu: {auto_reply}")
             enviar_mensagem(
-                phone,
+                normalized_phone,
                 auto_reply,
                 token=tenant.whatsapp_token,
                 phone_number_id=tenant.phone_number_id,
@@ -350,8 +351,8 @@ Cliente disse:
                 last_message=auto_reply,
             )
 
-            print(f"Evento processado (telefone={phone}, conteúdo={incoming_message})")
-            print(f"Resposta automática enviada para {phone}")
+            print(f"Evento processado (telefone={normalized_phone}, conteúdo={incoming_message})")
+            print(f"Resposta automática enviada para {normalized_phone}")
 
             persistence_db = SessionLocal()
             try:

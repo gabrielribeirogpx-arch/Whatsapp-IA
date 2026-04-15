@@ -10,8 +10,23 @@ import { Conversation } from '../../lib/types';
 export default function DashboardPage() {
   const [conversations, setConversations] = useState<Conversation[]>([]);
 
+  const fetchDashboardData = async () => {
+    try {
+      const data = await getConversations();
+      setConversations(data);
+    } catch {
+      localStorage.removeItem('tenant');
+    }
+  };
+
   useEffect(() => {
-    getConversations().then(setConversations).catch(() => localStorage.removeItem('tenant'));
+    fetchDashboardData();
+
+    const interval = setInterval(() => {
+      fetchDashboardData();
+    }, 5000);
+
+    return () => clearInterval(interval);
   }, []);
 
   const humanInProgress = useMemo(
