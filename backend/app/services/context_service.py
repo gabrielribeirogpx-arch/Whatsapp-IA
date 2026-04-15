@@ -1,10 +1,11 @@
+import uuid
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from backend.app.models import Conversation, Message
 
 
-def build_context(db: Session, tenant_id: int, phone: str, limit: int = 10) -> list[Message]:
+def build_context(db: Session, tenant_id: uuid.UUID, phone: str, limit: int = 10) -> list[Message]:
     conversation = db.execute(
         select(Conversation).where(Conversation.tenant_id == tenant_id, Conversation.phone_number == phone)
     ).scalar_one_or_none()

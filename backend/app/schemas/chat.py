@@ -1,11 +1,12 @@
+import uuid
 from datetime import datetime
 
 from pydantic import BaseModel, Field
 
 
 class ConversationOut(BaseModel):
-    id: int
-    tenant_id: int
+    id: uuid.UUID
+    tenant_id: uuid.UUID
     phone: str
     name: str
     status: str
@@ -17,8 +18,8 @@ class ConversationOut(BaseModel):
 
 
 class MessageOut(BaseModel):
-    id: int
-    tenant_id: int
+    id: uuid.UUID
+    tenant_id: uuid.UUID
     phone: str
     content: str
     from_me: bool
@@ -52,7 +53,7 @@ class TenantUsageOut(BaseModel):
 
 
 class TenantLoginResponse(BaseModel):
-    tenant_id: int
+    tenant_id: uuid.UUID
     name: str
     slug: str
     usage: TenantUsageOut

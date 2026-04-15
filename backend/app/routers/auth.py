@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
+import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -24,7 +25,7 @@ class LoginRequest(BaseModel):
 
 
 class TenantAuthResponse(BaseModel):
-    tenant_id: int
+    tenant_id: uuid.UUID
     slug: str
 
 
