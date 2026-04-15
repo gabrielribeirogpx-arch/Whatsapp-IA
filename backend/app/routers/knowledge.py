@@ -3,23 +3,23 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from sqlalchemy.orm import Session
 
-from app.database import get_db
-from app.models import Tenant
-from app.schemas.knowledge import (
+from backend.app.database import get_db
+from backend.app.models import Tenant
+from backend.app.schemas.knowledge import (
     KnowledgeCreate,
     KnowledgeCrawlOut,
     KnowledgeCrawlRequest,
     KnowledgeOut,
     KnowledgeUploadOut,
 )
-from app.services.knowledge_service import (
+from backend.app.services.knowledge_service import (
     create_knowledge_item,
     delete_knowledge_item,
     list_knowledge_items,
     process_pdf_knowledge,
     process_site_knowledge,
 )
-from app.services.tenant_service import get_current_tenant
+from backend.app.services.tenant_service import get_current_tenant
 
 router = APIRouter(prefix="/api/knowledge", tags=["knowledge"])
 

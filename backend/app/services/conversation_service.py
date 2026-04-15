@@ -2,8 +2,8 @@ from sqlalchemy import desc, select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
-from app.models.conversation import Conversation
-from app.utils.phone import normalize_phone
+from backend.app.models.conversation import Conversation
+from backend.app.utils.phone import normalize_phone
 
 
 def save_conversation(db: Session, phone: str, message: str, response: str, tenant_id):

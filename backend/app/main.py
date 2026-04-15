@@ -6,15 +6,15 @@ import traceback
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.db.base import Base
-from app.db.session import engine
-from app import models  # noqa: F401
-from app.routers import webhook
-from app.routers import chat
-from app.routers import auth
-from app.routers import products
-from app.routers import knowledge
-from app.routers import leads
+from backend.app.db.base import Base
+from backend.app.db.session import engine
+from backend.app import models  # noqa: F401
+from backend.app.routers import webhook
+from backend.app.routers import chat
+from backend.app.routers import auth
+from backend.app.routers import products
+from backend.app.routers import knowledge
+from backend.app.routers import leads
 
 print("🚀 APP STARTED - DEBUG MODE")
 
@@ -81,7 +81,7 @@ def root():
 @app.on_event("startup")
 async def test_db() -> None:
     try:
-        from app.core.database import engine as core_engine
+        from backend.app.core.database import engine as core_engine
 
         conn = core_engine.connect()
         print("✅ DB CONNECTED")

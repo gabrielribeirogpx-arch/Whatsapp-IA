@@ -3,7 +3,7 @@ from datetime import datetime
 
 from pydantic import BaseModel
 
-from app.models.lead import LeadStage, LeadTemperature
+from backend.app.models.lead import LeadStage, LeadTemperature
 
 
 class LeadOut(BaseModel):

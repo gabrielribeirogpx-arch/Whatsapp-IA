@@ -13,8 +13,8 @@ from PyPDF2 import PdfReader
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import KnowledgeBase, KnowledgeChunk
-from app.services.embedding_service import cosine_similarity, generate_embedding
+from backend.app.models import KnowledgeBase, KnowledgeChunk
+from backend.app.services.embedding_service import cosine_similarity, generate_embedding
 
 SIMILARITY_THRESHOLD = 0.2
 CHUNK_SIZE = 800

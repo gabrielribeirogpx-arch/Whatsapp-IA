@@ -5,19 +5,19 @@ from fastapi import APIRouter, Depends, Request
 from sqlalchemy import desc, select
 from sqlalchemy.orm import Session, load_only
 
-from app.database import get_db
-from app.models import Conversation, Message, Product
-from app.models.lead import LeadTemperature
-from app.services.ai_provider import classificar_lead
-from app.services.ai_service import generate_ai_response
-from app.services.contact_sync_service import ensure_conversation_contact_link, upsert_contact_for_phone
-from app.services.conversation_service import get_or_create_conversation
-from app.services.lead_service import get_or_create_lead
-from app.services.knowledge_service import build_rag_context, search_relevant_knowledge
-from app.models import Tenant
-from app.services.tenant_service import get_or_create_default_tenant
-from app.services.whatsapp_service import enviar_mensagem
-from app.utils.phone import normalize_phone
+from backend.app.database import get_db
+from backend.app.models import Conversation, Message, Product
+from backend.app.models.lead import LeadTemperature
+from backend.app.services.ai_provider import classificar_lead
+from backend.app.services.ai_service import generate_ai_response
+from backend.app.services.contact_sync_service import ensure_conversation_contact_link, upsert_contact_for_phone
+from backend.app.services.conversation_service import get_or_create_conversation
+from backend.app.services.lead_service import get_or_create_lead
+from backend.app.services.knowledge_service import build_rag_context, search_relevant_knowledge
+from backend.app.models import Tenant
+from backend.app.services.tenant_service import get_or_create_default_tenant
+from backend.app.services.whatsapp_service import enviar_mensagem
+from backend.app.utils.phone import normalize_phone
 
 router = APIRouter()
 

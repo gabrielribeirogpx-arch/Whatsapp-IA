@@ -4,7 +4,7 @@ from typing import Sequence
 
 from openai import OpenAI
 
-from app.models import AIConfig, Message
+from backend.app.models import AIConfig, Message
 
 logger = logging.getLogger(__name__)
 

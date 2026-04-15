@@ -2,7 +2,7 @@ import uuid
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import Conversation, Message
+from backend.app.models import Conversation, Message
 
 
 def build_context(db: Session, tenant_id: uuid.UUID, phone: str, limit: int = 10) -> list[Message]:

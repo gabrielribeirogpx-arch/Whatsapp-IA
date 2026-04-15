@@ -5,12 +5,12 @@ import unicodedata
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-from app.schemas.auth import TenantAuthResponse
+from backend.app.schemas.auth import TenantAuthResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.database import get_db
-from app.models import Tenant
+from backend.app.database import get_db
+from backend.app.models import Tenant
 
 router = APIRouter(tags=["auth"])
 

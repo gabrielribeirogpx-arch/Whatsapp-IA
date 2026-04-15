@@ -3,7 +3,7 @@ from datetime import datetime
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import Contact, Conversation
+from backend.app.models import Contact, Conversation
 
 
 DEFAULT_CONTACT_NAME = "Cliente"

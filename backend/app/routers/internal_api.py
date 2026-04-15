@@ -1,13 +1,13 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
-from app.database import get_db
-from app.schemas.chat import ConversationOut, MessageOut, SendMessageRequest
-from app.services.tenant_service import get_current_tenant
-from app.models import Tenant
-from app.routers.chat import get_messages as get_messages_api
-from app.routers.chat import list_conversations as list_conversations_api
-from app.routers.chat import send_message as send_message_api
+from backend.app.database import get_db
+from backend.app.schemas.chat import ConversationOut, MessageOut, SendMessageRequest
+from backend.app.services.tenant_service import get_current_tenant
+from backend.app.models import Tenant
+from backend.app.routers.chat import get_messages as get_messages_api
+from backend.app.routers.chat import list_conversations as list_conversations_api
+from backend.app.routers.chat import send_message as send_message_api
 
 router = APIRouter(tags=["internal-api"])
 

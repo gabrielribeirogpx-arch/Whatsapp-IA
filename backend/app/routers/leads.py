@@ -4,10 +4,10 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import desc, func, select
 from sqlalchemy.orm import Session
 
-from app.database import get_db
-from app.models import Lead, PipelineStage, Tenant
-from app.models.lead import LeadStage
-from app.schemas.lead import (
+from backend.app.database import get_db
+from backend.app.models import Lead, PipelineStage, Tenant
+from backend.app.models.lead import LeadStage
+from backend.app.schemas.lead import (
     LeadMoveRequest,
     LeadOut,
     LeadStageUpdateRequest,
@@ -15,8 +15,8 @@ from app.schemas.lead import (
     PipelineLeadOut,
     PipelineStageOut,
 )
-from app.services.pipeline_service import ensure_pipeline_stages
-from app.services.tenant_service import get_current_tenant
+from backend.app.services.pipeline_service import ensure_pipeline_stages
+from backend.app.services.tenant_service import get_current_tenant
 
 router = APIRouter(prefix="/api", tags=["leads"])
 

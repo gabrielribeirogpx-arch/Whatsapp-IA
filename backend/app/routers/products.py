@@ -4,10 +4,10 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.database import get_db
-from app.models import Product, Tenant
-from app.schemas.product import ProductCreate, ProductOut, ProductUpdate
-from app.services.tenant_service import get_current_tenant
+from backend.app.database import get_db
+from backend.app.models import Product, Tenant
+from backend.app.schemas.product import ProductCreate, ProductOut, ProductUpdate
+from backend.app.services.tenant_service import get_current_tenant
 
 router = APIRouter(prefix="/api/products", tags=["products"])
 
