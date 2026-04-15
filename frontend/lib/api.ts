@@ -85,7 +85,7 @@ export async function tenantLogin(phone_number_id: string): Promise<TenantSessio
   return res.json();
 }
 
-export async function getConversations() {
+export async function getConversations(): Promise<Conversation[]> {
   const res = await fetch(`${BASE_URL}/api/conversations`, { headers: tenantHeaders() });
   if (!res.ok) throw new Error(await res.text());
   const data = await res.json();
@@ -96,13 +96,13 @@ export async function getConversations() {
   return [];
 }
 
-export async function getMessages(phone: string) {
+export async function getMessages(phone: string): Promise<Message[]> {
   const res = await fetch(`${BASE_URL}/api/messages/${phone}`, { headers: tenantHeaders() });
   if (!res.ok) throw new Error(await res.text());
   return res.json();
 }
 
-export async function getMessagesByContact(contactId: string) {
+export async function getMessagesByContact(contactId: string): Promise<Message[]> {
   const res = await fetch(`${BASE_URL}/api/messages/by-contact/${contactId}`, { headers: tenantHeaders() });
   if (!res.ok) throw new Error(await res.text());
   return res.json();
