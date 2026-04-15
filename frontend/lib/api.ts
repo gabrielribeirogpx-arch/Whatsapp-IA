@@ -1,6 +1,6 @@
 import { Conversation, Message, SendMessagePayload, TenantAuth, TenantSession } from './types';
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
+const BASE_URL = process.env.NEXT_PUBLIC_API_URL;
 const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL ?? 'https://SEU_BACKEND_URL';
 
 function tenantHeaders(auth: TenantAuth) {
@@ -11,7 +11,7 @@ function tenantHeaders(auth: TenantAuth) {
 }
 
 export async function tenantLogin(auth: TenantAuth): Promise<TenantSession> {
-  const res = await fetch(`${API_BASE}/api/auth/login`, {
+  const res = await fetch(`${BASE_URL}/api/auth/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(auth)
@@ -21,26 +21,18 @@ export async function tenantLogin(auth: TenantAuth): Promise<TenantSession> {
   return res.json();
 }
 
-export async function getConversations(auth: TenantAuth): Promise<Conversation[]> {
-  const res = await fetch(`${API_BASE}/api/conversations`, {
-    cache: 'no-store',
-    headers: tenantHeaders(auth)
-  });
-  if (!res.ok) throw new Error('Falha ao carregar conversas');
+export async function getConversations() {
+  const res = await fetch(`${BASE_URL}/api/conversations`);
   return res.json();
 }
 
-export async function getMessages(phone: string, auth: TenantAuth): Promise<Message[]> {
-  const res = await fetch(`${API_BASE}/api/messages/${phone}`, {
-    cache: 'no-store',
-    headers: tenantHeaders(auth)
-  });
-  if (!res.ok) throw new Error('Falha ao carregar mensagens');
+export async function getMessages(conversationId: string) {
+  const res = await fetch(`${BASE_URL}/api/messages/${conversationId}`);
   return res.json();
 }
 
 export async function sendMessage(phone: string, message: string, auth: TenantAuth) {
-  const res = await fetch(`${API_BASE}/api/send-message`, {
+  const res = await fetch(`${BASE_URL}/api/send-message`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -53,7 +45,7 @@ export async function sendMessage(phone: string, message: string, auth: TenantAu
 }
 
 export async function toggleTakeOver(phone: string, auth: TenantAuth) {
-  const res = await fetch(`${API_BASE}/api/take-over/${phone}`, {
+  const res = await fetch(`${BASE_URL}/api/take-over/${phone}`, {
     method: 'POST',
     headers: tenantHeaders(auth)
   });
@@ -66,7 +58,7 @@ export function streamMessagesUrl(phone: string, auth: TenantAuth) {
     tenant_slug: auth.slug,
     tenant_password: auth.password
   });
-  return `${API_BASE}/api/stream/messages/${phone}?${params.toString()}`;
+  return `${BASE_URL}/api/stream/messages/${phone}?${params.toString()}`;
 }
 
 export async function sendMessageToBackend(payload: SendMessagePayload) {
