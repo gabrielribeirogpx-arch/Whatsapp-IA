@@ -64,3 +64,26 @@ export type CRMContact = {
   last_message?: string | null;
   created_at: string;
 };
+
+
+export type Product = {
+  id: string;
+  tenant_id: string;
+  name: string;
+  description?: string | null;
+  price?: string | null;
+  benefits?: string | null;
+  objections?: string | null;
+  target_customer?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ProductPayload = {
+  name: string;
+  description?: string;
+  price?: string;
+  benefits?: string;
+  objections?: string;
+  target_customer?: string;
+};
