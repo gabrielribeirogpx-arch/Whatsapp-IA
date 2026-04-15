@@ -1,38 +1,65 @@
 'use client';
 
-import { FormEvent, useMemo, useState } from 'react';
+import { FormEvent, useEffect, useMemo, useState } from 'react';
 
 import ChatWindow from './ChatWindow';
 import Sidebar from './Sidebar';
-import { sendMessageToBackend } from '../lib/api';
-import { ChatMessage, Contact } from '../lib/types';
+import { getConversations, getMessages, sendMessageToBackend } from '../lib/api';
+import { ChatMessage, Contact, Conversation, Message } from '../lib/types';
 
-const mockContacts: Contact[] = [
-  { id: '1', name: 'Ana Silva', phone: '+55 11 99999-0001', lastMessage: 'Consegue me enviar o orçamento?' },
-  { id: '2', name: 'João Souza', phone: '+55 11 99999-0002', lastMessage: 'Obrigado pelo retorno!' },
-  { id: '3', name: 'Clínica Vida', phone: '+55 11 99999-0003', lastMessage: 'Quero agendar para amanhã.' }
-];
+function toChatMessage(message: Message): ChatMessage {
+  const parsedDate = new Date(message.timestamp);
+  const time = Number.isNaN(parsedDate.getTime())
+    ? '--:--'
+    : parsedDate.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
 
-const mockMessages: Record<string, ChatMessage[]> = {
-  '1': [
-    { id: '1', text: 'Olá, tudo bem?', fromMe: false, time: '09:10' },
-    { id: '2', text: 'Oi Ana! Tudo ótimo, como posso ajudar?', fromMe: true, time: '09:11' }
-  ],
-  '2': [{ id: '3', text: 'Recebi a proposta, perfeito!', fromMe: false, time: '10:02' }],
-  '3': [{ id: '4', text: 'Tem horário disponível às 14h?', fromMe: false, time: '11:47' }]
-};
+  return {
+    id: String(message.id),
+    text: message.content,
+    fromMe: message.from_me,
+    time
+  };
+}
 
 export default function ChatShell() {
-  const [selectedContactId, setSelectedContactId] = useState(mockContacts[0].id);
-  const [chatByContact, setChatByContact] = useState<Record<string, ChatMessage[]>>(mockMessages);
+  const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [selectedContactId, setSelectedContactId] = useState('');
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputValue, setInputValue] = useState('');
 
-  const selectedContact = useMemo(
-    () => mockContacts.find((contact) => contact.id === selectedContactId),
-    [selectedContactId]
+  useEffect(() => {
+    getConversations().then(setConversations);
+  }, []);
+
+  const contacts = useMemo<Contact[]>(
+    () =>
+      conversations.map((conversation) => ({
+        id: String(conversation.id),
+        name: conversation.name,
+        phone: conversation.phone,
+        lastMessage: conversation.last_message
+      })),
+    [conversations]
   );
 
-  const selectedMessages = chatByContact[selectedContactId] ?? [];
+  const selectedContact = useMemo(
+    () => contacts.find((contact) => contact.id === selectedContactId),
+    [contacts, selectedContactId]
+  );
+
+  function onSelectContact(contactId: string) {
+    setSelectedContactId(contactId);
+    const conversation = conversations.find((item) => String(item.id) === contactId);
+
+    if (!conversation) {
+      setMessages([]);
+      return;
+    }
+
+    getMessages(String(conversation.id)).then((realMessages: Message[]) => {
+      setMessages(realMessages.map(toChatMessage));
+    });
+  }
 
   async function onSend(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -47,11 +74,7 @@ export default function ChatShell() {
       time: now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
     };
 
-    setChatByContact((current) => ({
-      ...current,
-      [selectedContact.id]: [...(current[selectedContact.id] ?? []), newMessage]
-    }));
-
+    setMessages((current) => [...current, newMessage]);
     setInputValue('');
 
     try {
@@ -61,21 +84,12 @@ export default function ChatShell() {
     }
   }
 
-  const contacts = useMemo(
-    () =>
-      mockContacts.map((contact) => {
-        const lastMessage = (chatByContact[contact.id] ?? []).at(-1)?.text ?? contact.lastMessage;
-        return { ...contact, lastMessage };
-      }),
-    [chatByContact]
-  );
-
   return (
     <div className="wa-layout">
-      <Sidebar contacts={contacts} selectedContactId={selectedContactId} onSelectContact={setSelectedContactId} />
+      <Sidebar contacts={contacts} selectedContactId={selectedContactId} onSelectContact={onSelectContact} />
       <ChatWindow
         contact={selectedContact}
-        messages={selectedMessages}
+        messages={messages}
         inputValue={inputValue}
         onInputChange={setInputValue}
         onSend={onSend}
