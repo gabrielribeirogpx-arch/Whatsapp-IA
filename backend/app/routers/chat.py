@@ -20,6 +20,7 @@ from backend.app.schemas.chat import (
     ToggleAssignmentResponse,
 )
 from backend.app.services.contact_sync_service import ensure_conversation_contact_link, upsert_contact_for_phone
+from backend.app.services.conversation_service import get_or_create_conversation
 from backend.app.services.lead_service import get_or_create_lead
 from backend.app.services.message_service import sanitize_text
 from backend.app.utils.phone import normalize_phone
@@ -105,7 +106,13 @@ def list_conversations(
     print("CONVERSAS:", items)
 
     response: list[ConversationOut] = []
+    seen_phones: set[str] = set()
     for conversation in items:
+        phone = getattr(conversation, "phone", None) or conversation.phone_number or ""
+        if phone in seen_phones:
+            continue
+        seen_phones.add(phone)
+
         last_message_item = (
             db.execute(
                 select(Message)
@@ -122,7 +129,7 @@ def list_conversations(
                 id=conversation.id,
                 tenant_id=conversation.tenant_id,
                 contact_id=conversation.contact_id,
-                phone=getattr(conversation, "phone", None) or conversation.phone_number or "",
+                phone=phone,
                 name=(conversation.name if hasattr(conversation, "name") else None) or conversation.phone_number or "",
                 avatar_url=conversation.avatar_url,
                 stage=conversation.contact.stage if conversation.contact else "novo",
@@ -265,24 +272,13 @@ async def send_message(
             name=payload.name,
         )
 
-    conversation = (
-        db.query(Conversation)
-        .options(load_only(Conversation.id, Conversation.tenant_id, Conversation.phone_number, Conversation.updated_at, Conversation.contact_id))
-        .filter(Conversation.tenant_id == tenant_id, Conversation.phone_number == phone)
-        .order_by(desc(Conversation.updated_at), desc(Conversation.id))
-        .first()
+    conversation, _ = get_or_create_conversation(
+        db=db,
+        tenant_id=tenant_id,
+        phone=phone,
+        contact_id=contact.id,
     )
-    if not conversation:
-        conversation = Conversation(
-            tenant_id=tenant_id,
-            contact_id=contact.id,
-            phone_number=phone,
-            name=None,
-        )
-        db.add(conversation)
-        db.flush()
-    else:
-        ensure_conversation_contact_link(conversation, contact)
+    ensure_conversation_contact_link(conversation, contact)
 
     if payload.name and payload.name.strip() and payload.name.strip() != contact.name:
         contact.name = payload.name.strip()

@@ -1,4 +1,5 @@
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy import desc, select
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from backend.app.models.conversation import Conversation
@@ -53,3 +54,46 @@ def save_conversation(db: Session, phone: str, message: str, response: str, tena
         else:
             fallback_conv.message = message
         db.commit()
+
+
+def get_or_create_conversation(db: Session, tenant_id, phone: str, contact_id=None, message: str | None = None):
+    normalized_phone = normalize_phone(phone)
+    print("PHONE:", normalized_phone)
+
+    conversation = db.execute(
+        select(Conversation)
+        .where(Conversation.tenant_id == tenant_id, Conversation.phone_number == normalized_phone)
+        .order_by(desc(Conversation.updated_at), desc(Conversation.id))
+    ).scalars().first()
+
+    existed = conversation is not None
+    if not conversation:
+        conversation = Conversation(
+            tenant_id=tenant_id,
+            contact_id=contact_id,
+            phone_number=normalized_phone,
+            message=message,
+        )
+        db.add(conversation)
+        try:
+            with db.begin_nested():
+                db.flush()
+        except IntegrityError:
+            conversation = db.execute(
+                select(Conversation)
+                .where(Conversation.tenant_id == tenant_id, Conversation.phone_number == normalized_phone)
+                .order_by(desc(Conversation.updated_at), desc(Conversation.id))
+            ).scalars().first()
+            existed = True
+            if conversation is None:
+                raise
+    else:
+        if message is not None:
+            conversation.message = message
+
+    if contact_id and conversation.contact_id is None:
+        conversation.contact_id = contact_id
+
+    print("CONVERSATION_ID:", conversation.id if conversation else None)
+    print("EXISTENTE:", existed)
+    return conversation, existed

@@ -2,6 +2,7 @@ from datetime import datetime
 from uuid import UUID
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from backend.app.models.lead import Lead, LeadStage
@@ -16,7 +17,7 @@ def get_or_create_lead(
     last_message: str | None = None,
 ) -> Lead:
     phone = normalize_phone(phone)
-    print("PHONE_NORMALIZED:", phone)
+    print("PHONE:", phone)
 
     lead = db.execute(
         select(Lead).where(Lead.tenant_id == tenant_id, Lead.phone == phone)
@@ -39,5 +40,15 @@ def get_or_create_lead(
         last_contact_at=datetime.utcnow(),
     )
     db.add(lead)
-    db.flush()
+
+    try:
+        with db.begin_nested():
+            db.flush()
+    except IntegrityError:
+        lead = db.execute(
+            select(Lead).where(Lead.tenant_id == tenant_id, Lead.phone == phone)
+        ).scalars().first()
+        if not lead:
+            raise
+
     return lead

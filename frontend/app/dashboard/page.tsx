@@ -29,15 +29,26 @@ export default function DashboardPage() {
     return () => clearInterval(interval);
   }, []);
 
+  const uniqueConversations = useMemo(() => {
+    const seen = new Set<string>();
+
+    return conversations.filter((conversation) => {
+      const phone = conversation.phone ?? '';
+      if (!phone || seen.has(phone)) return false;
+      seen.add(phone);
+      return true;
+    });
+  }, [conversations]);
+
   const humanInProgress = useMemo(
-    () => conversations.filter((conversation) => conversation.status === 'human').length,
-    [conversations]
+    () => uniqueConversations.filter((conversation) => conversation.status === 'human').length,
+    [uniqueConversations]
   );
 
   const answeredToday = useMemo(() => {
     const now = new Date();
 
-    return conversations.filter((conversation) => {
+    return uniqueConversations.filter((conversation) => {
       const updatedAt = new Date(conversation.updated_at);
 
       return (
@@ -47,7 +58,7 @@ export default function DashboardPage() {
         updatedAt.getFullYear() === now.getFullYear()
       );
     }).length;
-  }, [conversations]);
+  }, [uniqueConversations]);
 
   const userName = 'Gabriel Lima';
 
@@ -80,7 +91,7 @@ export default function DashboardPage() {
             <IconChats width={20} />
             <h2 className="text-xs text-gray-500 uppercase tracking-wide">Conversas</h2>
           </div>
-          <p className="text-3xl font-semibold">{conversations.length}</p>
+          <p className="text-3xl font-semibold">{uniqueConversations.length}</p>
           <small>Contatos com histórico recente na inbox.</small>
         </article>
 

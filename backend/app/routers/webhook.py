@@ -10,6 +10,7 @@ from backend.app.models import Conversation, Message, Product
 from backend.app.services.ai_provider import classificar_lead
 from backend.app.services.ai_service import generate_ai_response
 from backend.app.services.contact_sync_service import ensure_conversation_contact_link, upsert_contact_for_phone
+from backend.app.services.conversation_service import get_or_create_conversation
 from backend.app.services.lead_service import get_or_create_lead
 from backend.app.services.knowledge_service import build_rag_context, search_relevant_knowledge
 from backend.app.models import Tenant
@@ -198,22 +199,6 @@ async def webhook(request: Request, db: Session = Depends(get_db)):
 
             ai_mode = tenant.ai_mode if tenant.ai_mode in {"atendente", "vendedor"} else "atendente"
 
-            conversation = db.execute(
-                select(Conversation)
-                .options(
-                    load_only(
-                        Conversation.id,
-                        Conversation.contact_id,
-                        Conversation.phone_number,
-                        Conversation.name,
-                        Conversation.message,
-                        Conversation.created_at,
-                    )
-                )
-                .where(Conversation.tenant_id == tenant_id, Conversation.phone_number == normalized_phone)
-                .order_by(desc(Conversation.updated_at), desc(Conversation.id))
-            ).scalars().first()
-
             contact = upsert_contact_for_phone(
                 db,
                 tenant_id=tenant_id,
@@ -221,23 +206,23 @@ async def webhook(request: Request, db: Session = Depends(get_db)):
                 name=contact_name,
             )
 
-            if not conversation:
-                print(f"Nenhuma conversa encontrada, criando nova para {normalized_phone}")
-                conversation = Conversation(
-                    contact_id=contact.id,
-                    phone_number=normalized_phone,
-                    name=None,
-                    message=incoming_message,
-                    tenant_id=tenant_id,
-                )
-                db.add(conversation)
-                db.flush()
-            else:
+            conversation, existed = get_or_create_conversation(
+                db=db,
+                tenant_id=tenant_id,
+                phone=normalized_phone,
+                contact_id=contact.id,
+                message=incoming_message,
+            )
+
+            if existed:
                 print(f"Conversa encontrada: {conversation.id}")
-                if contact_name and not conversation.name:
-                    conversation.name = contact_name
-                ensure_conversation_contact_link(conversation, contact)
-                conversation.message = incoming_message
+            else:
+                print(f"Nenhuma conversa encontrada, criando nova para {normalized_phone}")
+
+            if contact_name and not conversation.name:
+                conversation.name = contact_name
+            ensure_conversation_contact_link(conversation, contact)
+            conversation.message = incoming_message
 
             if conversation.name is None and _looks_like_name(incoming_message):
                 conversation.name = incoming_message.strip()
