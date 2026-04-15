@@ -69,13 +69,22 @@ async def generate_ai_response(prompt: str) -> str:
 
     client = genai.Client(api_key=api_key)
 
-    try:
-        response = client.models.generate_content(
-            model="gemini-2.5-flash",
-            contents=prompt,
-        )
-        text = getattr(response, "text", None)
-        return text.strip() if text else "Não consegui responder agora, tenta de novo?"
-    except Exception:
-        logger.exception("Erro ao gerar resposta de IA com Gemini")
-        return "Não consegui responder agora, tenta de novo?"
+    models = [
+        "gemini-1.5-flash-latest",
+        "gemini-1.5-flash",
+        "gemini-1.0-pro",
+    ]
+
+    for model in models:
+        try:
+            response = client.models.generate_content(
+                model=model,
+                contents=prompt,
+            )
+            text = getattr(response, "text", None)
+            if text:
+                return text.strip()
+        except Exception as e:
+            print(f"Erro no modelo {model}: {e}")
+
+    return "Desculpa, estou com instabilidade agora. Pode tentar novamente em alguns segundos?"
