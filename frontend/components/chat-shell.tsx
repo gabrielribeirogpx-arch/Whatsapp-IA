@@ -1,6 +1,6 @@
 'use client';
 
-import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import ChatWindow from './ChatWindow';
 import Sidebar from './Sidebar';
@@ -27,6 +27,29 @@ export default function ChatShell() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputValue, setInputValue] = useState('');
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [typing, setTyping] = useState(false);
+  const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastIncomingByContactRef = useRef<Record<string, string>>({});
+
+  const stopTypingIndicator = useCallback(() => {
+    if (typingTimeoutRef.current) {
+      clearTimeout(typingTimeoutRef.current);
+      typingTimeoutRef.current = null;
+    }
+    setTyping(false);
+  }, []);
+
+  const startTypingIndicator = useCallback(() => {
+    if (typingTimeoutRef.current) {
+      clearTimeout(typingTimeoutRef.current);
+    }
+
+    setTyping(true);
+    typingTimeoutRef.current = setTimeout(() => {
+      setTyping(false);
+      typingTimeoutRef.current = null;
+    }, 5000);
+  }, []);
 
   const fetchConversations = useCallback(async () => {
     const conversationsResponse = await getConversations();
@@ -57,9 +80,21 @@ export default function ChatShell() {
         : getMessages(conversation.phone);
 
       const realMessages: Message[] = await loadMessages;
+      const latestIncoming = [...realMessages].reverse().find((message) => !message.from_me);
+      const latestIncomingId = latestIncoming ? String(latestIncoming.id) : '';
+      const previousIncomingId = lastIncomingByContactRef.current[conversationId] ?? '';
+
+      if (latestIncomingId) {
+        lastIncomingByContactRef.current[conversationId] = latestIncomingId;
+
+        if (latestIncomingId !== previousIncomingId && conversationId === selectedContactId) {
+          stopTypingIndicator();
+        }
+      }
+
       setMessages(realMessages.map(toChatMessage));
     },
-    [conversations]
+    [conversations, selectedContactId, stopTypingIndicator]
   );
 
   useEffect(() => {
@@ -73,10 +108,11 @@ export default function ChatShell() {
         const now = Date.now();
         const elapsed = updatedAt ? now - updatedAt.getTime() : Number.POSITIVE_INFINITY;
         const isOnline = elapsed <= 2 * 60 * 1000;
-        const isTyping = elapsed <= 20 * 1000;
+        const contactId = String(conversation.contact_id ?? conversation.id);
+        const isTyping = contactId === selectedContactId ? typing : false;
 
         return {
-          id: String(conversation.contact_id ?? conversation.id),
+          id: contactId,
           name: conversation.name,
           phone: conversation.phone,
           avatarUrl: conversation.avatar_url,
@@ -89,7 +125,7 @@ export default function ChatShell() {
           status: conversation.status
         };
       }),
-    [conversations]
+    [conversations, selectedContactId, typing]
   );
 
   const orderedContacts = useMemo(() => {
@@ -132,6 +168,10 @@ export default function ChatShell() {
   }, [selectedContactId, fetchMessages]);
 
   useEffect(() => {
+    stopTypingIndicator();
+  }, [selectedContactId, stopTypingIndicator]);
+
+  useEffect(() => {
     const interval = setInterval(() => {
       fetchConversations().catch(() => undefined);
       if (selectedContactId) {
@@ -143,6 +183,7 @@ export default function ChatShell() {
   }, [selectedContactId, fetchConversations, fetchMessages]);
 
   function onSelectContact(contactId: string) {
+    stopTypingIndicator();
     setSelectedContactId(contactId);
   }
 
@@ -161,6 +202,7 @@ export default function ChatShell() {
 
     setMessages((current) => [...current, newMessage]);
     setInputValue('');
+    startTypingIndicator();
 
     try {
       await sendMessage(selectedContact.phone, text, selectedContact.id);
@@ -168,6 +210,14 @@ export default function ChatShell() {
       console.error('Falha ao enviar para backend:', error);
     }
   }
+
+  useEffect(() => {
+    return () => {
+      if (typingTimeoutRef.current) {
+        clearTimeout(typingTimeoutRef.current);
+      }
+    };
+  }, []);
 
   return (
     <div className="wa-layout">
