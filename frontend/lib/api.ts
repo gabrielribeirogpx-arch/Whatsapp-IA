@@ -14,8 +14,7 @@ import {
   PipelineStage
 } from './types';
 
-const BASE_URL = process.env.NEXT_PUBLIC_API_URL;
-const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL ?? 'https://SEU_BACKEND_URL';
+const API_PREFIX = '/api';
 const TENANT_STORAGE_KEY = 'tenant';
 const TENANT_ID_STORAGE_KEY = 'tenant_id';
 
@@ -59,7 +58,7 @@ function tenantAuthHeaders() {
 }
 
 export async function registerTenant(name: string, phone_number_id: string): Promise<TenantSession> {
-  const res = await fetch(`${BASE_URL}/api/register`, {
+  const res = await fetch(`${API_PREFIX}/register`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ name, phone_number_id })
@@ -73,7 +72,7 @@ export async function registerTenant(name: string, phone_number_id: string): Pro
 }
 
 export async function tenantLogin(phone_number_id: string): Promise<TenantSession> {
-  const res = await fetch(`${BASE_URL}/api/login`, {
+  const res = await fetch(`${API_PREFIX}/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ phone_number_id })
@@ -87,7 +86,7 @@ export async function tenantLogin(phone_number_id: string): Promise<TenantSessio
 }
 
 export async function getConversations(): Promise<Conversation[]> {
-  const res = await fetch(`${BASE_URL}/api/conversations`, { headers: tenantHeaders() });
+  const res = await fetch(`${API_PREFIX}/conversations`, { headers: tenantHeaders() });
   if (!res.ok) throw new Error(await res.text());
   const data = await res.json();
   console.log('CONVERSAS:', data);
@@ -98,19 +97,19 @@ export async function getConversations(): Promise<Conversation[]> {
 }
 
 export async function getMessages(phone: string): Promise<Message[]> {
-  const res = await fetch(`${BASE_URL}/api/messages/${phone}`, { headers: tenantHeaders() });
+  const res = await fetch(`${API_PREFIX}/messages/${phone}`, { headers: tenantHeaders() });
   if (!res.ok) throw new Error(await res.text());
   return res.json();
 }
 
 export async function getMessagesByContact(contactId: string): Promise<Message[]> {
-  const res = await fetch(`${BASE_URL}/api/messages/by-contact/${contactId}`, { headers: tenantHeaders() });
+  const res = await fetch(`${API_PREFIX}/messages/by-contact/${contactId}`, { headers: tenantHeaders() });
   if (!res.ok) throw new Error(await res.text());
   return res.json();
 }
 
 export async function sendMessage(phone: string, message: string, contact_id?: string) {
-  const res = await fetch(`${BASE_URL}/api/send-message`, {
+  const res = await fetch(`${API_PREFIX}/send-message`, {
     method: 'POST',
     headers: tenantHeaders(),
     body: JSON.stringify({ phone, message, contact_id })
@@ -120,13 +119,13 @@ export async function sendMessage(phone: string, message: string, contact_id?: s
 }
 
 export async function getContacts(): Promise<CRMContact[]> {
-  const res = await fetch(`${BASE_URL}/api/contacts`, { headers: tenantHeaders() });
+  const res = await fetch(`${API_PREFIX}/contacts`, { headers: tenantHeaders() });
   if (!res.ok) throw new Error(await res.text());
   return res.json();
 }
 
 export async function sendMessageToBackend(payload: SendMessagePayload) {
-  const response = await fetch(`${BACKEND_URL}/send-message`, {
+  const response = await fetch(`${API_PREFIX}/send-message`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json'
@@ -143,13 +142,13 @@ export async function sendMessageToBackend(payload: SendMessagePayload) {
 
 
 export async function getProducts(): Promise<Product[]> {
-  const res = await fetch(`${BASE_URL}/api/products`, { headers: tenantHeaders() });
+  const res = await fetch(`${API_PREFIX}/products`, { headers: tenantHeaders() });
   if (!res.ok) throw new Error(await res.text());
   return res.json();
 }
 
 export async function createProduct(payload: ProductPayload): Promise<Product> {
-  const res = await fetch(`${BASE_URL}/api/products`, {
+  const res = await fetch(`${API_PREFIX}/products`, {
     method: 'POST',
     headers: tenantHeaders(),
     body: JSON.stringify(payload)
@@ -160,7 +159,7 @@ export async function createProduct(payload: ProductPayload): Promise<Product> {
 }
 
 export async function updateProduct(productId: string, payload: ProductPayload): Promise<Product> {
-  const res = await fetch(`${BASE_URL}/api/products/${productId}`, {
+  const res = await fetch(`${API_PREFIX}/products/${productId}`, {
     method: 'PUT',
     headers: tenantHeaders(),
     body: JSON.stringify(payload)
@@ -171,7 +170,7 @@ export async function updateProduct(productId: string, payload: ProductPayload):
 }
 
 export async function deleteProduct(productId: string): Promise<void> {
-  const res = await fetch(`${BASE_URL}/api/products/${productId}`, {
+  const res = await fetch(`${API_PREFIX}/products/${productId}`, {
     method: 'DELETE',
     headers: tenantHeaders()
   });
@@ -180,13 +179,13 @@ export async function deleteProduct(productId: string): Promise<void> {
 }
 
 export async function getKnowledge(): Promise<KnowledgeItem[]> {
-  const res = await fetch(`${BASE_URL}/api/knowledge`, { headers: tenantHeaders() });
+  const res = await fetch(`${API_PREFIX}/knowledge`, { headers: tenantHeaders() });
   if (!res.ok) throw new Error(await res.text());
   return res.json();
 }
 
 export async function createKnowledge(payload: KnowledgePayload): Promise<KnowledgeItem> {
-  const res = await fetch(`${BASE_URL}/api/knowledge`, {
+  const res = await fetch(`${API_PREFIX}/knowledge`, {
     method: 'POST',
     headers: tenantHeaders(),
     body: JSON.stringify(payload)
@@ -197,7 +196,7 @@ export async function createKnowledge(payload: KnowledgePayload): Promise<Knowle
 }
 
 export async function deleteKnowledge(knowledgeId: string): Promise<void> {
-  const res = await fetch(`${BASE_URL}/api/knowledge/${knowledgeId}`, {
+  const res = await fetch(`${API_PREFIX}/knowledge/${knowledgeId}`, {
     method: 'DELETE',
     headers: tenantHeaders()
   });
@@ -209,7 +208,7 @@ export async function uploadKnowledgePdf(file: File): Promise<KnowledgeUploadRes
   const formData = new FormData();
   formData.append('file', file);
 
-  const res = await fetch(`${BASE_URL}/api/knowledge/upload-pdf`, {
+  const res = await fetch(`${API_PREFIX}/knowledge/upload-pdf`, {
     method: 'POST',
     headers: tenantAuthHeaders(),
     body: formData
@@ -221,7 +220,7 @@ export async function uploadKnowledgePdf(file: File): Promise<KnowledgeUploadRes
 
 
 export async function crawlKnowledgeSite(payload: KnowledgeCrawlPayload): Promise<KnowledgeCrawlResult> {
-  const res = await fetch(`${BASE_URL}/api/knowledge/crawl`, {
+  const res = await fetch(`${API_PREFIX}/knowledge/crawl`, {
     method: 'POST',
     headers: tenantHeaders(),
     body: JSON.stringify(payload)
@@ -232,13 +231,13 @@ export async function crawlKnowledgeSite(payload: KnowledgeCrawlPayload): Promis
 }
 
 export async function getPipeline(): Promise<PipelineStage[]> {
-  const res = await fetch(`${BASE_URL}/api/pipeline`, { headers: tenantHeaders() });
+  const res = await fetch(`${API_PREFIX}/pipeline`, { headers: tenantHeaders() });
   if (!res.ok) throw new Error(await res.text());
   return res.json();
 }
 
 export async function moveLeadToStage(leadId: string, stageId: string) {
-  const res = await fetch(`${BASE_URL}/api/leads/${leadId}/move`, {
+  const res = await fetch(`${API_PREFIX}/leads/${leadId}/move`, {
     method: 'POST',
     headers: tenantHeaders(),
     body: JSON.stringify({ stage_id: stageId })
