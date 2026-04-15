@@ -1,13 +1,22 @@
 import Avatar from './Avatar';
+import { IconClose, IconMenu } from './icons';
 import { Contact } from '../lib/types';
 
 type SidebarProps = {
   contacts: Contact[];
   selectedContactId: string;
   onSelectContact: (contactId: string) => void;
+  sidebarOpen: boolean;
+  onToggleSidebar: () => void;
 };
 
-export default function Sidebar({ contacts, selectedContactId, onSelectContact }: SidebarProps) {
+export default function Sidebar({
+  contacts,
+  selectedContactId,
+  onSelectContact,
+  sidebarOpen,
+  onToggleSidebar
+}: SidebarProps) {
   function formatPhone(phone: string) {
     const digits = phone.replace(/\D/g, '');
 
@@ -31,22 +40,31 @@ export default function Sidebar({ contacts, selectedContactId, onSelectContact }
   }
 
   return (
-    <aside className="wa-sidebar">
+    <aside className={`wa-sidebar ${sidebarOpen ? 'open' : ''}`}>
       <header className="wa-sidebar-header">
-        <h2>Atendimentos</h2>
+        <h2>Conversas</h2>
+        <button type="button" className="wa-sidebar-toggle" onClick={onToggleSidebar} aria-label="Alternar sidebar">
+          {sidebarOpen ? <IconClose width={20} /> : <IconMenu width={20} />}
+        </button>
       </header>
 
       <div className="wa-contact-list">
         {contacts.map((contact) => {
           const isActive = contact.id === selectedContactId;
           const displayName = contact.name || formatPhone(contact.phone);
+          const statusText = contact.isTyping ? 'digitando...' : contact.isOnline ? 'online' : 'offline';
 
           return (
             <button
               type="button"
               key={contact.id}
               className={`wa-contact-item ${isActive ? 'active' : ''}`}
-              onClick={() => onSelectContact(contact.id)}
+              onClick={() => {
+                onSelectContact(contact.id);
+                if (window.innerWidth <= 900) {
+                  onToggleSidebar();
+                }
+              }}
             >
               <div className="wa-contact-main">
                 <Avatar name={contact.name} avatarUrl={contact.avatarUrl} phone={contact.phone} />
@@ -54,8 +72,11 @@ export default function Sidebar({ contacts, selectedContactId, onSelectContact }
                 <div className="wa-contact-body">
                   <div className="wa-contact-row">
                     <strong>{displayName}</strong>
+                    <span className={`wa-contact-status ${contact.isTyping ? 'typing' : contact.isOnline ? 'online' : 'offline'}`}>
+                      {statusText}
+                    </span>
                   </div>
-                  <p>{contact.lastMessage}</p>
+                  <p>{contact.lastMessage || 'Sem mensagens ainda.'}</p>
                 </div>
               </div>
             </button>

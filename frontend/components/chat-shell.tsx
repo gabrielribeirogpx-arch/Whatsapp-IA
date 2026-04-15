@@ -26,6 +26,7 @@ export default function ChatShell() {
   const [selectedContactId, setSelectedContactId] = useState('');
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputValue, setInputValue] = useState('');
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   useEffect(() => {
     getConversations().then((conversationsResponse: Conversation[]) => {
@@ -37,20 +38,31 @@ export default function ChatShell() {
       );
 
       setConversations(unique);
+      if (unique.length && !selectedContactId) {
+        setSelectedContactId(String(unique[0].contact_id ?? unique[0].id));
+      }
     });
-  }, []);
+  }, [selectedContactId]);
 
   const contacts = useMemo<Contact[]>(
     () =>
-      conversations.map((conversation) => ({
-        id: String(conversation.contact_id ?? conversation.id),
-        name: conversation.name,
-        phone: conversation.phone,
-        avatarUrl: conversation.avatar_url,
-        stage: conversation.stage,
-        score: conversation.score,
-        lastMessage: conversation.last_message
-      })),
+      conversations.map((conversation) => {
+        const updatedAt = conversation.updated_at ? new Date(conversation.updated_at) : null;
+        const isOnline = updatedAt ? Date.now() - updatedAt.getTime() <= 2 * 60 * 1000 : false;
+
+        return {
+          id: String(conversation.contact_id ?? conversation.id),
+          name: conversation.name,
+          phone: conversation.phone,
+          avatarUrl: conversation.avatar_url,
+          stage: conversation.stage,
+          score: conversation.score,
+          lastMessage: conversation.last_message,
+          lastMessageAt: conversation.updated_at,
+          isOnline,
+          isTyping: false
+        };
+      }),
     [conversations]
   );
 
@@ -59,9 +71,10 @@ export default function ChatShell() {
     [contacts, selectedContactId]
   );
 
-  function onSelectContact(contactId: string) {
-    setSelectedContactId(contactId);
-    const conversation = conversations.find((item) => String(item.contact_id ?? item.id) === contactId);
+  useEffect(() => {
+    if (!selectedContactId) return;
+
+    const conversation = conversations.find((item) => String(item.contact_id ?? item.id) === selectedContactId);
 
     if (!conversation) {
       setMessages([]);
@@ -75,6 +88,10 @@ export default function ChatShell() {
     loadMessages.then((realMessages: Message[]) => {
       setMessages(realMessages.map(toChatMessage));
     });
+  }, [conversations, selectedContactId]);
+
+  function onSelectContact(contactId: string) {
+    setSelectedContactId(contactId);
   }
 
   async function onSend(event: FormEvent<HTMLFormElement>) {
@@ -102,13 +119,20 @@ export default function ChatShell() {
 
   return (
     <div className="wa-layout">
-      <Sidebar contacts={contacts} selectedContactId={selectedContactId} onSelectContact={onSelectContact} />
+      <Sidebar
+        contacts={contacts}
+        selectedContactId={selectedContactId}
+        onSelectContact={onSelectContact}
+        sidebarOpen={sidebarOpen}
+        onToggleSidebar={() => setSidebarOpen((value) => !value)}
+      />
       <ChatWindow
         contact={selectedContact}
         messages={messages}
         inputValue={inputValue}
         onInputChange={setInputValue}
         onSend={onSend}
+        onToggleSidebar={() => setSidebarOpen((value) => !value)}
       />
     </div>
   );

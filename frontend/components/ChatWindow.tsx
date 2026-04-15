@@ -1,6 +1,7 @@
-import { FormEvent } from 'react';
-
+import { FormEvent, useEffect, useRef } from 'react';
 import { ChatMessage, Contact } from '../lib/types';
+import { IconMenu } from './icons';
+import Avatar from './Avatar';
 import MessageBubble from './MessageBubble';
 
 type ChatWindowProps = {
@@ -9,17 +10,56 @@ type ChatWindowProps = {
   inputValue: string;
   onInputChange: (value: string) => void;
   onSend: (event: FormEvent<HTMLFormElement>) => void;
+  onToggleSidebar: () => void;
 };
 
-export default function ChatWindow({ contact, messages, inputValue, onInputChange, onSend }: ChatWindowProps) {
+export default function ChatWindow({
+  contact,
+  messages,
+  inputValue,
+  onInputChange,
+  onSend,
+  onToggleSidebar
+}: ChatWindowProps) {
+  const messagesRef = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    if (!messagesRef.current) return;
+
+    messagesRef.current.scrollTo({
+      top: messagesRef.current.scrollHeight,
+      behavior: 'smooth'
+    });
+  }, [messages]);
+
+  const statusText = contact?.isTyping ? 'digitando...' : contact?.isOnline ? 'online' : 'offline';
+
   return (
     <section className="wa-chat-window">
       <header className="wa-chat-header">
-        <h1>{contact ? contact.name || contact.phone : 'Selecione um contato'}</h1>
-        <p>{contact?.phone ?? 'Escolha um contato para iniciar'}</p>
+        <button type="button" className="wa-mobile-menu" onClick={onToggleSidebar} aria-label="Abrir conversas">
+          <IconMenu width={20} />
+        </button>
+
+        {contact ? (
+          <div className="wa-chat-contact">
+            <Avatar name={contact.name} avatarUrl={contact.avatarUrl} phone={contact.phone} />
+            <div>
+              <h1>{contact.name || contact.phone}</h1>
+              <p className={`wa-contact-status ${contact.isTyping ? 'typing' : contact.isOnline ? 'online' : 'offline'}`}>
+                {statusText}
+              </p>
+            </div>
+          </div>
+        ) : (
+          <div>
+            <h1>Selecione um contato</h1>
+            <p>Escolha uma conversa para começar.</p>
+          </div>
+        )}
       </header>
 
-      <main className="wa-messages-panel">
+      <main className="wa-messages-panel" ref={messagesRef}>
         {contact ? (
           messages.map((message) => <MessageBubble key={message.id} message={message} />)
         ) : (
