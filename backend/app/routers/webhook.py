@@ -11,7 +11,7 @@ from backend.app.services.ai_provider import classificar_lead
 from backend.app.services.ai_service import generate_ai_response
 from backend.app.services.conversation_service import save_conversation
 from backend.app.models import Tenant
-from backend.app.services.tenant_service import get_or_create_default_tenant, resolve_tenant_by_phone_number_id
+from backend.app.services.tenant_service import get_or_create_default_tenant
 from backend.app.services.whatsapp_service import enviar_mensagem
 
 router = APIRouter()
@@ -123,19 +123,22 @@ async def webhook(request: Request, db: Session = Depends(get_db)):
             if tenant_slug:
                 tenant = db.execute(select(Tenant).where(Tenant.slug == tenant_slug)).scalar_one_or_none()
             if not tenant:
-                tenant = resolve_tenant_by_phone_number_id(db, phone_number_id) or get_or_create_default_tenant(db)
+                tenant = db.execute(select(Tenant).where(Tenant.phone_number_id == phone_number_id)).scalar_one_or_none() or get_or_create_default_tenant(db)
+
+            tenant_id = tenant.id
+            print("TENANT ID:", tenant_id, type(tenant_id))
 
             ai_mode = tenant.ai_mode if tenant.ai_mode in {"atendente", "vendedor"} else "atendente"
 
             conversation = db.execute(
                 select(Conversation)
                 .options(load_only(Conversation.id, Conversation.phone_number, Conversation.message, Conversation.created_at))
-                .where(Conversation.tenant_id == tenant.id, Conversation.phone_number == phone)
+                .where(Conversation.tenant_id == tenant_id, Conversation.phone_number == phone)
                 .order_by(desc(Conversation.created_at), desc(Conversation.id))
             ).scalars().first()
             if not conversation:
                 print(f"Nenhuma conversa encontrada, criando nova para {phone}")
-                conversation = Conversation(phone_number=phone, message=incoming_message, tenant_id=tenant.id)
+                conversation = Conversation(phone_number=phone, message=incoming_message, tenant_id=tenant_id)
                 db.add(conversation)
                 db.flush()
             else:
@@ -214,7 +217,7 @@ Cliente disse:
                     phone=phone,
                     message=incoming_message,
                     response=auto_reply,
-                    tenant_id=tenant.id,
+                    tenant_id=tenant_id,
                 )
             except Exception as persistence_error:
                 persistence_db.rollback()
