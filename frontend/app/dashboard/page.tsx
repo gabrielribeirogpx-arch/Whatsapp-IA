@@ -41,7 +41,7 @@ export default function DashboardPage() {
       <section className="dashboard-hero premium">
         <div>
           <h1>{userName}</h1>
-          <p>Sua central de atendimento</p>
+          <p>Sua central de conversas</p>
         </div>
         <div className="dashboard-actions">
           <Link href="/crm" className="secondary-button">
@@ -59,31 +59,31 @@ export default function DashboardPage() {
         </div>
       </section>
 
-      <section className="dashboard-grid">
-        <article className="dashboard-card premium-card">
+      <section className="dashboard-grid gap-4 mt-8">
+        <article className="dashboard-card premium-card p-6">
           <div className="dashboard-card-title">
             <IconChats width={20} />
-            <h2>Conversas ativas</h2>
+            <h2 className="text-xs text-gray-500 uppercase tracking-wide">Conversas</h2>
           </div>
-          <p>{conversations.length}</p>
+          <p className="text-3xl font-semibold">{conversations.length}</p>
           <small>Contatos com histórico recente na inbox.</small>
         </article>
 
-        <article className="dashboard-card premium-card">
+        <article className="dashboard-card premium-card p-6">
           <div className="dashboard-card-title">
             <IconUsers width={20} />
-            <h2>Em atendimento</h2>
+            <h2 className="text-xs text-gray-500 uppercase tracking-wide">Online agora</h2>
           </div>
-          <p>{humanInProgress}</p>
+          <p className="text-3xl font-semibold">{humanInProgress}</p>
           <small>Conversas em modo humano neste momento.</small>
         </article>
 
-        <article className="dashboard-card premium-card">
+        <article className="dashboard-card premium-card p-6">
           <div className="dashboard-card-title">
             <IconChats width={20} />
-            <h2>Respondidas hoje</h2>
+            <h2 className="text-xs text-gray-500 uppercase tracking-wide">Resolvidas hoje</h2>
           </div>
-          <p>{answeredToday}</p>
+          <p className="text-3xl font-semibold">{answeredToday}</p>
           <small>Mensagens atualizadas no dia atual.</small>
         </article>
       </section>
