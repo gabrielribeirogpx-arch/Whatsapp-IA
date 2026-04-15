@@ -2,7 +2,8 @@ export type Conversation = {
   id: string;
   tenant_id: string;
   phone: string;
-  name: string;
+  name: string | null;
+  avatar_url?: string | null;
   status: 'bot' | 'human' | string;
   last_message: string;
   updated_at: string;
@@ -24,8 +25,9 @@ export type TenantSession = {
 
 export type Contact = {
   id: string;
-  name: string;
+  name: string | null;
   phone: string;
+  avatarUrl?: string | null;
   lastMessage: string;
 };
 

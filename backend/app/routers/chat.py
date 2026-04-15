@@ -84,6 +84,8 @@ def list_conversations(
                     Conversation.id,
                     Conversation.tenant_id,
                     Conversation.phone_number,
+                    Conversation.name,
+                    Conversation.avatar_url,
                     Conversation.message,
                     Conversation.updated_at,
                 )
@@ -114,7 +116,8 @@ def list_conversations(
                 id=conversation.id,
                 tenant_id=conversation.tenant_id,
                 phone=getattr(conversation, "phone", None) or conversation.phone_number or "",
-                name=(conversation.name if hasattr(conversation, "name") else None) or conversation.phone_number or "Cliente",
+                name=(conversation.name if hasattr(conversation, "name") else None) or conversation.phone_number or "",
+                avatar_url=conversation.avatar_url,
                 status=getattr(conversation, "status", None) or "human",
                 last_message=(last_message_item.text if last_message_item else conversation.message or ""),
                 updated_at=conversation.updated_at,

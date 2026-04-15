@@ -15,7 +15,7 @@ export default function ChatWindow({ contact, messages, inputValue, onInputChang
   return (
     <section className="wa-chat-window">
       <header className="wa-chat-header">
-        <h1>{contact?.name ?? 'Selecione um contato'}</h1>
+        <h1>{contact ? contact.name || contact.phone : 'Selecione um contato'}</h1>
         <p>{contact?.phone ?? 'Escolha um contato para iniciar'}</p>
       </header>
 
