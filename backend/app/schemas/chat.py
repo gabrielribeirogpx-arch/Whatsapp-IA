@@ -41,7 +41,6 @@ class ToggleAssignmentResponse(BaseModel):
 
 class TenantLoginRequest(BaseModel):
     slug: str = Field(min_length=2, max_length=80)
-    password: str = Field(min_length=4, max_length=255)
 
 
 class TenantUsageOut(BaseModel):

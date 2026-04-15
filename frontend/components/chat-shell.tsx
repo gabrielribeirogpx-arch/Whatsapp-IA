@@ -4,7 +4,7 @@ import { FormEvent, useEffect, useMemo, useState } from 'react';
 
 import ChatWindow from './ChatWindow';
 import Sidebar from './Sidebar';
-import { getConversations, getMessages, sendMessageToBackend } from '../lib/api';
+import { getConversations, getMessages, sendMessage } from '../lib/api';
 import { ChatMessage, Contact, Conversation, Message } from '../lib/types';
 
 function toChatMessage(message: Message): ChatMessage {
@@ -56,7 +56,7 @@ export default function ChatShell() {
       return;
     }
 
-    getMessages(String(conversation.id)).then((realMessages: Message[]) => {
+    getMessages(conversation.phone).then((realMessages: Message[]) => {
       setMessages(realMessages.map(toChatMessage));
     });
   }
@@ -78,7 +78,7 @@ export default function ChatShell() {
     setInputValue('');
 
     try {
-      await sendMessageToBackend({ to: selectedContact.phone, message: text });
+      await sendMessage(selectedContact.phone, text);
     } catch (error) {
       console.error('Falha ao enviar para backend:', error);
     }

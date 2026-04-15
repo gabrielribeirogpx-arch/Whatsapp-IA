@@ -1,20 +1,47 @@
-import { Conversation, Message, SendMessagePayload, TenantAuth, TenantSession } from './types';
+import { Conversation, Message, SendMessagePayload, TenantSession } from './types';
 
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL;
 const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL ?? 'https://SEU_BACKEND_URL';
+const TENANT_STORAGE_KEY = 'tenant';
 
-function tenantHeaders(auth: TenantAuth) {
+export function getTenantSessionFromStorage(): TenantSession | null {
+  if (typeof window === 'undefined') return null;
+
+  const saved = localStorage.getItem(TENANT_STORAGE_KEY);
+  if (!saved) return null;
+
+  try {
+    return JSON.parse(saved) as TenantSession;
+  } catch {
+    localStorage.removeItem(TENANT_STORAGE_KEY);
+    return null;
+  }
+}
+
+function tenantHeaders() {
+  const tenant = getTenantSessionFromStorage();
   return {
-    'X-Tenant-Slug': auth.slug,
-    'X-Tenant-Password': auth.password
+    'Content-Type': 'application/json',
+    'x-tenant-slug': tenant?.slug ?? ''
   };
 }
 
-export async function tenantLogin(auth: TenantAuth): Promise<TenantSession> {
-  const res = await fetch(`${BASE_URL}/api/auth/login`, {
+export async function registerTenant(name: string, phone_number_id: string): Promise<TenantSession> {
+  const res = await fetch(`${BASE_URL}/api/register`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(auth)
+    body: JSON.stringify({ name, phone_number_id })
+  });
+
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function tenantLogin(slug: string): Promise<TenantSession> {
+  const res = await fetch(`${BASE_URL}/api/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ slug })
   });
 
   if (!res.ok) throw new Error('Falha de autenticação do tenant');
@@ -22,43 +49,25 @@ export async function tenantLogin(auth: TenantAuth): Promise<TenantSession> {
 }
 
 export async function getConversations() {
-  const res = await fetch(`${BASE_URL}/api/conversations`);
-  return res.json();
-}
-
-export async function getMessages(conversationId: string) {
-  const res = await fetch(`${BASE_URL}/api/messages/${conversationId}`);
-  return res.json();
-}
-
-export async function sendMessage(phone: string, message: string, auth: TenantAuth) {
-  const res = await fetch(`${BASE_URL}/api/send-message`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      ...tenantHeaders(auth)
-    },
-    body: JSON.stringify({ phone, message })
-  });
+  const res = await fetch(`${BASE_URL}/api/conversations`, { headers: tenantHeaders() });
   if (!res.ok) throw new Error(await res.text());
   return res.json();
 }
 
-export async function toggleTakeOver(phone: string, auth: TenantAuth) {
-  const res = await fetch(`${BASE_URL}/api/take-over/${phone}`, {
-    method: 'POST',
-    headers: tenantHeaders(auth)
-  });
-  if (!res.ok) throw new Error('Falha ao alternar atendimento');
+export async function getMessages(phone: string) {
+  const res = await fetch(`${BASE_URL}/api/messages/${phone}`, { headers: tenantHeaders() });
+  if (!res.ok) throw new Error(await res.text());
   return res.json();
 }
 
-export function streamMessagesUrl(phone: string, auth: TenantAuth) {
-  const params = new URLSearchParams({
-    tenant_slug: auth.slug,
-    tenant_password: auth.password
+export async function sendMessage(phone: string, message: string) {
+  const res = await fetch(`${BASE_URL}/api/send-message`, {
+    method: 'POST',
+    headers: tenantHeaders(),
+    body: JSON.stringify({ phone, message })
   });
-  return `${BASE_URL}/api/stream/messages/${phone}?${params.toString()}`;
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
 }
 
 export async function sendMessageToBackend(payload: SendMessagePayload) {

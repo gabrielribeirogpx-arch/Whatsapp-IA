@@ -10,6 +10,7 @@ from backend.app.models import Conversation, Message
 from backend.app.services.ai_provider import classificar_lead
 from backend.app.services.ai_service import generate_ai_response
 from backend.app.services.conversation_service import save_conversation
+from backend.app.models import Tenant
 from backend.app.services.tenant_service import get_or_create_default_tenant, resolve_tenant_by_phone_number_id
 from backend.app.services.whatsapp_service import enviar_mensagem
 
@@ -111,11 +112,19 @@ async def webhook(request: Request, db: Session = Depends(get_db)):
             print("Evento ignorado: payload sem mensagens de texto")
             return {"status": "ignored"}
 
+        tenant_slug = (request.headers.get("x-tenant-slug") or "").strip()
+
         for incoming in messages_data:
             phone = incoming["phone"]
             incoming_message = incoming["text"]
             phone_number_id = incoming.get("phone_number_id")
-            tenant = resolve_tenant_by_phone_number_id(db, phone_number_id) or get_or_create_default_tenant(db)
+
+            tenant = None
+            if tenant_slug:
+                tenant = db.execute(select(Tenant).where(Tenant.slug == tenant_slug)).scalar_one_or_none()
+            if not tenant:
+                tenant = resolve_tenant_by_phone_number_id(db, phone_number_id) or get_or_create_default_tenant(db)
+
             ai_mode = tenant.ai_mode if tenant.ai_mode in {"atendente", "vendedor"} else "atendente"
 
             conversation = db.execute(

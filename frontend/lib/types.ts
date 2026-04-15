@@ -17,22 +17,9 @@ export type Message = {
   timestamp: string;
 };
 
-export type TenantAuth = {
-  slug: string;
-  password: string;
-};
-
 export type TenantSession = {
   tenant_id: number;
-  name: string;
   slug: string;
-  usage: {
-    plan: string;
-    is_blocked: boolean;
-    max_monthly_messages: number;
-    messages_used_month: number;
-    usage_month: string;
-  };
 };
 
 export type Contact = {
