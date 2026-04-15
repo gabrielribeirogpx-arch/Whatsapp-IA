@@ -1,6 +1,8 @@
 import {
   CRMContact,
   Conversation,
+  KnowledgeCrawlPayload,
+  KnowledgeCrawlResult,
   KnowledgeItem,
   KnowledgePayload,
   KnowledgeUploadResult,
@@ -210,6 +212,18 @@ export async function uploadKnowledgePdf(file: File): Promise<KnowledgeUploadRes
     method: 'POST',
     headers: tenantAuthHeaders(),
     body: formData
+  });
+
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+
+export async function crawlKnowledgeSite(payload: KnowledgeCrawlPayload): Promise<KnowledgeCrawlResult> {
+  const res = await fetch(`${BASE_URL}/api/knowledge/crawl`, {
+    method: 'POST',
+    headers: tenantHeaders(),
+    body: JSON.stringify(payload)
   });
 
   if (!res.ok) throw new Error(await res.text());
