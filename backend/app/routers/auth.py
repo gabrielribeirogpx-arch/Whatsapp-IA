@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import re
 import unicodedata
-import uuid
-
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
+
+from backend.app.schemas.auth import TenantAuthResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -22,11 +22,6 @@ class RegisterRequest(BaseModel):
 
 class LoginRequest(BaseModel):
     slug: str = Field(min_length=2, max_length=80)
-
-
-class TenantAuthResponse(BaseModel):
-    tenant_id: uuid.UUID
-    slug: str
 
 
 def _slugify(value: str) -> str:
@@ -65,7 +60,10 @@ def register(payload: RegisterRequest, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(tenant)
 
-    return TenantAuthResponse(tenant_id=tenant.id, slug=tenant.slug)
+    return TenantAuthResponse(
+        tenant_id=str(tenant.id),  # 🔥 importante
+        slug=tenant.slug,
+    )
 
 
 @router.post("/login", response_model=TenantAuthResponse)
@@ -74,4 +72,7 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)):
     if not tenant:
         raise HTTPException(status_code=404, detail="Tenant não encontrado")
 
-    return TenantAuthResponse(tenant_id=tenant.id, slug=tenant.slug)
+    return TenantAuthResponse(
+        tenant_id=str(tenant.id),  # 🔥 importante
+        slug=tenant.slug,
+    )

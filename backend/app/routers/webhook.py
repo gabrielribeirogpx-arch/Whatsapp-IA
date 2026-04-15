@@ -123,10 +123,15 @@ async def webhook(request: Request, db: Session = Depends(get_db)):
             if tenant_slug:
                 tenant = db.execute(select(Tenant).where(Tenant.slug == tenant_slug)).scalar_one_or_none()
             if not tenant:
-                tenant = db.execute(select(Tenant).where(Tenant.phone_number_id == phone_number_id)).scalar_one_or_none() or get_or_create_default_tenant(db)
+                tenant = (
+                    db.query(Tenant)
+                    .filter(Tenant.phone_number_id == phone_number_id)
+                    .first()
+                    or get_or_create_default_tenant(db)
+                )
 
             tenant_id = tenant.id
-            print("TENANT ID:", tenant_id, type(tenant_id))
+            print("TENANT ID:", tenant.id, type(tenant.id))
 
             ai_mode = tenant.ai_mode if tenant.ai_mode in {"atendente", "vendedor"} else "atendente"
 
