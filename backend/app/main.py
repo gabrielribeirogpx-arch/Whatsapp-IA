@@ -1,4 +1,5 @@
 import sys
+import threading
 import time
 import traceback
 
@@ -27,6 +28,15 @@ sys.excepthook = handle_exception
 
 app = FastAPI()
 START_TIME = time.monotonic()
+
+
+def keep_alive() -> None:
+    while True:
+        print("💓 alive")
+        time.sleep(25)
+
+
+threading.Thread(target=keep_alive, daemon=True).start()
 
 app.add_middleware(
     CORSMiddleware,
