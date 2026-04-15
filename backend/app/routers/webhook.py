@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session, load_only
 
 from backend.app.database import SessionLocal, get_db
 from backend.app.models import Conversation, Message
+from backend.app.services.ai_provider import classificar_lead
 from backend.app.services.ai_service import generate_ai_response
 from backend.app.services.conversation_service import save_conversation
 from backend.app.services.tenant_service import get_or_create_default_tenant, resolve_tenant_by_phone_number_id
@@ -28,16 +29,40 @@ REGRAS:
 
 VENDEDOR_PROMPT = """Você é um especialista em vendas via WhatsApp.
 
-Seu objetivo é:
-- Engajar
-- Identificar interesse
-- Conduzir para compra
+Cliente disse:
+"{incoming_message}"
+
+Histórico:
+{history}
+
+Nível do cliente:
+{lead_level}
+
+OBJETIVO:
+Converter o cliente.
+
+ESTRATÉGIA:
+
+Se FRIO:
+- Seja leve
+- Gere curiosidade
+- Faça perguntas simples
+
+Se MORNO:
+- Explore necessidade
+- Mostre valor
+- Direcione
+
+Se QUENTE:
+- Seja direto
+- Crie urgência
+- Leve para ação (compra/agendamento)
 
 REGRAS:
-- Sempre faça perguntas
-- Use gatilhos mentais
-- Seja persuasivo
-- Leve o cliente para ação"""
+- Nunca seja genérico
+- Sempre faça pergunta
+- Seja curto (WhatsApp)
+- Pareça humano"""
 
 
 @router.get("/webhook")
@@ -129,9 +154,16 @@ async def webhook(request: Request, db: Session = Depends(get_db)):
                 role = "Cliente" if not msg.from_me else "Atendente"
                 history += f"{role}: {msg.text}\n"
 
-            system_prompt = VENDEDOR_PROMPT if ai_mode == "vendedor" else ATENDENTE_PROMPT
-            prompt = f"""
-{system_prompt}
+            if ai_mode == "vendedor":
+                lead_level = classificar_lead(incoming_message)
+                prompt = VENDEDOR_PROMPT.format(
+                    incoming_message=incoming_message,
+                    history=history,
+                    lead_level=lead_level.upper(),
+                )
+            else:
+                prompt = f"""
+{ATENDENTE_PROMPT}
 
 Histórico:
 {history}
