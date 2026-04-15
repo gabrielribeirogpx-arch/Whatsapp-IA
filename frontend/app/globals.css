@@ -455,6 +455,13 @@ input {
   font-size: 1rem;
 }
 
+.wa-avatar-fallback-phone {
+  background: #d1d5db;
+  color: #4b5563;
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
 .wa-avatar-image {
   object-fit: cover;
   box-shadow: 0 6px 14px rgba(15, 23, 42, 0.12);
@@ -466,21 +473,13 @@ input {
 }
 
 .wa-contact-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 0.5rem;
+  display: block;
 }
 
 .wa-contact-row strong {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-
-.wa-contact-row span {
-  color: #64748b;
-  font-size: 0.75rem;
 }
 
 .wa-contact-item p {

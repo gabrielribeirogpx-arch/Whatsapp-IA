@@ -8,6 +8,28 @@ type SidebarProps = {
 };
 
 export default function Sidebar({ contacts, selectedContactId, onSelectContact }: SidebarProps) {
+  function formatPhone(phone: string) {
+    const digits = phone.replace(/\D/g, '');
+
+    if (digits.length === 13) {
+      return `+${digits.slice(0, 2)} (${digits.slice(2, 4)}) ${digits.slice(4, 9)}-${digits.slice(9)}`;
+    }
+
+    if (digits.length === 12) {
+      return `+${digits.slice(0, 2)} (${digits.slice(2, 4)}) ${digits.slice(4, 8)}-${digits.slice(8)}`;
+    }
+
+    if (digits.length === 11) {
+      return `(${digits.slice(0, 2)}) ${digits.slice(2, 7)}-${digits.slice(7)}`;
+    }
+
+    if (digits.length === 10) {
+      return `(${digits.slice(0, 2)}) ${digits.slice(2, 6)}-${digits.slice(6)}`;
+    }
+
+    return phone;
+  }
+
   return (
     <aside className="wa-sidebar">
       <header className="wa-sidebar-header">
@@ -17,6 +39,8 @@ export default function Sidebar({ contacts, selectedContactId, onSelectContact }
       <div className="wa-contact-list">
         {contacts.map((contact) => {
           const isActive = contact.id === selectedContactId;
+          const displayName = contact.name || formatPhone(contact.phone);
+
           return (
             <button
               type="button"
@@ -25,12 +49,11 @@ export default function Sidebar({ contacts, selectedContactId, onSelectContact }
               onClick={() => onSelectContact(contact.id)}
             >
               <div className="wa-contact-main">
-                <Avatar name={contact.name} avatarUrl={contact.avatarUrl} />
+                <Avatar name={contact.name} avatarUrl={contact.avatarUrl} phone={contact.phone} />
 
                 <div className="wa-contact-body">
                   <div className="wa-contact-row">
-                    <strong>{contact.name || contact.phone}</strong>
-                    <span>{contact.phone}</span>
+                    <strong>{displayName}</strong>
                   </div>
                   <p>{contact.lastMessage}</p>
                 </div>
