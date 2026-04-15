@@ -35,7 +35,7 @@ def _build_unique_slug(db: Session, name: str) -> str:
     slug = base_slug
     suffix = 1
 
-    while db.execute(select(Tenant.id).where(Tenant.slug == slug)).scalar_one_or_none() is not None:
+    while db.execute(select(Tenant.id).where(Tenant.slug == slug)).scalars().first() is not None:
         suffix += 1
         slug = f"{base_slug}-{suffix}"
 
@@ -46,7 +46,7 @@ def _build_unique_slug(db: Session, name: str) -> str:
 def register(payload: RegisterRequest, db: Session = Depends(get_db)):
     phone_number_id = payload.phone_number_id.strip()
 
-    existing_phone = db.execute(select(Tenant.id).where(Tenant.phone_number_id == phone_number_id)).scalar_one_or_none()
+    existing_phone = db.execute(select(Tenant.id).where(Tenant.phone_number_id == phone_number_id)).scalars().first()
     if existing_phone is not None:
         raise HTTPException(status_code=409, detail="phone_number_id já cadastrado")
 
@@ -69,7 +69,7 @@ def register(payload: RegisterRequest, db: Session = Depends(get_db)):
 @router.post("/login", response_model=TenantAuthResponse)
 def login(payload: LoginRequest, db: Session = Depends(get_db)):
     phone_number_id = payload.phone_number_id.strip()
-    tenant = db.execute(select(Tenant).where(Tenant.phone_number_id == phone_number_id)).scalar_one_or_none()
+    tenant = db.execute(select(Tenant).where(Tenant.phone_number_id == phone_number_id)).scalars().first()
     if not tenant:
         raise HTTPException(status_code=404, detail="Tenant não encontrado")
 
