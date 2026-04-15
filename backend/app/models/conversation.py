@@ -14,6 +14,7 @@ class Conversation(Base):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     tenant_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=True)
     phone_number: Mapped[str | None] = mapped_column(String, index=True, nullable=True)
+    name: Mapped[str | None] = mapped_column(String, nullable=True)
     message: Mapped[str | None] = mapped_column(Text, nullable=True)
     response: Mapped[str | None] = mapped_column(Text, nullable=True, deferred=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
