@@ -16,6 +16,7 @@ class ConversationOut(BaseModel):
     status: str
     last_message: str
     updated_at: datetime
+    last_interaction: datetime | None = None
 
     class Config:
         from_attributes = True

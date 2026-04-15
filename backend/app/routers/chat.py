@@ -8,7 +8,7 @@ from sqlalchemy import desc, select
 from sqlalchemy.orm import Session, load_only, selectinload
 
 from backend.app.database import get_db
-from backend.app.models import Contact, Conversation, Message, Tenant
+from backend.app.models import Contact, Conversation, Lead, Message, Tenant
 from backend.app.schemas.chat import (
     ContactOut,
     ConversationOut,
@@ -137,6 +137,16 @@ def list_conversations(
                 status=getattr(conversation, "status", None) or "human",
                 last_message=(last_message_item.text if last_message_item else ""),
                 updated_at=conversation.updated_at,
+                last_interaction=(
+                    db.execute(
+                        select(Lead.last_interaction)
+                        .where(Lead.tenant_id == tenant.id, Lead.phone == phone)
+                        .order_by(desc(Lead.last_interaction))
+                        .limit(1)
+                    )
+                    .scalars()
+                    .first()
+                ),
             )
         )
 

@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useRef } from 'react';
+import { FormEvent, useEffect, useRef, useState } from 'react';
 import { ChatMessage, Contact } from '../lib/types';
 import { IconMenu } from './icons';
 import Avatar from './Avatar';
@@ -22,6 +22,7 @@ export default function ChatWindow({
   onToggleSidebar
 }: ChatWindowProps) {
   const messagesRef = useRef<HTMLElement | null>(null);
+  const [, setStatusTick] = useState(0);
 
   useEffect(() => {
     if (!messagesRef.current) return;
@@ -32,7 +33,43 @@ export default function ChatWindow({
     });
   }, [messages]);
 
-  const statusText = contact?.isTyping ? 'Digitando...' : contact?.isOnline ? 'Online agora' : 'Aguardando resposta';
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setStatusTick((current) => current + 1);
+    }, 10000);
+
+    return () => clearInterval(interval);
+  }, []);
+
+  function getStatus(lastInteraction?: string | null) {
+    if (!lastInteraction) return 'offline';
+
+    const diff = Date.now() - new Date(lastInteraction).getTime();
+
+    if (diff < 30000) return 'online';
+    if (diff < 300000) return 'recent';
+    return 'offline';
+  }
+
+  function getSeenMinutes(lastInteraction?: string | null) {
+    if (!lastInteraction) return 'Visto há alguns minutos';
+
+    const diff = Date.now() - new Date(lastInteraction).getTime();
+    if (Number.isNaN(diff) || diff <= 0) return 'Visto há alguns minutos';
+
+    const minutes = Math.max(1, Math.floor(diff / 60000));
+    return `Visto há ${minutes} minuto${minutes > 1 ? 's' : ''}`;
+  }
+
+  const status = getStatus(contact?.lastInteraction);
+  const statusText = contact?.isTyping
+    ? 'Digitando...'
+    : status === 'online'
+      ? 'Online agora'
+      : status === 'recent'
+        ? 'Ativo há poucos minutos'
+        : getSeenMinutes(contact?.lastInteraction);
+  const statusClass = contact?.isTyping ? 'typing' : status;
 
   return (
     <section className="wa-chat-window">
@@ -46,7 +83,7 @@ export default function ChatWindow({
             <Avatar name={contact.name} avatarUrl={contact.avatarUrl} phone={contact.phone} />
             <div>
               <h1>{contact.name || contact.phone}</h1>
-              <p className={`wa-contact-status ${contact.isTyping ? 'typing' : contact.isOnline ? 'online' : 'away'}`}>
+              <p className={`wa-contact-status ${statusClass}`}>
                 <span className="wa-status-dot" aria-hidden="true" />
                 {statusText}
               </p>

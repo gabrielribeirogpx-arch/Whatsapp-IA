@@ -10,6 +10,7 @@ export type Conversation = {
   status: 'bot' | 'human' | string;
   last_message: string;
   updated_at: string;
+  last_interaction?: string | null;
 };
 
 export type Message = {
@@ -35,8 +36,8 @@ export type Contact = {
   stage?: string;
   score?: number;
   lastMessageAt?: string | null;
+  lastInteraction?: string | null;
   lastMessage: string;
-  isOnline?: boolean;
   isTyping?: boolean;
   status?: string;
 };

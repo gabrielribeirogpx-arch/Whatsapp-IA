@@ -104,10 +104,6 @@ export default function ChatShell() {
   const contacts = useMemo<Contact[]>(
     () =>
       conversations.map((conversation) => {
-        const updatedAt = conversation.updated_at ? new Date(conversation.updated_at) : null;
-        const now = Date.now();
-        const elapsed = updatedAt ? now - updatedAt.getTime() : Number.POSITIVE_INFINITY;
-        const isOnline = elapsed <= 2 * 60 * 1000;
         const contactId = String(conversation.contact_id ?? conversation.id);
         const isTyping = contactId === selectedContactId ? typing : false;
 
@@ -120,7 +116,7 @@ export default function ChatShell() {
           score: conversation.score,
           lastMessage: conversation.last_message,
           lastMessageAt: conversation.updated_at,
-          isOnline,
+          lastInteraction: conversation.last_interaction ?? conversation.updated_at,
           isTyping,
           status: conversation.status
         };
