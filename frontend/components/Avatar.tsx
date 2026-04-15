@@ -7,7 +7,10 @@ type AvatarProps = {
 function getInitials(name?: string | null, phone?: string | null) {
   if (name?.trim()) {
     const parts = name.trim().split(/\s+/).filter(Boolean);
-    const initials = parts.slice(0, 2).map((part) => part[0]?.toUpperCase()).join('');
+    const initials = parts
+      .slice(0, 2)
+      .map((part) => part[0]?.toUpperCase())
+      .join('');
 
     if (initials) return initials;
   }
@@ -16,8 +19,7 @@ function getInitials(name?: string | null, phone?: string | null) {
   return digits.slice(-2) || '--';
 }
 
-function colorFromSeed(seed: string) {
-  const palette = ['#F59E0B', '#3B82F6', '#8B5CF6', '#EC4899', '#14B8A6', '#10B981', '#F97316'];
+function pastelColorFromSeed(seed: string) {
   let hash = 0;
 
   for (let i = 0; i < seed.length; i += 1) {
@@ -25,7 +27,8 @@ function colorFromSeed(seed: string) {
     hash |= 0;
   }
 
-  return palette[Math.abs(hash) % palette.length];
+  const hue = Math.abs(hash) % 360;
+  return `hsl(${hue} 68% 82%)`;
 }
 
 export default function Avatar({ name, avatarUrl, phone }: AvatarProps) {
@@ -34,7 +37,7 @@ export default function Avatar({ name, avatarUrl, phone }: AvatarProps) {
   }
 
   const initials = getInitials(name, phone);
-  const color = colorFromSeed(`${name || ''}-${phone || ''}`);
+  const color = pastelColorFromSeed(`${name || ''}-${phone || ''}`);
 
   return (
     <div className="wa-avatar-fallback" style={{ backgroundColor: color }} aria-label="Avatar fallback">
