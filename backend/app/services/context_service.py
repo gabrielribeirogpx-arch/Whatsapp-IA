@@ -16,7 +16,7 @@ def build_context(db: Session, tenant_id: uuid.UUID, phone: str, limit: int = 10
         db.execute(
             select(Message)
             .where(Message.tenant_id == tenant_id, Message.conversation_id == conversation.id)
-            .order_by(Message.timestamp.desc(), Message.id.desc())
+            .order_by(Message.created_at.desc(), Message.id.desc())
             .limit(limit)
         )
         .scalars()

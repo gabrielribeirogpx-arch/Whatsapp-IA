@@ -162,6 +162,7 @@ async def webhook(request: Request, db: Session = Depends(get_db)):
 
             db.add(
                 Message(
+                    tenant_id=conversation.tenant_id,
                     conversation_id=conversation.id,
                     text=incoming_message,
                     from_me=False,
@@ -215,6 +216,7 @@ Cliente disse:
 
             db.add(
                 Message(
+                    tenant_id=conversation.tenant_id,
                     conversation_id=conversation.id,
                     text=auto_reply,
                     from_me=True,

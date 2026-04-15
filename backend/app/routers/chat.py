@@ -60,7 +60,7 @@ def list_conversations(
     tenant: Tenant = Depends(get_current_tenant),
     db: Session = Depends(get_db),
 ):
-    print("TENANT ID RECEBIDO:", tenant.id)
+    print("TENANT ID:", tenant.id)
     items = (
         db.execute(
             select(Conversation)
@@ -79,7 +79,7 @@ def list_conversations(
         .scalars()
         .all()
     )
-    print("CONVERSAS ENCONTRADAS:", len(items))
+    print("CONVERSAS:", items)
 
     response: list[ConversationOut] = []
     for conversation in items:
@@ -99,7 +99,7 @@ def list_conversations(
                 id=conversation.id,
                 tenant_id=conversation.tenant_id,
                 phone=getattr(conversation, "phone", None) or conversation.phone_number or "",
-                name=getattr(conversation, "name", None) or "Cliente",
+                name=(conversation.name if hasattr(conversation, "name") else None) or "Cliente",
                 status=getattr(conversation, "status", None) or "human",
                 last_message=(last_message_item.text if last_message_item else conversation.message or ""),
                 updated_at=conversation.updated_at,
@@ -116,11 +116,19 @@ def get_messages(
     db: Session = Depends(get_db),
 ):
     sanitized_phone = sanitize_phone(phone)
+    conversation = db.execute(
+        select(Conversation)
+        .options(load_only(Conversation.id))
+        .where(Conversation.tenant_id == tenant.id, Conversation.phone_number == sanitized_phone)
+    ).scalar_one_or_none()
+    if not conversation:
+        return []
+
     items = (
         db.execute(
             select(Message)
-            .where(Message.tenant_id == tenant.id, Message.phone == sanitized_phone)
-            .order_by(Message.timestamp.asc(), Message.id.asc())
+            .where(Message.conversation_id == conversation.id)
+            .order_by(Message.created_at.asc(), Message.id.asc())
         )
         .scalars()
         .all()
@@ -149,7 +157,7 @@ async def send_message(
 
     conversation = (
         db.query(Conversation)
-        .options(load_only(Conversation.id, Conversation.tenant_id, Conversation.phone_number, Conversation.status))
+        .options(load_only(Conversation.id, Conversation.tenant_id, Conversation.phone_number, Conversation.updated_at))
         .filter(Conversation.tenant_id == tenant_id, Conversation.phone_number == phone)
         .first()
     )
@@ -158,7 +166,6 @@ async def send_message(
             tenant_id=tenant_id,
             phone_number=phone,
             name=sanitize_text(payload.name or "Cliente"),
-            status="human",
         )
         db.add(conversation)
         db.flush()
@@ -169,19 +176,15 @@ async def send_message(
         pass
 
     message = Message(
-        tenant_id=tenant_id,
-        phone=phone,
+        tenant_id=conversation.tenant_id,
         conversation_id=conversation.id,
-        role="assistant",
-        message=message_text,
+        text=message_text,
         created_at=datetime.utcnow(),
-        content=message_text,
         from_me=True,
-        timestamp=datetime.utcnow(),
     )
     db.add(message)
     consume_usage(tenant, 1)
-    conversation.last_message = message_text
+    conversation.message = message_text
     conversation.updated_at = datetime.utcnow()
     db.commit()
     db.refresh(message)
@@ -204,17 +207,16 @@ def take_over(
     sanitized_phone = sanitize_phone(phone)
     conversation = db.execute(
         select(Conversation)
-        .options(load_only(Conversation.id, Conversation.tenant_id, Conversation.phone_number, Conversation.status))
+        .options(load_only(Conversation.id, Conversation.tenant_id, Conversation.phone_number))
         .where(Conversation.tenant_id == tenant.id, Conversation.phone_number == sanitized_phone)
     ).scalar_one_or_none()
     if not conversation:
         raise HTTPException(status_code=404, detail="Conversa não encontrada")
 
-    conversation.status = "human" if conversation.status == "bot" else "bot"
     conversation.updated_at = datetime.utcnow()
     db.commit()
 
-    return ToggleAssignmentResponse(phone=sanitized_phone, status=conversation.status)
+    return ToggleAssignmentResponse(phone=sanitized_phone, status="human")
 
 
 @router.get("/stream/messages/{phone}")
