@@ -47,6 +47,9 @@ export default function DashboardPage() {
           <Link href="/crm" className="secondary-button">
             Clientes
           </Link>
+          <Link href="/products" className="secondary-button">
+            Produtos
+          </Link>
           <Link href="/chat" className="primary-button">
             Abrir Inbox
           </Link>

@@ -29,6 +29,7 @@ class Tenant(Base):
     ai_mode: Mapped[str] = mapped_column(String(32), default="atendente", server_default="atendente")
 
     ai_config: Mapped["AIConfig | None"] = relationship(back_populates="tenant", uselist=False, cascade="all, delete-orphan")
+    products: Mapped[list["Product"]] = relationship(back_populates="tenant", cascade="all, delete-orphan")
 
 
 class AIConfig(Base):
@@ -41,3 +42,6 @@ class AIConfig(Base):
     temperature: Mapped[float] = mapped_column(Float, default=0.4)
 
     tenant: Mapped[Tenant] = relationship(back_populates="ai_config")
+
+
+from backend.app.models.product import Product  # noqa: E402

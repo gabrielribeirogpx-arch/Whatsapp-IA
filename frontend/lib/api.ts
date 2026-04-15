@@ -1,4 +1,4 @@
-import { CRMContact, Conversation, Message, SendMessagePayload, TenantSession } from './types';
+import { CRMContact, Conversation, Message, Product, ProductPayload, SendMessagePayload, TenantSession } from './types';
 
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL;
 const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL ?? 'https://SEU_BACKEND_URL';
@@ -117,4 +117,42 @@ export async function sendMessageToBackend(payload: SendMessagePayload) {
   }
 
   return response.json();
+}
+
+
+export async function getProducts(): Promise<Product[]> {
+  const res = await fetch(`${BASE_URL}/api/products`, { headers: tenantHeaders() });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function createProduct(payload: ProductPayload): Promise<Product> {
+  const res = await fetch(`${BASE_URL}/api/products`, {
+    method: 'POST',
+    headers: tenantHeaders(),
+    body: JSON.stringify(payload)
+  });
+
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function updateProduct(productId: string, payload: ProductPayload): Promise<Product> {
+  const res = await fetch(`${BASE_URL}/api/products/${productId}`, {
+    method: 'PUT',
+    headers: tenantHeaders(),
+    body: JSON.stringify(payload)
+  });
+
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function deleteProduct(productId: string): Promise<void> {
+  const res = await fetch(`${BASE_URL}/api/products/${productId}`, {
+    method: 'DELETE',
+    headers: tenantHeaders()
+  });
+
+  if (!res.ok) throw new Error(await res.text());
 }

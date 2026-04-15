@@ -6,7 +6,7 @@ from sqlalchemy import desc, select
 from sqlalchemy.orm import Session, load_only
 
 from backend.app.database import SessionLocal, get_db
-from backend.app.models import Conversation, Message
+from backend.app.models import Conversation, Message, Product
 from backend.app.services.ai_provider import classificar_lead
 from backend.app.services.ai_service import generate_ai_response
 from backend.app.services.contact_sync_service import ensure_conversation_contact_link, upsert_contact_for_phone
@@ -66,6 +66,39 @@ REGRAS:
 - Sempre faça pergunta
 - Seja curto (WhatsApp)
 - Pareça humano"""
+
+
+def _build_products_context(products: list[Product]) -> str:
+    lines = ["Você é um vendedor. Aqui estão os produtos disponíveis:"]
+
+    for index, product in enumerate(products, start=1):
+        lines.extend(
+            [
+                f"Produto {index}:",
+                f"- Nome: {product.name}",
+                f"- Descrição: {product.description or '-'}",
+                f"- Preço: {product.price or '-'}",
+                f"- Benefícios: {product.benefits or '-'}",
+                f"- Objeções comuns: {product.objections or '-'}",
+                f"- Cliente ideal: {product.target_customer or '-'}",
+            ]
+        )
+
+    lines.extend(
+        [
+            "",
+            "REGRAS CRÍTICAS:",
+            "- use os produtos acima para responder",
+            "- sugira produto quando fizer sentido",
+            "- não invente produto",
+            "- responda como vendedor",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def _join_prompt_with_products(products_context: str, prompt: str) -> str:
+    return f"{products_context}\n\n{prompt.strip()}"
 
 
 def _looks_like_name(text: str) -> bool:
@@ -234,18 +267,29 @@ async def webhook(request: Request, db: Session = Depends(get_db)):
                 role = "Cliente" if not msg.from_me else "Atendente"
                 history += f"{role}: {msg.text}\n"
 
-            if ai_mode == "vendedor":
-                lead_level = classificar_lead(incoming_message)
-                contact.stage, contact.score = _lead_to_updates(lead_level, contact.score)
-                prompt = VENDEDOR_PROMPT.format(
-                    incoming_message=incoming_message,
-                    history=history,
-                    lead_level=lead_level.upper(),
-                )
+            products = (
+                db.execute(select(Product).where(Product.tenant_id == tenant_id).order_by(Product.created_at.asc(), Product.id.asc()))
+                .scalars()
+                .all()
+            )
+
+            if not products:
+                auto_reply = "Nosso catálogo ainda não foi configurado"
             else:
-                lead_level = classificar_lead(incoming_message)
-                contact.stage, contact.score = _lead_to_updates(lead_level, contact.score)
-                prompt = f"""
+                products_context = _build_products_context(products)
+
+                if ai_mode == "vendedor":
+                    lead_level = classificar_lead(incoming_message)
+                    contact.stage, contact.score = _lead_to_updates(lead_level, contact.score)
+                    prompt = VENDEDOR_PROMPT.format(
+                        incoming_message=incoming_message,
+                        history=history,
+                        lead_level=lead_level.upper(),
+                    )
+                else:
+                    lead_level = classificar_lead(incoming_message)
+                    contact.stage, contact.score = _lead_to_updates(lead_level, contact.score)
+                    prompt = f"""
 {ATENDENTE_PROMPT}
 
 Histórico:
@@ -255,11 +299,13 @@ Cliente disse:
 "{incoming_message}"
 """
 
-            try:
-                auto_reply = await generate_ai_response(prompt)
-            except Exception as e:
-                print(f"Erro IA: {e}")
-                auto_reply = "Desculpa, tive um erro aqui. Pode repetir?"
+                prompt = _join_prompt_with_products(products_context, prompt)
+
+                try:
+                    auto_reply = await generate_ai_response(prompt)
+                except Exception as e:
+                    print(f"Erro IA: {e}")
+                    auto_reply = "Desculpa, tive um erro aqui. Pode repetir?"
 
             print(f"IA respondeu: {auto_reply}")
             enviar_mensagem(
