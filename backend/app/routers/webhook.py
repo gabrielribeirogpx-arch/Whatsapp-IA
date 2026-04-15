@@ -124,7 +124,7 @@ async def webhook(request: Request, db: Session = Depends(get_db)):
 
             tenant = None
             if tenant_slug:
-                tenant = db.execute(select(Tenant).where(Tenant.slug == tenant_slug)).scalar_one_or_none()
+                tenant = db.execute(select(Tenant).where(Tenant.slug == tenant_slug)).scalars().first()
             if not tenant:
                 tenant = (
                     db.query(Tenant)
@@ -231,7 +231,7 @@ Cliente disse:
             try:
                 save_conversation(
                     db=persistence_db,
-                    phone=phone,
+                    phone=normalized_phone,
                     message=incoming_message,
                     response=auto_reply,
                     tenant_id=tenant_id,

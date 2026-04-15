@@ -39,7 +39,7 @@ def consume_usage(tenant: Tenant, amount: int = 1) -> None:
 
 
 def get_or_create_default_tenant(db: Session) -> Tenant:
-    tenant = db.execute(select(Tenant).where(Tenant.slug == "default")).scalar_one_or_none()
+    tenant = db.execute(select(Tenant).where(Tenant.slug == "default")).scalars().first()
     if tenant:
         return tenant
 
@@ -63,7 +63,7 @@ def get_or_create_default_tenant(db: Session) -> Tenant:
 def get_tenant_by_phone_number_id(db: Session, phone_id: str | None) -> Tenant | None:
     if not phone_id:
         return None
-    return db.execute(select(Tenant).where(Tenant.phone_number_id == phone_id)).scalar_one_or_none()
+    return db.execute(select(Tenant).where(Tenant.phone_number_id == phone_id)).scalars().first()
 
 
 def resolve_tenant_by_phone_number_id(db: Session, phone_number_id: str | None) -> Tenant | None:
@@ -86,7 +86,7 @@ def get_current_tenant(
         except ValueError as exc:
             raise HTTPException(status_code=401, detail="Tenant ID inválido") from exc
 
-        tenant = db.execute(select(Tenant).where(Tenant.id == parsed_tenant_id)).scalar_one_or_none()
+        tenant = db.execute(select(Tenant).where(Tenant.id == parsed_tenant_id)).scalars().first()
         if not tenant:
             raise HTTPException(status_code=401, detail="Credenciais inválidas")
         return tenant
@@ -94,7 +94,7 @@ def get_current_tenant(
     if not slug:
         raise HTTPException(status_code=401, detail="Tenant não autenticado")
 
-    tenant = db.execute(select(Tenant).where(Tenant.slug == slug)).scalar_one_or_none()
+    tenant = db.execute(select(Tenant).where(Tenant.slug == slug)).scalars().first()
     if not tenant:
         raise HTTPException(status_code=401, detail="Credenciais inválidas")
 
@@ -102,7 +102,7 @@ def get_current_tenant(
 
 
 def login_tenant(db: Session, slug: str) -> Tenant | None:
-    tenant = db.execute(select(Tenant).where(Tenant.slug == slug)).scalar_one_or_none()
+    tenant = db.execute(select(Tenant).where(Tenant.slug == slug)).scalars().first()
     if tenant:
         return tenant
     return None

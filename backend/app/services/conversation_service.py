@@ -1,17 +1,27 @@
-from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.orm import Session
 
 from backend.app.models.conversation import Conversation
 
 
 def save_conversation(db: Session, phone: str, message: str, response: str, tenant_id):
-    conv = Conversation(
-        tenant_id=tenant_id,
-        phone_number=phone,
-        message=message,
-        response=response,
+    conv = (
+        db.query(Conversation)
+        .filter(Conversation.phone_number == phone, Conversation.tenant_id == tenant_id)
+        .first()
     )
-    db.add(conv)
+
+    if not conv:
+        conv = Conversation(
+            tenant_id=tenant_id,
+            phone_number=phone,
+            message=message,
+            response=response,
+        )
+        db.add(conv)
+    else:
+        conv.message = message
+        conv.response = response
 
     try:
         _ = conv.response
@@ -25,10 +35,18 @@ def save_conversation(db: Session, phone: str, message: str, response: str, tena
         if "conversations.response" not in str(exc):
             raise
 
-        fallback_conv = Conversation(
-            tenant_id=tenant_id,
-            phone_number=phone,
-            message=message,
+        fallback_conv = (
+            db.query(Conversation)
+            .filter(Conversation.phone_number == phone, Conversation.tenant_id == tenant_id)
+            .first()
         )
-        db.add(fallback_conv)
+        if not fallback_conv:
+            fallback_conv = Conversation(
+                tenant_id=tenant_id,
+                phone_number=phone,
+                message=message,
+            )
+            db.add(fallback_conv)
+        else:
+            fallback_conv.message = message
         db.commit()

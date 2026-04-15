@@ -120,7 +120,7 @@ def get_messages(
         select(Conversation)
         .options(load_only(Conversation.id))
         .where(Conversation.tenant_id == tenant.id, Conversation.phone_number == sanitized_phone)
-    ).scalar_one_or_none()
+    ).scalars().first()
     if not conversation:
         return []
 
@@ -209,7 +209,7 @@ def take_over(
         select(Conversation)
         .options(load_only(Conversation.id, Conversation.tenant_id, Conversation.phone_number))
         .where(Conversation.tenant_id == tenant.id, Conversation.phone_number == sanitized_phone)
-    ).scalar_one_or_none()
+    ).scalars().first()
     if not conversation:
         raise HTTPException(status_code=404, detail="Conversa não encontrada")
 
