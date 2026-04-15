@@ -54,10 +54,10 @@ export default function Sidebar({
     if (diffInMinutes < 60) return `há ${diffInMinutes} min`;
 
     const diffInHours = Math.floor(diffInMinutes / 60);
-    if (diffInHours < 24) return `há ${diffInHours} h`;
+    if (diffInHours < 24) return diffInHours === 1 ? 'há 1 hora' : `há ${diffInHours} horas`;
 
     const diffInDays = Math.floor(diffInHours / 24);
-    return `há ${diffInDays} d`;
+    return diffInDays === 1 ? 'há 1 dia' : `há ${diffInDays} dias`;
   }
 
   function getBadge(status?: string) {
