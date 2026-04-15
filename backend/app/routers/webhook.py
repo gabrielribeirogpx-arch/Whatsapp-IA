@@ -130,12 +130,12 @@ async def webhook(request: Request, db: Session = Depends(get_db)):
             conversation = db.execute(
                 select(Conversation)
                 .options(load_only(Conversation.id, Conversation.phone_number, Conversation.message, Conversation.created_at))
-                .where(Conversation.phone_number == phone)
+                .where(Conversation.tenant_id == tenant.id, Conversation.phone_number == phone)
                 .order_by(desc(Conversation.created_at), desc(Conversation.id))
             ).scalars().first()
             if not conversation:
                 print(f"Nenhuma conversa encontrada, criando nova para {phone}")
-                conversation = Conversation(phone_number=phone, message=incoming_message)
+                conversation = Conversation(phone_number=phone, message=incoming_message, tenant_id=tenant.id)
                 db.add(conversation)
                 db.flush()
             else:
@@ -214,6 +214,7 @@ Cliente disse:
                     phone=phone,
                     message=incoming_message,
                     response=auto_reply,
+                    tenant_id=tenant.id,
                 )
             except Exception as persistence_error:
                 persistence_db.rollback()

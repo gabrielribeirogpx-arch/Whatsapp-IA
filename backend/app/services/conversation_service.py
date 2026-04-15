@@ -4,8 +4,9 @@ from sqlalchemy.exc import SQLAlchemyError
 from backend.app.models.conversation import Conversation
 
 
-def save_conversation(db: Session, phone: str, message: str, response: str):
+def save_conversation(db: Session, phone: str, message: str, response: str, tenant_id):
     conv = Conversation(
+        tenant_id=tenant_id,
         phone_number=phone,
         message=message,
         response=response,
@@ -25,6 +26,7 @@ def save_conversation(db: Session, phone: str, message: str, response: str):
             raise
 
         fallback_conv = Conversation(
+            tenant_id=tenant_id,
             phone_number=phone,
             message=message,
         )
