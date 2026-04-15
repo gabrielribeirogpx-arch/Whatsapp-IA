@@ -1,7 +1,8 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from backend.app.core.database import Base, engine
+from backend.app.db.base import Base
+from backend.app.db.session import engine
 from backend.app import models  # noqa: F401
 from backend.app.routers import webhook
 from backend.app.routers import chat
