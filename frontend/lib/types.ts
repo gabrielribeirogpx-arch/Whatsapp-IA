@@ -38,6 +38,7 @@ export type Contact = {
   lastMessage: string;
   isOnline?: boolean;
   isTyping?: boolean;
+  status?: string;
 };
 
 export type ChatMessage = {

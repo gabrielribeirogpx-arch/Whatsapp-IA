@@ -63,10 +63,39 @@ export default function ChatShell() {
           lastMessage: conversation.last_message,
           lastMessageAt: conversation.updated_at,
           isOnline,
-          isTyping
+          isTyping,
+          status: conversation.status
         };
       }),
     [conversations]
+  );
+
+  const orderedContacts = useMemo(() => {
+    const getPriority = (status?: string) => {
+      const normalizedStatus = status?.toLowerCase();
+
+      if (normalizedStatus === 'human') return 2;
+      if (normalizedStatus === 'bot' || normalizedStatus === 'ai') return 1;
+      return 0;
+    };
+
+    return [...contacts].sort((a, b) => {
+      const priorityDiff = getPriority(a.status) - getPriority(b.status);
+      if (priorityDiff !== 0) return priorityDiff;
+
+      const dateA = a.lastMessageAt ? new Date(a.lastMessageAt).getTime() : 0;
+      const dateB = b.lastMessageAt ? new Date(b.lastMessageAt).getTime() : 0;
+      return dateB - dateA;
+    });
+  }, [contacts]);
+
+  const unansweredCount = useMemo(
+    () =>
+      orderedContacts.filter((contact) => {
+        const normalizedStatus = contact.status?.toLowerCase();
+        return normalizedStatus !== 'human' && normalizedStatus !== 'bot' && normalizedStatus !== 'ai';
+      }).length,
+    [orderedContacts]
   );
 
   const selectedContact = useMemo(
@@ -123,11 +152,12 @@ export default function ChatShell() {
   return (
     <div className="wa-layout">
       <Sidebar
-        contacts={contacts}
+        contacts={orderedContacts}
         selectedContactId={selectedContactId}
         onSelectContact={onSelectContact}
         sidebarOpen={sidebarOpen}
         onToggleSidebar={() => setSidebarOpen((value) => !value)}
+        unansweredCount={unansweredCount}
       />
       <ChatWindow
         contact={selectedContact}
