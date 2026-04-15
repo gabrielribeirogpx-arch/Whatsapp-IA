@@ -48,7 +48,10 @@ export default function ChatShell() {
     () =>
       conversations.map((conversation) => {
         const updatedAt = conversation.updated_at ? new Date(conversation.updated_at) : null;
-        const isOnline = updatedAt ? Date.now() - updatedAt.getTime() <= 2 * 60 * 1000 : false;
+        const now = Date.now();
+        const elapsed = updatedAt ? now - updatedAt.getTime() : Number.POSITIVE_INFINITY;
+        const isOnline = elapsed <= 2 * 60 * 1000;
+        const isTyping = elapsed <= 20 * 1000;
 
         return {
           id: String(conversation.contact_id ?? conversation.id),
@@ -60,7 +63,7 @@ export default function ChatShell() {
           lastMessage: conversation.last_message,
           lastMessageAt: conversation.updated_at,
           isOnline,
-          isTyping: false
+          isTyping
         };
       }),
     [conversations]

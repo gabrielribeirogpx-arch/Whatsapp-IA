@@ -42,7 +42,10 @@ export default function Sidebar({
   return (
     <aside className={`wa-sidebar ${sidebarOpen ? 'open' : ''}`}>
       <header className="wa-sidebar-header">
-        <h2>Conversas</h2>
+        <div>
+          <h2>Inbox</h2>
+          <p>Conversas em tempo real</p>
+        </div>
         <button type="button" className="wa-sidebar-toggle" onClick={onToggleSidebar} aria-label="Alternar sidebar">
           {sidebarOpen ? <IconClose width={20} /> : <IconMenu width={20} />}
         </button>
@@ -52,7 +55,7 @@ export default function Sidebar({
         {contacts.map((contact) => {
           const isActive = contact.id === selectedContactId;
           const displayName = contact.name || formatPhone(contact.phone);
-          const statusText = contact.isTyping ? 'digitando...' : contact.isOnline ? 'online' : 'offline';
+          const statusText = contact.isTyping ? 'digitando' : 'online';
 
           return (
             <button
@@ -72,9 +75,7 @@ export default function Sidebar({
                 <div className="wa-contact-body">
                   <div className="wa-contact-row">
                     <strong>{displayName}</strong>
-                    <span className={`wa-contact-status ${contact.isTyping ? 'typing' : contact.isOnline ? 'online' : 'offline'}`}>
-                      {statusText}
-                    </span>
+                    <span className={`wa-contact-status ${contact.isTyping ? 'typing' : 'online'}`}>{statusText}</span>
                   </div>
                   <p>{contact.lastMessage || 'Sem mensagens ainda.'}</p>
                 </div>
