@@ -4,7 +4,7 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from backend.app.models.lead import Lead
+from backend.app.models.lead import Lead, LeadStage
 from backend.app.utils.phone import normalize_phone
 
 
@@ -33,7 +33,7 @@ def get_or_create_lead(
         tenant_id=tenant_id,
         phone=phone,
         name=(name.strip() if name and name.strip() else None),
-        stage="lead",
+        stage=LeadStage.LEAD.value,
         score=0,
         last_message=last_message,
         last_contact_at=datetime.utcnow(),
