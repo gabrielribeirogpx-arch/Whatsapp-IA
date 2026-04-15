@@ -60,7 +60,7 @@ def gerar_resposta(
         return "Obrigado pela mensagem! Nosso time está avaliando sua solicitação."
 
 
-async def generate_ai_response(user_message: str) -> str:
+async def generate_ai_response(prompt: str) -> str:
     from google import genai
 
     api_key = os.getenv("GEMINI_API_KEY")
@@ -68,25 +68,6 @@ async def generate_ai_response(user_message: str) -> str:
         return "Olá! Recebi sua mensagem e já vou te ajudar da melhor forma possível."
 
     client = genai.Client(api_key=api_key)
-
-    prompt = f"""
-    Você é um atendente comercial especialista em vendas via WhatsApp.
-
-    Responda de forma natural, humana e personalizada.
-
-    Cliente disse:
-    "{user_message}"
-
-    REGRAS:
-    - Nunca responda genérico
-    - Sempre responda baseado na mensagem
-    - Seja direto e útil
-    - Se for "oi", puxe conversa
-    - Se for pergunta, responda direto
-
-    RESULTADO:
-    Resposta contextual e não repetitiva
-    """
 
     try:
         response = client.models.generate_content(
