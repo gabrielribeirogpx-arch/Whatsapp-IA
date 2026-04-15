@@ -119,6 +119,7 @@ async def webhook(request: Request, db: Session = Depends(get_db)):
             phone = incoming["phone"]
             normalized_phone = normalize_phone(phone)
             incoming_message = incoming["text"]
+            contact_name = incoming.get("name")
             phone_number_id = incoming.get("phone_number_id")
 
             tenant = None
@@ -139,17 +140,24 @@ async def webhook(request: Request, db: Session = Depends(get_db)):
 
             conversation = db.execute(
                 select(Conversation)
-                .options(load_only(Conversation.id, Conversation.phone_number, Conversation.message, Conversation.created_at))
+                .options(load_only(Conversation.id, Conversation.phone_number, Conversation.name, Conversation.message, Conversation.created_at))
                 .where(Conversation.tenant_id == tenant_id, Conversation.phone_number == normalized_phone)
                 .order_by(desc(Conversation.created_at), desc(Conversation.id))
             ).scalars().first()
             if not conversation:
                 print(f"Nenhuma conversa encontrada, criando nova para {normalized_phone}")
-                conversation = Conversation(phone_number=normalized_phone, message=incoming_message, tenant_id=tenant_id)
+                conversation = Conversation(
+                    phone_number=normalized_phone,
+                    name=contact_name,
+                    message=incoming_message,
+                    tenant_id=tenant_id,
+                )
                 db.add(conversation)
                 db.flush()
             else:
                 print(f"Conversa encontrada: {conversation.id}")
+                if contact_name and not conversation.name:
+                    conversation.name = contact_name
                 conversation.message = incoming_message
 
             db.add(
