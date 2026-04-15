@@ -32,7 +32,7 @@ export default function ChatWindow({
     });
   }, [messages]);
 
-  const statusText = contact?.isTyping ? 'digitando' : 'online';
+  const statusText = contact?.isTyping ? 'Digitando...' : contact?.isOnline ? 'Online agora' : 'Aguardando resposta';
 
   return (
     <section className="wa-chat-window">
@@ -46,7 +46,10 @@ export default function ChatWindow({
             <Avatar name={contact.name} avatarUrl={contact.avatarUrl} phone={contact.phone} />
             <div>
               <h1>{contact.name || contact.phone}</h1>
-              <p className={`wa-contact-status ${contact.isTyping ? 'typing' : 'online'}`}>{statusText}</p>
+              <p className={`wa-contact-status ${contact.isTyping ? 'typing' : contact.isOnline ? 'online' : 'away'}`}>
+                <span className="wa-status-dot" aria-hidden="true" />
+                {statusText}
+              </p>
             </div>
           </div>
         ) : (

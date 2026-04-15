@@ -288,8 +288,8 @@ input {
   grid-template-columns: minmax(320px, 400px) 1fr;
   height: 100vh;
   background: var(--background);
-  gap: 0.75rem;
-  padding: 0.75rem;
+  gap: 12px;
+  padding: 24px;
   position: relative;
 }
 
@@ -301,10 +301,11 @@ input {
   background: #fff;
   z-index: 2;
   overflow: hidden;
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.06);
 }
 
 .wa-sidebar-header {
-  padding: 1rem;
+  padding: 24px;
   border-bottom: 1px solid var(--line);
   display: flex;
   align-items: center;
@@ -333,16 +334,17 @@ input {
   border-radius: 8px;
   color: #4b5563;
   padding: 0.3rem;
+  transition: all 0.2s ease;
 }
 
 .wa-contact-list {
   flex: 1;
   overflow-y: auto;
   scroll-behavior: smooth;
-  padding: 0.75rem;
+  padding: 24px;
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  gap: 12px;
 }
 
 .wa-unanswered-box {
@@ -350,7 +352,7 @@ input {
   border: 1px solid #f59e0b;
   padding: 1rem;
   border-radius: 0.75rem;
-  margin-bottom: 0.5rem;
+  margin-bottom: 0;
 }
 
 .wa-unanswered-box h3 {
@@ -364,7 +366,7 @@ input {
   width: 100%;
   border: 0;
   text-align: left;
-  padding: 0.85rem;
+  padding: 12px;
   background: transparent;
   border-radius: 0.95rem;
   cursor: pointer;
@@ -384,14 +386,14 @@ input {
 .wa-contact-main {
   display: flex;
   align-items: center;
-  gap: 0.8rem;
+  gap: 12px;
   min-width: 0;
 }
 
 .wa-avatar-fallback,
 .wa-avatar-image {
-  width: 2.6rem;
-  height: 2.6rem;
+  width: 40px;
+  height: 40px;
   border-radius: 50%;
   flex-shrink: 0;
 }
@@ -428,6 +430,7 @@ input {
   text-overflow: ellipsis;
   font-size: 1rem;
   font-weight: 600;
+  line-height: 1.45;
 }
 
 .wa-contact-item p {
@@ -449,6 +452,7 @@ input {
   margin: 0.35rem 0 0;
   color: #6b7280;
   font-size: 0.875rem;
+  line-height: 1.5;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -469,8 +473,8 @@ input {
 }
 
 .wa-contact-badge.ai {
-  background: #dbeafe;
-  color: #1e3a8a;
+  background: #dcfce7;
+  color: #166534;
 }
 
 .wa-contact-badge.human {
@@ -479,14 +483,29 @@ input {
 }
 
 .wa-contact-status {
-  font-size: 0.75rem;
+  font-size: 0.8rem;
   color: #16a34a;
-  text-transform: lowercase;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  line-height: 1.5;
+}
+
+.wa-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: currentColor;
+  box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 20%, transparent);
 }
 
 .wa-contact-status.typing {
   font-style: italic;
   color: #059669;
+}
+
+.wa-contact-status.away {
+  color: #ca8a04;
 }
 
 .wa-chat-window {
@@ -497,21 +516,22 @@ input {
   border: 1px solid var(--line);
   border-radius: 1rem;
   overflow: hidden;
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.06);
 }
 
 .wa-chat-header {
-  padding: 0.95rem 1rem;
+  padding: 24px;
   border-bottom: 1px solid var(--line);
   background: #fff;
   display: flex;
   align-items: center;
-  gap: 0.8rem;
+  gap: 12px;
 }
 
 .wa-chat-contact {
   display: flex;
   align-items: center;
-  gap: 0.75rem;
+  gap: 12px;
 }
 
 .wa-chat-header h1 {
@@ -530,18 +550,19 @@ input {
   flex: 1;
   overflow-y: auto;
   scroll-behavior: smooth;
-  padding: 1rem 1.5rem;
+  padding: 24px;
   display: flex;
   flex-direction: column;
-  gap: 0.6rem;
+  gap: 12px;
   background: linear-gradient(180deg, #f9fafb 0%, #f3f4f6 100%);
 }
 
 .wa-message-bubble {
   max-width: min(75%, 560px);
   border-radius: 16px;
-  padding: 10px 14px;
-  box-shadow: 0 4px 10px rgba(17, 24, 39, 0.08);
+  padding: 12px 14px;
+  line-height: 1.55;
+  transition: all 0.2s ease;
 }
 
 .wa-message-bubble p {
@@ -558,18 +579,19 @@ input {
 
 .wa-message-bubble.mine {
   align-self: flex-end;
-  background: #dcfce7;
+  background: #dcf8c6;
 }
 
 .wa-message-bubble.theirs {
   align-self: flex-start;
   background: #fff;
+  box-shadow: 0 4px 12px rgba(17, 24, 39, 0.1);
 }
 
 .wa-message-composer {
   display: flex;
-  gap: 0.75rem;
-  padding: 0.75rem 1rem;
+  gap: 12px;
+  padding: 24px;
   border-top: 1px solid var(--line);
   background: #fff;
 }
@@ -579,6 +601,13 @@ input {
   border: 1px solid #d1d5db;
   border-radius: 12px;
   padding: 0.7rem 0.9rem;
+  transition: all 0.2s ease;
+}
+
+.wa-message-composer input:focus {
+  outline: none;
+  border-color: #86efac;
+  box-shadow: 0 0 0 3px rgba(134, 239, 172, 0.35);
 }
 
 @media (max-width: 900px) {
