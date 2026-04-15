@@ -3,6 +3,7 @@ import { Conversation, Message, SendMessagePayload, TenantSession } from './type
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL;
 const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL ?? 'https://SEU_BACKEND_URL';
 const TENANT_STORAGE_KEY = 'tenant';
+const TENANT_ID_STORAGE_KEY = 'tenant_id';
 
 export function getTenantSessionFromStorage(): TenantSession | null {
   if (typeof window === 'undefined') return null;
@@ -11,18 +12,27 @@ export function getTenantSessionFromStorage(): TenantSession | null {
   if (!saved) return null;
 
   try {
-    return JSON.parse(saved) as TenantSession;
+    const parsed = JSON.parse(saved) as TenantSession;
+    if (parsed?.tenant_id) return parsed;
+
+    const tenantId = localStorage.getItem(TENANT_ID_STORAGE_KEY);
+    if (!tenantId || !parsed?.slug) return null;
+
+    return { ...parsed, tenant_id: tenantId };
   } catch {
     localStorage.removeItem(TENANT_STORAGE_KEY);
+    localStorage.removeItem(TENANT_ID_STORAGE_KEY);
     return null;
   }
 }
 
 function tenantHeaders() {
   const tenant = getTenantSessionFromStorage();
+  console.log('TENANT_ID:', tenant?.tenant_id ?? null);
   return {
     'Content-Type': 'application/json',
-    'x-tenant-slug': tenant?.slug ?? ''
+    'x-tenant-slug': tenant?.slug ?? '',
+    'x-tenant-id': tenant?.tenant_id ?? ''
   };
 }
 
@@ -57,7 +67,12 @@ export async function tenantLogin(phone_number_id: string): Promise<TenantSessio
 export async function getConversations() {
   const res = await fetch(`${BASE_URL}/api/conversations`, { headers: tenantHeaders() });
   if (!res.ok) throw new Error(await res.text());
-  return res.json();
+  const data = await res.json();
+  console.log('CONVERSAS:', data);
+
+  if (Array.isArray(data)) return data;
+  if (Array.isArray(data?.conversations)) return data.conversations;
+  return [];
 }
 
 export async function getMessages(phone: string) {

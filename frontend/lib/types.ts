@@ -1,6 +1,6 @@
 export type Conversation = {
-  id: number;
-  tenant_id: number;
+  id: string;
+  tenant_id: string;
   phone: string;
   name: string;
   status: 'bot' | 'human' | string;
@@ -9,8 +9,8 @@ export type Conversation = {
 };
 
 export type Message = {
-  id: number;
-  tenant_id: number;
+  id: string;
+  tenant_id: string;
   phone: string;
   content: string;
   from_me: boolean;
@@ -18,7 +18,7 @@ export type Message = {
 };
 
 export type TenantSession = {
-  tenant_id: number;
+  tenant_id: string;
   slug: string;
 };
 

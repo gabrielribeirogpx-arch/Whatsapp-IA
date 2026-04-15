@@ -22,6 +22,7 @@ export default function RegisterPage() {
     try {
       const tenant = await registerTenant(name.trim(), phoneNumberId.trim());
       localStorage.setItem('tenant', JSON.stringify(tenant));
+      localStorage.setItem('tenant_id', tenant.tenant_id);
       router.push('/chat');
       return;
     } catch (error) {
@@ -30,6 +31,7 @@ export default function RegisterPage() {
         try {
           const tenant = await tenantLogin(phoneNumberId.trim());
           localStorage.setItem('tenant', JSON.stringify(tenant));
+          localStorage.setItem('tenant_id', tenant.tenant_id);
           router.push('/chat');
           return;
         } catch {

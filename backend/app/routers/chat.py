@@ -60,6 +60,7 @@ def list_conversations(
     tenant: Tenant = Depends(get_current_tenant),
     db: Session = Depends(get_db),
 ):
+    print("TENANT ID RECEBIDO:", tenant.id)
     items = (
         db.execute(
             select(Conversation)
@@ -67,6 +68,8 @@ def list_conversations(
                 load_only(
                     Conversation.id,
                     Conversation.tenant_id,
+                    Conversation.phone_number,
+                    Conversation.message,
                     Conversation.updated_at,
                 )
             )
@@ -76,7 +79,34 @@ def list_conversations(
         .scalars()
         .all()
     )
-    return items
+    print("CONVERSAS ENCONTRADAS:", len(items))
+
+    response: list[ConversationOut] = []
+    for conversation in items:
+        last_message_item = (
+            db.execute(
+                select(Message)
+                .where(Message.conversation_id == conversation.id)
+                .order_by(desc(Message.created_at), desc(Message.id))
+                .limit(1)
+            )
+            .scalars()
+            .first()
+        )
+
+        response.append(
+            ConversationOut(
+                id=conversation.id,
+                tenant_id=conversation.tenant_id,
+                phone=getattr(conversation, "phone", None) or conversation.phone_number or "",
+                name=getattr(conversation, "name", None) or "Cliente",
+                status=getattr(conversation, "status", None) or "human",
+                last_message=(last_message_item.text if last_message_item else conversation.message or ""),
+                updated_at=conversation.updated_at,
+            )
+        )
+
+    return response
 
 
 @router.get("/messages/{phone}", response_model=list[MessageOut])

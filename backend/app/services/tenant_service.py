@@ -1,5 +1,6 @@
 from datetime import datetime
 import os
+import uuid
 
 from fastapi import Depends, Header, HTTPException, Query
 from sqlalchemy import select
@@ -71,10 +72,25 @@ def resolve_tenant_by_phone_number_id(db: Session, phone_number_id: str | None) 
 
 def get_current_tenant(
     x_tenant_slug: str = Header(default="", alias="X-Tenant-Slug"),
+    x_tenant_id: str = Header(default="", alias="X-Tenant-Id"),
     tenant_slug: str = Query(default=""),
+    tenant_id: str = Query(default=""),
     db: Session = Depends(get_db),
 ) -> Tenant:
+    raw_tenant_id = (x_tenant_id or tenant_id).strip()
     slug = (x_tenant_slug or tenant_slug).strip()
+
+    if raw_tenant_id:
+        try:
+            parsed_tenant_id = uuid.UUID(raw_tenant_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=401, detail="Tenant ID inválido") from exc
+
+        tenant = db.execute(select(Tenant).where(Tenant.id == parsed_tenant_id)).scalar_one_or_none()
+        if not tenant:
+            raise HTTPException(status_code=401, detail="Credenciais inválidas")
+        return tenant
+
     if not slug:
         raise HTTPException(status_code=401, detail="Tenant não autenticado")
 
