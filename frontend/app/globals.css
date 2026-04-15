@@ -347,26 +347,76 @@ input {
   gap: 12px;
 }
 
-.wa-unanswered-box {
-  background: #fef3c7;
-  border: 1px solid #f59e0b;
-  padding: 1rem;
-  border-radius: 0.75rem;
-  margin-bottom: 0;
+.wa-sidebar-search-wrapper {
+  position: relative;
 }
 
-.wa-unanswered-box h3 {
-  margin: 0;
+.wa-sidebar-search-icon {
+  position: absolute;
+  left: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: #9ca3af;
+  pointer-events: none;
   font-size: 0.95rem;
-  font-weight: 700;
-  color: #92400e;
 }
 
-.wa-inbox-synced {
+.wa-sidebar-search-input {
+  width: 100%;
+  border: 1px solid #e5e7eb;
+  border-radius: 0.5rem;
+  height: 42px;
+  padding: 0 12px 0 36px;
+  font-size: 0.92rem;
+  color: #111827;
+  outline: none;
+  transition: box-shadow 0.2s ease, border-color 0.2s ease;
+}
+
+.wa-sidebar-search-input:focus {
+  border-color: #22c55e;
+  box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.2);
+}
+
+.wa-sidebar-search-input::placeholder {
+  color: #9ca3af;
+}
+
+.wa-filter-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.wa-filter-chip {
+  border: 1px solid #e5e7eb;
+  background: #fff;
+  color: #374151;
+  border-radius: 9999px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  padding: 0.4rem 0.75rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.wa-filter-chip:hover {
+  border-color: #86efac;
+  color: #047857;
+}
+
+.wa-filter-chip.active {
+  background: #dcfce7;
+  color: #15803d;
+  border-color: transparent;
+}
+
+.wa-inbox-empty {
   margin: 0;
   font-size: 0.875rem;
   font-weight: 500;
-  color: #16a34a;
+  color: #6b7280;
+  padding: 0.25rem 0.25rem 0.1rem;
 }
 
 .wa-contact-item {

@@ -1,3 +1,4 @@
+import { useMemo, useState } from 'react';
 import Avatar from './Avatar';
 import { IconClose, IconMenu } from './icons';
 import { Contact } from '../lib/types';
@@ -17,8 +18,18 @@ export default function Sidebar({
   onSelectContact,
   sidebarOpen,
   onToggleSidebar,
-  unansweredCount
+  unansweredCount: _unansweredCount
 }: SidebarProps) {
+  const [searchTerm, setSearchTerm] = useState('');
+  const [activeFilter, setActiveFilter] = useState<'all' | 'pending' | 'human' | 'ai'>('all');
+
+  const filterChips = [
+    { id: 'all', label: 'Todas' },
+    { id: 'pending', label: 'Não respondidas' },
+    { id: 'human', label: 'Humanos' },
+    { id: 'ai', label: 'IA' }
+  ] as const;
+
   function formatPhone(phone: string) {
     const digits = phone.replace(/\D/g, '');
 
@@ -74,6 +85,32 @@ export default function Sidebar({
     return { label: '⏳ Aguardando', className: 'pending' };
   }
 
+  const filteredContacts = useMemo(() => {
+    const normalizedSearchTerm = searchTerm.trim().toLowerCase();
+
+    return contacts.filter((contact) => {
+      const normalizedStatus = (contact.status || '').toLowerCase();
+      const matchesFilter =
+        activeFilter === 'all'
+          ? true
+          : activeFilter === 'pending'
+            ? normalizedStatus === 'pending'
+            : activeFilter === 'human'
+              ? normalizedStatus === 'human'
+              : normalizedStatus === 'ai' || normalizedStatus === 'bot';
+
+      if (!matchesFilter) return false;
+
+      if (!normalizedSearchTerm) return true;
+
+      const searchFields = [contact.phone, contact.name || '', contact.lastMessage || '']
+        .join(' ')
+        .toLowerCase();
+
+      return searchFields.includes(normalizedSearchTerm);
+    });
+  }, [contacts, activeFilter, searchTerm]);
+
   return (
     <aside className={`wa-sidebar ${sidebarOpen ? 'open' : ''}`}>
       <header className="wa-sidebar-header">
@@ -87,15 +124,41 @@ export default function Sidebar({
       </header>
 
       <div className="wa-contact-list">
-        {unansweredCount > 0 ? (
-          <div className="wa-unanswered-box">
-            <h3>Não respondidas ({unansweredCount})</h3>
-          </div>
-        ) : (
-          <p className="wa-inbox-synced">Todas as conversas estão em dia ✓</p>
-        )}
+        <div className="wa-sidebar-search-wrapper">
+          <span className="wa-sidebar-search-icon" aria-hidden="true">
+            🔍
+          </span>
+          <input
+            type="text"
+            className="wa-sidebar-search-input"
+            placeholder="Buscar ou iniciar conversa"
+            value={searchTerm}
+            onChange={(event) => setSearchTerm(event.target.value)}
+            aria-label="Buscar conversa"
+          />
+        </div>
 
-        {contacts.map((contact) => {
+        <div className="wa-filter-chips" role="tablist" aria-label="Filtros de conversa">
+          {filterChips.map((chip) => {
+            const isActive = activeFilter === chip.id;
+            return (
+              <button
+                key={chip.id}
+                type="button"
+                className={`wa-filter-chip ${isActive ? 'active' : ''}`}
+                onClick={() => setActiveFilter(chip.id)}
+              >
+                {chip.label}
+              </button>
+            );
+          })}
+        </div>
+
+        {filteredContacts.length === 0 ? (
+          <p className="wa-inbox-empty">Nenhuma conversa encontrada</p>
+        ) : null}
+
+        {filteredContacts.map((contact) => {
           const isActive = contact.id === selectedContactId;
           const displayName = contact.name || formatPhone(contact.phone);
           const badge = getBadge(contact.status);
