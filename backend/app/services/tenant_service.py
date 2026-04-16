@@ -2,7 +2,7 @@ from datetime import datetime
 import os
 import uuid
 
-from fastapi import Depends, Header, HTTPException, Query
+from fastapi import Depends, HTTPException, Request
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -71,38 +71,25 @@ def resolve_tenant_by_phone_number_id(db: Session, phone_number_id: str | None) 
 
 
 def get_current_tenant(
-    x_tenant_slug: str = Header(default="", alias="X-Tenant-Slug"),
-    x_tenant_id: str = Header(default="", alias="X-Tenant-Id"),
-    tenant_slug: str = Query(default=""),
-    tenant_id: str = Query(default=""),
+    request: Request,
     db: Session = Depends(get_db),
 ) -> Tenant:
-    raw_tenant_id = (x_tenant_id or tenant_id).strip()
-    slug = (x_tenant_slug or tenant_slug).strip()
+    tenant_id = request.headers.get("X-Tenant-ID") or request.headers.get("x-tenant-id")
+    tenant_id = (tenant_id or "").strip()
+    print("TENANT HEADER:", tenant_id)
 
-    if not raw_tenant_id and not slug:
-        print("⚠️ Tenant não enviado - usando fallback")
-        slug = "default"
+    if not tenant_id:
+        raise HTTPException(status_code=400, detail="Tenant não enviado")
 
-    if raw_tenant_id:
-        try:
-            parsed_tenant_id = uuid.UUID(raw_tenant_id)
-        except ValueError as exc:
-            raise HTTPException(status_code=401, detail="Tenant ID inválido") from exc
+    try:
+        parsed_tenant_id = uuid.UUID(tenant_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Tenant ID inválido") from exc
 
-        tenant = db.execute(select(Tenant).where(Tenant.id == parsed_tenant_id)).scalars().first()
-        if not tenant:
-            raise HTTPException(status_code=401, detail="Credenciais inválidas")
-        print(f"Tenant usado: {tenant.id}")
-        return tenant
-
-    tenant = db.execute(select(Tenant).where(Tenant.slug == slug)).scalars().first()
-    if not tenant and slug == "default":
-        tenant = get_or_create_default_tenant(db)
+    tenant = db.execute(select(Tenant).where(Tenant.id == parsed_tenant_id)).scalars().first()
     if not tenant:
-        raise HTTPException(status_code=401, detail="Credenciais inválidas")
+        raise HTTPException(status_code=404, detail="Tenant não encontrado")
 
-    print(f"Tenant usado: {tenant.id}")
     return tenant
 
 
