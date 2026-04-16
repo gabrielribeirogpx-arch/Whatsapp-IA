@@ -49,10 +49,10 @@ function CustomTooltip({ active, payload, label }: TooltipProps) {
   const received = payload.find((entry) => entry.name === 'Recebidas')?.value ?? 0;
 
   return (
-    <div className="rounded-lg border border-gray-200 bg-white px-3 py-2 shadow-sm">
+    <div className="rounded-md border border-gray-200 bg-white px-2 py-1.5 shadow-sm">
       <p className="text-xs text-gray-500">Data: {label}</p>
-      <p className="text-sm font-medium text-gray-700">Enviadas: {sent}</p>
-      <p className="text-sm font-medium text-gray-700">Recebidas: {received}</p>
+      <p className="text-xs font-normal text-gray-700">Enviadas: {sent}</p>
+      <p className="text-xs font-normal text-gray-700">Recebidas: {received}</p>
     </div>
   );
 }
@@ -85,7 +85,7 @@ export default function DashboardChart({ data = [] }: DashboardChartProps) {
   const hasActivity = normalizedData.some((item) => item.sent > 0 || item.received > 0);
 
   const summaryText = hasActivity && peak && peak.value > 0
-    ? `Maior atividade ocorreu em ${peak.date} com ${peak.value} mensagem${peak.value > 1 ? 's' : ''}`
+    ? `Pico: ${peak.date.replace(' de ', ' ').replace('.', '')} • ${peak.value} msg`
     : 'Sem atividade significativa nos últimos dias';
 
   return (
@@ -93,7 +93,7 @@ export default function DashboardChart({ data = [] }: DashboardChartProps) {
       <div className="dashboard-card-title">
         <h2 className="text-xs text-gray-500 uppercase tracking-wide">Mensagens (últimos 7 dias)</h2>
       </div>
-      <p className="mt-2 text-sm text-gray-500">{summaryText}</p>
+      <p className="mt-2 mb-2 text-[13px] font-medium text-[#777] opacity-80">{summaryText}</p>
 
       <div style={{ width: '100%', height: 300 }}>
         {hasActivity ? (
