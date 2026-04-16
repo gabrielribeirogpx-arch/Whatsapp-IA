@@ -18,6 +18,7 @@ class Conversation(Base):
     phone_number: Mapped[str | None] = mapped_column(String, index=True, nullable=True)
     name: Mapped[str | None] = mapped_column(String, nullable=True)
     avatar_url: Mapped[str | None] = mapped_column(String, nullable=True)
+    mode: Mapped[str] = mapped_column(String, nullable=False, default="human")
     message: Mapped[str | None] = mapped_column(Text, nullable=True)
     response: Mapped[str | None] = mapped_column(Text, nullable=True, deferred=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

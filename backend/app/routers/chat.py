@@ -350,6 +350,37 @@ def take_over(
     return ToggleAssignmentResponse(phone=sanitized_phone, status="human")
 
 
+@router.patch("/conversations/{conversation_id}/mode")
+def update_conversation_mode(
+    conversation_id: UUID,
+    mode: str,
+    tenant: Tenant = Depends(get_current_tenant),
+    db: Session = Depends(get_db),
+):
+    conversation = (
+        db.execute(
+            select(Conversation).where(
+                Conversation.id == conversation_id,
+                Conversation.tenant_id == tenant.id,
+            )
+        )
+        .scalars()
+        .first()
+    )
+
+    if not conversation:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    if mode not in {"human", "bot", "ai"}:
+        raise HTTPException(status_code=400, detail="Invalid mode")
+
+    conversation.mode = mode
+    conversation.updated_at = datetime.utcnow()
+    db.commit()
+
+    return {"status": "updated", "mode": mode}
+
+
 @router.get("/stream/messages/{phone}")
 async def stream_messages(phone: str, tenant: Tenant = Depends(get_current_tenant)):
     sanitized_phone = normalize_phone(phone)
