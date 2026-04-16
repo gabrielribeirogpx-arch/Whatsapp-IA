@@ -5,7 +5,10 @@ from sqlalchemy import CheckConstraint, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.core.database import Base
+from app.db.base import Base
+from app.models.knowledge_base import KnowledgeBase
+from app.models.knowledge_chunk import KnowledgeChunk
+from app.models.product import Product
 
 DEFAULT_SYSTEM_PROMPT = "Você é um assistente de vendas altamente persuasivo, especializado em converter leads em clientes."
 
@@ -29,9 +32,17 @@ class Tenant(Base):
     ai_mode: Mapped[str] = mapped_column(String(32), default="atendente", server_default="atendente")
 
     ai_config: Mapped["AIConfig | None"] = relationship(back_populates="tenant", uselist=False, cascade="all, delete-orphan")
-    products: Mapped[list["Product"]] = relationship(back_populates="tenant", cascade="all, delete-orphan")
-    knowledge_items: Mapped[list["KnowledgeBase"]] = relationship(back_populates="tenant", cascade="all, delete-orphan")
-    knowledge_chunks: Mapped[list["KnowledgeChunk"]] = relationship(back_populates="tenant", cascade="all, delete-orphan")
+    products: Mapped[list[Product]] = relationship(Product, back_populates="tenant", cascade="all, delete-orphan")
+    knowledge_items: Mapped[list[KnowledgeBase]] = relationship(
+        KnowledgeBase,
+        back_populates="tenant",
+        cascade="all, delete-orphan",
+    )
+    knowledge_chunks: Mapped[list[KnowledgeChunk]] = relationship(
+        KnowledgeChunk,
+        back_populates="tenant",
+        cascade="all, delete-orphan",
+    )
 
 
 class AIConfig(Base):
@@ -44,8 +55,3 @@ class AIConfig(Base):
     temperature: Mapped[float] = mapped_column(Float, default=0.4)
 
     tenant: Mapped[Tenant] = relationship(back_populates="ai_config")
-
-
-from app.models.product import Product  # noqa: E402
-from app.models.knowledge_base import KnowledgeBase  # noqa: E402
-from app.models.knowledge_chunk import KnowledgeChunk  # noqa: E402
