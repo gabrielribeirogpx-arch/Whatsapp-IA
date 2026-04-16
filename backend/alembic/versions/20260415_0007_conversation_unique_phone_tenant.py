@@ -28,14 +28,21 @@ def upgrade() -> None:
         """
         DO $$
         BEGIN
-            IF NOT EXISTS (
+            IF EXISTS (
                 SELECT 1
-                FROM pg_constraint
-                WHERE conname = 'unique_phone_tenant'
+                FROM information_schema.columns
+                WHERE table_name = 'conversations'
+                  AND column_name = 'tenant_id'
             ) THEN
-                ALTER TABLE conversations
-                ADD CONSTRAINT unique_phone_tenant
-                UNIQUE (phone_number, tenant_id);
+                IF NOT EXISTS (
+                    SELECT 1
+                    FROM pg_constraint
+                    WHERE conname = 'unique_phone_tenant'
+                ) THEN
+                    ALTER TABLE conversations
+                    ADD CONSTRAINT unique_phone_tenant
+                    UNIQUE (phone_number, tenant_id);
+                END IF;
             END IF;
         END $$;
         """
