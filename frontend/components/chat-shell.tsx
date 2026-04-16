@@ -1,10 +1,11 @@
 'use client';
 
 import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
+import { useRouter } from 'next/navigation';
 
 import ChatWindow from './ChatWindow';
 import Sidebar from './Sidebar';
-import { getMessages, getMessagesByContact, sendMessage } from '../lib/api';
+import { getConversations, getMessagesByConversation, sendMessage } from '../lib/api';
 import { ChatMessage, Contact, Conversation, Message } from '../lib/types';
 
 function toChatMessage(message: Message): ChatMessage {
@@ -22,12 +23,20 @@ function toChatMessage(message: Message): ChatMessage {
 }
 
 export default function ChatShell() {
-  const conversations: Conversation[] = [];
+  const router = useRouter();
+  const [conversations, setConversations] = useState<Conversation[]>([]);
   const [selectedContactId, setSelectedContactId] = useState('');
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputValue, setInputValue] = useState('');
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
+
+  useEffect(() => {
+    const token = localStorage.getItem('token');
+    if (!token) {
+      router.replace('/login');
+    }
+  }, [router]);
 
 
   const fetchMessages = useCallback(
@@ -39,11 +48,7 @@ export default function ChatShell() {
         return;
       }
 
-      const loadMessages = conversation.contact_id
-        ? getMessagesByContact(conversation.contact_id)
-        : getMessages(conversation.phone);
-
-      const realMessages: Message[] = await loadMessages;
+      const realMessages: Message[] = await getMessagesByConversation(String(conversation.id));
       setMessages(realMessages.map(toChatMessage));
     },
     [conversations]
@@ -115,6 +120,15 @@ export default function ChatShell() {
     fetchMessages(selectedContactId).catch(() => undefined);
   }, [selectedContactId, fetchMessages]);
 
+
+  useEffect(() => {
+    getConversations()
+      .then((items) => {
+        setConversations(items);
+        setSelectedContactId((current) => current || (items[0] ? String(items[0].contact_id ?? items[0].id) : ''));
+      })
+      .catch(() => setConversations([]));
+  }, []);
 
 
   function onSelectContact(contactId: string) {

@@ -1,5 +1,6 @@
 import {
   CRMContact,
+  Conversation,
   KnowledgeCrawlPayload,
   KnowledgeCrawlResult,
   KnowledgeItem,
@@ -16,51 +17,94 @@ import {
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL;
 const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL ?? 'https://SEU_BACKEND_URL';
 const TENANT_STORAGE_KEY = 'tenant';
+const TOKEN_STORAGE_KEY = 'token';
 const TENANT_ID_STORAGE_KEY = 'tenant_id';
+
+function buildApiUrl(path: string) {
+  if (!BASE_URL) {
+    throw new Error('NEXT_PUBLIC_API_URL não está configurado.');
+  }
+
+  if (/^https?:\/\//.test(path)) return path;
+  return `${BASE_URL}${path.startsWith('/') ? path : `/${path}`}`;
+}
+
+function clearAuthSession() {
+  if (typeof window === 'undefined') return;
+
+  localStorage.removeItem(TENANT_STORAGE_KEY);
+  localStorage.removeItem(TOKEN_STORAGE_KEY);
+  localStorage.removeItem(TENANT_ID_STORAGE_KEY);
+}
 
 export function getTenantSessionFromStorage(): TenantSession | null {
   if (typeof window === 'undefined') return null;
 
+  const token = localStorage.getItem(TOKEN_STORAGE_KEY);
+  const tenantId = localStorage.getItem(TENANT_ID_STORAGE_KEY);
   const saved = localStorage.getItem(TENANT_STORAGE_KEY);
-  if (!saved) return null;
+
+  if (!token || !tenantId) return null;
+
+  if (!saved) {
+    return { token, tenant_id: tenantId };
+  }
 
   try {
-    const parsed = JSON.parse(saved) as TenantSession;
-    if (parsed?.tenant_id) return parsed;
-
-    const tenantId = localStorage.getItem(TENANT_ID_STORAGE_KEY);
-    if (!tenantId || !parsed?.slug) return null;
-
-    return { ...parsed, tenant_id: tenantId };
+    const parsed = JSON.parse(saved) as Partial<TenantSession>;
+    return {
+      token,
+      tenant_id: tenantId,
+      slug: parsed.slug
+    };
   } catch {
     localStorage.removeItem(TENANT_STORAGE_KEY);
-    localStorage.removeItem(TENANT_ID_STORAGE_KEY);
-    return null;
+    return { token, tenant_id: tenantId };
   }
 }
 
-function tenantHeaders() {
-  const tenant = getTenantSessionFromStorage();
-  console.log('TENANT_ID:', tenant?.tenant_id ?? null);
-  return {
-    'Content-Type': 'application/json',
-    'x-tenant-slug': tenant?.slug ?? '',
-    'x-tenant-id': tenant?.tenant_id ?? ''
-  };
+export async function apiFetch(path: string, init: RequestInit = {}): Promise<Response> {
+  const isBrowser = typeof window !== 'undefined';
+  const headers = new Headers(init.headers);
+
+  if (!headers.has('Content-Type') && !(init.body instanceof FormData)) {
+    headers.set('Content-Type', 'application/json');
+  }
+
+  if (isBrowser) {
+    const token = localStorage.getItem(TOKEN_STORAGE_KEY);
+    const tenantId = localStorage.getItem(TENANT_ID_STORAGE_KEY);
+
+    if (token) {
+      headers.set('Authorization', `Bearer ${token}`);
+    }
+
+    if (tenantId) {
+      headers.set('X-Tenant-ID', tenantId);
+    }
+  }
+
+  const response = await fetch(buildApiUrl(path), {
+    ...init,
+    headers
+  });
+
+  if (response.status === 401 && isBrowser) {
+    clearAuthSession();
+    window.location.href = '/login';
+  }
+
+  return response;
 }
 
-function tenantAuthHeaders() {
-  const tenant = getTenantSessionFromStorage();
-  return {
-    'x-tenant-slug': tenant?.slug ?? '',
-    'x-tenant-id': tenant?.tenant_id ?? ''
-  };
+async function parseApiResponse<T>(res: Response): Promise<T> {
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
 }
 
 export async function registerTenant(name: string, phone_number_id: string): Promise<TenantSession> {
-  const res = await fetch(`${BASE_URL}/api/register`, {
+  const res = await apiFetch('/api/register', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ name, phone_number_id })
   });
 
@@ -68,13 +112,13 @@ export async function registerTenant(name: string, phone_number_id: string): Pro
     const body = await res.text();
     throw new Error(`HTTP ${res.status}: ${body}`);
   }
+
   return res.json();
 }
 
 export async function tenantLogin(phone_number_id: string): Promise<TenantSession> {
-  const res = await fetch(`${BASE_URL}/api/login`, {
+  const res = await apiFetch('/api/login', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ phone_number_id })
   });
 
@@ -82,35 +126,31 @@ export async function tenantLogin(phone_number_id: string): Promise<TenantSessio
     const body = await res.text();
     throw new Error(`HTTP ${res.status}: ${body}`);
   }
+
   return res.json();
 }
 
-export async function getMessages(phone: string): Promise<Message[]> {
-  const res = await fetch(`${BASE_URL}/api/messages/${phone}`, { headers: tenantHeaders() });
-  if (!res.ok) throw new Error(await res.text());
-  return res.json();
+export async function getConversations(): Promise<Conversation[]> {
+  const res = await apiFetch('/api/conversations');
+  return parseApiResponse<Conversation[]>(res);
 }
 
-export async function getMessagesByContact(contactId: string): Promise<Message[]> {
-  const res = await fetch(`${BASE_URL}/api/messages/by-contact/${contactId}`, { headers: tenantHeaders() });
-  if (!res.ok) throw new Error(await res.text());
-  return res.json();
+export async function getMessagesByConversation(conversationId: string): Promise<Message[]> {
+  const res = await apiFetch(`/api/messages/conversation/${conversationId}`);
+  return parseApiResponse<Message[]>(res);
 }
 
 export async function sendMessage(phone: string, message: string, contact_id?: string) {
-  const res = await fetch(`${BASE_URL}/api/send-message`, {
+  const res = await apiFetch('/api/send-message', {
     method: 'POST',
-    headers: tenantHeaders(),
     body: JSON.stringify({ phone, message, contact_id })
   });
-  if (!res.ok) throw new Error(await res.text());
-  return res.json();
+  return parseApiResponse(res);
 }
 
 export async function getContacts(): Promise<CRMContact[]> {
-  const res = await fetch(`${BASE_URL}/api/contacts`, { headers: tenantHeaders() });
-  if (!res.ok) throw new Error(await res.text());
-  return res.json();
+  const res = await apiFetch('/api/contacts');
+  return parseApiResponse<CRMContact[]>(res);
 }
 
 export async function sendMessageToBackend(payload: SendMessagePayload) {
@@ -129,65 +169,54 @@ export async function sendMessageToBackend(payload: SendMessagePayload) {
   return response.json();
 }
 
-
 export async function getProducts(): Promise<Product[]> {
-  const res = await fetch(`${BASE_URL}/api/products`, { headers: tenantHeaders() });
-  if (!res.ok) throw new Error(await res.text());
-  return res.json();
+  const res = await apiFetch('/api/products');
+  return parseApiResponse<Product[]>(res);
 }
 
 export async function createProduct(payload: ProductPayload): Promise<Product> {
-  const res = await fetch(`${BASE_URL}/api/products`, {
+  const res = await apiFetch('/api/products', {
     method: 'POST',
-    headers: tenantHeaders(),
     body: JSON.stringify(payload)
   });
 
-  if (!res.ok) throw new Error(await res.text());
-  return res.json();
+  return parseApiResponse<Product>(res);
 }
 
 export async function updateProduct(productId: string, payload: ProductPayload): Promise<Product> {
-  const res = await fetch(`${BASE_URL}/api/products/${productId}`, {
+  const res = await apiFetch(`/api/products/${productId}`, {
     method: 'PUT',
-    headers: tenantHeaders(),
     body: JSON.stringify(payload)
   });
 
-  if (!res.ok) throw new Error(await res.text());
-  return res.json();
+  return parseApiResponse<Product>(res);
 }
 
 export async function deleteProduct(productId: string): Promise<void> {
-  const res = await fetch(`${BASE_URL}/api/products/${productId}`, {
-    method: 'DELETE',
-    headers: tenantHeaders()
+  const res = await apiFetch(`/api/products/${productId}`, {
+    method: 'DELETE'
   });
 
   if (!res.ok) throw new Error(await res.text());
 }
 
 export async function getKnowledge(): Promise<KnowledgeItem[]> {
-  const res = await fetch(`${BASE_URL}/api/knowledge`, { headers: tenantHeaders() });
-  if (!res.ok) throw new Error(await res.text());
-  return res.json();
+  const res = await apiFetch('/api/knowledge');
+  return parseApiResponse<KnowledgeItem[]>(res);
 }
 
 export async function createKnowledge(payload: KnowledgePayload): Promise<KnowledgeItem> {
-  const res = await fetch(`${BASE_URL}/api/knowledge`, {
+  const res = await apiFetch('/api/knowledge', {
     method: 'POST',
-    headers: tenantHeaders(),
     body: JSON.stringify(payload)
   });
 
-  if (!res.ok) throw new Error(await res.text());
-  return res.json();
+  return parseApiResponse<KnowledgeItem>(res);
 }
 
 export async function deleteKnowledge(knowledgeId: string): Promise<void> {
-  const res = await fetch(`${BASE_URL}/api/knowledge/${knowledgeId}`, {
-    method: 'DELETE',
-    headers: tenantHeaders()
+  const res = await apiFetch(`/api/knowledge/${knowledgeId}`, {
+    method: 'DELETE'
   });
 
   if (!res.ok) throw new Error(await res.text());
@@ -197,41 +226,33 @@ export async function uploadKnowledgePdf(file: File): Promise<KnowledgeUploadRes
   const formData = new FormData();
   formData.append('file', file);
 
-  const res = await fetch(`${BASE_URL}/api/knowledge/upload-pdf`, {
+  const res = await apiFetch('/api/knowledge/upload-pdf', {
     method: 'POST',
-    headers: tenantAuthHeaders(),
     body: formData
   });
 
-  if (!res.ok) throw new Error(await res.text());
-  return res.json();
+  return parseApiResponse<KnowledgeUploadResult>(res);
 }
 
-
 export async function crawlKnowledgeSite(payload: KnowledgeCrawlPayload): Promise<KnowledgeCrawlResult> {
-  const res = await fetch(`${BASE_URL}/api/knowledge/crawl`, {
+  const res = await apiFetch('/api/knowledge/crawl', {
     method: 'POST',
-    headers: tenantHeaders(),
     body: JSON.stringify(payload)
   });
 
-  if (!res.ok) throw new Error(await res.text());
-  return res.json();
+  return parseApiResponse<KnowledgeCrawlResult>(res);
 }
 
 export async function getPipeline(): Promise<PipelineStage[]> {
-  const res = await fetch(`${BASE_URL}/api/pipeline`, { headers: tenantHeaders() });
-  if (!res.ok) throw new Error(await res.text());
-  return res.json();
+  const res = await apiFetch('/api/pipeline');
+  return parseApiResponse<PipelineStage[]>(res);
 }
 
 export async function moveLeadToStage(leadId: string, stageId: string) {
-  const res = await fetch(`${BASE_URL}/api/leads/${leadId}/move`, {
+  const res = await apiFetch(`/api/leads/${leadId}/move`, {
     method: 'POST',
-    headers: tenantHeaders(),
     body: JSON.stringify({ stage_id: stageId })
   });
 
-  if (!res.ok) throw new Error(await res.text());
-  return res.json();
+  return parseApiResponse(res);
 }
