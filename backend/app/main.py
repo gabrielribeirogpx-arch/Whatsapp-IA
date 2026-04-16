@@ -1,15 +1,15 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from backend.app.db.base import Base
-from backend.app.db.session import engine
-from backend.app import models  # noqa: F401
-from backend.app.routers import webhook
-from backend.app.routers import chat
-from backend.app.routers import auth
-from backend.app.routers import products
-from backend.app.routers import knowledge
-from backend.app.routers import leads
+from app.db.base import Base
+from app.db.session import engine
+from app import models  # noqa: F401
+from app.routers import webhook
+from app.routers import chat
+from app.routers import auth
+from app.routers import products
+from app.routers import knowledge
+from app.routers import leads
 
 app = FastAPI()
 
