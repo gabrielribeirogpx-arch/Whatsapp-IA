@@ -63,6 +63,7 @@ def get_dashboard(
     conversations_updated_today = db.execute(
         select(func.count(Conversation.id)).where(
             Conversation.tenant_id == tenant.id,
+            Conversation.updated_at.isnot(None),
             Conversation.updated_at >= start_of_day,
         )
     ).scalar() or 0
@@ -71,6 +72,7 @@ def get_dashboard(
         select(func.count(Message.id)).where(
             Message.tenant_id == tenant.id,
             Message.from_me.is_(True),
+            Message.created_at.isnot(None),
             Message.created_at >= start_of_day,
         )
     ).scalar() or 0
@@ -79,6 +81,7 @@ def get_dashboard(
         select(func.count(Message.id)).where(
             Message.tenant_id == tenant.id,
             Message.from_me.is_(False),
+            Message.created_at.isnot(None),
             Message.created_at >= start_of_day,
         )
     ).scalar() or 0
