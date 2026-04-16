@@ -23,7 +23,8 @@ export type Message = {
 
 export type TenantSession = {
   tenant_id: string;
-  slug: string;
+  token: string;
+  slug?: string;
 };
 
 export type Contact = {
