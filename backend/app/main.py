@@ -7,7 +7,7 @@ from app.db.session import engine
 import app.models  # noqa: F401
 
 from app.routers import webhook
-from app.routers import chat
+from app.routers import chat as conversations
 from app.routers import auth
 from app.routers import products
 from app.routers import knowledge
@@ -32,7 +32,8 @@ app.add_middleware(
 
 # ✅ ROTAS COM PREFIXO PADRÃO /api
 app.include_router(auth.router, prefix="/api")
-app.include_router(chat.router, prefix="/api")
+app.include_router(conversations.router, prefix="/api")
+app.include_router(conversations.router, prefix="/api/api")  # backward compatibility
 app.include_router(products.router, prefix="/api")
 app.include_router(knowledge.router, prefix="/api")
 app.include_router(leads.router, prefix="/api")
