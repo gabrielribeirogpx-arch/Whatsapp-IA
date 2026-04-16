@@ -4,7 +4,7 @@ import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
 
 import ChatWindow from './ChatWindow';
 import Sidebar from './Sidebar';
-import { getConversations, getMessages, getMessagesByContact, sendMessage } from '../lib/api';
+import { getMessages, getMessagesByContact, sendMessage } from '../lib/api';
 import { ChatMessage, Contact, Conversation, Message } from '../lib/types';
 
 function toChatMessage(message: Message): ChatMessage {
@@ -22,26 +22,13 @@ function toChatMessage(message: Message): ChatMessage {
 }
 
 export default function ChatShell() {
-  const [conversations, setConversations] = useState<Conversation[]>([]);
+  const conversations: Conversation[] = [];
   const [selectedContactId, setSelectedContactId] = useState('');
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputValue, setInputValue] = useState('');
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
-  const fetchConversations = useCallback(async () => {
-    const conversationsResponse = await getConversations();
-    const unique = Object.values(
-      conversationsResponse.reduce<Record<string, Conversation>>((acc, conversation) => {
-        acc[conversation.phone] = conversation;
-        return acc;
-      }, {})
-    );
 
-    setConversations(unique);
-    if (unique.length && !selectedContactId) {
-      setSelectedContactId(String(unique[0].contact_id ?? unique[0].id));
-    }
-  }, [selectedContactId]);
 
   const fetchMessages = useCallback(
     async (conversationId: string) => {
@@ -62,9 +49,6 @@ export default function ChatShell() {
     [conversations]
   );
 
-  useEffect(() => {
-    fetchConversations().catch(() => undefined);
-  }, [fetchConversations]);
 
   const contacts = useMemo<Contact[]>(
     () =>
@@ -131,16 +115,7 @@ export default function ChatShell() {
     fetchMessages(selectedContactId).catch(() => undefined);
   }, [selectedContactId, fetchMessages]);
 
-  useEffect(() => {
-    const interval = setInterval(() => {
-      fetchConversations().catch(() => undefined);
-      if (selectedContactId) {
-        fetchMessages(selectedContactId).catch(() => undefined);
-      }
-    }, 3000);
 
-    return () => clearInterval(interval);
-  }, [selectedContactId, fetchConversations, fetchMessages]);
 
   function onSelectContact(contactId: string) {
     setSelectedContactId(contactId);
