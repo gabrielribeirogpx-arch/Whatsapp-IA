@@ -70,6 +70,7 @@ export default function DashboardPage() {
   }, [uniqueConversations]);
 
   const userName = 'Gabriel Lima';
+  const messagesLast7Days = data?.charts?.messages_last_7_days;
 
   return (
     <main className="dashboard-page">
@@ -101,7 +102,7 @@ export default function DashboardPage() {
         <article className="dashboard-card premium-card p-6">
           <div className="dashboard-card-title">
             <IconChats width={20} />
-            <h2 className="text-xs text-gray-500 uppercase tracking-wide">Conversas</h2>
+            <h2 className="text-xs text-gray-500 uppercase tracking-wide">Conversas ativas</h2>
           </div>
           <p className="text-3xl font-semibold">{uniqueConversations.length}</p>
           <small>Contatos com histórico recente na inbox.</small>
@@ -110,7 +111,7 @@ export default function DashboardPage() {
         <article className="dashboard-card premium-card p-6">
           <div className="dashboard-card-title">
             <IconUsers width={20} />
-            <h2 className="text-xs text-gray-500 uppercase tracking-wide">Online agora</h2>
+            <h2 className="text-xs text-gray-500 uppercase tracking-wide">Leads ativos</h2>
           </div>
           <p className="text-3xl font-semibold">{humanInProgress}</p>
           <small>Conversas em modo humano neste momento.</small>
@@ -119,14 +120,18 @@ export default function DashboardPage() {
         <article className="dashboard-card premium-card p-6">
           <div className="dashboard-card-title">
             <IconChats width={20} />
-            <h2 className="text-xs text-gray-500 uppercase tracking-wide">Resolvidas hoje</h2>
+            <h2 className="text-xs text-gray-500 uppercase tracking-wide">Mensagens hoje</h2>
           </div>
           <p className="text-3xl font-semibold">{answeredToday}</p>
           <small>Mensagens atualizadas no dia atual.</small>
         </article>
       </section>
 
-      {data?.charts ? <DashboardChart data={data.charts.messages_last_7_days} /> : null}
+      {(() => {
+        if (!messagesLast7Days) return null;
+
+        return <DashboardChart data={messagesLast7Days} />;
+      })()}
     </main>
   );
 }
