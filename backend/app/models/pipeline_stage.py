@@ -5,7 +5,7 @@ from sqlalchemy import DateTime, ForeignKey, Integer, String, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
-from backend.app.db.base import Base
+from app.db.base import Base
 
 
 class PipelineStage(Base):

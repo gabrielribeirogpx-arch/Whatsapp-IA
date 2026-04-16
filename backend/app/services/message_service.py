@@ -2,7 +2,7 @@ import logging
 import re
 from typing import Any
 
-from backend.app.utils.phone import normalize_phone
+from app.utils.phone import normalize_phone
 
 logger = logging.getLogger(__name__)
 
