@@ -2,7 +2,10 @@ import logging
 import os
 from typing import Sequence
 
-from openai import OpenAI
+try:
+    from openai import OpenAI
+except ImportError:
+    OpenAI = None
 
 from app.models import AIConfig, Message
 
@@ -41,6 +44,10 @@ def gerar_resposta(
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
         return "Olá! Recebi sua mensagem e já vou te ajudar da melhor forma possível."
+
+    if OpenAI is None:
+        logger.warning("SDK openai não disponível no ambiente")
+        return "Obrigado pela mensagem! Nosso time está avaliando sua solicitação."
 
     system_prompt = ai_config.system_prompt if ai_config and ai_config.system_prompt else DEFAULT_SYSTEM_PROMPT
     model = ai_config.model if ai_config and ai_config.model else os.getenv("OPENAI_MODEL", "gpt-4o-mini")
