@@ -46,6 +46,11 @@ def on_startup():
     Base.metadata.create_all(bind=engine)
 
 # ✅ HEALTH CHECK
+@app.get("/health")
+def health():
+    return {"status": "ok"}
+
+
 @app.get("/")
 def root():
     return {"status": "ok"}
