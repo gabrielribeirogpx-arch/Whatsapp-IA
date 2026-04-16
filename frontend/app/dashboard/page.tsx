@@ -1,33 +1,13 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 
 import { IconChats, IconUsers } from '../../components/icons';
-import { getConversations } from '../../lib/api';
 import { Conversation } from '../../lib/types';
 
 export default function DashboardPage() {
-  const [conversations, setConversations] = useState<Conversation[]>([]);
-
-  const fetchDashboardData = async () => {
-    try {
-      const data = await getConversations();
-      setConversations(data);
-    } catch {
-      localStorage.removeItem('tenant');
-    }
-  };
-
-  useEffect(() => {
-    fetchDashboardData();
-
-    const interval = setInterval(() => {
-      fetchDashboardData();
-    }, 5000);
-
-    return () => clearInterval(interval);
-  }, []);
+  const [conversations] = useState<Conversation[]>([]);
 
   const uniqueConversations = useMemo(() => {
     const seen = new Set<string>();
