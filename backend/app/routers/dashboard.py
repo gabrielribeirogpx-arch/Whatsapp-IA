@@ -1,11 +1,11 @@
-from datetime import datetime, timezone
+from datetime import datetime
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.database import get_db
+from app.db.base import get_db
 from app.models import Contact, Conversation, Lead, Message, Product, Tenant
 from app.services.tenant_service import get_current_tenant
 
@@ -37,35 +37,35 @@ def get_dashboard(
     db: Session = Depends(get_db),
     tenant: Tenant = Depends(get_current_tenant),
 ):
-    now_utc = datetime.now(timezone.utc)
-    start_of_day = datetime(now_utc.year, now_utc.month, now_utc.day, tzinfo=timezone.utc).replace(tzinfo=None)
+    now_utc = datetime.utcnow()
+    start_of_day = datetime(now_utc.year, now_utc.month, now_utc.day)
 
     conversations_total = db.execute(
         select(func.count(Conversation.id)).where(Conversation.tenant_id == tenant.id)
-    ).scalar_one()
+    ).scalar() or 0
 
     contacts_total = db.execute(
         select(func.count(Contact.id)).where(Contact.tenant_id == tenant.id)
-    ).scalar_one()
+    ).scalar() or 0
 
     leads_total = db.execute(
         select(func.count(Lead.id)).where(Lead.tenant_id == tenant.id)
-    ).scalar_one()
+    ).scalar() or 0
 
     products_total = db.execute(
         select(func.count(Product.id)).where(Product.tenant_id == tenant.id)
-    ).scalar_one()
+    ).scalar() or 0
 
     messages_total = db.execute(
         select(func.count(Message.id)).where(Message.tenant_id == tenant.id)
-    ).scalar_one()
+    ).scalar() or 0
 
     conversations_updated_today = db.execute(
         select(func.count(Conversation.id)).where(
             Conversation.tenant_id == tenant.id,
             Conversation.updated_at >= start_of_day,
         )
-    ).scalar_one()
+    ).scalar() or 0
 
     messages_sent_today = db.execute(
         select(func.count(Message.id)).where(
@@ -73,7 +73,7 @@ def get_dashboard(
             Message.from_me.is_(True),
             Message.created_at >= start_of_day,
         )
-    ).scalar_one()
+    ).scalar() or 0
 
     messages_received_today = db.execute(
         select(func.count(Message.id)).where(
@@ -81,7 +81,7 @@ def get_dashboard(
             Message.from_me.is_(False),
             Message.created_at >= start_of_day,
         )
-    ).scalar_one()
+    ).scalar() or 0
 
     return DashboardOut(
         tenant_id=str(tenant.id),
