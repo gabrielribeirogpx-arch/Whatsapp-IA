@@ -1,11 +1,14 @@
 import os
 
-from google import genai
+try:
+    from google import genai
+except ImportError:
+    genai = None
 
 
 def generate_response(message: str) -> str:
     api_key = os.getenv("GEMINI_API_KEY")
-    if not api_key:
+    if not api_key or genai is None:
         return "Olá! Recebi sua mensagem, já vou te responder."
 
     client = genai.Client(api_key=api_key)
@@ -30,7 +33,7 @@ def generate_response(message: str) -> str:
 
 def classificar_lead(mensagem: str) -> str:
     api_key = os.getenv("GEMINI_API_KEY")
-    if not api_key:
+    if not api_key or genai is None:
         return "morno"
 
     client = genai.Client(api_key=api_key)
