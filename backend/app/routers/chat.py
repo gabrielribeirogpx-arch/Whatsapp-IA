@@ -34,7 +34,7 @@ from app.services.tenant_service import (
 )
 from app.services.whatsapp_service import WhatsAppConfigError, enviar_mensagem
 
-router = APIRouter(prefix="/api", tags=["chat"])
+router = APIRouter(tags=["chat"])
 
 
 def _looks_like_name(text: str) -> bool:
