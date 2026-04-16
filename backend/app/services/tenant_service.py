@@ -80,6 +80,10 @@ def get_current_tenant(
     raw_tenant_id = (x_tenant_id or tenant_id).strip()
     slug = (x_tenant_slug or tenant_slug).strip()
 
+    if not raw_tenant_id and not slug:
+        print("⚠️ Tenant não enviado - usando fallback")
+        slug = "default"
+
     if raw_tenant_id:
         try:
             parsed_tenant_id = uuid.UUID(raw_tenant_id)
@@ -89,15 +93,16 @@ def get_current_tenant(
         tenant = db.execute(select(Tenant).where(Tenant.id == parsed_tenant_id)).scalars().first()
         if not tenant:
             raise HTTPException(status_code=401, detail="Credenciais inválidas")
+        print(f"Tenant usado: {tenant.id}")
         return tenant
 
-    if not slug:
-        raise HTTPException(status_code=401, detail="Tenant não autenticado")
-
     tenant = db.execute(select(Tenant).where(Tenant.slug == slug)).scalars().first()
+    if not tenant and slug == "default":
+        tenant = get_or_create_default_tenant(db)
     if not tenant:
         raise HTTPException(status_code=401, detail="Credenciais inválidas")
 
+    print(f"Tenant usado: {tenant.id}")
     return tenant
 
 
