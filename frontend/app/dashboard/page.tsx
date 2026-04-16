@@ -71,7 +71,6 @@ export default function DashboardPage() {
 
   const userName = 'Gabriel Lima';
   const messagesLast7Days = data?.charts?.messages_last_7_days;
-  const activityDelta = answeredToday > 0 ? '↑ atividade hoje' : '↓ sem atividade hoje';
 
   return (
     <main className="dashboard-page">
@@ -125,7 +124,6 @@ export default function DashboardPage() {
           </div>
           <p className="text-3xl font-semibold">{answeredToday}</p>
           <small>Mensagens atualizadas no dia atual.</small>
-          <p className="mt-2 text-sm font-medium text-gray-500">{activityDelta}</p>
         </article>
       </section>
 
