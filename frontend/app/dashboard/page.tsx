@@ -1,13 +1,42 @@
 'use client';
 
 import Link from 'next/link';
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
+import DashboardChart from '../../components/DashboardChart';
 import { IconChats, IconUsers } from '../../components/icons';
+import { apiFetch } from '../../lib/api';
 import { Conversation } from '../../lib/types';
+
+type DashboardData = {
+  charts?: {
+    messages_last_7_days?: {
+      date: string;
+      sent: number;
+      received: number;
+    }[];
+  };
+};
 
 export default function DashboardPage() {
   const conversations: Conversation[] = [];
+  const [data, setData] = useState<DashboardData | null>(null);
+
+  useEffect(() => {
+    async function loadDashboardData() {
+      try {
+        const res = await apiFetch('/api/dashboard');
+        if (!res.ok) return;
+
+        const payload = (await res.json()) as DashboardData;
+        setData(payload);
+      } catch {
+        setData(null);
+      }
+    }
+
+    void loadDashboardData();
+  }, []);
 
   const uniqueConversations = useMemo(() => {
     const seen = new Set<string>();
@@ -96,6 +125,8 @@ export default function DashboardPage() {
           <small>Mensagens atualizadas no dia atual.</small>
         </article>
       </section>
+
+      {data?.charts ? <DashboardChart data={data.charts.messages_last_7_days} /> : null}
     </main>
   );
 }
