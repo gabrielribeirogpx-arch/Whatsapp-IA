@@ -7,6 +7,7 @@ Create Date: 2026-04-15 04:00:00
 
 from alembic import op
 import sqlalchemy as sa
+from sqlalchemy import inspect
 from sqlalchemy.dialects import postgresql
 
 
@@ -17,22 +18,26 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.create_table(
-        "products",
-        sa.Column("id", postgresql.UUID(as_uuid=True), nullable=False),
-        sa.Column("tenant_id", postgresql.UUID(as_uuid=True), nullable=False),
-        sa.Column("name", sa.String(length=150), nullable=False),
-        sa.Column("description", sa.Text(), nullable=True),
-        sa.Column("price", sa.String(length=120), nullable=True),
-        sa.Column("benefits", sa.Text(), nullable=True),
-        sa.Column("objections", sa.Text(), nullable=True),
-        sa.Column("target_customer", sa.Text(), nullable=True),
-        sa.Column("created_at", sa.DateTime(), nullable=False),
-        sa.Column("updated_at", sa.DateTime(), nullable=False),
-        sa.ForeignKeyConstraint(["tenant_id"], ["tenants.id"], ondelete="CASCADE"),
-        sa.PrimaryKeyConstraint("id"),
-    )
-    op.create_index(op.f("ix_products_tenant_id"), "products", ["tenant_id"], unique=False)
+    bind = op.get_bind()
+    inspector = inspect(bind)
+
+    if "products" not in inspector.get_table_names():
+        op.create_table(
+            "products",
+            sa.Column("id", postgresql.UUID(as_uuid=True), nullable=False),
+            sa.Column("tenant_id", postgresql.UUID(as_uuid=True), nullable=False),
+            sa.Column("name", sa.String(length=150), nullable=False),
+            sa.Column("description", sa.Text(), nullable=True),
+            sa.Column("price", sa.String(length=120), nullable=True),
+            sa.Column("benefits", sa.Text(), nullable=True),
+            sa.Column("objections", sa.Text(), nullable=True),
+            sa.Column("target_customer", sa.Text(), nullable=True),
+            sa.Column("created_at", sa.DateTime(), nullable=False),
+            sa.Column("updated_at", sa.DateTime(), nullable=False),
+            sa.ForeignKeyConstraint(["tenant_id"], ["tenants.id"], ondelete="CASCADE"),
+            sa.PrimaryKeyConstraint("id"),
+        )
+        op.create_index(op.f("ix_products_tenant_id"), "products", ["tenant_id"], unique=False)
 
 
 def downgrade() -> None:
