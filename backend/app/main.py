@@ -28,15 +28,13 @@ sys.excepthook = handle_exception
 
 app = FastAPI()
 START_TIME = time.monotonic()
+_keep_alive_thread_started = False
 
 
 def keep_alive() -> None:
     while True:
         print("💓 alive")
         time.sleep(25)
-
-
-threading.Thread(target=keep_alive, daemon=True).start()
 
 app.add_middleware(
     CORSMiddleware,
@@ -69,8 +67,13 @@ app.include_router(leads.router)
 
 @app.on_event("startup")
 def on_startup() -> None:
+    global _keep_alive_thread_started
     print("🔥 STARTUP EVENT EXECUTADO")
     Base.metadata.create_all(bind=engine)
+    if not _keep_alive_thread_started:
+        thread = threading.Thread(target=keep_alive, daemon=True, name="keep-alive")
+        thread.start()
+        _keep_alive_thread_started = True
 
 
 @app.get("/")
