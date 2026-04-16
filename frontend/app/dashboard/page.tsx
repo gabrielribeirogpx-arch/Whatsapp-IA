@@ -71,6 +71,7 @@ export default function DashboardPage() {
 
   const userName = 'Gabriel Lima';
   const messagesLast7Days = data?.charts?.messages_last_7_days;
+  const activityDelta = answeredToday > 0 ? '↑ atividade hoje' : '↓ sem atividade hoje';
 
   return (
     <main className="dashboard-page">
@@ -99,7 +100,7 @@ export default function DashboardPage() {
       </section>
 
       <section className="dashboard-grid gap-4 mt-8">
-        <article className="dashboard-card premium-card p-6">
+        <article className="dashboard-card premium-card p-6 cursor-pointer">
           <div className="dashboard-card-title">
             <IconChats width={20} />
             <h2 className="text-xs text-gray-500 uppercase tracking-wide">Conversas ativas</h2>
@@ -108,7 +109,7 @@ export default function DashboardPage() {
           <small>Contatos com histórico recente na inbox.</small>
         </article>
 
-        <article className="dashboard-card premium-card p-6">
+        <article className="dashboard-card premium-card p-6 cursor-pointer">
           <div className="dashboard-card-title">
             <IconUsers width={20} />
             <h2 className="text-xs text-gray-500 uppercase tracking-wide">Leads ativos</h2>
@@ -117,13 +118,14 @@ export default function DashboardPage() {
           <small>Conversas em modo humano neste momento.</small>
         </article>
 
-        <article className="dashboard-card premium-card p-6">
+        <article className="dashboard-card premium-card p-6 cursor-pointer">
           <div className="dashboard-card-title">
             <IconChats width={20} />
             <h2 className="text-xs text-gray-500 uppercase tracking-wide">Mensagens hoje</h2>
           </div>
           <p className="text-3xl font-semibold">{answeredToday}</p>
           <small>Mensagens atualizadas no dia atual.</small>
+          <p className="mt-2 text-sm font-medium text-gray-500">{activityDelta}</p>
         </article>
       </section>
 
