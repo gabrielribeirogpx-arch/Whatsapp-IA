@@ -19,12 +19,10 @@ def save_conversation(db: Session, phone: str, message: str, response: str, tena
         conv = Conversation(
             tenant_id=tenant_id,
             phone_number=phone,
-            message=message,
             response=response,
         )
         db.add(conv)
     else:
-        conv.message = message
         conv.response = response
 
     try:
@@ -48,11 +46,8 @@ def save_conversation(db: Session, phone: str, message: str, response: str, tena
             fallback_conv = Conversation(
                 tenant_id=tenant_id,
                 phone_number=phone,
-                message=message,
             )
             db.add(fallback_conv)
-        else:
-            fallback_conv.message = message
         db.commit()
 
 
@@ -72,7 +67,6 @@ def get_or_create_conversation(db: Session, tenant_id, phone: str, contact_id=No
             tenant_id=tenant_id,
             contact_id=contact_id,
             phone_number=normalized_phone,
-            message=message,
         )
         db.add(conversation)
         try:
@@ -87,9 +81,6 @@ def get_or_create_conversation(db: Session, tenant_id, phone: str, contact_id=No
             existed = True
             if conversation is None:
                 raise
-    else:
-        if message is not None:
-            conversation.message = message
 
     if contact_id and conversation.contact_id is None:
         conversation.contact_id = contact_id

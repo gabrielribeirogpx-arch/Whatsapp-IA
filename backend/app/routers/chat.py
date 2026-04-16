@@ -314,7 +314,6 @@ async def send_message(
     )
     consume_usage(tenant, 1)
     contact.last_message_at = datetime.utcnow()
-    conversation.message = message_text
     conversation.updated_at = datetime.utcnow()
     db.commit()
     db.refresh(message)

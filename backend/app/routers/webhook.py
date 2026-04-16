@@ -251,7 +251,6 @@ async def webhook(request: Request, db: Session = Depends(get_db)):
                 tenant_id=tenant_id,
                 phone=normalized_phone,
                 contact_id=contact.id,
-                message=incoming_message,
             )
 
             if existed:
@@ -262,7 +261,6 @@ async def webhook(request: Request, db: Session = Depends(get_db)):
             if contact_name and not conversation.name:
                 conversation.name = contact_name
             ensure_conversation_contact_link(conversation, contact)
-            conversation.message = incoming_message
 
             if conversation.name is None and _looks_like_name(incoming_message):
                 conversation.name = incoming_message.strip()
@@ -378,7 +376,6 @@ Cliente disse:
             db.add(outbound_message)
             print("CONVERSA_ID:", conversation.id)
             print("MSG_SALVA:", outbound_message.text)
-            conversation.message = auto_reply
             conversation.updated_at = datetime.utcnow()
 
             print("LEAD_SYNC:", normalized_phone, tenant.id)
