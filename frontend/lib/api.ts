@@ -1,6 +1,5 @@
 import {
   CRMContact,
-  Conversation,
   KnowledgeCrawlPayload,
   KnowledgeCrawlResult,
   KnowledgeItem,
@@ -84,17 +83,6 @@ export async function tenantLogin(phone_number_id: string): Promise<TenantSessio
     throw new Error(`HTTP ${res.status}: ${body}`);
   }
   return res.json();
-}
-
-export async function getConversations(): Promise<Conversation[]> {
-  const res = await fetch(`${BASE_URL}/api/conversations`, { headers: tenantHeaders() });
-  if (!res.ok) throw new Error(await res.text());
-  const data = await res.json();
-  console.log('CONVERSAS:', data);
-
-  if (Array.isArray(data)) return data;
-  if (Array.isArray(data?.conversations)) return data.conversations;
-  return [];
 }
 
 export async function getMessages(phone: string): Promise<Message[]> {

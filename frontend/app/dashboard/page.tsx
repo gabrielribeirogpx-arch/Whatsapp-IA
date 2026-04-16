@@ -1,13 +1,13 @@
 'use client';
 
 import Link from 'next/link';
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 
 import { IconChats, IconUsers } from '../../components/icons';
 import { Conversation } from '../../lib/types';
 
 export default function DashboardPage() {
-  const [conversations] = useState<Conversation[]>([]);
+  const conversations: Conversation[] = [];
 
   const uniqueConversations = useMemo(() => {
     const seen = new Set<string>();
