@@ -5,7 +5,7 @@ from sqlalchemy import Boolean, DateTime, ForeignKey, String
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship, validates
 
-from backend.app.db.base import Base
+from app.db.base import Base
 
 
 class Message(Base):

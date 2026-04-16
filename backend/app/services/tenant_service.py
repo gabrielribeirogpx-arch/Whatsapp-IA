@@ -6,8 +6,8 @@ from fastapi import Depends, Header, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from backend.app.database import get_db
-from backend.app.models import AIConfig, Tenant
+from app.database import get_db
+from app.models import AIConfig, Tenant
 
 
 class TenantLimitError(RuntimeError):

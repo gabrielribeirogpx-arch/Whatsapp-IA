@@ -7,9 +7,9 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy import desc, select
 from sqlalchemy.orm import Session, load_only, selectinload
 
-from backend.app.database import get_db
-from backend.app.models import Contact, Conversation, Lead, Message, Tenant
-from backend.app.schemas.chat import (
+from app.database import get_db
+from app.models import Contact, Conversation, Lead, Message, Tenant
+from app.schemas.chat import (
     ContactOut,
     ConversationOut,
     MessageOut,
@@ -19,20 +19,20 @@ from backend.app.schemas.chat import (
     TenantUsageOut,
     ToggleAssignmentResponse,
 )
-from backend.app.services.contact_sync_service import ensure_conversation_contact_link, upsert_contact_for_phone
-from backend.app.services.conversation_service import get_or_create_conversation
-from backend.app.services.lead_service import get_or_create_lead
-from backend.app.services.message_service import sanitize_text
-from backend.app.utils.phone import normalize_phone
-from backend.app.services.realtime_service import sse_broker
-from backend.app.services.tenant_service import (
+from app.services.contact_sync_service import ensure_conversation_contact_link, upsert_contact_for_phone
+from app.services.conversation_service import get_or_create_conversation
+from app.services.lead_service import get_or_create_lead
+from app.services.message_service import sanitize_text
+from app.utils.phone import normalize_phone
+from app.services.realtime_service import sse_broker
+from app.services.tenant_service import (
     TenantLimitError,
     assert_tenant_can_send,
     consume_usage,
     get_current_tenant,
     login_tenant,
 )
-from backend.app.services.whatsapp_service import WhatsAppConfigError, enviar_mensagem
+from app.services.whatsapp_service import WhatsAppConfigError, enviar_mensagem
 
 router = APIRouter(prefix="/api", tags=["chat"])
 
