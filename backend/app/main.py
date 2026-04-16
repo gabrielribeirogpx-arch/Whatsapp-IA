@@ -12,6 +12,7 @@ from app.routers import auth
 from app.routers import products
 from app.routers import knowledge
 from app.routers import leads
+from app.routers import dashboard
 
 app = FastAPI()
 
@@ -37,6 +38,7 @@ app.include_router(conversations.router, prefix="/api/api")  # backward compatib
 app.include_router(products.router, prefix="/api")
 app.include_router(knowledge.router, prefix="/api")
 app.include_router(leads.router, prefix="/api")
+app.include_router(dashboard.router, prefix="/api")
 
 # webhook normalmente externo (Meta)
 app.include_router(webhook.router)
