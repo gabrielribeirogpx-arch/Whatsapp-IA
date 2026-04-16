@@ -4,7 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.db.base import Base
 from app.db.session import engine
 
-from app import models  # noqa
+import app.models  # noqa: F401
 
 from app.routers import webhook
 from app.routers import chat

@@ -5,7 +5,7 @@ from sqlalchemy import DateTime, ForeignKey, JSON, String, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.core.database import Base
+from app.db.base import Base
 
 
 class KnowledgeChunk(Base):
