@@ -27,6 +27,7 @@ type TooltipProps = {
     value: number;
     name: string;
     stroke: string;
+    dataKey?: string;
   }[];
   label?: string;
 };
@@ -44,14 +45,30 @@ function formatDateLabel(dateValue: string) {
 function CustomTooltip({ active, payload, label }: TooltipProps) {
   if (!active || !payload?.length) return null;
 
-  const sent = payload.find((entry) => entry.name === 'Enviadas')?.value ?? 0;
-  const received = payload.find((entry) => entry.name === 'Recebidas')?.value ?? 0;
+  const sent = payload.find((entry) => entry.dataKey === 'sent')?.value ?? 0;
+  const received = payload.find((entry) => entry.dataKey === 'received')?.value ?? 0;
+  const parsedDate = label ? new Date(label) : null;
+  const date = parsedDate && !Number.isNaN(parsedDate.getTime())
+    ? parsedDate.toLocaleDateString('pt-BR', {
+        day: '2-digit',
+        month: 'short'
+      })
+    : (label ?? '');
 
   return (
-    <div className="rounded-md border border-gray-200 bg-white px-2 py-1 text-[12px] shadow-sm">
-      <p className="text-gray-500">{label}</p>
-      <p className="text-gray-700">Enviadas: {sent}</p>
-      <p className="text-gray-700">Recebidas: {received}</p>
+    <div
+      style={{
+        background: '#fff',
+        padding: '6px 10px',
+        borderRadius: 8,
+        border: '1px solid #eee',
+        fontSize: 12,
+        color: '#444',
+        boxShadow: '0 2px 6px rgba(0,0,0,0.05)',
+        whiteSpace: 'nowrap'
+      }}
+    >
+      {date} • E:{sent} R:{received}
     </div>
   );
 }
