@@ -23,11 +23,9 @@ class ConversationOut(BaseModel):
 
 class MessageOut(BaseModel):
     id: uuid.UUID
-    tenant_id: uuid.UUID
-    phone: str
     content: str
-    from_me: bool
-    timestamp: datetime
+    role: str
+    created_at: datetime
 
     class Config:
         from_attributes = True

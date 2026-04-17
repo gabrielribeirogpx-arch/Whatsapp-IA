@@ -18,7 +18,7 @@ class Message(Base):
     from_me: Mapped[bool] = mapped_column(Boolean)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
-    conversation = relationship("Conversation", back_populates="messages")
+    conversation = relationship("Conversation", back_populates="messages", lazy="select")
 
     @validates("conversation")
     def _sync_tenant_from_conversation(self, key: str, conversation):
@@ -33,6 +33,10 @@ class Message(Base):
     @property
     def content(self) -> str:
         return self.text
+
+    @property
+    def role(self) -> str:
+        return "assistant" if self.from_me else "user"
 
     @property
     def timestamp(self) -> datetime:
