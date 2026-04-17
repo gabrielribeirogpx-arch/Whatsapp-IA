@@ -25,6 +25,25 @@ export type TenantSession = {
   slug?: string;
 };
 
+
+export type BotMatchType = 'contains' | 'exact';
+
+export type BotRule = {
+  id: string;
+  tenant_id: string;
+  trigger: string;
+  response: string;
+  match_type: BotMatchType;
+  created_at?: string;
+  updated_at?: string;
+};
+
+export type BotRulePayload = {
+  trigger: string;
+  response: string;
+  match_type: BotMatchType;
+};
+
 export type Contact = {
   id: string;
   tenant_id?: string;
