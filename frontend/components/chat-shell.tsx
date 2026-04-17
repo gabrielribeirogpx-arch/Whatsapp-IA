@@ -113,12 +113,43 @@ export default function ChatShell() {
     () => contacts.find((contact) => contact.id === selectedContactId),
     [contacts, selectedContactId]
   );
+  const selectedConversation = useMemo(
+    () => conversations.find((item) => String(item.contact_id ?? item.id) === selectedContactId),
+    [conversations, selectedContactId]
+  );
 
   useEffect(() => {
     if (!selectedContactId) return;
 
     fetchMessages(selectedContactId).catch(() => undefined);
   }, [selectedContactId, fetchMessages]);
+
+  useEffect(() => {
+    if (!selectedContactId) return;
+    if (typeof window === 'undefined') return;
+
+    const tenantId = localStorage.getItem('tenant_id');
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL;
+    if (!selectedConversation || !tenantId || !apiUrl) return;
+
+    const baseUrl = apiUrl.endsWith('/') ? apiUrl.slice(0, -1) : apiUrl;
+    const eventSource = new EventSource(
+      `${baseUrl}/api/sse/messages/${selectedConversation.id}?tenant_id=${encodeURIComponent(tenantId)}`
+    );
+
+    eventSource.onmessage = () => {
+      fetchMessages(selectedContactId).catch(() => undefined);
+      getConversations().then(setConversations).catch(() => undefined);
+    };
+
+    eventSource.onerror = () => {
+      eventSource.close();
+    };
+
+    return () => {
+      eventSource.close();
+    };
+  }, [selectedContactId, selectedConversation, fetchMessages]);
 
 
   useEffect(() => {

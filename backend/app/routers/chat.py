@@ -315,7 +315,9 @@ async def send_message(
     db.commit()
     db.refresh(message)
 
-    await sse_broker.publish(f"{tenant.id}:{phone}", {"event": "message", "message": MessageOut.model_validate(message).model_dump(mode="json")})
+    message_payload = {"event": "message", "message": MessageOut.model_validate(message).model_dump(mode="json")}
+    await sse_broker.publish(f"{tenant.id}:{phone}", message_payload)
+    await sse_broker.publish(f"{tenant.id}:{conversation.id}", message_payload)
     return message
 
 
@@ -382,6 +384,44 @@ async def stream_messages(phone: str, tenant: Tenant = Depends(get_current_tenan
     sanitized_phone = normalize_phone(phone)
     print("PHONE_NORMALIZED:", sanitized_phone)
     channel = f"{tenant.id}:{sanitized_phone}"
+    queue = await sse_broker.subscribe(channel)
+
+    async def event_generator():
+        try:
+            while True:
+                try:
+                    data = await asyncio.wait_for(queue.get(), timeout=20)
+                    yield data
+                except asyncio.TimeoutError:
+                    yield ": ping\n\n"
+        finally:
+            sse_broker.unsubscribe(channel, queue)
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+
+@router.get("/sse/messages/{conversation_id}")
+async def stream_messages_by_conversation(
+    conversation_id: UUID,
+    tenant: Tenant = Depends(get_current_tenant),
+    db: Session = Depends(get_db),
+):
+    conversation = (
+        db.execute(
+            select(Conversation)
+            .options(load_only(Conversation.id))
+            .where(
+                Conversation.id == conversation_id,
+                Conversation.tenant_id == tenant.id,
+            )
+        )
+        .scalars()
+        .first()
+    )
+    if not conversation:
+        raise HTTPException(status_code=404, detail="Conversa não encontrada")
+
+    channel = f"{tenant.id}:{conversation.id}"
     queue = await sse_broker.subscribe(channel)
 
     async def event_generator():
