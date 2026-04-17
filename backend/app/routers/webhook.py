@@ -7,9 +7,11 @@ from sqlalchemy.orm import Session, load_only
 
 from app.database import get_db
 from app.models import Conversation, Message
+from app.schemas.chat import MessageOut
 from app.services.contact_sync_service import ensure_conversation_contact_link, upsert_contact_for_phone
 from app.services.conversation_service import get_or_create_conversation
 from app.services.message_router import handle_incoming_message
+from app.services.realtime_service import sse_broker
 from app.models import Tenant
 from app.services.tenant_service import get_or_create_default_tenant
 from app.utils.phone import normalize_phone
@@ -156,6 +158,12 @@ async def webhook(request: Request, db: Session = Depends(get_db)):
             db.add(inbound_message)
             db.commit()
             db.refresh(inbound_message)
+            message_payload = {
+                "event": "message",
+                "message": MessageOut.model_validate(inbound_message).model_dump(mode="json"),
+            }
+            await sse_broker.publish(f"{tenant.id}:{normalized_phone}", message_payload)
+            await sse_broker.publish(f"{tenant.id}:{conversation.id}", message_payload)
             print("CONVERSA_ID:", conversation.id)
             print("MSG_SALVA:", inbound_message.text)
 
