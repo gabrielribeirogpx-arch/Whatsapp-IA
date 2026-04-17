@@ -8,8 +8,6 @@ from sqlalchemy.orm import Session
 from app.models import BotRule, Message, Tenant
 from app.services.whatsapp_service import WhatsAppConfigError, enviar_mensagem
 
-FALLBACK_RESPONSE = "Recebi sua mensagem! Em instantes um atendente vai continuar por aqui."
-
 
 def _matches(rule: BotRule, incoming_text: str) -> bool:
     trigger = (rule.trigger or "").strip().lower()
@@ -35,7 +33,7 @@ def _create_outbound_message(db: Session, conversation_id, tenant_id, text: str)
     return reply_message
 
 
-def handle_bot(db: Session, message: Message, conversation) -> Message:
+def handle_bot(db: Session, message: Message, conversation) -> bool:
     tenant = db.execute(select(Tenant).where(Tenant.id == conversation.tenant_id)).scalars().first()
 
     rules = (
@@ -48,11 +46,14 @@ def handle_bot(db: Session, message: Message, conversation) -> Message:
         .all()
     )
 
-    selected_response = FALLBACK_RESPONSE
+    selected_response = None
     for rule in rules:
         if _matches(rule, message.text):
             selected_response = rule.response
             break
+
+    if not selected_response:
+        return False
 
     if tenant:
         try:
@@ -65,11 +66,11 @@ def handle_bot(db: Session, message: Message, conversation) -> Message:
         except WhatsAppConfigError:
             pass
 
-    outbound = _create_outbound_message(
+    _create_outbound_message(
         db=db,
         conversation_id=conversation.id,
         tenant_id=conversation.tenant_id,
         text=selected_response,
     )
     conversation.updated_at = datetime.utcnow()
-    return outbound
+    return True

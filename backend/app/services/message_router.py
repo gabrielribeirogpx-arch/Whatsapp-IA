@@ -12,6 +12,10 @@ def handle_incoming_message(db: Session, message: Message, conversation: Convers
     if mode == "human":
         return None
     elif mode == "bot":
-        return handle_bot(db, message, conversation)
+        matched = handle_bot(db, message, conversation)
+        print(f"[BOT] matched={matched} mode={conversation.mode}")
+        if not matched:
+            return None
+        return True
 
     return None
