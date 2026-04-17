@@ -93,7 +93,6 @@ def list_conversations(
                     Conversation.phone_number,
                     Conversation.name,
                     Conversation.avatar_url,
-                    Conversation.message,
                     Conversation.updated_at,
                 )
             )
