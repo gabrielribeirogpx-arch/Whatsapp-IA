@@ -143,14 +143,24 @@ export async function getMessagesByConversation(conversationId: string): Promise
 }
 
 export async function updateConversationMode(conversationId: string, mode: ConversationMode) {
-  const token =
-    typeof window !== 'undefined' ? localStorage.getItem(TOKEN_STORAGE_KEY) : null;
+  const token = localStorage.getItem('token');
+  const newMode = mode;
+  const API_URL = process.env.NEXT_PUBLIC_API_URL;
+
+  if (!API_URL) {
+    throw new Error('NEXT_PUBLIC_API_URL não está configurado.');
+  }
+
+  console.log('MODE:', newMode);
+  console.log('PATCH MODE URL:', `${API_URL}/api/conversations/${conversationId}/mode?mode=${newMode}`);
 
   const res = await fetch(
-    buildApiUrl(`/api/conversations/${conversationId}/mode?mode=${encodeURIComponent(mode)}`),
+    `${process.env.NEXT_PUBLIC_API_URL}/api/conversations/${conversationId}/mode?mode=${newMode}`,
     {
       method: 'PATCH',
-      headers: token ? { Authorization: `Bearer ${token}` } : undefined
+      headers: {
+        Authorization: `Bearer ${token}`
+      }
     }
   );
 
