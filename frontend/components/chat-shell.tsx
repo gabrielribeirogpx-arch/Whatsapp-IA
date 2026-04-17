@@ -232,7 +232,7 @@ export default function ChatShell() {
     try {
       console.log('MODE SEND:', newMode);
 
-      const res = await fetch(`/api/conversations/${conversationId}/mode`, {
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/conversations/${conversationId}/mode`, {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json'
