@@ -7,7 +7,7 @@ export type Conversation = {
   avatar_url?: string | null;
   stage?: string;
   score?: number;
-  status: 'bot' | 'human' | string;
+  mode: 'human' | 'bot' | 'ai' | string;
   last_message: string;
   updated_at: string;
 };
