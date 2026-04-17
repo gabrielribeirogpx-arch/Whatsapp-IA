@@ -37,7 +37,11 @@ def upgrade() -> None:
             sa.ForeignKeyConstraint(["tenant_id"], ["tenants.id"], ondelete="CASCADE"),
             sa.PrimaryKeyConstraint("id"),
         )
-        op.create_index(op.f("ix_products_tenant_id"), "products", ["tenant_id"], unique=False)
+    inspector = inspect(bind)
+    existing_indexes = {index["name"] for index in inspector.get_indexes("products")}
+    tenant_index_name = op.f("ix_products_tenant_id")
+    if tenant_index_name not in existing_indexes:
+        op.create_index(tenant_index_name, "products", ["tenant_id"], unique=False)
 
 
 def downgrade() -> None:
