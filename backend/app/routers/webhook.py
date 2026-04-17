@@ -6,104 +6,15 @@ from sqlalchemy import desc, select
 from sqlalchemy.orm import Session, load_only
 
 from app.database import get_db
-from app.models import Conversation, Message, Product
-from app.models.lead import LeadTemperature
-from app.services.ai_provider import classificar_lead
-from app.services.ai_service import generate_ai_response
+from app.models import Conversation, Message
 from app.services.contact_sync_service import ensure_conversation_contact_link, upsert_contact_for_phone
 from app.services.conversation_service import get_or_create_conversation
-from app.services.lead_service import get_or_create_lead
 from app.services.message_router import handle_incoming_message
-from app.services.knowledge_service import build_rag_context, search_relevant_knowledge
 from app.models import Tenant
 from app.services.tenant_service import get_or_create_default_tenant
-from app.services.whatsapp_service import enviar_mensagem
 from app.utils.phone import normalize_phone
 
 router = APIRouter()
-
-ATENDENTE_PROMPT = """Você é um atendente profissional via WhatsApp.
-
-Seu objetivo é:
-- Ajudar o cliente
-- Responder dúvidas
-- Ser claro e educado
-
-REGRAS:
-- Não force venda
-- Seja direto
-- Seja útil"""
-
-VENDEDOR_PROMPT = """Você é um especialista em vendas via WhatsApp.
-
-Cliente disse:
-"{incoming_message}"
-
-Histórico:
-{history}
-
-Nível do cliente:
-{lead_level}
-
-OBJETIVO:
-Converter o cliente.
-
-ESTRATÉGIA:
-
-Se FRIO:
-- Seja leve
-- Gere curiosidade
-- Faça perguntas simples
-
-Se MORNO:
-- Explore necessidade
-- Mostre valor
-- Direcione
-
-Se QUENTE:
-- Seja direto
-- Crie urgência
-- Leve para ação (compra/agendamento)
-
-REGRAS:
-- Nunca seja genérico
-- Sempre faça pergunta
-- Seja curto (WhatsApp)
-- Pareça humano"""
-
-
-def _build_products_context(products: list[Product]) -> str:
-    lines = ["Você é um vendedor. Aqui estão os produtos disponíveis:"]
-
-    for index, product in enumerate(products, start=1):
-        lines.extend(
-            [
-                f"Produto {index}:",
-                f"- Nome: {product.name}",
-                f"- Descrição: {product.description or '-'}",
-                f"- Preço: {product.price or '-'}",
-                f"- Benefícios: {product.benefits or '-'}",
-                f"- Objeções comuns: {product.objections or '-'}",
-                f"- Cliente ideal: {product.target_customer or '-'}",
-            ]
-        )
-
-    lines.extend(
-        [
-            "",
-            "REGRAS CRÍTICAS:",
-            "- use os produtos acima para responder",
-            "- sugira produto quando fizer sentido",
-            "- não invente produto",
-            "- responda como vendedor",
-        ]
-    )
-    return "\n".join(lines)
-
-
-def _join_prompt_with_products(products_context: str, prompt: str) -> str:
-    return f"{products_context}\n\n{prompt.strip()}"
-
 
 def _looks_like_name(text: str) -> bool:
     if not text:
@@ -118,53 +29,6 @@ def _looks_like_name(text: str) -> bool:
 
     words = cleaned.split()
     return len(words) <= 4
-
-
-def _keyword_score(message: str) -> int:
-    normalized = (message or "").strip().lower()
-    if not normalized:
-        return 0
-
-    hot_keywords = ["comprar", "fechar", "agendar", "hoje", "urgente", "preço", "valor"]
-    warm_keywords = ["interesse", "detalhes", "planos", "benefícios", "como funciona"]
-    cold_keywords = ["depois", "talvez", "sem interesse", "não quero"]
-
-    score = 0
-    for keyword in hot_keywords:
-        if keyword in normalized:
-            score += 12
-    for keyword in warm_keywords:
-        if keyword in normalized:
-            score += 6
-    for keyword in cold_keywords:
-        if keyword in normalized:
-            score -= 10
-
-    if "?" in normalized:
-        score += 3
-
-    return score
-
-
-def _lead_to_updates(lead_level: str, current_score: int, incoming_message: str) -> tuple[str, int, str]:
-    normalized = (lead_level or "").strip().lower()
-    keyword_delta = _keyword_score(incoming_message)
-
-    if normalized == "quente":
-        temperature = LeadTemperature.HOT.value
-        base_delta = 15
-        stage = "quente"
-    elif normalized == "frio":
-        temperature = LeadTemperature.COLD.value
-        base_delta = -5
-        stage = "frio"
-    else:
-        temperature = LeadTemperature.WARM.value
-        base_delta = 8
-        stage = "morno"
-
-    score = max(0, min(100, current_score + base_delta + keyword_delta))
-    return stage, score, temperature
 
 
 @router.get("/webhook")
@@ -237,7 +101,6 @@ async def webhook(request: Request, db: Session = Depends(get_db)):
             tenant_id = tenant.id
             print("TENANT ID:", tenant.id, type(tenant.id))
 
-            ai_mode = tenant.ai_mode if tenant.ai_mode in {"atendente", "vendedor"} else "atendente"
 
             contact = upsert_contact_for_phone(
                 db,
@@ -282,15 +145,6 @@ async def webhook(request: Request, db: Session = Depends(get_db)):
 
             contact.last_message_at = datetime.utcnow()
 
-            print("LEAD_SYNC:", normalized_phone, tenant.id)
-            lead = get_or_create_lead(
-                db=db,
-                tenant_id=tenant.id,
-                phone=conversation.phone_number or normalized_phone,
-                name=conversation.name,
-                last_message=incoming_message,
-            )
-
             print("SALVANDO_MSG:", normalized_phone, incoming_message)
             inbound_message = Message(
                 tenant_id=conversation.tenant_id,
@@ -307,100 +161,7 @@ async def webhook(request: Request, db: Session = Depends(get_db)):
 
             handle_incoming_message(db, inbound_message, conversation)
 
-            recent_messages = db.execute(
-                select(Message)
-                .where(Message.conversation_id == conversation.id)
-                .order_by(desc(Message.created_at), desc(Message.id))
-                .limit(10)
-            ).scalars().all()
-
-            history = ""
-            for msg in reversed(recent_messages):
-                role = "Cliente" if not msg.from_me else "Atendente"
-                history += f"{role}: {msg.text}\n"
-
-            lead_level = classificar_lead(incoming_message)
-            contact.stage, contact.score, lead.temperature = _lead_to_updates(lead_level, contact.score, incoming_message)
-            lead.score = contact.score
-            lead.last_message = incoming_message
-            lead.last_interaction = datetime.utcnow()
-            lead.last_contact_at = datetime.utcnow()
-
-            products = (
-                db.execute(select(Product).where(Product.tenant_id == tenant_id).order_by(Product.created_at.asc(), Product.id.asc()))
-                .scalars()
-                .all()
-            )
-
-            if not products:
-                auto_reply = "Nosso catálogo ainda não foi configurado"
-            else:
-                products_context = _build_products_context(products)
-
-                if ai_mode == "vendedor":
-                    prompt = VENDEDOR_PROMPT.format(
-                        incoming_message=incoming_message,
-                        history=history,
-                        lead_level=lead_level.upper(),
-                    )
-                else:
-                    prompt = f"""
-{ATENDENTE_PROMPT}
-
-Histórico:
-{history}
-
-Cliente disse:
-"{incoming_message}"
-"""
-
-                prompt = _join_prompt_with_products(products_context, prompt)
-                knowledge_items = search_relevant_knowledge(
-                    db=db,
-                    tenant_id=tenant_id,
-                    query_text=incoming_message,
-                    top_k=5,
-                )
-                prompt = build_rag_context(prompt, knowledge_items)
-
-                try:
-                    auto_reply = await generate_ai_response(prompt)
-                except Exception as e:
-                    print(f"Erro IA: {e}")
-                    auto_reply = "Desculpa, tive um erro aqui. Pode repetir?"
-
-            print(f"IA respondeu: {auto_reply}")
-            enviar_mensagem(
-                normalized_phone,
-                auto_reply,
-                token=tenant.whatsapp_token,
-                phone_number_id=tenant.phone_number_id,
-            )
-
-            print("SALVANDO_MSG:", normalized_phone, auto_reply)
-            outbound_message = Message(
-                tenant_id=conversation.tenant_id,
-                conversation_id=conversation.id,
-                text=auto_reply,
-                from_me=True,
-                created_at=datetime.utcnow(),
-            )
-            db.add(outbound_message)
-            print("CONVERSA_ID:", conversation.id)
-            print("MSG_SALVA:", outbound_message.text)
-            conversation.updated_at = datetime.utcnow()
-
-            print("LEAD_SYNC:", normalized_phone, tenant.id)
-            lead = get_or_create_lead(
-                db=db,
-                tenant_id=tenant.id,
-                phone=conversation.phone_number or normalized_phone,
-                name=conversation.name,
-                last_message=auto_reply,
-            )
-
             print(f"Evento processado (telefone={normalized_phone}, conteúdo={incoming_message})")
-            print(f"Resposta automática enviada para {normalized_phone}")
 
         db.commit()
     except Exception as e:
