@@ -5,8 +5,8 @@ import { useRouter } from 'next/navigation';
 
 import ChatWindow from './ChatWindow';
 import Sidebar from './Sidebar';
-import { getConversations, getMessagesByConversation, sendMessage } from '../lib/api';
-import { ChatMessage, Contact, Conversation, Message } from '../lib/types';
+import { getConversations, getMessagesByConversation, sendMessage, updateConversationMode } from '../lib/api';
+import { ChatMessage, Contact, Conversation, ConversationMode, Message } from '../lib/types';
 
 function toChatMessage(message: Message): ChatMessage {
   const parsedDate = new Date(message.created_at);
@@ -29,6 +29,10 @@ export default function ChatShell() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputValue, setInputValue] = useState('');
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [mode, setMode] = useState<ConversationMode>('human');
+  const [modeUpdating, setModeUpdating] = useState(false);
+  const [modeNotice, setModeNotice] = useState('');
+  const [modeError, setModeError] = useState('');
 
 
   useEffect(() => {
@@ -119,6 +123,32 @@ export default function ChatShell() {
   );
 
   useEffect(() => {
+    if (!selectedConversation) {
+      setMode('human');
+      return;
+    }
+
+    const status = selectedConversation.status?.toLowerCase();
+    if (status === 'bot' || status === 'ai' || status === 'human') {
+      setMode(status);
+      return;
+    }
+
+    setMode('human');
+  }, [selectedConversation]);
+
+  useEffect(() => {
+    if (!modeNotice && !modeError) return;
+
+    const timeoutId = window.setTimeout(() => {
+      setModeNotice('');
+      setModeError('');
+    }, 2200);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [modeNotice, modeError]);
+
+  useEffect(() => {
     if (!selectedContactId) return;
 
     fetchMessages(selectedContactId).catch(() => undefined);
@@ -189,6 +219,32 @@ export default function ChatShell() {
     }
   }
 
+  async function handleModeChange(nextMode: ConversationMode) {
+    if (!selectedConversation || modeUpdating || nextMode === mode) return;
+
+    const previousMode = mode;
+    setModeError('');
+    setModeNotice('');
+    setModeUpdating(true);
+    setMode(nextMode);
+
+    try {
+      await updateConversationMode(String(selectedConversation.id), nextMode);
+      setConversations((current) =>
+        current.map((conversation) =>
+          conversation.id === selectedConversation.id ? { ...conversation, status: nextMode } : conversation
+        )
+      );
+      setModeNotice('Modo atualizado.');
+    } catch (error) {
+      console.error('Falha ao atualizar modo da conversa:', error);
+      setMode(previousMode);
+      setModeError('Não foi possível atualizar o modo.');
+    } finally {
+      setModeUpdating(false);
+    }
+  }
+
   return (
     <div className="wa-layout">
       <Sidebar
@@ -206,6 +262,11 @@ export default function ChatShell() {
         onInputChange={setInputValue}
         onSend={onSend}
         onToggleSidebar={() => setSidebarOpen((value) => !value)}
+        mode={mode}
+        modeUpdating={modeUpdating}
+        modeNotice={modeNotice}
+        modeError={modeError}
+        onModeChange={handleModeChange}
       />
     </div>
   );

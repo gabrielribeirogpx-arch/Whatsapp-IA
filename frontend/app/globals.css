@@ -570,6 +570,72 @@ input {
   gap: 12px;
 }
 
+.wa-chat-actions {
+  margin-left: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.4rem;
+}
+
+.wa-mode-selector {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid #e5e7eb;
+  background: #f8fafc;
+  border-radius: 999px;
+  padding: 0.2rem;
+  gap: 0.2rem;
+}
+
+.wa-mode-button {
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  padding: 0.38rem 0.7rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #4b5563;
+  cursor: pointer;
+}
+
+.wa-mode-button:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
+.wa-mode-button.human.active {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.wa-mode-button.bot.active {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.wa-mode-button.ai.active {
+  background: #ede9fe;
+  color: #5b21b6;
+}
+
+.wa-mode-feedback {
+  margin: 0;
+  font-size: 0.78rem;
+  color: #475569;
+}
+
+.wa-mode-feedback.success {
+  color: #0f766e;
+}
+
+.wa-mode-feedback.error {
+  color: #b91c1c;
+}
+
 .wa-chat-header h1 {
   margin: 0;
   font-size: 1.125rem;
@@ -686,6 +752,16 @@ input {
     display: inline-flex;
     align-items: center;
     justify-content: center;
+  }
+
+  .wa-chat-header {
+    flex-wrap: wrap;
+  }
+
+  .wa-chat-actions {
+    margin-left: 0;
+    width: 100%;
+    align-items: flex-start;
   }
 }
 
