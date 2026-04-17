@@ -7,6 +7,7 @@ Create Date: 2026-04-15 16:20:00
 
 from alembic import op
 import sqlalchemy as sa
+from sqlalchemy import inspect
 from sqlalchemy.dialects import postgresql
 
 
@@ -26,19 +27,28 @@ DEFAULT_STAGES = [
 
 
 def upgrade() -> None:
-    op.create_table(
-        "pipeline_stages",
-        sa.Column("id", postgresql.UUID(as_uuid=True), nullable=False),
-        sa.Column("tenant_id", postgresql.UUID(as_uuid=True), nullable=False),
-        sa.Column("name", sa.String(length=100), nullable=False),
-        sa.Column("position", sa.Integer(), nullable=False, server_default="0"),
-        sa.Column("created_at", sa.DateTime(), nullable=False, server_default=sa.func.now()),
-        sa.ForeignKeyConstraint(["tenant_id"], ["tenants.id"]),
-        sa.PrimaryKeyConstraint("id"),
-        sa.UniqueConstraint("tenant_id", "name", name="uq_pipeline_stage_tenant_name"),
-        sa.UniqueConstraint("tenant_id", "position", name="uq_pipeline_stage_tenant_position"),
-    )
-    op.create_index(op.f("ix_pipeline_stages_tenant_id"), "pipeline_stages", ["tenant_id"], unique=False)
+    bind = op.get_bind()
+    inspector = inspect(bind)
+
+    if "pipeline_stages" not in inspector.get_table_names():
+        op.create_table(
+            "pipeline_stages",
+            sa.Column("id", postgresql.UUID(as_uuid=True), nullable=False),
+            sa.Column("tenant_id", postgresql.UUID(as_uuid=True), nullable=False),
+            sa.Column("name", sa.String(length=100), nullable=False),
+            sa.Column("position", sa.Integer(), nullable=False, server_default="0"),
+            sa.Column("created_at", sa.DateTime(), nullable=False, server_default=sa.func.now()),
+            sa.ForeignKeyConstraint(["tenant_id"], ["tenants.id"]),
+            sa.PrimaryKeyConstraint("id"),
+            sa.UniqueConstraint("tenant_id", "name", name="uq_pipeline_stage_tenant_name"),
+            sa.UniqueConstraint("tenant_id", "position", name="uq_pipeline_stage_tenant_position"),
+        )
+
+    inspector = inspect(bind)
+    existing_pipeline_indexes = {index["name"] for index in inspector.get_indexes("pipeline_stages")}
+    pipeline_tenant_index = op.f("ix_pipeline_stages_tenant_id")
+    if pipeline_tenant_index not in existing_pipeline_indexes:
+        op.create_index(pipeline_tenant_index, "pipeline_stages", ["tenant_id"], unique=False)
 
     op.add_column("leads", sa.Column("stage_id", postgresql.UUID(as_uuid=True), nullable=True))
     op.add_column("leads", sa.Column("temperature", sa.String(length=16), nullable=False, server_default="cold"))
