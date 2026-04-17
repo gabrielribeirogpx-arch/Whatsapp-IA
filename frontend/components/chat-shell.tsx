@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 
 import ChatWindow from './ChatWindow';
 import Sidebar from './Sidebar';
-import { getConversations, getMessagesByConversation, sendMessage, updateConversationMode } from '../lib/api';
+import { getConversations, getMessagesByConversation, sendMessage } from '../lib/api';
 import { ChatMessage, Contact, Conversation, ConversationMode, Message } from '../lib/types';
 
 function toChatMessage(message: Message): ChatMessage {
@@ -219,25 +219,42 @@ export default function ChatShell() {
     }
   }
 
-  async function handleModeChange(nextMode: ConversationMode) {
-    if (!selectedConversation || modeUpdating || nextMode === mode) return;
+  async function handleChangeMode(newMode: ConversationMode) {
+    if (!selectedConversation || modeUpdating || newMode === mode) return;
 
+    const conversationId = String(selectedConversation.id);
     const previousMode = mode;
+
     setModeError('');
     setModeNotice('');
     setModeUpdating(true);
-    setMode(nextMode);
 
     try {
-      await updateConversationMode(String(selectedConversation.id), nextMode);
+      console.log('MODE SEND:', newMode);
+
+      const res = await fetch(`/api/conversations/${conversationId}/mode`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          mode: newMode
+        })
+      });
+
+      if (!res.ok) {
+        throw new Error('Erro ao atualizar modo');
+      }
+
+      setMode(newMode);
       setConversations((current) =>
         current.map((conversation) =>
-          conversation.id === selectedConversation.id ? { ...conversation, status: nextMode } : conversation
+          conversation.id === selectedConversation.id ? { ...conversation, status: newMode } : conversation
         )
       );
       setModeNotice('Modo atualizado.');
-    } catch (error) {
-      console.error('Falha ao atualizar modo da conversa:', error);
+    } catch (err) {
+      console.error('Erro ao atualizar modo:', err);
       setMode(previousMode);
       setModeError('Não foi possível atualizar o modo.');
     } finally {
@@ -266,7 +283,7 @@ export default function ChatShell() {
         modeUpdating={modeUpdating}
         modeNotice={modeNotice}
         modeError={modeError}
-        onModeChange={handleModeChange}
+        onModeChange={handleChangeMode}
       />
     </div>
   );
