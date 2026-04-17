@@ -11,7 +11,9 @@ import {
   ProductPayload,
   SendMessagePayload,
   TenantSession,
-  PipelineStage
+  PipelineStage,
+  BotRule,
+  BotRulePayload
 } from './types';
 
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL;
@@ -255,4 +257,27 @@ export async function moveLeadToStage(leadId: string, stageId: string) {
   });
 
   return parseApiResponse(res);
+}
+
+
+export async function getBotRules(): Promise<BotRule[]> {
+  const res = await apiFetch('/api/bot/rules');
+  return parseApiResponse<BotRule[]>(res);
+}
+
+export async function createBotRule(payload: BotRulePayload): Promise<BotRule> {
+  const res = await apiFetch('/api/bot/rules', {
+    method: 'POST',
+    body: JSON.stringify(payload)
+  });
+
+  return parseApiResponse<BotRule>(res);
+}
+
+export async function deleteBotRule(ruleId: string): Promise<void> {
+  const res = await apiFetch(`/api/bot/rules/${ruleId}`, {
+    method: 'DELETE'
+  });
+
+  if (!res.ok) throw new Error(await res.text());
 }

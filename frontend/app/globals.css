@@ -747,6 +747,22 @@ input {
   resize: vertical;
 }
 
+
+.products-form .bot-form-select {
+  width: 100%;
+  border: 1px solid #d1d5db;
+  border-radius: 10px;
+  padding: 0.65rem;
+  font: inherit;
+  background: #fff;
+}
+
+.bot-rules-table-wrap {
+  overflow: auto;
+  border: 1px solid #f1f5f9;
+  border-radius: 10px;
+}
+
 @media (max-width: 900px) {
   .products-layout {
     grid-template-columns: 1fr;
