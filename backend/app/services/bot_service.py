@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+import unicodedata
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -9,16 +10,28 @@ from app.models import BotRule, Message, Tenant
 from app.services.whatsapp_service import WhatsAppConfigError, enviar_mensagem
 
 
+def normalize(text: str) -> str:
+    normalized = (text or "").lower().strip()
+    normalized = unicodedata.normalize("NFKD", normalized)
+    normalized = "".join(char for char in normalized if not unicodedata.combining(char))
+    normalized = " ".join(normalized.split())
+    return normalized
+
+
 def _matches(rule: BotRule, incoming_text: str) -> bool:
-    trigger = (rule.trigger or "").strip().lower()
-    text = (incoming_text or "").strip().lower()
-    if not trigger or not text:
+    trigger_normalized = normalize(rule.trigger)
+    message_normalized = normalize(incoming_text)
+    print(f"[BOT MATCH] trigger={trigger_normalized} message={message_normalized}")
+    if not trigger_normalized or not message_normalized:
         return False
 
     if rule.match_type == "exact":
-        return text == trigger
+        return trigger_normalized == message_normalized
 
-    return trigger in text
+    if rule.match_type == "contains":
+        return trigger_normalized in message_normalized
+
+    return trigger_normalized in message_normalized
 
 
 def _create_outbound_message(db: Session, conversation_id, tenant_id, text: str) -> Message:
