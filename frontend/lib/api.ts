@@ -143,10 +143,16 @@ export async function getMessagesByConversation(conversationId: string): Promise
 }
 
 export async function updateConversationMode(conversationId: string, mode: ConversationMode) {
-  const res = await apiFetch(`/api/conversations/${conversationId}/mode`, {
-    method: 'PATCH',
-    body: JSON.stringify({ mode })
-  });
+  const token =
+    typeof window !== 'undefined' ? localStorage.getItem(TOKEN_STORAGE_KEY) : null;
+
+  const res = await fetch(
+    buildApiUrl(`/api/conversations/${conversationId}/mode?mode=${encodeURIComponent(mode)}`),
+    {
+      method: 'PATCH',
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined
+    }
+  );
 
   return parseApiResponse(res);
 }
