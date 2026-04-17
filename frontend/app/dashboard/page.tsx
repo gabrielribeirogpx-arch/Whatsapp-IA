@@ -50,7 +50,7 @@ export default function DashboardPage() {
   }, [conversations]);
 
   const humanInProgress = useMemo(
-    () => uniqueConversations.filter((conversation) => conversation.status === 'human').length,
+    () => uniqueConversations.filter((conversation) => conversation.mode === 'human').length,
     [uniqueConversations]
   );
 

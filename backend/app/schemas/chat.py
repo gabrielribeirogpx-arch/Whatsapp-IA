@@ -13,7 +13,7 @@ class ConversationOut(BaseModel):
     avatar_url: str | None = None
     stage: str = "novo"
     score: int = 0
-    status: str
+    mode: str
     last_message: str
     updated_at: datetime
 

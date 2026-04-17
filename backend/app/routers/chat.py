@@ -94,6 +94,7 @@ def list_conversations(
                     Conversation.phone_number,
                     Conversation.name,
                     Conversation.avatar_url,
+                    Conversation.mode,
                     Conversation.updated_at,
                 )
             )
@@ -134,7 +135,7 @@ def list_conversations(
                 avatar_url=conversation.avatar_url,
                 stage=conversation.contact.stage if conversation.contact else "novo",
                 score=conversation.contact.score if conversation.contact else 0,
-                status=getattr(conversation, "status", None) or "human",
+                mode=conversation.mode or "human",
                 last_message=(last_message_item.text if last_message_item else ""),
                 updated_at=conversation.updated_at,
             )

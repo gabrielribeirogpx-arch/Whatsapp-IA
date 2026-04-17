@@ -79,7 +79,7 @@ export default function ChatShell() {
           lastMessageAt: conversation.updated_at,
           isOnline,
           isTyping,
-          status: conversation.status
+          status: conversation.mode
         };
       }),
     [conversations]
@@ -124,17 +124,14 @@ export default function ChatShell() {
 
   useEffect(() => {
     if (!selectedConversation) {
-      setMode('human');
       return;
     }
 
-    const status = selectedConversation.status?.toLowerCase();
-    if (status === 'bot' || status === 'ai' || status === 'human') {
-      setMode(status);
+    const currentMode = selectedConversation.mode?.toLowerCase();
+    if (currentMode === 'bot' || currentMode === 'ai' || currentMode === 'human') {
+      setMode(currentMode);
       return;
     }
-
-    setMode('human');
   }, [selectedConversation]);
 
   useEffect(() => {
@@ -235,7 +232,7 @@ export default function ChatShell() {
       setMode(newMode);
       setConversations((current) =>
         current.map((conversation) =>
-          conversation.id === selectedConversation.id ? { ...conversation, status: newMode } : conversation
+          conversation.id === selectedConversation.id ? { ...conversation, mode: newMode } : conversation
         )
       );
       setModeNotice('Modo atualizado.');
