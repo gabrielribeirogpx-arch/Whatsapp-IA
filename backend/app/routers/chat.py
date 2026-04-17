@@ -1,5 +1,6 @@
 import asyncio
 from datetime import datetime
+from typing import List
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -173,22 +174,19 @@ def get_messages(
 
 
 
-@router.get("/messages/conversation/{conversation_id}", response_model=list[MessageOut])
+@router.get("/messages/conversation/{conversation_id}", response_model=List[MessageOut])
 def get_messages_by_conversation(
     conversation_id: UUID,
     tenant: Tenant = Depends(get_current_tenant),
     db: Session = Depends(get_db),
 ):
-    items = (
-        db.execute(
-            select(Message)
-            .where(Message.tenant_id == tenant.id, Message.conversation_id == conversation_id)
-            .order_by(Message.created_at.asc(), Message.id.asc())
-        )
-        .scalars()
+    messages = (
+        db.query(Message)
+        .filter(Message.conversation_id == conversation_id)
+        .order_by(Message.created_at.asc())
         .all()
     )
-    return items
+    return messages
 
 @router.get("/messages/by-contact/{contact_id}", response_model=list[MessageOut])
 def get_messages_by_contact(
