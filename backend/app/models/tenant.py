@@ -9,6 +9,7 @@ from app.db.base import Base
 from app.models.knowledge_base import KnowledgeBase
 from app.models.knowledge_chunk import KnowledgeChunk
 from app.models.product import Product
+from app.models.bot_rule import BotRule
 
 DEFAULT_SYSTEM_PROMPT = "Você é um assistente de vendas altamente persuasivo, especializado em converter leads em clientes."
 
@@ -43,6 +44,7 @@ class Tenant(Base):
         back_populates="tenant",
         cascade="all, delete-orphan",
     )
+    bot_rules: Mapped[list[BotRule]] = relationship(BotRule, back_populates="tenant", cascade="all, delete-orphan")
 
 
 class AIConfig(Base):
