@@ -12,6 +12,8 @@ export type Conversation = {
   updated_at: string;
 };
 
+export type ConversationMode = 'human' | 'bot' | 'ai';
+
 export type Message = {
   id: string;
   content: string;

@@ -1,8 +1,9 @@
 import { FormEvent, useEffect, useRef } from 'react';
-import { ChatMessage, Contact } from '../lib/types';
+import { ChatMessage, Contact, ConversationMode } from '../lib/types';
 import { IconMenu } from './icons';
 import Avatar from './Avatar';
 import MessageBubble from './MessageBubble';
+import ConversationModeSelector from './ConversationModeSelector';
 
 type ChatWindowProps = {
   contact?: Contact;
@@ -11,6 +12,11 @@ type ChatWindowProps = {
   onInputChange: (value: string) => void;
   onSend: (event: FormEvent<HTMLFormElement>) => void;
   onToggleSidebar: () => void;
+  mode: ConversationMode;
+  modeUpdating?: boolean;
+  modeNotice?: string;
+  modeError?: string;
+  onModeChange: (mode: ConversationMode) => void;
 };
 
 export default function ChatWindow({
@@ -19,7 +25,12 @@ export default function ChatWindow({
   inputValue,
   onInputChange,
   onSend,
-  onToggleSidebar
+  onToggleSidebar,
+  mode,
+  modeUpdating = false,
+  modeNotice,
+  modeError,
+  onModeChange
 }: ChatWindowProps) {
   const messagesRef = useRef<HTMLElement | null>(null);
 
@@ -42,16 +53,25 @@ export default function ChatWindow({
         </button>
 
         {contact ? (
-          <div className="wa-chat-contact">
-            <Avatar name={contact.name} avatarUrl={contact.avatarUrl} phone={contact.phone} />
-            <div>
-              <h1>{contact.name || contact.phone}</h1>
-              <p className={`wa-contact-status ${contact.isTyping ? 'typing' : contact.isOnline ? 'online' : 'away'}`}>
-                <span className="wa-status-dot" aria-hidden="true" />
-                {statusText}
-              </p>
+          <>
+            <div className="wa-chat-contact">
+              <Avatar name={contact.name} avatarUrl={contact.avatarUrl} phone={contact.phone} />
+              <div>
+                <h1>{contact.name || contact.phone}</h1>
+                <p className={`wa-contact-status ${contact.isTyping ? 'typing' : contact.isOnline ? 'online' : 'away'}`}>
+                  <span className="wa-status-dot" aria-hidden="true" />
+                  {statusText}
+                </p>
+              </div>
             </div>
-          </div>
+
+            <div className="wa-chat-actions">
+              <ConversationModeSelector mode={mode} loading={modeUpdating} disabled={!contact} onChange={onModeChange} />
+              {modeUpdating ? <p className="wa-mode-feedback">Atualizando modo...</p> : null}
+              {!modeUpdating && modeNotice ? <p className="wa-mode-feedback success">{modeNotice}</p> : null}
+              {!modeUpdating && modeError ? <p className="wa-mode-feedback error">{modeError}</p> : null}
+            </div>
+          </>
         ) : (
           <div>
             <h1>Selecione um contato</h1>

@@ -7,6 +7,7 @@ import {
   KnowledgePayload,
   KnowledgeUploadResult,
   Message,
+  ConversationMode,
   Product,
   ProductPayload,
   SendMessagePayload,
@@ -140,6 +141,15 @@ export async function getConversations(): Promise<Conversation[]> {
 export async function getMessagesByConversation(conversationId: string): Promise<Message[]> {
   const res = await apiFetch(`/api/messages/conversation/${conversationId}`);
   return parseApiResponse<Message[]>(res);
+}
+
+export async function updateConversationMode(conversationId: string, mode: ConversationMode) {
+  const res = await apiFetch(`/api/conversations/${conversationId}/mode`, {
+    method: 'PATCH',
+    body: JSON.stringify({ mode })
+  });
+
+  return parseApiResponse(res);
 }
 
 export async function sendMessage(phone: string, message: string, contact_id?: string) {
