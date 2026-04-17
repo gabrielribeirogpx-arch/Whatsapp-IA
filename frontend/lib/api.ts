@@ -151,18 +151,16 @@ export async function updateConversationMode(conversationId: string, mode: Conve
     throw new Error('NEXT_PUBLIC_API_URL não está configurado.');
   }
 
+  console.log('TOKEN:', token);
   console.log('MODE:', newMode);
   console.log('PATCH MODE URL:', `${API_URL}/api/conversations/${conversationId}/mode?mode=${newMode}`);
 
-  const res = await fetch(
-    `${process.env.NEXT_PUBLIC_API_URL}/api/conversations/${conversationId}/mode?mode=${newMode}`,
-    {
-      method: 'PATCH',
-      headers: {
-        Authorization: `Bearer ${token}`
-      }
+  const res = await apiFetch(`/api/conversations/${conversationId}/mode?mode=${newMode}`, {
+    method: 'PATCH',
+    headers: {
+      Authorization: `Bearer ${token}`
     }
-  );
+  });
 
   return parseApiResponse(res);
 }
