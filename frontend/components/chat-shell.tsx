@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 
 import ChatWindow from './ChatWindow';
 import Sidebar from './Sidebar';
-import { getConversations, getMessagesByConversation, sendMessage } from '../lib/api';
+import { getConversations, getMessagesByConversation, sendMessage, updateConversationMode } from '../lib/api';
 import { ChatMessage, Contact, Conversation, ConversationMode, Message } from '../lib/types';
 
 function toChatMessage(message: Message): ChatMessage {
@@ -230,21 +230,7 @@ export default function ChatShell() {
     setModeUpdating(true);
 
     try {
-      console.log('MODE SEND:', newMode);
-
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/conversations/${conversationId}/mode`, {
-        method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          mode: newMode
-        })
-      });
-
-      if (!res.ok) {
-        throw new Error('Erro ao atualizar modo');
-      }
+      await updateConversationMode(conversationId, newMode);
 
       setMode(newMode);
       setConversations((current) =>
