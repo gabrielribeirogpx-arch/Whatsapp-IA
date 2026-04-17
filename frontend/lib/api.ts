@@ -18,7 +18,6 @@ import {
 } from './types';
 
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL;
-const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL ?? 'https://SEU_BACKEND_URL';
 const TENANT_STORAGE_KEY = 'tenant';
 const TOKEN_STORAGE_KEY = 'token';
 const TENANT_ID_STORAGE_KEY = 'tenant_id';
@@ -166,11 +165,8 @@ export async function getContacts(): Promise<CRMContact[]> {
 }
 
 export async function sendMessageToBackend(payload: SendMessagePayload) {
-  const response = await fetch(`${BACKEND_URL}/send-message`, {
+  const response = await apiFetch('/api/send-message', {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json'
-    },
     body: JSON.stringify(payload)
   });
 
