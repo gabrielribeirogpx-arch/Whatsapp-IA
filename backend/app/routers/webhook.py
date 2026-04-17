@@ -246,12 +246,24 @@ async def webhook(request: Request, db: Session = Depends(get_db)):
                 name=contact_name,
             )
 
-            conversation, existed = get_or_create_conversation(
-                db=db,
-                tenant_id=tenant_id,
-                phone=normalized_phone,
-                contact_id=contact.id,
+            conversation = (
+                db.query(Conversation)
+                .filter(
+                    Conversation.tenant_id == tenant.id,
+                    Conversation.phone_number == normalized_phone
+                )
+                .order_by(Conversation.updated_at.desc())
+                .first()
             )
+            existed = conversation is not None
+
+            if not conversation:
+                conversation, existed = get_or_create_conversation(
+                    db=db,
+                    tenant_id=tenant_id,
+                    phone=normalized_phone,
+                    contact_id=contact.id,
+                )
 
             if existed:
                 print(f"Conversa encontrada: {conversation.id}")
