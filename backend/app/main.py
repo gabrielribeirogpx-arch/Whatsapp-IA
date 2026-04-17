@@ -13,6 +13,7 @@ from app.routers import products
 from app.routers import knowledge
 from app.routers import leads
 from app.routers import dashboard
+from app.routers import bot_rules
 
 app = FastAPI()
 
@@ -39,6 +40,7 @@ app.include_router(products.router, prefix="/api")
 app.include_router(knowledge.router, prefix="/api")
 app.include_router(leads.router, prefix="/api")
 app.include_router(dashboard.router, prefix="/api")
+app.include_router(bot_rules.router)
 
 # webhook normalmente externo (Meta)
 app.include_router(webhook.router)
