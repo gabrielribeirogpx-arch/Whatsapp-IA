@@ -9,7 +9,7 @@ import { getConversations, getMessagesByConversation, sendMessage } from '../lib
 import { ChatMessage, Contact, Conversation, Message } from '../lib/types';
 
 function toChatMessage(message: Message): ChatMessage {
-  const parsedDate = new Date(message.timestamp);
+  const parsedDate = new Date(message.created_at);
   const time = Number.isNaN(parsedDate.getTime())
     ? '--:--'
     : parsedDate.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
@@ -17,7 +17,7 @@ function toChatMessage(message: Message): ChatMessage {
   return {
     id: String(message.id),
     text: message.content,
-    fromMe: message.from_me,
+    fromMe: message.role === 'assistant',
     time
   };
 }

@@ -14,11 +14,9 @@ export type Conversation = {
 
 export type Message = {
   id: string;
-  tenant_id: string;
-  phone: string;
   content: string;
-  from_me: boolean;
-  timestamp: string;
+  role: string;
+  created_at: string;
 };
 
 export type TenantSession = {
