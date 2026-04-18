@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 from app.models import Conversation
+from app.services.product_service import build_products_response, get_active_products
+from sqlalchemy.orm import Session
 
 
 def handle_positive(conversation: Conversation) -> str:
     if conversation.last_bot_question == "interesse_planos":
         conversation.conversation_state = "plano"
         conversation.last_bot_question = "plano"
-        return "Temos Básico, Essencial e PRO. Qual você quer ver agora?"
+        return "Temos alguns planos disponíveis. Qual você quer ver agora?"
 
     if conversation.last_bot_question == "plano":
         conversation.last_bot_question = "detalhe_plano"
@@ -17,15 +19,10 @@ def handle_positive(conversation: Conversation) -> str:
     return "Perfeito 🔥 Você prefere atendimento manual ou automático?"
 
 
-def responder_preco(conversation: Conversation) -> str:
+def responder_preco(db: Session, conversation: Conversation) -> str:
     conversation.last_bot_question = "escolha_inicio"
-    return (
-        "Os valores variam por plano 👍\n\n"
-        "Básico: R$29\n"
-        "Essencial: R$69\n"
-        "PRO: R$129\n\n"
-        "Agora me diz: você quer começar mais simples ou já escalar?"
-    )
+    products = get_active_products(db=db, tenant_id=conversation.tenant_id)
+    return build_products_response(products)
 
 
 def responder_funcionamento(conversation: Conversation) -> str:

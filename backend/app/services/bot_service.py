@@ -70,28 +70,22 @@ def _handle_state_machine(conversation: Conversation, incoming_text: str) -> tup
     if state == STATE_APRESENTANDO_PLANOS:
         if message_normalized in {"sim", "quero"}:
             return (
-                "Perfeito! Temos:\n"
-                "1️⃣ Básico\n"
-                "2️⃣ Essencial\n"
-                "3️⃣ PRO\n\n"
+                "Perfeito! Temos algumas opções de planos ativas para você.\n\n"
                 "Qual você quer conhecer melhor?",
                 True,
             )
         if "basico" in message_normalized or "básico" in message_normalized:
             _set_state(conversation, STATE_ESCOLHA_PLANO)
-            return ("Ótima escolha! O plano Básico é enxuto e eficiente. Quer fechar com ele?", True)
+            return ("Ótima escolha! Esse plano é enxuto e eficiente. Quer fechar com ele?", True)
         if "essencial" in message_normalized:
             _set_state(conversation, STATE_ESCOLHA_PLANO)
-            return ("Excelente! O Essencial é o mais escolhido. Quer fechar com ele?", True)
+            return ("Excelente! Esse plano costuma ser muito escolhido. Quer fechar com ele?", True)
         if "pro" in message_normalized:
             _set_state(conversation, STATE_ESCOLHA_PLANO)
-            return ("Perfeito! O PRO entrega automação completa. Quer fechar com ele?", True)
+            return ("Perfeito! Esse plano entrega automação completa. Quer fechar com ele?", True)
         if "plano" in message_normalized or "planos" in message_normalized:
             return (
-                "Temos:\n"
-                "1️⃣ Básico\n"
-                "2️⃣ Essencial\n"
-                "3️⃣ PRO\n\n"
+                "Temos planos ativos disponíveis para seu tenant.\n\n"
                 "Qual você quer escolher?",
                 True,
             )
@@ -332,7 +326,7 @@ def handle_bot(db: Session, message: Message, conversation) -> bool:
         active_intent = get_active_intent(conversation)
         print("[ACTIVE INTENT]", active_intent)
         if active_intent == "planos":
-            selected_response = "Temos Básico, Essencial e PRO. Quer ver os detalhes de algum?"
+            selected_response = "Temos planos ativos para você. Quer ver os detalhes de algum?"
         elif active_intent == "preco":
             selected_response = "Os valores variam por plano. Quer que eu te explique cada um?"
         elif active_intent == "fechamento":
