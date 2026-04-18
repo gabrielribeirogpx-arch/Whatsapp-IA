@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from app.models import Conversation, Flow, FlowEdge, FlowNode
 
 DEFAULT_FLOW_NAME = "__default_visual__"
+MAX_AUTO_STEPS = 10
 
 
 def _normalize_text(value: str | None) -> str:
@@ -18,6 +19,18 @@ def _normalize_text(value: str | None) -> str:
     normalized = unicodedata.normalize("NFKD", value)
     without_accents = "".join(ch for ch in normalized if not unicodedata.combining(ch))
     return without_accents.lower().strip()
+
+
+def _extract_node_data(node: FlowNode) -> dict[str, Any]:
+    metadata = node.metadata_json or {}
+    return {
+        "label": metadata.get("label") or node.content or node.type,
+        "content": node.content,
+        "buttons": metadata.get("buttons") if isinstance(metadata.get("buttons"), list) else [],
+        "condition": metadata.get("condition"),
+        "action": metadata.get("action"),
+        "metadata": metadata,
+    }
 
 
 def _get_or_create_visual_flow(db: Session, tenant_id: uuid.UUID) -> Flow:
@@ -50,7 +63,7 @@ def _get_start_node(db: Session, flow_id: uuid.UUID, tenant_id: uuid.UUID) -> Fl
             return node
 
     for node in nodes:
-        if node.type in {"start", "messageNode", "questionNode"}:
+        if node.type in {"start", "message", "messageNode", "choice", "choiceNode", "questionNode"}:
             return node
 
     return nodes[0] if nodes else None
@@ -70,6 +83,39 @@ def _get_edges(db: Session, flow_id: uuid.UUID, source: uuid.UUID) -> list[FlowE
     ).scalars().all()
 
 
+def _pick_default_edge(edges: list[FlowEdge]) -> FlowEdge | None:
+    for edge in edges:
+        condition = _normalize_text(edge.condition)
+        if condition in {"", "default", "else", "next"}:
+            return edge
+    return edges[0] if edges else None
+
+
+def _advance_to_edge_target(db: Session, conversation: Conversation, edge: FlowEdge | None) -> FlowNode | None:
+    if not edge:
+        conversation.current_node_id = None
+        return None
+
+    next_node = _get_node(db=db, node_id=edge.target, tenant_id=conversation.tenant_id)
+    conversation.current_node_id = next_node.id if next_node else None
+    return next_node
+
+
+def _render_choice_prompt(node_data: dict[str, Any], edges: list[FlowEdge]) -> str:
+    base = (node_data.get("content") or "Escolha uma opção:").strip()
+    raw_buttons = node_data.get("buttons") if isinstance(node_data.get("buttons"), list) else []
+    button_labels = [str(button.get("label")).strip() for button in raw_buttons if isinstance(button, dict) and button.get("label")]
+
+    if button_labels:
+        return f"{base}\n\n" + "\n".join(f"- {label}" for label in button_labels)
+
+    conditions = [edge.condition.strip() for edge in edges if edge.condition and edge.condition.strip()]
+    if conditions:
+        return f"{base}\n\n" + "\n".join(f"- {label}" for label in conditions)
+
+    return base
+
+
 def process_flow_engine(db: Session, conversation: Conversation, message_text: str) -> str | None:
     flow = _get_or_create_visual_flow(db=db, tenant_id=conversation.tenant_id)
 
@@ -80,32 +126,115 @@ def process_flow_engine(db: Session, conversation: Conversation, message_text: s
 
         conversation.current_flow = flow.id
         conversation.current_node_id = start_node.id
-        return start_node.content
 
     node = _get_node(db=db, node_id=conversation.current_node_id, tenant_id=conversation.tenant_id)
     if not node:
         conversation.current_node_id = None
         return None
 
-    edges = _get_edges(db=db, flow_id=node.flow_id, source=node.id)
     msg = _normalize_text(message_text)
+    collected_messages: list[str] = []
 
-    for edge in edges:
-        condition = _normalize_text(edge.condition)
-        if not condition:
+    for _ in range(MAX_AUTO_STEPS):
+        node_data = _extract_node_data(node)
+        node_type = node.type
+        if node_type.endswith("Node"):
+            node_type = node_type[:-4]
+
+        edges = _get_edges(db=db, flow_id=node.flow_id, source=node.id)
+
+        if node_type in {"message", "start"}:
+            content = (node_data.get("content") or "").strip()
+            if content:
+                collected_messages.append(content)
+            node = _advance_to_edge_target(db=db, conversation=conversation, edge=_pick_default_edge(edges))
+            if not node:
+                break
             continue
-        if condition in msg:
-            next_node = _get_node(db=db, node_id=edge.target, tenant_id=conversation.tenant_id)
-            if not next_node:
-                continue
-            conversation.current_node_id = next_node.id
-            return next_node.content
 
-    expected = [edge.condition.strip() for edge in edges if edge.condition and edge.condition.strip()]
-    if expected:
-        return f"Responde uma dessas opções 👇 {', '.join(expected)}"
+        if node_type in {"choice", "question"}:
+            expected_options = []
+            buttons = node_data.get("buttons") if isinstance(node_data.get("buttons"), list) else []
+            for button in buttons:
+                if isinstance(button, dict) and button.get("label"):
+                    expected_options.append(_normalize_text(str(button["label"])))
 
-    return None
+            edge_labels = [
+                _normalize_text(edge.condition)
+                for edge in edges
+                if edge.condition and _normalize_text(edge.condition)
+            ]
+            options = expected_options or edge_labels
+
+            if not msg:
+                collected_messages.append(_render_choice_prompt(node_data=node_data, edges=edges))
+                break
+
+            selected_edge = None
+            for edge in edges:
+                condition = _normalize_text(edge.condition)
+                if condition and condition in msg:
+                    selected_edge = edge
+                    break
+
+            if not selected_edge and options:
+                collected_messages.append(_render_choice_prompt(node_data=node_data, edges=edges))
+                break
+
+            node = _advance_to_edge_target(db=db, conversation=conversation, edge=selected_edge or _pick_default_edge(edges))
+            if not node:
+                break
+            continue
+
+        if node_type == "condition":
+            condition_text = _normalize_text(str(node_data.get("condition") or node_data.get("content") or ""))
+            result = bool(condition_text and condition_text in msg)
+
+            selected_edge = None
+            for edge in edges:
+                edge_condition = _normalize_text(edge.condition)
+                if result and edge_condition in {"true", "sim", "yes"}:
+                    selected_edge = edge
+                    break
+                if (not result) and edge_condition in {"false", "nao", "não", "no"}:
+                    selected_edge = edge
+                    break
+
+            node = _advance_to_edge_target(db=db, conversation=conversation, edge=selected_edge or _pick_default_edge(edges))
+            if not node:
+                break
+            continue
+
+        if node_type == "delay":
+            delay_value = str(node_data.get("content") or "").strip()
+            if delay_value:
+                collected_messages.append(f"⏳ Aguarde {delay_value}s")
+            node = _advance_to_edge_target(db=db, conversation=conversation, edge=_pick_default_edge(edges))
+            if not node:
+                break
+            continue
+
+        if node_type == "action":
+            action_name = str(node_data.get("action") or "").strip()
+            content = str(node_data.get("content") or "").strip()
+            if content:
+                collected_messages.append(content)
+            elif action_name:
+                collected_messages.append(f"⚙️ Ação executada: {action_name}")
+
+            node = _advance_to_edge_target(db=db, conversation=conversation, edge=_pick_default_edge(edges))
+            if not node:
+                break
+            continue
+
+        content = (node_data.get("content") or "").strip()
+        if content:
+            collected_messages.append(content)
+        node = _advance_to_edge_target(db=db, conversation=conversation, edge=_pick_default_edge(edges))
+        if not node:
+            break
+
+    return "\n\n".join(part for part in collected_messages if part).strip() or None
 
 
 def seed_default_visual_flow(db: Session, flow: Flow, tenant_id: uuid.UUID) -> None:
@@ -118,16 +247,24 @@ def seed_default_visual_flow(db: Session, flow: Flow, tenant_id: uuid.UUID) -> N
     start = FlowNode(
         flow_id=flow.id,
         tenant_id=tenant_id,
-        type="questionNode",
+        type="choice",
         content="Você quer vendas, suporte ou atendimento?",
-        metadata_json={"isStart": True, "label": "início"},
+        metadata_json={
+            "isStart": True,
+            "label": "início",
+            "buttons": [
+                {"label": "vendas"},
+                {"label": "suporte"},
+                {"label": "atendimento"},
+            ],
+        },
         position_x=120,
         position_y=120,
     )
     vendas = FlowNode(
         flow_id=flow.id,
         tenant_id=tenant_id,
-        type="messageNode",
+        type="message",
         content="Perfeito, vamos seguir por vendas 🚀",
         metadata_json={"label": "vendas"},
         position_x=420,
@@ -136,7 +273,7 @@ def seed_default_visual_flow(db: Session, flow: Flow, tenant_id: uuid.UUID) -> N
     suporte = FlowNode(
         flow_id=flow.id,
         tenant_id=tenant_id,
-        type="messageNode",
+        type="message",
         content="Perfeito, vamos seguir por suporte 🛟",
         metadata_json={"label": "suporte"},
         position_x=420,
@@ -145,7 +282,7 @@ def seed_default_visual_flow(db: Session, flow: Flow, tenant_id: uuid.UUID) -> N
     atendimento = FlowNode(
         flow_id=flow.id,
         tenant_id=tenant_id,
-        type="messageNode",
+        type="message",
         content="Perfeito, vamos seguir por atendimento 💬",
         metadata_json={"label": "atendimento"},
         position_x=420,
@@ -180,11 +317,7 @@ def get_flow_graph(db: Session, tenant_id: uuid.UUID, flow_id: str) -> dict[str,
                 "id": str(node.id),
                 "type": node.type,
                 "position": {"x": node.position_x or 0, "y": node.position_y or 0},
-                "data": {
-                    "label": (node.metadata_json or {}).get("label") or node.content or node.type,
-                    "content": node.content,
-                    "metadata": node.metadata_json or {},
-                },
+                "data": _extract_node_data(node),
             }
             for node in nodes
         ],
@@ -220,15 +353,29 @@ def save_flow_graph(db: Session, tenant_id: uuid.UUID, flow_id: str, nodes: list
 
         data = item.get("data") or {}
         position = item.get("position") or {}
-        metadata = data.get("metadata") if isinstance(data, dict) else None
+        metadata = data.get("metadata") if isinstance(data, dict) else {}
+        if not isinstance(metadata, dict):
+            metadata = {}
+
+        if isinstance(data, dict):
+            if data.get("label"):
+                metadata["label"] = data.get("label")
+            if isinstance(data.get("buttons"), list):
+                metadata["buttons"] = data.get("buttons")
+            if data.get("condition") is not None:
+                metadata["condition"] = data.get("condition")
+            if data.get("action") is not None:
+                metadata["action"] = data.get("action")
+
+        node_type = item.get("type") or "message"
 
         node = FlowNode(
             id=node_id,
             flow_id=flow.id,
             tenant_id=tenant_id,
-            type=item.get("type") or "messageNode",
+            type=node_type,
             content=data.get("content") if isinstance(data, dict) else None,
-            metadata_json=metadata if isinstance(metadata, dict) else {},
+            metadata_json=metadata,
             position_x=int(position.get("x", 0) or 0),
             position_y=int(position.get("y", 0) or 0),
         )

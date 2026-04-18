@@ -161,6 +161,11 @@ export type PipelineStage = {
 };
 
 
+export type FlowChoiceButton = {
+  label: string;
+  next?: string;
+};
+
 export type FlowNodePayload = {
   id: string;
   type: string;
@@ -168,7 +173,11 @@ export type FlowNodePayload = {
   data: {
     label?: string;
     content?: string;
+    buttons?: FlowChoiceButton[];
+    condition?: string;
+    action?: string;
     metadata?: Record<string, unknown>;
+    onChange?: (nodeId: string, patch: Record<string, unknown>) => void;
   };
 };
 
