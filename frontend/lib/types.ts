@@ -183,7 +183,6 @@ export type FlowEdgePayload = {
 };
 
 export type FlowGraphPayload = {
-  flow_id: string;
   nodes: FlowNodePayload[];
   edges: FlowEdgePayload[];
 };
