@@ -26,6 +26,12 @@
     "paths": {
       "@/*": [
         "./*"
+      ],
+      "@xyflow/react": [
+        "./lib/xyflow/react/index.tsx"
+      ],
+      "@xyflow/react/*": [
+        "./lib/xyflow/react/*"
       ]
     }
   },
