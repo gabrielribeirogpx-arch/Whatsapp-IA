@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.models import BotRule, Conversation, Message, Tenant
 from app.services.flow_orchestrator import handle_flow
-from app.services.whatsapp_service import WhatsAppConfigError, enviar_mensagem
+from app.services.whatsapp_service import WhatsAppConfigError, enviar_mensagem, send_whatsapp_message
 from app.utils.text import normalize_text, tokenize
 
 STATE_INICIO = "inicio"
@@ -386,17 +386,20 @@ def handle_bot(db: Session, message: Message, conversation) -> dict[str, str | b
         conversation.updated_at = datetime.utcnow()
         return None
 
-    if tenant:
-        try:
-            print(f"[MODE CHECK] current mode={conversation.mode}")
+    print(f"[BOT RESPONSE] {selected_response}")
+    try:
+        print(f"[MODE CHECK] current mode={conversation.mode}")
+        if tenant:
             enviar_mensagem(
                 conversation.phone_number,
                 selected_response,
                 token=tenant.whatsapp_token,
                 phone_number_id=tenant.phone_number_id,
             )
-        except WhatsAppConfigError:
-            pass
+        else:
+            send_whatsapp_message(conversation.phone_number, selected_response)
+    except WhatsAppConfigError:
+        pass
 
     _create_outbound_message(
         db=db,
