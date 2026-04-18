@@ -9,6 +9,111 @@ from app.models import BotRule, Conversation, Message, Tenant
 from app.services.whatsapp_service import WhatsAppConfigError, enviar_mensagem
 from app.utils.text import normalize_text, tokenize
 
+STATE_INICIO = "inicio"
+STATE_ESCOLHA_AREA = "escolha_area"
+STATE_TIPO_ATENDIMENTO = "tipo_atendimento"
+STATE_APRESENTANDO_VALOR = "apresentando_valor"
+STATE_APRESENTANDO_PLANOS = "apresentando_planos"
+STATE_ESCOLHA_PLANO = "escolha_plano"
+STATE_FECHAMENTO = "fechamento"
+
+
+def _set_state(conversation: Conversation, new_state: str | None) -> None:
+    previous_state = conversation.conversation_state or "sem_estado"
+    next_state = new_state or "sem_estado"
+    print(f"[STATE TRANSITION] {previous_state} → {next_state}")
+    conversation.conversation_state = new_state
+
+
+def _state_fallback_response() -> str:
+    return (
+        "Me confirma rapidinho 👇\n"
+        "Você quer:\n"
+        "1️⃣ Ver planos\n"
+        "2️⃣ Entender como funciona"
+    )
+
+
+def _handle_state_machine(conversation: Conversation, incoming_text: str) -> tuple[str | None, bool]:
+    message_normalized = normalize_text(incoming_text)
+    state = conversation.conversation_state or STATE_INICIO
+    print(f"[STATE] atual={state}")
+
+    if state == STATE_INICIO:
+        _set_state(conversation, STATE_ESCOLHA_AREA)
+        return ("Olá! Pra te atender melhor, você quer falar com vendas, suporte ou atendimento?", True)
+
+    if state == STATE_ESCOLHA_AREA:
+        if "vendas" in message_normalized or "suporte" in message_normalized or "atendimento" in message_normalized:
+            _set_state(conversation, STATE_TIPO_ATENDIMENTO)
+            return ("Perfeito 👌 Você prefere atendimento manual ou automático?", True)
+        if message_normalized in {"sim", "quero"}:
+            return ("Show! Você quer seguir com vendas, suporte ou atendimento?", True)
+        return (_state_fallback_response(), True)
+
+    if state == STATE_TIPO_ATENDIMENTO:
+        if "manual" in message_normalized:
+            _set_state(conversation, STATE_APRESENTANDO_VALOR)
+            return ("Perfeito! Atendimento manual funciona bem para começar. Quer ver os planos agora?", True)
+        if "automatico" in message_normalized or "automático" in message_normalized:
+            _set_state(conversation, STATE_APRESENTANDO_VALOR)
+            return ("Top 🔥 automação total! Quer ver os planos agora?", True)
+        if message_normalized in {"sim", "quero"}:
+            return ("Você prefere manual ou automático?", True)
+        return (_state_fallback_response(), True)
+
+    if state == STATE_APRESENTANDO_VALOR:
+        _set_state(conversation, STATE_APRESENTANDO_PLANOS)
+        return ("Quer ver os planos? Posso te mostrar as opções agora.", True)
+
+    if state == STATE_APRESENTANDO_PLANOS:
+        if message_normalized in {"sim", "quero"}:
+            return (
+                "Perfeito! Temos:\n"
+                "1️⃣ Básico\n"
+                "2️⃣ Essencial\n"
+                "3️⃣ PRO\n\n"
+                "Qual você quer conhecer melhor?",
+                True,
+            )
+        if "basico" in message_normalized or "básico" in message_normalized:
+            _set_state(conversation, STATE_ESCOLHA_PLANO)
+            return ("Ótima escolha! O plano Básico é enxuto e eficiente. Quer fechar com ele?", True)
+        if "essencial" in message_normalized:
+            _set_state(conversation, STATE_ESCOLHA_PLANO)
+            return ("Excelente! O Essencial é o mais escolhido. Quer fechar com ele?", True)
+        if "pro" in message_normalized:
+            _set_state(conversation, STATE_ESCOLHA_PLANO)
+            return ("Perfeito! O PRO entrega automação completa. Quer fechar com ele?", True)
+        if "plano" in message_normalized or "planos" in message_normalized:
+            return (
+                "Temos:\n"
+                "1️⃣ Básico\n"
+                "2️⃣ Essencial\n"
+                "3️⃣ PRO\n\n"
+                "Qual você quer escolher?",
+                True,
+            )
+        return (_state_fallback_response(), True)
+
+    if state == STATE_ESCOLHA_PLANO:
+        if message_normalized in {"sim", "quero", "fechar"}:
+            _set_state(conversation, STATE_FECHAMENTO)
+            return ("Fechou! 🎉 Vou te passar os próximos passos para conclusão do atendimento.", True)
+        if "basico" in message_normalized or "básico" in message_normalized or "essencial" in message_normalized or "pro" in message_normalized:
+            _set_state(conversation, STATE_FECHAMENTO)
+            return ("Perfeito, plano escolhido! 🎯 Posso seguir com o fechamento?", True)
+        return (_state_fallback_response(), True)
+
+    if state == STATE_FECHAMENTO:
+        if message_normalized in {"sim", "quero", "ok", "fechar"}:
+            _set_state(conversation, None)
+            return ("Maravilha! Atendimento concluído ✅ Se precisar, é só me chamar.", True)
+        return ("Estamos no fechamento. Se estiver tudo certo, me responde 'sim' que eu concluo para você.", True)
+
+    _set_state(conversation, STATE_ESCOLHA_AREA)
+    return ("Vamos retomar do início. Você quer vendas, suporte ou atendimento?", True)
+
 
 def detect_intent(message: str) -> str | None:
     normalized_message = normalize_text(message)
@@ -178,28 +283,34 @@ def handle_bot(db: Session, message: Message, conversation) -> bool:
     update_lead_score(conversation, message.text)
     print("[LEAD SCORE]", conversation.lead_score)
 
-    rules = (
-        db.execute(
-            select(BotRule)
-            .where(BotRule.tenant_id == conversation.tenant_id)
-            .order_by(BotRule.created_at.asc(), BotRule.id.asc())
+    state_response: str | None = None
+    state_handled = False
+    if conversation.conversation_state:
+        state_response, state_handled = _handle_state_machine(conversation, message.text)
+
+    selected_response = state_response if (state_handled and state_response) else None
+
+    if not state_handled:
+        rules = (
+            db.execute(
+                select(BotRule)
+                .where(BotRule.tenant_id == conversation.tenant_id)
+                .order_by(BotRule.created_at.asc(), BotRule.id.asc())
+            )
+            .scalars()
+            .all()
         )
-        .scalars()
-        .all()
-    )
+        best_match: tuple[int, int] | None = None
+        for rule in rules:
+            match = _match_score(rule, message.text)
+            if not match:
+                continue
 
-    selected_response = None
-    best_match: tuple[int, int] | None = None
-    for rule in rules:
-        match = _match_score(rule, message.text)
-        if not match:
-            continue
+            if best_match is None or match > best_match:
+                best_match = match
+                selected_response = rule.response
 
-        if best_match is None or match > best_match:
-            best_match = match
-            selected_response = rule.response
-
-    if not selected_response:
+    if not selected_response and not state_handled:
         active_intent = get_active_intent(conversation)
         print("[ACTIVE INTENT]", active_intent)
         if active_intent == "planos":
