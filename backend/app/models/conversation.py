@@ -19,6 +19,8 @@ class Conversation(Base):
     avatar_url: Mapped[str | None] = mapped_column(String, nullable=True)
     mode: Mapped[str] = mapped_column(String, nullable=False, default="human")
     conversation_state: Mapped[str | None] = mapped_column(String, nullable=True)
+    last_bot_question: Mapped[str | None] = mapped_column(String, nullable=True)
+    current_objective: Mapped[str] = mapped_column(String, nullable=False, default="venda", server_default="venda")
     last_bot_triggered_message_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     last_intent: Mapped[str | None] = mapped_column(String, nullable=True)
     intent_history: Mapped[list[dict[str, str]] | None] = mapped_column(JSON, nullable=True)
