@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.models import BotRule, Conversation, Message, Tenant
 from app.services.flow_orchestrator import handle_flow as handle_orchestrator_flow
+from app.services.flow_engine_service import process_flow_engine
 from app.services.flow_service import handle_flow as handle_priority_flow
 from app.services.whatsapp_service import WhatsAppConfigError, enviar_mensagem, send_whatsapp_message
 from app.utils.text import normalize_text, tokenize
@@ -304,10 +305,16 @@ def handle_bot(db: Session, message: Message, conversation) -> dict[str, str | b
 
     tenant = db.execute(select(Tenant).where(Tenant.id == conversation.tenant_id)).scalars().first()
 
-    priority_flow_response = handle_priority_flow(db=db, conversation=conversation, message=message)
-    selected_response = priority_flow_response if priority_flow_response else None
-    matched_rule: str | None = "priority_flow" if priority_flow_response else None
-    using_priority_flow = bool(priority_flow_response)
+    visual_flow_response = process_flow_engine(db=db, conversation=conversation, message_text=message.text or "")
+    selected_response = visual_flow_response if visual_flow_response else None
+    matched_rule: str | None = "visual_flow_engine" if visual_flow_response else None
+    using_visual_flow = bool(visual_flow_response)
+
+    if not selected_response:
+        priority_flow_response = handle_priority_flow(db=db, conversation=conversation, message=message)
+        selected_response = priority_flow_response if priority_flow_response else None
+        if priority_flow_response:
+            matched_rule = "priority_flow"
 
     if not selected_response:
         flow_response = handle_orchestrator_flow(db=db, message=message, conversation=conversation)
@@ -316,14 +323,14 @@ def handle_bot(db: Session, message: Message, conversation) -> dict[str, str | b
             matched_rule = "flow_orchestrator"
 
     intent: str | None = None
-    if not using_priority_flow:
+    if not using_visual_flow:
         message_normalized = normalize_text(message.text)
         intent = detect_intent(message_normalized)
         update_context(conversation, intent)
         print("[INTENT DETECTED]", intent)
         print("[INTENT HISTORY]", conversation.intent_history)
     else:
-        print("[FLOW] prioridade ativa, intent detection ignorada")
+        print("[FLOW] fluxo visual ativo, intent detection ignorada")
 
     update_lead_score(conversation, message.text)
     print("[LEAD SCORE]", conversation.lead_score)

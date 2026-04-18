@@ -14,7 +14,10 @@ import {
   TenantSession,
   PipelineStage,
   BotRule,
-  BotRulePayload
+  BotRulePayload,
+  FlowGraphPayload,
+  FlowNodePayload,
+  FlowEdgePayload
 } from './types';
 
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL;
@@ -300,4 +303,22 @@ export async function deleteBotRule(ruleId: string): Promise<void> {
   });
 
   if (!res.ok) throw new Error(await res.text());
+}
+
+
+export async function getFlowGraph(flowId: string): Promise<FlowGraphPayload> {
+  const res = await apiFetch(`/api/flows/${flowId}`);
+  return parseApiResponse<FlowGraphPayload>(res);
+}
+
+export async function saveFlowGraph(
+  flowId: string,
+  payload: { nodes: FlowNodePayload[]; edges: FlowEdgePayload[] }
+): Promise<{ flow_id: string; status: string }> {
+  const res = await apiFetch(`/api/flows/${flowId}`, {
+    method: 'POST',
+    body: JSON.stringify(payload)
+  });
+
+  return parseApiResponse<{ flow_id: string; status: string }>(res);
 }

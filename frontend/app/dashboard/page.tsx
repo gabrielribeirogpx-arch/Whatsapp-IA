@@ -95,6 +95,9 @@ export default function DashboardPage() {
           <Link href="/chat" className="primary-button">
             Abrir Inbox
           </Link>
+          <Link href="/dashboard/flow-builder" className="secondary-button">
+            Flow Builder
+          </Link>
         </div>
       </section>
 

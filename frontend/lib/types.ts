@@ -159,3 +159,31 @@ export type PipelineStage = {
   position: number;
   leads: PipelineLead[];
 };
+
+
+export type FlowNodePayload = {
+  id: string;
+  type: string;
+  position: { x: number; y: number };
+  data: {
+    label?: string;
+    content?: string;
+    metadata?: Record<string, unknown>;
+  };
+};
+
+export type FlowEdgePayload = {
+  id: string;
+  source: string;
+  target: string;
+  label?: string;
+  data?: {
+    condition?: string;
+  };
+};
+
+export type FlowGraphPayload = {
+  flow_id: string;
+  nodes: FlowNodePayload[];
+  edges: FlowEdgePayload[];
+};
