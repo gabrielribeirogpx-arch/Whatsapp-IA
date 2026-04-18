@@ -1,5 +1,8 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from alembic.config import Config
+from alembic import command
+import os
 
 from app.db.base import Base
 from app.db.session import engine
@@ -14,6 +17,19 @@ from app.routers import knowledge
 from app.routers import leads
 from app.routers import dashboard
 from app.routers import bot_rules
+
+
+def run_migrations():
+    try:
+        if os.getenv("RUN_MIGRATIONS", "true") == "true":
+            alembic_cfg = Config("alembic.ini")
+            command.upgrade(alembic_cfg, "head")
+            print("✅ Migrations aplicadas com sucesso")
+    except Exception as e:
+        print("❌ Erro ao rodar migrations:", e)
+
+
+run_migrations()
 
 app = FastAPI()
 
