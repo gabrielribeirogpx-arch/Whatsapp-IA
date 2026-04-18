@@ -306,19 +306,19 @@ export async function deleteBotRule(ruleId: string): Promise<void> {
 }
 
 
-export async function getFlowGraph(flowId: string): Promise<FlowGraphPayload> {
-  const res = await apiFetch(`/api/flows/${flowId}`);
+export async function getFlowGraph(tenantId: string): Promise<FlowGraphPayload> {
+  const res = await apiFetch(`/api/flows/${tenantId}`);
   return parseApiResponse<FlowGraphPayload>(res);
 }
 
 export async function saveFlowGraph(
-  flowId: string,
+  tenantId: string,
   payload: { nodes: FlowNodePayload[]; edges: FlowEdgePayload[] }
-): Promise<{ flow_id: string; status: string }> {
-  const res = await apiFetch(`/api/flows/${flowId}`, {
+): Promise<FlowGraphPayload> {
+  const res = await apiFetch(`/api/flows/${tenantId}`, {
     method: 'POST',
     body: JSON.stringify(payload)
   });
 
-  return parseApiResponse<{ flow_id: string; status: string }>(res);
+  return parseApiResponse<FlowGraphPayload>(res);
 }
