@@ -19,6 +19,7 @@ class Conversation(Base):
     avatar_url: Mapped[str | None] = mapped_column(String, nullable=True)
     mode: Mapped[str] = mapped_column(String, nullable=False, default="human")
     conversation_state: Mapped[str | None] = mapped_column(String, nullable=True)
+    current_flow: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("flows.id"), nullable=True)
     current_step: Mapped[str | None] = mapped_column(String, nullable=True)
     last_bot_question: Mapped[str | None] = mapped_column(String, nullable=True)
     current_objective: Mapped[str] = mapped_column(String, nullable=False, default="venda", server_default="venda")
