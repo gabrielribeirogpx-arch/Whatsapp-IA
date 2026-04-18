@@ -21,6 +21,7 @@ from app.schemas.chat import (
     ToggleAssignmentResponse,
 )
 from app.services.contact_sync_service import ensure_conversation_contact_link, upsert_contact_for_phone
+from app.services.bot_service import handle_bot_activation
 from app.services.conversation_service import get_or_create_conversation
 from app.services.lead_service import get_or_create_lead
 from app.services.message_service import sanitize_text
@@ -376,6 +377,10 @@ def update_conversation_mode(
 
     conversation.mode = mode
     conversation.updated_at = datetime.utcnow()
+
+    if mode == "bot":
+        handle_bot_activation(db=db, conversation=conversation)
+
     db.commit()
 
     return {"status": "updated", "mode": mode}
