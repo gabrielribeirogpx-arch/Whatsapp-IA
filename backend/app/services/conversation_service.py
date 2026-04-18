@@ -19,6 +19,7 @@ def save_conversation(db: Session, phone: str, message: str, tenant_id):
         conv = Conversation(
             tenant_id=tenant_id,
             phone_number=phone,
+            conversation_state="inicio",
         )
         db.add(conv)
 
@@ -45,6 +46,7 @@ def get_or_create_conversation(db: Session, tenant_id, phone: str, contact_id=No
             tenant_id=tenant_id,
             contact_id=contact_id,
             phone_number=normalized_phone,
+            conversation_state="inicio",
         )
         db.add(conversation)
         try:
