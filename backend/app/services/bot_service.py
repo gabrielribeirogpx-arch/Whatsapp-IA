@@ -6,6 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models import BotRule, Conversation, Message, Tenant
+from app.services.flow_orchestrator import handle_flow
 from app.services.whatsapp_service import WhatsAppConfigError, enviar_mensagem
 from app.utils.text import normalize_text, tokenize
 
@@ -266,6 +267,21 @@ def _create_outbound_message(db: Session, conversation_id, tenant_id, text: str)
     return reply_message
 
 
+def _infer_last_bot_question_from_response(response: str) -> str | None:
+    normalized = normalize_text(response)
+    if "quer ver os planos" in normalized:
+        return "interesse_planos"
+    if "manual ou automatico" in normalized or "manual ou automático" in normalized:
+        return "tipo_atendimento"
+    if "qual voce quer conhecer melhor" in normalized or "qual você quer conhecer melhor" in normalized:
+        return "plano"
+    if "agora me diz" in normalized:
+        return "follow_up"
+    if "?" in response:
+        return "follow_up"
+    return None
+
+
 def handle_bot(db: Session, message: Message, conversation) -> bool:
     print(f"[MODE CHECK] current mode={conversation.mode}")
     if conversation.mode != "bot":
@@ -273,6 +289,9 @@ def handle_bot(db: Session, message: Message, conversation) -> bool:
         return False
 
     tenant = db.execute(select(Tenant).where(Tenant.id == conversation.tenant_id)).scalars().first()
+
+    flow_response = handle_flow(db=db, message=message, conversation=conversation)
+    selected_response = flow_response if flow_response else None
 
     message_normalized = normalize_text(message.text)
     intent = detect_intent(message_normalized)
@@ -284,11 +303,10 @@ def handle_bot(db: Session, message: Message, conversation) -> bool:
     print("[LEAD SCORE]", conversation.lead_score)
 
     state_response: str | None = None
-    state_handled = False
-    if conversation.conversation_state:
+    state_handled = bool(selected_response)
+    if conversation.conversation_state and not selected_response:
         state_response, state_handled = _handle_state_machine(conversation, message.text)
-
-    selected_response = state_response if (state_handled and state_response) else None
+        selected_response = state_response if (state_handled and state_response) else None
 
     if not state_handled:
         rules = (
@@ -350,6 +368,9 @@ def handle_bot(db: Session, message: Message, conversation) -> bool:
         tenant_id=conversation.tenant_id,
         text=selected_response,
     )
+    inferred_question = _infer_last_bot_question_from_response(selected_response)
+    if inferred_question:
+        conversation.last_bot_question = inferred_question
     if not message.from_me:
         conversation.last_bot_triggered_message_id = message.id
     conversation.updated_at = datetime.utcnow()
