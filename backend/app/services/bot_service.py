@@ -276,7 +276,7 @@ def _infer_last_bot_question_from_response(response: str) -> str | None:
     return None
 
 
-def handle_bot(db: Session, message: Message, conversation) -> bool:
+def handle_bot(db: Session, message: Message, conversation) -> dict[str, str | bool | None] | None:
     print(f"[MODE CHECK] current mode={conversation.mode}")
     if conversation.mode != "bot":
         print("[BOT] envio automático bloqueado: modo diferente de bot")
@@ -286,6 +286,7 @@ def handle_bot(db: Session, message: Message, conversation) -> bool:
 
     flow_response = handle_flow(db=db, message=message, conversation=conversation)
     selected_response = flow_response if flow_response else None
+    matched_rule: str | None = "flow_orchestrator" if flow_response else None
 
     message_normalized = normalize_text(message.text)
     intent = detect_intent(message_normalized)
@@ -301,6 +302,8 @@ def handle_bot(db: Session, message: Message, conversation) -> bool:
     if conversation.conversation_state and not selected_response:
         state_response, state_handled = _handle_state_machine(conversation, message.text)
         selected_response = state_response if (state_handled and state_response) else None
+        if selected_response:
+            matched_rule = "state_machine"
 
     if not state_handled:
         rules = (
@@ -321,28 +324,34 @@ def handle_bot(db: Session, message: Message, conversation) -> bool:
             if best_match is None or match > best_match:
                 best_match = match
                 selected_response = rule.response
+                matched_rule = rule.trigger
 
     if not selected_response and not state_handled:
         active_intent = get_active_intent(conversation)
         print("[ACTIVE INTENT]", active_intent)
         if active_intent == "planos":
             selected_response = "Temos planos ativos para você. Quer ver os detalhes de algum?"
+            matched_rule = "active_intent:planos"
         elif active_intent == "preco":
             selected_response = "Os valores variam por plano. Quer que eu te explique cada um?"
+            matched_rule = "active_intent:preco"
         elif active_intent == "fechamento":
             selected_response = "Posso te ajudar a fechar agora. Quer seguir com qual plano?"
+            matched_rule = "active_intent:fechamento"
         elif active_intent == "saudacao":
             selected_response = "Olá! Em que posso te ajudar hoje?"
+            matched_rule = "active_intent:saudacao"
         else:
             print("[BOT FALLBACK]")
             selected_response = "Não entendi muito bem 😅\n\nVocê pode me dizer melhor se quer:\n1️⃣ Ver planos\n2️⃣ Entender como funciona\n3️⃣ Falar com atendente"
+            matched_rule = "fallback_default"
 
     if not selected_response:
-        return False
+        return None
 
     if _last_bot_message_within_cooldown(db=db, conversation=conversation, seconds=10):
         conversation.updated_at = datetime.utcnow()
-        return False
+        return None
 
     if tenant:
         try:
@@ -368,7 +377,12 @@ def handle_bot(db: Session, message: Message, conversation) -> bool:
     if not message.from_me:
         conversation.last_bot_triggered_message_id = message.id
     conversation.updated_at = datetime.utcnow()
-    return True
+    return {
+        "response": selected_response,
+        "matched_rule": matched_rule,
+        "intent": intent,
+        "fallback": bool(matched_rule == "fallback_default"),
+    }
 
 
 def get_last_message(db: Session, conversation_id, tenant_id) -> Message | None:
@@ -398,4 +412,4 @@ def handle_bot_activation(db: Session, conversation: Conversation) -> bool:
     if conversation.last_bot_triggered_message_id == last_message.id:
         return False
 
-    return handle_bot(db=db, message=last_message, conversation=conversation)
+    return bool(handle_bot(db=db, message=last_message, conversation=conversation))

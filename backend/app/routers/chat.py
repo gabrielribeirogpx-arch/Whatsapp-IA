@@ -9,10 +9,11 @@ from sqlalchemy import desc, select
 from sqlalchemy.orm import Session, load_only, selectinload
 
 from app.database import get_db
-from app.models import Contact, Conversation, Message, Tenant
+from app.models import Contact, Conversation, ConversationLog, Message, Tenant
 from app.schemas.chat import (
     ContactOut,
     ConversationOut,
+    ConversationLogOut,
     MessageOut,
     SendMessageRequest,
     TenantLoginRequest,
@@ -215,6 +216,27 @@ def get_messages_by_contact(
         .all()
     )
     return items
+
+
+@router.get("/logs", response_model=list[ConversationLogOut])
+def get_conversation_logs(
+    conversation_id: UUID,
+    tenant: Tenant = Depends(get_current_tenant),
+    db: Session = Depends(get_db),
+):
+    logs = (
+        db.execute(
+            select(ConversationLog)
+            .where(
+                ConversationLog.tenant_id == tenant.id,
+                ConversationLog.conversation_id == conversation_id,
+            )
+            .order_by(ConversationLog.created_at.asc(), ConversationLog.id.asc())
+        )
+        .scalars()
+        .all()
+    )
+    return logs
 
 
 @router.get("/contacts", response_model=list[ContactOut])

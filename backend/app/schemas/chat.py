@@ -76,3 +76,20 @@ class TenantLoginResponse(BaseModel):
     name: str
     slug: str
     usage: TenantUsageOut
+
+
+class ConversationLogOut(BaseModel):
+    id: uuid.UUID
+    tenant_id: uuid.UUID
+    conversation_id: uuid.UUID
+    message: str
+    mode: str
+    intent: str | None = None
+    matched_rule: str | None = None
+    flow_step: str | None = None
+    used_fallback: bool
+    response: str | None = None
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
