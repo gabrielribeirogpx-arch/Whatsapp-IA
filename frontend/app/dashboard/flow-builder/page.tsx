@@ -1,6 +1,8 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import ReactFlow, { Background, Controls, Edge, Node } from '@xyflow/react';
+import '@xyflow/react/dist/style.css';
 
 import { getFlowGraph, getTenantSessionFromStorage } from '@/lib/api';
 import { FlowEdgePayload, FlowNodePayload } from '@/lib/types';
@@ -61,6 +63,34 @@ export default function FlowBuilderPage() {
 
   const isEmpty = useMemo(() => nodes.length === 0 && edges.length === 0, [edges.length, nodes.length]);
 
+  const flowNodes: Node[] = useMemo(
+    () =>
+      nodes.map((node) => ({
+        id: node.id,
+        type: node.type,
+        data: {
+          ...node.data,
+          label: node.data?.label || node.data?.content || `Node ${node.id}`,
+        },
+        position: node.position || {
+          x: Math.random() * 400,
+          y: Math.random() * 400,
+        },
+      })),
+    [nodes],
+  );
+
+  const flowEdges: Edge[] = useMemo(
+    () =>
+      edges.map((edge) => ({
+        id: edge.id,
+        source: edge.source,
+        target: edge.target,
+        label: edge.label || edge.data?.condition,
+      })),
+    [edges],
+  );
+
   if (isLoading) {
     return <div>Carregando fluxo...</div>;
   }
@@ -70,10 +100,11 @@ export default function FlowBuilderPage() {
   }
 
   return (
-    <div>
-      <h1>Flow Builder</h1>
-      <p>{nodes.length} nós carregados.</p>
-      <p>{edges.length} conexões carregadas.</p>
+    <div style={{ width: '100%', height: '100vh' }}>
+      <ReactFlow nodes={flowNodes} edges={flowEdges} fitView>
+        <Background />
+        <Controls />
+      </ReactFlow>
     </div>
   );
 }
