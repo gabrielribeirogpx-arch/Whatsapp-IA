@@ -47,6 +47,11 @@ def _create_outbound_message(db: Session, conversation_id, tenant_id, text: str)
 
 
 def handle_bot(db: Session, message: Message, conversation) -> bool:
+    print(f"[MODE CHECK] current mode={conversation.mode}")
+    if conversation.mode != "bot":
+        print("[BOT] envio automático bloqueado: modo diferente de bot")
+        return False
+
     tenant = db.execute(select(Tenant).where(Tenant.id == conversation.tenant_id)).scalars().first()
 
     rules = (
@@ -70,6 +75,7 @@ def handle_bot(db: Session, message: Message, conversation) -> bool:
 
     if tenant:
         try:
+            print(f"[MODE CHECK] current mode={conversation.mode}")
             enviar_mensagem(
                 conversation.phone_number,
                 selected_response,

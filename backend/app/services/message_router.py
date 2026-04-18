@@ -10,6 +10,7 @@ def handle_incoming_message(db: Session, message: Message, conversation: Convers
     print(f"[ROUTER] mode={mode}")
 
     if mode == "human":
+        print("[ROUTER] human mode ativo: mensagem salva sem resposta automática")
         return None
     elif mode == "bot":
         matched = handle_bot(db, message, conversation)

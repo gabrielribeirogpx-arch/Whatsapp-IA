@@ -286,6 +286,7 @@ async def send_message(
             contact.name = conversation.name
     print("NOME CLIENTE:", conversation.name)
 
+    print(f"[MODE CHECK] current mode={conversation.mode}")
     try:
         enviar_mensagem(phone, message_text, token=tenant.whatsapp_token, phone_number_id=tenant.phone_number_id)
     except WhatsAppConfigError:
