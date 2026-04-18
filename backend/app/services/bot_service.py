@@ -18,6 +18,25 @@ STATE_APRESENTANDO_PLANOS = "apresentando_planos"
 STATE_ESCOLHA_PLANO = "escolha_plano"
 STATE_FECHAMENTO = "fechamento"
 
+INTENT_RESPONSES = {
+    "saudacao": (
+        "Olá! 👋 Bem-vindo à Wazza-API 🚀\n"
+        "Quer saber sobre planos ou como funciona?"
+    ),
+    "planos": (
+        "Temos 3 planos:\n\n"
+        "🔥 Básico — R$29,90\n"
+        "🔥 Essencial — R$69,90\n"
+        "🔥 PRO — R$129,90\n\n"
+        "Qual quer conhecer melhor?"
+    ),
+    "preco": "Os valores variam conforme o plano. Quer que eu te explique cada um?",
+    "compra": (
+        "Perfeito! 🚀 Posso te ajudar a começar agora.\n"
+        "Você quer ativar hoje?"
+    ),
+}
+
 
 def _set_state(conversation: Conversation, new_state: str | None) -> None:
     previous_state = conversation.conversation_state or "sem_estado"
@@ -135,7 +154,7 @@ def detect_intent(message: str) -> str | None:
         or "fechar" in normalized_message
         or "assinar" in normalized_message
     ):
-        return "fechamento"
+        return "compra"
 
     return None
 
@@ -327,6 +346,11 @@ def handle_bot(db: Session, message: Message, conversation) -> dict[str, str | b
                 matched_rule = rule.trigger
 
     if not selected_response and not state_handled:
+        if intent in INTENT_RESPONSES:
+            selected_response = INTENT_RESPONSES[intent]
+            matched_rule = f"intent_response:{intent}"
+
+    if not selected_response and not state_handled:
         active_intent = get_active_intent(conversation)
         print("[ACTIVE INTENT]", active_intent)
         if active_intent == "planos":
@@ -335,6 +359,9 @@ def handle_bot(db: Session, message: Message, conversation) -> dict[str, str | b
         elif active_intent == "preco":
             selected_response = "Os valores variam por plano. Quer que eu te explique cada um?"
             matched_rule = "active_intent:preco"
+        elif active_intent == "compra":
+            selected_response = "Perfeito! 🚀 Posso te ajudar a começar agora. Você quer ativar hoje?"
+            matched_rule = "active_intent:compra"
         elif active_intent == "fechamento":
             selected_response = "Posso te ajudar a fechar agora. Quer seguir com qual plano?"
             matched_rule = "active_intent:fechamento"
@@ -343,7 +370,13 @@ def handle_bot(db: Session, message: Message, conversation) -> dict[str, str | b
             matched_rule = "active_intent:saudacao"
         else:
             print("[BOT FALLBACK]")
-            selected_response = "Não entendi muito bem 😅\n\nVocê pode me dizer melhor se quer:\n1️⃣ Ver planos\n2️⃣ Entender como funciona\n3️⃣ Falar com atendente"
+            selected_response = (
+                "Não entendi totalmente 🤔\n"
+                "Você quer saber sobre:\n"
+                "1️⃣ Planos\n"
+                "2️⃣ Como funciona\n"
+                "3️⃣ Preço"
+            )
             matched_rule = "fallback_default"
 
     if not selected_response:
