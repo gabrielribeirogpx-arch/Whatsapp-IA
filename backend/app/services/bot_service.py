@@ -2,25 +2,16 @@ from __future__ import annotations
 
 from collections import Counter
 from datetime import datetime, timedelta
-import unicodedata
-
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models import BotRule, Conversation, Message, Tenant
 from app.services.whatsapp_service import WhatsAppConfigError, enviar_mensagem
-
-
-def normalize(text: str) -> str:
-    normalized = (text or "").lower().strip()
-    normalized = unicodedata.normalize("NFKD", normalized)
-    normalized = "".join(char for char in normalized if not unicodedata.combining(char))
-    normalized = " ".join(normalized.split())
-    return normalized
+from app.utils.text import normalize_text, tokenize
 
 
 def detect_intent(message: str) -> str | None:
-    normalized_message = normalize(message)
+    normalized_message = normalize_text(message)
 
     if "plano" in normalized_message or "planos" in normalized_message:
         return "planos"
@@ -50,7 +41,7 @@ def detect_intent(message: str) -> str | None:
 
 
 def update_lead_score(conversation: Conversation, message: str) -> None:
-    normalized_message = normalize(message)
+    normalized_message = normalize_text(message)
     score_increment = 0
 
     if "preco" in normalized_message:
@@ -127,20 +118,35 @@ def _last_bot_message_within_cooldown(db: Session, conversation: Conversation, s
     return datetime.utcnow() - last_bot_message.created_at < timedelta(seconds=seconds)
 
 
-def _matches(rule: BotRule, incoming_text: str) -> bool:
-    trigger_normalized = normalize(rule.trigger)
-    message_normalized = normalize(incoming_text)
-    print(f"[BOT MATCH] trigger={trigger_normalized} message={message_normalized}")
+def _match_score(rule: BotRule, incoming_text: str) -> tuple[int, int] | None:
+    trigger_normalized = normalize_text(rule.trigger)
+    message_normalized = normalize_text(incoming_text)
+
     if not trigger_normalized or not message_normalized:
-        return False
+        return None
 
     if rule.match_type == "exact":
-        return trigger_normalized == message_normalized
+        score = 100 if trigger_normalized == message_normalized else 0
+        if score:
+            print(f"[BOT MATCH] trigger={trigger_normalized} score={score}")
+            return (3, score)
+        return None
 
-    if rule.match_type == "contains":
-        return trigger_normalized in message_normalized
+    trigger_tokens = tokenize(trigger_normalized)
+    message_tokens = set(tokenize(message_normalized))
+    token_score = sum(1 for token in trigger_tokens if token in message_tokens)
 
-    return trigger_normalized in message_normalized
+    phrase_match = trigger_normalized in message_normalized
+    if phrase_match:
+        score = max(token_score, len(trigger_tokens), 1)
+        print(f"[BOT MATCH] trigger={trigger_normalized} score={score}")
+        return (2, score)
+
+    if token_score >= 1:
+        print(f"[BOT MATCH] trigger={trigger_normalized} score={token_score}")
+        return (1, token_score)
+
+    return None
 
 
 def _create_outbound_message(db: Session, conversation_id, tenant_id, text: str) -> Message:
@@ -163,7 +169,7 @@ def handle_bot(db: Session, message: Message, conversation) -> bool:
 
     tenant = db.execute(select(Tenant).where(Tenant.id == conversation.tenant_id)).scalars().first()
 
-    message_normalized = normalize(message.text)
+    message_normalized = normalize_text(message.text)
     intent = detect_intent(message_normalized)
     update_context(conversation, intent)
     print("[INTENT DETECTED]", intent)
@@ -183,10 +189,15 @@ def handle_bot(db: Session, message: Message, conversation) -> bool:
     )
 
     selected_response = None
+    best_match: tuple[int, int] | None = None
     for rule in rules:
-        if _matches(rule, message.text):
+        match = _match_score(rule, message.text)
+        if not match:
+            continue
+
+        if best_match is None or match > best_match:
+            best_match = match
             selected_response = rule.response
-            break
 
     if not selected_response:
         active_intent = get_active_intent(conversation)
@@ -200,8 +211,8 @@ def handle_bot(db: Session, message: Message, conversation) -> bool:
         elif active_intent == "saudacao":
             selected_response = "Olá! Em que posso te ajudar hoje?"
         else:
-            conversation.updated_at = datetime.utcnow()
-            return False
+            print("[BOT FALLBACK]")
+            selected_response = "Não entendi muito bem 😅\n\nVocê pode me dizer melhor se quer:\n1️⃣ Ver planos\n2️⃣ Entender como funciona\n3️⃣ Falar com atendente"
 
     if not selected_response:
         return False
