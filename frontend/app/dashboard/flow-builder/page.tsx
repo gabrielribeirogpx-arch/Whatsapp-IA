@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import ReactFlow, {
-  addEdge,
   Background,
   Connection,
   Controls,
@@ -13,6 +12,7 @@ import ReactFlow, {
   useNodesState,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
+import { addEdge } from '@xyflow/react';
 
 import ActionNode from '@/components/flow/nodes/ActionNode';
 import ChoiceNode from '@/components/flow/nodes/ChoiceNode';
@@ -67,8 +67,8 @@ function makeNodeId() {
 }
 
 export default function FlowBuilderPage() {
-  const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
-  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
+  const [nodes, setNodes, onNodesChange] = useNodesState([]);
+  const [edges, setEdges, onEdgesChange] = useEdgesState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
 
@@ -158,12 +158,9 @@ export default function FlowBuilderPage() {
 
   const isEmpty = useMemo(() => nodes.length === 0 && edges.length === 0, [edges.length, nodes.length]);
 
-  const onConnect: OnConnect = useCallback(
-    (params: Connection) => {
-      setEdges((current) => addEdge(params, current));
-    },
-    [setEdges],
-  );
+  const onConnect: OnConnect = useCallback((params: Connection) => {
+    setEdges((eds) => addEdge(params, eds));
+  }, [setEdges]);
 
   const addNode = useCallback(
     (kind: FlowNodeKind) => {
