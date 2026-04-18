@@ -6,7 +6,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models import BotRule, Conversation, Message, Tenant
-from app.services.flow_orchestrator import handle_flow
+from app.services.flow_orchestrator import handle_flow as handle_orchestrator_flow
+from app.services.flow_service import handle_flow as handle_priority_flow
 from app.services.whatsapp_service import WhatsAppConfigError, enviar_mensagem, send_whatsapp_message
 from app.utils.text import normalize_text, tokenize
 
@@ -303,9 +304,15 @@ def handle_bot(db: Session, message: Message, conversation) -> dict[str, str | b
 
     tenant = db.execute(select(Tenant).where(Tenant.id == conversation.tenant_id)).scalars().first()
 
-    flow_response = handle_flow(db=db, message=message, conversation=conversation)
-    selected_response = flow_response if flow_response else None
-    matched_rule: str | None = "flow_orchestrator" if flow_response else None
+    priority_flow_response = handle_priority_flow(db=db, conversation=conversation, message=message)
+    selected_response = priority_flow_response if priority_flow_response else None
+    matched_rule: str | None = "priority_flow" if priority_flow_response else None
+
+    if not selected_response:
+        flow_response = handle_orchestrator_flow(db=db, message=message, conversation=conversation)
+        selected_response = flow_response if flow_response else None
+        if flow_response:
+            matched_rule = "flow_orchestrator"
 
     message_normalized = normalize_text(message.text)
     intent = detect_intent(message_normalized)
