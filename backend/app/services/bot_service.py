@@ -307,6 +307,7 @@ def handle_bot(db: Session, message: Message, conversation) -> dict[str, str | b
     priority_flow_response = handle_priority_flow(db=db, conversation=conversation, message=message)
     selected_response = priority_flow_response if priority_flow_response else None
     matched_rule: str | None = "priority_flow" if priority_flow_response else None
+    using_priority_flow = bool(priority_flow_response)
 
     if not selected_response:
         flow_response = handle_orchestrator_flow(db=db, message=message, conversation=conversation)
@@ -314,11 +315,15 @@ def handle_bot(db: Session, message: Message, conversation) -> dict[str, str | b
         if flow_response:
             matched_rule = "flow_orchestrator"
 
-    message_normalized = normalize_text(message.text)
-    intent = detect_intent(message_normalized)
-    update_context(conversation, intent)
-    print("[INTENT DETECTED]", intent)
-    print("[INTENT HISTORY]", conversation.intent_history)
+    intent: str | None = None
+    if not using_priority_flow:
+        message_normalized = normalize_text(message.text)
+        intent = detect_intent(message_normalized)
+        update_context(conversation, intent)
+        print("[INTENT DETECTED]", intent)
+        print("[INTENT HISTORY]", conversation.intent_history)
+    else:
+        print("[FLOW] prioridade ativa, intent detection ignorada")
 
     update_lead_score(conversation, message.text)
     print("[LEAD SCORE]", conversation.lead_score)
