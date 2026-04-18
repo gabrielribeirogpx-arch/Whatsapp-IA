@@ -18,6 +18,7 @@ class Conversation(Base):
     name: Mapped[str | None] = mapped_column(String, nullable=True)
     avatar_url: Mapped[str | None] = mapped_column(String, nullable=True)
     mode: Mapped[str] = mapped_column(String, nullable=False, default="human")
+    last_bot_triggered_message_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime | None] = mapped_column(
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=True

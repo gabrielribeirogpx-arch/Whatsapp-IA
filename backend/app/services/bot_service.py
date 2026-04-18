@@ -6,7 +6,7 @@ import unicodedata
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import BotRule, Message, Tenant
+from app.models import BotRule, Conversation, Message, Tenant
 from app.services.whatsapp_service import WhatsAppConfigError, enviar_mensagem
 
 
@@ -91,5 +91,37 @@ def handle_bot(db: Session, message: Message, conversation) -> bool:
         tenant_id=conversation.tenant_id,
         text=selected_response,
     )
+    if not message.from_me:
+        conversation.last_bot_triggered_message_id = message.id
     conversation.updated_at = datetime.utcnow()
     return True
+
+
+def get_last_message(db: Session, conversation_id) -> Message | None:
+    return (
+        db.execute(
+            select(Message)
+            .where(Message.conversation_id == conversation_id)
+            .order_by(Message.created_at.desc(), Message.id.desc())
+            .limit(1)
+        )
+        .scalars()
+        .first()
+    )
+
+
+def handle_bot_activation(db: Session, conversation: Conversation) -> bool:
+    if conversation.mode != "bot":
+        return False
+
+    last_message = get_last_message(db, conversation.id)
+    if not last_message:
+        return False
+
+    if last_message.from_me:
+        return False
+
+    if conversation.last_bot_triggered_message_id == last_message.id:
+        return False
+
+    return handle_bot(db=db, message=last_message, conversation=conversation)
