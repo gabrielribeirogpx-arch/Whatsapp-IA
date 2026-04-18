@@ -8,5 +8,6 @@ from app.models.knowledge_chunk import KnowledgeChunk
 from app.models.lead import Lead
 from app.models.pipeline_stage import PipelineStage
 from app.models.bot_rule import BotRule
+from app.models.conversation_log import ConversationLog
 
-__all__ = ["Tenant", "AIConfig", "Conversation", "Contact", "Message", "Product", "KnowledgeBase", "KnowledgeChunk", "Lead", "PipelineStage", "BotRule"]
+__all__ = ["Tenant", "AIConfig", "Conversation", "Contact", "Message", "Product", "KnowledgeBase", "KnowledgeChunk", "Lead", "PipelineStage", "BotRule", "ConversationLog"]
