@@ -8,6 +8,7 @@ class ProductBase(BaseModel):
     name: str = Field(min_length=1, max_length=150)
     description: str | None = None
     price: str | None = Field(default=None, max_length=120)
+    is_active: bool = True
     benefits: str | None = None
     objections: str | None = None
     target_customer: str | None = None
@@ -17,8 +18,14 @@ class ProductCreate(ProductBase):
     pass
 
 
-class ProductUpdate(ProductBase):
-    pass
+class ProductUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=150)
+    description: str | None = None
+    price: str | None = Field(default=None, max_length=120)
+    is_active: bool | None = None
+    benefits: str | None = None
+    objections: str | None = None
+    target_customer: str | None = None
 
 
 class ProductOut(ProductBase):

@@ -28,7 +28,6 @@ def _retomar_fluxo(conversation: Conversation) -> str:
 
 
 def handle_flow(db: Session, message: Message, conversation: Conversation) -> str:
-    del db
     conversation.current_objective = conversation.current_objective or "venda"
     normalized_message = _normalize_text(message.text)
     state = conversation.conversation_state or ""
@@ -40,7 +39,7 @@ def handle_flow(db: Session, message: Message, conversation: Conversation) -> st
             return response
 
     if "preço" in normalized_message or "preco" in normalized_message or "valor" in normalized_message:
-        response = responder_preco(conversation)
+        response = responder_preco(db=db, conversation=conversation)
         return f"{response}\n\n{_retomar_fluxo(conversation)}"
 
     if "como funciona" in normalized_message:

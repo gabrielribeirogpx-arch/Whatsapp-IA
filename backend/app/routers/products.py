@@ -35,6 +35,7 @@ def create_product(
         name=payload.name.strip(),
         description=(payload.description.strip() if payload.description else None),
         price=(payload.price.strip() if payload.price else None),
+        is_active=payload.is_active,
         benefits=(payload.benefits.strip() if payload.benefits else None),
         objections=(payload.objections.strip() if payload.objections else None),
         target_customer=(payload.target_customer.strip() if payload.target_customer else None),
@@ -45,10 +46,41 @@ def create_product(
     return product
 
 
+@router.patch("/{product_id}", response_model=ProductOut)
+def patch_product(
+    product_id: UUID,
+    payload: ProductUpdate,
+    tenant: Tenant = Depends(get_current_tenant),
+    db: Session = Depends(get_db),
+):
+    product = db.execute(select(Product).where(Product.id == product_id, Product.tenant_id == tenant.id)).scalars().first()
+    if not product:
+        raise HTTPException(status_code=404, detail="Produto não encontrado")
+
+    if payload.name is not None:
+        product.name = payload.name.strip()
+    if payload.description is not None:
+        product.description = payload.description.strip() if payload.description else None
+    if payload.price is not None:
+        product.price = payload.price.strip() if payload.price else None
+    if payload.is_active is not None:
+        product.is_active = payload.is_active
+    if payload.benefits is not None:
+        product.benefits = payload.benefits.strip() if payload.benefits else None
+    if payload.objections is not None:
+        product.objections = payload.objections.strip() if payload.objections else None
+    if payload.target_customer is not None:
+        product.target_customer = payload.target_customer.strip() if payload.target_customer else None
+
+    db.commit()
+    db.refresh(product)
+    return product
+
+
 @router.put("/{product_id}", response_model=ProductOut)
 def update_product(
     product_id: UUID,
-    payload: ProductUpdate,
+    payload: ProductCreate,
     tenant: Tenant = Depends(get_current_tenant),
     db: Session = Depends(get_db),
 ):
@@ -59,6 +91,7 @@ def update_product(
     product.name = payload.name.strip()
     product.description = payload.description.strip() if payload.description else None
     product.price = payload.price.strip() if payload.price else None
+    product.is_active = payload.is_active
     product.benefits = payload.benefits.strip() if payload.benefits else None
     product.objections = payload.objections.strip() if payload.objections else None
     product.target_customer = payload.target_customer.strip() if payload.target_customer else None
