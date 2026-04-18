@@ -18,6 +18,7 @@ from app.routers import knowledge
 from app.routers import leads
 from app.routers import dashboard
 from app.routers import bot_rules
+from app.routers import flows
 
 
 def run_migrations():
@@ -41,6 +42,7 @@ def ensure_conversations_columns():
         "ALTER TABLE conversations ADD COLUMN IF NOT EXISTS lead_score INTEGER DEFAULT 0;",
         "ALTER TABLE conversations ADD COLUMN IF NOT EXISTS current_step TEXT;",
         "ALTER TABLE conversations ADD COLUMN IF NOT EXISTS current_flow UUID;",
+        "ALTER TABLE conversations ADD COLUMN IF NOT EXISTS current_node_id UUID;",
     ]
     try:
         with engine.begin() as connection:
@@ -79,6 +81,7 @@ app.include_router(knowledge.router, prefix="/api")
 app.include_router(leads.router, prefix="/api")
 app.include_router(dashboard.router, prefix="/api")
 app.include_router(bot_rules.router)
+app.include_router(flows.router)
 
 # webhook normalmente externo (Meta)
 app.include_router(webhook.router)

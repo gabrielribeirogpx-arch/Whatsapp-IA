@@ -19,7 +19,8 @@ type DashboardData = {
 };
 
 export default function DashboardPage() {
-  const conversations: Conversation[] = [];
+  const conversations = useMemo<Conversation[]>(() => [], []);
+  const conversationsMemo = useMemo(() => conversations, [conversations]);
   const [data, setData] = useState<DashboardData | null>(null);
 
   useEffect(() => {
@@ -41,13 +42,13 @@ export default function DashboardPage() {
   const uniqueConversations = useMemo(() => {
     const seen = new Set<string>();
 
-    return conversations.filter((conversation) => {
+    return conversationsMemo.filter((conversation) => {
       const phone = conversation.phone ?? '';
       if (!phone || seen.has(phone)) return false;
       seen.add(phone);
       return true;
     });
-  }, [conversations]);
+  }, [conversationsMemo]);
 
   const humanInProgress = useMemo(
     () => uniqueConversations.filter((conversation) => conversation.mode === 'human').length,
@@ -94,6 +95,9 @@ export default function DashboardPage() {
           </Link>
           <Link href="/chat" className="primary-button">
             Abrir Inbox
+          </Link>
+          <Link href="/dashboard/flow-builder" className="secondary-button">
+            Flow Builder
           </Link>
         </div>
       </section>

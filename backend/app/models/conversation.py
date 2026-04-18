@@ -21,6 +21,7 @@ class Conversation(Base):
     conversation_state: Mapped[str | None] = mapped_column(String, nullable=True)
     current_flow: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("flows.id"), nullable=True)
     current_step: Mapped[str | None] = mapped_column(String, nullable=True)
+    current_node_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("flow_nodes.id"), nullable=True)
     last_bot_question: Mapped[str | None] = mapped_column(String, nullable=True)
     current_objective: Mapped[str] = mapped_column(String, nullable=False, default="venda", server_default="venda")
     last_bot_triggered_message_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
