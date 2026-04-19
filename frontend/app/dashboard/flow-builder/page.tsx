@@ -6,12 +6,11 @@ import ReactFlow, {
   Background,
   Connection,
   Controls,
-  Edge,
-  Node,
   OnConnect,
   useEdgesState,
   useNodesState,
 } from '@xyflow/react';
+import type { Edge, Node } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 
 import ActionNode from '@/components/flow/nodes/ActionNode';
@@ -51,6 +50,9 @@ const NODE_PRESETS: Record<FlowNodeKind, { label: string; type: string; data: Re
   action: { label: 'Ação', type: 'action', data: { action: '' } },
 };
 
+const initialNodes: Node[] = [];
+const initialEdges: Edge[] = [];
+
 function randomPosition() {
   return {
     x: Math.floor(Math.random() * 550),
@@ -67,19 +69,19 @@ function makeNodeId() {
 }
 
 export default function FlowBuilderPage() {
-  const [nodes, setNodes, onNodesChange] = useNodesState([]);
-  const [edges, setEdges, onEdgesChange] = useEdgesState([]);
+  const [nodes, setNodes, onNodesChange] = useNodesState<Node>(initialNodes);
+  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>(initialEdges);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
 
   const updateNodeData = useCallback((nodeId: string, patch: Record<string, unknown>) => {
-    setNodes((prev) =>
+    setNodes((prev: Node[]) =>
       prev.map((node) => {
         if (node.id !== nodeId) return node;
         return {
           ...node,
           data: {
-            ...(node.data || {}),
+            ...node.data,
             ...patch,
           },
         };
