@@ -14,7 +14,7 @@ type ChoiceNodeData = {
   onChange?: (nodeId: string, patch: Record<string, unknown>) => void;
 };
 
-export default function ChoiceNode({ id, data }: NodeProps) {
+export default function ChoiceNode({ id, data, selected }: NodeProps) {
   const nodeData = (data || {}) as ChoiceNodeData;
   const buttons = nodeData.buttons || [];
 
@@ -31,7 +31,10 @@ export default function ChoiceNode({ id, data }: NodeProps) {
   };
 
   return (
-    <div style={{ background: '#fff', border: '1px solid #d1d5db', borderRadius: 8, padding: 12, minWidth: 260 }}>
+    <div
+      className={selected ? 'selected' : undefined}
+      style={{ background: '#fff', border: '1px solid #d1d5db', borderRadius: 8, padding: 12, minWidth: 260 }}
+    >
       <Handle type="target" position={Position.Left} />
       <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 8 }}>{nodeData.label || 'Escolha'}</div>
       <textarea

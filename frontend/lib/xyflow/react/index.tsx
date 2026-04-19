@@ -31,6 +31,7 @@ export type OnEdgesChange = (changes: unknown[]) => void;
 export type NodeProps<TData = Record<string, unknown>> = {
   id: string;
   data: TData;
+  selected?: boolean;
 };
 
 export enum Position {
@@ -60,6 +61,13 @@ type ReactFlowProps = {
   onConnect?: OnConnect;
   onNodesChange?: OnNodesChange;
   onEdgesChange?: OnEdgesChange;
+  onNodesDelete?: (deleted: Node[]) => void;
+  nodesDraggable?: boolean;
+  nodesConnectable?: boolean;
+  elementsSelectable?: boolean;
+  deleteKeyCode?: string[];
+  snapToGrid?: boolean;
+  snapGrid?: [number, number];
 };
 
 const nodeStyle: CSSProperties = {

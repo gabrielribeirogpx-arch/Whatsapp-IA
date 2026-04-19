@@ -939,3 +939,7 @@ input {
   background: #dbeafe;
   color: #1d4ed8;
 }
+
+.selected {
+  border: 2px solid #3b82f6 !important;
+}
