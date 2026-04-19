@@ -129,12 +129,15 @@ export default function FlowBuilderPage() {
         if (!active) return;
 
         const initialNodes = (data?.nodes || []).map(buildFlowNode);
-        const initialEdges: Edge[] = (data?.edges || []).map((edge) => ({
+        const initialEdges: Edge[] = (data?.edges || []).map((edge): Edge => ({
           id: edge.id,
           source: edge.source,
           target: edge.target,
+          type: 'default',
+          data: {
+            condition: edge.data?.condition ?? edge.label ?? '',
+          },
           label: edge.label || edge.data?.condition,
-          data: edge.data,
         }));
 
         setNodes(initialNodes);
@@ -210,12 +213,15 @@ export default function FlowBuilderPage() {
       const result = await saveFlowGraph(tenantId, { nodes: payloadNodes, edges: payloadEdges });
       setNodes((result.nodes || []).map(buildFlowNode));
       setEdges(
-        (result.edges || []).map((edge) => ({
+        (result.edges || []).map((edge): Edge => ({
           id: edge.id,
           source: edge.source,
           target: edge.target,
+          type: 'default',
+          data: {
+            condition: edge.data?.condition ?? edge.label ?? '',
+          },
           label: edge.label || edge.data?.condition,
-          data: edge.data,
         })),
       );
     } finally {
