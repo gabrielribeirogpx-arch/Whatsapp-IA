@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import ReactFlow, {
+  addEdge,
   Background,
   Connection,
   Controls,
@@ -12,7 +13,6 @@ import ReactFlow, {
   useNodesState,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { addEdge } from '@xyflow/react';
 
 import ActionNode from '@/components/flow/nodes/ActionNode';
 import ChoiceNode from '@/components/flow/nodes/ChoiceNode';
@@ -254,7 +254,7 @@ export default function FlowBuilderPage() {
             setNodes((nds) => nds.filter((node) => !deleted.find((item) => item.id === node.id)));
           }}
           nodeTypes={nodeTypes}
-          nodesDraggable
+          nodesDraggable={true}
           nodesConnectable
           elementsSelectable
           deleteKeyCode={['Backspace', 'Delete']}
