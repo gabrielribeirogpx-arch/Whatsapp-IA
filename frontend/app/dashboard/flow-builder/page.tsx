@@ -6,7 +6,6 @@ import ReactFlow, {
   Connection,
   Controls,
   Edge,
-  MiniMap,
   Node,
   OnConnect,
   useEdgesState,
@@ -265,7 +264,6 @@ export default function FlowBuilderPage() {
         >
           <Background />
           <Controls />
-          <MiniMap />
         </ReactFlow>
       </main>
     </div>
