@@ -1,6 +1,6 @@
 'use client';
 
-import { Handle, NodeProps, Position } from '@xyflow/react';
+import { Handle, NodeProps, Position } from 'reactflow';
 
 type ConditionNodeData = {
   label?: string;

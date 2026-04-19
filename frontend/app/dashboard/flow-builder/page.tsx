@@ -1,17 +1,16 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import ReactFlow from '@xyflow/react';
-import {
+import ReactFlow, {
   addEdge,
   Background,
   Controls,
   MiniMap,
   useEdgesState,
   useNodesState,
-} from '@xyflow/react';
-import type { Connection, Edge, Node } from '@xyflow/react';
-import '@xyflow/react/dist/style.css';
+} from 'reactflow';
+import type { Connection, Edge, Node } from 'reactflow';
+import 'reactflow/dist/style.css';
 
 import ActionNode from '@/components/flow/nodes/ActionNode';
 import ChoiceNode from '@/components/flow/nodes/ChoiceNode';
