@@ -4,13 +4,12 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import ReactFlow, {
   addEdge,
   Background,
-  Connection,
   Controls,
-  OnConnect,
+  MiniMap,
   useEdgesState,
   useNodesState,
 } from '@xyflow/react';
-import type { Edge, Node } from '@xyflow/react';
+import type { Connection, Edge, Node, OnConnect } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 
 import ActionNode from '@/components/flow/nodes/ActionNode';
@@ -265,6 +264,7 @@ export default function FlowBuilderPage() {
           fitView
         >
           <Background />
+          <MiniMap />
           <Controls />
         </ReactFlow>
       </main>
