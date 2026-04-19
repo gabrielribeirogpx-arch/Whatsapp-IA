@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import ReactFlow, {
+  addEdge,
   Background,
   Connection,
   Controls,
@@ -12,7 +13,6 @@ import ReactFlow, {
   useNodesState,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { addEdge } from '@xyflow/react';
 
 import ActionNode from '@/components/flow/nodes/ActionNode';
 import ChoiceNode from '@/components/flow/nodes/ChoiceNode';
@@ -92,6 +92,7 @@ export default function FlowBuilderPage() {
       id: node.id,
       type: node.type,
       position: node.position || randomPosition(),
+      draggable: true,
       data: {
         ...node.data,
         label: node.data?.label || node.data?.content || `Node ${node.id}`,
@@ -169,6 +170,7 @@ export default function FlowBuilderPage() {
         id: makeNodeId(),
         type: preset.type,
         position: randomPosition(),
+        draggable: true,
         data: {
           label: preset.label,
           ...preset.data,
