@@ -6,6 +6,7 @@ import ReactFlow, {
   Connection,
   Controls,
   Edge,
+  MiniMap,
   Node,
   OnConnect,
   useEdgesState,
@@ -250,11 +251,21 @@ export default function FlowBuilderPage() {
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
           onConnect={onConnect}
+          onNodesDelete={(deleted) => {
+            setNodes((nds) => nds.filter((node) => !deleted.find((item) => item.id === node.id)));
+          }}
           nodeTypes={nodeTypes}
+          nodesDraggable
+          nodesConnectable
+          elementsSelectable
+          deleteKeyCode={['Backspace', 'Delete']}
+          snapToGrid
+          snapGrid={[20, 20]}
           fitView
         >
           <Background />
           <Controls />
+          <MiniMap />
         </ReactFlow>
       </main>
     </div>

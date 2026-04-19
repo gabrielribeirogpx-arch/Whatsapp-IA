@@ -8,11 +8,14 @@ type ConditionNodeData = {
   onChange?: (nodeId: string, patch: Record<string, unknown>) => void;
 };
 
-export default function ConditionNode({ id, data }: NodeProps) {
+export default function ConditionNode({ id, data, selected }: NodeProps) {
   const nodeData = (data || {}) as ConditionNodeData;
 
   return (
-    <div style={{ background: '#fff', border: '1px solid #d1d5db', borderRadius: 8, padding: 12, minWidth: 240 }}>
+    <div
+      className={selected ? 'selected' : undefined}
+      style={{ background: '#fff', border: '1px solid #d1d5db', borderRadius: 8, padding: 12, minWidth: 240 }}
+    >
       <Handle type="target" position={Position.Left} />
       <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 8 }}>{nodeData.label || 'Condição'}</div>
       <input
