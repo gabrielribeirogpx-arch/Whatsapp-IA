@@ -4,15 +4,13 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import ReactFlow, {
   addEdge,
   Background,
-  Connection,
   Controls,
-  Edge,
-  Node,
-  OnConnect,
+  MiniMap,
   useEdgesState,
   useNodesState,
-} from '@xyflow/react';
-import '@xyflow/react/dist/style.css';
+} from 'reactflow';
+import type { Connection, Edge, Node } from 'reactflow';
+import 'reactflow/dist/style.css';
 
 import ActionNode from '@/components/flow/nodes/ActionNode';
 import ChoiceNode from '@/components/flow/nodes/ChoiceNode';
@@ -51,6 +49,9 @@ const NODE_PRESETS: Record<FlowNodeKind, { label: string; type: string; data: Re
   action: { label: 'Ação', type: 'action', data: { action: '' } },
 };
 
+const initialNodes: Node[] = [];
+const initialEdges: Edge[] = [];
+
 function randomPosition() {
   return {
     x: Math.floor(Math.random() * 550),
@@ -67,19 +68,19 @@ function makeNodeId() {
 }
 
 export default function FlowBuilderPage() {
-  const [nodes, setNodes, onNodesChange] = useNodesState([]);
-  const [edges, setEdges, onEdgesChange] = useEdgesState([]);
+  const [nodes, setNodes, onNodesChange] = useNodesState<Node>(initialNodes);
+  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>(initialEdges);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
 
   const updateNodeData = useCallback((nodeId: string, patch: Record<string, unknown>) => {
-    setNodes((prev) =>
+    setNodes((prev: Node[]) =>
       prev.map((node) => {
         if (node.id !== nodeId) return node;
         return {
           ...node,
           data: {
-            ...(node.data || {}),
+            ...node.data,
             ...patch,
           },
         };
@@ -128,12 +129,15 @@ export default function FlowBuilderPage() {
         if (!active) return;
 
         const initialNodes = (data?.nodes || []).map(buildFlowNode);
-        const initialEdges: Edge[] = (data?.edges || []).map((edge) => ({
+        const initialEdges: Edge[] = (data?.edges || []).map((edge): Edge => ({
           id: edge.id,
           source: edge.source,
           target: edge.target,
+          type: 'default',
+          data: {
+            condition: edge.data?.condition ?? edge.label ?? '',
+          },
           label: edge.label || edge.data?.condition,
-          data: edge.data,
         }));
 
         setNodes(initialNodes);
@@ -158,7 +162,7 @@ export default function FlowBuilderPage() {
 
   const isEmpty = useMemo(() => nodes.length === 0 && edges.length === 0, [edges.length, nodes.length]);
 
-  const onConnect: OnConnect = useCallback((params: Connection) => {
+  const onConnect = useCallback((params: Connection) => {
     setEdges((eds) => addEdge(params, eds));
   }, [setEdges]);
 
@@ -209,12 +213,15 @@ export default function FlowBuilderPage() {
       const result = await saveFlowGraph(tenantId, { nodes: payloadNodes, edges: payloadEdges });
       setNodes((result.nodes || []).map(buildFlowNode));
       setEdges(
-        (result.edges || []).map((edge) => ({
+        (result.edges || []).map((edge): Edge => ({
           id: edge.id,
           source: edge.source,
           target: edge.target,
+          type: 'default',
+          data: {
+            condition: edge.data?.condition ?? edge.label ?? '',
+          },
           label: edge.label || edge.data?.condition,
-          data: edge.data,
         })),
       );
     } finally {
@@ -263,6 +270,7 @@ export default function FlowBuilderPage() {
           fitView
         >
           <Background />
+          <MiniMap />
           <Controls />
         </ReactFlow>
       </main>
