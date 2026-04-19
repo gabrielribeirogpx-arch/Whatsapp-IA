@@ -92,7 +92,6 @@ export default function FlowBuilderPage() {
       id: node.id,
       type: node.type,
       position: node.position || randomPosition(),
-      draggable: true,
       data: {
         ...node.data,
         label: node.data?.label || node.data?.content || `Node ${node.id}`,
@@ -170,7 +169,6 @@ export default function FlowBuilderPage() {
         id: makeNodeId(),
         type: preset.type,
         position: randomPosition(),
-        draggable: true,
         data: {
           label: preset.label,
           ...preset.data,
@@ -256,7 +254,7 @@ export default function FlowBuilderPage() {
             setNodes((nds) => nds.filter((node) => !deleted.find((item) => item.id === node.id)));
           }}
           nodeTypes={nodeTypes}
-          nodesDraggable
+          nodesDraggable={true}
           nodesConnectable
           elementsSelectable
           deleteKeyCode={['Backspace', 'Delete']}
