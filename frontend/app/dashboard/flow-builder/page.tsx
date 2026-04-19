@@ -1,7 +1,8 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import ReactFlow, {
+import ReactFlow from '@xyflow/react';
+import {
   addEdge,
   Background,
   Controls,
@@ -9,7 +10,7 @@ import ReactFlow, {
   useEdgesState,
   useNodesState,
 } from '@xyflow/react';
-import type { Connection, Edge, Node, OnConnect } from '@xyflow/react';
+import type { Connection, Edge, Node } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 
 import ActionNode from '@/components/flow/nodes/ActionNode';
@@ -159,7 +160,7 @@ export default function FlowBuilderPage() {
 
   const isEmpty = useMemo(() => nodes.length === 0 && edges.length === 0, [edges.length, nodes.length]);
 
-  const onConnect: OnConnect = useCallback((params: Connection) => {
+  const onConnect = useCallback((params: Connection) => {
     setEdges((eds) => addEdge(params, eds));
   }, [setEdges]);
 
