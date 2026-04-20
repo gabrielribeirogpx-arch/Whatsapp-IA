@@ -183,18 +183,23 @@ export default function FlowBuilderPage() {
   const isEmpty = useMemo(() => nodes.length === 0 && edges.length === 0, [edges.length, nodes.length]);
 
   const onConnect = useCallback((params: Connection) => {
+    if (!params.source || !params.target) {
+      return;
+    }
+
     const choiceLabel = getChoiceLabelByHandle(nodes, params.source || null, params.sourceHandle || null);
     const edgeLabel = choiceLabel || params.sourceHandle || '';
 
     setEdges((eds) =>
       addEdge(
         {
+          id: `${params.source}-${params.target}-${Date.now()}`,
           ...params,
-          sourceHandle: params.sourceHandle || undefined,
-          label: edgeLabel || undefined,
+          sourceHandle: params.sourceHandle ?? undefined,
+          label: edgeLabel ?? undefined,
           data: {
-            sourceHandle: params.sourceHandle || undefined,
-            condition: edgeLabel || undefined,
+            sourceHandle: params.sourceHandle ?? undefined,
+            condition: edgeLabel ?? undefined,
           },
         },
         eds,
