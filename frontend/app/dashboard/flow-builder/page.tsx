@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import dagre from 'dagre';
 import ReactFlow, {
   addEdge,
   Background,
@@ -59,13 +60,47 @@ const NODE_PRESETS: Record<FlowNodeKind, { label: string; type: string; data: Re
 const initialNodes: Node[] = [];
 const initialEdges: Edge[] = [];
 
-function randomPosition() {
-  return {
-    x: Math.floor(Math.random() * 550),
-    y: Math.floor(Math.random() * 450),
-  };
-}
+const nodeWidth = 220;
+const nodeHeight = 120;
 
+function layoutNodes(nodes: Node[], edges: Edge[]) {
+  const g = new dagre.graphlib.Graph();
+  g.setDefaultEdgeLabel(() => ({}));
+
+  g.setGraph({
+    rankdir: 'LR',
+    nodesep: 80,
+    ranksep: 150,
+  });
+
+  nodes.forEach((node) => {
+    g.setNode(node.id, { width: nodeWidth, height: nodeHeight });
+  });
+
+  edges.forEach((edge) => {
+    if (edge.source && edge.target) {
+      g.setEdge(edge.source, edge.target);
+    }
+  });
+
+  dagre.layout(g);
+
+  return nodes.map((node) => {
+    const pos = g.node(node.id);
+
+    if (!pos) {
+      return node;
+    }
+
+    return {
+      ...node,
+      position: {
+        x: pos.x - nodeWidth / 2,
+        y: pos.y - nodeHeight / 2,
+      },
+    };
+  });
+}
 
 const safeString = (v?: string | null) => (v ? v : '');
 const toHandleId = (value: string, fallback: string) => {
@@ -140,7 +175,7 @@ export default function FlowBuilderPage() {
     (node: FlowNodePayload): Node => ({
       id: node.id,
       type: node.type,
-      position: node.position || randomPosition(),
+      position: node.position || { x: 0, y: 0 },
       data: {
         ...node.data,
         buttons: node.type === 'choice' ? normalizeChoiceButtons(node.id, node.data?.buttons) : node.data?.buttons,
@@ -180,7 +215,7 @@ export default function FlowBuilderPage() {
         const initialNodes = (data?.nodes || []).map(buildFlowNode);
         const initialEdges: Edge[] = (data?.edges || []).map(buildFlowEdge);
 
-        setNodes(initialNodes);
+        setNodes(layoutNodes(initialNodes, initialEdges));
         setEdges(initialEdges);
       } catch {
         if (!active) return;
@@ -232,7 +267,7 @@ export default function FlowBuilderPage() {
       const newNode: Node = {
         id: makeNodeId(),
         type: preset.type,
-        position: randomPosition(),
+        position: { x: 0, y: 0 },
         data: {
           label: preset.label,
           ...preset.data,
@@ -240,10 +275,14 @@ export default function FlowBuilderPage() {
         },
       };
 
-      setNodes((prev) => [...prev, newNode]);
+      setNodes((prev) => layoutNodes([...prev, newNode], edges));
     },
-    [setNodes, updateNodeData],
+    [edges, setNodes, updateNodeData],
   );
+
+  const autoOrganize = useCallback(() => {
+    setNodes((prev) => layoutNodes(prev, edges));
+  }, [edges, setNodes]);
 
   const saveFlow = useCallback(async () => {
     const tenantSession = getTenantSessionFromStorage();
@@ -305,6 +344,7 @@ export default function FlowBuilderPage() {
         <button type="button" onClick={() => addNode('delay')}>+ Delay</button>
         <button type="button" onClick={() => addNode('action')}>+ Ação</button>
         <hr style={{ borderColor: '#f3f4f6', width: '100%' }} />
+        <button type="button" onClick={autoOrganize} disabled={isEmpty}>Organizar automaticamente</button>
         <button type="button" onClick={saveFlow} disabled={isSaving}>
           {isSaving ? 'Salvando...' : 'Salvar fluxo'}
         </button>
