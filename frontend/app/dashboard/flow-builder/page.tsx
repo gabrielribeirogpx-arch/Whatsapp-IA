@@ -59,6 +59,8 @@ function randomPosition() {
   };
 }
 
+
+const safeString = (v?: string | null) => (v ? v : '');
 function makeNodeId() {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
     return crypto.randomUUID();
@@ -130,9 +132,9 @@ export default function FlowBuilderPage() {
 
         const initialNodes = (data?.nodes || []).map(buildFlowNode);
         const initialEdges: Edge[] = (data?.edges || []).map((edge): Edge => ({
-          id: edge.id,
-          source: edge.source,
-          target: edge.target,
+          id: safeString(edge.id),
+          source: safeString(edge.source),
+          target: safeString(edge.target),
           type: 'default',
           data: {
             condition: edge.data?.condition ?? edge.label ?? '',
@@ -163,7 +165,22 @@ export default function FlowBuilderPage() {
   const isEmpty = useMemo(() => nodes.length === 0 && edges.length === 0, [edges.length, nodes.length]);
 
   const onConnect = useCallback((params: Connection) => {
-    setEdges((eds) => addEdge(params, eds));
+    const edgeLabel = '';
+
+    setEdges((eds) =>
+      addEdge(
+        {
+          id: `${safeString(params.source)}-${safeString(params.target)}-${Date.now()}`,
+          source: safeString(params.source),
+          target: safeString(params.target),
+          sourceHandle: safeString(params.sourceHandle),
+          targetHandle: safeString(params.targetHandle),
+          label: safeString(edgeLabel),
+          type: 'default',
+        },
+        eds,
+      ),
+    );
   }, [setEdges]);
 
   const addNode = useCallback(
@@ -203,10 +220,10 @@ export default function FlowBuilderPage() {
       });
 
       const payloadEdges: FlowEdgePayload[] = edges.map((edge) => ({
-        id: edge.id,
-        source: edge.source,
-        target: edge.target,
-        label: edge.label?.toString(),
+        id: safeString(edge.id),
+        source: safeString(edge.source),
+        target: safeString(edge.target),
+        label: safeString(edge.label?.toString() ?? ''),
         data: edge.data as FlowEdgePayload['data'],
       }));
 
@@ -214,9 +231,9 @@ export default function FlowBuilderPage() {
       setNodes((result.nodes || []).map(buildFlowNode));
       setEdges(
         (result.edges || []).map((edge): Edge => ({
-          id: edge.id,
-          source: edge.source,
-          target: edge.target,
+          id: safeString(edge.id),
+          source: safeString(edge.source),
+          target: safeString(edge.target),
           type: 'default',
           data: {
             condition: edge.data?.condition ?? edge.label ?? '',
