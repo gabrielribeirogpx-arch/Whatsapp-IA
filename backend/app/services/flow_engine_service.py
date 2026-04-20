@@ -325,9 +325,10 @@ def get_flow_graph(db: Session, tenant_id: uuid.UUID, flow_id: str) -> dict[str,
             {
                 "id": str(edge.id),
                 "source": str(edge.source),
+                "sourceHandle": edge.source_handle,
                 "target": str(edge.target),
                 "label": edge.condition,
-                "data": {"condition": edge.condition},
+                "data": {"condition": edge.condition, "sourceHandle": edge.source_handle},
             }
             for edge in edges
         ],
@@ -393,6 +394,12 @@ def save_flow_graph(db: Session, tenant_id: uuid.UUID, flow_id: str, nodes: list
             continue
 
         data = item.get("data") or {}
+        source_handle = item.get("sourceHandle")
+        if not source_handle and isinstance(data, dict):
+            source_handle = data.get("sourceHandle")
+        if source_handle is not None:
+            source_handle = str(source_handle).strip() or None
+
         condition = data.get("condition") if isinstance(data, dict) else None
         if not condition:
             condition = item.get("label")
@@ -410,6 +417,7 @@ def save_flow_graph(db: Session, tenant_id: uuid.UUID, flow_id: str, nodes: list
                 flow_id=flow.id,
                 source=source_id,
                 target=target_id,
+                source_handle=source_handle,
                 condition=condition,
             )
         )

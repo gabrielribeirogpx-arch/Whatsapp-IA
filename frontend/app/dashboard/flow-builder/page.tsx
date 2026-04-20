@@ -67,6 +67,14 @@ function makeNodeId() {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 }
 
+function getChoiceLabelByHandle(nodes: Node[], sourceId: string | null, sourceHandle: string | null): string {
+  if (!sourceId || !sourceHandle) return '';
+  const sourceNode = nodes.find((node) => node.id === sourceId);
+  const buttons = Array.isArray(sourceNode?.data?.buttons) ? sourceNode.data.buttons : [];
+  const matchedButton = buttons.find((button) => (button as { label?: string }).label?.trim() === sourceHandle);
+  return (matchedButton as { label?: string } | undefined)?.label?.trim() || sourceHandle;
+}
+
 export default function FlowBuilderPage() {
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>(initialEdges);
@@ -132,9 +140,11 @@ export default function FlowBuilderPage() {
         const initialEdges: Edge[] = (data?.edges || []).map((edge): Edge => ({
           id: edge.id,
           source: edge.source,
+          sourceHandle: edge.sourceHandle || edge.data?.sourceHandle,
           target: edge.target,
           type: 'default',
           data: {
+            sourceHandle: edge.sourceHandle || edge.data?.sourceHandle,
             condition: edge.data?.condition ?? edge.label ?? '',
           },
           label: edge.label || edge.data?.condition,
@@ -163,8 +173,24 @@ export default function FlowBuilderPage() {
   const isEmpty = useMemo(() => nodes.length === 0 && edges.length === 0, [edges.length, nodes.length]);
 
   const onConnect = useCallback((params: Connection) => {
-    setEdges((eds) => addEdge(params, eds));
-  }, [setEdges]);
+    const choiceLabel = getChoiceLabelByHandle(nodes, params.source || null, params.sourceHandle || null);
+    const edgeLabel = choiceLabel || params.sourceHandle || '';
+
+    setEdges((eds) =>
+      addEdge(
+        {
+          ...params,
+          sourceHandle: params.sourceHandle || undefined,
+          label: edgeLabel || undefined,
+          data: {
+            sourceHandle: params.sourceHandle || undefined,
+            condition: edgeLabel || undefined,
+          },
+        },
+        eds,
+      ),
+    );
+  }, [nodes, setEdges]);
 
   const addNode = useCallback(
     (kind: FlowNodeKind) => {
@@ -206,8 +232,16 @@ export default function FlowBuilderPage() {
         id: edge.id,
         source: edge.source,
         target: edge.target,
+        sourceHandle: edge.sourceHandle || (edge.data as FlowEdgePayload['data'])?.sourceHandle,
         label: edge.label?.toString(),
-        data: edge.data as FlowEdgePayload['data'],
+        data: {
+          ...(edge.data as FlowEdgePayload['data']),
+          sourceHandle: edge.sourceHandle || (edge.data as FlowEdgePayload['data'])?.sourceHandle,
+          condition:
+            (edge.data as FlowEdgePayload['data'])?.condition ||
+            edge.label?.toString() ||
+            undefined,
+        },
       }));
 
       const result = await saveFlowGraph(tenantId, { nodes: payloadNodes, edges: payloadEdges });
@@ -216,9 +250,11 @@ export default function FlowBuilderPage() {
         (result.edges || []).map((edge): Edge => ({
           id: edge.id,
           source: edge.source,
+          sourceHandle: edge.sourceHandle || edge.data?.sourceHandle,
           target: edge.target,
           type: 'default',
           data: {
+            sourceHandle: edge.sourceHandle || edge.data?.sourceHandle,
             condition: edge.data?.condition ?? edge.label ?? '',
           },
           label: edge.label || edge.data?.condition,

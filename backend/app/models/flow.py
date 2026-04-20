@@ -56,4 +56,5 @@ class FlowEdge(Base):
     flow_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("flows.id"), nullable=False, index=True)
     source: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("flow_nodes.id"), nullable=False)
     target: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("flow_nodes.id"), nullable=False)
+    source_handle: Mapped[str | None] = mapped_column(String, nullable=True)
     condition: Mapped[str | None] = mapped_column(Text, nullable=True)

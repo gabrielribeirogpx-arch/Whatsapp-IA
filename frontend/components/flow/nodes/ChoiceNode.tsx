@@ -46,13 +46,22 @@ export default function ChoiceNode({ id, data, selected }: NodeProps) {
 
       <div style={{ marginTop: 8, display: 'grid', gap: 6 }}>
         {buttons.map((button, index) => (
-          <input
-            key={`${id}-button-${index}`}
-            value={button.label || ''}
-            onChange={(event) => updateButton(index, event.target.value)}
-            placeholder={`Opção ${index + 1}`}
-            style={{ border: '1px solid #e5e7eb', borderRadius: 6, padding: '6px 8px' }}
-          />
+          <div key={`${id}-button-${index}`} style={{ position: 'relative' }}>
+            <input
+              value={button.label || ''}
+              onChange={(event) => updateButton(index, event.target.value)}
+              placeholder={`Opção ${index + 1}`}
+              style={{ border: '1px solid #e5e7eb', borderRadius: 6, padding: '6px 8px', width: '100%' }}
+            />
+            {button.label?.trim() ? (
+              <Handle
+                type="source"
+                id={button.label.trim()}
+                position={Position.Right}
+                style={{ top: '50%', transform: 'translateY(-50%)', right: -6 }}
+              />
+            ) : null}
+          </div>
         ))}
       </div>
 
@@ -63,7 +72,6 @@ export default function ChoiceNode({ id, data, selected }: NodeProps) {
       >
         + Adicionar opção
       </button>
-      <Handle type="source" position={Position.Right} />
     </div>
   );
 }
