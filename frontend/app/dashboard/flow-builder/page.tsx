@@ -52,6 +52,10 @@ const NODE_PRESETS: Record<FlowNodeKind, { label: string; type: string; data: Re
 const initialNodes: Node[] = [];
 const initialEdges: Edge[] = [];
 
+type Button = {
+  label: string;
+};
+
 function randomPosition() {
   return {
     x: Math.floor(Math.random() * 550),
@@ -70,9 +74,15 @@ function makeNodeId() {
 function getChoiceLabelByHandle(nodes: Node[], sourceId: string | null, sourceHandle: string | null): string {
   if (!sourceId || !sourceHandle) return '';
   const sourceNode = nodes.find((node) => node.id === sourceId);
-  const buttons = Array.isArray(sourceNode?.data?.buttons) ? sourceNode.data.buttons : [];
-  const matchedButton = buttons.find((button) => (button as { label?: string }).label?.trim() === sourceHandle);
-  return (matchedButton as { label?: string } | undefined)?.label?.trim() || sourceHandle;
+  const buttons: Button[] = Array.isArray(sourceNode?.data?.buttons)
+    ? (sourceNode.data.buttons as Button[])
+    : [];
+  const matchedButton = buttons.find(
+    (button: Button) =>
+      typeof button.label === 'string' &&
+      button.label.trim() === sourceHandle,
+  );
+  return matchedButton?.label?.trim() || sourceHandle;
 }
 
 export default function FlowBuilderPage() {
