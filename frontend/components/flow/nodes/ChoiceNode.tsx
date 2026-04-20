@@ -16,18 +16,27 @@ type ChoiceNodeData = {
   onChange?: (nodeId: string, patch: Record<string, unknown>) => void;
 };
 
+const toHandleId = (value: string, fallback: string) => {
+  const normalized = value.toLowerCase().trim().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
+  return normalized || fallback;
+};
+
 export default function ChoiceNode({ id, data, selected }: NodeProps) {
   const nodeData = (data || {}) as ChoiceNodeData;
   const buttons = (nodeData.buttons || []).map((button, index) => ({
     id: button.id || `${id}-button-${index + 1}`,
     label: button.label || '',
-    handleId: button.handleId || button.label || `option_${index + 1}`,
+    handleId: toHandleId(button.handleId || button.label || '', `option_${index + 1}`),
     next: button.next,
   }));
 
   const updateButton = (index: number, label: string) => {
     const nextButtons = [...buttons];
-    nextButtons[index] = { ...nextButtons[index], label };
+    nextButtons[index] = {
+      ...nextButtons[index],
+      label,
+      handleId: toHandleId(label, `option_${index + 1}`),
+    };
     nodeData.onChange?.(id, { buttons: nextButtons });
   };
 
@@ -73,7 +82,7 @@ export default function ChoiceNode({ id, data, selected }: NodeProps) {
       </button>
       {buttons.map((button, index) => (
         <Handle
-          key={`${button.id}-handle`}
+          key={button.handleId}
           id={button.handleId}
           type="source"
           position={Position.Right}
