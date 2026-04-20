@@ -139,7 +139,7 @@ export default function FlowBuilderPage() {
           data: {
             condition: edge.data?.condition ?? edge.label ?? '',
           },
-          label: edge.label || edge.data?.condition,
+          label: safeString(edge.label || edge.data?.condition),
         }));
 
         setNodes(initialNodes);
@@ -238,7 +238,7 @@ export default function FlowBuilderPage() {
           data: {
             condition: edge.data?.condition ?? edge.label ?? '',
           },
-          label: edge.label || edge.data?.condition,
+          label: safeString(edge.label || edge.data?.condition),
         })),
       );
     } finally {
