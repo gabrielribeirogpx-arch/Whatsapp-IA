@@ -165,16 +165,14 @@ export default function FlowBuilderPage() {
   const isEmpty = useMemo(() => nodes.length === 0 && edges.length === 0, [edges.length, nodes.length]);
 
   const onConnect = useCallback((params: Connection) => {
-    const source = safeString(params.source);
-    const target = safeString(params.target);
     const edgeLabel = '';
 
     setEdges((eds) =>
       addEdge(
         {
-          id: `${source}-${target}-${Date.now()}`,
-          source,
-          target,
+          id: `${safeString(params.source)}-${safeString(params.target)}-${Date.now()}`,
+          source: safeString(params.source),
+          target: safeString(params.target),
           sourceHandle: safeString(params.sourceHandle),
           targetHandle: safeString(params.targetHandle),
           label: safeString(edgeLabel),
