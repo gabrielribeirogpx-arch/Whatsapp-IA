@@ -1,0 +1,103 @@
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from alembic.config import Config
+from alembic import command
+import os
+from sqlalchemy import text
+
+from app.db.base import Base
+from app.db.session import engine
+
+import app.models  # noqa: F401
+
+from app.routers import webhook
+from app.routers import chat as conversations
+from app.routers import auth
+from app.routers import products
+from app.routers import knowledge
+from app.routers import leads
+from app.routers import dashboard
+from app.routers import bot_rules
+from app.routers import flows
+
+
+def run_migrations():
+    try:
+        if os.getenv("RUN_MIGRATIONS", "true") == "true":
+            alembic_cfg = Config("alembic.ini")
+            command.upgrade(alembic_cfg, "head")
+            print("✅ Migrations aplicadas com sucesso")
+    except Exception as e:
+        print("❌ Erro ao rodar migrations:", e)
+
+
+def ensure_conversations_columns():
+    statements = [
+        "ALTER TABLE conversations ADD COLUMN IF NOT EXISTS last_bot_question TEXT;",
+        "ALTER TABLE conversations ADD COLUMN IF NOT EXISTS current_objective TEXT;",
+        "ALTER TABLE conversations ADD COLUMN IF NOT EXISTS last_bot_triggered_message_id UUID;",
+        "ALTER TABLE conversations ADD COLUMN IF NOT EXISTS last_intent TEXT;",
+        "ALTER TABLE conversations ADD COLUMN IF NOT EXISTS intent_history JSONB;",
+        "ALTER TABLE conversations ADD COLUMN IF NOT EXISTS last_intent_at TIMESTAMP;",
+        "ALTER TABLE conversations ADD COLUMN IF NOT EXISTS lead_score INTEGER DEFAULT 0;",
+        "ALTER TABLE conversations ADD COLUMN IF NOT EXISTS current_step TEXT;",
+        "ALTER TABLE conversations ADD COLUMN IF NOT EXISTS current_flow UUID;",
+        "ALTER TABLE conversations ADD COLUMN IF NOT EXISTS current_node_id UUID;",
+    ]
+    try:
+        with engine.begin() as connection:
+            for statement in statements:
+                connection.execute(text(statement))
+        print("✅ Estrutura de conversations validada com SQL de segurança")
+    except Exception as e:
+        print("❌ Erro ao validar estrutura de conversations:", e)
+
+
+run_migrations()
+
+app = FastAPI()
+
+# ✅ CORS CORRETO PARA VERCEL + LOCAL
+origins = [
+    "http://localhost:3000",
+    "http://localhost:3001",
+    "https://whatsapp-ia-three.vercel.app",
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,  # ⚠️ NÃO usa "*" em produção
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# ✅ ROTAS COM PREFIXO PADRÃO /api
+app.include_router(auth.router, prefix="/api")
+app.include_router(conversations.router, prefix="/api")
+app.include_router(conversations.router, prefix="/api/api")  # backward compatibility
+app.include_router(products.router, prefix="/api")
+app.include_router(knowledge.router, prefix="/api")
+app.include_router(leads.router, prefix="/api")
+app.include_router(dashboard.router, prefix="/api")
+app.include_router(bot_rules.router)
+app.include_router(flows.router)
+
+# webhook normalmente externo (Meta)
+app.include_router(webhook.router)
+
+# ✅ STARTUP
+@app.on_event("startup")
+def on_startup():
+    Base.metadata.create_all(bind=engine)
+    ensure_conversations_columns()
+
+# ✅ HEALTH CHECK
+@app.get("/health")
+def health():
+    return {"status": "ok"}
+
+
+@app.get("/")
+def root():
+    return {"status": "ok"}
