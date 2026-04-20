@@ -18,6 +18,7 @@ import ConditionNode from '@/components/flow/nodes/ConditionNode';
 import DelayNode from '@/components/flow/nodes/DelayNode';
 import MessageNode from '@/components/flow/nodes/MessageNode';
 import { getFlowGraph, getTenantSessionFromStorage, saveFlowGraph } from '@/lib/api';
+import { getLayoutedElements } from '@/lib/autoLayout';
 import { FlowEdgePayload, FlowNodePayload } from '@/lib/types';
 
 const FETCH_TIMEOUT_MS = 8000;
@@ -179,9 +180,10 @@ export default function FlowBuilderPage() {
 
         const initialNodes = (data?.nodes || []).map(buildFlowNode);
         const initialEdges: Edge[] = (data?.edges || []).map(buildFlowEdge);
+        const layouted = getLayoutedElements(initialNodes, initialEdges);
 
-        setNodes(initialNodes);
-        setEdges(initialEdges);
+        setNodes(layouted.nodes);
+        setEdges(layouted.edges);
       } catch {
         if (!active) return;
         setNodes([]);
@@ -282,8 +284,12 @@ export default function FlowBuilderPage() {
       }));
 
       const result = await saveFlowGraph(tenantId, { nodes: payloadNodes, edges: payloadEdges });
-      setNodes((result.nodes || []).map(buildFlowNode));
-      setEdges((result.edges || []).map(buildFlowEdge));
+      const savedNodes = (result.nodes || []).map(buildFlowNode);
+      const savedEdges = (result.edges || []).map(buildFlowEdge);
+      const layouted = getLayoutedElements(savedNodes, savedEdges);
+
+      setNodes(layouted.nodes);
+      setEdges(layouted.edges);
     } finally {
       setIsSaving(false);
     }
