@@ -71,6 +71,7 @@ origins = [
     "http://localhost:3000",
     "http://localhost:3001",
     "https://whatsapp-ia-three.vercel.app",
+    "https://whatsapp-ia-nine.vercel.app",
 ]
 
 app.add_middleware(
