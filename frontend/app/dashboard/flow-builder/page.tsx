@@ -194,12 +194,13 @@ export default function FlowBuilderPage() {
       addEdge(
         {
           id: `${params.source}-${params.target}-${Date.now()}`,
-          ...params,
-          sourceHandle: params.sourceHandle ?? undefined,
-          label: edgeLabel ?? undefined,
+          source: params.source,
+          target: params.target,
+          sourceHandle: params.sourceHandle ?? '',
+          label: edgeLabel ?? '',
           data: {
-            sourceHandle: params.sourceHandle ?? undefined,
-            condition: edgeLabel ?? undefined,
+            sourceHandle: params.sourceHandle ?? '',
+            condition: edgeLabel ?? '',
           },
         },
         eds,
