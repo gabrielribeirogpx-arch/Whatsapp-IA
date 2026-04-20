@@ -162,7 +162,9 @@ export type PipelineStage = {
 
 
 export type FlowChoiceButton = {
+  id: string;
   label: string;
+  handleId: string;
   next?: string;
 };
 
@@ -185,9 +187,12 @@ export type FlowEdgePayload = {
   id: string;
   source: string;
   target: string;
+  sourceHandle?: string;
+  targetHandle?: string;
   label?: string;
   data?: {
     condition?: string;
+    sourceHandle?: string;
   };
 };
 

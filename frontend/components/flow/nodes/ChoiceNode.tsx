@@ -3,7 +3,9 @@
 import { Handle, NodeProps, Position } from 'reactflow';
 
 type ChoiceButton = {
+  id: string;
   label: string;
+  handleId: string;
   next?: string;
 };
 
@@ -16,7 +18,12 @@ type ChoiceNodeData = {
 
 export default function ChoiceNode({ id, data, selected }: NodeProps) {
   const nodeData = (data || {}) as ChoiceNodeData;
-  const buttons = nodeData.buttons || [];
+  const buttons = (nodeData.buttons || []).map((button, index) => ({
+    id: button.id || `${id}-button-${index + 1}`,
+    label: button.label || '',
+    handleId: button.handleId || button.label || `option_${index + 1}`,
+    next: button.next,
+  }));
 
   const updateButton = (index: number, label: string) => {
     const nextButtons = [...buttons];
@@ -25,8 +32,9 @@ export default function ChoiceNode({ id, data, selected }: NodeProps) {
   };
 
   const addButton = () => {
+    const nextIndex = buttons.length + 1;
     nodeData.onChange?.(id, {
-      buttons: [...buttons, { label: `Opção ${buttons.length + 1}`, next: '' }],
+      buttons: [...buttons, { id: `${id}-button-${nextIndex}`, label: `Opção ${nextIndex}`, handleId: `option_${nextIndex}`, next: '' }],
     });
   };
 
@@ -47,7 +55,7 @@ export default function ChoiceNode({ id, data, selected }: NodeProps) {
       <div style={{ marginTop: 8, display: 'grid', gap: 6 }}>
         {buttons.map((button, index) => (
           <input
-            key={`${id}-button-${index}`}
+            key={button.id}
             value={button.label || ''}
             onChange={(event) => updateButton(index, event.target.value)}
             placeholder={`Opção ${index + 1}`}
@@ -63,7 +71,15 @@ export default function ChoiceNode({ id, data, selected }: NodeProps) {
       >
         + Adicionar opção
       </button>
-      <Handle type="source" position={Position.Right} />
+      {buttons.map((button, index) => (
+        <Handle
+          key={`${button.id}-handle`}
+          id={button.handleId}
+          type="source"
+          position={Position.Right}
+          style={{ top: 124 + index * 34 }}
+        />
+      ))}
     </div>
   );
 }

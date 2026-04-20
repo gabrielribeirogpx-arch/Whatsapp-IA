@@ -36,13 +36,20 @@ const nodeTypes = {
 };
 
 type FlowNodeKind = 'message' | 'choice' | 'condition' | 'delay' | 'action';
+type FlowConnection = Connection & { sourceHandle?: string | null };
 
 const NODE_PRESETS: Record<FlowNodeKind, { label: string; type: string; data: Record<string, unknown> }> = {
   message: { label: 'Mensagem', type: 'message', data: { content: '' } },
   choice: {
     label: 'Escolha',
     type: 'choice',
-    data: { content: '', buttons: [{ label: 'Quero planos', next: '' }, { label: 'Falar com humano', next: '' }] },
+    data: {
+      content: '',
+      buttons: [
+        { id: 'choice-1', label: 'Quero planos', handleId: 'quero_planos', next: '' },
+        { id: 'choice-2', label: 'Falar com humano', handleId: 'falar_com_humano', next: '' },
+      ],
+    },
   },
   condition: { label: 'Condição', type: 'condition', data: { condition: '' } },
   delay: { label: 'Delay', type: 'delay', data: { content: '3' } },
@@ -61,6 +68,22 @@ function randomPosition() {
 
 
 const safeString = (v?: string | null) => (v ? v : '');
+const toHandleId = (value: string, fallback: string) => {
+  const normalized = value.toLowerCase().trim().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
+  return normalized || fallback;
+};
+
+const normalizeChoiceButtons = (nodeId: string, buttons: Array<{ id?: string; label?: string; handleId?: string; next?: string }> = []) =>
+  buttons.map((button, index) => {
+    const defaultLabel = button.label || `Opção ${index + 1}`;
+    return {
+      id: button.id || `${nodeId}-button-${index + 1}`,
+      label: defaultLabel,
+      handleId: button.handleId || toHandleId(defaultLabel, `option_${index + 1}`),
+      next: button.next || '',
+    };
+  });
+
 function makeNodeId() {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
     return crypto.randomUUID();
@@ -97,6 +120,7 @@ export default function FlowBuilderPage() {
       position: node.position || randomPosition(),
       data: {
         ...node.data,
+        buttons: node.type === 'choice' ? normalizeChoiceButtons(node.id, node.data?.buttons) : node.data?.buttons,
         label: node.data?.label || node.data?.content || `Node ${node.id}`,
         onChange: updateNodeData,
       },
@@ -135,11 +159,14 @@ export default function FlowBuilderPage() {
           id: safeString(edge.id),
           source: safeString(edge.source),
           target: safeString(edge.target),
+          sourceHandle: safeString(edge.sourceHandle || edge.data?.sourceHandle),
+          targetHandle: safeString(edge.targetHandle),
           type: 'default',
           data: {
-            condition: edge.data?.condition ?? edge.label ?? '',
+            condition: edge.data?.condition ?? edge.label ?? edge.sourceHandle ?? edge.data?.sourceHandle ?? '',
+            sourceHandle: safeString(edge.sourceHandle || edge.data?.sourceHandle),
           },
-          label: safeString(edge.label || edge.data?.condition),
+          label: safeString(edge.label || edge.sourceHandle || edge.data?.sourceHandle || edge.data?.condition),
         }));
 
         setNodes(initialNodes);
@@ -164,8 +191,8 @@ export default function FlowBuilderPage() {
 
   const isEmpty = useMemo(() => nodes.length === 0 && edges.length === 0, [edges.length, nodes.length]);
 
-  const onConnect = useCallback((params: Connection) => {
-    const edgeLabel = '';
+  const onConnect = useCallback((params: FlowConnection) => {
+    const edgeLabel = safeString(params.sourceHandle);
 
     setEdges((eds) =>
       addEdge(
@@ -176,6 +203,10 @@ export default function FlowBuilderPage() {
           sourceHandle: safeString(params.sourceHandle),
           targetHandle: safeString(params.targetHandle),
           label: safeString(edgeLabel),
+          data: {
+            condition: safeString(edgeLabel),
+            sourceHandle: safeString(params.sourceHandle),
+          },
           type: 'default',
         },
         eds,
@@ -223,8 +254,14 @@ export default function FlowBuilderPage() {
         id: safeString(edge.id),
         source: safeString(edge.source),
         target: safeString(edge.target),
+        sourceHandle: safeString(edge.sourceHandle),
+        targetHandle: safeString(edge.targetHandle),
         label: safeString(edge.label?.toString() ?? ''),
-        data: edge.data as FlowEdgePayload['data'],
+        data: {
+          ...(edge.data as FlowEdgePayload['data']),
+          sourceHandle: safeString(edge.sourceHandle || (edge.data as FlowEdgePayload['data'])?.sourceHandle),
+          condition: safeString(edge.label?.toString() || (edge.data as FlowEdgePayload['data'])?.condition || ''),
+        },
       }));
 
       const result = await saveFlowGraph(tenantId, { nodes: payloadNodes, edges: payloadEdges });
@@ -234,11 +271,14 @@ export default function FlowBuilderPage() {
           id: safeString(edge.id),
           source: safeString(edge.source),
           target: safeString(edge.target),
+          sourceHandle: safeString(edge.sourceHandle || edge.data?.sourceHandle),
+          targetHandle: safeString(edge.targetHandle),
           type: 'default',
           data: {
-            condition: edge.data?.condition ?? edge.label ?? '',
+            condition: edge.data?.condition ?? edge.label ?? edge.sourceHandle ?? edge.data?.sourceHandle ?? '',
+            sourceHandle: safeString(edge.sourceHandle || edge.data?.sourceHandle),
           },
-          label: safeString(edge.label || edge.data?.condition),
+          label: safeString(edge.label || edge.sourceHandle || edge.data?.sourceHandle || edge.data?.condition),
         })),
       );
     } finally {
