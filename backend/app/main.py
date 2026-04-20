@@ -21,6 +21,7 @@ from app.routers import bot_rules
 from app.routers import flows
 
 
+# ✅ MIGRATIONS
 def run_migrations():
     try:
         if os.getenv("RUN_MIGRATIONS", "true") == "true":
@@ -31,6 +32,7 @@ def run_migrations():
         print("❌ Erro ao rodar migrations:", e)
 
 
+# ✅ SAFE ALTER TABLE
 def ensure_conversations_columns():
     statements = [
         "ALTER TABLE conversations ADD COLUMN IF NOT EXISTS last_bot_question TEXT;",
@@ -50,14 +52,21 @@ def ensure_conversations_columns():
                 connection.execute(text(statement))
         print("✅ Estrutura de conversations validada com SQL de segurança")
     except Exception as e:
-        print("❌ Erro ao validar estrutura de conversations:", e)
+        print("❌ Erro ao validar estrutura:", e)
 
-
-run_migrations()
 
 app = FastAPI()
 
-# ✅ CORS CORRETO PARA VERCEL + LOCAL
+
+# ✅ STARTUP (CORRETO)
+@app.on_event("startup")
+def on_startup():
+    run_migrations()
+    Base.metadata.create_all(bind=engine)
+    ensure_conversations_columns()
+
+
+# ✅ CORS
 origins = [
     "http://localhost:3000",
     "http://localhost:3001",
@@ -66,33 +75,27 @@ origins = [
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,  # ⚠️ NÃO usa "*" em produção
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# ✅ ROTAS COM PREFIXO PADRÃO /api
+
+# ✅ ROUTES
 app.include_router(auth.router, prefix="/api")
 app.include_router(conversations.router, prefix="/api")
-app.include_router(conversations.router, prefix="/api/api")  # backward compatibility
+app.include_router(conversations.router, prefix="/api/api")
 app.include_router(products.router, prefix="/api")
 app.include_router(knowledge.router, prefix="/api")
 app.include_router(leads.router, prefix="/api")
 app.include_router(dashboard.router, prefix="/api")
 app.include_router(bot_rules.router)
 app.include_router(flows.router)
-
-# webhook normalmente externo (Meta)
 app.include_router(webhook.router)
 
-# ✅ STARTUP
-@app.on_event("startup")
-def on_startup():
-    Base.metadata.create_all(bind=engine)
-    ensure_conversations_columns()
 
-# ✅ HEALTH CHECK
+# ✅ HEALTH
 @app.get("/health")
 def health():
     return {"status": "ok"}
@@ -101,3 +104,9 @@ def health():
 @app.get("/")
 def root():
     return {"status": "ok"}
+
+
+# ✅ START SERVER (CRÍTICO)
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("app.main:app", host="0.0.0.0", port=int(os.getenv("PORT", 8000)))
