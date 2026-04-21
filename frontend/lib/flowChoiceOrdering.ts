@@ -1,46 +1,21 @@
 import type { Edge, Node } from 'reactflow';
 
 type ChoiceOption = {
-  label?: string;
   handleId?: string;
 };
 
-const normalizeValue = (value?: string | null) =>
-  (value || '')
-    .toString()
-    .trim()
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/[^a-z0-9\s_]/g, '')
-    .replace(/\s+/g, '_');
-
 const extractChoiceOrder = (node: Node) => {
-  const options = Array.isArray(node.data?.options) ? (node.data.options as string[]) : [];
   const buttons = Array.isArray(node.data?.buttons) ? (node.data.buttons as ChoiceOption[]) : [];
-
-  const optionValues = options.length > 0
-    ? options
-    : buttons.map((button) => button.label || button.handleId || '');
-
-  const normalized = optionValues
-    .map((option) => normalizeValue(option))
-    .filter(Boolean);
-
-  return Array.from(new Set(normalized));
+  return buttons
+    .map((button) => button.handleId)
+    .filter((handleId): handleId is string => Boolean(handleId));
 };
 
 const getEdgeOptionCandidates = (edge: Edge) => {
   const edgeData = (edge.data as { option?: string; condition?: string; sourceHandle?: string } | undefined);
-  const candidates = [
-    edgeData?.option,
-    edge.label?.toString(),
-    edge.sourceHandle,
-    edgeData?.condition,
-    edgeData?.sourceHandle,
-  ]
-    .map((value) => normalizeValue(value))
-    .filter(Boolean);
+  const candidates = [edge.sourceHandle, edgeData?.sourceHandle]
+    .map((value) => value?.toString())
+    .filter((value): value is string => Boolean(value));
 
   return Array.from(new Set(candidates));
 };
@@ -130,7 +105,8 @@ export function orderChoiceChildrenEdges(nodes: Node[], edges: Edge[]): Edge[] {
   });
 }
 
-const CHILD_VERTICAL_SPACING = 120;
+const CHILD_HORIZONTAL_SPACING = 260;
+const CHILD_VERTICAL_OFFSET = 220;
 
 export function alignChoiceChildren(nodes: Node[], edges: Edge[]): Node[] {
   if (!nodes.length || !edges.length) {
@@ -138,7 +114,7 @@ export function alignChoiceChildren(nodes: Node[], edges: Edge[]): Node[] {
   }
 
   const nodeMap = new Map(nodes.map((node) => [node.id, node]));
-  const overrides = new Map<string, number>();
+  const overrides = new Map<string, { x: number; y: number }>();
 
   nodes.forEach((node) => {
     if (node.type !== 'choice') {
@@ -150,6 +126,7 @@ export function alignChoiceChildren(nodes: Node[], edges: Edge[]): Node[] {
       return;
     }
 
+    const parentX = node.position.x;
     const parentY = node.position.y;
 
     const orderedChildren = optionOrder
@@ -171,24 +148,28 @@ export function alignChoiceChildren(nodes: Node[], edges: Edge[]): Node[] {
       return;
     }
 
-    const startY = parentY - ((orderedChildren.length - 1) * CHILD_VERTICAL_SPACING) / 2;
+    const startX = parentX - ((orderedChildren.length - 1) * CHILD_HORIZONTAL_SPACING) / 2;
+    const childY = parentY + CHILD_VERTICAL_OFFSET;
 
     orderedChildren.forEach((child, index) => {
-      overrides.set(child.id, startY + index * CHILD_VERTICAL_SPACING);
+      overrides.set(child.id, {
+        x: startX + index * CHILD_HORIZONTAL_SPACING,
+        y: childY,
+      });
     });
   });
 
   return nodes.map((node) => {
-    const nextY = overrides.get(node.id);
-    if (typeof nextY !== 'number') {
+    const nextPosition = overrides.get(node.id);
+    if (!nextPosition) {
       return node;
     }
 
     return {
       ...node,
       position: {
-        ...node.position,
-        y: nextY,
+        x: nextPosition.x,
+        y: nextPosition.y,
       },
     };
   });

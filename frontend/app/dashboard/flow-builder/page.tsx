@@ -9,7 +9,7 @@ import ReactFlow, {
   useEdgesState,
   useNodesState,
 } from 'reactflow';
-import type { Connection, Edge, Node } from 'reactflow';
+import type { Connection, Edge, Node, ReactFlowInstance } from 'reactflow';
 import 'reactflow/dist/style.css';
 
 import ActionNode from '@/components/flow/nodes/ActionNode';
@@ -123,6 +123,7 @@ function makeNodeId() {
 export default function FlowBuilderPage() {
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>(initialEdges);
+  const [reactFlowInstance, setReactFlowInstance] = useState<ReactFlowInstance | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
 
@@ -165,10 +166,13 @@ export default function FlowBuilderPage() {
 
     const orderedEdges = orderChoiceChildrenEdges(nextNodes, nextEdges);
     const { nodes: layoutedNodes, edges: layoutedEdges } = getLayoutedElements(nextNodes, orderedEdges);
-    const yOrderedNodes = alignChoiceChildren(layoutedNodes, layoutedEdges);
-    setNodes(yOrderedNodes);
+    const alignedNodes = alignChoiceChildren(layoutedNodes, layoutedEdges);
+    setNodes(alignedNodes);
     setEdges(layoutedEdges);
-  }, [setEdges, setNodes]);
+    requestAnimationFrame(() => {
+      reactFlowInstance?.fitView();
+    });
+  }, [reactFlowInstance, setEdges, setNodes]);
 
   useEffect(() => {
     let active = true;
@@ -329,6 +333,7 @@ export default function FlowBuilderPage() {
       </aside>
       <main style={{ flex: 1 }}>
         <ReactFlow
+          onInit={setReactFlowInstance}
           nodes={nodes}
           edges={edges}
           onNodesChange={onNodesChange}
@@ -344,7 +349,6 @@ export default function FlowBuilderPage() {
           deleteKeyCode={['Backspace', 'Delete']}
           snapToGrid
           snapGrid={[20, 20]}
-          fitView
         >
           <Background />
           <MiniMap />
