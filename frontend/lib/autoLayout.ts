@@ -5,39 +5,23 @@ const nodeWidth = 260;
 const nodeHeight = 140;
 
 export function getLayoutedElements(nodes: Node[], edges: Edge[]) {
-  // Identifica filhos diretos de nodes "choice"
-  const choiceNodeIds = new Set(
-    nodes.filter((n) => n.type === 'choice').map((n) => n.id)
-  );
-  const choiceChildIds = new Set(
-    edges
-      .filter((e) => choiceNodeIds.has(e.source))
-      .map((e) => e.target)
-  );
-
-  // Roda dagre apenas nos nodes que NÃO são filhos de choice
-  const dagreNodes = nodes.filter((n) => !choiceChildIds.has(n.id));
-
   const dagreGraph = new dagre.graphlib.Graph();
   dagreGraph.setDefaultEdgeLabel(() => ({}));
   dagreGraph.setGraph({ rankdir: 'LR', nodesep: 80, ranksep: 120 });
 
-  dagreNodes.forEach((node) => {
+  nodes.forEach((node) => {
     dagreGraph.setNode(node.id, { width: nodeWidth, height: nodeHeight });
   });
 
   edges.forEach((edge) => {
-    // só adiciona edge se ambos os endpoints estão no grafo dagre
-    if (!choiceChildIds.has(edge.source) && !choiceChildIds.has(edge.target)) {
-      dagreGraph.setEdge(edge.source, edge.target);
-    }
+    dagreGraph.setEdge(edge.source, edge.target);
   });
 
   dagre.layout(dagreGraph);
 
-  // Posições calculadas pelo dagre
+  // Posições base do dagre
   const positionMap = new Map<string, { x: number; y: number }>();
-  dagreNodes.forEach((node) => {
+  nodes.forEach((node) => {
     const n = dagreGraph.node(node.id);
     positionMap.set(node.id, {
       x: n.x - nodeWidth / 2,
@@ -45,36 +29,49 @@ export function getLayoutedElements(nodes: Node[], edges: Edge[]) {
     });
   });
 
-  // Posiciona filhos de choice manualmente
+  // Sobrescreve posição dos filhos de choice com layout horizontal
   nodes
     .filter((n) => n.type === 'choice')
     .forEach((choiceNode) => {
       const buttons: Array<{ handleId?: string }> =
         Array.isArray(choiceNode.data?.buttons) ? choiceNode.data.buttons : [];
 
-      const childrenOrdered = buttons
+      // Coleta todos os filhos deste choice (qualquer edge saindo dele)
+      const childEdges = edges.filter((e) => e.source === choiceNode.id);
+      if (!childEdges.length) return;
+
+      // Ordena filhos pela ordem dos botões usando sourceHandle
+      const childNodes = buttons
         .map((btn) => {
-          const edge = edges.find(
-            (e) => e.source === choiceNode.id && e.sourceHandle === btn.handleId
-          );
+          const edge = childEdges.find((e) => {
+            const sh = e.sourceHandle ?? (e.data as { sourceHandle?: string } | undefined)?.sourceHandle ?? '';
+            return sh === btn.handleId;
+          });
           return edge ? nodes.find((n) => n.id === edge.target) ?? null : null;
         })
         .filter((n): n is Node => n !== null);
 
-      if (!childrenOrdered.length) return;
+      // Se nenhum match por handleId, usa a ordem das edges como fallback
+      const orderedChildren = childNodes.length === childEdges.length
+        ? childNodes
+        : childEdges
+            .map((e) => nodes.find((n) => n.id === e.target) ?? null)
+            .filter((n): n is Node => n !== null);
+
+      if (!orderedChildren.length) return;
 
       const parentPos = positionMap.get(choiceNode.id);
       if (!parentPos) return;
 
+      const SPACING = 80;
       const parentCenterX = parentPos.x + nodeWidth / 2;
-      const totalWidth = childrenOrdered.length * nodeWidth +
-        (childrenOrdered.length - 1) * 80;
+      const totalWidth = orderedChildren.length * nodeWidth + (orderedChildren.length - 1) * SPACING;
       const startX = parentCenterX - totalWidth / 2;
       const childY = parentPos.y + nodeHeight + 80;
 
-      childrenOrdered.forEach((child, i) => {
+      orderedChildren.forEach((child, i) => {
         positionMap.set(child.id, {
-          x: startX + i * (nodeWidth + 80),
+          x: startX + i * (nodeWidth + SPACING),
           y: childY,
         });
       });
