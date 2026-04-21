@@ -145,18 +145,23 @@ export function alignChoiceChildren(nodes: Node[], edges: Edge[]): Node[] {
       return;
     }
 
-    const options = Array.isArray(node.data?.options) ? (node.data.options as string[]) : [];
-    if (!options.length) {
+    const optionOrder = extractChoiceOrder(node);
+    if (!optionOrder.length) {
       return;
     }
 
     const parentY = node.position.y;
 
-    const orderedChildren = options
-      .map((option) => {
-        const edge = edges.find((currentEdge) =>
-          currentEdge.source === node.id && normalizeValue(currentEdge.sourceHandle || '') === normalizeValue(option),
-        );
+    const orderedChildren = optionOrder
+      .map((optionKey) => {
+        const edge = edges.find((currentEdge) => {
+          if (currentEdge.source !== node.id) {
+            return false;
+          }
+
+          const candidates = getEdgeOptionCandidates(currentEdge);
+          return candidates.includes(optionKey);
+        });
 
         return edge ? nodeMap.get(edge.target) || null : null;
       })
