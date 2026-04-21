@@ -90,18 +90,24 @@ export function orderChoiceChildrenEdges(nodes: Node[], edges: Edge[]): Edge[] {
     return edges;
   }
 
-  const nextEdgeIndex = new Map<string, number>();
-
-  return edges.map((edge) => {
+  const result: Edge[] = [];
+  edges.forEach((edge) => {
     const sorted = orderedChoiceEdges.get(edge.source);
     if (!sorted) {
-      return edge;
+      result.push(edge);
     }
-
-    const index = nextEdgeIndex.get(edge.source) || 0;
-    nextEdgeIndex.set(edge.source, index + 1);
-    return sorted[index] || edge;
   });
+
+  orderedChoiceEdges.forEach((sorted, sourceId) => {
+    sorted.forEach((edge) => result.push(edge));
+  });
+
+  const choiceSources = new Set(orderedChoiceEdges.keys());
+  const nonChoiceEdges = edges.filter((e) => !choiceSources.has(e.source));
+  const choiceEdgesOrdered: Edge[] = [];
+  orderedChoiceEdges.forEach((sorted) => sorted.forEach((e) => choiceEdgesOrdered.push(e)));
+
+  return [...nonChoiceEdges, ...choiceEdgesOrdered];
 }
 
 const CHILD_HORIZONTAL_SPACING = 180;
