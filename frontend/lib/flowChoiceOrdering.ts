@@ -167,10 +167,8 @@ export function alignChoiceChildren(nodes: Node[], edges: Edge[]): Node[] {
 
     return {
       ...node,
-      position: {
-        x: nextPosition.x,
-        y: nextPosition.y,
-      },
+      position: nextPosition,
+      positionAbsolute: nextPosition,
     };
   });
 }
