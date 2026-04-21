@@ -152,6 +152,18 @@ export default function FlowBuilderPage() {
     [updateNodeData],
   );
 
+  const applyLayoutAndSetFlow = useCallback((nextNodes: Node[], nextEdges: Edge[]) => {
+    if (nextNodes.length === 0) {
+      setNodes(nextNodes);
+      setEdges(nextEdges);
+      return;
+    }
+
+    const { nodes: layoutedNodes, edges: layoutedEdges } = getLayoutedElements(nextNodes, nextEdges);
+    setNodes(layoutedNodes);
+    setEdges(layoutedEdges);
+  }, [setEdges, setNodes]);
+
   useEffect(() => {
     let active = true;
 
@@ -180,10 +192,8 @@ export default function FlowBuilderPage() {
 
         const initialNodes = (data?.nodes || []).map(buildFlowNode);
         const initialEdges: Edge[] = (data?.edges || []).map(buildFlowEdge);
-        const layouted = getLayoutedElements(initialNodes, initialEdges);
 
-        setNodes(layouted.nodes);
-        setEdges(layouted.edges);
+        applyLayoutAndSetFlow(initialNodes, initialEdges);
       } catch {
         if (!active) return;
         setNodes([]);
@@ -200,7 +210,7 @@ export default function FlowBuilderPage() {
     return () => {
       active = false;
     };
-  }, [buildFlowNode, setEdges, setNodes]);
+  }, [applyLayoutAndSetFlow, buildFlowNode, setEdges, setNodes]);
 
   const isEmpty = useMemo(() => nodes.length === 0 && edges.length === 0, [edges.length, nodes.length]);
 
@@ -286,13 +296,11 @@ export default function FlowBuilderPage() {
       const result = await saveFlowGraph(tenantId, { nodes: payloadNodes, edges: payloadEdges });
       const savedNodes = (result.nodes || []).map(buildFlowNode);
       const savedEdges = (result.edges || []).map(buildFlowEdge);
-      const layouted = getLayoutedElements(savedNodes, savedEdges);
-      setNodes(layouted.nodes);
-      setEdges(layouted.edges);
+      applyLayoutAndSetFlow(savedNodes, savedEdges);
     } finally {
       setIsSaving(false);
     }
-  }, [buildFlowNode, edges, nodes, setEdges, setNodes]);
+  }, [applyLayoutAndSetFlow, buildFlowNode, edges, nodes, setEdges, setNodes]);
 
   if (isLoading) {
     return <div>Carregando fluxo...</div>;
