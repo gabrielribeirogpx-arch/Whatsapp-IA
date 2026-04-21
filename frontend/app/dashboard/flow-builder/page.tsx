@@ -206,7 +206,8 @@ export default function FlowBuilderPage() {
         const initialNodes = (data?.nodes || []).map(buildFlowNode);
         const initialEdges: Edge[] = (data?.edges || []).map(buildFlowEdge);
 
-        applyLayoutAndSetFlow(initialNodes, initialEdges);
+        const alignedNodes = alignNodes(initialNodes, initialEdges)
+applyLayoutAndSetFlow(alignedNodes, initialEdges);
       } catch {
         if (!active) return;
         setNodes([]);
@@ -377,7 +378,7 @@ function alignNodes(nodes: Node[], edges: Edge[]) {
       </aside>
       <main style={{ flex: 1 }}>
         <ReactFlow
-          nodes={alignNodes(nodes, edges)}
+          nodes={nodes}
           edges={edges}
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
