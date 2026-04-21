@@ -7,9 +7,9 @@ const nodeHeight = 140;
 export function getLayoutedElements(nodes: Node[], edges: Edge[]) {
   const dagreGraph = new dagre.graphlib.Graph();
   dagreGraph.setDefaultEdgeLabel(() => ({}));
-  const nodeOrder = new Map(nodes.map((node, index) => [node.id, index]));
-  const sortedNodes = [...nodes].sort(
-    (a, b) => (nodeOrder.get(a.id) ?? 0) - (nodeOrder.get(b.id) ?? 0),
+  const sortedNodes = [...nodes].sort((a, b) => a.id.localeCompare(b.id));
+  const sortedEdges = [...edges].sort((a, b) =>
+    `${a.source}${a.target}`.localeCompare(`${b.source}${b.target}`),
   );
 
   dagreGraph.setGraph({
@@ -25,7 +25,7 @@ export function getLayoutedElements(nodes: Node[], edges: Edge[]) {
     });
   });
 
-  edges.forEach((edge, index) => {
+  sortedEdges.forEach((edge, index) => {
     dagreGraph.setEdge(edge.source, edge.target, {
       weight: index,
     });
