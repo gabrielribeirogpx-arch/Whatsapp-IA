@@ -108,6 +108,49 @@ const buildFlowEdge = (edge: FlowEdgePayload): Edge => {
   };
 };
 
+const alignChildNodes = (nodes: Node[], edges: Edge[]): Node[] => {
+  const parentMap: Record<string, Edge[]> = {};
+
+  edges.forEach((edge) => {
+    if (!parentMap[edge.source]) {
+      parentMap[edge.source] = [];
+    }
+    parentMap[edge.source].push(edge);
+  });
+
+  return nodes.map((node) => {
+    const parentEntry = Object.entries(parentMap).find(([, parentEdges]) =>
+      parentEdges.some((edge) => edge.target === node.id),
+    );
+
+    if (!parentEntry) {
+      return node;
+    }
+
+    const [parentId, edgesList] = parentEntry;
+    const parentNode = nodes.find((parent) => parent.id === parentId);
+    if (!parentNode) {
+      return node;
+    }
+
+    const index = edgesList.findIndex((edge) => edge.target === node.id);
+    if (index < 0) {
+      return node;
+    }
+
+    const spacing = 110;
+    const baseOffset = -((edgesList.length - 1) * spacing) / 2;
+
+    return {
+      ...node,
+      position: {
+        ...node.position,
+        y: parentNode.position.y + baseOffset + index * spacing,
+      },
+    };
+  });
+};
+
 function makeNodeId() {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
     return crypto.randomUUID();
@@ -160,7 +203,8 @@ export default function FlowBuilderPage() {
     }
 
     const { nodes: layoutedNodes, edges: layoutedEdges } = getLayoutedElements(nextNodes, nextEdges);
-    setNodes(layoutedNodes);
+    const alignedNodes = alignChildNodes(layoutedNodes, layoutedEdges);
+    setNodes(alignedNodes);
     setEdges(layoutedEdges);
   }, [setEdges, setNodes]);
 
