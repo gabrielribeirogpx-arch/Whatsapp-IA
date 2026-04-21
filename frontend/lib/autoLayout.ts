@@ -1,8 +1,8 @@
 import dagre from 'dagre';
 import type { Edge, Node } from 'reactflow';
 
-const nodeWidth = 260;
-const nodeHeight = 140;
+const nodeWidth = 300;
+const nodeHeight = 180;
 
 export function getLayoutedElements(nodes: Node[], edges: Edge[]) {
   const dagreGraph = new dagre.graphlib.Graph();
@@ -14,8 +14,8 @@ export function getLayoutedElements(nodes: Node[], edges: Edge[]) {
 
   dagreGraph.setGraph({
     rankdir: 'LR',
-    nodesep: 80,
-    ranksep: 120,
+    nodesep: 140,
+    ranksep: 220,
   });
 
   sortedNodes.forEach((node) => {
