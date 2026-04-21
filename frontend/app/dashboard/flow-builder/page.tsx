@@ -92,7 +92,10 @@ const normalizeChoiceButtons = (nodeId: string, buttons: Array<{ id?: string; la
 
 const buildFlowEdge = (edge: FlowEdgePayload): Edge => {
   const label = safeString(edge.label || edge.data?.condition || edge.sourceHandle || edge.data?.sourceHandle);
-  const inferredHandle = toOptionalHandleId(edge.sourceHandle || edge.data?.sourceHandle || label);
+  const inferredHandle =
+  edge.sourceHandle ??
+  edge.data?.sourceHandle ??
+   null;
 
   return {
     id: safeString(edge.id),
@@ -103,7 +106,7 @@ const buildFlowEdge = (edge: FlowEdgePayload): Edge => {
     type: 'default',
     data: {
       condition: label,
-      sourceHandle: inferredHandle || undefined,
+      sourceHandle: inferredHandle,
     },
     label,
   };
@@ -225,7 +228,7 @@ export default function FlowBuilderPage() {
   const isEmpty = useMemo(() => nodes.length === 0 && edges.length === 0, [edges.length, nodes.length]);
 
   const onConnect = useCallback((params: FlowConnection) => {
-    const edgeSourceHandle = toOptionalHandleId(params.sourceHandle);
+    const edgeSourceHandle = params.sourceHandle;
     const edgeLabel = safeString(params.sourceHandle);
 
     setEdges((eds) =>
@@ -315,7 +318,45 @@ export default function FlowBuilderPage() {
   if (isLoading) {
     return <div>Carregando fluxo...</div>;
   }
+function alignNodes(nodes: Node[], edges: Edge[]) {
+  const nodeMap = new Map(nodes.map(n => [n.id, n]))
+  const updatedNodes = [...nodes]
 
+  nodes.forEach((node) => {
+    if (node.type !== 'choice') return
+
+    const options = node.data?.buttons?.map((b: any) => b.handleId) || []
+    const parentY = node.position.y
+
+    const children = options.map(option => {
+      const edge = edges.find(e =>
+        e.source === node.id &&
+        e.sourceHandle === option
+      )
+      return edge ? nodeMap.get(edge.target) : null
+    }).filter(Boolean)
+
+    const spacing = 120
+    const startY = parentY - ((children.length - 1) * spacing) / 2
+
+    children.forEach((child, index) => {
+      const newY = startY + index * spacing
+
+      const idx = updatedNodes.findIndex(n => n.id === child.id)
+      if (idx !== -1) {
+        updatedNodes[idx] = {
+          ...updatedNodes[idx],
+          position: {
+            ...updatedNodes[idx].position,
+            y: newY
+          }
+        }
+      }
+    })
+  })
+
+  return updatedNodes
+}
   return (
     <div style={{ width: '100%', height: '100vh', display: 'flex' }}>
       <aside
@@ -335,7 +376,7 @@ export default function FlowBuilderPage() {
       </aside>
       <main style={{ flex: 1 }}>
         <ReactFlow
-          nodes={nodes}
+          nodes={alignNodes(nodes, edges)}
           edges={edges}
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
