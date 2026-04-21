@@ -19,7 +19,7 @@ import DelayNode from '@/components/flow/nodes/DelayNode';
 import MessageNode from '@/components/flow/nodes/MessageNode';
 import { getFlowGraph, getTenantSessionFromStorage, saveFlowGraph } from '@/lib/api';
 import { getLayoutedElements } from '@/lib/autoLayout';
-import { orderChoiceChildrenEdges } from '@/lib/flowChoiceOrdering';
+import { forceChoiceChildrenYOrder, orderChoiceChildrenEdges } from '@/lib/flowChoiceOrdering';
 import { FlowEdgePayload, FlowNodePayload } from '@/lib/types';
 
 const FETCH_TIMEOUT_MS = 8000;
@@ -162,9 +162,14 @@ export default function FlowBuilderPage() {
 
     const orderedEdges = orderChoiceChildrenEdges(nextNodes, nextEdges);
     const { nodes: layoutedNodes, edges: layoutedEdges } = getLayoutedElements(nextNodes, orderedEdges);
-    setNodes(layoutedNodes);
+    const yOrderedNodes = forceChoiceChildrenYOrder(layoutedNodes, layoutedEdges);
+    setNodes(yOrderedNodes);
     setEdges(layoutedEdges);
   }, [setEdges, setNodes]);
+
+  useEffect(() => {
+    setNodes((prevNodes) => forceChoiceChildrenYOrder(prevNodes, edges));
+  }, [edges, setNodes]);
 
   useEffect(() => {
     let active = true;

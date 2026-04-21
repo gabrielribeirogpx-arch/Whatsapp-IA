@@ -129,3 +129,63 @@ export function orderChoiceChildrenEdges(nodes: Node[], edges: Edge[]): Edge[] {
     return sorted[index] || edge;
   });
 }
+
+const CHILD_VERTICAL_SPACING = 120;
+
+const extractOptionHandleOrder = (node: Node) => {
+  const options = Array.isArray(node.data?.options) ? (node.data.options as string[]) : [];
+  return options
+    .map((option) => normalizeValue(option))
+    .filter(Boolean);
+};
+
+export function forceChoiceChildrenYOrder(nodes: Node[], edges: Edge[]): Node[] {
+  if (!nodes.length || !edges.length) {
+    return nodes;
+  }
+
+  const nodeMap = new Map(nodes.map((node) => [node.id, node]));
+  const nextNodes = nodes.map((node) => ({ ...node, position: { ...node.position } }));
+
+  nextNodes.forEach((node) => {
+    if (node.type !== 'choice') {
+      return;
+    }
+
+    const optionOrder = extractOptionHandleOrder(node);
+    if (optionOrder.length === 0) {
+      return;
+    }
+
+    const orderedChildren = optionOrder
+      .map((optionHandle) => {
+        const edge = edges.find((currentEdge) =>
+          currentEdge.source === node.id && normalizeValue(currentEdge.sourceHandle || '') === optionHandle,
+        );
+
+        if (!edge) {
+          return null;
+        }
+
+        return nodeMap.get(edge.target) || null;
+      })
+      .filter((child): child is Node => Boolean(child));
+
+    if (orderedChildren.length === 0) {
+      return;
+    }
+
+    const startY = node.position.y - ((optionOrder.length - 1) * CHILD_VERTICAL_SPACING) / 2;
+
+    orderedChildren.forEach((child, index) => {
+      const childToUpdate = nextNodes.find((currentNode) => currentNode.id === child.id);
+      if (!childToUpdate) {
+        return;
+      }
+
+      childToUpdate.position.y = startY + index * CHILD_VERTICAL_SPACING;
+    });
+  });
+
+  return nextNodes;
+}
