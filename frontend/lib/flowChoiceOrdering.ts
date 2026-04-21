@@ -10,6 +10,9 @@ const normalizeValue = (value?: string | null) =>
     .toString()
     .trim()
     .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9\s_]/g, '')
     .replace(/\s+/g, '_');
 
 const extractChoiceOrder = (node: Node) => {
@@ -20,19 +23,27 @@ const extractChoiceOrder = (node: Node) => {
     ? options
     : buttons.map((button) => button.label || button.handleId || '');
 
-  return optionValues
+  const normalized = optionValues
     .map((option) => normalizeValue(option))
     .filter(Boolean);
+
+  return Array.from(new Set(normalized));
 };
 
-const getEdgeOptionValue = (edge: Edge) =>
-  normalizeValue(
-    (edge.data as { option?: string; condition?: string; sourceHandle?: string } | undefined)?.option ||
-    edge.label?.toString() ||
-    edge.sourceHandle ||
-    (edge.data as { condition?: string; sourceHandle?: string } | undefined)?.condition ||
-    (edge.data as { sourceHandle?: string } | undefined)?.sourceHandle,
-  );
+const getEdgeOptionCandidates = (edge: Edge) => {
+  const edgeData = (edge.data as { option?: string; condition?: string; sourceHandle?: string } | undefined);
+  const candidates = [
+    edgeData?.option,
+    edge.label?.toString(),
+    edge.sourceHandle,
+    edgeData?.condition,
+    edgeData?.sourceHandle,
+  ]
+    .map((value) => normalizeValue(value))
+    .filter(Boolean);
+
+  return Array.from(new Set(candidates));
+};
 
 export function orderChoiceChildrenEdges(nodes: Node[], edges: Edge[]): Edge[] {
   if (!nodes.length || !edges.length) {
@@ -73,22 +84,30 @@ export function orderChoiceChildrenEdges(nodes: Node[], edges: Edge[]): Edge[] {
       return;
     }
 
-    const orderIndex = new Map(order.map((value, index) => [value, index]));
+    const usedEdgeIds = new Set<string>();
+    const sorted: Edge[] = [];
 
-    const sorted = choiceEdges
-      .map((edge, index) => ({
-        edge,
-        index,
-        optionIndex: orderIndex.get(getEdgeOptionValue(edge)) ?? Number.MAX_SAFE_INTEGER,
-      }))
-      .sort((a, b) => {
-        if (a.optionIndex !== b.optionIndex) {
-          return a.optionIndex - b.optionIndex;
+    order.forEach((optionKey) => {
+      const matchedEdge = choiceEdges.find((edge) => {
+        if (usedEdgeIds.has(edge.id)) {
+          return false;
         }
 
-        return a.index - b.index;
-      })
-      .map((item) => item.edge);
+        const candidates = getEdgeOptionCandidates(edge);
+        return candidates.includes(optionKey);
+      });
+
+      if (matchedEdge) {
+        usedEdgeIds.add(matchedEdge.id);
+        sorted.push(matchedEdge);
+      }
+    });
+
+    choiceEdges.forEach((edge) => {
+      if (!usedEdgeIds.has(edge.id)) {
+        sorted.push(edge);
+      }
+    });
 
     orderedChoiceEdges.set(nodeId, sorted);
   });
