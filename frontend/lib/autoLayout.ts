@@ -14,16 +14,16 @@ export function getLayoutedElements(nodes: Node[], edges: Edge[]) {
 
   dagreGraph.setGraph({
     rankdir: 'LR',
-    nodesep: 300,
-    ranksep: 420,
+    nodesep: 500,
+    ranksep: 700,
     edgesep: 40,
-    marginx: 80,
-    marginy: 80,
+    marginx: 150,
+    marginy: 150,
   });
 
   sortedNodes.forEach((node) => {
-    const width = (node.width ?? 320) + 120;
-    const height = (node.height ?? 180) + 80;
+    const width = (node.width ?? 320) + 200;
+    const height = (node.height ?? 180) + 150;
 
     dagreGraph.setNode(node.id, {
       width,
@@ -39,16 +39,34 @@ export function getLayoutedElements(nodes: Node[], edges: Edge[]) {
 
   dagre.layout(dagreGraph);
 
-  const layoutedNodes = nodes.map((node, index) => {
+  const childOrderByNodeId = new Map<string, number>();
+  const childrenBySource = new Map<string, string[]>();
+
+  sortedEdges.forEach((edge) => {
+    const currentChildren = childrenBySource.get(edge.source) ?? [];
+    currentChildren.push(edge.target);
+    childrenBySource.set(edge.source, currentChildren);
+  });
+
+  childrenBySource.forEach((children) => {
+    children.forEach((childId, index) => {
+      if (!childOrderByNodeId.has(childId)) {
+        childOrderByNodeId.set(childId, index);
+      }
+    });
+  });
+
+  const layoutedNodes = nodes.map((node) => {
     const nodeWithPosition = dagreGraph.node(node.id);
     const nodeWidth = node.width ?? defaultNodeWidth;
     const nodeHeight = node.height ?? defaultNodeHeight;
+    const childOrder = childOrderByNodeId.get(node.id) ?? 0;
 
     return {
       ...node,
       position: {
         x: nodeWithPosition.x - nodeWidth / 2,
-        y: nodeWithPosition.y - nodeHeight / 2 + index * 40,
+        y: nodeWithPosition.y - nodeHeight / 2 + childOrder * 220,
       },
     };
   });
