@@ -60,14 +60,6 @@ const NODE_PRESETS: Record<FlowNodeKind, { label: string; type: string; data: Re
 const initialNodes: Node[] = [];
 const initialEdges: Edge[] = [];
 
-function randomPosition() {
-  return {
-    x: Math.floor(Math.random() * 550),
-    y: Math.floor(Math.random() * 450),
-  };
-}
-
-
 const safeString = (v?: string | null) => (v ? v : '');
 const toHandleId = (value: string, fallback: string) => {
   const normalized = value.toLowerCase().trim().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
@@ -108,13 +100,26 @@ const buildFlowEdge = (edge: FlowEdgePayload): Edge => {
   };
 };
 
-function makeNodeId() {
-  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-    return crypto.randomUUID();
-  }
+const hasValidPosition = (node: Node) =>
+  Number.isFinite(node.position?.x) && Number.isFinite(node.position?.y);
 
-  return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
-}
+const getSortedElements = (inputNodes: Node[], inputEdges: Edge[]) => ({
+  nodes: [...inputNodes].sort((a, b) => a.id.localeCompare(b.id)),
+  edges: [...inputEdges].sort((a, b) =>
+    `${a.source}${a.target}`.localeCompare(`${b.source}${b.target}`),
+  ),
+});
+
+const nextIncrementalId = (prefix: string, existingIds: string[]) => {
+  const maxId = existingIds.reduce((max, id) => {
+    if (!id.startsWith(prefix)) return max;
+    const suffix = Number.parseInt(id.slice(prefix.length), 10);
+    if (!Number.isFinite(suffix)) return max;
+    return Math.max(max, suffix);
+  }, 0);
+
+  return `${prefix}${maxId + 1}`;
+};
 
 export default function FlowBuilderPage() {
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>(initialNodes);
@@ -141,7 +146,7 @@ export default function FlowBuilderPage() {
     (node: FlowNodePayload): Node => ({
       id: node.id,
       type: node.type,
-      position: node.position || randomPosition(),
+      position: node.position ?? { x: 0, y: 0 },
       data: {
         ...node.data,
         buttons: node.type === 'choice' ? normalizeChoiceButtons(node.id, node.data?.buttons) : node.data?.buttons,
@@ -159,7 +164,16 @@ export default function FlowBuilderPage() {
       return;
     }
 
-    const { nodes: layoutedNodes, edges: layoutedEdges } = getLayoutedElements(nextNodes, nextEdges);
+    const { nodes: sortedNodes, edges: sortedEdges } = getSortedElements(nextNodes, nextEdges);
+    const shouldApplyLayout = sortedNodes.some((node) => !hasValidPosition(node));
+
+    if (!shouldApplyLayout) {
+      setNodes(sortedNodes);
+      setEdges(sortedEdges);
+      return;
+    }
+
+    const { nodes: layoutedNodes, edges: layoutedEdges } = getLayoutedElements(sortedNodes, sortedEdges);
     setNodes(layoutedNodes);
     setEdges(layoutedEdges);
   }, [setEdges, setNodes]);
@@ -217,11 +231,14 @@ export default function FlowBuilderPage() {
   const onConnect = useCallback((params: FlowConnection) => {
     const edgeSourceHandle = toOptionalHandleId(params.sourceHandle);
     const edgeLabel = safeString(params.sourceHandle);
+    const edgeBaseId = `${safeString(params.source)}-${edgeSourceHandle || 'default'}-${safeString(params.target)}-${safeString(params.targetHandle) || 'default'}`;
 
     setEdges((eds) =>
       addEdge(
         {
-          id: `${safeString(params.source)}-${safeString(params.target)}-${Date.now()}`,
+          id: eds.some((edge) => edge.id === edgeBaseId)
+            ? `${edgeBaseId}-${eds.filter((edge) => edge.id.startsWith(edgeBaseId)).length + 1}`
+            : edgeBaseId,
           source: safeString(params.source),
           target: safeString(params.target),
           sourceHandle: edgeSourceHandle,
@@ -241,18 +258,21 @@ export default function FlowBuilderPage() {
   const addNode = useCallback(
     (kind: FlowNodeKind) => {
       const preset = NODE_PRESETS[kind];
-      const newNode: Node = {
-        id: makeNodeId(),
-        type: preset.type,
-        position: randomPosition(),
-        data: {
-          label: preset.label,
-          ...preset.data,
-          onChange: updateNodeData,
-        },
-      };
+      setNodes((prev) => {
+        const nextNodeId = nextIncrementalId('node_', prev.map((node) => node.id));
+        const newNode: Node = {
+          id: nextNodeId,
+          type: preset.type,
+          position: { x: 0, y: 0 },
+          data: {
+            label: preset.label,
+            ...preset.data,
+            onChange: updateNodeData,
+          },
+        };
 
-      setNodes((prev) => [...prev, newNode]);
+        return [...prev, newNode];
+      });
     },
     [setNodes, updateNodeData],
   );
@@ -296,11 +316,13 @@ export default function FlowBuilderPage() {
       const result = await saveFlowGraph(tenantId, { nodes: payloadNodes, edges: payloadEdges });
       const savedNodes = (result.nodes || []).map(buildFlowNode);
       const savedEdges = (result.edges || []).map(buildFlowEdge);
-      applyLayoutAndSetFlow(savedNodes, savedEdges);
+      const { nodes: sortedNodes, edges: sortedEdges } = getSortedElements(savedNodes, savedEdges);
+      setNodes(sortedNodes);
+      setEdges(sortedEdges);
     } finally {
       setIsSaving(false);
     }
-  }, [applyLayoutAndSetFlow, buildFlowNode, edges, nodes, setEdges, setNodes]);
+  }, [buildFlowNode, edges, nodes, setEdges, setNodes]);
 
   if (isLoading) {
     return <div>Carregando fluxo...</div>;
