@@ -325,7 +325,7 @@ function alignNodes(nodes: Node[], edges: Edge[]) {
   nodes.forEach((node) => {
     if (node.type !== 'choice') return
 
-    const options = node.data?.buttons?.map((b: any) => b.handleId) || []
+    const options = node.data?.buttons?.map((b: any) => b.label) || []
     const parentY = node.position.y
 
     const children = options.map(option => {
