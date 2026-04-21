@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ReactFlow, {
   addEdge,
   Background,
@@ -125,6 +125,7 @@ export default function FlowBuilderPage() {
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>(initialEdges);
   const [isLoading, setIsLoading] = useState(true);
+  const layoutFrameRef = useRef<number | null>(null);
   const [isSaving, setIsSaving] = useState(false);
 
   const updateNodeData = useCallback((nodeId: string, patch: Record<string, unknown>) => {
@@ -173,10 +174,28 @@ export default function FlowBuilderPage() {
       return;
     }
 
-    const { nodes: layoutedNodes, edges: layoutedEdges } = getLayoutedElements(sortedNodes, sortedEdges);
-    setNodes(layoutedNodes);
-    setEdges(layoutedEdges);
+    setNodes(sortedNodes);
+    setEdges(sortedEdges);
+
+    if (layoutFrameRef.current) {
+      cancelAnimationFrame(layoutFrameRef.current);
+    }
+
+    layoutFrameRef.current = requestAnimationFrame(() => {
+      setNodes((currentNodes: Node[]) => {
+        const { nodes: currentSortedNodes, edges: currentSortedEdges } = getSortedElements(currentNodes, sortedEdges);
+        const { nodes: layoutedNodes } = getLayoutedElements(currentSortedNodes, currentSortedEdges);
+        return layoutedNodes;
+      });
+      layoutFrameRef.current = null;
+    });
   }, [setEdges, setNodes]);
+
+  useEffect(() => () => {
+    if (layoutFrameRef.current) {
+      cancelAnimationFrame(layoutFrameRef.current);
+    }
+  }, []);
 
   useEffect(() => {
     let active = true;

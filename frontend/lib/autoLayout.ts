@@ -1,8 +1,8 @@
 import dagre from 'dagre';
 import type { Edge, Node } from 'reactflow';
 
-const nodeWidth = 300;
-const nodeHeight = 180;
+const defaultNodeWidth = 340;
+const defaultNodeHeight = 200;
 
 export function getLayoutedElements(nodes: Node[], edges: Edge[]) {
   const dagreGraph = new dagre.graphlib.Graph();
@@ -14,14 +14,18 @@ export function getLayoutedElements(nodes: Node[], edges: Edge[]) {
 
   dagreGraph.setGraph({
     rankdir: 'LR',
-    nodesep: 140,
-    ranksep: 220,
+    nodesep: 220,
+    ranksep: 320,
+    edgesep: 40,
   });
 
   sortedNodes.forEach((node) => {
+    const width = node.width ?? defaultNodeWidth;
+    const height = node.height ?? defaultNodeHeight;
+
     dagreGraph.setNode(node.id, {
-      width: nodeWidth,
-      height: nodeHeight,
+      width,
+      height,
     });
   });
 
@@ -35,12 +39,14 @@ export function getLayoutedElements(nodes: Node[], edges: Edge[]) {
 
   const layoutedNodes = nodes.map((node) => {
     const nodeWithPosition = dagreGraph.node(node.id);
+    const width = node.width ?? defaultNodeWidth;
+    const height = node.height ?? defaultNodeHeight;
 
     return {
       ...node,
       position: {
-        x: nodeWithPosition.x - nodeWidth / 2,
-        y: nodeWithPosition.y - nodeHeight / 2,
+        x: nodeWithPosition.x - width / 2,
+        y: nodeWithPosition.y - height / 2,
       },
     };
   });
