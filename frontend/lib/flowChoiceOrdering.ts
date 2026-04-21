@@ -132,60 +132,59 @@ export function orderChoiceChildrenEdges(nodes: Node[], edges: Edge[]): Edge[] {
 
 const CHILD_VERTICAL_SPACING = 120;
 
-const extractOptionHandleOrder = (node: Node) => {
-  const options = Array.isArray(node.data?.options) ? (node.data.options as string[]) : [];
-  return options
-    .map((option) => normalizeValue(option))
-    .filter(Boolean);
-};
-
-export function forceChoiceChildrenYOrder(nodes: Node[], edges: Edge[]): Node[] {
+export function alignChoiceChildren(nodes: Node[], edges: Edge[]): Node[] {
   if (!nodes.length || !edges.length) {
     return nodes;
   }
 
   const nodeMap = new Map(nodes.map((node) => [node.id, node]));
-  const nextNodes = nodes.map((node) => ({ ...node, position: { ...node.position } }));
+  const overrides = new Map<string, number>();
 
-  nextNodes.forEach((node) => {
+  nodes.forEach((node) => {
     if (node.type !== 'choice') {
       return;
     }
 
-    const optionOrder = extractOptionHandleOrder(node);
-    if (optionOrder.length === 0) {
+    const options = Array.isArray(node.data?.options) ? (node.data.options as string[]) : [];
+    if (!options.length) {
       return;
     }
 
-    const orderedChildren = optionOrder
-      .map((optionHandle) => {
+    const parentY = node.position.y;
+
+    const orderedChildren = options
+      .map((option) => {
         const edge = edges.find((currentEdge) =>
-          currentEdge.source === node.id && normalizeValue(currentEdge.sourceHandle || '') === optionHandle,
+          currentEdge.source === node.id && normalizeValue(currentEdge.sourceHandle || '') === normalizeValue(option),
         );
 
-        if (!edge) {
-          return null;
-        }
-
-        return nodeMap.get(edge.target) || null;
+        return edge ? nodeMap.get(edge.target) || null : null;
       })
       .filter((child): child is Node => Boolean(child));
 
-    if (orderedChildren.length === 0) {
+    if (!orderedChildren.length) {
       return;
     }
 
-    const startY = node.position.y - ((optionOrder.length - 1) * CHILD_VERTICAL_SPACING) / 2;
+    const startY = parentY - ((orderedChildren.length - 1) * CHILD_VERTICAL_SPACING) / 2;
 
     orderedChildren.forEach((child, index) => {
-      const childToUpdate = nextNodes.find((currentNode) => currentNode.id === child.id);
-      if (!childToUpdate) {
-        return;
-      }
-
-      childToUpdate.position.y = startY + index * CHILD_VERTICAL_SPACING;
+      overrides.set(child.id, startY + index * CHILD_VERTICAL_SPACING);
     });
   });
 
-  return nextNodes;
+  return nodes.map((node) => {
+    const nextY = overrides.get(node.id);
+    if (typeof nextY !== 'number') {
+      return node;
+    }
+
+    return {
+      ...node,
+      position: {
+        ...node.position,
+        y: nextY,
+      },
+    };
+  });
 }
