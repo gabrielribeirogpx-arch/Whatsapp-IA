@@ -12,7 +12,8 @@ const extractChoiceOrder = (node: Node) => {
 };
 
 const getEdgeOptionCandidates = (edge: Edge) => {
-  const candidates = [edge.sourceHandle]
+  const edgeData = (edge.data as { sourceHandle?: string } | undefined);
+  const candidates = [edge.sourceHandle, edgeData?.sourceHandle]
     .map((value) => value?.toString().trim())
     .filter((value): value is string => Boolean(value));
 
@@ -89,18 +90,6 @@ export function orderChoiceChildrenEdges(nodes: Node[], edges: Edge[]): Edge[] {
   if (orderedChoiceEdges.size === 0) {
     return edges;
   }
-
-  const result: Edge[] = [];
-  edges.forEach((edge) => {
-    const sorted = orderedChoiceEdges.get(edge.source);
-    if (!sorted) {
-      result.push(edge);
-    }
-  });
-
-  orderedChoiceEdges.forEach((sorted, sourceId) => {
-    sorted.forEach((edge) => result.push(edge));
-  });
 
   const choiceSources = new Set(orderedChoiceEdges.keys());
   const nonChoiceEdges = edges.filter((e) => !choiceSources.has(e.source));
