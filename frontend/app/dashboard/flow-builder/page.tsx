@@ -319,6 +319,7 @@ export default function FlowBuilderPage() {
     return <div>Carregando fluxo...</div>;
   }
 function alignNodes(nodes: Node[], edges: Edge[]) {
+  console.log("ALIGN EXECUTANDO")
   const nodeMap = new Map(nodes.map(n => [n.id, n]))
   const updatedNodes = [...nodes]
 
