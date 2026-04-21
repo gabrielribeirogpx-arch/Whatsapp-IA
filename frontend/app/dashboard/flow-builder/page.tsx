@@ -91,7 +91,12 @@ const normalizeChoiceButtons = (nodeId: string, buttons: Array<{ id?: string; la
   });
 
 const buildFlowEdge = (edge: FlowEdgePayload): Edge => {
-  const inferredHandle = edge.sourceHandle ?? edge.data?.sourceHandle ?? null;
+  const inferredHandle =
+    edge.sourceHandle ??
+    edge.data?.sourceHandle ??
+    edge.data?.condition ??
+    edge.label ??
+    null;
   const label = safeString(edge.label || inferredHandle);
 
   return {
@@ -298,12 +303,20 @@ export default function FlowBuilderPage() {
         id: safeString(edge.id),
         source: safeString(edge.source),
         target: safeString(edge.target),
-        sourceHandle: toOptionalHandleId(edge.sourceHandle || (edge.data as FlowEdgePayload['data'])?.sourceHandle) || undefined,
+        sourceHandle:
+          edge.sourceHandle ||
+          (edge.data as FlowEdgePayload['data'])?.sourceHandle ||
+          edge.label?.toString() ||
+          undefined,
         targetHandle: safeString(edge.targetHandle),
         label: safeString(edge.label?.toString() ?? edge.sourceHandle ?? ''),
         data: {
           ...(edge.data as FlowEdgePayload['data']),
-          sourceHandle: toOptionalHandleId(edge.sourceHandle || (edge.data as FlowEdgePayload['data'])?.sourceHandle) || undefined,
+          sourceHandle:
+            edge.sourceHandle ||
+            (edge.data as FlowEdgePayload['data'])?.sourceHandle ||
+            edge.label?.toString() ||
+            undefined,
           condition: safeString(edge.label?.toString() || (edge.data as FlowEdgePayload['data'])?.condition || ''),
         },
       }));
