@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ReactFlow, {
   addEdge,
   Background,
@@ -19,7 +19,7 @@ import DelayNode from '@/components/flow/nodes/DelayNode';
 import MessageNode from '@/components/flow/nodes/MessageNode';
 import { getFlowGraph, getTenantSessionFromStorage, saveFlowGraph } from '@/lib/api';
 import { getLayoutedElements } from '@/lib/autoLayout';
-import { alignNodes } from '@/lib/flowChoiceOrdering';
+import { alignNodes, orderChoiceChildrenEdges } from '@/lib/flowChoiceOrdering';
 import { FlowEdgePayload, FlowNodePayload } from '@/lib/types';
 
 const FETCH_TIMEOUT_MS = 8000;
@@ -126,7 +126,6 @@ export default function FlowBuilderPage() {
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>(initialEdges);
   const [reactFlowInstance, setReactFlowInstance] = useState<ReactFlowInstance | null>(null);
-  const shouldFitViewRef = useRef(false);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
 
@@ -167,18 +166,12 @@ export default function FlowBuilderPage() {
       return;
     }
 
-    const { nodes: layoutedNodes, edges: layoutedEdges } = getLayoutedElements(nextNodes, nextEdges);
-
-    shouldFitViewRef.current = true;
+    const orderedEdges = orderChoiceChildrenEdges(nextNodes, nextEdges);
+    const { nodes: layoutedNodes, edges: layoutedEdges } = getLayoutedElements(nextNodes, orderedEdges);
     setNodes(layoutedNodes);
     setEdges(layoutedEdges);
-  }, [setEdges, setNodes]);
-
-  useLayoutEffect(() => {
-    if (!shouldFitViewRef.current || !reactFlowInstance) return;
-    shouldFitViewRef.current = false;
-    reactFlowInstance.fitView();
-  }, [edges, nodes, reactFlowInstance]);
+    requestAnimationFrame(() => { reactFlowInstance?.fitView(); });
+  }, [reactFlowInstance, setEdges, setNodes]);
 
   useEffect(() => {
     let active = true;

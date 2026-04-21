@@ -96,7 +96,7 @@ export function orderChoiceChildrenEdges(nodes: Node[], edges: Edge[]): Edge[] {
   const choiceEdgesOrdered: Edge[] = [];
   orderedChoiceEdges.forEach((sorted) => sorted.forEach((e) => choiceEdgesOrdered.push(e)));
 
-  return [...nonChoiceEdges, ...choiceEdgesOrdered];
+  return [...choiceEdgesOrdered, ...nonChoiceEdges];
 }
 
 const CHILD_HORIZONTAL_SPACING = 180;
