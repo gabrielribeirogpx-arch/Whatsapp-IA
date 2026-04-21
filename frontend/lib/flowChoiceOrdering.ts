@@ -12,9 +12,8 @@ const extractChoiceOrder = (node: Node) => {
 };
 
 const getEdgeOptionCandidates = (edge: Edge) => {
-  const edgeData = (edge.data as { option?: string; condition?: string; sourceHandle?: string } | undefined);
-  const candidates = [edge.sourceHandle, edgeData?.sourceHandle]
-    .map((value) => value?.toString())
+  const candidates = [edge.sourceHandle]
+    .map((value) => value?.toString().trim())
     .filter((value): value is string => Boolean(value));
 
   return Array.from(new Set(candidates));
@@ -105,53 +104,77 @@ export function orderChoiceChildrenEdges(nodes: Node[], edges: Edge[]): Edge[] {
   });
 }
 
-const CHILD_HORIZONTAL_SPACING = 260;
+const CHILD_HORIZONTAL_SPACING = 320;
 const CHILD_VERTICAL_OFFSET = 220;
+const NODE_WIDTH = 260;
 
-export function alignChoiceChildren(nodes: Node[], edges: Edge[]): Node[] {
+export function alignNodes(nodes: Node[], edges: Edge[]): Node[] {
   if (!nodes.length || !edges.length) {
     return nodes;
   }
 
   const nodeMap = new Map(nodes.map((node) => [node.id, node]));
   const overrides = new Map<string, { x: number; y: number }>();
+  const outgoingEdgesBySource = new Map<string, Edge[]>();
+
+  edges.forEach((edge) => {
+    const list = outgoingEdgesBySource.get(edge.source) || [];
+    list.push(edge);
+    outgoingEdgesBySource.set(edge.source, list);
+  });
 
   nodes.forEach((node) => {
     if (node.type !== 'choice') {
       return;
     }
 
-    const optionOrder = extractChoiceOrder(node);
-    if (!optionOrder.length) {
+    const buttons = Array.isArray(node.data?.buttons) ? (node.data.buttons as ChoiceOption[]) : [];
+    const buttonHandles = buttons
+      .map((button) => button.handleId?.toString().trim())
+      .filter((handleId): handleId is string => Boolean(handleId));
+
+    if (!buttonHandles.length) {
       return;
     }
 
-    const parentX = node.position.x;
+    const parentCenterX = node.position.x + NODE_WIDTH / 2;
     const parentY = node.position.y;
+    const nodeOutgoingEdges = outgoingEdgesBySource.get(node.id) || [];
 
-    const orderedChildren = optionOrder
-      .map((optionKey) => {
-        const edge = edges.find((currentEdge) => {
-          if (currentEdge.source !== node.id) {
-            return false;
-          }
+    if (!nodeOutgoingEdges.length) {
+      return;
+    }
 
-          const candidates = getEdgeOptionCandidates(currentEdge);
-          return candidates.includes(optionKey);
-        });
+    const childrenByHandle = new Map<string, Node>();
 
-        return edge ? nodeMap.get(edge.target) || null : null;
-      })
+    buttonHandles.forEach((handleId) => {
+      const matchedEdge = nodeOutgoingEdges.find((edge) => edge.sourceHandle === handleId);
+      if (!matchedEdge) return;
+      const child = nodeMap.get(matchedEdge.target);
+      if (!child) return;
+      childrenByHandle.set(handleId, child);
+    });
+
+    const orderedChildren = buttonHandles
+      .map((handleId) => childrenByHandle.get(handleId) || null)
       .filter((child): child is Node => Boolean(child));
 
     if (!orderedChildren.length) {
       return;
     }
 
-    const startX = parentX - ((orderedChildren.length - 1) * CHILD_HORIZONTAL_SPACING) / 2;
+    const alreadyOrderedIds = new Set(orderedChildren.map((child) => child.id));
+    const remainingChildren = nodeOutgoingEdges
+      .map((edge) => nodeMap.get(edge.target) || null)
+      .filter((child): child is Node => Boolean(child) && !alreadyOrderedIds.has(child.id));
+
+    const finalChildren = [...orderedChildren, ...remainingChildren];
+
+    const totalWidth = (finalChildren.length - 1) * CHILD_HORIZONTAL_SPACING;
+    const startX = parentCenterX - totalWidth / 2 - NODE_WIDTH / 2;
     const childY = parentY + CHILD_VERTICAL_OFFSET;
 
-    orderedChildren.forEach((child, index) => {
+    finalChildren.forEach((child, index) => {
       overrides.set(child.id, {
         x: startX + index * CHILD_HORIZONTAL_SPACING,
         y: childY,
@@ -164,11 +187,14 @@ export function alignChoiceChildren(nodes: Node[], edges: Edge[]): Node[] {
     if (!nextPosition) {
       return node;
     }
+    const { x, y } = nextPosition;
 
     return {
       ...node,
-      position: nextPosition,
-      positionAbsolute: nextPosition,
+      position: { x, y },
+      positionAbsolute: { x, y },
     };
   });
 }
+
+export const alignChoiceChildren = alignNodes;
