@@ -171,13 +171,6 @@ export default function FlowBuilderPage() {
   }, [setEdges, setNodes]);
 
   useEffect(() => {
-    if (!nodes.length || !edges.length) return;
-
-    console.log('ALIGN EXECUTANDO');
-    setNodes((nds) => alignChoiceChildren(nds, edges));
-  }, [edges, nodes.length, setNodes]);
-
-  useEffect(() => {
     let active = true;
 
     const loadFlow = async () => {
@@ -205,9 +198,7 @@ export default function FlowBuilderPage() {
 
         const initialNodes = (data?.nodes || []).map(buildFlowNode);
         const initialEdges: Edge[] = (data?.edges || []).map(buildFlowEdge);
-
-        const alignedNodes = alignNodes(initialNodes, initialEdges)
-applyLayoutAndSetFlow(alignedNodes, initialEdges);
+        applyLayoutAndSetFlow(initialNodes, initialEdges);
       } catch {
         if (!active) return;
         setNodes([]);
@@ -319,46 +310,6 @@ applyLayoutAndSetFlow(alignedNodes, initialEdges);
   if (isLoading) {
     return <div>Carregando fluxo...</div>;
   }
-function alignNodes(nodes: Node[], edges: Edge[]) {
-  console.log("ALIGN EXECUTANDO")
-  const nodeMap = new Map(nodes.map(n => [n.id, n]))
-  const updatedNodes = [...nodes]
-
-  nodes.forEach((node) => {
-    if (node.type !== 'choice') return
-
-    const options = node.data?.buttons?.map((b: any) => b.label) || []
-    const parentY = node.position.y
-
-    const children = options.map(option => {
-      const edge = edges.find(e =>
-        e.source === node.id &&
-        e.sourceHandle === option
-      )
-      return edge ? nodeMap.get(edge.target) : null
-    }).filter(Boolean)
-
-    const spacing = 120
-    const startY = parentY - ((children.length - 1) * spacing) / 2
-
-    children.forEach((child, index) => {
-      const newY = startY + index * spacing
-
-      const idx = updatedNodes.findIndex(n => n.id === child.id)
-      if (idx !== -1) {
-        updatedNodes[idx] = {
-          ...updatedNodes[idx],
-          position: {
-            ...updatedNodes[idx].position,
-            y: newY
-          }
-        }
-      }
-    })
-  })
-
-  return updatedNodes
-}
   return (
     <div style={{ width: '100%', height: '100vh', display: 'flex' }}>
       <aside
