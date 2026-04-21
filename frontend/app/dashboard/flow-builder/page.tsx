@@ -163,10 +163,9 @@ export default function FlowBuilderPage() {
     }
 
     const { nodes: layoutedNodes, edges: layoutedEdges } = getLayoutedElements(nextNodes, nextEdges);
-    const alignedNodes = alignNodes(layoutedNodes, layoutedEdges);
 
     shouldFitViewRef.current = true;
-    setNodes(alignedNodes);
+    setNodes(layoutedNodes);
     setEdges(layoutedEdges);
   }, [setEdges, setNodes]);
 
