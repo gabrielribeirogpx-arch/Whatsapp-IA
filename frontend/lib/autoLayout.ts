@@ -31,31 +31,47 @@ export function getLayoutedElements(nodes: Node[], edges: Edge[]) {
   nodes
     .filter((n) => n.type === 'choice')
     .forEach((choiceNode) => {
-      const buttons: Array<{ handleId?: string }> = Array.isArray(choiceNode.data?.buttons)
-        ? (choiceNode.data.buttons as Array<{ handleId?: string }>)
+      const buttons: Array<{ handleId?: string; label?: string }> = Array.isArray(choiceNode.data?.buttons)
+        ? (choiceNode.data.buttons as Array<{ handleId?: string; label?: string }>)
         : [];
 
       const childEdges = edges.filter((e) => e.source === choiceNode.id);
       if (!childEdges.length) return;
 
-      const orderedChildren: Node[] = buttons
+      // Tenta match por sourceHandle (direto e via data)
+      const matchedByHandle: Node[] = buttons
         .map((btn) => {
           const edge = childEdges.find((e) => {
-            const sh =
-              e.sourceHandle ??
-              (e.data as { sourceHandle?: string } | undefined)?.sourceHandle ??
-              '';
-            return sh === btn.handleId;
+            const sh1 = (e.sourceHandle ?? '').toLowerCase().trim();
+            const sh2 = ((e.data as { sourceHandle?: string } | undefined)?.sourceHandle ?? '').toLowerCase().trim();
+            const handle = (btn.handleId ?? '').toLowerCase().trim();
+            return handle && (sh1 === handle || sh2 === handle);
           });
           return edge ? (nodes.find((n) => n.id === edge.target) ?? null) : null;
         })
         .filter((n): n is Node => n !== null);
 
-      const fallbackChildren: Node[] = childEdges
-        .map((e) => nodes.find((n) => n.id === e.target) ?? null)
+      // Tenta match por label normalizado como fallback
+      const matchedByLabel: Node[] = buttons
+        .map((btn) => {
+          const edge = childEdges.find((e) => {
+            const edgeLabel = ((e.label ?? e.sourceHandle ?? (e.data as {condition?:string}|undefined)?.condition ?? '') as string)
+              .toLowerCase().trim().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
+            const btnHandle = (btn.handleId ?? '').toLowerCase().trim();
+            const btnLabel = (btn.label ?? '').toLowerCase().trim().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
+            return edgeLabel && (edgeLabel === btnHandle || edgeLabel === btnLabel);
+          });
+          return edge ? (nodes.find((n) => n.id === edge.target) ?? null) : null;
+        })
         .filter((n): n is Node => n !== null);
 
-      const children = orderedChildren.length > 0 ? orderedChildren : fallbackChildren;
+      // Usa o melhor match disponível
+      const children =
+        matchedByHandle.length === childEdges.length ? matchedByHandle :
+        matchedByLabel.length === childEdges.length ? matchedByLabel :
+        matchedByHandle.length > 0 ? matchedByHandle :
+        matchedByLabel.length > 0 ? matchedByLabel :
+        childEdges.map((e) => nodes.find((n) => n.id === e.target) ?? null).filter((n): n is Node => n !== null);
       if (!children.length) return;
 
       const parentPos = positionMap.get(choiceNode.id);
