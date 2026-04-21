@@ -31,8 +31,8 @@ export function getLayoutedElements(nodes: Node[], edges: Edge[]) {
   nodes
     .filter((n) => n.type === 'choice')
     .forEach((choiceNode) => {
-      const buttons: Array<{ handleId?: string }> = Array.isArray(choiceNode.data?.buttons)
-        ? (choiceNode.data.buttons as Array<{ handleId?: string }>)
+      const buttons: Array<{ handleId?: string; label?: string }> = Array.isArray(choiceNode.data?.buttons)
+        ? (choiceNode.data.buttons as Array<{ handleId?: string; label?: string }>)
         : [];
 
       const childEdges = edges.filter((e) => e.source === choiceNode.id);
