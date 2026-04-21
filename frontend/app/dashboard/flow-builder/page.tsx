@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import ReactFlow, {
   addEdge,
   Background,
@@ -19,7 +19,7 @@ import DelayNode from '@/components/flow/nodes/DelayNode';
 import MessageNode from '@/components/flow/nodes/MessageNode';
 import { getFlowGraph, getTenantSessionFromStorage, saveFlowGraph } from '@/lib/api';
 import { getLayoutedElements } from '@/lib/autoLayout';
-import { alignChoiceChildren, orderChoiceChildrenEdges } from '@/lib/flowChoiceOrdering';
+import { alignNodes } from '@/lib/flowChoiceOrdering';
 import { FlowEdgePayload, FlowNodePayload } from '@/lib/types';
 
 const FETCH_TIMEOUT_MS = 8000;
@@ -75,7 +75,7 @@ const toHandleId = (value: string, fallback: string) => {
   return normalized || fallback;
 };
 const toOptionalHandleId = (value?: string | null) => {
-  const normalized = toHandleId(safeString(value), '');
+  const normalized = safeString(value).trim();
   return normalized || null;
 };
 
@@ -124,6 +124,7 @@ export default function FlowBuilderPage() {
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>(initialEdges);
   const [reactFlowInstance, setReactFlowInstance] = useState<ReactFlowInstance | null>(null);
+  const shouldFitViewRef = useRef(false);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
 
@@ -164,15 +165,19 @@ export default function FlowBuilderPage() {
       return;
     }
 
-    const orderedEdges = orderChoiceChildrenEdges(nextNodes, nextEdges);
-    const { nodes: layoutedNodes, edges: layoutedEdges } = getLayoutedElements(nextNodes, orderedEdges);
-    const alignedNodes = alignChoiceChildren(layoutedNodes, layoutedEdges);
+    const { nodes: layoutedNodes, edges: layoutedEdges } = getLayoutedElements(nextNodes, nextEdges);
+    const alignedNodes = alignNodes(layoutedNodes, layoutedEdges);
+
+    shouldFitViewRef.current = true;
     setNodes(alignedNodes);
     setEdges(layoutedEdges);
-    requestAnimationFrame(() => {
-      reactFlowInstance?.fitView();
-    });
-  }, [reactFlowInstance, setEdges, setNodes]);
+  }, [setEdges, setNodes]);
+
+  useLayoutEffect(() => {
+    if (!shouldFitViewRef.current || !reactFlowInstance) return;
+    shouldFitViewRef.current = false;
+    reactFlowInstance.fitView();
+  }, [edges, nodes, reactFlowInstance]);
 
   useEffect(() => {
     let active = true;
@@ -224,8 +229,8 @@ export default function FlowBuilderPage() {
   const isEmpty = useMemo(() => nodes.length === 0 && edges.length === 0, [edges.length, nodes.length]);
 
   const onConnect = useCallback((params: FlowConnection) => {
-    const edgeSourceHandle = params.sourceHandle;
-    const edgeLabel = safeString(params.sourceHandle);
+    const edgeSourceHandle = params.sourceHandle?.toString() || null;
+    const edgeLabel = safeString(edgeSourceHandle);
 
     setEdges((eds) =>
       addEdge(
