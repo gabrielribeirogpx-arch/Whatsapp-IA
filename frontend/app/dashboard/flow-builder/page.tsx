@@ -307,7 +307,11 @@ export default function FlowBuilderPage() {
       if (node.type === 'choice') {
         setActiveEdgeIds(traversedEdgeIds);
         setCurrentNodeId(currentNodeToRun);
-        setCurrentChoices(response.buttons || []);
+        if (response.type === 'choice') {
+          setCurrentChoices(response.buttons || []);
+        } else {
+          setCurrentChoices([]);
+        }
         break;
       }
 
