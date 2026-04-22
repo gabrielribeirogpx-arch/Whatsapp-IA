@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Handle, NodeProps, Position } from 'reactflow';
 
 type ChoiceButton = {
@@ -23,6 +23,19 @@ const toHandleId = (value: string, fallback: string) => {
   return normalized || fallback;
 };
 
+// Calcula tops estimados baseado na estrutura real do node:
+// barra(3) + header(paddingTop14 + altura~28 + paddingBottom8) = ~53px
+// body padding top (10px) + textarea (minHeight52 + marginBottom8) = ~70px
+// total até primeira opção: ~123px
+// cada opção: height~28px + gap5px = ~33px
+function estimateTops(count: number): number[] {
+  const FIRST_OPTION_TOP = 123;
+  const OPTION_STEP = 33;
+  return Array.from({ length: count }, (_, i) =>
+    FIRST_OPTION_TOP + i * OPTION_STEP + 14 // +14 = metade da altura da opção
+  );
+}
+
 export default function ChoiceNode({ id, data, selected }: NodeProps) {
   const nodeData = (data || {}) as ChoiceNodeData;
   const buttons = (nodeData.buttons || []).map((button, index) => ({
@@ -32,36 +45,42 @@ export default function ChoiceNode({ id, data, selected }: NodeProps) {
     next: button.next,
   }));
 
-  // Refs para medir a posição real de cada opção
   const optionRefs = useRef<(HTMLDivElement | null)[]>([]);
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const [handleTops, setHandleTops] = useState<number[]>([]);
 
-  // Recalcula a posição dos handles sempre que o layout muda
+  // Inicia com estimativa para evitar flash no topo
+  const [handleTops, setHandleTops] = useState<number[]>(() => estimateTops(buttons.length));
+
+  // Atualiza estimativa quando muda o número de botões
   useEffect(() => {
-    const updatePositions = () => {
-      if (!containerRef.current) return;
-      const containerRect = containerRef.current.getBoundingClientRect();
-      // Se o container ainda não foi pintado (rect zerado), não mede
-      if (containerRect.height === 0) return;
-      const tops = optionRefs.current.map((ref) => {
-        if (!ref) return 0;
+    setHandleTops(estimateTops(buttons.length));
+  }, [buttons.length]);
+
+  const measurePositions = () => {
+    if (!containerRef.current) return;
+    const containerRect = containerRef.current.getBoundingClientRect();
+    if (containerRect.height === 0) return;
+    const tops = optionRefs.current
+      .slice(0, buttons.length)
+      .map((ref) => {
+        if (!ref) return null;
         const rect = ref.getBoundingClientRect();
+        if (rect.height === 0) return null;
         return rect.top - containerRect.top + rect.height / 2;
       });
-      // Só atualiza se os valores são válidos (maiores que zero)
-      if (tops.every((t) => t > 0)) {
-        setHandleTops(tops);
-      }
-    };
+    // Só atualiza se todos os valores são válidos
+    if (tops.every((t) => t !== null && t > 0)) {
+      setHandleTops(tops as number[]);
+    }
+  };
 
-    // Medição imediata
-    updatePositions();
-    // Segunda medição após o ReactFlow terminar de posicionar o node
-    const t1 = setTimeout(updatePositions, 50);
-    const t2 = setTimeout(updatePositions, 150);
+  // useLayoutEffect para medir antes do paint — evita flash
+  useLayoutEffect(() => {
+    measurePositions();
+    const t1 = setTimeout(measurePositions, 50);
+    const t2 = setTimeout(measurePositions, 200);
 
-    const observer = new ResizeObserver(updatePositions);
+    const observer = new ResizeObserver(measurePositions);
     if (containerRef.current) observer.observe(containerRef.current);
 
     return () => {
@@ -69,6 +88,7 @@ export default function ChoiceNode({ id, data, selected }: NodeProps) {
       clearTimeout(t2);
       observer.disconnect();
     };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [buttons.length, nodeData.content]);
 
   const updateButton = (index: number, label: string) => {
@@ -102,7 +122,6 @@ export default function ChoiceNode({ id, data, selected }: NodeProps) {
       className={`flow-node ${selected ? 'is-selected' : ''} ${nodeData.running ? 'running' : ''}`}
       style={{ minWidth: 260, position: 'relative' }}
     >
-      {/* Barra de identidade */}
       <div
         className="flow-node-header-bar"
         style={{ background: 'linear-gradient(90deg, #f97316, #fb923c)' }}
@@ -110,19 +129,14 @@ export default function ChoiceNode({ id, data, selected }: NodeProps) {
 
       <Handle type="target" position={Position.Left} />
 
-      {/* Header */}
       <div className="flow-node-header" style={{ paddingTop: 14 }}>
         <div className="flow-node-type-dot" style={{ background: '#f97316' }} />
         <span className="flow-node-title">{nodeData.label || 'Escolha'}</span>
-        <span
-          className="flow-node-badge"
-          style={{ background: '#fff7ed', color: '#c2410c' }}
-        >
+        <span className="flow-node-badge" style={{ background: '#fff7ed', color: '#c2410c' }}>
           CHOICE
         </span>
       </div>
 
-      {/* Corpo */}
       <div className="flow-node-body">
         <textarea
           value={nodeData.content || ''}
@@ -191,7 +205,6 @@ export default function ChoiceNode({ id, data, selected }: NodeProps) {
         </button>
       </div>
 
-      {/* Handles com posição medida pelo ref — sempre alinhados com a opção real */}
       {buttons.map((button, index) => (
         <Handle
           key={button.handleId}
@@ -199,7 +212,7 @@ export default function ChoiceNode({ id, data, selected }: NodeProps) {
           type="source"
           position={Position.Right}
           style={{
-            top: handleTops[index] ?? (100 + index * 39 + 19),
+            top: handleTops[index] ?? estimateTops(buttons.length)[index],
             right: -6,
             width: 10,
             height: 10,
