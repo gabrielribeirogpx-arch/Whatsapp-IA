@@ -129,7 +129,8 @@ export default function FlowBuilderPage() {
   const [reactFlowInstance, setReactFlowInstance] = useState<ReactFlowInstance | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
-  const [messages, setMessages] = useState<any[]>([]);
+  const [messages, setMessages] = useState<Array<{ type: 'bot' | 'user'; text: string }>>([]);
+  const [currentChoices, setCurrentChoices] = useState<Array<{ id?: string; label?: string; handleId?: string }>>([]);
   const [currentNodeId, setCurrentNodeId] = useState<string | null>(null);
 
   const updateNodeData = useCallback((nodeId: string, patch: Record<string, unknown>) => {
@@ -252,14 +253,19 @@ export default function FlowBuilderPage() {
     [edges, nodes],
   );
 
-  const runNode = useCallback((nodeId: string) => {
+  const runNode = useCallback((nodeId: string, replaceMessages = false) => {
     const response = executeNode(simulationFlow, nodeId);
     setCurrentNodeId(nodeId);
 
     if (response.type === 'message') {
       if (response.text) {
-        setMessages((prev) => [...prev, { type: 'bot', text: response.text }]);
+        if (replaceMessages) {
+          setMessages([{ type: 'bot', text: response.text }]);
+        } else {
+          setMessages((prev) => [...prev, { type: 'bot', text: response.text }]);
+        }
       }
+      setCurrentChoices([]);
       if (response.nextNodeId) {
         runNode(response.nextNodeId);
       }
@@ -267,7 +273,14 @@ export default function FlowBuilderPage() {
     }
 
     if (response.type === 'choice') {
-      setMessages((prev) => [...prev, { type: 'choice', text: response.text, buttons: response.buttons || [] }]);
+      if (response.text) {
+        if (replaceMessages) {
+          setMessages([{ type: 'bot', text: response.text }]);
+        } else {
+          setMessages((prev) => [...prev, { type: 'bot', text: response.text }]);
+        }
+      }
+      setCurrentChoices(response.buttons || []);
       return;
     }
   }, [simulationFlow]);
@@ -284,16 +297,18 @@ export default function FlowBuilderPage() {
     if (!startNode) return;
 
     setMessages([]);
-    runNode(startNode.id);
+    setCurrentChoices([]);
+    runNode(startNode.id, true);
   }, [edges, nodes, runNode]);
 
-  const handleChoiceClick = useCallback((handleId: string) => {
+  const handleChoiceClick = useCallback((handleId: string, label: string) => {
     if (!currentNodeId) return;
 
-    setMessages((prev) => [...prev, { type: 'user', text: handleId }]);
+    setMessages((prev) => [...prev, { type: 'user', text: label }]);
     const edge = edges.find((item) => item.source === currentNodeId && item.sourceHandle === handleId);
     if (!edge?.target) return;
 
+    setCurrentChoices([]);
     runNode(edge.target);
   }, [currentNodeId, edges, runNode]);
 
@@ -432,37 +447,36 @@ export default function FlowBuilderPage() {
       </main>
       <aside style={{ width: 320, borderLeft: '1px solid #e5e7eb', padding: 12, display: 'grid', alignContent: 'start', gap: 8 }}>
         <strong>Simulador</strong>
-        <div style={{ display: 'grid', gap: 8 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           {messages.map((message, index) => (
-            <div key={`${message.type}-${index}`} style={{ display: 'grid', gap: 6 }}>
-              <div
-                style={{
-                  background: message.type === 'user' ? '#dcfce7' : '#f3f4f6',
-                  padding: '8px 10px',
-                  borderRadius: 8,
-                  justifySelf: message.type === 'user' ? 'end' : 'start',
-                  maxWidth: '100%',
-                }}
-              >
-                {message.text}
-              </div>
-              {message.type === 'choice' && Array.isArray(message.buttons) ? (
-                <div style={{ display: 'grid', gap: 6 }}>
-                  {message.buttons.map((button: { id?: string; label?: string; handleId?: string }, buttonIndex: number) => (
-                    <button
-                      key={button.id || `${index}-${buttonIndex}`}
-                      type="button"
-                      onClick={() => handleChoiceClick(button.handleId || '')}
-                      disabled={!button.handleId}
-                    >
-                      {button.label || button.handleId || `Opção ${buttonIndex + 1}`}
-                    </button>
-                  ))}
-                </div>
-              ) : null}
+            <div
+              key={`${message.type}-${index}`}
+              style={{
+                alignSelf: message.type === 'user' ? 'flex-end' : 'flex-start',
+                background: message.type === 'user' ? '#DCF8C6' : '#FFF',
+                padding: 8,
+                borderRadius: 8,
+                maxWidth: '80%',
+              }}
+            >
+              {message.text}
             </div>
           ))}
         </div>
+        {currentChoices.length > 0 ? (
+          <div style={{ display: 'grid', gap: 6 }}>
+            {currentChoices.map((button, buttonIndex) => (
+              <button
+                key={button.id || `${button.handleId || 'choice'}-${buttonIndex}`}
+                type="button"
+                onClick={() => handleChoiceClick(button.handleId || '', button.label || button.handleId || `Opção ${buttonIndex + 1}`)}
+                disabled={!button.handleId}
+              >
+                {button.label || button.handleId || `Opção ${buttonIndex + 1}`}
+              </button>
+            ))}
+          </div>
+        ) : null}
       </aside>
     </div>
   );
