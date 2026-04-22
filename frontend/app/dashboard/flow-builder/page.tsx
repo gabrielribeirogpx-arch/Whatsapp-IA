@@ -20,6 +20,7 @@ import MessageNode from '@/components/flow/nodes/MessageNode';
 import { getFlowGraph, getTenantSessionFromStorage, saveFlowGraph } from '@/lib/api';
 import { getLayoutedElements } from '@/lib/autoLayout';
 import { orderChoiceChildrenEdges } from '@/lib/flowChoiceOrdering';
+import { executeNode } from '@/lib/flowEngine';
 import { FlowEdgePayload, FlowNodePayload } from '@/lib/types';
 
 const FETCH_TIMEOUT_MS = 8000;
@@ -128,6 +129,8 @@ export default function FlowBuilderPage() {
   const [reactFlowInstance, setReactFlowInstance] = useState<ReactFlowInstance | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const [messages, setMessages] = useState<any[]>([]);
+  const [currentNodeId, setCurrentNodeId] = useState<string | null>(null);
 
   const updateNodeData = useCallback((nodeId: string, patch: Record<string, unknown>) => {
     setNodes((prev: Node[]) =>
@@ -221,6 +224,78 @@ export default function FlowBuilderPage() {
   }, [applyLayoutAndSetFlow, buildFlowNode, setEdges, setNodes]);
 
   const isEmpty = useMemo(() => nodes.length === 0 && edges.length === 0, [edges.length, nodes.length]);
+  const simulationFlow = useMemo(
+    () => ({
+      nodes: nodes.map((node) => ({
+        id: node.id,
+        type: node.type || 'message',
+        data: {
+          ...(node.data || {}),
+          text: safeString((node.data as Record<string, unknown>)?.text as string) || safeString((node.data as Record<string, unknown>)?.content as string),
+        },
+      })),
+      edges: edges.map((edge) => ({
+        source: safeString(edge.source),
+        target: safeString(edge.target),
+        sourceHandle:
+          edge.sourceHandle ||
+          (edge.data as FlowEdgePayload['data'])?.sourceHandle ||
+          undefined,
+        data: {
+          sourceHandle:
+            edge.sourceHandle ||
+            (edge.data as FlowEdgePayload['data'])?.sourceHandle ||
+            undefined,
+        },
+      })),
+    }),
+    [edges, nodes],
+  );
+
+  const runNode = useCallback((nodeId: string) => {
+    const response = executeNode(simulationFlow, nodeId);
+    setCurrentNodeId(nodeId);
+
+    if (response.type === 'message') {
+      if (response.text) {
+        setMessages((prev) => [...prev, { type: 'bot', text: response.text }]);
+      }
+      if (response.nextNodeId) {
+        runNode(response.nextNodeId);
+      }
+      return;
+    }
+
+    if (response.type === 'choice') {
+      setMessages((prev) => [...prev, { type: 'choice', text: response.text, buttons: response.buttons || [] }]);
+      return;
+    }
+  }, [simulationFlow]);
+
+  useEffect(() => {
+    if (nodes.length === 0) {
+      setMessages([]);
+      setCurrentNodeId(null);
+      return;
+    }
+
+    const incomingTargets = new Set(edges.map((edge) => edge.target));
+    const startNode = nodes.find((node) => !incomingTargets.has(node.id)) || nodes[0];
+    if (!startNode) return;
+
+    setMessages([]);
+    runNode(startNode.id);
+  }, [edges, nodes, runNode]);
+
+  const handleChoiceClick = useCallback((handleId: string) => {
+    if (!currentNodeId) return;
+
+    setMessages((prev) => [...prev, { type: 'user', text: handleId }]);
+    const edge = edges.find((item) => item.source === currentNodeId && item.sourceHandle === handleId);
+    if (!edge?.target) return;
+
+    runNode(edge.target);
+  }, [currentNodeId, edges, runNode]);
 
   const onConnect = useCallback((params: FlowConnection) => {
     const sourceHandle = params.sourceHandle?.toString() || null;
@@ -355,6 +430,40 @@ export default function FlowBuilderPage() {
           <Controls />
         </ReactFlow>
       </main>
+      <aside style={{ width: 320, borderLeft: '1px solid #e5e7eb', padding: 12, display: 'grid', alignContent: 'start', gap: 8 }}>
+        <strong>Simulador</strong>
+        <div style={{ display: 'grid', gap: 8 }}>
+          {messages.map((message, index) => (
+            <div key={`${message.type}-${index}`} style={{ display: 'grid', gap: 6 }}>
+              <div
+                style={{
+                  background: message.type === 'user' ? '#dcfce7' : '#f3f4f6',
+                  padding: '8px 10px',
+                  borderRadius: 8,
+                  justifySelf: message.type === 'user' ? 'end' : 'start',
+                  maxWidth: '100%',
+                }}
+              >
+                {message.text}
+              </div>
+              {message.type === 'choice' && Array.isArray(message.buttons) ? (
+                <div style={{ display: 'grid', gap: 6 }}>
+                  {message.buttons.map((button: { id?: string; label?: string; handleId?: string }, buttonIndex: number) => (
+                    <button
+                      key={button.id || `${index}-${buttonIndex}`}
+                      type="button"
+                      onClick={() => handleChoiceClick(button.handleId || '')}
+                      disabled={!button.handleId}
+                    >
+                      {button.label || button.handleId || `Opção ${buttonIndex + 1}`}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          ))}
+        </div>
+      </aside>
     </div>
   );
 }
