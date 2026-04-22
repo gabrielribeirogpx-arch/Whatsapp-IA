@@ -225,44 +225,31 @@ export default function FlowBuilderPage() {
   }, [applyLayoutAndSetFlow, buildFlowNode, setEdges, setNodes]);
 
   const isEmpty = useMemo(() => nodes.length === 0 && edges.length === 0, [edges.length, nodes.length]);
-  const simulationFlow = useMemo(
+  const flow = useMemo(
     () => ({
       nodes: nodes.map((node) => ({
         id: node.id,
         type: node.type || 'message',
-        data: {
-          ...(node.data || {}),
-          text: safeString((node.data as Record<string, unknown>)?.text as string) || safeString((node.data as Record<string, unknown>)?.content as string),
-        },
+        data: node.data || {},
       })),
-      edges: edges.map((edge) => ({
-        source: safeString(edge.source),
-        target: safeString(edge.target),
-        sourceHandle:
-          edge.sourceHandle ||
-          (edge.data as FlowEdgePayload['data'])?.sourceHandle ||
-          undefined,
-        data: {
-          sourceHandle:
-            edge.sourceHandle ||
-            (edge.data as FlowEdgePayload['data'])?.sourceHandle ||
-            undefined,
-        },
-      })),
+      edges,
     }),
     [edges, nodes],
   );
 
   const runFlowFromNode = useCallback((startNodeId: string) => {
+    if (!startNodeId) return;
+
     let currentId: string | null = startNodeId;
     let safety = 20;
+    const messagesBuffer: Array<{ type: 'bot'; text: string }> = [];
 
     while (currentId && safety-- > 0) {
-      const response = executeNode(simulationFlow, currentId);
+      const response = executeNode(flow, currentId);
       if (!response) break;
 
       if (response.text) {
-        setMessages((prev) => [...prev, { type: 'bot', text: response.text }]);
+        messagesBuffer.push({ type: 'bot', text: response.text });
       }
 
       if (response.type === 'choice') {
@@ -271,7 +258,7 @@ export default function FlowBuilderPage() {
         break;
       }
 
-      const nextEdge = simulationFlow.edges.find((edge) => edge.source === currentId);
+      const nextEdge = flow.edges.find((edge) => edge.source === currentId);
       if (!nextEdge?.target) {
         setCurrentNodeId(null);
         setCurrentChoices([]);
@@ -280,7 +267,11 @@ export default function FlowBuilderPage() {
 
       currentId = nextEdge.target;
     }
-  }, [simulationFlow]);
+
+    if (messagesBuffer.length > 0) {
+      setMessages((prev) => [...prev, ...messagesBuffer]);
+    }
+  }, [flow]);
 
   useEffect(() => {
     if (nodes.length === 0) {
@@ -303,12 +294,12 @@ export default function FlowBuilderPage() {
     if (!currentNodeId) return;
 
     setMessages((prev) => [...prev, { type: 'user', text: label }]);
-    const edge = simulationFlow.edges.find((item) => item.source === currentNodeId && item.sourceHandle === handleId);
+    const edge = flow.edges.find((item) => item.source === currentNodeId && item.sourceHandle === handleId);
     if (!edge?.target) return;
 
     setCurrentChoices([]);
     runFlowFromNode(edge.target);
-  }, [currentNodeId, runFlowFromNode, simulationFlow.edges]);
+  }, [currentNodeId, flow.edges, runFlowFromNode]);
 
   const onConnect = useCallback((params: FlowConnection) => {
     const sourceHandle = params.sourceHandle?.toString() || null;
