@@ -251,11 +251,6 @@ export default function FlowBuilderPage() {
     [edges, nodes],
   );
 
-  const addBotMessage = useCallback((text: string) => {
-    if (!text) return;
-    setMessages((prev) => [...prev, { type: 'bot', text }]);
-  }, []);
-
   const simulateTyping = useCallback(async () => {
     setIsTyping(true);
     await new Promise((resolve) => setTimeout(resolve, 900));
@@ -268,6 +263,7 @@ export default function FlowBuilderPage() {
     let currentNodeToRun: string | null = startNodeId;
     let safety = 50;
     const traversedEdgeIds = [...initialActiveEdgeIds];
+    const messagesBuffer: Array<{ type: 'bot' | 'user'; text: string }> = [...messages];
     const getNextNodeIdFromResponse = (response: ReturnType<typeof executeNode>) => {
       if (!response) return null;
       if ('nextNodeId' in response) {
@@ -276,43 +272,40 @@ export default function FlowBuilderPage() {
       return null;
     };
 
-    while (currentNodeToRun && safety-- > 0) {
+    while (currentNodeToRun && safety > 0) {
       const response = executeNode(flow, currentNodeToRun);
       if (!response) break;
 
       const node = flow.nodes.find((item) => item.id === currentNodeToRun);
       if (!node) break;
 
+      if ('text' in response && response.text) {
+        await simulateTyping();
+        messagesBuffer.push({
+          type: 'bot',
+          text: response.text,
+        });
+      }
+
+      if (response.type === 'choice') {
+        setMessages([...messagesBuffer]);
+        setActiveEdgeIds(traversedEdgeIds);
+        setCurrentNodeId(currentNodeToRun);
+        setCurrentChoices(response.buttons || []);
+        return;
+      }
+
       if (node.type === 'delay') {
         await new Promise((resolve) => setTimeout(resolve, 800));
         currentNodeToRun = getNextNodeIdFromResponse(response);
+        safety--;
         continue;
       }
 
       if (node.type === 'condition' || node.type === 'action') {
         currentNodeToRun = getNextNodeIdFromResponse(response);
+        safety--;
         continue;
-      }
-
-      if (node.type === 'message') {
-        const text = String((node.data as { text?: string; content?: string })?.text || (node.data as { text?: string; content?: string })?.content || '').trim();
-        if (text) {
-          await simulateTyping();
-          addBotMessage(text);
-        }
-        currentNodeToRun = getNextNodeIdFromResponse(response);
-        continue;
-      }
-
-      if (node.type === 'choice') {
-        setActiveEdgeIds(traversedEdgeIds);
-        setCurrentNodeId(currentNodeToRun);
-        if (response.type === 'choice') {
-          setCurrentChoices(response.buttons || []);
-        } else {
-          setCurrentChoices([]);
-        }
-        break;
       }
 
       const nextEdge = flow.edges.find((edge) => edge.source === currentNodeToRun);
@@ -327,10 +320,12 @@ export default function FlowBuilderPage() {
       }
 
       currentNodeToRun = nextEdge.target;
+      safety--;
     }
 
+    setMessages([...messagesBuffer]);
     setActiveEdgeIds(traversedEdgeIds);
-  }, [addBotMessage, flow, simulateTyping]);
+  }, [flow, messages, simulateTyping]);
 
   useEffect(() => {
     if (nodes.length === 0) {
