@@ -228,7 +228,14 @@ export default function FlowBuilderPage() {
   useEffect(() => {
     if (isLoading) return;
 
-    const flow = { nodes, edges };
+    const flow = {
+      nodes: nodes.map((n) => ({
+        id: n.id,
+        type: n.type || 'message',
+        data: n.data || {},
+      })),
+      edges,
+    };
 
     // tenta encontrar node inicial
     let currentNodeId = nodes[0]?.id;
