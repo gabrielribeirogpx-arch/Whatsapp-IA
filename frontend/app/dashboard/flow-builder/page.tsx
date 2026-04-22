@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ReactFlow, {
   addEdge,
   Background,
@@ -129,7 +129,14 @@ export default function FlowBuilderPage() {
   const [messages, setMessages] = useState<Array<{ type: 'bot' | 'user'; text: string }>>([]);
   const [currentChoices, setCurrentChoices] = useState<Array<{ id?: string; label?: string; handleId?: string }>>([]);
   const [currentNodeId, setCurrentNodeId] = useState<string | null>(null);
-  const [activeEdgeIds, setActiveEdgeIds] = useState<string[]>([]);
+  const [activeEdgeId, setActiveEdgeId] = useState<string | null>(null);
+  const [runningNodeId, setRunningNodeId] = useState<string | null>(null);
+  const [isTyping, setIsTyping] = useState(false);
+  const simulationRunRef = useRef(0);
+
+  const wait = useCallback((ms: number) => new Promise<void>((resolve) => {
+    window.setTimeout(() => resolve(), ms);
+  }), []);
 
   const updateNodeData = useCallback((nodeId: string, patch: Record<string, unknown>) => {
     setNodes((prev: Node[]) =>
@@ -235,15 +242,27 @@ export default function FlowBuilderPage() {
     [edges, nodes],
   );
 
-  const runFlowFromNode = useCallback((startNodeId: string, initialActiveEdgeIds: string[] = []) => {
+  const runFlowFromNode = useCallback(async (startNodeId: string, initialActiveEdgeId?: string | null) => {
     if (!startNodeId) return;
+    const runId = ++simulationRunRef.current;
 
     let currentId: string | null = startNodeId;
     let safety = 20;
     const messagesBuffer: Array<{ type: 'bot'; text: string }> = [];
-    const traversedEdgeIds = [...initialActiveEdgeIds];
+
+    if (initialActiveEdgeId) {
+      setActiveEdgeId(initialActiveEdgeId);
+      await wait(420);
+      if (runId !== simulationRunRef.current) return;
+      setActiveEdgeId(null);
+    }
 
     while (currentId && safety-- > 0) {
+      setRunningNodeId(currentId);
+      setCurrentNodeId(currentId);
+      await wait(300);
+      if (runId !== simulationRunRef.current) return;
+
       const response = executeNode(flow, currentId);
       if (!response) break;
 
@@ -252,7 +271,6 @@ export default function FlowBuilderPage() {
       }
 
       if (response.type === 'choice') {
-        setCurrentNodeId(currentId);
         setCurrentChoices(response.buttons || []);
         break;
       }
@@ -265,7 +283,10 @@ export default function FlowBuilderPage() {
       }
 
       if (nextEdge.id) {
-        traversedEdgeIds.push(nextEdge.id);
+        setActiveEdgeId(nextEdge.id);
+        await wait(420);
+        if (runId !== simulationRunRef.current) return;
+        setActiveEdgeId(null);
       }
 
       currentId = nextEdge.target;
@@ -275,14 +296,16 @@ export default function FlowBuilderPage() {
       setMessages((prev) => [...prev, ...messagesBuffer]);
     }
 
-    setActiveEdgeIds(traversedEdgeIds);
-  }, [flow]);
+    setRunningNodeId(null);
+  }, [flow, wait]);
 
   useEffect(() => {
     if (nodes.length === 0) {
       setMessages([]);
       setCurrentNodeId(null);
-      setActiveEdgeIds([]);
+      setActiveEdgeId(null);
+      setRunningNodeId(null);
+      setIsTyping(false);
       return;
     }
 
@@ -293,20 +316,25 @@ export default function FlowBuilderPage() {
     setMessages([]);
     setCurrentChoices([]);
     setCurrentNodeId(null);
-    setActiveEdgeIds([]);
-    runFlowFromNode(startNode.id);
+    setActiveEdgeId(null);
+    setRunningNodeId(null);
+    setIsTyping(false);
+    void runFlowFromNode(startNode.id);
   }, [edges, nodes, runFlowFromNode]);
 
-  const handleChoiceClick = useCallback((handleId: string, label: string) => {
-    if (!currentNodeId) return;
+  const handleChoiceClick = useCallback(async (handleId: string, label: string) => {
+    if (!currentNodeId || isTyping) return;
 
     setMessages((prev) => [...prev, { type: 'user', text: label }]);
     const edge = flow.edges.find((item) => item.source === currentNodeId && item.sourceHandle === handleId);
     if (!edge?.target) return;
 
     setCurrentChoices([]);
-    runFlowFromNode(edge.target, edge.id ? [edge.id] : []);
-  }, [currentNodeId, flow.edges, runFlowFromNode]);
+    setIsTyping(true);
+    await wait(300 + Math.floor(Math.random() * 501));
+    setIsTyping(false);
+    await runFlowFromNode(edge.target, edge.id || null);
+  }, [currentNodeId, flow.edges, isTyping, runFlowFromNode, wait]);
 
   const onConnect = useCallback((params: FlowConnection) => {
     const sourceHandle = params.sourceHandle?.toString() || null;
@@ -402,19 +430,19 @@ export default function FlowBuilderPage() {
       ...node,
       data: {
         ...node.data,
-        running: node.id === currentNodeId,
+        running: node.id === runningNodeId,
       },
     })),
-    [currentNodeId, nodes],
+    [nodes, runningNodeId],
   );
 
   const decoratedEdges = useMemo(
     () =>
       edges.map((edge) => ({
         ...edge,
-        className: activeEdgeIds.includes(edge.id) ? 'flow-edge flow-edge-active' : 'flow-edge',
+        className: edge.id === activeEdgeId ? 'flow-edge edge-active' : 'flow-edge',
       })),
-    [activeEdgeIds, edges],
+    [activeEdgeId, edges],
   );
 
   if (isLoading) {
@@ -467,6 +495,7 @@ export default function FlowBuilderPage() {
           {messages.map((message, index) => (
             <div
               key={`${message.type}-${index}`}
+              className={message.type === 'bot' ? 'chat-message-bot' : 'chat-message-user'}
               style={{
                 alignSelf: message.type === 'user' ? 'flex-end' : 'flex-start',
                 background: message.type === 'user' ? '#DCFCE7' : '#FFF',
@@ -480,6 +509,23 @@ export default function FlowBuilderPage() {
               {message.text}
             </div>
           ))}
+          {isTyping ? (
+            <div
+              className="chat-message-bot"
+              style={{
+                alignSelf: 'flex-start',
+                background: '#FFF',
+                padding: 8,
+                borderRadius: 12,
+                maxWidth: '80%',
+                color: '#6B7280',
+                border: '1px solid #E8E6E0',
+                fontStyle: 'italic',
+              }}
+            >
+              digitando...
+            </div>
+          ) : null}
         </div>
         {currentChoices.length > 0 ? (
           <div style={{ display: 'grid', gap: 6 }}>
@@ -488,7 +534,7 @@ export default function FlowBuilderPage() {
                 key={button.id || `${button.handleId || 'choice'}-${buttonIndex}`}
                 type="button"
                 onClick={() => handleChoiceClick(button.handleId || '', button.label || button.handleId || `Opção ${buttonIndex + 1}`)}
-                disabled={!button.handleId}
+                disabled={!button.handleId || isTyping}
                 className="flow-simulator-button"
               >
                 {button.label || button.handleId || `Opção ${buttonIndex + 1}`}
