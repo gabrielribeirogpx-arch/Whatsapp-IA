@@ -5,8 +5,11 @@
 :root {
   color-scheme: light;
   --primary: #16a34a;
+  --primary-hover: #22c55e;
   --primary-dark: #15803d;
-  --background: #f5f7fb;
+  --success: #10b981;
+  --background: #f7f7f5;
+  --border-soft: #e8e6e0;
   --text: #111827;
   --muted: #6b7280;
   --line: #e5e7eb;
@@ -50,7 +53,96 @@ input {
 }
 
 .primary-button:hover {
+  background: var(--primary-hover);
+}
+
+.primary-button:active {
   background: var(--primary-dark);
+}
+
+.flow-builder-page {
+  font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+
+.flow-sidebar-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  border: 1px solid var(--border-soft);
+  border-radius: 12px;
+  background: #ffffff;
+  color: #14532d;
+  padding: 10px 12px;
+  cursor: pointer;
+  transition: background 0.2s ease;
+}
+
+.flow-sidebar-button:hover {
+  background: #f0fdf4;
+}
+
+.flow-node {
+  background: #ffffff;
+  border: 1px solid var(--border-soft);
+  border-radius: 12px;
+  padding: 12px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+  transition: box-shadow 0.2s ease;
+}
+
+.flow-node:hover {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.flow-node.is-selected {
+  outline: 2px solid var(--primary);
+  outline-offset: 0;
+}
+
+.flow-node.running {
+  border: 2px solid var(--success);
+  box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.2);
+}
+
+.flow-node-field {
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.flow-node-field:focus {
+  outline: 2px solid rgba(22, 163, 74, 0.25);
+  border-color: var(--primary);
+}
+
+.flow-edge .react-flow__edge-path {
+  stroke: #b0aea8;
+  stroke-width: 1.2;
+}
+
+.flow-edge-active .react-flow__edge-path {
+  stroke: var(--success);
+  stroke-dasharray: 6;
+  animation: dash 1s linear infinite;
+}
+
+.flow-simulator-button {
+  border: 1px solid #86efac;
+  background: #dcfce7;
+  color: #166534;
+  border-radius: 12px;
+  padding: 8px 12px;
+  cursor: pointer;
+}
+
+.flow-simulator-button:hover {
+  background: #bbf7d0;
+}
+
+@keyframes dash {
+  to {
+    stroke-dashoffset: -12;
+  }
 }
 
 .secondary-button {
