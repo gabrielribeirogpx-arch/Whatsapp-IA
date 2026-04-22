@@ -130,6 +130,7 @@ export default function FlowBuilderPage() {
   const [currentChoices, setCurrentChoices] = useState<Array<{ id?: string; label?: string; handleId?: string }>>([]);
   const [currentNodeId, setCurrentNodeId] = useState<string | null>(null);
   const [activeEdgeIds, setActiveEdgeIds] = useState<string[]>([]);
+  const [isSimulatorOpen, setIsSimulatorOpen] = useState(false);
 
   const updateNodeData = useCallback((nodeId: string, patch: Record<string, unknown>) => {
     setNodes((prev: Node[]) =>
@@ -353,11 +354,16 @@ export default function FlowBuilderPage() {
 
   const addNode = useCallback(
     (kind: FlowNodeKind) => {
+      if (!reactFlowInstance) return;
+
       const preset = NODE_PRESETS[kind];
+      const { x, y, zoom } = reactFlowInstance.getViewport();
+      const centerX = (window.innerWidth / 2 - x) / zoom;
+      const centerY = (window.innerHeight / 2 - y) / zoom;
       const newNode: Node = {
         id: makeNodeId(),
         type: preset.type,
-        position: randomPosition(),
+        position: { x: centerX - 120, y: centerY - 70 },
         data: {
           label: preset.label,
           ...preset.data,
@@ -366,8 +372,12 @@ export default function FlowBuilderPage() {
       };
 
       setNodes((prev) => [...prev, newNode]);
+
+      setTimeout(() => {
+        reactFlowInstance.setCenter(centerX, centerY, { zoom, duration: 300 });
+      }, 50);
     },
-    [setNodes, updateNodeData],
+    [reactFlowInstance, setNodes, updateNodeData],
   );
 
   const saveFlow = useCallback(async () => {
@@ -466,7 +476,30 @@ export default function FlowBuilderPage() {
         </button>
         {isEmpty ? <small>Nenhum node ainda.</small> : null}
       </aside>
-      <main style={{ flex: 1, background: '#F7F7F5' }}>
+      <main style={{ flex: 1, background: '#F7F7F5', position: 'relative' }}>
+        {!isSimulatorOpen && (
+          <button
+            type="button"
+            onClick={() => setIsSimulatorOpen(true)}
+            style={{
+              position: 'absolute',
+              top: '14px',
+              right: '14px',
+              padding: '8px 14px',
+              borderRadius: '8px',
+              background: '#16A34A',
+              color: '#fff',
+              border: 'none',
+              fontSize: '12px',
+              fontWeight: '500',
+              cursor: 'pointer',
+              boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
+              zIndex: 10,
+            }}
+          >
+            ▶ Simular fluxo
+          </button>
+        )}
         <ReactFlow
           onInit={setReactFlowInstance}
           nodes={decoratedNodes}
@@ -484,20 +517,25 @@ export default function FlowBuilderPage() {
           deleteKeyCode={['Backspace', 'Delete']}
           snapToGrid
           snapGrid={[20, 20]}
+          minZoom={0.1}
+          maxZoom={4}
         >
           <Background variant={BackgroundVariant.Dots} gap={18} size={1.2} color="rgba(22, 163, 74, 0.18)" />
           <MiniMap nodeBorderRadius={8} pannable style={{ background: '#FFFFFF', border: '1px solid #E8E6E0' }} />
           <Controls />
         </ReactFlow>
       </main>
-      <aside style={{
-        width: 320,
-        borderLeft: '1px solid #E8E6E0',
-        background: '#FFFFFF',
-        display: 'flex',
-        flexDirection: 'column',
-        overflow: 'hidden',
-      }}>
+      {isSimulatorOpen && (
+        <aside style={{
+          width: 320,
+          borderLeft: '1px solid #E8E6E0',
+          background: '#FFFFFF',
+          display: 'flex',
+          flexDirection: 'column',
+          overflow: 'hidden',
+          transform: isSimulatorOpen ? 'translateX(0)' : 'translateX(100%)',
+          transition: 'transform 0.25s ease',
+        }}>
         {/* Header do simulador */}
         <div style={{
           display: 'flex',
@@ -508,12 +546,35 @@ export default function FlowBuilderPage() {
           flexShrink: 0,
         }}>
           <strong style={{ fontSize: 13, color: '#1a1a18' }}>Simulador</strong>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, fontWeight: 600, color: '#16a34a' }}>
-            <div style={{
-              width: 6, height: 6, borderRadius: '50%', background: '#16a34a',
-              animation: 'blink 1.4s ease infinite',
-            }} />
-            Ao vivo
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, fontWeight: 600, color: '#16a34a' }}>
+              <div style={{
+                width: 6, height: 6, borderRadius: '50%', background: '#16a34a',
+                animation: 'blink 1.4s ease infinite',
+              }} />
+              Ao vivo
+            </div>
+            <button
+              type="button"
+              onClick={() => setIsSimulatorOpen(false)}
+              style={{
+                width: 24,
+                height: 24,
+                borderRadius: 6,
+                border: '1px solid #e5e7eb',
+                background: '#fff',
+                color: '#4b5563',
+                cursor: 'pointer',
+                fontSize: 16,
+                lineHeight: 1,
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+              aria-label="Fechar simulador"
+            >
+              ×
+            </button>
           </div>
         </div>
 
@@ -600,7 +661,8 @@ export default function FlowBuilderPage() {
             ↺ Reiniciar simulação
           </button>
         </div>
-      </aside>
+        </aside>
+      )}
     </div>
   );
 }
