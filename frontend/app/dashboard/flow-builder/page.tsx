@@ -277,7 +277,11 @@ export default function FlowBuilderPage() {
       const node = flow.nodes.find((item) => item.id === currentNodeToRun);
       if (!node) break;
 
-      if (response.type === 'message' && response.text) {
+      if (
+        (response.type === 'message' || response.type === 'choice') &&
+        'text' in response &&
+        response.text
+      ) {
         messagesBuffer.push({
           type: 'bot',
           text: response.text,
@@ -285,9 +289,7 @@ export default function FlowBuilderPage() {
       }
 
       if (response.type === 'choice') {
-        if (messagesBuffer.length > 0) {
-          setMessages((prev) => [...prev, ...messagesBuffer]);
-        }
+        setMessages([...messagesBuffer]);
         setActiveEdgeIds(traversedEdgeIds);
         setCurrentNodeId(currentNodeToRun);
         setCurrentChoices(response.buttons || []);
