@@ -396,9 +396,17 @@ export default function FlowBuilderPage() {
       }));
 
       const result = await saveFlowGraph(tenantId, { nodes: payloadNodes, edges: payloadEdges });
-      const savedNodes = (result.nodes || []).map(buildFlowNode);
+      // Preserva as posições atuais dos nodes em tela após salvar
+      // Só atualiza edges vindas da API, mantendo nodes na posição do usuário
+      const positionMap = new Map(nodes.map((n) => [n.id, n.position]));
+      const savedNodes = (result.nodes || []).map((n: FlowNodePayload) => {
+        const built = buildFlowNode(n);
+        const currentPos = positionMap.get(built.id);
+        return currentPos ? { ...built, position: currentPos } : built;
+      });
       const savedEdges = (result.edges || []).map(buildFlowEdge);
-      applyLayoutAndSetFlow(savedNodes, savedEdges);
+      setNodes(savedNodes);
+      setEdges(savedEdges);
     } finally {
       setIsSaving(false);
     }
