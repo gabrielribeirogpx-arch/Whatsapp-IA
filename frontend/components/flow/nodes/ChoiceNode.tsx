@@ -44,43 +44,71 @@ export default function ChoiceNode({ id, data, selected }: NodeProps) {
   const addButton = () => {
     const nextIndex = buttons.length + 1;
     nodeData.onChange?.(id, {
-      buttons: [...buttons, { id: `${id}-button-${nextIndex}`, label: `Opção ${nextIndex}`, handleId: `option_${nextIndex}`, next: '' }],
+      buttons: [
+        ...buttons,
+        { id: `${id}-button-${nextIndex}`, label: `Opção ${nextIndex}`, handleId: `option_${nextIndex}`, next: '' },
+      ],
     });
   };
 
   return (
-    <div className={`flow-node ${selected ? 'is-selected' : ''} ${nodeData.running ? 'running' : ''}`} style={{ minWidth: 260 }}>
-      <Handle type="target" position={Position.Left} />
-      <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 8 }}>{nodeData.label || 'Escolha'}</div>
-      <textarea
-        value={nodeData.content || ''}
-        onChange={(event) => nodeData.onChange?.(id, { content: event.target.value })}
-        placeholder="Pergunta para o usuário..."
-        className="flow-node-field"
-        style={{ width: '100%', minHeight: 60, resize: 'vertical' }}
+    <div
+      className={`flow-node ${selected ? 'is-selected' : ''} ${nodeData.running ? 'running' : ''}`}
+      style={{ minWidth: 260, position: 'relative' }}
+    >
+      {/* Barra de identidade — coral/laranja para Escolha */}
+      <div
+        className="flow-node-header-bar"
+        style={{ background: 'linear-gradient(90deg, #f97316, #fb923c)' }}
       />
 
-      <div style={{ marginTop: 8, display: 'grid', gap: 6 }}>
-        {buttons.map((button, index) => (
-          <input
-            key={button.id}
-            value={button.label || ''}
-            onChange={(event) => updateButton(index, event.target.value)}
-            placeholder={`Opção ${index + 1}`}
-            className="flow-node-field"
-            style={{ padding: '6px 8px' }}
-          />
-        ))}
+      <Handle type="target" position={Position.Left} />
+
+      {/* Header */}
+      <div className="flow-node-header" style={{ paddingTop: 14 }}>
+        <div className="flow-node-type-dot" style={{ background: '#f97316' }} />
+        <span className="flow-node-title">{nodeData.label || 'Escolha'}</span>
+        <span
+          className="flow-node-badge"
+          style={{ background: '#fff7ed', color: '#c2410c' }}
+        >
+          CHOICE
+        </span>
       </div>
 
-      <button
-        type="button"
-        onClick={addButton}
-        className="flow-sidebar-button"
-        style={{ marginTop: 8, width: '100%', justifyContent: 'center', padding: '6px 10px', fontSize: 13 }}
-      >
-        + Adicionar opção
-      </button>
+      {/* Corpo */}
+      <div className="flow-node-body">
+        <textarea
+          value={nodeData.content || ''}
+          onChange={(e) => nodeData.onChange?.(id, { content: e.target.value })}
+          placeholder="Pergunta para o usuário..."
+          className="flow-node-field"
+          style={{ minHeight: 52, resize: 'vertical', marginBottom: 8 }}
+        />
+
+        <div style={{ display: 'grid', gap: 5 }}>
+          {buttons.map((button, index) => (
+            <div key={button.id} className="flow-choice-option">
+              <div className="flow-choice-option-dot" />
+              <input
+                value={button.label || ''}
+                onChange={(e) => updateButton(index, e.target.value)}
+                placeholder={`Opção ${index + 1}`}
+              />
+            </div>
+          ))}
+        </div>
+
+        <button
+          type="button"
+          onClick={addButton}
+          className="flow-sidebar-button"
+          style={{ marginTop: 8, width: '100%', justifyContent: 'center', fontSize: 12 }}
+        >
+          + Adicionar opção
+        </button>
+      </div>
+
       {buttons.map((button, index) => (
         <Handle
           key={button.handleId}

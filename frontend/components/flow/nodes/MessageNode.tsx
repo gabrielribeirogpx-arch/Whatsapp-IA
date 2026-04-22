@@ -13,16 +13,41 @@ export default function MessageNode({ id, data, selected }: NodeProps) {
   const nodeData = (data || {}) as MessageNodeData;
 
   return (
-    <div className={`flow-node ${selected ? 'is-selected' : ''} ${nodeData.running ? 'running' : ''}`} style={{ minWidth: 240 }}>
-      <Handle type="target" position={Position.Left} />
-      <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 8 }}>{nodeData.label || 'Mensagem'}</div>
-      <textarea
-        value={nodeData.content || ''}
-        onChange={(event) => nodeData.onChange?.(id, { content: event.target.value })}
-        placeholder="Digite a mensagem..."
-        className="flow-node-field"
-        style={{ width: '100%', minHeight: 80, resize: 'vertical' }}
+    <div
+      className={`flow-node ${selected ? 'is-selected' : ''} ${nodeData.running ? 'running' : ''}`}
+      style={{ minWidth: 240, position: 'relative' }}
+    >
+      {/* Barra de identidade — azul-índigo para Mensagem */}
+      <div
+        className="flow-node-header-bar"
+        style={{ background: 'linear-gradient(90deg, #4f46e5, #6366f1)' }}
       />
+
+      <Handle type="target" position={Position.Left} />
+
+      {/* Header */}
+      <div className="flow-node-header" style={{ paddingTop: 14 }}>
+        <div className="flow-node-type-dot" style={{ background: '#4f46e5' }} />
+        <span className="flow-node-title">{nodeData.label || 'Mensagem'}</span>
+        <span
+          className="flow-node-badge"
+          style={{ background: '#eef2ff', color: '#4338ca' }}
+        >
+          MSG
+        </span>
+      </div>
+
+      {/* Corpo */}
+      <div className="flow-node-body">
+        <textarea
+          value={nodeData.content || ''}
+          onChange={(e) => nodeData.onChange?.(id, { content: e.target.value })}
+          placeholder="Digite a mensagem..."
+          className="flow-node-field"
+          style={{ minHeight: 72, resize: 'vertical' }}
+        />
+      </div>
+
       <Handle type="source" position={Position.Right} />
     </div>
   );

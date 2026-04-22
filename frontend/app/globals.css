@@ -64,85 +64,203 @@ input {
   font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
 }
 
+/* ── FLOW SIDEBAR BUTTON ───────────────────────────── */
 .flow-sidebar-button {
   display: inline-flex;
   align-items: center;
   gap: 0.5rem;
-  border: 1px solid var(--border-soft);
-  border-radius: 12px;
-  background: #ffffff;
-  color: #14532d;
-  padding: 10px 12px;
+  border: 1.5px solid #bbf7d0;
+  border-radius: 10px;
+  background: #f0fdf4;
+  color: #15803d;
+  padding: 9px 12px;
   cursor: pointer;
-  transition: background 0.2s ease;
+  font-size: 13px;
+  font-weight: 500;
+  transition: background 0.15s ease, border-color 0.15s ease;
 }
 
 .flow-sidebar-button:hover {
-  background: #f0fdf4;
+  background: #dcfce7;
+  border-color: #86efac;
 }
 
+/* ── FLOW NODE BASE ─────────────────────────────────── */
 .flow-node {
   background: #ffffff;
-  border: 1px solid var(--border-soft);
-  border-radius: 12px;
-  padding: 12px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
-  transition: box-shadow 0.2s ease;
+  border: 1px solid #e4e8e0;
+  border-radius: 14px;
+  padding: 0;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.05), 0 4px 12px rgba(0,0,0,0.04);
+  transition: box-shadow 0.2s ease, transform 0.15s ease;
+  overflow: hidden;
 }
 
 .flow-node:hover {
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.09), 0 8px 24px rgba(0,0,0,0.06);
+  transform: translateY(-1px);
 }
 
 .flow-node.is-selected {
-  outline: 2px solid var(--primary);
-  outline-offset: 0;
+  outline: 2.5px solid #16a34a;
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px rgba(22,163,74,0.12);
 }
 
 .flow-node.running {
-  border: 2px solid var(--success);
-  box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.2);
+  outline: 2px solid #10b981;
+  box-shadow: 0 0 0 4px rgba(16,185,129,0.15);
 }
 
+/* Barra colorida no topo de cada node (identidade por tipo) */
+.flow-node-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px 8px;
+  border-bottom: 1px solid #f1f5f0;
+}
+
+.flow-node-header-bar {
+  width: 100%;
+  height: 3px;
+  border-radius: 3px 3px 0 0;
+  position: absolute;
+  top: 0;
+  left: 0;
+}
+
+.flow-node-type-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.flow-node-title {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: #1a1a18;
+  letter-spacing: -0.01em;
+  flex: 1;
+}
+
+.flow-node-badge {
+  font-size: 9.5px;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+/* Corpo do node */
+.flow-node-body {
+  padding: 10px 12px 12px;
+}
+
+/* ── CAMPO DENTRO DO NODE ───────────────────────────── */
 .flow-node-field {
-  border: 1px solid var(--border-soft);
+  border: 1px solid #e4e8e0;
   border-radius: 8px;
-  background: #ffffff;
+  background: #fafafa;
+  font-size: 12px;
+  color: #1a1a18;
+  padding: 7px 9px;
+  line-height: 1.5;
+  width: 100%;
+  font-family: inherit;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
 .flow-node-field:focus {
-  outline: 2px solid rgba(22, 163, 74, 0.25);
-  border-color: var(--primary);
+  outline: none;
+  border-color: #16a34a;
+  box-shadow: 0 0 0 3px rgba(22,163,74,0.12);
+  background: #fff;
 }
 
+.flow-node-field::placeholder {
+  color: #a8b0a0;
+}
+
+/* ── BOTÃO DE OPÇÃO DENTRO DO CHOICE NODE ───────────── */
+.flow-choice-option {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 9px;
+  border: 1px solid #e4e8e0;
+  border-radius: 8px;
+  background: #f8fdf8;
+  font-size: 12px;
+  color: #15803d;
+  font-weight: 500;
+  width: 100%;
+}
+
+.flow-choice-option input {
+  border: none;
+  background: transparent;
+  font: inherit;
+  color: inherit;
+  width: 100%;
+  outline: none;
+}
+
+.flow-choice-option-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #16a34a;
+  flex-shrink: 0;
+}
+
+/* ── EDGES ──────────────────────────────────────────── */
 .flow-edge .react-flow__edge-path {
-  stroke: #b0aea8;
-  stroke-width: 1.2;
+  stroke: #c8d4c0;
+  stroke-width: 1.5;
 }
 
 .flow-edge-active .react-flow__edge-path {
-  stroke: var(--success);
+  stroke: #16a34a;
   stroke-dasharray: 6;
   animation: dash 1s linear infinite;
 }
 
+@keyframes dash {
+  to { stroke-dashoffset: -12; }
+}
+
+/* ── SIMULADOR ──────────────────────────────────────── */
 .flow-simulator-button {
-  border: 1px solid #86efac;
-  background: #dcfce7;
-  color: #166534;
-  border-radius: 12px;
-  padding: 8px 12px;
+  border: 1.5px solid #86efac;
+  background: #f0fdf4;
+  color: #15803d;
+  border-radius: 10px;
+  padding: 7px 14px;
+  font-size: 12.5px;
+  font-weight: 500;
   cursor: pointer;
+  transition: background 0.15s ease;
 }
 
 .flow-simulator-button:hover {
-  background: #bbf7d0;
+  background: #dcfce7;
 }
 
-@keyframes dash {
-  to {
-    stroke-dashoffset: -12;
-  }
+/* ── REACT FLOW OVERRIDES ───────────────────────────── */
+.react-flow__node {
+  border-radius: 14px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+}
+
+.react-flow__edge-path {
+  stroke: #c8d4c0;
+  stroke-width: 1.5;
 }
 
 .secondary-button {
