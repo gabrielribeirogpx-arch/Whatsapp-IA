@@ -231,9 +231,7 @@ export default function FlowBuilderPage() {
     const flow = { nodes, edges };
 
     // tenta encontrar node inicial
-    let currentNodeId =
-      nodes.find((n) => n.data?.label?.toLowerCase?.() === 'inicio')?.id ||
-      nodes[0]?.id;
+    let currentNodeId = nodes[0]?.id;
 
     const results = [];
 
