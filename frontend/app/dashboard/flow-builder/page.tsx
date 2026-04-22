@@ -358,8 +358,12 @@ export default function FlowBuilderPage() {
     if (!edge?.target) return;
 
     setCurrentChoices([]);
-    // Passa o label clicado como lastUserMessage para que Condição possa avaliá-lo
-    runFlowStep(edge.target, edge.id ? [edge.id] : [], label, label);
+
+    // Adiciona imediatamente a escolha do usuário como bolha no chat
+    setMessages((prev) => [...prev, { type: 'user', text: label }]);
+
+    // Continua o fluxo SEM passar userMessage (já foi adicionada acima)
+    runFlowStep(edge.target, edge.id ? [edge.id] : [], undefined, label);
   }, [currentNodeId, flow.edges, runFlowStep]);
 
   const onConnect = useCallback((params: FlowConnection) => {
