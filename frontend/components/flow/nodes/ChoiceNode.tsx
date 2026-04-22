@@ -56,7 +56,7 @@ export default function ChoiceNode({ id, data, selected }: NodeProps) {
       className={`flow-node ${selected ? 'is-selected' : ''} ${nodeData.running ? 'running' : ''}`}
       style={{ minWidth: 260, position: 'relative' }}
     >
-      {/* Barra de identidade — coral/laranja para Escolha */}
+      {/* Barra de identidade */}
       <div
         className="flow-node-header-bar"
         style={{ background: 'linear-gradient(90deg, #f97316, #fb923c)' }}
@@ -88,12 +88,34 @@ export default function ChoiceNode({ id, data, selected }: NodeProps) {
 
         <div style={{ display: 'grid', gap: 5 }}>
           {buttons.map((button, index) => (
-            <div key={button.id} className="flow-choice-option">
+            /* O handle fica DENTRO do container da opção, alinhado ao centro dela */
+            <div
+              key={button.id}
+              className="flow-choice-option"
+              style={{ position: 'relative' }}
+            >
               <div className="flow-choice-option-dot" />
               <input
                 value={button.label || ''}
                 onChange={(e) => updateButton(index, e.target.value)}
                 placeholder={`Opção ${index + 1}`}
+              />
+              <Handle
+                id={button.handleId}
+                type="source"
+                position={Position.Right}
+                style={{
+                  position: 'absolute',
+                  right: -14,
+                  top: '50%',
+                  transform: 'translateY(-50%)',
+                  width: 10,
+                  height: 10,
+                  background: '#fff',
+                  border: '2px solid #16a34a',
+                  borderRadius: '50%',
+                  cursor: 'crosshair',
+                }}
               />
             </div>
           ))}
@@ -108,16 +130,6 @@ export default function ChoiceNode({ id, data, selected }: NodeProps) {
           + Adicionar opção
         </button>
       </div>
-
-      {buttons.map((button, index) => (
-        <Handle
-          key={button.handleId}
-          id={button.handleId}
-          type="source"
-          position={Position.Right}
-          style={{ top: 124 + index * 34 }}
-        />
-      ))}
     </div>
   );
 }
