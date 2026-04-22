@@ -19,6 +19,7 @@ import DelayNode from '@/components/flow/nodes/DelayNode';
 import MessageNode from '@/components/flow/nodes/MessageNode';
 import { getFlowGraph, getTenantSessionFromStorage, saveFlowGraph } from '@/lib/api';
 import { getLayoutedElements } from '@/lib/autoLayout';
+import { executeNode, Flow as EngineFlow } from '@/lib/flowEngine';
 import { orderChoiceChildrenEdges } from '@/lib/flowChoiceOrdering';
 import { FlowEdgePayload, FlowNodePayload } from '@/lib/types';
 
@@ -128,6 +129,7 @@ export default function FlowBuilderPage() {
   const [reactFlowInstance, setReactFlowInstance] = useState<ReactFlowInstance | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const hasExecutedFlowEngineRef = useRef(false);
 
   const updateNodeData = useCallback((nodeId: string, patch: Record<string, unknown>) => {
     setNodes((prev: Node[]) =>
@@ -221,6 +223,46 @@ export default function FlowBuilderPage() {
   }, [applyLayoutAndSetFlow, buildFlowNode, setEdges, setNodes]);
 
   const isEmpty = useMemo(() => nodes.length === 0 && edges.length === 0, [edges.length, nodes.length]);
+
+  // TEMPORÁRIO: executa o flowEngine ao carregar a página e imprime no console.
+  useEffect(() => {
+    if (isLoading || hasExecutedFlowEngineRef.current || nodes.length === 0) return;
+
+    hasExecutedFlowEngineRef.current = true;
+
+    const flow: EngineFlow = {
+      nodes: nodes.map((node) => ({
+        id: node.id,
+        type: node.type || 'message',
+        data: node.data,
+      })),
+      edges: edges.map((edge) => ({
+        source: edge.source,
+        target: edge.target,
+        sourceHandle: edge.sourceHandle,
+        data: edge.data as { sourceHandle?: string } | undefined,
+      })),
+    };
+
+    const startNodeId = flow.nodes[0]?.id;
+    if (!startNodeId) return;
+
+    const results = [];
+    let currentNodeId: string | undefined = startNodeId;
+    let safetyCounter = 0;
+
+    while (currentNodeId && safetyCounter < 50) {
+      const result = executeNode(flow, currentNodeId);
+      results.push({ nodeId: currentNodeId, result });
+
+      if (result.type !== 'message' || !result.nextNodeId) break;
+
+      currentNodeId = result.nextNodeId;
+      safetyCounter += 1;
+    }
+
+    console.log('[TEMPORÁRIO] flowEngine results on page load:', results);
+  }, [edges, isLoading, nodes]);
 
   const onConnect = useCallback((params: FlowConnection) => {
     const sourceHandle = params.sourceHandle?.toString() || null;
