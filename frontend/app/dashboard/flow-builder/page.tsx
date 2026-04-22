@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import ReactFlow, {
   addEdge,
   Background,
@@ -19,7 +19,6 @@ import DelayNode from '@/components/flow/nodes/DelayNode';
 import MessageNode from '@/components/flow/nodes/MessageNode';
 import { getFlowGraph, getTenantSessionFromStorage, saveFlowGraph } from '@/lib/api';
 import { getLayoutedElements } from '@/lib/autoLayout';
-import { executeNode, Flow as EngineFlow } from '@/lib/flowEngine';
 import { orderChoiceChildrenEdges } from '@/lib/flowChoiceOrdering';
 import { FlowEdgePayload, FlowNodePayload } from '@/lib/types';
 
@@ -129,7 +128,6 @@ export default function FlowBuilderPage() {
   const [reactFlowInstance, setReactFlowInstance] = useState<ReactFlowInstance | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
-  const hasExecutedFlowEngineRef = useRef(false);
 
   const updateNodeData = useCallback((nodeId: string, patch: Record<string, unknown>) => {
     setNodes((prev: Node[]) =>
@@ -223,55 +221,6 @@ export default function FlowBuilderPage() {
   }, [applyLayoutAndSetFlow, buildFlowNode, setEdges, setNodes]);
 
   const isEmpty = useMemo(() => nodes.length === 0 && edges.length === 0, [edges.length, nodes.length]);
-
-  // TEMPORÁRIO: executa o flowEngine ao carregar a página e imprime no console.
-  useEffect(() => {
-    if (isLoading) return;
-
-    const flow = {
-      nodes: nodes.map((n) => ({
-        id: n.id,
-        type: n.type || 'message',
-        data: n.data || {},
-      })),
-      edges,
-    };
-
-    // tenta encontrar node inicial
-    let currentNodeId = nodes[0]?.id;
-
-    const results = [];
-
-    let safety = 10; // evita loop infinito
-
-    while (currentNodeId && safety > 0) {
-      const res = executeNode(flow, currentNodeId);
-
-      results.push({
-        nodeId: currentNodeId,
-        result: res,
-      });
-
-      if (!res) break;
-
-      // Se vier nextNodeId diretamente (caso futuro)
-      if ('nextNodeId' in res && res.nextNodeId) {
-        currentNodeId = res.nextNodeId;
-        continue;
-      }
-
-      // Caso NÃO tenha nextNodeId (message ou choice)
-      const nextEdge = flow.edges.find((e) => e.source === currentNodeId);
-
-      if (!nextEdge) break;
-
-      currentNodeId = nextEdge.target;
-
-      safety--;
-    }
-
-    console.log('[ENGINE TEST COMPLETO]', results);
-  }, [isLoading]);
 
   const onConnect = useCallback((params: FlowConnection) => {
     const sourceHandle = params.sourceHandle?.toString() || null;
