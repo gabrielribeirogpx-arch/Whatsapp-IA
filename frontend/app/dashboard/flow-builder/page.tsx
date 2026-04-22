@@ -253,35 +253,32 @@ export default function FlowBuilderPage() {
     [edges, nodes],
   );
 
-  const runNode = useCallback((nodeId: string, replaceMessages = false) => {
-    const response = executeNode(simulationFlow, nodeId);
-    setCurrentNodeId(nodeId);
+  const runFlowFromNode = useCallback((startNodeId: string) => {
+    let currentId: string | null = startNodeId;
+    let safety = 20;
 
-    if (response.type === 'message') {
-      if (response.text) {
-        if (replaceMessages) {
-          setMessages([{ type: 'bot', text: response.text }]);
-        } else {
-          setMessages((prev) => [...prev, { type: 'bot', text: response.text }]);
-        }
-      }
-      setCurrentChoices([]);
-      if (response.nextNodeId) {
-        runNode(response.nextNodeId);
-      }
-      return;
-    }
+    while (currentId && safety-- > 0) {
+      const response = executeNode(simulationFlow, currentId);
+      if (!response) break;
 
-    if (response.type === 'choice') {
       if (response.text) {
-        if (replaceMessages) {
-          setMessages([{ type: 'bot', text: response.text }]);
-        } else {
-          setMessages((prev) => [...prev, { type: 'bot', text: response.text }]);
-        }
+        setMessages((prev) => [...prev, { type: 'bot', text: response.text }]);
       }
-      setCurrentChoices(response.buttons || []);
-      return;
+
+      if (response.type === 'choice') {
+        setCurrentNodeId(currentId);
+        setCurrentChoices(response.buttons || []);
+        break;
+      }
+
+      const nextEdge = simulationFlow.edges.find((edge) => edge.source === currentId);
+      if (!nextEdge?.target) {
+        setCurrentNodeId(null);
+        setCurrentChoices([]);
+        break;
+      }
+
+      currentId = nextEdge.target;
     }
   }, [simulationFlow]);
 
@@ -298,19 +295,20 @@ export default function FlowBuilderPage() {
 
     setMessages([]);
     setCurrentChoices([]);
-    runNode(startNode.id, true);
-  }, [edges, nodes, runNode]);
+    setCurrentNodeId(null);
+    runFlowFromNode(startNode.id);
+  }, [edges, nodes, runFlowFromNode]);
 
   const handleChoiceClick = useCallback((handleId: string, label: string) => {
     if (!currentNodeId) return;
 
     setMessages((prev) => [...prev, { type: 'user', text: label }]);
-    const edge = edges.find((item) => item.source === currentNodeId && item.sourceHandle === handleId);
+    const edge = simulationFlow.edges.find((item) => item.source === currentNodeId && item.sourceHandle === handleId);
     if (!edge?.target) return;
 
     setCurrentChoices([]);
-    runNode(edge.target);
-  }, [currentNodeId, edges, runNode]);
+    runFlowFromNode(edge.target);
+  }, [currentNodeId, runFlowFromNode, simulationFlow.edges]);
 
   const onConnect = useCallback((params: FlowConnection) => {
     const sourceHandle = params.sourceHandle?.toString() || null;
