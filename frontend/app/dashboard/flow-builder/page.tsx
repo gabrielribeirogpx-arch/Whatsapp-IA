@@ -389,13 +389,28 @@ export default function FlowBuilderPage() {
       if (!reactFlowInstance) return;
 
       const preset = NODE_PRESETS[kind];
-      const { x, y, zoom } = reactFlowInstance.getViewport();
-      const centerX = (window.innerWidth / 2 - x) / zoom;
-      const centerY = (window.innerHeight / 2 - y) / zoom;
+
+      // Usa o centro visível atual do viewport do ReactFlow
+      // screenToFlowPosition converte coordenadas de tela para coordenadas do flow
+      // O canvas ocupa a área entre a sidebar (240px) e o simulador (quando aberto)
+      const simWidth = isSimulatorOpen ? 320 : 0;
+      const canvasLeft = 240;
+      const canvasRight = window.innerWidth - simWidth;
+      const canvasCenterScreenX = (canvasLeft + canvasRight) / 2;
+      const canvasCenterScreenY = window.innerHeight / 2;
+
+      const flowPosition = reactFlowInstance.screenToFlowPosition({
+        x: canvasCenterScreenX,
+        y: canvasCenterScreenY,
+      });
+
       const newNode: Node = {
         id: makeNodeId(),
         type: preset.type,
-        position: { x: centerX - 120, y: centerY - 70 },
+        position: {
+          x: flowPosition.x - 120,
+          y: flowPosition.y - 70,
+        },
         data: {
           label: preset.label,
           ...preset.data,
@@ -404,12 +419,8 @@ export default function FlowBuilderPage() {
       };
 
       setNodes((prev) => [...prev, newNode]);
-
-      setTimeout(() => {
-        reactFlowInstance.setCenter(centerX, centerY, { zoom, duration: 300 });
-      }, 50);
     },
-    [reactFlowInstance, setNodes, updateNodeData],
+    [reactFlowInstance, isSimulatorOpen, setNodes, updateNodeData],
   );
 
   const saveFlow = useCallback(async () => {
