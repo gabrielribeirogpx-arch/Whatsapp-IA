@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import ReactFlow, {
   addEdge,
   Background,
+  BackgroundVariant,
   Controls,
   MiniMap,
   useEdgesState,
@@ -75,10 +76,6 @@ const toHandleId = (value: string, fallback: string) => {
   const normalized = value.toLowerCase().trim().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
   return normalized || fallback;
 };
-const toOptionalHandleId = (value?: string | null) => {
-  const normalized = safeString(value).trim();
-  return normalized || null;
-};
 
 const normalizeChoiceButtons = (nodeId: string, buttons: Array<{ id?: string; label?: string; handleId?: string; next?: string }> = []) =>
   buttons.map((button, index) => {
@@ -132,6 +129,7 @@ export default function FlowBuilderPage() {
   const [messages, setMessages] = useState<Array<{ type: 'bot' | 'user'; text: string }>>([]);
   const [currentChoices, setCurrentChoices] = useState<Array<{ id?: string; label?: string; handleId?: string }>>([]);
   const [currentNodeId, setCurrentNodeId] = useState<string | null>(null);
+  const [activeEdgeIds, setActiveEdgeIds] = useState<string[]>([]);
 
   const updateNodeData = useCallback((nodeId: string, patch: Record<string, unknown>) => {
     setNodes((prev: Node[]) =>
@@ -237,12 +235,13 @@ export default function FlowBuilderPage() {
     [edges, nodes],
   );
 
-  const runFlowFromNode = useCallback((startNodeId: string) => {
+  const runFlowFromNode = useCallback((startNodeId: string, initialActiveEdgeIds: string[] = []) => {
     if (!startNodeId) return;
 
     let currentId: string | null = startNodeId;
     let safety = 20;
     const messagesBuffer: Array<{ type: 'bot'; text: string }> = [];
+    const traversedEdgeIds = [...initialActiveEdgeIds];
 
     while (currentId && safety-- > 0) {
       const response = executeNode(flow, currentId);
@@ -265,18 +264,25 @@ export default function FlowBuilderPage() {
         break;
       }
 
+      if (nextEdge.id) {
+        traversedEdgeIds.push(nextEdge.id);
+      }
+
       currentId = nextEdge.target;
     }
 
     if (messagesBuffer.length > 0) {
       setMessages((prev) => [...prev, ...messagesBuffer]);
     }
+
+    setActiveEdgeIds(traversedEdgeIds);
   }, [flow]);
 
   useEffect(() => {
     if (nodes.length === 0) {
       setMessages([]);
       setCurrentNodeId(null);
+      setActiveEdgeIds([]);
       return;
     }
 
@@ -287,6 +293,7 @@ export default function FlowBuilderPage() {
     setMessages([]);
     setCurrentChoices([]);
     setCurrentNodeId(null);
+    setActiveEdgeIds([]);
     runFlowFromNode(startNode.id);
   }, [edges, nodes, runFlowFromNode]);
 
@@ -298,7 +305,7 @@ export default function FlowBuilderPage() {
     if (!edge?.target) return;
 
     setCurrentChoices([]);
-    runFlowFromNode(edge.target);
+    runFlowFromNode(edge.target, edge.id ? [edge.id] : []);
   }, [currentNodeId, flow.edges, runFlowFromNode]);
 
   const onConnect = useCallback((params: FlowConnection) => {
@@ -390,31 +397,51 @@ export default function FlowBuilderPage() {
     }
   }, [applyLayoutAndSetFlow, buildFlowNode, edges, nodes, setEdges, setNodes]);
 
+  const decoratedNodes = useMemo(
+    () => nodes.map((node) => ({
+      ...node,
+      data: {
+        ...node.data,
+        running: node.id === currentNodeId,
+      },
+    })),
+    [currentNodeId, nodes],
+  );
+
+  const decoratedEdges = useMemo(
+    () =>
+      edges.map((edge) => ({
+        ...edge,
+        className: activeEdgeIds.includes(edge.id) ? 'flow-edge flow-edge-active' : 'flow-edge',
+      })),
+    [activeEdgeIds, edges],
+  );
+
   if (isLoading) {
     return <div>Carregando fluxo...</div>;
   }
   return (
-    <div style={{ width: '100%', height: '100vh', display: 'flex' }}>
+    <div className="flow-builder-page" style={{ width: '100%', height: '100vh', display: 'flex' }}>
       <aside
-        style={{ width: 220, borderRight: '1px solid #e5e7eb', padding: 12, display: 'grid', alignContent: 'start', gap: 8 }}
+        style={{ width: 240, borderRight: '1px solid #E8E6E0', padding: 16, display: 'grid', alignContent: 'start', gap: 10, background: '#FFFFFF' }}
       >
-        <strong>Blocos</strong>
-        <button type="button" onClick={() => addNode('message')}>+ Mensagem</button>
-        <button type="button" onClick={() => addNode('choice')}>+ Escolha</button>
-        <button type="button" onClick={() => addNode('condition')}>+ Condição</button>
-        <button type="button" onClick={() => addNode('delay')}>+ Delay</button>
-        <button type="button" onClick={() => addNode('action')}>+ Ação</button>
+        <strong style={{ fontSize: 14 }}>Blocos</strong>
+        <button className="flow-sidebar-button" type="button" onClick={() => addNode('message')}>💬 + Mensagem</button>
+        <button className="flow-sidebar-button" type="button" onClick={() => addNode('choice')}>🔘 + Escolha</button>
+        <button className="flow-sidebar-button" type="button" onClick={() => addNode('condition')}>🧭 + Condição</button>
+        <button className="flow-sidebar-button" type="button" onClick={() => addNode('delay')}>⏱️ + Delay</button>
+        <button className="flow-sidebar-button" type="button" onClick={() => addNode('action')}>⚡ + Ação</button>
         <hr style={{ borderColor: '#f3f4f6', width: '100%' }} />
-        <button type="button" onClick={saveFlow} disabled={isSaving}>
+        <button className="primary-button" type="button" onClick={saveFlow} disabled={isSaving}>
           {isSaving ? 'Salvando...' : 'Salvar fluxo'}
         </button>
         {isEmpty ? <small>Nenhum node ainda.</small> : null}
       </aside>
-      <main style={{ flex: 1 }}>
+      <main style={{ flex: 1, background: '#F7F7F5' }}>
         <ReactFlow
           onInit={setReactFlowInstance}
-          nodes={nodes}
-          edges={edges}
+          nodes={decoratedNodes}
+          edges={decoratedEdges}
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
           onConnect={onConnect}
@@ -429,12 +456,12 @@ export default function FlowBuilderPage() {
           snapToGrid
           snapGrid={[20, 20]}
         >
-          <Background />
-          <MiniMap />
+          <Background variant={BackgroundVariant.Dots} gap={18} size={1.2} color="rgba(22, 163, 74, 0.18)" />
+          <MiniMap nodeBorderRadius={8} pannable style={{ background: '#FFFFFF', border: '1px solid #E8E6E0' }} />
           <Controls />
         </ReactFlow>
       </main>
-      <aside style={{ width: 320, borderLeft: '1px solid #e5e7eb', padding: 12, display: 'grid', alignContent: 'start', gap: 8 }}>
+      <aside style={{ width: 320, borderLeft: '1px solid #E8E6E0', padding: 16, display: 'grid', alignContent: 'start', gap: 10, background: '#FFFFFF' }}>
         <strong>Simulador</strong>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           {messages.map((message, index) => (
@@ -442,10 +469,12 @@ export default function FlowBuilderPage() {
               key={`${message.type}-${index}`}
               style={{
                 alignSelf: message.type === 'user' ? 'flex-end' : 'flex-start',
-                background: message.type === 'user' ? '#DCF8C6' : '#FFF',
+                background: message.type === 'user' ? '#DCFCE7' : '#FFF',
                 padding: 8,
-                borderRadius: 8,
+                borderRadius: 12,
                 maxWidth: '80%',
+                color: message.type === 'user' ? '#166534' : '#111827',
+                border: '1px solid #E8E6E0',
               }}
             >
               {message.text}
@@ -460,6 +489,7 @@ export default function FlowBuilderPage() {
                 type="button"
                 onClick={() => handleChoiceClick(button.handleId || '', button.label || button.handleId || `Opção ${buttonIndex + 1}`)}
                 disabled={!button.handleId}
+                className="flow-simulator-button"
               >
                 {button.label || button.handleId || `Opção ${buttonIndex + 1}`}
               </button>
