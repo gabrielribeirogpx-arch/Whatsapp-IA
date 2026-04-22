@@ -157,6 +157,18 @@ input {
   transform: scale(0.96);
 }
 
+.simulator-container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  gap: 10px;
+}
+
+.simulator-messages {
+  flex: 1;
+  overflow-y: auto;
+}
+
 .chat-message-bot {
   opacity: 0;
   transform: translateY(10px);

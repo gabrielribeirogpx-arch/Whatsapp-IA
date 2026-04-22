@@ -134,6 +134,11 @@ export default function FlowBuilderPage() {
   const [isTyping, setIsTyping] = useState(false);
   const simulationRunRef = useRef(0);
 
+  const currentNode = useMemo(
+    () => nodes.find((node) => node.id === currentNodeId) || null,
+    [currentNodeId, nodes],
+  );
+
   const wait = useCallback((ms: number) => new Promise<void>((resolve) => {
     window.setTimeout(() => resolve(), ms);
   }), []);
@@ -322,6 +327,24 @@ export default function FlowBuilderPage() {
     void runFlowFromNode(startNode.id);
   }, [edges, nodes, runFlowFromNode]);
 
+  useEffect(() => {
+    if (!messages || messages.length === 0) {
+      setMessages([
+        {
+          type: 'bot',
+          text: 'Você quer vendas, suporte ou atendimento?',
+        },
+      ]);
+    }
+  }, [messages]);
+
+  useEffect(() => {
+    console.log('SIMULADOR STATE', {
+      messages,
+      currentNode,
+    });
+  }, [currentNode, messages]);
+
   const handleChoiceClick = useCallback(async (handleId: string, label: string) => {
     if (!currentNodeId || isTyping) return;
 
@@ -489,9 +512,9 @@ export default function FlowBuilderPage() {
           <Controls />
         </ReactFlow>
       </main>
-      <aside style={{ width: 320, borderLeft: '1px solid #E8E6E0', padding: 16, display: 'grid', alignContent: 'start', gap: 10, background: '#FFFFFF' }}>
+      <aside className="simulator-container" style={{ width: 320, borderLeft: '1px solid #E8E6E0', padding: 16, background: '#FFFFFF' }}>
         <strong>Simulador</strong>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <div className="simulator-messages" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           {messages.map((message, index) => (
             <div
               key={`${message.type}-${index}`}
