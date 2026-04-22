@@ -42,20 +42,33 @@ export default function ChoiceNode({ id, data, selected }: NodeProps) {
     const updatePositions = () => {
       if (!containerRef.current) return;
       const containerRect = containerRef.current.getBoundingClientRect();
+      // Se o container ainda não foi pintado (rect zerado), não mede
+      if (containerRect.height === 0) return;
       const tops = optionRefs.current.map((ref) => {
         if (!ref) return 0;
         const rect = ref.getBoundingClientRect();
         return rect.top - containerRect.top + rect.height / 2;
       });
-      setHandleTops(tops);
+      // Só atualiza se os valores são válidos (maiores que zero)
+      if (tops.every((t) => t > 0)) {
+        setHandleTops(tops);
+      }
     };
 
+    // Medição imediata
     updatePositions();
+    // Segunda medição após o ReactFlow terminar de posicionar o node
+    const t1 = setTimeout(updatePositions, 50);
+    const t2 = setTimeout(updatePositions, 150);
 
-    // ResizeObserver para reagir a mudanças de tamanho (textarea resize, etc.)
     const observer = new ResizeObserver(updatePositions);
     if (containerRef.current) observer.observe(containerRef.current);
-    return () => observer.disconnect();
+
+    return () => {
+      clearTimeout(t1);
+      clearTimeout(t2);
+      observer.disconnect();
+    };
   }, [buttons.length, nodeData.content]);
 
   const updateButton = (index: number, label: string) => {
