@@ -247,14 +247,20 @@ export default function FlowBuilderPage() {
       const response = executeNode(flow, currentId);
       if (!response) break;
 
+      // Sempre adiciona o texto ao buffer ANTES de verificar o tipo
       if ('text' in response && response.text) {
         messagesBuffer.push({ type: 'bot', text: response.text });
       }
 
       if (response.type === 'choice') {
+        // Commita as mensagens acumuladas (incluindo a pergunta do choice) antes de parar
+        if (messagesBuffer.length > 0) {
+          setMessages((prev) => [...prev, ...messagesBuffer]);
+        }
+        setActiveEdgeIds(traversedEdgeIds);
         setCurrentNodeId(currentId);
         setCurrentChoices(response.buttons || []);
-        break;
+        return; // usa return em vez de break para não duplicar o setMessages abaixo
       }
 
       const nextEdge = flow.edges.find((edge) => edge.source === currentId);
@@ -271,6 +277,7 @@ export default function FlowBuilderPage() {
       currentId = nextEdge.target;
     }
 
+    // Para nodes que não são choice (message, delay, action, etc.)
     if (messagesBuffer.length > 0) {
       setMessages((prev) => [...prev, ...messagesBuffer]);
     }
