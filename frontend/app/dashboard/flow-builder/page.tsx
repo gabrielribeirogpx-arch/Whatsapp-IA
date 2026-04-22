@@ -203,7 +203,21 @@ export default function FlowBuilderPage() {
 
         const initialNodes = (data?.nodes || []).map(buildFlowNode);
         const initialEdges: Edge[] = (data?.edges || []).map(buildFlowEdge);
-        applyLayoutAndSetFlow(initialNodes, initialEdges);
+
+        // Se os nodes já têm posições salvas (x e y não-zero), usa diretamente
+        // sem passar pelo dagre — preserva layout manual do usuário
+        const hasStoredPositions = initialNodes.some(
+          (n) => n.position && (n.position.x !== 0 || n.position.y !== 0)
+        );
+
+        if (hasStoredPositions) {
+          const orderedEdges = orderChoiceChildrenEdges(initialNodes, initialEdges);
+          setNodes(initialNodes);
+          setEdges(orderedEdges);
+          requestAnimationFrame(() => { reactFlowInstance?.fitView(); });
+        } else {
+          applyLayoutAndSetFlow(initialNodes, initialEdges);
+        }
       } catch {
         if (!active) return;
         setNodes([]);
