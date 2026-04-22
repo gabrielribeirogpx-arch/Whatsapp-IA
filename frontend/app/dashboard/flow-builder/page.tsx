@@ -225,65 +225,53 @@ export default function FlowBuilderPage() {
   }, [applyLayoutAndSetFlow, buildFlowNode, setEdges, setNodes]);
 
   const isEmpty = useMemo(() => nodes.length === 0 && edges.length === 0, [edges.length, nodes.length]);
-  const simulationFlow = useMemo(
+  const flow = useMemo(
     () => ({
       nodes: nodes.map((node) => ({
         id: node.id,
         type: node.type || 'message',
-        data: {
-          ...(node.data || {}),
-          text: safeString((node.data as Record<string, unknown>)?.text as string) || safeString((node.data as Record<string, unknown>)?.content as string),
-        },
+        data: node.data || {},
       })),
-      edges: edges.map((edge) => ({
-        source: safeString(edge.source),
-        target: safeString(edge.target),
-        sourceHandle:
-          edge.sourceHandle ||
-          (edge.data as FlowEdgePayload['data'])?.sourceHandle ||
-          undefined,
-        data: {
-          sourceHandle:
-            edge.sourceHandle ||
-            (edge.data as FlowEdgePayload['data'])?.sourceHandle ||
-            undefined,
-        },
-      })),
+      edges,
     }),
     [edges, nodes],
   );
 
-  const runNode = useCallback((nodeId: string, replaceMessages = false) => {
-    const response = executeNode(simulationFlow, nodeId);
-    setCurrentNodeId(nodeId);
+  const runFlowFromNode = useCallback((startNodeId: string) => {
+    if (!startNodeId) return;
 
-    if (response.type === 'message') {
-      if (response.text) {
-        if (replaceMessages) {
-          setMessages([{ type: 'bot', text: response.text }]);
-        } else {
-          setMessages((prev) => [...prev, { type: 'bot', text: response.text }]);
-        }
+    let currentId: string | null = startNodeId;
+    let safety = 20;
+    const messagesBuffer: Array<{ type: 'bot'; text: string }> = [];
+
+    while (currentId && safety-- > 0) {
+      const response = executeNode(flow, currentId);
+      if (!response) break;
+
+      if ('text' in response && response.text) {
+        messagesBuffer.push({ type: 'bot', text: response.text });
       }
-      setCurrentChoices([]);
-      if (response.nextNodeId) {
-        runNode(response.nextNodeId);
+
+      if (response.type === 'choice') {
+        setCurrentNodeId(currentId);
+        setCurrentChoices(response.buttons || []);
+        break;
       }
-      return;
+
+      const nextEdge = flow.edges.find((edge) => edge.source === currentId);
+      if (!nextEdge?.target) {
+        setCurrentNodeId(null);
+        setCurrentChoices([]);
+        break;
+      }
+
+      currentId = nextEdge.target;
     }
 
-    if (response.type === 'choice') {
-      if (response.text) {
-        if (replaceMessages) {
-          setMessages([{ type: 'bot', text: response.text }]);
-        } else {
-          setMessages((prev) => [...prev, { type: 'bot', text: response.text }]);
-        }
-      }
-      setCurrentChoices(response.buttons || []);
-      return;
+    if (messagesBuffer.length > 0) {
+      setMessages((prev) => [...prev, ...messagesBuffer]);
     }
-  }, [simulationFlow]);
+  }, [flow]);
 
   useEffect(() => {
     if (nodes.length === 0) {
@@ -298,19 +286,20 @@ export default function FlowBuilderPage() {
 
     setMessages([]);
     setCurrentChoices([]);
-    runNode(startNode.id, true);
-  }, [edges, nodes, runNode]);
+    setCurrentNodeId(null);
+    runFlowFromNode(startNode.id);
+  }, [edges, nodes, runFlowFromNode]);
 
   const handleChoiceClick = useCallback((handleId: string, label: string) => {
     if (!currentNodeId) return;
 
     setMessages((prev) => [...prev, { type: 'user', text: label }]);
-    const edge = edges.find((item) => item.source === currentNodeId && item.sourceHandle === handleId);
+    const edge = flow.edges.find((item) => item.source === currentNodeId && item.sourceHandle === handleId);
     if (!edge?.target) return;
 
     setCurrentChoices([]);
-    runNode(edge.target);
-  }, [currentNodeId, edges, runNode]);
+    runFlowFromNode(edge.target);
+  }, [currentNodeId, flow.edges, runFlowFromNode]);
 
   const onConnect = useCallback((params: FlowConnection) => {
     const sourceHandle = params.sourceHandle?.toString() || null;
