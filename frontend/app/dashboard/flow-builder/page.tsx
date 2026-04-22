@@ -226,43 +226,52 @@ export default function FlowBuilderPage() {
 
   // TEMPORÁRIO: executa o flowEngine ao carregar a página e imprime no console.
   useEffect(() => {
-    if (isLoading || hasExecutedFlowEngineRef.current || nodes.length === 0) return;
+    if (isLoading) return;
 
-    hasExecutedFlowEngineRef.current = true;
-
-    const flow: EngineFlow = {
-      nodes: nodes.map((node) => ({
-        id: node.id,
-        type: node.type || 'message',
-        data: node.data,
+    const flow = {
+      nodes: nodes.map((n) => ({
+        id: n.id,
+        type: n.type || 'message',
+        data: n.data || {},
       })),
-      edges: edges.map((edge) => ({
-        source: edge.source,
-        target: edge.target,
-        sourceHandle: edge.sourceHandle,
-        data: edge.data as { sourceHandle?: string } | undefined,
-      })),
+      edges,
     };
 
-    const startNodeId = flow.nodes[0]?.id;
-    if (!startNodeId) return;
+    // tenta encontrar node inicial
+    let currentNodeId = nodes[0]?.id;
 
     const results = [];
-    let currentNodeId: string | undefined = startNodeId;
-    let safetyCounter = 0;
 
-    while (currentNodeId && safetyCounter < 50) {
-      const result = executeNode(flow, currentNodeId);
-      results.push({ nodeId: currentNodeId, result });
+    let safety = 10; // evita loop infinito
 
-      if (result.type !== 'message' || !result.nextNodeId) break;
+    while (currentNodeId && safety > 0) {
+      const res = executeNode(flow, currentNodeId);
 
-      currentNodeId = result.nextNodeId;
-      safetyCounter += 1;
+      results.push({
+        nodeId: currentNodeId,
+        result: res,
+      });
+
+      if (!res) break;
+
+      // Se vier nextNodeId diretamente (caso futuro)
+      if ('nextNodeId' in res && res.nextNodeId) {
+        currentNodeId = res.nextNodeId;
+        continue;
+      }
+
+      // Caso NÃO tenha nextNodeId (message ou choice)
+      const nextEdge = flow.edges.find((e) => e.source === currentNodeId);
+
+      if (!nextEdge) break;
+
+      currentNodeId = nextEdge.target;
+
+      safety--;
     }
 
-    console.log('[TEMPORÁRIO] flowEngine results on page load:', results);
-  }, [edges, isLoading, nodes]);
+    console.log('[ENGINE TEST COMPLETO]', results);
+  }, [isLoading]);
 
   const onConnect = useCallback((params: FlowConnection) => {
     const sourceHandle = params.sourceHandle?.toString() || null;
