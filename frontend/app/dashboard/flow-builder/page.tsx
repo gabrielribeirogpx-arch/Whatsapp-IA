@@ -289,7 +289,7 @@ export default function FlowBuilderPage() {
       }
 
       if (response.type === 'choice') {
-        setMessages([...messagesBuffer]);
+        setMessages((prev) => [...prev, ...messagesBuffer]);
         setActiveEdgeIds(traversedEdgeIds);
         setCurrentNodeId(currentNodeToRun);
         setCurrentChoices(response.buttons || []);
