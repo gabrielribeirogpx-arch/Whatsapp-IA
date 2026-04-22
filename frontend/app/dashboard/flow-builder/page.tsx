@@ -248,7 +248,7 @@ export default function FlowBuilderPage() {
       const response = executeNode(flow, currentId);
       if (!response) break;
 
-      if (response.text) {
+      if ('text' in response && response.text) {
         messagesBuffer.push({ type: 'bot', text: response.text });
       }
 
