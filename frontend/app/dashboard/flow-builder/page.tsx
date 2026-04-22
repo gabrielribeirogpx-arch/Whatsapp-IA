@@ -461,28 +461,80 @@ export default function FlowBuilderPage() {
           <Controls />
         </ReactFlow>
       </main>
-      <aside style={{ width: 320, borderLeft: '1px solid #E8E6E0', padding: 16, display: 'grid', alignContent: 'start', gap: 10, background: '#FFFFFF' }}>
-        <strong>Simulador</strong>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <aside style={{
+        width: 320,
+        borderLeft: '1px solid #E8E6E0',
+        background: '#FFFFFF',
+        display: 'flex',
+        flexDirection: 'column',
+        overflow: 'hidden',
+      }}>
+        {/* Header do simulador */}
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          padding: '14px 16px',
+          borderBottom: '1px solid #E8E6E0',
+          flexShrink: 0,
+        }}>
+          <strong style={{ fontSize: 13, color: '#1a1a18' }}>Simulador</strong>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, fontWeight: 600, color: '#16a34a' }}>
+            <div style={{
+              width: 6, height: 6, borderRadius: '50%', background: '#16a34a',
+              animation: 'blink 1.4s ease infinite',
+            }} />
+            Ao vivo
+          </div>
+        </div>
+
+        {/* Área de mensagens com scroll */}
+        <div style={{
+          flex: 1,
+          overflowY: 'auto',
+          padding: '16px',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 10,
+          background: 'linear-gradient(180deg, #f9fafb 0%, #f3f6f4 100%)',
+        }}>
+          {messages.length === 0 && (
+            <div style={{ textAlign: 'center', color: '#a8b0a0', fontSize: 12, marginTop: 32 }}>
+              Nenhuma mensagem ainda.<br />O fluxo será simulado automaticamente.
+            </div>
+          )}
           {messages.map((message, index) => (
             <div
               key={`${message.type}-${index}`}
               style={{
                 alignSelf: message.type === 'user' ? 'flex-end' : 'flex-start',
-                background: message.type === 'user' ? '#DCFCE7' : '#FFF',
-                padding: 8,
-                borderRadius: 12,
-                maxWidth: '80%',
-                color: message.type === 'user' ? '#166534' : '#111827',
-                border: '1px solid #E8E6E0',
+                background: message.type === 'user' ? '#dcf8c6' : '#FFFFFF',
+                padding: '9px 12px',
+                borderRadius: message.type === 'user' ? '14px 4px 14px 14px' : '4px 14px 14px 14px',
+                maxWidth: '85%',
+                fontSize: 12.5,
+                lineHeight: 1.55,
+                color: message.type === 'user' ? '#14532d' : '#111827',
+                fontWeight: message.type === 'user' ? 500 : 400,
+                border: message.type === 'user' ? 'none' : '1px solid #e4e8e0',
+                boxShadow: message.type === 'user' ? 'none' : '0 1px 4px rgba(0,0,0,0.06)',
               }}
             >
               {message.text}
             </div>
           ))}
         </div>
-        {currentChoices.length > 0 ? (
-          <div style={{ display: 'grid', gap: 6 }}>
+
+        {/* Botões de escolha */}
+        {currentChoices.length > 0 && (
+          <div style={{
+            padding: '10px 16px 12px',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 6,
+            borderTop: '1px solid #f0f4f0',
+            flexShrink: 0,
+          }}>
             {currentChoices.map((button, buttonIndex) => (
               <button
                 key={button.id || `${button.handleId || 'choice'}-${buttonIndex}`}
@@ -490,12 +542,35 @@ export default function FlowBuilderPage() {
                 onClick={() => handleChoiceClick(button.handleId || '', button.label || button.handleId || `Opção ${buttonIndex + 1}`)}
                 disabled={!button.handleId}
                 className="flow-simulator-button"
+                style={{ justifyContent: 'flex-start', gap: 8 }}
               >
+                <div style={{ width: 6, height: 6, borderRadius: '50%', background: '#16a34a', flexShrink: 0 }} />
                 {button.label || button.handleId || `Opção ${buttonIndex + 1}`}
               </button>
             ))}
           </div>
-        ) : null}
+        )}
+
+        {/* Footer */}
+        <div style={{ padding: '10px 16px', borderTop: '1px solid #E8E6E0', flexShrink: 0 }}>
+          <button
+            type="button"
+            onClick={() => { setMessages([]); setCurrentChoices([]); setCurrentNodeId(null); setActiveEdgeIds([]); if (nodes.length > 0) { const incomingTargets = new Set(edges.map((e) => e.target)); const startNode = nodes.find((n) => !incomingTargets.has(n.id)) || nodes[0]; if (startNode) runFlowFromNode(startNode.id); } }}
+            style={{
+              width: '100%',
+              border: '1px solid #e4e8e0',
+              background: 'transparent',
+              borderRadius: 9,
+              padding: '7px',
+              fontSize: 12,
+              color: '#6b7280',
+              cursor: 'pointer',
+              fontFamily: 'inherit',
+            }}
+          >
+            ↺ Reiniciar simulação
+          </button>
+        </div>
       </aside>
     </div>
   );
