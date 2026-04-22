@@ -268,6 +268,13 @@ export default function FlowBuilderPage() {
     let currentNodeToRun: string | null = startNodeId;
     let safety = 50;
     const traversedEdgeIds = [...initialActiveEdgeIds];
+    const getNextNodeIdFromResponse = (response: ReturnType<typeof executeNode>) => {
+      if (!response) return null;
+      if ('nextNodeId' in response) {
+        return response.nextNodeId || null;
+      }
+      return null;
+    };
 
     while (currentNodeToRun && safety-- > 0) {
       const response = executeNode(flow, currentNodeToRun);
@@ -278,12 +285,12 @@ export default function FlowBuilderPage() {
 
       if (node.type === 'delay') {
         await new Promise((resolve) => setTimeout(resolve, 800));
-        currentNodeToRun = response.nextNodeId || null;
+        currentNodeToRun = getNextNodeIdFromResponse(response);
         continue;
       }
 
       if (node.type === 'condition' || node.type === 'action') {
-        currentNodeToRun = response.nextNodeId || null;
+        currentNodeToRun = getNextNodeIdFromResponse(response);
         continue;
       }
 
@@ -293,7 +300,7 @@ export default function FlowBuilderPage() {
           await simulateTyping();
           addBotMessage(text);
         }
-        currentNodeToRun = response.nextNodeId || null;
+        currentNodeToRun = getNextNodeIdFromResponse(response);
         continue;
       }
 
