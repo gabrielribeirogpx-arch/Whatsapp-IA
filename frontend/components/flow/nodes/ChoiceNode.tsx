@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect, useRef, useState } from 'react';
 import { Handle, NodeProps, Position } from 'reactflow';
 
 type ChoiceButton = {
@@ -31,6 +32,32 @@ export default function ChoiceNode({ id, data, selected }: NodeProps) {
     next: button.next,
   }));
 
+  // Refs para medir a posição real de cada opção
+  const optionRefs = useRef<(HTMLDivElement | null)[]>([]);
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const [handleTops, setHandleTops] = useState<number[]>([]);
+
+  // Recalcula a posição dos handles sempre que o layout muda
+  useEffect(() => {
+    const updatePositions = () => {
+      if (!containerRef.current) return;
+      const containerRect = containerRef.current.getBoundingClientRect();
+      const tops = optionRefs.current.map((ref) => {
+        if (!ref) return 0;
+        const rect = ref.getBoundingClientRect();
+        return rect.top - containerRect.top + rect.height / 2;
+      });
+      setHandleTops(tops);
+    };
+
+    updatePositions();
+
+    // ResizeObserver para reagir a mudanças de tamanho (textarea resize, etc.)
+    const observer = new ResizeObserver(updatePositions);
+    if (containerRef.current) observer.observe(containerRef.current);
+    return () => observer.disconnect();
+  }, [buttons.length, nodeData.content]);
+
   const updateButton = (index: number, label: string) => {
     const nextButtons = [...buttons];
     nextButtons[index] = {
@@ -56,11 +83,9 @@ export default function ChoiceNode({ id, data, selected }: NodeProps) {
     });
   };
 
-  const OPTION_TOP_OFFSET = 115;
-  const OPTION_HEIGHT = 34;
-
   return (
     <div
+      ref={containerRef}
       className={`flow-node ${selected ? 'is-selected' : ''} ${nodeData.running ? 'running' : ''}`}
       style={{ minWidth: 260, position: 'relative' }}
     >
@@ -98,6 +123,7 @@ export default function ChoiceNode({ id, data, selected }: NodeProps) {
           {buttons.map((button, index) => (
             <div
               key={button.id}
+              ref={(el) => { optionRefs.current[index] = el; }}
               className="flow-choice-option"
               style={{ position: 'relative', paddingRight: 24 }}
             >
@@ -108,7 +134,6 @@ export default function ChoiceNode({ id, data, selected }: NodeProps) {
                 onChange={(e) => updateButton(index, e.target.value)}
                 placeholder={`Opção ${index + 1}`}
               />
-              {/* Botão excluir — só aparece se tiver mais de 1 opção */}
               {buttons.length > 1 && (
                 <button
                   type="button"
@@ -153,7 +178,7 @@ export default function ChoiceNode({ id, data, selected }: NodeProps) {
         </button>
       </div>
 
-      {/* Handles posicionados absolutamente por índice */}
+      {/* Handles com posição medida pelo ref — sempre alinhados com a opção real */}
       {buttons.map((button, index) => (
         <Handle
           key={button.handleId}
@@ -161,7 +186,7 @@ export default function ChoiceNode({ id, data, selected }: NodeProps) {
           type="source"
           position={Position.Right}
           style={{
-            top: OPTION_TOP_OFFSET + index * (OPTION_HEIGHT + 5) + OPTION_HEIGHT / 2,
+            top: handleTops[index] ?? (100 + index * 39 + 19),
             right: -6,
             width: 10,
             height: 10,
