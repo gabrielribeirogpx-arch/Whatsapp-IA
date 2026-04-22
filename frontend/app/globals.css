@@ -82,6 +82,8 @@ input {
 }
 
 .flow-node {
+  position: relative;
+  overflow: hidden;
   background: #ffffff;
   border: 1px solid var(--border-soft);
   border-radius: 12px;
@@ -104,6 +106,17 @@ input {
   box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.2);
 }
 
+.flow-node.running::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 3px;
+  width: 100%;
+  background: linear-gradient(90deg, #10b981, #22c55e);
+  animation: flowBar 1.2s linear infinite;
+}
+
 .flow-node-field {
   border: 1px solid var(--border-soft);
   border-radius: 8px;
@@ -120,10 +133,11 @@ input {
   stroke-width: 1.2;
 }
 
-.flow-edge-active .react-flow__edge-path {
+.edge-active path {
   stroke: var(--success);
+  stroke-width: 2;
   stroke-dasharray: 6;
-  animation: dash 1s linear infinite;
+  animation: dashMove 1s linear infinite;
 }
 
 .flow-simulator-button {
@@ -139,9 +153,35 @@ input {
   background: #bbf7d0;
 }
 
-@keyframes dash {
+.flow-simulator-button:active {
+  transform: scale(0.96);
+}
+
+.chat-message-bot {
+  opacity: 0;
+  transform: translateY(10px);
+  animation: messageIn 0.2s ease forwards;
+}
+
+@keyframes dashMove {
   to {
     stroke-dashoffset: -12;
+  }
+}
+
+@keyframes flowBar {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+@keyframes messageIn {
+  to {
+    opacity: 1;
+    transform: translateY(0);
   }
 }
 
