@@ -21,6 +21,7 @@ export type Flow = {
 export type FlowResponse =
   | { type: 'message'; text: string; nextNodeId?: string }
   | { type: 'choice'; text: string; buttons: any[] }
+  | { type: 'system'; nextNodeId?: string }
   | { type: 'end' };
 
 function getOutgoingEdges(nodeId: string, edges: FlowEdge[]) {
@@ -83,24 +84,35 @@ export function executeNode(
     };
   }
 
-  // CONDITION (simplificado)
+  // CONDITION (interno)
   if (node.type === 'condition') {
-    const next = getNextNode(node.id, flow.edges);
+    const trueId = getNextNodeByHandle(node.id, 'true', flow.edges);
+    const falseId = getNextNodeByHandle(node.id, 'false', flow.edges);
+    const fallbackNext = getNextNode(node.id, flow.edges);
+    const result = Boolean(node.data?.result);
 
     return {
-      type: 'message',
-      text: 'Condição avaliada',
-      nextNodeId: next || undefined,
+      type: 'system',
+      nextNodeId: (result ? trueId : falseId) || fallbackNext || undefined,
     };
   }
 
-  // DELAY (simples)
+  // DELAY (interno)
   if (node.type === 'delay') {
     const next = getNextNode(node.id, flow.edges);
 
     return {
-      type: 'message',
-      text: 'Aguarde...',
+      type: 'system',
+      nextNodeId: next || undefined,
+    };
+  }
+
+  // ACTION (interno)
+  if (node.type === 'action') {
+    const next = getNextNode(node.id, flow.edges);
+
+    return {
+      type: 'system',
       nextNodeId: next || undefined,
     };
   }

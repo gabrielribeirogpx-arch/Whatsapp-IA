@@ -277,7 +277,7 @@ export default function FlowBuilderPage() {
       const node = flow.nodes.find((item) => item.id === currentNodeToRun);
       if (!node) break;
 
-      if ('text' in response && response.text) {
+      if (response.type === 'message' && response.text) {
         messagesBuffer.push({
           type: 'bot',
           text: response.text,
