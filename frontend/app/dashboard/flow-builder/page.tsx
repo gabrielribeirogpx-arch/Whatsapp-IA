@@ -252,43 +252,51 @@ export default function FlowBuilderPage() {
     [edges, nodes],
   );
 
-  const runFlowStep = useCallback((startNodeId: string, initialActiveEdgeIds: string[] = [], userMessage?: string) => {
+  const runFlowStep = useCallback((startNodeId: string, initialActiveEdgeIds: string[] = [], userMessage?: string, lastUserMsg?: string) => {
     if (!startNodeId) return;
 
     let currentNodeToRun: string | null = startNodeId;
     let safety = 20;
     const traversedEdgeIds = [...initialActiveEdgeIds];
     const messagesBuffer: Array<{ type: 'bot' | 'user'; text: string }> = [];
+
     if (userMessage) {
       messagesBuffer.push({ type: 'user', text: userMessage });
     }
-    const getNextNodeIdFromResponse = (response: ReturnType<typeof executeNode>) => {
-      if (!response) return null;
-      if ('nextNodeId' in response) {
-        return response.nextNodeId || null;
-      }
-      return null;
-    };
+
+    // Contexto com a última mensagem do usuário para avaliação de condições
+    const context = { lastUserMessage: lastUserMsg || userMessage || '' };
 
     while (currentNodeToRun && safety > 0) {
-      const response = executeNode(flow, currentNodeToRun);
-      if (!response) break;
+      const response = executeNode(flow, currentNodeToRun, context);
+      if (!response || response.type === 'end') break;
 
-      const node = flow.nodes.find((item) => item.id === currentNodeToRun);
-      if (!node) break;
-
-      if (
-        (response.type === 'message' || response.type === 'choice') &&
-        'text' in response &&
-        response.text
-      ) {
-        messagesBuffer.push({
-          type: 'bot',
-          text: response.text,
-        });
+      // MENSAGEM normal
+      if (response.type === 'message') {
+        if (response.text) {
+          messagesBuffer.push({ type: 'bot', text: response.text });
+        }
+        if (response.nextNodeId) {
+          const nextEdge = flow.edges.find((e) => e.source === currentNodeToRun);
+          if (nextEdge?.id) traversedEdgeIds.push(nextEdge.id);
+          currentNodeToRun = response.nextNodeId;
+          safety--;
+          continue;
+        }
+        // Sem próximo node — busca pela edge
+        const nextEdge = flow.edges.find((e) => e.source === currentNodeToRun);
+        if (!nextEdge?.target) { currentNodeToRun = null; break; }
+        if (nextEdge.id) traversedEdgeIds.push(nextEdge.id);
+        currentNodeToRun = nextEdge.target;
+        safety--;
+        continue;
       }
 
+      // ESCOLHA — para e aguarda input do usuário
       if (response.type === 'choice') {
+        if (response.text) {
+          messagesBuffer.push({ type: 'bot', text: response.text });
+        }
         setMessages((prev) => [...prev, ...messagesBuffer]);
         setActiveEdgeIds(traversedEdgeIds);
         setCurrentNodeId(currentNodeToRun);
@@ -296,32 +304,52 @@ export default function FlowBuilderPage() {
         return;
       }
 
-      if (node.type === 'delay' || node.type === 'condition' || node.type === 'action') {
-        currentNodeToRun = getNextNodeIdFromResponse(response);
+      // CONDIÇÃO — avalia e segue o caminho correto (true ou false)
+      if (response.type === 'condition') {
+        const nextId = response.result === 'true' ? response.trueNodeId : response.falseNodeId;
+        const handleUsed = response.result;
+        const condEdge = flow.edges.find(
+          (e) => e.source === currentNodeToRun && (e.sourceHandle === handleUsed || (e.data as any)?.sourceHandle === handleUsed)
+        );
+        if (condEdge?.id) traversedEdgeIds.push(condEdge.id);
+        currentNodeToRun = nextId || null;
         safety--;
         continue;
       }
 
-      const nextEdge = flow.edges.find((edge) => edge.source === currentNodeToRun);
-      if (!nextEdge?.target) {
-        setCurrentNodeId(null);
-        setCurrentChoices([]);
-        break;
+      // DELAY — mostra indicador "digitando..." e continua após X segundos
+      if (response.type === 'delay') {
+        const delayMs = Math.min((response.seconds || 3) * 1000, 10000);
+        const nextId = response.nextNodeId;
+        const delayEdge = flow.edges.find((e) => e.source === currentNodeToRun);
+        if (delayEdge?.id) traversedEdgeIds.push(delayEdge.id);
+
+        // Commita mensagens acumuladas antes do delay
+        if (messagesBuffer.length > 0) {
+          setMessages((prev) => [...prev, ...messagesBuffer]);
+          messagesBuffer.length = 0;
+        }
+        setActiveEdgeIds(traversedEdgeIds);
+        setIsTyping(true);
+
+        // Continua o fluxo após o delay
+        setTimeout(() => {
+          setIsTyping(false);
+          if (nextId) {
+            runFlowStep(nextId, traversedEdgeIds, undefined, context.lastUserMessage);
+          }
+        }, delayMs);
+        return;
       }
 
-      if (nextEdge.id) {
-        traversedEdgeIds.push(nextEdge.id);
-      }
-
-      currentNodeToRun = nextEdge.target;
-      safety--;
+      break;
     }
 
     if (messagesBuffer.length > 0) {
       setMessages((prev) => [...prev, ...messagesBuffer]);
     }
     setActiveEdgeIds(traversedEdgeIds);
-  }, [flow]);
+  }, [flow, setIsTyping]);
 
   const handleChoiceClick = useCallback((handleId: string, label: string) => {
     if (!currentNodeId) return;
@@ -330,7 +358,8 @@ export default function FlowBuilderPage() {
     if (!edge?.target) return;
 
     setCurrentChoices([]);
-    runFlowStep(edge.target, edge.id ? [edge.id] : [], label);
+    // Passa o label clicado como lastUserMessage para que Condição possa avaliá-lo
+    runFlowStep(edge.target, edge.id ? [edge.id] : [], label, label);
   }, [currentNodeId, flow.edges, runFlowStep]);
 
   const onConnect = useCallback((params: FlowConnection) => {

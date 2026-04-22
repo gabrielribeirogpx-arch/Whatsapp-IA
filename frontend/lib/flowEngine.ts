@@ -5,6 +5,7 @@ export type FlowNode = {
 };
 
 export type FlowEdge = {
+  id?: string;
   source: string;
   target: string;
   sourceHandle?: string | null;
@@ -21,7 +22,8 @@ export type Flow = {
 export type FlowResponse =
   | { type: 'message'; text: string; nextNodeId?: string }
   | { type: 'choice'; text: string; buttons: any[] }
-  | { type: 'system'; nextNodeId?: string }
+  | { type: 'condition'; result: 'true' | 'false'; trueNodeId?: string; falseNodeId?: string }
+  | { type: 'delay'; seconds: number; nextNodeId?: string }
   | { type: 'end' };
 
 function getOutgoingEdges(nodeId: string, edges: FlowEdge[]) {
@@ -44,19 +46,17 @@ function getNextNodeByHandle(
   edges: FlowEdge[]
 ): string | null {
   const outgoing = getOutgoingEdges(nodeId, edges);
-
   const match = outgoing.find((e) => {
     const h = resolveHandle(e);
     return h === handleId;
   });
-
   return match ? match.target : null;
 }
 
 export function executeNode(
   flow: Flow,
   currentNodeId: string,
-  input?: { handleId?: string }
+  context?: { lastUserMessage?: string }
 ): FlowResponse {
   const node = flow.nodes.find((n) => n.id === currentNodeId);
 
@@ -67,7 +67,6 @@ export function executeNode(
   // MESSAGE
   if (node.type === 'message') {
     const next = getNextNode(node.id, flow.edges);
-
     return {
       type: 'message',
       text: node.data?.content || node.data?.text || node.data?.label || '',
@@ -84,35 +83,43 @@ export function executeNode(
     };
   }
 
-  // CONDITION (interno)
+  // CONDITION — avalia se a última mensagem do usuário contém a palavra-chave
   if (node.type === 'condition') {
-    const trueId = getNextNodeByHandle(node.id, 'true', flow.edges);
-    const falseId = getNextNodeByHandle(node.id, 'false', flow.edges);
-    const fallbackNext = getNextNode(node.id, flow.edges);
-    const result = Boolean(node.data?.result);
+    const keyword = (node.data?.condition || '').toLowerCase().trim();
+    const lastMessage = (context?.lastUserMessage || '').toLowerCase().trim();
+
+    // Match: verifica se a mensagem contém a palavra-chave
+    const matched = keyword.length > 0 && lastMessage.includes(keyword);
+    const result = matched ? 'true' : 'false';
+
+    const trueNodeId = getNextNodeByHandle(node.id, 'true', flow.edges) || undefined;
+    const falseNodeId = getNextNodeByHandle(node.id, 'false', flow.edges) || undefined;
 
     return {
-      type: 'system',
-      nextNodeId: (result ? trueId : falseId) || fallbackNext || undefined,
+      type: 'condition',
+      result,
+      trueNodeId,
+      falseNodeId,
     };
   }
 
-  // DELAY (interno)
+  // DELAY
   if (node.type === 'delay') {
+    const seconds = parseFloat(node.data?.content || node.data?.text || '3') || 3;
     const next = getNextNode(node.id, flow.edges);
-
     return {
-      type: 'system',
+      type: 'delay',
+      seconds,
       nextNodeId: next || undefined,
     };
   }
 
-  // ACTION (interno)
+  // ACTION
   if (node.type === 'action') {
     const next = getNextNode(node.id, flow.edges);
-
     return {
-      type: 'system',
+      type: 'message',
+      text: node.data?.action ? `Ação executada: ${node.data.action}` : '',
       nextNodeId: next || undefined,
     };
   }
@@ -123,13 +130,12 @@ export function executeNode(
 export function handleUserChoice(
   flow: Flow,
   currentNodeId: string,
-  handleId: string
+  handleId: string,
+  context?: { lastUserMessage?: string }
 ): FlowResponse {
   const nextNodeId = getNextNodeByHandle(currentNodeId, handleId, flow.edges);
-
   if (!nextNodeId) {
     return { type: 'end' };
   }
-
-  return executeNode(flow, nextNodeId);
+  return executeNode(flow, nextNodeId, context);
 }
