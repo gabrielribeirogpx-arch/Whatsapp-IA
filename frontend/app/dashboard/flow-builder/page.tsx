@@ -19,7 +19,7 @@ import DelayNode from '@/components/flow/nodes/DelayNode';
 import MessageNode from '@/components/flow/nodes/MessageNode';
 import { getFlowGraph, getTenantSessionFromStorage, saveFlowGraph } from '@/lib/api';
 import { getLayoutedElements } from '@/lib/autoLayout';
-import { executeNode, handleUserChoice, Flow as EngineFlow } from '@/lib/flowEngine';
+import { executeNode, Flow as EngineFlow } from '@/lib/flowEngine';
 import { orderChoiceChildrenEdges } from '@/lib/flowChoiceOrdering';
 import { FlowEdgePayload, FlowNodePayload } from '@/lib/types';
 
@@ -252,23 +252,20 @@ export default function FlowBuilderPage() {
         result: res,
       });
 
-      // se for choice → simula clique no PRIMEIRO botão
-      if (res.type === 'choice') {
-        const handleId = res.buttons?.[0]?.handleId;
+      if (!res) break;
 
-        if (!handleId) break;
-
-        const next = handleUserChoice(flow, currentNodeId, handleId);
-
-        results.push({
-          nodeId: 'choice-click',
-          result: next,
-        });
-
-        currentNodeId = next.nextNodeId;
-      } else {
+      // Se vier nextNodeId diretamente (caso futuro)
+      if ('nextNodeId' in res && res.nextNodeId) {
         currentNodeId = res.nextNodeId;
+        continue;
       }
+
+      // Caso NÃO tenha nextNodeId (message ou choice)
+      const nextEdge = flow.edges.find((e) => e.source === currentNodeId);
+
+      if (!nextEdge) break;
+
+      currentNodeId = nextEdge.target;
 
       safety--;
     }
