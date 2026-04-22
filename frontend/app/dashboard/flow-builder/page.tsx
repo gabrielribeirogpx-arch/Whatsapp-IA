@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ReactFlow, {
   addEdge,
   Background,
@@ -132,6 +132,7 @@ export default function FlowBuilderPage() {
   const [activeEdgeIds, setActiveEdgeIds] = useState<string[]>([]);
   const [isSimulatorOpen, setIsSimulatorOpen] = useState(false);
   const [isTyping, setIsTyping] = useState(false);
+  const simulationStartedRef = useRef(false);
 
   const updateNodeData = useCallback((nodeId: string, patch: Record<string, unknown>) => {
     setNodes((prev: Node[]) =>
@@ -251,19 +252,16 @@ export default function FlowBuilderPage() {
     [edges, nodes],
   );
 
-  const simulateTyping = useCallback(async () => {
-    setIsTyping(true);
-    await new Promise((resolve) => setTimeout(resolve, 900));
-    setIsTyping(false);
-  }, []);
-
-  const runFlowUntilUserInput = useCallback(async (startNodeId: string, initialActiveEdgeIds: string[] = []) => {
+  const runFlowStep = useCallback((startNodeId: string, initialActiveEdgeIds: string[] = [], userMessage?: string) => {
     if (!startNodeId) return;
 
     let currentNodeToRun: string | null = startNodeId;
-    let safety = 50;
+    let safety = 20;
     const traversedEdgeIds = [...initialActiveEdgeIds];
-    const messagesBuffer: Array<{ type: 'bot' | 'user'; text: string }> = [...messages];
+    const messagesBuffer: Array<{ type: 'bot' | 'user'; text: string }> = [];
+    if (userMessage) {
+      messagesBuffer.push({ type: 'user', text: userMessage });
+    }
     const getNextNodeIdFromResponse = (response: ReturnType<typeof executeNode>) => {
       if (!response) return null;
       if ('nextNodeId' in response) {
@@ -280,7 +278,6 @@ export default function FlowBuilderPage() {
       if (!node) break;
 
       if ('text' in response && response.text) {
-        await simulateTyping();
         messagesBuffer.push({
           type: 'bot',
           text: response.text,
@@ -288,21 +285,16 @@ export default function FlowBuilderPage() {
       }
 
       if (response.type === 'choice') {
-        setMessages([...messagesBuffer]);
+        if (messagesBuffer.length > 0) {
+          setMessages((prev) => [...prev, ...messagesBuffer]);
+        }
         setActiveEdgeIds(traversedEdgeIds);
         setCurrentNodeId(currentNodeToRun);
         setCurrentChoices(response.buttons || []);
         return;
       }
 
-      if (node.type === 'delay') {
-        await new Promise((resolve) => setTimeout(resolve, 800));
-        currentNodeToRun = getNextNodeIdFromResponse(response);
-        safety--;
-        continue;
-      }
-
-      if (node.type === 'condition' || node.type === 'action') {
+      if (node.type === 'delay' || node.type === 'condition' || node.type === 'action') {
         currentNodeToRun = getNextNodeIdFromResponse(response);
         safety--;
         continue;
@@ -323,39 +315,21 @@ export default function FlowBuilderPage() {
       safety--;
     }
 
-    setMessages([...messagesBuffer]);
-    setActiveEdgeIds(traversedEdgeIds);
-  }, [flow, messages, simulateTyping]);
-
-  useEffect(() => {
-    if (nodes.length === 0) {
-      setMessages([]);
-      setCurrentNodeId(null);
-      setActiveEdgeIds([]);
-      return;
+    if (messagesBuffer.length > 0) {
+      setMessages((prev) => [...prev, ...messagesBuffer]);
     }
-
-    const incomingTargets = new Set(edges.map((edge) => edge.target));
-    const startNode = nodes.find((node) => !incomingTargets.has(node.id)) || nodes[0];
-    if (!startNode) return;
-
-    setMessages([]);
-    setCurrentChoices([]);
-    setCurrentNodeId(null);
-    setActiveEdgeIds([]);
-    void runFlowUntilUserInput(startNode.id);
-  }, [edges, nodes, runFlowUntilUserInput]);
+    setActiveEdgeIds(traversedEdgeIds);
+  }, [flow]);
 
   const handleChoiceClick = useCallback((handleId: string, label: string) => {
     if (!currentNodeId) return;
 
-    setMessages((prev) => [...prev, { type: 'user', text: label }]);
     const edge = flow.edges.find((item) => item.source === currentNodeId && item.sourceHandle === handleId);
     if (!edge?.target) return;
 
     setCurrentChoices([]);
-    void runFlowUntilUserInput(edge.target, edge.id ? [edge.id] : []);
-  }, [currentNodeId, flow.edges, runFlowUntilUserInput]);
+    runFlowStep(edge.target, edge.id ? [edge.id] : [], label);
+  }, [currentNodeId, flow.edges, runFlowStep]);
 
   const onConnect = useCallback((params: FlowConnection) => {
     const sourceHandle = params.sourceHandle?.toString() || null;
@@ -507,7 +481,23 @@ export default function FlowBuilderPage() {
         {!isSimulatorOpen && (
           <button
             type="button"
-            onClick={() => setIsSimulatorOpen(true)}
+            onClick={() => {
+              setIsSimulatorOpen(true);
+              if (simulationStartedRef.current || nodes.length === 0) return;
+
+              simulationStartedRef.current = true;
+              setMessages([]);
+              setCurrentChoices([]);
+              setCurrentNodeId(null);
+              setActiveEdgeIds([]);
+              setIsTyping(false);
+
+              const incomingTargets = new Set(edges.map((edge) => edge.target));
+              const startNode = nodes.find((node) => !incomingTargets.has(node.id)) || nodes[0];
+              if (startNode) {
+                runFlowStep(startNode.id);
+              }
+            }}
             style={{
               position: 'absolute',
               top: '14px',
@@ -617,7 +607,7 @@ export default function FlowBuilderPage() {
         }}>
           {messages.length === 0 && (
             <div style={{ textAlign: 'center', color: '#a8b0a0', fontSize: 12, marginTop: 32 }}>
-              Nenhuma mensagem ainda.<br />O fluxo será simulado automaticamente.
+              Nenhuma mensagem ainda.<br />Clique em “Simular fluxo” para iniciar.
             </div>
           )}
           {messages.map((message, index) => (
@@ -677,7 +667,23 @@ export default function FlowBuilderPage() {
         <div style={{ padding: '10px 16px', borderTop: '1px solid #E8E6E0', flexShrink: 0 }}>
           <button
             type="button"
-            onClick={() => { setMessages([]); setCurrentChoices([]); setCurrentNodeId(null); setActiveEdgeIds([]); setIsTyping(false); if (nodes.length > 0) { const incomingTargets = new Set(edges.map((e) => e.target)); const startNode = nodes.find((n) => !incomingTargets.has(n.id)) || nodes[0]; if (startNode) void runFlowUntilUserInput(startNode.id); } }}
+            onClick={() => {
+              setMessages([]);
+              setCurrentChoices([]);
+              setCurrentNodeId(null);
+              setActiveEdgeIds([]);
+              setIsTyping(false);
+              simulationStartedRef.current = false;
+
+              if (nodes.length > 0) {
+                const incomingTargets = new Set(edges.map((e) => e.target));
+                const startNode = nodes.find((n) => !incomingTargets.has(n.id)) || nodes[0];
+                if (startNode) {
+                  simulationStartedRef.current = true;
+                  runFlowStep(startNode.id);
+                }
+              }
+            }}
             style={{
               width: '100%',
               border: '1px solid #e4e8e0',
