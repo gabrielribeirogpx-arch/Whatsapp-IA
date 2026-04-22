@@ -24,6 +24,7 @@ export type FlowResponse =
   | { type: 'choice'; text: string; buttons: any[] }
   | { type: 'condition'; result: 'true' | 'false'; trueNodeId?: string; falseNodeId?: string }
   | { type: 'delay'; seconds: number; nextNodeId?: string }
+  | { type: 'action'; actionName: string; nextNodeId?: string }
   | { type: 'end' };
 
 function getOutgoingEdges(nodeId: string, edges: FlowEdge[]) {
@@ -114,12 +115,12 @@ export function executeNode(
     };
   }
 
-  // ACTION
+  // ACTION — executa silenciosamente, sem gerar mensagem no chat
   if (node.type === 'action') {
     const next = getNextNode(node.id, flow.edges);
     return {
-      type: 'message',
-      text: node.data?.action ? `Ação executada: ${node.data.action}` : '',
+      type: 'action',
+      actionName: node.data?.action || '',
       nextNodeId: next || undefined,
     };
   }

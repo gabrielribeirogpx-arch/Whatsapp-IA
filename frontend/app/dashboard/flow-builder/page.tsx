@@ -342,6 +342,16 @@ export default function FlowBuilderPage() {
         return;
       }
 
+      // AÇÃO — executa silenciosamente e continua o fluxo
+      if (response.type === 'action') {
+        const nextId = response.nextNodeId;
+        const actionEdge = flow.edges.find((e) => e.source === currentNodeToRun);
+        if (actionEdge?.id) traversedEdgeIds.push(actionEdge.id);
+        currentNodeToRun = nextId || null;
+        safety--;
+        continue;
+      }
+
       break;
     }
 
