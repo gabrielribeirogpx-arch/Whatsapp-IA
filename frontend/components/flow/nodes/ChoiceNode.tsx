@@ -205,25 +205,34 @@ export default function ChoiceNode({ id, data, selected }: NodeProps) {
         </button>
       </div>
 
-      {buttons.map((button, index) => (
-        <Handle
-          key={button.handleId}
-          id={button.handleId}
-          type="source"
-          position={Position.Right}
-          style={{
-            top: handleTops[index] ?? estimateTops(buttons.length)[index],
-            right: -6,
-            width: 10,
-            height: 10,
-            background: '#fff',
-            border: '2px solid #16a34a',
-            borderRadius: '50%',
-            cursor: 'crosshair',
-            zIndex: 10,
-          }}
-        />
-      ))}
+      {buttons.map((button, index) => {
+        // Altura base: header (40px) + textarea (60px + 8px margin) + margem antes dos botões (8px) = 116px
+        // Cada botão tem altura ~34px (padding + border + input)
+        // Handle deve ficar no centro vertical de cada botão
+        const baseOffset = 116;
+        const buttonHeight = 34;
+        const handleTop = baseOffset + (index * buttonHeight) + (buttonHeight / 2);
+
+        return (
+          <Handle
+            key={button.handleId}
+            id={button.handleId}
+            type="source"
+            position={Position.Right}
+            style={{
+              top: handleTop,
+              right: -6,
+              width: 10,
+              height: 10,
+              background: '#fff',
+              border: '2px solid #16a34a',
+              borderRadius: '50%',
+              cursor: 'crosshair',
+              zIndex: 10,
+            }}
+          />
+        );
+      })}
     </div>
   );
 }
