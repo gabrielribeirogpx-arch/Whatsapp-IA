@@ -69,7 +69,7 @@ export function executeNode(
 
     return {
       type: 'message',
-      text: node.data?.text || '',
+      text: node.data?.content || node.data?.text || node.data?.label || '',
       nextNodeId: next || undefined,
     };
   }
@@ -78,7 +78,7 @@ export function executeNode(
   if (node.type === 'choice') {
     return {
       type: 'choice',
-      text: node.data?.text || '',
+      text: node.data?.content || node.data?.text || node.data?.label || '',
       buttons: node.data?.buttons || [],
     };
   }
