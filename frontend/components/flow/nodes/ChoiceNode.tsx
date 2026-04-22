@@ -41,6 +41,11 @@ export default function ChoiceNode({ id, data, selected }: NodeProps) {
     nodeData.onChange?.(id, { buttons: nextButtons });
   };
 
+  const removeButton = (index: number) => {
+    const nextButtons = buttons.filter((_, i) => i !== index);
+    nodeData.onChange?.(id, { buttons: nextButtons });
+  };
+
   const addButton = () => {
     const nextIndex = buttons.length + 1;
     nodeData.onChange?.(id, {
@@ -51,10 +56,6 @@ export default function ChoiceNode({ id, data, selected }: NodeProps) {
     });
   };
 
-  // Altura de cada opção (padding 6px top+bottom + 1px border x2 + linha ~20px) = ~34px
-  // Offset do topo até o início das opções:
-  // barra (3px) + header (paddingTop 14 + dot ~20px + paddingBottom 8) + body padding (10px)
-  // + textarea (minHeight 52 + marginBottom 8) + border = ~115px
   const OPTION_TOP_OFFSET = 115;
   const OPTION_HEIGHT = 34;
 
@@ -95,7 +96,11 @@ export default function ChoiceNode({ id, data, selected }: NodeProps) {
 
         <div style={{ display: 'grid', gap: 5 }}>
           {buttons.map((button, index) => (
-            <div key={button.id} className="flow-choice-option">
+            <div
+              key={button.id}
+              className="flow-choice-option"
+              style={{ position: 'relative', paddingRight: 24 }}
+            >
               <div className="flow-choice-option-dot" />
               <input
                 className="nodrag"
@@ -103,6 +108,37 @@ export default function ChoiceNode({ id, data, selected }: NodeProps) {
                 onChange={(e) => updateButton(index, e.target.value)}
                 placeholder={`Opção ${index + 1}`}
               />
+              {/* Botão excluir — só aparece se tiver mais de 1 opção */}
+              {buttons.length > 1 && (
+                <button
+                  type="button"
+                  className="nodrag"
+                  onClick={() => removeButton(index)}
+                  title="Remover opção"
+                  style={{
+                    position: 'absolute',
+                    right: 4,
+                    top: '50%',
+                    transform: 'translateY(-50%)',
+                    border: 'none',
+                    background: 'transparent',
+                    color: '#d1d5db',
+                    cursor: 'pointer',
+                    fontSize: 14,
+                    lineHeight: 1,
+                    padding: '2px 4px',
+                    borderRadius: 4,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    transition: 'color 0.15s',
+                  }}
+                  onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = '#ef4444'; }}
+                  onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = '#d1d5db'; }}
+                >
+                  ×
+                </button>
+              )}
             </div>
           ))}
         </div>
@@ -117,7 +153,7 @@ export default function ChoiceNode({ id, data, selected }: NodeProps) {
         </button>
       </div>
 
-      {/* Handles posicionados absolutamente, calculados por índice */}
+      {/* Handles posicionados absolutamente por índice */}
       {buttons.map((button, index) => (
         <Handle
           key={button.handleId}
