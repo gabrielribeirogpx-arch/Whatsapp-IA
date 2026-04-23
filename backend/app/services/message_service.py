@@ -56,3 +56,40 @@ def extract_whatsapp_messages(payload: dict[str, Any]) -> list[dict[str, str]]:
                 )
 
     return messages_data
+
+
+def normalize_meta_message(payload: dict[str, Any]) -> list[dict[str, str | None]]:
+    normalized: list[dict[str, str | None]] = []
+    entries = payload.get("entry", [])
+
+    for entry in entries:
+        for change in entry.get("changes", []):
+            value = change.get("value", {})
+            metadata = value.get("metadata", {})
+            phone_number_id = sanitize_text(metadata.get("phone_number_id", ""))
+            contacts = value.get("contacts", [])
+            fallback_phone = sanitize_phone(contacts[0].get("wa_id", "")) if contacts else ""
+
+            for message in value.get("messages", []):
+                message_type = sanitize_text(message.get("type", ""))
+                text = ""
+                if message_type == "text":
+                    text = sanitize_text(message.get("text", {}).get("body", ""))
+
+                phone = sanitize_phone(message.get("from", "") or fallback_phone)
+                if not phone:
+                    continue
+
+                normalized.append(
+                    {
+                        "phone": phone,
+                        "text": text,
+                        "type": message_type or "unknown",
+                        "tenant_id": None,
+                        "phone_number_id": phone_number_id,
+                        "name": sanitize_text(contacts[0].get("profile", {}).get("name", "")) if contacts else "",
+                        "message_id": sanitize_text(message.get("id", "")),
+                    }
+                )
+
+    return normalized

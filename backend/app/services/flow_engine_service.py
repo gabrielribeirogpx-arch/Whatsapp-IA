@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import unicodedata
 import uuid
+import logging
 from typing import Any
 
 from sqlalchemy import select
@@ -11,6 +12,7 @@ from app.models import Conversation, Flow, FlowEdge, FlowNode
 
 DEFAULT_FLOW_NAME = "__default_visual__"
 MAX_AUTO_STEPS = 10
+logger = logging.getLogger(__name__)
 
 
 def _normalize_text(value: str | None) -> str:
@@ -93,10 +95,17 @@ def _pick_default_edge(edges: list[FlowEdge]) -> FlowEdge | None:
 
 def _advance_to_edge_target(db: Session, conversation: Conversation, edge: FlowEdge | None) -> FlowNode | None:
     if not edge:
+        logger.info("Flow sem próxima aresta, encerrando fluxo conversation_id=%s", conversation.id)
         conversation.current_node_id = None
         return None
 
     next_node = _get_node(db=db, node_id=edge.target, tenant_id=conversation.tenant_id)
+    logger.info(
+        "Flow avançando conversation_id=%s edge=%s target_node=%s",
+        conversation.id,
+        edge.id,
+        next_node.id if next_node else None,
+    )
     conversation.current_node_id = next_node.id if next_node else None
     return next_node
 
@@ -140,6 +149,7 @@ def process_flow_engine(db: Session, conversation: Conversation, message_text: s
         node_type = node.type
         if node_type.endswith("Node"):
             node_type = node_type[:-4]
+        logger.info("Node executado conversation_id=%s node_id=%s node_type=%s", conversation.id, node.id, node_type)
 
         edges = _get_edges(db=db, flow_id=node.flow_id, source=node.id)
 

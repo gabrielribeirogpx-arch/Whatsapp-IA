@@ -4,6 +4,8 @@ from typing import Any
 
 import requests
 
+from app.models import Tenant
+
 logger = logging.getLogger(__name__)
 
 
@@ -11,16 +13,14 @@ class WhatsAppConfigError(RuntimeError):
     """Erro de configuração para integração com WhatsApp Cloud API."""
 
 
-def send_message(token: str, to: str, message: str) -> dict[str, Any]:
+def send_message(token: str, phone_number_id: str, to: str, message: str) -> dict[str, Any]:
     """Envia uma mensagem usando a API oficial do WhatsApp Cloud."""
     if not token:
         raise WhatsAppConfigError("WHATSAPP_TOKEN não configurado")
-    PHONE_NUMBER_ID = os.getenv("PHONE_NUMBER_ID")
-    if not PHONE_NUMBER_ID:
-        raise Exception("PHONE_NUMBER_ID não configurado")
-    print("PHONE_NUMBER_ID:", PHONE_NUMBER_ID)
+    if not phone_number_id:
+        raise WhatsAppConfigError("PHONE_NUMBER_ID do tenant não configurado")
 
-    url = f"https://graph.facebook.com/v18.0/{PHONE_NUMBER_ID}/messages"
+    url = f"https://graph.facebook.com/v18.0/{phone_number_id}/messages"
     payload = {
         "messaging_product": "whatsapp",
         "to": to,
@@ -36,7 +36,7 @@ def send_message(token: str, to: str, message: str) -> dict[str, Any]:
         )
         response.raise_for_status()
         response_data = response.json()
-        logger.info("Mensagem enviada para %s", to)
+        logger.info("Mensagem enviada para %s com phone_number_id=%s response=%s", to, phone_number_id, response_data)
         return response_data
     except requests.HTTPError:
         logger.exception(
@@ -51,18 +51,16 @@ def send_message(token: str, to: str, message: str) -> dict[str, Any]:
         raise
 
 
-def enviar_mensagem(
-    numero: str,
-    mensagem: str,
-    *,
-    token: str | None = None,
-    phone_number_id: str | None = None,
-) -> dict[str, Any]:
+def enviar_mensagem(numero: str, mensagem: str, *, token: str | None = None, phone_number_id: str | None = None) -> dict[str, Any]:
     token = token or os.getenv("WHATSAPP_TOKEN")
-    _ = phone_number_id  # Mantido por compatibilidade de assinatura.
-    return send_message(token or "", numero, mensagem)
+    resolved_phone_number_id = phone_number_id or os.getenv("PHONE_NUMBER_ID")
+    return send_message(token or "", resolved_phone_number_id or "", numero, mensagem)
 
 
-def send_whatsapp_message(phone: str, message: str) -> dict[str, Any]:
-    token = os.getenv("WHATSAPP_TOKEN")
-    return send_message(token or "", phone, message)
+def send_whatsapp_message(tenant: Tenant, phone: str, text: str) -> dict[str, Any]:
+    return send_message(
+        token=tenant.whatsapp_token or "",
+        phone_number_id=tenant.phone_number_id,
+        to=phone,
+        message=text,
+    )
