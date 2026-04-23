@@ -116,6 +116,8 @@ def _pick_default_edge(edges: list[FlowEdge]) -> FlowEdge | None:
 def _advance_to_edge_target(db: Session, conversation: Conversation, edge: FlowEdge | None) -> FlowNode | None:
     if not edge:
         logger.info("Flow sem próxima aresta, encerrando fluxo conversation_id=%s", conversation.id)
+        conversation.mode = "bot"
+        conversation.current_flow = None
         conversation.current_node_id = None
         return None
 
@@ -165,6 +167,7 @@ def process_flow_engine(
     flow = _get_or_create_visual_flow(db=db, tenant_id=conversation.tenant_id)
 
     if force_node:
+        conversation.mode = "flow"
         conversation.current_flow = flow.id
         conversation.current_node_id = force_node
         logger.info(
@@ -177,11 +180,24 @@ def process_flow_engine(
         if not start_node:
             return None
 
+        conversation.mode = "flow"
         conversation.current_flow = flow.id
         conversation.current_node_id = start_node.id
 
+    if conversation.mode == "flow" and conversation.current_node_id is None:
+        logger.warning(
+            "Flow inconsistente sem node_id, resetando para bot conversation_id=%s",
+            conversation.id,
+        )
+        conversation.mode = "bot"
+        conversation.current_flow = None
+        conversation.current_node_id = None
+        return None
+
     node = _get_node(db=db, node_id=conversation.current_node_id, tenant_id=conversation.tenant_id)
     if not node:
+        conversation.mode = "bot"
+        conversation.current_flow = None
         conversation.current_node_id = None
         return None
 
@@ -269,6 +285,8 @@ def process_flow_engine(
             next_edge = _pick_default_edge(edges)
             if not next_edge:
                 logger.info("Delay sem próxima aresta conversation_id=%s node_id=%s", conversation.id, node.id)
+                conversation.mode = "bot"
+                conversation.current_flow = None
                 conversation.current_node_id = None
                 break
 
@@ -278,6 +296,8 @@ def process_flow_engine(
                 next_node_id=next_edge.target,
                 seconds=delay_seconds,
             )
+            conversation.mode = "bot"
+            conversation.current_flow = None
             conversation.current_node_id = None
             break
 

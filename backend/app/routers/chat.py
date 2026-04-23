@@ -137,7 +137,7 @@ def list_conversations(
                 avatar_url=conversation.avatar_url,
                 stage=conversation.contact.stage if conversation.contact else "novo",
                 score=conversation.contact.score if conversation.contact else 0,
-                mode=conversation.mode or "human",
+                mode=conversation.mode or "bot",
                 last_message=(last_message_item.text if last_message_item else ""),
                 updated_at=conversation.updated_at,
             )
@@ -394,7 +394,7 @@ def update_conversation_mode(
     if not conversation:
         raise HTTPException(status_code=404, detail="Conversation not found")
 
-    if mode not in {"human", "bot", "ai"}:
+    if mode not in {"human", "bot", "ai", "flow"}:
         raise HTTPException(status_code=400, detail="Invalid mode")
 
     conversation.mode = mode
