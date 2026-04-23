@@ -30,6 +30,7 @@ def _extract_node_data(node: FlowNode) -> dict[str, Any]:
     metadata = node.metadata_json or {}
     return {
         "label": metadata.get("label") or node.content or node.type,
+        "text": metadata.get("text") or node.content,
         "content": node.content,
         "buttons": metadata.get("buttons") if isinstance(metadata.get("buttons"), list) else [],
         "condition": metadata.get("condition"),
@@ -167,24 +168,20 @@ def _render_choice_prompt(node_data: dict[str, Any], edges: list[FlowEdge]) -> s
 
     return base
 
-
-
-
-def _send_flow_whatsapp_message(db: Session, conversation: Conversation, text: str) -> None:
+def _send_flow_whatsapp_message(tenant: Tenant, phone: str, text: str) -> None:
     content = (text or "").strip()
     if not content:
         return
 
-    tenant = db.execute(select(Tenant).where(Tenant.id == conversation.tenant_id)).scalars().first()
-    if not tenant:
-        logger.warning("[FLOW SEND] Tenant não encontrado para conversation_id=%s", conversation.id)
+    if not phone:
+        logger.warning("[FLOW SEND] Telefone ausente, mensagem não enviada")
         return
 
     logger.info("[FLOW SEND] Enviando mensagem: %s", content)
     try:
-        send_whatsapp_message(tenant, conversation.phone_number, content)
+        send_whatsapp_message(tenant, phone, content)
     except WhatsAppConfigError:
-        logger.warning("[FLOW SEND] Configuração WhatsApp ausente para tenant_id=%s", conversation.tenant_id)
+        logger.warning("[FLOW SEND] Configuração WhatsApp ausente para tenant_id=%s", tenant.id)
 
 def process_flow_engine(
     db: Session,
@@ -230,6 +227,13 @@ def process_flow_engine(
     if conversation.mode == "flow":
         _keep_flow_mode(conversation)
 
+    tenant = db.execute(select(Tenant).where(Tenant.id == conversation.tenant_id)).scalars().first()
+    if not tenant:
+        logger.warning("[FLOW SEND] Tenant não encontrado para conversation_id=%s", conversation.id)
+        return None
+
+    conversation_phone = getattr(conversation, "phone", None) or conversation.phone_number
+
     node = _get_node(db=db, node_id=conversation.current_node_id, tenant_id=conversation.tenant_id)
     if not node:
         _reset_to_bot_mode(db=db, conversation=conversation, reason="flow_error_node_not_found")
@@ -249,9 +253,9 @@ def process_flow_engine(
 
         if node_type in {"message", "start"}:
             metadata = node_data.get("metadata") if isinstance(node_data.get("metadata"), dict) else {}
-            content = (metadata.get("text") or node_data.get("content") or "").strip()
+            content = (node_data.get("text") or metadata.get("text") or node_data.get("content") or "").strip()
             if node_type == "message":
-                _send_flow_whatsapp_message(db=db, conversation=conversation, text=content)
+                _send_flow_whatsapp_message(tenant=tenant, phone=conversation_phone, text=content)
             elif content:
                 collected_messages.append(content)
             node = _advance_to_edge_target(db=db, conversation=conversation, edge=_pick_default_edge(edges))
@@ -479,6 +483,8 @@ def save_flow_graph(db: Session, tenant_id: uuid.UUID, flow_id: str, nodes: list
             metadata = {}
 
         if isinstance(data, dict):
+            if data.get("text") is not None:
+                metadata["text"] = data.get("text")
             if data.get("label"):
                 metadata["label"] = data.get("label")
             if isinstance(data.get("buttons"), list):
@@ -495,7 +501,7 @@ def save_flow_graph(db: Session, tenant_id: uuid.UUID, flow_id: str, nodes: list
             flow_id=flow.id,
             tenant_id=tenant_id,
             type=node_type,
-            content=data.get("content") if isinstance(data, dict) else None,
+            content=(data.get("content") or data.get("text")) if isinstance(data, dict) else None,
             metadata_json=metadata,
             position_x=int(position.get("x", 0) or 0),
             position_y=int(position.get("y", 0) or 0),
