@@ -1,8 +1,9 @@
 from sqlalchemy.orm import Session
 
 from app.models import Conversation, Message
-from app.services.bot_service import handle_bot
+from app.services.bot_service import handle_bot, handle_visual_flow_priority
 from app.services.conversation_log_service import log_conversation_event
+from app.services.flow_engine_service import tenant_has_active_visual_flow
 
 
 def handle_incoming_message(db: Session, message: Message, conversation: Conversation):
@@ -27,6 +28,22 @@ def handle_incoming_message(db: Session, message: Message, conversation: Convers
         )
         return None
     elif mode == "bot":
+        if tenant_has_active_visual_flow(db=db, tenant_id=conversation.tenant_id):
+            result = handle_visual_flow_priority(db=db, message=message, conversation=conversation)
+            log_conversation_event(
+                db,
+                {
+                    **base_log_data,
+                    "intent": result.get("intent"),
+                    "matched_rule": result.get("matched_rule"),
+                    "flow_step": conversation.conversation_state,
+                    "used_fallback": bool(result.get("fallback")),
+                    "response": result.get("response"),
+                },
+            )
+            return True
+
+        print("[BOT FALLBACK] executando bot")
         result = handle_bot(db, message, conversation)
         print(f"[BOT] matched={bool(result)} mode={conversation.mode}")
         if not result:
