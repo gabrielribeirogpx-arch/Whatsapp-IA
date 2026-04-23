@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.models import BotRule, Conversation, Message, Tenant
 from app.services.flow_orchestrator import handle_flow as handle_orchestrator_flow
-from app.services.flow_engine_service import process_flow_engine
+from app.services.flow_engine_service import process_flow_engine, tenant_has_active_visual_flow
 from app.services.flow_service import handle_flow as handle_priority_flow
 from app.services.whatsapp_service import WhatsAppConfigError, send_whatsapp_message
 from app.utils.text import normalize_text, tokenize
@@ -305,14 +305,17 @@ def handle_bot(db: Session, message: Message, conversation) -> dict[str, str | b
 
     tenant = db.execute(select(Tenant).where(Tenant.id == conversation.tenant_id)).scalars().first()
 
-    visual_flow_response = process_flow_engine(
-        db=db,
-        tenant_id=conversation.tenant_id,
-        phone=conversation.phone_number,
-        message_text=message.text or "",
-    )
-    if visual_flow_response:
-        print(f"[FLOW ENGINE] process_flow_engine executado node_atual={conversation.current_node_id}")
+    visual_flow_response: str | None = None
+    if tenant_has_active_visual_flow(db=db, tenant_id=conversation.tenant_id):
+        print("[FLOW ENGINE] executando fluxo principal")
+        visual_flow_response = process_flow_engine(
+            db=db,
+            tenant_id=conversation.tenant_id,
+            phone=conversation.phone_number,
+            message_text=message.text or "",
+        )
+        if visual_flow_response:
+            print(f"[FLOW ENGINE] process_flow_engine executado node_atual={conversation.current_node_id}")
     selected_response = visual_flow_response if visual_flow_response else None
     matched_rule: str | None = "visual_flow_engine" if visual_flow_response else None
     using_visual_flow = bool(visual_flow_response)
