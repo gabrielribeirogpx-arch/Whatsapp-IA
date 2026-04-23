@@ -87,8 +87,17 @@ export function executeNode(
 
   // CONDITION — se não há lastUserMessage, para e aguarda input do usuário
   if (node.type === 'condition') {
-    const keyword = (node.data?.condition || '').toLowerCase().trim();
-    const lastMessage = (context?.lastUserMessage || '').toLowerCase().trim();
+    // Remove aspas simples/duplas e normaliza acentos para comparação robusta
+    const normalize = (str: string) =>
+      str
+        .toLowerCase()
+        .trim()
+        .replace(/['"]/g, '') // remove aspas simples e duplas
+        .normalize('NFD') // separa letras de acentos
+        .replace(/[\u0300-\u036f]/g, ''); // remove os acentos
+
+    const keyword = normalize(node.data?.condition || '');
+    const lastMessage = normalize(context?.lastUserMessage || '');
 
     // Sem mensagem do usuário ainda — para o fluxo e aguarda input
     if (!lastMessage) {
