@@ -7,7 +7,7 @@ from app.services.flow_engine_service import tenant_has_active_visual_flow
 
 
 def handle_incoming_message(db: Session, message: Message, conversation: Conversation):
-    mode = conversation.mode or "human"
+    mode = conversation.mode or "bot"
     base_log_data = {
         "tenant_id": conversation.tenant_id,
         "conversation_id": conversation.id,
@@ -15,23 +15,40 @@ def handle_incoming_message(db: Session, message: Message, conversation: Convers
         "mode": mode,
     }
 
-    print(f"[ROUTER] mode={mode}")
+    print(f"[MODE] {mode}")
+    print(f"[FLOW] node={conversation.current_node_id}")
 
-    if mode == "human":
-        print("[ROUTER] human mode ativo: mensagem salva sem resposta automática")
-        log_conversation_event(
-            db,
-            {
-                **base_log_data,
-                "flow_step": conversation.conversation_state,
-            },
-        )
-        return None
-    elif mode == "bot":
+    if mode == "flow":
+        if conversation.current_node_id is None:
+            print("[FLOW MODE] inconsistente sem node, resetando para bot")
+            conversation.mode = "bot"
+            conversation.current_flow = None
+            conversation.current_node_id = None
+            mode = "bot"
+            base_log_data["mode"] = "bot"
+        else:
+            print("[FLOW MODE] usuário em fluxo")
+            result = handle_visual_flow_priority(db=db, message=message, conversation=conversation)
+            base_log_data["mode"] = conversation.mode or mode
+            log_conversation_event(
+                db,
+                {
+                    **base_log_data,
+                    "intent": result.get("intent"),
+                    "matched_rule": result.get("matched_rule"),
+                    "flow_step": conversation.conversation_state,
+                    "used_fallback": bool(result.get("fallback")),
+                    "response": result.get("response"),
+                },
+            )
+            return True
+
+    if mode == "bot":
         has_active_visual_flow = tenant_has_active_visual_flow(db=db, tenant_id=conversation.tenant_id)
         if has_active_visual_flow:
-            print("[FLOW PRIORITY] executando fluxo antes do bot")
+            print("[FLOW MODE] iniciando fluxo")
             result = handle_visual_flow_priority(db=db, message=message, conversation=conversation)
+            base_log_data["mode"] = conversation.mode or mode
             log_conversation_event(
                 db,
                 {
