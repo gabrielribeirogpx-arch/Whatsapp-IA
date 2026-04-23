@@ -8,9 +8,10 @@ from typing import Any
 from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
-from app.models import Conversation, Flow, FlowEdge, FlowNode
+from app.models import Conversation, Flow, FlowEdge, FlowNode, Tenant
 from app.services.delay_queue_service import enqueue_delay
 from app.utils.phone import normalize_phone
+from app.services.whatsapp_service import WhatsAppConfigError, send_whatsapp_message
 
 DEFAULT_FLOW_NAME = "__default_visual__"
 MAX_AUTO_STEPS = 10
@@ -167,6 +168,24 @@ def _render_choice_prompt(node_data: dict[str, Any], edges: list[FlowEdge]) -> s
     return base
 
 
+
+
+def _send_flow_whatsapp_message(db: Session, conversation: Conversation, text: str) -> None:
+    content = (text or "").strip()
+    if not content:
+        return
+
+    tenant = db.execute(select(Tenant).where(Tenant.id == conversation.tenant_id)).scalars().first()
+    if not tenant:
+        logger.warning("[FLOW SEND] Tenant não encontrado para conversation_id=%s", conversation.id)
+        return
+
+    logger.info("[FLOW SEND] Enviando mensagem: %s", content)
+    try:
+        send_whatsapp_message(tenant, conversation.phone_number, content)
+    except WhatsAppConfigError:
+        logger.warning("[FLOW SEND] Configuração WhatsApp ausente para tenant_id=%s", conversation.tenant_id)
+
 def process_flow_engine(
     db: Session,
     tenant_id: uuid.UUID,
@@ -229,8 +248,11 @@ def process_flow_engine(
         edges = _get_edges(db=db, flow_id=node.flow_id, source=node.id)
 
         if node_type in {"message", "start"}:
-            content = (node_data.get("content") or "").strip()
-            if content:
+            metadata = node_data.get("metadata") if isinstance(node_data.get("metadata"), dict) else {}
+            content = (metadata.get("text") or node_data.get("content") or "").strip()
+            if node_type == "message":
+                _send_flow_whatsapp_message(db=db, conversation=conversation, text=content)
+            elif content:
                 collected_messages.append(content)
             node = _advance_to_edge_target(db=db, conversation=conversation, edge=_pick_default_edge(edges))
             if not node:
