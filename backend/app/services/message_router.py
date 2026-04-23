@@ -24,9 +24,13 @@ def handle_incoming_message(db: Session, message: Message, conversation: Convers
             conversation.mode = "bot"
             conversation.current_flow = None
             conversation.current_node_id = None
+            db.commit()
+            db.refresh(conversation)
+            print("[MODE RESET] bot")
             mode = "bot"
             base_log_data["mode"] = "bot"
         else:
+            print("[MODE KEEP] flow")
             print("[FLOW MODE] usuário em fluxo")
             result = handle_visual_flow_priority(db=db, message=message, conversation=conversation)
             base_log_data["mode"] = conversation.mode or mode
@@ -47,6 +51,10 @@ def handle_incoming_message(db: Session, message: Message, conversation: Convers
         has_active_visual_flow = tenant_has_active_visual_flow(db=db, tenant_id=conversation.tenant_id)
         if has_active_visual_flow:
             print("[FLOW MODE] iniciando fluxo")
+            conversation.mode = "flow"
+            db.commit()
+            db.refresh(conversation)
+            print("[MODE SET] flow")
             result = handle_visual_flow_priority(db=db, message=message, conversation=conversation)
             base_log_data["mode"] = conversation.mode or mode
             log_conversation_event(
