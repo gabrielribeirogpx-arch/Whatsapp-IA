@@ -306,6 +306,7 @@ def process_flow_engine(
                                 body_text=text,
                                 buttons=buttons,
                             )
+                            print(f"[FLOW BUTTON SEND] Botões enviados: {[b.get('label') for b in buttons]}")
                         except Exception as btn_err:
                             print(f"[FLOW BUTTON ERROR] {btn_err}")
                             _send_flow_whatsapp_message(tenant=tenant, phone=conversation_phone, text=text)
@@ -316,12 +317,16 @@ def process_flow_engine(
 
                 conversation.current_node_id = node.id
                 db.commit()
+                db.refresh(conversation)
                 break
 
             selected_edge = None
             for edge in edges:
                 condition = _normalize_text(edge.condition)
-                if condition and condition in msg:
+                if not condition:
+                    continue
+                # match exato (handleId do botão) ou por substring
+                if condition == msg or condition in msg or msg in condition:
                     selected_edge = edge
                     break
 
