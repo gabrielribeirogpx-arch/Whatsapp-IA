@@ -104,7 +104,10 @@ export function executeNode(
       return { type: 'waiting_input', nodeId: node.id };
     }
 
-    const matched = keyword.length > 0 && lastMessage.includes(keyword);
+    // Suporta múltiplas palavras separadas por vírgula
+    // Ex: "preço, valor, custo" → match se a mensagem contiver qualquer uma delas
+    const keywords = keyword.split(',').map((k) => k.trim()).filter((k) => k.length > 0);
+    const matched = keywords.length > 0 && keywords.some((kw) => lastMessage.includes(kw));
     const result = matched ? 'true' : 'false';
 
     const trueNodeId = getNextNodeByHandle(node.id, 'true', flow.edges) || undefined;
