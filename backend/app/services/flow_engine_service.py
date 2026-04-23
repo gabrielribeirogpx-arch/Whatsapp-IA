@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from app.models import Conversation, Flow, FlowEdge, FlowNode, Tenant
 from app.services.delay_queue_service import enqueue_delay
 from app.utils.phone import normalize_phone
-from app.services.whatsapp_service import WhatsAppConfigError, send_whatsapp_message
+from app.services.whatsapp_service import WhatsAppConfigError, send_whatsapp_message, send_whatsapp_interactive_buttons
 
 DEFAULT_FLOW_NAME = "__default_visual__"
 MAX_AUTO_STEPS = 10
@@ -294,11 +294,26 @@ def process_flow_engine(
                 text = (node_data.get("text") or node_data.get("content") or "").strip()
                 if not text:
                     text = _render_choice_prompt(node_data=node_data, edges=edges).strip()
+
+                buttons = node_data.get("buttons") if isinstance(node_data.get("buttons"), list) else []
+
                 if text:
-                    _send_flow_whatsapp_message(tenant=tenant, phone=conversation_phone, text=text)
+                    if buttons and len(buttons) <= 3:
+                        try:
+                            send_whatsapp_interactive_buttons(
+                                tenant=tenant,
+                                phone=conversation_phone,
+                                body_text=text,
+                                buttons=buttons,
+                            )
+                        except Exception:
+                            # fallback para texto simples se botões falharem
+                            _send_flow_whatsapp_message(tenant=tenant, phone=conversation_phone, text=text)
+                    else:
+                        _send_flow_whatsapp_message(tenant=tenant, phone=conversation_phone, text=text)
                 else:
                     print("[FLOW ERROR] node choice sem texto")
-                # Persiste o node atual como ponto de espera da resposta do usuário
+
                 conversation.current_node_id = node.id
                 db.commit()
                 break
