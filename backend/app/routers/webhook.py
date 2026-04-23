@@ -102,7 +102,7 @@ async def webhook(request: Request, db: Session = Depends(get_db)):
                 logger.info("Mensagem duplicada ignorada tenant_id=%s phone=%s message_id=%s", tenant_id, normalized_phone, message_id)
                 return {"status": "duplicate", "message_id": message_id}
 
-            if incoming_type != "text" or not incoming_message:
+            if incoming_type not in {"text", "interactive"} or not incoming_message:
                 logger.info("Evento ignorado: tipo=%s sem texto processável", incoming_type)
                 continue
 

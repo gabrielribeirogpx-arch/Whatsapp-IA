@@ -75,6 +75,13 @@ def normalize_meta_message(payload: dict[str, Any]) -> list[dict[str, str | None
                 text = ""
                 if message_type == "text":
                     text = sanitize_text(message.get("text", {}).get("body", ""))
+                elif message_type == "interactive":
+                    interactive = message.get("interactive", {})
+                    interactive_type = interactive.get("type", "")
+                    if interactive_type == "button_reply":
+                        text = sanitize_text(interactive.get("button_reply", {}).get("id", ""))
+                    elif interactive_type == "list_reply":
+                        text = sanitize_text(interactive.get("list_reply", {}).get("id", ""))
 
                 phone = sanitize_phone(message.get("from", "") or fallback_phone)
                 if not phone:
