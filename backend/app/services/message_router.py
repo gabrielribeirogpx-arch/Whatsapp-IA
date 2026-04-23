@@ -28,7 +28,9 @@ def handle_incoming_message(db: Session, message: Message, conversation: Convers
         )
         return None
     elif mode == "bot":
-        if tenant_has_active_visual_flow(db=db, tenant_id=conversation.tenant_id):
+        has_active_visual_flow = tenant_has_active_visual_flow(db=db, tenant_id=conversation.tenant_id)
+        if has_active_visual_flow:
+            print("[FLOW PRIORITY] executando fluxo antes do bot")
             result = handle_visual_flow_priority(db=db, message=message, conversation=conversation)
             log_conversation_event(
                 db,

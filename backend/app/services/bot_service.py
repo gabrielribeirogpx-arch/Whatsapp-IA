@@ -353,9 +353,6 @@ def handle_bot(db: Session, message: Message, conversation) -> dict[str, str | b
         print("[BOT] envio automático bloqueado: modo diferente de bot")
         return False
 
-    if tenant_has_active_visual_flow(db=db, tenant_id=conversation.tenant_id):
-        return handle_visual_flow_priority(db=db, message=message, conversation=conversation)
-
     tenant = db.execute(select(Tenant).where(Tenant.id == conversation.tenant_id)).scalars().first()
 
     selected_response: str | None = None
@@ -513,5 +510,10 @@ def handle_bot_activation(db: Session, conversation: Conversation) -> bool:
 
     if conversation.last_bot_triggered_message_id == last_message.id:
         return False
+
+    if tenant_has_active_visual_flow(db=db, tenant_id=conversation.tenant_id):
+        print("[FLOW PRIORITY] executando fluxo antes do bot")
+        handle_visual_flow_priority(db=db, message=last_message, conversation=conversation)
+        return True
 
     return bool(handle_bot(db=db, message=last_message, conversation=conversation))
