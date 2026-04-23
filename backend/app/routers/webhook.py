@@ -12,6 +12,7 @@ from app.schemas.chat import MessageOut
 from app.services.contact_sync_service import ensure_conversation_contact_link, upsert_contact_for_phone
 from app.services.conversation_service import get_or_create_conversation
 from app.services.message_router import handle_incoming_message
+from app.services.idempotency_service import register_processed_message
 from app.services.message_service import normalize_meta_message
 from app.services.realtime_service import sse_broker
 from app.models import Tenant
@@ -95,6 +96,11 @@ async def webhook(request: Request, db: Session = Depends(get_db)):
             tenant_id = tenant.id
             incoming["tenant_id"] = str(tenant_id)
             logger.info("Tenant resolvido tenant_id=%s slug=%s", tenant.id, tenant.slug)
+            message_id = (incoming.get("message_id") or "").strip()
+            was_inserted = register_processed_message(db=db, tenant_id=tenant_id, message_id=message_id)
+            if not was_inserted:
+                logger.info("Mensagem duplicada ignorada tenant_id=%s phone=%s message_id=%s", tenant_id, normalized_phone, message_id)
+                return {"status": "duplicate", "message_id": message_id}
 
             if incoming_type != "text" or not incoming_message:
                 logger.info("Evento ignorado: tipo=%s sem texto processável", incoming_type)

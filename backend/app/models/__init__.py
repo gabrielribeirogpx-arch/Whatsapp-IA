@@ -10,5 +10,6 @@ from app.models.pipeline_stage import PipelineStage
 from app.models.bot_rule import BotRule
 from app.models.conversation_log import ConversationLog
 from app.models.flow import Flow, FlowStep, FlowNode, FlowEdge
+from app.models.processed_message import ProcessedMessage
 
-__all__ = ["Tenant", "AIConfig", "Conversation", "Contact", "Message", "Product", "KnowledgeBase", "KnowledgeChunk", "Lead", "PipelineStage", "BotRule", "ConversationLog", "Flow", "FlowStep", "FlowNode", "FlowEdge"]
+__all__ = ["Tenant", "AIConfig", "Conversation", "Contact", "Message", "Product", "KnowledgeBase", "KnowledgeChunk", "Lead", "PipelineStage", "BotRule", "ConversationLog", "Flow", "FlowStep", "FlowNode", "FlowEdge", "ProcessedMessage"]
