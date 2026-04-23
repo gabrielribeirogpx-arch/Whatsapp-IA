@@ -15,7 +15,9 @@ type ChoiceNodeData = {
   content?: string;
   buttons?: ChoiceButton[];
   running?: boolean;
+  isStart?: boolean;
   onChange?: (nodeId: string, patch: Record<string, unknown>) => void;
+  onToggleStart?: (nodeId: string) => void;
 };
 
 const toHandleId = (value: string, fallback: string) => {
@@ -135,6 +137,31 @@ export default function ChoiceNode({ id, data, selected }: NodeProps) {
         <span className="flow-node-badge" style={{ background: '#fff7ed', color: '#c2410c' }}>
           CHOICE
         </span>
+        <button
+          type="button"
+          title={nodeData.isStart ? 'Node inicial' : 'Marcar como início'}
+          onClick={(e) => {
+            e.stopPropagation();
+            nodeData.onToggleStart?.(id);
+          }}
+          style={{
+            marginLeft: 'auto',
+            background: nodeData.isStart ? '#16A34A' : 'transparent',
+            border: nodeData.isStart ? 'none' : '1px solid #D1D5DB',
+            borderRadius: 6,
+            padding: '2px 6px',
+            cursor: 'pointer',
+            fontSize: 10,
+            fontWeight: 600,
+            color: nodeData.isStart ? '#fff' : '#9CA3AF',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 3,
+            transition: 'all 0.15s',
+          }}
+        >
+          {nodeData.isStart ? '▶ Início' : '▶'}
+        </button>
       </div>
 
       <div className="flow-node-body">

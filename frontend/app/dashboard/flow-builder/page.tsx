@@ -150,6 +150,18 @@ export default function FlowBuilderPage() {
     );
   }, [setNodes]);
 
+  const toggleStartNode = useCallback((nodeId: string) => {
+    setNodes((prev) =>
+      prev.map((node) => ({
+        ...node,
+        data: {
+          ...node.data,
+          isStart: node.id === nodeId ? !node.data.isStart : false,
+        },
+      }))
+    );
+  }, [setNodes]);
+
   const buildFlowNode = useCallback(
     (node: FlowNodePayload): Node => ({
       id: node.id,
@@ -160,9 +172,10 @@ export default function FlowBuilderPage() {
         buttons: node.type === 'choice' ? normalizeChoiceButtons(node.id, node.data?.buttons) : node.data?.buttons,
         label: node.data?.label || node.data?.content || `Node ${node.id}`,
         onChange: updateNodeData,
+        onToggleStart: toggleStartNode,
       },
     }),
-    [updateNodeData],
+    [toggleStartNode, updateNodeData],
   );
 
   const applyLayoutAndSetFlow = useCallback((nextNodes: Node[], nextEdges: Edge[]) => {
@@ -466,12 +479,13 @@ export default function FlowBuilderPage() {
           label: preset.label,
           ...preset.data,
           onChange: updateNodeData,
+          onToggleStart: toggleStartNode,
         },
       };
 
       setNodes((prev) => [...prev, newNode]);
     },
-    [reactFlowInstance, isSimulatorOpen, setNodes, updateNodeData],
+    [reactFlowInstance, isSimulatorOpen, setNodes, toggleStartNode, updateNodeData],
   );
 
   const saveFlow = useCallback(async () => {
@@ -482,7 +496,7 @@ export default function FlowBuilderPage() {
     setIsSaving(true);
     try {
       const payloadNodes: FlowNodePayload[] = nodes.map((node) => {
-        const { onChange, ...restData } = (node.data || {}) as FlowNodePayload['data'];
+        const { onChange, onToggleStart, ...restData } = (node.data || {}) as FlowNodePayload['data'] & { onToggleStart?: unknown };
         return {
           id: node.id,
           type: node.type || 'message',
@@ -536,9 +550,10 @@ export default function FlowBuilderPage() {
       data: {
         ...node.data,
         running: node.id === currentNodeId,
+        onToggleStart: toggleStartNode,
       },
     })),
-    [currentNodeId, nodes],
+    [currentNodeId, nodes, toggleStartNode],
   );
 
   const decoratedEdges = useMemo(
@@ -585,8 +600,9 @@ export default function FlowBuilderPage() {
               setActiveEdgeIds([]);
               setIsTyping(false);
 
+              const markedStart = nodes.find((node) => node.data.isStart);
               const incomingTargets = new Set(edges.map((edge) => edge.target));
-              const startNode = nodes.find((node) => !incomingTargets.has(node.id)) || nodes[0];
+              const startNode = markedStart || nodes.find((node) => !incomingTargets.has(node.id)) || nodes[0];
               if (startNode) {
                 runFlowStep(startNode.id);
               }
@@ -822,8 +838,9 @@ export default function FlowBuilderPage() {
               simulationStartedRef.current = false;
 
               if (nodes.length > 0) {
+                const markedStart = nodes.find((node) => node.data.isStart);
                 const incomingTargets = new Set(edges.map((e) => e.target));
-                const startNode = nodes.find((n) => !incomingTargets.has(n.id)) || nodes[0];
+                const startNode = markedStart || nodes.find((n) => !incomingTargets.has(n.id)) || nodes[0];
                 if (startNode) {
                   simulationStartedRef.current = true;
                   runFlowStep(startNode.id);

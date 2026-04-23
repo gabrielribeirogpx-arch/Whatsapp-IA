@@ -6,7 +6,9 @@ type ActionNodeData = {
   label?: string;
   action?: string;
   running?: boolean;
+  isStart?: boolean;
   onChange?: (nodeId: string, patch: Record<string, unknown>) => void;
+  onToggleStart?: (nodeId: string) => void;
 };
 
 export default function ActionNode({ id, data, selected }: NodeProps) {
@@ -35,6 +37,31 @@ export default function ActionNode({ id, data, selected }: NodeProps) {
         >
           ACT
         </span>
+        <button
+          type="button"
+          title={nodeData.isStart ? 'Node inicial' : 'Marcar como início'}
+          onClick={(e) => {
+            e.stopPropagation();
+            nodeData.onToggleStart?.(id);
+          }}
+          style={{
+            marginLeft: 'auto',
+            background: nodeData.isStart ? '#16A34A' : 'transparent',
+            border: nodeData.isStart ? 'none' : '1px solid #D1D5DB',
+            borderRadius: 6,
+            padding: '2px 6px',
+            cursor: 'pointer',
+            fontSize: 10,
+            fontWeight: 600,
+            color: nodeData.isStart ? '#fff' : '#9CA3AF',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 3,
+            transition: 'all 0.15s',
+          }}
+        >
+          {nodeData.isStart ? '▶ Início' : '▶'}
+        </button>
       </div>
 
       {/* Corpo */}

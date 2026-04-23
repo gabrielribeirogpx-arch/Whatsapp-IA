@@ -178,6 +178,7 @@ export type FlowNodePayload = {
     buttons?: FlowChoiceButton[];
     condition?: string;
     action?: string;
+    isStart?: boolean;
     metadata?: Record<string, unknown>;
     onChange?: (nodeId: string, patch: Record<string, unknown>) => void;
   };
