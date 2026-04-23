@@ -4,7 +4,6 @@ import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 
 import DashboardChart from '../../components/DashboardChart';
-import { IconChats, IconUsers } from '../../components/icons';
 import { apiFetch } from '../../lib/api';
 import { Conversation } from '../../lib/types';
 
@@ -70,218 +69,104 @@ export default function DashboardPage() {
     }).length;
   }, [uniqueConversations]);
 
-  const userName = 'Gabriel Lima';
   const messagesLast7Days = data?.charts?.messages_last_7_days;
 
   return (
-    <div style={{ display: 'flex', height: '100vh', background: '#F7F8F7', fontFamily: 'Inter, -apple-system, sans-serif' }}>
-      {/* Sidebar com ícones */}
-      <nav
-        style={{
-          width: 56,
-          background: '#FFFFFF',
-          borderRight: '1px solid #E8EAE6',
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          padding: '12px 0',
-          gap: 4,
-          flexShrink: 0,
-        }}
-      >
-        {/* Logo */}
-        <div style={{ marginBottom: 16, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <img
-            src="/logo.svg"
-            alt="Logo"
-            width={36}
-            height={36}
-            style={{ borderRadius: 8, objectFit: 'contain' }}
-          />
+    <div style={{ display: 'flex', minHeight: '100vh', background: '#F7F8F7', fontFamily: 'Inter, -apple-system, sans-serif' }}>
+      {/* Sidebar */}
+      <nav className="dash-sidebar">
+        <div className="dash-sidebar-logo">
+          <img src="/Logo.svg" alt="Logo" width={32} height={32} style={{ objectFit: 'contain' }} />
         </div>
 
-        {/* Nav items */}
-        {[
-          {
-            href: '/dashboard',
-            label: 'Dashboard',
-            active: true,
-            svg: (
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <rect x="3" y="3" width="7" height="7" />
-                <rect x="14" y="3" width="7" height="7" />
-                <rect x="3" y="14" width="7" height="7" />
-                <rect x="14" y="14" width="7" height="7" />
-              </svg>
-            ),
-          },
-          {
-            href: '/chat',
-            label: 'Inbox',
-            svg: (
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-              </svg>
-            ),
-          },
-          {
-            href: '/crm',
-            label: 'Clientes',
-            svg: (
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
-                <circle cx="9" cy="7" r="4" />
-                <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
-                <path d="M16 3.13a4 4 0 0 1 0 7.75" />
-              </svg>
-            ),
-          },
-          {
-            href: '/pipeline',
-            label: 'Pipeline',
-            svg: (
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <line x1="18" y1="20" x2="18" y2="10" />
-                <line x1="12" y1="20" x2="12" y2="4" />
-                <line x1="6" y1="20" x2="6" y2="14" />
-              </svg>
-            ),
-          },
-          {
-            href: '/products',
-            label: 'Produtos',
-            svg: (
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
-              </svg>
-            ),
-          },
-          {
-            href: '/knowledge',
-            label: 'Knowledge',
-            svg: (
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z" />
-                <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z" />
-              </svg>
-            ),
-          },
-          {
-            href: '/dashboard/flow-builder',
-            label: 'Flow Builder',
-            svg: (
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
-              </svg>
-            ),
-          },
-        ].map((item) => (
-          <Link
-            key={item.href}
-            href={item.href}
-            title={item.label}
-            style={{
-              width: 36,
-              height: 36,
-              borderRadius: 8,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              textDecoration: 'none',
-              background: item.active ? '#F0FDF4' : 'transparent',
-              color: item.active ? '#16A34A' : '#9CA3AF',
-              transition: 'background 0.15s, color 0.15s',
-              border: item.active ? '1px solid #BBF7D0' : '1px solid transparent',
-            }}
-          >
-            {item.svg}
-          </Link>
-        ))}
+        <span className="dash-nav-section">Principal</span>
 
-        {/* Avatar no bottom */}
-        <div style={{ marginTop: 'auto', marginBottom: 4 }}>
-          <div
-            style={{
-              width: 32,
-              height: 32,
-              borderRadius: '50%',
-              background: '#16A34A',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontSize: 12,
-              fontWeight: 700,
-              color: '#fff',
-            }}
-          >
-            GL
+        <Link href="/dashboard" className="dash-nav-item active">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+          Dashboard
+        </Link>
+
+        <Link href="/chat" className="dash-nav-item">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+          Inbox
+        </Link>
+
+        <Link href="/crm" className="dash-nav-item">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+          Clientes
+        </Link>
+
+        <Link href="/pipeline" className="dash-nav-item">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+          Pipeline
+        </Link>
+
+        <div className="dash-nav-divider" />
+        <span className="dash-nav-section">Ferramentas</span>
+
+        <Link href="/products" className="dash-nav-item">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>
+          Produtos
+        </Link>
+
+        <Link href="/knowledge" className="dash-nav-item">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
+          Knowledge
+        </Link>
+
+        <Link href="/dashboard/flow-builder" className="dash-nav-item">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+          Flow Builder
+        </Link>
+
+        {/* Bottom: avatar */}
+        <div style={{ marginTop: 'auto' }}>
+          <div className="dash-nav-divider" />
+          <div className="dash-nav-item" style={{ gap: 10 }}>
+            <div className="dash-avatar">GL</div>
+            <div>
+              <div style={{ fontSize: 12, fontWeight: 600, color: '#111827' }}>Gabriel Lima</div>
+              <div style={{ fontSize: 11, color: '#9CA3AF' }}>Admin</div>
+            </div>
           </div>
         </div>
       </nav>
 
       {/* Conteúdo principal */}
-      <main style={{ flex: 1, overflowY: 'auto', padding: '28px 32px' }}>
+      <main style={{ flex: 1, overflowY: 'auto', padding: '32px 36px' }}>
         {/* Header */}
         <div style={{ marginBottom: 28 }}>
-          <h1 style={{ fontSize: 20, fontWeight: 600, color: '#111827', margin: 0 }}>{userName}</h1>
-          <p style={{ fontSize: 13, color: '#6B7280', margin: '2px 0 0' }}>Sua central de conversas</p>
+          <h1 style={{ fontSize: 22, fontWeight: 700, color: '#111827', margin: '0 0 2px' }}>
+            Bom dia, Gabriel 👋
+          </h1>
+          <p style={{ fontSize: 13, color: '#6B7280', margin: 0 }}>
+            Aqui está o resumo das suas conversas hoje.
+          </p>
         </div>
 
         {/* Cards de métricas */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16, marginBottom: 28 }}>
-          {[
-            {
-              label: 'Conversas ativas',
-              value: uniqueConversations.length,
-              desc: 'Contatos com histórico recente na inbox.',
-            },
-            { label: 'Leads ativos', value: humanInProgress, desc: 'Conversas em modo humano neste momento.' },
-            { label: 'Mensagens hoje', value: answeredToday, desc: 'Mensagens atualizadas no dia atual.' },
-          ].map((card) => (
-            <div
-              key={card.label}
-              style={{
-                background: '#FFFFFF',
-                border: '1px solid #E8EAE6',
-                borderRadius: 12,
-                padding: '20px 24px',
-                boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
-              }}
-            >
-              <p
-                style={{
-                  fontSize: 11,
-                  fontWeight: 600,
-                  color: '#9CA3AF',
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.06em',
-                  margin: '0 0 8px',
-                }}
-              >
-                {card.label}
-              </p>
-              <p style={{ fontSize: 32, fontWeight: 700, color: '#111827', margin: '0 0 4px', lineHeight: 1 }}>
-                {card.value}
-              </p>
-              <p style={{ fontSize: 12, color: '#9CA3AF', margin: 0 }}>{card.desc}</p>
-            </div>
-          ))}
+          <div className="dash-metric-card">
+            <p className="dash-metric-label">Conversas ativas</p>
+            <p className="dash-metric-value">{uniqueConversations.length}</p>
+            <p className="dash-metric-desc">Contatos com histórico recente na inbox.</p>
+          </div>
+          <div className="dash-metric-card">
+            <p className="dash-metric-label">Leads ativos</p>
+            <p className="dash-metric-value">{humanInProgress}</p>
+            <p className="dash-metric-desc">Conversas em modo humano neste momento.</p>
+          </div>
+          <div className="dash-metric-card">
+            <p className="dash-metric-label">Mensagens hoje</p>
+            <p className="dash-metric-value">{answeredToday}</p>
+            <p className="dash-metric-desc">Mensagens atualizadas no dia atual.</p>
+          </div>
         </div>
 
         {/* Gráfico */}
         {messagesLast7Days && (
-          <div
-            style={{
-              background: '#FFFFFF',
-              border: '1px solid #E8EAE6',
-              borderRadius: 12,
-              padding: '20px 24px',
-              boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
-            }}
-          >
-            <p style={{ fontSize: 13, fontWeight: 600, color: '#374151', margin: '0 0 16px' }}>
-              Mensagens (últimos 7 dias)
-            </p>
+          <div className="dash-chart-card">
+            <p className="dash-chart-title">Mensagens — últimos 7 dias</p>
             <DashboardChart data={messagesLast7Days} />
           </div>
         )}

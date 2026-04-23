@@ -1171,3 +1171,138 @@ input {
   stroke: #22c55e;
   stroke-width: 2;
 }
+
+/* ── DASHBOARD SIDEBAR PREMIUM ──────────────────────── */
+.dash-sidebar {
+  width: 200px;
+  background: #ffffff;
+  border-right: 1px solid #E8EAE6;
+  display: flex;
+  flex-direction: column;
+  padding: 16px 10px;
+  gap: 2px;
+  flex-shrink: 0;
+  height: 100vh;
+  position: sticky;
+  top: 0;
+}
+
+.dash-sidebar-logo {
+  display: flex;
+  align-items: center;
+  padding: 4px 8px 20px;
+}
+
+.dash-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #6B7280;
+  text-decoration: none;
+  transition: background 0.15s, color 0.15s;
+  cursor: pointer;
+  border: none;
+  background: transparent;
+  width: 100%;
+  text-align: left;
+}
+
+.dash-nav-item:hover {
+  background: #F3F4F6;
+  color: #111827;
+}
+
+.dash-nav-item.active {
+  background: #F0FDF4;
+  color: #16A34A;
+  font-weight: 600;
+}
+
+.dash-nav-item svg {
+  flex-shrink: 0;
+}
+
+.dash-nav-section {
+  font-size: 10px;
+  font-weight: 600;
+  color: #9CA3AF;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  padding: 12px 10px 4px;
+}
+
+.dash-nav-divider {
+  height: 1px;
+  background: #F3F4F6;
+  margin: 8px 0;
+}
+
+.dash-avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: #16A34A;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 700;
+  color: #fff;
+  flex-shrink: 0;
+}
+
+.dash-metric-card {
+  background: #fff;
+  border: 1px solid #E8EAE6;
+  border-radius: 12px;
+  padding: 20px 24px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+  transition: box-shadow 0.2s, transform 0.2s;
+}
+
+.dash-metric-card:hover {
+  box-shadow: 0 4px 16px rgba(0,0,0,0.08);
+  transform: translateY(-1px);
+}
+
+.dash-metric-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: #9CA3AF;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin: 0 0 8px;
+}
+
+.dash-metric-value {
+  font-size: 36px;
+  font-weight: 700;
+  color: #111827;
+  margin: 0 0 4px;
+  line-height: 1;
+}
+
+.dash-metric-desc {
+  font-size: 12px;
+  color: #9CA3AF;
+  margin: 0;
+}
+
+.dash-chart-card {
+  background: #fff;
+  border: 1px solid #E8EAE6;
+  border-radius: 12px;
+  padding: 20px 24px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+}
+
+.dash-chart-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #374151;
+  margin: 0 0 16px;
+}
