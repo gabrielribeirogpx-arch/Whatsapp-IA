@@ -1174,30 +1174,69 @@ input {
 
 /* ── DASHBOARD SIDEBAR PREMIUM ──────────────────────── */
 .dash-sidebar {
-  width: 200px;
+  width: 56px;
   background: #ffffff;
   border-right: 1px solid #E8EAE6;
   display: flex;
   flex-direction: column;
-  padding: 16px 10px;
+  padding: 12px 8px;
   gap: 2px;
   flex-shrink: 0;
   height: 100vh;
   position: sticky;
   top: 0;
+  overflow: hidden;
+  transition: width 0.22s cubic-bezier(0.4, 0, 0.2, 1);
+  z-index: 100;
+}
+
+.dash-sidebar:hover {
+  width: 200px;
+  box-shadow: 2px 0 16px rgba(0,0,0,0.06);
 }
 
 .dash-sidebar-logo {
   display: flex;
   align-items: center;
-  padding: 4px 8px 20px;
+  height: 40px;
+  margin-bottom: 16px;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.dash-sidebar-logo .logo-icon {
+  width: 32px;
+  height: 32px;
+  object-fit: contain;
+  flex-shrink: 0;
+  transition: opacity 0.15s;
+}
+
+.dash-sidebar-logo .logo-full {
+  height: 28px;
+  object-fit: contain;
+  margin-left: 8px;
+  opacity: 0;
+  width: 0;
+  transition: opacity 0.2s, width 0.2s;
+  white-space: nowrap;
+}
+
+.dash-sidebar:hover .logo-icon {
+  opacity: 0;
+  width: 0;
+}
+
+.dash-sidebar:hover .logo-full {
+  opacity: 1;
+  width: 120px;
 }
 
 .dash-nav-item {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 8px 10px;
+  padding: 8px;
   border-radius: 8px;
   font-size: 13px;
   font-weight: 500;
@@ -1209,6 +1248,8 @@ input {
   background: transparent;
   width: 100%;
   text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
 }
 
 .dash-nav-item:hover {
@@ -1224,6 +1265,18 @@ input {
 
 .dash-nav-item svg {
   flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+}
+
+.dash-nav-label {
+  opacity: 0;
+  transition: opacity 0.15s;
+  white-space: nowrap;
+}
+
+.dash-sidebar:hover .dash-nav-label {
+  opacity: 1;
 }
 
 .dash-nav-section {
@@ -1232,7 +1285,17 @@ input {
   color: #9CA3AF;
   text-transform: uppercase;
   letter-spacing: 0.08em;
-  padding: 12px 10px 4px;
+  padding: 12px 8px 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  opacity: 0;
+  height: 0;
+  transition: opacity 0.15s, height 0.15s;
+}
+
+.dash-sidebar:hover .dash-nav-section {
+  opacity: 1;
+  height: auto;
 }
 
 .dash-nav-divider {
@@ -1306,3 +1369,4 @@ input {
   color: #374151;
   margin: 0 0 16px;
 }
+
