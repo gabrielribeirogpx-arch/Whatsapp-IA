@@ -531,10 +531,19 @@ export default function FlowBuilderPage() {
       // Preserva as posições atuais dos nodes em tela após salvar
       // Só atualiza edges vindas da API, mantendo nodes na posição do usuário
       const positionMap = new Map(nodes.map((n) => [n.id, n.position]));
+      // Preserva isStart do estado local — a API pode não devolver esse campo
+      const isStartMap = new Map(nodes.map((n) => [n.id, (n.data as { isStart?: boolean }).isStart ?? false]));
       const savedNodes = (result.nodes || []).map((n: FlowNodePayload) => {
         const built = buildFlowNode(n);
         const currentPos = positionMap.get(built.id);
-        return currentPos ? { ...built, position: currentPos } : built;
+        const isStart = isStartMap.get(built.id) ?? (built.data as { isStart?: boolean }).isStart ?? false;
+        return {
+          ...(currentPos ? { ...built, position: currentPos } : built),
+          data: {
+            ...built.data,
+            isStart,
+          },
+        };
       });
       const savedEdges = (result.edges || []).map(buildFlowEdge);
       setNodes(savedNodes);
