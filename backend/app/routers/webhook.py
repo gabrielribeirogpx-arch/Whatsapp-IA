@@ -73,6 +73,7 @@ async def webhook(request: Request, db: Session = Depends(get_db)):
             normalized_phone = normalize_phone(phone)
             incoming_message = incoming.get("text") or ""
             incoming_type = incoming.get("type") or "unknown"
+            logger.info("[WEBHOOK DEBUG] type=%s message=%s", incoming_type, incoming_message)
             contact_name = incoming.get("name")
             phone_number_id = incoming.get("phone_number_id")
             logger.info(
