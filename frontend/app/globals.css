@@ -1198,7 +1198,7 @@ input {
 .dash-sidebar-logo {
   display: flex;
   align-items: center;
-  height: 40px;
+  height: 72px;
   margin-bottom: 16px;
   overflow: hidden;
   flex-shrink: 0;
@@ -1213,8 +1213,9 @@ input {
 }
 
 .dash-sidebar-logo .logo-full {
-  height: 28px;
+  height: 64px;
   object-fit: contain;
+  max-width: 100%;
   margin-left: 8px;
   opacity: 0;
   width: 0;
@@ -1229,7 +1230,7 @@ input {
 
 .dash-sidebar:hover .logo-full {
   opacity: 1;
-  width: 120px;
+  width: 160px;
 }
 
 .dash-nav-item {
