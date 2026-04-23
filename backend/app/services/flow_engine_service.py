@@ -37,6 +37,24 @@ def _extract_node_data(node: FlowNode) -> dict[str, Any]:
     }
 
 
+def tenant_has_active_visual_flow(db: Session, tenant_id: uuid.UUID) -> bool:
+    flow = db.execute(
+        select(Flow.id)
+        .where(Flow.tenant_id == tenant_id)
+        .order_by(Flow.created_at.asc(), Flow.id.asc())
+        .limit(1)
+    ).scalar_one_or_none()
+    if not flow:
+        return False
+
+    node = db.execute(
+        select(FlowNode.id)
+        .where(FlowNode.tenant_id == tenant_id, FlowNode.flow_id == flow)
+        .limit(1)
+    ).scalar_one_or_none()
+    return bool(node)
+
+
 def _get_or_create_visual_flow(db: Session, tenant_id: uuid.UUID) -> Flow:
     flow = db.execute(
         select(Flow)
