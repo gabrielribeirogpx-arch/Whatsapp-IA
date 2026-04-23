@@ -113,12 +113,32 @@ def _pick_default_edge(edges: list[FlowEdge]) -> FlowEdge | None:
     return edges[0] if edges else None
 
 
+def _set_flow_mode(db: Session, conversation: Conversation, flow_id: uuid.UUID, node_id: uuid.UUID) -> None:
+    conversation.mode = "flow"
+    conversation.current_flow = flow_id
+    conversation.current_node_id = node_id
+    db.commit()
+    db.refresh(conversation)
+    logger.info("[MODE SET] flow conversation_id=%s node_id=%s", conversation.id, node_id)
+
+
+def _keep_flow_mode(conversation: Conversation) -> None:
+    logger.info("[MODE KEEP] flow conversation_id=%s node_id=%s", conversation.id, conversation.current_node_id)
+
+
+def _reset_to_bot_mode(db: Session, conversation: Conversation, reason: str) -> None:
+    conversation.mode = "bot"
+    conversation.current_flow = None
+    conversation.current_node_id = None
+    db.commit()
+    db.refresh(conversation)
+    logger.info("[MODE RESET] bot conversation_id=%s reason=%s", conversation.id, reason)
+
+
 def _advance_to_edge_target(db: Session, conversation: Conversation, edge: FlowEdge | None) -> FlowNode | None:
     if not edge:
         logger.info("Flow sem próxima aresta, encerrando fluxo conversation_id=%s", conversation.id)
-        conversation.mode = "bot"
-        conversation.current_flow = None
-        conversation.current_node_id = None
+        _reset_to_bot_mode(db=db, conversation=conversation, reason="flow_finished_no_next_edge")
         return None
 
     next_node = _get_node(db=db, node_id=edge.target, tenant_id=conversation.tenant_id)
@@ -167,9 +187,7 @@ def process_flow_engine(
     flow = _get_or_create_visual_flow(db=db, tenant_id=conversation.tenant_id)
 
     if force_node:
-        conversation.mode = "flow"
-        conversation.current_flow = flow.id
-        conversation.current_node_id = force_node
+        _set_flow_mode(db=db, conversation=conversation, flow_id=flow.id, node_id=force_node)
         logger.info(
             "Flow retomado após delay conversation_id=%s force_node=%s",
             conversation.id,
@@ -180,25 +198,22 @@ def process_flow_engine(
         if not start_node:
             return None
 
-        conversation.mode = "flow"
-        conversation.current_flow = flow.id
-        conversation.current_node_id = start_node.id
+        _set_flow_mode(db=db, conversation=conversation, flow_id=flow.id, node_id=start_node.id)
 
     if conversation.mode == "flow" and conversation.current_node_id is None:
         logger.warning(
             "Flow inconsistente sem node_id, resetando para bot conversation_id=%s",
             conversation.id,
         )
-        conversation.mode = "bot"
-        conversation.current_flow = None
-        conversation.current_node_id = None
+        _reset_to_bot_mode(db=db, conversation=conversation, reason="current_node_none")
         return None
+
+    if conversation.mode == "flow":
+        _keep_flow_mode(conversation)
 
     node = _get_node(db=db, node_id=conversation.current_node_id, tenant_id=conversation.tenant_id)
     if not node:
-        conversation.mode = "bot"
-        conversation.current_flow = None
-        conversation.current_node_id = None
+        _reset_to_bot_mode(db=db, conversation=conversation, reason="flow_error_node_not_found")
         return None
 
     msg = _normalize_text(message_text)
@@ -285,9 +300,7 @@ def process_flow_engine(
             next_edge = _pick_default_edge(edges)
             if not next_edge:
                 logger.info("Delay sem próxima aresta conversation_id=%s node_id=%s", conversation.id, node.id)
-                conversation.mode = "bot"
-                conversation.current_flow = None
-                conversation.current_node_id = None
+                _reset_to_bot_mode(db=db, conversation=conversation, reason="flow_finished_delay_without_next")
                 break
 
             enqueue_delay(
@@ -296,9 +309,8 @@ def process_flow_engine(
                 next_node_id=next_edge.target,
                 seconds=delay_seconds,
             )
-            conversation.mode = "bot"
-            conversation.current_flow = None
-            conversation.current_node_id = None
+            conversation.current_node_id = next_edge.target
+            _keep_flow_mode(conversation)
             break
 
         if node_type == "action":
