@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from app.models import Conversation, Flow, FlowEdge, FlowNode, Tenant
 from app.services.delay_queue_service import enqueue_delay
 from app.utils.phone import normalize_phone
-from app.services.whatsapp_service import WhatsAppConfigError, send_whatsapp_message, send_whatsapp_interactive_buttons
+from app.services.whatsapp_service import WhatsAppConfigError, send_whatsapp_message
 
 DEFAULT_FLOW_NAME = "__default_visual__"
 MAX_AUTO_STEPS = 10
@@ -294,39 +294,16 @@ def process_flow_engine(
                 text = (node_data.get("text") or node_data.get("content") or "").strip()
                 if not text:
                     text = _render_choice_prompt(node_data=node_data, edges=edges).strip()
-
-                buttons = node_data.get("buttons") if isinstance(node_data.get("buttons"), list) else []
-
                 if text:
-                    if buttons and len(buttons) <= 3:
-                        try:
-                            send_whatsapp_interactive_buttons(
-                                tenant=tenant,
-                                phone=conversation_phone,
-                                body_text=text,
-                                buttons=buttons,
-                            )
-                            print(f"[FLOW BUTTON SEND] Botões enviados: {[b.get('label') for b in buttons]}")
-                        except Exception as btn_err:
-                            print(f"[FLOW BUTTON ERROR] {btn_err}")
-                            _send_flow_whatsapp_message(tenant=tenant, phone=conversation_phone, text=text)
-                    else:
-                        _send_flow_whatsapp_message(tenant=tenant, phone=conversation_phone, text=text)
+                    _send_flow_whatsapp_message(tenant=tenant, phone=conversation_phone, text=text)
                 else:
                     print("[FLOW ERROR] node choice sem texto")
-
-                conversation.current_node_id = node.id
-                db.commit()
-                db.refresh(conversation)
                 break
 
             selected_edge = None
             for edge in edges:
                 condition = _normalize_text(edge.condition)
-                if not condition:
-                    continue
-                # match exato (handleId do botão) ou por substring
-                if condition == msg or condition in msg or msg in condition:
+                if condition and condition in msg:
                     selected_edge = edge
                     break
 
@@ -568,15 +545,9 @@ def save_flow_graph(db: Session, tenant_id: uuid.UUID, flow_id: str, nodes: list
             continue
 
         data = item.get("data") or {}
-        condition = (
-            (data.get("condition") if isinstance(data, dict) else None)
-            or (data.get("sourceHandle") if isinstance(data, dict) else None)
-            or item.get("label")
-            or item.get("sourceHandle")
-        ) or None
-        # Remove string vazia
-        if condition == "":
-            condition = None
+        condition = data.get("condition") if isinstance(data, dict) else None
+        if not condition:
+            condition = item.get("label")
 
         edge_id = uuid.uuid4()
         if item.get("id"):
