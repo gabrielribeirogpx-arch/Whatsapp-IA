@@ -600,7 +600,7 @@ export default function FlowBuilderPage() {
               setActiveEdgeIds([]);
               setIsTyping(false);
 
-              const markedStart = nodes.find((node) => node.data.isStart);
+              const markedStart = nodes.find((node) => (node.data as { isStart?: boolean }).isStart);
               const incomingTargets = new Set(edges.map((edge) => edge.target));
               const startNode = markedStart || nodes.find((node) => !incomingTargets.has(node.id)) || nodes[0];
               if (startNode) {
@@ -838,7 +838,7 @@ export default function FlowBuilderPage() {
               simulationStartedRef.current = false;
 
               if (nodes.length > 0) {
-                const markedStart = nodes.find((node) => node.data.isStart);
+                const markedStart = nodes.find((node) => (node.data as { isStart?: boolean }).isStart);
                 const incomingTargets = new Set(edges.map((e) => e.target));
                 const startNode = markedStart || nodes.find((n) => !incomingTargets.has(n.id)) || nodes[0];
                 if (startNode) {
