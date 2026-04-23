@@ -22,6 +22,7 @@ export type Flow = {
 export type FlowResponse =
   | { type: 'message'; text: string; nextNodeId?: string }
   | { type: 'choice'; text: string; buttons: any[] }
+  | { type: 'waiting_input'; nodeId: string }
   | { type: 'condition'; result: 'true' | 'false'; trueNodeId?: string; falseNodeId?: string }
   | { type: 'delay'; seconds: number; nextNodeId?: string }
   | { type: 'action'; actionName: string; nextNodeId?: string }
@@ -84,24 +85,23 @@ export function executeNode(
     };
   }
 
-  // CONDITION — avalia se a última mensagem do usuário contém a palavra-chave
+  // CONDITION — se não há lastUserMessage, para e aguarda input do usuário
   if (node.type === 'condition') {
     const keyword = (node.data?.condition || '').toLowerCase().trim();
     const lastMessage = (context?.lastUserMessage || '').toLowerCase().trim();
 
-    // Match: verifica se a mensagem contém a palavra-chave
+    // Sem mensagem do usuário ainda — para o fluxo e aguarda input
+    if (!lastMessage) {
+      return { type: 'waiting_input', nodeId: node.id };
+    }
+
     const matched = keyword.length > 0 && lastMessage.includes(keyword);
     const result = matched ? 'true' : 'false';
 
     const trueNodeId = getNextNodeByHandle(node.id, 'true', flow.edges) || undefined;
     const falseNodeId = getNextNodeByHandle(node.id, 'false', flow.edges) || undefined;
 
-    return {
-      type: 'condition',
-      result,
-      trueNodeId,
-      falseNodeId,
-    };
+    return { type: 'condition', result, trueNodeId, falseNodeId };
   }
 
   // DELAY

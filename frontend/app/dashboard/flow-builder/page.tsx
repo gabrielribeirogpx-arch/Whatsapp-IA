@@ -305,6 +305,17 @@ export default function FlowBuilderPage() {
         return;
       }
 
+      // AGUARDANDO INPUT — para o fluxo e espera o usuário digitar
+      if (response.type === 'waiting_input') {
+        if (messagesBuffer.length > 0) {
+          setMessages((prev) => [...prev, ...messagesBuffer]);
+        }
+        setActiveEdgeIds(traversedEdgeIds);
+        setCurrentNodeId(response.nodeId);
+        setCurrentChoices([]);
+        return;
+      }
+
       // CONDIÇÃO — avalia e segue o caminho correto (true ou false)
       if (response.type === 'condition') {
         const nextId = response.result === 'true' ? response.trueNodeId : response.falseNodeId;
@@ -379,22 +390,26 @@ export default function FlowBuilderPage() {
 
   const handleUserTextInput = useCallback((text: string) => {
     if (!currentNodeId) {
-      // Se não há node atual aguardando input, adiciona a mensagem e continua do início
-      setMessages((prev) => [...prev, { type: 'user', text }]);
-      return;
-    }
-
-    // Procura edge saindo do node atual (para condição ou próximo node)
-    const nextEdge = flow.edges.find((e) => e.source === currentNodeId);
-    if (!nextEdge?.target) {
       setMessages((prev) => [...prev, { type: 'user', text }]);
       return;
     }
 
     setCurrentChoices([]);
     setMessages((prev) => [...prev, { type: 'user', text }]);
+
+    // Verifica se o node atual é uma condição aguardando input
+    const currentNode = flow.nodes.find((n) => n.id === currentNodeId);
+    if (currentNode?.type === 'condition') {
+      // Reavalia a condição com o texto digitado pelo usuário
+      runFlowStep(currentNodeId, [], undefined, text);
+      return;
+    }
+
+    // Caso contrário, segue para o próximo node
+    const nextEdge = flow.edges.find((e) => e.source === currentNodeId);
+    if (!nextEdge?.target) return;
     runFlowStep(nextEdge.target, nextEdge.id ? [nextEdge.id] : [], undefined, text);
-  }, [currentNodeId, flow.edges, runFlowStep]);
+  }, [currentNodeId, flow.edges, flow.nodes, runFlowStep]);
 
   const onConnect = useCallback((params: FlowConnection) => {
     const sourceHandle = params.sourceHandle?.toString() || null;
