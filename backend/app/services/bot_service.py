@@ -9,7 +9,7 @@ from app.models import BotRule, Conversation, Message, Tenant
 from app.services.flow_orchestrator import handle_flow as handle_orchestrator_flow
 from app.services.flow_engine_service import process_flow_engine
 from app.services.flow_service import handle_flow as handle_priority_flow
-from app.services.whatsapp_service import WhatsAppConfigError, enviar_mensagem, send_whatsapp_message
+from app.services.whatsapp_service import WhatsAppConfigError, send_whatsapp_message
 from app.utils.text import normalize_text, tokenize
 
 STATE_INICIO = "inicio"
@@ -306,6 +306,8 @@ def handle_bot(db: Session, message: Message, conversation) -> dict[str, str | b
     tenant = db.execute(select(Tenant).where(Tenant.id == conversation.tenant_id)).scalars().first()
 
     visual_flow_response = process_flow_engine(db=db, conversation=conversation, message_text=message.text or "")
+    if visual_flow_response:
+        print(f"[FLOW ENGINE] process_flow_engine executado node_atual={conversation.current_node_id}")
     selected_response = visual_flow_response if visual_flow_response else None
     matched_rule: str | None = "visual_flow_engine" if visual_flow_response else None
     using_visual_flow = bool(visual_flow_response)
@@ -409,14 +411,9 @@ def handle_bot(db: Session, message: Message, conversation) -> dict[str, str | b
     try:
         print(f"[MODE CHECK] current mode={conversation.mode}")
         if tenant:
-            enviar_mensagem(
-                conversation.phone_number,
-                selected_response,
-                token=tenant.whatsapp_token,
-                phone_number_id=tenant.phone_number_id,
-            )
+            send_whatsapp_message(tenant, conversation.phone_number, selected_response)
         else:
-            send_whatsapp_message(conversation.phone_number, selected_response)
+            print("[BOT] Tenant não encontrado, envio WhatsApp ignorado")
     except WhatsAppConfigError:
         pass
 

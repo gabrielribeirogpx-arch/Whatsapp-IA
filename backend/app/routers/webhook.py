@@ -1,7 +1,8 @@
 from datetime import datetime
+import logging
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from sqlalchemy import desc, select
 from sqlalchemy.orm import Session, load_only
 
@@ -11,12 +12,14 @@ from app.schemas.chat import MessageOut
 from app.services.contact_sync_service import ensure_conversation_contact_link, upsert_contact_for_phone
 from app.services.conversation_service import get_or_create_conversation
 from app.services.message_router import handle_incoming_message
+from app.services.message_service import normalize_meta_message
 from app.services.realtime_service import sse_broker
 from app.models import Tenant
 from app.services.tenant_service import get_or_create_default_tenant
 from app.utils.phone import normalize_phone
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 def _looks_like_name(text: str) -> bool:
     if not text:
@@ -34,49 +37,32 @@ def _looks_like_name(text: str) -> bool:
 
 
 @router.get("/webhook")
-async def verify():
-    return {"status": "webhook ativo"}
+async def verify(
+    hub_mode: str = Query(default="", alias="hub.mode"),
+    hub_verify_token: str = Query(default="", alias="hub.verify_token"),
+    hub_challenge: str = Query(default="", alias="hub.challenge"),
+    db: Session = Depends(get_db),
+):
+    if hub_mode != "subscribe":
+        raise HTTPException(status_code=400, detail="hub.mode inválido")
+
+    tenant = None
+    if hub_verify_token:
+        tenant = db.execute(select(Tenant).where(Tenant.verify_token == hub_verify_token)).scalars().first()
+    if not tenant:
+        raise HTTPException(status_code=403, detail="verify_token ausente")
+    return Response(content=hub_challenge, media_type="text/plain")
 
 
 @router.post("/webhook")
 async def webhook(request: Request, db: Session = Depends(get_db)):
     try:
         payload = await request.json()
-        print("Payload recebido:", payload)
-
-        messages_data = []
-        entry = payload.get("entry", [])
-
-        for e in entry:
-            changes = e.get("changes", [])
-
-            for change in changes:
-                value = change.get("value", {})
-                contacts = value.get("contacts", [])
-                contact_name = (contacts[0].get("profile", {}).get("name") if contacts else None)
-                phone_number_id = value.get("metadata", {}).get("phone_number_id")
-
-                messages = value.get("messages", [])
-
-                for msg in messages:
-                    from_number = msg.get("from")
-                    text_body = msg.get("text", {}).get("body")
-
-                    print(f"Mensagem recebida de {from_number}: {text_body}")
-
-                    if text_body:
-                        messages_data.append(
-                            {
-                                "phone": from_number,
-                                "text": text_body,
-                                "phone_number_id": phone_number_id,
-                                "name": contact_name,
-                                "message_id": msg.get("id"),
-                            }
-                        )
+        logger.info("Webhook Meta recebido: keys=%s", list(payload.keys()))
+        messages_data = normalize_meta_message(payload)
 
         if not messages_data:
-            print("Evento ignorado: payload sem mensagens de texto")
+            logger.info("Evento ignorado: payload sem mensagens processáveis")
             return {"status": "ignored"}
 
         tenant_slug = (request.headers.get("x-tenant-slug") or "").strip()
@@ -84,10 +70,16 @@ async def webhook(request: Request, db: Session = Depends(get_db)):
         for incoming in messages_data:
             phone = incoming["phone"]
             normalized_phone = normalize_phone(phone)
-            print("PHONE_NORMALIZED:", normalized_phone)
-            incoming_message = incoming["text"]
+            incoming_message = incoming.get("text") or ""
+            incoming_type = incoming.get("type") or "unknown"
             contact_name = incoming.get("name")
             phone_number_id = incoming.get("phone_number_id")
+            logger.info(
+                "Mensagem normalizada recebida phone=%s type=%s phone_number_id=%s",
+                normalized_phone,
+                incoming_type,
+                phone_number_id,
+            )
 
             tenant = None
             if tenant_slug:
@@ -101,7 +93,12 @@ async def webhook(request: Request, db: Session = Depends(get_db)):
                 )
 
             tenant_id = tenant.id
-            print("TENANT ID:", tenant.id, type(tenant.id))
+            incoming["tenant_id"] = str(tenant_id)
+            logger.info("Tenant resolvido tenant_id=%s slug=%s", tenant.id, tenant.slug)
+
+            if incoming_type != "text" or not incoming_message:
+                logger.info("Evento ignorado: tipo=%s sem texto processável", incoming_type)
+                continue
 
 
             contact = upsert_contact_for_phone(
@@ -131,9 +128,9 @@ async def webhook(request: Request, db: Session = Depends(get_db)):
                 )
 
             if existed:
-                print(f"Conversa encontrada: {conversation.id}")
+                logger.info("Conversa encontrada id=%s", conversation.id)
             else:
-                print(f"Nenhuma conversa encontrada, criando nova para {normalized_phone}")
+                logger.info("Nenhuma conversa encontrada, criando nova para %s", normalized_phone)
 
             if contact_name and not conversation.name:
                 conversation.name = contact_name
@@ -143,11 +140,9 @@ async def webhook(request: Request, db: Session = Depends(get_db)):
                 conversation.name = incoming_message.strip()
             if conversation.name and (not contact.name or contact.name == "Cliente"):
                 contact.name = conversation.name
-            print("NOME CLIENTE:", conversation.name)
-
             contact.last_message_at = datetime.utcnow()
 
-            print("SALVANDO_MSG:", normalized_phone, incoming_message)
+            logger.info("Salvando mensagem de entrada phone=%s conversation_id=%s", normalized_phone, conversation.id)
             inbound_message = Message(
                 tenant_id=conversation.tenant_id,
                 conversation_id=conversation.id,
@@ -164,17 +159,15 @@ async def webhook(request: Request, db: Session = Depends(get_db)):
             }
             await sse_broker.publish(f"{tenant.id}:{normalized_phone}", message_payload)
             await sse_broker.publish(f"{tenant.id}:{conversation.id}", message_payload)
-            print("CONVERSA_ID:", conversation.id)
-            print("MSG_SALVA:", inbound_message.text)
 
             handle_incoming_message(db, inbound_message, conversation)
 
-            print(f"Evento processado (telefone={normalized_phone}, conteúdo={incoming_message})")
+            logger.info("Evento processado telefone=%s conteúdo=%s", normalized_phone, incoming_message)
 
         db.commit()
     except Exception as e:
         db.rollback()
-        print("Erro ao processar webhook:", str(e))
+        logger.exception("Erro ao processar webhook: %s", str(e))
 
     return {"status": "message processed"}
 
