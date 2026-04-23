@@ -291,7 +291,11 @@ def process_flow_engine(
             options = expected_options or edge_labels
 
             if not msg:
-                collected_messages.append(_render_choice_prompt(node_data=node_data, edges=edges))
+                text = (node_data.get("text") or node_data.get("content") or "").strip()
+                if not text:
+                    text = _render_choice_prompt(node_data=node_data, edges=edges).strip()
+                if text:
+                    _send_flow_whatsapp_message(tenant=tenant, phone=conversation_phone, text=text)
                 break
 
             selected_edge = None
@@ -302,7 +306,11 @@ def process_flow_engine(
                     break
 
             if not selected_edge and options:
-                collected_messages.append(_render_choice_prompt(node_data=node_data, edges=edges))
+                text = (node_data.get("text") or node_data.get("content") or "").strip()
+                if not text:
+                    text = _render_choice_prompt(node_data=node_data, edges=edges).strip()
+                if text:
+                    _send_flow_whatsapp_message(tenant=tenant, phone=conversation_phone, text=text)
                 break
 
             node = _advance_to_edge_target(db=db, conversation=conversation, edge=selected_edge or _pick_default_edge(edges))
