@@ -306,8 +306,8 @@ def process_flow_engine(
                                 body_text=text,
                                 buttons=buttons,
                             )
-                        except Exception:
-                            # fallback para texto simples se botões falharem
+                        except Exception as btn_err:
+                            print(f"[FLOW BUTTON ERROR] {btn_err}")
                             _send_flow_whatsapp_message(tenant=tenant, phone=conversation_phone, text=text)
                     else:
                         _send_flow_whatsapp_message(tenant=tenant, phone=conversation_phone, text=text)
