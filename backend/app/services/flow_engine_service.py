@@ -296,6 +296,8 @@ def process_flow_engine(
                     text = _render_choice_prompt(node_data=node_data, edges=edges).strip()
                 if text:
                     _send_flow_whatsapp_message(tenant=tenant, phone=conversation_phone, text=text)
+                else:
+                    print("[FLOW ERROR] node choice sem texto")
                 break
 
             selected_edge = None
@@ -311,6 +313,8 @@ def process_flow_engine(
                     text = _render_choice_prompt(node_data=node_data, edges=edges).strip()
                 if text:
                     _send_flow_whatsapp_message(tenant=tenant, phone=conversation_phone, text=text)
+                else:
+                    print("[FLOW ERROR] node choice sem texto")
                 break
 
             node = _advance_to_edge_target(db=db, conversation=conversation, edge=selected_edge or _pick_default_edge(edges))
