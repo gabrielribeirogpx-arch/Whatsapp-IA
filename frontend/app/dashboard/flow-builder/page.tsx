@@ -132,6 +132,7 @@ export default function FlowBuilderPage() {
   const [activeEdgeIds, setActiveEdgeIds] = useState<string[]>([]);
   const [isSimulatorOpen, setIsSimulatorOpen] = useState(false);
   const [isTyping, setIsTyping] = useState(false);
+  const [userInputText, setUserInputText] = useState('');
   const simulationStartedRef = useRef(false);
 
   const updateNodeData = useCallback((nodeId: string, patch: Record<string, unknown>) => {
@@ -374,6 +375,25 @@ export default function FlowBuilderPage() {
 
     // Continua o fluxo SEM passar userMessage (já foi adicionada acima)
     runFlowStep(edge.target, edge.id ? [edge.id] : [], undefined, label);
+  }, [currentNodeId, flow.edges, runFlowStep]);
+
+  const handleUserTextInput = useCallback((text: string) => {
+    if (!currentNodeId) {
+      // Se não há node atual aguardando input, adiciona a mensagem e continua do início
+      setMessages((prev) => [...prev, { type: 'user', text }]);
+      return;
+    }
+
+    // Procura edge saindo do node atual (para condição ou próximo node)
+    const nextEdge = flow.edges.find((e) => e.source === currentNodeId);
+    if (!nextEdge?.target) {
+      setMessages((prev) => [...prev, { type: 'user', text }]);
+      return;
+    }
+
+    setCurrentChoices([]);
+    setMessages((prev) => [...prev, { type: 'user', text }]);
+    runFlowStep(nextEdge.target, nextEdge.id ? [nextEdge.id] : [], undefined, text);
   }, [currentNodeId, flow.edges, runFlowStep]);
 
   const onConnect = useCallback((params: FlowConnection) => {
@@ -718,6 +738,59 @@ export default function FlowBuilderPage() {
             ))}
           </div>
         )}
+
+        {/* Input de texto livre */}
+        <div style={{
+          padding: '8px 16px',
+          borderTop: '1px solid #f0f4f0',
+          flexShrink: 0,
+          display: 'flex',
+          gap: 6,
+        }}>
+          <input
+            type="text"
+            value={userInputText}
+            onChange={(e) => setUserInputText(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && userInputText.trim()) {
+                handleUserTextInput(userInputText.trim());
+                setUserInputText('');
+              }
+            }}
+            placeholder="Digite uma mensagem..."
+            style={{
+              flex: 1,
+              border: '1px solid #e4e8e0',
+              borderRadius: 8,
+              padding: '7px 10px',
+              fontSize: 12,
+              fontFamily: 'inherit',
+              outline: 'none',
+              color: '#111827',
+            }}
+          />
+          <button
+            type="button"
+            onClick={() => {
+              if (userInputText.trim()) {
+                handleUserTextInput(userInputText.trim());
+                setUserInputText('');
+              }
+            }}
+            style={{
+              background: '#16A34A',
+              color: '#fff',
+              border: 'none',
+              borderRadius: 8,
+              padding: '7px 12px',
+              fontSize: 13,
+              cursor: 'pointer',
+              fontWeight: 600,
+            }}
+          >
+            ➤
+          </button>
+        </div>
 
         {/* Footer */}
         <div style={{ padding: '10px 16px', borderTop: '1px solid #E8E6E0', flexShrink: 0 }}>
