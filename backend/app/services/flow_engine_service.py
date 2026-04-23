@@ -35,6 +35,7 @@ def _extract_node_data(node: FlowNode) -> dict[str, Any]:
         "buttons": metadata.get("buttons") if isinstance(metadata.get("buttons"), list) else [],
         "condition": metadata.get("condition"),
         "action": metadata.get("action"),
+        "isStart": bool(metadata.get("isStart", False)),
         "metadata": metadata,
     }
 
@@ -572,6 +573,8 @@ def save_flow_graph(db: Session, tenant_id: uuid.UUID, flow_id: str, nodes: list
                 metadata["condition"] = data.get("condition")
             if data.get("action") is not None:
                 metadata["action"] = data.get("action")
+            if data.get("isStart") is not None:
+                metadata["isStart"] = bool(data.get("isStart"))
 
         node_type = item.get("type") or "message"
 
