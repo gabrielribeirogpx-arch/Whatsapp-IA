@@ -60,6 +60,7 @@ async def webhook(request: Request, db: Session = Depends(get_db)):
     try:
         payload = await request.json()
         logger.info("Webhook Meta recebido: keys=%s", list(payload.keys()))
+        logger.info("[WEBHOOK RAW] payload=%s", str(payload)[:800])
         messages_data = normalize_meta_message(payload)
 
         if not messages_data:
