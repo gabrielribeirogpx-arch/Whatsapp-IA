@@ -174,14 +174,21 @@ def _send_flow_whatsapp_message(tenant: Tenant, phone: str, text: str) -> None:
         return
 
     if not phone:
+        print("[FLOW ERROR] phone ausente")
         logger.warning("[FLOW SEND] Telefone ausente, mensagem não enviada")
         return
 
+    print(f"[FLOW SEND] phone={phone} text={content}")
     logger.info("[FLOW SEND] Enviando mensagem: %s", content)
     try:
-        send_whatsapp_message(tenant, phone, content)
-    except WhatsAppConfigError:
+        response = send_whatsapp_message(tenant, phone, content)
+        print(f"[FLOW SEND RESULT] {response}")
+    except WhatsAppConfigError as error:
+        print(f"[FLOW ERROR] {error}")
         logger.warning("[FLOW SEND] Configuração WhatsApp ausente para tenant_id=%s", tenant.id)
+    except Exception as error:
+        print(f"[FLOW ERROR] {error}")
+        logger.exception("[FLOW SEND] Falha inesperada ao enviar mensagem no flow")
 
 def process_flow_engine(
     db: Session,
