@@ -389,6 +389,15 @@ def process_flow_engine(
 
         if node_type == "condition":
             condition_text = _normalize_text(str(node_data.get("condition") or node_data.get("content") or ""))
+
+            # Sem mensagem do usuário ainda — para o fluxo e aguarda input
+            if not msg:
+                print(f"[FLOW CONDITION WAIT] aguardando resposta do usuario no node={node.id}")
+                conversation.current_node_id = node.id
+                db.commit()
+                db.refresh(conversation)
+                break
+
             result = bool(condition_text and condition_text in msg)
 
             selected_edge = None
@@ -397,7 +406,7 @@ def process_flow_engine(
                 if result and edge_condition in {"true", "sim", "yes"}:
                     selected_edge = edge
                     break
-                if (not result) and edge_condition in {"false", "nao", "nao", "no"}:
+                if (not result) and edge_condition in {"false", "nao", "não", "no"}:
                     selected_edge = edge
                     break
 
