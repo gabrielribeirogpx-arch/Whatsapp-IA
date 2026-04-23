@@ -156,7 +156,7 @@ export default function FlowBuilderPage() {
         ...node,
         data: {
           ...node.data,
-          isStart: node.id === nodeId ? !node.data.isStart : false,
+          isStart: node.id === nodeId ? !(node.data as { isStart?: boolean }).isStart : false,
         },
       }))
     );
