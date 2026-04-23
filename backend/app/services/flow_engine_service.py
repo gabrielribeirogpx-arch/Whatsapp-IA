@@ -298,6 +298,9 @@ def process_flow_engine(
                     _send_flow_whatsapp_message(tenant=tenant, phone=conversation_phone, text=text)
                 else:
                     print("[FLOW ERROR] node choice sem texto")
+                # Persiste o node atual como ponto de espera da resposta do usuário
+                conversation.current_node_id = node.id
+                db.commit()
                 break
 
             selected_edge = None
@@ -545,9 +548,15 @@ def save_flow_graph(db: Session, tenant_id: uuid.UUID, flow_id: str, nodes: list
             continue
 
         data = item.get("data") or {}
-        condition = data.get("condition") if isinstance(data, dict) else None
-        if not condition:
-            condition = item.get("label")
+        condition = (
+            (data.get("condition") if isinstance(data, dict) else None)
+            or (data.get("sourceHandle") if isinstance(data, dict) else None)
+            or item.get("label")
+            or item.get("sourceHandle")
+        ) or None
+        # Remove string vazia
+        if condition == "":
+            condition = None
 
         edge_id = uuid.uuid4()
         if item.get("id"):
