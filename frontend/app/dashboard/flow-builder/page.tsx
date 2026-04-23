@@ -277,6 +277,8 @@ export default function FlowBuilderPage() {
         if (response.text) {
           messagesBuffer.push({ type: 'bot', text: response.text });
         }
+        // Bot falou — zera o contexto para que condições seguintes aguardem novo input
+        context.lastUserMessage = '';
         if (response.nextNodeId) {
           const nextEdge = flow.edges.find((e) => e.source === currentNodeToRun);
           if (nextEdge?.id) traversedEdgeIds.push(nextEdge.id);
