@@ -139,13 +139,13 @@ def _reset_to_bot_mode(db: Session, conversation: Conversation, reason: str) -> 
 
 def _advance_to_edge_target(db: Session, conversation: Conversation, edge: FlowEdge | None) -> FlowNode | None:
     if not edge:
-        logger.info("Flow sem próxima aresta, encerrando fluxo conversation_id=%s", conversation.id)
+        logger.info("Flow sem proxima aresta, encerrando fluxo conversation_id=%s", conversation.id)
         _reset_to_bot_mode(db=db, conversation=conversation, reason="flow_finished_no_next_edge")
         return None
 
     next_node = _get_node(db=db, node_id=edge.target, tenant_id=conversation.tenant_id)
     logger.info(
-        "Flow avançando conversation_id=%s edge=%s target_node=%s",
+        "Flow avancando conversation_id=%s edge=%s target_node=%s",
         conversation.id,
         edge.id,
         next_node.id if next_node else None,
@@ -155,7 +155,7 @@ def _advance_to_edge_target(db: Session, conversation: Conversation, edge: FlowE
 
 
 def _render_choice_prompt(node_data: dict[str, Any], edges: list[FlowEdge]) -> str:
-    base = (node_data.get("content") or "Escolha uma opção:").strip()
+    base = (node_data.get("content") or "Escolha uma opcao:").strip()
     raw_buttons = node_data.get("buttons") if isinstance(node_data.get("buttons"), list) else []
     button_labels = [str(button.get("label")).strip() for button in raw_buttons if isinstance(button, dict) and button.get("label")]
 
@@ -168,6 +168,7 @@ def _render_choice_prompt(node_data: dict[str, Any], edges: list[FlowEdge]) -> s
 
     return base
 
+
 def _send_flow_whatsapp_message(tenant: Tenant, phone: str, text: str) -> None:
     content = (text or "").strip()
     if not content:
@@ -176,7 +177,7 @@ def _send_flow_whatsapp_message(tenant: Tenant, phone: str, text: str) -> None:
 
     if not phone:
         print("[FLOW ERROR] phone ausente")
-        logger.warning("[FLOW SEND] Telefone ausente, mensagem não enviada")
+        logger.warning("[FLOW SEND] Telefone ausente, mensagem nao enviada")
         return
 
     print(f"[FLOW SEND] Enviando: {content}")
@@ -186,10 +187,30 @@ def _send_flow_whatsapp_message(tenant: Tenant, phone: str, text: str) -> None:
         print(f"[FLOW SEND RESULT] {response}")
     except WhatsAppConfigError as error:
         print(f"[FLOW ERROR] {error}")
-        logger.warning("[FLOW SEND] Configuração WhatsApp ausente para tenant_id=%s", tenant.id)
+        logger.warning("[FLOW SEND] Configuracao WhatsApp ausente para tenant_id=%s", tenant.id)
     except Exception as error:
         print(f"[FLOW ERROR] {error}")
         logger.exception("[FLOW SEND] Falha inesperada ao enviar mensagem no flow")
+
+
+def _send_flow_interactive_buttons(tenant: Tenant, phone: str, text: str, buttons: list[dict]) -> None:
+    """Envia botoes interativos; faz fallback para texto simples se falhar."""
+    print(f"[FLOW BUTTON SEND] Tentando enviar botoes: {[b.get('label') for b in buttons]}")
+    try:
+        response = send_whatsapp_interactive_buttons(
+            tenant=tenant,
+            phone=phone,
+            body_text=text,
+            buttons=buttons,
+        )
+        print(f"[FLOW BUTTON SEND RESULT] {response}")
+    except WhatsAppConfigError as error:
+        print(f"[FLOW BUTTON ERROR] Config: {error}")
+        _send_flow_whatsapp_message(tenant=tenant, phone=phone, text=text)
+    except Exception as error:
+        print(f"[FLOW BUTTON ERROR] {error} — usando fallback texto")
+        _send_flow_whatsapp_message(tenant=tenant, phone=phone, text=text)
+
 
 def process_flow_engine(
     db: Session,
@@ -205,7 +226,7 @@ def process_flow_engine(
         .order_by(desc(Conversation.updated_at), desc(Conversation.id))
     ).scalars().first()
     if not conversation:
-        logger.info("Flow ignorado: conversa não encontrada tenant_id=%s phone=%s", tenant_id, normalized_phone)
+        logger.info("Flow ignorado: conversa nao encontrada tenant_id=%s phone=%s", tenant_id, normalized_phone)
         return None
 
     flow = _get_or_create_visual_flow(db=db, tenant_id=conversation.tenant_id)
@@ -213,7 +234,7 @@ def process_flow_engine(
     if force_node:
         _set_flow_mode(db=db, conversation=conversation, flow_id=flow.id, node_id=force_node)
         logger.info(
-            "Flow retomado após delay conversation_id=%s force_node=%s",
+            "Flow retomado apos delay conversation_id=%s force_node=%s",
             conversation.id,
             force_node,
         )
@@ -237,7 +258,7 @@ def process_flow_engine(
 
     tenant = db.execute(select(Tenant).where(Tenant.id == conversation.tenant_id)).scalars().first()
     if not tenant:
-        logger.warning("[FLOW SEND] Tenant não encontrado para conversation_id=%s", conversation.id)
+        logger.warning("[FLOW SEND] Tenant nao encontrado para conversation_id=%s", conversation.id)
         return None
 
     conversation_phone = getattr(conversation, "phone", None) or conversation.phone_number
@@ -277,8 +298,9 @@ def process_flow_engine(
             continue
 
         if node_type in {"choice", "question"}:
-            expected_options = []
             buttons = node_data.get("buttons") if isinstance(node_data.get("buttons"), list) else []
+
+            expected_options = []
             for button in buttons:
                 if isinstance(button, dict) and button.get("label"):
                     expected_options.append(_normalize_text(str(button["label"])))
@@ -290,26 +312,55 @@ def process_flow_engine(
             ]
             options = expected_options or edge_labels
 
+            # Usuario ainda nao respondeu — envia a pergunta com botoes e aguarda
             if not msg:
                 text = (node_data.get("text") or node_data.get("content") or "").strip()
                 if not text:
                     text = _render_choice_prompt(node_data=node_data, edges=edges).strip()
 
-                buttons = node_data.get("buttons") if isinstance(node_data.get("buttons"), list) else []
-
                 if text:
                     if buttons and len(buttons) <= 3:
-                        try:
-                            send_whatsapp_interactive_buttons(
-                                tenant=tenant,
-                                phone=conversation_phone,
-                                body_text=text,
-                                buttons=buttons,
-                            )
-                            print(f"[FLOW BUTTON SEND] Botões enviados: {[b.get('label') for b in buttons]}")
-                        except Exception as btn_err:
-                            print(f"[FLOW BUTTON ERROR] {btn_err}")
-                            _send_flow_whatsapp_message(tenant=tenant, phone=conversation_phone, text=text)
+                        _send_flow_interactive_buttons(
+                            tenant=tenant,
+                            phone=conversation_phone,
+                            text=text,
+                            buttons=buttons,
+                        )
+                    else:
+                        _send_flow_whatsapp_message(tenant=tenant, phone=conversation_phone, text=text)
+                else:
+                    print("[FLOW ERROR] node choice sem texto")
+
+                # Persiste o node atual como ponto de espera da resposta
+                conversation.current_node_id = node.id
+                db.commit()
+                db.refresh(conversation)
+                break
+
+            # Usuario respondeu — tenta match com as edges
+            selected_edge = None
+            for edge in edges:
+                condition = _normalize_text(edge.condition)
+                if not condition:
+                    continue
+                # match exato (handleId do botao) ou por substring
+                if condition == msg or condition in msg or msg in condition:
+                    selected_edge = edge
+                    break
+
+            # Resposta nao bate com nenhuma opcao — reenvia a pergunta
+            if not selected_edge and options:
+                text = (node_data.get("text") or node_data.get("content") or "").strip()
+                if not text:
+                    text = _render_choice_prompt(node_data=node_data, edges=edges).strip()
+                if text:
+                    if buttons and len(buttons) <= 3:
+                        _send_flow_interactive_buttons(
+                            tenant=tenant,
+                            phone=conversation_phone,
+                            text=text,
+                            buttons=buttons,
+                        )
                     else:
                         _send_flow_whatsapp_message(tenant=tenant, phone=conversation_phone, text=text)
                 else:
@@ -318,26 +369,6 @@ def process_flow_engine(
                 conversation.current_node_id = node.id
                 db.commit()
                 db.refresh(conversation)
-                break
-
-            selected_edge = None
-            for edge in edges:
-                condition = _normalize_text(edge.condition)
-                if not condition:
-                    continue
-                # match exato (handleId do botão) ou por substring
-                if condition == msg or condition in msg or msg in condition:
-                    selected_edge = edge
-                    break
-
-            if not selected_edge and options:
-                text = (node_data.get("text") or node_data.get("content") or "").strip()
-                if not text:
-                    text = _render_choice_prompt(node_data=node_data, edges=edges).strip()
-                if text:
-                    _send_flow_whatsapp_message(tenant=tenant, phone=conversation_phone, text=text)
-                else:
-                    print("[FLOW ERROR] node choice sem texto")
                 break
 
             node = _advance_to_edge_target(db=db, conversation=conversation, edge=selected_edge or _pick_default_edge(edges))
@@ -355,7 +386,7 @@ def process_flow_engine(
                 if result and edge_condition in {"true", "sim", "yes"}:
                     selected_edge = edge
                     break
-                if (not result) and edge_condition in {"false", "nao", "não", "no"}:
+                if (not result) and edge_condition in {"false", "nao", "nao", "no"}:
                     selected_edge = edge
                     break
 
@@ -373,7 +404,7 @@ def process_flow_engine(
 
             next_edge = _pick_default_edge(edges)
             if not next_edge:
-                logger.info("Delay sem próxima aresta conversation_id=%s node_id=%s", conversation.id, node.id)
+                logger.info("Delay sem proxima aresta conversation_id=%s node_id=%s", conversation.id, node.id)
                 _reset_to_bot_mode(db=db, conversation=conversation, reason="flow_finished_delay_without_next")
                 break
 
@@ -393,7 +424,7 @@ def process_flow_engine(
             if content:
                 collected_messages.append(content)
             elif action_name:
-                collected_messages.append(f"⚙️ Ação executada: {action_name}")
+                collected_messages.append(f"Acao executada: {action_name}")
 
             node = _advance_to_edge_target(db=db, conversation=conversation, edge=_pick_default_edge(edges))
             if not node:
@@ -421,10 +452,10 @@ def seed_default_visual_flow(db: Session, flow: Flow, tenant_id: uuid.UUID) -> N
         flow_id=flow.id,
         tenant_id=tenant_id,
         type="choice",
-        content="Você quer vendas, suporte ou atendimento?",
+        content="Voce quer vendas, suporte ou atendimento?",
         metadata_json={
             "isStart": True,
-            "label": "início",
+            "label": "inicio",
             "buttons": [
                 {"label": "vendas"},
                 {"label": "suporte"},
@@ -438,7 +469,7 @@ def seed_default_visual_flow(db: Session, flow: Flow, tenant_id: uuid.UUID) -> N
         flow_id=flow.id,
         tenant_id=tenant_id,
         type="message",
-        content="Perfeito, vamos seguir por vendas 🚀",
+        content="Perfeito, vamos seguir por vendas",
         metadata_json={"label": "vendas"},
         position_x=420,
         position_y=20,
@@ -447,7 +478,7 @@ def seed_default_visual_flow(db: Session, flow: Flow, tenant_id: uuid.UUID) -> N
         flow_id=flow.id,
         tenant_id=tenant_id,
         type="message",
-        content="Perfeito, vamos seguir por suporte 🛟",
+        content="Perfeito, vamos seguir por suporte",
         metadata_json={"label": "suporte"},
         position_x=420,
         position_y=140,
@@ -456,7 +487,7 @@ def seed_default_visual_flow(db: Session, flow: Flow, tenant_id: uuid.UUID) -> N
         flow_id=flow.id,
         tenant_id=tenant_id,
         type="message",
-        content="Perfeito, vamos seguir por atendimento 💬",
+        content="Perfeito, vamos seguir por atendimento",
         metadata_json={"label": "atendimento"},
         position_x=420,
         position_y=260,
@@ -574,7 +605,6 @@ def save_flow_graph(db: Session, tenant_id: uuid.UUID, flow_id: str, nodes: list
             or item.get("label")
             or item.get("sourceHandle")
         ) or None
-        # Remove string vazia
         if condition == "":
             condition = None
 
@@ -606,5 +636,5 @@ def resolve_flow(db: Session, tenant_id: uuid.UUID, flow_id: str) -> Flow:
     parsed_flow_id = uuid.UUID(flow_id)
     flow = db.execute(select(Flow).where(Flow.id == parsed_flow_id, Flow.tenant_id == tenant_id)).scalars().first()
     if not flow:
-        raise ValueError("Flow não encontrado para este tenant")
+        raise ValueError("Flow nao encontrado para este tenant")
     return flow
