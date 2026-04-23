@@ -110,13 +110,79 @@ export default function DashboardPage() {
 
         {/* Nav items */}
         {[
-          { href: '/dashboard', icon: '⊞', label: 'Dashboard', active: true },
-          { href: '/chat', icon: '💬', label: 'Inbox' },
-          { href: '/crm', icon: '👥', label: 'Clientes' },
-          { href: '/pipeline', icon: '📊', label: 'Pipeline' },
-          { href: '/products', icon: '📦', label: 'Produtos' },
-          { href: '/knowledge', icon: '🧠', label: 'Knowledge' },
-          { href: '/dashboard/flow-builder', icon: '⚡', label: 'Flow Builder' },
+          {
+            href: '/dashboard',
+            label: 'Dashboard',
+            active: true,
+            svg: (
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="3" width="7" height="7" />
+                <rect x="14" y="3" width="7" height="7" />
+                <rect x="3" y="14" width="7" height="7" />
+                <rect x="14" y="14" width="7" height="7" />
+              </svg>
+            ),
+          },
+          {
+            href: '/chat',
+            label: 'Inbox',
+            svg: (
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+              </svg>
+            ),
+          },
+          {
+            href: '/crm',
+            label: 'Clientes',
+            svg: (
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+                <circle cx="9" cy="7" r="4" />
+                <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+                <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+              </svg>
+            ),
+          },
+          {
+            href: '/pipeline',
+            label: 'Pipeline',
+            svg: (
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="18" y1="20" x2="18" y2="10" />
+                <line x1="12" y1="20" x2="12" y2="4" />
+                <line x1="6" y1="20" x2="6" y2="14" />
+              </svg>
+            ),
+          },
+          {
+            href: '/products',
+            label: 'Produtos',
+            svg: (
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
+              </svg>
+            ),
+          },
+          {
+            href: '/knowledge',
+            label: 'Knowledge',
+            svg: (
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z" />
+                <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z" />
+              </svg>
+            ),
+          },
+          {
+            href: '/dashboard/flow-builder',
+            label: 'Flow Builder',
+            svg: (
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
+              </svg>
+            ),
+          },
         ].map((item) => (
           <Link
             key={item.href}
@@ -129,15 +195,14 @@ export default function DashboardPage() {
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              fontSize: 16,
               textDecoration: 'none',
               background: item.active ? '#F0FDF4' : 'transparent',
-              color: item.active ? '#16A34A' : '#6B7280',
+              color: item.active ? '#16A34A' : '#9CA3AF',
               transition: 'background 0.15s, color 0.15s',
               border: item.active ? '1px solid #BBF7D0' : '1px solid transparent',
             }}
           >
-            {item.icon}
+            {item.svg}
           </Link>
         ))}
 
