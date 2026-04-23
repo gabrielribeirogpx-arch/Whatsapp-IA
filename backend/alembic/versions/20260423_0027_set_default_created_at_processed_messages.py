@@ -6,7 +6,6 @@ Create Date: 2026-04-23 00:10:00
 """
 
 from alembic import op
-import sqlalchemy as sa
 
 
 revision = "20260423_0027"
@@ -16,20 +15,18 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.alter_column(
-        "processed_messages",
-        "created_at",
-        existing_type=sa.DateTime(),
-        nullable=False,
-        server_default=sa.text("NOW()"),
+    op.execute(
+        """
+        ALTER TABLE processed_messages
+        ALTER COLUMN created_at SET DEFAULT NOW();
+        """
     )
 
 
 def downgrade() -> None:
-    op.alter_column(
-        "processed_messages",
-        "created_at",
-        existing_type=sa.DateTime(),
-        nullable=False,
-        server_default=None,
+    op.execute(
+        """
+        ALTER TABLE processed_messages
+        ALTER COLUMN created_at DROP DEFAULT;
+        """
     )
