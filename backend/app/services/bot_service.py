@@ -305,7 +305,6 @@ def handle_bot(db: Session, message: Message, conversation) -> dict[str, str | b
 
     tenant = db.execute(select(Tenant).where(Tenant.id == conversation.tenant_id)).scalars().first()
 
-    visual_flow_response: str | None = None
     if tenant_has_active_visual_flow(db=db, tenant_id=conversation.tenant_id):
         print("[FLOW ENGINE] executando fluxo principal")
         visual_flow_response = process_flow_engine(
@@ -314,11 +313,42 @@ def handle_bot(db: Session, message: Message, conversation) -> dict[str, str | b
             phone=conversation.phone_number,
             message_text=message.text or "",
         )
+        print("[FLOW] fluxo visual ativo")
+        print("[FLOW PRIORITY] Bot ignorado pois fluxo ativo")
         if visual_flow_response:
             print(f"[FLOW ENGINE] process_flow_engine executado node_atual={conversation.current_node_id}")
-    selected_response = visual_flow_response if visual_flow_response else None
-    matched_rule: str | None = "visual_flow_engine" if visual_flow_response else None
-    using_visual_flow = bool(visual_flow_response)
+            if _last_bot_message_within_cooldown(db=db, conversation=conversation, seconds=10):
+                conversation.updated_at = datetime.utcnow()
+                return None
+
+            try:
+                print(f"[MODE CHECK] current mode={conversation.mode}")
+                if tenant:
+                    send_whatsapp_message(tenant, conversation.phone_number, visual_flow_response)
+                else:
+                    print("[BOT] Tenant não encontrado, envio WhatsApp ignorado")
+            except WhatsAppConfigError:
+                pass
+
+            _create_outbound_message(
+                db=db,
+                conversation_id=conversation.id,
+                tenant_id=conversation.tenant_id,
+                text=visual_flow_response,
+            )
+            if not message.from_me:
+                conversation.last_bot_triggered_message_id = message.id
+        conversation.updated_at = datetime.utcnow()
+        return {
+            "response": visual_flow_response,
+            "matched_rule": "visual_flow_engine",
+            "intent": None,
+            "fallback": False,
+        }
+
+    selected_response: str | None = None
+    matched_rule: str | None = None
+    using_visual_flow = False
 
     if not selected_response:
         priority_flow_response = handle_priority_flow(db=db, conversation=conversation, message=message)
