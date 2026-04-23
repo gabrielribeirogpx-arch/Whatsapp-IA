@@ -1198,8 +1198,11 @@ input {
 .dash-sidebar-logo {
   display: flex;
   align-items: center;
-  height: 72px;
-  margin-bottom: 16px;
+  justify-content: center;
+  height: auto;
+  min-height: 64px;
+  padding: 8px 6px;
+  margin-bottom: 8px;
   overflow: hidden;
   flex-shrink: 0;
 }
@@ -1213,10 +1216,10 @@ input {
 }
 
 .dash-sidebar-logo .logo-full {
-  height: 64px;
+  height: 72px;
   object-fit: contain;
   max-width: 100%;
-  margin-left: 8px;
+  margin-left: 6px;
   opacity: 0;
   width: 0;
   transition: opacity 0.2s, width 0.2s;
@@ -1370,4 +1373,3 @@ input {
   color: #374151;
   margin: 0 0 16px;
 }
-
