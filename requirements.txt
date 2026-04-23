@@ -10,3 +10,4 @@ PyPDF2==3.0.1
 python-multipart==0.0.9
 
 google-genai
+redis==5.0.4

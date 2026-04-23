@@ -305,7 +305,12 @@ def handle_bot(db: Session, message: Message, conversation) -> dict[str, str | b
 
     tenant = db.execute(select(Tenant).where(Tenant.id == conversation.tenant_id)).scalars().first()
 
-    visual_flow_response = process_flow_engine(db=db, conversation=conversation, message_text=message.text or "")
+    visual_flow_response = process_flow_engine(
+        db=db,
+        tenant_id=conversation.tenant_id,
+        phone=conversation.phone_number,
+        message_text=message.text or "",
+    )
     if visual_flow_response:
         print(f"[FLOW ENGINE] process_flow_engine executado node_atual={conversation.current_node_id}")
     selected_response = visual_flow_response if visual_flow_response else None

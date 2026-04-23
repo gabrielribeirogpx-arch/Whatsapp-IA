@@ -5,10 +5,12 @@ import uuid
 import logging
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
 from app.models import Conversation, Flow, FlowEdge, FlowNode
+from app.services.delay_queue_service import enqueue_delay
+from app.utils.phone import normalize_phone
 
 DEFAULT_FLOW_NAME = "__default_visual__"
 MAX_AUTO_STEPS = 10
@@ -125,10 +127,34 @@ def _render_choice_prompt(node_data: dict[str, Any], edges: list[FlowEdge]) -> s
     return base
 
 
-def process_flow_engine(db: Session, conversation: Conversation, message_text: str) -> str | None:
+def process_flow_engine(
+    db: Session,
+    tenant_id: uuid.UUID,
+    phone: str,
+    message_text: str = "",
+    force_node: uuid.UUID | None = None,
+) -> str | None:
+    normalized_phone = normalize_phone(phone)
+    conversation = db.execute(
+        select(Conversation)
+        .where(Conversation.tenant_id == tenant_id, Conversation.phone_number == normalized_phone)
+        .order_by(desc(Conversation.updated_at), desc(Conversation.id))
+    ).scalars().first()
+    if not conversation:
+        logger.info("Flow ignorado: conversa não encontrada tenant_id=%s phone=%s", tenant_id, normalized_phone)
+        return None
+
     flow = _get_or_create_visual_flow(db=db, tenant_id=conversation.tenant_id)
 
-    if not conversation.current_node_id:
+    if force_node:
+        conversation.current_flow = flow.id
+        conversation.current_node_id = force_node
+        logger.info(
+            "Flow retomado após delay conversation_id=%s force_node=%s",
+            conversation.id,
+            force_node,
+        )
+    elif not conversation.current_node_id:
         start_node = _get_start_node(db=db, flow_id=flow.id, tenant_id=conversation.tenant_id)
         if not start_node:
             return None
@@ -217,12 +243,25 @@ def process_flow_engine(db: Session, conversation: Conversation, message_text: s
 
         if node_type == "delay":
             delay_value = str(node_data.get("content") or "").strip()
-            if delay_value:
-                collected_messages.append(f"⏳ Aguarde {delay_value}s")
-            node = _advance_to_edge_target(db=db, conversation=conversation, edge=_pick_default_edge(edges))
-            if not node:
+            try:
+                delay_seconds = int(delay_value)
+            except ValueError:
+                delay_seconds = 0
+
+            next_edge = _pick_default_edge(edges)
+            if not next_edge:
+                logger.info("Delay sem próxima aresta conversation_id=%s node_id=%s", conversation.id, node.id)
+                conversation.current_node_id = None
                 break
-            continue
+
+            enqueue_delay(
+                tenant_id=conversation.tenant_id,
+                phone=conversation.phone_number,
+                next_node_id=next_edge.target,
+                seconds=delay_seconds,
+            )
+            conversation.current_node_id = None
+            break
 
         if node_type == "action":
             action_name = str(node_data.get("action") or "").strip()
