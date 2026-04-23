@@ -82,13 +82,23 @@ def _get_start_node(db: Session, flow_id: uuid.UUID, tenant_id: uuid.UUID) -> Fl
         .order_by(FlowNode.created_at.asc(), FlowNode.id.asc())
     ).scalars().all()
 
+    logger.info("[START NODE] total nodes=%d", len(nodes))
     for node in nodes:
         metadata = node.metadata_json or {}
+        logger.info(
+            "[START NODE] node_id=%s type=%s isStart=%s metadata_keys=%s",
+            node.id,
+            node.type,
+            metadata.get("isStart"),
+            list(metadata.keys()),
+        )
         if metadata.get("isStart"):
+            logger.info("[START NODE] found isStart node=%s", node.id)
             return node
 
     for node in nodes:
         if node.type in {"start", "message", "messageNode", "choice", "choiceNode", "questionNode"}:
+            logger.info("[START NODE] fallback node=%s type=%s", node.id, node.type)
             return node
 
     return nodes[0] if nodes else None
