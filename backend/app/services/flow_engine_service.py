@@ -171,6 +171,7 @@ def _render_choice_prompt(node_data: dict[str, Any], edges: list[FlowEdge]) -> s
 def _send_flow_whatsapp_message(tenant: Tenant, phone: str, text: str) -> None:
     content = (text or "").strip()
     if not content:
+        print("[FLOW ERROR] texto vazio no node")
         return
 
     if not phone:
@@ -178,7 +179,7 @@ def _send_flow_whatsapp_message(tenant: Tenant, phone: str, text: str) -> None:
         logger.warning("[FLOW SEND] Telefone ausente, mensagem não enviada")
         return
 
-    print(f"[FLOW SEND] phone={phone} text={content}")
+    print(f"[FLOW SEND] Enviando: {content}")
     logger.info("[FLOW SEND] Enviando mensagem: %s", content)
     try:
         response = send_whatsapp_message(tenant, phone, content)
@@ -254,17 +255,22 @@ def process_flow_engine(
         node_type = node.type
         if node_type.endswith("Node"):
             node_type = node_type[:-4]
+        print(f"[FLOW DEBUG] node.type={node.type}")
+        print(f"[FLOW DEBUG] node.data={getattr(node, 'data', None) or node_data}")
         logger.info("Node executado conversation_id=%s node_id=%s node_type=%s", conversation.id, node.id, node_type)
 
         edges = _get_edges(db=db, flow_id=node.flow_id, source=node.id)
 
-        if node_type in {"message", "start"}:
+        if node_type in {"message", "text", "msg", "start"}:
             metadata = node_data.get("metadata") if isinstance(node_data.get("metadata"), dict) else {}
-            content = (node_data.get("text") or metadata.get("text") or node_data.get("content") or "").strip()
-            if node_type == "message":
-                _send_flow_whatsapp_message(tenant=tenant, phone=conversation_phone, text=content)
-            elif content:
-                collected_messages.append(content)
+            text = (node_data.get("text") or node_data.get("content") or metadata.get("text") or "").strip()
+            if node_type in {"message", "text", "msg"}:
+                if not text:
+                    print("[FLOW ERROR] texto vazio no node")
+                    return None
+                _send_flow_whatsapp_message(tenant=tenant, phone=conversation_phone, text=text)
+            elif text:
+                collected_messages.append(text)
             node = _advance_to_edge_target(db=db, conversation=conversation, edge=_pick_default_edge(edges))
             if not node:
                 break
