@@ -1179,7 +1179,7 @@ input {
   border-right: 1px solid #E8EAE6;
   display: flex;
   flex-direction: column;
-  padding: 12px 8px;
+  padding: 8px 6px;
   gap: 2px;
   flex-shrink: 0;
   height: 100vh;
@@ -1200,9 +1200,9 @@ input {
   align-items: center;
   justify-content: center;
   height: auto;
-  min-height: 64px;
-  padding: 8px 6px;
-  margin-bottom: 8px;
+  min-height: 52px;
+  padding: 4px 3px;
+  margin-bottom: 4px;
   overflow: hidden;
   flex-shrink: 0;
 }
@@ -1289,7 +1289,7 @@ input {
   color: #9CA3AF;
   text-transform: uppercase;
   letter-spacing: 0.08em;
-  padding: 12px 8px 4px;
+  padding: 8px 8px 2px;
   white-space: nowrap;
   overflow: hidden;
   opacity: 0;
@@ -1305,7 +1305,7 @@ input {
 .dash-nav-divider {
   height: 1px;
   background: #F3F4F6;
-  margin: 8px 0;
+  margin: 6px 0;
 }
 
 .dash-avatar {
