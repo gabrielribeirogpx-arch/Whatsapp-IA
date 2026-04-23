@@ -163,18 +163,25 @@ export default function FlowBuilderPage() {
   }, [setNodes]);
 
   const buildFlowNode = useCallback(
-    (node: FlowNodePayload): Node => ({
-      id: node.id,
-      type: node.type,
-      position: node.position || randomPosition(),
-      data: {
-        ...node.data,
-        buttons: node.type === 'choice' ? normalizeChoiceButtons(node.id, node.data?.buttons) : node.data?.buttons,
-        label: node.data?.label || node.data?.content || `Node ${node.id}`,
-        onChange: updateNodeData,
-        onToggleStart: toggleStartNode,
-      },
-    }),
+    (node: FlowNodePayload): Node => {
+      // DEBUG — remover após confirmar que isStart chega da API
+      if (node.data?.isStart) {
+        console.log('[buildFlowNode] isStart=true para node:', node.id, node.data);
+      }
+      return {
+        id: node.id,
+        type: node.type,
+        position: node.position || randomPosition(),
+        data: {
+          ...node.data,
+          isStart: node.data?.isStart ?? false,
+          buttons: node.type === 'choice' ? normalizeChoiceButtons(node.id, node.data?.buttons) : node.data?.buttons,
+          label: node.data?.label || node.data?.content || `Node ${node.id}`,
+          onChange: updateNodeData,
+          onToggleStart: toggleStartNode,
+        },
+      };
+    },
     [toggleStartNode, updateNodeData],
   );
 
