@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models import Flow, Tenant
+from app.services.flow_analytics_service import get_flow_analytics
 from app.services.flow_engine_service import get_flow_graph, save_flow_graph
 from app.services.flow_service import create_flow, delete_flow, duplicate_flow, get_flow, get_flows, update_flow
 
@@ -166,6 +167,22 @@ def get_tenant_flow_by_id(
     if not flow:
         raise HTTPException(status_code=404, detail="Flow not found")
     return _serialize_flow(flow)
+
+
+@crud_router.get("/{flow_id}/analytics")
+def get_tenant_flow_analytics(
+    flow_id: uuid.UUID,
+    x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
+    db: Session = Depends(get_db),
+):
+    tenant_uuid = _resolve_tenant_header(x_tenant_id)
+    flow = get_flow(db=db, flow_id=flow_id, tenant_id=tenant_uuid)
+    if not flow:
+        raise HTTPException(status_code=404, detail="Flow not found")
+
+    analytics = get_flow_analytics(db=db, tenant_id=tenant_uuid, flow_id=flow_id)
+    print(f"[FLOW ANALYTICS] flow_id={flow_id} tenant_id={tenant_uuid} analytics={analytics}")
+    return analytics
 
 
 @crud_router.put("/{flow_id}")
