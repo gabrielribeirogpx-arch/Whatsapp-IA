@@ -19,7 +19,8 @@ import {
   FlowNodePayload,
   FlowEdgePayload,
   FlowItem,
-  FlowPayload
+  FlowPayload,
+  FlowVersionItem
 } from './types';
 
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL;
@@ -354,4 +355,17 @@ export async function deleteFlow(flowId: string): Promise<void> {
     method: 'DELETE'
   });
   if (!res.ok) throw new Error(await res.text());
+}
+
+export async function listFlowVersions(flowId: string): Promise<FlowVersionItem[]> {
+  const res = await apiFetch(`/flows/${flowId}/versions`);
+  return parseApiResponse<FlowVersionItem[]>(res);
+}
+
+export async function restoreFlowVersion(flowId: string, versionId: string): Promise<FlowItem> {
+  const res = await apiFetch(`/flows/${flowId}/versions/restore`, {
+    method: 'POST',
+    body: JSON.stringify({ version_id: versionId })
+  });
+  return parseApiResponse<FlowItem>(res);
 }

@@ -1436,6 +1436,163 @@ input {
   max-width: 100%;
 }
 
+.flow-builder-top-actions {
+  position: absolute;
+  top: 14px;
+  right: 150px;
+  z-index: 12;
+}
+
+.flow-top-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 9px;
+  border: 1px solid #dbe2d8;
+  padding: 8px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.flow-top-btn-secondary {
+  color: #14532d;
+  background: #fff;
+  box-shadow: 0 4px 14px rgba(20, 83, 45, 0.08);
+}
+
+.flow-top-btn-secondary:hover:not(:disabled) {
+  background: #f0fdf4;
+}
+
+.flow-top-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.flow-versions-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  background: rgba(17, 24, 39, 0.42);
+  backdrop-filter: blur(3px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.flow-versions-modal {
+  width: min(560px, 100%);
+  background: #fff;
+  border: 1px solid #e6ebe3;
+  border-radius: 16px;
+  box-shadow: 0 22px 56px rgba(15, 23, 42, 0.2);
+  overflow: hidden;
+}
+
+.flow-versions-header {
+  padding: 18px 20px;
+  border-bottom: 1px solid #edf1ea;
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.flow-versions-header h3 {
+  margin: 0;
+  font-size: 16px;
+  color: #111827;
+}
+
+.flow-versions-header p {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: #6b7280;
+}
+
+.flow-versions-header button {
+  border: 1px solid #e5e7eb;
+  background: #fff;
+  border-radius: 8px;
+  width: 28px;
+  height: 28px;
+  cursor: pointer;
+  color: #6b7280;
+}
+
+.flow-versions-list {
+  max-height: 360px;
+  overflow: auto;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.flow-version-row {
+  border: 1px solid #e8ece5;
+  border-radius: 12px;
+  padding: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  background: #fcfdfc;
+}
+
+.flow-version-row strong {
+  display: block;
+  font-size: 13px;
+  color: #111827;
+}
+
+.flow-version-row span {
+  font-size: 12px;
+  color: #6b7280;
+}
+
+.flow-version-row.is-current {
+  border-color: #86efac;
+  background: #f0fdf4;
+}
+
+.flow-version-row button {
+  border: 1px solid #bbf7d0;
+  background: #fff;
+  color: #166534;
+  border-radius: 8px;
+  padding: 7px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+
+.flow-version-row button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.flow-version-current-pill {
+  background: #16a34a;
+  color: #fff !important;
+  border-radius: 999px;
+  padding: 4px 8px;
+  font-size: 11px !important;
+  font-weight: 700;
+}
+
+.flow-versions-empty {
+  padding: 26px;
+  text-align: center;
+  color: #9ca3af;
+  font-size: 13px;
+}
+
 @keyframes flowContextMenuIn {
   from {
     opacity: 0;
