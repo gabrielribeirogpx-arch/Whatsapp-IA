@@ -12,5 +12,6 @@ from app.models.conversation_log import ConversationLog
 from app.models.flow import Flow, FlowStep, FlowNode, FlowEdge
 from app.models.processed_message import ProcessedMessage
 from app.models.flow_event import FlowEvent
+from app.models.failed_message import FailedMessage
 
-__all__ = ["Tenant", "AIConfig", "Conversation", "Contact", "Message", "Product", "KnowledgeBase", "KnowledgeChunk", "Lead", "PipelineStage", "BotRule", "ConversationLog", "Flow", "FlowStep", "FlowNode", "FlowEdge", "ProcessedMessage", "FlowEvent"]
+__all__ = ["Tenant", "AIConfig", "Conversation", "Contact", "Message", "Product", "KnowledgeBase", "KnowledgeChunk", "Lead", "PipelineStage", "BotRule", "ConversationLog", "Flow", "FlowStep", "FlowNode", "FlowEdge", "ProcessedMessage", "FlowEvent", "FailedMessage"]
