@@ -17,6 +17,7 @@ from app.routers import products
 from app.routers import knowledge
 from app.routers import leads
 from app.routers import dashboard
+from app.routers import settings
 from app.routers import bot_rules
 from app.routers import flows
 from app.middleware.tenant_context import TenantContextMiddleware
@@ -96,6 +97,7 @@ app.include_router(products.router, prefix="/api")
 app.include_router(knowledge.router, prefix="/api")
 app.include_router(leads.router, prefix="/api")
 app.include_router(dashboard.router, prefix="/api")
+app.include_router(settings.router, prefix="/api")
 app.include_router(bot_rules.router)
 app.include_router(flows.router)
 app.include_router(flows.crud_router, prefix="/flows")

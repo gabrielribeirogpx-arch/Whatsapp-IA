@@ -21,7 +21,9 @@ import {
   FlowItem,
   FlowPayload,
   FlowVersionItem,
-  FlowAnalytics
+  FlowAnalytics,
+  SystemSettings,
+  SystemSettingsPayload
 } from './types';
 
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL;
@@ -381,4 +383,17 @@ export async function restoreFlowVersion(flowId: string, versionId: string): Pro
 export async function getFlowAnalytics(flowId: string): Promise<FlowAnalytics> {
   const res = await apiFetch(`/flows/${flowId}/analytics`);
   return parseApiResponse<FlowAnalytics>(res);
+}
+
+export async function getSystemSettings(): Promise<SystemSettings> {
+  const res = await apiFetch('/api/settings');
+  return parseApiResponse<SystemSettings>(res);
+}
+
+export async function updateSystemSettings(payload: SystemSettingsPayload): Promise<SystemSettings> {
+  const res = await apiFetch('/api/settings', {
+    method: 'PUT',
+    body: JSON.stringify(payload)
+  });
+  return parseApiResponse<SystemSettings>(res);
 }
