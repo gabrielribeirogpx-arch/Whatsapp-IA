@@ -19,33 +19,26 @@ def handle_incoming_message(db: Session, message: Message, conversation: Convers
     print(f"[FLOW] node={conversation.current_node_id}")
 
     if mode == "flow":
-        if conversation.current_node_id is None:
-            print("[FLOW MODE] inconsistente sem node, resetando para bot")
-            conversation.mode = "bot"
-            conversation.current_flow = None
-            conversation.current_node_id = None
-            db.commit()
-            db.refresh(conversation)
-            print("[MODE RESET] bot")
-            mode = "bot"
-            base_log_data["mode"] = "bot"
+        if conversation.current_node_id:
+            print("[MODE PROTECTED] mantendo modo flow durante execução")
         else:
-            print("[MODE KEEP] flow")
-            print("[FLOW MODE] usuário em fluxo")
-            result = handle_visual_flow_priority(db=db, message=message, conversation=conversation)
-            base_log_data["mode"] = conversation.mode or mode
-            log_conversation_event(
-                db,
-                {
-                    **base_log_data,
-                    "intent": result.get("intent"),
-                    "matched_rule": result.get("matched_rule"),
-                    "flow_step": conversation.conversation_state,
-                    "used_fallback": bool(result.get("fallback")),
-                    "response": result.get("response"),
-                },
-            )
-            return True
+            print("[FLOW MODE] sem node ativo, mantendo flow e tentando retomar")
+
+        print("[FLOW MODE] usuário em fluxo")
+        result = handle_visual_flow_priority(db=db, message=message, conversation=conversation)
+        base_log_data["mode"] = conversation.mode or mode
+        log_conversation_event(
+            db,
+            {
+                **base_log_data,
+                "intent": result.get("intent"),
+                "matched_rule": result.get("matched_rule"),
+                "flow_step": conversation.conversation_state,
+                "used_fallback": bool(result.get("fallback")),
+                "response": result.get("response"),
+            },
+        )
+        return True
 
     if mode == "bot":
         has_active_visual_flow = tenant_has_active_visual_flow(db=db, tenant_id=conversation.tenant_id)
