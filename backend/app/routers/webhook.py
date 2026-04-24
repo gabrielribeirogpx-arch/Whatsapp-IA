@@ -16,6 +16,7 @@ from app.services.message_router import handle_incoming_message
 from app.services.idempotency_service import register_processed_message
 from app.services.message_service import normalize_meta_message
 from app.services.realtime_service import sse_broker
+from app.services.flow_service import resolve_flow_for_message
 from app.models import Tenant
 from app.utils.phone import normalize_phone
 
@@ -180,6 +181,24 @@ async def _process_meta_webhook(request: Request, db: Session) -> dict[str, str]
             }
             await sse_broker.publish(f"{tenant.id}:{normalized_phone}", message_payload)
             await sse_broker.publish(f"{tenant.id}:{conversation.id}", message_payload)
+
+            should_resolve_flow = not (
+                conversation.mode == "flow" and conversation.current_node_id is not None
+            ) and (
+                conversation.current_flow_id is None or conversation.current_node_id is None
+            )
+            if should_resolve_flow:
+                resolved_flow = resolve_flow_for_message(
+                    db=db,
+                    tenant_id=conversation.tenant_id,
+                    message_text=incoming_message,
+                )
+                if resolved_flow:
+                    conversation.current_flow_id = resolved_flow.id
+                    conversation.mode = "flow"
+                    db.add(conversation)
+                else:
+                    logger.info("[FALLBACK ROUTING] tenant=%s conversation=%s", conversation.tenant_id, conversation.id)
 
             handle_incoming_message(db, inbound_message, conversation)
 
