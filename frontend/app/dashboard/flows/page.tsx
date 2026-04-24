@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 
-import { createFlow, deleteFlow, listFlows, updateFlow } from '@/lib/api';
+import { createFlow, deleteFlow, duplicateFlow, listFlows, updateFlow } from '@/lib/api';
 import { FlowItem, FlowPayload } from '@/lib/types';
 
 const EMPTY_FORM: FlowPayload = {
@@ -19,6 +19,7 @@ export default function FlowsPage() {
   const [isOpen, setIsOpen] = useState(false);
   const [editingFlow, setEditingFlow] = useState<FlowItem | null>(null);
   const [form, setForm] = useState<FlowPayload>(EMPTY_FORM);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   const title = useMemo(() => (editingFlow ? 'Editar fluxo' : 'Novo fluxo'), [editingFlow]);
 
@@ -70,6 +71,13 @@ export default function FlowsPage() {
     await loadFlows();
   };
 
+  const onDuplicate = async (flowId: string) => {
+    await duplicateFlow(flowId);
+    await loadFlows();
+    setToastMessage('Flow duplicado com sucesso');
+    setTimeout(() => setToastMessage(null), 3000);
+  };
+
   return (
     <div style={{ padding: 24 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
@@ -97,6 +105,7 @@ export default function FlowsPage() {
                 <td>{flow.trigger_value || '-'}</td>
                 <td style={{ display: 'flex', gap: 8, padding: '8px 0' }}>
                   <button onClick={() => openEdit(flow)}>Editar</button>
+                  <button onClick={() => onDuplicate(flow.id)}>Duplicar</button>
                   <button onClick={() => onDelete(flow.id)}>Deletar</button>
                   <Link href={`/dashboard/flow-builder?flow_id=${flow.id}`}>Abrir builder</Link>
                 </td>
@@ -104,6 +113,23 @@ export default function FlowsPage() {
             ))}
           </tbody>
         </table>
+      )}
+
+      {toastMessage && (
+        <div
+          style={{
+            position: 'fixed',
+            right: 24,
+            bottom: 24,
+            backgroundColor: '#111827',
+            color: '#fff',
+            padding: '10px 14px',
+            borderRadius: 8,
+            boxShadow: '0 8px 20px rgba(0,0,0,0.2)'
+          }}
+        >
+          {toastMessage}
+        </div>
       )}
 
       {isOpen && (
