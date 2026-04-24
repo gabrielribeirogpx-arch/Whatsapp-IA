@@ -35,7 +35,7 @@ from app.services.tenant_service import (
     get_current_tenant,
     login_tenant,
 )
-from app.services.whatsapp_service import WhatsAppConfigError, send_whatsapp_message
+from app.services.queue import enqueue_send_message
 
 router = APIRouter(tags=["chat"])
 
@@ -311,8 +311,8 @@ async def send_message(
 
     print(f"[MODE CHECK] current mode={conversation.mode}")
     try:
-        send_whatsapp_message(tenant, phone, message_text)
-    except WhatsAppConfigError:
+        enqueue_send_message(tenant.id, phone, message_text)
+    except Exception:
         pass
 
     print("SALVANDO_MSG:", phone, message_text)

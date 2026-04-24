@@ -9,7 +9,7 @@ from app.models import BotRule, Conversation, Message, Tenant
 from app.services.flow_orchestrator import handle_flow as handle_orchestrator_flow
 from app.services.flow_engine_service import process_flow_engine, tenant_has_active_visual_flow
 from app.services.flow_service import handle_flow as handle_priority_flow
-from app.services.whatsapp_service import WhatsAppConfigError, send_whatsapp_message
+from app.services.queue import enqueue_send_message
 from app.utils.text import normalize_text, tokenize
 
 STATE_INICIO = "inicio"
@@ -324,10 +324,10 @@ def handle_visual_flow_priority(db: Session, message: Message, conversation) -> 
         try:
             print(f"[MODE CHECK] current mode={conversation.mode}")
             if tenant:
-                send_whatsapp_message(tenant, conversation.phone_number, visual_flow_response)
+                enqueue_send_message(tenant.id, conversation.phone_number, visual_flow_response)
             else:
                 print("[BOT] Tenant não encontrado, envio WhatsApp ignorado")
-        except WhatsAppConfigError:
+        except Exception:
             pass
 
         _create_outbound_message(
@@ -470,10 +470,10 @@ def handle_bot(db: Session, message: Message, conversation) -> dict[str, str | b
     try:
         print(f"[MODE CHECK] current mode={conversation.mode}")
         if tenant:
-            send_whatsapp_message(tenant, conversation.phone_number, selected_response)
+            enqueue_send_message(tenant.id, conversation.phone_number, selected_response)
         else:
             print("[BOT] Tenant não encontrado, envio WhatsApp ignorado")
-    except WhatsAppConfigError:
+    except Exception:
         pass
 
     _create_outbound_message(

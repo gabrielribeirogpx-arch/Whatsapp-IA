@@ -1,6 +1,7 @@
 from datetime import datetime
 import logging
 from uuid import UUID
+import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from sqlalchemy import desc, select
@@ -37,6 +38,159 @@ def _looks_like_name(text: str) -> bool:
     return len(words) <= 4
 
 
+def _resolve_request_tenant_id(request: Request) -> uuid.UUID | None:
+    tenant_from_middleware = getattr(request.state, "tenant_id", None)
+    if tenant_from_middleware:
+        return tenant_from_middleware
+
+    tenant_header = (request.headers.get("x-tenant-id") or "").strip()
+    if not tenant_header:
+        return None
+    try:
+        return uuid.UUID(tenant_header)
+    except ValueError:
+        return None
+
+
+async def _parse_webhook_payload(request: Request) -> dict:
+    try:
+        payload = await request.json()
+    except Exception:
+        logger.warning("Webhook rejeitado: payload JSON inválido")
+        return {}
+
+    if not isinstance(payload, dict):
+        logger.warning("Webhook rejeitado: payload não é objeto")
+        return {}
+    return payload
+
+
+async def _process_meta_webhook(request: Request, db: Session) -> dict[str, str]:
+    payload = await _parse_webhook_payload(request)
+    if not payload:
+        return {"status": "ignored"}
+
+    logger.info("event=meta_webhook_received keys=%s", list(payload.keys()))
+    logger.info("[WEBHOOK RAW] payload=%s", str(payload)[:800])
+    messages_data = normalize_meta_message(payload)
+
+    if not messages_data:
+        logger.info("Evento ignorado: payload sem mensagens processáveis")
+        return {"status": "ignored"}
+
+    tenant_slug = (request.headers.get("x-tenant-slug") or "").strip()
+    tenant_id_from_context = _resolve_request_tenant_id(request)
+    processed_any = False
+
+    for incoming in messages_data:
+        phone = incoming["phone"]
+        normalized_phone = normalize_phone(phone)
+        incoming_message = incoming.get("text") or ""
+        incoming_type = incoming.get("type") or "unknown"
+        logger.info("[WEBHOOK DEBUG] type=%s message=%s", incoming_type, incoming_message)
+        contact_name = incoming.get("name")
+        phone_number_id = incoming.get("phone_number_id")
+        logger.info(
+            "Mensagem normalizada recebida phone=%s type=%s phone_number_id=%s",
+            normalized_phone,
+            incoming_type,
+            phone_number_id,
+        )
+
+        tenant = None
+        if tenant_id_from_context:
+            tenant = db.execute(select(Tenant).where(Tenant.id == tenant_id_from_context)).scalars().first()
+        if not tenant and tenant_slug:
+            tenant = db.execute(select(Tenant).where(Tenant.slug == tenant_slug)).scalars().first()
+        if not tenant:
+            tenant = (
+                db.query(Tenant)
+                .filter(Tenant.phone_number_id == phone_number_id)
+                .first()
+                or get_or_create_default_tenant(db)
+            )
+
+        tenant_id = tenant.id
+        incoming["tenant_id"] = str(tenant_id)
+        logger.info("event=tenant_resolved tenant_id=%s slug=%s", tenant.id, tenant.slug)
+        message_id = (incoming.get("message_id") or "").strip()
+        was_inserted = register_processed_message(db=db, tenant_id=tenant_id, message_id=message_id)
+        if not was_inserted:
+            logger.info("Mensagem duplicada ignorada tenant_id=%s phone=%s message_id=%s", tenant_id, normalized_phone, message_id)
+            continue
+
+        if incoming_type not in {"text", "interactive"} or not incoming_message:
+            logger.info("Evento ignorado: tipo=%s sem texto processável", incoming_type)
+            continue
+
+        processed_any = True
+        contact = upsert_contact_for_phone(
+            db,
+            tenant_id=tenant_id,
+            phone=normalized_phone,
+            name=contact_name,
+        )
+
+        conversation = (
+            db.query(Conversation)
+            .filter(
+                Conversation.tenant_id == tenant.id,
+                Conversation.phone_number == normalized_phone
+            )
+            .order_by(Conversation.updated_at.desc())
+            .first()
+        )
+        existed = conversation is not None
+
+        if not conversation:
+            conversation, existed = get_or_create_conversation(
+                db=db,
+                tenant_id=tenant_id,
+                phone=normalized_phone,
+                contact_id=contact.id,
+            )
+
+        if existed:
+            logger.info("Conversa encontrada id=%s", conversation.id)
+        else:
+            logger.info("Nenhuma conversa encontrada, criando nova para %s", normalized_phone)
+
+        if contact_name and not conversation.name:
+            conversation.name = contact_name
+        ensure_conversation_contact_link(conversation, contact)
+
+        if conversation.name is None and _looks_like_name(incoming_message):
+            conversation.name = incoming_message.strip()
+        if conversation.name and (not contact.name or contact.name == "Cliente"):
+            contact.name = conversation.name
+        contact.last_message_at = datetime.utcnow()
+
+        logger.info("Salvando mensagem de entrada phone=%s conversation_id=%s", normalized_phone, conversation.id)
+        inbound_message = Message(
+            tenant_id=conversation.tenant_id,
+            conversation_id=conversation.id,
+            text=incoming_message,
+            from_me=False,
+            created_at=datetime.utcnow(),
+        )
+        db.add(inbound_message)
+        db.commit()
+        db.refresh(inbound_message)
+        message_payload = {
+            "event": "message",
+            "message": MessageOut.model_validate(inbound_message).model_dump(mode="json"),
+        }
+        await sse_broker.publish(f"{tenant.id}:{normalized_phone}", message_payload)
+        await sse_broker.publish(f"{tenant.id}:{conversation.id}", message_payload)
+
+        handle_incoming_message(db, inbound_message, conversation)
+
+        logger.info("Evento processado telefone=%s conteúdo=%s", normalized_phone, incoming_message)
+
+    db.commit()
+    return {"status": "message processed" if processed_any else "ignored"}
+
+
 @router.get("/webhook")
 async def verify(
     hub_mode: str = Query(default="", alias="hub.mode"),
@@ -58,121 +212,7 @@ async def verify(
 @router.post("/webhook")
 async def webhook(request: Request, db: Session = Depends(get_db)):
     try:
-        payload = await request.json()
-        logger.info("Webhook Meta recebido: keys=%s", list(payload.keys()))
-        logger.info("[WEBHOOK RAW] payload=%s", str(payload)[:800])
-        messages_data = normalize_meta_message(payload)
-
-        if not messages_data:
-            logger.info("Evento ignorado: payload sem mensagens processáveis")
-            return {"status": "ignored"}
-
-        tenant_slug = (request.headers.get("x-tenant-slug") or "").strip()
-
-        for incoming in messages_data:
-            phone = incoming["phone"]
-            normalized_phone = normalize_phone(phone)
-            incoming_message = incoming.get("text") or ""
-            incoming_type = incoming.get("type") or "unknown"
-            logger.info("[WEBHOOK DEBUG] type=%s message=%s", incoming_type, incoming_message)
-            contact_name = incoming.get("name")
-            phone_number_id = incoming.get("phone_number_id")
-            logger.info(
-                "Mensagem normalizada recebida phone=%s type=%s phone_number_id=%s",
-                normalized_phone,
-                incoming_type,
-                phone_number_id,
-            )
-
-            tenant = None
-            if tenant_slug:
-                tenant = db.execute(select(Tenant).where(Tenant.slug == tenant_slug)).scalars().first()
-            if not tenant:
-                tenant = (
-                    db.query(Tenant)
-                    .filter(Tenant.phone_number_id == phone_number_id)
-                    .first()
-                    or get_or_create_default_tenant(db)
-                )
-
-            tenant_id = tenant.id
-            incoming["tenant_id"] = str(tenant_id)
-            logger.info("Tenant resolvido tenant_id=%s slug=%s", tenant.id, tenant.slug)
-            message_id = (incoming.get("message_id") or "").strip()
-            was_inserted = register_processed_message(db=db, tenant_id=tenant_id, message_id=message_id)
-            if not was_inserted:
-                logger.info("Mensagem duplicada ignorada tenant_id=%s phone=%s message_id=%s", tenant_id, normalized_phone, message_id)
-                return {"status": "duplicate", "message_id": message_id}
-
-            if incoming_type not in {"text", "interactive"} or not incoming_message:
-                logger.info("Evento ignorado: tipo=%s sem texto processável", incoming_type)
-                continue
-
-
-            contact = upsert_contact_for_phone(
-                db,
-                tenant_id=tenant_id,
-                phone=normalized_phone,
-                name=contact_name,
-            )
-
-            conversation = (
-                db.query(Conversation)
-                .filter(
-                    Conversation.tenant_id == tenant.id,
-                    Conversation.phone_number == normalized_phone
-                )
-                .order_by(Conversation.updated_at.desc())
-                .first()
-            )
-            existed = conversation is not None
-
-            if not conversation:
-                conversation, existed = get_or_create_conversation(
-                    db=db,
-                    tenant_id=tenant_id,
-                    phone=normalized_phone,
-                    contact_id=contact.id,
-                )
-
-            if existed:
-                logger.info("Conversa encontrada id=%s", conversation.id)
-            else:
-                logger.info("Nenhuma conversa encontrada, criando nova para %s", normalized_phone)
-
-            if contact_name and not conversation.name:
-                conversation.name = contact_name
-            ensure_conversation_contact_link(conversation, contact)
-
-            if conversation.name is None and _looks_like_name(incoming_message):
-                conversation.name = incoming_message.strip()
-            if conversation.name and (not contact.name or contact.name == "Cliente"):
-                contact.name = conversation.name
-            contact.last_message_at = datetime.utcnow()
-
-            logger.info("Salvando mensagem de entrada phone=%s conversation_id=%s", normalized_phone, conversation.id)
-            inbound_message = Message(
-                tenant_id=conversation.tenant_id,
-                conversation_id=conversation.id,
-                text=incoming_message,
-                from_me=False,
-                created_at=datetime.utcnow(),
-            )
-            db.add(inbound_message)
-            db.commit()
-            db.refresh(inbound_message)
-            message_payload = {
-                "event": "message",
-                "message": MessageOut.model_validate(inbound_message).model_dump(mode="json"),
-            }
-            await sse_broker.publish(f"{tenant.id}:{normalized_phone}", message_payload)
-            await sse_broker.publish(f"{tenant.id}:{conversation.id}", message_payload)
-
-            handle_incoming_message(db, inbound_message, conversation)
-
-            logger.info("Evento processado telefone=%s conteúdo=%s", normalized_phone, incoming_message)
-
-        db.commit()
+        return await _process_meta_webhook(request=request, db=db)
     except Exception as e:
         db.rollback()
         logger.exception("Erro ao processar webhook: %s", str(e))
@@ -180,13 +220,28 @@ async def webhook(request: Request, db: Session = Depends(get_db)):
     return {"status": "message processed"}
 
 
+@router.post("/webhook/meta")
+async def webhook_meta(request: Request, db: Session = Depends(get_db)):
+    try:
+        return await _process_meta_webhook(request=request, db=db)
+    except Exception as e:
+        db.rollback()
+        logger.exception("Erro ao processar /webhook/meta: %s", str(e))
+        return {"status": "ignored"}
+
+
 @router.get("/conversations")
-def list_conversations(db: Session = Depends(get_db)):
-    conversations = db.execute(
+def list_conversations(request: Request, db: Session = Depends(get_db)):
+    tenant_id = _resolve_request_tenant_id(request)
+    query = (
         select(Conversation)
-        .options(load_only(Conversation.id, Conversation.phone_number, Conversation.created_at))
+        .options(load_only(Conversation.id, Conversation.phone_number, Conversation.created_at, Conversation.tenant_id))
         .order_by(desc(Conversation.updated_at), desc(Conversation.id))
-    ).scalars().all()
+    )
+    if tenant_id:
+        query = query.where(Conversation.tenant_id == tenant_id)
+
+    conversations = db.execute(query).scalars().all()
 
     response: list[dict[str, str | None]] = []
     for conversation in conversations:
@@ -207,12 +262,16 @@ def list_conversations(db: Session = Depends(get_db)):
 
 
 @router.get("/messages/{conversation_id}")
-def list_messages(conversation_id: UUID, db: Session = Depends(get_db)):
-    messages = db.execute(
+def list_messages(conversation_id: UUID, request: Request, db: Session = Depends(get_db)):
+    tenant_id = _resolve_request_tenant_id(request)
+    query = (
         select(Message)
         .where(Message.conversation_id == conversation_id)
         .order_by(Message.created_at.asc(), Message.id.asc())
-    ).scalars().all()
+    )
+    if tenant_id:
+        query = query.where(Message.tenant_id == tenant_id)
+    messages = db.execute(query).scalars().all()
 
     return [
         {

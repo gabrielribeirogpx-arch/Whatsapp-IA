@@ -10,8 +10,9 @@ from sqlalchemy.orm import Session
 
 from app.models import Conversation, Flow, FlowEdge, FlowNode, Tenant
 from app.services.delay_queue_service import enqueue_delay
+from app.services.flow_analytics_service import FALLBACK, FLOW_MATCH, FLOW_SEND, FLOW_START, record_flow_event
+from app.services.queue import enqueue_send_message
 from app.utils.phone import normalize_phone
-from app.services.whatsapp_service import WhatsAppConfigError, send_whatsapp_message, send_whatsapp_interactive_buttons
 
 DEFAULT_FLOW_NAME = "__default_visual__"
 MAX_AUTO_STEPS = 10
@@ -290,6 +291,15 @@ def _advance_to_edge_target(db: Session, conversation: Conversation, edge: FlowE
         _reset_to_bot_mode(db=db, conversation=conversation, reason="flow_finished_no_next_edge")
         return None
 
+    if edge.target is None:
+        logger.warning(
+            "Flow com edge sem target conversation_id=%s edge=%s",
+            conversation.id,
+            edge.id,
+        )
+        _reset_to_bot_mode(db=db, conversation=conversation, reason="flow_error_next_node_is_none")
+        return None
+
     next_node = _get_node(db=db, node_id=edge.target, tenant_id=conversation.tenant_id)
     if not next_node:
         logger.warning(
@@ -339,34 +349,23 @@ def _send_flow_whatsapp_message(tenant: Tenant, phone: str, text: str) -> None:
         return
 
     print(f"[FLOW SEND] Enviando: {content}")
-    logger.info("[FLOW SEND] Enviando mensagem: %s", content)
+    logger.info("[FLOW SEND] Enfileirando mensagem: %s", content)
     try:
-        response = send_whatsapp_message(tenant, phone, content)
-        print(f"[FLOW SEND RESULT] {response}")
-    except WhatsAppConfigError as error:
-        print(f"[FLOW ERROR] {error}")
-        logger.warning("[FLOW SEND] Configuracao WhatsApp ausente para tenant_id=%s", tenant.id)
+        job_id = enqueue_send_message(tenant_id=tenant.id, phone=phone, text=content)
+        print(f"[FLOW SEND RESULT] job_id={job_id}")
     except Exception as error:
         print(f"[FLOW ERROR] {error}")
         logger.exception("[FLOW SEND] Falha inesperada ao enviar mensagem no flow")
 
 
 def _send_flow_interactive_buttons(tenant: Tenant, phone: str, text: str, buttons: list[dict]) -> None:
-    """Envia botoes interativos; faz fallback para texto simples se falhar."""
+    """Enfileira envio de botoes; worker aplica fallback para texto simples se falhar."""
     print(f"[FLOW BUTTON SEND] Tentando enviar botoes: {[b.get('label') for b in buttons]}")
     try:
-        response = send_whatsapp_interactive_buttons(
-            tenant=tenant,
-            phone=phone,
-            body_text=text,
-            buttons=buttons,
-        )
-        print(f"[FLOW BUTTON SEND RESULT] {response}")
-    except WhatsAppConfigError as error:
-        print(f"[FLOW BUTTON ERROR] Config: {error}")
-        _send_flow_whatsapp_message(tenant=tenant, phone=phone, text=text)
+        job_id = enqueue_send_message(tenant_id=tenant.id, phone=phone, text=text, buttons=buttons)
+        print(f"[FLOW BUTTON SEND RESULT] job_id={job_id}")
     except Exception as error:
-        print(f"[FLOW BUTTON ERROR] {error} — usando fallback texto")
+        print(f"[FLOW BUTTON ERROR] {error} — usando fallback texto em fila")
         _send_flow_whatsapp_message(tenant=tenant, phone=phone, text=text)
 
 
@@ -441,6 +440,14 @@ def process_flow_engine(
             conversation.retries = (conversation.retries or 0) + 1
             if conversation.retries >= MAX_RETRIES:
                 logger.info("[FALLBACK LIMIT] exceeded → reset")
+                record_flow_event(
+                    db=db,
+                    tenant_id=conversation.tenant_id,
+                    conversation_id=conversation.id,
+                    flow_id=conversation.current_flow,
+                    node_id=conversation.current_node_id,
+                    event_type=FALLBACK,
+                )
                 _reset_to_bot_mode(db=db, conversation=conversation, reason="fallback_limit_exceeded")
                 conversation.retries = 0
                 db.commit()
@@ -464,6 +471,14 @@ def process_flow_engine(
             )
             logger.info("[FALLBACK] triggered")
             logger.info("[FALLBACK] retries=%s", conversation.retries)
+            record_flow_event(
+                db=db,
+                tenant_id=conversation.tenant_id,
+                conversation_id=conversation.id,
+                flow_id=conversation.current_flow,
+                node_id=conversation.current_node_id,
+                event_type=FALLBACK,
+            )
             db.commit()
             db.refresh(conversation)
             return fallback_text
@@ -489,6 +504,14 @@ def process_flow_engine(
                 print(f"[FLOW INIT] start_node_id={start_node.id}")
                 logger.info("[FLOW INIT] start_node_id=%s", start_node.id)
                 logger.info("[FLOW RECOVERY] node=%s", start_node.id)
+                record_flow_event(
+                    db=db,
+                    tenant_id=conversation.tenant_id,
+                    conversation_id=conversation.id,
+                    flow_id=flow.id,
+                    node_id=start_node.id,
+                    event_type=FLOW_START,
+                )
             else:
                 print("[FLOW ERROR] no start node found")
                 logger.error("[FLOW ERROR] no start node found")
@@ -505,6 +528,14 @@ def process_flow_engine(
                 )
                 logger.info("[FALLBACK] triggered")
                 logger.info("[FALLBACK] retries=%s", conversation.retries)
+                record_flow_event(
+                    db=db,
+                    tenant_id=conversation.tenant_id,
+                    conversation_id=conversation.id,
+                    flow_id=conversation.current_flow,
+                    node_id=conversation.current_node_id,
+                    event_type=FALLBACK,
+                )
                 db.commit()
                 db.refresh(conversation)
                 return fallback_text
@@ -524,6 +555,14 @@ def process_flow_engine(
             selected_start_node_id = selected_start_edge.target if selected_start_edge else start_node.id
             _set_flow_mode(db=db, conversation=conversation, flow_id=flow.id, node_id=selected_start_node_id)
             logger.info("[FLOW STATE] current=%s next=%s", conversation.current_node_id, selected_start_node_id)
+            record_flow_event(
+                db=db,
+                tenant_id=conversation.tenant_id,
+                conversation_id=conversation.id,
+                flow_id=flow.id,
+                node_id=selected_start_node_id,
+                event_type=FLOW_START,
+            )
 
     if conversation.mode == "flow":
         _keep_flow_mode(conversation)
@@ -551,8 +590,28 @@ def process_flow_engine(
         return None
 
     collected_messages: list[str] = []
-    for _ in range(MAX_AUTO_STEPS):
+    visited_node_ids: set[uuid.UUID] = set()
+    reached_max_steps = True
+    for step_index in range(MAX_AUTO_STEPS):
+        logger.info(
+            "event=flow_step tenant_id=%s conversation_id=%s step=%s current_node_id=%s",
+            conversation.tenant_id,
+            conversation.id,
+            step_index + 1,
+            conversation.current_node_id,
+        )
         node_data = _extract_node_data(node)
+        if node.id in visited_node_ids:
+            logger.warning(
+                "event=flow_loop_detected tenant_id=%s conversation_id=%s node_id=%s",
+                conversation.tenant_id,
+                conversation.id,
+                node.id,
+            )
+            _reset_to_bot_mode(db=db, conversation=conversation, reason="flow_loop_detected")
+            reached_max_steps = False
+            break
+        visited_node_ids.add(node.id)
         node_type = node.type
         if node_type.endswith("Node"):
             node_type = node_type[:-4]
@@ -569,6 +628,14 @@ def process_flow_engine(
                     print("[FLOW ERROR] texto vazio no node")
                     return None
                 _send_flow_whatsapp_message(tenant=tenant, phone=conversation_phone, text=text)
+                record_flow_event(
+                    db=db,
+                    tenant_id=conversation.tenant_id,
+                    conversation_id=conversation.id,
+                    flow_id=node.flow_id,
+                    node_id=node.id,
+                    event_type=FLOW_SEND,
+                )
                 # Após enviar mensagem, zera msg para que nodes seguintes
                 # (condition, choice) não usem a mensagem inicial do usuário
                 msg = ""
@@ -576,6 +643,7 @@ def process_flow_engine(
                 collected_messages.append(text)
             node = _advance_to_edge_target(db=db, conversation=conversation, edge=_pick_default_edge(edges))
             if not node:
+                reached_max_steps = False
                 break
             continue
 
@@ -615,6 +683,7 @@ def process_flow_engine(
 
                 # Persiste o node atual como ponto de espera da resposta
                 set_current_node(conversation=conversation, node_id=node.id, db=db)
+                reached_max_steps = False
                 break
 
             # Usuario respondeu — tenta match com as edges
@@ -647,10 +716,12 @@ def process_flow_engine(
                     print("[FLOW ERROR] node choice sem texto")
 
                 set_current_node(conversation=conversation, node_id=node.id, db=db)
+                reached_max_steps = False
                 break
 
             node = _advance_to_edge_target(db=db, conversation=conversation, edge=selected_edge or _pick_default_edge(edges))
             if not node:
+                reached_max_steps = False
                 break
             continue
 
@@ -663,6 +734,7 @@ def process_flow_engine(
             if not msg:
                 print(f"[FLOW CONDITION WAIT] aguardando resposta no node={node.id}")
                 set_current_node(conversation=conversation, node_id=node.id, db=db)
+                reached_max_steps = False
                 break
 
             # Suporte a múltiplas palavras/sinônimos separados por vírgula
@@ -684,6 +756,14 @@ def process_flow_engine(
             if result:
                 print(f"[FLOW MATCH] condição TRUE: {node.id}")
                 logger.info("[FLOW MATCH] condicao TRUE node=%s conversation_id=%s", node.id, conversation.id)
+                record_flow_event(
+                    db=db,
+                    tenant_id=conversation.tenant_id,
+                    conversation_id=conversation.id,
+                    flow_id=node.flow_id,
+                    node_id=node.id,
+                    event_type=FLOW_MATCH,
+                )
             else:
                 print(f"[FLOW MISS] condição FALSE: {node.id}")
                 logger.info("[FLOW MISS] condicao FALSE node=%s conversation_id=%s", node.id, conversation.id)
@@ -704,6 +784,7 @@ def process_flow_engine(
 
             node = _advance_to_edge_target(db=db, conversation=conversation, edge=selected_edge)
             if not node:
+                reached_max_steps = False
                 break
 
             # Condição resolvida por edge (true/false) — interrompe avaliação atual
@@ -721,6 +802,7 @@ def process_flow_engine(
             if not next_edge:
                 logger.info("Delay sem proxima aresta conversation_id=%s node_id=%s", conversation.id, node.id)
                 _reset_to_bot_mode(db=db, conversation=conversation, reason="flow_finished_delay_without_next")
+                reached_max_steps = False
                 break
 
             enqueue_delay(
@@ -732,6 +814,7 @@ def process_flow_engine(
             logger.info("[FLOW STATE] current=%s next=%s", conversation.current_node_id, next_edge.target)
             set_current_node(conversation=conversation, node_id=next_edge.target, db=db)
             _keep_flow_mode(conversation)
+            reached_max_steps = False
             break
 
         if node_type == "action":
@@ -744,6 +827,7 @@ def process_flow_engine(
 
             node = _advance_to_edge_target(db=db, conversation=conversation, edge=_pick_default_edge(edges))
             if not node:
+                reached_max_steps = False
                 break
             continue
 
@@ -752,7 +836,18 @@ def process_flow_engine(
             collected_messages.append(content)
         node = _advance_to_edge_target(db=db, conversation=conversation, edge=_pick_default_edge(edges))
         if not node:
+            reached_max_steps = False
             break
+
+    if reached_max_steps and node is not None:
+        logger.warning(
+            "event=flow_max_steps_reached tenant_id=%s conversation_id=%s max_steps=%s node_id=%s",
+            conversation.tenant_id,
+            conversation.id,
+            MAX_AUTO_STEPS,
+            node.id,
+        )
+        _reset_to_bot_mode(db=db, conversation=conversation, reason="flow_max_steps_reached")
 
     return "\n\n".join(part for part in collected_messages if part).strip() or None
 
