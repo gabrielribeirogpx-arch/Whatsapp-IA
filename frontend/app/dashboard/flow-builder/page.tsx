@@ -12,6 +12,7 @@ import ReactFlow, {
 } from 'reactflow';
 import type { Connection, Edge, Node, ReactFlowInstance } from 'reactflow';
 import 'reactflow/dist/style.css';
+import { Clock, GitBranch, ListChecks, MessageSquare, Zap } from 'lucide-react';
 
 import ActionNode from '@/components/flow/nodes/ActionNode';
 import ChoiceNode from '@/components/flow/nodes/ChoiceNode';
@@ -618,39 +619,27 @@ export default function FlowBuilderPage() {
         <span className="dash-nav-section">Blocos</span>
 
         <button type="button" className="dash-nav-item" onClick={() => addNode('message')} title="Mensagem" style={{ border: 'none', background: 'none', cursor: 'pointer', width: '100%', textAlign: 'left' }}>
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
-          </svg>
+          <MessageSquare size={18} strokeWidth={1.8} className="text-current" />
           <span className="dash-nav-label">Mensagem</span>
         </button>
 
         <button type="button" className="dash-nav-item" onClick={() => addNode('choice')} title="Escolha" style={{ border: 'none', background: 'none', cursor: 'pointer', width: '100%', textAlign: 'left' }}>
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <circle cx="12" cy="12" r="10"/>
-            <polyline points="12 8 12 12 14 14"/>
-          </svg>
+          <ListChecks size={18} strokeWidth={1.8} className="text-current" />
           <span className="dash-nav-label">Escolha</span>
         </button>
 
         <button type="button" className="dash-nav-item" onClick={() => addNode('condition')} title="Condição" style={{ border: 'none', background: 'none', cursor: 'pointer', width: '100%', textAlign: 'left' }}>
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
-          </svg>
+          <GitBranch size={18} strokeWidth={1.8} className="text-current" />
           <span className="dash-nav-label">Condição</span>
         </button>
 
         <button type="button" className="dash-nav-item" onClick={() => addNode('delay')} title="Delay" style={{ border: 'none', background: 'none', cursor: 'pointer', width: '100%', textAlign: 'left' }}>
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <circle cx="12" cy="12" r="10"/>
-            <polyline points="12 6 12 12 16 14"/>
-          </svg>
+          <Clock size={18} strokeWidth={1.8} className="text-current" />
           <span className="dash-nav-label">Delay</span>
         </button>
 
         <button type="button" className="dash-nav-item" onClick={() => addNode('action')} title="Ação" style={{ border: 'none', background: 'none', cursor: 'pointer', width: '100%', textAlign: 'left' }}>
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
-          </svg>
+          <Zap size={18} strokeWidth={1.8} className="text-current" />
           <span className="dash-nav-label">Ação</span>
         </button>
 
