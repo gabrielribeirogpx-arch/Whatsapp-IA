@@ -146,6 +146,7 @@ export default function FlowBuilderClient({ flowId }: FlowBuilderClientProps) {
   const [isRestoringVersion, setIsRestoringVersion] = useState(false);
   const [flowVersions, setFlowVersions] = useState<FlowVersionItem[]>([]);
   const [activeVersionId, setActiveVersionId] = useState<string | null>(null);
+  const [hasVersions, setHasVersions] = useState(false);
   const simulationStartedRef = useRef(false);
 
   const formatVersionDate = useCallback((timestamp?: string | null) => {
@@ -285,6 +286,30 @@ export default function FlowBuilderClient({ flowId }: FlowBuilderClientProps) {
       active = false;
     };
   }, [applyLayoutAndSetFlow, buildFlowNode, selectedFlowId, setEdges, setNodes]);
+
+  useEffect(() => {
+    let active = true;
+
+    const checkVersionsAvailability = async () => {
+      if (!selectedFlowId) {
+        setHasVersions(false);
+        return;
+      }
+      try {
+        const versions = await listFlowVersions(selectedFlowId);
+        if (!active) return;
+        setHasVersions(versions.length > 0);
+      } catch {
+        if (!active) return;
+        setHasVersions(false);
+      }
+    };
+
+    checkVersionsAvailability();
+    return () => {
+      active = false;
+    };
+  }, [selectedFlowId]);
 
   const flow = useMemo(
     () => ({
@@ -592,6 +617,7 @@ export default function FlowBuilderClient({ flowId }: FlowBuilderClientProps) {
     try {
       const versions = await listFlowVersions(selectedFlowId);
       setFlowVersions(versions);
+      setHasVersions(versions.length > 0);
       const current = versions.find((item) => item.is_current);
       setActiveVersionId(current?.id || null);
     } finally {
@@ -615,6 +641,7 @@ export default function FlowBuilderClient({ flowId }: FlowBuilderClientProps) {
       setEdges(orderedEdges);
       setActiveVersionId(versionId);
       setFlowVersions((prev) => prev.map((item) => ({ ...item, is_current: item.id === versionId })));
+      setHasVersions(true);
       requestAnimationFrame(() => { reactFlowInstance?.fitView(); });
     } finally {
       setIsRestoringVersion(false);
@@ -736,7 +763,7 @@ export default function FlowBuilderClient({ flowId }: FlowBuilderClientProps) {
             type="button"
             className="flow-top-btn flow-top-btn-secondary"
             onClick={openVersionsModal}
-            disabled={!selectedFlowId}
+            disabled={!selectedFlowId || !hasVersions}
           >
             <History size={14} />
             Versões

@@ -373,9 +373,8 @@ export async function listFlowVersions(flowId: string): Promise<FlowVersionItem[
 }
 
 export async function restoreFlowVersion(flowId: string, versionId: string): Promise<FlowItem> {
-  const res = await apiFetch(`/flows/${flowId}/versions/restore`, {
-    method: 'POST',
-    body: JSON.stringify({ version_id: versionId })
+  const res = await apiFetch(`/flows/${flowId}/restore/${versionId}`, {
+    method: 'POST'
   });
   return parseApiResponse<FlowItem>(res);
 }

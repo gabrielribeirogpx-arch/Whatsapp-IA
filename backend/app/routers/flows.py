@@ -82,7 +82,8 @@ def _serialize_flow_version(flow_version: FlowVersion, current_version_id: uuid.
     return {
         "id": str(flow_version.id),
         "flow_id": str(flow_version.flow_id),
-        "version": flow_version.version,
+        "version": flow_version.version_number,
+        "version_number": flow_version.version_number,
         "created_at": flow_version.created_at.isoformat() if flow_version.created_at else None,
         "is_current": bool(current_version_id and flow_version.id == current_version_id),
     }
@@ -258,7 +259,7 @@ def list_tenant_flow_versions(
     versions = db.execute(
         select(FlowVersion)
         .where(FlowVersion.flow_id == flow.id)
-        .order_by(FlowVersion.created_at.desc(), FlowVersion.version.desc())
+        .order_by(FlowVersion.created_at.desc(), FlowVersion.version_number.desc())
     ).scalars().all()
 
     return [_serialize_flow_version(item, flow.current_version_id) for item in versions]
@@ -283,9 +284,20 @@ def restore_tenant_flow_version(
         raise HTTPException(status_code=404, detail="Flow version not found")
 
     flow.current_version_id = flow_version.id
-    flow.version = flow_version.version
+    flow.version = flow_version.version_number
     db.add(flow)
     db.commit()
     db.refresh(flow)
 
     return _serialize_flow(flow)
+
+
+@crud_router.post("/{flow_id}/restore/{version_id}")
+def restore_tenant_flow_version_by_path(
+    flow_id: uuid.UUID,
+    version_id: uuid.UUID,
+    x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
+    db: Session = Depends(get_db),
+):
+    payload = RestoreFlowVersionPayload(version_id=version_id)
+    return restore_tenant_flow_version(flow_id=flow_id, payload=payload, x_tenant_id=x_tenant_id, db=db)

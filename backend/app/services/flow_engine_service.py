@@ -123,7 +123,7 @@ def _load_flow_version_runtime(flow: Flow, tenant_id: uuid.UUID, flow_version: F
         "[FLOW VERSION LOADED] flow_id=%s version_id=%s version=%s",
         flow.id,
         flow_version.id,
-        flow_version.version,
+        flow_version.version_number,
     )
     return {"nodes": nodes, "edges": edges, "node_map": node_map, "edges_by_source": edges_by_source}
 
@@ -1240,13 +1240,13 @@ def get_flow_graph(db: Session, tenant_id: uuid.UUID, flow_id: str) -> dict[str,
 def save_flow_graph(db: Session, tenant_id: uuid.UUID, flow_id: str, nodes: list[dict[str, Any]], edges: list[dict[str, Any]]) -> dict[str, str]:
     flow = resolve_flow(db=db, tenant_id=tenant_id, flow_id=flow_id)
     latest_version = db.execute(
-        select(func.max(FlowVersion.version)).where(FlowVersion.flow_id == flow.id)
+        select(func.max(FlowVersion.version_number)).where(FlowVersion.flow_id == flow.id)
     ).scalar_one_or_none()
     next_version = int(latest_version or 0) + 1
 
     flow_version = FlowVersion(
         flow_id=flow.id,
-        version=next_version,
+        version_number=next_version,
         nodes_json=nodes or [],
         edges_json=edges or [],
     )
@@ -1259,7 +1259,7 @@ def save_flow_graph(db: Session, tenant_id: uuid.UUID, flow_id: str, nodes: list
         "[FLOW VERSION CREATED] flow_id=%s version_id=%s version=%s",
         flow.id,
         flow_version.id,
-        flow_version.version,
+        flow_version.version_number,
     )
 
     db.query(FlowEdge).filter(FlowEdge.flow_id == flow.id).delete(synchronize_session=False)
