@@ -9,8 +9,17 @@ if not redis_url:
 
 conn = redis.from_url(redis_url)
 
+listen = ["default"]
+
+
+class LoggingWorker(Worker):
+    def execute_job(self, job, queue):
+        print("[RQ JOB] processing job")
+        return super().execute_job(job, queue)
+
+
 if __name__ == "__main__":
     print("[RQ WORKER] started")
     with Connection(conn):
-        worker = Worker(["default"])
+        worker = LoggingWorker(list(map(Queue, listen)))
         worker.work()
