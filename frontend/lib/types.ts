@@ -236,3 +236,21 @@ export type FlowAnalytics = {
   messages_sent: number;
   finalizations: number;
 };
+
+export type SystemSettings = {
+  token: string | null;
+  phone_number_id: string;
+  webhook_url: string | null;
+  webhook_status: string;
+  system_name: string;
+  language: string;
+};
+
+export type SystemSettingsPayload = {
+  token: string | null;
+  phone_number_id: string;
+  webhook_url: string | null;
+  webhook_status: string;
+  system_name: string;
+  language: string;
+};
