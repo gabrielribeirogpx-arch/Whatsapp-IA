@@ -3,12 +3,13 @@ from __future__ import annotations
 import unicodedata
 import uuid
 import logging
+from dataclasses import dataclass
 from typing import Any
 
-from sqlalchemy import desc, select
+from sqlalchemy import desc, func, select
 from sqlalchemy.orm import Session
 
-from app.models import Conversation, Flow, FlowEdge, FlowNode, Tenant
+from app.models import Conversation, Flow, FlowEdge, FlowNode, FlowVersion, Tenant
 from app.services.delay_queue_service import enqueue_delay
 from app.services.flow_analytics_service import FALLBACK, FLOW_MATCH, FLOW_SEND, FLOW_START, record_flow_event
 from app.services.queue import enqueue_send_message
@@ -18,6 +19,124 @@ DEFAULT_FLOW_NAME = "__default_visual__"
 MAX_AUTO_STEPS = 10
 MAX_RETRIES = 3
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class VersionedFlowNode:
+    id: uuid.UUID
+    flow_id: uuid.UUID
+    tenant_id: uuid.UUID
+    type: str
+    content: str | None
+    metadata_json: dict[str, Any] | None
+    position_x: int | None
+    position_y: int | None
+
+
+@dataclass
+class VersionedFlowEdge:
+    id: uuid.UUID
+    flow_id: uuid.UUID
+    source: uuid.UUID
+    target: uuid.UUID
+    condition: str | None
+
+
+def _parse_uuid(value: Any) -> uuid.UUID | None:
+    if isinstance(value, uuid.UUID):
+        return value
+    if value is None:
+        return None
+    try:
+        return uuid.UUID(str(value))
+    except (TypeError, ValueError):
+        return None
+
+
+def _load_flow_version_runtime(flow: Flow, tenant_id: uuid.UUID, flow_version: FlowVersion) -> dict[str, Any]:
+    raw_nodes = flow_version.nodes_json if isinstance(flow_version.nodes_json, list) else []
+    raw_edges = flow_version.edges_json if isinstance(flow_version.edges_json, list) else []
+    nodes: list[VersionedFlowNode] = []
+    node_map: dict[uuid.UUID, VersionedFlowNode] = {}
+    legacy_id_map: dict[str, uuid.UUID] = {}
+
+    for item in raw_nodes:
+        if not isinstance(item, dict):
+            continue
+        node_id = _parse_uuid(item.get("id")) or uuid.uuid4()
+        data = item.get("data") if isinstance(item.get("data"), dict) else {}
+        metadata = data.get("metadata") if isinstance(data.get("metadata"), dict) else {}
+        if data.get("text") is not None:
+            metadata["text"] = data.get("text")
+        if data.get("label") is not None:
+            metadata["label"] = data.get("label")
+        if data.get("buttons") is not None:
+            metadata["buttons"] = data.get("buttons")
+        if data.get("condition") is not None:
+            metadata["condition"] = data.get("condition")
+        if data.get("action") is not None:
+            metadata["action"] = data.get("action")
+        if data.get("isStart") is not None:
+            metadata["isStart"] = bool(data.get("isStart"))
+        position = item.get("position") if isinstance(item.get("position"), dict) else {}
+        node = VersionedFlowNode(
+            id=node_id,
+            flow_id=flow.id,
+            tenant_id=tenant_id,
+            type=str(item.get("type") or "message"),
+            content=(data.get("content") or data.get("text")) if isinstance(data, dict) else None,
+            metadata_json=metadata,
+            position_x=int(position.get("x", 0) or 0),
+            position_y=int(position.get("y", 0) or 0),
+        )
+        nodes.append(node)
+        node_map[node_id] = node
+        legacy_id_map[str(item.get("id"))] = node_id
+
+    edges: list[VersionedFlowEdge] = []
+    edges_by_source: dict[uuid.UUID, list[VersionedFlowEdge]] = {}
+    for item in raw_edges:
+        if not isinstance(item, dict):
+            continue
+        source_id = _parse_uuid(item.get("source")) or legacy_id_map.get(str(item.get("source")))
+        target_id = _parse_uuid(item.get("target")) or legacy_id_map.get(str(item.get("target")))
+        if not source_id or not target_id:
+            continue
+        edge_data = item.get("data") if isinstance(item.get("data"), dict) else {}
+        condition = (
+            edge_data.get("condition")
+            or edge_data.get("sourceHandle")
+            or item.get("label")
+            or item.get("sourceHandle")
+        ) or None
+        edge = VersionedFlowEdge(
+            id=_parse_uuid(item.get("id")) or uuid.uuid4(),
+            flow_id=flow.id,
+            source=source_id,
+            target=target_id,
+            condition=str(condition) if condition is not None else None,
+        )
+        edges.append(edge)
+        edges_by_source.setdefault(source_id, []).append(edge)
+
+    logger.info(
+        "[FLOW VERSION LOADED] flow_id=%s version_id=%s version=%s",
+        flow.id,
+        flow_version.id,
+        flow_version.version,
+    )
+    return {"nodes": nodes, "edges": edges, "node_map": node_map, "edges_by_source": edges_by_source}
+
+
+def _get_current_flow_runtime(db: Session, flow: Flow, tenant_id: uuid.UUID) -> dict[str, Any] | None:
+    if not flow.current_version_id:
+        return None
+    flow_version = db.execute(
+        select(FlowVersion).where(FlowVersion.id == flow.current_version_id, FlowVersion.flow_id == flow.id)
+    ).scalars().first()
+    if not flow_version:
+        return None
+    return _load_flow_version_runtime(flow=flow, tenant_id=tenant_id, flow_version=flow_version)
 
 
 def _normalize_text(value: str | None) -> str:
@@ -48,7 +167,7 @@ def should_reset_context(message: str, context: dict[str, Any] | None) -> bool:
     return "api" in context and "vender" in normalized_message
 
 
-def _extract_node_data(node: FlowNode) -> dict[str, Any]:
+def _extract_node_data(node: FlowNode | VersionedFlowNode) -> dict[str, Any]:
     metadata = node.metadata_json or {}
     return {
         "label": metadata.get("label") or node.content or node.type,
@@ -142,12 +261,20 @@ def _find_start_node(nodes: list[dict[str, Any]]) -> dict[str, Any] | None:
     return None
 
 
-def _get_start_node(db: Session, flow_id: uuid.UUID, tenant_id: uuid.UUID) -> FlowNode | None:
-    nodes = db.execute(
-        select(FlowNode)
-        .where(FlowNode.flow_id == flow_id, FlowNode.tenant_id == tenant_id)
-        .order_by(FlowNode.created_at.asc(), FlowNode.id.asc())
-    ).scalars().all()
+def _get_start_node(
+    db: Session,
+    flow_id: uuid.UUID,
+    tenant_id: uuid.UUID,
+    runtime_graph: dict[str, Any] | None = None,
+) -> FlowNode | VersionedFlowNode | None:
+    if runtime_graph:
+        nodes = runtime_graph.get("nodes", [])
+    else:
+        nodes = db.execute(
+            select(FlowNode)
+            .where(FlowNode.flow_id == flow_id, FlowNode.tenant_id == tenant_id)
+            .order_by(FlowNode.created_at.asc(), FlowNode.id.asc())
+        ).scalars().all()
 
     check_payload = [
         {
@@ -169,12 +296,20 @@ def _get_start_node(db: Session, flow_id: uuid.UUID, tenant_id: uuid.UUID) -> Fl
     return nodes[0] if nodes else None
 
 
-def _initialize_flow_start_node(db: Session, conversation: Conversation, flow_id: uuid.UUID) -> FlowNode | None:
-    nodes = db.execute(
-        select(FlowNode)
-        .where(FlowNode.flow_id == flow_id, FlowNode.tenant_id == conversation.tenant_id)
-        .order_by(FlowNode.created_at.asc(), FlowNode.id.asc())
-    ).scalars().all()
+def _initialize_flow_start_node(
+    db: Session,
+    conversation: Conversation,
+    flow_id: uuid.UUID,
+    runtime_graph: dict[str, Any] | None = None,
+) -> FlowNode | VersionedFlowNode | None:
+    if runtime_graph:
+        nodes = runtime_graph.get("nodes", [])
+    else:
+        nodes = db.execute(
+            select(FlowNode)
+            .where(FlowNode.flow_id == flow_id, FlowNode.tenant_id == conversation.tenant_id)
+            .order_by(FlowNode.created_at.asc(), FlowNode.id.asc())
+        ).scalars().all()
 
     node_payload = [
         {
@@ -197,7 +332,12 @@ def _initialize_flow_start_node(db: Session, conversation: Conversation, flow_id
                 start_node["id"],
                 start_node.get("data", {}).get("isStart"),
             )
-            return _get_node(db=db, node_id=start_node["id"], tenant_id=conversation.tenant_id)
+            return _get_node(
+                db=db,
+                node_id=start_node["id"],
+                tenant_id=conversation.tenant_id,
+                runtime_graph=runtime_graph,
+            )
         logger.error("[FLOW ERROR] Nenhum nó inicial encontrado")
         return None
 
@@ -205,16 +345,35 @@ def _initialize_flow_start_node(db: Session, conversation: Conversation, flow_id
         logger.error("[FLOW ERROR] Nenhum nó inicial encontrado")
         return None
 
-    return _get_node(db=db, node_id=conversation.current_node_id, tenant_id=conversation.tenant_id)
+    return _get_node(
+        db=db,
+        node_id=conversation.current_node_id,
+        tenant_id=conversation.tenant_id,
+        runtime_graph=runtime_graph,
+    )
 
 
-def _get_node(db: Session, node_id: uuid.UUID, tenant_id: uuid.UUID) -> FlowNode | None:
+def _get_node(
+    db: Session,
+    node_id: uuid.UUID,
+    tenant_id: uuid.UUID,
+    runtime_graph: dict[str, Any] | None = None,
+) -> FlowNode | VersionedFlowNode | None:
+    if runtime_graph:
+        return runtime_graph.get("node_map", {}).get(node_id)
     return db.execute(
         select(FlowNode).where(FlowNode.id == node_id, FlowNode.tenant_id == tenant_id)
     ).scalars().first()
 
 
-def _get_edges(db: Session, flow_id: uuid.UUID, source: uuid.UUID) -> list[FlowEdge]:
+def _get_edges(
+    db: Session,
+    flow_id: uuid.UUID,
+    source: uuid.UUID,
+    runtime_graph: dict[str, Any] | None = None,
+) -> list[FlowEdge | VersionedFlowEdge]:
+    if runtime_graph:
+        return runtime_graph.get("edges_by_source", {}).get(source, [])
     return db.execute(
         select(FlowEdge)
         .where(FlowEdge.flow_id == flow_id, FlowEdge.source == source)
@@ -222,7 +381,7 @@ def _get_edges(db: Session, flow_id: uuid.UUID, source: uuid.UUID) -> list[FlowE
     ).scalars().all()
 
 
-def _pick_default_edge(edges: list[FlowEdge]) -> FlowEdge | None:
+def _pick_default_edge(edges: list[FlowEdge | VersionedFlowEdge]) -> FlowEdge | VersionedFlowEdge | None:
     for edge in edges:
         condition = _normalize_text(edge.condition)
         if condition in {"", "default", "else", "next"}:
@@ -230,9 +389,11 @@ def _pick_default_edge(edges: list[FlowEdge]) -> FlowEdge | None:
     return edges[0] if edges else None
 
 
-def _resolve_condition_routes(edges: list[FlowEdge]) -> tuple[FlowEdge | None, FlowEdge | None]:
-    true_edge: FlowEdge | None = None
-    false_edge: FlowEdge | None = None
+def _resolve_condition_routes(
+    edges: list[FlowEdge | VersionedFlowEdge],
+) -> tuple[FlowEdge | VersionedFlowEdge | None, FlowEdge | VersionedFlowEdge | None]:
+    true_edge: FlowEdge | VersionedFlowEdge | None = None
+    false_edge: FlowEdge | VersionedFlowEdge | None = None
 
     for edge in edges:
         edge_condition = _normalize_text(edge.condition)
@@ -285,7 +446,12 @@ def _reset_to_bot_mode(db: Session, conversation: Conversation, reason: str) -> 
     logger.info("[MODE RESET] bot conversation_id=%s reason=%s", conversation.id, reason)
 
 
-def _advance_to_edge_target(db: Session, conversation: Conversation, edge: FlowEdge | None) -> FlowNode | None:
+def _advance_to_edge_target(
+    db: Session,
+    conversation: Conversation,
+    edge: FlowEdge | VersionedFlowEdge | None,
+    runtime_graph: dict[str, Any] | None = None,
+) -> FlowNode | VersionedFlowNode | None:
     if not edge:
         logger.info("Flow sem proxima aresta, encerrando fluxo conversation_id=%s", conversation.id)
         _reset_to_bot_mode(db=db, conversation=conversation, reason="flow_finished_no_next_edge")
@@ -300,7 +466,12 @@ def _advance_to_edge_target(db: Session, conversation: Conversation, edge: FlowE
         _reset_to_bot_mode(db=db, conversation=conversation, reason="flow_error_next_node_is_none")
         return None
 
-    next_node = _get_node(db=db, node_id=edge.target, tenant_id=conversation.tenant_id)
+    next_node = _get_node(
+        db=db,
+        node_id=edge.target,
+        tenant_id=conversation.tenant_id,
+        runtime_graph=runtime_graph,
+    )
     if not next_node:
         logger.warning(
             "Flow com edge sem node alvo conversation_id=%s edge=%s target_node=%s",
@@ -322,7 +493,7 @@ def _advance_to_edge_target(db: Session, conversation: Conversation, edge: FlowE
     return next_node
 
 
-def _render_choice_prompt(node_data: dict[str, Any], edges: list[FlowEdge]) -> str:
+def _render_choice_prompt(node_data: dict[str, Any], edges: list[FlowEdge | VersionedFlowEdge]) -> str:
     base = (node_data.get("content") or "Escolha uma opcao:").strip()
     raw_buttons = node_data.get("buttons") if isinstance(node_data.get("buttons"), list) else []
     button_labels = [str(button.get("label")).strip() for button in raw_buttons if isinstance(button, dict) and button.get("label")]
@@ -391,7 +562,13 @@ def process_flow_engine(
         conversation.context = {}
         logger.info("[CONTEXT RESET]")
     flow = _get_or_create_visual_flow(db=db, tenant_id=conversation.tenant_id)
-    initialized_node = _initialize_flow_start_node(db=db, conversation=conversation, flow_id=flow.id)
+    runtime_graph = _get_current_flow_runtime(db=db, flow=flow, tenant_id=conversation.tenant_id)
+    initialized_node = _initialize_flow_start_node(
+        db=db,
+        conversation=conversation,
+        flow_id=flow.id,
+        runtime_graph=runtime_graph,
+    )
     if conversation.current_node_id is None and not initialized_node:
         return None
 
@@ -435,7 +612,12 @@ def process_flow_engine(
     else:
         if conversation.mode == "flow" and conversation.current_flow and conversation.current_node_id is None:
             logger.warning("[FLOW ERROR] no current node, trying to recover")
-            start_node = _get_start_node(db=db, flow_id=flow.id, tenant_id=conversation.tenant_id)
+            start_node = _get_start_node(
+                db=db,
+                flow_id=flow.id,
+                tenant_id=conversation.tenant_id,
+                runtime_graph=runtime_graph,
+            )
             if start_node:
                 set_current_node(conversation=conversation, node_id=start_node.id, db=db)
                 logger.info("[FLOW RECOVERY] node=%s", start_node.id)
@@ -490,11 +672,21 @@ def process_flow_engine(
             db.refresh(conversation)
             return fallback_text
 
-        start_node = _get_start_node(db=db, flow_id=flow.id, tenant_id=conversation.tenant_id)
+        start_node = _get_start_node(
+            db=db,
+            flow_id=flow.id,
+            tenant_id=conversation.tenant_id,
+            runtime_graph=runtime_graph,
+        )
         if not start_node:
             return None
 
-        start_edges = _get_edges(db=db, flow_id=flow.id, source=start_node.id)
+        start_edges = _get_edges(
+            db=db,
+            flow_id=flow.id,
+            source=start_node.id,
+            runtime_graph=runtime_graph,
+        )
         selected_start_edge = None
         for edge in start_edges:
             edge_condition = _normalize_text(edge.condition)
@@ -503,7 +695,12 @@ def process_flow_engine(
                 break
 
         if not conversation.current_node_id:
-            start_node = _get_start_node(db=db, flow_id=flow.id, tenant_id=conversation.tenant_id)
+            start_node = _get_start_node(
+                db=db,
+                flow_id=flow.id,
+                tenant_id=conversation.tenant_id,
+                runtime_graph=runtime_graph,
+            )
             if start_node:
                 conversation.mode = "flow"
                 conversation.current_flow = flow.id
@@ -547,11 +744,21 @@ def process_flow_engine(
                 db.refresh(conversation)
                 return fallback_text
 
-            start_node = _get_start_node(db=db, flow_id=flow.id, tenant_id=conversation.tenant_id)
+            start_node = _get_start_node(
+                db=db,
+                flow_id=flow.id,
+                tenant_id=conversation.tenant_id,
+                runtime_graph=runtime_graph,
+            )
             if not start_node:
                 return None
 
-            start_edges = _get_edges(db=db, flow_id=flow.id, source=start_node.id)
+            start_edges = _get_edges(
+                db=db,
+                flow_id=flow.id,
+                source=start_node.id,
+                runtime_graph=runtime_graph,
+            )
             selected_start_edge = None
             for edge in start_edges:
                 edge_condition = _normalize_text(edge.condition)
@@ -583,7 +790,12 @@ def process_flow_engine(
 
     if not conversation.current_node_id:
         logger.warning("[FLOW ERROR] no current node, trying to recover")
-        start_node = _get_start_node(db=db, flow_id=flow.id, tenant_id=conversation.tenant_id)
+        start_node = _get_start_node(
+            db=db,
+            flow_id=flow.id,
+            tenant_id=conversation.tenant_id,
+            runtime_graph=runtime_graph,
+        )
         if start_node:
             set_current_node(conversation=conversation, node_id=start_node.id, db=db)
             logger.info("[FLOW RECOVERY] node=%s", start_node.id)
@@ -591,7 +803,12 @@ def process_flow_engine(
             logger.error("[FLOW ERROR] no start node found")
             return None
 
-    node = _get_node(db=db, node_id=conversation.current_node_id, tenant_id=conversation.tenant_id)
+    node = _get_node(
+        db=db,
+        node_id=conversation.current_node_id,
+        tenant_id=conversation.tenant_id,
+        runtime_graph=runtime_graph,
+    )
     if not node:
         _reset_to_bot_mode(db=db, conversation=conversation, reason="flow_error_node_not_found")
         return None
@@ -626,7 +843,12 @@ def process_flow_engine(
         print(f"[FLOW DEBUG] node.data={getattr(node, 'data', None) or node_data}")
         logger.info("Node executado conversation_id=%s node_id=%s node_type=%s", conversation.id, node.id, node_type)
 
-        edges = _get_edges(db=db, flow_id=node.flow_id, source=node.id)
+        edges = _get_edges(
+            db=db,
+            flow_id=node.flow_id,
+            source=node.id,
+            runtime_graph=runtime_graph,
+        )
 
         if node_type in {"message", "text", "msg", "start"}:
             text = _resolve_node_text(node_data)
@@ -648,7 +870,12 @@ def process_flow_engine(
                 msg = ""
             elif text:
                 collected_messages.append(text)
-            node = _advance_to_edge_target(db=db, conversation=conversation, edge=_pick_default_edge(edges))
+            node = _advance_to_edge_target(
+                db=db,
+                conversation=conversation,
+                edge=_pick_default_edge(edges),
+                runtime_graph=runtime_graph,
+            )
             if not node:
                 reached_max_steps = False
                 break
@@ -726,7 +953,12 @@ def process_flow_engine(
                 reached_max_steps = False
                 break
 
-            node = _advance_to_edge_target(db=db, conversation=conversation, edge=selected_edge or _pick_default_edge(edges))
+            node = _advance_to_edge_target(
+                db=db,
+                conversation=conversation,
+                edge=selected_edge or _pick_default_edge(edges),
+                runtime_graph=runtime_graph,
+            )
             if not node:
                 reached_max_steps = False
                 break
@@ -789,7 +1021,12 @@ def process_flow_engine(
                 conversation.id,
             )
 
-            node = _advance_to_edge_target(db=db, conversation=conversation, edge=selected_edge)
+            node = _advance_to_edge_target(
+                db=db,
+                conversation=conversation,
+                edge=selected_edge,
+                runtime_graph=runtime_graph,
+            )
             if not node:
                 reached_max_steps = False
                 break
@@ -832,7 +1069,12 @@ def process_flow_engine(
             elif action_name:
                 collected_messages.append(f"Acao executada: {action_name}")
 
-            node = _advance_to_edge_target(db=db, conversation=conversation, edge=_pick_default_edge(edges))
+            node = _advance_to_edge_target(
+                db=db,
+                conversation=conversation,
+                edge=_pick_default_edge(edges),
+                runtime_graph=runtime_graph,
+            )
             if not node:
                 reached_max_steps = False
                 break
@@ -841,7 +1083,12 @@ def process_flow_engine(
         content = (node_data.get("content") or "").strip()
         if content:
             collected_messages.append(content)
-        node = _advance_to_edge_target(db=db, conversation=conversation, edge=_pick_default_edge(edges))
+        node = _advance_to_edge_target(
+            db=db,
+            conversation=conversation,
+            edge=_pick_default_edge(edges),
+            runtime_graph=runtime_graph,
+        )
         if not node:
             reached_max_steps = False
             break
@@ -926,6 +1173,30 @@ def seed_default_visual_flow(db: Session, flow: Flow, tenant_id: uuid.UUID) -> N
 
 def get_flow_graph(db: Session, tenant_id: uuid.UUID, flow_id: str) -> dict[str, list[dict[str, Any]]]:
     flow = resolve_flow(db=db, tenant_id=tenant_id, flow_id=flow_id)
+    runtime_graph = _get_current_flow_runtime(db=db, flow=flow, tenant_id=tenant_id)
+    if runtime_graph:
+        return {
+            "flow_id": str(flow.id),
+            "nodes": [
+                {
+                    "id": str(node.id),
+                    "type": node.type,
+                    "position": {"x": node.position_x or 0, "y": node.position_y or 0},
+                    "data": _extract_node_data(node),
+                }
+                for node in runtime_graph["nodes"]
+            ],
+            "edges": [
+                {
+                    "id": str(edge.id),
+                    "source": str(edge.source),
+                    "target": str(edge.target),
+                    "label": edge.condition,
+                    "data": {"condition": edge.condition},
+                }
+                for edge in runtime_graph["edges"]
+            ],
+        }
 
     nodes = db.execute(
         select(FlowNode).where(FlowNode.flow_id == flow.id, FlowNode.tenant_id == tenant_id).order_by(FlowNode.created_at.asc())
@@ -958,6 +1229,28 @@ def get_flow_graph(db: Session, tenant_id: uuid.UUID, flow_id: str) -> dict[str,
 
 def save_flow_graph(db: Session, tenant_id: uuid.UUID, flow_id: str, nodes: list[dict[str, Any]], edges: list[dict[str, Any]]) -> dict[str, str]:
     flow = resolve_flow(db=db, tenant_id=tenant_id, flow_id=flow_id)
+    latest_version = db.execute(
+        select(func.max(FlowVersion.version)).where(FlowVersion.flow_id == flow.id)
+    ).scalar_one_or_none()
+    next_version = int(latest_version or 0) + 1
+
+    flow_version = FlowVersion(
+        flow_id=flow.id,
+        version=next_version,
+        nodes_json=nodes or [],
+        edges_json=edges or [],
+    )
+    db.add(flow_version)
+    db.flush()
+    flow.current_version_id = flow_version.id
+    flow.version = next_version
+    db.add(flow)
+    logger.info(
+        "[FLOW VERSION CREATED] flow_id=%s version_id=%s version=%s",
+        flow.id,
+        flow_version.id,
+        flow_version.version,
+    )
 
     db.query(FlowEdge).filter(FlowEdge.flow_id == flow.id).delete(synchronize_session=False)
     db.query(FlowNode).filter(FlowNode.flow_id == flow.id, FlowNode.tenant_id == tenant_id).delete(synchronize_session=False)
