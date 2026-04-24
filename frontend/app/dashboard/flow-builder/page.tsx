@@ -133,7 +133,6 @@ export default function FlowBuilderPage() {
   const [isSimulatorOpen, setIsSimulatorOpen] = useState(false);
   const [isSidebarExpanded, setIsSidebarExpanded] = useState(false);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
-  const contextMenuRef = useRef<HTMLDivElement | null>(null);
   const [isTyping, setIsTyping] = useState(false);
   const [userInputText, setUserInputText] = useState('');
   const simulationStartedRef = useRef(false);
@@ -263,7 +262,6 @@ export default function FlowBuilderPage() {
     };
   }, [applyLayoutAndSetFlow, buildFlowNode, setEdges, setNodes]);
 
-  const isEmpty = useMemo(() => nodes.length === 0 && edges.length === 0, [edges.length, nodes.length]);
   const flow = useMemo(
     () => ({
       nodes: nodes.map((node) => ({
@@ -596,136 +594,94 @@ export default function FlowBuilderPage() {
   }
   return (
     <div className="flow-builder-page" style={{ width: '100%', height: '100vh', display: 'flex' }}>
-      {/* Sidebar retrátil */}
-      <aside
+      <nav
+        className="dash-sidebar"
         onMouseEnter={() => setIsSidebarExpanded(true)}
         onMouseLeave={() => setIsSidebarExpanded(false)}
-        style={{
-          width: isSidebarExpanded ? 220 : 56,
-          minWidth: isSidebarExpanded ? 220 : 56,
-          borderRight: '1px solid #E8E6E0',
-          background: '#FFFFFF',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 4,
-          padding: isSidebarExpanded ? '16px 12px' : '16px 8px',
-          overflow: 'hidden',
-          transition: 'width 0.2s ease, min-width 0.2s ease, padding 0.2s ease',
-          boxShadow: isSidebarExpanded ? '2px 0 12px rgba(0,0,0,0.06)' : 'none',
-          zIndex: 20,
-        }}
+        style={{ zIndex: 20 }}
       >
-        {/* Label "Blocos" — só aparece expandido */}
-        <div style={{
-          fontSize: 10,
-          fontWeight: 700,
-          color: '#a8b0a0',
-          letterSpacing: '0.08em',
-          textTransform: 'uppercase',
-          marginBottom: 4,
-          opacity: isSidebarExpanded ? 1 : 0,
-          transition: 'opacity 0.15s ease',
-          whiteSpace: 'nowrap',
-          overflow: 'hidden',
-        }}>
-          Blocos
+        <div className="dash-sidebar-logo">
+          <img
+            src="/Logo.svg"
+            alt="Ícone"
+            className="logo-icon"
+            style={{ display: isSidebarExpanded ? 'none' : 'block' }}
+          />
+          <img
+            src="/Logo2.svg"
+            alt="Logo"
+            className="logo-full"
+            style={{ display: isSidebarExpanded ? 'block' : 'none' }}
+          />
         </div>
 
-        {/* Botões de bloco */}
-        {([
-          { kind: 'message' as FlowNodeKind, icon: '💬', label: 'Mensagem', color: '#eef2ff', dot: '#4f46e5' },
-          { kind: 'choice' as FlowNodeKind, icon: '🔀', label: 'Escolha', color: '#fff7ed', dot: '#f97316' },
-          { kind: 'condition' as FlowNodeKind, icon: '⚡', label: 'Condição', color: '#fef3c7', dot: '#d97706' },
-          { kind: 'delay' as FlowNodeKind, icon: '⏱', label: 'Delay', color: '#f0fdf4', dot: '#16a34a' },
-          { kind: 'action' as FlowNodeKind, icon: '🔗', label: 'Ação', color: '#faf5ff', dot: '#7c3aed' },
-        ] as Array<{ kind: FlowNodeKind; icon: string; label: string; color: string; dot: string }>).map(({ kind, icon, label, color }) => (
-          <button
-            key={kind}
-            type="button"
-            onClick={() => addNode(kind)}
-            title={label}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 10,
-              padding: isSidebarExpanded ? '9px 10px' : '9px 0',
-              justifyContent: isSidebarExpanded ? 'flex-start' : 'center',
-              borderRadius: 10,
-              border: '1px solid transparent',
-              background: 'transparent',
-              cursor: 'pointer',
-              fontSize: 13,
-              fontWeight: 500,
-              color: '#1a1a18',
-              transition: 'background 0.15s, border-color 0.15s',
-              whiteSpace: 'nowrap',
-              overflow: 'hidden',
-              width: '100%',
-            }}
-            onMouseEnter={(e) => {
-              (e.currentTarget as HTMLButtonElement).style.background = color;
-              (e.currentTarget as HTMLButtonElement).style.borderColor = '#e4e8e0';
-            }}
-            onMouseLeave={(e) => {
-              (e.currentTarget as HTMLButtonElement).style.background = 'transparent';
-              (e.currentTarget as HTMLButtonElement).style.borderColor = 'transparent';
-            }}
-          >
-            <span style={{ fontSize: 16, flexShrink: 0, width: 20, textAlign: 'center' }}>{icon}</span>
-            <span style={{
-              opacity: isSidebarExpanded ? 1 : 0,
-              maxWidth: isSidebarExpanded ? 160 : 0,
-              overflow: 'hidden',
-              transition: 'opacity 0.15s ease, max-width 0.2s ease',
-              whiteSpace: 'nowrap',
-            }}>
-              {label}
-            </span>
-          </button>
-        ))}
+        <span className="dash-nav-section">Blocos</span>
 
-        {/* Divider */}
-        <div style={{ height: 1, background: '#f3f4f6', margin: '4px 0' }} />
+        <button type="button" className="dash-nav-item" onClick={() => addNode('message')} title="Mensagem" style={{ border: 'none', background: 'none', cursor: 'pointer', width: '100%', textAlign: 'left' }}>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+          </svg>
+          <span className="dash-nav-label">Mensagem</span>
+        </button>
 
-        {/* Botão Salvar */}
+        <button type="button" className="dash-nav-item" onClick={() => addNode('choice')} title="Escolha" style={{ border: 'none', background: 'none', cursor: 'pointer', width: '100%', textAlign: 'left' }}>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="12" cy="12" r="10"/>
+            <polyline points="12 8 12 12 14 14"/>
+          </svg>
+          <span className="dash-nav-label">Escolha</span>
+        </button>
+
+        <button type="button" className="dash-nav-item" onClick={() => addNode('condition')} title="Condição" style={{ border: 'none', background: 'none', cursor: 'pointer', width: '100%', textAlign: 'left' }}>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
+          </svg>
+          <span className="dash-nav-label">Condição</span>
+        </button>
+
+        <button type="button" className="dash-nav-item" onClick={() => addNode('delay')} title="Delay" style={{ border: 'none', background: 'none', cursor: 'pointer', width: '100%', textAlign: 'left' }}>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="12" cy="12" r="10"/>
+            <polyline points="12 6 12 12 16 14"/>
+          </svg>
+          <span className="dash-nav-label">Delay</span>
+        </button>
+
+        <button type="button" className="dash-nav-item" onClick={() => addNode('action')} title="Ação" style={{ border: 'none', background: 'none', cursor: 'pointer', width: '100%', textAlign: 'left' }}>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+          </svg>
+          <span className="dash-nav-label">Ação</span>
+        </button>
+
+        <div className="dash-nav-divider" />
+
         <button
           type="button"
+          className="dash-nav-item"
           onClick={saveFlow}
           disabled={isSaving}
           title="Salvar fluxo"
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 10,
-            padding: isSidebarExpanded ? '10px 10px' : '10px 0',
-            justifyContent: isSidebarExpanded ? 'flex-start' : 'center',
-            borderRadius: 10,
-            border: 'none',
-            background: '#16a34a',
-            cursor: isSaving ? 'not-allowed' : 'pointer',
-            fontSize: 13,
-            fontWeight: 600,
-            color: '#fff',
-            whiteSpace: 'nowrap',
-            overflow: 'hidden',
-            width: '100%',
-            opacity: isSaving ? 0.7 : 1,
-            transition: 'background 0.15s',
-          }}
+          style={{ border: 'none', background: 'none', cursor: isSaving ? 'not-allowed' : 'pointer', width: '100%', textAlign: 'left', opacity: isSaving ? 0.6 : 1 }}
         >
-          <span style={{ fontSize: 15, flexShrink: 0, width: 20, textAlign: 'center' }}>💾</span>
-          <span style={{
-            opacity: isSidebarExpanded ? 1 : 0,
-            maxWidth: isSidebarExpanded ? 160 : 0,
-            overflow: 'hidden',
-            transition: 'opacity 0.15s ease, max-width 0.2s ease',
-            whiteSpace: 'nowrap',
-          }}>
-            {isSaving ? 'Salvando...' : 'Salvar fluxo'}
-          </span>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/>
+            <polyline points="17 21 17 13 7 13 7 21"/>
+            <polyline points="7 3 7 8 15 8"/>
+          </svg>
+          <span className="dash-nav-label">{isSaving ? 'Salvando...' : 'Salvar fluxo'}</span>
         </button>
-        {isEmpty ? <small style={{ opacity: isSidebarExpanded ? 1 : 0, transition: 'opacity 0.15s ease' }}>Nenhum node ainda.</small> : null}
-      </aside>
+
+        <div style={{ marginTop: 'auto' }}>
+          <div className="dash-nav-divider" />
+          <a href="/dashboard" className="dash-nav-item" title="Dashboard" style={{ textDecoration: 'none' }}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="15 18 9 12 15 6"/>
+            </svg>
+            <span className="dash-nav-label">Voltar</span>
+          </a>
+        </div>
+      </nav>
       <main style={{ flex: 1, background: '#F7F7F5', position: 'relative' }}>
         {!isSimulatorOpen && (
           <button
@@ -770,7 +726,6 @@ export default function FlowBuilderPage() {
         {/* Menu de contexto — botão direito no canvas */}
         {contextMenu && (
           <div
-            ref={contextMenuRef}
             onClick={(e) => e.stopPropagation()}
             style={{
               position: 'absolute',
@@ -780,7 +735,7 @@ export default function FlowBuilderPage() {
               background: '#fff',
               border: '1px solid #e4e8e0',
               borderRadius: 12,
-              boxShadow: '0 8px 32px rgba(0,0,0,0.12), 0 2px 8px rgba(0,0,0,0.06)',
+              boxShadow: '0 8px 32px rgba(0,0,0,0.12)',
               padding: '6px',
               minWidth: 180,
               display: 'flex',
@@ -792,37 +747,20 @@ export default function FlowBuilderPage() {
               Adicionar bloco
             </div>
             {([
-              { kind: 'message' as FlowNodeKind, icon: '💬', label: 'Mensagem', color: '#eef2ff' },
-              { kind: 'choice' as FlowNodeKind, icon: '🔀', label: 'Escolha', color: '#fff7ed' },
-              { kind: 'condition' as FlowNodeKind, icon: '⚡', label: 'Condição', color: '#fef3c7' },
-              { kind: 'delay' as FlowNodeKind, icon: '⏱', label: 'Delay', color: '#f0fdf4' },
-              { kind: 'action' as FlowNodeKind, icon: '🔗', label: 'Ação', color: '#faf5ff' },
-            ] as Array<{ kind: FlowNodeKind; icon: string; label: string; color: string }>).map(({ kind, icon, label, color }) => (
+              { kind: 'message' as FlowNodeKind, label: 'Mensagem' },
+              { kind: 'choice' as FlowNodeKind, label: 'Escolha' },
+              { kind: 'condition' as FlowNodeKind, label: 'Condição' },
+              { kind: 'delay' as FlowNodeKind, label: 'Delay' },
+              { kind: 'action' as FlowNodeKind, label: 'Ação' },
+            ]).map(({ kind, label }) => (
               <button
                 key={kind}
                 type="button"
                 onClick={() => { addNode(kind); setContextMenu(null); }}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 10,
-                  padding: '8px 10px',
-                  borderRadius: 8,
-                  border: 'none',
-                  background: 'transparent',
-                  cursor: 'pointer',
-                  fontSize: 13,
-                  fontWeight: 500,
-                  color: '#1a1a18',
-                  textAlign: 'left',
-                  width: '100%',
-                  transition: 'background 0.1s',
-                }}
-                onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = color; }}
-                onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'transparent'; }}
+                className="dash-nav-item"
+                style={{ border: 'none', background: 'transparent', cursor: 'pointer', width: '100%', textAlign: 'left', borderRadius: 8 }}
               >
-                <span style={{ fontSize: 15 }}>{icon}</span>
-                {label}
+                <span className="dash-nav-label" style={{ opacity: 1, maxWidth: '100%' }}>{label}</span>
               </button>
             ))}
           </div>
