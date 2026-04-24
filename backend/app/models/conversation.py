@@ -22,6 +22,9 @@ class Conversation(Base):
     current_flow: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("flows.id"), nullable=True)
     current_step: Mapped[str | None] = mapped_column(String, nullable=True)
     current_node_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("flow_nodes.id"), nullable=True)
+    context: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    last_input: Mapped[str | None] = mapped_column(String, nullable=True)
+    retries: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     last_bot_question: Mapped[str | None] = mapped_column(String, nullable=True)
     current_objective: Mapped[str] = mapped_column(String, nullable=False, default="venda", server_default="venda")
     last_bot_triggered_message_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
@@ -36,3 +39,11 @@ class Conversation(Base):
 
     messages = relationship("Message", back_populates="conversation", cascade="all, delete-orphan")
     contact = relationship("Contact", back_populates="conversations")
+
+    @property
+    def current_flow_id(self) -> uuid.UUID | None:
+        return self.current_flow
+
+    @current_flow_id.setter
+    def current_flow_id(self, value: uuid.UUID | None) -> None:
+        self.current_flow = value
