@@ -423,7 +423,14 @@ def process_flow_engine(
             conversation.id,
             force_node,
         )
-    elif conversation.mode == "flow" and conversation.current_node_id:
+    elif conversation.current_node_id:
+        if conversation.mode != "flow" or conversation.current_flow != flow.id:
+            conversation.mode = "flow"
+            conversation.current_flow = flow.id
+            db.add(conversation)
+            db.commit()
+            db.refresh(conversation)
+        logger.info("[FLOW CONTINUE] node_id=%s", conversation.current_node_id)
         logger.info("[FLOW PRIORITY] mantendo fluxo atual current_node_id=%s", conversation.current_node_id)
     else:
         if conversation.mode == "flow" and conversation.current_flow and conversation.current_node_id is None:
