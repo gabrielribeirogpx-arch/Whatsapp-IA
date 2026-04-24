@@ -434,7 +434,13 @@ def process_flow_engine(
                 break
 
             if result:
-                should_stop_flow = True
+                print(f"[FLOW STOP] execução finalizada após match TRUE node={node.id}")
+                logger.info("[FLOW STOP] execucao finalizada apos match TRUE conversation_id=%s next_node=%s", conversation.id, node.id if node else None)
+                # Processa o próximo node (mensagem de resultado) e para
+                # Não usa should_stop_flow — quebra direto para evitar execução paralela
+                break
+
+            # Condição FALSE: continua normalmente pelo caminho false
             continue
 
         if node_type == "delay":
