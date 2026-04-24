@@ -23,7 +23,9 @@ def _normalize_text(value: str | None) -> str:
         return ""
     normalized = unicodedata.normalize("NFKD", value)
     without_accents = "".join(ch for ch in normalized if not unicodedata.combining(ch))
-    return without_accents.lower().strip()
+    # Remove pontuação e espaços extras para match robusto
+    cleaned = "".join(ch for ch in without_accents if ch.isalnum() or ch.isspace())
+    return " ".join(cleaned.lower().split())
 
 
 def _extract_node_data(node: FlowNode) -> dict[str, Any]:
