@@ -124,6 +124,13 @@ def find_start_node(flow: Any) -> Any | None:
     return None
 
 
+def _find_start_node(nodes: list[dict[str, Any]]) -> dict[str, Any] | None:
+    for node in nodes:
+        if node.get("data", {}).get("isStart") is True:
+            return node
+    return None
+
+
 def _get_start_node(db: Session, flow_id: uuid.UUID, tenant_id: uuid.UUID) -> FlowNode | None:
     nodes = db.execute(
         select(FlowNode)
@@ -149,6 +156,38 @@ def _get_start_node(db: Session, flow_id: uuid.UUID, tenant_id: uuid.UUID) -> Fl
         return start_node
 
     return nodes[0] if nodes else None
+
+
+def _initialize_flow_start_node(db: Session, conversation: Conversation, flow_id: uuid.UUID) -> FlowNode | None:
+    nodes = db.execute(
+        select(FlowNode)
+        .where(FlowNode.flow_id == flow_id, FlowNode.tenant_id == conversation.tenant_id)
+        .order_by(FlowNode.created_at.asc(), FlowNode.id.asc())
+    ).scalars().all()
+
+    node_payload = [
+        {
+            "id": node.id,
+            "data": node.metadata_json or {},
+        }
+        for node in nodes
+    ]
+
+    if conversation.current_node_id is None:
+        start_node = _find_start_node(node_payload)
+        if start_node:
+            conversation.current_node_id = start_node["id"]
+            db.add(conversation)
+            db.commit()
+            db.refresh(conversation)
+            logger.info("[FLOW START] node_id=%s", start_node["id"])
+            return _get_node(db=db, node_id=start_node["id"], tenant_id=conversation.tenant_id)
+
+    if not conversation.current_node_id:
+        logger.warning("[FLOW ERROR] Nenhum nó inicial encontrado")
+        return None
+
+    return _get_node(db=db, node_id=conversation.current_node_id, tenant_id=conversation.tenant_id)
 
 
 def _get_node(db: Session, node_id: uuid.UUID, tenant_id: uuid.UUID) -> FlowNode | None:
@@ -336,6 +375,10 @@ def process_flow_engine(
         conversation.context = {}
         logger.info("[CONTEXT RESET]")
     flow = _get_or_create_visual_flow(db=db, tenant_id=conversation.tenant_id)
+    initialized_node = _initialize_flow_start_node(db=db, conversation=conversation, flow_id=flow.id)
+    if conversation.current_node_id is None and not initialized_node:
+        return None
+
     msg = _normalize_text(message_text)
     intent: str | None = None
     if conversation.mode != "flow":
