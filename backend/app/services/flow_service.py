@@ -130,6 +130,46 @@ def _get_step(db: Session, flow_id, step_key: str) -> FlowStep | None:
     ).scalars().first()
 
 
+def _split_trigger_keywords(trigger_value: str | None) -> list[str]:
+    if not trigger_value:
+        return []
+    return [_normalize_text(item) for item in trigger_value.split(",") if _normalize_text(item)]
+
+
+def resolve_flow_for_message(db: Session, tenant_id, message_text: str) -> Flow | None:
+    normalized_message = _normalize_text(message_text)
+    active_flows = db.execute(
+        select(Flow)
+        .where(Flow.tenant_id == tenant_id, Flow.is_active.is_(True))
+        .order_by(Flow.created_at.asc(), Flow.id.asc())
+    ).scalars().all()
+
+    default_flow: Flow | None = None
+    for flow in active_flows:
+        trigger_type = _normalize_text(flow.trigger_type)
+        if trigger_type == "default" and default_flow is None:
+            default_flow = flow
+            continue
+
+        if trigger_type != "keyword":
+            continue
+
+        keywords = _split_trigger_keywords(flow.trigger_value)
+        if not keywords:
+            continue
+
+        if any(keyword in normalized_message for keyword in keywords):
+            logger.info("[FLOW RESOLVED] tenant=%s flow_id=%s reason=keyword", tenant_id, flow.id)
+            return flow
+
+    if default_flow:
+        logger.info("[FLOW RESOLVED] tenant=%s flow_id=%s reason=default", tenant_id, default_flow.id)
+        return default_flow
+
+    logger.info("[FLOW NOT FOUND] tenant=%s", tenant_id)
+    return None
+
+
 def process_flow(db: Session, conversation: Conversation, message_text: str) -> str | None:
     step = conversation.current_step
     if not step or not conversation.current_flow:
