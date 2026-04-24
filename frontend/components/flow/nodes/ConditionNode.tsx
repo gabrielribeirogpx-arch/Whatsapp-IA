@@ -70,9 +70,13 @@ export default function ConditionNode({ id, data, selected }: NodeProps) {
           className="flow-node-field nodrag"
           value={nodeData.condition || ''}
           onChange={(e) => nodeData.onChange?.(id, { condition: e.target.value })}
-          placeholder="Ex.: mensagem contém 'plano'"
+          placeholder="Ex.: plano, preço, valor, quanto custa"
           style={{ width: '100%', padding: '7px 9px' }}
         />
+        <div style={{ marginTop: 5, fontSize: 10.5, color: '#a8b0a0', lineHeight: 1.4 }}>
+          Separe múltiplas palavras por vírgula.<br />
+          Match se a mensagem contiver qualquer uma.
+        </div>
         {/* Labels dos handles */}
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 10 }}>
           <span style={{ fontSize: 10, fontWeight: 600, color: '#16a34a', background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 4, padding: '2px 6px' }}>
