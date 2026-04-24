@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import unicodedata
 import logging
+import re
 from typing import Any
 
 from sqlalchemy import select
@@ -76,12 +77,17 @@ DEFAULT_FLOW_STEPS: list[dict[str, Any]] = [
 logger = logging.getLogger(__name__)
 
 
-def _normalize_text(value: str | None) -> str:
+def normalize_text(value: str | None) -> str:
     if not value:
         return ""
     normalized = unicodedata.normalize("NFKD", value)
     without_accents = "".join(ch for ch in normalized if not unicodedata.combining(ch))
-    return without_accents.lower().strip()
+    without_punctuation = re.sub(r"[^\w\s]", " ", without_accents.lower())
+    return " ".join(without_punctuation.split())
+
+
+def _normalize_text(value: str | None) -> str:
+    return normalize_text(value)
 
 
 def _flow_seed_exists(db: Session, flow_id) -> bool:
@@ -136,8 +142,49 @@ def _split_trigger_keywords(trigger_value: str | None) -> list[str]:
     return [_normalize_text(item) for item in trigger_value.split(",") if _normalize_text(item)]
 
 
-def resolve_flow_for_message(db: Session, tenant_id, message_text: str) -> Flow | None:
-    normalized_message = _normalize_text(message_text)
+def _tokenize_text(value: str | None) -> set[str]:
+    normalized = normalize_text(value)
+    return {token for token in normalized.split() if token}
+
+
+def _split_csv_words(value: str | None) -> list[str]:
+    if not value:
+        return []
+    return [normalize_text(item) for item in value.split(",") if normalize_text(item)]
+
+
+def score_flow(flow: Flow, message_text: str) -> int:
+    normalized_message = normalize_text(message_text)
+    message_tokens = _tokenize_text(message_text)
+    score = 0
+
+    keywords_source = flow.keywords if flow.keywords else flow.trigger_value
+    keywords = _split_csv_words(keywords_source)
+    stop_words = _split_csv_words(flow.stop_words)
+
+    for keyword in keywords:
+        if not keyword:
+            continue
+        keyword_tokens = _tokenize_text(keyword)
+        if keyword_tokens and keyword_tokens.issubset(message_tokens):
+            score += 10
+        if normalized_message == keyword:
+            score += 20
+
+    for stop_word in stop_words:
+        stop_tokens = _tokenize_text(stop_word)
+        if stop_tokens and stop_tokens.issubset(message_tokens):
+            score -= 20
+
+    score += flow.priority or 0
+    return score
+
+
+def resolve_flow_for_message(db: Session, tenant_id, message_text: str, conversation: Conversation | None = None) -> Flow | None:
+    if conversation and conversation.mode == "flow":
+        logger.info("[FLOW SKIP MODE] conversation_id=%s mode=flow", conversation.id)
+        return None
+
     active_flows = db.execute(
         select(Flow)
         .where(Flow.tenant_id == tenant_id, Flow.is_active.is_(True))
@@ -145,6 +192,7 @@ def resolve_flow_for_message(db: Session, tenant_id, message_text: str) -> Flow 
     ).scalars().all()
 
     default_flow: Flow | None = None
+    scored_flows: list[tuple[int, Flow]] = []
     for flow in active_flows:
         trigger_type = _normalize_text(flow.trigger_type)
         if trigger_type == "default" and default_flow is None:
@@ -154,19 +202,26 @@ def resolve_flow_for_message(db: Session, tenant_id, message_text: str) -> Flow 
         if trigger_type != "keyword":
             continue
 
-        keywords = _split_trigger_keywords(flow.trigger_value)
+        keywords = _split_csv_words(flow.keywords) if flow.keywords else _split_trigger_keywords(flow.trigger_value)
         if not keywords:
             continue
 
-        if any(keyword in normalized_message for keyword in keywords):
-            logger.info("[FLOW RESOLVED] tenant=%s flow_id=%s reason=keyword", tenant_id, flow.id)
-            return flow
+        score = score_flow(flow, message_text)
+        logger.info("[FLOW SCORE] flow_id=%s score=%s", flow.id, score)
+        scored_flows.append((score, flow))
+
+    scored_flows.sort(key=lambda item: item[0], reverse=True)
+    if scored_flows:
+        winner_score, winner_flow = scored_flows[0]
+        if winner_score > 0:
+            logger.info("[FLOW WINNER] flow_id=%s score=%s", winner_flow.id, winner_score)
+            return winner_flow
 
     if default_flow:
         logger.info("[FLOW RESOLVED] tenant=%s flow_id=%s reason=default", tenant_id, default_flow.id)
         return default_flow
 
-    logger.info("[FLOW NOT FOUND] tenant=%s", tenant_id)
+    logger.info("[FLOW NO MATCH] tenant=%s", tenant_id)
     return None
 
 
@@ -222,6 +277,9 @@ def create_flow(db: Session, tenant_id, data: dict[str, Any]) -> Flow:
         is_active=data.get("is_active", True),
         trigger_type=data.get("trigger_type", "default"),
         trigger_value=data.get("trigger_value"),
+        keywords=data.get("keywords"),
+        stop_words=data.get("stop_words"),
+        priority=data.get("priority", 0),
         version=data.get("version", 1),
     )
     db.add(flow)
@@ -259,6 +317,12 @@ def update_flow(db: Session, flow_id, tenant_id, data: dict[str, Any]) -> Flow |
         flow.trigger_type = data["trigger_type"]
     if "trigger_value" in data:
         flow.trigger_value = data["trigger_value"]
+    if "keywords" in data:
+        flow.keywords = data["keywords"]
+    if "stop_words" in data:
+        flow.stop_words = data["stop_words"]
+    if "priority" in data:
+        flow.priority = data["priority"]
     if "version" in data:
         flow.version = data["version"]
 

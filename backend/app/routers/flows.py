@@ -28,6 +28,9 @@ class FlowCreatePayload(BaseModel):
     is_active: bool = True
     trigger_type: str = "default"
     trigger_value: str | None = None
+    keywords: str | None = None
+    stop_words: str | None = None
+    priority: int = 0
 
 
 class FlowUpdatePayload(BaseModel):
@@ -36,6 +39,9 @@ class FlowUpdatePayload(BaseModel):
     is_active: bool | None = None
     trigger_type: str | None = None
     trigger_value: str | None = None
+    keywords: str | None = None
+    stop_words: str | None = None
+    priority: int | None = None
     version: int | None = None
 
 
@@ -57,6 +63,9 @@ def _serialize_flow(flow: Flow) -> dict[str, Any]:
         "is_active": flow.is_active,
         "trigger_type": flow.trigger_type,
         "trigger_value": flow.trigger_value,
+        "keywords": flow.keywords,
+        "stop_words": flow.stop_words,
+        "priority": flow.priority,
         "version": flow.version,
         "created_at": flow.created_at.isoformat() if flow.created_at else None,
         "updated_at": flow.updated_at.isoformat() if flow.updated_at else None,
