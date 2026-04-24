@@ -125,9 +125,19 @@ def find_start_node(flow: Any) -> Any | None:
 
 
 def _find_start_node(nodes: list[dict[str, Any]]) -> dict[str, Any] | None:
+    # 1. prioridade: novo sistema com flag isStart
     for node in nodes:
         if node.get("data", {}).get("isStart") is True:
             return node
+
+    # 2. fallback: fluxo antigo com choice "Inicio"
+    for node in nodes:
+        if (
+            node.get("type") == "choice"
+            and str(node.get("data", {}).get("label", "")).lower() == "inicio"
+        ):
+            return node
+
     return None
 
 
@@ -168,6 +178,7 @@ def _initialize_flow_start_node(db: Session, conversation: Conversation, flow_id
     node_payload = [
         {
             "id": node.id,
+            "type": node.type,
             "data": node.metadata_json or {},
         }
         for node in nodes
@@ -180,11 +191,17 @@ def _initialize_flow_start_node(db: Session, conversation: Conversation, flow_id
             db.add(conversation)
             db.commit()
             db.refresh(conversation)
-            logger.info("[FLOW START] node_id=%s", start_node["id"])
+            logger.info(
+                "[FLOW START] node_id=%s (isStart=%s)",
+                start_node["id"],
+                start_node.get("data", {}).get("isStart"),
+            )
             return _get_node(db=db, node_id=start_node["id"], tenant_id=conversation.tenant_id)
+        logger.error("[FLOW ERROR] Nenhum nó inicial encontrado")
+        return None
 
     if not conversation.current_node_id:
-        logger.warning("[FLOW ERROR] Nenhum nó inicial encontrado")
+        logger.error("[FLOW ERROR] Nenhum nó inicial encontrado")
         return None
 
     return _get_node(db=db, node_id=conversation.current_node_id, tenant_id=conversation.tenant_id)
