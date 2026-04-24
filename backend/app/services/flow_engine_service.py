@@ -395,7 +395,7 @@ def process_flow_engine(
             print(f"[FLOW CHECK] avaliando node: {node.id}")
             logger.info("[FLOW CHECK] avaliando node=%s conversation_id=%s", node.id, conversation.id)
             condition_id = node.id
-            condition_text = _normalize_text(str(node_data.get("condition") or node_data.get("content") or ""))
+            raw_condition = str(node_data.get("condition") or node_data.get("content") or "")
 
             # Sem mensagem do usuário — para e aguarda resposta
             if not msg:
@@ -405,7 +405,22 @@ def process_flow_engine(
                 db.refresh(conversation)
                 break
 
-            result = bool(condition_text and condition_text in msg)
+            # Suporte a múltiplas palavras/sinônimos separados por vírgula
+            # Exemplo: "vender, vendas, comercial, quero vender"
+            keywords = [
+                _normalize_text(kw)
+                for kw in raw_condition.split(",")
+                if _normalize_text(kw)
+            ]
+
+            # Match TRUE se a mensagem contiver QUALQUER uma das palavras-chave
+            result = any(kw and (kw in msg or msg in kw) for kw in keywords)
+
+            print(f"[FLOW KEYWORDS] keywords={keywords} msg='{msg}' result={result}")
+            logger.info(
+                "[FLOW KEYWORDS] node=%s keywords=%s msg='%s' result=%s",
+                node.id, keywords, msg, result
+            )
             if result:
                 print(f"[FLOW MATCH] condição TRUE: {node.id}")
                 logger.info("[FLOW MATCH] condicao TRUE node=%s conversation_id=%s", node.id, conversation.id)
