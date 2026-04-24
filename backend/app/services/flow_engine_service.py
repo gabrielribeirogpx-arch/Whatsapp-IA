@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.models import Conversation, Flow, FlowEdge, FlowNode, FlowVersion, Tenant
 from app.services.delay_queue_service import enqueue_delay
-from app.services.flow_analytics_service import FALLBACK, FLOW_MATCH, FLOW_SEND, FLOW_START, record_flow_event
+from app.services.flow_analytics_service import FALLBACK, FLOW_FINISH, FLOW_MATCH, FLOW_SEND, FLOW_START, record_flow_event
 from app.services.queue import enqueue_send_message
 from app.utils.phone import normalize_phone
 
@@ -438,6 +438,16 @@ def set_current_node(conversation: Conversation, node_id: uuid.UUID | None, db: 
 
 
 def _reset_to_bot_mode(db: Session, conversation: Conversation, reason: str) -> None:
+    if reason.startswith("flow_finished") and conversation.current_flow:
+        record_flow_event(
+            db=db,
+            tenant_id=conversation.tenant_id,
+            conversation_id=conversation.id,
+            flow_id=conversation.current_flow,
+            node_id=conversation.current_node_id,
+            event_type=FLOW_FINISH,
+        )
+
     conversation.mode = "bot"
     conversation.current_flow = None
     set_current_node(conversation=conversation, node_id=None, db=db)

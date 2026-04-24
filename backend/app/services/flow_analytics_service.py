@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import uuid
 
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.models.flow_event import FlowEvent
@@ -14,9 +15,35 @@ FLOW_START = "FLOW_START"
 FLOW_SEND = "FLOW_SEND"
 FLOW_MATCH = "FLOW_MATCH"
 FALLBACK = "FALLBACK"
+FLOW_FINISH = "FLOW_FINISH"
 
 
-VALID_EVENT_TYPES = {FLOW_START, FLOW_SEND, FLOW_MATCH, FALLBACK}
+VALID_EVENT_TYPES = {FLOW_START, FLOW_SEND, FLOW_MATCH, FALLBACK, FLOW_FINISH}
+
+
+def get_flow_analytics(
+    db: Session,
+    *,
+    tenant_id: uuid.UUID,
+    flow_id: uuid.UUID,
+) -> dict[str, int]:
+    event_counts_stmt = (
+        select(FlowEvent.event_type, func.count(FlowEvent.id))
+        .where(
+            FlowEvent.tenant_id == tenant_id,
+            FlowEvent.flow_id == flow_id,
+            FlowEvent.event_type.in_({FLOW_START, FLOW_SEND, FLOW_FINISH}),
+        )
+        .group_by(FlowEvent.event_type)
+    )
+    rows = db.execute(event_counts_stmt).all()
+    counts_by_event = {event_type: total for event_type, total in rows}
+
+    return {
+        "entries": counts_by_event.get(FLOW_START, 0),
+        "messages_sent": counts_by_event.get(FLOW_SEND, 0),
+        "finalizations": counts_by_event.get(FLOW_FINISH, 0),
+    }
 
 
 def record_flow_event(
