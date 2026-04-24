@@ -1,21 +1,37 @@
-from rq import Worker, Queue, Connection
-import redis
 import os
 
-redis_url = os.getenv("REDIS_URL")
+import redis
+from rq import Connection, Queue, Worker
+from sqlalchemy import create_engine
 
-if not redis_url:
+DATABASE_URL = os.getenv("DATABASE_URL")
+REDIS_URL = os.getenv("REDIS_URL")
+
+if not DATABASE_URL:
+    raise Exception("DATABASE_URL não configurado")
+
+if not REDIS_URL:
     raise Exception("REDIS_URL não configurado")
 
-conn = redis.from_url(redis_url)
+print("[WORKER] Connecting DB...")
+engine = create_engine(DATABASE_URL)
+
+print("[WORKER] Connecting Redis...")
+conn = redis.from_url(REDIS_URL)
 
 listen = ["default"]
 
 
 class LoggingWorker(Worker):
     def execute_job(self, job, queue):
-        print("[RQ JOB] processing job")
-        return super().execute_job(job, queue)
+        print(f"[RQ JOB START] {job.id}")
+        try:
+            result = super().execute_job(job, queue)
+            print(f"[RQ JOB SUCCESS] {job.id}")
+            return result
+        except Exception as e:
+            print(f"[RQ JOB ERROR] {job.id}: {e}")
+            raise
 
 
 if __name__ == "__main__":
