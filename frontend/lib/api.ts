@@ -357,6 +357,13 @@ export async function deleteFlow(flowId: string): Promise<void> {
   if (!res.ok) throw new Error(await res.text());
 }
 
+export async function duplicateFlow(flowId: string): Promise<FlowItem> {
+  const res = await apiFetch(`/flows/${flowId}/duplicate`, {
+    method: 'POST'
+  });
+  return parseApiResponse<FlowItem>(res);
+}
+
 export async function listFlowVersions(flowId: string): Promise<FlowVersionItem[]> {
   const res = await apiFetch(`/flows/${flowId}/versions`);
   return parseApiResponse<FlowVersionItem[]>(res);
