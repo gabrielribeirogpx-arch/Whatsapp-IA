@@ -141,6 +141,21 @@ def _pick_default_edge(edges: list[FlowEdge]) -> FlowEdge | None:
     return edges[0] if edges else None
 
 
+def _resolve_condition_routes(edges: list[FlowEdge]) -> tuple[FlowEdge | None, FlowEdge | None]:
+    true_edge: FlowEdge | None = None
+    false_edge: FlowEdge | None = None
+
+    for edge in edges:
+        edge_condition = _normalize_text(edge.condition)
+        if edge_condition in {"true", "sim", "yes"} and not true_edge:
+            true_edge = edge
+            continue
+        if edge_condition in {"false", "nao", "não", "no"} and not false_edge:
+            false_edge = edge
+
+    return true_edge, false_edge
+
+
 def _set_flow_mode(db: Session, conversation: Conversation, flow_id: uuid.UUID, node_id: uuid.UUID) -> None:
     conversation.mode = "flow"
     conversation.current_flow = flow_id
@@ -434,31 +449,27 @@ def process_flow_engine(
                 print(f"[FLOW MISS] condição FALSE: {node.id}")
                 logger.info("[FLOW MISS] condicao FALSE node=%s conversation_id=%s", node.id, conversation.id)
 
-            selected_edge = None
-            for edge in edges:
-                edge_condition = _normalize_text(edge.condition)
-                if result and edge_condition in {"true", "sim", "yes"}:
-                    selected_edge = edge
-                    break
-                if (not result) and edge_condition in {"false", "nao", "não", "no"}:
-                    selected_edge = edge
-                    break
+            true_edge, false_edge = _resolve_condition_routes(edges)
+            true_node_id = true_edge.target if true_edge else None
+            false_node_id = false_edge.target if false_edge else None
+            selected_edge = true_edge if result else false_edge
+            selected_next = true_node_id if result else false_node_id
+            route_label = "TRUE" if result else "FALSE"
+            print(f"[FLOW ROUTE] condition_id={condition_id} → {route_label} → next={selected_next}")
+            logger.info(
+                "[FLOW ROUTE] condition_id=%s -> %s -> next=%s conversation_id=%s",
+                condition_id,
+                route_label,
+                selected_next,
+                conversation.id,
+            )
 
-            node = _advance_to_edge_target(db=db, conversation=conversation, edge=selected_edge or _pick_default_edge(edges))
+            node = _advance_to_edge_target(db=db, conversation=conversation, edge=selected_edge)
             if not node:
                 break
 
-            if result:
-                print(f"[FLOW MATCH] condition_id={condition_id} matched → stopping further evaluation")
-                logger.info(
-                    "[FLOW MATCH] condition_id=%s matched -> stopping further evaluation conversation_id=%s next_node=%s",
-                    condition_id,
-                    conversation.id,
-                    node.id if node else None,
-                )
-                return "\n\n".join(part for part in collected_messages if part).strip() or None
-
-            # Condição FALSE: continua normalmente pelo caminho false
+            # Condição resolvida por edge (true/false) — interrompe avaliação atual
+            # para manter execução determinística conforme o caminho visual.
             continue
 
         if node_type == "delay":
