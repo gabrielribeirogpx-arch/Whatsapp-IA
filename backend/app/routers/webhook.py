@@ -17,7 +17,6 @@ from app.services.idempotency_service import register_processed_message
 from app.services.message_service import normalize_meta_message
 from app.services.realtime_service import sse_broker
 from app.models import Tenant
-from app.services.tenant_service import get_or_create_default_tenant
 from app.utils.phone import normalize_phone
 
 router = APIRouter()
@@ -78,114 +77,122 @@ async def _process_meta_webhook(request: Request, db: Session) -> dict[str, str]
         logger.info("Evento ignorado: payload sem mensagens processáveis")
         return {"status": "ignored"}
 
-    tenant_slug = (request.headers.get("x-tenant-slug") or "").strip()
-    tenant_id_from_context = _resolve_request_tenant_id(request)
     processed_any = False
 
     for incoming in messages_data:
-        phone = incoming["phone"]
-        normalized_phone = normalize_phone(phone)
-        incoming_message = incoming.get("text") or ""
-        incoming_type = incoming.get("type") or "unknown"
-        logger.info("[WEBHOOK DEBUG] type=%s message=%s", incoming_type, incoming_message)
-        contact_name = incoming.get("name")
-        phone_number_id = incoming.get("phone_number_id")
-        logger.info(
-            "Mensagem normalizada recebida phone=%s type=%s phone_number_id=%s",
-            normalized_phone,
-            incoming_type,
-            phone_number_id,
-        )
+        try:
+            phone = incoming["phone"]
+            normalized_phone = normalize_phone(phone)
+            incoming_message = incoming.get("text") or ""
+            incoming_type = incoming.get("type") or "unknown"
+            logger.info("[WEBHOOK DEBUG] type=%s message=%s", incoming_type, incoming_message)
+            contact_name = incoming.get("name")
+            phone_number_id = incoming.get("phone_number_id")
+            logger.info(
+                "Mensagem normalizada recebida phone=%s type=%s phone_number_id=%s",
+                normalized_phone,
+                incoming_type,
+                phone_number_id,
+            )
 
-        tenant = None
-        if tenant_id_from_context:
-            tenant = db.execute(select(Tenant).where(Tenant.id == tenant_id_from_context)).scalars().first()
-        if not tenant and tenant_slug:
-            tenant = db.execute(select(Tenant).where(Tenant.slug == tenant_slug)).scalars().first()
-        if not tenant:
             tenant = (
                 db.query(Tenant)
                 .filter(Tenant.phone_number_id == phone_number_id)
                 .first()
-                or get_or_create_default_tenant(db)
             )
+            if not tenant:
+                logger.warning(
+                    "[WEBHOOK ERROR] tenant_not_found phone_number_id=%s phone=%s",
+                    phone_number_id,
+                    normalized_phone,
+                )
+                continue
 
-        tenant_id = tenant.id
-        incoming["tenant_id"] = str(tenant_id)
-        logger.info("event=tenant_resolved tenant_id=%s slug=%s", tenant.id, tenant.slug)
-        message_id = (incoming.get("message_id") or "").strip()
-        was_inserted = register_processed_message(db=db, tenant_id=tenant_id, message_id=message_id)
-        if not was_inserted:
-            logger.info("Mensagem duplicada ignorada tenant_id=%s phone=%s message_id=%s", tenant_id, normalized_phone, message_id)
-            continue
+            tenant_id = tenant.id
+            incoming["tenant_id"] = str(tenant_id)
+            logger.info("[TENANT RESOLVED] tenant_id=%s slug=%s phone_number_id=%s", tenant.id, tenant.slug, phone_number_id)
+            message_id = (incoming.get("message_id") or "").strip()
+            was_inserted = register_processed_message(db=db, tenant_id=tenant_id, message_id=message_id)
+            if not was_inserted:
+                logger.info("Mensagem duplicada ignorada tenant_id=%s phone=%s message_id=%s", tenant_id, normalized_phone, message_id)
+                continue
 
-        if incoming_type not in {"text", "interactive"} or not incoming_message:
-            logger.info("Evento ignorado: tipo=%s sem texto processável", incoming_type)
-            continue
+            if incoming_type not in {"text", "interactive"} or not incoming_message:
+                logger.info("Evento ignorado: tipo=%s sem texto processável", incoming_type)
+                continue
 
-        processed_any = True
-        contact = upsert_contact_for_phone(
-            db,
-            tenant_id=tenant_id,
-            phone=normalized_phone,
-            name=contact_name,
-        )
-
-        conversation = (
-            db.query(Conversation)
-            .filter(
-                Conversation.tenant_id == tenant.id,
-                Conversation.phone_number == normalized_phone
-            )
-            .order_by(Conversation.updated_at.desc())
-            .first()
-        )
-        existed = conversation is not None
-
-        if not conversation:
-            conversation, existed = get_or_create_conversation(
-                db=db,
+            processed_any = True
+            contact = upsert_contact_for_phone(
+                db,
                 tenant_id=tenant_id,
                 phone=normalized_phone,
-                contact_id=contact.id,
+                name=contact_name,
             )
 
-        if existed:
-            logger.info("Conversa encontrada id=%s", conversation.id)
-        else:
-            logger.info("Nenhuma conversa encontrada, criando nova para %s", normalized_phone)
+            conversation = (
+                db.query(Conversation)
+                .filter(
+                    Conversation.tenant_id == tenant.id,
+                    Conversation.phone_number == normalized_phone
+                )
+                .order_by(Conversation.updated_at.desc())
+                .first()
+            )
+            existed = conversation is not None
 
-        if contact_name and not conversation.name:
-            conversation.name = contact_name
-        ensure_conversation_contact_link(conversation, contact)
+            if not conversation:
+                conversation, existed = get_or_create_conversation(
+                    db=db,
+                    tenant_id=tenant_id,
+                    phone=normalized_phone,
+                    contact_id=contact.id,
+                )
 
-        if conversation.name is None and _looks_like_name(incoming_message):
-            conversation.name = incoming_message.strip()
-        if conversation.name and (not contact.name or contact.name == "Cliente"):
-            contact.name = conversation.name
-        contact.last_message_at = datetime.utcnow()
+            if existed:
+                logger.info("Conversa encontrada id=%s", conversation.id)
+            else:
+                logger.info("Nenhuma conversa encontrada, criando nova para %s", normalized_phone)
 
-        logger.info("Salvando mensagem de entrada phone=%s conversation_id=%s", normalized_phone, conversation.id)
-        inbound_message = Message(
-            tenant_id=conversation.tenant_id,
-            conversation_id=conversation.id,
-            text=incoming_message,
-            from_me=False,
-            created_at=datetime.utcnow(),
-        )
-        db.add(inbound_message)
-        db.commit()
-        db.refresh(inbound_message)
-        message_payload = {
-            "event": "message",
-            "message": MessageOut.model_validate(inbound_message).model_dump(mode="json"),
-        }
-        await sse_broker.publish(f"{tenant.id}:{normalized_phone}", message_payload)
-        await sse_broker.publish(f"{tenant.id}:{conversation.id}", message_payload)
+            if contact_name and not conversation.name:
+                conversation.name = contact_name
+            ensure_conversation_contact_link(conversation, contact)
 
-        handle_incoming_message(db, inbound_message, conversation)
+            if conversation.name is None and _looks_like_name(incoming_message):
+                conversation.name = incoming_message.strip()
+            if conversation.name and (not contact.name or contact.name == "Cliente"):
+                contact.name = conversation.name
+            contact.last_message_at = datetime.utcnow()
 
-        logger.info("Evento processado telefone=%s conteúdo=%s", normalized_phone, incoming_message)
+            logger.info("Salvando mensagem de entrada phone=%s conversation_id=%s", normalized_phone, conversation.id)
+            inbound_message = Message(
+                tenant_id=conversation.tenant_id,
+                conversation_id=conversation.id,
+                text=incoming_message,
+                from_me=False,
+                created_at=datetime.utcnow(),
+            )
+            db.add(inbound_message)
+            db.commit()
+            db.refresh(inbound_message)
+            message_payload = {
+                "event": "message",
+                "message": MessageOut.model_validate(inbound_message).model_dump(mode="json"),
+            }
+            await sse_broker.publish(f"{tenant.id}:{normalized_phone}", message_payload)
+            await sse_broker.publish(f"{tenant.id}:{conversation.id}", message_payload)
+
+            handle_incoming_message(db, inbound_message, conversation)
+
+            logger.info("Evento processado telefone=%s conteúdo=%s", normalized_phone, incoming_message)
+        except Exception as exc:
+            db.rollback()
+            logger.exception(
+                "[WEBHOOK ERROR] failed to process message_id=%s phone=%s error=%s",
+                incoming.get("message_id"),
+                incoming.get("phone"),
+                str(exc),
+            )
+            continue
 
     db.commit()
     return {"status": "message processed" if processed_any else "ignored"}
