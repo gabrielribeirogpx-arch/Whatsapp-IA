@@ -32,7 +32,7 @@ def _extract_node_data(node: FlowNode) -> dict[str, Any]:
     metadata = node.metadata_json or {}
     return {
         "label": metadata.get("label") or node.content or node.type,
-        "text": metadata.get("text") or node.content,
+        "text": node.content or metadata.get("text"),
         "content": node.content,
         "buttons": metadata.get("buttons") if isinstance(metadata.get("buttons"), list) else [],
         "condition": metadata.get("condition"),
@@ -40,6 +40,19 @@ def _extract_node_data(node: FlowNode) -> dict[str, Any]:
         "isStart": bool(metadata.get("isStart", False)),
         "metadata": metadata,
     }
+
+
+def _resolve_node_text(node_data: dict[str, Any]) -> str:
+    metadata = node_data.get("metadata")
+    metadata = metadata if isinstance(metadata, dict) else {}
+    text = (
+        node_data.get("text")
+        or node_data.get("content")
+        or metadata.get("text")
+        or ""
+    )
+    logger.info('[FLOW TEXT RESOLVED] text="%s"', text)
+    return str(text).strip()
 
 
 def tenant_has_active_visual_flow(db: Session, tenant_id: uuid.UUID) -> bool:
@@ -295,8 +308,7 @@ def process_flow_engine(
         edges = _get_edges(db=db, flow_id=node.flow_id, source=node.id)
 
         if node_type in {"message", "text", "msg", "start"}:
-            metadata = node_data.get("metadata") if isinstance(node_data.get("metadata"), dict) else {}
-            text = (node_data.get("text") or node_data.get("content") or metadata.get("text") or "").strip()
+            text = _resolve_node_text(node_data)
             if node_type in {"message", "text", "msg"}:
                 if not text:
                     print("[FLOW ERROR] texto vazio no node")
@@ -329,7 +341,7 @@ def process_flow_engine(
 
             # Usuario ainda nao respondeu — envia a pergunta com botoes e aguarda
             if not msg:
-                text = (node_data.get("text") or node_data.get("content") or "").strip()
+                text = _resolve_node_text(node_data)
                 if not text:
                     text = _render_choice_prompt(node_data=node_data, edges=edges).strip()
 
@@ -365,7 +377,7 @@ def process_flow_engine(
 
             # Resposta nao bate com nenhuma opcao — reenvia a pergunta
             if not selected_edge and options:
-                text = (node_data.get("text") or node_data.get("content") or "").strip()
+                text = _resolve_node_text(node_data)
                 if not text:
                     text = _render_choice_prompt(node_data=node_data, edges=edges).strip()
                 if text:
