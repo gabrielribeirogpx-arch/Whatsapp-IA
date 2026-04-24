@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import ReactFlow, {
   addEdge,
   Background,
@@ -122,6 +123,8 @@ function makeNodeId() {
 }
 
 export default function FlowBuilderPage() {
+  const searchParams = useSearchParams();
+  const selectedFlowId = searchParams.get('flow_id') || undefined;
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>(initialEdges);
   const [reactFlowInstance, setReactFlowInstance] = useState<ReactFlowInstance | null>(null);
@@ -225,7 +228,7 @@ export default function FlowBuilderPage() {
           }, FETCH_TIMEOUT_MS);
         });
 
-        const data = await Promise.race([getFlowGraph(tenantId), timeoutPromise]);
+        const data = await Promise.race([getFlowGraph(tenantId, selectedFlowId), timeoutPromise]);
         if (!active) return;
 
         const initialNodes = (data?.nodes || []).map(buildFlowNode);
@@ -261,7 +264,7 @@ export default function FlowBuilderPage() {
     return () => {
       active = false;
     };
-  }, [applyLayoutAndSetFlow, buildFlowNode, setEdges, setNodes]);
+  }, [applyLayoutAndSetFlow, buildFlowNode, selectedFlowId, setEdges, setNodes]);
 
   const flow = useMemo(
     () => ({
@@ -536,7 +539,7 @@ export default function FlowBuilderPage() {
         },
       }));
 
-      const result = await saveFlowGraph(tenantId, { nodes: payloadNodes, edges: payloadEdges });
+      const result = await saveFlowGraph(tenantId, { nodes: payloadNodes, edges: payloadEdges }, selectedFlowId);
       // Preserva as posições atuais dos nodes em tela após salvar
       // Só atualiza edges vindas da API, mantendo nodes na posição do usuário
       const positionMap = new Map(nodes.map((n) => [n.id, n.position]));
@@ -560,7 +563,7 @@ export default function FlowBuilderPage() {
     } finally {
       setIsSaving(false);
     }
-  }, [applyLayoutAndSetFlow, buildFlowNode, edges, nodes, setEdges, setNodes]);
+  }, [applyLayoutAndSetFlow, buildFlowNode, edges, nodes, selectedFlowId, setEdges, setNodes]);
 
   const decoratedNodes = useMemo(
     () => nodes.map((node) => ({

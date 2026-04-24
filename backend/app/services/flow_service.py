@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unicodedata
+import logging
 from typing import Any
 
 from sqlalchemy import select
@@ -72,6 +73,7 @@ DEFAULT_FLOW_STEPS: list[dict[str, Any]] = [
         "next_step_map": None,
     },
 ]
+logger = logging.getLogger(__name__)
 
 
 def _normalize_text(value: str | None) -> str:
@@ -170,3 +172,68 @@ def handle_flow(db: Session, conversation: Conversation, message: Message) -> st
         conversation.current_flow = default_flow.id
 
     return process_flow(db=db, conversation=conversation, message_text=message.text or "")
+
+
+def create_flow(db: Session, tenant_id, data: dict[str, Any]) -> Flow:
+    flow = Flow(
+        tenant_id=tenant_id,
+        name=data["name"],
+        description=data.get("description"),
+        is_active=data.get("is_active", True),
+        trigger_type=data.get("trigger_type", "default"),
+        trigger_value=data.get("trigger_value"),
+        version=data.get("version", 1),
+    )
+    db.add(flow)
+    db.flush()
+    logger.info("[FLOW CREATED] flow_id=%s tenant_id=%s", flow.id, tenant_id)
+    return flow
+
+
+def get_flows(db: Session, tenant_id) -> list[Flow]:
+    return db.execute(
+        select(Flow)
+        .where(Flow.tenant_id == tenant_id)
+        .order_by(Flow.created_at.desc(), Flow.id.desc())
+    ).scalars().all()
+
+
+def get_flow(db: Session, flow_id, tenant_id) -> Flow | None:
+    return db.execute(
+        select(Flow).where(Flow.id == flow_id, Flow.tenant_id == tenant_id)
+    ).scalars().first()
+
+
+def update_flow(db: Session, flow_id, tenant_id, data: dict[str, Any]) -> Flow | None:
+    flow = get_flow(db=db, flow_id=flow_id, tenant_id=tenant_id)
+    if not flow:
+        return None
+
+    if "name" in data:
+        flow.name = data["name"]
+    if "description" in data:
+        flow.description = data["description"]
+    if "is_active" in data:
+        flow.is_active = data["is_active"]
+    if "trigger_type" in data:
+        flow.trigger_type = data["trigger_type"]
+    if "trigger_value" in data:
+        flow.trigger_value = data["trigger_value"]
+    if "version" in data:
+        flow.version = data["version"]
+
+    db.add(flow)
+    db.flush()
+    logger.info("[FLOW UPDATED] flow_id=%s tenant_id=%s", flow.id, tenant_id)
+    return flow
+
+
+def delete_flow(db: Session, flow_id, tenant_id) -> bool:
+    flow = get_flow(db=db, flow_id=flow_id, tenant_id=tenant_id)
+    if not flow:
+        return False
+
+    db.delete(flow)
+    db.flush()
+    logger.info("[FLOW DELETED] flow_id=%s tenant_id=%s", flow_id, tenant_id)
+    return True

@@ -3,21 +3,64 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import Tenant
+from app.models import Flow, Tenant
 from app.services.flow_engine_service import get_flow_graph, save_flow_graph
+from app.services.flow_service import create_flow, delete_flow, get_flow, get_flows, update_flow
 
 router = APIRouter(prefix="/api/flows", tags=["flows"])
+crud_router = APIRouter(tags=["flows-crud"])
 
 
 class FlowBuilderPayload(BaseModel):
     nodes: list[dict[str, Any]] = Field(default_factory=list)
     edges: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class FlowCreatePayload(BaseModel):
+    name: str
+    description: str | None = None
+    is_active: bool = True
+    trigger_type: str = "default"
+    trigger_value: str | None = None
+
+
+class FlowUpdatePayload(BaseModel):
+    name: str | None = None
+    description: str | None = None
+    is_active: bool | None = None
+    trigger_type: str | None = None
+    trigger_value: str | None = None
+    version: int | None = None
+
+
+def _resolve_tenant_header(tenant_id: str | None) -> uuid.UUID:
+    if not tenant_id:
+        raise HTTPException(status_code=400, detail="X-Tenant-ID header is required")
+    try:
+        return uuid.UUID(tenant_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="X-Tenant-ID header is invalid") from exc
+
+
+def _serialize_flow(flow: Flow) -> dict[str, Any]:
+    return {
+        "id": str(flow.id),
+        "tenant_id": str(flow.tenant_id),
+        "name": flow.name,
+        "description": flow.description,
+        "is_active": flow.is_active,
+        "trigger_type": flow.trigger_type,
+        "trigger_value": flow.trigger_value,
+        "version": flow.version,
+        "created_at": flow.created_at.isoformat() if flow.created_at else None,
+        "updated_at": flow.updated_at.isoformat() if flow.updated_at else None,
+    }
 
 
 _EMPTY_FLOW = {"nodes": [], "edges": []}
@@ -45,13 +88,14 @@ def _resolve_tenant(db: Session, tenant_id: str) -> Tenant | None:
 @router.get("/{tenant_id}")
 def get_tenant_flow(
     tenant_id: str,
+    flow_id: str | None = None,
     db: Session = Depends(get_db),
 ):
     tenant = _resolve_tenant(db=db, tenant_id=tenant_id)
     if not tenant:
         return dict(_EMPTY_FLOW)
 
-    graph = get_flow_graph(db=db, tenant_id=tenant.id, flow_id="default")
+    graph = get_flow_graph(db=db, tenant_id=tenant.id, flow_id=flow_id or "default")
     return _normalize_flow_response(graph)
 
 
@@ -59,6 +103,7 @@ def get_tenant_flow(
 def save_tenant_flow(
     tenant_id: str,
     payload: FlowBuilderPayload,
+    flow_id: str | None = None,
     db: Session = Depends(get_db),
 ):
     tenant = _resolve_tenant(db=db, tenant_id=tenant_id)
@@ -68,11 +113,76 @@ def save_tenant_flow(
     save_flow_graph(
         db=db,
         tenant_id=tenant.id,
-        flow_id="default",
+        flow_id=flow_id or "default",
         nodes=payload.nodes or [],
         edges=payload.edges or [],
     )
     db.commit()
 
-    graph = get_flow_graph(db=db, tenant_id=tenant.id, flow_id="default")
+    graph = get_flow_graph(db=db, tenant_id=tenant.id, flow_id=flow_id or "default")
     return _normalize_flow_response(graph)
+
+
+@crud_router.post("")
+def create_tenant_flow(
+    payload: FlowCreatePayload,
+    x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
+    db: Session = Depends(get_db),
+):
+    tenant_uuid = _resolve_tenant_header(x_tenant_id)
+    flow = create_flow(db=db, tenant_id=tenant_uuid, data=payload.model_dump())
+    db.commit()
+    db.refresh(flow)
+    return _serialize_flow(flow)
+
+
+@crud_router.get("")
+def list_tenant_flows(
+    x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
+    db: Session = Depends(get_db),
+):
+    tenant_uuid = _resolve_tenant_header(x_tenant_id)
+    return [_serialize_flow(item) for item in get_flows(db=db, tenant_id=tenant_uuid)]
+
+
+@crud_router.get("/{flow_id}")
+def get_tenant_flow_by_id(
+    flow_id: uuid.UUID,
+    x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
+    db: Session = Depends(get_db),
+):
+    tenant_uuid = _resolve_tenant_header(x_tenant_id)
+    flow = get_flow(db=db, flow_id=flow_id, tenant_id=tenant_uuid)
+    if not flow:
+        raise HTTPException(status_code=404, detail="Flow not found")
+    return _serialize_flow(flow)
+
+
+@crud_router.put("/{flow_id}")
+def update_tenant_flow(
+    flow_id: uuid.UUID,
+    payload: FlowUpdatePayload,
+    x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
+    db: Session = Depends(get_db),
+):
+    tenant_uuid = _resolve_tenant_header(x_tenant_id)
+    flow = update_flow(db=db, flow_id=flow_id, tenant_id=tenant_uuid, data=payload.model_dump(exclude_unset=True))
+    if not flow:
+        raise HTTPException(status_code=404, detail="Flow not found")
+    db.commit()
+    db.refresh(flow)
+    return _serialize_flow(flow)
+
+
+@crud_router.delete("/{flow_id}")
+def delete_tenant_flow(
+    flow_id: uuid.UUID,
+    x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
+    db: Session = Depends(get_db),
+):
+    tenant_uuid = _resolve_tenant_header(x_tenant_id)
+    deleted = delete_flow(db=db, flow_id=flow_id, tenant_id=tenant_uuid)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Flow not found")
+    db.commit()
+    return {"status": "deleted"}
