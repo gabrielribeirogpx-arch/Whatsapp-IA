@@ -191,9 +191,7 @@ def _resolve_condition_routes(edges: list[FlowEdge]) -> tuple[FlowEdge | None, F
 def _set_flow_mode(db: Session, conversation: Conversation, flow_id: uuid.UUID, node_id: uuid.UUID) -> None:
     conversation.mode = "flow"
     conversation.current_flow = flow_id
-    conversation.current_node_id = node_id
-    db.commit()
-    db.refresh(conversation)
+    set_current_node(conversation=conversation, node_id=node_id, db=db)
     logger.info("[MODE SET] flow conversation_id=%s node_id=%s", conversation.id, node_id)
 
 
@@ -213,10 +211,18 @@ def _ensure_conversation_state(conversation: Conversation, message_text: str) ->
     conversation.last_input = message_text or ""
 
 
+def set_current_node(conversation: Conversation, node_id: uuid.UUID | None, db: Session) -> None:
+    conversation.current_node_id = node_id
+    db.add(conversation)
+    db.commit()
+    db.refresh(conversation)
+    logger.info("[FLOW STATE SET] node=%s", node_id)
+
+
 def _reset_to_bot_mode(db: Session, conversation: Conversation, reason: str) -> None:
     conversation.mode = "bot"
     conversation.current_flow = None
-    conversation.current_node_id = None
+    set_current_node(conversation=conversation, node_id=None, db=db)
     db.commit()
     db.refresh(conversation)
     logger.info("[MODE RESET] bot conversation_id=%s reason=%s", conversation.id, reason)
@@ -246,9 +252,7 @@ def _advance_to_edge_target(db: Session, conversation: Conversation, edge: FlowE
         next_node.id,
     )
     logger.info("[FLOW STATE] current=%s next=%s", conversation.current_node_id, next_node.id)
-    conversation.current_node_id = next_node.id
-    db.commit()
-    db.refresh(conversation)
+    set_current_node(conversation=conversation, node_id=next_node.id, db=db)
     return next_node
 
 
@@ -364,11 +368,14 @@ def process_flow_engine(
         logger.info("[FLOW PRIORITY] mantendo fluxo atual current_node_id=%s", conversation.current_node_id)
     else:
         if conversation.mode == "flow" and conversation.current_flow and conversation.current_node_id is None:
-            logger.info(
-                "[FLOW STATE] conversation_id=%s em modo flow sem current_node_id; iniciando pelo start node",
-                conversation.id,
-            )
-            return None
+            logger.warning("[FLOW ERROR] no current node, trying to recover")
+            start_node = _get_start_node(db=db, flow_id=flow.id, tenant_id=conversation.tenant_id)
+            if start_node:
+                set_current_node(conversation=conversation, node_id=start_node.id, db=db)
+                logger.info("[FLOW RECOVERY] node=%s", start_node.id)
+            else:
+                logger.error("[FLOW ERROR] no start node found")
+                return None
 
         if not intent:
             conversation.retries = (conversation.retries or 0) + 1
@@ -418,11 +425,10 @@ def process_flow_engine(
             if start_node:
                 conversation.mode = "flow"
                 conversation.current_flow = flow.id
-                conversation.current_node_id = start_node.id
-                db.commit()
-                db.refresh(conversation)
+                set_current_node(conversation=conversation, node_id=start_node.id, db=db)
                 print(f"[FLOW INIT] start_node_id={start_node.id}")
                 logger.info("[FLOW INIT] start_node_id=%s", start_node.id)
+                logger.info("[FLOW RECOVERY] node=%s", start_node.id)
             else:
                 print("[FLOW ERROR] no start node found")
                 logger.error("[FLOW ERROR] no start node found")
@@ -468,6 +474,16 @@ def process_flow_engine(
         return None
 
     conversation_phone = getattr(conversation, "phone", None) or conversation.phone_number
+
+    if not conversation.current_node_id:
+        logger.warning("[FLOW ERROR] no current node, trying to recover")
+        start_node = _get_start_node(db=db, flow_id=flow.id, tenant_id=conversation.tenant_id)
+        if start_node:
+            set_current_node(conversation=conversation, node_id=start_node.id, db=db)
+            logger.info("[FLOW RECOVERY] node=%s", start_node.id)
+        else:
+            logger.error("[FLOW ERROR] no start node found")
+            return None
 
     node = _get_node(db=db, node_id=conversation.current_node_id, tenant_id=conversation.tenant_id)
     if not node:
@@ -538,9 +554,7 @@ def process_flow_engine(
                     print("[FLOW ERROR] node choice sem texto")
 
                 # Persiste o node atual como ponto de espera da resposta
-                conversation.current_node_id = node.id
-                db.commit()
-                db.refresh(conversation)
+                set_current_node(conversation=conversation, node_id=node.id, db=db)
                 break
 
             # Usuario respondeu — tenta match com as edges
@@ -572,9 +586,7 @@ def process_flow_engine(
                 else:
                     print("[FLOW ERROR] node choice sem texto")
 
-                conversation.current_node_id = node.id
-                db.commit()
-                db.refresh(conversation)
+                set_current_node(conversation=conversation, node_id=node.id, db=db)
                 break
 
             node = _advance_to_edge_target(db=db, conversation=conversation, edge=selected_edge or _pick_default_edge(edges))
@@ -590,9 +602,7 @@ def process_flow_engine(
             # Sem mensagem do usuário — para e aguarda resposta
             if not msg:
                 print(f"[FLOW CONDITION WAIT] aguardando resposta no node={node.id}")
-                conversation.current_node_id = node.id
-                db.commit()
-                db.refresh(conversation)
+                set_current_node(conversation=conversation, node_id=node.id, db=db)
                 break
 
             # Suporte a múltiplas palavras/sinônimos separados por vírgula
@@ -660,9 +670,7 @@ def process_flow_engine(
                 seconds=delay_seconds,
             )
             logger.info("[FLOW STATE] current=%s next=%s", conversation.current_node_id, next_edge.target)
-            conversation.current_node_id = next_edge.target
-            db.commit()
-            db.refresh(conversation)
+            set_current_node(conversation=conversation, node_id=next_edge.target, db=db)
             _keep_flow_mode(conversation)
             break
 
