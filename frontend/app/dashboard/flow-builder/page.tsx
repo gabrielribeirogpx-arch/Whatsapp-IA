@@ -736,12 +736,12 @@ export default function FlowBuilderPage() {
               Adicionar bloco
             </div>
             {([
-              { kind: 'message' as FlowNodeKind, label: 'Mensagem' },
-              { kind: 'choice' as FlowNodeKind, label: 'Escolha' },
-              { kind: 'condition' as FlowNodeKind, label: 'Condição' },
-              { kind: 'delay' as FlowNodeKind, label: 'Delay' },
-              { kind: 'action' as FlowNodeKind, label: 'Ação' },
-            ]).map(({ kind, label }) => (
+              { kind: 'message' as FlowNodeKind, label: 'Mensagem', icon: MessageSquare },
+              { kind: 'choice' as FlowNodeKind, label: 'Escolha', icon: ListChecks },
+              { kind: 'condition' as FlowNodeKind, label: 'Condição', icon: GitBranch },
+              { kind: 'delay' as FlowNodeKind, label: 'Delay', icon: Clock },
+              { kind: 'action' as FlowNodeKind, label: 'Ação', icon: Zap },
+            ]).map(({ kind, label, icon: Icon }) => (
               <button
                 key={kind}
                 type="button"
@@ -749,7 +749,10 @@ export default function FlowBuilderPage() {
                 className="dash-nav-item"
                 style={{ border: 'none', background: 'transparent', cursor: 'pointer', width: '100%', textAlign: 'left', borderRadius: 8 }}
               >
-                <span className="dash-nav-label" style={{ opacity: 1, maxWidth: '100%' }}>{label}</span>
+                <span className="flex items-center gap-2">
+                  <Icon size={16} strokeWidth={1.8} className="text-current" />
+                  <span className="dash-nav-label" style={{ opacity: 1, maxWidth: '100%' }}>{label}</span>
+                </span>
               </button>
             ))}
           </div>
