@@ -24,11 +24,28 @@ class Flow(Base):
     stop_words: Mapped[str | None] = mapped_column(Text, nullable=True)
     priority: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
+    current_version_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("flow_versions.id"),
+        nullable=True,
+        index=True,
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     steps: Mapped[list["FlowStep"]] = relationship("FlowStep", back_populates="flow", cascade="all, delete-orphan")
     nodes: Mapped[list["FlowNode"]] = relationship("FlowNode", cascade="all, delete-orphan")
+    versions: Mapped[list["FlowVersion"]] = relationship(
+        "FlowVersion",
+        back_populates="flow",
+        cascade="all, delete-orphan",
+        foreign_keys="FlowVersion.flow_id",
+    )
+    current_version: Mapped["FlowVersion | None"] = relationship(
+        "FlowVersion",
+        foreign_keys=[current_version_id],
+        post_update=True,
+    )
 
 
 class FlowStep(Base):
@@ -67,3 +84,16 @@ class FlowEdge(Base):
     source: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("flow_nodes.id"), nullable=False)
     target: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("flow_nodes.id"), nullable=False)
     condition: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class FlowVersion(Base):
+    __tablename__ = "flow_versions"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    flow_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("flows.id"), nullable=False, index=True)
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    nodes_json: Mapped[list[dict] | None] = mapped_column(JSONB, nullable=True)
+    edges_json: Mapped[list[dict] | None] = mapped_column(JSONB, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    flow: Mapped[Flow] = relationship("Flow", back_populates="versions", foreign_keys=[flow_id])

@@ -67,6 +67,7 @@ def _serialize_flow(flow: Flow) -> dict[str, Any]:
         "stop_words": flow.stop_words,
         "priority": flow.priority,
         "version": flow.version,
+        "current_version_id": str(flow.current_version_id) if flow.current_version_id else None,
         "created_at": flow.created_at.isoformat() if flow.created_at else None,
         "updated_at": flow.updated_at.isoformat() if flow.updated_at else None,
     }
