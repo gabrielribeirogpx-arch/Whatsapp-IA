@@ -15,6 +15,7 @@ from app.services.whatsapp_service import WhatsAppConfigError, send_whatsapp_mes
 
 DEFAULT_FLOW_NAME = "__default_visual__"
 MAX_AUTO_STEPS = 10
+MAX_RETRIES = 3
 logger = logging.getLogger(__name__)
 
 
@@ -37,6 +38,13 @@ def detect_intent(text: str) -> str | None:
     if "vender" in normalized_text or "vendas" in normalized_text:
         return "vendas"
     return None
+
+
+def should_reset_context(message: str, context: dict[str, Any] | None) -> bool:
+    if not isinstance(context, dict):
+        return False
+    normalized_message = _normalize_text(message)
+    return "api" in context and "vender" in normalized_message
 
 
 def _extract_node_data(node: FlowNode) -> dict[str, Any]:
@@ -320,12 +328,28 @@ def process_flow_engine(
         return None
 
     _ensure_conversation_state(conversation=conversation, message_text=message_text)
+    if should_reset_context(message=message_text or "", context=conversation.context):
+        conversation.context = {}
+        logger.info("[CONTEXT RESET]")
     flow = _get_or_create_visual_flow(db=db, tenant_id=conversation.tenant_id)
     msg = _normalize_text(message_text)
-    intent = detect_intent(message_text or "")
-    logger.info("[INTENT] detected=%s", intent)
-    if intent:
-        conversation.context["intent"] = intent
+    intent: str | None = None
+    if conversation.mode != "flow":
+        intent = detect_intent(message_text or "")
+        logger.info("[INTENT] detected=%s", intent)
+        if intent:
+            conversation.context["intent"] = intent
+    else:
+        logger.info("[INTENT] skipped (in flow mode)")
+        intent = conversation.context.get("intent")
+
+    logger.info(
+        "[STATE FULL] mode=%s node=%s intent=%s retries=%s",
+        conversation.mode,
+        conversation.current_node_id,
+        conversation.context.get("intent"),
+        conversation.retries,
+    )
     db.commit()
     db.refresh(conversation)
 
@@ -344,6 +368,50 @@ def process_flow_engine(
                 "[FLOW STATE] conversation_id=%s em modo flow sem current_node_id; iniciando pelo start node",
                 conversation.id,
             )
+            return None
+
+        if not intent:
+            conversation.retries = (conversation.retries or 0) + 1
+            if conversation.retries >= MAX_RETRIES:
+                logger.info("[FALLBACK LIMIT] exceeded → reset")
+                _reset_to_bot_mode(db=db, conversation=conversation, reason="fallback_limit_exceeded")
+                conversation.retries = 0
+                db.commit()
+                db.refresh(conversation)
+                logger.info(
+                    "[STATE FULL] mode=%s node=%s intent=%s retries=%s",
+                    conversation.mode,
+                    conversation.current_node_id,
+                    conversation.context.get("intent") if isinstance(conversation.context, dict) else None,
+                    conversation.retries,
+                )
+                return (
+                    "Ainda não consegui identificar o que você precisa. "
+                    "Vamos recomeçar: me diga se você quer vender mais, automatizar atendimento ou integrar com sistema."
+                )
+            fallback_text = (
+                "Boa 👌 Me fala melhor o que você quer fazer:\n"
+                "📈 vender mais\n"
+                "🤖 automatizar atendimento\n"
+                "🔗 integrar com sistema"
+            )
+            logger.info("[FALLBACK] triggered")
+            logger.info("[FALLBACK] retries=%s", conversation.retries)
+            db.commit()
+            db.refresh(conversation)
+            return fallback_text
+
+        start_node = _get_start_node(db=db, flow_id=flow.id, tenant_id=conversation.tenant_id)
+        if not start_node:
+            return None
+
+        start_edges = _get_edges(db=db, flow_id=flow.id, source=start_node.id)
+        selected_start_edge = None
+        for edge in start_edges:
+            edge_condition = _normalize_text(edge.condition)
+            if intent == edge_condition or (intent and edge_condition and intent in edge_condition):
+                selected_start_edge = edge
+                break
 
         if not conversation.current_node_id:
             start_node = _get_start_node(db=db, flow_id=flow.id, tenant_id=conversation.tenant_id)
