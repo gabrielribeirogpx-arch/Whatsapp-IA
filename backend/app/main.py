@@ -19,6 +19,7 @@ from app.routers import leads
 from app.routers import dashboard
 from app.routers import bot_rules
 from app.routers import flows
+from app.middleware.tenant_context import TenantContextMiddleware
 
 
 # ✅ MIGRATIONS
@@ -84,6 +85,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(TenantContextMiddleware)
 
 
 # ✅ ROUTES
