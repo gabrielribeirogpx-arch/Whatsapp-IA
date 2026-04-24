@@ -25,6 +25,7 @@ SEND_QUEUE_NAME = os.getenv("WHATSAPP_SEND_QUEUE", "default")
 
 def _send_whatsapp_job(tenant_id: str, phone: str, text: str, buttons: list[dict[str, Any]] | None = None) -> None:
     job = get_current_job()
+    print("[RQ JOB] processing...")
     logger.info("[RQ JOB] processing job_id=%s", getattr(job, "id", None))
 
     tenant_uuid = uuid.UUID(str(tenant_id))
