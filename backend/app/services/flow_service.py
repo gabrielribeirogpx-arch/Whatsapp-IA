@@ -9,6 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models import Conversation, Flow, FlowStep, Message
+from app.services.flow_engine_service import get_flow_graph, save_flow_graph
 
 DEFAULT_FLOW_NAME = "__default__"
 DEFAULT_START_STEP = "inicio"
@@ -341,3 +342,42 @@ def delete_flow(db: Session, flow_id, tenant_id) -> bool:
     db.flush()
     logger.info("[FLOW DELETED] flow_id=%s tenant_id=%s", flow_id, tenant_id)
     return True
+
+
+def duplicate_flow(db: Session, flow_id, tenant_id) -> Flow | None:
+    source_flow = get_flow(db=db, flow_id=flow_id, tenant_id=tenant_id)
+    if not source_flow:
+        return None
+
+    duplicated_flow = create_flow(
+        db=db,
+        tenant_id=tenant_id,
+        data={
+            "name": f"{source_flow.name} (cópia)",
+            "description": source_flow.description,
+            "is_active": source_flow.is_active,
+            "trigger_type": source_flow.trigger_type,
+            "trigger_value": source_flow.trigger_value,
+            "keywords": source_flow.keywords,
+            "stop_words": source_flow.stop_words,
+            "priority": source_flow.priority,
+            "version": source_flow.version,
+        },
+    )
+
+    source_graph = get_flow_graph(db=db, tenant_id=tenant_id, flow_id=str(source_flow.id))
+    save_flow_graph(
+        db=db,
+        tenant_id=tenant_id,
+        flow_id=str(duplicated_flow.id),
+        nodes=source_graph.get("nodes") or [],
+        edges=source_graph.get("edges") or [],
+    )
+    db.flush()
+    logger.info(
+        "[FLOW DUPLICATED] source_flow_id=%s duplicated_flow_id=%s tenant_id=%s",
+        source_flow.id,
+        duplicated_flow.id,
+        tenant_id,
+    )
+    return duplicated_flow

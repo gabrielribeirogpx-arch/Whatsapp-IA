@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import Flow, Tenant
 from app.services.flow_engine_service import get_flow_graph, save_flow_graph
-from app.services.flow_service import create_flow, delete_flow, get_flow, get_flows, update_flow
+from app.services.flow_service import create_flow, delete_flow, duplicate_flow, get_flow, get_flows, update_flow
 
 router = APIRouter(prefix="/api/flows", tags=["flows"])
 crud_router = APIRouter(tags=["flows-crud"])
@@ -196,3 +196,18 @@ def delete_tenant_flow(
         raise HTTPException(status_code=404, detail="Flow not found")
     db.commit()
     return {"status": "deleted"}
+
+
+@crud_router.post("/{flow_id}/duplicate")
+def duplicate_tenant_flow(
+    flow_id: uuid.UUID,
+    x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
+    db: Session = Depends(get_db),
+):
+    tenant_uuid = _resolve_tenant_header(x_tenant_id)
+    flow = duplicate_flow(db=db, flow_id=flow_id, tenant_id=tenant_uuid)
+    if not flow:
+        raise HTTPException(status_code=404, detail="Flow not found")
+    db.commit()
+    db.refresh(flow)
+    return _serialize_flow(flow)
