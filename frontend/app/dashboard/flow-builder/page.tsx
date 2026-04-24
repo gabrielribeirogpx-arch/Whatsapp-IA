@@ -716,20 +716,13 @@ export default function FlowBuilderPage() {
         {contextMenu && (
           <div
             onClick={(e) => e.stopPropagation()}
+            className="flow-context-menu"
             style={{
               position: 'absolute',
               top: contextMenu.y,
               left: contextMenu.x,
               zIndex: 1000,
-              background: '#fff',
-              border: '1px solid #e4e8e0',
-              borderRadius: 12,
-              boxShadow: '0 8px 32px rgba(0,0,0,0.12)',
-              padding: '6px',
               minWidth: 180,
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 2,
             }}
           >
             <div style={{ fontSize: 10, fontWeight: 700, color: '#a8b0a0', letterSpacing: '0.08em', textTransform: 'uppercase', padding: '4px 8px 2px' }}>
@@ -746,13 +739,12 @@ export default function FlowBuilderPage() {
                 key={kind}
                 type="button"
                 onClick={() => { addNode(kind); setContextMenu(null); }}
-                className="dash-nav-item"
-                style={{ border: 'none', background: 'transparent', cursor: 'pointer', width: '100%', textAlign: 'left', borderRadius: 8 }}
+                className="flow-context-menu-item flex items-center gap-2 px-3 py-2 rounded-md transition-all duration-150"
               >
-                <span className="flex items-center gap-2">
+                <span className="flow-context-menu-icon">
                   <Icon size={16} strokeWidth={1.8} className="text-current" />
-                  <span className="dash-nav-label" style={{ opacity: 1, maxWidth: '100%' }}>{label}</span>
                 </span>
+                <span className="flow-context-menu-label">{label}</span>
               </button>
             ))}
           </div>
