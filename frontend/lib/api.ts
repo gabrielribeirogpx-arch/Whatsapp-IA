@@ -20,7 +20,8 @@ import {
   FlowEdgePayload,
   FlowItem,
   FlowPayload,
-  FlowVersionItem
+  FlowVersionItem,
+  FlowAnalytics
 } from './types';
 
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL;
@@ -375,4 +376,9 @@ export async function restoreFlowVersion(flowId: string, versionId: string): Pro
     body: JSON.stringify({ version_id: versionId })
   });
   return parseApiResponse<FlowItem>(res);
+}
+
+export async function getFlowAnalytics(flowId: string): Promise<FlowAnalytics> {
+  const res = await apiFetch(`/flows/${flowId}/analytics`);
+  return parseApiResponse<FlowAnalytics>(res);
 }

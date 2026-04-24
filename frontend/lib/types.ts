@@ -230,3 +230,9 @@ export type FlowPayload = {
   trigger_value?: string;
   is_active?: boolean;
 };
+
+export type FlowAnalytics = {
+  entries: number;
+  messages_sent: number;
+  finalizations: number;
+};

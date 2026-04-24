@@ -105,6 +105,7 @@ export default function FlowsPage() {
                 <td>{flow.trigger_value || '-'}</td>
                 <td style={{ display: 'flex', gap: 8, padding: '8px 0' }}>
                   <button onClick={() => openEdit(flow)}>Editar</button>
+                  <Link href={`/dashboard/flows/${flow.id}/analytics`}>Analytics</Link>
                   <button onClick={() => onDuplicate(flow.id)}>Duplicar</button>
                   <button onClick={() => onDelete(flow.id)}>Deletar</button>
                   <Link href={`/dashboard/flow-builder?flow_id=${flow.id}`}>Abrir builder</Link>
