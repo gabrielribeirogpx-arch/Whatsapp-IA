@@ -283,14 +283,7 @@ def process_flow_engine(
 
     msg = _normalize_text(message_text)
     collected_messages: list[str] = []
-    should_stop_flow = False
-
     for _ in range(MAX_AUTO_STEPS):
-        if should_stop_flow:
-            print("[FLOW STOP] execução finalizada após match")
-            logger.info("[FLOW STOP] execucao finalizada apos match conversation_id=%s", conversation.id)
-            break
-
         node_data = _extract_node_data(node)
         node_type = node.type
         if node_type.endswith("Node"):
@@ -401,6 +394,7 @@ def process_flow_engine(
         if node_type == "condition":
             print(f"[FLOW CHECK] avaliando node: {node.id}")
             logger.info("[FLOW CHECK] avaliando node=%s conversation_id=%s", node.id, conversation.id)
+            condition_id = node.id
             condition_text = _normalize_text(str(node_data.get("condition") or node_data.get("content") or ""))
 
             # Sem mensagem do usuário — para e aguarda resposta
@@ -434,11 +428,14 @@ def process_flow_engine(
                 break
 
             if result:
-                print(f"[FLOW STOP] execução finalizada após match TRUE node={node.id}")
-                logger.info("[FLOW STOP] execucao finalizada apos match TRUE conversation_id=%s next_node=%s", conversation.id, node.id if node else None)
-                # Processa o próximo node (mensagem de resultado) e para
-                # Não usa should_stop_flow — quebra direto para evitar execução paralela
-                break
+                print(f"[FLOW MATCH] condition_id={condition_id} matched → stopping further evaluation")
+                logger.info(
+                    "[FLOW MATCH] condition_id=%s matched -> stopping further evaluation conversation_id=%s next_node=%s",
+                    condition_id,
+                    conversation.id,
+                    node.id if node else None,
+                )
+                return "\n\n".join(part for part in collected_messages if part).strip() or None
 
             # Condição FALSE: continua normalmente pelo caminho false
             continue
