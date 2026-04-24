@@ -283,8 +283,14 @@ def process_flow_engine(
 
     msg = _normalize_text(message_text)
     collected_messages: list[str] = []
+    should_stop_flow = False
 
     for _ in range(MAX_AUTO_STEPS):
+        if should_stop_flow:
+            print("[FLOW STOP] execução finalizada após match")
+            logger.info("[FLOW STOP] execucao finalizada apos match conversation_id=%s", conversation.id)
+            break
+
         node_data = _extract_node_data(node)
         node_type = node.type
         if node_type.endswith("Node"):
@@ -393,6 +399,8 @@ def process_flow_engine(
             continue
 
         if node_type == "condition":
+            print(f"[FLOW CHECK] avaliando node: {node.id}")
+            logger.info("[FLOW CHECK] avaliando node=%s conversation_id=%s", node.id, conversation.id)
             condition_text = _normalize_text(str(node_data.get("condition") or node_data.get("content") or ""))
 
             # Sem mensagem do usuário — para e aguarda resposta
@@ -404,6 +412,12 @@ def process_flow_engine(
                 break
 
             result = bool(condition_text and condition_text in msg)
+            if result:
+                print(f"[FLOW MATCH] condição TRUE: {node.id}")
+                logger.info("[FLOW MATCH] condicao TRUE node=%s conversation_id=%s", node.id, conversation.id)
+            else:
+                print(f"[FLOW MISS] condição FALSE: {node.id}")
+                logger.info("[FLOW MISS] condicao FALSE node=%s conversation_id=%s", node.id, conversation.id)
 
             selected_edge = None
             for edge in edges:
@@ -418,6 +432,9 @@ def process_flow_engine(
             node = _advance_to_edge_target(db=db, conversation=conversation, edge=selected_edge or _pick_default_edge(edges))
             if not node:
                 break
+
+            if result:
+                should_stop_flow = True
             continue
 
         if node_type == "delay":
