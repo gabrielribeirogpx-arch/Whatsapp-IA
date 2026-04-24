@@ -301,6 +301,9 @@ def process_flow_engine(
                     print("[FLOW ERROR] texto vazio no node")
                     return None
                 _send_flow_whatsapp_message(tenant=tenant, phone=conversation_phone, text=text)
+                # Após enviar mensagem, zera msg para que nodes seguintes
+                # (condition, choice) não usem a mensagem inicial do usuário
+                msg = ""
             elif text:
                 collected_messages.append(text)
             node = _advance_to_edge_target(db=db, conversation=conversation, edge=_pick_default_edge(edges))
@@ -390,9 +393,9 @@ def process_flow_engine(
         if node_type == "condition":
             condition_text = _normalize_text(str(node_data.get("condition") or node_data.get("content") or ""))
 
-            # Sem mensagem do usuário ainda — para o fluxo e aguarda input
+            # Sem mensagem do usuário — para e aguarda resposta
             if not msg:
-                print(f"[FLOW CONDITION WAIT] aguardando resposta do usuario no node={node.id}")
+                print(f"[FLOW CONDITION WAIT] aguardando resposta no node={node.id}")
                 conversation.current_node_id = node.id
                 db.commit()
                 db.refresh(conversation)
