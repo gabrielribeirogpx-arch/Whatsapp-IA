@@ -187,13 +187,26 @@ def _advance_to_edge_target(db: Session, conversation: Conversation, edge: FlowE
         return None
 
     next_node = _get_node(db=db, node_id=edge.target, tenant_id=conversation.tenant_id)
+    if not next_node:
+        logger.warning(
+            "Flow com edge sem node alvo conversation_id=%s edge=%s target_node=%s",
+            conversation.id,
+            edge.id,
+            edge.target,
+        )
+        _reset_to_bot_mode(db=db, conversation=conversation, reason="flow_error_next_node_not_found")
+        return None
+
     logger.info(
         "Flow avancando conversation_id=%s edge=%s target_node=%s",
         conversation.id,
         edge.id,
-        next_node.id if next_node else None,
+        next_node.id,
     )
-    conversation.current_node_id = next_node.id if next_node else None
+    logger.info("[FLOW STATE] current_node=%s → next_node=%s", conversation.current_node_id, next_node.id)
+    conversation.current_node_id = next_node.id
+    db.commit()
+    db.refresh(conversation)
     return next_node
 
 
@@ -281,7 +294,14 @@ def process_flow_engine(
             conversation.id,
             force_node,
         )
-    elif not conversation.current_node_id:
+    elif conversation.current_node_id is None:
+        if conversation.mode == "flow" and conversation.current_flow:
+            logger.warning(
+                "[FLOW STATE] conversation_id=%s em modo flow sem current_node_id; nao reiniciando automaticamente",
+                conversation.id,
+            )
+            return None
+
         start_node = _get_start_node(db=db, flow_id=flow.id, tenant_id=conversation.tenant_id)
         if not start_node:
             return None
@@ -491,7 +511,10 @@ def process_flow_engine(
                 next_node_id=next_edge.target,
                 seconds=delay_seconds,
             )
+            logger.info("[FLOW STATE] current_node=%s → next_node=%s", conversation.current_node_id, next_edge.target)
             conversation.current_node_id = next_edge.target
+            db.commit()
+            db.refresh(conversation)
             _keep_flow_mode(conversation)
             break
 
