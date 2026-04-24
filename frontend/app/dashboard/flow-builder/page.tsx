@@ -131,6 +131,9 @@ export default function FlowBuilderPage() {
   const [currentNodeId, setCurrentNodeId] = useState<string | null>(null);
   const [activeEdgeIds, setActiveEdgeIds] = useState<string[]>([]);
   const [isSimulatorOpen, setIsSimulatorOpen] = useState(false);
+  const [isSidebarExpanded, setIsSidebarExpanded] = useState(false);
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
+  const contextMenuRef = useRef<HTMLDivElement | null>(null);
   const [isTyping, setIsTyping] = useState(false);
   const [userInputText, setUserInputText] = useState('');
   const simulationStartedRef = useRef(false);
@@ -581,25 +584,147 @@ export default function FlowBuilderPage() {
     [activeEdgeIds, edges],
   );
 
+  // Fecha o menu de contexto ao clicar fora
+  useEffect(() => {
+    const handleClick = () => setContextMenu(null);
+    document.addEventListener('click', handleClick);
+    return () => document.removeEventListener('click', handleClick);
+  }, []);
+
   if (isLoading) {
     return <div>Carregando fluxo...</div>;
   }
   return (
     <div className="flow-builder-page" style={{ width: '100%', height: '100vh', display: 'flex' }}>
+      {/* Sidebar retrátil */}
       <aside
-        style={{ width: 240, borderRight: '1px solid #E8E6E0', padding: 16, display: 'grid', alignContent: 'start', gap: 10, background: '#FFFFFF' }}
+        onMouseEnter={() => setIsSidebarExpanded(true)}
+        onMouseLeave={() => setIsSidebarExpanded(false)}
+        style={{
+          width: isSidebarExpanded ? 220 : 56,
+          minWidth: isSidebarExpanded ? 220 : 56,
+          borderRight: '1px solid #E8E6E0',
+          background: '#FFFFFF',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 4,
+          padding: isSidebarExpanded ? '16px 12px' : '16px 8px',
+          overflow: 'hidden',
+          transition: 'width 0.2s ease, min-width 0.2s ease, padding 0.2s ease',
+          boxShadow: isSidebarExpanded ? '2px 0 12px rgba(0,0,0,0.06)' : 'none',
+          zIndex: 20,
+        }}
       >
-        <strong style={{ fontSize: 14 }}>Blocos</strong>
-        <button className="flow-sidebar-button" type="button" onClick={() => addNode('message')}>💬 + Mensagem</button>
-        <button className="flow-sidebar-button" type="button" onClick={() => addNode('choice')}>🔘 + Escolha</button>
-        <button className="flow-sidebar-button" type="button" onClick={() => addNode('condition')}>🧭 + Condição</button>
-        <button className="flow-sidebar-button" type="button" onClick={() => addNode('delay')}>⏱️ + Delay</button>
-        <button className="flow-sidebar-button" type="button" onClick={() => addNode('action')}>⚡ + Ação</button>
-        <hr style={{ borderColor: '#f3f4f6', width: '100%' }} />
-        <button className="primary-button" type="button" onClick={saveFlow} disabled={isSaving}>
-          {isSaving ? 'Salvando...' : 'Salvar fluxo'}
+        {/* Label "Blocos" — só aparece expandido */}
+        <div style={{
+          fontSize: 10,
+          fontWeight: 700,
+          color: '#a8b0a0',
+          letterSpacing: '0.08em',
+          textTransform: 'uppercase',
+          marginBottom: 4,
+          opacity: isSidebarExpanded ? 1 : 0,
+          transition: 'opacity 0.15s ease',
+          whiteSpace: 'nowrap',
+          overflow: 'hidden',
+        }}>
+          Blocos
+        </div>
+
+        {/* Botões de bloco */}
+        {([
+          { kind: 'message' as FlowNodeKind, icon: '💬', label: 'Mensagem', color: '#eef2ff', dot: '#4f46e5' },
+          { kind: 'choice' as FlowNodeKind, icon: '🔀', label: 'Escolha', color: '#fff7ed', dot: '#f97316' },
+          { kind: 'condition' as FlowNodeKind, icon: '⚡', label: 'Condição', color: '#fef3c7', dot: '#d97706' },
+          { kind: 'delay' as FlowNodeKind, icon: '⏱', label: 'Delay', color: '#f0fdf4', dot: '#16a34a' },
+          { kind: 'action' as FlowNodeKind, icon: '🔗', label: 'Ação', color: '#faf5ff', dot: '#7c3aed' },
+        ] as Array<{ kind: FlowNodeKind; icon: string; label: string; color: string; dot: string }>).map(({ kind, icon, label, color }) => (
+          <button
+            key={kind}
+            type="button"
+            onClick={() => addNode(kind)}
+            title={label}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 10,
+              padding: isSidebarExpanded ? '9px 10px' : '9px 0',
+              justifyContent: isSidebarExpanded ? 'flex-start' : 'center',
+              borderRadius: 10,
+              border: '1px solid transparent',
+              background: 'transparent',
+              cursor: 'pointer',
+              fontSize: 13,
+              fontWeight: 500,
+              color: '#1a1a18',
+              transition: 'background 0.15s, border-color 0.15s',
+              whiteSpace: 'nowrap',
+              overflow: 'hidden',
+              width: '100%',
+            }}
+            onMouseEnter={(e) => {
+              (e.currentTarget as HTMLButtonElement).style.background = color;
+              (e.currentTarget as HTMLButtonElement).style.borderColor = '#e4e8e0';
+            }}
+            onMouseLeave={(e) => {
+              (e.currentTarget as HTMLButtonElement).style.background = 'transparent';
+              (e.currentTarget as HTMLButtonElement).style.borderColor = 'transparent';
+            }}
+          >
+            <span style={{ fontSize: 16, flexShrink: 0, width: 20, textAlign: 'center' }}>{icon}</span>
+            <span style={{
+              opacity: isSidebarExpanded ? 1 : 0,
+              maxWidth: isSidebarExpanded ? 160 : 0,
+              overflow: 'hidden',
+              transition: 'opacity 0.15s ease, max-width 0.2s ease',
+              whiteSpace: 'nowrap',
+            }}>
+              {label}
+            </span>
+          </button>
+        ))}
+
+        {/* Divider */}
+        <div style={{ height: 1, background: '#f3f4f6', margin: '4px 0' }} />
+
+        {/* Botão Salvar */}
+        <button
+          type="button"
+          onClick={saveFlow}
+          disabled={isSaving}
+          title="Salvar fluxo"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 10,
+            padding: isSidebarExpanded ? '10px 10px' : '10px 0',
+            justifyContent: isSidebarExpanded ? 'flex-start' : 'center',
+            borderRadius: 10,
+            border: 'none',
+            background: '#16a34a',
+            cursor: isSaving ? 'not-allowed' : 'pointer',
+            fontSize: 13,
+            fontWeight: 600,
+            color: '#fff',
+            whiteSpace: 'nowrap',
+            overflow: 'hidden',
+            width: '100%',
+            opacity: isSaving ? 0.7 : 1,
+            transition: 'background 0.15s',
+          }}
+        >
+          <span style={{ fontSize: 15, flexShrink: 0, width: 20, textAlign: 'center' }}>💾</span>
+          <span style={{
+            opacity: isSidebarExpanded ? 1 : 0,
+            maxWidth: isSidebarExpanded ? 160 : 0,
+            overflow: 'hidden',
+            transition: 'opacity 0.15s ease, max-width 0.2s ease',
+            whiteSpace: 'nowrap',
+          }}>
+            {isSaving ? 'Salvando...' : 'Salvar fluxo'}
+          </span>
         </button>
-        {isEmpty ? <small>Nenhum node ainda.</small> : null}
+        {isEmpty ? <small style={{ opacity: isSidebarExpanded ? 1 : 0, transition: 'opacity 0.15s ease' }}>Nenhum node ainda.</small> : null}
       </aside>
       <main style={{ flex: 1, background: '#F7F7F5', position: 'relative' }}>
         {!isSimulatorOpen && (
@@ -642,6 +767,66 @@ export default function FlowBuilderPage() {
             ▶ Simular fluxo
           </button>
         )}
+        {/* Menu de contexto — botão direito no canvas */}
+        {contextMenu && (
+          <div
+            ref={contextMenuRef}
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              position: 'absolute',
+              top: contextMenu.y,
+              left: contextMenu.x,
+              zIndex: 1000,
+              background: '#fff',
+              border: '1px solid #e4e8e0',
+              borderRadius: 12,
+              boxShadow: '0 8px 32px rgba(0,0,0,0.12), 0 2px 8px rgba(0,0,0,0.06)',
+              padding: '6px',
+              minWidth: 180,
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 2,
+            }}
+          >
+            <div style={{ fontSize: 10, fontWeight: 700, color: '#a8b0a0', letterSpacing: '0.08em', textTransform: 'uppercase', padding: '4px 8px 2px' }}>
+              Adicionar bloco
+            </div>
+            {([
+              { kind: 'message' as FlowNodeKind, icon: '💬', label: 'Mensagem', color: '#eef2ff' },
+              { kind: 'choice' as FlowNodeKind, icon: '🔀', label: 'Escolha', color: '#fff7ed' },
+              { kind: 'condition' as FlowNodeKind, icon: '⚡', label: 'Condição', color: '#fef3c7' },
+              { kind: 'delay' as FlowNodeKind, icon: '⏱', label: 'Delay', color: '#f0fdf4' },
+              { kind: 'action' as FlowNodeKind, icon: '🔗', label: 'Ação', color: '#faf5ff' },
+            ] as Array<{ kind: FlowNodeKind; icon: string; label: string; color: string }>).map(({ kind, icon, label, color }) => (
+              <button
+                key={kind}
+                type="button"
+                onClick={() => { addNode(kind); setContextMenu(null); }}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 10,
+                  padding: '8px 10px',
+                  borderRadius: 8,
+                  border: 'none',
+                  background: 'transparent',
+                  cursor: 'pointer',
+                  fontSize: 13,
+                  fontWeight: 500,
+                  color: '#1a1a18',
+                  textAlign: 'left',
+                  width: '100%',
+                  transition: 'background 0.1s',
+                }}
+                onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = color; }}
+                onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'transparent'; }}
+              >
+                <span style={{ fontSize: 15 }}>{icon}</span>
+                {label}
+              </button>
+            ))}
+          </div>
+        )}
         <ReactFlow
           onInit={setReactFlowInstance}
           nodes={decoratedNodes}
@@ -649,6 +834,11 @@ export default function FlowBuilderPage() {
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
           onConnect={onConnect}
+          onContextMenu={(e) => {
+            e.preventDefault();
+            const mainRect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+            setContextMenu({ x: e.clientX - mainRect.left, y: e.clientY - mainRect.top });
+          }}
           onNodesDelete={(deleted) => {
             setNodes((nds) => nds.filter((node) => !deleted.find((item) => item.id === node.id)));
           }}
