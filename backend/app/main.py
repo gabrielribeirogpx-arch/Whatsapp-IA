@@ -62,30 +62,24 @@ def ensure_conversations_columns():
 
 app = FastAPI()
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # produção depois restringir
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 
 # ✅ STARTUP (CORRETO)
 @app.on_event("startup")
 def on_startup():
+    print("[CORS] enabled")
     run_migrations()
     Base.metadata.create_all(bind=engine)
     ensure_conversations_columns()
 
 
-# ✅ CORS
-origins = [
-    "http://localhost:3000",
-    "http://localhost:3001",
-    "https://whatsapp-ia-three.vercel.app",
-    "https://whatsapp-ia-nine.vercel.app",
-]
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=origins,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 app.add_middleware(TenantContextMiddleware)
 
 
