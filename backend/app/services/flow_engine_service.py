@@ -152,6 +152,8 @@ def _set_flow_mode(db: Session, conversation: Conversation, flow_id: uuid.UUID, 
 
 def _keep_flow_mode(conversation: Conversation) -> None:
     logger.info("[MODE KEEP] flow conversation_id=%s node_id=%s", conversation.id, conversation.current_node_id)
+    if conversation.mode == "flow" and conversation.current_node_id:
+        logger.info("[MODE PROTECTED] mantendo modo flow durante execução")
 
 
 def _reset_to_bot_mode(db: Session, conversation: Conversation, reason: str) -> None:
@@ -270,14 +272,6 @@ def process_flow_engine(
             return None
 
         _set_flow_mode(db=db, conversation=conversation, flow_id=flow.id, node_id=start_node.id)
-
-    if conversation.mode == "flow" and conversation.current_node_id is None:
-        logger.warning(
-            "Flow inconsistente sem node_id, resetando para bot conversation_id=%s",
-            conversation.id,
-        )
-        _reset_to_bot_mode(db=db, conversation=conversation, reason="current_node_none")
-        return None
 
     if conversation.mode == "flow":
         _keep_flow_mode(conversation)
