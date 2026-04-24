@@ -6,7 +6,7 @@ import uuid
 from typing import Any
 
 from redis import Redis
-from rq import Queue
+from rq import Queue, get_current_job
 
 try:
     from rq import Retry
@@ -20,10 +20,13 @@ from app.services.whatsapp_service import send_whatsapp_interactive_buttons, sen
 logger = logging.getLogger(__name__)
 
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
-SEND_QUEUE_NAME = os.getenv("WHATSAPP_SEND_QUEUE", "whatsapp-send")
+SEND_QUEUE_NAME = os.getenv("WHATSAPP_SEND_QUEUE", "default")
 
 
 def _send_whatsapp_job(tenant_id: str, phone: str, text: str, buttons: list[dict[str, Any]] | None = None) -> None:
+    job = get_current_job()
+    logger.info("[RQ JOB] processing job_id=%s", getattr(job, "id", None))
+
     tenant_uuid = uuid.UUID(str(tenant_id))
     with SessionLocal() as db:
         tenant = db.query(Tenant).filter(Tenant.id == tenant_uuid).first()
