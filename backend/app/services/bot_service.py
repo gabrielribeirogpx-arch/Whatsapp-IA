@@ -349,9 +349,21 @@ def handle_visual_flow_priority(db: Session, message: Message, conversation) -> 
 
 def handle_bot(db: Session, message: Message, conversation) -> dict[str, str | bool | None] | None:
     print(f"[MODE CHECK] current mode={conversation.mode}")
+    if conversation.mode == "flow":
+        print("[BOT] bloqueado: conversa em modo flow")
+        return None
+
+    if tenant_has_active_visual_flow(db=db, tenant_id=conversation.tenant_id):
+        print("[FLOW PRIORITY] fluxo ativo detectado dentro do bot")
+        conversation.mode = "flow"
+        db.commit()
+        db.refresh(conversation)
+        print("[MODE SET] flow")
+        return None
+
     if conversation.mode != "bot":
         print("[BOT] envio automático bloqueado: modo diferente de bot")
-        return False
+        return None
 
     tenant = db.execute(select(Tenant).where(Tenant.id == conversation.tenant_id)).scalars().first()
 
@@ -498,6 +510,10 @@ def get_last_message(db: Session, conversation_id, tenant_id) -> Message | None:
 
 
 def handle_bot_activation(db: Session, conversation: Conversation) -> bool:
+    if conversation.mode == "flow":
+        print("[FLOW PRIORITY] ativação do bot bloqueada: modo flow")
+        return False
+
     if conversation.mode != "bot":
         return False
 
@@ -513,6 +529,10 @@ def handle_bot_activation(db: Session, conversation: Conversation) -> bool:
 
     if tenant_has_active_visual_flow(db=db, tenant_id=conversation.tenant_id):
         print("[FLOW PRIORITY] executando fluxo antes do bot")
+        conversation.mode = "flow"
+        db.commit()
+        db.refresh(conversation)
+        print("[MODE SET] flow")
         handle_visual_flow_priority(db=db, message=last_message, conversation=conversation)
         return True
 
