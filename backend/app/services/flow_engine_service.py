@@ -28,6 +28,17 @@ def _normalize_text(value: str | None) -> str:
     return " ".join(cleaned.lower().split())
 
 
+def detect_intent(text: str) -> str | None:
+    normalized_text = _normalize_text(text)
+    if "api" in normalized_text or "integra" in normalized_text:
+        return "api"
+    if "automat" in normalized_text or "bot" in normalized_text:
+        return "automacao"
+    if "vender" in normalized_text or "vendas" in normalized_text:
+        return "vendas"
+    return None
+
+
 def _extract_node_data(node: FlowNode) -> dict[str, Any]:
     metadata = node.metadata_json or {}
     return {
@@ -171,6 +182,16 @@ def _keep_flow_mode(conversation: Conversation) -> None:
         logger.info("[MODE PROTECTED] mantendo modo flow durante execução")
 
 
+def _ensure_conversation_state(conversation: Conversation, message_text: str) -> None:
+    if not getattr(conversation, "context", None) or not isinstance(conversation.context, dict):
+        conversation.context = {}
+
+    if getattr(conversation, "retries", None) is None:
+        conversation.retries = 0
+
+    conversation.last_input = message_text or ""
+
+
 def _reset_to_bot_mode(db: Session, conversation: Conversation, reason: str) -> None:
     conversation.mode = "bot"
     conversation.current_flow = None
@@ -203,7 +224,7 @@ def _advance_to_edge_target(db: Session, conversation: Conversation, edge: FlowE
         edge.id,
         next_node.id,
     )
-    logger.info("[FLOW STATE] current_node=%s → next_node=%s", conversation.current_node_id, next_node.id)
+    logger.info("[FLOW STATE] current=%s next=%s", conversation.current_node_id, next_node.id)
     conversation.current_node_id = next_node.id
     db.commit()
     db.refresh(conversation)
@@ -285,7 +306,15 @@ def process_flow_engine(
         logger.info("Flow ignorado: conversa nao encontrada tenant_id=%s phone=%s", tenant_id, normalized_phone)
         return None
 
+    _ensure_conversation_state(conversation=conversation, message_text=message_text)
     flow = _get_or_create_visual_flow(db=db, tenant_id=conversation.tenant_id)
+    msg = _normalize_text(message_text)
+    intent = detect_intent(message_text or "")
+    logger.info("[INTENT] detected=%s", intent)
+    if intent:
+        conversation.context["intent"] = intent
+    db.commit()
+    db.refresh(conversation)
 
     if force_node:
         _set_flow_mode(db=db, conversation=conversation, flow_id=flow.id, node_id=force_node)
@@ -294,19 +323,45 @@ def process_flow_engine(
             conversation.id,
             force_node,
         )
-    elif conversation.current_node_id is None:
-        if conversation.mode == "flow" and conversation.current_flow:
+    elif conversation.mode == "flow" and conversation.current_node_id:
+        logger.info("[FLOW PRIORITY] mantendo fluxo atual current_node_id=%s", conversation.current_node_id)
+    else:
+        if conversation.mode == "flow" and conversation.current_flow and conversation.current_node_id is None:
             logger.warning(
                 "[FLOW STATE] conversation_id=%s em modo flow sem current_node_id; nao reiniciando automaticamente",
                 conversation.id,
             )
             return None
 
+        if not intent:
+            conversation.retries = (conversation.retries or 0) + 1
+            fallback_text = (
+                "Boa 👌 Me fala melhor o que você quer fazer:\n"
+                "📈 vender mais\n"
+                "🤖 automatizar atendimento\n"
+                "🔗 integrar com sistema"
+            )
+            logger.info("[FALLBACK] triggered")
+            logger.info("[FALLBACK] retries=%s", conversation.retries)
+            db.commit()
+            db.refresh(conversation)
+            return fallback_text
+
         start_node = _get_start_node(db=db, flow_id=flow.id, tenant_id=conversation.tenant_id)
         if not start_node:
             return None
 
-        _set_flow_mode(db=db, conversation=conversation, flow_id=flow.id, node_id=start_node.id)
+        start_edges = _get_edges(db=db, flow_id=flow.id, source=start_node.id)
+        selected_start_edge = None
+        for edge in start_edges:
+            edge_condition = _normalize_text(edge.condition)
+            if intent == edge_condition or (intent and edge_condition and intent in edge_condition):
+                selected_start_edge = edge
+                break
+
+        selected_start_node_id = selected_start_edge.target if selected_start_edge else start_node.id
+        _set_flow_mode(db=db, conversation=conversation, flow_id=flow.id, node_id=selected_start_node_id)
+        logger.info("[FLOW STATE] current=%s next=%s", conversation.current_node_id, selected_start_node_id)
 
     if conversation.mode == "flow":
         _keep_flow_mode(conversation)
@@ -323,7 +378,6 @@ def process_flow_engine(
         _reset_to_bot_mode(db=db, conversation=conversation, reason="flow_error_node_not_found")
         return None
 
-    msg = _normalize_text(message_text)
     collected_messages: list[str] = []
     for _ in range(MAX_AUTO_STEPS):
         node_data = _extract_node_data(node)
@@ -435,7 +489,6 @@ def process_flow_engine(
         if node_type == "condition":
             print(f"[FLOW CHECK] avaliando node: {node.id}")
             logger.info("[FLOW CHECK] avaliando node=%s conversation_id=%s", node.id, conversation.id)
-            condition_id = node.id
             raw_condition = str(node_data.get("condition") or node_data.get("content") or "")
 
             # Sem mensagem do usuário — para e aguarda resposta
@@ -475,10 +528,9 @@ def process_flow_engine(
             selected_edge = true_edge if result else false_edge
             selected_next = true_node_id if result else false_node_id
             route_label = "TRUE" if result else "FALSE"
-            print(f"[FLOW ROUTE] condition_id={condition_id} → {route_label} → next={selected_next}")
+            print(f"[FLOW ROUTE] {route_label} → next={selected_next}")
             logger.info(
-                "[FLOW ROUTE] condition_id=%s -> %s -> next=%s conversation_id=%s",
-                condition_id,
+                "[FLOW ROUTE] %s -> next=%s conversation_id=%s",
                 route_label,
                 selected_next,
                 conversation.id,
@@ -511,7 +563,7 @@ def process_flow_engine(
                 next_node_id=next_edge.target,
                 seconds=delay_seconds,
             )
-            logger.info("[FLOW STATE] current_node=%s → next_node=%s", conversation.current_node_id, next_edge.target)
+            logger.info("[FLOW STATE] current=%s next=%s", conversation.current_node_id, next_edge.target)
             conversation.current_node_id = next_edge.target
             db.commit()
             db.refresh(conversation)

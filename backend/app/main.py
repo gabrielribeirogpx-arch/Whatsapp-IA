@@ -45,6 +45,9 @@ def ensure_conversations_columns():
         "ALTER TABLE conversations ADD COLUMN IF NOT EXISTS current_step TEXT;",
         "ALTER TABLE conversations ADD COLUMN IF NOT EXISTS current_flow UUID;",
         "ALTER TABLE conversations ADD COLUMN IF NOT EXISTS current_node_id UUID;",
+        "ALTER TABLE conversations ADD COLUMN IF NOT EXISTS context JSONB;",
+        "ALTER TABLE conversations ADD COLUMN IF NOT EXISTS last_input TEXT;",
+        "ALTER TABLE conversations ADD COLUMN IF NOT EXISTS retries INTEGER DEFAULT 0;",
     ]
     try:
         with engine.begin() as connection:
