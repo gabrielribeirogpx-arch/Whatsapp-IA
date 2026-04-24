@@ -7,7 +7,11 @@ from typing import Any
 
 from redis import Redis
 from rq import Queue
-from rq.retry import Retry
+
+try:
+    from rq import Retry
+except ImportError:
+    Retry = None
 
 from app.db.session import SessionLocal
 from app.models import Tenant
@@ -84,7 +88,7 @@ def enqueue_send_message(
         phone,
         content,
         buttons,
-        retry=Retry(max=3, interval=[5, 15, 45]),
+        retry=Retry(max=3, interval=[5, 15, 45]) if Retry else None,
         failure_ttl=86400,
         result_ttl=3600,
     )
