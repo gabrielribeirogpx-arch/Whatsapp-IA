@@ -101,6 +101,21 @@ def _get_or_create_visual_flow(db: Session, tenant_id: uuid.UUID) -> Flow:
     return flow
 
 
+def find_start_node(flow: Any) -> Any | None:
+    nodes = getattr(flow, "nodes", None)
+    if nodes is None and isinstance(flow, dict):
+        nodes = flow.get("nodes", [])
+    nodes = nodes or []
+
+    for node in nodes:
+        node_data = getattr(node, "data", None)
+        if not isinstance(node_data, dict):
+            node_data = getattr(node, "metadata_json", None)
+        if node_data and node_data.get("isStart") is True:
+            return node
+    return None
+
+
 def _get_start_node(db: Session, flow_id: uuid.UUID, tenant_id: uuid.UUID) -> FlowNode | None:
     nodes = db.execute(
         select(FlowNode)
@@ -108,24 +123,22 @@ def _get_start_node(db: Session, flow_id: uuid.UUID, tenant_id: uuid.UUID) -> Fl
         .order_by(FlowNode.created_at.asc(), FlowNode.id.asc())
     ).scalars().all()
 
-    logger.info("[START NODE] total nodes=%d", len(nodes))
-    for node in nodes:
-        metadata = node.metadata_json or {}
-        logger.info(
-            "[START NODE] node_id=%s type=%s isStart=%s metadata_keys=%s",
-            node.id,
-            node.type,
-            metadata.get("isStart"),
-            list(metadata.keys()),
-        )
-        if metadata.get("isStart"):
-            logger.info("[START NODE] found isStart node=%s", node.id)
-            return node
+    check_payload = [
+        {
+            "id": str(node.id),
+            "type": node.type,
+            "isStart": bool((node.metadata_json or {}).get("isStart")),
+        }
+        for node in nodes
+    ]
+    print(f"[FLOW INIT CHECK] nodes={check_payload}")
+    logger.info("[FLOW INIT CHECK] nodes=%s", check_payload)
 
-    for node in nodes:
-        if node.type in {"start", "message", "messageNode", "choice", "choiceNode", "questionNode"}:
-            logger.info("[START NODE] fallback node=%s type=%s", node.id, node.type)
-            return node
+    start_node = find_start_node({"nodes": nodes})
+    if start_node:
+        print(f"[FLOW INIT FOUND] node_id={start_node.id}")
+        logger.info("[FLOW INIT FOUND] node_id=%s", start_node.id)
+        return start_node
 
     return nodes[0] if nodes else None
 
@@ -327,41 +340,56 @@ def process_flow_engine(
         logger.info("[FLOW PRIORITY] mantendo fluxo atual current_node_id=%s", conversation.current_node_id)
     else:
         if conversation.mode == "flow" and conversation.current_flow and conversation.current_node_id is None:
-            logger.warning(
-                "[FLOW STATE] conversation_id=%s em modo flow sem current_node_id; nao reiniciando automaticamente",
+            logger.info(
+                "[FLOW STATE] conversation_id=%s em modo flow sem current_node_id; iniciando pelo start node",
                 conversation.id,
             )
-            return None
 
-        if not intent:
-            conversation.retries = (conversation.retries or 0) + 1
-            fallback_text = (
-                "Boa 👌 Me fala melhor o que você quer fazer:\n"
-                "📈 vender mais\n"
-                "🤖 automatizar atendimento\n"
-                "🔗 integrar com sistema"
-            )
-            logger.info("[FALLBACK] triggered")
-            logger.info("[FALLBACK] retries=%s", conversation.retries)
-            db.commit()
-            db.refresh(conversation)
-            return fallback_text
+        if not conversation.current_node_id:
+            start_node = _get_start_node(db=db, flow_id=flow.id, tenant_id=conversation.tenant_id)
+            if start_node:
+                conversation.mode = "flow"
+                conversation.current_flow = flow.id
+                conversation.current_node_id = start_node.id
+                db.commit()
+                db.refresh(conversation)
+                print(f"[FLOW INIT] start_node_id={start_node.id}")
+                logger.info("[FLOW INIT] start_node_id=%s", start_node.id)
+            else:
+                print("[FLOW ERROR] no start node found")
+                logger.error("[FLOW ERROR] no start node found")
+                return None
 
-        start_node = _get_start_node(db=db, flow_id=flow.id, tenant_id=conversation.tenant_id)
-        if not start_node:
-            return None
+        if conversation.mode != "flow":
+            if not intent:
+                conversation.retries = (conversation.retries or 0) + 1
+                fallback_text = (
+                    "Boa 👌 Me fala melhor o que você quer fazer:\n"
+                    "📈 vender mais\n"
+                    "🤖 automatizar atendimento\n"
+                    "🔗 integrar com sistema"
+                )
+                logger.info("[FALLBACK] triggered")
+                logger.info("[FALLBACK] retries=%s", conversation.retries)
+                db.commit()
+                db.refresh(conversation)
+                return fallback_text
 
-        start_edges = _get_edges(db=db, flow_id=flow.id, source=start_node.id)
-        selected_start_edge = None
-        for edge in start_edges:
-            edge_condition = _normalize_text(edge.condition)
-            if intent == edge_condition or (intent and edge_condition and intent in edge_condition):
-                selected_start_edge = edge
-                break
+            start_node = _get_start_node(db=db, flow_id=flow.id, tenant_id=conversation.tenant_id)
+            if not start_node:
+                return None
 
-        selected_start_node_id = selected_start_edge.target if selected_start_edge else start_node.id
-        _set_flow_mode(db=db, conversation=conversation, flow_id=flow.id, node_id=selected_start_node_id)
-        logger.info("[FLOW STATE] current=%s next=%s", conversation.current_node_id, selected_start_node_id)
+            start_edges = _get_edges(db=db, flow_id=flow.id, source=start_node.id)
+            selected_start_edge = None
+            for edge in start_edges:
+                edge_condition = _normalize_text(edge.condition)
+                if intent == edge_condition or (intent and edge_condition and intent in edge_condition):
+                    selected_start_edge = edge
+                    break
+
+            selected_start_node_id = selected_start_edge.target if selected_start_edge else start_node.id
+            _set_flow_mode(db=db, conversation=conversation, flow_id=flow.id, node_id=selected_start_node_id)
+            logger.info("[FLOW STATE] current=%s next=%s", conversation.current_node_id, selected_start_node_id)
 
     if conversation.mode == "flow":
         _keep_flow_mode(conversation)
