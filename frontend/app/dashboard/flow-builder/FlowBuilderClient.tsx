@@ -12,18 +12,18 @@ import ReactFlow, {
 } from 'reactflow';
 import type { Connection, Edge, Node, ReactFlowInstance } from 'reactflow';
 import 'reactflow/dist/style.css';
-import { Clock, GitBranch, ListChecks, MessageSquare, Zap } from 'lucide-react';
+import { Clock, GitBranch, History, ListChecks, MessageSquare, RotateCcw, Zap } from 'lucide-react';
 
 import ActionNode from '@/components/flow/nodes/ActionNode';
 import ChoiceNode from '@/components/flow/nodes/ChoiceNode';
 import ConditionNode from '@/components/flow/nodes/ConditionNode';
 import DelayNode from '@/components/flow/nodes/DelayNode';
 import MessageNode from '@/components/flow/nodes/MessageNode';
-import { getFlowGraph, getTenantSessionFromStorage, saveFlowGraph } from '@/lib/api';
+import { getFlowGraph, getTenantSessionFromStorage, listFlowVersions, restoreFlowVersion, saveFlowGraph } from '@/lib/api';
 import { getLayoutedElements } from '@/lib/autoLayout';
 import { orderChoiceChildrenEdges } from '@/lib/flowChoiceOrdering';
 import { executeNode } from '@/lib/flowEngine';
-import { FlowEdgePayload, FlowNodePayload } from '@/lib/types';
+import { FlowEdgePayload, FlowNodePayload, FlowVersionItem } from '@/lib/types';
 
 const FETCH_TIMEOUT_MS = 8000;
 
@@ -141,7 +141,25 @@ export default function FlowBuilderClient({ flowId }: FlowBuilderClientProps) {
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
   const [isTyping, setIsTyping] = useState(false);
   const [userInputText, setUserInputText] = useState('');
+  const [isVersionsModalOpen, setIsVersionsModalOpen] = useState(false);
+  const [isLoadingVersions, setIsLoadingVersions] = useState(false);
+  const [isRestoringVersion, setIsRestoringVersion] = useState(false);
+  const [flowVersions, setFlowVersions] = useState<FlowVersionItem[]>([]);
+  const [activeVersionId, setActiveVersionId] = useState<string | null>(null);
   const simulationStartedRef = useRef(false);
+
+  const formatVersionDate = useCallback((timestamp?: string | null) => {
+    if (!timestamp) return 'Sem data';
+    const parsed = new Date(timestamp);
+    if (Number.isNaN(parsed.getTime())) return 'Sem data';
+    return parsed.toLocaleString('pt-BR', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  }, []);
 
   const updateNodeData = useCallback((nodeId: string, patch: Record<string, unknown>) => {
     setNodes((prev: Node[]) =>
@@ -567,6 +585,42 @@ export default function FlowBuilderClient({ flowId }: FlowBuilderClientProps) {
     }
   }, [applyLayoutAndSetFlow, buildFlowNode, edges, nodes, selectedFlowId, setEdges, setNodes]);
 
+  const openVersionsModal = useCallback(async () => {
+    if (!selectedFlowId) return;
+    setIsVersionsModalOpen(true);
+    setIsLoadingVersions(true);
+    try {
+      const versions = await listFlowVersions(selectedFlowId);
+      setFlowVersions(versions);
+      const current = versions.find((item) => item.is_current);
+      setActiveVersionId(current?.id || null);
+    } finally {
+      setIsLoadingVersions(false);
+    }
+  }, [selectedFlowId]);
+
+  const handleRestoreVersion = useCallback(async (versionId: string) => {
+    const tenantSession = getTenantSessionFromStorage();
+    const tenantId = tenantSession?.tenant_id;
+    if (!tenantId || !selectedFlowId) return;
+
+    setIsRestoringVersion(true);
+    try {
+      await restoreFlowVersion(selectedFlowId, versionId);
+      const data = await getFlowGraph(tenantId, selectedFlowId);
+      const restoredNodes = (data?.nodes || []).map(buildFlowNode);
+      const restoredEdges: Edge[] = (data?.edges || []).map(buildFlowEdge);
+      const orderedEdges = orderChoiceChildrenEdges(restoredNodes, restoredEdges);
+      setNodes(restoredNodes);
+      setEdges(orderedEdges);
+      setActiveVersionId(versionId);
+      setFlowVersions((prev) => prev.map((item) => ({ ...item, is_current: item.id === versionId })));
+      requestAnimationFrame(() => { reactFlowInstance?.fitView(); });
+    } finally {
+      setIsRestoringVersion(false);
+    }
+  }, [buildFlowNode, reactFlowInstance, selectedFlowId, setEdges, setNodes]);
+
   const decoratedNodes = useMemo(
     () => nodes.map((node) => ({
       ...node,
@@ -677,6 +731,17 @@ export default function FlowBuilderClient({ flowId }: FlowBuilderClientProps) {
         </div>
       </nav>
       <main style={{ flex: 1, background: '#F7F7F5', position: 'relative' }}>
+        <div className="flow-builder-top-actions">
+          <button
+            type="button"
+            className="flow-top-btn flow-top-btn-secondary"
+            onClick={openVersionsModal}
+            disabled={!selectedFlowId}
+          >
+            <History size={14} />
+            Versões
+          </button>
+        </div>
         {!isSimulatorOpen && (
           <button
             type="button"
@@ -996,6 +1061,46 @@ export default function FlowBuilderClient({ flowId }: FlowBuilderClientProps) {
           </button>
         </div>
         </aside>
+      )}
+      {isVersionsModalOpen && (
+        <div className="flow-versions-backdrop" onClick={() => setIsVersionsModalOpen(false)}>
+          <div className="flow-versions-modal" onClick={(event) => event.stopPropagation()}>
+            <div className="flow-versions-header">
+              <div>
+                <h3>Histórico de versões</h3>
+                <p>Restaure qualquer snapshot salvo do flow.</p>
+              </div>
+              <button type="button" onClick={() => setIsVersionsModalOpen(false)}>×</button>
+            </div>
+
+            <div className="flow-versions-list">
+              {isLoadingVersions && <div className="flow-versions-empty">Carregando versões...</div>}
+              {!isLoadingVersions && flowVersions.length === 0 && (
+                <div className="flow-versions-empty">Nenhuma versão encontrada.</div>
+              )}
+              {!isLoadingVersions && flowVersions.map((item) => (
+                <div key={item.id} className={`flow-version-row ${item.is_current ? 'is-current' : ''}`}>
+                  <div>
+                    <strong>Versão {item.version}</strong>
+                    <span>{formatVersionDate(item.created_at)}</span>
+                  </div>
+                  {item.is_current ? (
+                    <span className="flow-version-current-pill">Atual</span>
+                  ) : (
+                    <button
+                      type="button"
+                      disabled={isRestoringVersion || activeVersionId === item.id}
+                      onClick={() => handleRestoreVersion(item.id)}
+                    >
+                      <RotateCcw size={13} />
+                      Restaurar
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

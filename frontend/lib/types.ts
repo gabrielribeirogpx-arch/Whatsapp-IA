@@ -215,6 +215,14 @@ export type FlowItem = {
   updated_at?: string | null;
 };
 
+export type FlowVersionItem = {
+  id: string;
+  flow_id: string;
+  version: number;
+  created_at?: string | null;
+  is_current: boolean;
+};
+
 export type FlowPayload = {
   name: string;
   description?: string;
