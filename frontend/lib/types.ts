@@ -201,3 +201,24 @@ export type FlowGraphPayload = {
   nodes: FlowNodePayload[];
   edges: FlowEdgePayload[];
 };
+
+export type FlowItem = {
+  id: string;
+  tenant_id: string;
+  name: string;
+  description?: string | null;
+  is_active: boolean;
+  trigger_type: 'keyword' | 'default' | string;
+  trigger_value?: string | null;
+  version: number;
+  created_at?: string | null;
+  updated_at?: string | null;
+};
+
+export type FlowPayload = {
+  name: string;
+  description?: string;
+  trigger_type: 'keyword' | 'default';
+  trigger_value?: string;
+  is_active?: boolean;
+};

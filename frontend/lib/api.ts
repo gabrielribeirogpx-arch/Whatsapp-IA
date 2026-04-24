@@ -17,7 +17,9 @@ import {
   BotRulePayload,
   FlowGraphPayload,
   FlowNodePayload,
-  FlowEdgePayload
+  FlowEdgePayload,
+  FlowItem,
+  FlowPayload
 } from './types';
 
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL;
@@ -306,19 +308,50 @@ export async function deleteBotRule(ruleId: string): Promise<void> {
 }
 
 
-export async function getFlowGraph(tenantId: string): Promise<FlowGraphPayload> {
-  const res = await apiFetch(`/api/flows/${tenantId}`);
+export async function getFlowGraph(tenantId: string, flowId?: string): Promise<FlowGraphPayload> {
+  const query = flowId ? `?flow_id=${encodeURIComponent(flowId)}` : '';
+  const res = await apiFetch(`/api/flows/${tenantId}${query}`);
   return parseApiResponse<FlowGraphPayload>(res);
 }
 
 export async function saveFlowGraph(
   tenantId: string,
-  payload: { nodes: FlowNodePayload[]; edges: FlowEdgePayload[] }
+  payload: { nodes: FlowNodePayload[]; edges: FlowEdgePayload[] },
+  flowId?: string
 ): Promise<FlowGraphPayload> {
-  const res = await apiFetch(`/api/flows/${tenantId}`, {
+  const query = flowId ? `?flow_id=${encodeURIComponent(flowId)}` : '';
+  const res = await apiFetch(`/api/flows/${tenantId}${query}`, {
     method: 'POST',
     body: JSON.stringify(payload)
   });
 
   return parseApiResponse<FlowGraphPayload>(res);
+}
+
+export async function listFlows(): Promise<FlowItem[]> {
+  const res = await apiFetch('/flows');
+  return parseApiResponse<FlowItem[]>(res);
+}
+
+export async function createFlow(payload: FlowPayload): Promise<FlowItem> {
+  const res = await apiFetch('/flows', {
+    method: 'POST',
+    body: JSON.stringify(payload)
+  });
+  return parseApiResponse<FlowItem>(res);
+}
+
+export async function updateFlow(flowId: string, payload: Partial<FlowPayload>): Promise<FlowItem> {
+  const res = await apiFetch(`/flows/${flowId}`, {
+    method: 'PUT',
+    body: JSON.stringify(payload)
+  });
+  return parseApiResponse<FlowItem>(res);
+}
+
+export async function deleteFlow(flowId: string): Promise<void> {
+  const res = await apiFetch(`/flows/${flowId}`, {
+    method: 'DELETE'
+  });
+  if (!res.ok) throw new Error(await res.text());
 }
