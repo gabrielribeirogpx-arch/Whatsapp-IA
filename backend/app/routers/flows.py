@@ -316,41 +316,49 @@ def get_tenant_flow_by_id(
         flow = db.query(Flow).filter(Flow.id == flow_id).first()
 
         if not flow:
-            return {"nodes": [], "edges": []}
-        version: FlowVersion | None = None
+            return {
+                "nodes": [],
+                "edges": [],
+            }
+
+        version = None
 
         if flow.current_version_id:
-            version = db.execute(
-                select(FlowVersion).where(FlowVersion.id == flow.current_version_id, FlowVersion.flow_id == flow.id)
-            ).scalars().first()
-        else:
-            version = db.execute(
-                select(FlowVersion)
-                .where(FlowVersion.flow_id == flow.id)
-                .order_by(FlowVersion.created_at.desc())
-                .limit(1)
-            ).scalars().first()
-
-        print(
-            "FLOW LOAD:",
-            {
-                "flow_id": str(flow.id),
-                "current_version_id": str(flow.current_version_id) if flow.current_version_id else None,
-                "version_found": str(version.id) if version else None,
-                "nodes_count": len(version.nodes) if version and isinstance(version.nodes, list) else 0,
-            },
-        )
+            version = db.query(FlowVersion).filter(
+                FlowVersion.id == flow.current_version_id
+            ).first()
 
         if not version:
-            return {"nodes": [], "edges": []}
+            version = db.query(FlowVersion).filter(
+                FlowVersion.flow_id == flow.id,
+                FlowVersion.is_active.is_(True),
+            ).first()
 
-        nodes = version.nodes if isinstance(version.nodes, list) else []
-        edges = version.edges if isinstance(version.edges, list) else []
-        return {"nodes": nodes, "edges": edges}
+        if not version:
+            print("FLOW SEM VERSÃO")
+            return {
+                "nodes": [],
+                "edges": [],
+            }
+
+        nodes = version.nodes or []
+        edges = version.edges or []
+
+        print("FLOW OK:", len(nodes), "nodes")
+        print("FLOW RETORNADO:", nodes)
+
+        return {
+            "nodes": nodes,
+            "edges": edges,
+        }
 
     except Exception as e:
-        print("🔥 FLOW LOAD ERROR:", e)
-        return {"nodes": [], "edges": []}
+        print("ERRO CRÍTICO FLOW:", str(e))
+
+        return {
+            "nodes": [],
+            "edges": [],
+        }
 
 
 @crud_router.get("/{flow_id}/analytics")
@@ -381,6 +389,7 @@ async def update_tenant_flow(
         payload = await request.json()
         payload_data = payload if isinstance(payload, dict) else {}
         payload_model = FlowUpdatePayload(**payload_data)
+        print("FLOW RECEBIDO:", payload_model.model_dump())
         update_data = payload_model.model_dump(exclude_unset=True)
 
         flow = update_flow(
@@ -392,66 +401,38 @@ async def update_tenant_flow(
         if not flow:
             raise HTTPException(status_code=404, detail="Flow não encontrado")
 
-        nodes = payload_data.get("nodes") or []
-        edges = payload_data.get("edges")
+        if not payload_model.nodes:
+            print("IGNORANDO SAVE VAZIO")
+            return {"status": "ignored"}
 
-        if not isinstance(nodes, list):
-            nodes = []
-        if not nodes or len(nodes) == 0:
-            raise HTTPException(status_code=422, detail="Flow precisa ter pelo menos 1 node")
-        edges = edges or []
-        print("VALIDANDO FLOW:", {"nodes": len(nodes), "edges": len(edges)})
-        for node in nodes:
-            if not isinstance(node, dict):
-                raise HTTPException(status_code=422, detail="Node inválido: sem id")
-            if "id" not in node:
-                raise HTTPException(status_code=422, detail="Node inválido: sem id")
-            if "type" not in node:
-                node["type"] = "default"
-            if "position" not in node:
-                node["position"] = {"x": 0, "y": 0}
-            if "data" not in node:
-                node["data"] = {}
+        nodes = payload_model.nodes or []
+        edges = payload_model.edges or []
 
-        if not isinstance(edges, list):
-            edges = []
-
-        save_flow_graph(
-            db=db,
-            tenant_id=flow.tenant_id,
-            flow_id=str(flow.id),
+        nova = FlowVersion(
+            flow_id=flow.id,
             nodes=nodes,
             edges=edges,
+            is_active=True,
+        )
+        db.add(nova)
+        db.flush()
+
+        db.query(FlowVersion).filter(
+            FlowVersion.flow_id == flow.id,
+            FlowVersion.id != nova.id,
+        ).update(
+            {"is_active": False},
+            synchronize_session=False,
         )
 
-        new_version = db.execute(
-            select(FlowVersion)
-            .where(FlowVersion.flow_id == flow.id)
-            .order_by(FlowVersion.created_at.desc(), FlowVersion.version.desc())
-            .limit(1)
-        ).scalars().first()
-
-        if new_version:
-            db.query(FlowVersion).filter(FlowVersion.flow_id == flow.id).update(
-                {FlowVersion.is_active: False},
-                synchronize_session=False,
-            )
-            db.query(FlowVersion).filter(FlowVersion.id == new_version.id).update(
-                {FlowVersion.is_active: True},
-                synchronize_session=False,
-            )
-            flow.current_version_id = new_version.id
-            db.add(flow)
-
+        flow.current_version_id = nova.id
         db.commit()
 
         return {"status": "ok"}
 
-    except HTTPException:
-        raise
     except Exception as e:
-        print("🔥 FLOW SAVE ERROR:", e)
-        return {"status": "fallback_saved"}
+        print("ERRO SALVAR FLOW:", str(e))
+        raise HTTPException(status_code=500, detail="Erro interno")
 
 
 @crud_router.delete("/{flow_id}")
