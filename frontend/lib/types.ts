@@ -221,6 +221,7 @@ export type FlowVersionItem = {
   version: number;
   version_number?: number;
   created_at?: string | null;
+  is_active?: boolean;
   is_current: boolean;
 };
 

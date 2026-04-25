@@ -104,11 +104,14 @@ def update_flow_route(
     if not flow:
         raise HTTPException(status_code=404, detail="Flow not found")
     if "nodes" in payload_data or "edges" in payload_data:
+        nodes = payload_data.get("nodes", [])
+        if not nodes or len(nodes) == 0:
+            raise HTTPException(status_code=422, detail="Flow não pode ser vazio")
         save_flow_graph(
             db=db,
             tenant_id=TEMP_TENANT_ID,
             flow_id=str(flow.id),
-            nodes=payload_data.get("nodes", []),
+            nodes=nodes,
             edges=payload_data.get("edges", []),
         )
     db.add(flow)
@@ -165,6 +168,7 @@ def _serialize_flow_version(flow_version: FlowVersion, current_version_id: uuid.
         "version": flow_version.version,
         "version_number": flow_version.version,
         "created_at": flow_version.created_at.isoformat() if flow_version.created_at else None,
+        "is_active": flow_version.is_active,
         "is_current": bool(current_version_id and flow_version.id == current_version_id),
     }
 
@@ -197,6 +201,17 @@ def get_tenant_flow(
     flow_id: str | None = None,
     db: Session = Depends(get_db),
 ):
+    try:
+        parsed_flow_id = uuid.UUID(tenant_id)
+        flow = db.execute(select(Flow).where(Flow.id == parsed_flow_id)).scalars().first()
+        if flow:
+            if not flow.current_version_id:
+                return dict(_EMPTY_FLOW)
+            graph = get_flow_graph(db=db, tenant_id=flow.tenant_id, flow_id=str(flow.id))
+            return _normalize_flow_response(graph)
+    except ValueError:
+        pass
+
     tenant = _resolve_tenant(db=db, tenant_id=tenant_id)
     if not tenant:
         return dict(_EMPTY_FLOW)
@@ -260,6 +275,8 @@ def get_tenant_flow_by_id(
         flow = db.query(Flow).filter(Flow.id == flow_id).first()
 
         if not flow:
+            return {"nodes": [], "edges": []}
+        if not flow.current_version_id:
             return {"nodes": [], "edges": []}
 
         data = get_flow_graph(db=db, tenant_id=flow.tenant_id, flow_id=str(flow.id))
@@ -328,6 +345,9 @@ async def update_tenant_flow(
 
         nodes = payload_data.get("nodes") or []
         edges = payload_data.get("edges") or []
+
+        if not nodes or len(nodes) == 0:
+            raise HTTPException(status_code=422, detail="Flow não pode ser vazio")
 
         if not isinstance(nodes, list):
             nodes = []
@@ -420,8 +440,14 @@ def restore_tenant_flow_version(
     if not flow_version:
         raise HTTPException(status_code=404, detail="Flow version not found")
 
+    db.query(FlowVersion).filter(FlowVersion.flow_id == flow.id).update(
+        {FlowVersion.is_active: False},
+        synchronize_session=False,
+    )
+    flow_version.is_active = True
     flow.current_version_id = flow_version.id
     flow.version = flow_version.version
+    db.add(flow_version)
     db.add(flow)
     db.commit()
     db.refresh(flow)
@@ -438,3 +464,50 @@ def restore_tenant_flow_version_by_path(
 ):
     payload = RestoreFlowVersionPayload(version_id=version_id)
     return restore_tenant_flow_version(flow_id=flow_id, payload=payload, x_tenant_id=x_tenant_id, db=db)
+
+
+@router.get("/{flow_id}/versions")
+def list_flow_versions_by_id(
+    flow_id: uuid.UUID,
+    db: Session = Depends(get_db),
+):
+    flow = db.execute(select(Flow).where(Flow.id == flow_id)).scalars().first()
+    if not flow:
+        raise HTTPException(status_code=404, detail="Flow not found")
+
+    versions = db.execute(
+        select(FlowVersion)
+        .where(FlowVersion.flow_id == flow.id)
+        .order_by(FlowVersion.created_at.desc(), FlowVersion.version.desc())
+    ).scalars().all()
+    return [_serialize_flow_version(item, flow.current_version_id) for item in versions]
+
+
+@router.post("/{flow_id}/restore/{version_id}")
+def restore_flow_version_by_id(
+    flow_id: uuid.UUID,
+    version_id: uuid.UUID,
+    db: Session = Depends(get_db),
+):
+    flow = db.execute(select(Flow).where(Flow.id == flow_id)).scalars().first()
+    if not flow:
+        raise HTTPException(status_code=404, detail="Flow not found")
+
+    flow_version = db.execute(
+        select(FlowVersion).where(FlowVersion.id == version_id, FlowVersion.flow_id == flow.id)
+    ).scalars().first()
+    if not flow_version:
+        raise HTTPException(status_code=404, detail="Flow version not found")
+
+    db.query(FlowVersion).filter(FlowVersion.flow_id == flow.id).update(
+        {FlowVersion.is_active: False},
+        synchronize_session=False,
+    )
+    flow_version.is_active = True
+    flow.current_version_id = flow_version.id
+    flow.version = flow_version.version
+    db.add(flow_version)
+    db.add(flow)
+    db.commit()
+    db.refresh(flow)
+    return _serialize_flow(flow)

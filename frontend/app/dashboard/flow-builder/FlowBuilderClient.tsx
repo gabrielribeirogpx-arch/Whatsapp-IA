@@ -20,7 +20,7 @@ import ChoiceNode from '@/components/flow/nodes/ChoiceNode';
 import ConditionNode from '@/components/flow/nodes/ConditionNode';
 import DelayNode from '@/components/flow/nodes/DelayNode';
 import MessageNode from '@/components/flow/nodes/MessageNode';
-import { getFlowGraph, getTenantSessionFromStorage, restoreFlowVersion } from '@/lib/api';
+import { getFlowGraph, getTenantSessionFromStorage, listFlowVersions, restoreFlowVersion } from '@/lib/api';
 import { getLayoutedElements } from '@/lib/autoLayout';
 import { orderChoiceChildrenEdges } from '@/lib/flowChoiceOrdering';
 import { executeNode } from '@/lib/flowEngine';
@@ -64,6 +64,12 @@ const NODE_PRESETS: Record<FlowNodeKind, { label: string; type: string; data: Re
 
 const initialNodes: Node[] = [];
 const initialEdges: Edge[] = [];
+const FALLBACK_START_NODE: Node = {
+  id: 'start',
+  type: 'message',
+  position: { x: 250, y: 100 },
+  data: { label: 'Início' },
+};
 
 function randomPosition() {
   return {
@@ -151,8 +157,9 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
   const [isRestoringVersion, setIsRestoringVersion] = useState(false);
   const [flowVersions, setFlowVersions] = useState<FlowVersionItem[]>([]);
   const [activeVersionId, setActiveVersionId] = useState<string | null>(null);
-  const [hasVersions, setHasVersions] = useState(false);
   const simulationStartedRef = useRef(false);
+  const autosaveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const autosaveReadyRef = useRef(false);
 
   const formatVersionDate = useCallback((timestamp?: string | null) => {
     if (!timestamp) return 'Sem data';
@@ -261,7 +268,10 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
         const safeNodes = Array.isArray(data?.nodes) ? data.nodes : [];
         const safeEdges = Array.isArray(data?.edges) ? data.edges : [];
 
-        const initialNodes = safeNodes.map(buildFlowNode);
+        const initialNodes =
+          safeNodes.length === 0
+            ? [FALLBACK_START_NODE]
+            : safeNodes.map(buildFlowNode);
         const initialEdges: Edge[] = safeEdges.map(buildFlowEdge);
 
         // Se os nodes já têm posições salvas (x e y não-zero), usa diretamente
@@ -575,6 +585,11 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
       edges: Array.isArray(realFlow.edges) ? realFlow.edges : [],
     };
 
+    if (!safeFlow.nodes || safeFlow.nodes.length === 0) {
+      alert('Não é possível salvar fluxo vazio');
+      return;
+    }
+
     console.log('FLOW SALVANDO:', safeFlow);
 
     setIsSaving(true);
@@ -591,12 +606,41 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
     }
   }, [flowId, rfInstance]);
 
+  useEffect(() => {
+    if (!autosaveReadyRef.current) {
+      autosaveReadyRef.current = true;
+      return;
+    }
+    if (!rfInstance || !flowId) return;
+
+    if (autosaveTimeoutRef.current) {
+      clearTimeout(autosaveTimeoutRef.current);
+    }
+
+    autosaveTimeoutRef.current = setTimeout(() => {
+      void handleSaveFlow();
+    }, 2000);
+
+    return () => {
+      if (autosaveTimeoutRef.current) {
+        clearTimeout(autosaveTimeoutRef.current);
+      }
+    };
+  }, [edges, flowId, handleSaveFlow, nodes, rfInstance]);
+
   const openVersionsModal = useCallback(async () => {
     if (!selectedFlowId) return;
     setIsVersionsModalOpen(true);
-    setIsLoadingVersions(false);
-    setFlowVersions([]);
-    setActiveVersionId(null);
+    setIsLoadingVersions(true);
+    try {
+      const versions = await listFlowVersions(selectedFlowId);
+      setFlowVersions(versions);
+      setActiveVersionId(versions.find((item) => item.is_current)?.id || null);
+    } catch {
+      setFlowVersions([]);
+    } finally {
+      setIsLoadingVersions(false);
+    }
   }, [selectedFlowId]);
 
   const handleRestoreVersion = useCallback(async (versionId: string) => {
@@ -615,7 +659,6 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
       setEdges(orderedEdges);
       setActiveVersionId(versionId);
       setFlowVersions((prev) => prev.map((item) => ({ ...item, is_current: item.id === versionId })));
-      setHasVersions(true);
       requestAnimationFrame(() => { rfInstance?.fitView(); });
     } finally {
       setIsRestoringVersion(false);
@@ -737,10 +780,10 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
             type="button"
             className="flow-top-btn flow-top-btn-secondary"
             onClick={openVersionsModal}
-            disabled={!selectedFlowId || !hasVersions}
+            disabled={!selectedFlowId}
           >
             <History size={14} />
-            Versões
+            Histórico
           </button>
         </div>
         {!isSimulatorOpen && (
