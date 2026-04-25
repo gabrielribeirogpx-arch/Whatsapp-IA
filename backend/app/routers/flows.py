@@ -96,27 +96,41 @@ async def update_flow_route(
 ):
     payload = await request.json()
     payload_data = payload if isinstance(payload, dict) else {}
-    print("PAYLOAD RECEBIDO:", payload_data)
-
-    payload_model = FlowUpdatePayload(**payload_data)
-    update_data = payload_model.model_dump(exclude_unset=True)
-
-    flow = update_flow(
-        db=db,
-        flow_id=flow_id,
-        tenant_id=TEMP_TENANT_ID,
-        data={key: value for key, value in update_data.items() if key not in {"nodes", "edges"}},
-    )
-    if not flow:
-        raise HTTPException(status_code=404, detail="Flow not found")
 
     nodes = payload_data.get("nodes", [])
     edges = payload_data.get("edges", [])
+
+    print("PAYLOAD REAL:", payload_data)
+    print("NODES RECEBIDOS:", len(nodes) if isinstance(nodes, list) else 0)
 
     if not isinstance(nodes, list):
         nodes = []
     if not isinstance(edges, list):
         edges = []
+
+    flow = update_flow(
+        db=db,
+        flow_id=flow_id,
+        tenant_id=TEMP_TENANT_ID,
+        data={
+            key: value
+            for key, value in payload_data.items()
+            if key
+            in {
+                "name",
+                "description",
+                "is_active",
+                "trigger_type",
+                "trigger_value",
+                "keywords",
+                "stop_words",
+                "priority",
+                "version",
+            }
+        },
+    )
+    if not flow:
+        raise HTTPException(status_code=404, detail="Flow not found")
 
     if not nodes or len(nodes) == 0:
         raise HTTPException(status_code=422, detail="Flow precisa ter pelo menos 1 node")
@@ -147,15 +161,8 @@ async def update_flow_route(
     db.refresh(new_version)
 
     flow.current_version_id = new_version.id
-    db.add(flow)
     db.commit()
-    db.refresh(flow)
-
-    graph = get_flow_graph(db=db, tenant_id=TEMP_TENANT_ID, flow_id=str(flow.id))
-    return {
-        **_serialize_flow(flow),
-        "definition": _normalize_flow_response(graph),
-    }
+    return {"success": True, "version_id": str(new_version.id)}
 
 
 @router.delete("/{flow_id}")
