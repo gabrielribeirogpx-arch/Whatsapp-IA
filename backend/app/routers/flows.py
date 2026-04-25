@@ -355,11 +355,12 @@ def get_tenant_flow_by_id(
     flow_id: uuid.UUID,
     db: Session = Depends(get_db),
 ):
-    try:
-        flow = db.query(Flow).filter(Flow.id == flow_id).first()
+    flow = db.query(Flow).get(flow_id)
 
-        if not flow:
-            return {"nodes": [], "edges": []}
+    if not flow:
+        return {"nodes": [], "edges": []}
+
+    try:
         version: FlowVersion | None = None
 
         if flow.current_version_id:
@@ -387,12 +388,12 @@ def get_tenant_flow_by_id(
         if not version:
             return {"nodes": [], "edges": []}
 
-        nodes = version.nodes if isinstance(version.nodes, list) else []
-        edges = version.edges if isinstance(version.edges, list) else []
-        return {"nodes": nodes, "edges": edges}
-
+        return {
+            "nodes": version.nodes or [],
+            "edges": version.edges or [],
+        }
     except Exception as e:
-        print("🔥 FLOW LOAD ERROR:", e)
+        print("ERRO FLOW:", e)
         return {"nodes": [], "edges": []}
 
 
@@ -424,6 +425,7 @@ async def update_tenant_flow(
         payload = await request.json()
         payload_data = payload if isinstance(payload, dict) else {}
         payload_model = FlowUpdatePayload(**payload_data)
+        print("FLOW RECEBIDO:", payload_model.model_dump())
         update_data = payload_model.model_dump(exclude_unset=True)
 
         flow = update_flow(
@@ -442,35 +444,41 @@ async def update_tenant_flow(
                 raise HTTPException(status_code=422, detail="Flow precisa ter pelo menos 1 node")
             nodes = _normalize_nodes_for_storage(nodes)
             print("VALIDANDO FLOW:", {"nodes": len(nodes), "edges": len(edges)})
-
-            save_flow_graph(
-                db=db,
-                tenant_id=flow.tenant_id,
-                flow_id=str(flow.id),
-                nodes=nodes,
-                edges=edges,
-            )
-
-            new_version = db.execute(
-                select(FlowVersion)
-                .where(FlowVersion.flow_id == flow.id)
-                .order_by(FlowVersion.created_at.desc(), FlowVersion.version.desc())
-                .limit(1)
-            ).scalars().first()
-
-            if new_version:
-                db.query(FlowVersion).filter(FlowVersion.flow_id == flow.id).update(
-                    {FlowVersion.is_active: False},
-                    synchronize_session=False,
+            try:
+                save_flow_graph(
+                    db=db,
+                    tenant_id=flow.tenant_id,
+                    flow_id=str(flow.id),
+                    nodes=nodes,
+                    edges=edges or [],
                 )
-                db.query(FlowVersion).filter(FlowVersion.id == new_version.id).update(
-                    {FlowVersion.is_active: True},
-                    synchronize_session=False,
-                )
-                flow.current_version_id = new_version.id
-                db.add(flow)
 
-        db.commit()
+                new_version = db.execute(
+                    select(FlowVersion)
+                    .where(FlowVersion.flow_id == flow.id)
+                    .order_by(FlowVersion.created_at.desc(), FlowVersion.version.desc())
+                    .limit(1)
+                ).scalars().first()
+
+                if new_version:
+                    db.query(FlowVersion).filter(FlowVersion.flow_id == flow.id).update(
+                        {FlowVersion.is_active: False},
+                        synchronize_session=False,
+                    )
+                    db.query(FlowVersion).filter(FlowVersion.id == new_version.id).update(
+                        {FlowVersion.is_active: True},
+                        synchronize_session=False,
+                    )
+                    flow.current_version_id = new_version.id
+                    db.add(flow)
+
+                db.commit()
+            except Exception as e:
+                db.rollback()
+                print("ERRO SALVAR FLOW:", e)
+                raise HTTPException(status_code=500, detail="Erro interno ao salvar flow")
+        else:
+            db.commit()
 
         return {"status": "ok", "graph_updated": has_graph_payload}
 
