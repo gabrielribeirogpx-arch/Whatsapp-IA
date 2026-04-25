@@ -54,8 +54,8 @@ def _parse_uuid(value: Any) -> uuid.UUID | None:
 
 
 def _load_flow_version_runtime(flow: Flow, tenant_id: uuid.UUID, flow_version: FlowVersion) -> dict[str, Any]:
-    raw_nodes = flow_version.nodes_json if isinstance(flow_version.nodes_json, list) else []
-    raw_edges = flow_version.edges_json if isinstance(flow_version.edges_json, list) else []
+    raw_nodes = flow_version.nodes if isinstance(flow_version.nodes, list) else []
+    raw_edges = flow_version.edges if isinstance(flow_version.edges, list) else []
     nodes: list[VersionedFlowNode] = []
     node_map: dict[uuid.UUID, VersionedFlowNode] = {}
     legacy_id_map: dict[str, uuid.UUID] = {}
@@ -1242,11 +1242,17 @@ def save_flow_graph(db: Session, tenant_id: uuid.UUID, flow_id: str, nodes: list
     last_version = db.query(func.max(FlowVersion.version)).filter(FlowVersion.flow_id == flow.id).scalar()
     next_version = (last_version or 0) + 1
 
+    db.query(FlowVersion).filter(FlowVersion.flow_id == flow.id).update(
+        {FlowVersion.is_active: False},
+        synchronize_session=False,
+    )
+
     flow_version = FlowVersion(
         flow_id=flow.id,
         version=next_version,
-        nodes_json=nodes or [],
-        edges_json=edges or [],
+        nodes=nodes or [],
+        edges=edges or [],
+        is_active=True,
     )
     db.add(flow_version)
     db.flush()

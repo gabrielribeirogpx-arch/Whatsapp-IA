@@ -92,9 +92,9 @@ class FlowVersion(Base):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     flow_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("flows.id"), nullable=False, index=True)
     version: Mapped[int] = mapped_column("version", Integer, nullable=False)
-    nodes_json: Mapped[list[dict] | None] = mapped_column(JSONB, nullable=True)
-    edges_json: Mapped[list[dict] | None] = mapped_column(JSONB, nullable=True)
+    nodes: Mapped[list[dict] | None] = mapped_column(JSONB, nullable=True)
+    edges: Mapped[list[dict] | None] = mapped_column(JSONB, nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     flow: Mapped[Flow] = relationship("Flow", back_populates="versions", foreign_keys=[flow_id])
-
