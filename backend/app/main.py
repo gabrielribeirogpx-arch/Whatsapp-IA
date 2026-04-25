@@ -95,7 +95,11 @@ app.include_router(leads.router, prefix="/api")
 app.include_router(dashboard.router, prefix="/api")
 app.include_router(settings.router, prefix="/api")
 app.include_router(bot_rules.router)
-app.include_router(flows.router)
+app.include_router(
+    flows.router,
+    prefix="/api/flows",
+    tags=["flows"],
+)
 app.include_router(flows.crud_router, prefix="/flows")
 app.include_router(webhook.router)
 
