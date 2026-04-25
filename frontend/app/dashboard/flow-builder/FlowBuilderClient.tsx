@@ -238,14 +238,18 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
       try {
         const tenantSession = getTenantSessionFromStorage();
         const tenantId = tenantSession?.tenant_id;
+        console.log('[FlowBuilder] tenantSession:', tenantSession, 'tenantId:', tenantId);
 
         if (!tenantId) {
+          console.warn('[FlowBuilder] tenantId não encontrado — fluxo não carregado');
           if (active) {
             setNodes([]);
             setEdges([]);
           }
           return;
         }
+
+        console.log('[FlowBuilder] carregando fluxo para tenant:', tenantId, 'flowId:', selectedFlowId);
 
         const timeoutPromise = new Promise<never>((_, reject) => {
           const timeoutId = setTimeout(() => {
