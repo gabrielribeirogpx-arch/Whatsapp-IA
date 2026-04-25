@@ -19,7 +19,7 @@ import ChoiceNode from '@/components/flow/nodes/ChoiceNode';
 import ConditionNode from '@/components/flow/nodes/ConditionNode';
 import DelayNode from '@/components/flow/nodes/DelayNode';
 import MessageNode from '@/components/flow/nodes/MessageNode';
-import { getFlowGraph, getTenantSessionFromStorage, listFlowVersions, restoreFlowVersion, saveFlowGraph } from '@/lib/api';
+import { getFlowGraph, getTenantSessionFromStorage, listFlowVersions, restoreFlowVersion } from '@/lib/api';
 import { getLayoutedElements } from '@/lib/autoLayout';
 import { orderChoiceChildrenEdges } from '@/lib/flowChoiceOrdering';
 import { executeNode } from '@/lib/flowEngine';
@@ -545,72 +545,43 @@ export default function FlowBuilderClient({ flowId }: FlowBuilderClientProps) {
     [rfInstance, isSimulatorOpen, setNodes, toggleStartNode, updateNodeData],
   );
 
-  const saveFlow = useCallback(async () => {
-    const tenantSession = getTenantSessionFromStorage();
-    const tenantId = tenantSession?.tenant_id;
-    if (!tenantId || !rfInstance) return;
+  const handleSaveFlow = useCallback(async () => {
+    if (!selectedFlowId) {
+      console.error('flowId não definido');
+      return;
+    }
 
-    const flowObject = rfInstance.toObject();
+    if (!rfInstance) {
+      console.error('ReactFlow não inicializado');
+      return;
+    }
+
+    const API_URL = process.env.NEXT_PUBLIC_API_URL;
+    if (!API_URL) {
+      console.error('NEXT_PUBLIC_API_URL não configurado');
+      return;
+    }
+
+    const flow = rfInstance.toObject();
+
+    console.log('SALVANDO FLOW:', flow);
 
     setIsSaving(true);
     try {
-      const payloadNodes: FlowNodePayload[] = flowObject.nodes.map((node) => {
-        const { onChange, onToggleStart, ...restData } = (node.data || {}) as FlowNodePayload['data'] & { onToggleStart?: unknown };
-        return {
-          id: node.id,
-          type: node.type || 'message',
-          position: node.position,
-          data: restData,
-        };
-      });
-
-      const payloadEdges: FlowEdgePayload[] = flowObject.edges.map((edge) => ({
-        id: safeString(edge.id),
-        source: safeString(edge.source),
-        target: safeString(edge.target),
-        sourceHandle:
-          edge.sourceHandle ||
-          (edge.data as FlowEdgePayload['data'])?.sourceHandle ||
-          edge.label?.toString() ||
-          undefined,
-        targetHandle: safeString(edge.targetHandle),
-        label: safeString(edge.label?.toString() ?? edge.sourceHandle ?? ''),
-        data: {
-          ...(edge.data as FlowEdgePayload['data']),
-          sourceHandle:
-            edge.sourceHandle ||
-            (edge.data as FlowEdgePayload['data'])?.sourceHandle ||
-            edge.label?.toString() ||
-            undefined,
-          condition: safeString(edge.label?.toString() || (edge.data as FlowEdgePayload['data'])?.condition || ''),
+      await fetch(`${API_URL}/api/flows/${selectedFlowId}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
         },
-      }));
-
-      const result = await saveFlowGraph(tenantId, { nodes: payloadNodes, edges: payloadEdges }, selectedFlowId);
-      // Preserva as posições atuais dos nodes em tela após salvar
-      // Só atualiza edges vindas da API, mantendo nodes na posição do usuário
-      const positionMap = new Map(flowObject.nodes.map((n) => [n.id, n.position]));
-      // Preserva isStart do estado local — a API pode não devolver esse campo
-      const isStartMap = new Map(flowObject.nodes.map((n) => [n.id, (n.data as { isStart?: boolean }).isStart ?? false]));
-      const savedNodes = (result.nodes || []).map((n: FlowNodePayload) => {
-        const built = buildFlowNode(n);
-        const currentPos = positionMap.get(built.id);
-        const isStart = isStartMap.get(built.id) ?? (built.data as { isStart?: boolean }).isStart ?? false;
-        return {
-          ...(currentPos ? { ...built, position: currentPos } : built),
-          data: {
-            ...built.data,
-            isStart,
-          },
-        };
+        body: JSON.stringify({
+          nodes: flow.nodes,
+          edges: flow.edges,
+        }),
       });
-      const savedEdges = (result.edges || []).map(buildFlowEdge);
-      setNodes(savedNodes);
-      setEdges(savedEdges);
     } finally {
       setIsSaving(false);
     }
-  }, [buildFlowNode, rfInstance, selectedFlowId, setEdges, setNodes]);
+  }, [rfInstance, selectedFlowId]);
 
   const openVersionsModal = useCallback(async () => {
     if (!selectedFlowId) return;
@@ -736,7 +707,7 @@ export default function FlowBuilderClient({ flowId }: FlowBuilderClientProps) {
         <button
           type="button"
           className="dash-nav-item"
-          onClick={saveFlow}
+          onClick={handleSaveFlow}
           disabled={isSaving}
           title="Salvar fluxo"
           style={{ border: 'none', background: 'none', cursor: isSaving ? 'not-allowed' : 'pointer', width: '100%', textAlign: 'left', opacity: isSaving ? 0.6 : 1 }}
