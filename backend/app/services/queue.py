@@ -105,6 +105,7 @@ def _on_send_failure(job, connection, type_, value, traceback) -> None:  # noqa:
         job_id=getattr(job, "id", None),
         error=error,
     )
+    print("[QUEUE FAILED]", error)
     logger.error(
         "[QUEUE FAILED] tenant_id=%s phone=%s job_id=%s error=%s",
         tenant_id,
@@ -130,6 +131,7 @@ def enqueue_send_message(
         logger.warning("event=queue_send_skip reason=missing_phone tenant_id=%s", tenant_id)
         return None
 
+    print("[QUEUE SEND]", phone)
     redis_conn = Redis.from_url(REDIS_URL, decode_responses=True)
     queue = Queue(name=SEND_QUEUE_NAME, connection=redis_conn)
 

@@ -204,6 +204,7 @@ async def _process_meta_webhook(request: Request, db: Session) -> dict[str, str]
             logger.info("Evento processado telefone=%s conteúdo=%s", normalized_phone, incoming_message)
         except Exception as exc:
             db.rollback()
+            print("[WEBHOOK ERROR]", exc)
             logger.exception(
                 "[WEBHOOK ERROR] failed to process message_id=%s phone=%s error=%s",
                 incoming.get("message_id"),
