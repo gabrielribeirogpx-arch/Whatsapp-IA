@@ -126,9 +126,9 @@ type FlowBuilderClientProps = {
   flowId?: string;
 };
 
-export default function FlowBuilderClient({ flowId: initialFlowId }: FlowBuilderClientProps) {
+export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilderClientProps) {
   const searchParams = useSearchParams();
-  const flowId = searchParams.get('flowId') || initialFlowId || '1';
+  const flowId = searchParams.get('flowId') || '1';
   console.log('FLOW ID:', flowId);
 
   const selectedFlowId = flowId;
