@@ -14,6 +14,8 @@ from app.services.flow_analytics_service import get_flow_analytics
 from app.services.flow_engine_service import get_flow_graph, save_flow_graph
 from app.services.flow_service import create_flow, delete_flow, duplicate_flow, get_flow, get_flows, update_flow
 
+print("[FLOW API] carregada")
+
 router = APIRouter()
 crud_router = APIRouter(tags=["flows-crud"])
 TEMP_TENANT_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
@@ -51,6 +53,7 @@ class RestoreFlowVersionPayload(BaseModel):
     version_id: uuid.UUID
 
 
+@router.get("")
 @router.get("/")
 def list_flows(db: Session = Depends(get_db)):
     return [_serialize_flow(item) for item in get_flows(db=db, tenant_id=TEMP_TENANT_ID)]
