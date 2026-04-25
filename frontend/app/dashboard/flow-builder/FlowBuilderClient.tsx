@@ -20,7 +20,7 @@ import ChoiceNode from '@/components/flow/nodes/ChoiceNode';
 import ConditionNode from '@/components/flow/nodes/ConditionNode';
 import DelayNode from '@/components/flow/nodes/DelayNode';
 import MessageNode from '@/components/flow/nodes/MessageNode';
-import { getFlowGraph, getTenantSessionFromStorage, listFlowVersions, restoreFlowVersion } from '@/lib/api';
+import { getFlowGraph, getTenantSessionFromStorage, listFlowVersions, restoreFlowVersion, saveFlowGraph } from '@/lib/api';
 import { getLayoutedElements } from '@/lib/autoLayout';
 import { orderChoiceChildrenEdges } from '@/lib/flowChoiceOrdering';
 import { executeNode } from '@/lib/flowEngine';
@@ -266,7 +266,11 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
           }, FETCH_TIMEOUT_MS);
         });
 
-        const requestPromise = fetch(`${API_URL}/api/flows/${selectedFlowId}`).then((res) => res.json());
+        const tenantSession = getTenantSessionFromStorage();
+        const tenantId = tenantSession?.tenant_id;
+        if (!tenantId) throw new Error('Tenant não autenticado');
+
+        const requestPromise = getFlowGraph(tenantId, selectedFlowId);
         const data = await Promise.race([requestPromise, timeoutPromise]);
         if (!active) return;
 
@@ -565,12 +569,6 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
       return;
     }
 
-    const API_URL = process.env.NEXT_PUBLIC_API_URL;
-    if (!API_URL) {
-      console.error('NEXT_PUBLIC_API_URL não configurado');
-      return;
-    }
-
     const flow = rfInstance.toObject() as {
       nodes?: Array<{
         id: string;
@@ -608,13 +606,10 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
 
     setIsSaving(true);
     try {
-      await fetch(`${API_URL}/api/flows/${flowId}`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(safeFlow),
-      });
+      const tenantSession = getTenantSessionFromStorage();
+      const tenantId = tenantSession?.tenant_id;
+      if (!tenantId) throw new Error('Tenant não autenticado');
+      await saveFlowGraph(tenantId, safeFlow as { nodes: FlowNodePayload[]; edges: FlowEdgePayload[] }, flowId);
     } finally {
       setIsSaving(false);
     }
