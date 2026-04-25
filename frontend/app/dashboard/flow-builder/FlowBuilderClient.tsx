@@ -609,7 +609,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
       const tenantSession = getTenantSessionFromStorage();
       const tenantId = tenantSession?.tenant_id;
       if (!tenantId) throw new Error('Tenant não autenticado');
-      await saveFlowGraph(tenantId, safeFlow, flowId);
+      await saveFlowGraph(tenantId, safeFlow as { nodes: FlowNodePayload[]; edges: FlowEdgePayload[] }, flowId);
     } finally {
       setIsSaving(false);
     }
