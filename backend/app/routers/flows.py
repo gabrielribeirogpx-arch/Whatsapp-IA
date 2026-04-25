@@ -35,6 +35,8 @@ class FlowCreatePayload(BaseModel):
     keywords: str | None = None
     stop_words: str | None = None
     priority: int = 0
+    nodes: list[dict[str, Any]] = Field(default_factory=list)
+    edges: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class FlowUpdatePayload(BaseModel):
@@ -47,6 +49,8 @@ class FlowUpdatePayload(BaseModel):
     stop_words: str | None = None
     priority: int | None = None
     version: int | None = None
+    nodes: list[dict[str, Any]] | None = None
+    edges: list[dict[str, Any]] | None = None
 
 
 class RestoreFlowVersionPayload(BaseModel):
@@ -61,10 +65,27 @@ def list_flows(db: Session = Depends(get_db)):
 
 @router.post("/")
 def create_flow_route(payload: FlowCreatePayload, db: Session = Depends(get_db)):
-    flow = create_flow(db=db, tenant_id=TEMP_TENANT_ID, data=payload.model_dump())
+    payload_data = payload.model_dump()
+    flow = create_flow(
+        db=db,
+        tenant_id=TEMP_TENANT_ID,
+        data={key: value for key, value in payload_data.items() if key not in {"nodes", "edges"}},
+    )
+    save_flow_graph(
+        db=db,
+        tenant_id=TEMP_TENANT_ID,
+        flow_id=str(flow.id),
+        nodes=payload_data.get("nodes", []),
+        edges=payload_data.get("edges", []),
+    )
+    db.add(flow)
     db.commit()
     db.refresh(flow)
-    return _serialize_flow(flow)
+    graph = get_flow_graph(db=db, tenant_id=TEMP_TENANT_ID, flow_id=str(flow.id))
+    return {
+        **_serialize_flow(flow),
+        "definition": _normalize_flow_response(graph),
+    }
 
 
 @router.put("/{flow_id}")
@@ -73,12 +94,31 @@ def update_flow_route(
     payload: FlowUpdatePayload,
     db: Session = Depends(get_db),
 ):
-    flow = update_flow(db=db, flow_id=flow_id, tenant_id=TEMP_TENANT_ID, data=payload.model_dump(exclude_unset=True))
+    payload_data = payload.model_dump(exclude_unset=True)
+    flow = update_flow(
+        db=db,
+        flow_id=flow_id,
+        tenant_id=TEMP_TENANT_ID,
+        data={key: value for key, value in payload_data.items() if key not in {"nodes", "edges"}},
+    )
     if not flow:
         raise HTTPException(status_code=404, detail="Flow not found")
+    if "nodes" in payload_data or "edges" in payload_data:
+        save_flow_graph(
+            db=db,
+            tenant_id=TEMP_TENANT_ID,
+            flow_id=str(flow.id),
+            nodes=payload_data.get("nodes", []),
+            edges=payload_data.get("edges", []),
+        )
+    db.add(flow)
     db.commit()
     db.refresh(flow)
-    return _serialize_flow(flow)
+    graph = get_flow_graph(db=db, tenant_id=TEMP_TENANT_ID, flow_id=str(flow.id))
+    return {
+        **_serialize_flow(flow),
+        "definition": _normalize_flow_response(graph),
+    }
 
 
 @router.delete("/{flow_id}")
