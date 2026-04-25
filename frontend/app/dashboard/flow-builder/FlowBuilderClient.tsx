@@ -129,7 +129,7 @@ export default function FlowBuilderClient({ flowId }: FlowBuilderClientProps) {
   const selectedFlowId = flowId;
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>(initialEdges);
-  const [reactFlowInstance, setReactFlowInstance] = useState<ReactFlowInstance | null>(null);
+  const [rfInstance, setRfInstance] = useState<ReactFlowInstance | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [messages, setMessages] = useState<Array<{ type: 'bot' | 'user'; text: string }>>([]);
@@ -223,8 +223,8 @@ export default function FlowBuilderClient({ flowId }: FlowBuilderClientProps) {
     const { nodes: layoutedNodes, edges: layoutedEdges } = getLayoutedElements(nextNodes, orderedEdges);
     setNodes(layoutedNodes);
     setEdges(layoutedEdges);
-    requestAnimationFrame(() => { reactFlowInstance?.fitView(); });
-  }, [reactFlowInstance, setEdges, setNodes]);
+    requestAnimationFrame(() => { rfInstance?.fitView(); });
+  }, [rfInstance, setEdges, setNodes]);
 
   useEffect(() => {
     let active = true;
@@ -265,7 +265,7 @@ export default function FlowBuilderClient({ flowId }: FlowBuilderClientProps) {
           const orderedEdges = orderChoiceChildrenEdges(initialNodes, initialEdges);
           setNodes(initialNodes);
           setEdges(orderedEdges);
-          requestAnimationFrame(() => { reactFlowInstance?.fitView(); });
+          requestAnimationFrame(() => { rfInstance?.fitView(); });
         } else {
           applyLayoutAndSetFlow(initialNodes, initialEdges);
         }
@@ -507,7 +507,7 @@ export default function FlowBuilderClient({ flowId }: FlowBuilderClientProps) {
 
   const addNode = useCallback(
     (kind: FlowNodeKind) => {
-      if (!reactFlowInstance) return;
+      if (!rfInstance) return;
 
       const preset = NODE_PRESETS[kind];
 
@@ -520,7 +520,7 @@ export default function FlowBuilderClient({ flowId }: FlowBuilderClientProps) {
       const canvasCenterScreenX = (canvasLeft + canvasRight) / 2;
       const canvasCenterScreenY = window.innerHeight / 2;
 
-      const flowPosition = reactFlowInstance.screenToFlowPosition({
+      const flowPosition = rfInstance.screenToFlowPosition({
         x: canvasCenterScreenX,
         y: canvasCenterScreenY,
       });
@@ -542,17 +542,19 @@ export default function FlowBuilderClient({ flowId }: FlowBuilderClientProps) {
 
       setNodes((prev) => [...prev, newNode]);
     },
-    [reactFlowInstance, isSimulatorOpen, setNodes, toggleStartNode, updateNodeData],
+    [rfInstance, isSimulatorOpen, setNodes, toggleStartNode, updateNodeData],
   );
 
   const saveFlow = useCallback(async () => {
     const tenantSession = getTenantSessionFromStorage();
     const tenantId = tenantSession?.tenant_id;
-    if (!tenantId) return;
+    if (!tenantId || !rfInstance) return;
+
+    const flowObject = rfInstance.toObject();
 
     setIsSaving(true);
     try {
-      const payloadNodes: FlowNodePayload[] = nodes.map((node) => {
+      const payloadNodes: FlowNodePayload[] = flowObject.nodes.map((node) => {
         const { onChange, onToggleStart, ...restData } = (node.data || {}) as FlowNodePayload['data'] & { onToggleStart?: unknown };
         return {
           id: node.id,
@@ -562,7 +564,7 @@ export default function FlowBuilderClient({ flowId }: FlowBuilderClientProps) {
         };
       });
 
-      const payloadEdges: FlowEdgePayload[] = edges.map((edge) => ({
+      const payloadEdges: FlowEdgePayload[] = flowObject.edges.map((edge) => ({
         id: safeString(edge.id),
         source: safeString(edge.source),
         target: safeString(edge.target),
@@ -587,9 +589,9 @@ export default function FlowBuilderClient({ flowId }: FlowBuilderClientProps) {
       const result = await saveFlowGraph(tenantId, { nodes: payloadNodes, edges: payloadEdges }, selectedFlowId);
       // Preserva as posições atuais dos nodes em tela após salvar
       // Só atualiza edges vindas da API, mantendo nodes na posição do usuário
-      const positionMap = new Map(nodes.map((n) => [n.id, n.position]));
+      const positionMap = new Map(flowObject.nodes.map((n) => [n.id, n.position]));
       // Preserva isStart do estado local — a API pode não devolver esse campo
-      const isStartMap = new Map(nodes.map((n) => [n.id, (n.data as { isStart?: boolean }).isStart ?? false]));
+      const isStartMap = new Map(flowObject.nodes.map((n) => [n.id, (n.data as { isStart?: boolean }).isStart ?? false]));
       const savedNodes = (result.nodes || []).map((n: FlowNodePayload) => {
         const built = buildFlowNode(n);
         const currentPos = positionMap.get(built.id);
@@ -608,7 +610,7 @@ export default function FlowBuilderClient({ flowId }: FlowBuilderClientProps) {
     } finally {
       setIsSaving(false);
     }
-  }, [applyLayoutAndSetFlow, buildFlowNode, edges, nodes, selectedFlowId, setEdges, setNodes]);
+  }, [buildFlowNode, rfInstance, selectedFlowId, setEdges, setNodes]);
 
   const openVersionsModal = useCallback(async () => {
     if (!selectedFlowId) return;
@@ -642,11 +644,11 @@ export default function FlowBuilderClient({ flowId }: FlowBuilderClientProps) {
       setActiveVersionId(versionId);
       setFlowVersions((prev) => prev.map((item) => ({ ...item, is_current: item.id === versionId })));
       setHasVersions(true);
-      requestAnimationFrame(() => { reactFlowInstance?.fitView(); });
+      requestAnimationFrame(() => { rfInstance?.fitView(); });
     } finally {
       setIsRestoringVersion(false);
     }
-  }, [buildFlowNode, reactFlowInstance, selectedFlowId, setEdges, setNodes]);
+  }, [buildFlowNode, rfInstance, selectedFlowId, setEdges, setNodes]);
 
   const decoratedNodes = useMemo(
     () => nodes.map((node) => ({
@@ -847,7 +849,7 @@ export default function FlowBuilderClient({ flowId }: FlowBuilderClientProps) {
           </div>
         )}
         <ReactFlow
-          onInit={setReactFlowInstance}
+          onInit={setRfInstance}
           nodes={decoratedNodes}
           edges={decoratedEdges}
           onNodesChange={onNodesChange}
