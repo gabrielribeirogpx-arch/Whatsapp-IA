@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
-from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -299,19 +299,23 @@ def get_tenant_flow_analytics(
 
 
 @crud_router.put("/{flow_id}")
-def update_tenant_flow(
+async def update_tenant_flow(
     flow_id: uuid.UUID,
-    payload: FlowUpdatePayload,
+    request: Request,
     x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
     db: Session = Depends(get_db),
 ):
     tenant_uuid = _resolve_tenant_header(x_tenant_id)
-    payload_data = payload.model_dump(exclude_unset=True)
+    payload = await request.json()
+    payload_data = payload if isinstance(payload, dict) else {}
+    payload_model = FlowUpdatePayload(**payload_data)
+    update_data = payload_model.model_dump(exclude_unset=True)
+
     flow = update_flow(
         db=db,
         flow_id=flow_id,
         tenant_id=tenant_uuid,
-        data={key: value for key, value in payload_data.items() if key not in {"nodes", "edges"}},
+        data={key: value for key, value in update_data.items() if key not in {"nodes", "edges"}},
     )
     if not flow:
         raise HTTPException(status_code=404, detail="Flow not found")
