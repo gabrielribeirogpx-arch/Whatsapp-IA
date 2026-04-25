@@ -276,28 +276,36 @@ def get_tenant_flow_by_id(
 
         if not flow:
             return {"nodes": [], "edges": []}
-        if not flow.current_version_id:
+        version: FlowVersion | None = None
+
+        if flow.current_version_id:
+            version = db.execute(
+                select(FlowVersion).where(FlowVersion.id == flow.current_version_id, FlowVersion.flow_id == flow.id)
+            ).scalars().first()
+        else:
+            version = db.execute(
+                select(FlowVersion)
+                .where(FlowVersion.flow_id == flow.id)
+                .order_by(FlowVersion.created_at.desc())
+                .limit(1)
+            ).scalars().first()
+
+        print(
+            "FLOW LOAD:",
+            {
+                "flow_id": str(flow.id),
+                "current_version_id": str(flow.current_version_id) if flow.current_version_id else None,
+                "version_found": str(version.id) if version else None,
+                "nodes_count": len(version.nodes) if version and isinstance(version.nodes, list) else 0,
+            },
+        )
+
+        if not version:
             return {"nodes": [], "edges": []}
 
-        data = get_flow_graph(db=db, tenant_id=flow.tenant_id, flow_id=str(flow.id))
-
-        # fallback total contra corrupção
-        if not isinstance(data, dict):
-            return {"nodes": [], "edges": []}
-
-        nodes = data.get("nodes") or []
-        edges = data.get("edges") or []
-
-        if not isinstance(nodes, list):
-            nodes = []
-
-        if not isinstance(edges, list):
-            edges = []
-
-        return {
-            "nodes": nodes,
-            "edges": edges,
-        }
+        nodes = version.nodes if isinstance(version.nodes, list) else []
+        edges = version.edges if isinstance(version.edges, list) else []
+        return {"nodes": nodes, "edges": edges}
 
     except Exception as e:
         print("🔥 FLOW LOAD ERROR:", e)
@@ -362,6 +370,26 @@ async def update_tenant_flow(
             nodes=nodes,
             edges=edges,
         )
+
+        new_version = db.execute(
+            select(FlowVersion)
+            .where(FlowVersion.flow_id == flow.id)
+            .order_by(FlowVersion.created_at.desc(), FlowVersion.version.desc())
+            .limit(1)
+        ).scalars().first()
+
+        if new_version:
+            db.query(FlowVersion).filter(FlowVersion.flow_id == flow.id).update(
+                {FlowVersion.is_active: False},
+                synchronize_session=False,
+            )
+            db.query(FlowVersion).filter(FlowVersion.id == new_version.id).update(
+                {FlowVersion.is_active: True},
+                synchronize_session=False,
+            )
+            flow.current_version_id = new_version.id
+            db.add(flow)
+
         db.commit()
 
         return {"status": "ok"}
@@ -444,10 +472,12 @@ def restore_tenant_flow_version(
         {FlowVersion.is_active: False},
         synchronize_session=False,
     )
-    flow_version.is_active = True
+    db.query(FlowVersion).filter(FlowVersion.id == flow_version.id).update(
+        {FlowVersion.is_active: True},
+        synchronize_session=False,
+    )
     flow.current_version_id = flow_version.id
     flow.version = flow_version.version
-    db.add(flow_version)
     db.add(flow)
     db.commit()
     db.refresh(flow)
@@ -503,10 +533,12 @@ def restore_flow_version_by_id(
         {FlowVersion.is_active: False},
         synchronize_session=False,
     )
-    flow_version.is_active = True
+    db.query(FlowVersion).filter(FlowVersion.id == flow_version.id).update(
+        {FlowVersion.is_active: True},
+        synchronize_session=False,
+    )
     flow.current_version_id = flow_version.id
     flow.version = flow_version.version
-    db.add(flow_version)
     db.add(flow)
     db.commit()
     db.refresh(flow)
