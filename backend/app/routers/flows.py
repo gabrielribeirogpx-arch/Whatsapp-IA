@@ -258,19 +258,22 @@ def get_tenant_flow_by_id(
     db: Session = Depends(get_db),
 ):
     tenant_uuid = _resolve_tenant_header(x_tenant_id)
-    flow = get_flow(db=db, flow_id=flow_id, tenant_id=tenant_uuid)
-    if not flow:
-        return dict(_EMPTY_FLOW)
-
     try:
-        data = flow.data or {}
-    except Exception:
-        data = {}
+        flow = get_flow(db=db, flow_id=flow_id, tenant_id=tenant_uuid)
+        if not flow:
+            return dict(_EMPTY_FLOW)
 
-    return {
-        "nodes": data.get("nodes", []),
-        "edges": data.get("edges", []),
-    }
+        data = flow.data if isinstance(flow.data, dict) else {}
+        nodes = data.get("nodes") or []
+        edges = data.get("edges") or []
+
+        return {
+            "nodes": nodes,
+            "edges": edges,
+        }
+    except Exception as exc:
+        print("ERRO AO CARREGAR FLOW:", str(exc))
+        return dict(_EMPTY_FLOW)
 
 
 @crud_router.get("/{flow_id}/analytics")
@@ -297,9 +300,25 @@ def update_tenant_flow(
     db: Session = Depends(get_db),
 ):
     tenant_uuid = _resolve_tenant_header(x_tenant_id)
-    flow = update_flow(db=db, flow_id=flow_id, tenant_id=tenant_uuid, data=payload.model_dump(exclude_unset=True))
+    payload_data = payload.model_dump(exclude_unset=True)
+    flow = update_flow(
+        db=db,
+        flow_id=flow_id,
+        tenant_id=tenant_uuid,
+        data={key: value for key, value in payload_data.items() if key not in {"nodes", "edges"}},
+    )
     if not flow:
         raise HTTPException(status_code=404, detail="Flow not found")
+
+    nodes = payload_data.get("nodes", [])
+    edges = payload_data.get("edges", [])
+
+    flow.data = {
+        "nodes": nodes,
+        "edges": edges,
+    }
+
+    db.add(flow)
     db.commit()
     db.refresh(flow)
     return _serialize_flow(flow)
