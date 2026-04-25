@@ -236,12 +236,8 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
 
     const loadFlow = async () => {
       try {
-        const tenantSession = getTenantSessionFromStorage();
-        const tenantId = tenantSession?.tenant_id;
-        console.log('[FlowBuilder] tenantSession:', tenantSession, 'tenantId:', tenantId);
-
-        if (!tenantId) {
-          console.warn('[FlowBuilder] tenantId não encontrado — fluxo não carregado');
+        const API_URL = process.env.NEXT_PUBLIC_API_URL;
+        if (!API_URL) {
           if (active) {
             setNodes([]);
             setEdges([]);
@@ -249,7 +245,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
           return;
         }
 
-        console.log('[FlowBuilder] carregando fluxo para tenant:', tenantId, 'flowId:', selectedFlowId);
+        console.log('[FlowBuilder] carregando flowId:', selectedFlowId);
 
         const timeoutPromise = new Promise<never>((_, reject) => {
           const timeoutId = setTimeout(() => {
@@ -258,11 +254,15 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
           }, FETCH_TIMEOUT_MS);
         });
 
-        const data = await Promise.race([getFlowGraph(tenantId, selectedFlowId), timeoutPromise]);
+        const requestPromise = fetch(`${API_URL}/api/flows/${selectedFlowId}`).then((res) => res.json());
+        const data = await Promise.race([requestPromise, timeoutPromise]);
         if (!active) return;
 
-        const initialNodes = (data?.nodes || []).map(buildFlowNode);
-        const initialEdges: Edge[] = (data?.edges || []).map(buildFlowEdge);
+        const safeNodes = Array.isArray(data?.nodes) ? data.nodes : [];
+        const safeEdges = Array.isArray(data?.edges) ? data.edges : [];
+
+        const initialNodes = safeNodes.map(buildFlowNode);
+        const initialEdges: Edge[] = safeEdges.map(buildFlowEdge);
 
         // Se os nodes já têm posições salvas (x e y não-zero), usa diretamente
         // sem passar pelo dagre — preserva layout manual do usuário
@@ -581,12 +581,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
       edges?: Array<Record<string, unknown>>;
     };
 
-    if (!flow.nodes || flow.nodes.length === 0) {
-      console.error('Flow vazio — não salvar');
-      return;
-    }
-
-    flow.nodes = flow.nodes.map((n) => ({
+    flow.nodes = (flow.nodes || []).map((n) => ({
       ...n,
       id: n.id,
       type: n.type || 'default',
@@ -598,7 +593,13 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
 
     flow.edges = flow.edges || [];
 
-    console.log('FLOW SALVANDO:', flow);
+    const realFlow = rfInstance?.toObject?.() || flow;
+    const safeFlow = {
+      nodes: Array.isArray(realFlow.nodes) ? realFlow.nodes : [],
+      edges: Array.isArray(realFlow.edges) ? realFlow.edges : [],
+    };
+
+    console.log('FLOW SALVANDO:', safeFlow);
 
     setIsSaving(true);
     try {
@@ -607,7 +608,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ nodes: flow.nodes, edges: flow.edges }),
+        body: JSON.stringify(safeFlow),
       });
     } finally {
       setIsSaving(false);
