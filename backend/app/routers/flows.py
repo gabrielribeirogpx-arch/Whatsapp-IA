@@ -14,8 +14,9 @@ from app.services.flow_analytics_service import get_flow_analytics
 from app.services.flow_engine_service import get_flow_graph, save_flow_graph
 from app.services.flow_service import create_flow, delete_flow, duplicate_flow, get_flow, get_flows, update_flow
 
-router = APIRouter(prefix="/api/flows", tags=["flows"])
+router = APIRouter()
 crud_router = APIRouter(tags=["flows-crud"])
+TEMP_TENANT_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
 
 
 class FlowBuilderPayload(BaseModel):
@@ -48,6 +49,42 @@ class FlowUpdatePayload(BaseModel):
 
 class RestoreFlowVersionPayload(BaseModel):
     version_id: uuid.UUID
+
+
+@router.get("/")
+def list_flows(db: Session = Depends(get_db)):
+    return [_serialize_flow(item) for item in get_flows(db=db, tenant_id=TEMP_TENANT_ID)]
+
+
+@router.post("/")
+def create_flow_route(payload: FlowCreatePayload, db: Session = Depends(get_db)):
+    flow = create_flow(db=db, tenant_id=TEMP_TENANT_ID, data=payload.model_dump())
+    db.commit()
+    db.refresh(flow)
+    return _serialize_flow(flow)
+
+
+@router.put("/{flow_id}")
+def update_flow_route(
+    flow_id: uuid.UUID,
+    payload: FlowUpdatePayload,
+    db: Session = Depends(get_db),
+):
+    flow = update_flow(db=db, flow_id=flow_id, tenant_id=TEMP_TENANT_ID, data=payload.model_dump(exclude_unset=True))
+    if not flow:
+        raise HTTPException(status_code=404, detail="Flow not found")
+    db.commit()
+    db.refresh(flow)
+    return _serialize_flow(flow)
+
+
+@router.delete("/{flow_id}")
+def delete_flow_route(flow_id: uuid.UUID, db: Session = Depends(get_db)):
+    deleted = delete_flow(db=db, flow_id=flow_id, tenant_id=TEMP_TENANT_ID)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Flow not found")
+    db.commit()
+    return {"status": "deleted"}
 
 
 def _resolve_tenant_header(tenant_id: str | None) -> uuid.UUID:
