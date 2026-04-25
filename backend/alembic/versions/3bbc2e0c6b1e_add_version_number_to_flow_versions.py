@@ -1,4 +1,4 @@
-"""add version_number to flow_versions
+"""ensure flow_versions.version column exists
 
 Revision ID: 3bbc2e0c6b1e
 Revises: da4e2fa678e1
@@ -17,11 +17,25 @@ depends_on = None
 
 
 def upgrade():
-    op.add_column(
-        'flow_versions',
-        sa.Column('version_number', sa.Integer(), nullable=False, server_default='1')
-    )
+    bind = op.get_bind()
+    inspector = sa.inspect(bind)
+    columns = {column['name'] for column in inspector.get_columns('flow_versions')}
+
+    if 'version' not in columns and 'version_number' in columns:
+        op.alter_column('flow_versions', 'version_number', new_column_name='version')
+    elif 'version' not in columns:
+        op.add_column(
+            'flow_versions',
+            sa.Column('version', sa.Integer(), nullable=False, server_default='1')
+        )
 
 
 def downgrade():
-    op.drop_column('flow_versions', 'version_number')
+    bind = op.get_bind()
+    inspector = sa.inspect(bind)
+    columns = {column['name'] for column in inspector.get_columns('flow_versions')}
+
+    if 'version' in columns and 'version_number' not in columns:
+        op.alter_column('flow_versions', 'version', new_column_name='version_number')
+    elif 'version' in columns:
+        op.drop_column('flow_versions', 'version')
