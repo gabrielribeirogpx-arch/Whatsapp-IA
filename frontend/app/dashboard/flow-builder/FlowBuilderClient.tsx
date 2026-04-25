@@ -20,7 +20,7 @@ import ChoiceNode from '@/components/flow/nodes/ChoiceNode';
 import ConditionNode from '@/components/flow/nodes/ConditionNode';
 import DelayNode from '@/components/flow/nodes/DelayNode';
 import MessageNode from '@/components/flow/nodes/MessageNode';
-import { getFlowGraph, getTenantSessionFromStorage, listFlowVersions, restoreFlowVersion } from '@/lib/api';
+import { getFlowGraph, getTenantSessionFromStorage, restoreFlowVersion } from '@/lib/api';
 import { getLayoutedElements } from '@/lib/autoLayout';
 import { orderChoiceChildrenEdges } from '@/lib/flowChoiceOrdering';
 import { executeNode } from '@/lib/flowEngine';
@@ -295,30 +295,6 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
       active = false;
     };
   }, [applyLayoutAndSetFlow, buildFlowNode, selectedFlowId, setEdges, setNodes]);
-
-  useEffect(() => {
-    let active = true;
-
-    const checkVersionsAvailability = async () => {
-      if (!selectedFlowId) {
-        setHasVersions(false);
-        return;
-      }
-      try {
-        const versions = await listFlowVersions(selectedFlowId);
-        if (!active) return;
-        setHasVersions(versions.length > 0);
-      } catch {
-        if (!active) return;
-        setHasVersions(false);
-      }
-    };
-
-    checkVersionsAvailability();
-    return () => {
-      active = false;
-    };
-  }, [selectedFlowId]);
 
   const flow = useMemo(
     () => ({
@@ -618,16 +594,9 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
   const openVersionsModal = useCallback(async () => {
     if (!selectedFlowId) return;
     setIsVersionsModalOpen(true);
-    setIsLoadingVersions(true);
-    try {
-      const versions = await listFlowVersions(selectedFlowId);
-      setFlowVersions(versions);
-      setHasVersions(versions.length > 0);
-      const current = versions.find((item) => item.is_current);
-      setActiveVersionId(current?.id || null);
-    } finally {
-      setIsLoadingVersions(false);
-    }
+    setIsLoadingVersions(false);
+    setFlowVersions([]);
+    setActiveVersionId(null);
   }, [selectedFlowId]);
 
   const handleRestoreVersion = useCallback(async (versionId: string) => {
