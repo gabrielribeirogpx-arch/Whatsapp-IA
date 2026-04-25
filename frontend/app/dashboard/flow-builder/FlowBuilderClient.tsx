@@ -567,14 +567,31 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
       return;
     }
 
-    const flow = rfInstance.toObject();
+    const flow = rfInstance.toObject() as {
+      nodes?: Array<{
+        id: string;
+        type?: string;
+        position?: { x: number; y: number };
+        data?: Record<string, unknown>;
+      }>;
+      edges?: Array<Record<string, unknown>>;
+    };
 
-    console.log('FLOW REAL:', flow);
-
-    if (!flow.nodes.length) {
-      console.warn('Nenhum node detectado — abortando save');
+    if (!flow.nodes || flow.nodes.length === 0) {
+      console.error('Flow vazio — não salvar');
       return;
     }
+
+    flow.nodes = flow.nodes.map((n) => ({
+      id: n.id,
+      type: n.type || 'default',
+      position: n.position || { x: 0, y: 0 },
+      data: n.data || {},
+    }));
+
+    flow.edges = flow.edges || [];
+
+    console.log('FLOW SALVANDO:', flow);
 
     setIsSaving(true);
     try {
@@ -583,10 +600,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          nodes: flow.nodes,
-          edges: flow.edges,
-        }),
+        body: JSON.stringify({ nodes: flow.nodes, edges: flow.edges }),
       });
     } finally {
       setIsSaving(false);
