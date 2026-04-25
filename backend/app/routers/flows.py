@@ -393,19 +393,14 @@ async def update_tenant_flow(
             raise HTTPException(status_code=404, detail="Flow não encontrado")
 
         nodes = payload_data.get("nodes") or []
-        edges = payload_data.get("edges") or []
+        edges = payload_data.get("edges")
 
         if not isinstance(nodes, list):
             nodes = []
         if not nodes or len(nodes) == 0:
             raise HTTPException(status_code=422, detail="Flow precisa ter pelo menos 1 node")
-        print(
-            "VALIDANDO FLOW:",
-            {
-                "nodes_count": len(nodes),
-                "sample_node": nodes[0] if nodes else None,
-            },
-        )
+        edges = edges or []
+        print("VALIDANDO FLOW:", {"nodes": len(nodes), "edges": len(edges)})
         for node in nodes:
             if not isinstance(node, dict):
                 raise HTTPException(status_code=422, detail="Node inválido: sem id")
