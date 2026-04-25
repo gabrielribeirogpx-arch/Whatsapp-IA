@@ -253,17 +253,22 @@ def list_tenant_flows(
 
 @crud_router.get("/{flow_id}")
 def get_tenant_flow_by_id(
-    flow_id: uuid.UUID,
-    x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
+    flow_id: int,
     db: Session = Depends(get_db),
 ):
-    tenant_uuid = _resolve_tenant_header(x_tenant_id)
     try:
-        flow = get_flow(db=db, flow_id=flow_id, tenant_id=tenant_uuid)
-        if not flow:
-            return dict(_EMPTY_FLOW)
+        flow = db.query(Flow).filter(Flow.id == flow_id).first()
 
-        data = flow.data if isinstance(flow.data, dict) else {}
+        if not flow:
+            print("FLOW NÃO ENCONTRADO:", flow_id)
+            return {"nodes": [], "edges": []}
+
+        data = flow.data
+
+        if not isinstance(data, dict):
+            print("FLOW DATA INVÁLIDO:", data)
+            return {"nodes": [], "edges": []}
+
         nodes = data.get("nodes") or []
         edges = data.get("edges") or []
 
@@ -271,9 +276,10 @@ def get_tenant_flow_by_id(
             "nodes": nodes,
             "edges": edges,
         }
-    except Exception as exc:
-        print("ERRO AO CARREGAR FLOW:", str(exc))
-        return dict(_EMPTY_FLOW)
+
+    except Exception as e:
+        print("ERRO CRÍTICO FLOW:", str(e))
+        return {"nodes": [], "edges": []}
 
 
 @crud_router.get("/{flow_id}/analytics")
