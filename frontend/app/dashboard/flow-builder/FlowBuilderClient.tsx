@@ -583,10 +583,13 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
     }
 
     flow.nodes = flow.nodes.map((n) => ({
+      ...n,
       id: n.id,
       type: n.type || 'default',
       position: n.position || { x: 0, y: 0 },
-      data: n.data || {},
+      data: {
+        ...n.data,
+      },
     }));
 
     flow.edges = flow.edges || [];
