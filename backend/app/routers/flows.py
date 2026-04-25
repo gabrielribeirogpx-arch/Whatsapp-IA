@@ -260,8 +260,17 @@ def get_tenant_flow_by_id(
     tenant_uuid = _resolve_tenant_header(x_tenant_id)
     flow = get_flow(db=db, flow_id=flow_id, tenant_id=tenant_uuid)
     if not flow:
-        raise HTTPException(status_code=404, detail="Flow not found")
-    return _serialize_flow(flow)
+        return dict(_EMPTY_FLOW)
+
+    try:
+        data = flow.data or {}
+    except Exception:
+        data = {}
+
+    return {
+        "nodes": data.get("nodes", []),
+        "edges": data.get("edges", []),
+    }
 
 
 @crud_router.get("/{flow_id}/analytics")
