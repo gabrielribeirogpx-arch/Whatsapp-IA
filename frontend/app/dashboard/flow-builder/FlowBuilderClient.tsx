@@ -564,7 +564,12 @@ export default function FlowBuilderClient({ flowId }: FlowBuilderClientProps) {
 
     const flow = rfInstance.toObject();
 
-    console.log('SALVANDO FLOW:', flow);
+    console.log('FLOW REAL:', flow);
+
+    if (!flow.nodes.length) {
+      console.warn('Nenhum node detectado — abortando save');
+      return;
+    }
 
     setIsSaving(true);
     try {
