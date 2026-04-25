@@ -160,6 +160,11 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
   const simulationStartedRef = useRef(false);
   const autosaveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const autosaveReadyRef = useRef(false);
+  const nodesRef = useRef<Node[]>([]);
+
+  useEffect(() => {
+    nodesRef.current = nodes;
+  }, [nodes]);
 
   const formatVersionDate = useCallback((timestamp?: string | null) => {
     if (!timestamp) return 'Sem data';
@@ -245,8 +250,8 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
       try {
         const API_URL = process.env.NEXT_PUBLIC_API_URL;
         if (!API_URL) {
-          if (active) {
-            setNodes([]);
+          if (active && nodesRef.current.length === 0) {
+            setNodes([FALLBACK_START_NODE]);
             setEdges([]);
           }
           return;
@@ -267,6 +272,13 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
 
         const safeNodes = Array.isArray(data?.nodes) ? data.nodes : [];
         const safeEdges = Array.isArray(data?.edges) ? data.edges : [];
+
+        if (safeNodes.length === 0) {
+          console.warn('Flow vazio vindo do backend');
+          if (nodesRef.current.length > 0) {
+            return;
+          }
+        }
 
         const initialNodes =
           safeNodes.length === 0
@@ -290,8 +302,10 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
         }
       } catch {
         if (!active) return;
-        setNodes([]);
-        setEdges([]);
+        if (nodesRef.current.length === 0) {
+          setNodes([FALLBACK_START_NODE]);
+          setEdges([]);
+        }
       } finally {
         if (active) {
           setIsLoading(false);
