@@ -89,54 +89,68 @@ def create_flow_route(payload: FlowCreatePayload, db: Session = Depends(get_db))
 
 
 @router.put("/{flow_id}")
-def update_flow_route(
+async def update_flow_route(
     flow_id: uuid.UUID,
-    payload: FlowUpdatePayload,
+    request: Request,
     db: Session = Depends(get_db),
 ):
-    payload_data = payload.model_dump(exclude_unset=True)
+    payload = await request.json()
+    payload_data = payload if isinstance(payload, dict) else {}
+    print("PAYLOAD RECEBIDO:", payload_data)
+
+    payload_model = FlowUpdatePayload(**payload_data)
+    update_data = payload_model.model_dump(exclude_unset=True)
+
     flow = update_flow(
         db=db,
         flow_id=flow_id,
         tenant_id=TEMP_TENANT_ID,
-        data={key: value for key, value in payload_data.items() if key not in {"nodes", "edges"}},
+        data={key: value for key, value in update_data.items() if key not in {"nodes", "edges"}},
     )
     if not flow:
         raise HTTPException(status_code=404, detail="Flow not found")
-    if "nodes" in payload_data or "edges" in payload_data:
-        nodes = payload_data.get("nodes", [])
-        if not isinstance(nodes, list):
-            nodes = []
-        if not nodes or len(nodes) == 0:
-            raise HTTPException(status_code=422, detail="Flow precisa ter pelo menos 1 node")
-        print(
-            "VALIDANDO FLOW:",
-            {
-                "nodes_count": len(nodes),
-                "sample_node": nodes[0] if nodes else None,
-            },
-        )
-        for node in nodes:
-            if not isinstance(node, dict):
-                raise HTTPException(status_code=422, detail="Node inválido: sem id")
-            if "id" not in node:
-                raise HTTPException(status_code=422, detail="Node inválido: sem id")
-            if "type" not in node:
-                node["type"] = "default"
-            if "position" not in node:
-                node["position"] = {"x": 0, "y": 0}
-            if "data" not in node:
-                node["data"] = {}
-        save_flow_graph(
-            db=db,
-            tenant_id=TEMP_TENANT_ID,
-            flow_id=str(flow.id),
-            nodes=nodes,
-            edges=payload_data.get("edges", []),
-        )
+
+    nodes = payload_data.get("nodes", [])
+    edges = payload_data.get("edges", [])
+
+    if not isinstance(nodes, list):
+        nodes = []
+    if not isinstance(edges, list):
+        edges = []
+
+    if not nodes or len(nodes) == 0:
+        raise HTTPException(status_code=422, detail="Flow precisa ter pelo menos 1 node")
+
+    last_version = db.execute(
+        select(FlowVersion)
+        .where(FlowVersion.flow_id == flow.id)
+        .order_by(FlowVersion.version.desc(), FlowVersion.created_at.desc())
+        .limit(1)
+    ).scalars().first()
+    next_version = (last_version.version if last_version else 0) + 1
+
+    db.query(FlowVersion).filter(
+        FlowVersion.flow_id == flow.id,
+        FlowVersion.is_active.is_(True),
+    ).update({"is_active": False}, synchronize_session=False)
+
+    new_version = FlowVersion(
+        flow_id=flow.id,
+        version=next_version,
+        nodes=nodes,
+        edges=edges,
+        is_active=True,
+    )
+
+    db.add(new_version)
+    db.commit()
+    db.refresh(new_version)
+
+    flow.current_version_id = new_version.id
     db.add(flow)
     db.commit()
     db.refresh(flow)
+
     graph = get_flow_graph(db=db, tenant_id=TEMP_TENANT_ID, flow_id=str(flow.id))
     return {
         **_serialize_flow(flow),
