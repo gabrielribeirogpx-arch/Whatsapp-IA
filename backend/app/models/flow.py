@@ -91,14 +91,10 @@ class FlowVersion(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     flow_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("flows.id"), nullable=False, index=True)
-    version_number: Mapped[int] = mapped_column("version_number", Integer, nullable=False)
+    version: Mapped[int] = mapped_column("version", Integer, nullable=False)
     nodes_json: Mapped[list[dict] | None] = mapped_column(JSONB, nullable=True)
     edges_json: Mapped[list[dict] | None] = mapped_column(JSONB, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     flow: Mapped[Flow] = relationship("Flow", back_populates="versions", foreign_keys=[flow_id])
 
-    @property
-    def version(self) -> int:
-        """Compatibilidade retroativa com código/API legado."""
-        return self.version_number

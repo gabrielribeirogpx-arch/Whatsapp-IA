@@ -122,8 +122,8 @@ def _serialize_flow_version(flow_version: FlowVersion, current_version_id: uuid.
     return {
         "id": str(flow_version.id),
         "flow_id": str(flow_version.flow_id),
-        "version": flow_version.version_number,
-        "version_number": flow_version.version_number,
+        "version": flow_version.version,
+        "version_number": flow_version.version,
         "created_at": flow_version.created_at.isoformat() if flow_version.created_at else None,
         "is_current": bool(current_version_id and flow_version.id == current_version_id),
     }
@@ -299,7 +299,7 @@ def list_tenant_flow_versions(
     versions = db.execute(
         select(FlowVersion)
         .where(FlowVersion.flow_id == flow.id)
-        .order_by(FlowVersion.created_at.desc(), FlowVersion.version_number.desc())
+        .order_by(FlowVersion.created_at.desc(), FlowVersion.version.desc())
     ).scalars().all()
 
     return [_serialize_flow_version(item, flow.current_version_id) for item in versions]
@@ -324,7 +324,7 @@ def restore_tenant_flow_version(
         raise HTTPException(status_code=404, detail="Flow version not found")
 
     flow.current_version_id = flow_version.id
-    flow.version = flow_version.version_number
+    flow.version = flow_version.version
     db.add(flow)
     db.commit()
     db.refresh(flow)
