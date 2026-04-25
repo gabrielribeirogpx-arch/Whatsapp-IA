@@ -97,16 +97,34 @@ async def update_flow_route(
     payload = await request.json()
     payload_data = payload if isinstance(payload, dict) else {}
 
-    nodes = payload_data.get("nodes", [])
-    edges = payload_data.get("edges", [])
+    raw_nodes = payload_data.get("nodes", [])
+    raw_edges = payload_data.get("edges", [])
 
     print("PAYLOAD REAL:", payload_data)
-    print("NODES RECEBIDOS:", len(nodes) if isinstance(nodes, list) else 0)
+    print("NODES RECEBIDOS:", raw_nodes)
 
-    if not isinstance(nodes, list):
-        nodes = []
-    if not isinstance(edges, list):
-        edges = []
+    if not isinstance(raw_nodes, list):
+        raw_nodes = []
+    if not isinstance(raw_edges, list):
+        raw_edges = []
+
+    if raw_nodes is None or len(raw_nodes) == 0:
+        raise HTTPException(status_code=422, detail="Flow precisa ter pelo menos 1 node")
+
+    nodes = []
+    for node in raw_nodes:
+        normalized_node = node if isinstance(node, dict) else {}
+        nodes.append(
+            {
+                "id": str(normalized_node.get("id")),
+                "type": normalized_node.get("type") or "default",
+                "position": normalized_node.get("position") or {"x": 0, "y": 0},
+                "data": normalized_node.get("data") or {},
+            }
+        )
+
+    edges = raw_edges or []
+    print("NODES NORMALIZADOS:", nodes)
 
     flow = update_flow(
         db=db,
@@ -132,9 +150,6 @@ async def update_flow_route(
     if not flow:
         raise HTTPException(status_code=404, detail="Flow not found")
 
-    if not nodes or len(nodes) == 0:
-        raise HTTPException(status_code=422, detail="Flow precisa ter pelo menos 1 node")
-
     last_version = db.execute(
         select(FlowVersion)
         .where(FlowVersion.flow_id == flow.id)
@@ -155,13 +170,18 @@ async def update_flow_route(
         edges=edges,
         is_active=True,
     )
+    try:
+        db.add(new_version)
+        db.commit()
+        db.refresh(new_version)
 
-    db.add(new_version)
-    db.commit()
-    db.refresh(new_version)
+        flow.current_version_id = new_version.id
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        print("ERRO SALVAR:", str(exc))
+        raise HTTPException(status_code=500, detail="Erro ao salvar flow") from exc
 
-    flow.current_version_id = new_version.id
-    db.commit()
     return {"success": True, "version_id": str(new_version.id)}
 
 
