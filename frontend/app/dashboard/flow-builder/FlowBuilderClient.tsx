@@ -65,6 +65,13 @@ const NODE_PRESETS: Record<FlowNodeKind, { label: string; type: string; data: Re
 const initialNodes: Node[] = [];
 const initialEdges: Edge[] = [];
 
+const FALLBACK_START_NODE: FlowNodePayload = {
+  id: 'start',
+  type: 'message',
+  position: { x: 250, y: 100 },
+  data: { label: 'Start' },
+};
+
 function randomPosition() {
   return {
     x: Math.floor(Math.random() * 550),
@@ -261,8 +268,15 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
         const safeNodes = Array.isArray(data?.nodes) ? data.nodes : [];
         const safeEdges = Array.isArray(data?.edges) ? data.edges : [];
 
-        const initialNodes = safeNodes.map(buildFlowNode);
+        const initialNodesFromApi = safeNodes.map(buildFlowNode);
         const initialEdges: Edge[] = safeEdges.map(buildFlowEdge);
+
+        if (initialNodesFromApi.length === 0) {
+          console.error('Flow vazio vindo do backend');
+        }
+
+        const initialNodes =
+          initialNodesFromApi.length > 0 ? initialNodesFromApi : [buildFlowNode(FALLBACK_START_NODE)];
 
         // Se os nodes já têm posições salvas (x e y não-zero), usa diretamente
         // sem passar pelo dagre — preserva layout manual do usuário
