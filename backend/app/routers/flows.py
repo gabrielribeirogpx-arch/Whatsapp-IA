@@ -105,8 +105,28 @@ def update_flow_route(
         raise HTTPException(status_code=404, detail="Flow not found")
     if "nodes" in payload_data or "edges" in payload_data:
         nodes = payload_data.get("nodes", [])
+        if not isinstance(nodes, list):
+            nodes = []
         if not nodes or len(nodes) == 0:
-            raise HTTPException(status_code=422, detail="Flow não pode ser vazio")
+            raise HTTPException(status_code=422, detail="Flow precisa ter pelo menos 1 node")
+        print(
+            "VALIDANDO FLOW:",
+            {
+                "nodes_count": len(nodes),
+                "sample_node": nodes[0] if nodes else None,
+            },
+        )
+        for node in nodes:
+            if not isinstance(node, dict):
+                raise HTTPException(status_code=422, detail="Node inválido: sem id")
+            if "id" not in node:
+                raise HTTPException(status_code=422, detail="Node inválido: sem id")
+            if "type" not in node:
+                node["type"] = "default"
+            if "position" not in node:
+                node["position"] = {"x": 0, "y": 0}
+            if "data" not in node:
+                node["data"] = {}
         save_flow_graph(
             db=db,
             tenant_id=TEMP_TENANT_ID,
@@ -354,11 +374,28 @@ async def update_tenant_flow(
         nodes = payload_data.get("nodes") or []
         edges = payload_data.get("edges") or []
 
-        if not nodes or len(nodes) == 0:
-            raise HTTPException(status_code=422, detail="Flow não pode ser vazio")
-
         if not isinstance(nodes, list):
             nodes = []
+        if not nodes or len(nodes) == 0:
+            raise HTTPException(status_code=422, detail="Flow precisa ter pelo menos 1 node")
+        print(
+            "VALIDANDO FLOW:",
+            {
+                "nodes_count": len(nodes),
+                "sample_node": nodes[0] if nodes else None,
+            },
+        )
+        for node in nodes:
+            if not isinstance(node, dict):
+                raise HTTPException(status_code=422, detail="Node inválido: sem id")
+            if "id" not in node:
+                raise HTTPException(status_code=422, detail="Node inválido: sem id")
+            if "type" not in node:
+                node["type"] = "default"
+            if "position" not in node:
+                node["position"] = {"x": 0, "y": 0}
+            if "data" not in node:
+                node["data"] = {}
 
         if not isinstance(edges, list):
             edges = []
