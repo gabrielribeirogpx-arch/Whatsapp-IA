@@ -260,17 +260,21 @@ def get_tenant_flow_by_id(
         flow = db.query(Flow).filter(Flow.id == flow_id).first()
 
         if not flow:
-            print("FLOW NÃO ENCONTRADO:", flow_id)
             return {"nodes": [], "edges": []}
 
         data = flow.data
 
-        if not isinstance(data, dict):
-            print("FLOW DATA INVÁLIDO:", data)
+        if not data or not isinstance(data, dict):
             return {"nodes": [], "edges": []}
 
-        nodes = data.get("nodes") or []
-        edges = data.get("edges") or []
+        nodes = data.get("nodes", [])
+        edges = data.get("edges", [])
+
+        if not isinstance(nodes, list):
+            nodes = []
+
+        if not isinstance(edges, list):
+            edges = []
 
         return {
             "nodes": nodes,
@@ -278,7 +282,7 @@ def get_tenant_flow_by_id(
         }
 
     except Exception as e:
-        print("ERRO CRÍTICO FLOW:", str(e))
+        print("🔥 FLOW LOAD ERROR:", e)
         return {"nodes": [], "edges": []}
 
 
