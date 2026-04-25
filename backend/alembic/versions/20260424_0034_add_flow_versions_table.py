@@ -39,7 +39,7 @@ def upgrade() -> None:
             "flow_versions",
             sa.Column("id", postgresql.UUID(as_uuid=True), nullable=False),
             sa.Column("flow_id", postgresql.UUID(as_uuid=True), nullable=False),
-            sa.Column("version_number", sa.Integer(), nullable=False),
+            sa.Column("version", sa.Integer(), nullable=False),
             sa.Column("nodes_json", postgresql.JSONB(astext_type=sa.Text()), nullable=True),
             sa.Column("edges_json", postgresql.JSONB(astext_type=sa.Text()), nullable=True),
             sa.Column("created_at", sa.DateTime(), nullable=True),
@@ -49,8 +49,8 @@ def upgrade() -> None:
         op.create_index("ix_flow_versions_flow_id", "flow_versions", ["flow_id"], unique=False)
     else:
         flow_versions_columns = {column["name"] for column in inspector.get_columns("flow_versions")}
-        if "version_number" not in flow_versions_columns and "version" in flow_versions_columns:
-            op.alter_column("flow_versions", "version", new_column_name="version_number")
+        if "version" not in flow_versions_columns and "version_number" in flow_versions_columns:
+            op.alter_column("flow_versions", "version_number", new_column_name="version")
 
     inspector = inspect(bind)
     if not _has_column(inspector, "flows", "current_version_id"):
