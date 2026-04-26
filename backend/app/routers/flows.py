@@ -287,6 +287,8 @@ async def update_flow_route(
         db.add(new_version)
         db.flush()
         flow.current_version_id = new_version.id
+        if not flow.published_version_id:
+            flow.published_version_id = new_version.id
         if flow.is_active:
             print("[FLOW ACTIVE]:", flow.id)
 
@@ -363,6 +365,7 @@ def _serialize_flow(flow: Flow) -> dict[str, Any]:
         "priority": flow.priority,
         "version": flow.version,
         "current_version_id": str(flow.current_version_id) if flow.current_version_id else None,
+        "published_version_id": str(flow.published_version_id) if flow.published_version_id else None,
         "created_at": flow.created_at.isoformat() if flow.created_at else None,
         "updated_at": flow.updated_at.isoformat() if flow.updated_at else None,
     }
@@ -695,6 +698,8 @@ async def update_tenant_flow(
         )
 
         flow.current_version_id = nova.id
+        if not flow.published_version_id:
+            flow.published_version_id = nova.id
         if flow.is_active:
             print("[FLOW ACTIVE]:", flow.id)
         db.commit()
@@ -866,11 +871,37 @@ def restore_tenant_flow_version(
         synchronize_session=False,
     )
     flow.current_version_id = flow_version.id
+    flow.published_version_id = flow_version.id
     flow.version = flow_version.version
     db.add(flow)
     db.commit()
     db.refresh(flow)
 
+    return _serialize_flow(flow)
+
+
+@crud_router.post("/{flow_id}/versions/{version_id}/publish")
+def publish_tenant_flow_version(
+    flow_id: str,
+    version_id: uuid.UUID,
+    x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
+    db: Session = Depends(get_db),
+):
+    tenant_uuid = _resolve_tenant_header(x_tenant_id)
+    flow = _get_flow_by_identifier(db=db, flow_id=flow_id, tenant_id=tenant_uuid)
+    if not flow:
+        raise HTTPException(status_code=404, detail="Flow not found")
+
+    flow_version = db.execute(
+        select(FlowVersion).where(FlowVersion.id == version_id, FlowVersion.flow_id == flow.id)
+    ).scalars().first()
+    if not flow_version:
+        raise HTTPException(status_code=404, detail="Flow version not found")
+
+    flow.published_version_id = flow_version.id
+    db.add(flow)
+    db.commit()
+    db.refresh(flow)
     return _serialize_flow(flow)
 
 
@@ -927,7 +958,31 @@ def restore_flow_version_by_id(
         synchronize_session=False,
     )
     flow.current_version_id = flow_version.id
+    flow.published_version_id = flow_version.id
     flow.version = flow_version.version
+    db.add(flow)
+    db.commit()
+    db.refresh(flow)
+    return _serialize_flow(flow)
+
+
+@router.post("/{flow_id}/versions/{version_id}/publish")
+def publish_flow_version_by_id(
+    flow_id: str,
+    version_id: uuid.UUID,
+    db: Session = Depends(get_db),
+):
+    flow = _get_flow_by_identifier(db=db, flow_id=flow_id)
+    if not flow:
+        raise HTTPException(status_code=404, detail="Flow not found")
+
+    flow_version = db.execute(
+        select(FlowVersion).where(FlowVersion.id == version_id, FlowVersion.flow_id == flow.id)
+    ).scalars().first()
+    if not flow_version:
+        raise HTTPException(status_code=404, detail="Flow version not found")
+
+    flow.published_version_id = flow_version.id
     db.add(flow)
     db.commit()
     db.refresh(flow)
