@@ -546,9 +546,11 @@ def activate_tenant_flow(
     tenant_uuid = _resolve_tenant_header(x_tenant_id)
     flow = _get_flow_by_identifier(db=db, flow_id=flow_id, tenant_id=tenant_uuid)
     if not flow:
-        raise HTTPException(status_code=404, detail="Flow not found")
+        raise HTTPException(status_code=404, detail="Flow não encontrado")
 
-    db.query(Flow).filter(Flow.tenant_id == tenant_uuid).update(
+    db.query(Flow).filter(
+        Flow.tenant_id == tenant_uuid,
+    ).update(
         {Flow.is_active: False},
         synchronize_session=False,
     )

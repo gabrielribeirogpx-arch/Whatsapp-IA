@@ -136,6 +136,14 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
   const searchParams = useSearchParams();
   const urlFlowId = searchParams.get('flow_id') || searchParams.get('flowId') || _initialFlowId || '';
   const [flows, setFlows] = useState<Array<{ id: string; name?: string | null; created_at?: string | null; is_active?: boolean }>>([]);
+  const normalizedFlows = useMemo(
+    () =>
+      flows.map((flow) => ({
+        ...flow,
+        is_active: !!flow.is_active,
+      })),
+    [flows],
+  );
   const [activeFlowId, setActiveFlowId] = useState<string | null>(urlFlowId || null);
   console.log('FLOW ATIVO:', activeFlowId);
   console.log('FLOWS DISPONÍVEIS:', flows);
@@ -191,6 +199,16 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
   useEffect(() => {
     nodesRef.current = nodes;
   }, [nodes]);
+
+  useEffect(() => {
+    console.log(
+      'FLOW STATUS:',
+      normalizedFlows.map((flow) => ({
+        name: flow.name,
+        active: flow.is_active,
+      })),
+    );
+  }, [normalizedFlows]);
 
   useEffect(() => {
     let active = true;
@@ -1004,9 +1022,9 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
             <option value="" disabled>
               Selecione um flow
             </option>
-            {flows.map((flow) => (
+            {normalizedFlows.map((flow) => (
               <option key={flow.id} value={flow.id}>
-                {(flow.name || flow.id) + (flow.is_active ? ' 🟢' : '')}
+                {(flow.name || flow.id) + (flow.is_active === true ? ' 🟢' : '')}
               </option>
             ))}
           </select>
