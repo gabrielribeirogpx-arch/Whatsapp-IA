@@ -23,6 +23,7 @@ from app.routers import settings
 from app.routers import bot_rules
 from app.routers import flows
 from app.middleware.tenant_context import TenantContextMiddleware
+from app.api.debug import router as debug_router
 
 
 # ✅ MIGRATIONS
@@ -114,6 +115,7 @@ app.include_router(
 )
 app.include_router(flows.crud_router, prefix="/flows")
 app.include_router(webhook.router)
+app.include_router(debug_router)
 
 
 # ✅ HEALTH
