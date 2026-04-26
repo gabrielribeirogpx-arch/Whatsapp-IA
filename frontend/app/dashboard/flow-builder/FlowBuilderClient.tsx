@@ -436,6 +436,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
 
   const flow = useMemo(
     () => ({
+      id: selectedFlowId || null,
       nodes: nodes.map((node) => ({
         id: node.id,
         type: node.type || 'message',
@@ -443,7 +444,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
       })),
       edges,
     }),
-    [edges, nodes],
+    [edges, nodes, selectedFlowId],
   );
 
   const runFlowStep = useCallback((startNodeId: string, initialActiveEdgeIds: string[] = [], userMessage?: string, lastUserMsg?: string) => {
@@ -874,6 +875,15 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
     [currentNodeId, nodes, toggleStartNode],
   );
 
+  const safeNodes = useMemo(
+    () =>
+      decoratedNodes.map((node) => ({
+        type: node.type || 'default',
+        ...node,
+      })),
+    [decoratedNodes],
+  );
+
   const decoratedEdges = useMemo(
     () =>
       edges.map((edge) => ({
@@ -1118,9 +1128,9 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
           </div>
         )}
         <ReactFlow
-          key={selectedFlowId || 'no-flow'}
+          key={flow?.id || 'no-flow'}
           onInit={setRfInstance}
-          nodes={decoratedNodes}
+          nodes={safeNodes}
           edges={decoratedEdges}
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
