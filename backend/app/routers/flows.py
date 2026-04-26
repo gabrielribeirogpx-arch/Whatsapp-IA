@@ -102,6 +102,33 @@ def _is_valid_flow(nodes: list[dict[str, Any]], edges: list[dict[str, Any]]) -> 
     )
 
 
+def _ensure_start_node(nodes: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    if not nodes:
+        return nodes
+
+    has_start = any(
+        isinstance(node, dict)
+        and isinstance(node.get("data"), dict)
+        and bool(node.get("data", {}).get("isStart"))
+        for node in nodes
+    )
+    if has_start:
+        return nodes
+
+    first_node = nodes[0] if isinstance(nodes[0], dict) else {}
+    if not isinstance(first_node.get("data"), dict):
+        first_node["data"] = {}
+
+    first_node["data"]["isStart"] = True
+
+    if not isinstance(first_node["data"].get("metadata"), dict):
+        first_node["data"]["metadata"] = {}
+    first_node["data"]["metadata"]["isStart"] = True
+
+    print("FORÇANDO START NODE:", first_node.get("id"))
+    return nodes
+
+
 def _log_flow_version_blocked(flow_id: uuid.UUID, nodes_count: int) -> None:
     print(
         {
@@ -140,6 +167,7 @@ def create_flow_route(
     initial_nodes = payload_data.get("nodes", [])
     if not initial_nodes:
         initial_nodes = [_default_start_node()]
+    initial_nodes = _ensure_start_node(initial_nodes)
 
     save_flow_graph(
         db=db,
@@ -191,6 +219,7 @@ async def update_flow_route(
                     "data": normalized_node.get("data") or {},
                 }
             )
+        nodes = _ensure_start_node(nodes)
 
         edges = raw_edges or []
         print("VALIDANDO FLOW:")
@@ -371,7 +400,11 @@ def _default_start_node() -> dict[str, Any]:
         "id": node_id,
         "type": "start",
         "position": {"x": 120, "y": 80},
-        "data": {"label": "Início"},
+        "data": {
+            "label": "Início",
+            "isStart": True,
+            "metadata": {"isStart": True},
+        },
     }
 
 
@@ -425,7 +458,7 @@ def save_tenant_flow(
         db=db,
         tenant_id=tenant.id,
         flow_id=flow_id or "default",
-        nodes=payload.nodes or [],
+        nodes=_ensure_start_node(payload.nodes or []),
         edges=payload.edges or [],
     )
     db.commit()
@@ -446,6 +479,7 @@ def create_tenant_flow(
     initial_nodes = payload_data.get("nodes", [])
     if not initial_nodes:
         initial_nodes = [_default_start_node()]
+    initial_nodes = _ensure_start_node(initial_nodes)
     save_flow_graph(
         db=db,
         tenant_id=tenant_uuid,
