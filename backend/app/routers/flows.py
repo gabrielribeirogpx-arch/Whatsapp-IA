@@ -89,14 +89,21 @@ def _get_valid_tenant(db: Session) -> Tenant:
 
 @router.get("")
 @router.get("/")
-def list_flows(db: Session = Depends(get_db)):
-    tenant = _get_valid_tenant(db=db)
+def list_flows(
+    x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
+    db: Session = Depends(get_db),
+):
+    tenant = _resolve_request_tenant(db=db, tenant_id_header=x_tenant_id)
     return [_serialize_flow(item) for item in get_flows(db=db, tenant_id=tenant.id)]
 
 
 @router.post("/")
-def create_flow_route(payload: FlowCreatePayload, db: Session = Depends(get_db)):
-    tenant = _get_valid_tenant(db=db)
+def create_flow_route(
+    payload: FlowCreatePayload,
+    x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
+    db: Session = Depends(get_db),
+):
+    tenant = _resolve_request_tenant(db=db, tenant_id_header=x_tenant_id)
     payload_data = payload.model_dump()
     flow = create_flow(
         db=db,
@@ -124,6 +131,7 @@ def create_flow_route(payload: FlowCreatePayload, db: Session = Depends(get_db))
 async def update_flow_route(
     flow_id: str,
     request: Request,
+    x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
     db: Session = Depends(get_db),
 ):
     try:
@@ -160,23 +168,10 @@ async def update_flow_route(
         print("VALIDANDO FLOW:")
         print("nodes:", nodes)
 
-        tenant = _get_valid_tenant(db=db)
+        tenant = _resolve_request_tenant(db=db, tenant_id_header=x_tenant_id)
         flow = _get_flow_by_identifier(db=db, flow_id=flow_id, tenant_id=tenant.id)
         if not flow:
-            print("[FLOW DEBUG] Flow não encontrado, criando novo")
-            tenant = db.query(Tenant).first()
-            if not tenant:
-                raise Exception("Nenhum tenant encontrado no banco")
-            _, resolved_flow_id = _resolve_flow_query(db=db, flow_id=flow_id)
-            flow = Flow(
-                id=resolved_flow_id if isinstance(resolved_flow_id, uuid.UUID) else None,
-                name=f"Flow {flow_id}",
-                tenant_id=tenant.id,
-            )
-            db.add(flow)
-            db.commit()
-            db.refresh(flow)
-            print("[FLOW DEBUG] Flow criado com tenant:", tenant.id)
+            raise HTTPException(status_code=404, detail="Flow não encontrado")
 
         print("[FLOW DEBUG] Flow encontrado ou criado:", flow.id)
         for key, value in payload_data.items():
@@ -223,6 +218,8 @@ async def update_flow_route(
             "success": True,
             "flow_id": flow.id,
         }
+    except HTTPException:
+        raise
     except Exception as e:
         import traceback
 
@@ -241,8 +238,12 @@ async def update_flow_route(
 
 
 @router.delete("/{flow_id}")
-def delete_flow_route(flow_id: uuid.UUID, db: Session = Depends(get_db)):
-    tenant = _get_valid_tenant(db=db)
+def delete_flow_route(
+    flow_id: uuid.UUID,
+    x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
+    db: Session = Depends(get_db),
+):
+    tenant = _resolve_request_tenant(db=db, tenant_id_header=x_tenant_id)
     deleted = delete_flow(db=db, flow_id=flow_id, tenant_id=tenant.id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Flow not found")
@@ -257,6 +258,15 @@ def _resolve_tenant_header(tenant_id: str | None) -> uuid.UUID:
         return uuid.UUID(tenant_id)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail="X-Tenant-ID header is invalid") from exc
+
+
+def _resolve_request_tenant(db: Session, tenant_id_header: str | None) -> Tenant:
+    if tenant_id_header:
+        tenant = _resolve_tenant(db=db, tenant_id=tenant_id_header)
+        if not tenant:
+            raise HTTPException(status_code=404, detail="Tenant not found")
+        return tenant
+    return _get_valid_tenant(db=db)
 
 
 def _serialize_flow(flow: Flow) -> dict[str, Any]:
@@ -315,12 +325,19 @@ def _resolve_tenant(db: Session, tenant_id: str) -> Tenant | None:
 @router.get("/{tenant_id}")
 def get_tenant_flow(
     tenant_id: str,
+    x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
     flow_id: str | None = None,
     db: Session = Depends(get_db),
 ):
+    resolved_request_tenant = _resolve_request_tenant(db=db, tenant_id_header=x_tenant_id)
     try:
         parsed_flow_id = uuid.UUID(tenant_id)
-        flow = db.execute(select(Flow).where(Flow.id == parsed_flow_id)).scalars().first()
+        flow = db.execute(
+            select(Flow).where(
+                Flow.id == parsed_flow_id,
+                Flow.tenant_id == resolved_request_tenant.id,
+            )
+        ).scalars().first()
         if flow:
             if not flow.current_version_id:
                 return dict(_EMPTY_FLOW)

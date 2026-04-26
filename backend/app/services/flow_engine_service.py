@@ -581,7 +581,7 @@ def process_flow_engine(
             return None
     else:
         flow = _get_or_create_visual_flow(db=db, tenant_id=conversation.tenant_id)
-    logger.info("[FLOW SELECTED] flow_id=%s", flow.id)
+    logger.info("[FLOW SELECTED] %s", flow_id or str(flow.id))
     runtime_graph = _get_current_flow_runtime(db=db, flow=flow, tenant_id=conversation.tenant_id)
     initialized_node = _initialize_flow_start_node(
         db=db,
