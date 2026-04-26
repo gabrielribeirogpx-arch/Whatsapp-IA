@@ -144,7 +144,9 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
       })),
     [flows],
   );
-  const [activeFlowId, setActiveFlowId] = useState<string | null>(urlFlowId || null);
+  const [selectedFlowId, setSelectedFlowId] = useState<string | null>(urlFlowId || null);
+  const [activeFlowId, setActiveFlowId] = useState<string | null>(null);
+  console.log('FLOW SELECIONADO:', selectedFlowId);
   console.log('FLOW ATIVO:', activeFlowId);
   console.log('FLOWS DISPONÍVEIS:', flows);
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>(initialNodes);
@@ -178,23 +180,23 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
   }, []);
 
   useEffect(() => {
-    if (urlFlowId && urlFlowId !== activeFlowId) {
-      setActiveFlowId(urlFlowId);
+    if (urlFlowId && urlFlowId !== selectedFlowId) {
+      setSelectedFlowId(urlFlowId);
       return;
     }
-    if (urlFlowId || activeFlowId) return;
+    if (urlFlowId || selectedFlowId) return;
     if (typeof window === 'undefined') return;
     const storedFlowId = window.localStorage.getItem('flow_builder_flow_id');
     if (storedFlowId) {
-      setActiveFlowId(storedFlowId);
+      setSelectedFlowId(storedFlowId);
     }
-  }, [activeFlowId, urlFlowId]);
+  }, [selectedFlowId, urlFlowId]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    if (!activeFlowId) return;
-    window.localStorage.setItem('flow_builder_flow_id', activeFlowId);
-  }, [activeFlowId]);
+    if (!selectedFlowId) return;
+    window.localStorage.setItem('flow_builder_flow_id', selectedFlowId);
+  }, [selectedFlowId]);
 
   useEffect(() => {
     nodesRef.current = nodes;
@@ -232,8 +234,11 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
         if (!active) return;
         setFlows(safeFlows);
 
-        if (!activeFlowId && safeFlows.length > 0) {
-          setActiveFlowId(safeFlows[0].id);
+        const currentActiveFlow = safeFlows.find((flow) => flow.is_active);
+        setActiveFlowId(currentActiveFlow?.id || null);
+
+        if (!selectedFlowId && safeFlows.length > 0) {
+          setSelectedFlowId(currentActiveFlow?.id || safeFlows[0].id);
         }
       } catch (error) {
         console.error('[FlowBuilder] erro ao carregar lista de flows', error);
@@ -244,7 +249,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
     return () => {
       active = false;
     };
-  }, [activeFlowId, getTenantHeaders]);
+  }, [getTenantHeaders, selectedFlowId]);
 
   const formatVersionDate = useCallback((timestamp?: string | null) => {
     if (!timestamp) return 'Sem data';
@@ -338,8 +343,8 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
         }
 
         const ensureFlowId = async () => {
-          if (activeFlowId) {
-            return activeFlowId;
+          if (selectedFlowId) {
+            return selectedFlowId;
           }
 
           const createResponse = await fetch(`${API_URL}/api/flows/`, {
@@ -351,7 +356,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
             body: JSON.stringify({
               name: 'Novo Flow',
               description: '',
-              is_active: true,
+              is_active: false,
               trigger_type: 'default',
               nodes: [],
               edges: [],
@@ -369,7 +374,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
             throw new Error('Flow criado sem ID');
           }
 
-          setActiveFlowId(createdId);
+          setSelectedFlowId(createdId);
           setFlows((prev) => [{ id: createdId, name: 'Novo Flow' }, ...prev.filter((flow) => flow.id !== createdId)]);
           return createdId as string;
         };
@@ -399,7 +404,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
               body: JSON.stringify({
                 name: 'Novo Flow',
                 description: '',
-                is_active: true,
+                is_active: false,
                 trigger_type: 'default',
                 nodes: [],
                 edges: [],
@@ -415,7 +420,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
             if (!createdId) {
               throw new Error('Flow criado sem ID após 404');
             }
-            setActiveFlowId(createdId);
+            setSelectedFlowId(createdId);
             setFlows((prev) => [{ id: createdId, name: 'Novo Flow' }, ...prev.filter((flow) => flow.id !== createdId)]);
 
             const retryResponse = await fetch(`${API_URL}/api/flows/${createdId}`, {
@@ -485,7 +490,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
     return () => {
       active = false;
     };
-  }, [activeFlowId, applyLayoutAndSetFlow, buildFlowNode, getTenantHeaders, setEdges, setNodes]);
+  }, [selectedFlowId, applyLayoutAndSetFlow, buildFlowNode, getTenantHeaders, setEdges, setNodes]);
 
   const flow = useMemo(
     () => ({
@@ -722,8 +727,8 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
   );
 
   const handleSaveFlow = useCallback(async () => {
-    if (!activeFlowId) {
-      console.error('activeFlowId não definido');
+    if (!selectedFlowId) {
+      console.error('selectedFlowId não definido');
       return;
     }
 
@@ -775,7 +780,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
 
     setIsSaving(true);
     try {
-      await fetch(`${API_URL}/api/flows/${activeFlowId}`, {
+      await fetch(`${API_URL}/api/flows/${selectedFlowId}`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -786,14 +791,14 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
     } finally {
       setIsSaving(false);
     }
-  }, [activeFlowId, getTenantHeaders, rfInstance]);
+  }, [getTenantHeaders, rfInstance, selectedFlowId]);
 
   useEffect(() => {
     if (!autosaveReadyRef.current) {
       autosaveReadyRef.current = true;
       return;
     }
-    if (!rfInstance || !activeFlowId) return;
+    if (!rfInstance || !selectedFlowId) return;
 
     if (autosaveTimeoutRef.current) {
       clearTimeout(autosaveTimeoutRef.current);
@@ -808,14 +813,14 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
         clearTimeout(autosaveTimeoutRef.current);
       }
     };
-  }, [activeFlowId, edges, handleSaveFlow, nodes, rfInstance]);
+  }, [selectedFlowId, edges, handleSaveFlow, nodes, rfInstance]);
 
   const openVersionsModal = useCallback(async () => {
-    if (!activeFlowId) return;
+    if (!selectedFlowId) return;
     setIsVersionsModalOpen(true);
     setIsLoadingVersions(true);
     try {
-      const versions = await listFlowVersions(activeFlowId);
+      const versions = await listFlowVersions(selectedFlowId);
       setFlowVersions(versions);
       setActiveVersionId(versions.find((item) => item.is_current)?.id || null);
     } catch {
@@ -823,30 +828,46 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
     } finally {
       setIsLoadingVersions(false);
     }
-  }, [activeFlowId]);
+  }, [selectedFlowId]);
 
-  const activateFlow = useCallback(async () => {
-    if (!activeFlowId) return;
+  const handleActivateFlow = useCallback(async () => {
+    if (!selectedFlowId) return;
     const API_URL = process.env.NEXT_PUBLIC_API_URL;
     if (!API_URL) return;
 
-    await fetch(`${API_URL}/api/flows/${activeFlowId}/activate`, {
+    await fetch(`${API_URL}/api/flows/${selectedFlowId}/activate`, {
       method: 'PUT',
       headers: {
         ...getTenantHeaders(),
       },
     });
 
-    setFlows((prev) => prev.map((flow) => ({ ...flow, is_active: flow.id === activeFlowId })));
-  }, [activeFlowId, getTenantHeaders]);
+    setActiveFlowId(selectedFlowId);
+    setFlows((prev) => prev.map((flow) => ({ ...flow, is_active: flow.id === selectedFlowId })));
+  }, [getTenantHeaders, selectedFlowId]);
+
+  const handleDeactivateFlow = useCallback(async () => {
+    const API_URL = process.env.NEXT_PUBLIC_API_URL;
+    if (!API_URL) return;
+
+    await fetch(`${API_URL}/api/flows/deactivate`, {
+      method: 'POST',
+      headers: {
+        ...getTenantHeaders(),
+      },
+    });
+
+    setActiveFlowId(null);
+    setFlows((prev) => prev.map((flow) => ({ ...flow, is_active: false })));
+  }, [getTenantHeaders]);
 
   const deleteFlow = useCallback(async () => {
-    if (!activeFlowId) return;
+    if (!selectedFlowId) return;
     if (!confirm('Deseja excluir este flow?')) return;
     const API_URL = process.env.NEXT_PUBLIC_API_URL;
     if (!API_URL) return;
 
-    await fetch(`${API_URL}/api/flows/${activeFlowId}`, {
+    await fetch(`${API_URL}/api/flows/${selectedFlowId}`, {
       method: 'DELETE',
       headers: {
         ...getTenantHeaders(),
@@ -854,16 +875,16 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
     });
 
     window.location.reload();
-  }, [activeFlowId, getTenantHeaders]);
+  }, [getTenantHeaders, selectedFlowId]);
 
   const renameFlow = useCallback(async () => {
-    if (!activeFlowId) return;
+    if (!selectedFlowId) return;
     const name = prompt('Novo nome do flow:');
     if (!name) return;
     const API_URL = process.env.NEXT_PUBLIC_API_URL;
     if (!API_URL) return;
 
-    await fetch(`${API_URL}/api/flows/${activeFlowId}/rename`, {
+    await fetch(`${API_URL}/api/flows/${selectedFlowId}/rename`, {
       method: 'PUT',
       headers: {
         'Content-Type': 'application/json',
@@ -872,18 +893,18 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
       body: JSON.stringify({ name }),
     });
 
-    setFlows((prev) => prev.map((flow) => (flow.id === activeFlowId ? { ...flow, name } : flow)));
-  }, [activeFlowId, getTenantHeaders]);
+    setFlows((prev) => prev.map((flow) => (flow.id === selectedFlowId ? { ...flow, name } : flow)));
+  }, [getTenantHeaders, selectedFlowId]);
 
   const handleRestoreVersion = useCallback(async (versionId: string) => {
     const tenantSession = getTenantSessionFromStorage();
     const tenantId = tenantSession?.tenant_id;
-    if (!tenantId || !activeFlowId) return;
+    if (!tenantId || !selectedFlowId) return;
 
     setIsRestoringVersion(true);
     try {
-      await restoreFlowVersion(activeFlowId, versionId);
-      const data = await getFlowGraph(tenantId, activeFlowId);
+      await restoreFlowVersion(selectedFlowId, versionId);
+      const data = await getFlowGraph(tenantId, selectedFlowId);
       const restoredNodes = (data?.nodes || []).map(buildFlowNode);
       const restoredEdges: Edge[] = (data?.edges || []).map(buildFlowEdge);
       const orderedEdges = orderChoiceChildrenEdges(restoredNodes, restoredEdges);
@@ -895,7 +916,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
     } finally {
       setIsRestoringVersion(false);
     }
-  }, [activeFlowId, buildFlowNode, rfInstance, setEdges, setNodes]);
+  }, [buildFlowNode, rfInstance, selectedFlowId, setEdges, setNodes]);
 
   const decoratedNodes = useMemo(
     () => nodes.map((node) => ({
@@ -1009,8 +1030,8 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
       <main style={{ flex: 1, background: '#F7F7F5', position: 'relative' }}>
         <div className="flow-builder-top-actions">
           <select
-            value={activeFlowId || ''}
-            onChange={(e) => setActiveFlowId(e.target.value || null)}
+            value={selectedFlowId || ''}
+            onChange={(e) => setSelectedFlowId(e.target.value || null)}
             style={{
               padding: '6px 10px',
               borderRadius: 8,
@@ -1024,23 +1045,31 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
             </option>
             {normalizedFlows.map((flow) => (
               <option key={flow.id} value={flow.id}>
-                {(flow.name || flow.id) + (flow.is_active === true ? ' 🟢' : '')}
+                {(flow.name || flow.id) + (flow.id === activeFlowId ? ' 🟢' : '')}
               </option>
             ))}
           </select>
           <button
             type="button"
             className="flow-top-btn"
-            onClick={activateFlow}
-            disabled={!activeFlowId}
+            onClick={handleActivateFlow}
+            disabled={!selectedFlowId}
           >
             Ativar Flow
           </button>
           <button
             type="button"
             className="flow-top-btn flow-top-btn-secondary"
-            onClick={renameFlow}
+            onClick={handleDeactivateFlow}
             disabled={!activeFlowId}
+          >
+            Desativar Flow
+          </button>
+          <button
+            type="button"
+            className="flow-top-btn flow-top-btn-secondary"
+            onClick={renameFlow}
+            disabled={!selectedFlowId}
           >
             Renomear
           </button>
@@ -1048,7 +1077,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
             type="button"
             className="flow-top-btn flow-top-btn-danger"
             onClick={deleteFlow}
-            disabled={!activeFlowId}
+            disabled={!selectedFlowId}
           >
             Excluir
           </button>
@@ -1056,7 +1085,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
             type="button"
             className="flow-top-btn flow-top-btn-secondary"
             onClick={openVersionsModal}
-            disabled={!activeFlowId}
+            disabled={!selectedFlowId}
           >
             <History size={14} />
             Histórico

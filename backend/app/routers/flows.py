@@ -561,6 +561,23 @@ def activate_tenant_flow(
     return _serialize_flow(flow)
 
 
+@crud_router.post("/deactivate")
+def deactivate_tenant_flows(
+    x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
+    db: Session = Depends(get_db),
+):
+    tenant_uuid = _resolve_tenant_header(x_tenant_id)
+
+    db.query(Flow).filter(
+        Flow.tenant_id == tenant_uuid,
+    ).update(
+        {Flow.is_active: False},
+        synchronize_session=False,
+    )
+    db.commit()
+    return {"success": True}
+
+
 @crud_router.put("/{flow_id}/rename")
 def rename_tenant_flow(
     flow_id: str,
