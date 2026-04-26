@@ -65,6 +65,39 @@ def _is_valid_flow_payload(nodes: list[dict[str, Any]] | None, edges: list[dict[
     )
 
 
+def validate_flow(nodes: list[dict[str, Any]] | None, edges: list[dict[str, Any]] | None) -> tuple[bool, str | None]:
+    del edges
+    if not nodes or len(nodes) <= 1:
+        return False, "Flow inválido: poucos nodes"
+
+    has_start = any(
+        isinstance(node, dict)
+        and isinstance(node.get("data"), dict)
+        and bool(node.get("data", {}).get("isStart"))
+        for node in nodes
+    )
+    if not has_start:
+        return False, "Flow inválido: sem start node"
+
+    return True, None
+
+
+def _get_latest_valid_flow_version(db: Session, flow_id: uuid.UUID) -> FlowVersion | None:
+    versions = db.execute(
+        select(FlowVersion)
+        .where(FlowVersion.flow_id == flow_id)
+        .order_by(FlowVersion.version.desc(), FlowVersion.created_at.desc())
+    ).scalars().all()
+    for version in versions:
+        valid, _ = validate_flow(
+            version.nodes if isinstance(version.nodes, list) else [],
+            version.edges if isinstance(version.edges, list) else [],
+        )
+        if valid:
+            return version
+    return None
+
+
 def _load_flow_version_runtime(flow: Flow, tenant_id: uuid.UUID, flow_version: FlowVersion) -> dict[str, Any]:
     raw_nodes = flow_version.nodes if isinstance(flow_version.nodes, list) else []
     raw_edges = flow_version.edges if isinstance(flow_version.edges, list) else []
@@ -142,13 +175,32 @@ def _load_flow_version_runtime(flow: Flow, tenant_id: uuid.UUID, flow_version: F
 
 
 def _get_current_flow_runtime(db: Session, flow: Flow, tenant_id: uuid.UUID) -> dict[str, Any] | None:
-    if not flow.current_version_id:
-        return None
-    flow_version = db.execute(
-        select(FlowVersion).where(FlowVersion.id == flow.current_version_id, FlowVersion.flow_id == flow.id)
-    ).scalars().first()
+    flow_version: FlowVersion | None = None
+    if flow.current_version_id:
+        flow_version = db.execute(
+            select(FlowVersion).where(FlowVersion.id == flow.current_version_id, FlowVersion.flow_id == flow.id)
+        ).scalars().first()
+        if flow_version:
+            valid, error = validate_flow(
+                flow_version.nodes if isinstance(flow_version.nodes, list) else [],
+                flow_version.edges if isinstance(flow_version.edges, list) else [],
+            )
+            if not valid:
+                print(f"[FLOW BLOCKED] {error}")
+                print(f"[FLOW FALLBACK] flow_id={flow.id} invalid_version={flow_version.id}")
+                flow_version = None
+
     if not flow_version:
-        return None
+        fallback_version = _get_latest_valid_flow_version(db=db, flow_id=flow.id)
+        if not fallback_version:
+            return None
+        print(f"[FLOW FALLBACK ACTIVE] flow_id={flow.id} version_id={fallback_version.id}")
+        flow_version = fallback_version
+        if flow.current_version_id != fallback_version.id:
+            flow.current_version_id = fallback_version.id
+            db.add(flow)
+            db.flush()
+
     return _load_flow_version_runtime(flow=flow, tenant_id=tenant_id, flow_version=flow_version)
 
 
@@ -1207,6 +1259,7 @@ def get_flow_graph(db: Session, tenant_id: uuid.UUID, flow_id: str) -> dict[str,
     flow = resolve_flow(db=db, tenant_id=tenant_id, flow_id=flow_id)
     runtime_graph = _get_current_flow_runtime(db=db, flow=flow, tenant_id=tenant_id)
     if runtime_graph:
+        print(f"[FLOW REPAIR CHECK] flow_id={flow.id} nodes={len(runtime_graph.get('nodes', []))}")
         return {
             "flow_id": str(flow.id),
             "nodes": [
@@ -1263,10 +1316,16 @@ def save_flow_graph(db: Session, tenant_id: uuid.UUID, flow_id: str, nodes: list
     flow = resolve_flow(db=db, tenant_id=tenant_id, flow_id=flow_id)
     nodes_payload = nodes or []
     edges_payload = edges or []
+    print("[FLOW SAVE] nodes:", len(nodes_payload))
     persisted_nodes = flow.current_version.nodes if flow.current_version and isinstance(flow.current_version.nodes, list) else []
     persisted_edges = flow.current_version.edges if flow.current_version and isinstance(flow.current_version.edges, list) else []
 
-    if not _is_valid_flow_payload(nodes_payload, edges_payload):
+    valid, error = validate_flow(nodes_payload, edges_payload)
+    print("[FLOW VALID]:", valid)
+    if len(nodes_payload) <= 1:
+        raise Exception("BLOCK SAVE: flow vazio")
+    if not valid:
+        print(f"[FLOW BLOCKED] {error}")
         print(
             {
                 "action": "FLOW_VERSION_BLOCKED",
@@ -1314,6 +1373,8 @@ def save_flow_graph(db: Session, tenant_id: uuid.UUID, flow_id: str, nodes: list
     flow.current_version_id = flow_version.id
     flow.version = next_version
     db.add(flow)
+    if flow.is_active:
+        print("[FLOW ACTIVE]:", flow.id)
     logger.info(
         "[FLOW VERSION CREATED] flow_id=%s version_id=%s version=%s",
         flow.id,

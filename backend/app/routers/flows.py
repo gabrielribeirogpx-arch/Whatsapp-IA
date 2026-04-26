@@ -90,16 +90,21 @@ def _get_valid_tenant(db: Session) -> Tenant:
     return tenant
 
 
-def _is_valid_flow(nodes: list[dict[str, Any]], edges: list[dict[str, Any]]) -> bool:
+def validate_flow(nodes: list[dict[str, Any]], edges: list[dict[str, Any]]) -> tuple[bool, str | None]:
     del edges  # currently not mandatory for validity
     if not nodes or len(nodes) <= 1:
-        return False
-    return any(
+        return False, "Flow inválido: poucos nodes"
+
+    has_start = any(
         isinstance(node, dict)
         and isinstance(node.get("data"), dict)
         and bool(node.get("data", {}).get("isStart"))
         for node in nodes
     )
+    if not has_start:
+        return False, "Flow inválido: sem start node"
+
+    return True, None
 
 
 def _ensure_start_node(nodes: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -227,8 +232,9 @@ async def update_flow_route(
         nodes = _ensure_start_node(nodes)
 
         edges = raw_edges or []
+        print("[FLOW SAVE] nodes:", len(nodes))
         if len(nodes) <= 1:
-            _block_invalid_flow_save()
+            raise Exception("BLOCK SAVE: flow vazio")
         print("VALIDANDO FLOW:")
         print("nodes:", nodes)
 
@@ -241,12 +247,20 @@ async def update_flow_route(
         for key, value in payload_data.items():
             if key in {"name", "description", "is_active", "trigger_type", "trigger_value", "keywords", "stop_words", "priority", "version"}:
                 setattr(flow, key, value)
+        if flow.is_active:
+            db.query(Flow).filter(
+                Flow.tenant_id == tenant.id,
+                Flow.id != flow.id,
+            ).update({Flow.is_active: False}, synchronize_session=False)
 
         if not flow.id:
             raise Exception("Flow sem ID")
 
         persisted_nodes = flow.current_version.nodes if flow.current_version and isinstance(flow.current_version.nodes, list) else []
-        if not _is_valid_flow(nodes, edges):
+        valid, error = validate_flow(nodes, edges)
+        print("[FLOW VALID]:", valid)
+        if not valid:
+            print(f"[FLOW BLOCKED] {error}")
             _log_flow_version_blocked(flow.id, len(nodes))
             if persisted_nodes and not raw_nodes and not raw_edges:
                 print(
@@ -256,7 +270,7 @@ async def update_flow_route(
                         "flow_id": str(flow.id),
                     }
                 )
-            _block_invalid_flow_save()
+            return JSONResponse(status_code=400, content={"error": error or "Flow inválido"})
 
         last_version = db.execute(
             select(FlowVersion)
@@ -286,6 +300,8 @@ async def update_flow_route(
         db.add(new_version)
         db.flush()
         flow.current_version_id = new_version.id
+        if flow.is_active:
+            print("[FLOW ACTIVE]:", flow.id)
 
         print("ANTES DO COMMIT")
         db.commit()
@@ -452,8 +468,14 @@ def save_tenant_flow(
 
     normalized_nodes = _ensure_start_node(payload.nodes or [])
     normalized_edges = payload.edges or []
+    print("[FLOW SAVE] nodes:", len(normalized_nodes))
     if len(normalized_nodes) <= 1:
-        _block_invalid_flow_save()
+        raise HTTPException(status_code=400, detail="BLOCK SAVE: flow vazio")
+    valid, error = validate_flow(normalized_nodes, normalized_edges)
+    print("[FLOW VALID]:", valid)
+    if not valid:
+        print(f"[FLOW BLOCKED] {error}")
+        raise HTTPException(status_code=400, detail=error or "Flow inválido")
 
     existing_graph = get_flow_graph(db=db, tenant_id=tenant.id, flow_id=flow_id or "default")
     existing_nodes = existing_graph.get("nodes") if isinstance(existing_graph, dict) else []
@@ -599,6 +621,11 @@ async def update_tenant_flow(
         update_data = {key: value for key, value in payload_data.items() if key in flow_update_fields}
         for key, value in update_data.items():
             setattr(flow, key, value)
+        if flow.is_active:
+            db.query(Flow).filter(
+                Flow.tenant_id == tenant_uuid,
+                Flow.id != flow.id,
+            ).update({Flow.is_active: False}, synchronize_session=False)
 
         nodes = []
         for node in payload_model.nodes or []:
@@ -612,13 +639,17 @@ async def update_tenant_flow(
             )
         nodes = _ensure_start_node(nodes)
         edges = payload_model.edges or []
+        print("[FLOW SAVE] nodes:", len(nodes))
         if len(nodes) <= 1:
-            _block_invalid_flow_save()
+            raise Exception("BLOCK SAVE: flow vazio")
         print("VALIDANDO FLOW:")
         print("nodes:", nodes)
 
         persisted_nodes = flow.current_version.nodes if flow.current_version and isinstance(flow.current_version.nodes, list) else []
-        if not _is_valid_flow(nodes, edges):
+        valid, error = validate_flow(nodes, edges)
+        print("[FLOW VALID]:", valid)
+        if not valid:
+            print(f"[FLOW BLOCKED] {error}")
             _log_flow_version_blocked(flow.id, len(nodes))
             incoming_nodes = payload_model.nodes or []
             incoming_edges = payload_model.edges or []
@@ -630,7 +661,7 @@ async def update_tenant_flow(
                         "flow_id": str(flow.id),
                     }
                 )
-            _block_invalid_flow_save()
+            raise HTTPException(status_code=400, detail=error or "Flow inválido")
 
         nova = FlowVersion(
             flow_id=flow.id,
@@ -650,6 +681,8 @@ async def update_tenant_flow(
         )
 
         flow.current_version_id = nova.id
+        if flow.is_active:
+            print("[FLOW ACTIVE]:", flow.id)
         db.commit()
 
         return {"status": "ok"}
