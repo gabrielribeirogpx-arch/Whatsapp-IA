@@ -105,17 +105,29 @@ def validate_flow(nodes: list[dict[str, Any]], edges: list[dict[str, Any]]) -> t
 
 def _validate_nodes_by_type(nodes: list[dict[str, Any]]) -> None:
     for node in nodes:
-        node_type = str(node.get("type") or "").strip().lower()
         data = node.get("data", {})
         if not isinstance(data, dict):
             data = {}
 
+        node_type = str(
+            node.get("type")
+            or data.get("type")
+            or data.get("nodeType")
+            or ""
+        ).strip().lower()
+
         if node_type == "message":
-            if not data.get("text"):
-                raise HTTPException(status_code=400, detail="Message node sem texto")
+            text = data.get("text")
+            if isinstance(text, str):
+                text = text.strip()
+            if not text:
+                raise HTTPException(status_code=400, detail="Mensagem sem texto")
         elif node_type == "condition":
-            if not data.get("condition"):
-                raise HTTPException(status_code=400, detail="Condition node sem regra")
+            condition = data.get("condition")
+            if isinstance(condition, str):
+                condition = condition.strip()
+            if not condition:
+                raise HTTPException(status_code=400, detail="Condição sem conteúdo")
 
 
 def _ensure_start_node(nodes: list[dict[str, Any]]) -> list[dict[str, Any]]:
