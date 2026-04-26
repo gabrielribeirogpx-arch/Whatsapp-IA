@@ -14,6 +14,7 @@ from sqlalchemy import select
 
 from app.db.session import SessionLocal
 from app.models import Flow, FlowEdge, FlowNode, FlowVersion
+from app.services.flow_engine_service import validate_flow_structure
 
 
 @dataclass
@@ -32,6 +33,8 @@ class FlowSnapshot:
     nodes_count: int
     edges_count: int
     raw_nodes: list[dict]
+    is_valid: bool
+    validation_error: str | None
 
 
 def _safe_nodes(payload: list[dict] | None) -> list[dict]:
@@ -68,6 +71,34 @@ def scan_all_flows() -> list[FlowSnapshot]:
 
             raw_nodes = _safe_nodes(current_version.nodes if current_version else None)
             edges = current_version.edges if current_version and isinstance(current_version.edges, list) else []
+            valid, validation_error = validate_flow_structure(
+                nodes=raw_nodes if isinstance(raw_nodes, list) else [],
+                edges=edges if isinstance(edges, list) else [],
+            )
+
+            if not raw_nodes:
+                print(
+                    json.dumps(
+                        {
+                            "event": "flow_without_nodes",
+                            "flow_id": flow_id,
+                            "current_version_id": str(flow.current_version_id) if flow.current_version_id else None,
+                        },
+                        ensure_ascii=False,
+                    )
+                )
+            if not valid:
+                print(
+                    json.dumps(
+                        {
+                            "event": "flow_inconsistent",
+                            "flow_id": flow_id,
+                            "current_version_id": str(flow.current_version_id) if flow.current_version_id else None,
+                            "detail": validation_error,
+                        },
+                        ensure_ascii=False,
+                    )
+                )
 
             snapshots.append(
                 FlowSnapshot(
@@ -85,6 +116,8 @@ def scan_all_flows() -> list[FlowSnapshot]:
                     nodes_count=len(raw_nodes),
                     edges_count=len(edges) if isinstance(edges, list) else 0,
                     raw_nodes=raw_nodes,
+                    is_valid=valid,
+                    validation_error=validation_error,
                 )
             )
 

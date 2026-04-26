@@ -19,6 +19,7 @@ DEFAULT_FLOW_NAME = "__default_visual__"
 MAX_AUTO_STEPS = 10
 MAX_RETRIES = 3
 logger = logging.getLogger(__name__)
+_ACTIVE_FLOW_RUNTIME_CACHE: dict[uuid.UUID, dict[str, Any]] = {}
 
 
 @dataclass
@@ -118,6 +119,106 @@ def _get_latest_valid_flow_version(db: Session, flow_id: uuid.UUID) -> FlowVersi
     return None
 
 
+def _invalidate_flow_runtime_cache(flow_id: uuid.UUID, reason: str) -> None:
+    removed = _ACTIVE_FLOW_RUNTIME_CACHE.pop(flow_id, None)
+    logger.info(
+        "[FLOW CACHE] invalidated flow_id=%s reason=%s existed=%s",
+        flow_id,
+        reason,
+        bool(removed),
+    )
+
+
+def _detect_invalid_flow_payload(
+    *,
+    flow_id: uuid.UUID,
+    version_id: uuid.UUID | None,
+    nodes: list[dict[str, Any]] | None,
+    edges: list[dict[str, Any]] | None,
+    context: str,
+) -> tuple[bool, str | None]:
+    valid, error = validate_flow_structure(nodes=nodes, edges=edges)
+    if valid:
+        return True, None
+    node_count = len(nodes) if isinstance(nodes, list) else 0
+    edge_count = len(edges) if isinstance(edges, list) else 0
+    if node_count == 0:
+        logger.error(
+            "[FLOW INVALID] flow_without_nodes flow_id=%s version_id=%s context=%s detail=%s",
+            flow_id,
+            version_id,
+            context,
+            error,
+        )
+    else:
+        logger.error(
+            "[FLOW INVALID] inconsistent_flow flow_id=%s version_id=%s context=%s detail=%s nodes_count=%s edges_count=%s",
+            flow_id,
+            version_id,
+            context,
+            error,
+            node_count,
+            edge_count,
+        )
+    return False, error
+
+
+def _resolve_runtime_flow_payload(
+    db: Session,
+    flow: Flow,
+) -> tuple[FlowVersion | None, list[dict[str, Any]], list[dict[str, Any]], str]:
+    published_version = db.execute(
+        select(FlowVersion)
+        .where(FlowVersion.flow_id == flow.id, FlowVersion.is_active.is_(True))
+        .order_by(FlowVersion.version.desc(), FlowVersion.created_at.desc())
+    ).scalars().first()
+
+    current_version: FlowVersion | None = None
+    if flow.current_version_id:
+        current_version = db.execute(
+            select(FlowVersion).where(FlowVersion.id == flow.current_version_id, FlowVersion.flow_id == flow.id)
+        ).scalars().first()
+
+    latest_valid_version = _get_latest_valid_flow_version(db=db, flow_id=flow.id)
+    candidates: list[tuple[str, FlowVersion | None]] = [
+        ("published_version", published_version),
+        ("current_version", current_version),
+        ("latest_valid_version", latest_valid_version),
+    ]
+    evaluated: set[uuid.UUID] = set()
+
+    for source, candidate in candidates:
+        if not candidate or candidate.id in evaluated:
+            continue
+        evaluated.add(candidate.id)
+        nodes = candidate.nodes if isinstance(candidate.nodes, list) else []
+        edges = candidate.edges if isinstance(candidate.edges, list) else []
+        valid, _ = _detect_invalid_flow_payload(
+            flow_id=flow.id,
+            version_id=candidate.id,
+            nodes=nodes,
+            edges=edges,
+            context=source,
+        )
+        if valid:
+            if flow.current_version_id != candidate.id:
+                previous_version_id = flow.current_version_id
+                flow.current_version_id = candidate.id
+                flow.version = candidate.version
+                db.add(flow)
+                db.flush()
+                logger.warning(
+                    "[FLOW AUTO-REPAIR] flow_id=%s from_current_version=%s to_version=%s source=%s",
+                    flow.id,
+                    previous_version_id,
+                    candidate.id,
+                    source,
+                )
+            return candidate, nodes, edges, source
+
+    return None, [], [], "empty"
+
+
 def _serialize_persisted_flow_graph(
     db: Session,
     tenant_id: uuid.UUID,
@@ -153,53 +254,8 @@ def _serialize_persisted_flow_graph(
 
 def get_flow_for_builder(db: Session, tenant_id: uuid.UUID, flow_id: str) -> dict[str, Any]:
     flow = resolve_flow(db=db, tenant_id=tenant_id, flow_id=flow_id)
-    selected_version: FlowVersion | None = None
-
-    if flow.current_version_id:
-        selected_version = db.execute(
-            select(FlowVersion).where(FlowVersion.id == flow.current_version_id, FlowVersion.flow_id == flow.id)
-        ).scalars().first()
-
-    if not selected_version:
-        selected_version = db.execute(
-            select(FlowVersion)
-            .where(FlowVersion.flow_id == flow.id)
-            .order_by(FlowVersion.created_at.desc())
-        ).scalars().first()
-
-    nodes: list[dict[str, Any]] = []
-    edges: list[dict[str, Any]] = []
-    source = "empty"
-    if selected_version:
-        nodes = selected_version.nodes if isinstance(selected_version.nodes, list) else []
-        edges = selected_version.edges if isinstance(selected_version.edges, list) else []
-        source = "version"
-
+    selected_version, nodes, edges, source = _resolve_runtime_flow_payload(db=db, flow=flow)
     valid, error = validate_flow_structure(nodes=nodes, edges=edges)
-    if source == "version" and not valid:
-        logger.error(
-            "[FLOW ERROR] load_invalid_current_version flow_id=%s version_id=%s detail=%s",
-            flow.id,
-            selected_version.id if selected_version else None,
-            error,
-        )
-        fallback_version = _get_latest_valid_flow_version(db=db, flow_id=flow.id)
-        if fallback_version and (not selected_version or fallback_version.id != selected_version.id):
-            print("[FLOW RECOVERY] usando versão anterior válida")
-            logger.warning(
-                "[FLOW RECOVERY] using_previous_valid_version flow_id=%s version_id=%s",
-                flow.id,
-                fallback_version.id,
-            )
-            selected_version = fallback_version
-            nodes = fallback_version.nodes if isinstance(fallback_version.nodes, list) else []
-            edges = fallback_version.edges if isinstance(fallback_version.edges, list) else []
-            source = "version"
-            if flow.current_version_id != fallback_version.id:
-                flow.current_version_id = fallback_version.id
-                db.add(flow)
-                db.flush()
-            valid, error = validate_flow_structure(nodes=nodes, edges=edges)
 
     if not valid or not nodes:
         fallback_nodes, fallback_edges = _serialize_persisted_flow_graph(db=db, tenant_id=tenant_id, flow_id=flow.id)
@@ -207,7 +263,7 @@ def get_flow_for_builder(db: Session, tenant_id: uuid.UUID, flow_id: str) -> dic
         if fallback_valid:
             nodes = fallback_nodes
             edges = fallback_edges
-            source = "fallback"
+            source = "persisted_fallback"
         else:
             logger.error(
                 "[FLOW ERROR] empty_or_invalid_flow flow_id=%s current_version_id=%s detail=%s fallback_detail=%s",
@@ -315,6 +371,15 @@ def _load_flow_version_runtime(flow: Flow, tenant_id: uuid.UUID, flow_version: F
 
 
 def _get_current_flow_runtime(db: Session, flow: Flow, tenant_id: uuid.UUID) -> dict[str, Any] | None:
+    cached = _ACTIVE_FLOW_RUNTIME_CACHE.get(flow.id)
+    if cached and cached.get("version_id") == str(flow.current_version_id):
+        logger.info(
+            "[FLOW CACHE] hit flow_id=%s version_id=%s",
+            flow.id,
+            cached.get("version_id"),
+        )
+        return cached.get("runtime_graph")
+
     resolved = get_flow_for_builder(db=db, tenant_id=tenant_id, flow_id=str(flow.id))
     if not resolved["nodes"]:
         return None
@@ -328,7 +393,17 @@ def _get_current_flow_runtime(db: Session, flow: Flow, tenant_id: uuid.UUID) -> 
         parsed_version_id = _parse_uuid(resolved["version_id"])
         if parsed_version_id:
             runtime_version.id = parsed_version_id
-    return _load_flow_version_runtime(flow=flow, tenant_id=tenant_id, flow_version=runtime_version)
+    runtime_graph = _load_flow_version_runtime(flow=flow, tenant_id=tenant_id, flow_version=runtime_version)
+    _ACTIVE_FLOW_RUNTIME_CACHE[flow.id] = {
+        "version_id": resolved.get("version_id"),
+        "runtime_graph": runtime_graph,
+    }
+    logger.info(
+        "[FLOW CACHE] store flow_id=%s version_id=%s",
+        flow.id,
+        resolved.get("version_id"),
+    )
+    return runtime_graph
 
 
 def _normalize_text(value: str | None) -> str:
@@ -759,6 +834,13 @@ def process_flow_engine(
     if not conversation:
         logger.info("Flow ignorado: conversa nao encontrada tenant_id=%s phone=%s", tenant_id, normalized_phone)
         return None
+    logger.info(
+        "[FLOW_START] conversation_id=%s tenant_id=%s flow_id=%s phone=%s",
+        conversation.id,
+        conversation.tenant_id,
+        flow_id,
+        normalized_phone,
+    )
 
     _ensure_conversation_state(conversation=conversation, message_text=message_text)
     if should_reset_context(message=message_text or "", context=conversation.context):
@@ -769,6 +851,7 @@ def process_flow_engine(
             flow = resolve_flow(db=db, tenant_id=conversation.tenant_id, flow_id=flow_id)
         except Exception:
             logger.exception("[FLOW SELECT ERROR] tenant_id=%s flow_id=%s", conversation.tenant_id, flow_id)
+            logger.error("[FLOW_ERROR] conversation_id=%s reason=flow_select_error", conversation.id)
             return None
     else:
         flow = _get_or_create_visual_flow(db=db, tenant_id=conversation.tenant_id)
@@ -781,6 +864,7 @@ def process_flow_engine(
         runtime_graph=runtime_graph,
     )
     if conversation.current_node_id is None and not initialized_node:
+        logger.error("[FLOW_ERROR] conversation_id=%s reason=flow_start_node_missing", conversation.id)
         return None
 
     msg = _normalize_text(message_text)
@@ -834,6 +918,7 @@ def process_flow_engine(
                 logger.info("[FLOW RECOVERY] node=%s", start_node.id)
             else:
                 logger.error("[FLOW ERROR] no start node found")
+                logger.error("[FLOW_ERROR] conversation_id=%s reason=start_node_not_found", conversation.id)
                 return None
 
         if not intent:
@@ -930,6 +1015,7 @@ def process_flow_engine(
             else:
                 print("[FLOW ERROR] no start node found")
                 logger.error("[FLOW ERROR] no start node found")
+                logger.error("[FLOW_ERROR] conversation_id=%s reason=start_node_not_found", conversation.id)
                 return None
 
         if conversation.mode != "flow":
@@ -995,6 +1081,7 @@ def process_flow_engine(
     tenant = db.execute(select(Tenant).where(Tenant.id == conversation.tenant_id)).scalars().first()
     if not tenant:
         logger.warning("[FLOW SEND] Tenant nao encontrado para conversation_id=%s", conversation.id)
+        logger.error("[FLOW_ERROR] conversation_id=%s reason=tenant_not_found", conversation.id)
         return None
 
     conversation_phone = getattr(conversation, "phone", None) or conversation.phone_number
@@ -1012,6 +1099,7 @@ def process_flow_engine(
             logger.info("[FLOW RECOVERY] node=%s", start_node.id)
         else:
             logger.error("[FLOW ERROR] no start node found")
+            logger.error("[FLOW_ERROR] conversation_id=%s reason=start_node_not_found", conversation.id)
             return None
 
     node = _get_node(
@@ -1022,6 +1110,7 @@ def process_flow_engine(
     )
     if not node:
         _reset_to_bot_mode(db=db, conversation=conversation, reason="flow_error_node_not_found")
+        logger.error("[FLOW_ERROR] conversation_id=%s reason=node_not_found", conversation.id)
         return None
 
     collected_messages: list[str] = []
@@ -1066,6 +1155,7 @@ def process_flow_engine(
             if node_type in {"message", "text", "msg"}:
                 if not text:
                     print("[FLOW ERROR] texto vazio no node")
+                    logger.error("[FLOW_ERROR] conversation_id=%s reason=empty_message_node", conversation.id)
                     return None
                 _send_flow_whatsapp_message(tenant=tenant, phone=conversation_phone, text=text)
                 record_flow_event(
@@ -1314,7 +1404,14 @@ def process_flow_engine(
         )
         _reset_to_bot_mode(db=db, conversation=conversation, reason="flow_max_steps_reached")
 
-    return "\n\n".join(part for part in collected_messages if part).strip() or None
+    response = "\n\n".join(part for part in collected_messages if part).strip() or None
+    logger.info(
+        "[FLOW_END] conversation_id=%s flow_id=%s response_generated=%s",
+        conversation.id,
+        conversation.current_flow,
+        bool(response),
+    )
+    return response
 
 
 def seed_default_visual_flow(db: Session, flow: Flow, tenant_id: uuid.UUID) -> None:
@@ -1435,6 +1532,7 @@ def save_flow_graph(db: Session, tenant_id: uuid.UUID, flow_id: str, nodes: list
     flow.current_version_id = flow_version.id
     flow.version = next_version
     db.add(flow)
+    _invalidate_flow_runtime_cache(flow.id, reason="publish_new_version")
     if flow.is_active:
         print("[FLOW ACTIVE]:", flow.id)
     logger.info(
