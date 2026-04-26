@@ -171,6 +171,8 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
   const simulationStartedRef = useRef(false);
   const autosaveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const autosaveReadyRef = useRef(false);
+  const isLoadingFlowRef = useRef(false);
+  const lastLoadedFlowIdRef = useRef<string | null>(null);
   const nodesRef = useRef<Node[]>([]);
 
   const getTenantHeaders = useCallback(() => {
@@ -201,6 +203,11 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
   useEffect(() => {
     nodesRef.current = nodes;
   }, [nodes]);
+
+  useEffect(() => {
+    console.log('NODES:', nodes);
+    console.log('EDGES:', edges);
+  }, [edges, nodes]);
 
   useEffect(() => {
     console.log(
@@ -328,169 +335,104 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
     requestAnimationFrame(() => { rfInstance?.fitView(); });
   }, [rfInstance, setEdges, setNodes]);
 
-  useEffect(() => {
-    let active = true;
-
-    const loadFlow = async () => {
-      try {
-        const API_URL = process.env.NEXT_PUBLIC_API_URL;
-        if (!API_URL) {
-          if (active && nodesRef.current.length === 0) {
-            setNodes([FALLBACK_START_NODE]);
-            setEdges([]);
-          }
-          return;
-        }
-
-        const ensureFlowId = async () => {
-          if (selectedFlowId) {
-            return selectedFlowId;
-          }
-
-          const createResponse = await fetch(`${API_URL}/api/flows/`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              ...getTenantHeaders(),
-            },
-            body: JSON.stringify({
-              name: 'Novo Flow',
-              description: '',
-              is_active: false,
-              trigger_type: 'default',
-              nodes: [],
-              edges: [],
-            }),
-          });
-
-          if (!createResponse.ok) {
-            throw new Error('Erro ao criar flow');
-          }
-
-          const createdFlow = await createResponse.json();
-          const createdId = createdFlow?.id || createdFlow?.flow_id;
-
-          if (!createdId) {
-            throw new Error('Flow criado sem ID');
-          }
-
-          setSelectedFlowId(createdId);
-          setFlows((prev) => [{ id: createdId, name: 'Novo Flow' }, ...prev.filter((flow) => flow.id !== createdId)]);
-          return createdId as string;
-        };
-
-        const selectedFlowId = await ensureFlowId();
-        console.log('[FlowBuilder] carregando flowId:', selectedFlowId);
-
-        const timeoutPromise = new Promise<never>((_, reject) => {
-          const timeoutId = setTimeout(() => {
-            clearTimeout(timeoutId);
-            reject(new Error('Timeout carregando flow'));
-          }, FETCH_TIMEOUT_MS);
-        });
-
-        const requestPromise = fetch(`${API_URL}/api/flows/${selectedFlowId}`, {
-          headers: {
-            ...getTenantHeaders(),
-          },
-        }).then(async (res) => {
-          if (res.status === 404) {
-            const createResponse = await fetch(`${API_URL}/api/flows/`, {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                ...getTenantHeaders(),
-              },
-              body: JSON.stringify({
-                name: 'Novo Flow',
-                description: '',
-                is_active: false,
-                trigger_type: 'default',
-                nodes: [],
-                edges: [],
-              }),
-            });
-
-            if (!createResponse.ok) {
-              throw new Error('Erro ao criar flow após 404');
-            }
-
-            const createdFlow = await createResponse.json();
-            const createdId = createdFlow?.id || createdFlow?.flow_id;
-            if (!createdId) {
-              throw new Error('Flow criado sem ID após 404');
-            }
-            setSelectedFlowId(createdId);
-            setFlows((prev) => [{ id: createdId, name: 'Novo Flow' }, ...prev.filter((flow) => flow.id !== createdId)]);
-
-            const retryResponse = await fetch(`${API_URL}/api/flows/${createdId}`, {
-              headers: {
-                ...getTenantHeaders(),
-              },
-            });
-            if (!retryResponse.ok) {
-              throw new Error('Erro ao carregar flow recém-criado');
-            }
-            return retryResponse.json();
-          }
-
-          if (!res.ok) {
-            throw new Error('Erro ao carregar flow');
-          }
-          return res.json();
-        });
-        const data = await Promise.race([requestPromise, timeoutPromise]);
-        if (!active) return;
-
-        const safeNodes = Array.isArray(data?.nodes) ? data.nodes : [];
-        const safeEdges = Array.isArray(data?.edges) ? data.edges : [];
-
-        if (safeNodes.length === 0) {
-          console.warn('Flow vazio vindo do backend');
-          if (nodesRef.current.length > 0) {
-            return;
-          }
-        }
-
-        const initialNodes =
-          safeNodes.length === 0
-            ? [FALLBACK_START_NODE]
-            : safeNodes.map(buildFlowNode);
-        const initialEdges: Edge[] = safeEdges.map(buildFlowEdge);
-
-        // Se os nodes já têm posições salvas (x e y não-zero), usa diretamente
-        // sem passar pelo dagre — preserva layout manual do usuário
-        const hasStoredPositions = initialNodes.some(
-          (n) => n.position && (n.position.x !== 0 || n.position.y !== 0)
-        );
-
-        if (hasStoredPositions) {
-          const orderedEdges = orderChoiceChildrenEdges(initialNodes, initialEdges);
-          setNodes(initialNodes);
-          setEdges(orderedEdges);
-          requestAnimationFrame(() => { rfInstance?.fitView(); });
-        } else {
-          applyLayoutAndSetFlow(initialNodes, initialEdges);
-        }
-      } catch {
-        if (!active) return;
-        if (nodesRef.current.length === 0) {
-          setNodes([FALLBACK_START_NODE]);
-          setEdges([]);
-        }
-      } finally {
-        if (active) {
-          setIsLoading(false);
-        }
+  const loadFlow = useCallback(async (flowId: string | null) => {
+    try {
+      const API_URL = process.env.NEXT_PUBLIC_API_URL;
+      if (!API_URL) {
+        setNodes([FALLBACK_START_NODE]);
+        setEdges([]);
+        return;
       }
-    };
 
-    loadFlow();
+      if (!flowId) return;
 
-    return () => {
-      active = false;
-    };
-  }, [selectedFlowId, applyLayoutAndSetFlow, buildFlowNode, getTenantHeaders, setEdges, setNodes]);
+      isLoadingFlowRef.current = true;
+      setIsLoading(true);
+      lastLoadedFlowIdRef.current = flowId;
+
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        const timeoutId = setTimeout(() => {
+          clearTimeout(timeoutId);
+          reject(new Error('Timeout carregando flow'));
+        }, FETCH_TIMEOUT_MS);
+      });
+
+      const requestPromise = fetch(`${API_URL}/api/flows/${flowId}`, {
+        headers: {
+          ...getTenantHeaders(),
+        },
+      }).then(async (res) => {
+        if (!res.ok) {
+          throw new Error('Erro ao carregar flow');
+        }
+        return res.json();
+      });
+
+      const data = await Promise.race([requestPromise, timeoutPromise]);
+      console.log('FLOW CARREGADO:', data);
+
+      const safeNodes = Array.isArray(data?.nodes) ? data.nodes : [];
+      const safeEdges = Array.isArray(data?.edges) ? data.edges : [];
+
+      const formattedNodes: Node[] = safeNodes.map((n: FlowNodePayload) =>
+        buildFlowNode({
+          ...n,
+          id: String(n.id),
+          type: n.type || 'default',
+          position: n.position || { x: 0, y: 0 },
+          data: n.data || {},
+        }),
+      );
+
+      const formattedEdges: Edge[] = safeEdges.map((e: FlowEdgePayload) => ({
+        ...buildFlowEdge({
+          ...e,
+          id: String(e.id),
+          source: String(e.source),
+          target: String(e.target),
+          label: e.label || '',
+        }),
+      }));
+
+      const nodesToRender =
+        formattedNodes.length === 0
+          ? [
+              {
+                id: 'start',
+                type: 'default',
+                position: { x: 250, y: 150 },
+                data: { label: 'Início' },
+              } as Node,
+            ]
+          : formattedNodes;
+
+      console.log('NODES:', nodesToRender);
+      console.log('EDGES:', formattedEdges);
+
+      const hasStoredPositions = nodesToRender.some((n) => n.position && (n.position.x !== 0 || n.position.y !== 0));
+      if (hasStoredPositions) {
+        const orderedEdges = orderChoiceChildrenEdges(nodesToRender, formattedEdges);
+        setNodes(nodesToRender);
+        setEdges(orderedEdges);
+        requestAnimationFrame(() => { rfInstance?.fitView(); });
+      } else {
+        applyLayoutAndSetFlow(nodesToRender, formattedEdges);
+      }
+    } catch (err) {
+      console.error('Erro ao carregar flow', err);
+      setNodes([FALLBACK_START_NODE]);
+      setEdges([]);
+    } finally {
+      isLoadingFlowRef.current = false;
+      setIsLoading(false);
+    }
+  }, [applyLayoutAndSetFlow, buildFlowEdge, buildFlowNode, getTenantHeaders, rfInstance, setEdges, setNodes]);
+
+  useEffect(() => {
+    if (!selectedFlowId) return;
+    if (lastLoadedFlowIdRef.current === selectedFlowId) return;
+    void loadFlow(selectedFlowId);
+  }, [loadFlow, selectedFlowId]);
 
   const flow = useMemo(
     () => ({
@@ -798,6 +740,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
       autosaveReadyRef.current = true;
       return;
     }
+    if (isLoadingFlowRef.current) return;
     if (!rfInstance || !selectedFlowId) return;
 
     if (autosaveTimeoutRef.current) {
@@ -1031,7 +974,13 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
         <div className="flow-builder-top-actions">
           <select
             value={selectedFlowId || ''}
-            onChange={(e) => setSelectedFlowId(e.target.value || null)}
+            onChange={(e) => {
+              const id = e.target.value || null;
+              setSelectedFlowId(id);
+              setNodes([]);
+              setEdges([]);
+              void loadFlow(id);
+            }}
             style={{
               padding: '6px 10px',
               borderRadius: 8,
@@ -1169,6 +1118,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
           </div>
         )}
         <ReactFlow
+          key={selectedFlowId || 'no-flow'}
           onInit={setRfInstance}
           nodes={decoratedNodes}
           edges={decoratedEdges}
