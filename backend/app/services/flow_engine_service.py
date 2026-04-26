@@ -53,33 +53,53 @@ def _parse_uuid(value: Any) -> uuid.UUID | None:
         return None
 
 
-def _is_valid_flow_payload(nodes: list[dict[str, Any]] | None, edges: list[dict[str, Any]] | None) -> bool:
-    del edges  # edges are currently not required for version validity
-    if not isinstance(nodes, list) or len(nodes) <= 1:
-        return False
-    return any(
-        isinstance(node, dict)
-        and isinstance(node.get("data"), dict)
-        and bool(node.get("data", {}).get("isStart"))
-        for node in nodes
-    )
+def validate_flow_structure(
+    nodes: list[dict[str, Any]] | None,
+    edges: list[dict[str, Any]] | None,
+) -> tuple[bool, str | None]:
+    nodes_payload = nodes if isinstance(nodes, list) else []
+    edges_payload = edges if isinstance(edges, list) else []
+    if not nodes_payload:
+        return False, "Flow inválido: nodes vazio"
 
+    node_ids: set[str] = set()
+    has_start = False
+    for node in nodes_payload:
+        if not isinstance(node, dict):
+            return False, "Flow inválido: node malformado"
+        node_id = str(node.get("id") or "").strip()
+        if not node_id:
+            return False, "Flow inválido: node sem id"
+        if node_id in node_ids:
+            return False, f"Flow inválido: node duplicado ({node_id})"
+        node_ids.add(node_id)
+        data = node.get("data") if isinstance(node.get("data"), dict) else {}
+        if bool(data.get("isStart")):
+            has_start = True
 
-def validate_flow(nodes: list[dict[str, Any]] | None, edges: list[dict[str, Any]] | None) -> tuple[bool, str | None]:
-    del edges
-    if not nodes or len(nodes) <= 1:
-        return False, "Flow inválido: poucos nodes"
-
-    has_start = any(
-        isinstance(node, dict)
-        and isinstance(node.get("data"), dict)
-        and bool(node.get("data", {}).get("isStart"))
-        for node in nodes
-    )
     if not has_start:
         return False, "Flow inválido: sem start node"
 
+    for edge in edges_payload:
+        if not isinstance(edge, dict):
+            return False, "Flow inválido: edge malformado"
+        source = str(edge.get("source") or "").strip()
+        target = str(edge.get("target") or "").strip()
+        if not source or not target:
+            return False, "Flow inválido: edge sem source/target"
+        if source not in node_ids or target not in node_ids:
+            return False, "Flow inválido: edge aponta para node inexistente"
+
     return True, None
+
+
+def _is_valid_flow_payload(nodes: list[dict[str, Any]] | None, edges: list[dict[str, Any]] | None) -> bool:
+    valid, _ = validate_flow_structure(nodes=nodes, edges=edges)
+    return valid
+
+
+def validate_flow(nodes: list[dict[str, Any]] | None, edges: list[dict[str, Any]] | None) -> tuple[bool, str | None]:
+    return validate_flow_structure(nodes=nodes, edges=edges)
 
 
 def _get_latest_valid_flow_version(db: Session, flow_id: uuid.UUID) -> FlowVersion | None:
@@ -96,6 +116,126 @@ def _get_latest_valid_flow_version(db: Session, flow_id: uuid.UUID) -> FlowVersi
         if valid:
             return version
     return None
+
+
+def _serialize_persisted_flow_graph(
+    db: Session,
+    tenant_id: uuid.UUID,
+    flow_id: uuid.UUID,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    nodes = db.execute(
+        select(FlowNode).where(FlowNode.flow_id == flow_id, FlowNode.tenant_id == tenant_id).order_by(FlowNode.created_at.asc())
+    ).scalars().all()
+    edges = db.execute(select(FlowEdge).where(FlowEdge.flow_id == flow_id).order_by(FlowEdge.id.asc())).scalars().all()
+
+    return (
+        [
+            {
+                "id": str(node.id),
+                "type": node.type,
+                "position": {"x": node.position_x or 0, "y": node.position_y or 0},
+                "data": _extract_node_data(node),
+            }
+            for node in nodes
+        ],
+        [
+            {
+                "id": str(edge.id),
+                "source": str(edge.source),
+                "target": str(edge.target),
+                "label": edge.condition,
+                "data": {"condition": edge.condition},
+            }
+            for edge in edges
+        ],
+    )
+
+
+def get_flow_for_builder(db: Session, tenant_id: uuid.UUID, flow_id: str) -> dict[str, Any]:
+    flow = resolve_flow(db=db, tenant_id=tenant_id, flow_id=flow_id)
+    selected_version: FlowVersion | None = None
+
+    if flow.current_version_id:
+        selected_version = db.execute(
+            select(FlowVersion).where(FlowVersion.id == flow.current_version_id, FlowVersion.flow_id == flow.id)
+        ).scalars().first()
+
+    if not selected_version:
+        selected_version = db.execute(
+            select(FlowVersion)
+            .where(FlowVersion.flow_id == flow.id)
+            .order_by(FlowVersion.created_at.desc())
+        ).scalars().first()
+
+    nodes: list[dict[str, Any]] = []
+    edges: list[dict[str, Any]] = []
+    source = "empty"
+    if selected_version:
+        nodes = selected_version.nodes if isinstance(selected_version.nodes, list) else []
+        edges = selected_version.edges if isinstance(selected_version.edges, list) else []
+        source = "version"
+
+    valid, error = validate_flow_structure(nodes=nodes, edges=edges)
+    if source == "version" and not valid:
+        logger.error(
+            "[FLOW ERROR] load_invalid_current_version flow_id=%s version_id=%s detail=%s",
+            flow.id,
+            selected_version.id if selected_version else None,
+            error,
+        )
+        fallback_version = _get_latest_valid_flow_version(db=db, flow_id=flow.id)
+        if fallback_version and (not selected_version or fallback_version.id != selected_version.id):
+            print("[FLOW RECOVERY] usando versão anterior válida")
+            logger.warning(
+                "[FLOW RECOVERY] using_previous_valid_version flow_id=%s version_id=%s",
+                flow.id,
+                fallback_version.id,
+            )
+            selected_version = fallback_version
+            nodes = fallback_version.nodes if isinstance(fallback_version.nodes, list) else []
+            edges = fallback_version.edges if isinstance(fallback_version.edges, list) else []
+            source = "version"
+            if flow.current_version_id != fallback_version.id:
+                flow.current_version_id = fallback_version.id
+                db.add(flow)
+                db.flush()
+            valid, error = validate_flow_structure(nodes=nodes, edges=edges)
+
+    if not valid or not nodes:
+        fallback_nodes, fallback_edges = _serialize_persisted_flow_graph(db=db, tenant_id=tenant_id, flow_id=flow.id)
+        fallback_valid, fallback_error = validate_flow_structure(nodes=fallback_nodes, edges=fallback_edges)
+        if fallback_valid:
+            nodes = fallback_nodes
+            edges = fallback_edges
+            source = "fallback"
+        else:
+            logger.error(
+                "[FLOW ERROR] empty_or_invalid_flow flow_id=%s current_version_id=%s detail=%s fallback_detail=%s",
+                flow.id,
+                selected_version.id if selected_version else None,
+                error,
+                fallback_error,
+            )
+            source = "empty"
+            nodes = []
+            edges = []
+
+    result = {
+        "flow_id": str(flow.id),
+        "version_id": str(selected_version.id) if selected_version else None,
+        "nodes": nodes,
+        "edges": edges,
+        "source": source,
+    }
+    logger.info(
+        "[FLOW LOAD] flow_id=%s version_id=%s nodes_count=%s edges_count=%s source=%s",
+        result["flow_id"],
+        result["version_id"],
+        len(result["nodes"]),
+        len(result["edges"]),
+        result["source"],
+    )
+    return result
 
 
 def _load_flow_version_runtime(flow: Flow, tenant_id: uuid.UUID, flow_version: FlowVersion) -> dict[str, Any]:
@@ -175,33 +315,20 @@ def _load_flow_version_runtime(flow: Flow, tenant_id: uuid.UUID, flow_version: F
 
 
 def _get_current_flow_runtime(db: Session, flow: Flow, tenant_id: uuid.UUID) -> dict[str, Any] | None:
-    flow_version: FlowVersion | None = None
-    if flow.current_version_id:
-        flow_version = db.execute(
-            select(FlowVersion).where(FlowVersion.id == flow.current_version_id, FlowVersion.flow_id == flow.id)
-        ).scalars().first()
-        if flow_version:
-            valid, error = validate_flow(
-                flow_version.nodes if isinstance(flow_version.nodes, list) else [],
-                flow_version.edges if isinstance(flow_version.edges, list) else [],
-            )
-            if not valid:
-                print(f"[FLOW BLOCKED] {error}")
-                print(f"[FLOW FALLBACK] flow_id={flow.id} invalid_version={flow_version.id}")
-                flow_version = None
-
-    if not flow_version:
-        fallback_version = _get_latest_valid_flow_version(db=db, flow_id=flow.id)
-        if not fallback_version:
-            return None
-        print(f"[FLOW FALLBACK ACTIVE] flow_id={flow.id} version_id={fallback_version.id}")
-        flow_version = fallback_version
-        if flow.current_version_id != fallback_version.id:
-            flow.current_version_id = fallback_version.id
-            db.add(flow)
-            db.flush()
-
-    return _load_flow_version_runtime(flow=flow, tenant_id=tenant_id, flow_version=flow_version)
+    resolved = get_flow_for_builder(db=db, tenant_id=tenant_id, flow_id=str(flow.id))
+    if not resolved["nodes"]:
+        return None
+    runtime_version = FlowVersion(
+        flow_id=flow.id,
+        version=flow.version or 1,
+        nodes=resolved["nodes"],
+        edges=resolved["edges"],
+    )
+    if resolved.get("version_id"):
+        parsed_version_id = _parse_uuid(resolved["version_id"])
+        if parsed_version_id:
+            runtime_version.id = parsed_version_id
+    return _load_flow_version_runtime(flow=flow, tenant_id=tenant_id, flow_version=runtime_version)
 
 
 def _normalize_text(value: str | None) -> str:
@@ -1255,60 +1382,14 @@ def seed_default_visual_flow(db: Session, flow: Flow, tenant_id: uuid.UUID) -> N
     db.flush()
 
 
-def get_flow_graph(db: Session, tenant_id: uuid.UUID, flow_id: str) -> dict[str, list[dict[str, Any]]]:
-    flow = resolve_flow(db=db, tenant_id=tenant_id, flow_id=flow_id)
-    runtime_graph = _get_current_flow_runtime(db=db, flow=flow, tenant_id=tenant_id)
-    if runtime_graph:
-        print(f"[FLOW REPAIR CHECK] flow_id={flow.id} nodes={len(runtime_graph.get('nodes', []))}")
-        return {
-            "flow_id": str(flow.id),
-            "nodes": [
-                {
-                    "id": str(node.id),
-                    "type": node.type,
-                    "position": {"x": node.position_x or 0, "y": node.position_y or 0},
-                    "data": _extract_node_data(node),
-                }
-                for node in runtime_graph["nodes"]
-            ],
-            "edges": [
-                {
-                    "id": str(edge.id),
-                    "source": str(edge.source),
-                    "target": str(edge.target),
-                    "label": edge.condition,
-                    "data": {"condition": edge.condition},
-                }
-                for edge in runtime_graph["edges"]
-            ],
-        }
-
-    nodes = db.execute(
-        select(FlowNode).where(FlowNode.flow_id == flow.id, FlowNode.tenant_id == tenant_id).order_by(FlowNode.created_at.asc())
-    ).scalars().all()
-    edges = db.execute(select(FlowEdge).where(FlowEdge.flow_id == flow.id).order_by(FlowEdge.id.asc())).scalars().all()
-
+def get_flow_graph(db: Session, tenant_id: uuid.UUID, flow_id: str) -> dict[str, Any]:
+    resolved = get_flow_for_builder(db=db, tenant_id=tenant_id, flow_id=flow_id)
     return {
-        "flow_id": str(flow.id),
-        "nodes": [
-            {
-                "id": str(node.id),
-                "type": node.type,
-                "position": {"x": node.position_x or 0, "y": node.position_y or 0},
-                "data": _extract_node_data(node),
-            }
-            for node in nodes
-        ],
-        "edges": [
-            {
-                "id": str(edge.id),
-                "source": str(edge.source),
-                "target": str(edge.target),
-                "label": edge.condition,
-                "data": {"condition": edge.condition},
-            }
-            for edge in edges
-        ],
+        "flow_id": resolved["flow_id"],
+        "version_id": resolved["version_id"],
+        "source": resolved["source"],
+        "nodes": resolved["nodes"],
+        "edges": resolved["edges"],
     }
 
 
@@ -1317,41 +1398,22 @@ def save_flow_graph(db: Session, tenant_id: uuid.UUID, flow_id: str, nodes: list
     nodes_payload = nodes or []
     edges_payload = edges or []
     print("[FLOW SAVE] nodes:", len(nodes_payload))
-    persisted_nodes = flow.current_version.nodes if flow.current_version and isinstance(flow.current_version.nodes, list) else []
-    persisted_edges = flow.current_version.edges if flow.current_version and isinstance(flow.current_version.edges, list) else []
-
-    valid, error = validate_flow(nodes_payload, edges_payload)
-    print("[FLOW VALID]:", valid)
-    if len(nodes_payload) <= 1:
-        raise Exception("BLOCK SAVE: flow vazio")
+    valid, error = validate_flow_structure(nodes_payload, edges_payload)
+    logger.info(
+        "[FLOW SAVE] flow_id=%s nodes_count=%s validation_status=%s",
+        flow.id,
+        len(nodes_payload),
+        "valid" if valid else "invalid",
+    )
     if not valid:
-        print(f"[FLOW BLOCKED] {error}")
-        print(
-            {
-                "action": "FLOW_VERSION_BLOCKED",
-                "reason": "invalid_payload",
-                "flow_id": str(flow.id),
-                "nodes": len(nodes_payload),
-            }
+        logger.error(
+            "[FLOW ERROR] save_validation_failed flow_id=%s detail=%s nodes_count=%s edges_count=%s",
+            flow.id,
+            error,
+            len(nodes_payload),
+            len(edges_payload),
         )
-        if len(persisted_nodes) > len(nodes_payload):
-            nodes_payload = persisted_nodes
-            edges_payload = persisted_edges
-            print(
-                {
-                    "action": "FLOW_VERSION_FALLBACK",
-                    "reason": "payload_smaller_than_persisted",
-                    "flow_id": str(flow.id),
-                    "payload_nodes": len(nodes or []),
-                    "persisted_nodes": len(persisted_nodes),
-                }
-            )
-        else:
-            return {
-                "flow_id": str(flow.id),
-                "status": "ignored_invalid_payload",
-                "flow_version_id": str(flow.current_version_id) if flow.current_version_id else "",
-            }
+        raise ValueError(error or "Flow inválido")
 
     last_version = db.query(func.max(FlowVersion.version)).filter(FlowVersion.flow_id == flow.id).scalar()
     next_version = (last_version or 0) + 1
