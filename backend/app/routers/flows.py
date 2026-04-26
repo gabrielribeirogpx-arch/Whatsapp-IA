@@ -114,11 +114,15 @@ def create_flow_route(
         tenant_id=tenant.id,
         data={key: value for key, value in payload_data.items() if key not in {"nodes", "edges"}},
     )
+    initial_nodes = payload_data.get("nodes", [])
+    if not initial_nodes:
+        initial_nodes = [_default_start_node()]
+
     save_flow_graph(
         db=db,
         tenant_id=tenant.id,
         flow_id=str(flow.id),
-        nodes=payload_data.get("nodes", []),
+        nodes=initial_nodes,
         edges=payload_data.get("edges", []),
     )
     db.add(flow)
@@ -317,6 +321,16 @@ def _normalize_flow_response(payload: dict[str, Any] | None) -> dict[str, list[d
     }
 
 
+def _default_start_node() -> dict[str, Any]:
+    node_id = str(uuid.uuid4())
+    return {
+        "id": node_id,
+        "type": "start",
+        "position": {"x": 120, "y": 80},
+        "data": {"label": "Início"},
+    }
+
+
 def _resolve_tenant(db: Session, tenant_id: str) -> Tenant | None:
     try:
         parsed_tenant_id = uuid.UUID(tenant_id)
@@ -389,10 +403,25 @@ def create_tenant_flow(
     db: Session = Depends(get_db),
 ):
     tenant_uuid = _resolve_tenant_header(x_tenant_id)
-    flow = create_flow(db=db, tenant_id=tenant_uuid, data=payload.model_dump())
+    payload_data = payload.model_dump()
+    flow = create_flow(db=db, tenant_id=tenant_uuid, data=payload_data)
+    initial_nodes = payload_data.get("nodes", [])
+    if not initial_nodes:
+        initial_nodes = [_default_start_node()]
+    save_flow_graph(
+        db=db,
+        tenant_id=tenant_uuid,
+        flow_id=str(flow.id),
+        nodes=initial_nodes,
+        edges=payload_data.get("edges", []),
+    )
     db.commit()
     db.refresh(flow)
-    return _serialize_flow(flow)
+    return {
+        **_serialize_flow(flow),
+        "nodes": initial_nodes,
+        "edges": payload_data.get("edges", []),
+    }
 
 
 @crud_router.get("")
@@ -411,16 +440,30 @@ def get_tenant_flow_by_id(
     db: Session = Depends(get_db),
 ):
     tenant_uuid = _resolve_tenant_header(x_tenant_id)
-    try:
-        flow = _get_flow_by_identifier(db=db, flow_id=flow_id, tenant_id=tenant_uuid)
-        if not flow:
-            return dict(_EMPTY_FLOW)
+    parsed_flow_id = parse_flow_id(flow_id)
+    if not isinstance(parsed_flow_id, uuid.UUID):
+        raise HTTPException(status_code=404, detail="Flow não encontrado")
 
-        graph = get_flow_graph(db=db, tenant_id=tenant_uuid, flow_id=str(flow.id))
-        return _normalize_flow_response(graph)
-    except Exception as e:
-        print("ERRO CRÍTICO FLOW:", str(e))
-        return dict(_EMPTY_FLOW)
+    flow = db.query(Flow).filter(Flow.id == parsed_flow_id, Flow.tenant_id == tenant_uuid).first()
+
+    print("FLOW BUSCADO:", flow_id)
+    print("FLOW ENCONTRADO:", str(flow.id) if flow else None)
+
+    if not flow:
+        raise HTTPException(status_code=404, detail="Flow não encontrado")
+
+    graph = get_flow_graph(db=db, tenant_id=tenant_uuid, flow_id=str(flow.id))
+    nodes = graph.get("nodes") or []
+    edges = graph.get("edges") or []
+    print("NODES:", nodes)
+
+    return {
+        "id": str(flow.id),
+        "name": flow.name,
+        "nodes": nodes,
+        "edges": edges,
+        "is_active": flow.is_active,
+    }
 
 
 @crud_router.get("/{flow_id}/analytics")
