@@ -409,12 +409,14 @@ def _normalize_flow_response(payload: dict[str, Any] | None) -> dict[str, Any]:
     if not payload:
         return dict(_EMPTY_FLOW)
 
+    nodes = payload.get("nodes")
+    edges = payload.get("edges")
     return {
         "flow_id": payload.get("flow_id"),
         "version_id": payload.get("version_id"),
         "source": payload.get("source"),
-        "nodes": payload.get("nodes") or [],
-        "edges": payload.get("edges") or [],
+        "nodes": nodes if isinstance(nodes, list) else [],
+        "edges": edges if isinstance(edges, list) else [],
     }
 
 
@@ -679,6 +681,7 @@ async def update_tenant_flow(
 
         nova = FlowVersion(
             flow_id=flow.id,
+            version=(flow.version or 0) + 1,
             nodes=nodes,
             edges=edges,
             is_active=True,
@@ -695,6 +698,7 @@ async def update_tenant_flow(
         )
 
         flow.current_version_id = nova.id
+        flow.version = nova.version
         if flow.is_active:
             print("[FLOW ACTIVE]:", flow.id)
         db.commit()
@@ -718,7 +722,7 @@ def delete_tenant_flow(
     flow = _get_flow_by_identifier(db=db, flow_id=flow_id, tenant_id=tenant_uuid)
     if not flow:
         raise HTTPException(status_code=404, detail="Flow not found")
-    if flow.name == "_default_visual_":
+    if flow.name == "default_visual":
         raise HTTPException(status_code=400, detail="Default visual flow cannot be deleted")
     if flow.is_active:
         raise HTTPException(status_code=400, detail="Active flow cannot be deleted")

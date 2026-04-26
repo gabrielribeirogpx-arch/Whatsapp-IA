@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from app.models import Conversation, Flow, FlowStep, Message
 from app.services.flow_engine_service import get_flow_graph, save_flow_graph
 
-DEFAULT_FLOW_NAME = "__default__"
+DEFAULT_FLOW_NAME = "default_visual"
 DEFAULT_START_STEP = "inicio"
 
 DEFAULT_FLOW_STEPS: list[dict[str, Any]] = [
