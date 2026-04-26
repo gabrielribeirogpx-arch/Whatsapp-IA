@@ -53,6 +53,7 @@ def ensure_conversations_columns():
         "ALTER TABLE conversations ADD COLUMN IF NOT EXISTS context JSONB;",
         "ALTER TABLE conversations ADD COLUMN IF NOT EXISTS last_input TEXT;",
         "ALTER TABLE conversations ADD COLUMN IF NOT EXISTS retries INTEGER DEFAULT 0;",
+        "ALTER TABLE flows ADD COLUMN IF NOT EXISTS published_version_id UUID;",
     ]
     try:
         with engine.begin() as connection:

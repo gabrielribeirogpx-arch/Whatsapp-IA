@@ -19,6 +19,7 @@ DEFAULT_FLOW_NAME = "default_visual"
 MAX_AUTO_STEPS = 10
 MAX_RETRIES = 3
 logger = logging.getLogger(__name__)
+_FLOW_RUNTIME_CACHE: dict[uuid.UUID, dict[str, Any]] = {}
 
 
 @dataclass
@@ -116,6 +117,26 @@ def _get_latest_valid_flow_version(db: Session, flow_id: uuid.UUID) -> FlowVersi
         if valid:
             return version
     return None
+
+
+def invalidate_flow_runtime_cache(flow_id: uuid.UUID) -> None:
+    _FLOW_RUNTIME_CACHE.pop(flow_id, None)
+    logger.info("[FLOW CACHE] invalidated flow_id=%s", flow_id)
+
+
+def _get_valid_flow_version_by_id(db: Session, flow: Flow, version_id: uuid.UUID | None) -> FlowVersion | None:
+    if not version_id:
+        return None
+    selected = db.execute(
+        select(FlowVersion).where(FlowVersion.id == version_id, FlowVersion.flow_id == flow.id)
+    ).scalars().first()
+    if not selected:
+        return None
+    valid, _ = validate_flow_structure(
+        nodes=selected.nodes if isinstance(selected.nodes, list) else [],
+        edges=selected.edges if isinstance(selected.edges, list) else [],
+    )
+    return selected if valid else None
 
 
 def _serialize_persisted_flow_graph(
@@ -238,6 +259,49 @@ def get_flow_for_builder(db: Session, tenant_id: uuid.UUID, flow_id: str) -> dic
     return result
 
 
+def resolve_runtime_flow_graph(db: Session, tenant_id: uuid.UUID, flow_id: str) -> dict[str, Any]:
+    flow = resolve_flow(db=db, tenant_id=tenant_id, flow_id=flow_id)
+    cached = _FLOW_RUNTIME_CACHE.get(flow.id)
+    if cached:
+        return cached
+
+    selected_version = _get_valid_flow_version_by_id(db=db, flow=flow, version_id=flow.published_version_id)
+    source = "published_version"
+    if not selected_version:
+        selected_version = _get_valid_flow_version_by_id(db=db, flow=flow, version_id=flow.current_version_id)
+        source = "current_version"
+
+    if not selected_version:
+        selected_version = _get_latest_valid_flow_version(db=db, flow_id=flow.id)
+        source = "latest_valid_version"
+        logger.warning(
+            "[FLOW_RUNTIME_FALLBACK] flow_id=%s published_version_id=%s current_version_id=%s",
+            flow.id,
+            flow.published_version_id,
+            flow.current_version_id,
+        )
+
+    nodes = selected_version.nodes if selected_version and isinstance(selected_version.nodes, list) else []
+    edges = selected_version.edges if selected_version and isinstance(selected_version.edges, list) else []
+    runtime_payload = {
+        "flow_id": str(flow.id),
+        "version_id": str(selected_version.id) if selected_version else None,
+        "source": source,
+        "nodes": nodes if isinstance(nodes, list) else [],
+        "edges": edges if isinstance(edges, list) else [],
+    }
+    logger.info(
+        "[FLOW_RUNTIME_SELECTED] flow_id=%s version_id=%s source=%s nodes=%s edges=%s",
+        runtime_payload["flow_id"],
+        runtime_payload["version_id"],
+        runtime_payload["source"],
+        len(runtime_payload["nodes"]),
+        len(runtime_payload["edges"]),
+    )
+    _FLOW_RUNTIME_CACHE[flow.id] = runtime_payload
+    return runtime_payload
+
+
 def _load_flow_version_runtime(flow: Flow, tenant_id: uuid.UUID, flow_version: FlowVersion) -> dict[str, Any]:
     raw_nodes = flow_version.nodes if isinstance(flow_version.nodes, list) else []
     raw_edges = flow_version.edges if isinstance(flow_version.edges, list) else []
@@ -319,7 +383,7 @@ def _empty_runtime_graph() -> dict[str, Any]:
 
 
 def _get_current_flow_runtime(db: Session, flow: Flow, tenant_id: uuid.UUID) -> dict[str, Any]:
-    resolved = get_flow_for_builder(db=db, tenant_id=tenant_id, flow_id=str(flow.id))
+    resolved = resolve_runtime_flow_graph(db=db, tenant_id=tenant_id, flow_id=str(flow.id))
     if not resolved["nodes"]:
         return _empty_runtime_graph()
     runtime_version = FlowVersion(
@@ -1446,6 +1510,7 @@ def save_flow_graph(db: Session, tenant_id: uuid.UUID, flow_id: str, nodes: list
     flow.current_version_id = flow_version.id
     flow.version = next_version
     db.add(flow)
+    invalidate_flow_runtime_cache(flow.id)
     if flow.is_active:
         print("[FLOW ACTIVE]:", flow.id)
     logger.info(

@@ -13,7 +13,12 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import Flow, FlowVersion, Tenant
 from app.services.flow_analytics_service import get_flow_analytics
-from app.services.flow_engine_service import get_flow_graph, save_flow_graph, validate_flow_structure
+from app.services.flow_engine_service import (
+    get_flow_graph,
+    invalidate_flow_runtime_cache,
+    save_flow_graph,
+    validate_flow_structure,
+)
 from app.services.flow_service import create_flow, delete_flow, duplicate_flow, get_flow, get_flows, update_flow
 
 print("[FLOW API] carregada")
@@ -40,6 +45,10 @@ class FlowCreatePayload(BaseModel):
 
 
 class RestoreFlowVersionPayload(BaseModel):
+    version_id: uuid.UUID
+
+
+class PublishFlowPayload(BaseModel):
     version_id: uuid.UUID
 
 
@@ -287,6 +296,7 @@ async def update_flow_route(
         db.add(new_version)
         db.flush()
         flow.current_version_id = new_version.id
+        invalidate_flow_runtime_cache(flow.id)
         if flow.is_active:
             print("[FLOW ACTIVE]:", flow.id)
 
@@ -699,6 +709,7 @@ async def update_tenant_flow(
 
         flow.current_version_id = nova.id
         flow.version = nova.version
+        invalidate_flow_runtime_cache(flow.id)
         if flow.is_active:
             print("[FLOW ACTIVE]:", flow.id)
         db.commit()
@@ -871,6 +882,7 @@ def restore_tenant_flow_version(
     )
     flow.current_version_id = flow_version.id
     flow.version = flow_version.version
+    invalidate_flow_runtime_cache(flow.id)
     db.add(flow)
     db.commit()
     db.refresh(flow)
@@ -932,7 +944,51 @@ def restore_flow_version_by_id(
     )
     flow.current_version_id = flow_version.id
     flow.version = flow_version.version
+    invalidate_flow_runtime_cache(flow.id)
     db.add(flow)
     db.commit()
     db.refresh(flow)
     return _serialize_flow(flow)
+
+
+@crud_router.post("/{flow_id}/publish")
+def publish_tenant_flow_version(
+    flow_id: str,
+    payload: PublishFlowPayload,
+    x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
+    db: Session = Depends(get_db),
+):
+    tenant_uuid = _resolve_tenant_header(x_tenant_id)
+    flow = _get_flow_by_identifier(db=db, flow_id=flow_id, tenant_id=tenant_uuid)
+    if not flow:
+        raise HTTPException(status_code=404, detail="Flow not found")
+
+    flow_version = db.execute(
+        select(FlowVersion).where(FlowVersion.id == payload.version_id, FlowVersion.flow_id == flow.id)
+    ).scalars().first()
+    if not flow_version:
+        raise HTTPException(status_code=404, detail="Flow version not found")
+
+    nodes = flow_version.nodes if isinstance(flow_version.nodes, list) else []
+    edges = flow_version.edges if isinstance(flow_version.edges, list) else []
+    valid, error = validate_flow_structure(nodes=nodes, edges=edges)
+    if not valid:
+        raise HTTPException(status_code=400, detail=error or "Flow inválido")
+
+    flow.published_version_id = flow_version.id
+    db.add(flow)
+    invalidate_flow_runtime_cache(flow.id)
+    db.commit()
+    db.refresh(flow)
+    print(
+        {
+            "action": "FLOW_PUBLISHED",
+            "flow_id": str(flow.id),
+            "version_id": str(flow_version.id),
+        }
+    )
+    return {
+        "success": True,
+        "flow_id": str(flow.id),
+        "published_version_id": str(flow.published_version_id),
+    }
