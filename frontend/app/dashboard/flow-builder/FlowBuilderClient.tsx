@@ -135,7 +135,7 @@ type FlowBuilderClientProps = {
 export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilderClientProps) {
   const searchParams = useSearchParams();
   const urlFlowId = searchParams.get('flow_id') || searchParams.get('flowId') || _initialFlowId || '';
-  const [flows, setFlows] = useState<Array<{ id: string; name?: string | null; created_at?: string | null }>>([]);
+  const [flows, setFlows] = useState<Array<{ id: string; name?: string | null; created_at?: string | null; is_active?: boolean }>>([]);
   const [activeFlowId, setActiveFlowId] = useState<string | null>(urlFlowId || null);
   console.log('FLOW ATIVO:', activeFlowId);
   console.log('FLOWS DISPONÍVEIS:', flows);
@@ -807,6 +807,56 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
     }
   }, [activeFlowId]);
 
+  const activateFlow = useCallback(async () => {
+    if (!activeFlowId) return;
+    const API_URL = process.env.NEXT_PUBLIC_API_URL;
+    if (!API_URL) return;
+
+    await fetch(`${API_URL}/api/flows/${activeFlowId}/activate`, {
+      method: 'PUT',
+      headers: {
+        ...getTenantHeaders(),
+      },
+    });
+
+    setFlows((prev) => prev.map((flow) => ({ ...flow, is_active: flow.id === activeFlowId })));
+  }, [activeFlowId, getTenantHeaders]);
+
+  const deleteFlow = useCallback(async () => {
+    if (!activeFlowId) return;
+    if (!confirm('Deseja excluir este flow?')) return;
+    const API_URL = process.env.NEXT_PUBLIC_API_URL;
+    if (!API_URL) return;
+
+    await fetch(`${API_URL}/api/flows/${activeFlowId}`, {
+      method: 'DELETE',
+      headers: {
+        ...getTenantHeaders(),
+      },
+    });
+
+    window.location.reload();
+  }, [activeFlowId, getTenantHeaders]);
+
+  const renameFlow = useCallback(async () => {
+    if (!activeFlowId) return;
+    const name = prompt('Novo nome do flow:');
+    if (!name) return;
+    const API_URL = process.env.NEXT_PUBLIC_API_URL;
+    if (!API_URL) return;
+
+    await fetch(`${API_URL}/api/flows/${activeFlowId}/rename`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        ...getTenantHeaders(),
+      },
+      body: JSON.stringify({ name }),
+    });
+
+    setFlows((prev) => prev.map((flow) => (flow.id === activeFlowId ? { ...flow, name } : flow)));
+  }, [activeFlowId, getTenantHeaders]);
+
   const handleRestoreVersion = useCallback(async (versionId: string) => {
     const tenantSession = getTenantSessionFromStorage();
     const tenantId = tenantSession?.tenant_id;
@@ -956,10 +1006,34 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
             </option>
             {flows.map((flow) => (
               <option key={flow.id} value={flow.id}>
-                {flow.name || flow.id}
+                {(flow.name || flow.id) + (flow.is_active ? ' 🟢' : '')}
               </option>
             ))}
           </select>
+          <button
+            type="button"
+            className="flow-top-btn"
+            onClick={activateFlow}
+            disabled={!activeFlowId}
+          >
+            Ativar Flow
+          </button>
+          <button
+            type="button"
+            className="flow-top-btn flow-top-btn-secondary"
+            onClick={renameFlow}
+            disabled={!activeFlowId}
+          >
+            Renomear
+          </button>
+          <button
+            type="button"
+            className="flow-top-btn flow-top-btn-danger"
+            onClick={deleteFlow}
+            disabled={!activeFlowId}
+          >
+            Excluir
+          </button>
           <button
             type="button"
             className="flow-top-btn flow-top-btn-secondary"

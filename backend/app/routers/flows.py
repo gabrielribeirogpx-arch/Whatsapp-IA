@@ -43,6 +43,10 @@ class RestoreFlowVersionPayload(BaseModel):
     version_id: uuid.UUID
 
 
+class RenameFlowPayload(BaseModel):
+    name: str
+
+
 def parse_flow_id(flow_id: str):
     try:
         return uuid.UUID(flow_id)
@@ -524,9 +528,54 @@ def delete_tenant_flow(
     flow = _get_flow_by_identifier(db=db, flow_id=flow_id, tenant_id=tenant_uuid)
     if not flow:
         raise HTTPException(status_code=404, detail="Flow not found")
+    if flow.name == "_default_visual_":
+        raise HTTPException(status_code=400, detail="Default visual flow cannot be deleted")
+    if flow.is_active:
+        raise HTTPException(status_code=400, detail="Active flow cannot be deleted")
     db.delete(flow)
     db.commit()
     return {"status": "deleted"}
+
+
+@crud_router.put("/{flow_id}/activate")
+def activate_tenant_flow(
+    flow_id: str,
+    x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
+    db: Session = Depends(get_db),
+):
+    tenant_uuid = _resolve_tenant_header(x_tenant_id)
+    flow = _get_flow_by_identifier(db=db, flow_id=flow_id, tenant_id=tenant_uuid)
+    if not flow:
+        raise HTTPException(status_code=404, detail="Flow not found")
+
+    db.query(Flow).filter(Flow.tenant_id == tenant_uuid).update(
+        {Flow.is_active: False},
+        synchronize_session=False,
+    )
+    flow.is_active = True
+    db.add(flow)
+    db.commit()
+    db.refresh(flow)
+    return _serialize_flow(flow)
+
+
+@crud_router.put("/{flow_id}/rename")
+def rename_tenant_flow(
+    flow_id: str,
+    payload: RenameFlowPayload,
+    x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
+    db: Session = Depends(get_db),
+):
+    tenant_uuid = _resolve_tenant_header(x_tenant_id)
+    flow = _get_flow_by_identifier(db=db, flow_id=flow_id, tenant_id=tenant_uuid)
+    if not flow:
+        raise HTTPException(status_code=404, detail="Flow not found")
+
+    flow.name = payload.name
+    db.add(flow)
+    db.commit()
+    db.refresh(flow)
+    return _serialize_flow(flow)
 
 
 @crud_router.post("/{flow_id}/duplicate")
