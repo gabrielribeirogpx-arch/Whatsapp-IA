@@ -4,6 +4,7 @@ import uuid
 from typing import Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from app.schemas.flow import FlowUpdate
 from sqlalchemy import String, cast, or_, select
@@ -125,95 +126,118 @@ async def update_flow_route(
     request: Request,
     db: Session = Depends(get_db),
 ):
-    payload = await request.json()
-    payload_data = payload if isinstance(payload, dict) else {}
-
-    raw_nodes = payload_data.get("nodes", [])
-    raw_edges = payload_data.get("edges", [])
-
-    print("PAYLOAD REAL:", payload_data)
-    print("NODES RECEBIDOS:", raw_nodes)
-
-    if not isinstance(raw_nodes, list):
-        raw_nodes = []
-    if not isinstance(raw_edges, list):
-        raw_edges = []
-
-    if not raw_nodes:
-        raise HTTPException(status_code=422, detail="Flow precisa ter ao menos 1 node")
-
-    nodes = []
-    for node in raw_nodes:
-        normalized_node = node if isinstance(node, dict) else {}
-        nodes.append(
-            {
-                "id": str(normalized_node.get("id")),
-                "type": normalized_node.get("type") or "default",
-                "position": normalized_node.get("position") or {"x": 0, "y": 0},
-                "data": normalized_node.get("data") or {},
-            }
-        )
-
-    edges = raw_edges or []
-    print("VALIDANDO FLOW:")
-    print("nodes:", nodes)
-
-    tenant = _get_valid_tenant(db=db)
-    flow = _get_flow_by_identifier(db=db, flow_id=flow_id, tenant_id=tenant.id)
-    if not flow:
-        print("[FLOW DEBUG] Flow não encontrado, criando novo")
-        tenant = db.query(Tenant).first()
-        if not tenant:
-            raise Exception("Nenhum tenant encontrado no banco")
-        _, resolved_flow_id = _resolve_flow_query(db=db, flow_id=flow_id)
-        flow = Flow(
-            id=resolved_flow_id if isinstance(resolved_flow_id, uuid.UUID) else None,
-            name=f"Flow {flow_id}",
-            tenant_id=tenant.id,
-        )
-        db.add(flow)
-        db.commit()
-        db.refresh(flow)
-        print("[FLOW DEBUG] Flow criado com tenant:", tenant.id)
-
-    print("[FLOW DEBUG] Flow encontrado ou criado:", flow.id)
-    for key, value in payload_data.items():
-        if key in {"name", "description", "is_active", "trigger_type", "trigger_value", "keywords", "stop_words", "priority", "version"}:
-            setattr(flow, key, value)
-
-    last_version = db.execute(
-        select(FlowVersion)
-        .where(FlowVersion.flow_id == flow.id)
-        .order_by(FlowVersion.version.desc(), FlowVersion.created_at.desc())
-        .limit(1)
-    ).scalars().first()
-    next_version = (last_version.version if last_version else 0) + 1
-
-    db.query(FlowVersion).filter(
-        FlowVersion.flow_id == flow.id,
-        FlowVersion.is_active.is_(True),
-    ).update({"is_active": False}, synchronize_session=False)
-
-    new_version = FlowVersion(
-        flow_id=flow.id,
-        version=next_version,
-        nodes=nodes,
-        edges=edges,
-        is_active=True,
-    )
     try:
+        payload = await request.json()
+        payload_data = payload if isinstance(payload, dict) else {}
+
+        raw_nodes = payload_data.get("nodes", [])
+        raw_edges = payload_data.get("edges", [])
+
+        print("PAYLOAD REAL:", payload_data)
+        print("NODES RECEBIDOS:", raw_nodes)
+
+        if not isinstance(raw_nodes, list):
+            raw_nodes = []
+        if not isinstance(raw_edges, list):
+            raw_edges = []
+
+        if not raw_nodes:
+            raise Exception("Flow precisa ter ao menos 1 node")
+
+        nodes = []
+        for node in raw_nodes:
+            normalized_node = node if isinstance(node, dict) else {}
+            nodes.append(
+                {
+                    "id": str(normalized_node.get("id")),
+                    "type": normalized_node.get("type") or "default",
+                    "position": normalized_node.get("position") or {"x": 0, "y": 0},
+                    "data": normalized_node.get("data") or {},
+                }
+            )
+
+        edges = raw_edges or []
+        print("VALIDANDO FLOW:")
+        print("nodes:", nodes)
+
+        tenant = _get_valid_tenant(db=db)
+        flow = _get_flow_by_identifier(db=db, flow_id=flow_id, tenant_id=tenant.id)
+        if not flow:
+            print("[FLOW DEBUG] Flow não encontrado, criando novo")
+            tenant = db.query(Tenant).first()
+            if not tenant:
+                raise Exception("Nenhum tenant encontrado no banco")
+            _, resolved_flow_id = _resolve_flow_query(db=db, flow_id=flow_id)
+            flow = Flow(
+                id=resolved_flow_id if isinstance(resolved_flow_id, uuid.UUID) else None,
+                name=f"Flow {flow_id}",
+                tenant_id=tenant.id,
+            )
+            db.add(flow)
+            db.commit()
+            db.refresh(flow)
+            print("[FLOW DEBUG] Flow criado com tenant:", tenant.id)
+
+        print("[FLOW DEBUG] Flow encontrado ou criado:", flow.id)
+        for key, value in payload_data.items():
+            if key in {"name", "description", "is_active", "trigger_type", "trigger_value", "keywords", "stop_words", "priority", "version"}:
+                setattr(flow, key, value)
+
+        if not flow.id:
+            raise Exception("Flow sem ID")
+
+        last_version = db.execute(
+            select(FlowVersion)
+            .where(FlowVersion.flow_id == flow.id)
+            .order_by(FlowVersion.version.desc(), FlowVersion.created_at.desc())
+            .limit(1)
+        ).scalars().first()
+        next_version = (last_version.version if last_version else 0) + 1
+
+        db.query(FlowVersion).filter(
+            FlowVersion.flow_id == flow.id,
+            FlowVersion.is_active.is_(True),
+        ).update({"is_active": False}, synchronize_session=False)
+
+        print("ANTES DE CRIAR VERSION")
+        print("FLOW:", flow.id)
+        print("NODES:", len(nodes))
+
+        new_version = FlowVersion(
+            flow_id=flow.id,
+            version=next_version,
+            nodes=nodes,
+            edges=edges,
+            is_active=True,
+        )
+
         db.add(new_version)
+        db.flush()
+        flow.current_version_id = new_version.id
+
+        print("ANTES DO COMMIT")
         db.commit()
         db.refresh(new_version)
 
-        flow.current_version_id = new_version.id
-        db.commit()
-    except Exception as exc:
-        db.rollback()
-        print("ERRO SALVAR:", str(exc))
-        raise HTTPException(status_code=500, detail="Erro ao salvar flow") from exc
+        return {
+            "success": True,
+            "flow_id": flow.id,
+        }
+    except Exception as e:
+        import traceback
 
-    return {"success": True, "version_id": str(new_version.id)}
+        print("❌ ERRO SALVANDO FLOW:")
+        print(traceback.format_exc())
+
+        db.rollback()
+
+        return JSONResponse(
+            status_code=500,
+            content={
+                "error": str(e),
+                "trace": traceback.format_exc(),
+            },
+        )
 
 
 @router.delete("/{flow_id}")
