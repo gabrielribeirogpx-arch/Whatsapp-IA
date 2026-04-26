@@ -15,7 +15,7 @@ from app.services.flow_analytics_service import FALLBACK, FLOW_FINISH, FLOW_MATC
 from app.services.queue import enqueue_send_message
 from app.utils.phone import normalize_phone
 
-DEFAULT_FLOW_NAME = "__default_visual__"
+DEFAULT_FLOW_NAME = "default_visual"
 MAX_AUTO_STEPS = 10
 MAX_RETRIES = 3
 logger = logging.getLogger(__name__)
@@ -314,10 +314,14 @@ def _load_flow_version_runtime(flow: Flow, tenant_id: uuid.UUID, flow_version: F
     return {"nodes": nodes, "edges": edges, "node_map": node_map, "edges_by_source": edges_by_source}
 
 
-def _get_current_flow_runtime(db: Session, flow: Flow, tenant_id: uuid.UUID) -> dict[str, Any] | None:
+def _empty_runtime_graph() -> dict[str, Any]:
+    return {"nodes": [], "edges": [], "node_map": {}, "edges_by_source": {}}
+
+
+def _get_current_flow_runtime(db: Session, flow: Flow, tenant_id: uuid.UUID) -> dict[str, Any]:
     resolved = get_flow_for_builder(db=db, tenant_id=tenant_id, flow_id=str(flow.id))
     if not resolved["nodes"]:
-        return None
+        return _empty_runtime_graph()
     runtime_version = FlowVersion(
         flow_id=flow.id,
         version=flow.version or 1,
@@ -328,7 +332,12 @@ def _get_current_flow_runtime(db: Session, flow: Flow, tenant_id: uuid.UUID) -> 
         parsed_version_id = _parse_uuid(resolved["version_id"])
         if parsed_version_id:
             runtime_version.id = parsed_version_id
-    return _load_flow_version_runtime(flow=flow, tenant_id=tenant_id, flow_version=runtime_version)
+    runtime = _load_flow_version_runtime(flow=flow, tenant_id=tenant_id, flow_version=runtime_version)
+    nodes = runtime.get("nodes")
+    edges = runtime.get("edges")
+    runtime["nodes"] = nodes if isinstance(nodes, list) else []
+    runtime["edges"] = edges if isinstance(edges, list) else []
+    return runtime
 
 
 def _normalize_text(value: str | None) -> str:
@@ -389,7 +398,7 @@ def _resolve_node_text(node_data: dict[str, Any]) -> str:
 def tenant_has_active_visual_flow(db: Session, tenant_id: uuid.UUID) -> bool:
     flow = db.execute(
         select(Flow.id)
-        .where(Flow.tenant_id == tenant_id)
+        .where(Flow.tenant_id == tenant_id, Flow.is_active.is_(True))
         .order_by(Flow.created_at.asc(), Flow.id.asc())
         .limit(1)
     ).scalar_one_or_none()
@@ -1384,12 +1393,14 @@ def seed_default_visual_flow(db: Session, flow: Flow, tenant_id: uuid.UUID) -> N
 
 def get_flow_graph(db: Session, tenant_id: uuid.UUID, flow_id: str) -> dict[str, Any]:
     resolved = get_flow_for_builder(db=db, tenant_id=tenant_id, flow_id=flow_id)
+    nodes = resolved.get("nodes")
+    edges = resolved.get("edges")
     return {
         "flow_id": resolved["flow_id"],
         "version_id": resolved["version_id"],
         "source": resolved["source"],
-        "nodes": resolved["nodes"],
-        "edges": resolved["edges"],
+        "nodes": nodes if isinstance(nodes, list) else [],
+        "edges": edges if isinstance(edges, list) else [],
     }
 
 

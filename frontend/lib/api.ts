@@ -333,12 +333,12 @@ export async function saveFlowGraph(
 }
 
 export async function listFlows(): Promise<FlowItem[]> {
-  const res = await apiFetch('/flows');
+  const res = await apiFetch('/api/flows');
   return parseApiResponse<FlowItem[]>(res);
 }
 
 export async function createFlow(payload: FlowPayload): Promise<FlowItem> {
-  const res = await apiFetch('/flows', {
+  const res = await apiFetch('/api/flows', {
     method: 'POST',
     body: JSON.stringify(payload)
   });
@@ -346,7 +346,7 @@ export async function createFlow(payload: FlowPayload): Promise<FlowItem> {
 }
 
 export async function updateFlow(flowId: string, payload: Partial<FlowPayload>): Promise<FlowItem> {
-  const res = await apiFetch(`/flows/${flowId}`, {
+  const res = await apiFetch(`/api/flows/${flowId}`, {
     method: 'PUT',
     body: JSON.stringify(payload)
   });
@@ -354,33 +354,33 @@ export async function updateFlow(flowId: string, payload: Partial<FlowPayload>):
 }
 
 export async function deleteFlow(flowId: string): Promise<void> {
-  const res = await apiFetch(`/flows/${flowId}`, {
+  const res = await apiFetch(`/api/flows/${flowId}`, {
     method: 'DELETE'
   });
   if (!res.ok) throw new Error(await res.text());
 }
 
 export async function duplicateFlow(flowId: string): Promise<FlowItem> {
-  const res = await apiFetch(`/flows/${flowId}/duplicate`, {
+  const res = await apiFetch(`/api/flows/${flowId}/duplicate`, {
     method: 'POST'
   });
   return parseApiResponse<FlowItem>(res);
 }
 
 export async function listFlowVersions(flowId: string): Promise<FlowVersionItem[]> {
-  const res = await apiFetch(`/flows/${flowId}/versions`);
+  const res = await apiFetch(`/api/flows/${flowId}/versions`);
   return parseApiResponse<FlowVersionItem[]>(res);
 }
 
 export async function restoreFlowVersion(flowId: string, versionId: string): Promise<FlowItem> {
-  const res = await apiFetch(`/flows/${flowId}/restore/${versionId}`, {
+  const res = await apiFetch(`/api/flows/${flowId}/restore/${versionId}`, {
     method: 'POST'
   });
   return parseApiResponse<FlowItem>(res);
 }
 
 export async function getFlowAnalytics(flowId: string): Promise<FlowAnalytics> {
-  const res = await apiFetch(`/flows/${flowId}/analytics`);
+  const res = await apiFetch(`/api/flows/${flowId}/analytics`);
   return parseApiResponse<FlowAnalytics>(res);
 }
 
