@@ -740,17 +740,20 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
       };
     });
 
-    const validEdges = realFlowEdges
+    const cleanEdges = realFlowEdges
       .filter((edge) => edge.source && edge.target)
       .map((edge) => ({
         id: edge.id,
         source: edge.source,
         target: edge.target,
+        type: edge.type || 'default',
+        ...(edge.sourceHandle != null && edge.sourceHandle !== '' ? { sourceHandle: edge.sourceHandle } : {}),
+        ...(edge.targetHandle != null && edge.targetHandle !== '' ? { targetHandle: edge.targetHandle } : {}),
       }));
 
     const safeFlow = {
       nodes: payloadNodes,
-      edges: validEdges,
+      edges: cleanEdges,
     };
 
     if (!safeFlow.nodes || safeFlow.nodes.length === 0) {
