@@ -198,6 +198,9 @@ export type FlowEdgePayload = {
 };
 
 export type FlowGraphPayload = {
+  flow_id?: string;
+  version_id?: string | null;
+  source?: 'version' | 'fallback' | 'empty' | string;
   nodes: FlowNodePayload[];
   edges: FlowEdgePayload[];
 };

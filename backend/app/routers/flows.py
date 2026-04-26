@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import Flow, FlowVersion, Tenant
 from app.services.flow_analytics_service import get_flow_analytics
-from app.services.flow_engine_service import get_flow_graph, save_flow_graph
+from app.services.flow_engine_service import get_flow_graph, save_flow_graph, validate_flow_structure
 from app.services.flow_service import create_flow, delete_flow, duplicate_flow, get_flow, get_flows, update_flow
 
 print("[FLOW API] carregada")
@@ -91,20 +91,7 @@ def _get_valid_tenant(db: Session) -> Tenant:
 
 
 def validate_flow(nodes: list[dict[str, Any]], edges: list[dict[str, Any]]) -> tuple[bool, str | None]:
-    del edges  # currently not mandatory for validity
-    if not nodes or len(nodes) <= 1:
-        return False, "Flow inválido: poucos nodes"
-
-    has_start = any(
-        isinstance(node, dict)
-        and isinstance(node.get("data"), dict)
-        and bool(node.get("data", {}).get("isStart"))
-        for node in nodes
-    )
-    if not has_start:
-        return False, "Flow inválido: sem start node"
-
-    return True, None
+    return validate_flow_structure(nodes=nodes, edges=edges)
 
 
 def _ensure_start_node(nodes: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -396,11 +383,14 @@ def _serialize_flow_version(flow_version: FlowVersion, current_version_id: uuid.
 _EMPTY_FLOW = {"nodes": [], "edges": []}
 
 
-def _normalize_flow_response(payload: dict[str, Any] | None) -> dict[str, list[dict[str, Any]]]:
+def _normalize_flow_response(payload: dict[str, Any] | None) -> dict[str, Any]:
     if not payload:
         return dict(_EMPTY_FLOW)
 
     return {
+        "flow_id": payload.get("flow_id"),
+        "version_id": payload.get("version_id"),
+        "source": payload.get("source"),
         "nodes": payload.get("nodes") or [],
         "edges": payload.get("edges") or [],
     }
@@ -449,6 +439,8 @@ def get_tenant_flow(
     return {
         "id": str(flow.id),
         "name": flow.name,
+        "version_id": graph.get("version_id"),
+        "source": graph.get("source"),
         "nodes": graph.get("nodes") or [],
         "edges": graph.get("edges") or [],
         "is_active": flow.is_active,

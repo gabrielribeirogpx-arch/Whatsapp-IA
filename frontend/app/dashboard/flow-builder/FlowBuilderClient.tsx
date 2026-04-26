@@ -169,6 +169,8 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
   const [isRestoringVersion, setIsRestoringVersion] = useState(false);
   const [flowVersions, setFlowVersions] = useState<FlowVersionItem[]>([]);
   const [activeVersionId, setActiveVersionId] = useState<string | null>(null);
+  const [flowSource, setFlowSource] = useState<string>('version');
+  const [showEmptyFlowWarning, setShowEmptyFlowWarning] = useState(false);
   const simulationStartedRef = useRef(false);
   const autosaveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const autosaveReadyRef = useRef(false);
@@ -374,6 +376,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
       const data = await Promise.race([requestPromise, timeoutPromise]);
       const payload = data as {
         id?: string;
+        source?: string;
         current_version?: { nodes?: unknown[] | null } | null;
         raw_nodes?: unknown[] | null;
       };
@@ -388,6 +391,8 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
 
       const safeNodes = normalizedFlow.nodes;
       const safeEdges = normalizedFlow.edges;
+      setFlowSource(payload?.source || 'version');
+      setShowEmptyFlowWarning(!safeNodes || safeNodes.length === 0);
       console.log('NODES RECEBIDOS:', safeNodes);
       console.log('EDGES RECEBIDOS:', safeEdges);
 
@@ -860,6 +865,8 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
       await restoreFlowVersion(selectedFlowId, versionId);
       const data = await getFlowGraph(tenantId, selectedFlowId);
       const normalizedFlow = normalizeFlow(data);
+      setFlowSource(data.source || 'version');
+      setShowEmptyFlowWarning(!normalizedFlow.nodes || normalizedFlow.nodes.length === 0);
       const restoredNodes = normalizedFlow.nodes.map(buildFlowNode);
       const restoredEdges: Edge[] = normalizedFlow.edges.map(buildFlowEdge);
       const orderedEdges = orderChoiceChildrenEdges(restoredNodes, restoredEdges);
@@ -991,6 +998,17 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
           </a>
         </div>
       </nav>
+
+      {showEmptyFlowWarning && (
+        <div style={{ position: 'absolute', top: 12, left: '50%', transform: 'translateX(-50%)', zIndex: 25, background: '#fef3c7', color: '#92400e', border: '1px solid #f59e0b', borderRadius: 8, padding: '8px 12px', fontSize: 13 }}>
+          ⚠️ Flow vazio ou inconsistente
+        </div>
+      )}
+      {flowSource === 'fallback' && (
+        <div style={{ position: 'absolute', top: showEmptyFlowWarning ? 50 : 12, left: '50%', transform: 'translateX(-50%)', zIndex: 25, background: '#eff6ff', color: '#1d4ed8', border: '1px solid #93c5fd', borderRadius: 8, padding: '6px 10px', fontSize: 12 }}>
+          Flow recuperado automaticamente
+        </div>
+      )}
       <main style={{ flex: 1, background: '#F7F7F5', position: 'relative' }}>
         <div className="flow-builder-top-actions">
           <select
