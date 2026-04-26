@@ -24,6 +24,7 @@ import { getFlowGraph, getTenantSessionFromStorage, listFlowVersions, restoreFlo
 import { getLayoutedElements } from '@/lib/autoLayout';
 import { orderChoiceChildrenEdges } from '@/lib/flowChoiceOrdering';
 import { executeNode } from '@/lib/flowEngine';
+import { normalizeFlow } from '@/lib/flowNormalization';
 import { FlowEdgePayload, FlowNodePayload, FlowVersionItem } from '@/lib/types';
 
 const FETCH_TIMEOUT_MS = 8000;
@@ -348,6 +349,8 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
 
       isLoadingFlowRef.current = true;
       setIsLoading(true);
+      setNodes([]);
+      setEdges([]);
       lastLoadedFlowIdRef.current = flowId;
 
       const timeoutPromise = new Promise<never>((_, reject) => {
@@ -369,11 +372,12 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
       });
 
       const data = await Promise.race([requestPromise, timeoutPromise]);
-      console.log('FLOW CARREGADO:', data);
+      const normalizedFlow = normalizeFlow(data);
+      console.log('FLOW CARREGADO:', normalizedFlow);
       console.log('FLOW SELECIONADO:', flowId);
 
-      const safeNodes = Array.isArray(data?.nodes) ? data.nodes : [];
-      const safeEdges = Array.isArray(data?.edges) ? data.edges : [];
+      const safeNodes = normalizedFlow.nodes;
+      const safeEdges = normalizedFlow.edges;
       console.log('NODES RECEBIDOS:', safeNodes);
       console.log('EDGES RECEBIDOS:', safeEdges);
 
@@ -399,14 +403,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
 
       const nodesToRender =
         formattedNodes.length === 0
-          ? [
-              {
-                id: 'start',
-                type: 'default',
-                position: { x: 250, y: 150 },
-                data: { label: 'Início' },
-              } as Node,
-            ]
+          ? [FALLBACK_START_NODE]
           : formattedNodes;
 
       console.log('NODES:', nodesToRender);
@@ -851,8 +848,9 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
     try {
       await restoreFlowVersion(selectedFlowId, versionId);
       const data = await getFlowGraph(tenantId, selectedFlowId);
-      const restoredNodes = (data?.nodes || []).map(buildFlowNode);
-      const restoredEdges: Edge[] = (data?.edges || []).map(buildFlowEdge);
+      const normalizedFlow = normalizeFlow(data);
+      const restoredNodes = normalizedFlow.nodes.map(buildFlowNode);
+      const restoredEdges: Edge[] = normalizedFlow.edges.map(buildFlowEdge);
       const orderedEdges = orderChoiceChildrenEdges(restoredNodes, restoredEdges);
       setNodes(restoredNodes);
       setEdges(orderedEdges);
