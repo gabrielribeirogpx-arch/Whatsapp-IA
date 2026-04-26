@@ -1582,6 +1582,16 @@ input {
   background: #f0fdf4;
 }
 
+.flow-top-btn-danger {
+  color: #991b1b;
+  background: #fff;
+  border-color: #fecaca;
+}
+
+.flow-top-btn-danger:hover:not(:disabled) {
+  background: #fef2f2;
+}
+
 .flow-top-btn:disabled {
   cursor: not-allowed;
   opacity: 0.5;
