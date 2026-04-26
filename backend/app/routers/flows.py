@@ -344,32 +344,26 @@ def _resolve_tenant(db: Session, tenant_id: str) -> Tenant | None:
 def get_tenant_flow(
     tenant_id: str,
     x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
-    flow_id: str | None = None,
     db: Session = Depends(get_db),
 ):
     resolved_request_tenant = _resolve_request_tenant(db=db, tenant_id_header=x_tenant_id)
     try:
         parsed_flow_id = uuid.UUID(tenant_id)
-        flow = db.execute(
-            select(Flow).where(
-                Flow.id == parsed_flow_id,
-                Flow.tenant_id == resolved_request_tenant.id,
-            )
-        ).scalars().first()
-        if flow:
-            if not flow.current_version_id:
-                return dict(_EMPTY_FLOW)
-            graph = get_flow_graph(db=db, tenant_id=flow.tenant_id, flow_id=str(flow.id))
-            return _normalize_flow_response(graph)
     except ValueError:
-        pass
+        raise HTTPException(status_code=404, detail="Flow não encontrado")
 
-    tenant = _resolve_tenant(db=db, tenant_id=tenant_id)
-    if not tenant:
-        return dict(_EMPTY_FLOW)
+    flow = db.query(Flow).filter(Flow.id == parsed_flow_id, Flow.tenant_id == resolved_request_tenant.id).first()
+    if not flow:
+        raise HTTPException(status_code=404, detail="Flow não encontrado")
 
-    graph = get_flow_graph(db=db, tenant_id=tenant.id, flow_id=flow_id or "default")
-    return _normalize_flow_response(graph)
+    graph = get_flow_graph(db=db, tenant_id=flow.tenant_id, flow_id=str(flow.id))
+    return {
+        "id": str(flow.id),
+        "name": flow.name,
+        "nodes": graph.get("nodes") or [],
+        "edges": graph.get("edges") or [],
+        "is_active": flow.is_active,
+    }
 
 
 @router.post("/{tenant_id}")
