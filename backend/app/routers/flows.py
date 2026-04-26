@@ -6,7 +6,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from pydantic import BaseModel, Field
 from app.schemas.flow import FlowUpdate
-from sqlalchemy import String, cast, select
+from sqlalchemy import String, cast, or_, select
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -60,11 +60,16 @@ def _resolve_flow_query(db: Session, flow_id: str):
         return db.query(Flow).filter(Flow.id == flow_id_parsed), flow_id_parsed
 
     flow_id_text = str(flow_id_parsed).strip()
-    try:
-        flow_id_int = int(flow_id_text)
-        return db.query(Flow).filter(cast(Flow.id, String) == str(flow_id_int)), flow_id_int
-    except (TypeError, ValueError):
-        return db.query(Flow).filter(cast(Flow.id, String) == flow_id_text), flow_id_text
+    fallback_flow_uuid = uuid.uuid5(uuid.NAMESPACE_URL, f"flow:{flow_id_text}")
+    return (
+        db.query(Flow).filter(
+            or_(
+                cast(Flow.id, String) == flow_id_text,
+                Flow.id == fallback_flow_uuid,
+            )
+        ),
+        fallback_flow_uuid,
+    )
 
 
 def _get_flow_by_identifier(db: Session, flow_id: str, tenant_id: uuid.UUID | None = None):
@@ -146,7 +151,18 @@ async def update_flow_route(
 
     flow = _get_flow_by_identifier(db=db, flow_id=flow_id, tenant_id=TEMP_TENANT_ID)
     if not flow:
-        raise HTTPException(status_code=404, detail="Flow not found")
+        print("[FLOW DEBUG] Flow não encontrado, criando novo")
+        _, resolved_flow_id = _resolve_flow_query(db=db, flow_id=flow_id)
+        flow = Flow(
+            id=resolved_flow_id if isinstance(resolved_flow_id, uuid.UUID) else None,
+            name=f"Flow {flow_id}",
+            tenant_id=TEMP_TENANT_ID,
+        )
+        db.add(flow)
+        db.commit()
+        db.refresh(flow)
+
+    print("[FLOW DEBUG] Flow encontrado ou criado:", flow.id)
     for key, value in payload_data.items():
         if key in {"name", "description", "is_active", "trigger_type", "trigger_value", "keywords", "stop_words", "priority", "version"}:
             setattr(flow, key, value)
