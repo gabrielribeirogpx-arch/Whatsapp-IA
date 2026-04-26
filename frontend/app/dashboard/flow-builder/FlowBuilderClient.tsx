@@ -134,10 +134,9 @@ type FlowBuilderClientProps = {
 
 export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilderClientProps) {
   const searchParams = useSearchParams();
-  const flowId = searchParams.get('flowId') || '1';
+  const urlFlowId = searchParams.get('flow_id') || searchParams.get('flowId') || _initialFlowId || '';
+  const [flowId, setFlowId] = useState<string>(urlFlowId);
   console.log('FLOW ID:', flowId);
-
-  const selectedFlowId = flowId;
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>(initialEdges);
   const [rfInstance, setRfInstance] = useState<ReactFlowInstance | null>(null);
@@ -161,6 +160,25 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
   const autosaveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const autosaveReadyRef = useRef(false);
   const nodesRef = useRef<Node[]>([]);
+
+  useEffect(() => {
+    if (urlFlowId && urlFlowId !== flowId) {
+      setFlowId(urlFlowId);
+      return;
+    }
+    if (urlFlowId || flowId) return;
+    if (typeof window === 'undefined') return;
+    const storedFlowId = window.localStorage.getItem('flow_builder_flow_id');
+    if (storedFlowId) {
+      setFlowId(storedFlowId);
+    }
+  }, [flowId, urlFlowId]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (!flowId) return;
+    window.localStorage.setItem('flow_builder_flow_id', flowId);
+  }, [flowId]);
 
   useEffect(() => {
     nodesRef.current = nodes;
@@ -257,6 +275,42 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
           return;
         }
 
+        const ensureFlowId = async () => {
+          if (flowId) {
+            return flowId;
+          }
+
+          const createResponse = await fetch(`${API_URL}/api/flows/`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              name: 'Novo Flow',
+              description: '',
+              is_active: true,
+              trigger_type: 'default',
+              nodes: [],
+              edges: [],
+            }),
+          });
+
+          if (!createResponse.ok) {
+            throw new Error('Erro ao criar flow');
+          }
+
+          const createdFlow = await createResponse.json();
+          const createdId = createdFlow?.id || createdFlow?.flow_id;
+
+          if (!createdId) {
+            throw new Error('Flow criado sem ID');
+          }
+
+          setFlowId(createdId);
+          return createdId as string;
+        };
+
+        const selectedFlowId = await ensureFlowId();
         console.log('[FlowBuilder] carregando flowId:', selectedFlowId);
 
         const timeoutPromise = new Promise<never>((_, reject) => {
@@ -266,7 +320,46 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
           }, FETCH_TIMEOUT_MS);
         });
 
-        const requestPromise = fetch(`${API_URL}/api/flows/${selectedFlowId}`).then((res) => res.json());
+        const requestPromise = fetch(`${API_URL}/api/flows/${selectedFlowId}`).then(async (res) => {
+          if (res.status === 404) {
+            const createResponse = await fetch(`${API_URL}/api/flows/`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                name: 'Novo Flow',
+                description: '',
+                is_active: true,
+                trigger_type: 'default',
+                nodes: [],
+                edges: [],
+              }),
+            });
+
+            if (!createResponse.ok) {
+              throw new Error('Erro ao criar flow após 404');
+            }
+
+            const createdFlow = await createResponse.json();
+            const createdId = createdFlow?.id || createdFlow?.flow_id;
+            if (!createdId) {
+              throw new Error('Flow criado sem ID após 404');
+            }
+            setFlowId(createdId);
+
+            const retryResponse = await fetch(`${API_URL}/api/flows/${createdId}`);
+            if (!retryResponse.ok) {
+              throw new Error('Erro ao carregar flow recém-criado');
+            }
+            return retryResponse.json();
+          }
+
+          if (!res.ok) {
+            throw new Error('Erro ao carregar flow');
+          }
+          return res.json();
+        });
         const data = await Promise.race([requestPromise, timeoutPromise]);
         if (!active) return;
 
@@ -318,7 +411,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
     return () => {
       active = false;
     };
-  }, [applyLayoutAndSetFlow, buildFlowNode, selectedFlowId, setEdges, setNodes]);
+  }, [applyLayoutAndSetFlow, buildFlowNode, flowId, setEdges, setNodes]);
 
   const flow = useMemo(
     () => ({
@@ -643,11 +736,11 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
   }, [edges, flowId, handleSaveFlow, nodes, rfInstance]);
 
   const openVersionsModal = useCallback(async () => {
-    if (!selectedFlowId) return;
+    if (!flowId) return;
     setIsVersionsModalOpen(true);
     setIsLoadingVersions(true);
     try {
-      const versions = await listFlowVersions(selectedFlowId);
+      const versions = await listFlowVersions(flowId);
       setFlowVersions(versions);
       setActiveVersionId(versions.find((item) => item.is_current)?.id || null);
     } catch {
@@ -655,17 +748,17 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
     } finally {
       setIsLoadingVersions(false);
     }
-  }, [selectedFlowId]);
+  }, [flowId]);
 
   const handleRestoreVersion = useCallback(async (versionId: string) => {
     const tenantSession = getTenantSessionFromStorage();
     const tenantId = tenantSession?.tenant_id;
-    if (!tenantId || !selectedFlowId) return;
+    if (!tenantId || !flowId) return;
 
     setIsRestoringVersion(true);
     try {
-      await restoreFlowVersion(selectedFlowId, versionId);
-      const data = await getFlowGraph(tenantId, selectedFlowId);
+      await restoreFlowVersion(flowId, versionId);
+      const data = await getFlowGraph(tenantId, flowId);
       const restoredNodes = (data?.nodes || []).map(buildFlowNode);
       const restoredEdges: Edge[] = (data?.edges || []).map(buildFlowEdge);
       const orderedEdges = orderChoiceChildrenEdges(restoredNodes, restoredEdges);
@@ -677,7 +770,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
     } finally {
       setIsRestoringVersion(false);
     }
-  }, [buildFlowNode, rfInstance, selectedFlowId, setEdges, setNodes]);
+  }, [buildFlowNode, flowId, rfInstance, setEdges, setNodes]);
 
   const decoratedNodes = useMemo(
     () => nodes.map((node) => ({
@@ -794,7 +887,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
             type="button"
             className="flow-top-btn flow-top-btn-secondary"
             onClick={openVersionsModal}
-            disabled={!selectedFlowId}
+            disabled={!flowId}
           >
             <History size={14} />
             Histórico
