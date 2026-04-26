@@ -5,6 +5,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from pydantic import BaseModel, Field
+from app.schemas.flow import FlowUpdate
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -37,20 +38,6 @@ class FlowCreatePayload(BaseModel):
     priority: int = 0
     nodes: list[dict[str, Any]] = Field(default_factory=list)
     edges: list[dict[str, Any]] = Field(default_factory=list)
-
-
-class FlowUpdatePayload(BaseModel):
-    name: str | None = None
-    description: str | None = None
-    is_active: bool | None = None
-    trigger_type: str | None = None
-    trigger_value: str | None = None
-    keywords: str | None = None
-    stop_words: str | None = None
-    priority: int | None = None
-    version: int | None = None
-    nodes: list[dict[str, Any]] | None = None
-    edges: list[dict[str, Any]] | None = None
 
 
 class RestoreFlowVersionPayload(BaseModel):
@@ -409,28 +396,37 @@ async def update_tenant_flow(
         tenant_uuid = _resolve_tenant_header(x_tenant_id)
         payload = await request.json()
         payload_data = payload if isinstance(payload, dict) else {}
-        payload_model = FlowUpdatePayload(**payload_data)
+        payload_model = FlowUpdate(**payload_data)
         print("FLOW RECEBIDO:", payload_model.model_dump())
-        update_data = payload_model.model_dump(exclude_unset=True)
+        flow_update_fields = {
+            "name",
+            "description",
+            "is_active",
+            "trigger_type",
+            "trigger_value",
+            "keywords",
+            "stop_words",
+            "priority",
+            "version",
+        }
 
         flow = update_flow(
             db=db,
             flow_id=flow_id,
             tenant_id=tenant_uuid,
-            data={key: value for key, value in update_data.items() if key not in {"nodes", "edges"}},
+            data={key: value for key, value in payload_data.items() if key in flow_update_fields},
         )
         if not flow:
             raise HTTPException(status_code=404, detail="Flow não encontrado")
 
         nodes = []
         for node in payload_model.nodes or []:
-            normalized_node = node if isinstance(node, dict) else {}
             nodes.append(
                 {
-                    "id": str(normalized_node.get("id")),
-                    "type": normalized_node.get("type") or "default",
-                    "position": normalized_node.get("position") or {"x": 0, "y": 0},
-                    "data": normalized_node.get("data") or {},
+                    "id": str(node.id),
+                    "type": node.type or "default",
+                    "position": node.position or {"x": 0, "y": 0},
+                    "data": node.data or {},
                 }
             )
         if not nodes:
@@ -462,6 +458,8 @@ async def update_tenant_flow(
 
         return {"status": "ok"}
 
+    except HTTPException:
+        raise
     except Exception as e:
         print("ERRO SALVAR FLOW:", str(e))
         raise HTTPException(status_code=500, detail="Erro interno")
