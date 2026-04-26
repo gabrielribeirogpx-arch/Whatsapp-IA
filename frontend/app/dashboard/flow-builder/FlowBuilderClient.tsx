@@ -724,9 +724,29 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
     flow.edges = flow.edges || [];
 
     const realFlow = rfInstance?.toObject?.() || flow;
+    const realFlowEdges = Array.isArray(realFlow.edges) ? (realFlow.edges as Edge[]) : [];
+
+    const payloadEdges: FlowEdgePayload[] = realFlowEdges.map((edge) => {
+      const edgeData = edge.data as FlowEdgePayload['data'] | undefined;
+      const sourceHandle = edge.sourceHandle ?? edgeData?.sourceHandle ?? null;
+
+      return {
+        id: safeString(edge.id),
+        source: safeString(edge.source),
+        target: safeString(edge.target),
+        sourceHandle: sourceHandle || undefined,
+        targetHandle: safeString(edge.targetHandle),
+        label: safeString(edge.label?.toString() ?? ''),
+        data: {
+          sourceHandle: sourceHandle || undefined,
+          condition: safeString(edge.label?.toString() || edgeData?.condition || ''),
+        },
+      };
+    });
+
     const safeFlow = {
       nodes: Array.isArray(realFlow.nodes) ? realFlow.nodes : [],
-      edges: Array.isArray(realFlow.edges) ? realFlow.edges : [],
+      edges: payloadEdges,
     };
 
     if (!safeFlow.nodes || safeFlow.nodes.length === 0) {
