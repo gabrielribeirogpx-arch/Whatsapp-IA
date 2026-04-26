@@ -11,7 +11,15 @@ from sqlalchemy.orm import Session
 
 from app.models import Conversation, Flow, FlowEdge, FlowNode, FlowVersion, Tenant
 from app.services.delay_queue_service import enqueue_delay
-from app.services.flow_analytics_service import FALLBACK, FLOW_FINISH, FLOW_MATCH, FLOW_SEND, FLOW_START, record_flow_event
+from app.services.flow_analytics_service import (
+    FALLBACK,
+    FLOW_FINISH,
+    FLOW_MATCH,
+    FLOW_NODE_EXEC,
+    FLOW_SEND,
+    FLOW_START,
+    record_flow_event,
+)
 from app.services.queue import enqueue_send_message
 from app.utils.phone import normalize_phone
 
@@ -254,7 +262,38 @@ def _serialize_persisted_flow_graph(
 
 def get_flow_for_builder(db: Session, tenant_id: uuid.UUID, flow_id: str) -> dict[str, Any]:
     flow = resolve_flow(db=db, tenant_id=tenant_id, flow_id=flow_id)
-    selected_version, nodes, edges, source = _resolve_runtime_flow_payload(db=db, flow=flow)
+# 1. Resolver versão (nova lógica segura)
+selected_version, source = _resolve_runtime_payload(db=db, flow=flow)
+
+# 2. Garantir estrutura
+nodes: list[dict[str, Any]] = []
+edges: list[dict[str, Any]] = []
+
+if selected_version:
+    nodes = selected_version.nodes if isinstance(selected_version.nodes, list) else []
+    edges = selected_version.edges if isinstance(selected_version.edges, list) else []
+
+# 3. Validação estrutural
+valid, error = validate_flow_structure(nodes=nodes, edges=edges)
+
+# 4. Fallback automático se inválido
+if not valid or not nodes:
+    logger.warning(f"[FLOW INVALID] flow_id={flow.id} error={error}")
+
+    fallback_nodes, fallback_edges = _deserialize_persisted_flow_graph(
+        db=db,
+        tenant_id=tenant_id,
+        flow_id=flow.id
+    )
+
+    fallback_valid, _ = validate_flow_structure(
+        nodes=fallback_nodes,
+        edges=fallback_edges
+    )
+
+    if fallback_valid:
+        nodes = fallback_nodes
+        edges = fallback_edges
     valid, error = validate_flow_structure(nodes=nodes, edges=edges)
 
     if not valid or not nodes:
@@ -292,6 +331,53 @@ def get_flow_for_builder(db: Session, tenant_id: uuid.UUID, flow_id: str) -> dic
         result["source"],
     )
     return result
+
+
+def _select_flow_version(
+    db: Session,
+    *,
+    flow: Flow,
+    primary_version_id: uuid.UUID | None,
+) -> FlowVersion | None:
+    selected_version: FlowVersion | None = None
+    if primary_version_id:
+        selected_version = db.execute(
+            select(FlowVersion).where(FlowVersion.id == primary_version_id, FlowVersion.flow_id == flow.id)
+        ).scalars().first()
+
+    if not selected_version:
+        selected_version = db.execute(
+            select(FlowVersion)
+            .where(FlowVersion.flow_id == flow.id)
+            .order_by(FlowVersion.created_at.desc())
+        ).scalars().first()
+    return selected_version
+
+
+def get_flow_for_runtime(db: Session, tenant_id: uuid.UUID, flow_id: str) -> dict[str, Any]:
+    flow = resolve_flow(db=db, tenant_id=tenant_id, flow_id=flow_id)
+    selected_version = _select_flow_version(
+        db=db,
+        flow=flow,
+        primary_version_id=flow.published_version_id or flow.current_version_id,
+    )
+
+    nodes = selected_version.nodes if selected_version and isinstance(selected_version.nodes, list) else []
+    edges = selected_version.edges if selected_version and isinstance(selected_version.edges, list) else []
+    valid, _ = validate_flow_structure(nodes=nodes, edges=edges)
+    if not valid:
+        fallback = _get_latest_valid_flow_version(db=db, flow_id=flow.id)
+        if fallback:
+            selected_version = fallback
+            nodes = fallback.nodes if isinstance(fallback.nodes, list) else []
+            edges = fallback.edges if isinstance(fallback.edges, list) else []
+
+    return {
+        "flow_id": str(flow.id),
+        "version_id": str(selected_version.id) if selected_version else None,
+        "nodes": nodes,
+        "edges": edges,
+    }
 
 
 def _load_flow_version_runtime(flow: Flow, tenant_id: uuid.UUID, flow_version: FlowVersion) -> dict[str, Any]:
@@ -371,16 +457,43 @@ def _load_flow_version_runtime(flow: Flow, tenant_id: uuid.UUID, flow_version: F
 
 
 def _get_current_flow_runtime(db: Session, flow: Flow, tenant_id: uuid.UUID) -> dict[str, Any] | None:
-    cached = _ACTIVE_FLOW_RUNTIME_CACHE.get(flow.id)
-    if cached and cached.get("version_id") == str(flow.current_version_id):
-        logger.info(
-            "[FLOW CACHE] hit flow_id=%s version_id=%s",
-            flow.id,
-            cached.get("version_id"),
-        )
-        return cached.get("runtime_graph")
 
-    resolved = get_flow_for_builder(db=db, tenant_id=tenant_id, flow_id=str(flow.id))
+    # 1. Tentar cache primeiro
+cached = _ACTIVE_FLOW_RUNTIME_CACHE.get(flow.id)
+
+if cached and cached.get("version_id") == str(flow.current_version_id):
+    logger.info(
+        "[FLOW CACHE HIT] flow_id=%s version_id=%s",
+        flow.id,
+        cached.get("version_id"),
+    )
+    return cached.get("runtime_graph")
+
+# 2. Resolver runtime seguro
+resolved = _resolve_runtime_payload(
+    db=db,
+    tenant_id=tenant_id,
+    flow_id=str(flow.id)
+)
+
+if not resolved:
+    return None
+
+# 3. Construir versão runtime
+runtime_version = FlowVersion(
+    flow_id=flow.id,
+    version=flow.version or 1,
+    nodes=resolved["nodes"],
+    edges=resolved["edges"],
+)
+
+# 4. Salvar no cache
+_ACTIVE_FLOW_RUNTIME_CACHE[flow.id] = {
+    "version_id": str(resolved.get("version_id")),
+    "runtime_graph": resolved,
+}
+
+return resolved
     if not resolved["nodes"]:
         return None
     runtime_version = FlowVersion(
@@ -1125,6 +1238,14 @@ def process_flow_engine(
             conversation.current_node_id,
         )
         node_data = _extract_node_data(node)
+        record_flow_event(
+            db=db,
+            tenant_id=conversation.tenant_id,
+            conversation_id=conversation.id,
+            flow_id=flow.id,
+            node_id=node.id,
+            event_type=FLOW_NODE_EXEC,
+        )
         if node.id in visited_node_ids:
             logger.warning(
                 "event=flow_loop_detected tenant_id=%s conversation_id=%s node_id=%s",
@@ -1530,6 +1651,8 @@ def save_flow_graph(db: Session, tenant_id: uuid.UUID, flow_id: str, nodes: list
     db.add(flow_version)
     db.flush()
     flow.current_version_id = flow_version.id
+    if not flow.published_version_id:
+        flow.published_version_id = flow_version.id
     flow.version = next_version
     db.add(flow)
     _invalidate_flow_runtime_cache(flow.id, reason="publish_new_version")
