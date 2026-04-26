@@ -11,7 +11,15 @@ from sqlalchemy.orm import Session
 
 from app.models import Conversation, Flow, FlowEdge, FlowNode, FlowVersion, Tenant
 from app.services.delay_queue_service import enqueue_delay
-from app.services.flow_analytics_service import FALLBACK, FLOW_FINISH, FLOW_MATCH, FLOW_SEND, FLOW_START, record_flow_event
+from app.services.flow_analytics_service import (
+    FALLBACK,
+    FLOW_FINISH,
+    FLOW_MATCH,
+    FLOW_NODE_EXEC,
+    FLOW_SEND,
+    FLOW_START,
+    record_flow_event,
+)
 from app.services.queue import enqueue_send_message
 from app.utils.phone import normalize_phone
 
@@ -153,19 +161,11 @@ def _serialize_persisted_flow_graph(
 
 def get_flow_for_builder(db: Session, tenant_id: uuid.UUID, flow_id: str) -> dict[str, Any]:
     flow = resolve_flow(db=db, tenant_id=tenant_id, flow_id=flow_id)
-    selected_version: FlowVersion | None = None
-
-    if flow.current_version_id:
-        selected_version = db.execute(
-            select(FlowVersion).where(FlowVersion.id == flow.current_version_id, FlowVersion.flow_id == flow.id)
-        ).scalars().first()
-
-    if not selected_version:
-        selected_version = db.execute(
-            select(FlowVersion)
-            .where(FlowVersion.flow_id == flow.id)
-            .order_by(FlowVersion.created_at.desc())
-        ).scalars().first()
+    selected_version = _select_flow_version(
+        db=db,
+        flow=flow,
+        primary_version_id=flow.current_version_id,
+    )
 
     nodes: list[dict[str, Any]] = []
     edges: list[dict[str, Any]] = []
@@ -236,6 +236,53 @@ def get_flow_for_builder(db: Session, tenant_id: uuid.UUID, flow_id: str) -> dic
         result["source"],
     )
     return result
+
+
+def _select_flow_version(
+    db: Session,
+    *,
+    flow: Flow,
+    primary_version_id: uuid.UUID | None,
+) -> FlowVersion | None:
+    selected_version: FlowVersion | None = None
+    if primary_version_id:
+        selected_version = db.execute(
+            select(FlowVersion).where(FlowVersion.id == primary_version_id, FlowVersion.flow_id == flow.id)
+        ).scalars().first()
+
+    if not selected_version:
+        selected_version = db.execute(
+            select(FlowVersion)
+            .where(FlowVersion.flow_id == flow.id)
+            .order_by(FlowVersion.created_at.desc())
+        ).scalars().first()
+    return selected_version
+
+
+def get_flow_for_runtime(db: Session, tenant_id: uuid.UUID, flow_id: str) -> dict[str, Any]:
+    flow = resolve_flow(db=db, tenant_id=tenant_id, flow_id=flow_id)
+    selected_version = _select_flow_version(
+        db=db,
+        flow=flow,
+        primary_version_id=flow.published_version_id or flow.current_version_id,
+    )
+
+    nodes = selected_version.nodes if selected_version and isinstance(selected_version.nodes, list) else []
+    edges = selected_version.edges if selected_version and isinstance(selected_version.edges, list) else []
+    valid, _ = validate_flow_structure(nodes=nodes, edges=edges)
+    if not valid:
+        fallback = _get_latest_valid_flow_version(db=db, flow_id=flow.id)
+        if fallback:
+            selected_version = fallback
+            nodes = fallback.nodes if isinstance(fallback.nodes, list) else []
+            edges = fallback.edges if isinstance(fallback.edges, list) else []
+
+    return {
+        "flow_id": str(flow.id),
+        "version_id": str(selected_version.id) if selected_version else None,
+        "nodes": nodes,
+        "edges": edges,
+    }
 
 
 def _load_flow_version_runtime(flow: Flow, tenant_id: uuid.UUID, flow_version: FlowVersion) -> dict[str, Any]:
@@ -315,7 +362,7 @@ def _load_flow_version_runtime(flow: Flow, tenant_id: uuid.UUID, flow_version: F
 
 
 def _get_current_flow_runtime(db: Session, flow: Flow, tenant_id: uuid.UUID) -> dict[str, Any] | None:
-    resolved = get_flow_for_builder(db=db, tenant_id=tenant_id, flow_id=str(flow.id))
+    resolved = get_flow_for_runtime(db=db, tenant_id=tenant_id, flow_id=str(flow.id))
     if not resolved["nodes"]:
         return None
     runtime_version = FlowVersion(
@@ -1036,6 +1083,14 @@ def process_flow_engine(
             conversation.current_node_id,
         )
         node_data = _extract_node_data(node)
+        record_flow_event(
+            db=db,
+            tenant_id=conversation.tenant_id,
+            conversation_id=conversation.id,
+            flow_id=flow.id,
+            node_id=node.id,
+            event_type=FLOW_NODE_EXEC,
+        )
         if node.id in visited_node_ids:
             logger.warning(
                 "event=flow_loop_detected tenant_id=%s conversation_id=%s node_id=%s",
@@ -1433,6 +1488,8 @@ def save_flow_graph(db: Session, tenant_id: uuid.UUID, flow_id: str, nodes: list
     db.add(flow_version)
     db.flush()
     flow.current_version_id = flow_version.id
+    if not flow.published_version_id:
+        flow.published_version_id = flow_version.id
     flow.version = next_version
     db.add(flow)
     if flow.is_active:

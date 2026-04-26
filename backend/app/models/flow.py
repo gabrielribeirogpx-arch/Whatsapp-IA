@@ -30,6 +30,12 @@ class Flow(Base):
         nullable=True,
         index=True,
     )
+    published_version_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("flow_versions.id"),
+        nullable=True,
+        index=True,
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -44,6 +50,11 @@ class Flow(Base):
     current_version: Mapped["FlowVersion | None"] = relationship(
         "FlowVersion",
         foreign_keys=[current_version_id],
+        post_update=True,
+    )
+    published_version: Mapped["FlowVersion | None"] = relationship(
+        "FlowVersion",
+        foreign_keys=[published_version_id],
         post_update=True,
     )
 
