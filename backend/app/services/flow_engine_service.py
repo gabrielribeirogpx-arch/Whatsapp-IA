@@ -262,41 +262,12 @@ def _serialize_persisted_flow_graph(
 
 def get_flow_for_builder(db: Session, tenant_id: uuid.UUID, flow_id: str) -> dict[str, Any]:
     flow = resolve_flow(db=db, tenant_id=tenant_id, flow_id=flow_id)
-# 1. Resolver versão (nova lógica segura)
-selected_version, source = _resolve_runtime_payload(db=db, flow=flow)
+    selected_version, nodes, edges, source = _resolve_runtime_flow_payload(db=db, flow=flow)
 
-# 2. Garantir estrutura
-nodes: list[dict[str, Any]] = []
-edges: list[dict[str, Any]] = []
-
-if selected_version:
-    nodes = selected_version.nodes if isinstance(selected_version.nodes, list) else []
-    edges = selected_version.edges if isinstance(selected_version.edges, list) else []
-
-# 3. Validação estrutural
-valid, error = validate_flow_structure(nodes=nodes, edges=edges)
-
-# 4. Fallback automático se inválido
-if not valid or not nodes:
-    logger.warning(f"[FLOW INVALID] flow_id={flow.id} error={error}")
-
-    fallback_nodes, fallback_edges = _deserialize_persisted_flow_graph(
-        db=db,
-        tenant_id=tenant_id,
-        flow_id=flow.id
-    )
-
-    fallback_valid, _ = validate_flow_structure(
-        nodes=fallback_nodes,
-        edges=fallback_edges
-    )
-
-    if fallback_valid:
-        nodes = fallback_nodes
-        edges = fallback_edges
     valid, error = validate_flow_structure(nodes=nodes, edges=edges)
-
     if not valid or not nodes:
+        logger.warning("[FLOW INVALID] flow_id=%s error=%s", flow.id, error)
+
         fallback_nodes, fallback_edges = _serialize_persisted_flow_graph(db=db, tenant_id=tenant_id, flow_id=flow.id)
         fallback_valid, fallback_error = validate_flow_structure(nodes=fallback_nodes, edges=fallback_edges)
         if fallback_valid:
@@ -457,65 +428,59 @@ def _load_flow_version_runtime(flow: Flow, tenant_id: uuid.UUID, flow_version: F
 
 
 def _get_current_flow_runtime(db: Session, flow: Flow, tenant_id: uuid.UUID) -> dict[str, Any] | None:
+    selected_version, nodes, edges, source = _resolve_runtime_flow_payload(db=db, flow=flow)
 
-    # 1. Tentar cache primeiro
-cached = _ACTIVE_FLOW_RUNTIME_CACHE.get(flow.id)
-
-if cached and cached.get("version_id") == str(flow.current_version_id):
-    logger.info(
-        "[FLOW CACHE HIT] flow_id=%s version_id=%s",
-        flow.id,
-        cached.get("version_id"),
-    )
-    return cached.get("runtime_graph")
-
-# 2. Resolver runtime seguro
-resolved = _resolve_runtime_payload(
-    db=db,
-    tenant_id=tenant_id,
-    flow_id=str(flow.id)
-)
-
-if not resolved:
-    return None
-
-# 3. Construir versão runtime
-runtime_version = FlowVersion(
-    flow_id=flow.id,
-    version=flow.version or 1,
-    nodes=resolved["nodes"],
-    edges=resolved["edges"],
-)
-
-# 4. Salvar no cache
-_ACTIVE_FLOW_RUNTIME_CACHE[flow.id] = {
-    "version_id": str(resolved.get("version_id")),
-    "runtime_graph": resolved,
-}
-
-return resolved
-    if not resolved["nodes"]:
+    resolved_version_id = str(selected_version.id) if selected_version else None
+    if not selected_version or not nodes:
+        logger.warning(
+            "[FLOW_RUNTIME_RESOLVED] invalid runtime flow_id=%s version_id=%s source=%s",
+            flow.id,
+            resolved_version_id,
+            source,
+        )
         return None
-    runtime_version = FlowVersion(
-        flow_id=flow.id,
-        version=flow.version or 1,
-        nodes=resolved["nodes"],
-        edges=resolved["edges"],
-    )
-    if resolved.get("version_id"):
-        parsed_version_id = _parse_uuid(resolved["version_id"])
-        if parsed_version_id:
-            runtime_version.id = parsed_version_id
+
+    cached = _ACTIVE_FLOW_RUNTIME_CACHE.get(flow.id)
+    if cached and cached.get("version_id") == resolved_version_id:
+        logger.info(
+            "[FLOW_RUNTIME_CACHE_HIT] flow_id=%s version_id=%s source=%s",
+            flow.id,
+            resolved_version_id,
+            source,
+        )
+        return cached.get("runtime_graph")
+
+    runtime_version = selected_version
     runtime_graph = _load_flow_version_runtime(flow=flow, tenant_id=tenant_id, flow_version=runtime_version)
+
+    if not runtime_graph.get("nodes"):
+        logger.warning(
+            "[FLOW_RUNTIME_RESOLVED] empty runtime graph flow_id=%s version_id=%s source=%s",
+            flow.id,
+            resolved_version_id,
+            source,
+        )
+        return None
+
     _ACTIVE_FLOW_RUNTIME_CACHE[flow.id] = {
-        "version_id": resolved.get("version_id"),
+        "version_id": resolved_version_id,
         "runtime_graph": runtime_graph,
     }
+
     logger.info(
-        "[FLOW CACHE] store flow_id=%s version_id=%s",
+        "[FLOW_RUNTIME_RESOLVED] flow_id=%s version_id=%s source=%s",
         flow.id,
-        resolved.get("version_id"),
+        resolved_version_id,
+        source,
     )
+    if source != "published_version":
+        logger.warning(
+            "[FLOW_RUNTIME_FALLBACK] flow_id=%s version_id=%s source=%s",
+            flow.id,
+            resolved_version_id,
+            source,
+        )
+
     return runtime_graph
 
 
