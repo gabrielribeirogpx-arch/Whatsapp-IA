@@ -162,6 +162,9 @@ async def update_flow_route(
     flow = _get_flow_by_identifier(db=db, flow_id=flow_id, tenant_id=tenant.id)
     if not flow:
         print("[FLOW DEBUG] Flow não encontrado, criando novo")
+        tenant = db.query(Tenant).first()
+        if not tenant:
+            raise Exception("Nenhum tenant encontrado no banco")
         _, resolved_flow_id = _resolve_flow_query(db=db, flow_id=flow_id)
         flow = Flow(
             id=resolved_flow_id if isinstance(resolved_flow_id, uuid.UUID) else None,
@@ -171,6 +174,7 @@ async def update_flow_route(
         db.add(flow)
         db.commit()
         db.refresh(flow)
+        print("[FLOW DEBUG] Flow criado com tenant:", tenant.id)
 
     print("[FLOW DEBUG] Flow encontrado ou criado:", flow.id)
     for key, value in payload_data.items():
