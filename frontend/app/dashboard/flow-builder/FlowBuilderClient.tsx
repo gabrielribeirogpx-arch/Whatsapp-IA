@@ -372,6 +372,16 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
       });
 
       const data = await Promise.race([requestPromise, timeoutPromise]);
+      const payload = data as {
+        id?: string;
+        current_version?: { nodes?: unknown[] | null } | null;
+        raw_nodes?: unknown[] | null;
+      };
+      console.log('FLOW DEBUG:', {
+        id: payload?.id,
+        version_nodes: Array.isArray(payload?.current_version?.nodes) ? payload.current_version.nodes.length : undefined,
+        persisted_nodes: Array.isArray(payload?.raw_nodes) ? payload.raw_nodes.length : undefined,
+      });
       const normalizedFlow = normalizeFlow(data);
       console.log('FLOW CARREGADO:', normalizedFlow);
       console.log('FLOW SELECIONADO:', flowId);
