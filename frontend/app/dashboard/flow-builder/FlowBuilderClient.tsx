@@ -724,28 +724,43 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
     flow.edges = flow.edges || [];
 
     const realFlow = rfInstance?.toObject?.() || flow;
+    const realFlowNodes = Array.isArray(realFlow.nodes) ? (realFlow.nodes as Node[]) : [];
     const realFlowEdges = Array.isArray(realFlow.edges) ? (realFlow.edges as Edge[]) : [];
 
-    const payloadEdges: FlowEdgePayload[] = realFlowEdges.map((edge) => {
-      const edgeData = edge.data as FlowEdgePayload['data'] | undefined;
-      const sourceHandle = edge.sourceHandle ?? edgeData?.sourceHandle ?? null;
+    const payloadNodes: FlowNodePayload[] = realFlowNodes.map((node) => {
+      const nodeData = node.data || {};
+      // Remove funções e campos não serializáveis
+      const { onChange, ...cleanData } = nodeData as Record<string, unknown>;
 
       return {
-        id: safeString(edge.id),
-        source: safeString(edge.source),
-        target: safeString(edge.target),
-        sourceHandle: sourceHandle || undefined,
-        targetHandle: safeString(edge.targetHandle),
-        label: safeString(edge.label?.toString() ?? ''),
+        id: node.id,
+        type: node.type || 'message',
+        position: node.position,
+        data: cleanData,
+      };
+    });
+
+    const payloadEdges: FlowEdgePayload[] = edges.map((edge) => {
+      const edgeData = (edge.data || {}) as { sourceHandle?: string; condition?: string };
+      const rawSourceHandle = edge.sourceHandle ?? edgeData.sourceHandle ?? null;
+      const sourceHandle = typeof rawSourceHandle === 'string' ? rawSourceHandle : undefined;
+
+      return {
+        id: edge.id,
+        source: edge.source,
+        target: edge.target,
+        sourceHandle,
+        targetHandle: edge.targetHandle || undefined,
+        label: edge.label?.toString() || '',
         data: {
-          sourceHandle: sourceHandle || undefined,
-          condition: safeString(edge.label?.toString() || edgeData?.condition || ''),
+          sourceHandle,
+          condition: edge.label?.toString() || edgeData.condition || '',
         },
       };
     });
 
     const safeFlow = {
-      nodes: Array.isArray(realFlow.nodes) ? realFlow.nodes : [],
+      nodes: payloadNodes,
       edges: payloadEdges,
     };
 
@@ -754,7 +769,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
       return;
     }
 
-    console.log('FLOW SALVANDO:', safeFlow);
+    console.log('SAVING PAYLOAD:', safeFlow);
 
     setIsSaving(true);
     try {
