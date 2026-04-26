@@ -19,8 +19,6 @@ print("[FLOW API] carregada")
 
 router = APIRouter()
 crud_router = APIRouter(tags=["flows-crud"])
-TEMP_TENANT_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
-
 
 class FlowBuilderPayload(BaseModel):
     nodes: list[dict[str, Any]] = Field(default_factory=list)
@@ -79,23 +77,34 @@ def _get_flow_by_identifier(db: Session, flow_id: str, tenant_id: uuid.UUID | No
     return query.first()
 
 
+def _get_valid_tenant(db: Session) -> Tenant:
+    tenant = db.query(Tenant).order_by(Tenant.created_at.asc(), Tenant.id.asc()).first()
+    if not tenant:
+        raise HTTPException(status_code=500, detail="Nenhum tenant encontrado no banco")
+    print("[FLOW DEBUG] Tenant usado:", tenant.id)
+    return tenant
+
+
+
 @router.get("")
 @router.get("/")
 def list_flows(db: Session = Depends(get_db)):
-    return [_serialize_flow(item) for item in get_flows(db=db, tenant_id=TEMP_TENANT_ID)]
+    tenant = _get_valid_tenant(db=db)
+    return [_serialize_flow(item) for item in get_flows(db=db, tenant_id=tenant.id)]
 
 
 @router.post("/")
 def create_flow_route(payload: FlowCreatePayload, db: Session = Depends(get_db)):
+    tenant = _get_valid_tenant(db=db)
     payload_data = payload.model_dump()
     flow = create_flow(
         db=db,
-        tenant_id=TEMP_TENANT_ID,
+        tenant_id=tenant.id,
         data={key: value for key, value in payload_data.items() if key not in {"nodes", "edges"}},
     )
     save_flow_graph(
         db=db,
-        tenant_id=TEMP_TENANT_ID,
+        tenant_id=tenant.id,
         flow_id=str(flow.id),
         nodes=payload_data.get("nodes", []),
         edges=payload_data.get("edges", []),
@@ -103,7 +112,7 @@ def create_flow_route(payload: FlowCreatePayload, db: Session = Depends(get_db))
     db.add(flow)
     db.commit()
     db.refresh(flow)
-    graph = get_flow_graph(db=db, tenant_id=TEMP_TENANT_ID, flow_id=str(flow.id))
+    graph = get_flow_graph(db=db, tenant_id=tenant.id, flow_id=str(flow.id))
     return {
         **_serialize_flow(flow),
         "definition": _normalize_flow_response(graph),
@@ -149,14 +158,15 @@ async def update_flow_route(
     print("VALIDANDO FLOW:")
     print("nodes:", nodes)
 
-    flow = _get_flow_by_identifier(db=db, flow_id=flow_id, tenant_id=TEMP_TENANT_ID)
+    tenant = _get_valid_tenant(db=db)
+    flow = _get_flow_by_identifier(db=db, flow_id=flow_id, tenant_id=tenant.id)
     if not flow:
         print("[FLOW DEBUG] Flow não encontrado, criando novo")
         _, resolved_flow_id = _resolve_flow_query(db=db, flow_id=flow_id)
         flow = Flow(
             id=resolved_flow_id if isinstance(resolved_flow_id, uuid.UUID) else None,
             name=f"Flow {flow_id}",
-            tenant_id=TEMP_TENANT_ID,
+            tenant_id=tenant.id,
         )
         db.add(flow)
         db.commit()
@@ -204,7 +214,8 @@ async def update_flow_route(
 
 @router.delete("/{flow_id}")
 def delete_flow_route(flow_id: uuid.UUID, db: Session = Depends(get_db)):
-    deleted = delete_flow(db=db, flow_id=flow_id, tenant_id=TEMP_TENANT_ID)
+    tenant = _get_valid_tenant(db=db)
+    deleted = delete_flow(db=db, flow_id=flow_id, tenant_id=tenant.id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Flow not found")
     db.commit()
