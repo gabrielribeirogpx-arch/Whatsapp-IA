@@ -25,7 +25,7 @@ import { getLayoutedElements } from '@/lib/autoLayout';
 import { orderChoiceChildrenEdges } from '@/lib/flowChoiceOrdering';
 import { executeNode } from '@/lib/flowEngine';
 import { normalizeFlow } from '@/lib/flowNormalization';
-import { FlowEdgePayload, FlowNodePayload, FlowVersionItem } from '@/lib/types';
+import { FlowNodePayload, FlowVersionItem } from '@/lib/types';
 
 const FETCH_TIMEOUT_MS = 8000;
 
@@ -97,7 +97,7 @@ const normalizeChoiceButtons = (nodeId: string, buttons: Array<{ id?: string; la
     };
   });
 
-const buildFlowEdge = (edge: FlowEdgePayload): Edge => {
+const buildFlowEdge = (edge: any): Edge => {
   const inferredHandle =
     edge.sourceHandle ??
     edge.data?.sourceHandle ??
@@ -406,7 +406,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
         }),
       );
 
-      const formattedEdges: Edge[] = safeEdges.map((e: FlowEdgePayload) => ({
+      const formattedEdges: Edge[] = safeEdges.map((e: any) => ({
         ...buildFlowEdge({
           ...e,
           id: String(e.id),
@@ -740,28 +740,17 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
       };
     });
 
-    const payloadEdges: FlowEdgePayload[] = edges.map((edge) => {
-      const edgeData = (edge.data || {}) as { sourceHandle?: string; condition?: string };
-      const rawSourceHandle = edge.sourceHandle ?? edgeData.sourceHandle ?? null;
-      const sourceHandle = typeof rawSourceHandle === 'string' ? rawSourceHandle : undefined;
-
-      return {
+    const validEdges = realFlowEdges
+      .filter((edge) => edge.source && edge.target)
+      .map((edge) => ({
         id: edge.id,
         source: edge.source,
         target: edge.target,
-        sourceHandle,
-        targetHandle: edge.targetHandle || undefined,
-        label: edge.label?.toString() || '',
-        data: {
-          sourceHandle,
-          condition: edge.label?.toString() || edgeData.condition || '',
-        },
-      };
-    });
+      }));
 
     const safeFlow = {
       nodes: payloadNodes,
-      edges: payloadEdges,
+      edges: validEdges,
     };
 
     if (!safeFlow.nodes || safeFlow.nodes.length === 0) {
