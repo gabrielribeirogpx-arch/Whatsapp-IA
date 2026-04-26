@@ -79,9 +79,9 @@ def _get_flow_by_identifier(db: Session, flow_id: str, tenant_id: uuid.UUID | No
 
 
 def _get_valid_tenant(db: Session) -> Tenant:
-    tenant = db.query(Tenant).order_by(Tenant.created_at.asc(), Tenant.id.asc()).first()
+    tenant = db.query(Tenant).order_by(Tenant.id.asc()).first()
     if not tenant:
-        raise HTTPException(status_code=500, detail="Nenhum tenant encontrado no banco")
+        raise Exception("Nenhum tenant encontrado no banco")
     print("[FLOW DEBUG] Tenant usado:", tenant.id)
     return tenant
 
