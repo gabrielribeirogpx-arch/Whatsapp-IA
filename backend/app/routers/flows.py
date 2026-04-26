@@ -368,6 +368,28 @@ def _serialize_flow(flow: Flow) -> dict[str, Any]:
     }
 
 
+def _rename_flow_name(
+    *,
+    db: Session,
+    flow_id: str,
+    payload: RenameFlowPayload,
+    tenant_id: uuid.UUID | None,
+) -> dict[str, Any]:
+    flow = _get_flow_by_identifier(db=db, flow_id=flow_id, tenant_id=tenant_id)
+    if not flow:
+        raise HTTPException(status_code=404, detail="Flow not found")
+
+    normalized_name = payload.name.strip()
+    if not normalized_name:
+        raise HTTPException(status_code=400, detail="Name is required")
+
+    flow.name = normalized_name
+    db.add(flow)
+    db.commit()
+    db.refresh(flow)
+    return _serialize_flow(flow)
+
+
 def _serialize_flow_version(flow_version: FlowVersion, current_version_id: uuid.UUID | None) -> dict[str, Any]:
     return {
         "id": str(flow_version.id),
@@ -754,15 +776,28 @@ def rename_tenant_flow(
     db: Session = Depends(get_db),
 ):
     tenant_uuid = _resolve_tenant_header(x_tenant_id)
-    flow = _get_flow_by_identifier(db=db, flow_id=flow_id, tenant_id=tenant_uuid)
-    if not flow:
-        raise HTTPException(status_code=404, detail="Flow not found")
+    return _rename_flow_name(
+        db=db,
+        flow_id=flow_id,
+        payload=payload,
+        tenant_id=tenant_uuid,
+    )
 
-    flow.name = payload.name
-    db.add(flow)
-    db.commit()
-    db.refresh(flow)
-    return _serialize_flow(flow)
+
+@router.put("/{flow_id}/rename")
+def rename_flow_route(
+    flow_id: str,
+    payload: RenameFlowPayload,
+    x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
+    db: Session = Depends(get_db),
+):
+    tenant = _resolve_request_tenant(db=db, tenant_id_header=x_tenant_id)
+    return _rename_flow_name(
+        db=db,
+        flow_id=flow_id,
+        payload=payload,
+        tenant_id=tenant.id,
+    )
 
 
 @crud_router.post("/{flow_id}/duplicate")
