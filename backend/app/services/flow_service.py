@@ -5,7 +5,7 @@ import logging
 import re
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from app.models import Conversation, Flow, FlowStep, Message
@@ -271,11 +271,28 @@ def handle_flow(db: Session, conversation: Conversation, message: Message) -> st
 
 
 def create_flow(db: Session, tenant_id, data: dict[str, Any]) -> Flow:
+    has_active_flow = db.execute(
+        select(Flow.id).where(
+            Flow.tenant_id == tenant_id,
+            Flow.is_active.is_(True),
+        ).limit(1)
+    ).scalar_one_or_none() is not None
+
+    requested_active = data.get("is_active")
+    should_activate = bool(requested_active) if requested_active is not None else not has_active_flow
+
+    if should_activate:
+        db.execute(
+            update(Flow)
+            .where(Flow.tenant_id == tenant_id)
+            .values(is_active=False)
+        )
+
     flow = Flow(
         tenant_id=tenant_id,
         name=data["name"],
         description=data.get("description"),
-        is_active=data.get("is_active", True),
+        is_active=should_activate,
         trigger_type=data.get("trigger_type", "default"),
         trigger_value=data.get("trigger_value"),
         keywords=data.get("keywords"),
