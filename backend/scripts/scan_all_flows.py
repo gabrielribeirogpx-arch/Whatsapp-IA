@@ -93,6 +93,10 @@ def scan_all_flows() -> list[FlowSnapshot]:
         db.close()
 
 
+def scan_all() -> list[FlowSnapshot]:
+    return scan_all_flows()
+
+
 def main() -> None:
     snapshots = scan_all_flows()
 
