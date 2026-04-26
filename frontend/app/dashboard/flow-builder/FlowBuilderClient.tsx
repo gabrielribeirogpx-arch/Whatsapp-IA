@@ -740,20 +740,21 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
       };
     });
 
-    const payloadEdges: FlowEdgePayload[] = realFlowEdges.map((edge) => {
-      const edgeData = (edge.data || {}) as Record<string, unknown>;
-      const sourceHandle = edge.sourceHandle ?? edgeData.sourceHandle ?? null;
+    const payloadEdges: FlowEdgePayload[] = edges.map((edge) => {
+      const edgeData = (edge.data || {}) as { sourceHandle?: string; condition?: string };
+      const rawSourceHandle = edge.sourceHandle ?? edgeData.sourceHandle ?? null;
+      const sourceHandle = typeof rawSourceHandle === 'string' ? rawSourceHandle : undefined;
 
       return {
         id: edge.id,
         source: edge.source,
         target: edge.target,
-        sourceHandle: sourceHandle || undefined,
+        sourceHandle,
         targetHandle: edge.targetHandle || undefined,
         label: edge.label?.toString() || '',
         data: {
-          sourceHandle: sourceHandle || undefined,
-          condition: edge.label?.toString() || (edgeData.condition as string) || '',
+          sourceHandle,
+          condition: edge.label?.toString() || edgeData.condition || '',
         },
       };
     });
