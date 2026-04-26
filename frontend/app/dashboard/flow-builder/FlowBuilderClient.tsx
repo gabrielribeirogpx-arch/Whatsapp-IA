@@ -370,9 +370,12 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
 
       const data = await Promise.race([requestPromise, timeoutPromise]);
       console.log('FLOW CARREGADO:', data);
+      console.log('FLOW SELECIONADO:', flowId);
 
       const safeNodes = Array.isArray(data?.nodes) ? data.nodes : [];
       const safeEdges = Array.isArray(data?.edges) ? data.edges : [];
+      console.log('NODES RECEBIDOS:', safeNodes);
+      console.log('EDGES RECEBIDOS:', safeEdges);
 
       const formattedNodes: Node[] = safeNodes.map((n: FlowNodePayload) =>
         buildFlowNode({
@@ -714,7 +717,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
     };
 
     if (!safeFlow.nodes || safeFlow.nodes.length === 0) {
-      alert('Não é possível salvar fluxo vazio');
+      console.warn('Bloqueado: nodes vazio');
       return;
     }
 
@@ -974,12 +977,11 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
         <div className="flow-builder-top-actions">
           <select
             value={selectedFlowId || ''}
-            onChange={(e) => {
+            onChange={async (e) => {
               const id = e.target.value || null;
+              console.log('FLOW SELECIONADO:', id);
               setSelectedFlowId(id);
-              setNodes([]);
-              setEdges([]);
-              void loadFlow(id);
+              await loadFlow(id);
             }}
             style={{
               padding: '6px 10px',
