@@ -53,6 +53,18 @@ def _parse_uuid(value: Any) -> uuid.UUID | None:
         return None
 
 
+def _is_valid_flow_payload(nodes: list[dict[str, Any]] | None, edges: list[dict[str, Any]] | None) -> bool:
+    del edges  # edges are currently not required for version validity
+    if not isinstance(nodes, list) or len(nodes) <= 1:
+        return False
+    return any(
+        isinstance(node, dict)
+        and isinstance(node.get("data"), dict)
+        and bool(node.get("data", {}).get("isStart"))
+        for node in nodes
+    )
+
+
 def _load_flow_version_runtime(flow: Flow, tenant_id: uuid.UUID, flow_version: FlowVersion) -> dict[str, Any]:
     raw_nodes = flow_version.nodes if isinstance(flow_version.nodes, list) else []
     raw_edges = flow_version.edges if isinstance(flow_version.edges, list) else []
@@ -1249,6 +1261,39 @@ def get_flow_graph(db: Session, tenant_id: uuid.UUID, flow_id: str) -> dict[str,
 
 def save_flow_graph(db: Session, tenant_id: uuid.UUID, flow_id: str, nodes: list[dict[str, Any]], edges: list[dict[str, Any]]) -> dict[str, str]:
     flow = resolve_flow(db=db, tenant_id=tenant_id, flow_id=flow_id)
+    nodes_payload = nodes or []
+    edges_payload = edges or []
+    persisted_nodes = flow.current_version.nodes if flow.current_version and isinstance(flow.current_version.nodes, list) else []
+    persisted_edges = flow.current_version.edges if flow.current_version and isinstance(flow.current_version.edges, list) else []
+
+    if not _is_valid_flow_payload(nodes_payload, edges_payload):
+        print(
+            {
+                "action": "FLOW_VERSION_BLOCKED",
+                "reason": "invalid_payload",
+                "flow_id": str(flow.id),
+                "nodes": len(nodes_payload),
+            }
+        )
+        if len(persisted_nodes) > len(nodes_payload):
+            nodes_payload = persisted_nodes
+            edges_payload = persisted_edges
+            print(
+                {
+                    "action": "FLOW_VERSION_FALLBACK",
+                    "reason": "payload_smaller_than_persisted",
+                    "flow_id": str(flow.id),
+                    "payload_nodes": len(nodes or []),
+                    "persisted_nodes": len(persisted_nodes),
+                }
+            )
+        else:
+            return {
+                "flow_id": str(flow.id),
+                "status": "ignored_invalid_payload",
+                "flow_version_id": str(flow.current_version_id) if flow.current_version_id else "",
+            }
+
     last_version = db.query(func.max(FlowVersion.version)).filter(FlowVersion.flow_id == flow.id).scalar()
     next_version = (last_version or 0) + 1
 
@@ -1260,8 +1305,8 @@ def save_flow_graph(db: Session, tenant_id: uuid.UUID, flow_id: str, nodes: list
     flow_version = FlowVersion(
         flow_id=flow.id,
         version=next_version,
-        nodes=nodes or [],
-        edges=edges or [],
+        nodes=nodes_payload,
+        edges=edges_payload,
         is_active=True,
     )
     db.add(flow_version)
@@ -1281,7 +1326,7 @@ def save_flow_graph(db: Session, tenant_id: uuid.UUID, flow_id: str, nodes: list
     db.flush()
 
     node_id_map: dict[str, uuid.UUID] = {}
-    for item in nodes:
+    for item in nodes_payload:
         raw_id = str(item.get("id") or "").strip()
         node_id = uuid.uuid4()
         if raw_id:
@@ -1327,7 +1372,7 @@ def save_flow_graph(db: Session, tenant_id: uuid.UUID, flow_id: str, nodes: list
 
     db.flush()
 
-    for item in edges:
+    for item in edges_payload:
         source_raw = str(item.get("source") or "").strip()
         target_raw = str(item.get("target") or "").strip()
         source_id = node_id_map.get(source_raw)

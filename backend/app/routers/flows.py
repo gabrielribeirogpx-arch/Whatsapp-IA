@@ -90,6 +90,29 @@ def _get_valid_tenant(db: Session) -> Tenant:
     return tenant
 
 
+def _is_valid_flow(nodes: list[dict[str, Any]], edges: list[dict[str, Any]]) -> bool:
+    del edges  # currently not mandatory for validity
+    if not nodes or len(nodes) <= 1:
+        return False
+    return any(
+        isinstance(node, dict)
+        and isinstance(node.get("data"), dict)
+        and bool(node.get("data", {}).get("isStart"))
+        for node in nodes
+    )
+
+
+def _log_flow_version_blocked(flow_id: uuid.UUID, nodes_count: int) -> None:
+    print(
+        {
+            "action": "FLOW_VERSION_BLOCKED",
+            "reason": "invalid_payload",
+            "flow_id": str(flow_id),
+            "nodes": nodes_count,
+        }
+    )
+
+
 
 @router.get("")
 @router.get("/")
@@ -157,9 +180,6 @@ async def update_flow_route(
         if not isinstance(raw_edges, list):
             raw_edges = []
 
-        if not raw_nodes:
-            raise Exception("Flow precisa ter ao menos 1 node")
-
         nodes = []
         for node in raw_nodes:
             normalized_node = node if isinstance(node, dict) else {}
@@ -188,6 +208,30 @@ async def update_flow_route(
 
         if not flow.id:
             raise Exception("Flow sem ID")
+
+        persisted_nodes = flow.current_version.nodes if flow.current_version and isinstance(flow.current_version.nodes, list) else []
+        persisted_edges = flow.current_version.edges if flow.current_version and isinstance(flow.current_version.edges, list) else []
+        if not _is_valid_flow(nodes, edges):
+            _log_flow_version_blocked(flow.id, len(nodes))
+            if len(persisted_nodes) > len(nodes):
+                print(
+                    {
+                        "action": "FLOW_VERSION_FALLBACK",
+                        "reason": "payload_smaller_than_persisted",
+                        "flow_id": str(flow.id),
+                        "payload_nodes": len(nodes),
+                        "persisted_nodes": len(persisted_nodes),
+                    }
+                )
+                nodes = persisted_nodes
+                edges = persisted_edges
+            else:
+                return {
+                    "success": True,
+                    "flow_id": flow.id,
+                    "current_version_id": str(flow.current_version_id) if flow.current_version_id else None,
+                    "version_blocked": True,
+                }
 
         last_version = db.execute(
             select(FlowVersion)
@@ -519,12 +563,32 @@ async def update_tenant_flow(
                     "data": node.data or {},
                 }
             )
-        if not nodes:
-            raise HTTPException(status_code=422, detail="Flow precisa ter ao menos 1 node")
-
         edges = payload_model.edges or []
         print("VALIDANDO FLOW:")
         print("nodes:", nodes)
+
+        persisted_nodes = flow.current_version.nodes if flow.current_version and isinstance(flow.current_version.nodes, list) else []
+        persisted_edges = flow.current_version.edges if flow.current_version and isinstance(flow.current_version.edges, list) else []
+        if not _is_valid_flow(nodes, edges):
+            _log_flow_version_blocked(flow.id, len(nodes))
+            if len(persisted_nodes) > len(nodes):
+                print(
+                    {
+                        "action": "FLOW_VERSION_FALLBACK",
+                        "reason": "payload_smaller_than_persisted",
+                        "flow_id": str(flow.id),
+                        "payload_nodes": len(nodes),
+                        "persisted_nodes": len(persisted_nodes),
+                    }
+                )
+                nodes = persisted_nodes
+                edges = persisted_edges
+            else:
+                return {
+                    "status": "ok",
+                    "current_version_id": str(flow.current_version_id) if flow.current_version_id else None,
+                    "version_blocked": True,
+                }
 
         nova = FlowVersion(
             flow_id=flow.id,
