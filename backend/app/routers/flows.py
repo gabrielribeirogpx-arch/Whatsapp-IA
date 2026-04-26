@@ -386,55 +386,20 @@ def list_tenant_flows(
 @crud_router.get("/{flow_id}")
 def get_tenant_flow_by_id(
     flow_id: str,
+    x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
     db: Session = Depends(get_db),
 ):
+    tenant_uuid = _resolve_tenant_header(x_tenant_id)
     try:
-        flow = _get_flow_by_identifier(db=db, flow_id=flow_id)
-
+        flow = _get_flow_by_identifier(db=db, flow_id=flow_id, tenant_id=tenant_uuid)
         if not flow:
-            return {
-                "nodes": [],
-                "edges": [],
-            }
+            return dict(_EMPTY_FLOW)
 
-        version = None
-
-        if flow.current_version_id:
-            version = db.query(FlowVersion).filter(
-                FlowVersion.id == flow.current_version_id
-            ).first()
-
-        if not version:
-            version = db.query(FlowVersion).filter(
-                FlowVersion.flow_id == flow.id,
-                FlowVersion.is_active.is_(True),
-            ).first()
-
-        if not version:
-            print("FLOW SEM VERSÃO")
-            return {
-                "nodes": [],
-                "edges": [],
-            }
-
-        nodes = version.nodes or []
-        edges = version.edges or []
-
-        print("FLOW OK:", len(nodes), "nodes")
-        print("FLOW RETORNADO:", nodes)
-
-        return {
-            "nodes": nodes,
-            "edges": edges,
-        }
-
+        graph = get_flow_graph(db=db, tenant_id=tenant_uuid, flow_id=str(flow.id))
+        return _normalize_flow_response(graph)
     except Exception as e:
         print("ERRO CRÍTICO FLOW:", str(e))
-
-        return {
-            "nodes": [],
-            "edges": [],
-        }
+        return dict(_EMPTY_FLOW)
 
 
 @crud_router.get("/{flow_id}/analytics")

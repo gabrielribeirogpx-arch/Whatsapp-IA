@@ -557,6 +557,7 @@ def process_flow_engine(
     phone: str,
     message_text: str = "",
     force_node: uuid.UUID | None = None,
+    flow_id: str | None = None,
 ) -> str | None:
     normalized_phone = normalize_phone(phone)
     conversation = db.execute(
@@ -572,7 +573,15 @@ def process_flow_engine(
     if should_reset_context(message=message_text or "", context=conversation.context):
         conversation.context = {}
         logger.info("[CONTEXT RESET]")
-    flow = _get_or_create_visual_flow(db=db, tenant_id=conversation.tenant_id)
+    if flow_id:
+        try:
+            flow = resolve_flow(db=db, tenant_id=conversation.tenant_id, flow_id=flow_id)
+        except Exception:
+            logger.exception("[FLOW SELECT ERROR] tenant_id=%s flow_id=%s", conversation.tenant_id, flow_id)
+            return None
+    else:
+        flow = _get_or_create_visual_flow(db=db, tenant_id=conversation.tenant_id)
+    logger.info("[FLOW SELECTED] flow_id=%s", flow.id)
     runtime_graph = _get_current_flow_runtime(db=db, flow=flow, tenant_id=conversation.tenant_id)
     initialized_node = _initialize_flow_start_node(
         db=db,
