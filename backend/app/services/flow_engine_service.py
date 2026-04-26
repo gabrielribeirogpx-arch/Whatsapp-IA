@@ -79,11 +79,12 @@ def _load_flow_version_runtime(flow: Flow, tenant_id: uuid.UUID, flow_version: F
         if data.get("isStart") is not None:
             metadata["isStart"] = bool(data.get("isStart"))
         position = item.get("position") if isinstance(item.get("position"), dict) else {}
+        node_type = item.get("type") or "default"
         node = VersionedFlowNode(
             id=node_id,
             flow_id=flow.id,
             tenant_id=tenant_id,
-            type=str(item.get("type") or "message"),
+            type=str(node_type),
             content=(data.get("content") or data.get("text")) if isinstance(data, dict) else None,
             metadata_json=metadata,
             position_x=int(position.get("x", 0) or 0),
@@ -1300,7 +1301,7 @@ def save_flow_graph(db: Session, tenant_id: uuid.UUID, flow_id: str, nodes: list
             if data.get("isStart") is not None:
                 metadata["isStart"] = bool(data.get("isStart"))
 
-        node_type = item.get("type") or "message"
+        node_type = item.get("type") or "default"
 
         node = FlowNode(
             id=node_id,

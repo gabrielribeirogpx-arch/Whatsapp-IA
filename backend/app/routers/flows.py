@@ -108,8 +108,8 @@ async def update_flow_route(
     if not isinstance(raw_edges, list):
         raw_edges = []
 
-    if raw_nodes is None or len(raw_nodes) == 0:
-        raise HTTPException(status_code=422, detail="Flow precisa ter pelo menos 1 node")
+    if not raw_nodes:
+        raise HTTPException(status_code=422, detail="Flow precisa ter ao menos 1 node")
 
     nodes = []
     for node in raw_nodes:
@@ -124,7 +124,8 @@ async def update_flow_route(
         )
 
     edges = raw_edges or []
-    print("NODES NORMALIZADOS:", nodes)
+    print("VALIDANDO FLOW:")
+    print("nodes:", nodes)
 
     flow = update_flow(
         db=db,
@@ -421,12 +422,23 @@ async def update_tenant_flow(
         if not flow:
             raise HTTPException(status_code=404, detail="Flow não encontrado")
 
-        if not payload_model.nodes:
-            print("IGNORANDO SAVE VAZIO")
-            return {"status": "ignored"}
+        nodes = []
+        for node in payload_model.nodes or []:
+            normalized_node = node if isinstance(node, dict) else {}
+            nodes.append(
+                {
+                    "id": str(normalized_node.get("id")),
+                    "type": normalized_node.get("type") or "default",
+                    "position": normalized_node.get("position") or {"x": 0, "y": 0},
+                    "data": normalized_node.get("data") or {},
+                }
+            )
+        if not nodes:
+            raise HTTPException(status_code=422, detail="Flow precisa ter ao menos 1 node")
 
-        nodes = payload_model.nodes or []
         edges = payload_model.edges or []
+        print("VALIDANDO FLOW:")
+        print("nodes:", nodes)
 
         nova = FlowVersion(
             flow_id=flow.id,
