@@ -129,6 +129,11 @@ def _ensure_start_node(nodes: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return nodes
 
 
+def _block_invalid_flow_save() -> None:
+    print("FLOW BLOQUEADO - inválido")
+    raise Exception("Flow inválido - não salvar")
+
+
 def _log_flow_version_blocked(flow_id: uuid.UUID, nodes_count: int) -> None:
     print(
         {
@@ -222,6 +227,8 @@ async def update_flow_route(
         nodes = _ensure_start_node(nodes)
 
         edges = raw_edges or []
+        if len(nodes) <= 1:
+            _block_invalid_flow_save()
         print("VALIDANDO FLOW:")
         print("nodes:", nodes)
 
@@ -239,28 +246,17 @@ async def update_flow_route(
             raise Exception("Flow sem ID")
 
         persisted_nodes = flow.current_version.nodes if flow.current_version and isinstance(flow.current_version.nodes, list) else []
-        persisted_edges = flow.current_version.edges if flow.current_version and isinstance(flow.current_version.edges, list) else []
         if not _is_valid_flow(nodes, edges):
             _log_flow_version_blocked(flow.id, len(nodes))
-            if len(persisted_nodes) > len(nodes):
+            if persisted_nodes and not raw_nodes and not raw_edges:
                 print(
                     {
-                        "action": "FLOW_VERSION_FALLBACK",
-                        "reason": "payload_smaller_than_persisted",
+                        "action": "FLOW_VERSION_BLOCKED",
+                        "reason": "empty_payload_would_overwrite_existing",
                         "flow_id": str(flow.id),
-                        "payload_nodes": len(nodes),
-                        "persisted_nodes": len(persisted_nodes),
                     }
                 )
-                nodes = persisted_nodes
-                edges = persisted_edges
-            else:
-                return {
-                    "success": True,
-                    "flow_id": flow.id,
-                    "current_version_id": str(flow.current_version_id) if flow.current_version_id else None,
-                    "version_blocked": True,
-                }
+            _block_invalid_flow_save()
 
         last_version = db.execute(
             select(FlowVersion)
@@ -454,12 +450,29 @@ def save_tenant_flow(
     if not tenant:
         return dict(_EMPTY_FLOW)
 
+    normalized_nodes = _ensure_start_node(payload.nodes or [])
+    normalized_edges = payload.edges or []
+    if len(normalized_nodes) <= 1:
+        _block_invalid_flow_save()
+
+    existing_graph = get_flow_graph(db=db, tenant_id=tenant.id, flow_id=flow_id or "default")
+    existing_nodes = existing_graph.get("nodes") if isinstance(existing_graph, dict) else []
+    if existing_nodes and not (payload.nodes or []) and not (payload.edges or []):
+        print(
+            {
+                "action": "FLOW_VERSION_BLOCKED",
+                "reason": "empty_payload_would_overwrite_existing",
+                "flow_id": flow_id or "default",
+            }
+        )
+        _block_invalid_flow_save()
+
     save_flow_graph(
         db=db,
         tenant_id=tenant.id,
         flow_id=flow_id or "default",
-        nodes=_ensure_start_node(payload.nodes or []),
-        edges=payload.edges or [],
+        nodes=normalized_nodes,
+        edges=normalized_edges,
     )
     db.commit()
 
@@ -597,32 +610,27 @@ async def update_tenant_flow(
                     "data": node.data or {},
                 }
             )
+        nodes = _ensure_start_node(nodes)
         edges = payload_model.edges or []
+        if len(nodes) <= 1:
+            _block_invalid_flow_save()
         print("VALIDANDO FLOW:")
         print("nodes:", nodes)
 
         persisted_nodes = flow.current_version.nodes if flow.current_version and isinstance(flow.current_version.nodes, list) else []
-        persisted_edges = flow.current_version.edges if flow.current_version and isinstance(flow.current_version.edges, list) else []
         if not _is_valid_flow(nodes, edges):
             _log_flow_version_blocked(flow.id, len(nodes))
-            if len(persisted_nodes) > len(nodes):
+            incoming_nodes = payload_model.nodes or []
+            incoming_edges = payload_model.edges or []
+            if persisted_nodes and not incoming_nodes and not incoming_edges:
                 print(
                     {
-                        "action": "FLOW_VERSION_FALLBACK",
-                        "reason": "payload_smaller_than_persisted",
+                        "action": "FLOW_VERSION_BLOCKED",
+                        "reason": "empty_payload_would_overwrite_existing",
                         "flow_id": str(flow.id),
-                        "payload_nodes": len(nodes),
-                        "persisted_nodes": len(persisted_nodes),
                     }
                 )
-                nodes = persisted_nodes
-                edges = persisted_edges
-            else:
-                return {
-                    "status": "ok",
-                    "current_version_id": str(flow.current_version_id) if flow.current_version_id else None,
-                    "version_blocked": True,
-                }
+            _block_invalid_flow_save()
 
         nova = FlowVersion(
             flow_id=flow.id,
