@@ -6,7 +6,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from pydantic import BaseModel, Field
 from app.schemas.flow import FlowUpdate
-from sqlalchemy import select
+from sqlalchemy import String, cast, select
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -44,6 +44,36 @@ class RestoreFlowVersionPayload(BaseModel):
     version_id: uuid.UUID
 
 
+def parse_flow_id(flow_id: str):
+    try:
+        return uuid.UUID(flow_id)
+    except Exception:
+        return flow_id
+
+
+def _resolve_flow_query(db: Session, flow_id: str):
+    flow_id_parsed = parse_flow_id(flow_id)
+    print("[FLOW DEBUG] flow_id recebido:", flow_id)
+    print("[FLOW DEBUG] flow_id parseado:", flow_id_parsed)
+
+    if isinstance(flow_id_parsed, uuid.UUID):
+        return db.query(Flow).filter(Flow.id == flow_id_parsed), flow_id_parsed
+
+    flow_id_text = str(flow_id_parsed).strip()
+    try:
+        flow_id_int = int(flow_id_text)
+        return db.query(Flow).filter(cast(Flow.id, String) == str(flow_id_int)), flow_id_int
+    except (TypeError, ValueError):
+        return db.query(Flow).filter(cast(Flow.id, String) == flow_id_text), flow_id_text
+
+
+def _get_flow_by_identifier(db: Session, flow_id: str, tenant_id: uuid.UUID | None = None):
+    query, _ = _resolve_flow_query(db=db, flow_id=flow_id)
+    if tenant_id is not None:
+        query = query.filter(Flow.tenant_id == tenant_id)
+    return query.first()
+
+
 @router.get("")
 @router.get("/")
 def list_flows(db: Session = Depends(get_db)):
@@ -77,7 +107,7 @@ def create_flow_route(payload: FlowCreatePayload, db: Session = Depends(get_db))
 
 @router.put("/{flow_id}")
 async def update_flow_route(
-    flow_id: uuid.UUID,
+    flow_id: str,
     request: Request,
     db: Session = Depends(get_db),
 ):
@@ -114,29 +144,12 @@ async def update_flow_route(
     print("VALIDANDO FLOW:")
     print("nodes:", nodes)
 
-    flow = update_flow(
-        db=db,
-        flow_id=flow_id,
-        tenant_id=TEMP_TENANT_ID,
-        data={
-            key: value
-            for key, value in payload_data.items()
-            if key
-            in {
-                "name",
-                "description",
-                "is_active",
-                "trigger_type",
-                "trigger_value",
-                "keywords",
-                "stop_words",
-                "priority",
-                "version",
-            }
-        },
-    )
+    flow = _get_flow_by_identifier(db=db, flow_id=flow_id, tenant_id=TEMP_TENANT_ID)
     if not flow:
         raise HTTPException(status_code=404, detail="Flow not found")
+    for key, value in payload_data.items():
+        if key in {"name", "description", "is_active", "trigger_type", "trigger_value", "keywords", "stop_words", "priority", "version"}:
+            setattr(flow, key, value)
 
     last_version = db.execute(
         select(FlowVersion)
@@ -317,11 +330,11 @@ def list_tenant_flows(
 
 @crud_router.get("/{flow_id}")
 def get_tenant_flow_by_id(
-    flow_id: uuid.UUID,
+    flow_id: str,
     db: Session = Depends(get_db),
 ):
     try:
-        flow = db.query(Flow).filter(Flow.id == flow_id).first()
+        flow = _get_flow_by_identifier(db=db, flow_id=flow_id)
 
         if not flow:
             return {
@@ -371,12 +384,12 @@ def get_tenant_flow_by_id(
 
 @crud_router.get("/{flow_id}/analytics")
 def get_tenant_flow_analytics(
-    flow_id: uuid.UUID,
+    flow_id: str,
     x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
     db: Session = Depends(get_db),
 ):
     tenant_uuid = _resolve_tenant_header(x_tenant_id)
-    flow = get_flow(db=db, flow_id=flow_id, tenant_id=tenant_uuid)
+    flow = _get_flow_by_identifier(db=db, flow_id=flow_id, tenant_id=tenant_uuid)
     if not flow:
         raise HTTPException(status_code=404, detail="Flow not found")
 
@@ -387,7 +400,7 @@ def get_tenant_flow_analytics(
 
 @crud_router.put("/{flow_id}")
 async def update_tenant_flow(
-    flow_id: uuid.UUID,
+    flow_id: str,
     request: Request,
     x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
     db: Session = Depends(get_db),
@@ -410,14 +423,13 @@ async def update_tenant_flow(
             "version",
         }
 
-        flow = update_flow(
-            db=db,
-            flow_id=flow_id,
-            tenant_id=tenant_uuid,
-            data={key: value for key, value in payload_data.items() if key in flow_update_fields},
-        )
+        flow = _get_flow_by_identifier(db=db, flow_id=flow_id, tenant_id=tenant_uuid)
         if not flow:
             raise HTTPException(status_code=404, detail="Flow não encontrado")
+
+        update_data = {key: value for key, value in payload_data.items() if key in flow_update_fields}
+        for key, value in update_data.items():
+            setattr(flow, key, value)
 
         nodes = []
         for node in payload_model.nodes or []:
@@ -467,26 +479,31 @@ async def update_tenant_flow(
 
 @crud_router.delete("/{flow_id}")
 def delete_tenant_flow(
-    flow_id: uuid.UUID,
+    flow_id: str,
     x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
     db: Session = Depends(get_db),
 ):
     tenant_uuid = _resolve_tenant_header(x_tenant_id)
-    deleted = delete_flow(db=db, flow_id=flow_id, tenant_id=tenant_uuid)
-    if not deleted:
+    flow = _get_flow_by_identifier(db=db, flow_id=flow_id, tenant_id=tenant_uuid)
+    if not flow:
         raise HTTPException(status_code=404, detail="Flow not found")
+    db.delete(flow)
     db.commit()
     return {"status": "deleted"}
 
 
 @crud_router.post("/{flow_id}/duplicate")
 def duplicate_tenant_flow(
-    flow_id: uuid.UUID,
+    flow_id: str,
     x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
     db: Session = Depends(get_db),
 ):
     tenant_uuid = _resolve_tenant_header(x_tenant_id)
-    flow = duplicate_flow(db=db, flow_id=flow_id, tenant_id=tenant_uuid)
+    source_flow = _get_flow_by_identifier(db=db, flow_id=flow_id, tenant_id=tenant_uuid)
+    if not source_flow:
+        raise HTTPException(status_code=404, detail="Flow not found")
+
+    flow = duplicate_flow(db=db, flow_id=source_flow.id, tenant_id=tenant_uuid)
     if not flow:
         raise HTTPException(status_code=404, detail="Flow not found")
     db.commit()
@@ -496,12 +513,12 @@ def duplicate_tenant_flow(
 
 @crud_router.get("/{flow_id}/versions")
 def list_tenant_flow_versions(
-    flow_id: uuid.UUID,
+    flow_id: str,
     x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
     db: Session = Depends(get_db),
 ):
     tenant_uuid = _resolve_tenant_header(x_tenant_id)
-    flow = get_flow(db=db, flow_id=flow_id, tenant_id=tenant_uuid)
+    flow = _get_flow_by_identifier(db=db, flow_id=flow_id, tenant_id=tenant_uuid)
     if not flow:
         raise HTTPException(status_code=404, detail="Flow not found")
 
@@ -516,13 +533,13 @@ def list_tenant_flow_versions(
 
 @crud_router.post("/{flow_id}/versions/restore")
 def restore_tenant_flow_version(
-    flow_id: uuid.UUID,
+    flow_id: str,
     payload: RestoreFlowVersionPayload,
     x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
     db: Session = Depends(get_db),
 ):
     tenant_uuid = _resolve_tenant_header(x_tenant_id)
-    flow = get_flow(db=db, flow_id=flow_id, tenant_id=tenant_uuid)
+    flow = _get_flow_by_identifier(db=db, flow_id=flow_id, tenant_id=tenant_uuid)
     if not flow:
         raise HTTPException(status_code=404, detail="Flow not found")
 
@@ -551,7 +568,7 @@ def restore_tenant_flow_version(
 
 @crud_router.post("/{flow_id}/restore/{version_id}")
 def restore_tenant_flow_version_by_path(
-    flow_id: uuid.UUID,
+    flow_id: str,
     version_id: uuid.UUID,
     x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
     db: Session = Depends(get_db),
@@ -562,10 +579,10 @@ def restore_tenant_flow_version_by_path(
 
 @router.get("/{flow_id}/versions")
 def list_flow_versions_by_id(
-    flow_id: uuid.UUID,
+    flow_id: str,
     db: Session = Depends(get_db),
 ):
-    flow = db.execute(select(Flow).where(Flow.id == flow_id)).scalars().first()
+    flow = _get_flow_by_identifier(db=db, flow_id=flow_id)
     if not flow:
         raise HTTPException(status_code=404, detail="Flow not found")
 
@@ -579,11 +596,11 @@ def list_flow_versions_by_id(
 
 @router.post("/{flow_id}/restore/{version_id}")
 def restore_flow_version_by_id(
-    flow_id: uuid.UUID,
+    flow_id: str,
     version_id: uuid.UUID,
     db: Session = Depends(get_db),
 ):
-    flow = db.execute(select(Flow).where(Flow.id == flow_id)).scalars().first()
+    flow = _get_flow_by_identifier(db=db, flow_id=flow_id)
     if not flow:
         raise HTTPException(status_code=404, detail="Flow not found")
 
