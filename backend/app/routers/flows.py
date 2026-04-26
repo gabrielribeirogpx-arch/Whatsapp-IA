@@ -103,6 +103,21 @@ def validate_flow(nodes: list[dict[str, Any]], edges: list[dict[str, Any]]) -> t
     return validate_flow_structure(nodes=nodes, edges=edges)
 
 
+def _validate_nodes_by_type(nodes: list[dict[str, Any]]) -> None:
+    for node in nodes:
+        node_type = str(node.get("type") or "").strip().lower()
+        data = node.get("data", {})
+        if not isinstance(data, dict):
+            data = {}
+
+        if node_type == "message":
+            if not data.get("text"):
+                raise HTTPException(status_code=400, detail="Message node sem texto")
+        elif node_type == "condition":
+            if not data.get("condition"):
+                raise HTTPException(status_code=400, detail="Condition node sem regra")
+
+
 def _ensure_start_node(nodes: list[dict[str, Any]]) -> list[dict[str, Any]]:
     if not nodes:
         return nodes
@@ -233,6 +248,7 @@ async def update_flow_route(
             raise Exception("BLOCK SAVE: flow vazio")
         print("VALIDANDO FLOW:")
         print("nodes:", nodes)
+        _validate_nodes_by_type(nodes)
 
         tenant = _resolve_request_tenant(db=db, tenant_id_header=x_tenant_id)
         flow = _get_flow_by_identifier(db=db, flow_id=flow_id, tenant_id=tenant.id)
@@ -670,6 +686,7 @@ async def update_tenant_flow(
             raise Exception("BLOCK SAVE: flow vazio")
         print("VALIDANDO FLOW:")
         print("nodes:", nodes)
+        _validate_nodes_by_type(nodes)
 
         persisted_nodes = flow.current_version.nodes if flow.current_version and isinstance(flow.current_version.nodes, list) else []
         valid, error = validate_flow(nodes, edges)
