@@ -32,3 +32,29 @@ def test_validate_flow_structure_rejects_edges_to_unknown_nodes():
     valid, error = validate_flow_structure(nodes, edges)
     assert valid is False
     assert "inexistente" in (error or "")
+
+
+def test_validate_flow_structure_accepts_condition_without_text():
+    nodes = [
+        {"id": "start", "type": "message", "data": {"isStart": True, "text": "Olá"}},
+        {"id": "cond", "type": "condition", "data": {"condition": "cliente vip", "text": None}},
+    ]
+    edges = [{"id": "e1", "source": "start", "target": "cond"}]
+
+    valid, error = validate_flow_structure(nodes, edges)
+
+    assert valid is True
+    assert error is None
+
+
+def test_validate_flow_structure_rejects_condition_without_condition():
+    nodes = [
+        {"id": "start", "type": "message", "data": {"isStart": True, "text": "Olá"}},
+        {"id": "cond", "type": "condition", "data": {"text": None}},
+    ]
+    edges = [{"id": "e1", "source": "start", "target": "cond"}]
+
+    valid, error = validate_flow_structure(nodes, edges)
+
+    assert valid is False
+    assert "Condição sem conteúdo" in (error or "")

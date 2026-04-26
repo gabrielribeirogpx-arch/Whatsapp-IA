@@ -75,21 +75,25 @@ def validate_flow_structure(
             return False, f"Flow inválido: node duplicado ({node_id})"
         node_ids.add(node_id)
         data = node.get("data") if isinstance(node.get("data"), dict) else {}
-        node_type = str(node.get("type") or "default").strip().lower()
+        node_type = str(
+            node.get("type")
+            or data.get("type")
+            or data.get("nodeType")
+            or "default"
+        ).strip().lower()
 
         if node_type == "message":
             message_text = data.get("text")
             if isinstance(message_text, str):
                 message_text = message_text.strip()
             if not message_text:
-                return False, "Message node sem texto"
-
-        if node_type == "condition":
+                return False, "Mensagem sem texto"
+        elif node_type == "condition":
             condition_rule = data.get("condition")
             if isinstance(condition_rule, str):
                 condition_rule = condition_rule.strip()
             if not condition_rule:
-                return False, "Condition node sem regra"
+                return False, "Condição sem conteúdo"
 
         if bool(data.get("isStart")):
             has_start = True
