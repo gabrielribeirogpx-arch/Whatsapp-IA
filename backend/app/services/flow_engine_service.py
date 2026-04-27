@@ -101,15 +101,22 @@ def validate_flow_structure(
     if not has_start:
         return False, "Flow inválido: sem start node"
 
-    for edge in edges_payload:
-        if not isinstance(edge, dict):
-            return False, "Flow inválido: edge malformado"
-        source = str(edge.get("source") or "").strip()
-        target = str(edge.get("target") or "").strip()
-        if not source or not target:
-            return False, "Flow inválido: edge sem source/target"
-        if source not in node_ids or target not in node_ids:
-            return False, "Flow inválido: edge aponta para node inexistente"
+    try:
+        for edge in edges_payload:
+            if not isinstance(edge, dict):
+                print("EDGE INVÁLIDA:", edge)
+                raise ValueError("Flow inválido: edge malformado")
+
+            if not edge.get("source") or not edge.get("target"):
+                print("EDGE INVÁLIDA:", edge)
+                raise ValueError("edge inválido: falta source ou target")
+
+            source = str(edge.get("source") or "").strip()
+            target = str(edge.get("target") or "").strip()
+            if source not in node_ids or target not in node_ids:
+                return False, "Flow inválido: edge aponta para node inexistente"
+    except ValueError as exc:
+        return False, str(exc)
 
     return True, None
 
