@@ -167,6 +167,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
   const [isVersionsModalOpen, setIsVersionsModalOpen] = useState(false);
   const [isLoadingVersions, setIsLoadingVersions] = useState(false);
   const [isRestoringVersion, setIsRestoringVersion] = useState(false);
+  const [isCreatingFlow, setIsCreatingFlow] = useState(false);
   const [flowVersions, setFlowVersions] = useState<FlowVersionItem[]>([]);
   const [activeVersionId, setActiveVersionId] = useState<string | null>(null);
   const [flowSource, setFlowSource] = useState<string>('version');
@@ -176,6 +177,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
   const autosaveReadyRef = useRef(false);
   const isLoadingFlowRef = useRef(false);
   const lastLoadedFlowIdRef = useRef<string | null>(null);
+  const hasTriedAutoCreateRef = useRef(false);
   const nodesRef = useRef<Node[]>([]);
 
   const getTenantHeaders = useCallback(() => {
@@ -198,8 +200,23 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
   }, [selectedFlowId, urlFlowId]);
 
   useEffect(() => {
+    if (selectedFlowId && !normalizedFlows.find((flow) => flow.id === selectedFlowId)) {
+      setSelectedFlowId(null);
+      return;
+    }
+
+    if (!selectedFlowId && normalizedFlows.length > 0) {
+      const currentActiveFlow = normalizedFlows.find((flow) => flow.is_active);
+      setSelectedFlowId(currentActiveFlow?.id || normalizedFlows[0].id);
+    }
+  }, [normalizedFlows, selectedFlowId]);
+
+  useEffect(() => {
     if (typeof window === 'undefined') return;
-    if (!selectedFlowId) return;
+    if (!selectedFlowId) {
+      window.localStorage.removeItem('flow_builder_flow_id');
+      return;
+    }
     window.localStorage.setItem('flow_builder_flow_id', selectedFlowId);
   }, [selectedFlowId]);
 
@@ -246,12 +263,12 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
 
         const currentActiveFlow = safeFlows.find((flow) => flow.is_active);
         setActiveFlowId(currentActiveFlow?.id || null);
-
-        if (!selectedFlowId && safeFlows.length > 0) {
-          setSelectedFlowId(currentActiveFlow?.id || safeFlows[0].id);
-        }
       } catch (error) {
         console.error('[FlowBuilder] erro ao carregar lista de flows', error);
+      } finally {
+        if (active) {
+          setIsLoading(false);
+        }
       }
     };
 
@@ -259,7 +276,67 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
     return () => {
       active = false;
     };
-  }, [getTenantHeaders, selectedFlowId]);
+  }, [getTenantHeaders]);
+
+  const createDefaultFlow = useCallback(async () => {
+    const API_URL = process.env.NEXT_PUBLIC_API_URL;
+    if (!API_URL) return null;
+
+    try {
+      setIsCreatingFlow(true);
+      const response = await fetch(`${API_URL}/api/flows`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...getTenantHeaders(),
+        },
+        body: JSON.stringify({
+          name: 'Novo Flow',
+          nodes: [
+            {
+              id: 'start',
+              type: 'message',
+              data: {
+                text: 'Digite a mensagem...',
+              },
+            },
+          ],
+          edges: [],
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Erro ao criar flow base');
+      }
+
+      const newFlow = await response.json();
+      const safeFlow = newFlow && typeof newFlow.id === 'string' ? newFlow : null;
+      if (!safeFlow) return null;
+
+      setFlows((prev) => {
+        if (prev.some((flow) => flow.id === safeFlow.id)) return prev;
+        return [...prev, safeFlow];
+      });
+      setSelectedFlowId(safeFlow.id);
+      return safeFlow;
+    } catch (error) {
+      console.error('[FlowBuilder] erro ao criar flow base', error);
+      return null;
+    } finally {
+      setIsCreatingFlow(false);
+    }
+  }, [getTenantHeaders]);
+
+  useEffect(() => {
+    if (isLoading) return;
+    if (normalizedFlows.length > 0) {
+      hasTriedAutoCreateRef.current = false;
+      return;
+    }
+    if (hasTriedAutoCreateRef.current || isCreatingFlow) return;
+    hasTriedAutoCreateRef.current = true;
+    void createDefaultFlow();
+  }, [createDefaultFlow, isCreatingFlow, isLoading, normalizedFlows.length]);
 
   const formatVersionDate = useCallback((timestamp?: string | null) => {
     if (!timestamp) return 'Sem data';
@@ -347,7 +424,13 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
         return;
       }
 
-      if (!flowId) return;
+      if (!flowId) {
+        setNodes([FALLBACK_START_NODE]);
+        setEdges([]);
+        setShowEmptyFlowWarning(false);
+        setFlowSource('version');
+        return;
+      }
 
       isLoadingFlowRef.current = true;
       setIsLoading(true);
@@ -368,12 +451,24 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
         },
       }).then(async (res) => {
         if (!res.ok) {
+          if (res.status === 404) {
+            console.warn('[FlowBuilder] flow não encontrado, resetando estado');
+            setSelectedFlowId(null);
+            return null;
+          }
           throw new Error('Erro ao carregar flow');
         }
         return res.json();
       });
 
       const data = await Promise.race([requestPromise, timeoutPromise]);
+      if (!data) {
+        setNodes([FALLBACK_START_NODE]);
+        setEdges([]);
+        setShowEmptyFlowWarning(false);
+        setFlowSource('version');
+        return;
+      }
       const payload = data as {
         id?: string;
         source?: string;
@@ -435,6 +530,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
       }
     } catch (err) {
       console.error('Erro ao carregar flow', err);
+      setSelectedFlowId(null);
       setNodes([FALLBACK_START_NODE]);
       setEdges([]);
     } finally {
@@ -444,10 +540,17 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
   }, [applyLayoutAndSetFlow, buildFlowEdge, buildFlowNode, getTenantHeaders, rfInstance, setEdges, setNodes]);
 
   useEffect(() => {
+    if (!flows || flows.length === 0) {
+      setSelectedFlowId(null);
+      lastLoadedFlowIdRef.current = null;
+      setNodes([FALLBACK_START_NODE]);
+      setEdges([]);
+      return;
+    }
     if (!selectedFlowId) return;
     if (lastLoadedFlowIdRef.current === selectedFlowId) return;
     void loadFlow(selectedFlowId);
-  }, [loadFlow, selectedFlowId]);
+  }, [flows, loadFlow, selectedFlowId, setEdges, setNodes]);
 
   const flow = useMemo(
     () => ({
@@ -1050,6 +1153,21 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
       )}
       <main style={{ flex: 1, background: '#F7F7F5', position: 'relative' }}>
         <div className="flow-builder-top-actions">
+          {normalizedFlows.length === 0 && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <span style={{ color: '#6b7280', fontSize: 14 }}>Nenhum fluxo criado ainda</span>
+              <button
+                type="button"
+                className="flow-top-btn flow-top-btn-secondary"
+                onClick={() => {
+                  void createDefaultFlow();
+                }}
+                disabled={isCreatingFlow}
+              >
+                {isCreatingFlow ? 'Criando...' : 'Criar primeiro fluxo'}
+              </button>
+            </div>
+          )}
           <select
             value={selectedFlowId || ''}
             onChange={async (e) => {
@@ -1065,9 +1183,10 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
               background: '#fff',
               minWidth: 220,
             }}
+            disabled={normalizedFlows.length === 0}
           >
             <option value="" disabled>
-              Selecione um flow
+              {normalizedFlows.length === 0 ? 'Nenhum flow disponível' : 'Selecione um flow'}
             </option>
             {normalizedFlows.map((flow) => (
               <option key={flow.id} value={flow.id}>
