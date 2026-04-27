@@ -34,6 +34,14 @@ def test_validate_flow_structure_rejects_edges_to_unknown_nodes():
     assert "inexistente" in (error or "")
 
 
+def test_validate_flow_structure_rejects_edge_without_source_or_target():
+    nodes = _base_nodes()
+    edges = [{"id": "e1", "source": "start"}]
+    valid, error = validate_flow_structure(nodes, edges)
+    assert valid is False
+    assert "falta source ou target" in (error or "")
+
+
 def test_validate_flow_structure_accepts_condition_without_text():
     nodes = [
         {"id": "start", "type": "message", "data": {"isStart": True, "text": "Olá"}},
