@@ -256,8 +256,11 @@ async def update_flow_route(
 
         edges = raw_edges or []
         print("[FLOW SAVE] nodes:", len(nodes))
-        if len(nodes) <= 1:
-            raise Exception("BLOCK SAVE: flow vazio")
+        if not nodes or len(nodes) == 0:
+            raise Exception("BLOCK SAVE: flow sem nodes")
+        has_start = any(node.get("id") == "start" for node in nodes)
+        if not has_start:
+            raise Exception("BLOCK SAVE: flow sem start node")
         print("VALIDANDO FLOW:")
         print("nodes:", nodes)
         _validate_nodes_by_type(nodes)
@@ -523,8 +526,11 @@ def save_tenant_flow(
     normalized_nodes = _ensure_start_node(payload.nodes or [])
     normalized_edges = payload.edges or []
     print("[FLOW SAVE] nodes:", len(normalized_nodes))
-    if len(normalized_nodes) <= 1:
-        raise HTTPException(status_code=400, detail="BLOCK SAVE: flow vazio")
+    if not normalized_nodes or len(normalized_nodes) == 0:
+        raise HTTPException(status_code=400, detail="BLOCK SAVE: flow sem nodes")
+    has_start = any(node.get("id") == "start" for node in normalized_nodes)
+    if not has_start:
+        raise HTTPException(status_code=400, detail="BLOCK SAVE: flow sem start node")
     valid, error = validate_flow(normalized_nodes, normalized_edges)
     print("[FLOW VALID]:", valid)
     if not valid:
@@ -694,8 +700,11 @@ async def update_tenant_flow(
         nodes = _ensure_start_node(nodes)
         edges = payload_model.edges or []
         print("[FLOW SAVE] nodes:", len(nodes))
-        if len(nodes) <= 1:
-            raise Exception("BLOCK SAVE: flow vazio")
+        if not nodes or len(nodes) == 0:
+            raise Exception("BLOCK SAVE: flow sem nodes")
+        has_start = any(node.get("id") == "start" for node in nodes)
+        if not has_start:
+            raise Exception("BLOCK SAVE: flow sem start node")
         print("VALIDANDO FLOW:")
         print("nodes:", nodes)
         _validate_nodes_by_type(nodes)
