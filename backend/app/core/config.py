@@ -10,6 +10,8 @@ class Settings:
     openai_model: str = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
     whatsapp_token: str = os.getenv("WHATSAPP_TOKEN", "")
     phone_number_id: str = os.getenv("PHONE_NUMBER_ID", "")
+    whatsapp_phone_id: str = os.getenv("WHATSAPP_PHONE_ID", "")
+    whatsapp_verify_token: str = os.getenv("WHATSAPP_VERIFY_TOKEN", "")
 
 
 settings = Settings()
