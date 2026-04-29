@@ -13,5 +13,6 @@ from app.models.flow import Flow, FlowStep, FlowNode, FlowEdge, FlowVersion
 from app.models.processed_message import ProcessedMessage
 from app.models.flow_event import FlowEvent
 from app.models.failed_message import FailedMessage
+from app.models.flow_session import FlowSession
 
-__all__ = ["Tenant", "AIConfig", "Conversation", "Contact", "Message", "Product", "KnowledgeBase", "KnowledgeChunk", "Lead", "PipelineStage", "BotRule", "ConversationLog", "Flow", "FlowStep", "FlowNode", "FlowEdge", "FlowVersion", "ProcessedMessage", "FlowEvent", "FailedMessage"]
+__all__ = ["Tenant", "AIConfig", "Conversation", "Contact", "Message", "Product", "KnowledgeBase", "KnowledgeChunk", "Lead", "PipelineStage", "BotRule", "ConversationLog", "Flow", "FlowStep", "FlowNode", "FlowEdge", "FlowVersion", "ProcessedMessage", "FlowEvent", "FailedMessage", "FlowSession"]
