@@ -10,39 +10,32 @@ from app.models.flow_event import FlowEvent
 
 logger = logging.getLogger(__name__)
 
-
 FLOW_START = "FLOW_START"
 FLOW_SEND = "FLOW_SEND"
 FLOW_MATCH = "FLOW_MATCH"
 FALLBACK = "FALLBACK"
 FLOW_FINISH = "FLOW_FINISH"
 
-
 VALID_EVENT_TYPES = {FLOW_START, FLOW_SEND, FLOW_MATCH, FALLBACK, FLOW_FINISH}
 
 
-def get_flow_analytics(
-    db: Session,
-    *,
-    tenant_id: uuid.UUID,
-    flow_id: uuid.UUID,
-) -> dict[str, int]:
-    event_counts_stmt = (
+def get_flow_analytics(db: Session, *, tenant_id: uuid.UUID, flow_id: uuid.UUID) -> dict[str, int]:
+    rows = db.execute(
         select(FlowEvent.event_type, func.count(FlowEvent.id))
         .where(
             FlowEvent.tenant_id == tenant_id,
             FlowEvent.flow_id == flow_id,
-            FlowEvent.event_type.in_({FLOW_START, FLOW_SEND, FLOW_FINISH}),
+            FlowEvent.event_type.in_({"FLOW_START", "FLOW_STEP", "FLOW_WAIT", "FLOW_ERROR"}),
         )
         .group_by(FlowEvent.event_type)
-    )
-    rows = db.execute(event_counts_stmt).all()
+    ).all()
     counts_by_event = {event_type: total for event_type, total in rows}
 
     return {
-        "entries": counts_by_event.get(FLOW_START, 0),
-        "messages_sent": counts_by_event.get(FLOW_SEND, 0),
-        "finalizations": counts_by_event.get(FLOW_FINISH, 0),
+        "total_execucoes": counts_by_event.get("FLOW_START", 0),
+        "total_steps": counts_by_event.get("FLOW_STEP", 0),
+        "total_waits": counts_by_event.get("FLOW_WAIT", 0),
+        "total_errors": counts_by_event.get("FLOW_ERROR", 0),
     }
 
 
@@ -62,10 +55,11 @@ def record_flow_event(
     db.add(
         FlowEvent(
             tenant_id=tenant_id,
-            conversation_id=conversation_id,
+            conversation_id=str(conversation_id),
             flow_id=flow_id,
-            node_id=node_id,
+            node_id=str(node_id) if node_id else None,
             event_type=event_type,
+            data={},
         )
     )
     logger.info(
