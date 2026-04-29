@@ -298,6 +298,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
               type: 'message',
               data: {
                 text: 'Digite a mensagem...',
+                isStart: true,
               },
             },
           ],
@@ -326,6 +327,10 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
       setIsCreatingFlow(false);
     }
   }, [getTenantHeaders]);
+
+  const handleCreateFlow = useCallback(async () => {
+    await createDefaultFlow();
+  }, [createDefaultFlow]);
 
   useEffect(() => {
     if (isLoading) return;
@@ -1194,6 +1199,16 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
               </option>
             ))}
           </select>
+          <button
+            type="button"
+            className="flow-top-btn flow-top-btn-secondary"
+            onClick={() => {
+              void handleCreateFlow();
+            }}
+            disabled={isCreatingFlow}
+          >
+            {isCreatingFlow ? 'Criando...' : '+ Criar novo Flow'}
+          </button>
           <button
             type="button"
             className="flow-top-btn"
