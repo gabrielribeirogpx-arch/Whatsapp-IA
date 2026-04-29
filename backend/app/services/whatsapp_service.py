@@ -155,3 +155,23 @@ def send_whatsapp_interactive_buttons(
     except requests.RequestException:
         logger.exception("Erro de conexão ao enviar botões para %s", phone)
         raise
+
+
+def send_whatsapp_message_cloud(phone: str, text: str) -> dict[str, Any]:
+    url = f"https://graph.facebook.com/v18.0/{os.getenv('WHATSAPP_PHONE_ID')}/messages"
+
+    headers = {
+        "Authorization": f"Bearer {os.getenv('WHATSAPP_TOKEN')}",
+        "Content-Type": "application/json",
+    }
+
+    data = {
+        "messaging_product": "whatsapp",
+        "to": phone,
+        "type": "text",
+        "text": {"body": text},
+    }
+
+    response = requests.post(url, headers=headers, json=data, timeout=15)
+    print("[WHATSAPP SEND]", response.text)
+    return {"status_code": response.status_code, "body": response.text}
