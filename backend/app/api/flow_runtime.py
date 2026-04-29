@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.services.flow_runtime_service import FlowRuntimeService
+from app.services.flow_runtime_queue import enqueue_run_flow_job
 
 router = APIRouter(tags=["flow-runtime"])
 
@@ -21,9 +22,12 @@ def test_flow(flow_id: str, payload: dict[str, Any], db: Session = Depends(get_d
 
 @router.post("/runtime/session/{flow_id}")
 def run_with_session(flow_id: str, payload: dict[str, Any], db: Session = Depends(get_db)):
-    service = FlowRuntimeService(db)
-    return service.execute_with_session(
-        flow_id=flow_id,
-        conversation_id=str(payload["conversation_id"]),
-        input_text=str(payload.get("message", "")),
-    )
+    conversation_id = str(payload["conversation_id"])
+    message = str(payload.get("message", ""))
+    job_id = enqueue_run_flow_job(flow_id=flow_id, conversation_id=conversation_id, message=message)
+    return {
+        "queued": True,
+        "job_id": job_id,
+        "flow_id": flow_id,
+        "conversation_id": conversation_id,
+    }
