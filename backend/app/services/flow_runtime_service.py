@@ -121,6 +121,7 @@ class FlowRuntimeService:
                 "responses": [],
                 "session_node": session.current_node_id,
                 "status": session.status,
+                "steps": 0,
             }
 
         node_map = {str(node.get("id")): node for node in nodes if isinstance(node, dict) and node.get("id")}
@@ -142,37 +143,57 @@ class FlowRuntimeService:
             )
 
         responses: list[str] = []
+        status = session.status or "running"
+        max_steps = 20
+        steps = 0
+        input_text_normalized = str(input_text or "").lower()
 
-        if current_node:
+        while current_node and steps < max_steps:
             node_id = str(current_node.get("id") or "")
             node_type = str(current_node.get("type") or "").lower()
             data = current_node.get("data", {})
             if not isinstance(data, dict):
                 data = {}
 
+            next_id: str | None = None
+            status = "running"
+
             if node_type == "message":
                 text = data.get("text") or data.get("message") or ""
                 responses.append(str(text))
                 next_id = self._get_next_node(node_id, edges)
-                session_service.update_session(session, next_id)
-
             elif node_type == "condition":
                 keywords = data.get("keywords", [])
                 if not isinstance(keywords, list):
                     keywords = []
 
-                match = any(str(k).lower() in str(input_text or "").lower() for k in keywords)
+                match = any(str(k).lower() in input_text_normalized for k in keywords)
                 branch = "true" if match else "false"
-
                 next_id = self._get_next_node(node_id, edges, branch)
-                session_service.update_session(session, next_id)
-
+            elif node_type == "input":
+                status = "waiting_input"
+                next_id = node_id
+            elif node_type == "choice":
+                status = "waiting_choice"
+                next_id = node_id
             else:
                 next_id = self._get_next_node(node_id, edges)
-                session_service.update_session(session, next_id)
+
+            session_service.update_session(session, next_id, status=status)
+            steps += 1
+
+            if status in {"waiting_input", "waiting_choice"}:
+                current_node = None
+            else:
+                current_node = node_map.get(next_id)
+
+        if not current_node and status == "running":
+            status = "finished"
+            session_service.update_session(session, session.current_node_id, status=status)
 
         return {
             "responses": responses,
             "session_node": session.current_node_id,
             "status": session.status,
+            "steps": steps,
         }
