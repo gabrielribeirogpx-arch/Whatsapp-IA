@@ -1,6 +1,7 @@
 import logging
 import os
 import re
+import time
 from typing import Any
 
 import requests
@@ -172,6 +173,17 @@ def send_whatsapp_message_cloud(phone: str, text: str) -> dict[str, Any]:
         "text": {"body": text},
     }
 
-    response = requests.post(url, headers=headers, json=data, timeout=15)
-    print("[WHATSAPP SEND]", response.text)
-    return {"status_code": response.status_code, "body": response.text}
+    delays = [2, 5, 10]
+    for attempt in range(3):
+        try:
+            response = requests.post(url, headers=headers, json=data, timeout=15)
+            print("[FLOW SEND]", f"phone={phone}", f"attempt={attempt + 1}", f"status={response.status_code}")
+            if response.status_code == 200:
+                return {"status_code": response.status_code, "body": response.text}
+        except Exception as e:
+            print("[WHATSAPP ERROR]", str(e))
+
+        time.sleep(delays[attempt])
+
+    print("[WHATSAPP FAILED]", phone)
+    return {"status_code": 500, "body": "failed after retries"}
