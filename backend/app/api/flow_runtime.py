@@ -17,3 +17,13 @@ def test_flow(flow_id: str, payload: dict[str, Any], db: Session = Depends(get_d
     input_text = str(payload.get("message", ""))
     result = service.execute_flow(flow_id, input_text)
     return result
+
+
+@router.post("/runtime/session/{flow_id}")
+def run_with_session(flow_id: str, payload: dict[str, Any], db: Session = Depends(get_db)):
+    service = FlowRuntimeService(db)
+    return service.execute_with_session(
+        flow_id=flow_id,
+        conversation_id=str(payload["conversation_id"]),
+        input_text=str(payload.get("message", "")),
+    )
