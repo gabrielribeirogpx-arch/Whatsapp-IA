@@ -2,7 +2,9 @@ import os
 
 from fastapi import APIRouter, Query, Request
 
+from app.db.session import SessionLocal
 from app.services.flow_runtime_queue import enqueue_flow_job
+from app.services.idempotency_service import IdempotencyService
 
 router = APIRouter()
 
@@ -26,6 +28,7 @@ def verify(
 @router.post("/webhook/whatsapp")
 async def receive(request: Request):
     body = await request.json()
+    print("[FLOW RECEIVE]", body)
 
     try:
         entry = body["entry"][0]
@@ -46,12 +49,20 @@ async def receive(request: Request):
         conversation_id = phone
         flow_id = os.getenv("DEFAULT_FLOW_ID", "")
 
+        with SessionLocal() as db:
+            service = IdempotencyService(db)
+            if service.is_duplicate(message_id):
+                print("[FLOW DUPLICATE]", message_id)
+                return {"status": "duplicate"}
+            service.register(message_id)
+
         enqueue_flow_job(
             flow_id=flow_id,
             conversation_id=conversation_id,
             message=text,
             message_id=message_id,
         )
+        print("[FLOW QUEUED]", message_id)
 
         return {"status": "queued"}
 

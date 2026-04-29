@@ -13,6 +13,7 @@ except ImportError:
     Retry = None
 
 from app.db.session import SessionLocal
+from app.services.lock_service import ConversationLock
 from app.services.flow_runtime_service import FlowRuntimeService
 
 logger = logging.getLogger(__name__)
@@ -23,6 +24,13 @@ FLOW_RUNTIME_QUEUE_NAME = os.getenv("FLOW_RUNTIME_QUEUE", "default")
 
 def run_flow_job(flow_id: str, conversation_id: str, message: str, message_id: str | None = None) -> dict[str, Any]:
     job = get_current_job()
+    redis_conn = Redis.from_url(REDIS_URL, decode_responses=True)
+    lock_key = f"lock:{conversation_id}"
+    lock = ConversationLock(redis_conn)
+    if not lock.acquire(lock_key):
+        logger.info("[FLOW LOCKED] conversation_id=%s", conversation_id)
+        return {"status": "locked", "conversation_id": conversation_id}
+
     logger.info(
         "[FLOW JOB START] job_id=%s flow_id=%s conversation_id=%s",
         getattr(job, "id", None),
@@ -40,10 +48,11 @@ def run_flow_job(flow_id: str, conversation_id: str, message: str, message_id: s
             from app.services.whatsapp_service import send_whatsapp_message_cloud
 
             for msg in result.get("responses", []):
+                logger.info("[FLOW SEND] conversation_id=%s", conversation_id)
                 send_whatsapp_message_cloud(conversation_id, msg)
 
             logger.info(
-                "[FLOW JOB END] job_id=%s flow_id=%s conversation_id=%s steps=%s status=%s",
+                "[FLOW END] job_id=%s flow_id=%s conversation_id=%s steps=%s status=%s",
                 getattr(job, "id", None),
                 flow_id,
                 conversation_id,
@@ -59,6 +68,8 @@ def run_flow_job(flow_id: str, conversation_id: str, message: str, message_id: s
             conversation_id,
         )
         raise
+    finally:
+        lock.release(lock_key)
 
 
 def enqueue_run_flow_job(flow_id: str, conversation_id: str, message: str, message_id: str | None = None) -> str:
