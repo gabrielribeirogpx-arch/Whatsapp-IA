@@ -1,167 +1,194 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import Link from 'next/link';
 
-import { createFlow, deleteFlow, duplicateFlow, listFlows, updateFlow } from '@/lib/api';
-import { FlowItem, FlowPayload } from '@/lib/types';
+import { apiFetch, listFlows } from '@/lib/api';
+import { FlowItem } from '@/lib/types';
 
-const EMPTY_FORM: FlowPayload = {
-  name: '',
-  description: '',
-  trigger_type: 'default',
-  trigger_value: '',
+type FlowAnalyticsResponse = {
+  entries?: number;
+  messages_sent?: number;
+  finalizations?: number;
+  total_executions?: number;
+  total_steps?: number;
+  total_waits?: number;
+  total_errors?: number;
 };
 
-export default function FlowsPage() {
+type FlowSession = {
+  id?: string;
+  conversation_id: string;
+  status: string;
+  current_node_id?: string | null;
+  updated_at?: string | null;
+};
+
+type FlowEvent = {
+  id: string;
+  title: string;
+  timestamp: string;
+  description: string;
+};
+
+async function fetchAnalytics(flowId: string): Promise<FlowAnalyticsResponse> {
+  const res = await apiFetch(`/api/flows/${flowId}/analytics`);
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+async function fetchSessions(flowId: string): Promise<FlowSession[]> {
+  const res = await apiFetch(`/api/flows/${flowId}/sessions`);
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+function cardStyle() {
+  return {
+    background: '#fff',
+    border: '1px solid #e5e7eb',
+    borderRadius: 12,
+    padding: 16,
+    boxShadow: '0 4px 12px rgba(15, 23, 42, 0.05)'
+  } as const;
+}
+
+export default function FlowAnalyticsPage() {
   const [flows, setFlows] = useState<FlowItem[]>([]);
+  const [selectedFlow, setSelectedFlow] = useState<string>('');
+  const [analytics, setAnalytics] = useState<FlowAnalyticsResponse | null>(null);
+  const [sessions, setSessions] = useState<FlowSession[]>([]);
   const [loading, setLoading] = useState(true);
-  const [isOpen, setIsOpen] = useState(false);
-  const [editingFlow, setEditingFlow] = useState<FlowItem | null>(null);
-  const [form, setForm] = useState<FlowPayload>(EMPTY_FORM);
-  const [toastMessage, setToastMessage] = useState<string | null>(null);
-
-  const title = useMemo(() => (editingFlow ? 'Editar fluxo' : 'Novo fluxo'), [editingFlow]);
-
-  const loadFlows = async () => {
-    setLoading(true);
-    try {
-      setFlows(await listFlows());
-    } finally {
-      setLoading(false);
-    }
-  };
 
   useEffect(() => {
+    const loadFlows = async () => {
+      setLoading(true);
+      try {
+        const data = await listFlows();
+        setFlows(data);
+        if (data.length > 0) {
+          setSelectedFlow(data[0].id);
+        }
+      } finally {
+        setLoading(false);
+      }
+    };
+
     loadFlows();
   }, []);
 
-  const openCreate = () => {
-    setEditingFlow(null);
-    setForm(EMPTY_FORM);
-    setIsOpen(true);
-  };
+  useEffect(() => {
+    const loadFlowData = async () => {
+      if (!selectedFlow) return;
 
-  const openEdit = (flow: FlowItem) => {
-    setEditingFlow(flow);
-    setForm({
-      name: flow.name,
-      description: flow.description || '',
-      trigger_type: flow.trigger_type === 'keyword' ? 'keyword' : 'default',
-      trigger_value: flow.trigger_value || '',
-    });
-    setIsOpen(true);
-  };
+      setLoading(true);
+      try {
+        const [analyticsData, sessionsData] = await Promise.all([
+          fetchAnalytics(selectedFlow),
+          fetchSessions(selectedFlow)
+        ]);
 
-  const onSave = async () => {
-    if (!form.name.trim()) return;
+        setAnalytics(analyticsData);
+        setSessions(sessionsData);
+      } finally {
+        setLoading(false);
+      }
+    };
 
-    if (editingFlow) {
-      await updateFlow(editingFlow.id, form);
-    } else {
-      await createFlow(form);
+    loadFlowData();
+  }, [selectedFlow]);
+
+  const events = useMemo<FlowEvent[]>(() => {
+    if (sessions.length === 0) {
+      return [
+        {
+          id: 'mock-1',
+          title: 'Nenhum evento recente',
+          timestamp: new Date().toISOString(),
+          description: 'Assim que o flow for executado, os eventos aparecerão aqui.'
+        }
+      ];
     }
 
-    setIsOpen(false);
-    await loadFlows();
-  };
+    return sessions.slice(0, 5).map((session, index) => ({
+      id: session.id ?? `${session.conversation_id}-${index}`,
+      title: `Sessão ${session.status}`,
+      timestamp: session.updated_at ?? new Date().toISOString(),
+      description: `Conversa ${session.conversation_id} no nó ${session.current_node_id ?? 'N/A'}`
+    }));
+  }, [sessions]);
 
-  const onDelete = async (flowId: string) => {
-    await deleteFlow(flowId);
-    await loadFlows();
-  };
-
-  const onDuplicate = async (flowId: string) => {
-    await duplicateFlow(flowId);
-    await loadFlows();
-    setToastMessage('Flow duplicado com sucesso');
-    setTimeout(() => setToastMessage(null), 3000);
+  const summary = {
+    totalExecutions: analytics?.total_executions ?? analytics?.entries ?? 0,
+    totalSteps: analytics?.total_steps ?? analytics?.messages_sent ?? 0,
+    totalWaits: analytics?.total_waits ?? 0,
+    totalErrors: analytics?.total_errors ?? analytics?.finalizations ?? 0
   };
 
   return (
-    <div style={{ padding: 24 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
-        <h1>Flows</h1>
-        <button onClick={openCreate}>Novo fluxo</button>
+    <div style={{ padding: 24, display: 'grid', gap: 20, backgroundColor: '#f8fafc', minHeight: '100vh' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
+        <h1 style={{ margin: 0 }}>Flow Analytics</h1>
+        <select
+          value={selectedFlow}
+          onChange={(e) => setSelectedFlow(e.target.value)}
+          style={{ minWidth: 280, padding: '10px 12px', borderRadius: 10, border: '1px solid #cbd5e1', background: '#fff' }}
+        >
+          {flows.map((flow) => (
+            <option key={flow.id} value={flow.id}>
+              {flow.name}
+            </option>
+          ))}
+        </select>
       </div>
 
       {loading ? (
         <p>Carregando...</p>
       ) : (
-        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-          <thead>
-            <tr>
-              <th align="left">Nome</th>
-              <th align="left">Trigger</th>
-              <th align="left">Valor</th>
-              <th align="left">Ações</th>
-            </tr>
-          </thead>
-          <tbody>
-            {flows.map((flow) => (
-              <tr key={flow.id}>
-                <td>{flow.name}</td>
-                <td>{flow.trigger_type}</td>
-                <td>{flow.trigger_value || '-'}</td>
-                <td style={{ display: 'flex', gap: 8, padding: '8px 0' }}>
-                  <button onClick={() => openEdit(flow)}>Editar</button>
-                  <Link href={`/dashboard/flows/${flow.id}/analytics`}>Analytics</Link>
-                  <button onClick={() => onDuplicate(flow.id)}>Duplicar</button>
-                  <button onClick={() => onDelete(flow.id)}>Deletar</button>
-                  <Link href={`/dashboard/flow-builder?flow_id=${flow.id}`}>Abrir builder</Link>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
+        <>
+          <section style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }}>
+            <div style={cardStyle()}><strong>Total Execuções</strong><p style={{ fontSize: 24, margin: '8px 0 0' }}>{summary.totalExecutions}</p></div>
+            <div style={cardStyle()}><strong>Total Steps</strong><p style={{ fontSize: 24, margin: '8px 0 0' }}>{summary.totalSteps}</p></div>
+            <div style={cardStyle()}><strong>Total Waits</strong><p style={{ fontSize: 24, margin: '8px 0 0' }}>{summary.totalWaits}</p></div>
+            <div style={cardStyle()}><strong>Total Errors</strong><p style={{ fontSize: 24, margin: '8px 0 0' }}>{summary.totalErrors}</p></div>
+          </section>
 
-      {toastMessage && (
-        <div
-          style={{
-            position: 'fixed',
-            right: 24,
-            bottom: 24,
-            backgroundColor: '#111827',
-            color: '#fff',
-            padding: '10px 14px',
-            borderRadius: 8,
-            boxShadow: '0 8px 20px rgba(0,0,0,0.2)'
-          }}
-        >
-          {toastMessage}
-        </div>
-      )}
-
-      {isOpen && (
-        <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.35)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div style={{ background: '#fff', padding: 20, width: 420, borderRadius: 8, display: 'grid', gap: 12 }}>
-            <h2>{title}</h2>
-            <label>
-              Nome
-              <input value={form.name} onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))} style={{ width: '100%' }} />
-            </label>
-            <label>
-              Descrição
-              <input value={form.description || ''} onChange={(e) => setForm((prev) => ({ ...prev, description: e.target.value }))} style={{ width: '100%' }} />
-            </label>
-            <label>
-              Trigger type
-              <select value={form.trigger_type} onChange={(e) => setForm((prev) => ({ ...prev, trigger_type: e.target.value as 'keyword' | 'default' }))} style={{ width: '100%' }}>
-                <option value="keyword">keyword</option>
-                <option value="default">default</option>
-              </select>
-            </label>
-            <label>
-              Trigger value
-              <input value={form.trigger_value || ''} onChange={(e) => setForm((prev) => ({ ...prev, trigger_value: e.target.value }))} style={{ width: '100%' }} />
-            </label>
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-              <button onClick={() => setIsOpen(false)}>Cancelar</button>
-              <button onClick={onSave}>Salvar</button>
+          <section style={cardStyle()}>
+            <h2 style={{ marginTop: 0 }}>Sessões</h2>
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <thead>
+                  <tr>
+                    <th align="left">conversation_id</th>
+                    <th align="left">status</th>
+                    <th align="left">current_node_id</th>
+                    <th align="left">updated_at</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {sessions.map((session) => (
+                    <tr key={session.id ?? session.conversation_id}>
+                      <td style={{ padding: '10px 0', borderTop: '1px solid #e2e8f0' }}>{session.conversation_id}</td>
+                      <td style={{ borderTop: '1px solid #e2e8f0' }}>{session.status}</td>
+                      <td style={{ borderTop: '1px solid #e2e8f0' }}>{session.current_node_id ?? '-'}</td>
+                      <td style={{ borderTop: '1px solid #e2e8f0' }}>{session.updated_at ?? '-'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
-          </div>
-        </div>
+          </section>
+
+          <section style={cardStyle()}>
+            <h2 style={{ marginTop: 0 }}>Últimos eventos</h2>
+            <ul style={{ margin: 0, paddingLeft: 18, display: 'grid', gap: 8 }}>
+              {events.map((event) => (
+                <li key={event.id}>
+                  <strong>{event.title}</strong> — {event.description} <small>({event.timestamp})</small>
+                </li>
+              ))}
+            </ul>
+          </section>
+        </>
       )}
     </div>
   );
