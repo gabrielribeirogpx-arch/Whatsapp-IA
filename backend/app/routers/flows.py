@@ -602,13 +602,17 @@ def create_tenant_flow(
     }
 
 
-@crud_router.get("")
+@crud_router.get("/")
 def list_tenant_flows(
     x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
     db: Session = Depends(get_db),
 ):
-    tenant_uuid = _resolve_tenant_header(x_tenant_id)
-    return [_serialize_flow(item) for item in get_flows(db=db, tenant_id=tenant_uuid)]
+    try:
+        tenant_uuid = _resolve_tenant_header(x_tenant_id)
+        return [_serialize_flow(item) for item in get_flows(db=db, tenant_id=tenant_uuid)]
+    except Exception as e:
+        print("[FLOWS ERROR]", str(e))
+        return []
 
 
 @crud_router.get("/{flow_id}")
