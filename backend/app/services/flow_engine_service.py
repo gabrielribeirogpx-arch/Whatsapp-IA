@@ -64,6 +64,7 @@ def validate_flow_structure(
         return False, "Flow inválido: nodes vazio"
 
     node_ids: set[str] = set()
+    start_node_id: str | None = None
     has_start = False
     for node in nodes_payload:
         if not isinstance(node, dict):
@@ -97,6 +98,7 @@ def validate_flow_structure(
 
         if bool(data.get("isStart")):
             has_start = True
+            start_node_id = node_id
 
     if not has_start:
         return False, "Flow inválido: sem start node"
@@ -110,12 +112,13 @@ def validate_flow_structure(
             get_source = lambda e: getattr(e, "source", None)
             get_target = lambda e: getattr(e, "target", None)
 
+        outgoing_count: dict[str, int] = {node_id: 0 for node_id in node_ids}
         for edge in flow["edges"]:
             source = get_source(edge)
             target = get_target(edge)
 
             if not source or not target:
-                raise Exception("Edge inválida: source ou target ausente")
+                raise Exception("Edge inválida: falta source ou target")
 
             source_exists = any(n["id"] == source for n in flow["nodes"])
             target_exists = any(n["id"] == target for n in flow["nodes"])
@@ -123,7 +126,15 @@ def validate_flow_structure(
             if not source_exists or not target_exists:
                 raise Exception("Edge inválida: node inexistente")
 
+            outgoing_count[str(source)] = outgoing_count.get(str(source), 0) + 1
             print("[EDGE OK]:", source, "->", target)
+
+        for node_id in node_ids:
+            if outgoing_count.get(node_id, 0) < 1:
+                raise Exception(f"Flow inválido: node sem saída ({node_id})")
+
+        if start_node_id and outgoing_count.get(start_node_id, 0) < 1:
+            raise Exception("Flow inválido: start sem conexão")
     except Exception as exc:
         return False, str(exc)
 
@@ -1558,6 +1569,10 @@ def save_flow_graph(db: Session, tenant_id: uuid.UUID, flow_id: str, nodes: list
     last_version = db.query(func.max(FlowVersion.version)).filter(FlowVersion.flow_id == flow.id).scalar()
     next_version = (last_version or 0) + 1
 
+    previous_active = db.execute(
+        select(FlowVersion).where(FlowVersion.flow_id == flow.id, FlowVersion.is_active.is_(True))
+    ).scalars().first()
+
     db.query(FlowVersion).filter(FlowVersion.flow_id == flow.id).update(
         {FlowVersion.is_active: False},
         synchronize_session=False,
@@ -1573,8 +1588,16 @@ def save_flow_graph(db: Session, tenant_id: uuid.UUID, flow_id: str, nodes: list
     db.add(flow_version)
     db.flush()
     flow.current_version_id = flow_version.id
+    if flow.published_version_id is None:
+        flow.published_version_id = flow_version.id
     flow.version = next_version
     db.add(flow)
+    if previous_active:
+        logger.info(
+            "[FLOW BACKUP PRESERVED] flow_id=%s previous_active_version_id=%s",
+            flow.id,
+            previous_active.id,
+        )
     invalidate_flow_runtime_cache(flow.id)
     if flow.is_active:
         print("[FLOW ACTIVE]:", flow.id)

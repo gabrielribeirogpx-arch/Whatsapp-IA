@@ -58,6 +58,13 @@ def ensure_conversations_columns():
         "ALTER TABLE conversations ADD COLUMN IF NOT EXISTS last_input TEXT;",
         "ALTER TABLE conversations ADD COLUMN IF NOT EXISTS retries INTEGER DEFAULT 0;",
         "ALTER TABLE flows ADD COLUMN IF NOT EXISTS published_version_id UUID;",
+        "ALTER TABLE flows ADD COLUMN IF NOT EXISTS current_version_id UUID;",
+        "ALTER TABLE flows ADD COLUMN IF NOT EXISTS version INTEGER DEFAULT 1;",
+        "ALTER TABLE flow_versions ADD COLUMN IF NOT EXISTS tenant_id UUID;",
+        "ALTER TABLE flow_versions ADD COLUMN IF NOT EXISTS snapshot JSONB;",
+        "ALTER TABLE flow_versions ADD COLUMN IF NOT EXISTS nodes JSONB;",
+        "ALTER TABLE flow_versions ADD COLUMN IF NOT EXISTS edges JSONB;",
+        "ALTER TABLE flow_versions ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT false;",
     ]
     try:
         with engine.begin() as connection:
