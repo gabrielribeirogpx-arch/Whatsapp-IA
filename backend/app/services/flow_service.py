@@ -6,10 +6,10 @@ import re
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
-from app.models import Conversation, Flow, FlowStep, Message
+from app.models import Conversation, Flow, FlowStep, FlowVersion, Message
 from app.services.flow_engine_service import get_flow_graph, save_flow_graph
 
 DEFAULT_FLOW_NAME = "default_visual"
@@ -77,6 +77,57 @@ DEFAULT_FLOW_STEPS: list[dict[str, Any]] = [
     },
 ]
 logger = logging.getLogger(__name__)
+
+
+class FlowService:
+    def __init__(self, db: Session):
+        self.db = db
+
+    def create_flow(self, tenant_id, data: dict[str, Any]) -> Flow:
+        return create_flow(db=self.db, tenant_id=tenant_id, data=data)
+
+    def create_version(self, flow: Flow, tenant_id, nodes: list[dict[str, Any]], edges: list[dict[str, Any]]) -> FlowVersion:
+        self.db.execute(select(Flow.id).where(Flow.id == flow.id).with_for_update())
+        next_version = (self.db.execute(select(func.max(FlowVersion.version)).where(FlowVersion.flow_id == flow.id)).scalar() or 0) + 1
+        version = FlowVersion(
+            flow_id=flow.id,
+            tenant_id=tenant_id,
+            version=next_version,
+            snapshot={"nodes": nodes, "edges": edges},
+            nodes=nodes,
+            edges=edges,
+            is_active=False,
+            is_published=False,
+        )
+        self.db.add(version)
+        self.db.flush()
+        flow.current_version_id = version.id
+        flow.version = version.version
+        # compatibilidade temporária para frontend legado
+        flow.nodes_json = nodes
+        flow.edges_json = edges
+        flow.nodes = nodes
+        flow.edges = edges
+        self.db.add(flow)
+        self.db.flush()
+        return version
+
+    def publish_version(self, flow: Flow, flow_version: FlowVersion) -> None:
+        self.db.query(FlowVersion).filter(FlowVersion.flow_id == flow.id).update({FlowVersion.is_published: False}, synchronize_session=False)
+        self.db.query(FlowVersion).filter(FlowVersion.id == flow_version.id).update({FlowVersion.is_published: True}, synchronize_session=False)
+        flow.published_version_id = flow_version.id
+        self.db.add(flow)
+
+    def get_flow_with_version(self, flow: Flow) -> dict[str, Any]:
+        active_version = flow.current_version
+        nodes = active_version.nodes if active_version and isinstance(active_version.nodes, list) else []
+        edges = active_version.edges if active_version and isinstance(active_version.edges, list) else []
+        version = active_version.version if active_version else (flow.version or 1)
+        return {"flow": flow, "nodes": nodes, "edges": edges, "version": version}
+
+    def delete_flow_soft(self, flow: Flow) -> None:
+        flow.deleted_at = datetime.utcnow()
+        self.db.add(flow)
 
 
 def normalize_text(value: str | None) -> str:
@@ -346,10 +397,8 @@ def update_flow(db: Session, flow_id, tenant_id, data: dict[str, Any]) -> Flow |
         flow.priority = data["priority"]
     if "version" in data:
         flow.version = data["version"]
-    flow.nodes = data.get("nodes", [])
-    flow.edges = data.get("edges", [])
-    flow.nodes_json = data.get("nodes", [])
-    flow.edges_json = data.get("edges", [])
+    if "nodes" in data or "edges" in data:
+        raise ValueError("Atualização direta de nodes/edges em flows não é permitida; crie uma nova flow_version.")
 
     db.add(flow)
     db.flush()
@@ -362,7 +411,7 @@ def delete_flow(db: Session, flow_id, tenant_id) -> bool:
     if not flow:
         return False
 
-    flow.deleted_at = datetime.utcnow()
+    FlowService(db).delete_flow_soft(flow)
     db.flush()
     logger.info("[FLOW DELETED] flow_id=%s tenant_id=%s", flow_id, tenant_id)
     return True
