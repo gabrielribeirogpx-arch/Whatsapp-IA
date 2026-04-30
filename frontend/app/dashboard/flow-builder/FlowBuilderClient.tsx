@@ -172,6 +172,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
   const [activeVersionId, setActiveVersionId] = useState<string | null>(null);
   const [flowSource, setFlowSource] = useState<string>('version');
   const [showEmptyFlowWarning, setShowEmptyFlowWarning] = useState(false);
+  const [flowValidationError, setFlowValidationError] = useState<string | null>(null);
   const simulationStartedRef = useRef(false);
   const autosaveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const autosaveReadyRef = useRef(false);
@@ -882,27 +883,39 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
       return !conditionValue;
     });
 
+    const connectedNodeIds = new Set<string>();
+    for (const edge of safeFlow.edges) {
+      if (edge.source) connectedNodeIds.add(edge.source);
+      if (edge.target) connectedNodeIds.add(edge.target);
+    }
+    const hasUnconnectedNode = safeFlow.nodes.some((node) => !connectedNodeIds.has(node.id));
+
     if (!safeFlow.nodes || safeFlow.nodes.length <= 1) {
-      alert('Fluxo muito pequeno');
+      setFlowValidationError('Fluxo inválido: mínimo de 2 nós e 1 conexão.');
       return;
     }
     if (!safeFlow.edges || safeFlow.edges.length === 0) {
-      alert('Fluxo sem conexões');
+      setFlowValidationError('Fluxo inválido: mínimo de 2 nós e 1 conexão.');
+      return;
+    }
+    if (hasUnconnectedNode) {
+      setFlowValidationError('Fluxo inválido: existe nó sem conexão.');
       return;
     }
     if (conditionWithoutValue) {
-      alert('Condição vazia');
+      setFlowValidationError('Fluxo inválido: condição vazia.');
       return;
     }
     if (requireConfirmOverwrite && !confirm('Você está sobrescrevendo o fluxo atual. Deseja continuar?')) {
       return;
     }
+    setFlowValidationError(null);
 
     console.log('SAVING PAYLOAD:', safeFlow);
 
     setIsSaving(true);
     try {
-      await fetch(`${API_URL}/api/flows/${selectedFlowId}`, {
+      const response = await fetch(`${API_URL}/api/flows/${selectedFlowId}`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -910,10 +923,32 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
         },
         body: JSON.stringify(safeFlow),
       });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        const backendMessage = payload?.detail || payload?.error;
+        setFlowValidationError(backendMessage || 'Erro ao salvar fluxo.');
+      }
     } finally {
       setIsSaving(false);
     }
   }, [getTenantHeaders, rfInstance, selectedFlowId]);
+
+  const flowValidationState = useMemo(() => {
+    if (nodes.length < 2 || edges.length === 0) {
+      return { isValid: false, message: 'Fluxo inválido: mínimo de 2 nós e 1 conexão.' };
+    }
+
+    const connectedNodeIds = new Set<string>();
+    for (const edge of edges) {
+      if (edge.source) connectedNodeIds.add(edge.source);
+      if (edge.target) connectedNodeIds.add(edge.target);
+    }
+    const hasUnconnectedNode = nodes.some((node) => !connectedNodeIds.has(node.id));
+    if (hasUnconnectedNode) {
+      return { isValid: false, message: 'Fluxo inválido: existe nó sem conexão.' };
+    }
+    return { isValid: true, message: null };
+  }, [edges, nodes]);
 
   useEffect(() => {
     if (!autosaveReadyRef.current) {
@@ -1140,9 +1175,9 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
           type="button"
           className="dash-nav-item"
           onClick={() => void handleSaveFlow(true)}
-          disabled={isSaving}
+          disabled={isSaving || !flowValidationState.isValid}
           title="Salvar fluxo"
-          style={{ border: 'none', background: 'none', cursor: isSaving ? 'not-allowed' : 'pointer', width: '100%', textAlign: 'left', opacity: isSaving ? 0.6 : 1 }}
+          style={{ border: 'none', background: 'none', cursor: isSaving || !flowValidationState.isValid ? 'not-allowed' : 'pointer', width: '100%', textAlign: 'left', opacity: isSaving || !flowValidationState.isValid ? 0.6 : 1 }}
         >
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/>
@@ -1166,6 +1201,16 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
       {showEmptyFlowWarning && (
         <div style={{ position: 'absolute', top: 12, left: '50%', transform: 'translateX(-50%)', zIndex: 25, background: '#fef3c7', color: '#92400e', border: '1px solid #f59e0b', borderRadius: 8, padding: '8px 12px', fontSize: 13 }}>
           ⚠️ Flow vazio ou inconsistente
+        </div>
+      )}
+      {!flowValidationState.isValid && (
+        <div style={{ position: 'absolute', top: showEmptyFlowWarning ? 50 : 12, right: 16, zIndex: 25, background: '#fef2f2', color: '#b91c1c', border: '1px solid #fca5a5', borderRadius: 8, padding: '8px 12px', fontSize: 13 }}>
+          {flowValidationState.message}
+        </div>
+      )}
+      {flowValidationError && (
+        <div style={{ position: 'absolute', top: showEmptyFlowWarning || !flowValidationState.isValid ? 88 : 12, right: 16, zIndex: 25, background: '#fef2f2', color: '#b91c1c', border: '1px solid #fca5a5', borderRadius: 8, padding: '8px 12px', fontSize: 13 }}>
+          {flowValidationError}
         </div>
       )}
       {flowSource === 'fallback' && (
