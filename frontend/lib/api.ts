@@ -31,6 +31,37 @@ const TENANT_STORAGE_KEY = 'tenant';
 const TOKEN_STORAGE_KEY = 'token';
 const TENANT_ID_STORAGE_KEY = 'tenant_id';
 
+function getTenantFromSubdomain(hostname: string): string | null {
+  const normalized = hostname.split(':')[0].trim().toLowerCase();
+  if (!normalized) return null;
+  const parts = normalized.split('.');
+  if (parts.length < 3) return null;
+
+  const subdomain = parts[0]?.trim();
+  if (!subdomain || subdomain === 'www') return null;
+  return subdomain;
+}
+
+export function getTenant(): string | null {
+  if (typeof window === 'undefined') return null;
+
+  const tenantId = localStorage.getItem(TENANT_ID_STORAGE_KEY);
+  if (tenantId) return tenantId;
+
+  const storedTenant = localStorage.getItem(TENANT_STORAGE_KEY);
+  if (storedTenant) {
+    try {
+      const parsed = JSON.parse(storedTenant) as Partial<TenantSession>;
+      if (parsed.tenant_id) return parsed.tenant_id;
+      if (parsed.slug) return parsed.slug;
+    } catch {
+      if (storedTenant.trim()) return storedTenant.trim();
+    }
+  }
+
+  return getTenantFromSubdomain(window.location.hostname);
+}
+
 function buildApiUrl(path: string) {
   if (!BASE_URL) {
     throw new Error('NEXT_PUBLIC_API_URL não está configurado.');
@@ -84,7 +115,7 @@ export async function apiFetch(path: string, init: RequestInit = {}): Promise<Re
 
   if (isBrowser) {
     const token = localStorage.getItem(TOKEN_STORAGE_KEY);
-    const tenantId = localStorage.getItem(TENANT_ID_STORAGE_KEY);
+    const tenantId = getTenant();
 
     if (token) {
       headers.set('Authorization', `Bearer ${token}`);
