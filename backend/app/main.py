@@ -68,6 +68,11 @@ def ensure_conversations_columns():
 
 app = FastAPI()
 
+origins = [
+    "https://whatsapp-ia-nine.vercel.app",
+    "http://localhost:3000"
+]
+
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
     print("ERRO 422 DETALHADO:", exc.errors())
@@ -79,11 +84,7 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "https://whatsapp-ia-nine.vercel.app",
-        "https://*.vercel.app",
-        "http://localhost:3000",
-    ],
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
