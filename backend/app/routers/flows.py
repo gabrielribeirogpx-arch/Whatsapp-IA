@@ -175,16 +175,16 @@ def _log_flow_version_blocked(flow_id: uuid.UUID, nodes_count: int) -> None:
 
 
 def _validate_flow_payload(nodes: list[dict[str, Any]], edges: list[dict[str, Any]]) -> None:
-    if not any(bool((node.get("data") or {}).get("isStart")) for node in nodes):
-        raise HTTPException(status_code=400, detail="Fluxo precisa de um nó inicial")
+    if len(nodes) < 2 or len(edges) < 1:
+        raise HTTPException(status_code=400, detail="Fluxo inválido: estrutura incompleta")
 
-    message_nodes = [node for node in nodes if str(node.get("type") or "").lower() == "message"]
-    if len(nodes) < 2:
-        if len(nodes) != 1 or not message_nodes:
-            raise HTTPException(status_code=400, detail="Fluxo inválido (muito pequeno)")
-        node_text = ((message_nodes[0].get("data") or {}).get("text") or "").strip()
-        if not node_text:
-            raise HTTPException(status_code=400, detail="Fluxo inválido (message vazio)")
+    start_nodes = [
+        node
+        for node in nodes
+        if isinstance(node, dict) and bool((node.get("data") or {}).get("isStart"))
+    ]
+    if len(start_nodes) != 1:
+        raise HTTPException(status_code=400, detail="Fluxo inválido: estrutura incompleta")
 
     node_ids = {str(node.get("id")) for node in nodes if node.get("id")}
     outgoing_count: dict[str, int] = {node_id: 0 for node_id in node_ids}
@@ -688,11 +688,10 @@ def get_tenant_flow_by_id(
         raise HTTPException(status_code=404, detail="Flow não encontrado")
 
     flow = db.query(Flow).filter(Flow.id == parsed_flow_id, Flow.tenant_id == tenant_uuid).first()
-
-    print("FLOW BUSCADO:", flow_id)
-    print("FLOW ENCONTRADO:", str(flow.id) if flow else None)
+    print("[FLOW GET DEBUG]", {"tenant_id": str(tenant_uuid), "flow_id": flow_id, "query_result": str(flow.id) if flow else None})
 
     if not flow:
+        print("[FLOW GET ERROR]", {"tenant_id": str(tenant_uuid), "flow_id": flow_id, "reason": "flow_not_found"})
         raise HTTPException(status_code=404, detail="Flow não encontrado")
 
     graph = get_flow_graph(db=db, tenant_id=tenant_uuid, flow_id=str(flow.id))
@@ -787,18 +786,17 @@ async def update_tenant_flow(
         print("[FLOW SAVE OK]")
         print("nodes:", len(nodes_json))
         print("edges:", len(edges_json))
-        if not nodes or len(nodes) == 0:
-            raise Exception("BLOCK SAVE: flow sem nodes")
-        start_nodes = [n for n in nodes if n.get("data", {}).get("isStart") is True]
-        if len(start_nodes) == 0:
-            raise Exception("Flow precisa de um node inicial")
-        if len(start_nodes) > 1:
-            raise Exception("Flow só pode ter um node inicial")
         print("VALIDANDO FLOW:")
         print("nodes:", nodes)
         _validate_nodes_by_type(nodes)
 
         persisted_nodes = flow.current_version.nodes if flow.current_version and isinstance(flow.current_version.nodes, list) else []
+        if len(persisted_nodes) > 2 and len(nodes) <= 1:
+            raise HTTPException(
+                status_code=400,
+                detail="Bloqueado: tentativa de sobrescrever fluxo válido com fluxo vazio",
+            )
+        _validate_flow_payload(nodes_json, edges_json)
         valid, error = validate_flow(nodes_json, edges_json)
         print("[FLOW VALID]:", valid)
         if not valid:
