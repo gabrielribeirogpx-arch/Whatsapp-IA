@@ -185,16 +185,37 @@ def run_flow_from_message(user_id: str, text: str):
             return {"messages": []}
 
         if not session.current_node_id:
-            start_node = get_start_node(flow_data)
+            nodes = flow_data.get("nodes", []) if isinstance(flow_data.get("nodes"), list) else []
+            start_node = next(
+                (
+                    node
+                    for node in nodes
+                    if isinstance(node, dict)
+                    and isinstance(node.get("data"), dict)
+                    and node.get("data", {}).get("isStart")
+                ),
+                None,
+            )
             if not start_node:
-                print("[ERRO] flow sem start node")
+                print("[ERRO] sem start node")
                 return {
                     "messages": [
                         {"type": "text", "content": "Erro: fluxo sem início"},
                     ]
                 }
-            print("[START NODE]:", start_node["id"])
+
+            print("[FORCE START]:", start_node["id"])
             session.current_node_id = start_node["id"]
+            db.add(session)
+            db.commit()
+            return {
+                "messages": [
+                    {
+                        "type": "text",
+                        "content": str(start_node.get("data", {}).get("content") or ""),
+                    }
+                ]
+            }
 
         context = session.context if isinstance(session.context, dict) else {}
         if context.get("waiting_input"):
