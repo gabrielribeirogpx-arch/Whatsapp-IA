@@ -68,10 +68,17 @@ def ensure_conversations_columns():
 
 app = FastAPI()
 
-origins = [
+default_origins = [
     "https://whatsapp-ia-nine.vercel.app",
-    "http://localhost:3000"
+    "http://localhost:3000",
 ]
+
+# Permite configurar múltiplas origens via env: CORS_ORIGINS="https://a.com,https://b.com"
+origins_env = os.getenv("CORS_ORIGINS", "").strip()
+origins = [o.strip() for o in origins_env.split(",") if o.strip()] if origins_env else default_origins
+
+# Vercel cria deploy previews com subdomínios variáveis; regex evita bloqueio em preflight
+origin_regex = os.getenv("CORS_ORIGIN_REGEX", r"https://.*\.vercel\.app")
 
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
@@ -85,6 +92,7 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
+    allow_origin_regex=origin_regex,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
