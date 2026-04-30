@@ -2,6 +2,17 @@
 
 import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
+import {
+  Chart as ChartJS,
+  CategoryScale,
+  LinearScale,
+  BarElement,
+  LineElement,
+  PointElement,
+  Title,
+  Tooltip,
+  Legend
+} from 'chart.js';
 
 import Header from '@/components/Dashboard/Header';
 import KPICard from '@/components/Dashboard/KPICard';
@@ -9,6 +20,17 @@ import StatusBadge from '@/components/Dashboard/StatusBadge';
 import { apiFetch, listFlows } from '@/lib/api';
 import { FlowItem } from '@/lib/types';
 
+
+ChartJS.register(
+  CategoryScale,
+  LinearScale,
+  BarElement,
+  LineElement,
+  PointElement,
+  Title,
+  Tooltip,
+  Legend
+);
 type FlowAnalyticsResponse = {
   entries?: number;
   messages_sent?: number;
@@ -108,61 +130,52 @@ export default function FlowAnalyticsPage() {
   useEffect(() => {
     if (!chartRef.current) return;
 
-    let chartInstance: { destroy: () => void } | null = null;
+    const ctx = chartRef.current.getContext('2d');
+    if (!ctx) return;
 
-    const loadChart = async () => {
-      const { Chart, registerables } = await import('chart.js');
-      Chart.register(...registerables);
-
-      const ctx = chartRef.current?.getContext('2d');
-      if (!ctx) return;
-
-      chartInstance = new Chart(ctx, {
-        type: 'line',
-        data: {
-          labels: ['Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado', 'Domingo'],
-          datasets: [
-            {
-              label: 'Execuções',
-              data: [250, 320, 290, 410, 480, 350, 300],
-              borderColor: '#075E54',
-              backgroundColor: 'rgba(7, 94, 84, 0.08)',
-              tension: 0.4,
-              fill: true,
-              pointRadius: 4,
-              pointBackgroundColor: '#075E54',
-              pointBorderColor: '#fff',
-              pointBorderWidth: 2,
-              pointHoverRadius: 6,
-              borderWidth: 2
-            }
-          ]
+    const chartInstance = new ChartJS(ctx, {
+      type: 'line',
+      data: {
+        labels: ['Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado', 'Domingo'],
+        datasets: [
+          {
+            label: 'Execuções',
+            data: [250, 320, 290, 410, 480, 350, 300],
+            borderColor: '#075E54',
+            backgroundColor: 'rgba(7, 94, 84, 0.08)',
+            tension: 0.4,
+            fill: true,
+            pointRadius: 4,
+            pointBackgroundColor: '#075E54',
+            pointBorderColor: '#fff',
+            pointBorderWidth: 2,
+            pointHoverRadius: 6,
+            borderWidth: 2
+          }
+        ]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false }
         },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          plugins: {
-            legend: { display: false }
+        scales: {
+          y: {
+            beginAtZero: true,
+            grid: { color: 'rgba(115, 114, 108, 0.2)' },
+            ticks: { color: '#3d3d3a', font: { size: 12 } }
           },
-          scales: {
-            y: {
-              beginAtZero: true,
-              grid: { color: 'rgba(115, 114, 108, 0.2)' },
-              ticks: { color: '#3d3d3a', font: { size: 12 } }
-            },
-            x: {
-              grid: { display: false },
-              ticks: { color: '#3d3d3a', font: { size: 12 } }
-            }
+          x: {
+            grid: { display: false },
+            ticks: { color: '#3d3d3a', font: { size: 12 } }
           }
         }
-      });
-    };
-
-    void loadChart();
+      }
+    });
 
     return () => {
-      chartInstance?.destroy();
+      chartInstance.destroy();
     };
   }, []);
 
