@@ -153,9 +153,21 @@ def get_dashboard(
         )
     except Exception as e:
         print("[DASHBOARD ERROR]", str(e))
-        return {
-            "conversations": 0,
-            "leads": 0,
-            "messages": 0,
-            "ai_resolved": 0
-        }
+        return DashboardOut(
+            tenant_id="0",
+            totals=DashboardTotalsOut(
+                conversations=0,
+                contacts=0,
+                leads=0,
+                products=0,
+                messages=0,
+            ),
+            today=DashboardTodayOut(
+                conversations_updated=0,
+                messages_sent=0,
+                messages_received=0,
+            ),
+            charts=DashboardChartsOut(
+                messages_last_7_days=[]
+            ),
+        )
