@@ -3,6 +3,7 @@ from __future__ import annotations
 import unicodedata
 import logging
 import re
+from datetime import datetime
 from typing import Any
 
 from sqlalchemy import select, update
@@ -311,14 +312,14 @@ def create_flow(db: Session, tenant_id, data: dict[str, Any]) -> Flow:
 def get_flows(db: Session, tenant_id) -> list[Flow]:
     return db.execute(
         select(Flow)
-        .where(Flow.tenant_id == tenant_id)
+        .where(Flow.tenant_id == tenant_id, Flow.deleted_at.is_(None))
         .order_by(Flow.created_at.desc(), Flow.id.desc())
     ).scalars().all()
 
 
 def get_flow(db: Session, flow_id, tenant_id) -> Flow | None:
     return db.execute(
-        select(Flow).where(Flow.id == flow_id, Flow.tenant_id == tenant_id)
+        select(Flow).where(Flow.id == flow_id, Flow.tenant_id == tenant_id, Flow.deleted_at.is_(None))
     ).scalars().first()
 
 
@@ -347,6 +348,8 @@ def update_flow(db: Session, flow_id, tenant_id, data: dict[str, Any]) -> Flow |
         flow.version = data["version"]
     flow.nodes = data.get("nodes", [])
     flow.edges = data.get("edges", [])
+    flow.nodes_json = data.get("nodes", [])
+    flow.edges_json = data.get("edges", [])
 
     db.add(flow)
     db.flush()
@@ -359,7 +362,7 @@ def delete_flow(db: Session, flow_id, tenant_id) -> bool:
     if not flow:
         return False
 
-    db.delete(flow)
+    flow.deleted_at = datetime.utcnow()
     db.flush()
     logger.info("[FLOW DELETED] flow_id=%s tenant_id=%s", flow_id, tenant_id)
     return True
