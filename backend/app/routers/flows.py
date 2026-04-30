@@ -736,7 +736,10 @@ def get_tenant_flow_by_id(
     if not isinstance(parsed_flow_id, uuid.UUID):
         raise HTTPException(status_code=404, detail="Flow não encontrado")
 
-    flow = db.query(Flow).filter(Flow.id == parsed_flow_id, Flow.tenant_id == tenant_uuid).first()
+    flow = db.query(Flow).filter(
+        Flow.id == parsed_flow_id,
+        Flow.tenant_id == tenant_uuid,
+    ).first()
     print("[FLOW GET DEBUG]", {"tenant_id": str(tenant_uuid), "flow_id": flow_id, "query_result": str(flow.id) if flow else None})
 
     if not flow:
@@ -744,16 +747,22 @@ def get_tenant_flow_by_id(
         raise HTTPException(status_code=404, detail="Flow não encontrado")
 
     graph = get_flow_graph(db=db, tenant_id=tenant_uuid, flow_id=str(flow.id))
-    nodes = graph.get("nodes") or []
-    edges = graph.get("edges") or []
-    print("NODES:", nodes)
+    flow.nodes = graph.get("nodes") or []
+    flow.edges = graph.get("edges") or []
+    print("FLOW RETORNADO:", flow.nodes)
+    if not flow.nodes:
+        print("ERRO: nodes vazio no banco")
+
+    print({
+        "tenant": str(tenant_uuid),
+        "nodes": len(flow.nodes or []),
+        "edges": len(flow.edges or []),
+    })
 
     return {
         "id": str(flow.id),
-        "name": flow.name,
-        "nodes": nodes,
-        "edges": edges,
-        "is_active": flow.is_active,
+        "nodes": flow.nodes or [],
+        "edges": flow.edges or [],
     }
 
 

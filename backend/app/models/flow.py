@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -40,7 +40,9 @@ class Flow(TenantMixin, Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     steps: Mapped[list["FlowStep"]] = relationship("FlowStep", back_populates="flow", cascade="all, delete-orphan")
-    nodes: Mapped[list["FlowNode"]] = relationship("FlowNode", cascade="all, delete-orphan")
+    nodes: Mapped[list[dict] | None] = mapped_column(JSON, nullable=True)
+    edges: Mapped[list[dict] | None] = mapped_column(JSON, nullable=True)
+    node_records: Mapped[list["FlowNode"]] = relationship("FlowNode", cascade="all, delete-orphan")
     versions: Mapped[list["FlowVersion"]] = relationship(
         "FlowVersion",
         back_populates="flow",
