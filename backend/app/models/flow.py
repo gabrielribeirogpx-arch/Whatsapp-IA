@@ -26,13 +26,13 @@ class Flow(TenantMixin, Base):
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
     current_version_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("flow_versions.id"),
+        ForeignKey("flow_versions.id", ondelete="SET NULL"),
         nullable=True,
         index=True,
     )
     published_version_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("flow_versions.id"),
+        ForeignKey("flow_versions.id", ondelete="SET NULL"),
         nullable=True,
         index=True,
     )
