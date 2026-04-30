@@ -703,7 +703,18 @@ async def update_tenant_flow(
             )
         nodes = _ensure_start_node(nodes)
         edges = payload_model.edges or []
-        print("[FLOW SAVE] nodes:", len(nodes))
+        edges_json = [
+            {
+                "id": getattr(edge, "id", None),
+                "source": getattr(edge, "source", None),
+                "target": getattr(edge, "target", None),
+            }
+            for edge in edges
+        ]
+        nodes_json = nodes
+        print("[FLOW SAVE OK]")
+        print("nodes:", len(nodes_json))
+        print("edges:", len(edges_json))
         if not nodes or len(nodes) == 0:
             raise Exception("BLOCK SAVE: flow sem nodes")
         start_nodes = [n for n in nodes if n.get("data", {}).get("isStart") is True]
@@ -716,7 +727,7 @@ async def update_tenant_flow(
         _validate_nodes_by_type(nodes)
 
         persisted_nodes = flow.current_version.nodes if flow.current_version and isinstance(flow.current_version.nodes, list) else []
-        valid, error = validate_flow(nodes, edges)
+        valid, error = validate_flow(nodes_json, edges_json)
         print("[FLOW VALID]:", valid)
         if not valid:
             print(f"[FLOW BLOCKED] {error}")
@@ -736,8 +747,8 @@ async def update_tenant_flow(
         nova = FlowVersion(
             flow_id=flow.id,
             version=(flow.version or 0) + 1,
-            nodes=nodes,
-            edges=edges,
+            nodes=nodes_json,
+            edges=edges_json,
             is_active=True,
         )
         db.add(nova)
