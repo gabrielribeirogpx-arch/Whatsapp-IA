@@ -87,30 +87,38 @@ class FlowService:
         return create_flow(db=self.db, tenant_id=tenant_id, data=data)
 
     def create_version(self, flow: Flow, tenant_id, nodes: list[dict[str, Any]], edges: list[dict[str, Any]]) -> FlowVersion:
-        self.db.execute(select(Flow.id).where(Flow.id == flow.id).with_for_update())
-        next_version = (self.db.execute(select(func.max(FlowVersion.version)).where(FlowVersion.flow_id == flow.id)).scalar() or 0) + 1
-        version = FlowVersion(
-            flow_id=flow.id,
-            tenant_id=tenant_id,
-            version=next_version,
-            snapshot={"nodes": nodes, "edges": edges},
-            nodes=nodes,
-            edges=edges,
-            is_active=False,
-            is_published=False,
-        )
-        self.db.add(version)
-        self.db.flush()
-        flow.current_version_id = version.id
-        flow.version = version.version
-        # compatibilidade temporária para frontend legado
-        flow.nodes_json = nodes
-        flow.edges_json = edges
-        flow.nodes = nodes
-        flow.edges = edges
-        self.db.add(flow)
-        self.db.flush()
-        return version
+        with self.db.begin_nested():
+            self.db.execute(select(Flow.id).where(Flow.id == flow.id).with_for_update())
+            last_version = self.db.execute(
+                select(FlowVersion.version)
+                .where(FlowVersion.flow_id == flow.id)
+                .order_by(FlowVersion.version.desc())
+                .limit(1)
+                .with_for_update()
+            ).scalar()
+            next_version = (last_version or 0) + 1
+            version = FlowVersion(
+                flow_id=flow.id,
+                tenant_id=tenant_id,
+                version=next_version,
+                snapshot={"nodes": nodes, "edges": edges},
+                nodes=nodes,
+                edges=edges,
+                is_active=False,
+                is_published=False,
+            )
+            self.db.add(version)
+            self.db.flush()
+            flow.current_version_id = version.id
+            flow.version = version.version
+            # compatibilidade temporária para frontend legado
+            flow.nodes_json = nodes
+            flow.edges_json = edges
+            flow.nodes = nodes
+            flow.edges = edges
+            self.db.add(flow)
+            self.db.flush()
+            return version
 
     def publish_version(self, flow: Flow, flow_version: FlowVersion) -> None:
         self.db.query(FlowVersion).filter(FlowVersion.flow_id == flow.id).update({FlowVersion.is_published: False}, synchronize_session=False)
