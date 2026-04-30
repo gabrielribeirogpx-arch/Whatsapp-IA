@@ -2,9 +2,10 @@ import os
 from collections.abc import Generator
 
 from sqlalchemy import create_engine, event
-from sqlalchemy.orm import Session, declarative_base, sessionmaker, with_loader_criteria
+from sqlalchemy.orm import Session, sessionmaker, with_loader_criteria
 
 from app.core.tenant import get_current_tenant_id
+from app.db.base import Base
 from app.models.mixins import TenantMixin
 
 DATABASE_URL = os.getenv("DATABASE_URL")
@@ -17,7 +18,6 @@ engine = create_engine(
     pool_pre_ping=True,
 )
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-Base = declarative_base()
 
 
 @event.listens_for(Session, "do_orm_execute")

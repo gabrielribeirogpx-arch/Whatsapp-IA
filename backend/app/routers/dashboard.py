@@ -5,7 +5,7 @@ from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.db.base import get_db
+from app.db.session import get_db
 from app.models import Contact, Conversation, Lead, Message, Product, Tenant
 from app.services.tenant_service import get_current_tenant
 
