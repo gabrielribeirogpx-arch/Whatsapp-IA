@@ -2,15 +2,12 @@
 
 import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
-import { Chart as ChartJS, LineElement, CategoryScale, LinearScale, PointElement, Filler, Tooltip, Legend } from 'chart.js';
 
 import Header from '@/components/Dashboard/Header';
 import KPICard from '@/components/Dashboard/KPICard';
 import StatusBadge from '@/components/Dashboard/StatusBadge';
 import { apiFetch, listFlows } from '@/lib/api';
 import { FlowItem } from '@/lib/types';
-
-ChartJS.register(LineElement, CategoryScale, LinearScale, PointElement, Filler, Tooltip, Legend);
 
 type FlowAnalyticsResponse = {
   entries?: number;
@@ -68,7 +65,7 @@ export default function FlowAnalyticsPage() {
   const [analytics, setAnalytics] = useState<FlowAnalyticsResponse | null>(null);
   const [sessions, setSessions] = useState<FlowSession[]>([]);
   const [loading, setLoading] = useState(true);
-  const chartRef = useRef<HTMLCanvasElement | null>(null);
+  const chartRef = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
     const loadFlows = async () => {
@@ -111,26 +108,63 @@ export default function FlowAnalyticsPage() {
   useEffect(() => {
     if (!chartRef.current) return;
 
-    const chart = new ChartJS(chartRef.current, {
-      type: 'line',
-      data: {
-        labels: ['Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado', 'Domingo'],
-        datasets: [
-          {
-            data: [180, 260, 340, 320, 410, 460, 430],
-            borderColor: '#075E54',
-            backgroundColor: 'rgba(7, 94, 84, 0.15)',
-            tension: 0.35,
-            fill: true,
-            pointRadius: 3
-          }
-        ]
-      },
-      options: { responsive: true, maintainAspectRatio: false }
-    });
+    let chartInstance: { destroy: () => void } | null = null;
 
-    return () => chart.destroy();
-  }, [selectedFlow]);
+    const loadChart = async () => {
+      const { Chart, registerables } = await import('chart.js');
+      Chart.register(...registerables);
+
+      const ctx = chartRef.current?.getContext('2d');
+      if (!ctx) return;
+
+      chartInstance = new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels: ['Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado', 'Domingo'],
+          datasets: [
+            {
+              label: 'Execuções',
+              data: [250, 320, 290, 410, 480, 350, 300],
+              borderColor: '#075E54',
+              backgroundColor: 'rgba(7, 94, 84, 0.08)',
+              tension: 0.4,
+              fill: true,
+              pointRadius: 4,
+              pointBackgroundColor: '#075E54',
+              pointBorderColor: '#fff',
+              pointBorderWidth: 2,
+              pointHoverRadius: 6,
+              borderWidth: 2
+            }
+          ]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { display: false }
+          },
+          scales: {
+            y: {
+              beginAtZero: true,
+              grid: { color: 'rgba(115, 114, 108, 0.2)' },
+              ticks: { color: '#3d3d3a', font: { size: 12 } }
+            },
+            x: {
+              grid: { display: false },
+              ticks: { color: '#3d3d3a', font: { size: 12 } }
+            }
+          }
+        }
+      });
+    };
+
+    void loadChart();
+
+    return () => {
+      chartInstance?.destroy();
+    };
+  }, []);
 
   return (
     <div style={{ backgroundColor: '#f8fafc', minHeight: '100vh' }}>
@@ -162,11 +196,14 @@ export default function FlowAnalyticsPage() {
             <KPICard label="Erros" value="42" trend="↓ 15 (últimas 24h)" />
           </section>
 
-          <section style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 12, padding: '1rem' }}>
-            <div style={{ position: 'relative', height: 280 }}>
+          <div style={{ padding: '2rem', borderBottom: '0.5px solid var(--color-border-tertiary)', background: '#fff', borderRadius: 12 }}>
+            <h2 style={{ fontSize: '14px', fontWeight: 500, margin: '0 0 1.5rem', color: 'var(--color-text-primary)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+              Execuções últimos 7 dias
+            </h2>
+            <div style={{ position: 'relative', width: '100%', height: '280px' }}>
               <canvas id="executionsChart" ref={chartRef} />
             </div>
-          </section>
+          </div>
 
           <section style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 12, padding: '1rem' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
