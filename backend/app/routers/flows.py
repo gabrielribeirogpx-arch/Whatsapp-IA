@@ -258,9 +258,11 @@ async def update_flow_route(
         print("[FLOW SAVE] nodes:", len(nodes))
         if not nodes or len(nodes) == 0:
             raise Exception("BLOCK SAVE: flow sem nodes")
-        has_start = any(node.get("id") == "start" for node in nodes)
-        if not has_start:
-            raise Exception("BLOCK SAVE: flow sem start node")
+        start_nodes = [n for n in nodes if n.get("data", {}).get("isStart") is True]
+        if len(start_nodes) == 0:
+            raise Exception("Flow precisa de um node inicial")
+        if len(start_nodes) > 1:
+            raise Exception("Flow só pode ter um node inicial")
         print("VALIDANDO FLOW:")
         print("nodes:", nodes)
         _validate_nodes_by_type(nodes)
@@ -528,9 +530,11 @@ def save_tenant_flow(
     print("[FLOW SAVE] nodes:", len(normalized_nodes))
     if not normalized_nodes or len(normalized_nodes) == 0:
         raise HTTPException(status_code=400, detail="BLOCK SAVE: flow sem nodes")
-    has_start = any(node.get("id") == "start" for node in normalized_nodes)
-    if not has_start:
-        raise HTTPException(status_code=400, detail="BLOCK SAVE: flow sem start node")
+    start_nodes = [n for n in normalized_nodes if n.get("data", {}).get("isStart") is True]
+    if len(start_nodes) == 0:
+        raise HTTPException(status_code=400, detail="Flow precisa de um node inicial")
+    if len(start_nodes) > 1:
+        raise HTTPException(status_code=400, detail="Flow só pode ter um node inicial")
     valid, error = validate_flow(normalized_nodes, normalized_edges)
     print("[FLOW VALID]:", valid)
     if not valid:
@@ -702,9 +706,11 @@ async def update_tenant_flow(
         print("[FLOW SAVE] nodes:", len(nodes))
         if not nodes or len(nodes) == 0:
             raise Exception("BLOCK SAVE: flow sem nodes")
-        has_start = any(node.get("id") == "start" for node in nodes)
-        if not has_start:
-            raise Exception("BLOCK SAVE: flow sem start node")
+        start_nodes = [n for n in nodes if n.get("data", {}).get("isStart") is True]
+        if len(start_nodes) == 0:
+            raise Exception("Flow precisa de um node inicial")
+        if len(start_nodes) > 1:
+            raise Exception("Flow só pode ter um node inicial")
         print("VALIDANDO FLOW:")
         print("nodes:", nodes)
         _validate_nodes_by_type(nodes)
