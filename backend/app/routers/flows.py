@@ -177,20 +177,22 @@ def _log_flow_version_blocked(flow_id: uuid.UUID, nodes_count: int) -> None:
 @router.get("")
 @router.get("/")
 def list_flows(
+    request: Request,
     x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
     db: Session = Depends(get_db),
 ):
-    tenant = _resolve_request_tenant(db=db, tenant_id_header=x_tenant_id)
+    tenant = _resolve_request_tenant(db=db, tenant_id_header=x_tenant_id, request=request)
     return [_serialize_flow(item) for item in get_flows(db=db, tenant_id=tenant.id)]
 
 
 @router.post("/")
 def create_flow_route(
     payload: FlowCreatePayload,
+    request: Request,
     x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
     db: Session = Depends(get_db),
 ):
-    tenant = _resolve_request_tenant(db=db, tenant_id_header=x_tenant_id)
+    tenant = _resolve_request_tenant(db=db, tenant_id_header=x_tenant_id, request=request)
     payload_data = payload.model_dump()
     flow = create_flow(
         db=db,
@@ -265,7 +267,7 @@ async def update_flow_route(
         print("nodes:", nodes)
         _validate_nodes_by_type(nodes)
 
-        tenant = _resolve_request_tenant(db=db, tenant_id_header=x_tenant_id)
+        tenant = _resolve_request_tenant(db=db, tenant_id_header=x_tenant_id, request=request)
         flow = _get_flow_by_identifier(db=db, flow_id=flow_id, tenant_id=tenant.id)
         if not flow:
             raise HTTPException(status_code=404, detail="Flow não encontrado")
@@ -361,10 +363,11 @@ async def update_flow_route(
 @router.delete("/{flow_id}")
 def delete_flow_route(
     flow_id: uuid.UUID,
+    request: Request,
     x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
     db: Session = Depends(get_db),
 ):
-    tenant = _resolve_request_tenant(db=db, tenant_id_header=x_tenant_id)
+    tenant = _resolve_request_tenant(db=db, tenant_id_header=x_tenant_id, request=request)
     deleted = delete_flow(db=db, flow_id=flow_id, tenant_id=tenant.id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Flow not found")
@@ -381,7 +384,13 @@ def _resolve_tenant_header(tenant_id: str | None) -> uuid.UUID:
         raise HTTPException(status_code=400, detail="X-Tenant-ID header is invalid") from exc
 
 
-def _resolve_request_tenant(db: Session, tenant_id_header: str | None) -> Tenant:
+def _resolve_request_tenant(db: Session, tenant_id_header: str | None, request: Request | None = None) -> Tenant:
+    state_tenant_id = getattr(request.state, "tenant_id", None) if request is not None else None
+    if state_tenant_id:
+        tenant = _resolve_tenant(db=db, tenant_id=str(state_tenant_id))
+        if not tenant:
+            raise HTTPException(status_code=404, detail="Tenant not found")
+        return tenant
     if tenant_id_header:
         tenant = _resolve_tenant(db=db, tenant_id=tenant_id_header)
         if not tenant:
@@ -487,10 +496,11 @@ def _resolve_tenant(db: Session, tenant_id: str) -> Tenant | None:
 @router.get("/{tenant_id}")
 def get_tenant_flow(
     tenant_id: str,
+    request: Request,
     x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
     db: Session = Depends(get_db),
 ):
-    resolved_request_tenant = _resolve_request_tenant(db=db, tenant_id_header=x_tenant_id)
+    resolved_request_tenant = _resolve_request_tenant(db=db, tenant_id_header=x_tenant_id, request=request)
     try:
         parsed_flow_id = uuid.UUID(tenant_id)
     except ValueError:
@@ -565,6 +575,7 @@ def save_tenant_flow(
 @crud_router.post("")
 def create_tenant_flow(
     payload: FlowCreatePayload,
+    request: Request,
     x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
     db: Session = Depends(get_db),
 ):
@@ -870,10 +881,11 @@ def rename_tenant_flow(
 def rename_flow_route(
     flow_id: str,
     payload: RenameFlowPayload,
+    request: Request,
     x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
     db: Session = Depends(get_db),
 ):
-    tenant = _resolve_request_tenant(db=db, tenant_id_header=x_tenant_id)
+    tenant = _resolve_request_tenant(db=db, tenant_id_header=x_tenant_id, request=request)
     return _rename_flow_name(
         db=db,
         flow_id=flow_id,

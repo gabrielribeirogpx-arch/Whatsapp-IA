@@ -10,8 +10,9 @@ from app.services.flow_session_service import FlowSessionService
 
 
 class FlowRuntimeService:
-    def __init__(self, db: Session):
+    def __init__(self, db: Session, tenant_id: str | None = None):
         self.db = db
+        self.tenant_id = tenant_id
 
     @staticmethod
     def _get_next_node(
@@ -36,7 +37,7 @@ class FlowRuntimeService:
         - executa nodes sequencialmente
         - suporta message e condition
         """
-        flow_data = get_flow_for_builder(self.db, tenant_id=None, flow_id=flow_id)
+        flow_data = get_flow_for_builder(self.db, tenant_id=self.tenant_id, flow_id=flow_id)
 
         nodes = flow_data.get("nodes", []) if isinstance(flow_data, dict) else []
         edges = flow_data.get("edges", []) if isinstance(flow_data, dict) else []
@@ -114,7 +115,7 @@ class FlowRuntimeService:
         try:
             event_service.log(flow_id, conversation_id, "FLOW_START")
 
-            flow_data = get_flow_for_builder(self.db, tenant_id=None, flow_id=flow_id)
+            flow_data = get_flow_for_builder(self.db, tenant_id=self.tenant_id, flow_id=flow_id)
 
             nodes = flow_data.get("nodes", []) if isinstance(flow_data, dict) else []
             edges = flow_data.get("edges", []) if isinstance(flow_data, dict) else []
