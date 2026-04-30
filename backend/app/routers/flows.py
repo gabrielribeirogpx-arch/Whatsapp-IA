@@ -127,7 +127,8 @@ def _validate_nodes_by_type(nodes: list[dict[str, Any]]) -> None:
             if isinstance(condition, str):
                 condition = condition.strip()
             if not condition:
-                raise HTTPException(status_code=400, detail="Condição sem conteúdo")
+                data["condition"] = "default"
+                print("[CONDITION FIX]: aplicado fallback")
 
 
 def _ensure_start_node(nodes: list[dict[str, Any]]) -> list[dict[str, Any]]:
