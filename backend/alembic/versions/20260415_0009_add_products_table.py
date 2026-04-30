@@ -21,6 +21,9 @@ def upgrade() -> None:
     bind = op.get_bind()
     inspector = inspect(bind)
 
+    if "tenants" not in inspector.get_table_names():
+        raise Exception("tenants table must exist before products")
+
     if "products" not in inspector.get_table_names():
         op.create_table(
             "products",
