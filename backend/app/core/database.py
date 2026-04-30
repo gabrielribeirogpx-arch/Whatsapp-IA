@@ -1,8 +1,11 @@
 import os
 from collections.abc import Generator
 
-from sqlalchemy import create_engine
-from sqlalchemy.orm import Session, declarative_base, sessionmaker
+from sqlalchemy import create_engine, event
+from sqlalchemy.orm import Session, declarative_base, sessionmaker, with_loader_criteria
+
+from app.core.tenant import get_current_tenant_id
+from app.models.mixins import TenantMixin
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 
@@ -15,6 +18,22 @@ engine = create_engine(
 )
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
+
+
+@event.listens_for(Session, "do_orm_execute")
+def _add_tenant_criteria(execute_state):
+    if not execute_state.is_select:
+        return
+    tenant_id = get_current_tenant_id()
+    if tenant_id is None:
+        return
+    execute_state.statement = execute_state.statement.options(
+        with_loader_criteria(
+            TenantMixin,
+            lambda cls: cls.tenant_id == tenant_id,
+            include_aliases=True,
+        )
+    )
 
 
 def get_db() -> Generator[Session, None, None]:

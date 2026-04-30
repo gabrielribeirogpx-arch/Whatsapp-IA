@@ -7,6 +7,7 @@ from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
+from app.models.mixins import TenantMixin
 
 
 class LeadStage(StrEnum):
@@ -23,12 +24,11 @@ class LeadTemperature(StrEnum):
     HOT = "hot"
 
 
-class Lead(Base):
+class Lead(TenantMixin, Base):
     __tablename__ = "leads"
     __table_args__ = (UniqueConstraint("tenant_id", "phone", name="uq_leads_tenant_phone"),)
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    tenant_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False, index=True)
     phone: Mapped[str] = mapped_column(String, nullable=False, index=True)
     name: Mapped[str | None] = mapped_column(String, nullable=True)
     stage: Mapped[str] = mapped_column(String, nullable=False, default=LeadStage.LEAD.value)
