@@ -5,6 +5,7 @@ from typing import Any
 
 import requests
 
+from app.core.whatsapp_config import WHATSAPP_PHONE_NUMBER_ID, WHATSAPP_TOKEN
 from app.models import Tenant
 
 logger = logging.getLogger(__name__)
@@ -175,3 +176,27 @@ def send_whatsapp_message_cloud(phone: str, text: str) -> dict[str, Any]:
     response = requests.post(url, headers=headers, json=data, timeout=15)
     print("[WHATSAPP SEND]", response.text)
     return {"status_code": response.status_code, "body": response.text}
+
+
+def send_whatsapp_message_simple(to: str, text: str):
+    url = f"https://graph.facebook.com/v19.0/{WHATSAPP_PHONE_NUMBER_ID}/messages"
+
+    headers = {
+        "Authorization": f"Bearer {WHATSAPP_TOKEN}",
+        "Content-Type": "application/json"
+    }
+
+    payload = {
+        "messaging_product": "whatsapp",
+        "to": to,
+        "type": "text",
+        "text": {
+            "body": text
+        }
+    }
+
+    response = requests.post(url, json=payload, headers=headers)
+
+    print("WHATSAPP RESPONSE:", response.text)
+
+    return response.json()

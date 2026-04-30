@@ -88,3 +88,84 @@ class FlowEngine:
             steps += 1
 
         return {"messages": messages, "next_node": session.current_node_id, "finished": finished}
+
+
+from app.core.database import SessionLocal
+from app.models.flow import Flow
+from app.models.flow_session import FlowSession
+from app.services.flow_engine_service import get_flow_for_builder
+
+
+def run_flow_from_message(user_id: str, text: str):
+    db = SessionLocal()
+    try:
+        default_tenant_id = None
+        active_flow = (
+            db.query(Flow)
+            .filter(Flow.is_active.is_(True))
+            .order_by(Flow.updated_at.desc())
+            .first()
+        )
+        if active_flow is None:
+            return {"messages": []}
+
+        default_tenant_id = active_flow.tenant_id
+
+        session = (
+            db.query(FlowSession)
+            .filter(
+                FlowSession.tenant_id == default_tenant_id,
+                FlowSession.user_identifier == user_id,
+            )
+            .first()
+        )
+
+        if session is None:
+            session = FlowSession(
+                tenant_id=default_tenant_id,
+                user_identifier=user_id,
+                conversation_id=user_id,
+                flow_id=active_flow.id,
+                current_node_id=None,
+                status="running",
+                context={},
+                variables={},
+            )
+            db.add(session)
+            db.commit()
+            db.refresh(session)
+
+        flow_data = get_flow_for_builder(db=db, tenant_id=default_tenant_id, flow_id=str(session.flow_id))
+        if not isinstance(flow_data, dict):
+            return {"messages": []}
+
+        context = session.context if isinstance(session.context, dict) else {}
+        if context.get("waiting_input"):
+            input_key = str(context.get("input_key") or "last_input")
+            variables = session.variables if isinstance(session.variables, dict) else {}
+            variables[input_key] = text
+            session.variables = variables
+            context["waiting_input"] = False
+            context["input_key"] = None
+            session.context = context
+            session.status = "running"
+
+            current_node = str(session.current_node_id or "")
+            edges = flow_data.get("edges", []) if isinstance(flow_data.get("edges"), list) else []
+            for edge in edges:
+                if isinstance(edge, dict) and str(edge.get("source") or "") == current_node:
+                    session.current_node_id = str(edge.get("target") or "") or None
+                    break
+
+        engine = FlowEngine()
+        result = engine.run_flow(flow_data, session)
+
+        if result.get("finished"):
+            session.status = "finished"
+
+        db.add(session)
+        db.commit()
+
+        return {"messages": result.get("messages", [])}
+    finally:
+        db.close()
