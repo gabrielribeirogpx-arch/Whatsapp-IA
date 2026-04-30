@@ -7,8 +7,9 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from app.schemas.flow import FlowUpdate
-from sqlalchemy import String, cast, or_, select
+from sqlalchemy import String, cast, inspect, or_, select
 from sqlalchemy.orm import Session
+from sqlalchemy.orm import load_only
 
 from app.database import get_db
 from app.models import Flow, FlowVersion, Tenant
@@ -101,6 +102,24 @@ def _get_valid_tenant(db: Session) -> Tenant:
 
 def validate_flow(nodes: list[dict[str, Any]], edges: list[dict[str, Any]]) -> tuple[bool, str | None]:
     return validate_flow_structure(nodes=nodes, edges=edges)
+
+
+def _flow_versions_columns(db: Session) -> set[str]:
+    return {column["name"] for column in inspect(db.bind).get_columns("flow_versions")}
+
+
+def _flow_version_payload(db: Session, **values: Any) -> dict[str, Any]:
+    columns = _flow_versions_columns(db)
+    return {key: value for key, value in values.items() if key in columns}
+
+
+def _flow_version_select(db: Session):
+    columns = _flow_versions_columns(db)
+    attrs = [getattr(FlowVersion, name) for name in ("id", "flow_id", "version", "nodes", "edges", "is_active", "created_at", "tenant_id", "snapshot") if name in columns]
+    statement = select(FlowVersion)
+    if attrs:
+        statement = statement.options(load_only(*attrs))
+    return statement
 
 
 def _validate_nodes_by_type(nodes: list[dict[str, Any]]) -> None:
@@ -354,7 +373,7 @@ async def update_flow_route(
             return JSONResponse(status_code=400, content={"error": error or "Flow inválido"})
 
         last_version = db.execute(
-            select(FlowVersion)
+            _flow_version_select(db)
             .where(FlowVersion.flow_id == flow.id)
             .order_by(FlowVersion.version.desc(), FlowVersion.created_at.desc())
             .limit(1)
@@ -362,7 +381,8 @@ async def update_flow_route(
         next_version = (last_version.version if last_version else 0) + 1
 
         if flow.current_version:
-            backup_version = FlowVersion(
+            backup_version = FlowVersion(**_flow_version_payload(
+                db,
                 flow_id=flow.id,
                 tenant_id=tenant.id,
                 version=next_version,
@@ -373,7 +393,7 @@ async def update_flow_route(
                 nodes=flow.current_version.nodes or [],
                 edges=flow.current_version.edges or [],
                 is_active=False,
-            )
+            ))
             db.add(backup_version)
             db.flush()
             print("[FLOW VERSION CREATED]", {"flow_id": str(flow.id), "version_id": str(backup_version.id), "type": "snapshot"})
@@ -388,7 +408,8 @@ async def update_flow_route(
         print("FLOW:", flow.id)
         print("NODES:", len(nodes))
 
-        new_version = FlowVersion(
+        new_version = FlowVersion(**_flow_version_payload(
+            db,
             flow_id=flow.id,
             tenant_id=tenant.id,
             version=next_version,
@@ -396,7 +417,7 @@ async def update_flow_route(
             nodes=nodes,
             edges=edges,
             is_active=True,
-        )
+        ))
 
         db.add(new_version)
         db.flush()
@@ -814,13 +835,16 @@ async def update_tenant_flow(
                 )
             raise HTTPException(status_code=400, detail=error or "Flow inválido")
 
-        nova = FlowVersion(
+        nova = FlowVersion(**_flow_version_payload(
+            db,
             flow_id=flow.id,
+            tenant_id=tenant_uuid,
+            snapshot={"nodes": nodes_json, "edges": edges_json},
             version=(flow.version or 0) + 1,
             nodes=nodes_json,
             edges=edges_json,
             is_active=True,
-        )
+        ))
         db.add(nova)
         db.flush()
 
@@ -971,7 +995,7 @@ def list_tenant_flow_versions(
         raise HTTPException(status_code=404, detail="Flow not found")
 
     versions = db.execute(
-        select(FlowVersion)
+        _flow_version_select(db)
         .where(FlowVersion.flow_id == flow.id)
         .order_by(FlowVersion.created_at.desc(), FlowVersion.version.desc())
     ).scalars().all()
@@ -992,7 +1016,7 @@ def restore_tenant_flow_version(
         raise HTTPException(status_code=404, detail="Flow not found")
 
     flow_version = db.execute(
-        select(FlowVersion).where(FlowVersion.id == payload.version_id, FlowVersion.flow_id == flow.id)
+        _flow_version_select(db).where(FlowVersion.id == payload.version_id, FlowVersion.flow_id == flow.id)
     ).scalars().first()
     if not flow_version:
         raise HTTPException(status_code=404, detail="Flow version not found")
@@ -1036,7 +1060,7 @@ def list_flow_versions_by_id(
         raise HTTPException(status_code=404, detail="Flow not found")
 
     versions = db.execute(
-        select(FlowVersion)
+        _flow_version_select(db)
         .where(FlowVersion.flow_id == flow.id)
         .order_by(FlowVersion.created_at.desc(), FlowVersion.version.desc())
     ).scalars().all()
@@ -1054,7 +1078,7 @@ def restore_flow_version_by_id(
         raise HTTPException(status_code=404, detail="Flow not found")
 
     flow_version = db.execute(
-        select(FlowVersion).where(FlowVersion.id == version_id, FlowVersion.flow_id == flow.id)
+        _flow_version_select(db).where(FlowVersion.id == version_id, FlowVersion.flow_id == flow.id)
     ).scalars().first()
     if not flow_version:
         raise HTTPException(status_code=404, detail="Flow version not found")
@@ -1089,7 +1113,7 @@ def publish_tenant_flow_version(
         raise HTTPException(status_code=404, detail="Flow not found")
 
     flow_version = db.execute(
-        select(FlowVersion).where(FlowVersion.id == payload.version_id, FlowVersion.flow_id == flow.id)
+        _flow_version_select(db).where(FlowVersion.id == payload.version_id, FlowVersion.flow_id == flow.id)
     ).scalars().first()
     if not flow_version:
         raise HTTPException(status_code=404, detail="Flow version not found")
