@@ -96,6 +96,62 @@ from app.models.flow_session import FlowSession
 from app.services.flow_engine_service import get_flow_for_builder
 
 
+def get_start_node(flow):
+    if not flow or "nodes" not in flow:
+        return None
+
+    for node in flow["nodes"]:
+        if isinstance(node, dict) and node.get("type") == "start":
+            return node
+
+    if len(flow["nodes"]) > 0:
+        return flow["nodes"][0]
+
+    return None
+
+
+def get_node_by_id(flow, node_id):
+    nodes = flow.get("nodes", []) if isinstance(flow, dict) else []
+    for node in nodes:
+        if isinstance(node, dict) and node.get("id") == node_id:
+            return node
+    return None
+
+
+def process_node(node, session):
+    if not node:
+        return {
+            "messages": [
+                {"type": "text", "content": "Erro: node inválido"},
+            ]
+        }
+
+    node_type = node.get("type")
+    data = node.get("data", {}) if isinstance(node.get("data"), dict) else {}
+
+    if node_type == "message":
+        text = data.get("text", "")
+        return {
+            "messages": [
+                {"type": "text", "content": text},
+            ]
+        }
+
+    if node_type == "start":
+        text = data.get("text", "")
+        return {
+            "messages": [
+                {"type": "text", "content": text},
+            ]
+        }
+
+    return {
+        "messages": [
+            {"type": "text", "content": "Tipo de node não suportado"},
+        ]
+    }
+
+
 def run_flow_from_message(user_id: str, text: str):
     db = SessionLocal()
     try:
@@ -139,6 +195,18 @@ def run_flow_from_message(user_id: str, text: str):
         if not isinstance(flow_data, dict):
             return {"messages": []}
 
+        if not session.current_node_id:
+            start_node = get_start_node(flow_data)
+            if not start_node:
+                print("[FLOW ERROR] Nenhum node encontrado")
+                return {
+                    "messages": [
+                        {"type": "text", "content": "Erro interno: fluxo vazio"},
+                    ]
+                }
+            session.current_node_id = start_node["id"]
+            print("[FLOW] iniciando no node:", session.current_node_id)
+
         context = session.context if isinstance(session.context, dict) else {}
         if context.get("waiting_input"):
             input_key = str(context.get("input_key") or "last_input")
@@ -157,14 +225,29 @@ def run_flow_from_message(user_id: str, text: str):
                     session.current_node_id = str(edge.get("target") or "") or None
                     break
 
+        node = get_node_by_id(flow_data, session.current_node_id)
+        print("[FLOW] current_node:", session.current_node_id)
+        print("[FLOW] executando node:", node)
+        preview_result = process_node(node, session)
+        print("[FLOW] result:", preview_result)
+
         engine = FlowEngine()
         result = engine.run_flow(flow_data, session)
+        if (not result or "messages" not in result) and preview_result:
+            result = preview_result
 
         if result.get("finished"):
             session.status = "finished"
 
         db.add(session)
         db.commit()
+
+        if not result or "messages" not in result:
+            return {
+                "messages": [
+                    {"type": "text", "content": "Erro ao processar fluxo"},
+                ]
+            }
 
         return {"messages": result.get("messages", [])}
     finally:
