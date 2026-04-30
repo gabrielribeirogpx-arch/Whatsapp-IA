@@ -2,15 +2,17 @@ from __future__ import annotations
 
 import re
 import unicodedata
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel, Field
 
-from app.schemas.auth import TenantAuthResponse
+from app.core.security import create_tenant_token
+from app.schemas.auth import TenantAuthResponse, TenantProfileResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models import Tenant
+from app.services.tenant_service import get_current_tenant
 
 router = APIRouter(tags=["auth"])
 
@@ -63,6 +65,7 @@ def register(payload: RegisterRequest, db: Session = Depends(get_db)):
     return TenantAuthResponse(
         tenant_id=tenant.id,
         slug=tenant.slug,
+        token=create_tenant_token(str(tenant.id), tenant.slug),
     )
 
 
@@ -76,4 +79,17 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)):
     return TenantAuthResponse(
         tenant_id=tenant.id,
         slug=tenant.slug,
+        token=create_tenant_token(str(tenant.id), tenant.slug),
+    )
+
+
+@router.get("/me", response_model=TenantProfileResponse)
+def my_account(tenant: Tenant = Depends(get_current_tenant)):
+    return TenantProfileResponse(
+        tenant_id=tenant.id,
+        slug=tenant.slug,
+        name=tenant.name,
+        phone_number_id=tenant.phone_number_id,
+        plan=tenant.plan,
+        language=tenant.language,
     )

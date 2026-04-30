@@ -141,6 +141,11 @@ export async function tenantLogin(phone_number_id: string): Promise<TenantSessio
   return res.json();
 }
 
+
+export async function getMyAccountProfile() {
+  const res = await apiFetch('/api/me');
+  return parseApiResponse<{ tenant_id: string; slug: string; name: string; phone_number_id: string; plan: string; language: string }>(res);
+}
 export async function getConversations(): Promise<Conversation[]> {
   const res = await apiFetch('/api/conversations');
   return parseApiResponse<Conversation[]>(res);

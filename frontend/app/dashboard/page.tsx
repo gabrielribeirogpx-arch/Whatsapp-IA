@@ -125,6 +125,10 @@ export default function DashboardPage() {
           <span className="dash-nav-label">Configurações</span>
         </Link>
 
+        <Link href="/dashboard/account" className="dash-nav-item">
+          <span className="dash-nav-label">Minha Conta</span>
+        </Link>
+
         <div style={{ marginTop: 'auto' }}>
           <div className="dash-nav-divider" />
           <div className="dash-nav-item">
