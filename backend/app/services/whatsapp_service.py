@@ -96,7 +96,8 @@ def send_whatsapp_interactive_buttons(
 ) -> dict:
     """
     Envia mensagem com botões interativos (Reply Buttons) via Meta Cloud API.
-    Máximo de 3 botões. Cada botão deve ter 'id' e 'title' (máx 20 chars).
+    Máximo de 3 botões. Cada botão usa id derivado do label e title (máx 20 chars).
+    Se não houver botões válidos, faz fallback para mensagem de texto normal.
     """
     if not tenant.whatsapp_token:
         raise WhatsAppConfigError("tenant.whatsapp_token ausente")
@@ -112,12 +113,16 @@ def send_whatsapp_interactive_buttons(
         {
             "type": "reply",
             "reply": {
-                "id": str(btn.get("id") or btn.get("handleId") or f"btn_{i}"),
-                "title": str(btn.get("label") or btn.get("title") or f"Opção {i + 1}")[:20],
+                "id": str(btn.get("label") or "").strip().lower(),
+                "title": str(btn.get("label") or "")[:20],
             },
         }
-        for i, btn in enumerate(buttons[:3])
+        for btn in buttons[:3]
+        if isinstance(btn, dict) and str(btn.get("label") or "").strip()
     ]
+
+    if not safe_buttons:
+        return send_whatsapp_message(tenant=tenant, phone=normalized_phone, text=body_text)
 
     url = f"https://graph.facebook.com/v19.0/{tenant.phone_number_id}/messages"
     payload = {
