@@ -1,8 +1,8 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useState } from 'react';
-import { Chart, LineController, LineElement, PointElement, LinearScale, CategoryScale, Tooltip, Filler } from 'chart.js';
+import { useEffect, useRef, useState } from 'react';
+import { Chart as ChartJS, LineElement, CategoryScale, LinearScale, PointElement, Filler, Tooltip, Legend } from 'chart.js';
 
 import Header from '@/components/Dashboard/Header';
 import KPICard from '@/components/Dashboard/KPICard';
@@ -10,7 +10,7 @@ import StatusBadge from '@/components/Dashboard/StatusBadge';
 import { apiFetch, listFlows } from '@/lib/api';
 import { FlowItem } from '@/lib/types';
 
-Chart.register(LineController, LineElement, PointElement, LinearScale, CategoryScale, Tooltip, Filler);
+ChartJS.register(LineElement, CategoryScale, LinearScale, PointElement, Filler, Tooltip, Legend);
 
 type FlowAnalyticsResponse = {
   entries?: number;
@@ -68,6 +68,7 @@ export default function FlowAnalyticsPage() {
   const [analytics, setAnalytics] = useState<FlowAnalyticsResponse | null>(null);
   const [sessions, setSessions] = useState<FlowSession[]>([]);
   const [loading, setLoading] = useState(true);
+  const chartRef = useRef<HTMLCanvasElement | null>(null);
 
   useEffect(() => {
     const loadFlows = async () => {
@@ -108,10 +109,9 @@ export default function FlowAnalyticsPage() {
   }, [selectedFlow]);
 
   useEffect(() => {
-    const canvas = document.getElementById('executionsChart') as HTMLCanvasElement | null;
-    if (!canvas) return;
+    if (!chartRef.current) return;
 
-    const chart = new Chart(canvas, {
+    const chart = new ChartJS(chartRef.current, {
       type: 'line',
       data: {
         labels: ['Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado', 'Domingo'],
@@ -164,7 +164,7 @@ export default function FlowAnalyticsPage() {
 
           <section style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 12, padding: '1rem' }}>
             <div style={{ position: 'relative', height: 280 }}>
-              <canvas id="executionsChart" />
+              <canvas id="executionsChart" ref={chartRef} />
             </div>
           </section>
 
