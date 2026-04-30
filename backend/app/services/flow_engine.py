@@ -101,8 +101,7 @@ def get_start_node(flow):
         return None
 
     for node in flow["nodes"]:
-        if isinstance(node, dict) and node.get("data", {}).get("isStart") is True:
-            print("[START NODE DETECTADO]:", node["id"])
+        if node.get("data", {}).get("isStart") is True:
             return node
 
     return None
@@ -188,14 +187,14 @@ def run_flow_from_message(user_id: str, text: str):
         if not session.current_node_id:
             start_node = get_start_node(flow_data)
             if not start_node:
-                print("[ERRO] nenhum start node encontrado")
+                print("[ERRO] flow sem start node")
                 return {
                     "messages": [
                         {"type": "text", "content": "Erro: fluxo sem início"},
                     ]
                 }
+            print("[START NODE]:", start_node["id"])
             session.current_node_id = start_node["id"]
-            print("[FLOW] iniciando no node:", session.current_node_id)
 
         context = session.context if isinstance(session.context, dict) else {}
         if context.get("waiting_input"):
@@ -216,6 +215,13 @@ def run_flow_from_message(user_id: str, text: str):
                     break
 
         node = get_node_by_id(flow_data, session.current_node_id)
+        if not node:
+            print("[ERRO] node não encontrado")
+            return {
+                "messages": [
+                    {"type": "text", "content": "Erro: node não encontrado"},
+                ]
+            }
         print("[FLOW] current_node:", session.current_node_id)
         print("[FLOW] executando node:", node)
         preview_result = process_node(node, session)
