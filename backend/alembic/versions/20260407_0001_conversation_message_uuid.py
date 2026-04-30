@@ -12,7 +12,7 @@ from sqlalchemy.dialects import postgresql
 
 
 revision = "20260407_0001"
-down_revision = None
+down_revision = "0000_create_tenants_table"
 branch_labels = None
 depends_on = None
 
