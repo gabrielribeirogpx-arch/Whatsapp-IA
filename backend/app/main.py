@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
@@ -79,10 +79,7 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "https://whatsapp-ia-nine.vercel.app"
-    ],
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -99,6 +96,11 @@ def on_startup():
 
 
 app.add_middleware(TenantContextMiddleware)
+
+
+@app.options("/{full_path:path}")
+async def options_handler(full_path: str):
+    return Response(status_code=200)
 
 
 # ✅ ROUTES
