@@ -26,6 +26,7 @@ from app.middleware.tenant_context import TenantContextMiddleware
 from app.api.debug import router as debug_router
 from app.api.flow_runtime import router as flow_runtime_router
 from app.api.whatsapp_webhook import router as whatsapp_webhook_router
+from app.api.flow_execute import router as flow_execute_router
 
 
 # ✅ MIGRATIONS
@@ -124,6 +125,7 @@ app.include_router(flows.crud_router, prefix="/api/flows", tags=["flows"])
 app.include_router(webhook.router)
 app.include_router(debug_router)
 app.include_router(flow_runtime_router, prefix="/api")
+app.include_router(flow_execute_router, prefix="/api")
 app.include_router(whatsapp_webhook_router, prefix="/api")
 
 
