@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
@@ -12,7 +13,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.orm import load_only
 
 from app.database import get_db
-from app.models import Flow, FlowVersion, Tenant
+from app.models import Conversation, Flow, FlowVersion, Tenant
 from app.services.flow_analytics_service import get_flow_analytics
 from app.services.flow_engine_service import (
     get_flow_graph,
@@ -89,6 +90,7 @@ def _get_flow_by_identifier(db: Session, flow_id: str, tenant_id: uuid.UUID | No
     query, _ = _resolve_flow_query(db=db, flow_id=flow_id)
     if tenant_id is not None:
         query = query.filter(Flow.tenant_id == tenant_id)
+    query = query.filter(Flow.deleted_at.is_(None))
     return query.first()
 
 
@@ -737,6 +739,7 @@ def get_tenant_flow_by_id(
     flow = db.query(Flow).filter(
         Flow.id == parsed_flow_id,
         Flow.tenant_id == tenant_uuid,
+        Flow.deleted_at.is_(None),
     ).first()
     print("[FLOW GET DEBUG]", {"tenant_id": str(tenant_uuid), "flow_id": flow_id, "query_result": str(flow.id) if flow else None})
 
@@ -744,23 +747,16 @@ def get_tenant_flow_by_id(
         print("[FLOW GET ERROR]", {"tenant_id": str(tenant_uuid), "flow_id": flow_id, "reason": "flow_not_found"})
         raise HTTPException(status_code=404, detail="Flow não encontrado")
 
-    graph = get_flow_graph(db=db, tenant_id=tenant_uuid, flow_id=str(flow.id))
-    flow.nodes = graph.get("nodes") or []
-    flow.edges = graph.get("edges") or []
-    print("FLOW RETORNADO:", flow.nodes)
-    if not flow.nodes:
-        print("ERRO: nodes vazio no banco")
-
-    print({
+    print("[FLOW GET]", {
         "tenant": str(tenant_uuid),
-        "nodes": len(flow.nodes or []),
-        "edges": len(flow.edges or []),
+        "nodes_count": len(flow.nodes_json or flow.nodes or []),
+        "edges_count": len(flow.edges_json or flow.edges or []),
     })
 
     return {
         "id": str(flow.id),
-        "nodes": flow.nodes or [],
-        "edges": flow.edges or [],
+        "nodes": flow.nodes_json or flow.nodes or [],
+        "edges": flow.edges_json or flow.edges or [],
     }
 
 
@@ -795,14 +791,10 @@ async def update_tenant_flow(
         if not isinstance(payload_data.get("nodes"), list):
             raise HTTPException(status_code=400, detail="Payload inválido")
         if not payload_data.get("nodes"):
-            raise HTTPException(status_code=400, detail="Flow vazio")
-        print(
-            {
-                "tenant": str(tenant_uuid),
-                "nodes_count": len(payload_data.get("nodes") or []),
-                "edges_count": len(payload_data.get("edges") or []),
-            }
-        )
+            raise HTTPException(status_code=400, detail="nodes vazio")
+        if not payload_data.get("edges"):
+            raise HTTPException(status_code=400, detail="edges vazio")
+        print("[FLOW SAVE]", {"tenant": str(tenant_uuid), "nodes_count": len(payload_data.get("nodes") or []), "edges_count": len(payload_data.get("edges") or [])})
         payload_model = FlowUpdate(**payload_data)
         print("FLOW RECEBIDO:", payload_model.model_dump())
         flow_update_fields = {
@@ -904,6 +896,10 @@ async def update_tenant_flow(
             synchronize_session=False,
         )
 
+        flow.nodes_json = nodes_json
+        flow.edges_json = edges_json
+        flow.nodes = nodes_json
+        flow.edges = edges_json
         flow.current_version_id = nova.id
         flow.version = nova.version
         invalidate_flow_runtime_cache(flow.id)
@@ -911,7 +907,8 @@ async def update_tenant_flow(
             print("[FLOW ACTIVE]:", flow.id)
         db.commit()
 
-        return {"status": "ok"}
+        db.refresh(flow)
+        return {"id": str(flow.id), "nodes": flow.nodes_json or [], "edges": flow.edges_json or []}
 
     except HTTPException:
         raise
@@ -934,9 +931,16 @@ def delete_tenant_flow(
         raise HTTPException(status_code=400, detail="Default visual flow cannot be deleted")
     if flow.is_active:
         raise HTTPException(status_code=400, detail="Active flow cannot be deleted")
-    db.delete(flow)
+    db.query(Conversation).filter(
+        Conversation.tenant_id == tenant_uuid,
+        Conversation.current_flow_id == flow.id,
+    ).update(
+        {Conversation.current_flow_id: None},
+        synchronize_session=False,
+    )
+    flow.deleted_at = datetime.utcnow()
     db.commit()
-    return {"status": "deleted"}
+    return {"success": True}
 
 
 @crud_router.put("/{flow_id}/activate")

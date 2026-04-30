@@ -38,10 +38,13 @@ class Flow(TenantMixin, Base):
     )
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     steps: Mapped[list["FlowStep"]] = relationship("FlowStep", back_populates="flow", cascade="all, delete-orphan")
     nodes: Mapped[list[dict] | None] = mapped_column(JSON, nullable=True)
     edges: Mapped[list[dict] | None] = mapped_column(JSON, nullable=True)
+    nodes_json: Mapped[list[dict] | None] = mapped_column(JSON, nullable=True)
+    edges_json: Mapped[list[dict] | None] = mapped_column(JSON, nullable=True)
     node_records: Mapped[list["FlowNode"]] = relationship("FlowNode", cascade="all, delete-orphan")
     versions: Mapped[list["FlowVersion"]] = relationship(
         "FlowVersion",
