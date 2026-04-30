@@ -5,10 +5,12 @@ from fastapi.responses import JSONResponse
 from alembic.config import Config
 from alembic import command
 import os
+import subprocess
 from sqlalchemy import text
 
 from app.db.base import Base
 from app.db.session import engine
+from app.core.database import engine as core_engine
 
 import app.models  # noqa: F401
 
@@ -68,6 +70,7 @@ def ensure_conversations_columns():
 
 app = FastAPI()
 
+
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
     print("ERRO 422 DETALHADO:", exc.errors())
@@ -89,10 +92,23 @@ app.add_middleware(
 )
 
 
+@app.on_event("startup")
+def safe_db_init():
+    try:
+        with core_engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+    except Exception as e:
+        print("DB connection failed:", e)
+
+
 # ✅ STARTUP (CORRETO)
 @app.on_event("startup")
 def on_startup():
     print("[CORS] enabled")
+    try:
+        subprocess.run(["alembic", "upgrade", "head"], check=True)
+    except Exception as e:
+        print("Migration failed:", e)
     run_migrations()
     Base.metadata.create_all(bind=engine)
     ensure_conversations_columns()
@@ -132,4 +148,5 @@ def root():
 # ✅ START SERVER (CRÍTICO)
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run("app.main:app", host="0.0.0.0", port=int(os.getenv("PORT", 8000)))

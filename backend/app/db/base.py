@@ -1,30 +1,5 @@
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker, declarative_base
-import os
+"""Compat layer for projects expecting app.db.base."""
 
-# URL do banco (Railway já fornece automaticamente)
-DATABASE_URL = os.getenv("DATABASE_URL")
+from app.core.database import Base
 
-if not DATABASE_URL:
-    raise Exception("DATABASE_URL não definida no ambiente")
-
-# Engine
-engine = create_engine(DATABASE_URL)
-
-# Sessão do banco
-SessionLocal = sessionmaker(
-    autocommit=False,
-    autoflush=False,
-    bind=engine
-)
-
-# Base do SQLAlchemy
-Base = declarative_base()
-
-# Dependency do FastAPI
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
+__all__ = ["Base"]

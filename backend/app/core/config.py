@@ -15,3 +15,6 @@ class Settings:
 
 
 settings = Settings()
+
+if not settings.database_url:
+    raise Exception("DATABASE_URL não configurada")
