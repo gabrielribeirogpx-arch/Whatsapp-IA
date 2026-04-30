@@ -58,6 +58,21 @@ class RenameFlowPayload(BaseModel):
     name: str
 
 
+class CanonicalFlowVersionResponse(BaseModel):
+    flow_id: str
+    version_id: str | None = None
+    nodes: list[dict[str, Any]] = Field(default_factory=list)
+    edges: list[dict[str, Any]] = Field(default_factory=list)
+    version: int | None = None
+
+
+class FlowVersionResponse(CanonicalFlowVersionResponse):
+    id: str
+    definition: dict[str, Any]
+    is_active: bool
+    name: str | None = None
+
+
 def parse_flow_id(flow_id: str):
     try:
         return uuid.UUID(flow_id)
@@ -531,6 +546,35 @@ def _rename_flow_name(
     return _serialize_flow(flow)
 
 
+
+
+def _serialize_flow_version_response(
+    *,
+    flow: Flow,
+    nodes: list[dict[str, Any]] | None,
+    edges: list[dict[str, Any]] | None,
+    version_id: uuid.UUID | str | None,
+    version: int | None = None,
+) -> dict[str, Any]:
+    normalized_nodes = nodes if isinstance(nodes, list) else []
+    normalized_edges = edges if isinstance(edges, list) else []
+    version_value = version if version is not None else flow.version
+    serialized_version_id = str(version_id) if version_id else None
+    canonical = {
+        "flow_id": str(flow.id),
+        "version_id": serialized_version_id,
+        "nodes": normalized_nodes,
+        "edges": normalized_edges,
+        "version": version_value,
+    }
+    return {
+        **canonical,
+        "id": str(flow.id),
+        "definition": canonical,
+        "is_active": flow.is_active,
+        "name": flow.name,
+    }
+
 def _serialize_flow_version(flow_version: FlowVersion, current_version_id: uuid.UUID | None) -> dict[str, Any]:
     return {
         "id": str(flow_version.id),
@@ -664,7 +708,7 @@ def save_tenant_flow(
     return _normalize_flow_response(graph)
 
 
-@crud_router.post("")
+@crud_router.post("", response_model=FlowVersionResponse)
 def create_tenant_flow(
     payload: FlowCreatePayload,
     request: Request,
@@ -694,12 +738,13 @@ def create_tenant_flow(
     first_version = flow_service.create_version(flow=flow, tenant_id=tenant_uuid, nodes=initial_nodes, edges=initial_edges)
     db.commit()
     db.refresh(flow)
-    return {
-        **_serialize_flow(flow),
-        "version": flow.version,
-        "nodes": flow.current_version.nodes if flow.current_version else [],
-        "edges": flow.current_version.edges if flow.current_version else [],
-    }
+    return _serialize_flow_version_response(
+        flow=flow,
+        nodes=flow.current_version.nodes if flow.current_version else [],
+        edges=flow.current_version.edges if flow.current_version else [],
+        version_id=first_version.id if first_version else flow.current_version_id,
+        version=flow.version,
+    )
 
 
 @crud_router.get("")
@@ -713,7 +758,7 @@ def list_tenant_flows(
     return [_serialize_flow(item) for item in get_flows(db=db, tenant_id=tenant_uuid)]
 
 
-@crud_router.get("/{flow_id}")
+@crud_router.get("/{flow_id}", response_model=FlowVersionResponse)
 def get_tenant_flow_by_id(
     flow_id: str,
     x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
@@ -741,13 +786,13 @@ def get_tenant_flow_by_id(
     version = resolved["version"]
     print("[FLOW LOAD]", {"flow_id": str(flow.id), "version": version, "nodes_count": len(nodes)})
 
-    return {
-        "id": str(flow.id),
-        "name": flow.name,
-        "version": version,
-        "nodes": nodes,
-        "edges": edges,
-    }
+    return _serialize_flow_version_response(
+        flow=flow,
+        nodes=nodes,
+        edges=edges,
+        version_id=flow.current_version_id,
+        version=version,
+    )
 
 
 @crud_router.get("/{flow_id}/analytics")
@@ -766,7 +811,7 @@ def get_tenant_flow_analytics(
     return analytics
 
 
-@crud_router.put("/{flow_id}")
+@crud_router.post("/{flow_id}/save", response_model=FlowVersionResponse)
 async def update_tenant_flow(
     flow_id: str,
     request: Request,
@@ -880,7 +925,13 @@ async def update_tenant_flow(
         print("[FLOW SAVE]", {"tenant_id": str(tenant_uuid), "nodes_count": len(nodes_json), "edges_count": len(edges_json), "version": flow.version})
         db.refresh(flow)
         resolved = flow_service.get_flow_with_version(flow)
-        return {"id": str(flow.id), "name": flow.name, "version": flow.version, "nodes": resolved["nodes"], "edges": resolved["edges"]}
+        return _serialize_flow_version_response(
+            flow=flow,
+            nodes=resolved["nodes"],
+            edges=resolved["edges"],
+            version_id=flow.current_version_id,
+            version=flow.version,
+        )
 
     except HTTPException:
         raise
@@ -1133,7 +1184,7 @@ def restore_flow_version_by_id(
     return _serialize_flow(flow)
 
 
-@crud_router.post("/{flow_id}/publish")
+@crud_router.post("/{flow_id}/publish", response_model=FlowVersionResponse)
 def publish_tenant_flow_version(
     flow_id: str,
     payload: PublishFlowPayload,
@@ -1173,8 +1224,10 @@ def publish_tenant_flow_version(
             "version_id": str(flow_version.id),
         }
     )
-    return {
-        "success": True,
-        "flow_id": str(flow.id),
-        "published_version_id": str(flow.published_version_id),
-    }
+    return _serialize_flow_version_response(
+        flow=flow,
+        nodes=nodes,
+        edges=edges,
+        version_id=flow.published_version_id or flow_version.id,
+        version=flow.version,
+    )
