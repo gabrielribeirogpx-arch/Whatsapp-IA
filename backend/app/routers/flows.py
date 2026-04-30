@@ -94,13 +94,6 @@ def _get_flow_by_identifier(db: Session, flow_id: str, tenant_id: uuid.UUID | No
     return query.first()
 
 
-def _get_valid_tenant(db: Session) -> Tenant:
-    tenant = db.query(Tenant).order_by(Tenant.id.asc()).first()
-    if not tenant:
-        raise Exception("Nenhum tenant encontrado no banco")
-    print("[FLOW DEBUG] Tenant usado:", tenant.id)
-    return tenant
-
 
 def validate_flow(nodes: list[dict[str, Any]], edges: list[dict[str, Any]]) -> tuple[bool, str | None]:
     return validate_flow_structure(nodes=nodes, edges=edges)
@@ -389,7 +382,7 @@ async def update_flow_route(
 
         last_version = db.execute(
             _flow_version_select(db)
-            .where(FlowVersion.flow_id == flow.id)
+            .where(FlowVersion.flow_id == flow.id, FlowVersion.tenant_id == tenant_uuid)
             .order_by(FlowVersion.version.desc(), FlowVersion.created_at.desc())
             .limit(1)
         ).scalars().first()
@@ -482,20 +475,19 @@ def delete_flow_route(
 
 def _resolve_tenant_header(tenant_id: str | None) -> uuid.UUID:
     if not tenant_id:
-        raise HTTPException(status_code=400, detail="X-Tenant-ID header is required")
+        raise HTTPException(status_code=403, detail="X-Tenant-ID header is required")
     try:
         return uuid.UUID(tenant_id)
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail="X-Tenant-ID header is invalid") from exc
+        raise HTTPException(status_code=403, detail="X-Tenant-ID header is invalid") from exc
 
 
 def _resolve_request_tenant(db: Session, tenant_id_header: str | None) -> Tenant:
-    if tenant_id_header:
-        tenant = _resolve_tenant(db=db, tenant_id=tenant_id_header)
-        if not tenant:
-            raise HTTPException(status_code=404, detail="Tenant not found")
-        return tenant
-    return _get_valid_tenant(db=db)
+    tenant_uuid = _resolve_tenant_header(tenant_id_header)
+    tenant = db.execute(select(Tenant).where(Tenant.id == tenant_uuid)).scalars().first()
+    if not tenant:
+        raise HTTPException(status_code=403, detail="Tenant not found")
+    return tenant
 
 
 def _serialize_flow(flow: Flow) -> dict[str, Any]:
@@ -592,7 +584,7 @@ def _resolve_tenant(db: Session, tenant_id: str) -> Tenant | None:
     return db.execute(select(Tenant).where(Tenant.id == parsed_tenant_id)).scalars().first()
 
 
-@router.get("/{tenant_id}")
+@router.get("/tenant/{tenant_id}")
 def get_tenant_flow(
     tenant_id: str,
     x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
@@ -620,7 +612,7 @@ def get_tenant_flow(
     }
 
 
-@router.post("/{tenant_id}")
+@router.post("/tenant/{tenant_id}")
 def save_tenant_flow(
     tenant_id: str,
     payload: FlowBuilderPayload,
@@ -873,6 +865,7 @@ async def update_tenant_flow(
 
         db.query(FlowVersion).filter(
             FlowVersion.flow_id == flow.id,
+            FlowVersion.tenant_id == tenant_uuid,
             FlowVersion.id != nova.id,
         ).update(
             {"is_active": False, "is_published": False},
@@ -1027,7 +1020,7 @@ def list_tenant_flow_versions(
 
     versions = db.execute(
         _flow_version_select(db)
-        .where(FlowVersion.flow_id == flow.id)
+        .where(FlowVersion.flow_id == flow.id, FlowVersion.tenant_id == tenant_uuid)
         .order_by(FlowVersion.created_at.desc(), FlowVersion.version.desc())
     ).scalars().all()
 
@@ -1048,20 +1041,20 @@ def restore_tenant_flow_version(
 
     if payload.version_id:
         flow_version = db.execute(
-            _flow_version_select(db).where(FlowVersion.id == payload.version_id, FlowVersion.flow_id == flow.id)
+            _flow_version_select(db).where(FlowVersion.id == payload.version_id, FlowVersion.flow_id == flow.id, FlowVersion.tenant_id == tenant_uuid)
         ).scalars().first()
     else:
         flow_version = db.execute(
-            _flow_version_select(db).where(FlowVersion.flow_id == flow.id).order_by(FlowVersion.version.desc()).limit(1)
+            _flow_version_select(db).where(FlowVersion.flow_id == flow.id, FlowVersion.tenant_id == tenant_uuid).order_by(FlowVersion.version.desc()).limit(1)
         ).scalars().first()
     if not flow_version:
         raise HTTPException(status_code=404, detail="Flow version not found")
 
-    db.query(FlowVersion).filter(FlowVersion.flow_id == flow.id).update(
+    db.query(FlowVersion).filter(FlowVersion.flow_id == flow.id, FlowVersion.tenant_id == tenant_uuid).update(
         {FlowVersion.is_active: False},
         synchronize_session=False,
     )
-    db.query(FlowVersion).filter(FlowVersion.id == flow_version.id).update(
+    db.query(FlowVersion).filter(FlowVersion.id == flow_version.id, FlowVersion.tenant_id == tenant_uuid).update(
         {FlowVersion.is_active: True},
         synchronize_session=False,
     )
@@ -1089,15 +1082,17 @@ def restore_tenant_flow_version_by_path(
 @router.get("/{flow_id}/versions")
 def list_flow_versions_by_id(
     flow_id: str,
+    x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
     db: Session = Depends(get_db),
 ):
-    flow = _get_flow_by_identifier(db=db, flow_id=flow_id)
+    tenant = _resolve_request_tenant(db=db, tenant_id_header=x_tenant_id)
+    flow = _get_flow_by_identifier(db=db, flow_id=flow_id, tenant_id=tenant.id)
     if not flow:
         raise HTTPException(status_code=404, detail="Flow not found")
 
     versions = db.execute(
         _flow_version_select(db)
-        .where(FlowVersion.flow_id == flow.id)
+        .where(FlowVersion.flow_id == flow.id, FlowVersion.tenant_id == tenant_uuid)
         .order_by(FlowVersion.created_at.desc(), FlowVersion.version.desc())
     ).scalars().all()
     return [_serialize_flow_version(item, flow.current_version_id) for item in versions]
@@ -1107,23 +1102,25 @@ def list_flow_versions_by_id(
 def restore_flow_version_by_id(
     flow_id: str,
     version_id: uuid.UUID,
+    x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
     db: Session = Depends(get_db),
 ):
-    flow = _get_flow_by_identifier(db=db, flow_id=flow_id)
+    tenant = _resolve_request_tenant(db=db, tenant_id_header=x_tenant_id)
+    flow = _get_flow_by_identifier(db=db, flow_id=flow_id, tenant_id=tenant.id)
     if not flow:
         raise HTTPException(status_code=404, detail="Flow not found")
 
     flow_version = db.execute(
-        _flow_version_select(db).where(FlowVersion.id == version_id, FlowVersion.flow_id == flow.id)
+        _flow_version_select(db).where(FlowVersion.id == version_id, FlowVersion.flow_id == flow.id, FlowVersion.tenant_id == tenant_uuid)
     ).scalars().first()
     if not flow_version:
         raise HTTPException(status_code=404, detail="Flow version not found")
 
-    db.query(FlowVersion).filter(FlowVersion.flow_id == flow.id).update(
+    db.query(FlowVersion).filter(FlowVersion.flow_id == flow.id, FlowVersion.tenant_id == tenant_uuid).update(
         {FlowVersion.is_active: False},
         synchronize_session=False,
     )
-    db.query(FlowVersion).filter(FlowVersion.id == flow_version.id).update(
+    db.query(FlowVersion).filter(FlowVersion.id == flow_version.id, FlowVersion.tenant_id == tenant_uuid).update(
         {FlowVersion.is_active: True},
         synchronize_session=False,
     )
@@ -1150,11 +1147,11 @@ def publish_tenant_flow_version(
 
     if payload.version_id:
         flow_version = db.execute(
-            _flow_version_select(db).where(FlowVersion.id == payload.version_id, FlowVersion.flow_id == flow.id)
+            _flow_version_select(db).where(FlowVersion.id == payload.version_id, FlowVersion.flow_id == flow.id, FlowVersion.tenant_id == tenant_uuid)
         ).scalars().first()
     else:
         flow_version = db.execute(
-            _flow_version_select(db).where(FlowVersion.flow_id == flow.id).order_by(FlowVersion.version.desc()).limit(1)
+            _flow_version_select(db).where(FlowVersion.flow_id == flow.id, FlowVersion.tenant_id == tenant_uuid).order_by(FlowVersion.version.desc()).limit(1)
         ).scalars().first()
     if not flow_version:
         raise HTTPException(status_code=404, detail="Flow version not found")
