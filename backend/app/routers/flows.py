@@ -682,10 +682,9 @@ def create_tenant_flow(
     if not tenant_uuid:
         raise HTTPException(status_code=400, detail="Tenant obrigatório")
     payload_data = payload.model_dump()
-    if not isinstance(payload_data.get("nodes"), list):
+    if not isinstance(payload_data.get("nodes"), list) or not isinstance(payload_data.get("edges"), list):
         raise HTTPException(status_code=400, detail="Payload inválido")
-    if not payload_data.get("nodes"):
-        raise HTTPException(status_code=400, detail="Flow vazio")
+    _validate_flow_payload(payload_data.get("nodes") or [], payload_data.get("edges") or [])
     print(
         {
             "tenant": str(tenant_uuid),
@@ -698,19 +697,29 @@ def create_tenant_flow(
     if not initial_nodes:
         initial_nodes = [_default_start_node()]
     initial_nodes = _ensure_start_node(initial_nodes)
-    save_flow_graph(
-        db=db,
+    initial_edges = payload_data.get("edges", [])
+    first_version = FlowVersion(**_flow_version_payload(
+        db,
+        flow_id=flow.id,
         tenant_id=tenant_uuid,
-        flow_id=str(flow.id),
+        version=1,
+        snapshot={"nodes": initial_nodes, "edges": initial_edges},
         nodes=initial_nodes,
-        edges=payload_data.get("edges", []),
-    )
+        edges=initial_edges,
+        is_active=False,
+        is_published=False,
+    ))
+    db.add(first_version)
+    db.flush()
+    flow.current_version_id = first_version.id
+    flow.version = 1
     db.commit()
     db.refresh(flow)
     return {
         **_serialize_flow(flow),
-        "nodes": initial_nodes,
-        "edges": payload_data.get("edges", []),
+        "version": flow.version,
+        "nodes": flow.current_version.nodes if flow.current_version else [],
+        "edges": flow.current_version.edges if flow.current_version else [],
     }
 
 
@@ -747,16 +756,18 @@ def get_tenant_flow_by_id(
         print("[FLOW GET ERROR]", {"tenant_id": str(tenant_uuid), "flow_id": flow_id, "reason": "flow_not_found"})
         raise HTTPException(status_code=404, detail="Flow não encontrado")
 
-    print("[FLOW GET]", {
-        "tenant": str(tenant_uuid),
-        "nodes_count": len(flow.nodes_json or flow.nodes or []),
-        "edges_count": len(flow.edges_json or flow.edges or []),
-    })
+    active_version = flow.current_version
+    nodes = active_version.nodes if active_version and isinstance(active_version.nodes, list) else (flow.nodes_json or flow.nodes or [])
+    edges = active_version.edges if active_version and isinstance(active_version.edges, list) else (flow.edges_json or flow.edges or [])
+    version = active_version.version if active_version else (flow.version or 1)
+    print("[FLOW LOAD]", {"flow_id": str(flow.id), "version": version, "nodes_count": len(nodes)})
 
     return {
         "id": str(flow.id),
-        "nodes": flow.nodes_json or flow.nodes or [],
-        "edges": flow.edges_json or flow.edges or [],
+        "name": flow.name,
+        "version": version,
+        "nodes": nodes,
+        "edges": edges,
     }
 
 
@@ -788,12 +799,8 @@ async def update_tenant_flow(
             raise HTTPException(status_code=400, detail="Tenant obrigatório")
         payload = await request.json()
         payload_data = payload if isinstance(payload, dict) else {}
-        if not isinstance(payload_data.get("nodes"), list):
+        if not isinstance(payload_data.get("nodes"), list) or not isinstance(payload_data.get("edges"), list):
             raise HTTPException(status_code=400, detail="Payload inválido")
-        if not payload_data.get("nodes"):
-            raise HTTPException(status_code=400, detail="nodes vazio")
-        if not payload_data.get("edges"):
-            raise HTTPException(status_code=400, detail="edges vazio")
         print("[FLOW SAVE]", {"tenant": str(tenant_uuid), "nodes_count": len(payload_data.get("nodes") or []), "edges_count": len(payload_data.get("edges") or [])})
         payload_model = FlowUpdate(**payload_data)
         print("FLOW RECEBIDO:", payload_model.model_dump())
@@ -879,7 +886,7 @@ async def update_tenant_flow(
             flow_id=flow.id,
             tenant_id=tenant_uuid,
             snapshot={"nodes": nodes_json, "edges": edges_json},
-            version=(flow.version or 0) + 1,
+            version=((flow.version or 0) + 1),
             nodes=nodes_json,
             edges=edges_json,
             is_active=False,
@@ -907,8 +914,9 @@ async def update_tenant_flow(
             print("[FLOW ACTIVE]:", flow.id)
         db.commit()
 
+        print("[FLOW SAVE]", {"tenant_id": str(tenant_uuid), "nodes_count": len(nodes_json), "edges_count": len(edges_json), "version": flow.version})
         db.refresh(flow)
-        return {"id": str(flow.id), "nodes": flow.nodes_json or [], "edges": flow.edges_json or []}
+        return {"id": str(flow.id), "name": flow.name, "version": flow.version, "nodes": flow.nodes_json or [], "edges": flow.edges_json or []}
 
     except HTTPException:
         raise
