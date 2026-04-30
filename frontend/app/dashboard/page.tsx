@@ -3,8 +3,6 @@
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 
-import Header from '../../components/Dashboard/Header';
-import KPICard from '../../components/Dashboard/KPICard';
 import DashboardChart from '../../components/DashboardChart';
 import { apiFetch } from '../../lib/api';
 import { Conversation } from '../../lib/types';
@@ -72,11 +70,6 @@ export default function DashboardPage() {
   }, [uniqueConversations]);
 
   const messagesLast7Days = data?.charts?.messages_last_7_days;
-  const conversas = uniqueConversations.length;
-  const online = humanInProgress;
-  const tempoResposta = answeredToday;
-  const taxaIA = '98%';
-
   return (
     <div style={{ display: 'flex', minHeight: '100vh', background: '#F7F8F7', fontFamily: 'Inter, -apple-system, sans-serif' }}>
       {/* Sidebar */}
@@ -148,33 +141,71 @@ export default function DashboardPage() {
       </nav>
 
       {/* Conteúdo principal */}
-      <main style={{ flex: 1, overflowY: 'auto' }}>
-        <Header title="Inbox" subtitle="Contoso • Suporte em Tempo Real" />
+      <main className="dash-main">
 
-        <section style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 12, padding: '2rem' }}>
-          <KPICard label="Conversas" value={conversas} unit="Incluindo não respondidas" />
-          <KPICard label="Online agora" value={online} unit="Membros do time" />
-          <KPICard label="Tempo resposta" value={tempoResposta} unit="Média hoje" />
-          <KPICard label="Resolvidas por IA" value={taxaIA} unit="Sem intervenção" />
-        </section>
-
-        <section style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0 2rem 2rem', gap: 16, flexWrap: 'wrap' }}>
-          <Link href="/chat" style={{ background: '#075E54', color: '#fff', padding: '10px 14px', borderRadius: 10, textDecoration: 'none', fontSize: 13, fontWeight: 500 }}>
-            Abrir Inbox
-          </Link>
-          <div style={{ display: 'flex', gap: 16, fontSize: 13 }}>
-            <Link href="/crm">Clientes</Link>
-            <Link href="/products">Produtos</Link>
-            <Link href="/knowledge">Knowledge</Link>
+        {/* Header */}
+        <div className="dash-page-header-row">
+          <div>
+            <h1 className="dash-page-title">Bom dia, Gabriel 👋</h1>
+            <p className="dash-page-subtitle">Aqui está o resumo das suas conversas hoje.</p>
           </div>
-        </section>
+          <div className="dash-quick-links">
+            <Link href="/chat" className="dash-quick-link">Inbox</Link>
+            <Link href="/crm" className="dash-quick-link">Clientes</Link>
+            <Link href="/products" className="dash-quick-link">Produtos</Link>
+            <Link href="/knowledge" className="dash-quick-link">Knowledge</Link>
+          </div>
+        </div>
+
+        {/* KPIs */}
+        <div className="dash-kpi-grid">
+          <div className="dash-kpi-card">
+            <p className="dash-kpi-label">Conversas ativas</p>
+            <p className="dash-kpi-value">{uniqueConversations.length}</p>
+            <p className="dash-kpi-unit">Contatos com histórico recente</p>
+          </div>
+          <div className="dash-kpi-card">
+            <p className="dash-kpi-label">Leads ativos</p>
+            <p className="dash-kpi-value">{humanInProgress}</p>
+            <p className="dash-kpi-unit">Conversas em modo humano</p>
+          </div>
+          <div className="dash-kpi-card">
+            <p className="dash-kpi-label">Mensagens hoje</p>
+            <p className="dash-kpi-value">{answeredToday}</p>
+            <p className="dash-kpi-unit">Atualizadas no dia atual</p>
+          </div>
+          <div className="dash-kpi-card">
+            <p className="dash-kpi-label">Resolvidas por IA</p>
+            <p className="dash-kpi-value">98%</p>
+            <p className="dash-kpi-unit">Sem intervenção humana</p>
+          </div>
+        </div>
+
         {/* Gráfico */}
         {messagesLast7Days && (
-          <div className="dash-chart-card">
-            <p className="dash-chart-title">Mensagens — últimos 7 dias</p>
+          <div className="dash-chart-section">
+            <div className="dash-chart-section-header">
+              <div>
+                <p className="dash-chart-section-title">Mensagens — últimos 7 dias</p>
+                <p className="dash-chart-section-subtitle">Enviadas vs recebidas</p>
+              </div>
+            </div>
             <DashboardChart data={messagesLast7Days} />
           </div>
         )}
+
+        {/* Ação rápida */}
+        <div style={{ padding: '0 36px 36px', display: 'flex', gap: 12 }}>
+          <Link href="/chat" className="dash-btn-primary">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+            Abrir Inbox
+          </Link>
+          <Link href="/dashboard/flow-builder" className="dash-btn-primary" style={{ background: '#4f46e5', boxShadow: '0 2px 8px rgba(79,70,229,0.25)' }}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+            Flow Builder
+          </Link>
+        </div>
+
       </main>
     </div>
   );

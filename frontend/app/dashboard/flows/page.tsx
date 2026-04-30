@@ -14,9 +14,6 @@ import {
   Legend
 } from 'chart.js';
 
-import Header from '@/components/Dashboard/Header';
-import KPICard from '@/components/Dashboard/KPICard';
-import StatusBadge from '@/components/Dashboard/StatusBadge';
 import { apiFetch, listFlows } from '@/lib/api';
 import { FlowItem } from '@/lib/types';
 
@@ -180,75 +177,115 @@ export default function FlowAnalyticsPage() {
   }, []);
 
   return (
-    <div style={{ backgroundColor: '#f8fafc', minHeight: '100vh' }}>
-      <Header
-        title="Automações"
-        subtitle="Status de fluxos em tempo real"
-        actions={(
-          <select
-            value={selectedFlow}
-            onChange={(e) => setSelectedFlow(e.target.value)}
-            style={{ minWidth: 280, padding: '10px 12px', borderRadius: 10, border: '1px solid #cbd5e1', background: '#fff' }}
-          >
-            {flows.map((flow) => (
-              <option key={flow.id} value={flow.id}>
-                {flow.name}
-              </option>
-            ))}
-          </select>
-        )}
-      />
-      {loading ? (
-        <p style={{ padding: '2rem' }}>Carregando...</p>
-      ) : (
-        <div style={{ display: 'grid', gap: 16, padding: '2rem' }}>
-          <section style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }}>
-            <KPICard label="Execuções" value="2.4k" trend="↑ 24% em 7 dias" />
-            <KPICard label="Taxa sucesso" value="98.3%" unit="Saudável" />
-            <KPICard label="Tempo médio" value="1.2s" unit="Por execução" />
-            <KPICard label="Erros" value="42" trend="↓ 15 (últimas 24h)" />
-          </section>
+    <div style={{ display: 'flex', minHeight: '100vh', background: '#f7f8f7' }}>
 
-          <div style={{ padding: '2rem', borderBottom: '0.5px solid var(--color-border-tertiary)', background: '#fff', borderRadius: 12 }}>
-            <h2 style={{ fontSize: '14px', fontWeight: 500, margin: '0 0 1.5rem', color: 'var(--color-text-primary)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-              Execuções últimos 7 dias
-            </h2>
-            <div style={{ position: 'relative', width: '100%', height: '280px' }}>
-              <canvas id="executionsChart" ref={chartRef} />
-            </div>
+      {/* Conteúdo principal */}
+      <main className="dash-main">
+
+        {/* Header */}
+        <div className="dash-page-header-row">
+          <div>
+            <h1 className="dash-page-title">Automações</h1>
+            <p className="dash-page-subtitle">Status de fluxos em tempo real</p>
           </div>
-
-          <section style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 12, padding: '1rem' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-              <h2 style={{ margin: 0 }}>Instâncias de fluxo</h2>
-              <Link href="/dashboard/flows">Ver todas →</Link>
-            </div>
-            <p style={{ margin: '0 0 12px', fontSize: 12 }}>● Sucesso | ● Aguardando | ● Erro</p>
-            <div style={{ overflowX: 'auto' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                <thead>
-                  <tr>
-                    <th align="left">conversation_id</th>
-                    <th align="left">status</th>
-                    <th align="left">current_node_id</th>
-                    <th align="left">updated_at</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {sessions.map((session) => (
-                    <tr key={session.id ?? session.conversation_id}>
-                      <td style={{ padding: '10px 0', borderTop: '1px solid #e2e8f0', fontFamily: 'monospace', fontSize: 12 }}>{session.conversation_id}</td>
-                      <td style={{ borderTop: '1px solid #e2e8f0' }}><StatusBadge status={toBadgeStatus(session.status)} label={session.status} /></td>
-                      <td style={{ borderTop: '1px solid #e2e8f0', fontFamily: 'monospace', fontSize: 12 }}>{session.current_node_id ?? '-'}</td>
-                      <td style={{ borderTop: '1px solid #e2e8f0' }}>{getRelativeTime(session.updated_at)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </section>
+          <div className="dash-page-actions">
+            <select
+              className="dash-select"
+              value={selectedFlow}
+              onChange={(e) => setSelectedFlow(e.target.value)}
+            >
+              {flows.map((flow) => (
+                <option key={flow.id} value={flow.id}>{flow.name}</option>
+              ))}
+            </select>
+          </div>
         </div>
-      )}
+
+        {loading ? (
+          <div style={{ padding: '2rem 36px', color: '#9ca3af', fontSize: 13 }}>Carregando...</div>
+        ) : (
+          <>
+            {/* KPIs */}
+            <div className="dash-kpi-grid">
+              <div className="dash-kpi-card">
+                <p className="dash-kpi-label">Execuções</p>
+                <p className="dash-kpi-value">{analytics?.total_executions?.toLocaleString() ?? '2.4k'}</p>
+                <span className="dash-kpi-trend up">↑ 24% em 7 dias</span>
+              </div>
+              <div className="dash-kpi-card">
+                <p className="dash-kpi-label">Taxa sucesso</p>
+                <p className="dash-kpi-value">98.3%</p>
+                <p className="dash-kpi-unit">Saudável</p>
+              </div>
+              <div className="dash-kpi-card">
+                <p className="dash-kpi-label">Tempo médio</p>
+                <p className="dash-kpi-value">1.2s</p>
+                <p className="dash-kpi-unit">Por execução</p>
+              </div>
+              <div className="dash-kpi-card">
+                <p className="dash-kpi-label">Erros</p>
+                <p className="dash-kpi-value">{analytics?.total_errors ?? 42}</p>
+                <span className="dash-kpi-trend down">↓ 15 (últimas 24h)</span>
+              </div>
+            </div>
+
+            {/* Gráfico */}
+            <div className="dash-chart-section">
+              <div className="dash-chart-section-header">
+                <div>
+                  <p className="dash-chart-section-title">Execuções — últimos 7 dias</p>
+                  <p className="dash-chart-section-subtitle">Volume de execuções do fluxo selecionado</p>
+                </div>
+              </div>
+              <div style={{ position: 'relative', width: '100%', height: 280 }}>
+                <canvas ref={chartRef} />
+              </div>
+            </div>
+
+            {/* Tabela de instâncias */}
+            <div className="dash-table-section">
+              <div className="dash-table-section-header">
+                <h2 className="dash-table-section-title">Instâncias de fluxo</h2>
+                <Link href="/dashboard/flows" className="dash-table-link">
+                  Ver todas
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="9 18 15 12 9 6"/></svg>
+                </Link>
+              </div>
+              {sessions.length === 0 ? (
+                <div style={{ padding: '32px', textAlign: 'center', color: '#9ca3af', fontSize: 13 }}>
+                  Nenhuma instância encontrada.
+                </div>
+              ) : (
+                <table className="dash-table">
+                  <thead>
+                    <tr>
+                      <th>Conversa</th>
+                      <th>Status</th>
+                      <th>Node atual</th>
+                      <th>Atualizado</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {sessions.map((session) => (
+                      <tr key={session.id ?? session.conversation_id}>
+                        <td><span className="dash-mono">{session.conversation_id}</span></td>
+                        <td>
+                          <span className={`dash-status-badge ${toBadgeStatus(session.status)}`}>
+                            <span className="dash-status-dot" />
+                            {session.status}
+                          </span>
+                        </td>
+                        <td><span className="dash-mono">{session.current_node_id ?? '—'}</span></td>
+                        <td style={{ color: '#9ca3af', fontSize: 12 }}>{getRelativeTime(session.updated_at)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </>
+        )}
+      </main>
     </div>
   );
 }
