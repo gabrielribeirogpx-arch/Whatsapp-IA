@@ -22,6 +22,7 @@ from app.services.flow_engine import get_node_by_id
 from app.services.flow_session_service import FlowSessionService
 from app.models.flow import Flow
 from app.services.whatsapp_service import send_whatsapp_buttons, send_whatsapp_message_simple
+from app.services.intent_service import classify_intent, normalize_input, route_intent
 from app.models import Tenant
 from app.utils.phone import normalize_phone
 
@@ -263,10 +264,15 @@ async def webhook(request: Request, db: Session = Depends(get_db)):
     phone = normalize_phone(message["from"])
     if message["type"] == "interactive":
         user_input = message["interactive"]["button_reply"]["id"]
+    elif message["type"] == "text":
+        user_input = message["text"]["body"]
     else:
-        user_input = message["text"]["body"].lower()
+        user_input = ""
 
+    user_input = normalize_input(user_input)
     print("[USER INPUT]:", user_input)
+    intent = classify_intent(user_input)
+    print("[INTENT]:", intent)
 
     flow_row = (
         db.query(Flow)
@@ -303,7 +309,7 @@ async def webhook(request: Request, db: Session = Depends(get_db)):
         return {"status": "ignored"}
 
     edges = flow["edges"]
-    normalized_input = (user_input or "").lower()
+    normalized_input = normalize_input(user_input)
     next_edge = next(
         (
             e for e in edges
@@ -328,6 +334,9 @@ async def webhook(request: Request, db: Session = Depends(get_db)):
             send_whatsapp_message_simple(phone, node_message)
     else:
         print("[FLOW] nenhuma rota encontrada")
+        fallback_response = route_intent(intent)
+        send_whatsapp_message_simple(phone, fallback_response)
+
     return {"status": "message processed"}
 
 

@@ -2,6 +2,7 @@ from fastapi import APIRouter, Request
 
 from app.core.whatsapp_config import WHATSAPP_VERIFY_TOKEN
 from app.services.flow_engine import run_flow_from_message
+from app.services.intent_service import classify_intent, route_intent
 from app.services.whatsapp_service import send_whatsapp_message_simple
 
 router = APIRouter()
@@ -33,16 +34,25 @@ async def receive_message(request: Request):
 
         message = value["messages"][0]
         phone = message["from"]
-        text = message["text"]["body"]
+        if message.get("type") == "text":
+            text = message.get("text", {}).get("body", "")
+        else:
+            text = ""
 
         print("USER:", phone)
-        print("MESSAGE:", text)
+        print("[USER INPUT]:", text)
+        intent = classify_intent(text)
+        print("[INTENT]:", intent)
 
         response = run_flow_from_message(phone, text)
         print("FLOW RESPONSE:", response)
 
-        for msg in response["messages"]:
-            send_whatsapp_message_simple(phone, msg["content"])
+        messages = response.get("messages") if isinstance(response, dict) else None
+        if messages:
+            for msg in messages:
+                send_whatsapp_message_simple(phone, msg["content"])
+        else:
+            send_whatsapp_message_simple(phone, route_intent(intent))
 
     except Exception as e:
         print("ERROR:", str(e))
