@@ -174,6 +174,49 @@ def _log_flow_version_blocked(flow_id: uuid.UUID, nodes_count: int) -> None:
     )
 
 
+def _validate_flow_payload(nodes: list[dict[str, Any]], edges: list[dict[str, Any]]) -> None:
+    if not any(bool((node.get("data") or {}).get("isStart")) for node in nodes):
+        raise HTTPException(status_code=400, detail="Fluxo precisa de um nó inicial")
+
+    message_nodes = [node for node in nodes if str(node.get("type") or "").lower() == "message"]
+    if len(nodes) < 2:
+        if len(nodes) != 1 or not message_nodes:
+            raise HTTPException(status_code=400, detail="Fluxo inválido (muito pequeno)")
+        node_text = ((message_nodes[0].get("data") or {}).get("text") or "").strip()
+        if not node_text:
+            raise HTTPException(status_code=400, detail="Fluxo inválido (message vazio)")
+
+    node_ids = {str(node.get("id")) for node in nodes if node.get("id")}
+    outgoing_count: dict[str, int] = {node_id: 0 for node_id in node_ids}
+    outgoing_by_handle: dict[str, set[str]] = {node_id: set() for node_id in node_ids}
+
+    for edge in edges:
+        source = str(edge.get("source") or "")
+        target = str(edge.get("target") or "")
+        if source not in node_ids or target not in node_ids:
+            raise HTTPException(status_code=400, detail="Edge inválida: origem/destino inexistente")
+        outgoing_count[source] = outgoing_count.get(source, 0) + 1
+        source_handle = str(edge.get("sourceHandle") or (edge.get("data") or {}).get("sourceHandle") or "").lower()
+        if source_handle:
+            outgoing_by_handle[source].add(source_handle)
+
+    for node in nodes:
+        node_id = str(node.get("id") or "")
+        node_type = str(node.get("type") or "").lower()
+        data = node.get("data") or {}
+        if node_type == "condition":
+            condition = str(data.get("condition") or "").strip()
+            if not condition:
+                raise HTTPException(status_code=400, detail="Condition vazio")
+            if outgoing_count.get(node_id, 0) < 2:
+                raise HTTPException(status_code=400, detail="Condition precisa de duas saídas (SIM e NÃO)")
+            handles = outgoing_by_handle.get(node_id, set())
+            if not {"true", "false"}.issubset(handles):
+                raise HTTPException(status_code=400, detail="Condition precisa de saídas SIM e NÃO")
+        elif node_type == "message":
+            if outgoing_count.get(node_id, 0) < 1:
+                raise HTTPException(status_code=400, detail="Message precisa de ao menos uma saída")
+
 
 @router.get("")
 @router.get("/")
@@ -287,6 +330,14 @@ async def update_flow_route(
             raise Exception("Flow sem ID")
 
         persisted_nodes = flow.current_version.nodes if flow.current_version and isinstance(flow.current_version.nodes, list) else []
+        print("[FLOW SAVE ATTEMPT]", {"flow_id": str(flow.id), "nodes": len(nodes), "edges": len(edges)})
+        if len(persisted_nodes) > 1 and len(nodes) <= 1:
+            print("[FLOW SAVE BLOCKED]", {"flow_id": str(flow.id), "reason": "possible_accidental_overwrite"})
+            return JSONResponse(
+                status_code=400,
+                content={"error": "payload inválido: possível sobrescrita acidental"},
+            )
+        _validate_flow_payload(nodes, edges)
         valid, error = validate_flow(nodes, edges)
         print("[FLOW VALID]:", valid)
         if not valid:
@@ -310,6 +361,24 @@ async def update_flow_route(
         ).scalars().first()
         next_version = (last_version.version if last_version else 0) + 1
 
+        if flow.current_version:
+            backup_version = FlowVersion(
+                flow_id=flow.id,
+                tenant_id=tenant.id,
+                version=next_version,
+                snapshot={
+                    "nodes": flow.current_version.nodes or [],
+                    "edges": flow.current_version.edges or [],
+                },
+                nodes=flow.current_version.nodes or [],
+                edges=flow.current_version.edges or [],
+                is_active=False,
+            )
+            db.add(backup_version)
+            db.flush()
+            print("[FLOW VERSION CREATED]", {"flow_id": str(flow.id), "version_id": str(backup_version.id), "type": "snapshot"})
+            next_version += 1
+
         db.query(FlowVersion).filter(
             FlowVersion.flow_id == flow.id,
             FlowVersion.is_active.is_(True),
@@ -321,7 +390,9 @@ async def update_flow_route(
 
         new_version = FlowVersion(
             flow_id=flow.id,
+            tenant_id=tenant.id,
             version=next_version,
+            snapshot={"nodes": nodes, "edges": edges},
             nodes=nodes,
             edges=edges,
             is_active=True,

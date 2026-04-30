@@ -42,4 +42,4 @@ def route_intent(intent: str) -> str:
     if intent == "SUPPORT":
         return "Me explica o problema que você está enfrentando que eu te ajudo."
 
-    return "Não entendi 😅 Me fala se você quer: preço, como funciona ou contratar."
+    return "Não entendi 😅 Me diga: preço, como funciona ou suporte."

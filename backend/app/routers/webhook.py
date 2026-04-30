@@ -210,13 +210,22 @@ async def _process_meta_webhook(request: Request, db: Session) -> dict[str, str]
             logger.info("Evento processado telefone=%s conteúdo=%s", normalized_phone, incoming_message)
         except Exception as exc:
             db.rollback()
-            print("[WEBHOOK ERROR]", exc)
+            print("[FLOW EXECUTION ERROR]", exc)
             logger.exception(
                 "[WEBHOOK ERROR] failed to process message_id=%s phone=%s error=%s",
                 incoming.get("message_id"),
                 incoming.get("phone"),
                 str(exc),
             )
+            try:
+                if incoming.get("phone"):
+                    send_whatsapp_message_simple(
+                        normalize_phone(incoming["phone"]),
+                        "Tive um problema aqui 😅 mas já estou corrigindo. Pode tentar de novo?",
+                    )
+                    logger.warning("[WEBHOOK FALLBACK TRIGGERED] phone=%s", incoming.get("phone"))
+            except Exception:
+                logger.exception("Falha ao enviar fallback do webhook")
             continue
 
     db.commit()

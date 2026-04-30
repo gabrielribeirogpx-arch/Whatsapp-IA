@@ -792,7 +792,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
     [rfInstance, isSimulatorOpen, setNodes, toggleStartNode, updateNodeData],
   );
 
-  const handleSaveFlow = useCallback(async () => {
+  const handleSaveFlow = useCallback(async (requireConfirmOverwrite = false) => {
     if (!selectedFlowId) {
       console.error('selectedFlowId não definido');
       return;
@@ -876,8 +876,25 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
       edges: cleanEdges,
     };
 
-    if (!safeFlow.nodes || safeFlow.nodes.length === 0) {
-      console.warn('Bloqueado: nodes vazio');
+    const conditionWithoutValue = safeFlow.nodes.some((node) => {
+      if ((node.type || '').toLowerCase() !== 'condition') return false;
+      const conditionValue = String((node.data as Record<string, unknown>)?.condition || '').trim();
+      return !conditionValue;
+    });
+
+    if (!safeFlow.nodes || safeFlow.nodes.length <= 1) {
+      alert('Fluxo muito pequeno');
+      return;
+    }
+    if (!safeFlow.edges || safeFlow.edges.length === 0) {
+      alert('Fluxo sem conexões');
+      return;
+    }
+    if (conditionWithoutValue) {
+      alert('Condição vazia');
+      return;
+    }
+    if (requireConfirmOverwrite && !confirm('Você está sobrescrevendo o fluxo atual. Deseja continuar?')) {
       return;
     }
 
@@ -911,7 +928,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
     }
 
     autosaveTimeoutRef.current = setTimeout(() => {
-      void handleSaveFlow();
+      void handleSaveFlow(false);
     }, 2000);
 
     return () => {
@@ -1122,7 +1139,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
         <button
           type="button"
           className="dash-nav-item"
-          onClick={handleSaveFlow}
+          onClick={() => void handleSaveFlow(true)}
           disabled={isSaving}
           title="Salvar fluxo"
           style={{ border: 'none', background: 'none', cursor: isSaving ? 'not-allowed' : 'pointer', width: '100%', textAlign: 'left', opacity: isSaving ? 0.6 : 1 }}
