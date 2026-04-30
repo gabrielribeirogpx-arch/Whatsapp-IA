@@ -3,6 +3,7 @@ from __future__ import annotations
 import uuid
 
 from fastapi import Request
+from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.core.tenant import set_current_tenant_id
@@ -47,16 +48,18 @@ class TenantContextMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
 
         tenant_header = (request.headers.get("x-tenant-id") or "").strip()
+        if not tenant_header:
+            return JSONResponse(status_code=400, content={"detail": "Tenant obrigatório"})
+
         tenant_query = (request.query_params.get("tenant") or "").strip()
         tenant_subdomain = _resolve_tenant_from_host(request.headers.get("host", ""))
         tenant_value = tenant_header or tenant_query or tenant_subdomain
 
         tenant_id = None
-        if tenant_value:
-            try:
-                tenant_id = uuid.UUID(tenant_value)
-            except ValueError:
-                tenant_id = None
+        try:
+            tenant_id = uuid.UUID(tenant_value)
+        except ValueError:
+            return JSONResponse(status_code=400, content={"detail": "Tenant obrigatório"})
 
         request.state.tenant_id = tenant_id
         set_current_tenant_id(tenant_id)

@@ -123,6 +123,8 @@ export async function apiFetch(path: string, init: RequestInit = {}): Promise<Re
 
     if (tenantId) {
       headers.set('X-Tenant-ID', tenantId);
+    } else if (path.startsWith('/api/flows')) {
+      throw new Error('Tenant não encontrado para requisições de flow.');
     }
   }
 

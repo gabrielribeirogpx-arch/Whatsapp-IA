@@ -675,11 +675,24 @@ def save_tenant_flow(
 @crud_router.post("")
 def create_tenant_flow(
     payload: FlowCreatePayload,
-    x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
+    request: Request,
     db: Session = Depends(get_db),
 ):
-    tenant_uuid = _resolve_tenant_header(x_tenant_id)
+    tenant_uuid = request.state.tenant_id
+    if not tenant_uuid:
+        raise HTTPException(status_code=400, detail="Tenant obrigatório")
     payload_data = payload.model_dump()
+    if not isinstance(payload_data.get("nodes"), list):
+        raise HTTPException(status_code=400, detail="Payload inválido")
+    if not payload_data.get("nodes"):
+        raise HTTPException(status_code=400, detail="Flow vazio")
+    print(
+        {
+            "tenant": str(tenant_uuid),
+            "nodes_count": len(payload_data.get("nodes") or []),
+            "edges_count": len(payload_data.get("edges") or []),
+        }
+    )
     flow = create_flow(db=db, tenant_id=tenant_uuid, data=payload_data)
     initial_nodes = payload_data.get("nodes", [])
     if not initial_nodes:
@@ -703,10 +716,12 @@ def create_tenant_flow(
 
 @crud_router.get("")
 def list_tenant_flows(
-    x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
+    request: Request,
     db: Session = Depends(get_db),
 ):
-    tenant_uuid = _resolve_tenant_header(x_tenant_id)
+    tenant_uuid = request.state.tenant_id
+    if not tenant_uuid:
+        raise HTTPException(status_code=400, detail="Tenant obrigatório")
     return [_serialize_flow(item) for item in get_flows(db=db, tenant_id=tenant_uuid)]
 
 
@@ -762,13 +777,25 @@ def get_tenant_flow_analytics(
 async def update_tenant_flow(
     flow_id: str,
     request: Request,
-    x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
     db: Session = Depends(get_db),
 ):
     try:
-        tenant_uuid = _resolve_tenant_header(x_tenant_id)
+        tenant_uuid = request.state.tenant_id
+        if not tenant_uuid:
+            raise HTTPException(status_code=400, detail="Tenant obrigatório")
         payload = await request.json()
         payload_data = payload if isinstance(payload, dict) else {}
+        if not isinstance(payload_data.get("nodes"), list):
+            raise HTTPException(status_code=400, detail="Payload inválido")
+        if not payload_data.get("nodes"):
+            raise HTTPException(status_code=400, detail="Flow vazio")
+        print(
+            {
+                "tenant": str(tenant_uuid),
+                "nodes_count": len(payload_data.get("nodes") or []),
+                "edges_count": len(payload_data.get("edges") or []),
+            }
+        )
         payload_model = FlowUpdate(**payload_data)
         print("FLOW RECEBIDO:", payload_model.model_dump())
         flow_update_fields = {
