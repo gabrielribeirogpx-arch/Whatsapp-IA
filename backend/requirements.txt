@@ -12,3 +12,4 @@ python-multipart==0.0.9
 google-genai
 redis==5.0.4
 rq==1.16.2
+PyJWT==2.10.1

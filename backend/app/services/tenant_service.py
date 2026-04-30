@@ -6,6 +6,7 @@ from fastapi import Depends, Header, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.security import decode_tenant_token
 from app.database import get_db
 from app.models import AIConfig, Tenant
 
@@ -71,6 +72,7 @@ def resolve_tenant_by_phone_number_id(db: Session, phone_number_id: str | None) 
 
 
 def get_current_tenant(
+    authorization: str = Header(default="", alias="Authorization"),
     x_tenant_slug: str = Header(default="", alias="X-Tenant-Slug"),
     x_tenant_id: str = Header(default="", alias="X-Tenant-Id"),
     tenant_slug: str = Query(default=""),
@@ -79,6 +81,12 @@ def get_current_tenant(
 ) -> Tenant:
     raw_tenant_id = (x_tenant_id or tenant_id).strip()
     slug = (x_tenant_slug or tenant_slug).strip()
+
+    if authorization.lower().startswith("bearer "):
+        token = authorization.split(" ", 1)[1].strip()
+        payload = decode_tenant_token(token)
+        raw_tenant_id = str(payload.get("tenant_id") or payload.get("sub") or "").strip() or raw_tenant_id
+        slug = str(payload.get("slug") or "").strip() or slug
 
     if raw_tenant_id:
         try:
