@@ -18,6 +18,8 @@ from app.services.message_service import normalize_meta_message
 from app.services.realtime_service import sse_broker
 from app.services.flow_service import resolve_flow_for_message
 from app.services.flow_engine_service import get_flow_graph
+from app.services.flow_engine import get_node_by_id
+from app.services.flow_session_service import FlowSessionService
 from app.models.flow import Flow
 from app.services.whatsapp_service import send_whatsapp_buttons, send_whatsapp_message_simple
 from app.models import Tenant
@@ -251,11 +253,20 @@ async def webhook(request: Request, db: Session = Depends(get_db)):
     if not payload:
         return {"status": "ignored"}
 
-    messages_data = normalize_meta_message(payload)
-    if not messages_data:
+    entry = (payload.get("entry") or [None])[0] or {}
+    changes = (entry.get("changes") or [None])[0] or {}
+    value = changes.get("value") or {}
+    if not value.get("messages"):
         return {"status": "ignored"}
+    message = value["messages"][0]
 
-    phone = normalize_phone(messages_data[0].get("phone"))
+    phone = normalize_phone(message["from"])
+    if message["type"] == "interactive":
+        user_input = message["interactive"]["button_reply"]["id"]
+    else:
+        user_input = message["text"]["body"].lower()
+
+    print("[USER INPUT]:", user_input)
 
     flow_row = (
         db.query(Flow)
@@ -279,19 +290,44 @@ async def webhook(request: Request, db: Session = Depends(get_db)):
         print("[ERRO] flow sem start node")
         return {"status": "ignored"}
 
-    print("[START NODE]:", start_node["id"])
+    session_service = FlowSessionService(db)
+    session = session_service.get_or_create_session(str(flow_row.id), phone)
+    if not session.current_node_id:
+        session.current_node_id = start_node["id"]
+        db.add(session)
+        db.commit()
+        db.refresh(session)
 
-    message = start_node.get("data", {}).get("content") or start_node.get("data", {}).get("text")
+    current_node = get_node_by_id(flow, session.current_node_id)
+    if not current_node:
+        return {"status": "ignored"}
 
-    if not message:
-        message = "Fluxo iniciado"
+    edges = flow["edges"]
+    normalized_input = (user_input or "").lower()
+    next_edge = next(
+        (
+            e for e in edges
+            if e["source"] == current_node["id"]
+            and normalized_input in e.get("label", "").lower()
+        ),
+        None
+    )
 
-    print("[NODE TYPE]:", start_node["type"])
-
-    if start_node["type"] == "choice":
-        send_whatsapp_buttons(phone, start_node)
+    if next_edge:
+        next_node_id = next_edge["target"]
+        session.current_node_id = next_node_id
+        db.add(session)
+        db.commit()
+        db.refresh(session)
+        next_node = get_node_by_id(flow, next_node_id)
+        print("[FLOW MOVE]:", current_node["id"], "->", next_node_id)
+        if next_node and next_node["type"] == "choice":
+            send_whatsapp_buttons(phone, next_node)
+        elif next_node:
+            node_message = next_node["data"].get("content") or next_node["data"].get("text")
+            send_whatsapp_message_simple(phone, node_message)
     else:
-        send_whatsapp_message_simple(phone, message)
+        print("[FLOW] nenhuma rota encontrada")
     return {"status": "message processed"}
 
 
