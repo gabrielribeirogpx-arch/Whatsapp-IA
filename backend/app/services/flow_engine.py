@@ -187,17 +187,11 @@ def run_flow_from_message(user_id: str, text: str):
         if not session.current_node_id:
             nodes = flow_data.get("nodes", []) if isinstance(flow_data.get("nodes"), list) else []
             start_node = next(
-                (
-                    node
-                    for node in nodes
-                    if isinstance(node, dict)
-                    and isinstance(node.get("data"), dict)
-                    and node.get("data", {}).get("isStart")
-                ),
+                (n for n in nodes if isinstance(n, dict) and n.get("data", {}).get("isStart") == True),
                 None,
             )
             if not start_node:
-                print("[ERRO] sem start node")
+                print("ERRO: nenhum start node encontrado")
                 return {
                     "messages": [
                         {"type": "text", "content": "Erro: fluxo sem início"},

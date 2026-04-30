@@ -69,7 +69,7 @@ const FALLBACK_START_NODE: Node = {
   id: 'start',
   type: 'message',
   position: { x: 250, y: 100 },
-  data: { label: 'Início' },
+  data: { label: 'Início', isStart: true },
 };
 
 function randomPosition() {
@@ -848,6 +848,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
       position: n.position || { x: 0, y: 0 },
       data: {
         ...n.data,
+        isStart: !!n.data?.isStart,
       },
     }));
 
