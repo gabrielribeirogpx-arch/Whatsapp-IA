@@ -110,6 +110,18 @@ class FlowVersion(Base):
     nodes: Mapped[list[dict] | None] = mapped_column(JSONB, nullable=True)
     edges: Mapped[list[dict] | None] = mapped_column(JSONB, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    is_published: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false", index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     flow: Mapped[Flow] = relationship("Flow", back_populates="versions", foreign_keys=[flow_id])
+
+
+class FlowExecution(Base):
+    __tablename__ = "flow_executions"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    flow_version_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("flow_versions.id"), nullable=False, index=True)
+    user_phone: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    current_node_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    state: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
