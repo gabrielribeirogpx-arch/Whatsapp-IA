@@ -17,6 +17,9 @@ from app.services.idempotency_service import register_processed_message
 from app.services.message_service import normalize_meta_message
 from app.services.realtime_service import sse_broker
 from app.services.flow_service import resolve_flow_for_message
+from app.services.flow_engine_service import get_flow_graph
+from app.models.flow import Flow
+from app.services.whatsapp_service import send_whatsapp_message_simple
 from app.models import Tenant
 from app.utils.phone import normalize_phone
 
@@ -240,20 +243,50 @@ async def webhook(request: Request, db: Session = Depends(get_db)):
     tenant_id = request.headers.get("X-Tenant-ID")
 
     if not tenant_id:
-        tenant_id = request.query_params.get("tenant")
+        tenant_id = "619474df-9dc1-4cd6-bce0-57a9402284bf"
 
-    if not tenant_id:
-        print("[ERRO] webhook sem tenant")
+    print("[TENANT USADO]:", tenant_id)
+
+    payload = await _parse_webhook_payload(request)
+    if not payload:
         return {"status": "ignored"}
 
-    print("[TENANT OK]:", tenant_id)
+    messages_data = normalize_meta_message(payload)
+    if not messages_data:
+        return {"status": "ignored"}
 
-    try:
-        return await _process_meta_webhook(request=request, db=db)
-    except Exception as e:
-        db.rollback()
-        logger.exception("Erro ao processar webhook: %s", str(e))
+    phone = normalize_phone(messages_data[0].get("phone"))
 
+    flow_row = (
+        db.query(Flow)
+        .filter(Flow.tenant_id == UUID(tenant_id), Flow.is_active.is_(True))
+        .order_by(Flow.created_at.asc(), Flow.id.asc())
+        .first()
+    )
+
+    if not flow_row:
+        print("[ERRO] nenhum flow ativo encontrado")
+        return {"status": "ignored"}
+
+    flow = get_flow_graph(db=db, tenant_id=UUID(tenant_id), flow_id=str(flow_row.id))
+
+    start_node = next(
+        (n for n in flow["nodes"] if n.get("data", {}).get("isStart")),
+        None
+    )
+
+    if not start_node:
+        print("[ERRO] flow sem start node")
+        return {"status": "ignored"}
+
+    print("[START NODE]:", start_node["id"])
+
+    message = start_node.get("data", {}).get("content") or start_node.get("data", {}).get("text")
+
+    if not message:
+        message = "Fluxo iniciado"
+
+    send_whatsapp_message_simple(phone, message)
     return {"status": "message processed"}
 
 
