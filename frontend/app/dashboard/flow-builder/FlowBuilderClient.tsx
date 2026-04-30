@@ -225,12 +225,6 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
   }, [nodes]);
 
   useEffect(() => {
-    if (typeof window === 'undefined') return;
-    if (!selectedFlowId) return;
-    window.localStorage.setItem(`flow_draft_${selectedFlowId}`, JSON.stringify({ nodes, edges }));
-  }, [edges, nodes, selectedFlowId]);
-
-  useEffect(() => {
     console.log('NODES:', nodes);
     console.log('EDGES:', edges);
   }, [edges, nodes]);
@@ -527,21 +521,6 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
           ? [FALLBACK_START_NODE]
           : formattedNodes;
       let edgesToRender = formattedEdges;
-
-      if (typeof window !== 'undefined') {
-        const rawDraft = window.localStorage.getItem(`flow_draft_${flowId}`);
-        if (rawDraft) {
-          try {
-            const parsedDraft = JSON.parse(rawDraft) as { nodes?: Node[]; edges?: Edge[] };
-            if (Array.isArray(parsedDraft.nodes) && Array.isArray(parsedDraft.edges)) {
-              nodesToRender = parsedDraft.nodes;
-              edgesToRender = parsedDraft.edges;
-            }
-          } catch (draftError) {
-            console.warn('[FlowBuilder] erro ao restaurar draft local', draftError);
-          }
-        }
-      }
 
       console.log('NODES:', nodesToRender);
       console.log('EDGES:', edgesToRender);
@@ -899,8 +878,12 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
       edges: cleanEdges,
     };
 
-    if (safeFlow.nodes.length < 2 || safeFlow.edges.length < 1) {
-      alert('Fluxo inválido');
+    if (safeFlow.nodes.length < 2) {
+      setFlowValidationError('Flow precisa de pelo menos 2 nodes');
+      return;
+    }
+    if (safeFlow.edges.length < 1) {
+      setFlowValidationError('Flow precisa de pelo menos 1 conexão');
       return;
     }
     if (requireConfirmOverwrite && !confirm('Você está sobrescrevendo o fluxo atual. Deseja continuar?')) {
