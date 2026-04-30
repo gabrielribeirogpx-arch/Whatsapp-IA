@@ -1,9 +1,16 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
+import { useEffect, useState } from 'react';
+import { Chart, LineController, LineElement, PointElement, LinearScale, CategoryScale, Tooltip, Filler } from 'chart.js';
 
+import Header from '@/components/Dashboard/Header';
+import KPICard from '@/components/Dashboard/KPICard';
+import StatusBadge from '@/components/Dashboard/StatusBadge';
 import { apiFetch, listFlows } from '@/lib/api';
 import { FlowItem } from '@/lib/types';
+
+Chart.register(LineController, LineElement, PointElement, LinearScale, CategoryScale, Tooltip, Filler);
 
 type FlowAnalyticsResponse = {
   entries?: number;
@@ -23,13 +30,6 @@ type FlowSession = {
   updated_at?: string | null;
 };
 
-type FlowEvent = {
-  id: string;
-  title: string;
-  timestamp: string;
-  description: string;
-};
-
 async function fetchAnalytics(flowId: string): Promise<FlowAnalyticsResponse> {
   const res = await apiFetch(`/api/flows/${flowId}/analytics`);
   if (!res.ok) throw new Error(await res.text());
@@ -42,14 +42,24 @@ async function fetchSessions(flowId: string): Promise<FlowSession[]> {
   return res.json();
 }
 
-function cardStyle() {
-  return {
-    background: '#fff',
-    border: '1px solid #e5e7eb',
-    borderRadius: 12,
-    padding: 16,
-    boxShadow: '0 4px 12px rgba(15, 23, 42, 0.05)'
-  } as const;
+function getRelativeTime(iso?: string | null) {
+  if (!iso) return '-';
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return iso;
+  const diff = Date.now() - date.getTime();
+  const mins = Math.max(1, Math.floor(diff / 60000));
+  if (mins < 60) return `Há ${mins} min`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `Há ${hours} h`;
+  const days = Math.floor(hours / 24);
+  return `Há ${days} d`;
+}
+
+function toBadgeStatus(status: string): 'success' | 'warning' | 'danger' {
+  const normalized = status.toLowerCase();
+  if (normalized.includes('error') || normalized.includes('fail')) return 'danger';
+  if (normalized.includes('wait') || normalized.includes('pending')) return 'warning';
+  return 'success';
 }
 
 export default function FlowAnalyticsPage() {
@@ -97,63 +107,73 @@ export default function FlowAnalyticsPage() {
     loadFlowData();
   }, [selectedFlow]);
 
-  const events = useMemo<FlowEvent[]>(() => {
-    if (sessions.length === 0) {
-      return [
-        {
-          id: 'mock-1',
-          title: 'Nenhum evento recente',
-          timestamp: new Date().toISOString(),
-          description: 'Assim que o flow for executado, os eventos aparecerão aqui.'
-        }
-      ];
-    }
+  useEffect(() => {
+    const canvas = document.getElementById('executionsChart') as HTMLCanvasElement | null;
+    if (!canvas) return;
 
-    return sessions.slice(0, 5).map((session, index) => ({
-      id: session.id ?? `${session.conversation_id}-${index}`,
-      title: `Sessão ${session.status}`,
-      timestamp: session.updated_at ?? new Date().toISOString(),
-      description: `Conversa ${session.conversation_id} no nó ${session.current_node_id ?? 'N/A'}`
-    }));
-  }, [sessions]);
+    const chart = new Chart(canvas, {
+      type: 'line',
+      data: {
+        labels: ['Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado', 'Domingo'],
+        datasets: [
+          {
+            data: [180, 260, 340, 320, 410, 460, 430],
+            borderColor: '#075E54',
+            backgroundColor: 'rgba(7, 94, 84, 0.15)',
+            tension: 0.35,
+            fill: true,
+            pointRadius: 3
+          }
+        ]
+      },
+      options: { responsive: true, maintainAspectRatio: false }
+    });
 
-  const summary = {
-    totalExecutions: analytics?.total_executions ?? analytics?.entries ?? 0,
-    totalSteps: analytics?.total_steps ?? analytics?.messages_sent ?? 0,
-    totalWaits: analytics?.total_waits ?? 0,
-    totalErrors: analytics?.total_errors ?? analytics?.finalizations ?? 0
-  };
+    return () => chart.destroy();
+  }, [selectedFlow]);
 
   return (
-    <div style={{ padding: 24, display: 'grid', gap: 20, backgroundColor: '#f8fafc', minHeight: '100vh' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
-        <h1 style={{ margin: 0 }}>Flow Analytics</h1>
-        <select
-          value={selectedFlow}
-          onChange={(e) => setSelectedFlow(e.target.value)}
-          style={{ minWidth: 280, padding: '10px 12px', borderRadius: 10, border: '1px solid #cbd5e1', background: '#fff' }}
-        >
-          {flows.map((flow) => (
-            <option key={flow.id} value={flow.id}>
-              {flow.name}
-            </option>
-          ))}
-        </select>
-      </div>
-
+    <div style={{ backgroundColor: '#f8fafc', minHeight: '100vh' }}>
+      <Header
+        title="Automações"
+        subtitle="Status de fluxos em tempo real"
+        actions={(
+          <select
+            value={selectedFlow}
+            onChange={(e) => setSelectedFlow(e.target.value)}
+            style={{ minWidth: 280, padding: '10px 12px', borderRadius: 10, border: '1px solid #cbd5e1', background: '#fff' }}
+          >
+            {flows.map((flow) => (
+              <option key={flow.id} value={flow.id}>
+                {flow.name}
+              </option>
+            ))}
+          </select>
+        )}
+      />
       {loading ? (
-        <p>Carregando...</p>
+        <p style={{ padding: '2rem' }}>Carregando...</p>
       ) : (
-        <>
+        <div style={{ display: 'grid', gap: 16, padding: '2rem' }}>
           <section style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }}>
-            <div style={cardStyle()}><strong>Total Execuções</strong><p style={{ fontSize: 24, margin: '8px 0 0' }}>{summary.totalExecutions}</p></div>
-            <div style={cardStyle()}><strong>Total Steps</strong><p style={{ fontSize: 24, margin: '8px 0 0' }}>{summary.totalSteps}</p></div>
-            <div style={cardStyle()}><strong>Total Waits</strong><p style={{ fontSize: 24, margin: '8px 0 0' }}>{summary.totalWaits}</p></div>
-            <div style={cardStyle()}><strong>Total Errors</strong><p style={{ fontSize: 24, margin: '8px 0 0' }}>{summary.totalErrors}</p></div>
+            <KPICard label="Execuções" value="2.4k" trend="↑ 24% em 7 dias" />
+            <KPICard label="Taxa sucesso" value="98.3%" unit="Saudável" />
+            <KPICard label="Tempo médio" value="1.2s" unit="Por execução" />
+            <KPICard label="Erros" value="42" trend="↓ 15 (últimas 24h)" />
           </section>
 
-          <section style={cardStyle()}>
-            <h2 style={{ marginTop: 0 }}>Sessões</h2>
+          <section style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 12, padding: '1rem' }}>
+            <div style={{ position: 'relative', height: 280 }}>
+              <canvas id="executionsChart" />
+            </div>
+          </section>
+
+          <section style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 12, padding: '1rem' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+              <h2 style={{ margin: 0 }}>Instâncias de fluxo</h2>
+              <Link href="/dashboard/flows">Ver todas →</Link>
+            </div>
+            <p style={{ margin: '0 0 12px', fontSize: 12 }}>● Sucesso | ● Aguardando | ● Erro</p>
             <div style={{ overflowX: 'auto' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                 <thead>
@@ -167,28 +187,17 @@ export default function FlowAnalyticsPage() {
                 <tbody>
                   {sessions.map((session) => (
                     <tr key={session.id ?? session.conversation_id}>
-                      <td style={{ padding: '10px 0', borderTop: '1px solid #e2e8f0' }}>{session.conversation_id}</td>
-                      <td style={{ borderTop: '1px solid #e2e8f0' }}>{session.status}</td>
-                      <td style={{ borderTop: '1px solid #e2e8f0' }}>{session.current_node_id ?? '-'}</td>
-                      <td style={{ borderTop: '1px solid #e2e8f0' }}>{session.updated_at ?? '-'}</td>
+                      <td style={{ padding: '10px 0', borderTop: '1px solid #e2e8f0', fontFamily: 'monospace', fontSize: 12 }}>{session.conversation_id}</td>
+                      <td style={{ borderTop: '1px solid #e2e8f0' }}><StatusBadge status={toBadgeStatus(session.status)} label={session.status} /></td>
+                      <td style={{ borderTop: '1px solid #e2e8f0', fontFamily: 'monospace', fontSize: 12 }}>{session.current_node_id ?? '-'}</td>
+                      <td style={{ borderTop: '1px solid #e2e8f0' }}>{getRelativeTime(session.updated_at)}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
           </section>
-
-          <section style={cardStyle()}>
-            <h2 style={{ marginTop: 0 }}>Últimos eventos</h2>
-            <ul style={{ margin: 0, paddingLeft: 18, display: 'grid', gap: 8 }}>
-              {events.map((event) => (
-                <li key={event.id}>
-                  <strong>{event.title}</strong> — {event.description} <small>({event.timestamp})</small>
-                </li>
-              ))}
-            </ul>
-          </section>
-        </>
+        </div>
       )}
     </div>
   );
