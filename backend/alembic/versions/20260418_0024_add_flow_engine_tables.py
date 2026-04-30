@@ -7,7 +7,7 @@ Create Date: 2026-04-18 14:00:00
 
 from alembic import op
 import sqlalchemy as sa
-from sqlalchemy import inspect
+from sqlalchemy import inspect, text
 from sqlalchemy.dialects import postgresql
 
 
@@ -119,7 +119,7 @@ def upgrade() -> None:
 
     # default flow seed for existing tenants
     op.execute(
-        sa.text(
+        text(
             """
             INSERT INTO flows (id, tenant_id, name, created_at)
             SELECT gen_random_uuid(), t.id, :flow_name, NOW()
@@ -135,7 +135,7 @@ def upgrade() -> None:
     )
     for step_data in DEFAULT_FLOW_STEPS:
         op.execute(
-            sa.text(
+            text(
                 """
                 INSERT INTO flow_steps (id, flow_id, step_key, message, expected_inputs, next_step_map, created_at)
                 SELECT gen_random_uuid(), f.id, :step_key, :message, :expected_inputs, :next_step_map::jsonb, NOW()
