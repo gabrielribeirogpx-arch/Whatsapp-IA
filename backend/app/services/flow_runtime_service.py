@@ -107,7 +107,32 @@ class FlowRuntimeService:
 
     def execute_with_session(self, flow_id: str, conversation_id: str, input_text: str) -> dict[str, Any]:
         session_service = FlowSessionService(self.db)
-        session = session_service.get_or_create_session(flow_id, conversation_id)
+        try:
+            session = session_service.get_or_create_session(flow_id, conversation_id)
+        except Exception:
+            flow_data = get_flow_for_builder(self.db, tenant_id=None, flow_id=flow_id)
+            nodes = flow_data.get("nodes", []) if isinstance(flow_data, dict) else []
+            edges = flow_data.get("edges", []) if isinstance(flow_data, dict) else []
+            nodes = nodes if isinstance(nodes, list) else []
+            edges = edges if isinstance(edges, list) else []
+            start_node = next(
+                (
+                    n
+                    for n in nodes
+                    if isinstance(n, dict)
+                    and (
+                        n.get("type") == "start"
+                        or bool((n.get("data") if isinstance(n.get("data"), dict) else {}).get("isStart"))
+                    )
+                ),
+                nodes[0] if nodes and isinstance(nodes[0], dict) else None,
+            )
+            return {
+                "responses": [],
+                "session_node": str(start_node.get("id")) if isinstance(start_node, dict) else None,
+                "status": "fallback_start",
+                "steps": 0,
+            }
 
         flow_data = get_flow_for_builder(self.db, tenant_id=None, flow_id=flow_id)
 
