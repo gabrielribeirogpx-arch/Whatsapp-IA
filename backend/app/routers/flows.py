@@ -195,7 +195,7 @@ def _log_flow_version_blocked(flow_id: uuid.UUID, nodes_count: int) -> None:
 
 def _validate_flow_payload(nodes: list[dict[str, Any]], edges: list[dict[str, Any]]) -> None:
     if len(nodes) < 2 or len(edges) < 1:
-        raise HTTPException(status_code=400, detail="Fluxo inválido: estrutura incompleta")
+        raise HTTPException(status_code=400, detail="Fluxo inválido: mínimo de 2 nós e 1 conexão")
 
     start_nodes = [
         node
@@ -207,6 +207,7 @@ def _validate_flow_payload(nodes: list[dict[str, Any]], edges: list[dict[str, An
 
     node_ids = {str(node.get("id")) for node in nodes if node.get("id")}
     outgoing_count: dict[str, int] = {node_id: 0 for node_id in node_ids}
+    incoming_count: dict[str, int] = {node_id: 0 for node_id in node_ids}
     outgoing_by_handle: dict[str, set[str]] = {node_id: set() for node_id in node_ids}
 
     for edge in edges:
@@ -215,9 +216,21 @@ def _validate_flow_payload(nodes: list[dict[str, Any]], edges: list[dict[str, An
         if source not in node_ids or target not in node_ids:
             raise HTTPException(status_code=400, detail="Edge inválida: origem/destino inexistente")
         outgoing_count[source] = outgoing_count.get(source, 0) + 1
+        incoming_count[target] = incoming_count.get(target, 0) + 1
         source_handle = str(edge.get("sourceHandle") or (edge.get("data") or {}).get("sourceHandle") or "").lower()
         if source_handle:
             outgoing_by_handle[source].add(source_handle)
+
+    unconnected_nodes = [
+        node_id
+        for node_id in node_ids
+        if outgoing_count.get(node_id, 0) == 0 and incoming_count.get(node_id, 0) == 0
+    ]
+    if unconnected_nodes:
+        raise HTTPException(
+            status_code=400,
+            detail="Fluxo inválido: existe nó sem conexão",
+        )
 
     for node in nodes:
         node_id = str(node.get("id") or "")
