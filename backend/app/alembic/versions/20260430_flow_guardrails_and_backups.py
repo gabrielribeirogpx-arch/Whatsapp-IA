@@ -22,16 +22,9 @@ def upgrade() -> None:
     op.execute(
         "CREATE INDEX IF NOT EXISTS idx_flow_sessions_user ON flow_sessions(user_identifier)"
     )
-    op.add_column("flow_versions", sa.Column("tenant_id", postgresql.UUID(as_uuid=True), nullable=True))
-    op.add_column("flow_versions", sa.Column("snapshot", postgresql.JSONB(astext_type=sa.Text()), nullable=True))
-    op.create_index("ix_flow_versions_tenant_id", "flow_versions", ["tenant_id"], unique=False)
-    op.create_foreign_key(
-        "fk_flow_versions_tenant_id_tenants",
-        "flow_versions",
-        "tenants",
-        ["tenant_id"],
-        ["id"],
-    )
+    op.execute("ALTER TABLE flow_versions ADD COLUMN IF NOT EXISTS tenant_id UUID")
+    op.execute("ALTER TABLE flow_versions ADD COLUMN IF NOT EXISTS snapshot JSONB")
+    op.execute("CREATE INDEX IF NOT EXISTS ix_flow_versions_tenant_id ON flow_versions(tenant_id)")
 
 
 def downgrade() -> None:
