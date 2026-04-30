@@ -299,6 +299,8 @@ def create_flow(db: Session, tenant_id, data: dict[str, Any]) -> Flow:
         stop_words=data.get("stop_words"),
         priority=data.get("priority", 0),
         version=data.get("version", 1),
+        nodes=data.get("nodes", []),
+        edges=data.get("edges", []),
     )
     db.add(flow)
     db.flush()
@@ -343,6 +345,8 @@ def update_flow(db: Session, flow_id, tenant_id, data: dict[str, Any]) -> Flow |
         flow.priority = data["priority"]
     if "version" in data:
         flow.version = data["version"]
+    flow.nodes = data.get("nodes", [])
+    flow.edges = data.get("edges", [])
 
     db.add(flow)
     db.flush()
