@@ -13,10 +13,10 @@ class FlowEngine:
             if not isinstance(node, dict):
                 continue
             data = node.get("data") if isinstance(node.get("data"), dict) else {}
-            if node.get("type") == "start" or bool(data.get("isStart")):
+            if data.get("isStart") is True:
                 return node
 
-        return nodes[0] if isinstance(nodes[0], dict) else None
+        return None
 
     def get_next_node(self, flow: dict[str, Any], current_node_id: str) -> dict[str, Any] | None:
         nodes = flow.get("nodes", []) if isinstance(flow, dict) else []
@@ -101,11 +101,9 @@ def get_start_node(flow):
         return None
 
     for node in flow["nodes"]:
-        if isinstance(node, dict) and node.get("type") == "start":
+        if isinstance(node, dict) and node.get("data", {}).get("isStart") is True:
+            print("[START NODE DETECTADO]:", node["id"])
             return node
-
-    if len(flow["nodes"]) > 0:
-        return flow["nodes"][0]
 
     return None
 
@@ -130,14 +128,6 @@ def process_node(node, session):
     data = node.get("data", {}) if isinstance(node.get("data"), dict) else {}
 
     if node_type == "message":
-        text = data.get("text", "")
-        return {
-            "messages": [
-                {"type": "text", "content": text},
-            ]
-        }
-
-    if node_type == "start":
         text = data.get("text", "")
         return {
             "messages": [
@@ -198,10 +188,10 @@ def run_flow_from_message(user_id: str, text: str):
         if not session.current_node_id:
             start_node = get_start_node(flow_data)
             if not start_node:
-                print("[FLOW ERROR] Nenhum node encontrado")
+                print("[ERRO] nenhum start node encontrado")
                 return {
                     "messages": [
-                        {"type": "text", "content": "Erro interno: fluxo vazio"},
+                        {"type": "text", "content": "Erro: fluxo sem início"},
                     ]
                 }
             session.current_node_id = start_node["id"]
