@@ -81,6 +81,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "https://whatsapp-ia-nine.vercel.app",
+        "https://*.vercel.app",
         "http://localhost:3000",
     ],
     allow_credentials=True,
@@ -104,7 +105,6 @@ app.add_middleware(TenantContextMiddleware)
 # ✅ ROUTES
 app.include_router(auth.router, prefix="/api")
 app.include_router(conversations.router, prefix="/api")
-app.include_router(conversations.router, prefix="/api/api")
 app.include_router(products.router, prefix="/api")
 app.include_router(knowledge.router, prefix="/api")
 app.include_router(leads.router, prefix="/api")
