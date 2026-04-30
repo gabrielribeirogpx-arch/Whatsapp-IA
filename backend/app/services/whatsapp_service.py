@@ -205,3 +205,46 @@ def send_whatsapp_message_simple(to: str, text: str):
     print("WHATSAPP RESPONSE:", response.text)
 
     return response.json()
+
+
+def send_whatsapp_buttons(phone: str, node: dict[str, Any]):
+    buttons = node.get("data", {}).get("buttons", [])
+
+    interactive_buttons = [
+        {
+            "type": "reply",
+            "reply": {
+                "id": btn["label"].lower(),
+                "title": btn["label"][:20]
+            }
+        }
+        for btn in buttons
+    ]
+
+    payload = {
+        "messaging_product": "whatsapp",
+        "to": phone,
+        "type": "interactive",
+        "interactive": {
+            "type": "button",
+            "body": {
+                "text": node.get("data", {}).get("content")
+            },
+            "action": {
+                "buttons": interactive_buttons
+            }
+        }
+    }
+
+    response = requests.post(
+        f"https://graph.facebook.com/v19.0/{WHATSAPP_PHONE_NUMBER_ID}/messages",
+        headers={
+            "Authorization": f"Bearer {WHATSAPP_TOKEN}",
+            "Content-Type": "application/json"
+        },
+        json=payload
+    )
+
+    print("BUTTON RESPONSE:", response.text)
+
+    return response.json()

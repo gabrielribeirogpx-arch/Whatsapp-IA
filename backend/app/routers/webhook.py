@@ -19,7 +19,7 @@ from app.services.realtime_service import sse_broker
 from app.services.flow_service import resolve_flow_for_message
 from app.services.flow_engine_service import get_flow_graph
 from app.models.flow import Flow
-from app.services.whatsapp_service import send_whatsapp_message_simple
+from app.services.whatsapp_service import send_whatsapp_buttons, send_whatsapp_message_simple
 from app.models import Tenant
 from app.utils.phone import normalize_phone
 
@@ -286,7 +286,12 @@ async def webhook(request: Request, db: Session = Depends(get_db)):
     if not message:
         message = "Fluxo iniciado"
 
-    send_whatsapp_message_simple(phone, message)
+    print("[NODE TYPE]:", start_node["type"])
+
+    if start_node["type"] == "choice":
+        send_whatsapp_buttons(phone, start_node)
+    else:
+        send_whatsapp_message_simple(phone, message)
     return {"status": "message processed"}
 
 
