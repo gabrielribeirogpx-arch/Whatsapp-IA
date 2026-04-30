@@ -21,7 +21,7 @@ from app.services.flow_engine_service import (
     save_flow_graph,
     validate_flow_structure,
 )
-from app.services.flow_service import create_flow, delete_flow, duplicate_flow, get_flow, get_flows, update_flow
+from app.services.flow_service import FlowService, create_flow, delete_flow, duplicate_flow, get_flow, get_flows, update_flow
 
 print("[FLOW API] carregada")
 
@@ -692,27 +692,14 @@ def create_tenant_flow(
             "edges_count": len(payload_data.get("edges") or []),
         }
     )
-    flow = create_flow(db=db, tenant_id=tenant_uuid, data=payload_data)
+    flow_service = FlowService(db)
+    flow = flow_service.create_flow(tenant_id=tenant_uuid, data=payload_data)
     initial_nodes = payload_data.get("nodes", [])
     if not initial_nodes:
         initial_nodes = [_default_start_node()]
     initial_nodes = _ensure_start_node(initial_nodes)
     initial_edges = payload_data.get("edges", [])
-    first_version = FlowVersion(**_flow_version_payload(
-        db,
-        flow_id=flow.id,
-        tenant_id=tenant_uuid,
-        version=1,
-        snapshot={"nodes": initial_nodes, "edges": initial_edges},
-        nodes=initial_nodes,
-        edges=initial_edges,
-        is_active=False,
-        is_published=False,
-    ))
-    db.add(first_version)
-    db.flush()
-    flow.current_version_id = first_version.id
-    flow.version = 1
+    first_version = flow_service.create_version(flow=flow, tenant_id=tenant_uuid, nodes=initial_nodes, edges=initial_edges)
     db.commit()
     db.refresh(flow)
     return {
@@ -756,10 +743,10 @@ def get_tenant_flow_by_id(
         print("[FLOW GET ERROR]", {"tenant_id": str(tenant_uuid), "flow_id": flow_id, "reason": "flow_not_found"})
         raise HTTPException(status_code=404, detail="Flow não encontrado")
 
-    active_version = flow.current_version
-    nodes = active_version.nodes if active_version and isinstance(active_version.nodes, list) else (flow.nodes_json or flow.nodes or [])
-    edges = active_version.edges if active_version and isinstance(active_version.edges, list) else (flow.edges_json or flow.edges or [])
-    version = active_version.version if active_version else (flow.version or 1)
+    resolved = FlowService(db).get_flow_with_version(flow)
+    nodes = resolved["nodes"]
+    edges = resolved["edges"]
+    version = resolved["version"]
     print("[FLOW LOAD]", {"flow_id": str(flow.id), "version": version, "nodes_count": len(nodes)})
 
     return {
@@ -881,19 +868,8 @@ async def update_tenant_flow(
                 )
             raise HTTPException(status_code=400, detail=error or "Flow inválido")
 
-        nova = FlowVersion(**_flow_version_payload(
-            db,
-            flow_id=flow.id,
-            tenant_id=tenant_uuid,
-            snapshot={"nodes": nodes_json, "edges": edges_json},
-            version=((flow.version or 0) + 1),
-            nodes=nodes_json,
-            edges=edges_json,
-            is_active=False,
-            is_published=False,
-        ))
-        db.add(nova)
-        db.flush()
+        flow_service = FlowService(db)
+        nova = flow_service.create_version(flow=flow, tenant_id=tenant_uuid, nodes=nodes_json, edges=edges_json)
 
         db.query(FlowVersion).filter(
             FlowVersion.flow_id == flow.id,
@@ -903,12 +879,6 @@ async def update_tenant_flow(
             synchronize_session=False,
         )
 
-        flow.nodes_json = nodes_json
-        flow.edges_json = edges_json
-        flow.nodes = nodes_json
-        flow.edges = edges_json
-        flow.current_version_id = nova.id
-        flow.version = nova.version
         invalidate_flow_runtime_cache(flow.id)
         if flow.is_active:
             print("[FLOW ACTIVE]:", flow.id)
@@ -916,7 +886,8 @@ async def update_tenant_flow(
 
         print("[FLOW SAVE]", {"tenant_id": str(tenant_uuid), "nodes_count": len(nodes_json), "edges_count": len(edges_json), "version": flow.version})
         db.refresh(flow)
-        return {"id": str(flow.id), "name": flow.name, "version": flow.version, "nodes": flow.nodes_json or [], "edges": flow.edges_json or []}
+        resolved = flow_service.get_flow_with_version(flow)
+        return {"id": str(flow.id), "name": flow.name, "version": flow.version, "nodes": resolved["nodes"], "edges": resolved["edges"]}
 
     except HTTPException:
         raise
@@ -1194,11 +1165,7 @@ def publish_tenant_flow_version(
     if not valid:
         raise HTTPException(status_code=400, detail=error or "Flow inválido")
 
-    db.query(FlowVersion).filter(FlowVersion.flow_id == flow.id).update({FlowVersion.is_published: False}, synchronize_session=False)
-    db.query(FlowVersion).filter(FlowVersion.id == flow_version.id).update({FlowVersion.is_published: True}, synchronize_session=False)
-
-    flow.published_version_id = flow_version.id
-    db.add(flow)
+    FlowService(db).publish_version(flow=flow, flow_version=flow_version)
     invalidate_flow_runtime_cache(flow.id)
     db.commit()
     db.refresh(flow)
