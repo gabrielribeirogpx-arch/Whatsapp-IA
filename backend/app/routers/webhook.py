@@ -237,6 +237,17 @@ async def verify(
 
 @router.post("/webhook")
 async def webhook(request: Request, db: Session = Depends(get_db)):
+    tenant_id = request.headers.get("X-Tenant-ID")
+
+    if not tenant_id:
+        tenant_id = request.query_params.get("tenant")
+
+    if not tenant_id:
+        print("[ERRO] webhook sem tenant")
+        return {"status": "ignored"}
+
+    print("[TENANT OK]:", tenant_id)
+
     try:
         return await _process_meta_webhook(request=request, db=db)
     except Exception as e:
