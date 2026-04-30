@@ -50,7 +50,7 @@ class RestoreFlowVersionPayload(BaseModel):
 
 
 class PublishFlowPayload(BaseModel):
-    version_id: uuid.UUID
+    version_id: uuid.UUID | None = None
 
 
 class RenameFlowPayload(BaseModel):
@@ -406,16 +406,13 @@ async def update_flow_route(
                 nodes=flow.current_version.nodes or [],
                 edges=flow.current_version.edges or [],
                 is_active=False,
+            is_published=False,
             ))
             db.add(backup_version)
             db.flush()
             print("[FLOW VERSION CREATED]", {"flow_id": str(flow.id), "version_id": str(backup_version.id), "type": "snapshot"})
             next_version += 1
 
-        db.query(FlowVersion).filter(
-            FlowVersion.flow_id == flow.id,
-            FlowVersion.is_active.is_(True),
-        ).update({"is_active": False}, synchronize_session=False)
 
         print("ANTES DE CRIAR VERSION")
         print("FLOW:", flow.id)
@@ -429,7 +426,8 @@ async def update_flow_route(
             snapshot={"nodes": nodes, "edges": edges},
             nodes=nodes,
             edges=edges,
-            is_active=True,
+            is_active=False,
+            is_published=False,
         ))
 
         db.add(new_version)
@@ -892,7 +890,8 @@ async def update_tenant_flow(
             version=(flow.version or 0) + 1,
             nodes=nodes_json,
             edges=edges_json,
-            is_active=True,
+            is_active=False,
+            is_published=False,
         ))
         db.add(nova)
         db.flush()
@@ -901,7 +900,7 @@ async def update_tenant_flow(
             FlowVersion.flow_id == flow.id,
             FlowVersion.id != nova.id,
         ).update(
-            {"is_active": False},
+            {"is_active": False, "is_published": False},
             synchronize_session=False,
         )
 
@@ -1064,9 +1063,14 @@ def restore_tenant_flow_version(
     if not flow:
         raise HTTPException(status_code=404, detail="Flow not found")
 
-    flow_version = db.execute(
-        _flow_version_select(db).where(FlowVersion.id == payload.version_id, FlowVersion.flow_id == flow.id)
-    ).scalars().first()
+    if payload.version_id:
+        flow_version = db.execute(
+            _flow_version_select(db).where(FlowVersion.id == payload.version_id, FlowVersion.flow_id == flow.id)
+        ).scalars().first()
+    else:
+        flow_version = db.execute(
+            _flow_version_select(db).where(FlowVersion.flow_id == flow.id).order_by(FlowVersion.version.desc()).limit(1)
+        ).scalars().first()
     if not flow_version:
         raise HTTPException(status_code=404, detail="Flow version not found")
 
@@ -1161,9 +1165,14 @@ def publish_tenant_flow_version(
     if not flow:
         raise HTTPException(status_code=404, detail="Flow not found")
 
-    flow_version = db.execute(
-        _flow_version_select(db).where(FlowVersion.id == payload.version_id, FlowVersion.flow_id == flow.id)
-    ).scalars().first()
+    if payload.version_id:
+        flow_version = db.execute(
+            _flow_version_select(db).where(FlowVersion.id == payload.version_id, FlowVersion.flow_id == flow.id)
+        ).scalars().first()
+    else:
+        flow_version = db.execute(
+            _flow_version_select(db).where(FlowVersion.flow_id == flow.id).order_by(FlowVersion.version.desc()).limit(1)
+        ).scalars().first()
     if not flow_version:
         raise HTTPException(status_code=404, detail="Flow version not found")
 
@@ -1172,6 +1181,9 @@ def publish_tenant_flow_version(
     valid, error = validate_flow_structure(nodes=nodes, edges=edges)
     if not valid:
         raise HTTPException(status_code=400, detail=error or "Flow inválido")
+
+    db.query(FlowVersion).filter(FlowVersion.flow_id == flow.id).update({FlowVersion.is_published: False}, synchronize_session=False)
+    db.query(FlowVersion).filter(FlowVersion.id == flow_version.id).update({FlowVersion.is_published: True}, synchronize_session=False)
 
     flow.published_version_id = flow_version.id
     db.add(flow)

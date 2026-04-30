@@ -8,7 +8,7 @@ from sqlalchemy import desc, select
 from sqlalchemy.orm import Session, load_only
 
 from app.database import get_db
-from app.models import Conversation, Message
+from app.models import Conversation, Message, FlowExecution, FlowVersion
 from app.schemas.chat import MessageOut
 from app.services.contact_sync_service import ensure_conversation_contact_link, upsert_contact_for_phone
 from app.services.conversation_service import get_or_create_conversation
@@ -283,70 +283,81 @@ async def webhook(request: Request, db: Session = Depends(get_db)):
     intent = classify_intent(user_input)
     print("[INTENT]:", intent)
 
-    flow_row = (
-        db.query(Flow)
-        .filter(Flow.tenant_id == UUID(tenant_id), Flow.is_active.is_(True))
-        .order_by(Flow.created_at.asc(), Flow.id.asc())
-        .first()
-    )
+    try:
+        flow_row = (
+            db.query(Flow)
+            .filter(Flow.tenant_id == UUID(tenant_id), Flow.is_active.is_(True))
+            .order_by(Flow.created_at.asc(), Flow.id.asc())
+            .first()
+        )
+        if not flow_row:
+            return {"status": "ignored"}
 
-    if not flow_row:
-        print("[ERRO] nenhum flow ativo encontrado")
-        return {"status": "ignored"}
+        published_version = (
+            db.query(FlowVersion)
+            .filter(FlowVersion.flow_id == flow_row.id, FlowVersion.is_published.is_(True))
+            .order_by(FlowVersion.version.desc())
+            .first()
+        )
+        if not published_version:
+            return {"status": "ignored"}
 
-    flow = get_flow_graph(db=db, tenant_id=UUID(tenant_id), flow_id=str(flow_row.id))
+        flow = {"nodes": published_version.nodes or [], "edges": published_version.edges or []}
+        start_node = next((n for n in flow["nodes"] if n.get("data", {}).get("isStart")), None)
+        if not start_node:
+            return {"status": "ignored"}
 
-    start_node = next(
-        (n for n in flow["nodes"] if n.get("data", {}).get("isStart")),
-        None
-    )
+        execution = (
+            db.query(FlowExecution)
+            .filter(FlowExecution.flow_version_id == published_version.id, FlowExecution.user_phone == phone)
+            .first()
+        )
+        if not execution:
+            execution = FlowExecution(flow_version_id=published_version.id, user_phone=phone, current_node_id=str(start_node.get("id")), state={})
+            db.add(execution)
+            db.commit()
+            db.refresh(execution)
 
-    if not start_node:
-        print("[ERRO] flow sem start node")
-        return {"status": "ignored"}
+        current_node = get_node_by_id(flow, execution.current_node_id)
+        if not current_node:
+            current_node = start_node
 
-    session_service = FlowSessionService(db)
-    session = session_service.get_or_create_session(str(flow_row.id), phone)
-    if not session.current_node_id:
-        session.current_node_id = start_node["id"]
-        db.add(session)
+        def process_node(node: dict, user_input_value: str) -> str | None:
+            node_type = str(node.get("type") or "").lower()
+            if node_type == "message":
+                edge = next((e for e in flow["edges"] if e.get("source") == node.get("id")), None)
+                return edge.get("target") if edge else None
+            if node_type == "condition":
+                keywords = (node.get("data") or {}).get("keywords") or []
+                match = any(str(k).lower() in user_input_value.lower() for k in keywords)
+                desired = "true" if match else "false"
+                edge = next((e for e in flow["edges"] if e.get("source") == node.get("id") and str(e.get("sourceHandle") or "").lower() == desired), None)
+                return edge.get("target") if edge else None
+            edge = next((e for e in flow["edges"] if e.get("source") == node.get("id")), None)
+            return edge.get("target") if edge else None
+
+        print("[FLOW EXECUTION]", execution.id)
+        print("[FLOW VERSION]", published_version.version)
+        print("[USER INPUT]", user_input)
+        print("[CURRENT NODE]", current_node.get("id"))
+
+        next_node_id = process_node(current_node, user_input)
+        print("[NEXT NODE]", next_node_id)
+
+        execution.current_node_id = next_node_id
+        db.add(execution)
         db.commit()
-        db.refresh(session)
 
-    current_node = get_node_by_id(flow, session.current_node_id)
-    if not current_node:
-        return {"status": "ignored"}
-
-    edges = flow["edges"]
-    normalized_input = normalize_input(user_input)
-    next_edge = next(
-        (
-            e for e in edges
-            if e["source"] == current_node["id"]
-            and normalized_input in e.get("label", "").lower()
-        ),
-        None
-    )
-
-    if next_edge:
-        next_node_id = next_edge["target"]
-        session.current_node_id = next_node_id
-        db.add(session)
-        db.commit()
-        db.refresh(session)
-        next_node = get_node_by_id(flow, next_node_id)
-        print("[FLOW MOVE]:", current_node["id"], "->", next_node_id)
-        if next_node and next_node["type"] == "choice":
-            send_whatsapp_buttons(phone, next_node)
-        elif next_node:
-            node_message = next_node["data"].get("content") or next_node["data"].get("text")
-            send_whatsapp_message_simple(phone, node_message)
-    else:
-        print("[FLOW] nenhuma rota encontrada")
-        fallback_response = route_intent(intent)
-        send_whatsapp_message_simple(phone, fallback_response)
-
-    return {"status": "message processed"}
+        next_node = get_node_by_id(flow, next_node_id) if next_node_id else None
+        if next_node:
+            node_message = (next_node.get("data") or {}).get("content") or (next_node.get("data") or {}).get("text")
+            if node_message:
+                send_whatsapp_message_simple(phone, node_message)
+        return {"status": "message processed"}
+    except Exception:
+        db.rollback()
+        send_whatsapp_message_simple(phone, "⚠️ O sistema está inicializando. Tente novamente em instantes.")
+        return {"status": "fallback"}
 
 
 @router.post("/webhook/meta")
