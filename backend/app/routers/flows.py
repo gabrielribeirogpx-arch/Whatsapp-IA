@@ -35,7 +35,7 @@ class FlowBuilderPayload(BaseModel):
 
 
 class FlowCreatePayload(BaseModel):
-    name: str
+    name: str = "Novo fluxo"
     description: str | None = None
     is_active: bool = True
     trigger_type: str = "default"
@@ -270,20 +270,27 @@ def list_flows(
 
 @router.post("/")
 def create_flow_route(
-    payload: FlowCreatePayload,
+    payload: FlowCreatePayload | None = None,
     x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
     db: Session = Depends(get_db),
 ):
     tenant = _resolve_request_tenant(db=db, tenant_id_header=x_tenant_id)
-    payload_data = payload.model_dump()
+    payload_data = payload.model_dump(exclude_unset=True) if payload else {}
+    incoming_name = payload_data.get("name")
+    normalized_name = incoming_name.strip() if isinstance(incoming_name, str) else ""
+    if not normalized_name:
+        normalized_name = "Novo fluxo"
     flow = create_flow(
         db=db,
         tenant_id=tenant.id,
-        data={key: value for key, value in payload_data.items() if key not in {"nodes", "edges"}},
+        data={
+            **{key: value for key, value in payload_data.items() if key not in {"name", "nodes", "edges"}},
+            "name": normalized_name,
+        },
     )
-    initial_nodes = payload_data.get("nodes", [])
-    initial_edges = payload_data.get("edges", [])
-    validate_flow_payload_or_400(initial_nodes, initial_edges)
+    initial_nodes = payload_data.get("nodes") if isinstance(payload_data.get("nodes"), list) else [_default_start_node()]
+    initial_edges = payload_data.get("edges") if isinstance(payload_data.get("edges"), list) else []
+    initial_nodes = _ensure_start_node(initial_nodes)
 
     save_flow_graph(
         db=db,
@@ -296,9 +303,10 @@ def create_flow_route(
     db.commit()
     db.refresh(flow)
     graph = get_flow_graph(db=db, tenant_id=tenant.id, flow_id=str(flow.id))
+    normalized_definition = _normalize_flow_response(graph)
     return {
         **_serialize_flow(flow),
-        "definition": _normalize_flow_response(graph),
+        "definition": normalized_definition,
     }
 
 
