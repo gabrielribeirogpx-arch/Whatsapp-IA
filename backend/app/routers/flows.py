@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+import logging
 from datetime import datetime
 from typing import Any
 
@@ -23,10 +24,10 @@ from app.services.flow_engine_service import (
 )
 from app.services.flow_service import FlowService, create_flow, delete_flow, duplicate_flow, get_flow, get_flows, update_flow
 
-print("[FLOW API] carregada")
-
 router = APIRouter()
 crud_router = APIRouter(tags=["flows-crud"])
+logger = logging.getLogger(__name__)
+logger.info("[FLOW API] carregada")
 
 class FlowBuilderPayload(BaseModel):
     nodes: list[dict[str, Any]] = Field(default_factory=list)
@@ -82,8 +83,8 @@ def parse_flow_id(flow_id: str):
 
 def _resolve_flow_query(db: Session, flow_id: str):
     flow_id_parsed = parse_flow_id(flow_id)
-    print("[FLOW DEBUG] flow_id recebido:", flow_id)
-    print("[FLOW DEBUG] flow_id parseado:", flow_id_parsed)
+    logger.info("[FLOW DEBUG] flow_id recebido: %s", flow_id)
+    logger.info("[FLOW DEBUG] flow_id parseado: %s", flow_id_parsed)
 
     if isinstance(flow_id_parsed, uuid.UUID):
         return db.query(Flow).filter(Flow.id == flow_id_parsed), flow_id_parsed
@@ -157,7 +158,7 @@ def _validate_nodes_by_type(nodes: list[dict[str, Any]]) -> None:
                 condition = condition.strip()
             if not condition:
                 data["condition"] = "default"
-                print("[CONDITION FIX]: aplicado fallback")
+                logger.info("[CONDITION FIX]: aplicado fallback")
 
 
 def _ensure_start_node(nodes: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -183,24 +184,17 @@ def _ensure_start_node(nodes: list[dict[str, Any]]) -> list[dict[str, Any]]:
         first_node["data"]["metadata"] = {}
     first_node["data"]["metadata"]["isStart"] = True
 
-    print("FORÇANDO START NODE:", first_node.get("id"))
+    logger.info("FORÇANDO START NODE: %s", first_node.get("id"))
     return nodes
 
 
 def _block_invalid_flow_save() -> None:
-    print("FLOW BLOQUEADO - inválido")
+    logger.error("FLOW BLOQUEADO - inválido")
     raise Exception("Flow inválido - não salvar")
 
 
 def _log_flow_version_blocked(flow_id: uuid.UUID, nodes_count: int) -> None:
-    print(
-        {
-            "action": "FLOW_VERSION_BLOCKED",
-            "reason": "invalid_payload",
-            "flow_id": str(flow_id),
-            "nodes": nodes_count,
-        }
-    )
+    logger.error("[FLOW VERSION BLOCKED] flow_id=%s nodes=%s", str(flow_id), nodes_count)
 
 
 def validate_flow_payload_or_400(nodes: list[dict[str, Any]], edges: list[dict[str, Any]]) -> None:
@@ -322,8 +316,8 @@ async def update_flow_route(
         raw_nodes = payload_data.get("nodes", [])
         raw_edges = payload_data.get("edges", [])
 
-        print("PAYLOAD REAL:", payload_data)
-        print("NODES RECEBIDOS:", raw_nodes)
+        logger.info("PAYLOAD REAL: %s", payload_data)
+        logger.info("NODES RECEBIDOS: %s", raw_nodes)
 
         if not isinstance(raw_nodes, list):
             raw_nodes = []
@@ -344,7 +338,7 @@ async def update_flow_route(
         nodes = _ensure_start_node(nodes)
 
         edges = raw_edges or []
-        print("[FLOW SAVE] nodes:", len(nodes))
+        logger.info("[FLOW SAVE] nodes: %s", len(nodes))
         if not nodes or len(nodes) == 0:
             raise Exception("BLOCK SAVE: flow sem nodes")
         start_nodes = [n for n in nodes if n.get("data", {}).get("isStart") is True]
@@ -352,15 +346,14 @@ async def update_flow_route(
             raise Exception("Flow precisa de um node inicial")
         if len(start_nodes) > 1:
             raise Exception("Flow só pode ter um node inicial")
-        print("VALIDANDO FLOW:")
-        print("nodes:", nodes)
+        logger.info("VALIDANDO FLOW: nodes=%s", nodes)
         
         tenant = _resolve_request_tenant(db=db, tenant_id_header=x_tenant_id)
         flow = _get_flow_by_identifier(db=db, flow_id=flow_id, tenant_id=tenant.id)
         if not flow:
             raise HTTPException(status_code=404, detail="Flow não encontrado")
 
-        print("[FLOW DEBUG] Flow encontrado ou criado:", flow.id)
+        logger.info("[FLOW DEBUG] Flow encontrado ou criado: %s", flow.id)
         for key, value in payload_data.items():
             if key in {"name", "description", "is_active", "trigger_type", "trigger_value", "keywords", "stop_words", "priority", "version"}:
                 setattr(flow, key, value)
@@ -374,9 +367,9 @@ async def update_flow_route(
             raise Exception("Flow sem ID")
 
         persisted_nodes = flow.current_version.nodes if flow.current_version and isinstance(flow.current_version.nodes, list) else []
-        print("[FLOW SAVE ATTEMPT]", {"flow_id": str(flow.id), "nodes": len(nodes), "edges": len(edges)})
+        logger.info("[FLOW SAVE ATTEMPT] flow_id=%s nodes=%s edges=%s", str(flow.id), len(nodes), len(edges))
         if len(persisted_nodes) > 1 and len(nodes) <= 1:
-            print("[FLOW SAVE BLOCKED]", {"flow_id": str(flow.id), "reason": "possible_accidental_overwrite"})
+            logger.error("[FLOW SAVE BLOCKED] flow_id=%s reason=possible_accidental_overwrite", str(flow.id))
             return JSONResponse(
                 status_code=400,
                 content={"error": "payload inválido: possível sobrescrita acidental"},
@@ -386,13 +379,7 @@ async def update_flow_route(
         except HTTPException as exc:
             _log_flow_version_blocked(flow.id, len(nodes))
             if persisted_nodes and not raw_nodes and not raw_edges:
-                print(
-                    {
-                        "action": "FLOW_VERSION_BLOCKED",
-                        "reason": "empty_payload_would_overwrite_existing",
-                        "flow_id": str(flow.id),
-                    }
-                )
+                logger.error("[FLOW VERSION BLOCKED] flow_id=%s reason=empty_payload_would_overwrite_existing", str(flow.id))
             return JSONResponse(status_code=400, content={"error": exc.detail})
 
         last_version = db.execute(
@@ -420,13 +407,11 @@ async def update_flow_route(
             ))
             db.add(backup_version)
             db.flush()
-            print("[FLOW VERSION CREATED]", {"flow_id": str(flow.id), "version_id": str(backup_version.id), "type": "snapshot"})
+            logger.info("[FLOW VERSION CREATE] tenant_id=%s flow_id=%s version_id=%s request_id=%s", str(tenant.id), str(flow.id), str(backup_version.id), None)
             next_version += 1
 
 
-        print("ANTES DE CRIAR VERSION")
-        print("FLOW:", flow.id)
-        print("NODES:", len(nodes))
+        logger.info("ANTES DE CRIAR VERSION flow=%s nodes=%s", flow.id, len(nodes))
 
         new_version = FlowVersion(**_flow_version_payload(
             db,
@@ -445,9 +430,9 @@ async def update_flow_route(
         flow.current_version_id = new_version.id
         invalidate_flow_runtime_cache(flow.id)
         if flow.is_active:
-            print("[FLOW ACTIVE]:", flow.id)
+            logger.info("[FLOW ACTIVE]: %s", flow.id)
 
-        print("ANTES DO COMMIT")
+        logger.info("ANTES DO COMMIT")
         db.commit()
         db.refresh(new_version)
 
@@ -460,8 +445,7 @@ async def update_flow_route(
     except Exception as e:
         import traceback
 
-        print("❌ ERRO SALVANDO FLOW:")
-        print(traceback.format_exc())
+        logger.exception("[FLOW SAVE ERROR] exception while saving flow")
 
         db.rollback()
 
@@ -669,19 +653,13 @@ def save_tenant_flow(
 
     normalized_nodes = payload.nodes or []
     normalized_edges = payload.edges or []
-    print("[FLOW SAVE] nodes:", len(normalized_nodes))
+    logger.info("[FLOW SAVE] nodes: %s", len(normalized_nodes))
     validate_flow_payload_or_400(normalized_nodes, normalized_edges)
 
     existing_graph = get_flow_graph(db=db, tenant_id=tenant.id, flow_id=flow_id or "default")
     existing_nodes = existing_graph.get("nodes") if isinstance(existing_graph, dict) else []
     if existing_nodes and not (payload.nodes or []) and not (payload.edges or []):
-        print(
-            {
-                "action": "FLOW_VERSION_BLOCKED",
-                "reason": "empty_payload_would_overwrite_existing",
-                "flow_id": flow_id or "default",
-            }
-        )
+        logger.error("[FLOW VERSION BLOCKED] flow_id=%s reason=empty_payload_would_overwrite_existing", flow_id or "default")
         _block_invalid_flow_save()
 
     save_flow_graph(
@@ -710,13 +688,7 @@ def create_tenant_flow(
     if not isinstance(payload_data.get("nodes"), list) or not isinstance(payload_data.get("edges"), list):
         raise HTTPException(status_code=400, detail="Payload inválido")
     validate_flow_payload_or_400(payload_data.get("nodes") or [], payload_data.get("edges") or [])
-    print(
-        {
-            "tenant": str(tenant_uuid),
-            "nodes_count": len(payload_data.get("nodes") or []),
-            "edges_count": len(payload_data.get("edges") or []),
-        }
-    )
+    logger.info("[FLOW CREATE INPUT] tenant_id=%s nodes_count=%s edges_count=%s", str(tenant_uuid), len(payload_data.get("nodes") or []), len(payload_data.get("edges") or []))
     flow_service = FlowService(db)
     flow = flow_service.create_flow(tenant_id=tenant_uuid, data=payload_data)
     initial_nodes = payload_data.get("nodes", [])
@@ -761,17 +733,17 @@ def get_tenant_flow_by_id(
         Flow.tenant_id == tenant_uuid,
         Flow.deleted_at.is_(None),
     ).first()
-    print("[FLOW GET DEBUG]", {"tenant_id": str(tenant_uuid), "flow_id": flow_id, "query_result": str(flow.id) if flow else None})
+    logger.info("[FLOW GET DEBUG] tenant_id=%s flow_id=%s query_result=%s", str(tenant_uuid), flow_id, str(flow.id) if flow else None)
 
     if not flow:
-        print("[FLOW GET ERROR]", {"tenant_id": str(tenant_uuid), "flow_id": flow_id, "reason": "flow_not_found"})
+        logger.error("[FLOW GET ERROR] tenant_id=%s flow_id=%s reason=flow_not_found", str(tenant_uuid), flow_id)
         raise HTTPException(status_code=404, detail="Flow não encontrado")
 
     resolved = FlowService(db).get_flow_with_version(flow)
     nodes = resolved["nodes"]
     edges = resolved["edges"]
     version = resolved["version"]
-    print("[FLOW LOAD]", {"flow_id": str(flow.id), "version": version, "nodes_count": len(nodes)})
+    logger.info("[FLOW LOAD] flow_id=%s version=%s nodes_count=%s", str(flow.id), version, len(nodes))
 
     return _serialize_flow_version_response(
         flow=flow,
@@ -794,7 +766,7 @@ def get_tenant_flow_analytics(
         raise HTTPException(status_code=404, detail="Flow not found")
 
     analytics = get_flow_analytics(db=db, tenant_id=tenant_uuid, flow_id=flow_id)
-    print(f"[FLOW ANALYTICS] flow_id={flow_id} tenant_id={tenant_uuid} analytics={analytics}")
+    logger.info("[FLOW ANALYTICS] flow_id=%s tenant_id=%s analytics=%s", flow_id, tenant_uuid, analytics)
     return analytics
 
 
@@ -812,9 +784,9 @@ async def update_tenant_flow(
         payload_data = payload if isinstance(payload, dict) else {}
         if not isinstance(payload_data.get("nodes"), list) or not isinstance(payload_data.get("edges"), list):
             raise HTTPException(status_code=400, detail="Payload inválido")
-        print("[FLOW SAVE]", {"tenant": str(tenant_uuid), "nodes_count": len(payload_data.get("nodes") or []), "edges_count": len(payload_data.get("edges") or [])})
+        logger.info("[FLOW SAVE] tenant_id=%s nodes_count=%s edges_count=%s", str(tenant_uuid), len(payload_data.get("nodes") or []), len(payload_data.get("edges") or []))
         payload_model = FlowUpdate(**payload_data)
-        print("FLOW RECEBIDO:", payload_model.model_dump())
+        logger.info("FLOW RECEBIDO: %s", payload_model.model_dump())
         flow_update_fields = {
             "name",
             "description",
@@ -861,11 +833,8 @@ async def update_tenant_flow(
             for edge in edges
         ]
         nodes_json = nodes
-        print("[FLOW SAVE OK]")
-        print("nodes:", len(nodes_json))
-        print("edges:", len(edges_json))
-        print("VALIDANDO FLOW:")
-        print("nodes:", nodes)
+        logger.info("[FLOW SAVE OK] nodes=%s edges=%s", len(nodes_json), len(edges_json))
+        logger.info("VALIDANDO FLOW: nodes=%s", nodes)
         
         persisted_nodes = flow.current_version.nodes if flow.current_version and isinstance(flow.current_version.nodes, list) else []
         if len(persisted_nodes) > 2 and len(nodes) <= 1:
@@ -880,13 +849,7 @@ async def update_tenant_flow(
             incoming_nodes = payload_model.nodes or []
             incoming_edges = payload_model.edges or []
             if persisted_nodes and not incoming_nodes and not incoming_edges:
-                print(
-                    {
-                        "action": "FLOW_VERSION_BLOCKED",
-                        "reason": "empty_payload_would_overwrite_existing",
-                        "flow_id": str(flow.id),
-                    }
-                )
+                logger.error("[FLOW VERSION BLOCKED] flow_id=%s reason=empty_payload_would_overwrite_existing", str(flow.id))
             raise
 
         flow_service = FlowService(db)
@@ -903,10 +866,10 @@ async def update_tenant_flow(
 
         invalidate_flow_runtime_cache(flow.id)
         if flow.is_active:
-            print("[FLOW ACTIVE]:", flow.id)
+            logger.info("[FLOW ACTIVE]: %s", flow.id)
         db.commit()
 
-        print("[FLOW SAVE]", {"tenant_id": str(tenant_uuid), "nodes_count": len(nodes_json), "edges_count": len(edges_json), "version": flow.version})
+        logger.info("[FLOW SAVE] tenant_id=%s flow_id=%s version_id=%s request_id=%s nodes_count=%s edges_count=%s", str(tenant_uuid), str(flow.id), str(nova.id), None, len(nodes_json), len(edges_json))
         db.refresh(flow)
         resolved = flow_service.get_flow_with_version(flow)
         return _serialize_flow_version_response(
@@ -920,7 +883,7 @@ async def update_tenant_flow(
     except HTTPException:
         raise
     except Exception as e:
-        print("ERRO SALVAR FLOW:", str(e))
+        logger.exception("[FLOW SAVE ERROR] failed to save tenant flow")
         raise HTTPException(status_code=500, detail="Erro interno")
 
 
@@ -1199,13 +1162,7 @@ def publish_tenant_flow_version(
     invalidate_flow_runtime_cache(flow.id)
     db.commit()
     db.refresh(flow)
-    print(
-        {
-            "action": "FLOW_PUBLISHED",
-            "flow_id": str(flow.id),
-            "version_id": str(flow_version.id),
-        }
-    )
+    logger.info("[FLOW PUBLISH] tenant_id=%s flow_id=%s version_id=%s request_id=%s", str(tenant_uuid), str(flow.id), str(flow_version.id), None)
     return _serialize_flow_version_response(
         flow=flow,
         nodes=nodes,
