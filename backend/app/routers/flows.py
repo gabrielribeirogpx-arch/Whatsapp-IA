@@ -730,6 +730,9 @@ def create_tenant_flow(
 ):
     tenant_uuid = _resolve_tenant_header(x_tenant_id)
     payload_data = payload.model_dump()
+    logger.info("[FLOW CREATE PAYLOAD] %s", payload_data)
+    logger.info("[FLOW CREATE NODES] %s", payload_data.get("nodes"))
+    logger.info("[FLOW CREATE EDGES] %s", payload_data.get("edges"))
     if not isinstance(payload_data.get("nodes"), list) or not isinstance(payload_data.get("edges"), list):
         raise HTTPException(status_code=400, detail="Payload inválido")
 
