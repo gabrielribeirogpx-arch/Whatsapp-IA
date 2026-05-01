@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 
 import DashboardChart from '../../components/DashboardChart';
-import { apiFetch } from '../../lib/api';
+import { apiFetch, parseApiResponse } from '../../lib/api';
 import { Conversation } from '../../lib/types';
 
 type DashboardData = {
@@ -26,9 +26,7 @@ export default function DashboardPage() {
     async function loadDashboardData() {
       try {
         const res = await apiFetch('/api/dashboard');
-        if (!res.ok) return;
-
-        const payload = (await res.json()) as DashboardData;
+        const payload = await parseApiResponse<DashboardData>(res);
         setData(payload);
       } catch {
         setData(null);
