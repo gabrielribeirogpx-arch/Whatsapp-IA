@@ -18,48 +18,23 @@ PUBLIC_PATHS = (
 )
 
 
-def _resolve_tenant_from_host(host: str) -> str:
-    host_without_port = host.split(":", 1)[0].strip().lower()
-    if not host_without_port:
-        return ""
-
-    parts = host_without_port.split(".")
-    if len(parts) < 3:
-        return ""
-
-    subdomain = parts[0].strip()
-    if subdomain in {"www"}:
-        return ""
-
-    return subdomain
-
-
 class TenantContextMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
-        print("PATH:", request.url.path)
-        print("METHOD:", request.method)
-        print("TENANT HEADER:", request.headers.get("X-Tenant-ID"))
-
         if request.method == "OPTIONS":
             return await call_next(request)
 
         path = request.url.path
-        if path in PUBLIC_PATHS:
+        if any(path.startswith(public_path) for public_path in PUBLIC_PATHS):
             return await call_next(request)
 
         tenant_header = (request.headers.get("x-tenant-id") or "").strip()
         if not tenant_header:
-            return JSONResponse(status_code=400, content={"detail": "Tenant obrigatório"})
+            return JSONResponse(status_code=403, content={"detail": "X-Tenant-ID é obrigatório"})
 
-        tenant_query = (request.query_params.get("tenant") or "").strip()
-        tenant_subdomain = _resolve_tenant_from_host(request.headers.get("host", ""))
-        tenant_value = tenant_header or tenant_query or tenant_subdomain
-
-        tenant_id = None
         try:
-            tenant_id = uuid.UUID(tenant_value)
+            tenant_id = uuid.UUID(tenant_header)
         except ValueError:
-            return JSONResponse(status_code=400, content={"detail": "Tenant obrigatório"})
+            return JSONResponse(status_code=400, content={"detail": "X-Tenant-ID inválido"})
 
         request.state.tenant_id = tenant_id
         set_current_tenant_id(tenant_id)
