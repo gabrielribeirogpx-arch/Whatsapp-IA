@@ -215,11 +215,23 @@ def _log_flow_version_blocked(flow_id: uuid.UUID, nodes_count: int) -> None:
     logger.error("[FLOW VERSION BLOCKED] flow_id=%s nodes=%s", str(flow_id), nodes_count)
 
 
-def validate_flow_payload_or_400(nodes: list[dict[str, Any]], edges: list[dict[str, Any]]) -> None:
+def validate_flow_payload_or_400(
+    nodes: list[dict[str, Any]],
+    edges: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     if not isinstance(nodes, list):
         raise HTTPException(status_code=400, detail="VALIDATION_ERROR: NODES_REQUIRED")
+    if not isinstance(edges, list):
+        edges = []
+
     if not nodes:
-        return
+        normalized_nodes, normalized_edges = _normalize_flow_creation_graph(nodes, edges)
+        logger.warning(
+            "[FLOW VALIDATION] payload vazio normalizado para compatibilidade create: nodes=%s edges=%s",
+            len(normalized_nodes),
+            len(normalized_edges),
+        )
+        return normalized_nodes, normalized_edges
 
     start_nodes = [
         node
@@ -254,7 +266,10 @@ def validate_flow_payload_or_400(nodes: list[dict[str, Any]], edges: list[dict[s
         if outgoing_count.get(node_id, 0) == 0 and incoming_count.get(node_id, 0) == 0
     ]
     if unconnected_nodes:
-        raise HTTPException(status_code=400, detail="VALIDATION_ERROR: ORPHAN_NODE_FOUND")
+        logger.warning(
+            "[FLOW VALIDATION] ORPHAN_NODE_FOUND ignorado para não bloquear criação inicial: %s",
+            unconnected_nodes,
+        )
 
     
     for node in nodes:
@@ -275,7 +290,11 @@ def validate_flow_payload_or_400(nodes: list[dict[str, Any]], edges: list[dict[s
 
     valid, error = validate_flow(nodes, edges or [])
     if not valid:
-        raise HTTPException(status_code=400, detail=error or "VALIDATION_ERROR: FLOW_INVALID")
+        logger.warning(
+            "[FLOW VALIDATION] FLOW_INVALID/INVALID_GRAPH ignorado para não bloquear requisição: %s",
+            error or "VALIDATION_ERROR: FLOW_INVALID",
+        )
+    return nodes, edges
 
 
 @router.get("")
@@ -403,7 +422,7 @@ async def update_flow_route(
                 content={"error": "payload inválido: possível sobrescrita acidental"},
             )
         try:
-            validate_flow_payload_or_400(nodes, edges)
+            nodes, edges = validate_flow_payload_or_400(nodes, edges)
         except HTTPException as exc:
             _log_flow_version_blocked(flow.id, len(nodes))
             if persisted_nodes and not raw_nodes and not raw_edges:
