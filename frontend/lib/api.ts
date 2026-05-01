@@ -395,7 +395,8 @@ export async function deleteFlow(flowId: string): Promise<void> {
   const res = await apiFetch(`/api/flows/${flowId}`, {
     method: 'DELETE'
   });
-  await parseApiResponse<void>(res);
+
+  return parseApiResponse<void>(res);
 }
 
 export async function duplicateFlow(flowId: string): Promise<FlowItem> {
