@@ -282,26 +282,12 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
     try {
       setIsCreatingFlow(true);
       setOperationError(null);
-      const payload = {
-        name: 'Novo Flow',
-        nodes: [
-          {
-            id: 'start',
-            type: 'message',
-            data: {
-              text: 'Digite a mensagem...',
-              isStart: true,
-            },
-          },
-        ],
-        edges: [],
-      };
       const response = await apiFetch('/api/flows', {
         method: 'POST',
         body: JSON.stringify({
-          name: payload.name,
-          nodes: Array.isArray(payload.nodes) ? payload.nodes : [],
-          edges: Array.isArray(payload.edges) ? payload.edges : [],
+          name: 'Novo Flow',
+          nodes: [],
+          edges: [],
         }),
       });
 
