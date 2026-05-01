@@ -198,8 +198,10 @@ def _log_flow_version_blocked(flow_id: uuid.UUID, nodes_count: int) -> None:
 
 
 def validate_flow_payload_or_400(nodes: list[dict[str, Any]], edges: list[dict[str, Any]]) -> None:
-    if not isinstance(nodes, list) or len(nodes) == 0:
+    if not isinstance(nodes, list):
         raise HTTPException(status_code=400, detail="VALIDATION_ERROR: NODES_REQUIRED")
+    if not nodes:
+        return
 
     start_nodes = [
         node
@@ -693,13 +695,18 @@ def create_tenant_flow(
     payload_data = payload.model_dump()
     if not isinstance(payload_data.get("nodes"), list) or not isinstance(payload_data.get("edges"), list):
         raise HTTPException(status_code=400, detail="Payload inválido")
-    validate_flow_payload_or_400(payload_data.get("nodes") or [], payload_data.get("edges") or [])
-    logger.info("[FLOW CREATE INPUT] tenant_id=%s nodes_count=%s edges_count=%s", str(tenant_uuid), len(payload_data.get("nodes") or []), len(payload_data.get("edges") or []))
+
+    initial_nodes = payload_data.get("nodes") or []
+    initial_edges = payload_data.get("edges") or []
+
+    if not initial_nodes:
+        initial_nodes = [{"id": "start", "type": "start", "data": {}, "position": {"x": 0, "y": 0}}]
+        initial_edges = []
+
+    validate_flow_payload_or_400(initial_nodes, initial_edges)
+    logger.info("[FLOW CREATE INPUT] tenant_id=%s nodes_count=%s edges_count=%s", str(tenant_uuid), len(initial_nodes), len(initial_edges))
     flow_service = FlowService(db)
     flow = flow_service.create_flow(tenant_id=tenant_uuid, data=payload_data)
-    initial_nodes = payload_data.get("nodes", [])
-    initial_edges = payload_data.get("edges", [])
-    validate_flow_payload_or_400(initial_nodes, initial_edges)
     first_version = flow_service.create_version(flow=flow, tenant_id=tenant_uuid, nodes=initial_nodes, edges=initial_edges)
     db.commit()
     db.refresh(flow)
