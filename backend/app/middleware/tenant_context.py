@@ -9,13 +9,23 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from app.core.tenant import set_current_tenant_id
 
 PUBLIC_PATHS = (
+    "/",
     "/health",
     "/docs",
     "/openapi.json",
     "/redoc",
     "/api/register",
     "/api/login",
+    "/webhook",
+    "/api/webhook",
 )
+
+
+def _is_public_path(path: str) -> bool:
+    for public_path in PUBLIC_PATHS:
+        if path == public_path or path.startswith(f"{public_path}/"):
+            return True
+    return False
 
 
 class TenantContextMiddleware(BaseHTTPMiddleware):
@@ -24,12 +34,12 @@ class TenantContextMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
 
         path = request.url.path
-        if any(path.startswith(public_path) for public_path in PUBLIC_PATHS):
+        if _is_public_path(path):
             return await call_next(request)
 
         tenant_header = (request.headers.get("x-tenant-id") or "").strip()
         if not tenant_header:
-            return JSONResponse(status_code=403, content={"detail": "X-Tenant-ID é obrigatório"})
+            return JSONResponse(status_code=400, content={"detail": "X-Tenant-ID é obrigatório"})
 
         try:
             tenant_id = uuid.UUID(tenant_header)
