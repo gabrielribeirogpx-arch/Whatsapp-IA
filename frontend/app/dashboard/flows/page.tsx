@@ -21,6 +21,28 @@ export default function FlowsPage() {
   const [form, setForm] = useState<FlowPayload>(EMPTY_FORM);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
+  const showToast = (message: string) => {
+    setToastMessage(message);
+    setTimeout(() => setToastMessage(null), 4000);
+  };
+
+  const parseHttpStatus = (error: unknown): number | null => {
+    if (!(error instanceof Error)) return null;
+    const match = error.message.match(/HTTP\s+(\d{3})/i);
+    return match ? Number(match[1]) : null;
+  };
+
+  const logFlowOperationError = ({ method, endpoint, error }: { method: string; endpoint: string; error: unknown }) => {
+    const tenantPresent = typeof window !== 'undefined' && !!localStorage.getItem('tenant_id');
+    console.error('[FlowsPage] Falha em operação de flow', {
+      method,
+      endpoint,
+      tenantPresent,
+      status: parseHttpStatus(error),
+      message: error instanceof Error ? error.message : String(error),
+    });
+  };
+
   const title = useMemo(() => (editingFlow ? 'Editar fluxo' : 'Novo fluxo'), [editingFlow]);
 
   const loadFlows = async () => {
@@ -55,11 +77,28 @@ export default function FlowsPage() {
 
   const onSave = async () => {
     if (!form.name.trim()) return;
-
-    if (editingFlow) {
-      await updateFlow(editingFlow.id, form);
-    } else {
-      await createFlow(form);
+    try {
+      if (editingFlow) {
+        await updateFlow(editingFlow.id, form);
+      } else {
+        const createPayload = {
+          ...form,
+          name: form.name.trim(),
+          nodes: [],
+          edges: [],
+        };
+        await createFlow(createPayload as FlowPayload & { nodes: unknown[]; edges: unknown[] });
+      }
+    } catch (error) {
+      const status = parseHttpStatus(error);
+      const endpoint = editingFlow ? `/api/flows/${editingFlow.id}` : '/api/flows';
+      logFlowOperationError({
+        method: editingFlow ? 'PUT' : 'POST',
+        endpoint,
+        error,
+      });
+      showToast(`Não foi possível salvar o flow${status ? ` (HTTP ${status})` : ''}.`);
+      return;
     }
 
     setIsOpen(false);
@@ -67,15 +106,20 @@ export default function FlowsPage() {
   };
 
   const onDelete = async (flowId: string) => {
-    await deleteFlow(flowId);
-    await loadFlows();
+    try {
+      await deleteFlow(flowId);
+      await loadFlows();
+    } catch (error) {
+      const status = parseHttpStatus(error);
+      logFlowOperationError({ method: 'DELETE', endpoint: `/api/flows/${flowId}`, error });
+      showToast(`Não foi possível deletar o flow${status ? ` (HTTP ${status})` : ''}.`);
+    }
   };
 
   const onDuplicate = async (flowId: string) => {
     await duplicateFlow(flowId);
     await loadFlows();
-    setToastMessage('Flow duplicado com sucesso');
-    setTimeout(() => setToastMessage(null), 3000);
+    showToast('Flow duplicado com sucesso');
   };
 
   return (

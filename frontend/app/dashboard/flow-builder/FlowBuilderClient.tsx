@@ -173,12 +173,29 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
   const [flowSource, setFlowSource] = useState<string>('version');
   const [showEmptyFlowWarning, setShowEmptyFlowWarning] = useState(false);
   const [flowValidationError, setFlowValidationError] = useState<string | null>(null);
+  const [operationError, setOperationError] = useState<string | null>(null);
   const [isEditing] = useState(true);
   const simulationStartedRef = useRef(false);
   const isLoadingFlowRef = useRef(false);
   const lastLoadedFlowIdRef = useRef<string | null>(null);
   const hasTriedAutoCreateRef = useRef(false);
   const nodesRef = useRef<Node[]>([]);
+  const parseHttpStatus = useCallback((error: unknown): number | null => {
+    if (!(error instanceof Error)) return null;
+    const match = error.message.match(/HTTP\s+(\d{3})/i);
+    return match ? Number(match[1]) : null;
+  }, []);
+
+  const logFlowHttpError = useCallback((method: string, endpoint: string, error: unknown) => {
+    const tenantPresent = !!getTenantSessionFromStorage()?.tenant_id;
+    console.error('[FlowBuilder] Falha HTTP em operação de flow', {
+      method,
+      endpoint,
+      tenantPresent,
+      status: parseHttpStatus(error),
+      message: error instanceof Error ? error.message : String(error),
+    });
+  }, [parseHttpStatus]);
 
   useEffect(() => {
     if (urlFlowId && urlFlowId !== selectedFlowId) {
@@ -264,21 +281,27 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
   const createDefaultFlow = useCallback(async () => {
     try {
       setIsCreatingFlow(true);
+      setOperationError(null);
+      const payload = {
+        name: 'Novo Flow',
+        nodes: [
+          {
+            id: 'start',
+            type: 'message',
+            data: {
+              text: 'Digite a mensagem...',
+              isStart: true,
+            },
+          },
+        ],
+        edges: [],
+      };
       const response = await apiFetch('/api/flows', {
         method: 'POST',
         body: JSON.stringify({
-          name: 'Novo Flow',
-          nodes: [
-            {
-              id: 'start',
-              type: 'message',
-              data: {
-                text: 'Digite a mensagem...',
-                isStart: true,
-              },
-            },
-          ],
-          edges: [],
+          name: payload.name,
+          nodes: Array.isArray(payload.nodes) ? payload.nodes : [],
+          edges: Array.isArray(payload.edges) ? payload.edges : [],
         }),
       });
 
@@ -293,12 +316,14 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
       setSelectedFlowId(safeFlow.id);
       return safeFlow;
     } catch (error) {
-      console.error('[FlowBuilder] erro ao criar flow base', error);
+      const status = parseHttpStatus(error);
+      logFlowHttpError('POST', '/api/flows', error);
+      setOperationError(`Não foi possível criar o flow${status ? ` (HTTP ${status})` : ''}.`);
       return null;
     } finally {
       setIsCreatingFlow(false);
     }
-  }, []);
+  }, [logFlowHttpError, parseHttpStatus]);
 
   const handleCreateFlow = useCallback(async () => {
     await createDefaultFlow();
@@ -902,13 +927,21 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
   const deleteFlow = useCallback(async () => {
     if (!selectedFlowId) return;
     if (!confirm('Deseja excluir este flow?')) return;
-    const response = await apiFetch(`/api/flows/${selectedFlowId}`, {
-      method: 'DELETE',
-    });
-    await parseApiResponse(response);
+    try {
+      setOperationError(null);
+      const response = await apiFetch(`/api/flows/${selectedFlowId}`, {
+        method: 'DELETE',
+      });
+      await parseApiResponse(response);
 
-    window.location.reload();
-  }, [selectedFlowId]);
+      window.location.reload();
+    } catch (error) {
+      const endpoint = `/api/flows/${selectedFlowId}`;
+      const status = parseHttpStatus(error);
+      logFlowHttpError('DELETE', endpoint, error);
+      setOperationError(`Não foi possível excluir o flow${status ? ` (HTTP ${status})` : ''}.`);
+    }
+  }, [logFlowHttpError, parseHttpStatus, selectedFlowId]);
 
   const renameFlow = useCallback(async () => {
     if (!selectedFlowId) return;
@@ -1075,6 +1108,11 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
       {flowValidationError && (
         <div style={{ position: 'absolute', top: showEmptyFlowWarning ? 50 : 12, right: 16, zIndex: 25, background: '#fef2f2', color: '#b91c1c', border: '1px solid #fca5a5', borderRadius: 8, padding: '8px 12px', fontSize: 13 }}>
           {flowValidationError}
+        </div>
+      )}
+      {operationError && (
+        <div style={{ position: 'absolute', top: showEmptyFlowWarning ? 50 : 12, left: 16, zIndex: 25, background: '#fef2f2', color: '#b91c1c', border: '1px solid #fca5a5', borderRadius: 8, padding: '8px 12px', fontSize: 13 }}>
+          {operationError}
         </div>
       )}
       {flowSource === 'fallback' && (
