@@ -163,7 +163,14 @@ def _validate_nodes_by_type(nodes: list[dict[str, Any]]) -> None:
 
 def _ensure_start_node(nodes: list[dict[str, Any]]) -> list[dict[str, Any]]:
     if not nodes:
-        return nodes
+        return [
+            {
+                "id": "start",
+                "type": "start",
+                "data": {"isStart": True},
+                "position": {"x": 0, "y": 0},
+            }
+        ]
 
     has_start = any(
         isinstance(node, dict)
@@ -186,6 +193,17 @@ def _ensure_start_node(nodes: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
     logger.info("FORÇANDO START NODE: %s", first_node.get("id"))
     return nodes
+
+
+def _normalize_flow_creation_graph(
+    nodes: list[dict[str, Any]],
+    edges: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    normalized_nodes = _ensure_start_node(nodes or [])
+    normalized_edges = edges or []
+    if not nodes:
+        normalized_edges = []
+    return normalized_nodes, normalized_edges
 
 
 def _block_invalid_flow_save() -> None:
@@ -696,12 +714,12 @@ def create_tenant_flow(
     if not isinstance(payload_data.get("nodes"), list) or not isinstance(payload_data.get("edges"), list):
         raise HTTPException(status_code=400, detail="Payload inválido")
 
-    initial_nodes = payload_data.get("nodes") or []
-    initial_edges = payload_data.get("edges") or []
-
-    if not initial_nodes:
-        initial_nodes = [{"id": "start", "type": "start", "data": {}, "position": {"x": 0, "y": 0}}]
-        initial_edges = []
+    initial_nodes, initial_edges = _normalize_flow_creation_graph(
+        payload_data.get("nodes") or [],
+        payload_data.get("edges") or [],
+    )
+    payload_data["nodes"] = initial_nodes
+    payload_data["edges"] = initial_edges
 
     validate_flow_payload_or_400(initial_nodes, initial_edges)
     logger.info("[FLOW CREATE INPUT] tenant_id=%s nodes_count=%s edges_count=%s", str(tenant_uuid), len(initial_nodes), len(initial_edges))
