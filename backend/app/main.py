@@ -1,7 +1,7 @@
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from alembic.config import Config
 from alembic import command
 import os
@@ -122,6 +122,11 @@ def on_startup():
 
 
 app.add_middleware(TenantContextMiddleware)
+
+
+@app.options("/{path:path}")
+async def options_handler(path: str):
+    return Response(status_code=200)
 
 
 
