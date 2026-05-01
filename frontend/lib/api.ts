@@ -108,8 +108,9 @@ export function getTenantSessionFromStorage(): TenantSession | null {
 export async function apiFetch(path: string, init: RequestInit = {}): Promise<Response> {
   const isBrowser = typeof window !== 'undefined';
   const headers = new Headers(init.headers);
+  const hasBody = typeof init.body !== 'undefined' && init.body !== null;
 
-  if (!headers.has('Content-Type') && !(init.body instanceof FormData)) {
+  if (hasBody && !headers.has('Content-Type') && !(init.body instanceof FormData)) {
     headers.set('Content-Type', 'application/json');
   }
 
@@ -121,9 +122,12 @@ export async function apiFetch(path: string, init: RequestInit = {}): Promise<Re
       headers.set('Authorization', `Bearer ${token}`);
     }
 
-    if (tenantId) {
+    const isProtectedApiRoute =
+      path.startsWith('/api') && !path.startsWith('/api/login') && !path.startsWith('/api/register');
+
+    if (tenantId && isProtectedApiRoute) {
       headers.set('X-Tenant-ID', tenantId);
-    } else if (path.startsWith('/api/flows')) {
+    } else if (isProtectedApiRoute && path.startsWith('/api/flows')) {
       throw new Error('Tenant não encontrado para requisições de flow.');
     }
   }
@@ -142,7 +146,10 @@ export async function apiFetch(path: string, init: RequestInit = {}): Promise<Re
 }
 
 async function parseApiResponse<T>(res: Response): Promise<T> {
-  if (!res.ok) throw new Error(await res.text());
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`HTTP ${res.status}: ${body}`);
+  }
   return res.json();
 }
 
