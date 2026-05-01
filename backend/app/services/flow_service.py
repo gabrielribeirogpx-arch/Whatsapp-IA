@@ -118,6 +118,13 @@ class FlowService:
             flow.edges = edges
             self.db.add(flow)
             self.db.flush()
+            logger.info(
+                "[FLOW VERSION CREATE] tenant_id=%s flow_id=%s version_id=%s request_id=%s",
+                tenant_id,
+                flow.id,
+                version.id,
+                None,
+            )
             return version
 
     def publish_version(self, flow: Flow, flow_version: FlowVersion) -> None:
@@ -125,6 +132,13 @@ class FlowService:
         self.db.query(FlowVersion).filter(FlowVersion.id == flow_version.id).update({FlowVersion.is_published: True}, synchronize_session=False)
         flow.published_version_id = flow_version.id
         self.db.add(flow)
+        logger.info(
+            "[FLOW PUBLISH] tenant_id=%s flow_id=%s version_id=%s request_id=%s",
+            flow.tenant_id,
+            flow.id,
+            flow_version.id,
+            None,
+        )
 
     def get_flow_with_version(self, flow: Flow) -> dict[str, Any]:
         active_version = flow.current_version
@@ -364,7 +378,13 @@ def create_flow(db: Session, tenant_id, data: dict[str, Any]) -> Flow:
     )
     db.add(flow)
     db.flush()
-    logger.info("[FLOW CREATED] flow_id=%s tenant_id=%s", flow.id, tenant_id)
+    logger.info(
+        "[FLOW CREATE] tenant_id=%s flow_id=%s version_id=%s request_id=%s",
+        tenant_id,
+        flow.id,
+        None,
+        data.get("request_id"),
+    )
     return flow
 
 
@@ -421,7 +441,13 @@ def delete_flow(db: Session, flow_id, tenant_id) -> bool:
 
     FlowService(db).delete_flow_soft(flow)
     db.flush()
-    logger.info("[FLOW DELETED] flow_id=%s tenant_id=%s", flow_id, tenant_id)
+    logger.info(
+        "[FLOW DELETE] tenant_id=%s flow_id=%s version_id=%s request_id=%s",
+        tenant_id,
+        flow_id,
+        None,
+        None,
+    )
     return True
 
 
