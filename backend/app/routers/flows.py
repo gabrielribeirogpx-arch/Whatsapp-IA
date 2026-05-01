@@ -678,12 +678,10 @@ def save_tenant_flow(
 @crud_router.post("", response_model=FlowVersionResponse)
 def create_tenant_flow(
     payload: FlowCreatePayload,
-    request: Request,
+    x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
     db: Session = Depends(get_db),
 ):
-    tenant_uuid = request.state.tenant_id
-    if not tenant_uuid:
-        raise HTTPException(status_code=400, detail="Tenant obrigatório")
+    tenant_uuid = _resolve_tenant_header(x_tenant_id)
     payload_data = payload.model_dump()
     if not isinstance(payload_data.get("nodes"), list) or not isinstance(payload_data.get("edges"), list):
         raise HTTPException(status_code=400, detail="Payload inválido")
@@ -708,12 +706,10 @@ def create_tenant_flow(
 
 @crud_router.get("")
 def list_tenant_flows(
-    request: Request,
+    x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
     db: Session = Depends(get_db),
 ):
-    tenant_uuid = request.state.tenant_id
-    if not tenant_uuid:
-        raise HTTPException(status_code=400, detail="Tenant obrigatório")
+    tenant_uuid = _resolve_tenant_header(x_tenant_id)
     return [_serialize_flow(item) for item in get_flows(db=db, tenant_id=tenant_uuid)]
 
 
@@ -774,12 +770,11 @@ def get_tenant_flow_analytics(
 async def update_tenant_flow(
     flow_id: str,
     request: Request,
+    x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
     db: Session = Depends(get_db),
 ):
     try:
-        tenant_uuid = request.state.tenant_id
-        if not tenant_uuid:
-            raise HTTPException(status_code=400, detail="Tenant obrigatório")
+        tenant_uuid = _resolve_tenant_header(x_tenant_id)
         payload = await request.json()
         payload_data = payload if isinstance(payload, dict) else {}
         if not isinstance(payload_data.get("nodes"), list) or not isinstance(payload_data.get("edges"), list):
