@@ -105,6 +105,13 @@ export function getTenantSessionFromStorage(): TenantSession | null {
   }
 }
 
+/**
+ * Wrapper padrão para requisições HTTP no frontend.
+ *
+ * Mantém a injeção automática de `Content-Type` (quando aplicável) e `X-Tenant-ID`
+ * para rotas protegidas. Rotas de flow (`/api/flows*`) devem usar somente este
+ * wrapper para garantir consistência de autenticação e tenancy.
+ */
 export async function apiFetch(path: string, init: RequestInit = {}): Promise<Response> {
   const isBrowser = typeof window !== 'undefined';
   const headers = new Headers(init.headers);
