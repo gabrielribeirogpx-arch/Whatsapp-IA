@@ -75,19 +75,32 @@ def ensure_conversations_columns():
         print("❌ Erro ao validar estrutura:", e)
 
 
-ALLOWED_ORIGINS = [
-    "https://whatsapp-ia-nine.vercel.app",
-    "http://localhost:3000",
-]
+def _parse_allowed_origins() -> list[str]:
+    origins = os.getenv(
+        "CORS_ALLOW_ORIGINS",
+        "https://whatsapp-ia-nine.vercel.app,http://localhost:3000",
+    )
+    parsed = [origin.strip() for origin in origins.split(",") if origin.strip()]
+    return parsed or ["*"]
+
+
+def _parse_allowed_origin_regex() -> str | None:
+    regex = os.getenv("CORS_ALLOW_ORIGIN_REGEX", "").strip()
+    return regex or None
+
+
+ALLOWED_ORIGINS = _parse_allowed_origins()
+ALLOWED_ORIGIN_REGEX = _parse_allowed_origin_regex()
 
 app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
+    allow_origin_regex=ALLOWED_ORIGIN_REGEX,
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type", "X-Tenant-ID"],
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 @app.exception_handler(RequestValidationError)
@@ -102,7 +115,7 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 # ✅ STARTUP (CORRETO)
 @app.on_event("startup")
 def on_startup():
-    print("[CORS] enabled")
+    print(f"[CORS] enabled origins={ALLOWED_ORIGINS} origin_regex={ALLOWED_ORIGIN_REGEX}")
     run_migrations()
     Base.metadata.create_all(bind=engine)
     ensure_conversations_columns()
