@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Request, Response
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
@@ -75,14 +75,19 @@ def ensure_conversations_columns():
         print("❌ Erro ao validar estrutura:", e)
 
 
+ALLOWED_ORIGINS = [
+    "https://whatsapp-ia-nine.vercel.app",
+    "http://localhost:3000",
+]
+
 app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://whatsapp-ia-nine.vercel.app", "http://localhost:3000"],
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-Tenant-ID"],
 )
 
 @app.exception_handler(RequestValidationError)
@@ -105,17 +110,6 @@ def on_startup():
 
 app.add_middleware(TenantContextMiddleware)
 
-
-@app.options("/{full_path:path}")
-async def preflight_handler(full_path: str):
-    return Response(
-        status_code=200,
-        headers={
-            "Access-Control-Allow-Origin": "*",
-            "Access-Control-Allow-Methods": "*",
-            "Access-Control-Allow-Headers": "*",
-        },
-    )
 
 
 # ✅ ROUTES
