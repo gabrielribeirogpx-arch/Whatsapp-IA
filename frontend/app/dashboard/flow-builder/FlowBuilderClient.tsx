@@ -20,7 +20,7 @@ import ChoiceNode from '@/components/flow/nodes/ChoiceNode';
 import ConditionNode from '@/components/flow/nodes/ConditionNode';
 import DelayNode from '@/components/flow/nodes/DelayNode';
 import MessageNode from '@/components/flow/nodes/MessageNode';
-import { apiFetch, getFlowGraph, getTenantSessionFromStorage, listFlowVersions, restoreFlowVersion } from '@/lib/api';
+import { apiFetch, getFlowGraph, getTenantSessionFromStorage, listFlowVersions, parseApiResponse, restoreFlowVersion } from '@/lib/api';
 import { getLayoutedElements } from '@/lib/autoLayout';
 import { orderChoiceChildrenEdges } from '@/lib/flowChoiceOrdering';
 import { executeNode } from '@/lib/flowEngine';
@@ -239,11 +239,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
     const loadFlows = async () => {
       try {
         const response = await apiFetch('/api/flows', { method: 'GET' });
-        if (!response.ok) {
-          throw new Error('Erro ao listar flows');
-        }
-
-        const data = await response.json();
+        const data = await parseApiResponse<Array<{ id: string; name?: string | null; created_at?: string | null; is_active?: boolean }>>(response);
         const safeFlows = Array.isArray(data) ? data : [];
         if (!active) return;
         setFlows(safeFlows);
@@ -286,11 +282,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
         }),
       });
 
-      if (!response.ok) {
-        throw new Error('Erro ao criar flow base');
-      }
-
-      const newFlow = await response.json();
+      const newFlow = await parseApiResponse<{ id: string; name?: string | null; created_at?: string | null; is_active?: boolean }>(response);
       const safeFlow = newFlow && typeof newFlow.id === 'string' ? newFlow : null;
       if (!safeFlow) return null;
 
@@ -424,15 +416,12 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
       });
 
       const requestPromise = apiFetch(`/api/flows/${flowId}`, { method: 'GET' }).then(async (res) => {
-        if (!res.ok) {
-          if (res.status === 404) {
-            console.warn('[FlowBuilder] flow não encontrado, resetando estado');
-            setSelectedFlowId(null);
-            return null;
-          }
-          throw new Error('Erro ao carregar flow');
+        if (res.status === 404) {
+          console.warn('[FlowBuilder] flow não encontrado, resetando estado');
+          setSelectedFlowId(null);
+          return null;
         }
-        return res.json();
+        return parseApiResponse(res);
       });
 
       const data = await Promise.race([requestPromise, timeoutPromise]);
@@ -862,14 +851,11 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
         method: 'PUT',
         body: JSON.stringify(safeFlow),
       });
-      if (!response.ok) {
-        const payload = await response.json().catch(() => ({}));
-        const backendMessage = payload?.detail || payload?.error;
-        setFlowValidationError(backendMessage || 'Erro ao salvar fluxo.');
-      }
+      await parseApiResponse(response);
     } catch (error) {
       console.error(error);
-      setFlowValidationError('Erro ao salvar fluxo.');
+      const message = error instanceof Error && error.message ? error.message : 'Erro ao salvar fluxo.';
+      setFlowValidationError(message);
     } finally {
       setIsSaving(false);
     }
@@ -894,18 +880,20 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
 
   const handleActivateFlow = useCallback(async () => {
     if (!selectedFlowId) return;
-    await apiFetch(`/api/flows/${selectedFlowId}/activate`, {
+    const response = await apiFetch(`/api/flows/${selectedFlowId}/activate`, {
       method: 'PUT',
     });
+    await parseApiResponse(response);
 
     setActiveFlowId(selectedFlowId);
     setFlows((prev) => prev.map((flow) => ({ ...flow, is_active: flow.id === selectedFlowId })));
   }, [selectedFlowId]);
 
   const handleDeactivateFlow = useCallback(async () => {
-    await apiFetch('/api/flows/deactivate', {
+    const response = await apiFetch('/api/flows/deactivate', {
       method: 'POST',
     });
+    await parseApiResponse(response);
 
     setActiveFlowId(null);
     setFlows((prev) => prev.map((flow) => ({ ...flow, is_active: false })));
@@ -914,9 +902,10 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
   const deleteFlow = useCallback(async () => {
     if (!selectedFlowId) return;
     if (!confirm('Deseja excluir este flow?')) return;
-    await apiFetch(`/api/flows/${selectedFlowId}`, {
+    const response = await apiFetch(`/api/flows/${selectedFlowId}`, {
       method: 'DELETE',
     });
+    await parseApiResponse(response);
 
     window.location.reload();
   }, [selectedFlowId]);
@@ -925,10 +914,11 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
     if (!selectedFlowId) return;
     const name = prompt('Novo nome do flow:');
     if (!name) return;
-    await apiFetch(`/api/flows/${selectedFlowId}/rename`, {
+    const response = await apiFetch(`/api/flows/${selectedFlowId}/rename`, {
       method: 'PUT',
       body: JSON.stringify({ name }),
     });
+    await parseApiResponse(response);
 
     setFlows((prev) => prev.map((flow) => (flow.id === selectedFlowId ? { ...flow, name } : flow)));
   }, [selectedFlowId]);

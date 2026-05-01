@@ -145,11 +145,16 @@ export async function apiFetch(path: string, init: RequestInit = {}): Promise<Re
   return response;
 }
 
-async function parseApiResponse<T>(res: Response): Promise<T> {
+export async function parseApiResponse<T>(res: Response): Promise<T> {
   if (!res.ok) {
     const body = await res.text();
     throw new Error(`HTTP ${res.status}: ${body}`);
   }
+
+  if (res.status === 204) {
+    return undefined as T;
+  }
+
   return res.json();
 }
 
@@ -159,12 +164,7 @@ export async function registerTenant(name: string, phone_number_id: string): Pro
     body: JSON.stringify({ name, phone_number_id })
   });
 
-  if (!res.ok) {
-    const body = await res.text();
-    throw new Error(`HTTP ${res.status}: ${body}`);
-  }
-
-  return res.json();
+  return parseApiResponse<TenantSession>(res);
 }
 
 export async function tenantLogin(phone_number_id: string): Promise<TenantSession> {
@@ -173,12 +173,7 @@ export async function tenantLogin(phone_number_id: string): Promise<TenantSessio
     body: JSON.stringify({ phone_number_id })
   });
 
-  if (!res.ok) {
-    const body = await res.text();
-    throw new Error(`HTTP ${res.status}: ${body}`);
-  }
-
-  return res.json();
+  return parseApiResponse<TenantSession>(res);
 }
 
 export async function getConversations(): Promise<Conversation[]> {
@@ -233,11 +228,7 @@ export async function sendMessageToBackend(payload: SendMessagePayload) {
     body: JSON.stringify(payload)
   });
 
-  if (!response.ok) {
-    throw new Error('Não foi possível enviar mensagem para o backend.');
-  }
-
-  return response.json();
+  return parseApiResponse(response);
 }
 
 export async function getProducts(): Promise<Product[]> {
@@ -268,7 +259,7 @@ export async function deleteProduct(productId: string): Promise<void> {
     method: 'DELETE'
   });
 
-  if (!res.ok) throw new Error(await res.text());
+  await parseApiResponse<void>(res);
 }
 
 export async function getKnowledge(): Promise<KnowledgeItem[]> {
@@ -290,7 +281,7 @@ export async function deleteKnowledge(knowledgeId: string): Promise<void> {
     method: 'DELETE'
   });
 
-  if (!res.ok) throw new Error(await res.text());
+  await parseApiResponse<void>(res);
 }
 
 export async function uploadKnowledgePdf(file: File): Promise<KnowledgeUploadResult> {
@@ -348,7 +339,7 @@ export async function deleteBotRule(ruleId: string): Promise<void> {
     method: 'DELETE'
   });
 
-  if (!res.ok) throw new Error(await res.text());
+  await parseApiResponse<void>(res);
 }
 
 
@@ -397,7 +388,7 @@ export async function deleteFlow(flowId: string): Promise<void> {
   const res = await apiFetch(`/api/flows/${flowId}`, {
     method: 'DELETE'
   });
-  if (!res.ok) throw new Error(await res.text());
+  await parseApiResponse<void>(res);
 }
 
 export async function duplicateFlow(flowId: string): Promise<FlowItem> {
