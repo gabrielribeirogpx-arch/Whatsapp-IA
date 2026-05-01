@@ -124,9 +124,9 @@ def on_startup():
 app.add_middleware(TenantContextMiddleware)
 
 
-@app.options("/{path:path}")
-async def options_handler(path: str):
-    return Response(status_code=200)
+@app.options("/{full_path:path}")
+async def options_handler(full_path: str):
+    return Response(status_code=204)
 
 
 
