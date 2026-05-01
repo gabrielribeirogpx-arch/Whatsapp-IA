@@ -736,6 +736,19 @@ def create_tenant_flow(
     initial_nodes = payload_data.get("nodes") or []
     initial_edges = payload_data.get("edges") or []
     logger.info("[FLOW CREATE INPUT] tenant_id=%s nodes_count=%s edges_count=%s", str(tenant_uuid), len(initial_nodes), len(initial_edges))
+    # TEMP DEBUG
+    print(
+        "CREATE FLOW:",
+        {
+            "name": payload_data.get("name"),
+            "description": payload_data.get("description"),
+            "is_active": payload_data.get("is_active"),
+            "trigger_type": payload_data.get("trigger_type"),
+            "priority": payload_data.get("priority"),
+            "nodes_count": len(initial_nodes),
+            "edges_count": len(initial_edges),
+        },
+    )
     flow_service = FlowService(db)
     flow = flow_service.create_flow(
         tenant_id=tenant_uuid,
@@ -937,6 +950,8 @@ def delete_tenant_flow(
     x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
     db: Session = Depends(get_db),
 ):
+    # TEMP DEBUG
+    print("DELETE FLOW:", flow_id)
     tenant_uuid = _resolve_tenant_header(x_tenant_id)
     flow = _get_flow_by_identifier(db=db, flow_id=flow_id, tenant_id=tenant_uuid)
     if not flow:
