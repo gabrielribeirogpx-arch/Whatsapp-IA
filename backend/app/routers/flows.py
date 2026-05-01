@@ -714,17 +714,14 @@ def create_tenant_flow(
     if not isinstance(payload_data.get("nodes"), list) or not isinstance(payload_data.get("edges"), list):
         raise HTTPException(status_code=400, detail="Payload inválido")
 
-    initial_nodes, initial_edges = _normalize_flow_creation_graph(
-        payload_data.get("nodes") or [],
-        payload_data.get("edges") or [],
-    )
-    payload_data["nodes"] = initial_nodes
-    payload_data["edges"] = initial_edges
-
-    validate_flow_payload_or_400(initial_nodes, initial_edges)
+    initial_nodes = payload_data.get("nodes") or []
+    initial_edges = payload_data.get("edges") or []
     logger.info("[FLOW CREATE INPUT] tenant_id=%s nodes_count=%s edges_count=%s", str(tenant_uuid), len(initial_nodes), len(initial_edges))
     flow_service = FlowService(db)
-    flow = flow_service.create_flow(tenant_id=tenant_uuid, data=payload_data)
+    flow = flow_service.create_flow(
+        tenant_id=tenant_uuid,
+        data={"name": payload_data.get("name")},
+    )
     first_version = flow_service.create_version(flow=flow, tenant_id=tenant_uuid, nodes=initial_nodes, edges=initial_edges)
     db.commit()
     db.refresh(flow)
