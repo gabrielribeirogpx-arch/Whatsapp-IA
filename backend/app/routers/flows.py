@@ -203,9 +203,9 @@ def _log_flow_version_blocked(flow_id: uuid.UUID, nodes_count: int) -> None:
     )
 
 
-def _validate_flow_payload(nodes: list[dict[str, Any]], edges: list[dict[str, Any]]) -> None:
-    if len(nodes) < 2 or len(edges) < 1:
-        raise HTTPException(status_code=400, detail="Fluxo inválido: mínimo de 2 nós e 1 conexão")
+def validate_flow_payload_or_400(nodes: list[dict[str, Any]], edges: list[dict[str, Any]]) -> None:
+    if not isinstance(nodes, list) or len(nodes) == 0:
+        raise HTTPException(status_code=400, detail="VALIDATION_ERROR: NODES_REQUIRED")
 
     start_nodes = [
         node
@@ -213,18 +213,21 @@ def _validate_flow_payload(nodes: list[dict[str, Any]], edges: list[dict[str, An
         if isinstance(node, dict) and bool((node.get("data") or {}).get("isStart"))
     ]
     if len(start_nodes) != 1:
-        raise HTTPException(status_code=400, detail="Fluxo inválido: estrutura incompleta")
+        raise HTTPException(status_code=400, detail="VALIDATION_ERROR: SINGLE_START_NODE_REQUIRED")
 
-    node_ids = {str(node.get("id")) for node in nodes if node.get("id")}
+    node_ids = {str(node.get("id")) for node in nodes if isinstance(node, dict) and node.get("id")}
+    if len(node_ids) != len(nodes):
+        raise HTTPException(status_code=400, detail="VALIDATION_ERROR: NODE_ID_REQUIRED")
+
     outgoing_count: dict[str, int] = {node_id: 0 for node_id in node_ids}
     incoming_count: dict[str, int] = {node_id: 0 for node_id in node_ids}
     outgoing_by_handle: dict[str, set[str]] = {node_id: set() for node_id in node_ids}
 
-    for edge in edges:
+    for edge in edges or []:
         source = str(edge.get("source") or "")
         target = str(edge.get("target") or "")
         if source not in node_ids or target not in node_ids:
-            raise HTTPException(status_code=400, detail="Edge inválida: origem/destino inexistente")
+            raise HTTPException(status_code=400, detail="VALIDATION_ERROR: EDGE_REFERENCE_NOT_FOUND")
         outgoing_count[source] = outgoing_count.get(source, 0) + 1
         incoming_count[target] = incoming_count.get(target, 0) + 1
         source_handle = str(edge.get("sourceHandle") or (edge.get("data") or {}).get("sourceHandle") or "").lower()
@@ -237,11 +240,9 @@ def _validate_flow_payload(nodes: list[dict[str, Any]], edges: list[dict[str, An
         if outgoing_count.get(node_id, 0) == 0 and incoming_count.get(node_id, 0) == 0
     ]
     if unconnected_nodes:
-        raise HTTPException(
-            status_code=400,
-            detail="Fluxo inválido: existe nó sem conexão",
-        )
+        raise HTTPException(status_code=400, detail="VALIDATION_ERROR: ORPHAN_NODE_FOUND")
 
+    
     for node in nodes:
         node_id = str(node.get("id") or "")
         node_type = str(node.get("type") or "").lower()
@@ -249,15 +250,18 @@ def _validate_flow_payload(nodes: list[dict[str, Any]], edges: list[dict[str, An
         if node_type == "condition":
             condition = str(data.get("condition") or "").strip()
             if not condition:
-                raise HTTPException(status_code=400, detail="Condition vazio")
+                raise HTTPException(status_code=400, detail="VALIDATION_ERROR: CONDITION_EMPTY")
             if outgoing_count.get(node_id, 0) < 2:
-                raise HTTPException(status_code=400, detail="Condition precisa de duas saídas (SIM e NÃO)")
+                raise HTTPException(status_code=400, detail="VALIDATION_ERROR: CONDITION_REQUIRES_TWO_OUTPUTS")
             handles = outgoing_by_handle.get(node_id, set())
             if not {"true", "false"}.issubset(handles):
-                raise HTTPException(status_code=400, detail="Condition precisa de saídas SIM e NÃO")
-        elif node_type == "message":
-            if outgoing_count.get(node_id, 0) < 1:
-                raise HTTPException(status_code=400, detail="Message precisa de ao menos uma saída")
+                raise HTTPException(status_code=400, detail="VALIDATION_ERROR: CONDITION_REQUIRES_TRUE_FALSE")
+        elif node_type == "message" and outgoing_count.get(node_id, 0) < 1:
+            raise HTTPException(status_code=400, detail="VALIDATION_ERROR: MESSAGE_REQUIRES_OUTPUT")
+
+    valid, error = validate_flow(nodes, edges or [])
+    if not valid:
+        raise HTTPException(status_code=400, detail=error or "VALIDATION_ERROR: FLOW_INVALID")
 
 
 @router.get("")
@@ -284,16 +288,15 @@ def create_flow_route(
         data={key: value for key, value in payload_data.items() if key not in {"nodes", "edges"}},
     )
     initial_nodes = payload_data.get("nodes", [])
-    if not initial_nodes:
-        initial_nodes = [_default_start_node()]
-    initial_nodes = _ensure_start_node(initial_nodes)
+    initial_edges = payload_data.get("edges", [])
+    validate_flow_payload_or_400(initial_nodes, initial_edges)
 
     save_flow_graph(
         db=db,
         tenant_id=tenant.id,
         flow_id=str(flow.id),
         nodes=initial_nodes,
-        edges=payload_data.get("edges", []),
+        edges=initial_edges,
     )
     db.add(flow)
     db.commit()
@@ -351,8 +354,7 @@ async def update_flow_route(
             raise Exception("Flow só pode ter um node inicial")
         print("VALIDANDO FLOW:")
         print("nodes:", nodes)
-        _validate_nodes_by_type(nodes)
-
+        
         tenant = _resolve_request_tenant(db=db, tenant_id_header=x_tenant_id)
         flow = _get_flow_by_identifier(db=db, flow_id=flow_id, tenant_id=tenant.id)
         if not flow:
@@ -379,11 +381,9 @@ async def update_flow_route(
                 status_code=400,
                 content={"error": "payload inválido: possível sobrescrita acidental"},
             )
-        _validate_flow_payload(nodes, edges)
-        valid, error = validate_flow(nodes, edges)
-        print("[FLOW VALID]:", valid)
-        if not valid:
-            print(f"[FLOW BLOCKED] {error}")
+        try:
+            validate_flow_payload_or_400(nodes, edges)
+        except HTTPException as exc:
             _log_flow_version_blocked(flow.id, len(nodes))
             if persisted_nodes and not raw_nodes and not raw_edges:
                 print(
@@ -393,7 +393,7 @@ async def update_flow_route(
                         "flow_id": str(flow.id),
                     }
                 )
-            return JSONResponse(status_code=400, content={"error": error or "Flow inválido"})
+            return JSONResponse(status_code=400, content={"error": exc.detail})
 
         last_version = db.execute(
             _flow_version_select(db)
@@ -667,21 +667,10 @@ def save_tenant_flow(
     if not tenant:
         return dict(_EMPTY_FLOW)
 
-    normalized_nodes = _ensure_start_node(payload.nodes or [])
+    normalized_nodes = payload.nodes or []
     normalized_edges = payload.edges or []
     print("[FLOW SAVE] nodes:", len(normalized_nodes))
-    if not normalized_nodes or len(normalized_nodes) == 0:
-        raise HTTPException(status_code=400, detail="BLOCK SAVE: flow sem nodes")
-    start_nodes = [n for n in normalized_nodes if n.get("data", {}).get("isStart") is True]
-    if len(start_nodes) == 0:
-        raise HTTPException(status_code=400, detail="Flow precisa de um node inicial")
-    if len(start_nodes) > 1:
-        raise HTTPException(status_code=400, detail="Flow só pode ter um node inicial")
-    valid, error = validate_flow(normalized_nodes, normalized_edges)
-    print("[FLOW VALID]:", valid)
-    if not valid:
-        print(f"[FLOW BLOCKED] {error}")
-        raise HTTPException(status_code=400, detail=error or "Flow inválido")
+    validate_flow_payload_or_400(normalized_nodes, normalized_edges)
 
     existing_graph = get_flow_graph(db=db, tenant_id=tenant.id, flow_id=flow_id or "default")
     existing_nodes = existing_graph.get("nodes") if isinstance(existing_graph, dict) else []
@@ -720,7 +709,7 @@ def create_tenant_flow(
     payload_data = payload.model_dump()
     if not isinstance(payload_data.get("nodes"), list) or not isinstance(payload_data.get("edges"), list):
         raise HTTPException(status_code=400, detail="Payload inválido")
-    _validate_flow_payload(payload_data.get("nodes") or [], payload_data.get("edges") or [])
+    validate_flow_payload_or_400(payload_data.get("nodes") or [], payload_data.get("edges") or [])
     print(
         {
             "tenant": str(tenant_uuid),
@@ -731,10 +720,8 @@ def create_tenant_flow(
     flow_service = FlowService(db)
     flow = flow_service.create_flow(tenant_id=tenant_uuid, data=payload_data)
     initial_nodes = payload_data.get("nodes", [])
-    if not initial_nodes:
-        initial_nodes = [_default_start_node()]
-    initial_nodes = _ensure_start_node(initial_nodes)
     initial_edges = payload_data.get("edges", [])
+    validate_flow_payload_or_400(initial_nodes, initial_edges)
     first_version = flow_service.create_version(flow=flow, tenant_id=tenant_uuid, nodes=initial_nodes, edges=initial_edges)
     db.commit()
     db.refresh(flow)
@@ -879,19 +866,16 @@ async def update_tenant_flow(
         print("edges:", len(edges_json))
         print("VALIDANDO FLOW:")
         print("nodes:", nodes)
-        _validate_nodes_by_type(nodes)
-
+        
         persisted_nodes = flow.current_version.nodes if flow.current_version and isinstance(flow.current_version.nodes, list) else []
         if len(persisted_nodes) > 2 and len(nodes) <= 1:
             raise HTTPException(
                 status_code=400,
                 detail="Bloqueado: tentativa de sobrescrever fluxo válido com fluxo vazio",
             )
-        _validate_flow_payload(nodes_json, edges_json)
-        valid, error = validate_flow(nodes_json, edges_json)
-        print("[FLOW VALID]:", valid)
-        if not valid:
-            print(f"[FLOW BLOCKED] {error}")
+        try:
+            validate_flow_payload_or_400(nodes_json, edges_json)
+        except HTTPException:
             _log_flow_version_blocked(flow.id, len(nodes))
             incoming_nodes = payload_model.nodes or []
             incoming_edges = payload_model.edges or []
@@ -903,7 +887,7 @@ async def update_tenant_flow(
                         "flow_id": str(flow.id),
                     }
                 )
-            raise HTTPException(status_code=400, detail=error or "Flow inválido")
+            raise
 
         flow_service = FlowService(db)
         nova = flow_service.create_version(flow=flow, tenant_id=tenant_uuid, nodes=nodes_json, edges=edges_json)
@@ -1209,9 +1193,7 @@ def publish_tenant_flow_version(
 
     nodes = flow_version.nodes if isinstance(flow_version.nodes, list) else []
     edges = flow_version.edges if isinstance(flow_version.edges, list) else []
-    valid, error = validate_flow_structure(nodes=nodes, edges=edges)
-    if not valid:
-        raise HTTPException(status_code=400, detail=error or "Flow inválido")
+    validate_flow_payload_or_400(nodes, edges)
 
     FlowService(db).publish_version(flow=flow, flow_version=flow_version)
     invalidate_flow_runtime_cache(flow.id)
