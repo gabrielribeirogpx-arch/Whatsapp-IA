@@ -20,7 +20,7 @@ import ChoiceNode from '@/components/flow/nodes/ChoiceNode';
 import ConditionNode from '@/components/flow/nodes/ConditionNode';
 import DelayNode from '@/components/flow/nodes/DelayNode';
 import MessageNode from '@/components/flow/nodes/MessageNode';
-import { getFlowGraph, getTenantSessionFromStorage, listFlowVersions, restoreFlowVersion } from '@/lib/api';
+import { apiFetch, getFlowGraph, getTenantSessionFromStorage, listFlowVersions, restoreFlowVersion } from '@/lib/api';
 import { getLayoutedElements } from '@/lib/autoLayout';
 import { orderChoiceChildrenEdges } from '@/lib/flowChoiceOrdering';
 import { executeNode } from '@/lib/flowEngine';
@@ -180,12 +180,6 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
   const hasTriedAutoCreateRef = useRef(false);
   const nodesRef = useRef<Node[]>([]);
 
-  const getTenantHeaders = useCallback(() => {
-    if (typeof window === 'undefined') return {};
-    const tenantId = window.localStorage.getItem('tenant_id');
-    return tenantId ? { 'X-Tenant-ID': tenantId } : {};
-  }, []);
-
   useEffect(() => {
     if (urlFlowId && urlFlowId !== selectedFlowId) {
       setSelectedFlowId(urlFlowId);
@@ -244,14 +238,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
 
     const loadFlows = async () => {
       try {
-        const API_URL = process.env.NEXT_PUBLIC_API_URL;
-        if (!API_URL) return;
-
-        const response = await fetch(`${API_URL}/api/flows`, {
-          headers: {
-            ...getTenantHeaders(),
-          },
-        });
+        const response = await apiFetch('/api/flows', { method: 'GET' });
         if (!response.ok) {
           throw new Error('Erro ao listar flows');
         }
@@ -276,20 +263,13 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
     return () => {
       active = false;
     };
-  }, [getTenantHeaders]);
+  }, []);
 
   const createDefaultFlow = useCallback(async () => {
-    const API_URL = process.env.NEXT_PUBLIC_API_URL;
-    if (!API_URL) return null;
-
     try {
       setIsCreatingFlow(true);
-      const response = await fetch(`${API_URL}/api/flows`, {
+      const response = await apiFetch('/api/flows', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...getTenantHeaders(),
-        },
         body: JSON.stringify({
           name: 'Novo Flow',
           nodes: [
@@ -326,7 +306,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
     } finally {
       setIsCreatingFlow(false);
     }
-  }, [getTenantHeaders]);
+  }, []);
 
   const handleCreateFlow = useCallback(async () => {
     await createDefaultFlow();
@@ -422,13 +402,6 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
 
   const loadFlow = useCallback(async (flowId: string | null) => {
     try {
-      const API_URL = process.env.NEXT_PUBLIC_API_URL;
-      if (!API_URL) {
-        setNodes([FALLBACK_START_NODE]);
-        setEdges([]);
-        return;
-      }
-
       if (!flowId) {
         setNodes([FALLBACK_START_NODE]);
         setEdges([]);
@@ -450,11 +423,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
         }, FETCH_TIMEOUT_MS);
       });
 
-      const requestPromise = fetch(`${API_URL}/api/flows/${flowId}`, {
-        headers: {
-          ...getTenantHeaders(),
-        },
-      }).then(async (res) => {
+      const requestPromise = apiFetch(`/api/flows/${flowId}`, { method: 'GET' }).then(async (res) => {
         if (!res.ok) {
           if (res.status === 404) {
             console.warn('[FlowBuilder] flow não encontrado, resetando estado');
@@ -543,7 +512,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
       isLoadingFlowRef.current = false;
       setIsLoading(false);
     }
-  }, [applyLayoutAndSetFlow, buildFlowEdge, buildFlowNode, getTenantHeaders, rfInstance, setEdges, setNodes]);
+  }, [applyLayoutAndSetFlow, buildFlowEdge, buildFlowNode, rfInstance, setEdges, setNodes]);
 
   useEffect(() => {
     if (!flows || flows.length === 0) {
@@ -804,12 +773,6 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
       return;
     }
 
-    const API_URL = process.env.NEXT_PUBLIC_API_URL;
-    if (!API_URL) {
-      console.error('NEXT_PUBLIC_API_URL não configurado');
-      return;
-    }
-
     const flow = rfInstance.toObject() as {
       nodes?: Array<{
         id: string;
@@ -895,12 +858,8 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
 
     setIsSaving(true);
     try {
-      const response = await fetch(`${API_URL}/api/flows/${selectedFlowId}`, {
+      const response = await apiFetch(`/api/flows/${selectedFlowId}`, {
         method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          ...getTenantHeaders(),
-        },
         body: JSON.stringify(safeFlow),
       });
       if (!response.ok) {
@@ -914,7 +873,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
     } finally {
       setIsSaving(false);
     }
-  }, [getTenantHeaders, rfInstance, selectedFlowId]);
+  }, [rfInstance, selectedFlowId]);
 
 
 
@@ -935,69 +894,44 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
 
   const handleActivateFlow = useCallback(async () => {
     if (!selectedFlowId) return;
-    const API_URL = process.env.NEXT_PUBLIC_API_URL;
-    if (!API_URL) return;
-
-    await fetch(`${API_URL}/api/flows/${selectedFlowId}/activate`, {
+    await apiFetch(`/api/flows/${selectedFlowId}/activate`, {
       method: 'PUT',
-      headers: {
-        ...getTenantHeaders(),
-      },
     });
 
     setActiveFlowId(selectedFlowId);
     setFlows((prev) => prev.map((flow) => ({ ...flow, is_active: flow.id === selectedFlowId })));
-  }, [getTenantHeaders, selectedFlowId]);
+  }, [selectedFlowId]);
 
   const handleDeactivateFlow = useCallback(async () => {
-    const API_URL = process.env.NEXT_PUBLIC_API_URL;
-    if (!API_URL) return;
-
-    await fetch(`${API_URL}/api/flows/deactivate`, {
+    await apiFetch('/api/flows/deactivate', {
       method: 'POST',
-      headers: {
-        ...getTenantHeaders(),
-      },
     });
 
     setActiveFlowId(null);
     setFlows((prev) => prev.map((flow) => ({ ...flow, is_active: false })));
-  }, [getTenantHeaders]);
+  }, []);
 
   const deleteFlow = useCallback(async () => {
     if (!selectedFlowId) return;
     if (!confirm('Deseja excluir este flow?')) return;
-    const API_URL = process.env.NEXT_PUBLIC_API_URL;
-    if (!API_URL) return;
-
-    await fetch(`${API_URL}/api/flows/${selectedFlowId}`, {
+    await apiFetch(`/api/flows/${selectedFlowId}`, {
       method: 'DELETE',
-      headers: {
-        ...getTenantHeaders(),
-      },
     });
 
     window.location.reload();
-  }, [getTenantHeaders, selectedFlowId]);
+  }, [selectedFlowId]);
 
   const renameFlow = useCallback(async () => {
     if (!selectedFlowId) return;
     const name = prompt('Novo nome do flow:');
     if (!name) return;
-    const API_URL = process.env.NEXT_PUBLIC_API_URL;
-    if (!API_URL) return;
-
-    await fetch(`${API_URL}/api/flows/${selectedFlowId}/rename`, {
+    await apiFetch(`/api/flows/${selectedFlowId}/rename`, {
       method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-        ...getTenantHeaders(),
-      },
       body: JSON.stringify({ name }),
     });
 
     setFlows((prev) => prev.map((flow) => (flow.id === selectedFlowId ? { ...flow, name } : flow)));
-  }, [getTenantHeaders, selectedFlowId]);
+  }, [selectedFlowId]);
 
   const handleRestoreVersion = useCallback(async (versionId: string) => {
     const tenantSession = getTenantSessionFromStorage();
