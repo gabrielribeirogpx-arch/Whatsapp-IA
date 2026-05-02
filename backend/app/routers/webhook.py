@@ -313,7 +313,9 @@ async def webhook(request: Request, db: Session = Depends(get_db)):
         return {"status": "ignored"}
     message = value["messages"][0]
 
-    phone = normalize_phone(message["from"])
+    wa_id = message["from"]
+    phone = normalize_phone(wa_id)
+    message_id = (message.get("id") or "").strip()
     if message["type"] == "interactive":
         user_input = message["interactive"]["button_reply"]["id"]
     elif message["type"] == "text":
@@ -326,10 +328,21 @@ async def webhook(request: Request, db: Session = Depends(get_db)):
     intent = classify_intent(user_input)
     print("[INTENT]:", intent)
 
+    tenant_uuid = UUID(tenant_id)
+    was_inserted = register_processed_message(db=db, tenant_id=tenant_uuid, message_id=message_id)
+    if not was_inserted:
+        logger.info(
+            "[WEBHOOK DUPLICATE SKIPPED] message_id=%s tenant_id=%s wa_id=%s",
+            message_id,
+            tenant_id,
+            wa_id,
+        )
+        return {"status": "ignored"}
+
     try:
         flow_row = (
             db.query(Flow)
-            .filter(Flow.tenant_id == UUID(tenant_id), Flow.is_active.is_(True))
+            .filter(Flow.tenant_id == tenant_uuid, Flow.is_active.is_(True))
             .order_by(Flow.created_at.asc(), Flow.id.asc())
             .first()
         )
