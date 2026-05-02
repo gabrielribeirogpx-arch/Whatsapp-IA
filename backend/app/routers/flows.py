@@ -1267,55 +1267,63 @@ def simulate_tenant_flow(
     x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
     db: Session = Depends(get_db),
 ):
-    tenant_uuid = _resolve_tenant_header(x_tenant_id)
-    logger.info("[SIMULATOR START REQUEST]")
-    logger.info("[SIMULATOR TENANT] %s", str(tenant_uuid))
-    logger.info("[SIMULATOR FLOW_ID] %s", flow_id)
+    print("[SIMULATOR START REQUEST]", flow_id)
+    try:
+        tenant_uuid = _resolve_tenant_header(x_tenant_id)
+        logger.info("[SIMULATOR START REQUEST]")
+        logger.info("[SIMULATOR TENANT] %s", str(tenant_uuid))
+        logger.info("[SIMULATOR FLOW_ID] %s", flow_id)
 
-    flow = _get_flow_by_identifier(db=db, flow_id=flow_id, tenant_id=tenant_uuid)
-    if not flow:
-        raise HTTPException(status_code=404, detail="Flow não encontrado")
+        flow = _get_flow_by_identifier(db=db, flow_id=flow_id, tenant_id=tenant_uuid)
+        if not flow:
+            raise HTTPException(status_code=404, detail="Flow não encontrado")
 
-    graph = get_flow_graph(flow.id, db)
-    nodes = graph.get("nodes") if isinstance(graph, dict) else []
-    edges = graph.get("edges") if isinstance(graph, dict) else []
-    nodes = nodes if isinstance(nodes, list) else []
-    edges = edges if isinstance(edges, list) else []
+        graph = get_flow_graph(flow.id, db)
+        nodes = graph.get("nodes") if isinstance(graph, dict) else []
+        edges = graph.get("edges") if isinstance(graph, dict) else []
+        nodes = nodes if isinstance(nodes, list) else []
+        edges = edges if isinstance(edges, list) else []
 
-    start_node = next((n for n in nodes if isinstance(n, dict) and isinstance(n.get("data"), dict) and n.get("data", {}).get("isStart")), None)
-    if not start_node and nodes:
-        targets = {str(e.get("target")) for e in edges if isinstance(e, dict)}
-        start_node = next((n for n in nodes if str(n.get("id")) not in targets), nodes[0])
+        start_node = next((n for n in nodes if isinstance(n, dict) and isinstance(n.get("data"), dict) and n.get("data", {}).get("isStart")), None)
+        if not start_node and nodes:
+            targets = {str(e.get("target")) for e in edges if isinstance(e, dict)}
+            start_node = next((n for n in nodes if str(n.get("id")) not in targets), nodes[0])
 
-    if not start_node:
-        result = {"reply": "Fluxo sem nodes para simular", "current_node_id": None, "selected_edge": None}
+        if not start_node:
+            result = {"reply": "Fluxo sem nodes para simular", "current_node_id": None, "selected_edge": None}
+            logger.info("[SIMULATOR RESPONSE] %s", result)
+            return JSONResponse(status_code=200, content={"success": True, **result})
+
+        user_message = (payload.message or "").strip().lower()
+        node_id = str(start_node.get("id"))
+
+        def find_node(nid: str):
+            return next((n for n in nodes if str(n.get("id")) == str(nid)), None)
+
+        reply = ""
+        selected_edge = None
+        current = find_node(node_id)
+        if isinstance(current, dict):
+            data = current.get("data") if isinstance(current.get("data"), dict) else {}
+            reply = str(data.get("text") or data.get("content") or data.get("label") or "")
+
+        if user_message in {"sim", "já", "anuncio", "anúncio"}:
+            outgoing = [e for e in edges if isinstance(e, dict) and str(e.get("source")) == node_id]
+            true_edge = next((e for e in outgoing if str(e.get("sourceHandle") or (e.get("data") or {}).get("sourceHandle") or "").lower() == "true"), None)
+            if true_edge:
+                selected_edge = "true"
+                node_id = str(true_edge.get("target"))
+                target_node = find_node(node_id)
+                if isinstance(target_node, dict):
+                    data = target_node.get("data") if isinstance(target_node.get("data"), dict) else {}
+                    reply = str(data.get("text") or data.get("content") or data.get("label") or reply)
+
+        result = {"reply": reply, "current_node_id": node_id, "selected_edge": selected_edge}
         logger.info("[SIMULATOR RESPONSE] %s", result)
-        return result
-
-    user_message = (payload.message or "").strip().lower()
-    node_id = str(start_node.get("id"))
-
-    def find_node(nid: str):
-        return next((n for n in nodes if str(n.get("id")) == str(nid)), None)
-
-    reply = ""
-    selected_edge = None
-    current = find_node(node_id)
-    if isinstance(current, dict):
-        data = current.get("data") if isinstance(current.get("data"), dict) else {}
-        reply = str(data.get("text") or data.get("content") or data.get("label") or "")
-
-    if user_message in {"sim", "já", "anuncio", "anúncio"}:
-        outgoing = [e for e in edges if isinstance(e, dict) and str(e.get("source")) == node_id]
-        true_edge = next((e for e in outgoing if str(e.get("sourceHandle") or (e.get("data") or {}).get("sourceHandle") or "").lower() == "true"), None)
-        if true_edge:
-            selected_edge = "true"
-            node_id = str(true_edge.get("target"))
-            target_node = find_node(node_id)
-            if isinstance(target_node, dict):
-                data = target_node.get("data") if isinstance(target_node.get("data"), dict) else {}
-                reply = str(data.get("text") or data.get("content") or data.get("label") or reply)
-
-    result = {"reply": reply, "current_node_id": node_id, "selected_edge": selected_edge}
-    logger.info("[SIMULATOR RESPONSE] %s", result)
-    return result
+        return JSONResponse(status_code=200, content={"success": True, **result})
+    except Exception as e:
+        print("[SIMULATOR ERROR]", repr(e))
+        return JSONResponse(
+            status_code=500,
+            content={"success": False, "error": "SIMULATOR_INTERNAL_ERROR", "detail": str(e)},
+        )
