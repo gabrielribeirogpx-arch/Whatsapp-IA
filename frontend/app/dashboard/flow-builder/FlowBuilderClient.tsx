@@ -23,7 +23,6 @@ import MessageNode from '@/components/flow/nodes/MessageNode';
 import { apiFetch, getFlowGraph, getTenantSessionFromStorage, listFlowVersions, parseApiResponse, restoreFlowVersion } from '@/lib/api';
 import { getLayoutedElements } from '@/lib/autoLayout';
 import { orderChoiceChildrenEdges } from '@/lib/flowChoiceOrdering';
-import { executeNode } from '@/lib/flowEngine';
 import { normalizeFlow } from '@/lib/flowNormalization';
 import { FlowNodePayload, FlowVersionItem } from '@/lib/types';
 
@@ -178,6 +177,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
   const [operationError, setOperationError] = useState<string | null>(null);
   const [isEditing] = useState(true);
   const simulationStartedRef = useRef(false);
+  const simulationSessionIdRef = useRef<string>((typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : String(Date.now()));
   const isLoadingFlowRef = useRef(false);
   const lastLoadedFlowIdRef = useRef<string | null>(null);
   const hasTriedAutoCreateRef = useRef(false);
@@ -542,165 +542,31 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
     [edges, nodes, selectedFlowId],
   );
 
-  const runFlowStep = useCallback((startNodeId: string, initialActiveEdgeIds: string[] = [], userMessage?: string, lastUserMsg?: string) => {
-    if (!startNodeId) return;
+  const runFlowStep = useCallback(async (userMessage: string) => {
+    if (!selectedFlowId) return;
+    const response = await apiFetch(`/api/flows/${selectedFlowId}/simulate`, {
+      method: 'POST',
+      body: JSON.stringify({ session_id: simulationSessionIdRef.current, message: userMessage }),
+    });
+    const data = await parseApiResponse<any>(response);
 
-    let currentNodeToRun: string | null = startNodeId;
-    let safety = 20;
-    const traversedEdgeIds = [...initialActiveEdgeIds];
-    const messagesBuffer: Array<{ type: 'bot' | 'user'; text: string }> = [];
-
-    if (userMessage) {
-      messagesBuffer.push({ type: 'user', text: userMessage });
-    }
-
-    // Contexto com a última mensagem do usuário para avaliação de condições
-    const context = { lastUserMessage: lastUserMsg || userMessage || '' };
-
-    while (currentNodeToRun && safety > 0) {
-      const response = executeNode(flow, currentNodeToRun, context);
-      if (!response || response.type === 'end') break;
-
-      // MENSAGEM normal
-      if (response.type === 'message') {
-        if (response.text) {
-          messagesBuffer.push({ type: 'bot', text: response.text });
-        }
-        // Bot falou — zera o contexto para que condições seguintes aguardem novo input
-        context.lastUserMessage = '';
-        if (response.nextNodeId) {
-          const nextEdge = flow.edges.find((e) => e.source === currentNodeToRun);
-          if (nextEdge?.id) traversedEdgeIds.push(nextEdge.id);
-          currentNodeToRun = response.nextNodeId;
-          safety--;
-          continue;
-        }
-        // Sem próximo node — busca pela edge
-        const nextEdge = flow.edges.find((e) => e.source === currentNodeToRun);
-        if (!nextEdge?.target) { currentNodeToRun = null; break; }
-        if (nextEdge.id) traversedEdgeIds.push(nextEdge.id);
-        currentNodeToRun = nextEdge.target;
-        safety--;
-        continue;
-      }
-
-      // ESCOLHA — para e aguarda input do usuário
-      if (response.type === 'choice') {
-        if (response.text) {
-          messagesBuffer.push({ type: 'bot', text: response.text });
-        }
-        setMessages((prev) => [...prev, ...messagesBuffer]);
-        setActiveEdgeIds(traversedEdgeIds);
-        setCurrentNodeId(currentNodeToRun);
-        setCurrentChoices(response.buttons || []);
-        return;
-      }
-
-      // AGUARDANDO INPUT — para o fluxo e espera o usuário digitar
-      if (response.type === 'waiting_input') {
-        if (messagesBuffer.length > 0) {
-          setMessages((prev) => [...prev, ...messagesBuffer]);
-        }
-        setActiveEdgeIds(traversedEdgeIds);
-        setCurrentNodeId(response.nodeId);
-        setCurrentChoices([]);
-        return;
-      }
-
-      // CONDIÇÃO — avalia e segue o caminho correto (true ou false)
-      if (response.type === 'condition') {
-        const nextId = response.result === 'true' ? response.trueNodeId : response.falseNodeId;
-        const handleUsed = response.result;
-        const condEdge = flow.edges.find(
-          (e) => e.source === currentNodeToRun && (e.sourceHandle === handleUsed || (e.data as any)?.sourceHandle === handleUsed)
-        );
-        if (condEdge?.id) traversedEdgeIds.push(condEdge.id);
-        currentNodeToRun = nextId || null;
-        safety--;
-        continue;
-      }
-
-      // DELAY — mostra indicador "digitando..." e continua após X segundos
-      if (response.type === 'delay') {
-        const delayMs = Math.min((response.seconds || 3) * 1000, 10000);
-        const nextId = response.nextNodeId;
-        const delayEdge = flow.edges.find((e) => e.source === currentNodeToRun);
-        if (delayEdge?.id) traversedEdgeIds.push(delayEdge.id);
-
-        // Commita mensagens acumuladas antes do delay
-        if (messagesBuffer.length > 0) {
-          setMessages((prev) => [...prev, ...messagesBuffer]);
-          messagesBuffer.length = 0;
-        }
-        setActiveEdgeIds(traversedEdgeIds);
-        setIsTyping(true);
-
-        // Continua o fluxo após o delay
-        setTimeout(() => {
-          setIsTyping(false);
-          if (nextId) {
-            runFlowStep(nextId, traversedEdgeIds, undefined, context.lastUserMessage);
-          }
-        }, delayMs);
-        return;
-      }
-
-      // AÇÃO — executa silenciosamente e continua o fluxo
-      if (response.type === 'action') {
-        const nextId = response.nextNodeId;
-        const actionEdge = flow.edges.find((e) => e.source === currentNodeToRun);
-        if (actionEdge?.id) traversedEdgeIds.push(actionEdge.id);
-        currentNodeToRun = nextId || null;
-        safety--;
-        continue;
-      }
-
-      break;
-    }
-
-    if (messagesBuffer.length > 0) {
-      setMessages((prev) => [...prev, ...messagesBuffer]);
-    }
-    setActiveEdgeIds(traversedEdgeIds);
-  }, [flow, setIsTyping]);
+    setMessages((prev) => [...prev, { type: 'user', text: userMessage }, { type: 'bot', text: data.reply || '' }]);
+    setCurrentNodeId(data.current_node_id || null);
+    setCurrentChoices([]);
+    const active = flow.edges
+      .filter((e) => e.source === data.current_node_id && (e.sourceHandle === data.selected_edge || (e.data as any)?.sourceHandle === data.selected_edge))
+      .map((e) => e.id)
+      .filter(Boolean) as string[];
+    setActiveEdgeIds(active);
+  }, [flow.edges, selectedFlowId]);
 
   const handleChoiceClick = useCallback((handleId: string, label: string) => {
-    if (!currentNodeId) return;
-
-    const edge = flow.edges.find((item) => item.source === currentNodeId && item.sourceHandle === handleId);
-    if (!edge?.target) return;
-
-    setCurrentChoices([]);
-
-    // Adiciona imediatamente a escolha do usuário como bolha no chat
-    setMessages((prev) => [...prev, { type: 'user', text: label }]);
-
-    // Continua o fluxo SEM passar userMessage (já foi adicionada acima)
-    runFlowStep(edge.target, edge.id ? [edge.id] : [], undefined, label);
-  }, [currentNodeId, flow.edges, runFlowStep]);
+    void runFlowStep(label);
+  }, [runFlowStep]);
 
   const handleUserTextInput = useCallback((text: string) => {
-    if (!currentNodeId) {
-      setMessages((prev) => [...prev, { type: 'user', text }]);
-      return;
-    }
-
-    setCurrentChoices([]);
-    setMessages((prev) => [...prev, { type: 'user', text }]);
-
-    // Verifica se o node atual é uma condição aguardando input
-    const currentNode = flow.nodes.find((n) => n.id === currentNodeId);
-    if (currentNode?.type === 'condition') {
-      // Reavalia a condição com o texto digitado pelo usuário
-      runFlowStep(currentNodeId, [], undefined, text);
-      return;
-    }
-
-    // Caso contrário, segue para o próximo node
-    const nextEdge = flow.edges.find((e) => e.source === currentNodeId);
-    if (!nextEdge?.target) return;
-    runFlowStep(nextEdge.target, nextEdge.id ? [nextEdge.id] : [], undefined, text);
-  }, [currentNodeId, flow.edges, flow.nodes, runFlowStep]);
+    void runFlowStep(text);
+  }, [runFlowStep]);
 
   const onConnect = useCallback((params: FlowConnection) => {
     const sourceHandle = params.sourceHandle?.toString() || null;
@@ -1226,7 +1092,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
               const incomingTargets = new Set(edges.map((edge) => edge.target));
               const startNode = markedStart || nodes.find((node) => !incomingTargets.has(node.id)) || nodes[0];
               if (startNode) {
-                runFlowStep(startNode.id);
+                void runFlowStep('oi');
               }
             }}
             style={{
@@ -1508,7 +1374,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
                 const startNode = markedStart || nodes.find((n) => !incomingTargets.has(n.id)) || nodes[0];
                 if (startNode) {
                   simulationStartedRef.current = true;
-                  runFlowStep(startNode.id);
+                  void runFlowStep('oi');
                 }
               }
             }}
