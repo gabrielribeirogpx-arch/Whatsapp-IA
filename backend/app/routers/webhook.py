@@ -508,9 +508,36 @@ async def webhook(request: Request, db: Session = Depends(get_db)):
                 print("[CONDITION KEYWORDS RAW]", keywords_raw)
                 print("[CONDITION KEYWORDS NORMALIZED]", keywords_normalized)
                 print("[CONDITION MATCH]", match)
-                desired = "true" if match else "false"
-                edge = next((e for e in flow["edges"] if e.get("source") == node.get("id") and str(e.get("sourceHandle") or "").lower() == desired), None)
-                return edge.get("target") if edge else None
+
+                condition_edges = [
+                    e for e in flow["edges"] if str(e.get("source")) == str(node.get("id"))
+                ]
+
+                true_values = {"true", "sim"}
+                false_values = {"false", "nao"}
+                expected_values = true_values if match else false_values
+
+                selected_edge = None
+                edge_fields = ("sourceHandle", "source_handle", "output", "label")
+                for edge_candidate in condition_edges:
+                    field_values = {
+                        _normalize_for_condition(edge_candidate.get(field))
+                        for field in edge_fields
+                        if edge_candidate.get(field) is not None
+                    }
+                    if field_values.intersection(expected_values):
+                        selected_edge = edge_candidate
+                        break
+
+                if not selected_edge:
+                    print(
+                        f"[CONDITION ERROR] route_not_found node_id={node.get('id')} match={match} expected={sorted(expected_values)}"
+                    )
+                    return "__CONDITION_STOP__"
+
+                print("[CONDITION EDGE SELECTED]", selected_edge)
+                print("[CONDITION TARGET NODE]", selected_edge.get("target"))
+                return selected_edge.get("target")
             edge = next((e for e in flow["edges"] if e.get("source") == node.get("id")), None)
             return edge.get("target") if edge else None
 
@@ -522,6 +549,10 @@ async def webhook(request: Request, db: Session = Depends(get_db)):
         next_node_id = process_node(current_node, user_input)
         print("[NEXT NODE]", next_node_id)
 
+        if next_node_id == "__CONDITION_STOP__":
+            db.rollback()
+            return {"status": "ignored"}
+
         execution.current_node_id = next_node_id
         db.add(execution)
         db.commit()
@@ -531,6 +562,8 @@ async def webhook(request: Request, db: Session = Depends(get_db)):
             node_message = (next_node.get("data") or {}).get("content") or (next_node.get("data") or {}).get("text")
             if node_message:
                 send_whatsapp_message_simple(phone, node_message)
+                if str(current_node.get("type") or "").lower() == "condition":
+                    print("[WHATSAPP RESPONSE CONDITION]", node_message)
         return {"status": "message processed"}
     except Exception:
         db.rollback()
