@@ -22,6 +22,8 @@ MAX_AUTO_STEPS = 10
 MAX_RETRIES = 3
 logger = logging.getLogger(__name__)
 _FLOW_RUNTIME_CACHE: dict[uuid.UUID, dict[str, Any]] = {}
+STRONG_YES_MATCHES = {"sim", "s", "claro", "quero", "com certeza", "yes"}
+STRONG_NO_MATCHES = {"nao", "n", "negativo", "no"}
 
 
 @dataclass
@@ -593,6 +595,30 @@ def _normalize_text(value: str | None) -> str:
     # Remove pontuação e espaços extras para match robusto
     cleaned = "".join(ch for ch in without_accents if ch.isalnum() or ch.isspace())
     return " ".join(cleaned.lower().split())
+
+
+def _match_condition_input(normalized_input: str, keywords: list[str]) -> bool | None:
+    # Prioridade 1: match literal exato da condição
+    if normalized_input and normalized_input in keywords:
+        return True
+
+    # Prioridade 2: match forte sim/não (força rota sem usar fallback de intent/AI)
+    if normalized_input in STRONG_YES_MATCHES:
+        return True
+    if normalized_input in STRONG_NO_MATCHES:
+        return False
+
+    # Prioridade 3 (fallback): heurística existente
+    if not normalized_input:
+        return False
+    return any(
+        kw
+        and (
+            kw in normalized_input
+            or (len(normalized_input) >= 2 and normalized_input in kw)
+        )
+        for kw in keywords
+    )
 
 
 def detect_intent(text: str) -> str | None:
@@ -1503,16 +1529,7 @@ def process_flow_engine(
                 if (normalized_kw := _normalize_text(kw))
             ]
 
-            # Match TRUE se input contém keyword
-            # ou keyword contém input (com input >= 2 chars)
-            result = any(
-                kw
-                and (
-                    kw in normalized_input
-                    or (len(normalized_input) >= 2 and normalized_input in kw)
-                )
-                for kw in keywords
-            )
+            result = bool(_match_condition_input(normalized_input, keywords))
 
             print(f"[CONDITION INPUT RAW] {raw_input}")
             print(f"[CONDITION INPUT NORMALIZED] {normalized_input}")
