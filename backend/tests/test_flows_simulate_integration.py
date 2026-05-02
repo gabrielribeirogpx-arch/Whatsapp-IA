@@ -137,3 +137,42 @@ def test_post_simulate_calls_get_flow_graph_with_required_flow_id(monkeypatch):
     assert response.status_code == 200
     assert captured["flow_id"] == "flow-1"
     assert captured["tenant_id"] == "tenant-1"
+
+
+def test_post_simulate_auto_continues_message_delay_message_until_condition(monkeypatch):
+    monkeypatch.setattr(flows, "_resolve_tenant_header", lambda _: "tenant-1")
+    monkeypatch.setattr(flows, "_get_flow_by_identifier", lambda **kwargs: _FakeFlow())
+    monkeypatch.setattr(
+        flows,
+        "get_flow_graph",
+        lambda **kwargs: {
+            "nodes": [
+                {"id": "start", "type": "condition", "data": {"isStart": True, "condition": "sim"}},
+                {"id": "d1", "type": "delay", "data": {"seconds": 2}},
+                {"id": "m1", "type": "message", "data": {"text": "Message A"}},
+                {"id": "d2", "type": "delay", "data": {"seconds": 2}},
+                {"id": "m2", "type": "message", "data": {"text": "Message B"}},
+                {"id": "c2", "type": "condition", "data": {"condition": "ok"}},
+            ],
+            "edges": [
+                {"source": "start", "target": "d1", "sourceHandle": "true"},
+                {"source": "d1", "target": "m1", "sourceHandle": "default"},
+                {"source": "m1", "target": "d2", "sourceHandle": "default"},
+                {"source": "d2", "target": "m2", "sourceHandle": "default"},
+                {"source": "m2", "target": "c2", "sourceHandle": "default"},
+            ],
+        },
+    )
+
+    client = TestClient(_build_test_app())
+    response = client.post(
+        "/api/flows/flow-1/simulate",
+        headers={"X-Tenant-ID": "00000000-0000-0000-0000-000000000001"},
+        json={"session_id": "s1", "message": "sim"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["success"] is True
+    assert payload["reply"] == "Message A\n\nMessage B"
+    assert payload["next_node_id"] == "c2"

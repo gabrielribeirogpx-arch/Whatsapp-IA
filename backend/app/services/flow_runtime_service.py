@@ -90,6 +90,8 @@ async def execute_node_chain_until_reply(
 
     cursor = start_node_id
     normalized_input = _normalize_text(user_input)
+    replies: list[str] = []
+    response_node_id: str | None = None
     logger.info("[CORE EXECUTOR START] tenant_id=%s wa_id=%s start_node_id=%s context=%s", tenant_id, wa_id, start_node_id, context)
     while cursor:
         node = node_map.get(str(cursor))
@@ -101,18 +103,32 @@ async def execute_node_chain_until_reply(
 
         if ntype == "message":
             reply = str(data.get("text") or data.get("content") or data.get("label") or "")
-            logger.info("[DELAY RESPONSE NODE] node_id=%s", cursor)
+            logger.info("[MESSAGE SENT] node_id=%s", cursor)
             logger.info("[CORE REPLY BUILT] node_id=%s reply_summary=%s", cursor, _summarize_reply(reply))
-            return _result(
-                pending=False,
-                reply=reply,
-                response_node_id=str(cursor),
-                next_node_id=find_next(str(cursor)),
-            )
+            if reply:
+                replies.append(reply)
+            response_node_id = str(cursor)
+            next_id = find_next(str(cursor), ["default", "", "output"])
+            next_node = node_map.get(str(next_id)) if next_id else None
+            next_type = _node_type(next_node)
+            if next_type in {"delay", "action", "message"}:
+                logger.info("[MESSAGE HAS AUTO_CONTINUE] node_id=%s", cursor)
+                logger.info("[AUTO_CONTINUE TO] next_node_id=%s next_type=%s", next_id, next_type)
+                cursor = next_id
+                continue
+            return _result(pending=False, reply="
+
+".join(replies) or None, response_node_id=response_node_id, next_node_id=next_id)
 
         if ntype == "condition":
+            if replies:
+                logger.info("[AUTO_CONTINUE PAUSED_AT_CONDITION] node_id=%s", cursor)
+                return _result(pending=False, reply="
+
+".join(replies) or None, response_node_id=response_node_id, next_node_id=str(cursor))
             raw_condition = str(data.get("condition") or data.get("keywords") or data.get("content") or "")
-            keywords = [_normalize_text(p) for p in raw_condition.replace("\n", ",").split(",") if str(p).strip()]
+            keywords = [_normalize_text(p) for p in raw_condition.replace("
+", ",").split(",") if str(p).strip()]
             is_true = any(k and (k in normalized_input or normalized_input in k) for k in keywords)
             cursor = find_next(str(cursor), ["true", "sim"] if is_true else ["false", "nao", "não"])
             continue
@@ -136,11 +152,14 @@ async def execute_node_chain_until_reply(
 
         if ntype == "action":
             cursor = find_next(str(cursor), ["default", "", "output"])
+            logger.info("[AUTO_CONTINUE TO] next_node_id=%s next_type=unknown", cursor)
             continue
 
         cursor = find_next(str(cursor))
 
-    return _result(pending=False, reply=None, response_node_id=None, next_node_id=None)
+    return _result(pending=False, reply="
+
+".join(replies) or None, response_node_id=response_node_id, next_node_id=None)
 
 
 async def execute_until_message_or_end(
