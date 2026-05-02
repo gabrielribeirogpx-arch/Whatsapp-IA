@@ -456,7 +456,7 @@ async def webhook(request: Request, db: Session = Depends(get_db)):
         node_message = runtime_result.get("reply")
         response_node_id = runtime_result.get("response_node_id")
         next_node_id = runtime_result.get("next_node_id")
-        is_pending = bool(runtime_result.get("pending") or runtime_result.get("queued"))
+        is_pending = bool(runtime_result.get("pending"))
 
         print("[NEXT NODE]", next_node_id)
         print("[DELAY RESPONSE NODE]", response_node_id)

@@ -41,6 +41,20 @@ async def execute_until_message_or_end(
     user_input: str,
     context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    def _result(
+        *,
+        pending: bool,
+        reply: str | None,
+        response_node_id: str | None,
+        next_node_id: str | None,
+    ) -> dict[str, Any]:
+        return {
+            "pending": pending,
+            "reply": reply,
+            "response_node_id": response_node_id,
+            "next_node_id": next_node_id,
+        }
+
     context = context or {}
     nodes = graph.get("nodes", []) if isinstance(graph, dict) else []
     edges = graph.get("edges", []) if isinstance(graph, dict) else []
@@ -68,7 +82,12 @@ async def execute_until_message_or_end(
 
         if ntype == "message":
             reply = str(data.get("text") or data.get("content") or data.get("label") or "")
-            return {"reply": reply, "response_node_id": str(cursor), "next_node_id": find_next(str(cursor))}
+            return _result(
+                pending=False,
+                reply=reply,
+                response_node_id=str(cursor),
+                next_node_id=find_next(str(cursor)),
+            )
 
         if ntype == "condition":
             raw_condition = str(data.get("condition") or data.get("keywords") or data.get("content") or "")
@@ -84,7 +103,12 @@ async def execute_until_message_or_end(
             if seconds <= 5 or context.get("channel") == "simulator":
                 await asyncio.sleep(seconds)
             else:
-                return {"reply": None, "response_node_id": str(cursor), "next_node_id": find_next(str(cursor), ["default", "", "output"]), "queued": True}
+                return _result(
+                    pending=True,
+                    reply=None,
+                    response_node_id=str(cursor),
+                    next_node_id=find_next(str(cursor), ["default", "", "output"]),
+                )
             cursor = find_next(str(cursor), ["default", "", "output"])
             print("[DELAY CONTINUE TO]", cursor)
             print("[DELAY SKIP_REPLY]")
@@ -96,7 +120,7 @@ async def execute_until_message_or_end(
 
         cursor = find_next(str(cursor))
 
-    return {"reply": "", "response_node_id": None, "next_node_id": None}
+    return _result(pending=False, reply=None, response_node_id=None, next_node_id=None)
 
 
 class FlowRuntimeService:

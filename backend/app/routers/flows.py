@@ -1372,7 +1372,7 @@ async def simulate_tenant_flow(
                 seconds = 1
             return seconds
 
-        async def _resolve_operational_nodes(start_node_id: str | None) -> tuple[str, str | None, str | None]:
+        async def _resolve_operational_nodes(start_node_id: str | None) -> tuple[bool, str | None, str | None, str | None]:
             result = await execute_until_message_or_end(
                 graph={"nodes": nodes, "edges": edges},
                 current_node_id=start_node_id,
@@ -1380,7 +1380,12 @@ async def simulate_tenant_flow(
                 context={"channel": "simulator"},
             )
             logger.info("[DELAY RESPONSE NODE] node_id=%s", result.get("response_node_id"))
-            return str(result.get("reply") or ""), result.get("response_node_id"), result.get("next_node_id")
+            return (
+                bool(result.get("pending")),
+                result.get("reply"),
+                result.get("response_node_id"),
+                result.get("next_node_id"),
+            )
 
         simulator_user_identifier = f"simulator:{session_id}"
         sim_session = (
@@ -1447,12 +1452,18 @@ async def simulate_tenant_flow(
                         target_id = str(edge.get("target"))
                         target_node = find_node(target_id)
                         target_data = target_node.get("data") if isinstance(target_node, dict) and isinstance(target_node.get("data"), dict) else {}
-                        reply, current_node_id, next_node_id = await _resolve_operational_nodes(target_id)
+                        is_pending, resolved_reply, current_node_id, next_node_id = await _resolve_operational_nodes(target_id)
+                        reply = str(resolved_reply or "")
+                        if is_pending:
+                            reply = "Aguardando o tempo configurado para continuar o fluxo."
                     else:
                         reply = "Condição sem saída configurada."
                         next_node_id = None
                 else:
-                    reply, current_node_id, next_node_id = await _resolve_operational_nodes(str(current_node_id))
+                    is_pending, resolved_reply, current_node_id, next_node_id = await _resolve_operational_nodes(str(current_node_id))
+                    reply = str(resolved_reply or "")
+                    if is_pending:
+                        reply = "Aguardando o tempo configurado para continuar o fluxo."
 
                 sim_session.current_node_id = next_node_id
                 sim_session.status = "running" if next_node_id else "finished"
