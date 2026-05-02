@@ -25,6 +25,7 @@ from app.services.whatsapp_service import send_whatsapp_buttons, send_whatsapp_m
 from app.services.intent_service import classify_intent, normalize_input, route_intent
 from app.models import Tenant
 from app.utils.phone import normalize_phone
+from app.utils.text import normalize_text
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -50,7 +51,14 @@ def _find_start_node(nodes: list[dict]) -> dict | None:
             continue
         data = node.get("data") if isinstance(node.get("data"), dict) else {}
         node_type = str(node.get("type") or "").lower()
-        if data.get("isStart") is True or node.get("is_start") is True or node_type == "start":
+        if (
+            data.get("isStart") is True
+            or data.get("is_start") is True
+            or node.get("isStart") is True
+            or node.get("is_start") is True
+            or node_type == "start"
+            or str(node.get("id") or "").lower() == "start"
+        ):
             return node
     return None
 
@@ -377,6 +385,24 @@ async def webhook(request: Request, db: Session = Depends(get_db)):
             db.commit()
             db.refresh(execution)
             print("[FLOW RUNTIME] next_node_id=", next_node_id)
+            return {"status": "message processed"}
+
+        normalized = normalize_text(user_input)
+        force_start = normalized in {"oi", "ola", "menu", "iniciar", "inicio", "reiniciar", "reset"}
+        print("[RUNTIME FORCE START]", force_start)
+
+        if force_start:
+            start_content = _extract_node_content(start_node)
+            print("[RUNTIME START NODE FOUND]", start_node.get("id"))
+            print("[RUNTIME START CONTENT]", start_content)
+            if start_content:
+                send_whatsapp_message_simple(phone, start_content)
+            next_node_id = _find_next_node_id(start_node.get("id"), flow["edges"])
+            execution.current_node_id = next_node_id
+            db.add(execution)
+            db.commit()
+            print("[RUNTIME SESSION OVERRIDDEN]")
+            print("[WHATSAPP RESPONSE START]")
             return {"status": "message processed"}
 
         current_node = get_node_by_id(flow, execution.current_node_id)
