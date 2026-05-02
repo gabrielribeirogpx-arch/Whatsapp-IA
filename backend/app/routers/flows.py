@@ -1290,9 +1290,15 @@ def simulate_tenant_flow(
             start_node = next((n for n in nodes if str(n.get("id")) not in targets), nodes[0])
 
         if not start_node:
-            result = {"reply": "Fluxo sem nodes para simular", "current_node_id": None, "selected_edge": None}
+            result = {
+                "success": True,
+                "reply": "Fluxo sem nodes para simular",
+                "current_node_id": None,
+                "next_node_id": None,
+                "selected_edge": None,
+            }
             logger.info("[SIMULATOR RESPONSE] %s", result)
-            return JSONResponse(status_code=200, content={"success": True, **result})
+            return JSONResponse(status_code=200, content=result)
 
         session_id = payload.session_id or "default"
         message = (payload.message or "").strip()
@@ -1322,16 +1328,14 @@ def simulate_tenant_flow(
                     reply = str(data.get("text") or data.get("content") or data.get("label") or reply)
 
         result = {
+            "success": True,
             "reply": reply,
-            "current_node_id": node_id,
-            "selected_edge": selected_edge,
-            "session_id": session_id,
-            "message": message,
-            "normalized_message": normalized_message,
-            "routing_message": routing_message,
+            "current_node_id": str(start_node.get("id")) if start_node else None,
+            "next_node_id": node_id,
+            "selected_edge": str(selected_edge) if selected_edge is not None else None,
         }
         logger.info("[SIMULATOR RESPONSE] %s", result)
-        return JSONResponse(status_code=200, content={"success": True, **result})
+        return JSONResponse(status_code=200, content=result)
     except Exception as e:
         print("[SIMULATOR ERROR]", repr(e))
         return JSONResponse(
