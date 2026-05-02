@@ -142,99 +142,104 @@ def validate_flow_structure(
     return True, None
 
 
-def validate_flow(flow: dict[str, Any], mode: str = "draft") -> dict[str, Any]:
-    nodes_payload = flow.get("nodes") if isinstance(flow.get("nodes"), list) else []
-    edges_payload = flow.get("edges") if isinstance(flow.get("edges"), list) else []
-    strict_mode = str(mode).lower() == "published"
-    errors: list[str] = []
-    warnings: list[str] = []
+def validate_flow_graph(nodes: list[dict[str, Any]] | None, edges: list[dict[str, Any]] | None, mode: str = "draft") -> dict[str, Any]:
+    strict_mode = str(mode).lower() in {"published", "publish", "simulate"}
+    nodes_payload = nodes if isinstance(nodes, list) else []
+    edges_payload = edges if isinstance(edges, list) else []
+    errors: list[dict[str, str | None]] = []
+    warnings: list[dict[str, str | None]] = []
+
+    def add_issue(bucket, code: str, node_id: str | None, message: str) -> None:
+        bucket.append({"code": code, "node_id": node_id, "message": message})
 
     if not nodes_payload:
-        errors.append("Flow inválido: nodes vazio")
+        add_issue(errors, "FLOW_EMPTY", None, "Flow vazio/inconsistente")
         return {"valid": False, "errors": errors, "warnings": warnings}
 
-    node_ids: set[str] = set()
-    outgoing_count: dict[str, int] = {}
+    node_map: dict[str, dict[str, Any]] = {}
+    outgoing: dict[str, int] = {}
+    incoming: dict[str, int] = {}
     condition_handles: dict[str, set[str]] = {}
     start_nodes: list[str] = []
 
     for node in nodes_payload:
         node_id = str((node or {}).get("id") or "").strip()
         if not node_id:
-            errors.append("Flow inválido: node sem id")
+            add_issue(errors, "NODE_ID_REQUIRED", None, "Node sem id")
             continue
-        node_ids.add(node_id)
-        outgoing_count[node_id] = 0
+        node_map[node_id] = node
+        outgoing[node_id] = 0
+        incoming[node_id] = 0
         condition_handles[node_id] = set()
-
         data = node.get("data") if isinstance(node.get("data"), dict) else {}
-        node_type = str(node.get("type") or "").strip().lower()
-        is_terminal = bool(data.get("is_terminal") or data.get("isTerminal") or False)
-        if node_type == "message":
-            text = data.get("text") if isinstance(data.get("text"), str) else data.get("content")
-            if not isinstance(text, str) or not text.strip():
-                errors.append(f"Mensagem sem texto ({node_id})")
-
         if bool(data.get("isStart")):
             start_nodes.append(node_id)
 
-        if node_type == "message" and not is_terminal:
-            # opcional recomendado: auto-marcar terminal
-            data.setdefault("is_terminal", False)
+    if len(start_nodes) != 1:
+        add_issue(errors, "SINGLE_START_REQUIRED", None, "Flow precisa ter exatamente 1 start node.")
 
     for edge in edges_payload:
         source = str((edge or {}).get("source") or "").strip()
         target = str((edge or {}).get("target") or "").strip()
-        if not source or not target:
-            errors.append("Edge inválida: falta source ou target")
+        if source not in node_map or target not in node_map:
+            add_issue(errors, "EDGE_REFERENCE_NOT_FOUND", None, "Edge referencia node inexistente")
             continue
-        if source not in node_ids or target not in node_ids:
-            errors.append("Edge inválida: node inexistente")
-            continue
-        outgoing_count[source] = outgoing_count.get(source, 0) + 1
+        outgoing[source] += 1
+        incoming[target] += 1
         source_handle = str((edge.get("sourceHandle") or (edge.get("data") or {}).get("sourceHandle") or "")).lower()
         if source_handle:
-            condition_handles.setdefault(source, set()).add(source_handle)
+            condition_handles[source].add(source_handle)
 
-    if len(start_nodes) == 0:
-        errors.append("Flow inválido: sem start node")
+    if start_nodes:
+        reachable=set(); stack=[start_nodes[0]]; adj={k:[] for k in node_map}
+        for edge in edges_payload:
+            src=str((edge or {}).get('source') or '').strip(); dst=str((edge or {}).get('target') or '').strip()
+            if src in adj and dst in node_map: adj[src].append(dst)
+        while stack:
+            cur=stack.pop()
+            if cur in reachable: continue
+            reachable.add(cur); stack.extend(adj.get(cur,[]))
+        for nid in node_map:
+            if nid not in reachable:
+                add_issue(errors if strict_mode else warnings, "ORPHAN_NODE", nid, "Node órfão fora do caminho do start.")
 
-    for node in nodes_payload:
-        node_id = str((node or {}).get("id") or "").strip()
+    for node_id,node in node_map.items():
         data = node.get("data") if isinstance(node.get("data"), dict) else {}
         node_type = str(node.get("type") or "").strip().lower()
         is_terminal = bool(data.get("is_terminal") or data.get("isTerminal") or False)
-        if node_type == "message" and outgoing_count.get(node_id, 0) == 0 and not is_terminal:
-            data["is_terminal"] = True
-            is_terminal = True
-        if not is_terminal and outgoing_count.get(node_id, 0) < 1:
-            (errors if strict_mode else warnings).append(f"Node sem saída ({node_id})")
-        if node_type == "condition":
+
+        if node_type == "message":
+            text = data.get("text") if isinstance(data.get("text"), str) else data.get("content")
+            if not isinstance(text, str) or not text.strip():
+                add_issue(errors, "MESSAGE_TEXT_REQUIRED", node_id, "Message precisa ter texto.")
+        elif node_type == "delay":
+            raw_delay = data.get("delay") or data.get("seconds") or data.get("content")
+            try:
+                delay = float(str(raw_delay).strip())
+            except Exception:
+                delay = 0
+            if delay <= 0:
+                add_issue(errors, "DELAY_INVALID", node_id, "Delay precisa ter tempo válido > 0.")
+        elif node_type == "action":
+            action = data.get("action") or data.get("name")
+            if not isinstance(action, str) or not action.strip():
+                add_issue(errors, "ACTION_REQUIRED", node_id, "Action precisa ter nome/ação configurada.")
+        elif node_type == "condition":
             handles = condition_handles.get(node_id, set())
             if not {"true", "false"}.issubset(handles):
-                (errors if strict_mode else warnings).append(f"Condition sem caminhos true/false ({node_id})")
+                add_issue(errors, "CONDITION_REQUIRES_TRUE_FALSE", node_id, "Condition precisa ter saída SIM e saída NÃO.")
 
-    # orphan nodes
-    if start_nodes:
-        reachable = set()
-        adjacency: dict[str, list[str]] = {node_id: [] for node_id in node_ids}
-        for edge in edges_payload:
-            src = str((edge or {}).get("source") or "")
-            dst = str((edge or {}).get("target") or "")
-            if src in adjacency and dst in node_ids:
-                adjacency[src].append(dst)
-        stack = [start_nodes[0]]
-        while stack:
-            cur = stack.pop()
-            if cur in reachable:
-                continue
-            reachable.add(cur)
-            stack.extend(adjacency.get(cur, []))
-        for node_id in node_ids:
-            if node_id not in reachable:
-                (errors if strict_mode else warnings).append(f"Node órfão ({node_id})")
+        if not is_terminal and outgoing.get(node_id, 0) < 1:
+            add_issue(errors if strict_mode else warnings, "NODE_WITHOUT_OUTPUT", node_id, "Este node não tem saída. Conecte a outro node ou marque como final.")
 
+    logger.info("[FLOW VALIDATION] mode=%s valid=%s errors=%s warnings=%s", mode, len(errors)==0, len(errors), len(warnings))
+    for issue in errors:
+        logger.error("[FLOW VALIDATION ERROR] code=%s node_id=%s message=%s", issue.get("code"), issue.get("node_id"), issue.get("message"))
     return {"valid": len(errors) == 0, "errors": errors, "warnings": warnings}
+
+
+def validate_flow(flow: dict[str, Any], mode: str = "draft") -> dict[str, Any]:
+    return validate_flow_graph(flow.get("nodes"), flow.get("edges"), mode=mode)
 
 
 def _is_valid_flow_payload(nodes: list[dict[str, Any]] | None, edges: list[dict[str, Any]] | None) -> bool:

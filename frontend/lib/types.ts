@@ -181,6 +181,8 @@ export type FlowNodePayload = {
     isStart?: boolean;
     metadata?: Record<string, unknown>;
     onChange?: (nodeId: string, patch: Record<string, unknown>) => void;
+    is_terminal?: boolean;
+    hasValidationError?: boolean;
   };
 };
 

@@ -21,6 +21,7 @@ from app.services.flow_engine_service import (
     invalidate_flow_runtime_cache,
     save_flow_graph,
     validate_flow as validate_flow_definition,
+    validate_flow_graph,
 )
 from app.services.flow_service import FlowService, create_flow, delete_flow, duplicate_flow, get_flow, get_flows, update_flow
 
@@ -294,7 +295,7 @@ def validate_flow_payload_or_400(
         elif node_type == "message" and outgoing_count.get(node_id, 0) < 1:
             raise HTTPException(status_code=400, detail="VALIDATION_ERROR: MESSAGE_REQUIRES_OUTPUT")
 
-    validation = validate_flow_definition({"nodes": nodes, "edges": edges or []}, mode="draft")
+    validation = validate_flow_graph(nodes, edges or [], mode="draft")
     if not validation["valid"]:
         logger.warning(
             "[FLOW VALIDATION] FLOW_INVALID/INVALID_GRAPH ignorado para não bloquear requisição: %s",
@@ -1236,9 +1237,9 @@ def publish_tenant_flow_version(
 
     nodes = flow_version.nodes if isinstance(flow_version.nodes, list) else []
     edges = flow_version.edges if isinstance(flow_version.edges, list) else []
-    validation = validate_flow_definition({"nodes": nodes, "edges": edges}, mode="published")
+    validation = validate_flow_graph(nodes, edges, mode="publish")
     if validation["errors"]:
-        raise HTTPException(status_code=400, detail={"errors": validation["errors"], "warnings": validation["warnings"]})
+        raise HTTPException(status_code=422, detail=validation)
 
     FlowService(db).publish_version(flow=flow, flow_version=flow_version)
     flow.status = "published"
@@ -1311,6 +1312,10 @@ def simulate_tenant_flow(
         logger.info("[GRAPH NODES COUNT] %s", len(nodes))
         print("[SIMULATOR NODES COUNT]", len(nodes))
         logger.info("[GRAPH EDGES COUNT] %s", len(edges))
+
+        validation = validate_flow_graph(nodes, edges, mode="simulate")
+        if validation["errors"]:
+            raise HTTPException(status_code=422, detail=validation)
 
         start_node = next((n for n in nodes if isinstance(n, dict) and isinstance(n.get("data"), dict) and n.get("data", {}).get("isStart")), None)
         if not start_node and nodes:

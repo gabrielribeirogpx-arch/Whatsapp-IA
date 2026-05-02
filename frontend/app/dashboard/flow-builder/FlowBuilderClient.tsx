@@ -128,6 +128,8 @@ function makeNodeId() {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 }
 
+type FlowValidationIssue = { code: string; node_id?: string | null; message: string };
+
 type FlowBuilderClientProps = {
   flowId?: string;
 };
@@ -172,8 +174,9 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
   const [flowSource, setFlowSource] = useState<string>('version');
   const [showEmptyFlowWarning, setShowEmptyFlowWarning] = useState(false);
   const [flowValidationError, setFlowValidationError] = useState<string | null>(null);
-  const [validationWarnings, setValidationWarnings] = useState<string[]>([]);
-  const [validationErrors, setValidationErrors] = useState<string[]>([]);
+  const [validationWarnings, setValidationWarnings] = useState<FlowValidationIssue[]>([]);
+  const [validationErrors, setValidationErrors] = useState<FlowValidationIssue[]>([]);
+  const [highlightedNodeId, setHighlightedNodeId] = useState<string | null>(null);
   const [operationError, setOperationError] = useState<string | null>(null);
   const [isEditing] = useState(true);
   const simulationStartedRef = useRef(false);
@@ -386,6 +389,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
           label: node.data?.label || node.data?.content || `Node ${node.id}`,
           onChange: updateNodeData,
           onToggleStart: toggleStartNode,
+        hasValidationError: node.id === highlightedNodeId,
         },
       };
     },
@@ -662,6 +666,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
           ...preset.data,
           onChange: updateNodeData,
           onToggleStart: toggleStartNode,
+        hasValidationError: node.id === highlightedNodeId,
         },
       };
 
@@ -762,7 +767,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
         method: 'PUT',
         body: JSON.stringify(safeFlow),
       });
-      const data = await parseApiResponse<{ validation?: { warnings?: string[]; errors?: string[] } }>(response);
+      const data = await parseApiResponse<{ validation?: { warnings?: FlowValidationIssue[]; errors?: FlowValidationIssue[] } }>(response);
       setValidationWarnings(data?.validation?.warnings || []);
       setValidationErrors(data?.validation?.errors || []);
     } catch (error) {
@@ -870,6 +875,21 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
     }
   }, [buildFlowNode, rfInstance, selectedFlowId, setEdges, setNodes]);
 
+  const focusNodeIssue = useCallback((nodeId?: string | null) => {
+    if (!nodeId) return;
+    setHighlightedNodeId(nodeId);
+    const target = nodesRef.current.find((n) => n.id === nodeId);
+    if (target) {
+      rfInstance?.setCenter(target.position.x, target.position.y, { zoom: 1.2, duration: 300 });
+      console.info('[INVALID NODE HIGHLIGHTED]', nodeId);
+    }
+  }, [rfInstance]);
+
+  useEffect(() => {
+    const first = validationErrors.find((e) => e.node_id);
+    if (first?.node_id) focusNodeIssue(first.node_id);
+  }, [focusNodeIssue, validationErrors]);
+
   const decoratedNodes = useMemo(
     () => nodes.map((node) => ({
       ...node,
@@ -877,9 +897,10 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
         ...node.data,
         running: node.id === currentNodeId,
         onToggleStart: toggleStartNode,
+        hasValidationError: node.id === highlightedNodeId,
       },
     })),
-    [currentNodeId, nodes, toggleStartNode],
+    [currentNodeId, highlightedNodeId, nodes, toggleStartNode],
   );
 
   const safeNodes = useMemo(
@@ -1001,12 +1022,12 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
       )}
       {validationWarnings.length > 0 && (
         <div style={{ position: 'absolute', top: 12, right: 16, zIndex: 25, background: '#fef3c7', color: '#92400e', border: '1px solid #f59e0b', borderRadius: 8, padding: '8px 12px', fontSize: 13 }}>
-          ⚠️ {validationWarnings[0]}
+          ⚠️ {validationWarnings[0]?.message}
         </div>
       )}
       {validationErrors.length > 0 && (
         <div style={{ position: 'absolute', top: 50, right: 16, zIndex: 25, background: '#fef2f2', color: '#b91c1c', border: '1px solid #fca5a5', borderRadius: 8, padding: '8px 12px', fontSize: 13 }}>
-          ❌ {validationErrors[0]}
+          ❌ {validationErrors[0]?.message}
         </div>
       )}
       {operationError && (
@@ -1114,6 +1135,17 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
             Histórico
           </button>
         </div>
+        {validationErrors.length > 0 && (
+          <div style={{ margin: '8px 0', padding: 10, border: '1px solid #fecaca', borderRadius: 8, background: '#fff1f2', maxWidth: 420 }}>
+            <strong style={{ fontSize: 12 }}>Problemas do Flow</strong>
+            {validationErrors.map((issue, idx) => (
+              <div key={`${issue.code}-${idx}`} style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 12, marginTop: 6 }}>
+                <span>⚠️ {issue.message}</span>
+                <button type="button" onClick={() => focusNodeIssue(issue.node_id)} style={{ color: '#b91c1c' }}>Ir para node</button>
+              </div>
+            ))}
+          </div>
+        )}
         {!isSimulatorOpen && (
           <button
             type="button"
