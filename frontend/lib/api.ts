@@ -23,7 +23,8 @@ import {
   FlowVersionItem,
   FlowAnalytics,
   SystemSettings,
-  SystemSettingsPayload
+  SystemSettingsPayload,
+  DeleteFlowResponse
 } from './types';
 
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL;
@@ -391,12 +392,12 @@ export async function updateFlow(flowId: string, payload: Partial<FlowPayload>):
   return parseApiResponse<FlowItem>(res);
 }
 
-export async function deleteFlow(flowId: string): Promise<void> {
+export async function deleteFlow(flowId: string): Promise<DeleteFlowResponse> {
   const res = await apiFetch(`/api/flows/${flowId}`, {
     method: 'DELETE'
   });
 
-  return parseApiResponse<void>(res);
+  return parseApiResponse<DeleteFlowResponse>(res);
 }
 
 export async function duplicateFlow(flowId: string): Promise<FlowItem> {
