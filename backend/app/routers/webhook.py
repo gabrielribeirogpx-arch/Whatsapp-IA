@@ -8,6 +8,7 @@ from sqlalchemy import desc, select
 from sqlalchemy.orm import Session, load_only
 
 from app.database import get_db
+from app.core.redis_client import get_redis_client
 from app.models import Conversation, Message, FlowExecution, FlowVersion
 from app.schemas.chat import MessageOut
 from app.services.contact_sync_service import ensure_conversation_contact_link, upsert_contact_for_phone
@@ -339,6 +340,14 @@ async def webhook(request: Request, db: Session = Depends(get_db)):
         )
         return {"status": "ignored"}
 
+    redis_client = get_redis_client()
+    lock_key = f"flow_lock:{tenant_uuid}:{wa_id}"
+    lock_token = str(uuid.uuid4())
+    lock_acquired = redis_client.set(lock_key, lock_token, nx=True, ex=10)
+    if not lock_acquired:
+        logger.info("[RUNTIME LOCKED] tenant_id=%s wa_id=%s", tenant_uuid, wa_id)
+        return {"status": "ignored"}
+
     try:
         flow_row = (
             db.query(Flow)
@@ -458,6 +467,16 @@ async def webhook(request: Request, db: Session = Depends(get_db)):
         db.rollback()
         send_whatsapp_message_simple(phone, "⚠️ O sistema está inicializando. Tente novamente em instantes.")
         return {"status": "fallback"}
+    finally:
+        try:
+            redis_client.eval(
+                "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) else return 0 end",
+                1,
+                lock_key,
+                lock_token,
+            )
+        except Exception:
+            logger.exception("[RUNTIME LOCK RELEASE ERROR] tenant_id=%s wa_id=%s", tenant_uuid, wa_id)
 
 
 @router.post("/webhook/meta")
