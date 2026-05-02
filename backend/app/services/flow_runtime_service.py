@@ -116,19 +116,14 @@ async def execute_node_chain_until_reply(
                 logger.info("[AUTO_CONTINUE TO] next_node_id=%s next_type=%s", next_id, next_type)
                 cursor = next_id
                 continue
-            return _result(pending=False, reply="
-
-".join(replies) or None, response_node_id=response_node_id, next_node_id=next_id)
+            return _result(pending=False, reply="\n\n".join(replies) or None, response_node_id=response_node_id, next_node_id=next_id)
 
         if ntype == "condition":
             if replies:
                 logger.info("[AUTO_CONTINUE PAUSED_AT_CONDITION] node_id=%s", cursor)
-                return _result(pending=False, reply="
-
-".join(replies) or None, response_node_id=response_node_id, next_node_id=str(cursor))
+                return _result(pending=False, reply="\n\n".join(replies) or None, response_node_id=response_node_id, next_node_id=str(cursor))
             raw_condition = str(data.get("condition") or data.get("keywords") or data.get("content") or "")
-            keywords = [_normalize_text(p) for p in raw_condition.replace("
-", ",").split(",") if str(p).strip()]
+            keywords = [_normalize_text(p) for p in raw_condition.replace("\n", ",").split(",") if str(p).strip()]
             is_true = any(k and (k in normalized_input or normalized_input in k) for k in keywords)
             cursor = find_next(str(cursor), ["true", "sim"] if is_true else ["false", "nao", "não"])
             continue
@@ -157,9 +152,7 @@ async def execute_node_chain_until_reply(
 
         cursor = find_next(str(cursor))
 
-    return _result(pending=False, reply="
-
-".join(replies) or None, response_node_id=response_node_id, next_node_id=None)
+    return _result(pending=False, reply="\n\n".join(replies) or None, response_node_id=response_node_id, next_node_id=None)
 
 
 async def execute_until_message_or_end(
