@@ -1057,83 +1057,94 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
               </button>
             </div>
           )}
-          <select
-            value={selectedFlowId || ''}
-            onChange={async (e) => {
-              const id = e.target.value || null;
-              console.log('FLOW SELECIONADO:', id);
-              setSelectedFlowId(id);
-              await loadFlow(id);
-            }}
-            style={{
-              padding: '6px 10px',
-              borderRadius: 8,
-              border: '1px solid #d6ddd3',
-              background: '#fff',
-              minWidth: 220,
-            }}
-            disabled={normalizedFlows.length === 0}
-          >
-            <option value="" disabled>
-              {normalizedFlows.length === 0 ? 'Nenhum flow disponível' : 'Selecione um flow'}
-            </option>
-            {normalizedFlows.map((flow) => (
-              <option key={flow.id} value={flow.id}>
-                {(flow.name || flow.id) + (flow.id === activeFlowId ? ' 🟢' : '')}
-              </option>
-            ))}
-          </select>
-          <button
-            type="button"
-            className="flow-top-btn flow-top-btn-secondary"
-            onClick={() => {
-              void handleCreateFlow();
-            }}
-            disabled={isCreatingFlow}
-          >
-            {isCreatingFlow ? 'Criando...' : '+ Criar novo Flow'}
-          </button>
-          <button
-            type="button"
-            className="flow-top-btn"
-            onClick={handleActivateFlow}
-            disabled={!selectedFlowId || validationErrors.length > 0}
-          >
-            Ativar Flow
-          </button>
-          <button
-            type="button"
-            className="flow-top-btn flow-top-btn-secondary"
-            onClick={handleDeactivateFlow}
-            disabled={!activeFlowId}
-          >
-            Desativar Flow
-          </button>
-          <button
-            type="button"
-            className="flow-top-btn flow-top-btn-secondary"
-            onClick={renameFlow}
-            disabled={!selectedFlowId}
-          >
-            Renomear
-          </button>
-          <button
-            type="button"
-            className="flow-top-btn flow-top-btn-danger"
-            onClick={deleteFlow}
-            disabled={!selectedFlowId}
-          >
-            Excluir
-          </button>
-          <button
-            type="button"
-            className="flow-top-btn flow-top-btn-secondary"
-            onClick={openVersionsModal}
-            disabled={!selectedFlowId}
-          >
-            <History size={14} />
-            Histórico
-          </button>
+
+          <div className="flow-toolbar-groups">
+            <div className="flow-toolbar-group flow-toolbar-group-select">
+              <div className="flow-select-wrapper">
+                <select
+                  value={selectedFlowId || ''}
+                  onChange={async (e) => {
+                    const id = e.target.value || null;
+                    console.log('FLOW SELECIONADO:', id);
+                    setSelectedFlowId(id);
+                    await loadFlow(id);
+                  }}
+                  className="flow-select"
+                  disabled={normalizedFlows.length === 0}
+                >
+                  <option value="" disabled>
+                    {normalizedFlows.length === 0 ? 'Nenhum flow disponível' : 'Selecione um flow'}
+                  </option>
+                  {normalizedFlows.map((flow) => (
+                    <option key={flow.id} value={flow.id}>
+                      {flow.name || flow.id}
+                    </option>
+                  ))}
+                </select>
+                {selectedFlowId && selectedFlowId === activeFlowId && <span className="flow-active-badge">Ativo</span>}
+              </div>
+            </div>
+
+            <div className="flow-toolbar-group flow-toolbar-group-main">
+              <button
+                type="button"
+                className="flow-top-btn flow-top-btn-primary"
+                onClick={handleActivateFlow}
+                disabled={!selectedFlowId || validationErrors.length > 0}
+              >
+                Ativar Flow
+              </button>
+            </div>
+
+            <div className="flow-toolbar-group flow-toolbar-group-secondary">
+              <button
+                type="button"
+                className="flow-top-btn flow-top-btn-secondary"
+                onClick={() => {
+                  void handleCreateFlow();
+                }}
+                disabled={isCreatingFlow}
+              >
+                {isCreatingFlow ? 'Criando...' : '+ Criar novo Flow'}
+              </button>
+              <button
+                type="button"
+                className="flow-top-btn flow-top-btn-secondary"
+                onClick={handleDeactivateFlow}
+                disabled={!activeFlowId}
+              >
+                Desativar Flow
+              </button>
+              <button
+                type="button"
+                className="flow-top-btn flow-top-btn-neutral"
+                onClick={renameFlow}
+                disabled={!selectedFlowId}
+              >
+                Renomear
+              </button>
+              <button
+                type="button"
+                className="flow-top-btn flow-top-btn-neutral"
+                onClick={openVersionsModal}
+                disabled={!selectedFlowId}
+              >
+                <History size={14} />
+                Histórico
+              </button>
+            </div>
+
+            <div className="flow-toolbar-group flow-toolbar-group-danger">
+              <button
+                type="button"
+                className="flow-top-btn flow-top-btn-danger"
+                onClick={deleteFlow}
+                disabled={!selectedFlowId}
+              >
+                Excluir
+              </button>
+            </div>
+          </div>
         </div>
         {validationErrors.length > 0 && (
           <div style={{ margin: '8px 0', padding: 10, border: '1px solid #fecaca', borderRadius: 8, background: '#fff1f2', maxWidth: 420 }}>
