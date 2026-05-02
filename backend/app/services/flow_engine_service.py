@@ -3,6 +3,7 @@ from __future__ import annotations
 import unicodedata
 import uuid
 import logging
+import time
 from dataclasses import dataclass
 from typing import Any
 
@@ -1563,11 +1564,17 @@ def process_flow_engine(
             continue
 
         if node_type == "delay":
-            delay_value = str(node_data.get("content") or "").strip()
+            logger.info("[DELAY NODE HIT] node_id=%s", node.id)
+            raw_delay = node_data.get("delay") or node_data.get("seconds") or node_data.get("duration") or node_data.get("content") or node.content
             try:
-                delay_seconds = int(delay_value)
-            except ValueError:
-                delay_seconds = 0
+                delay_seconds = int(float(str(raw_delay).strip()))
+            except Exception:
+                logger.warning("[DELAY INVALID] node_id=%s raw=%s fallback=1", node.id, raw_delay)
+                delay_seconds = 1
+            if delay_seconds <= 0:
+                logger.warning("[DELAY INVALID] node_id=%s raw=%s fallback=1", node.id, raw_delay)
+                delay_seconds = 1
+            logger.info("[DELAY SECONDS] %s", delay_seconds)
 
             next_edge = _pick_default_edge(edges)
             if not next_edge:
@@ -1575,6 +1582,18 @@ def process_flow_engine(
                 _reset_to_bot_mode(db=db, conversation=conversation, reason="flow_finished_delay_without_next")
                 reached_max_steps = False
                 break
+
+            logger.info("[DELAY CONTINUE TO] next_node_id=%s", next_edge.target)
+            if delay_seconds <= 5:
+                time.sleep(delay_seconds)
+                set_current_node(conversation=conversation, node_id=next_edge.target, db=db)
+                _keep_flow_mode(conversation)
+                node = _find_node_by_id(nodes, next_edge.target)
+                if not node:
+                    reached_max_steps = False
+                    break
+                logger.info("[DELAY RESPONSE NODE] node_id=%s", node.id)
+                continue
 
             enqueue_delay(
                 tenant_id=conversation.tenant_id,
