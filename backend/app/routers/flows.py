@@ -1374,8 +1374,29 @@ async def simulate_tenant_flow(
         print("[SIMULATOR SESSION LOADED]", {"is_new": is_new_session, "session_id": session_id})
 
         reply = ""
+        messages: list[str] = []
         current_node_id = None
         next_node_id = None
+
+        def _extract_messages_from_runtime_result(runtime_result: dict | None) -> list[str]:
+            if not isinstance(runtime_result, dict):
+                return []
+            events = runtime_result.get("events")
+            if not isinstance(events, list):
+                events = []
+            logger.info("[SIMULATOR EVENTS BUILT] %s", events)
+            print("[SIMULATOR EVENTS BUILT]", events)
+            message_events = [
+                event for event in events
+                if isinstance(event, dict) and str(event.get("type") or "").strip().lower() == "send_message"
+            ]
+            logger.info("[SIMULATOR MESSAGE EVENTS COUNT] %s", len(message_events))
+            print("[SIMULATOR MESSAGE EVENTS COUNT]", len(message_events))
+            extracted = [str(event.get("text") or "").strip() for event in message_events if str(event.get("text") or "").strip()]
+            if extracted:
+                logger.info("[SIMULATOR REPLY TEXT] %s", "\\n\\n".join(extracted))
+                print("[SIMULATOR REPLY TEXT]", "\\n\\n".join(extracted))
+            return extracted
 
         if is_new_session:
             start_node_id = str(start_node.get("id"))
@@ -1388,7 +1409,8 @@ async def simulate_tenant_flow(
                 db=db,
                 context={"channel": "simulator"},
             )
-            reply = str(runtime_result.get("reply") or "")
+            messages = _extract_messages_from_runtime_result(runtime_result)
+            reply = "\n\n".join(messages) if messages else str(runtime_result.get("reply") or "")
             current_node_id = runtime_result.get("response_node_id") or start_node_id
             next_node_id = runtime_result.get("next_node_id")
 
@@ -1422,11 +1444,13 @@ async def simulate_tenant_flow(
                     db=db,
                     context={"channel": "simulator"},
                 )
-                reply = str(runtime_result.get("reply") or "")
+                messages = _extract_messages_from_runtime_result(runtime_result)
+                reply = "\n\n".join(messages) if messages else str(runtime_result.get("reply") or "")
                 current_node_id = runtime_result.get("response_node_id") or str(current_node_id)
                 next_node_id = runtime_result.get("next_node_id")
                 if runtime_result.get("pending"):
                     reply = "Aguardando o tempo configurado para continuar o fluxo."
+                    messages = [reply]
 
                 sim_session.current_node_id = next_node_id
                 sim_session.status = "running" if next_node_id else "finished"
@@ -1436,6 +1460,7 @@ async def simulate_tenant_flow(
         result = {
             "success": True,
             "reply": reply,
+            "messages": messages,
             "current_node_id": current_node_id,
             "next_node_id": next_node_id,
             "selected_edge": None,
