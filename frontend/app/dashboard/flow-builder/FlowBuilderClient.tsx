@@ -586,10 +586,17 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
       }
 
       const data = await parseApiResponse<any>(response);
+      const backendMessages = Array.isArray(data?.messages)
+        ? data.messages.map((item: unknown) => (typeof item === 'string' ? item.trim() : '')).filter(Boolean)
+        : [];
+      const fallbackReply = typeof data?.reply === 'string' ? data.reply : '';
+      const botMessages = backendMessages.length > 0
+        ? backendMessages
+        : (fallbackReply ? [fallbackReply] : ['Simulação concluída sem resposta textual.']);
       setMessages((prev) => [
         ...prev,
         { type: 'user', text: userMessage },
-        { type: 'bot', text: data.reply || 'Simulação concluída sem resposta textual.' },
+        ...botMessages.map((text: string) => ({ type: 'bot' as const, text })),
       ]);
       setCurrentNodeId(data.next_node_id || null);
       setCurrentChoices([]);
