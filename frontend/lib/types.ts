@@ -236,6 +236,11 @@ export type FlowPayload = {
   is_active?: boolean;
 };
 
+export type DeleteFlowResponse = {
+  success: boolean;
+  mode: 'hard_delete' | 'soft_delete' | string;
+};
+
 export type FlowAnalytics = {
   entries: number;
   messages_sent: number;

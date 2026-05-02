@@ -107,7 +107,12 @@ export default function FlowsPage() {
 
   const onDelete = async (flowId: string) => {
     try {
-      await deleteFlow(flowId);
+      const response = await deleteFlow(flowId);
+      if (response.success === true && response.mode === 'soft_delete') {
+        showToast('Flow em uso, removido apenas da visualização');
+      } else {
+        showToast('Flow deletado com sucesso');
+      }
       await loadFlows();
     } catch (error) {
       const status = parseHttpStatus(error);
