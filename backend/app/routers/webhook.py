@@ -73,6 +73,12 @@ def _find_next_node_id(source_node_id: str | None, edges: list[dict]) -> str | N
     target = edge.get("target")
     return str(target) if target else None
 
+
+def _has_outgoing_edges(node_id: str | None, edges: list[dict]) -> bool:
+    if not node_id:
+        return False
+    return any(str(edge.get("source")) == str(node_id) for edge in edges)
+
 def _looks_like_name(text: str) -> bool:
     if not text:
         return False
@@ -413,6 +419,10 @@ async def webhook(request: Request, db: Session = Depends(get_db)):
         force_start = normalized in {"oi", "ola", "menu", "iniciar", "inicio", "reiniciar", "reset"}
         print("[RUNTIME FORCE START]", force_start)
 
+        if execution.current_node_id is None and not force_start:
+            print("[RUNTIME SESSION COMPLETED] aguardando reset/start explícito")
+            return {"status": "ignored"}
+
         if force_start:
             start_content = _extract_node_content(start_node)
             print("[RUNTIME START NODE FOUND]", start_node.get("id"))
@@ -555,7 +565,6 @@ async def webhook(request: Request, db: Session = Depends(get_db)):
 
         execution.current_node_id = next_node_id
         db.add(execution)
-        db.commit()
 
         next_node = get_node_by_id(flow, next_node_id) if next_node_id else None
         if next_node:
@@ -564,6 +573,14 @@ async def webhook(request: Request, db: Session = Depends(get_db)):
                 send_whatsapp_message_simple(phone, node_message)
                 if str(current_node.get("type") or "").lower() == "condition":
                     print("[WHATSAPP RESPONSE CONDITION]", node_message)
+
+        is_terminal = not _has_outgoing_edges(next_node_id, flow["edges"])
+        if is_terminal:
+            execution.current_node_id = None
+            print("[FLOW RUNTIME] session finalized at node", next_node_id)
+
+        db.add(execution)
+        db.commit()
         return {"status": "message processed"}
     except Exception:
         db.rollback()
