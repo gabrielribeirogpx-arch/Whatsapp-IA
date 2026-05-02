@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import re
 import unicodedata
 from typing import Any
@@ -9,6 +10,19 @@ from sqlalchemy.orm import Session
 
 from app.services.flow_engine_service import get_flow_for_builder
 from app.services.flow_session_service import FlowSessionService
+
+
+logger = logging.getLogger(__name__)
+
+
+def _summarize_reply(value: Any) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    masked = re.sub(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}", "[email]", text)
+    masked = re.sub(r"\+?\d[\d\s().-]{7,}\d", "[phone]", masked)
+    masked = re.sub(r"\s+", " ", masked).strip()
+    return masked[:120] + ("..." if len(masked) > 120 else "")
 
 
 def _normalize_text(value: Any) -> str:
@@ -76,15 +90,19 @@ async def execute_node_chain_until_reply(
 
     cursor = start_node_id
     normalized_input = _normalize_text(user_input)
+    logger.info("[CORE EXECUTOR START] tenant_id=%s wa_id=%s start_node_id=%s context=%s", tenant_id, wa_id, start_node_id, context)
     while cursor:
         node = node_map.get(str(cursor))
         if not node:
             break
         ntype = _node_type(node)
         data = node.get("data") if isinstance(node.get("data"), dict) else {}
+        logger.info("[CORE NODE TYPE] node_id=%s node_type=%s", cursor, ntype)
 
         if ntype == "message":
             reply = str(data.get("text") or data.get("content") or data.get("label") or "")
+            logger.info("[DELAY RESPONSE NODE] node_id=%s", cursor)
+            logger.info("[CORE REPLY BUILT] node_id=%s reply_summary=%s", cursor, _summarize_reply(reply))
             return _result(
                 pending=False,
                 reply=reply,
@@ -100,9 +118,9 @@ async def execute_node_chain_until_reply(
             continue
 
         if ntype == "delay":
-            print("[DELAY NODE HIT]", cursor)
+            logger.info("[DELAY NODE HIT] node_id=%s", cursor)
             seconds = _extract_delay_seconds(node)
-            print("[DELAY SECONDS]", seconds)
+            logger.info("[DELAY SECONDS] %s", seconds)
             if seconds <= 5 or context.get("channel") == "simulator":
                 await asyncio.sleep(seconds)
             else:
@@ -113,8 +131,7 @@ async def execute_node_chain_until_reply(
                     next_node_id=find_next(str(cursor), ["default", "", "output"]),
                 )
             cursor = find_next(str(cursor), ["default", "", "output"])
-            print("[DELAY CONTINUE TO]", cursor)
-            print("[DELAY SKIP_REPLY]")
+            logger.info("[DELAY CONTINUE TO] next_node_id=%s", cursor)
             continue
 
         if ntype == "action":
