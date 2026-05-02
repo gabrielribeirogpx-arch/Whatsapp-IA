@@ -1066,8 +1066,9 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
           )}
 
           <div className="flow-toolbar-groups">
-            <div className="flow-toolbar-group flow-toolbar-group-select">
-              <div className="flow-select-wrapper">
+            <div className="flow-toolbar-section flow-toolbar-left">
+              <div className="flow-toolbar-group flow-toolbar-group-select">
+                <div className="flow-select-wrapper">
                 <select
                   value={selectedFlowId || ''}
                   onChange={async (e) => {
@@ -1088,68 +1089,100 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
                     </option>
                   ))}
                 </select>
-                {selectedFlowId && selectedFlowId === activeFlowId && <span className="flow-active-badge">Ativo</span>}
+                  {selectedFlowId && selectedFlowId === activeFlowId && <span className="flow-active-badge">Ativo</span>}
+                </div>
               </div>
             </div>
 
-            <div className="flow-toolbar-group flow-toolbar-group-main">
-              <button
-                type="button"
-                className="flow-top-btn flow-top-btn-primary"
-                onClick={handleActivateFlow}
-                disabled={!selectedFlowId || validationErrors.length > 0}
-              >
-                Ativar Flow
-              </button>
+            <div className="flow-toolbar-section flow-toolbar-center">
+              <div className="flow-toolbar-group flow-toolbar-group-main">
+                <button
+                  type="button"
+                  className="flow-top-btn flow-top-btn-primary"
+                  onClick={handleActivateFlow}
+                  disabled={!selectedFlowId || validationErrors.length > 0}
+                >
+                  Ativar Flow
+                </button>
+              </div>
+
+              <div className="flow-toolbar-group flow-toolbar-group-secondary">
+                <button
+                  type="button"
+                  className="flow-top-btn flow-top-btn-secondary"
+                  onClick={() => {
+                    void handleCreateFlow();
+                  }}
+                  disabled={isCreatingFlow}
+                >
+                  {isCreatingFlow ? 'Criando...' : '+ Criar novo Flow'}
+                </button>
+                <button
+                  type="button"
+                  className="flow-top-btn flow-top-btn-secondary"
+                  onClick={handleDeactivateFlow}
+                  disabled={!activeFlowId}
+                >
+                  Desativar Flow
+                </button>
+                <button
+                  type="button"
+                  className="flow-top-btn flow-top-btn-neutral"
+                  onClick={renameFlow}
+                  disabled={!selectedFlowId}
+                >
+                  Renomear
+                </button>
+                <button
+                  type="button"
+                  className="flow-top-btn flow-top-btn-neutral"
+                  onClick={openVersionsModal}
+                  disabled={!selectedFlowId}
+                >
+                  <History size={14} />
+                  Histórico
+                </button>
+              </div>
+
+              <div className="flow-toolbar-group flow-toolbar-group-danger">
+                <button
+                  type="button"
+                  className="flow-top-btn flow-top-btn-danger"
+                  onClick={deleteFlow}
+                  disabled={!selectedFlowId}
+                >
+                  Excluir
+                </button>
+              </div>
             </div>
 
-            <div className="flow-toolbar-group flow-toolbar-group-secondary">
-              <button
-                type="button"
-                className="flow-top-btn flow-top-btn-secondary"
-                onClick={() => {
-                  void handleCreateFlow();
-                }}
-                disabled={isCreatingFlow}
-              >
-                {isCreatingFlow ? 'Criando...' : '+ Criar novo Flow'}
-              </button>
-              <button
-                type="button"
-                className="flow-top-btn flow-top-btn-secondary"
-                onClick={handleDeactivateFlow}
-                disabled={!activeFlowId}
-              >
-                Desativar Flow
-              </button>
-              <button
-                type="button"
-                className="flow-top-btn flow-top-btn-neutral"
-                onClick={renameFlow}
-                disabled={!selectedFlowId}
-              >
-                Renomear
-              </button>
-              <button
-                type="button"
-                className="flow-top-btn flow-top-btn-neutral"
-                onClick={openVersionsModal}
-                disabled={!selectedFlowId}
-              >
-                <History size={14} />
-                Histórico
-              </button>
-            </div>
+            <div className="flow-toolbar-section flow-toolbar-right">
+              {!isSimulatorOpen && (
+                <button
+                  type="button"
+                  className="flow-top-btn flow-top-btn-simulate"
+                  onClick={() => {
+                    setIsSimulatorOpen(true);
+                    if (simulationStartedRef.current || nodes.length === 0) return;
 
-            <div className="flow-toolbar-group flow-toolbar-group-danger">
-              <button
-                type="button"
-                className="flow-top-btn flow-top-btn-danger"
-                onClick={deleteFlow}
-                disabled={!selectedFlowId}
-              >
-                Excluir
-              </button>
+                    simulationStartedRef.current = true;
+                    setMessages([]);
+                    setCurrentChoices([]);
+                    setCurrentNodeId(null);
+                    setActiveEdgeIds([]);
+                    setIsTyping(false);
+
+                    const markedStart = nodes.find((node) => (node.data as { isStart?: boolean }).isStart);
+                    const incomingTargets = new Set(edges.map((edge) => edge.target));
+                    const startNode = markedStart || nodes.find((node) => !incomingTargets.has(node.id)) || nodes[0];
+                    if (startNode) {
+                      void runFlowStep('oi');
+                    }
+                  }}
+                >
+                  ▶ Simular fluxo
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -1163,46 +1196,6 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
               </div>
             ))}
           </div>
-        )}
-        {!isSimulatorOpen && (
-          <button
-            type="button"
-            onClick={() => {
-              setIsSimulatorOpen(true);
-              if (simulationStartedRef.current || nodes.length === 0) return;
-
-              simulationStartedRef.current = true;
-              setMessages([]);
-              setCurrentChoices([]);
-              setCurrentNodeId(null);
-              setActiveEdgeIds([]);
-              setIsTyping(false);
-
-              const markedStart = nodes.find((node) => (node.data as { isStart?: boolean }).isStart);
-              const incomingTargets = new Set(edges.map((edge) => edge.target));
-              const startNode = markedStart || nodes.find((node) => !incomingTargets.has(node.id)) || nodes[0];
-              if (startNode) {
-                void runFlowStep('oi');
-              }
-            }}
-            style={{
-              position: 'absolute',
-              top: '14px',
-              right: '14px',
-              padding: '8px 14px',
-              borderRadius: '8px',
-              background: '#16A34A',
-              color: '#fff',
-              border: 'none',
-              fontSize: '12px',
-              fontWeight: '500',
-              cursor: 'pointer',
-              boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
-              zIndex: 10,
-            }}
-          >
-            ▶ Simular fluxo
-          </button>
         )}
         {/* Menu de contexto — botão direito no canvas */}
         {contextMenu && (
