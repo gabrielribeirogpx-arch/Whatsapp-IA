@@ -177,7 +177,8 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
   const [operationError, setOperationError] = useState<string | null>(null);
   const [isEditing] = useState(true);
   const simulationStartedRef = useRef(false);
-  const simulationSessionIdRef = useRef<string>((typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : String(Date.now()));
+  const createSimulationSessionId = () => ((typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : String(Date.now()));
+  const simulationSessionIdRef = useRef<string>(createSimulationSessionId());
   const isLoadingFlowRef = useRef(false);
   const lastLoadedFlowIdRef = useRef<string | null>(null);
   const hasTriedAutoCreateRef = useRef(false);
@@ -1406,6 +1407,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
               setActiveEdgeIds([]);
               setIsTyping(false);
               simulationStartedRef.current = false;
+              simulationSessionIdRef.current = createSimulationSessionId();
 
               if (nodes.length > 0) {
                 const markedStart = nodes.find((node) => (node.data as { isStart?: boolean }).isStart);
