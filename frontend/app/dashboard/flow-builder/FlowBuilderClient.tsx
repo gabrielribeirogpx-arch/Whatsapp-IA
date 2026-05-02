@@ -666,7 +666,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
           ...preset.data,
           onChange: updateNodeData,
           onToggleStart: toggleStartNode,
-        hasValidationError: node.id === highlightedNodeId,
+          hasValidationError: false,
         },
       };
 
