@@ -555,14 +555,37 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
       });
 
       if (!response.ok) {
-        const errorBody = await response.text();
-        console.error('[SIMULATOR ERROR]', response.status, errorBody);
-        setMessages((prev) => [...prev, { type: 'user', text: userMessage }, { type: 'bot', text: 'Não foi possível iniciar o simulador' }]);
+        let backendMessage: string | null = null;
+        let rawBody = '';
+
+        try {
+          const errorJson = await response.json() as { error?: string; detail?: string };
+          backendMessage = errorJson.error || errorJson.detail || null;
+        } catch {
+          rawBody = await response.text();
+          backendMessage = rawBody || null;
+        }
+
+        const friendlyMessage = backendMessage
+          ? `Não foi possível iniciar o simulador: ${backendMessage}`
+          : 'Não foi possível iniciar o simulador';
+        const statusBadge = `[HTTP ${response.status}]`;
+
+        console.error('[SIMULATOR ERROR]', response.status, backendMessage || rawBody);
+        setMessages((prev) => [
+          ...prev,
+          { type: 'user', text: userMessage },
+          { type: 'bot', text: `${statusBadge} ${friendlyMessage}` },
+        ]);
         return;
       }
 
       const data = await parseApiResponse<any>(response);
-      setMessages((prev) => [...prev, { type: 'user', text: userMessage }, { type: 'bot', text: data.reply || '' }]);
+      setMessages((prev) => [
+        ...prev,
+        { type: 'user', text: userMessage },
+        { type: 'bot', text: data.reply || 'Simulação concluída sem resposta textual.' },
+      ]);
       setCurrentNodeId(data.next_node_id || null);
       setCurrentChoices([]);
       const active = flow.edges
