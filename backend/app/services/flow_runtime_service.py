@@ -35,10 +35,13 @@ def _extract_delay_seconds(node: dict[str, Any] | None) -> int:
     return max(1, seconds)
 
 
-async def execute_until_message_or_end(
+async def execute_node_chain_until_reply(
     graph: dict[str, Any],
-    current_node_id: str | None,
+    start_node_id: str | None,
     user_input: str,
+    tenant_id: str | None = None,
+    wa_id: str | None = None,
+    db: Session | None = None,
     context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     def _result(
@@ -71,7 +74,7 @@ async def execute_until_message_or_end(
                     return str(edge.get("target"))
         return str(outgoing[0].get("target"))
 
-    cursor = current_node_id
+    cursor = start_node_id
     normalized_input = _normalize_text(user_input)
     while cursor:
         node = node_map.get(str(cursor))
@@ -121,6 +124,20 @@ async def execute_until_message_or_end(
         cursor = find_next(str(cursor))
 
     return _result(pending=False, reply=None, response_node_id=None, next_node_id=None)
+
+
+async def execute_until_message_or_end(
+    graph: dict[str, Any],
+    current_node_id: str | None,
+    user_input: str,
+    context: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    return await execute_node_chain_until_reply(
+        graph=graph,
+        start_node_id=current_node_id,
+        user_input=user_input,
+        context=context,
+    )
 
 
 class FlowRuntimeService:

@@ -24,7 +24,7 @@ from app.services.flow_engine_service import (
     validate_flow as validate_flow_definition,
     validate_flow_graph,
 )
-from app.services.flow_runtime_service import execute_until_message_or_end
+from app.services.flow_runtime_service import execute_node_chain_until_reply
 from app.services.flow_service import FlowService, create_flow, delete_flow, duplicate_flow, get_flow, get_flows, update_flow
 
 router = APIRouter()
@@ -1359,34 +1359,6 @@ async def simulate_tenant_flow(
                     return str(selected.get("target"))
             return str(outgoing[0].get("target"))
 
-        def _extract_delay_seconds(node: dict[str, Any] | None) -> int:
-            data = node.get("data") if isinstance(node, dict) and isinstance(node.get("data"), dict) else {}
-            raw_delay = data.get("delay") or data.get("seconds") or data.get("duration") or data.get("content") or (node.get("content") if isinstance(node, dict) else None)
-            try:
-                seconds = int(float(str(raw_delay).strip()))
-            except Exception:
-                logger.warning("[DELAY INVALID] node_id=%s raw=%s fallback=1", str((node or {}).get("id")), raw_delay)
-                seconds = 1
-            if seconds <= 0:
-                logger.warning("[DELAY INVALID] node_id=%s raw=%s fallback=1", str((node or {}).get("id")), raw_delay)
-                seconds = 1
-            return seconds
-
-        async def _resolve_operational_nodes(start_node_id: str | None) -> tuple[bool, str | None, str | None, str | None]:
-            result = await execute_until_message_or_end(
-                graph={"nodes": nodes, "edges": edges},
-                current_node_id=start_node_id,
-                user_input=message,
-                context={"channel": "simulator"},
-            )
-            logger.info("[DELAY RESPONSE NODE] node_id=%s", result.get("response_node_id"))
-            return (
-                bool(result.get("pending")),
-                result.get("reply"),
-                result.get("response_node_id"),
-                result.get("next_node_id"),
-            )
-
         simulator_user_identifier = f"simulator:{session_id}"
         sim_session = (
             db.query(FlowSession)
@@ -1401,17 +1373,24 @@ async def simulate_tenant_flow(
         logger.info("[SIMULATOR SESSION NEW] %s", is_new_session)
         print("[SIMULATOR SESSION LOADED]", {"is_new": is_new_session, "session_id": session_id})
 
-        selected_edge = None
         reply = ""
         current_node_id = None
         next_node_id = None
 
         if is_new_session:
             start_node_id = str(start_node.get("id"))
-            current_node_id = start_node_id
-            start_data = start_node.get("data") if isinstance(start_node.get("data"), dict) else {}
-            reply = str(start_data.get("text") or start_data.get("content") or start_data.get("label") or "")
-            next_node_id = get_next_node_id(start_node_id)
+            runtime_result = await execute_node_chain_until_reply(
+                graph={"nodes": nodes, "edges": edges},
+                start_node_id=start_node_id,
+                user_input=message,
+                tenant_id=str(tenant_uuid),
+                wa_id=session_id,
+                db=db,
+                context={"channel": "simulator"},
+            )
+            reply = str(runtime_result.get("reply") or "")
+            current_node_id = runtime_result.get("response_node_id") or start_node_id
+            next_node_id = runtime_result.get("next_node_id")
 
             sim_session = FlowSession(
                 tenant_id=tenant_uuid,
@@ -1434,36 +1413,20 @@ async def simulate_tenant_flow(
                 reply = "Simulação finalizada. Clique em Reiniciar simulação para começar novamente."
                 next_node_id = None
             else:
-                current = find_node(current_node_id)
-                data = current.get("data") if isinstance(current, dict) and isinstance(current.get("data"), dict) else {}
-                node_type = str(data.get("type") or current.get("type") or "").lower() if isinstance(current, dict) else ""
-
-                if "condition" in node_type:
-                    logger.info("[SIMULATOR CONDITION INPUT] %s", normalized_message)
-                    outgoing = [e for e in edges if isinstance(e, dict) and str(e.get("source")) == str(current_node_id)]
-                    condition_match = "true" if normalized_message in {"sim", "já", "ja", "anuncio", "anúncio"} else "false"
-                    logger.info("[SIMULATOR CONDITION MATCH] %s", condition_match)
-                    edge = next((e for e in outgoing if str(e.get("sourceHandle") or (e.get("data") or {}).get("sourceHandle") or "").lower() == condition_match), None)
-                    if edge is None and outgoing:
-                        edge = outgoing[0]
-                    if edge is not None:
-                        selected_edge = str(edge.get("sourceHandle") or (edge.get("data") or {}).get("sourceHandle") or condition_match)
-                        logger.info("[SIMULATOR EDGE SELECTED] %s", selected_edge)
-                        target_id = str(edge.get("target"))
-                        target_node = find_node(target_id)
-                        target_data = target_node.get("data") if isinstance(target_node, dict) and isinstance(target_node.get("data"), dict) else {}
-                        is_pending, resolved_reply, current_node_id, next_node_id = await _resolve_operational_nodes(target_id)
-                        reply = str(resolved_reply or "")
-                        if is_pending:
-                            reply = "Aguardando o tempo configurado para continuar o fluxo."
-                    else:
-                        reply = "Condição sem saída configurada."
-                        next_node_id = None
-                else:
-                    is_pending, resolved_reply, current_node_id, next_node_id = await _resolve_operational_nodes(str(current_node_id))
-                    reply = str(resolved_reply or "")
-                    if is_pending:
-                        reply = "Aguardando o tempo configurado para continuar o fluxo."
+                runtime_result = await execute_node_chain_until_reply(
+                    graph={"nodes": nodes, "edges": edges},
+                    start_node_id=str(current_node_id),
+                    user_input=message,
+                    tenant_id=str(tenant_uuid),
+                    wa_id=session_id,
+                    db=db,
+                    context={"channel": "simulator"},
+                )
+                reply = str(runtime_result.get("reply") or "")
+                current_node_id = runtime_result.get("response_node_id") or str(current_node_id)
+                next_node_id = runtime_result.get("next_node_id")
+                if runtime_result.get("pending"):
+                    reply = "Aguardando o tempo configurado para continuar o fluxo."
 
                 sim_session.current_node_id = next_node_id
                 sim_session.status = "running" if next_node_id else "finished"
@@ -1475,7 +1438,7 @@ async def simulate_tenant_flow(
             "reply": reply,
             "current_node_id": current_node_id,
             "next_node_id": next_node_id,
-            "selected_edge": str(selected_edge) if selected_edge is not None else None,
+            "selected_edge": None,
         }
         logger.info("[SIMULATOR RESPONSE] %s", result)
         print("[SIMULATOR RESPONSE BUILT]", result)
