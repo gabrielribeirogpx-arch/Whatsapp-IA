@@ -544,20 +544,36 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
 
   const runFlowStep = useCallback(async (userMessage: string) => {
     if (!selectedFlowId) return;
-    const response = await apiFetch(`/api/flows/${selectedFlowId}/simulate`, {
-      method: 'POST',
-      body: JSON.stringify({ session_id: simulationSessionIdRef.current, message: userMessage }),
-    });
-    const data = await parseApiResponse<any>(response);
 
-    setMessages((prev) => [...prev, { type: 'user', text: userMessage }, { type: 'bot', text: data.reply || '' }]);
-    setCurrentNodeId(data.current_node_id || null);
-    setCurrentChoices([]);
-    const active = flow.edges
-      .filter((e) => e.source === data.current_node_id && (e.sourceHandle === data.selected_edge || (e.data as any)?.sourceHandle === data.selected_edge))
-      .map((e) => e.id)
-      .filter(Boolean) as string[];
-    setActiveEdgeIds(active);
+    try {
+      const response = await apiFetch(`/api/flows/${selectedFlowId}/simulate`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ session_id: simulationSessionIdRef.current, message: userMessage }),
+      });
+
+      if (!response.ok) {
+        const errorBody = await response.text();
+        console.error('[SIMULATOR ERROR]', response.status, errorBody);
+        setMessages((prev) => [...prev, { type: 'user', text: userMessage }, { type: 'bot', text: 'Não foi possível iniciar o simulador' }]);
+        return;
+      }
+
+      const data = await parseApiResponse<any>(response);
+      setMessages((prev) => [...prev, { type: 'user', text: userMessage }, { type: 'bot', text: data.reply || '' }]);
+      setCurrentNodeId(data.current_node_id || null);
+      setCurrentChoices([]);
+      const active = flow.edges
+        .filter((e) => e.source === data.current_node_id && (e.sourceHandle === data.selected_edge || (e.data as any)?.sourceHandle === data.selected_edge))
+        .map((e) => e.id)
+        .filter(Boolean) as string[];
+      setActiveEdgeIds(active);
+    } catch (error) {
+      console.error('[SIMULATOR ERROR] failed to fetch', error);
+      setMessages((prev) => [...prev, { type: 'user', text: userMessage }, { type: 'bot', text: 'Não foi possível iniciar o simulador' }]);
+    }
   }, [flow.edges, selectedFlowId]);
 
   const handleChoiceClick = useCallback((handleId: string, label: string) => {
