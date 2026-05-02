@@ -1,4 +1,5 @@
 from datetime import datetime
+import asyncio
 import logging
 from uuid import UUID
 import uuid
@@ -32,6 +33,49 @@ from app.utils.text import normalize_text
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
+
+
+async def _process_runtime_events(
+    *,
+    events: list[dict],
+    phone: str,
+    execution: FlowExecution | None,
+    tenant_uuid: UUID,
+    wa_id: str,
+    db: Session,
+) -> bool:
+    for event in events:
+        event_type = str(event.get("type") or "").strip().lower()
+        if event_type == "delay":
+            seconds = float(event.get("seconds") or 0)
+            logger.info("[FLOW DELAY EVENT] tenant_id=%s wa_id=%s seconds=%s", tenant_uuid, wa_id, seconds)
+            if seconds <= 5:
+                await asyncio.sleep(seconds)
+                continue
+
+            if execution is not None:
+                runtime_state = execution.state if isinstance(execution.state, dict) else {}
+                runtime_state["pending_delay"] = True
+                runtime_state["pending_delay_at"] = datetime.utcnow().isoformat()
+                runtime_state["pending_delay_seconds"] = seconds
+                runtime_state["pending_delay_tenant_id"] = str(tenant_uuid)
+                runtime_state["pending_delay_wa_id"] = wa_id
+                execution.state = runtime_state
+                db.add(execution)
+                db.commit()
+                logger.info("[FLOW SESSION SAVED] execution_id=%s tenant_id=%s wa_id=%s", execution.id, tenant_uuid, wa_id)
+            return True
+
+        if event_type == "send_message":
+            text = str(event.get("text") or "").strip()
+            if not text:
+                continue
+            logger.info("[FLOW SEND EVENT] tenant_id=%s wa_id=%s", tenant_uuid, wa_id)
+            if event.get("after_delay") is True:
+                logger.info("[FLOW SEND AFTER DELAY] tenant_id=%s wa_id=%s", tenant_uuid, wa_id)
+            send_whatsapp_message_simple(phone, text)
+
+    return False
 
 def _find_start_node(nodes: list[dict]) -> dict | None:
     for node in nodes:
@@ -383,28 +427,25 @@ async def webhook(request: Request, db: Session = Depends(get_db)):
                 db=db,
                 context={"channel": "whatsapp"},
             )
-            node_message = runtime_result.get("reply")
-            response_node_id = runtime_result.get("response_node_id")
+            events = runtime_result.get("events", [])
             next_node_id = runtime_result.get("next_node_id")
-            is_pending = bool(runtime_result.get("pending"))
-            if is_pending:
-                logger.info("[RUNTIME PENDING DELAY] tenant_id=%s wa_id=%s on new session", tenant_uuid, wa_id)
             execution = FlowExecution(
                 flow_version_id=published_version.id,
                 user_phone=phone,
                 current_node_id=next_node_id,
-                state={"pending_delay": True} if is_pending else {},
+                state={},
             )
             db.add(execution)
             db.commit()
             db.refresh(execution)
-            if node_message:
-                wa_response = send_whatsapp_message_simple(phone, node_message)
-                status_code = getattr(wa_response, "status_code", "unknown")
-                response_body = getattr(wa_response, "text", "")
-                print(f"[WHATSAPP SEND] to={phone} status={status_code}")
-                if response_body:
-                    print(f"[WHATSAPP SEND BODY] {response_body[:500]}")
+            is_pending = await _process_runtime_events(
+                events=events,
+                phone=phone,
+                execution=execution,
+                tenant_uuid=tenant_uuid,
+                wa_id=wa_id,
+                db=db,
+            )
             print("[FLOW RUNTIME] next_node_id=", next_node_id)
             return {"status": "pending_delay" if is_pending else "message processed"}
 
@@ -427,15 +468,21 @@ async def webhook(request: Request, db: Session = Depends(get_db)):
                 db=db,
                 context={"channel": "whatsapp"},
             )
-            node_message = runtime_result.get("reply")
+            events = runtime_result.get("events", [])
             next_node_id = runtime_result.get("next_node_id")
-            is_pending = bool(runtime_result.get("pending"))
-            if is_pending:
-                logger.info("[RUNTIME PENDING DELAY] tenant_id=%s wa_id=%s on force_start", tenant_uuid, wa_id)
-            if node_message:
-                send_whatsapp_message_simple(phone, node_message)
             execution.current_node_id = next_node_id
-            execution.state = {"pending_delay": True} if is_pending else {}
+            execution.state = {}
+            db.add(execution)
+            db.commit()
+            db.refresh(execution)
+            is_pending = await _process_runtime_events(
+                events=events,
+                phone=phone,
+                execution=execution,
+                tenant_uuid=tenant_uuid,
+                wa_id=wa_id,
+                db=db,
+            )
             db.add(execution)
             db.commit()
             print("[RUNTIME SESSION OVERRIDDEN]")
@@ -460,41 +507,28 @@ async def webhook(request: Request, db: Session = Depends(get_db)):
             db=db,
             context={"channel": "whatsapp"},
         )
-        node_message = runtime_result.get("reply")
+        events = runtime_result.get("events", [])
         response_node_id = runtime_result.get("response_node_id")
         next_node_id = runtime_result.get("next_node_id")
-        is_pending = bool(runtime_result.get("pending"))
 
         print("[NEXT NODE]", next_node_id)
         print("[DELAY RESPONSE NODE]", response_node_id)
-        print("[RUNTIME PENDING]", is_pending)
-
-        if is_pending:
-            runtime_state = execution.state if isinstance(execution.state, dict) else {}
-            runtime_state["pending_delay"] = True
-            runtime_state["pending_delay_at"] = datetime.utcnow().isoformat()
-            runtime_state["pending_delay_node_id"] = response_node_id
-            runtime_state["pending_delay_next_node_id"] = next_node_id
-            runtime_state["pending_delay_tenant_id"] = str(tenant_uuid)
-            runtime_state["pending_delay_wa_id"] = wa_id
-            execution.state = runtime_state
-            execution.current_node_id = next_node_id
-            db.add(execution)
-            db.commit()
-            logger.info(
-                "[RUNTIME PENDING DELAY] execution_id=%s tenant_id=%s wa_id=%s next_node_id=%s",
-                execution.id,
-                tenant_uuid,
-                wa_id,
-                next_node_id,
-            )
-            return {"status": "pending_delay"}
 
         execution.current_node_id = next_node_id
         db.add(execution)
+        db.commit()
+        db.refresh(execution)
 
-        if node_message:
-            send_whatsapp_message_simple(phone, node_message)
+        is_pending = await _process_runtime_events(
+            events=events,
+            phone=phone,
+            execution=execution,
+            tenant_uuid=tenant_uuid,
+            wa_id=wa_id,
+            db=db,
+        )
+        if is_pending:
+            return {"status": "pending_delay"}
 
         is_terminal = not _has_outgoing_edges(response_node_id, flow["edges"]) if response_node_id else not next_node_id
         if is_terminal:
