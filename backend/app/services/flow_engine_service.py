@@ -845,10 +845,10 @@ def _resolve_condition_routes(
 
     for edge in edges:
         edge_condition = _normalize_text(edge.condition)
-        if edge_condition in {"true", "sim", "yes"} and not true_edge:
+        if (edge_condition in {"true", "sim", "yes"} or edge_condition.endswith("true") or edge_condition.endswith("sim")) and not true_edge:
             true_edge = edge
             continue
-        if edge_condition in {"false", "nao", "não", "no"} and not false_edge:
+        if (edge_condition in {"false", "nao", "não", "no"} or edge_condition.endswith("false") or edge_condition.endswith("nao")) and not false_edge:
             false_edge = edge
 
     return true_edge, false_edge
@@ -1486,22 +1486,38 @@ def process_flow_engine(
                 reached_max_steps = False
                 break
 
+            raw_input = message_text or ""
+            normalized_input = _normalize_text(raw_input)
+
             # Suporte a múltiplas palavras/sinônimos separados por vírgula
             # Exemplo: "vender, vendas, comercial, quero vender"
             keywords = [
-                _normalize_text(kw)
+                normalized_kw
                 for kw in raw_condition.split(",")
-                if _normalize_text(kw)
+                if (normalized_kw := _normalize_text(kw))
             ]
 
-            # Match TRUE se a mensagem contiver QUALQUER uma das palavras-chave
-            result = any(kw and (kw in msg or msg in kw) for kw in keywords)
-
-            print(f"[FLOW KEYWORDS] keywords={keywords} msg='{msg}' result={result}")
-            logger.info(
-                "[FLOW KEYWORDS] node=%s keywords=%s msg='%s' result=%s",
-                node.id, keywords, msg, result
+            # Match TRUE se input contém keyword
+            # ou keyword contém input (com input >= 2 chars)
+            result = any(
+                kw
+                and (
+                    kw in normalized_input
+                    or (len(normalized_input) >= 2 and normalized_input in kw)
+                )
+                for kw in keywords
             )
+
+            print(f"[CONDITION INPUT RAW] {raw_input}")
+            print(f"[CONDITION INPUT NORMALIZED] {normalized_input}")
+            print(f"[CONDITION KEYWORDS RAW] {raw_condition}")
+            print(f"[CONDITION KEYWORDS NORMALIZED] {keywords}")
+            print(f"[CONDITION MATCH] {result}")
+            logger.info("[CONDITION INPUT RAW] %s", raw_input)
+            logger.info("[CONDITION INPUT NORMALIZED] %s", normalized_input)
+            logger.info("[CONDITION KEYWORDS RAW] %s", raw_condition)
+            logger.info("[CONDITION KEYWORDS NORMALIZED] %s", keywords)
+            logger.info("[CONDITION MATCH] %s", result)
             if result:
                 print(f"[FLOW MATCH] condição TRUE: {node.id}")
                 logger.info("[FLOW MATCH] condicao TRUE node=%s conversation_id=%s", node.id, conversation.id)
@@ -1522,14 +1538,9 @@ def process_flow_engine(
             false_node_id = false_edge.target if false_edge else None
             selected_edge = true_edge if result else false_edge
             selected_next = true_node_id if result else false_node_id
-            route_label = "TRUE" if result else "FALSE"
-            print(f"[FLOW ROUTE] {route_label} → next={selected_next}")
-            logger.info(
-                "[FLOW ROUTE] %s -> next=%s conversation_id=%s",
-                route_label,
-                selected_next,
-                conversation.id,
-            )
+            route_label = "true" if result else "false"
+            print(f"[CONDITION EDGE SELECTED] {route_label} target_id={selected_next}")
+            logger.info("[CONDITION EDGE SELECTED] %s target_id=%s", route_label, selected_next)
 
             node = _advance_to_edge_target(
                 # primeira mensagem só inicializa o fluxo e envia o start node
