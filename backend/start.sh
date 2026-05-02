@@ -30,7 +30,7 @@ else:
 END
 
 echo "📦 Running migrations..."
-alembic upgrade head || echo "⚠️ Migration failed but continuing..."
+alembic upgrade head
 
 echo "🔥 Starting API..."
 uvicorn app.main:app --host 0.0.0.0 --port $PORT
