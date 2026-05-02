@@ -1289,6 +1289,22 @@ def simulate_tenant_flow(
         graph_source = str(graph.get("source") or "unknown") if isinstance(graph, dict) else "unknown"
         nodes = nodes if isinstance(nodes, list) else []
         edges = edges if isinstance(edges, list) else []
+
+        has_any_version = db.execute(
+            select(FlowVersion.id)
+            .where(FlowVersion.flow_id == flow.id, FlowVersion.tenant_id == tenant_uuid)
+            .limit(1)
+        ).scalar_one_or_none() is not None
+
+        if not has_any_version and not nodes:
+            draft_nodes = flow.nodes_json if isinstance(flow.nodes_json, list) else flow.nodes if isinstance(flow.nodes, list) else []
+            draft_edges = flow.edges_json if isinstance(flow.edges_json, list) else flow.edges if isinstance(flow.edges, list) else []
+            if draft_nodes:
+                nodes = draft_nodes
+                edges = draft_edges if isinstance(draft_edges, list) else []
+                graph_source = "flows_json_draft"
+            else:
+                raise HTTPException(status_code=422, detail="Salve o fluxo antes de simular")
         logger.info("[GRAPH SOURCE] %s", graph_source)
         print("[SIMULATOR GRAPH LOADED]")
         print("[SIMULATOR GRAPH SOURCE]", graph_source)
