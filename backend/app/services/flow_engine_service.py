@@ -1007,6 +1007,7 @@ def process_flow_engine(
         logger.info("Flow ignorado: conversa nao encontrada tenant_id=%s phone=%s", tenant_id, normalized_phone)
         return None
 
+    had_active_session = conversation.current_node_id is not None
     _ensure_conversation_state(conversation=conversation, message_text=message_text)
     if should_reset_context(message=message_text or "", context=conversation.context):
         conversation.context = {}
@@ -1031,6 +1032,7 @@ def process_flow_engine(
         return None
 
     msg = _normalize_text(message_text)
+    first_flow_turn = not had_active_session
     intent: str | None = None
     if conversation.mode != "flow":
         intent = detect_intent(message_text or "")
@@ -1239,6 +1241,9 @@ def process_flow_engine(
     if conversation.mode == "flow":
         _keep_flow_mode(conversation)
 
+    if first_flow_turn:
+        logger.info("[FLOW RUNTIME] new_session=true start_node=%s", conversation.current_node_id)
+
     tenant = db.execute(select(Tenant).where(Tenant.id == conversation.tenant_id)).scalars().first()
     if not tenant:
         logger.warning("[FLOW SEND] Tenant nao encontrado para conversation_id=%s", conversation.id)
@@ -1272,6 +1277,7 @@ def process_flow_engine(
         return None
 
     collected_messages: list[str] = []
+    consumed_start_message = False
     visited_node_ids: set[uuid.UUID] = set()
     reached_max_steps = True
     for step_index in range(MAX_AUTO_STEPS):
@@ -1315,6 +1321,9 @@ def process_flow_engine(
                     print("[FLOW ERROR] texto vazio no node")
                     return None
                 _send_flow_whatsapp_message(tenant=tenant, phone=conversation_phone, text=text)
+                if first_flow_turn and not consumed_start_message:
+                    logger.info("[FLOW RUNTIME] sent_start_message=%s", text)
+                    consumed_start_message = True
                 record_flow_event(
                     db=db,
                     tenant_id=conversation.tenant_id,
@@ -1329,6 +1338,7 @@ def process_flow_engine(
             elif text:
                 collected_messages.append(text)
             node = _advance_to_edge_target(
+                # primeira mensagem só inicializa o fluxo e envia o start node
                 db=db,
                 conversation=conversation,
                 edge=_pick_default_edge(edges),
@@ -1336,6 +1346,9 @@ def process_flow_engine(
             )
             if not node:
                 reached_max_steps = False
+                break
+            if first_flow_turn and consumed_start_message:
+                logger.info("[FLOW RUNTIME] next_node=%s", getattr(node, "id", None))
                 break
             continue
 
@@ -1370,6 +1383,9 @@ def process_flow_engine(
                         )
                     else:
                         _send_flow_whatsapp_message(tenant=tenant, phone=conversation_phone, text=text)
+                if first_flow_turn and not consumed_start_message:
+                    logger.info("[FLOW RUNTIME] sent_start_message=%s", text)
+                    consumed_start_message = True
                 else:
                     print("[FLOW ERROR] node choice sem texto")
 
@@ -1404,6 +1420,9 @@ def process_flow_engine(
                         )
                     else:
                         _send_flow_whatsapp_message(tenant=tenant, phone=conversation_phone, text=text)
+                if first_flow_turn and not consumed_start_message:
+                    logger.info("[FLOW RUNTIME] sent_start_message=%s", text)
+                    consumed_start_message = True
                 else:
                     print("[FLOW ERROR] node choice sem texto")
 
@@ -1412,6 +1431,7 @@ def process_flow_engine(
                 break
 
             node = _advance_to_edge_target(
+                # primeira mensagem só inicializa o fluxo e envia o start node
                 db=db,
                 conversation=conversation,
                 edge=selected_edge or _pick_default_edge(edges),
@@ -1424,6 +1444,7 @@ def process_flow_engine(
 
         if node_type == "condition":
             print(f"[FLOW CHECK] avaliando node: {node.id}")
+            logger.info("[FLOW RUNTIME] evaluating_condition=%s", node.id)
             logger.info("[FLOW CHECK] avaliando node=%s conversation_id=%s", node.id, conversation.id)
             raw_condition = str(node_data.get("condition") or node_data.get("content") or "")
 
@@ -1480,6 +1501,7 @@ def process_flow_engine(
             )
 
             node = _advance_to_edge_target(
+                # primeira mensagem só inicializa o fluxo e envia o start node
                 db=db,
                 conversation=conversation,
                 edge=selected_edge,
@@ -1528,6 +1550,7 @@ def process_flow_engine(
                 collected_messages.append(f"Acao executada: {action_name}")
 
             node = _advance_to_edge_target(
+                # primeira mensagem só inicializa o fluxo e envia o start node
                 db=db,
                 conversation=conversation,
                 edge=_pick_default_edge(edges),
