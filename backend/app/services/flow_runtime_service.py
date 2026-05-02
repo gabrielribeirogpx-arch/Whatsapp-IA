@@ -133,6 +133,7 @@ async def execute_node_chain_until_reply(
             logger.info("[DELAY NODE HIT] node_id=%s", cursor)
             seconds = _extract_delay_seconds(node)
             logger.info("[DELAY SECONDS] %s", seconds)
+            next_id = find_next(str(cursor), ["default", "", "output"])
             events.append({"type": "delay", "seconds": seconds})
             logger.info("[FLOW EVENTS BUILT] node_id=%s events=%s", cursor, events)
             if seconds <= 5 or context.get("channel") == "simulator":
@@ -142,9 +143,9 @@ async def execute_node_chain_until_reply(
                     pending=True,
                     events=events,
                     response_node_id=str(cursor),
-                    next_node_id=find_next(str(cursor), ["default", "", "output"]),
+                    next_node_id=next_id,
                 )
-            cursor = find_next(str(cursor), ["default", "", "output"])
+            cursor = next_id
             logger.info("[DELAY CONTINUE TO] next_node_id=%s", cursor)
             continue
 

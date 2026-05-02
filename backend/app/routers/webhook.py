@@ -60,6 +60,8 @@ async def _process_runtime_events(
                 runtime_state["pending_delay_seconds"] = seconds
                 runtime_state["pending_delay_tenant_id"] = str(tenant_uuid)
                 runtime_state["pending_delay_wa_id"] = wa_id
+                runtime_state["pending_delay_next_node_id"] = execution.current_node_id
+                runtime_state["pending_delay_resume_at"] = datetime.utcnow().isoformat()
                 execution.state = runtime_state
                 db.add(execution)
                 db.commit()
@@ -76,6 +78,18 @@ async def _process_runtime_events(
             send_whatsapp_message_simple(phone, text)
 
     return False
+
+
+def _clear_pending_delay_state(execution: FlowExecution) -> None:
+    runtime_state = execution.state if isinstance(execution.state, dict) else {}
+    runtime_state["pending_delay"] = False
+    runtime_state.pop("pending_delay_next_node_id", None)
+    runtime_state.pop("pending_delay_at", None)
+    runtime_state.pop("pending_delay_seconds", None)
+    runtime_state.pop("pending_delay_tenant_id", None)
+    runtime_state.pop("pending_delay_wa_id", None)
+    runtime_state.pop("pending_delay_resume_at", None)
+    execution.state = runtime_state
 
 def _find_start_node(nodes: list[dict]) -> dict | None:
     for node in nodes:
@@ -489,6 +503,16 @@ async def webhook(request: Request, db: Session = Depends(get_db)):
             print("[WHATSAPP RESPONSE START]")
             return {"status": "pending_delay" if is_pending else "message processed"}
 
+        execution_state = execution.state if isinstance(execution.state, dict) else {}
+        has_pending_delay = bool(execution_state.get("pending_delay"))
+        pending_next_node_id = execution_state.get("pending_delay_next_node_id")
+        if has_pending_delay and pending_next_node_id:
+            execution.current_node_id = str(pending_next_node_id)
+            _clear_pending_delay_state(execution)
+            db.add(execution)
+            db.commit()
+            db.refresh(execution)
+
         current_node = get_node_by_id(flow, execution.current_node_id)
         if not current_node:
             current_node = start_node
@@ -515,6 +539,8 @@ async def webhook(request: Request, db: Session = Depends(get_db)):
         print("[DELAY RESPONSE NODE]", response_node_id)
 
         execution.current_node_id = next_node_id
+        if isinstance(execution.state, dict):
+            execution.state["pending_delay_next_node_id"] = next_node_id
         db.add(execution)
         db.commit()
         db.refresh(execution)
@@ -529,6 +555,8 @@ async def webhook(request: Request, db: Session = Depends(get_db)):
         )
         if is_pending:
             return {"status": "pending_delay"}
+
+        _clear_pending_delay_state(execution)
 
         is_terminal = not _has_outgoing_edges(response_node_id, flow["edges"]) if response_node_id else not next_node_id
         if is_terminal:
