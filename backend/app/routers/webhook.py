@@ -29,6 +29,41 @@ from app.utils.phone import normalize_phone
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
+
+def _extract_node_content(node: dict | None) -> str:
+    if not isinstance(node, dict):
+        return ""
+    data = node.get("data") if isinstance(node.get("data"), dict) else {}
+    content = (
+        data.get("content")
+        or data.get("text")
+        or node.get("content")
+        or node.get("text")
+        or ""
+    )
+    return str(content).strip()
+
+
+def _find_start_node(nodes: list[dict]) -> dict | None:
+    for node in nodes:
+        if not isinstance(node, dict):
+            continue
+        data = node.get("data") if isinstance(node.get("data"), dict) else {}
+        node_type = str(node.get("type") or "").lower()
+        if data.get("isStart") is True or node.get("is_start") is True or node_type == "start":
+            return node
+    return None
+
+
+def _find_next_node_id(source_node_id: str | None, edges: list[dict]) -> str | None:
+    if not source_node_id:
+        return None
+    edge = next((e for e in edges if str(e.get("source")) == str(source_node_id)), None)
+    if not edge:
+        return None
+    target = edge.get("target")
+    return str(target) if target else None
+
 def _looks_like_name(text: str) -> bool:
     if not text:
         return False
@@ -303,8 +338,9 @@ async def webhook(request: Request, db: Session = Depends(get_db)):
             return {"status": "ignored"}
 
         flow = {"nodes": published_version.nodes or [], "edges": published_version.edges or []}
-        start_node = next((n for n in flow["nodes"] if n.get("data", {}).get("isStart")), None)
+        start_node = _find_start_node(flow["nodes"])
         if not start_node:
+            print("[FLOW ERROR] START_NODE_NOT_FOUND")
             return {"status": "ignored"}
 
         execution = (
@@ -313,10 +349,35 @@ async def webhook(request: Request, db: Session = Depends(get_db)):
             .first()
         )
         if not execution:
-            execution = FlowExecution(flow_version_id=published_version.id, user_phone=phone, current_node_id=str(start_node.get("id")), state={})
+            start_content = _extract_node_content(start_node)
+            print("[FLOW RUNTIME] new_session=true")
+            print("[FLOW RUNTIME] start_node_id=", start_node.get("id"))
+            print("[FLOW RUNTIME] start_content=", start_content)
+            if not start_content:
+                print("[FLOW ERROR] EMPTY_START_CONTENT")
+            else:
+                try:
+                    wa_response = send_whatsapp_message_simple(phone, start_content)
+                    status_code = getattr(wa_response, "status_code", "unknown")
+                    response_body = getattr(wa_response, "text", "")
+                    print(f"[WHATSAPP SEND] to={phone} status={status_code}")
+                    if response_body:
+                        print(f"[WHATSAPP SEND BODY] {response_body[:500]}")
+                except Exception as send_exc:
+                    print(f"[WHATSAPP SEND ERROR] to={phone} error={send_exc}")
+
+            next_node_id = _find_next_node_id(start_node.get("id"), flow["edges"])
+            execution = FlowExecution(
+                flow_version_id=published_version.id,
+                user_phone=phone,
+                current_node_id=next_node_id,
+                state={},
+            )
             db.add(execution)
             db.commit()
             db.refresh(execution)
+            print("[FLOW RUNTIME] next_node_id=", next_node_id)
+            return {"status": "message processed"}
 
         current_node = get_node_by_id(flow, execution.current_node_id)
         if not current_node:
