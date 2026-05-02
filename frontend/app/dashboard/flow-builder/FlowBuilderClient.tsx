@@ -173,6 +173,8 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
   const [flowSource, setFlowSource] = useState<string>('version');
   const [showEmptyFlowWarning, setShowEmptyFlowWarning] = useState(false);
   const [flowValidationError, setFlowValidationError] = useState<string | null>(null);
+  const [validationWarnings, setValidationWarnings] = useState<string[]>([]);
+  const [validationErrors, setValidationErrors] = useState<string[]>([]);
   const [operationError, setOperationError] = useState<string | null>(null);
   const [isEditing] = useState(true);
   const simulationStartedRef = useRef(false);
@@ -841,14 +843,6 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
       edges: cleanEdges,
     };
 
-    if (safeFlow.nodes.length < 2) {
-      setFlowValidationError('Flow precisa de pelo menos 2 nodes');
-      return;
-    }
-    if (safeFlow.edges.length < 1) {
-      setFlowValidationError('Flow precisa de pelo menos 1 conexão');
-      return;
-    }
     if (requireConfirmOverwrite && !confirm('Você está sobrescrevendo o fluxo atual. Deseja continuar?')) {
       return;
     }
@@ -862,7 +856,9 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
         method: 'PUT',
         body: JSON.stringify(safeFlow),
       });
-      await parseApiResponse(response);
+      const data = await parseApiResponse<{ validation?: { warnings?: string[]; errors?: string[] } }>(response);
+      setValidationWarnings(data?.validation?.warnings || []);
+      setValidationErrors(data?.validation?.errors || []);
     } catch (error) {
       console.error(error);
       const message = error instanceof Error && error.message ? error.message : 'Erro ao salvar fluxo.';
@@ -891,14 +887,15 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
 
   const handleActivateFlow = useCallback(async () => {
     if (!selectedFlowId) return;
-    const response = await apiFetch(`/api/flows/${selectedFlowId}/activate`, {
-      method: 'PUT',
-    });
+    if (validationErrors.length > 0) return;
+    const response = await apiFetch(`/api/flows/${selectedFlowId}/publish`, { method: 'POST', body: JSON.stringify({}) });
     await parseApiResponse(response);
+    const activateResponse = await apiFetch(`/api/flows/${selectedFlowId}/activate`, { method: 'PUT' });
+    await parseApiResponse(activateResponse);
 
     setActiveFlowId(selectedFlowId);
     setFlows((prev) => prev.map((flow) => ({ ...flow, is_active: flow.id === selectedFlowId })));
-  }, [selectedFlowId]);
+  }, [selectedFlowId, validationErrors.length]);
 
   const handleDeactivateFlow = useCallback(async () => {
     const response = await apiFetch('/api/flows/deactivate', {
@@ -1096,6 +1093,16 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
           {flowValidationError}
         </div>
       )}
+      {validationWarnings.length > 0 && (
+        <div style={{ position: 'absolute', top: 12, right: 16, zIndex: 25, background: '#fef3c7', color: '#92400e', border: '1px solid #f59e0b', borderRadius: 8, padding: '8px 12px', fontSize: 13 }}>
+          ⚠️ {validationWarnings[0]}
+        </div>
+      )}
+      {validationErrors.length > 0 && (
+        <div style={{ position: 'absolute', top: 50, right: 16, zIndex: 25, background: '#fef2f2', color: '#b91c1c', border: '1px solid #fca5a5', borderRadius: 8, padding: '8px 12px', fontSize: 13 }}>
+          ❌ {validationErrors[0]}
+        </div>
+      )}
       {operationError && (
         <div style={{ position: 'absolute', top: showEmptyFlowWarning ? 50 : 12, left: 16, zIndex: 25, background: '#fef2f2', color: '#b91c1c', border: '1px solid #fca5a5', borderRadius: 8, padding: '8px 12px', fontSize: 13 }}>
           {operationError}
@@ -1163,7 +1170,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
             type="button"
             className="flow-top-btn"
             onClick={handleActivateFlow}
-            disabled={!selectedFlowId}
+            disabled={!selectedFlowId || validationErrors.length > 0}
           >
             Ativar Flow
           </button>
