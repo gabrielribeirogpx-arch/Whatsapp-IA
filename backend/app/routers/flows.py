@@ -1278,7 +1278,7 @@ def simulate_tenant_flow(
         if not flow:
             raise HTTPException(status_code=404, detail="Flow não encontrado")
 
-        graph = get_flow_graph(flow.id, db)
+        graph = get_flow_graph(db=db, tenant_id=tenant_uuid, flow_id=str(flow.id))
         nodes = graph.get("nodes") if isinstance(graph, dict) else []
         edges = graph.get("edges") if isinstance(graph, dict) else []
         nodes = nodes if isinstance(nodes, list) else []
@@ -1336,8 +1336,15 @@ def simulate_tenant_flow(
         }
         logger.info("[SIMULATOR RESPONSE] %s", result)
         return JSONResponse(status_code=200, content=result)
+    except HTTPException as e:
+        logger.exception("[SIMULATOR ERROR] HTTPException flow_id=%s", flow_id)
+        detail = e.detail if isinstance(e.detail, (str, dict, list)) else str(e.detail)
+        return JSONResponse(
+            status_code=e.status_code,
+            content={"success": False, "error": "SIMULATOR_HTTP_ERROR", "detail": detail},
+        )
     except Exception as e:
-        print("[SIMULATOR ERROR]", repr(e))
+        logger.exception("[SIMULATOR ERROR] flow_id=%s", flow_id)
         return JSONResponse(
             status_code=500,
             content={"success": False, "error": "SIMULATOR_INTERNAL_ERROR", "detail": str(e)},
