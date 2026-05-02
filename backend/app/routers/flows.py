@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import uuid
 import logging
-from datetime import datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
@@ -14,7 +13,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.orm import load_only
 
 from app.database import get_db
-from app.models import Conversation, Flow, FlowVersion, Tenant
+from app.models import Flow, FlowVersion, Tenant
 from app.services.flow_analytics_service import get_flow_analytics
 from app.services.flow_engine_service import (
     get_flow_graph,
@@ -953,26 +952,21 @@ def delete_tenant_flow(
     x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
     db: Session = Depends(get_db),
 ):
-    # TEMP DEBUG
-    print("DELETE FLOW:", flow_id)
-    tenant_uuid = _resolve_tenant_header(x_tenant_id)
-    flow = _get_flow_by_identifier(db=db, flow_id=flow_id, tenant_id=tenant_uuid)
-    if not flow:
-        raise HTTPException(status_code=404, detail="Flow not found")
-    if flow.name == "default_visual":
-        raise HTTPException(status_code=400, detail="Default visual flow cannot be deleted")
-    if flow.is_active:
-        raise HTTPException(status_code=400, detail="Active flow cannot be deleted")
-    db.query(Conversation).filter(
-        Conversation.tenant_id == tenant_uuid,
-        Conversation.current_flow_id == flow.id,
-    ).update(
-        {Conversation.current_flow_id: None},
-        synchronize_session=False,
-    )
-    flow.deleted_at = datetime.utcnow()
-    db.commit()
-    return {"success": True}
+    try:
+        tenant_uuid = _resolve_tenant_header(x_tenant_id)
+        flow = _get_flow_by_identifier(db=db, flow_id=flow_id, tenant_id=tenant_uuid)
+
+        if not flow:
+            return {"success": True}
+
+        db.delete(flow)
+        db.commit()
+
+        return {"success": True}
+    except Exception as e:
+        db.rollback()
+        print("DELETE ERROR:", str(e))
+        return {"success": False}
 
 
 @crud_router.put("/{flow_id}/activate")

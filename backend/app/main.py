@@ -96,8 +96,7 @@ app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=ALLOWED_ORIGINS,
-    allow_origin_regex=ALLOWED_ORIGIN_REGEX,
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -124,8 +123,8 @@ def on_startup():
 app.add_middleware(TenantContextMiddleware)
 
 
-@app.options("/{full_path:path}")
-async def options_handler(full_path: str):
+@app.options("/{path:path}")
+async def options_handler():
     return Response(status_code=204)
 
 
