@@ -33,20 +33,6 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
-def _extract_node_content(node: dict | None) -> str:
-    if not isinstance(node, dict):
-        return ""
-    data = node.get("data") if isinstance(node.get("data"), dict) else {}
-    content = (
-        data.get("content")
-        or data.get("text")
-        or node.get("content")
-        or node.get("text")
-        or ""
-    )
-    return str(content).strip()
-
-
 def _find_start_node(nodes: list[dict]) -> dict | None:
     for node in nodes:
         if not isinstance(node, dict):
@@ -386,35 +372,41 @@ async def webhook(request: Request, db: Session = Depends(get_db)):
             .first()
         )
         if not execution:
-            start_content = _extract_node_content(start_node)
             print("[FLOW RUNTIME] new_session=true")
             print("[FLOW RUNTIME] start_node_id=", start_node.get("id"))
-            print("[FLOW RUNTIME] start_content=", start_content)
-            if not start_content:
-                print("[FLOW ERROR] EMPTY_START_CONTENT")
-            else:
-                try:
-                    wa_response = send_whatsapp_message_simple(phone, start_content)
-                    status_code = getattr(wa_response, "status_code", "unknown")
-                    response_body = getattr(wa_response, "text", "")
-                    print(f"[WHATSAPP SEND] to={phone} status={status_code}")
-                    if response_body:
-                        print(f"[WHATSAPP SEND BODY] {response_body[:500]}")
-                except Exception as send_exc:
-                    print(f"[WHATSAPP SEND ERROR] to={phone} error={send_exc}")
-
-            next_node_id = _find_next_node_id(start_node.get("id"), flow["edges"])
+            runtime_result = await execute_node_chain_until_reply(
+                graph=flow,
+                start_node_id=str(start_node.get("id")) if start_node else None,
+                user_input="",
+                tenant_id=str(tenant_uuid),
+                wa_id=wa_id,
+                db=db,
+                context={"channel": "whatsapp"},
+            )
+            node_message = runtime_result.get("reply")
+            response_node_id = runtime_result.get("response_node_id")
+            next_node_id = runtime_result.get("next_node_id")
+            is_pending = bool(runtime_result.get("pending"))
+            if is_pending:
+                logger.info("[RUNTIME PENDING DELAY] tenant_id=%s wa_id=%s on new session", tenant_uuid, wa_id)
             execution = FlowExecution(
                 flow_version_id=published_version.id,
                 user_phone=phone,
                 current_node_id=next_node_id,
-                state={},
+                state={"pending_delay": True} if is_pending else {},
             )
             db.add(execution)
             db.commit()
             db.refresh(execution)
+            if node_message:
+                wa_response = send_whatsapp_message_simple(phone, node_message)
+                status_code = getattr(wa_response, "status_code", "unknown")
+                response_body = getattr(wa_response, "text", "")
+                print(f"[WHATSAPP SEND] to={phone} status={status_code}")
+                if response_body:
+                    print(f"[WHATSAPP SEND BODY] {response_body[:500]}")
             print("[FLOW RUNTIME] next_node_id=", next_node_id)
-            return {"status": "message processed"}
+            return {"status": "pending_delay" if is_pending else "message processed"}
 
         normalized = normalize_text(user_input)
         force_start = normalized in {"oi", "ola", "menu", "iniciar", "inicio", "reiniciar", "reset"}
@@ -425,18 +417,30 @@ async def webhook(request: Request, db: Session = Depends(get_db)):
             return {"status": "ignored"}
 
         if force_start:
-            start_content = _extract_node_content(start_node)
             print("[RUNTIME START NODE FOUND]", start_node.get("id"))
-            print("[RUNTIME START CONTENT]", start_content)
-            if start_content:
-                send_whatsapp_message_simple(phone, start_content)
-            next_node_id = _find_next_node_id(start_node.get("id"), flow["edges"])
+            runtime_result = await execute_node_chain_until_reply(
+                graph=flow,
+                start_node_id=str(start_node.get("id")) if start_node else None,
+                user_input="",
+                tenant_id=str(tenant_uuid),
+                wa_id=wa_id,
+                db=db,
+                context={"channel": "whatsapp"},
+            )
+            node_message = runtime_result.get("reply")
+            next_node_id = runtime_result.get("next_node_id")
+            is_pending = bool(runtime_result.get("pending"))
+            if is_pending:
+                logger.info("[RUNTIME PENDING DELAY] tenant_id=%s wa_id=%s on force_start", tenant_uuid, wa_id)
+            if node_message:
+                send_whatsapp_message_simple(phone, node_message)
             execution.current_node_id = next_node_id
+            execution.state = {"pending_delay": True} if is_pending else {}
             db.add(execution)
             db.commit()
             print("[RUNTIME SESSION OVERRIDDEN]")
             print("[WHATSAPP RESPONSE START]")
-            return {"status": "message processed"}
+            return {"status": "pending_delay" if is_pending else "message processed"}
 
         current_node = get_node_by_id(flow, execution.current_node_id)
         if not current_node:
