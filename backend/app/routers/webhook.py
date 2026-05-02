@@ -432,13 +432,82 @@ async def webhook(request: Request, db: Session = Depends(get_db)):
             current_node = start_node
 
         def process_node(node: dict, user_input_value: str) -> str | None:
+            def _normalize_for_condition(value: str) -> str:
+                import re
+                import unicodedata
+
+                lowered = str(value or "").strip().lower()
+                no_accents = "".join(
+                    c for c in unicodedata.normalize("NFD", lowered) if unicodedata.category(c) != "Mn"
+                )
+                no_punct = re.sub(r"[^\w\s]", " ", no_accents)
+                compact = re.sub(r"\s+", " ", no_punct).strip()
+                return compact
+
+            def _extract_condition_keywords(data: dict) -> list[str]:
+                keywords_raw: list[str] = []
+                candidate_fields = [
+                    data.get("keywords"),
+                    data.get("condition"),
+                    data.get("text"),
+                    data.get("content"),
+                    data.get("options"),
+                ]
+
+                for candidate in candidate_fields:
+                    if candidate is None:
+                        continue
+                    if isinstance(candidate, list):
+                        for item in candidate:
+                            if isinstance(item, dict):
+                                val = item.get("label") or item.get("text") or item.get("value")
+                                if val:
+                                    keywords_raw.append(str(val))
+                            elif item is not None:
+                                keywords_raw.append(str(item))
+                    elif isinstance(candidate, dict):
+                        for value in candidate.values():
+                            if value is not None:
+                                keywords_raw.append(str(value))
+                    else:
+                        keywords_raw.append(str(candidate))
+
+                if not keywords_raw:
+                    fallback_visible_fields = ["label", "title", "name", "value", "placeholder"]
+                    for field in fallback_visible_fields:
+                        field_value = data.get(field) or node.get(field)
+                        if field_value:
+                            keywords_raw.append(str(field_value))
+
+                flattened_keywords: list[str] = []
+                for item in keywords_raw:
+                    parts = [part.strip() for part in str(item).replace("\n", ",").split(",")]
+                    flattened_keywords.extend([part for part in parts if part])
+                return flattened_keywords
+
             node_type = str(node.get("type") or "").lower()
             if node_type == "message":
                 edge = next((e for e in flow["edges"] if e.get("source") == node.get("id")), None)
                 return edge.get("target") if edge else None
             if node_type == "condition":
-                keywords = (node.get("data") or {}).get("keywords") or []
-                match = any(str(k).lower() in user_input_value.lower() for k in keywords)
+                data = node.get("data") if isinstance(node.get("data"), dict) else {}
+                keywords_raw = _extract_condition_keywords(data)
+                input_normalized = _normalize_for_condition(user_input_value)
+                keywords_normalized = [_normalize_for_condition(k) for k in keywords_raw if str(k).strip()]
+
+                match = any(
+                    keyword
+                    and (
+                        input_normalized.find(keyword) >= 0
+                        or (len(input_normalized) >= 2 and keyword.find(input_normalized) >= 0)
+                    )
+                    for keyword in keywords_normalized
+                )
+                print("[CONDITION INPUT RAW]", user_input_value)
+                print("[CONDITION INPUT NORMALIZED]", input_normalized)
+                print("[CONDITION KEYWORDS RAW]", keywords_raw)
+                print("[CONDITION KEYWORDS NORMALIZED]", keywords_normalized)
+                print("[CONDITION MATCH]", match)
                 desired = "true" if match else "false"
                 edge = next((e for e in flow["edges"] if e.get("source") == node.get("id") and str(e.get("sourceHandle") or "").lower() == desired), None)
                 return edge.get("target") if edge else None
