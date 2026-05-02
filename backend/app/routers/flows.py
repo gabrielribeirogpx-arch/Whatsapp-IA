@@ -1294,7 +1294,10 @@ def simulate_tenant_flow(
             logger.info("[SIMULATOR RESPONSE] %s", result)
             return JSONResponse(status_code=200, content={"success": True, **result})
 
-        user_message = (payload.message or "").strip().lower()
+        session_id = payload.session_id or "default"
+        message = (payload.message or "").strip()
+        normalized_message = message.lower()
+        routing_message = normalized_message or "oi"
         node_id = str(start_node.get("id"))
 
         def find_node(nid: str):
@@ -1307,7 +1310,7 @@ def simulate_tenant_flow(
             data = current.get("data") if isinstance(current.get("data"), dict) else {}
             reply = str(data.get("text") or data.get("content") or data.get("label") or "")
 
-        if user_message in {"sim", "já", "anuncio", "anúncio"}:
+        if routing_message in {"sim", "já", "anuncio", "anúncio"}:
             outgoing = [e for e in edges if isinstance(e, dict) and str(e.get("source")) == node_id]
             true_edge = next((e for e in outgoing if str(e.get("sourceHandle") or (e.get("data") or {}).get("sourceHandle") or "").lower() == "true"), None)
             if true_edge:
@@ -1318,7 +1321,15 @@ def simulate_tenant_flow(
                     data = target_node.get("data") if isinstance(target_node.get("data"), dict) else {}
                     reply = str(data.get("text") or data.get("content") or data.get("label") or reply)
 
-        result = {"reply": reply, "current_node_id": node_id, "selected_edge": selected_edge}
+        result = {
+            "reply": reply,
+            "current_node_id": node_id,
+            "selected_edge": selected_edge,
+            "session_id": session_id,
+            "message": message,
+            "normalized_message": normalized_message,
+            "routing_message": routing_message,
+        }
         logger.info("[SIMULATOR RESPONSE] %s", result)
         return JSONResponse(status_code=200, content={"success": True, **result})
     except Exception as e:
