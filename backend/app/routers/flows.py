@@ -1267,13 +1267,17 @@ def simulate_tenant_flow(
     x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
     db: Session = Depends(get_db),
 ):
-    print("[SIMULATOR START REQUEST]", flow_id)
     try:
+        import traceback
+
+        print("[SIMULATOR START REQUEST]", flow_id)
         tenant_uuid = _resolve_tenant_header(x_tenant_id)
         logger.info("[SIMULATOR START REQUEST]")
         logger.info("[SIMULATOR TENANT] %s", str(tenant_uuid))
+        print("[SIMULATOR TENANT OK]")
         logger.info("[SIMULATOR FLOW_ID] %s", flow_id)
         print("[SIMULATOR FLOW_ID]", flow_id)
+        print("[SIMULATOR PAYLOAD OK]", payload.model_dump())
 
         flow = _get_flow_by_identifier(db=db, flow_id=flow_id, tenant_id=tenant_uuid)
         if not flow:
@@ -1286,7 +1290,10 @@ def simulate_tenant_flow(
         nodes = nodes if isinstance(nodes, list) else []
         edges = edges if isinstance(edges, list) else []
         logger.info("[GRAPH SOURCE] %s", graph_source)
+        print("[SIMULATOR GRAPH LOADED]")
+        print("[SIMULATOR GRAPH SOURCE]", graph_source)
         logger.info("[GRAPH NODES COUNT] %s", len(nodes))
+        print("[SIMULATOR NODES COUNT]", len(nodes))
         logger.info("[GRAPH EDGES COUNT] %s", len(edges))
 
         start_node = next((n for n in nodes if isinstance(n, dict) and isinstance(n.get("data"), dict) and n.get("data", {}).get("isStart")), None)
@@ -1340,6 +1347,7 @@ def simulate_tenant_flow(
         )
         is_new_session = sim_session is None
         logger.info("[SIMULATOR SESSION NEW] %s", is_new_session)
+        print("[SIMULATOR SESSION LOADED]", {"is_new": is_new_session, "session_id": session_id})
 
         selected_edge = None
         reply = ""
@@ -1414,17 +1422,20 @@ def simulate_tenant_flow(
             "selected_edge": str(selected_edge) if selected_edge is not None else None,
         }
         logger.info("[SIMULATOR RESPONSE] %s", result)
+        print("[SIMULATOR RESPONSE BUILT]", result)
         return JSONResponse(status_code=200, content=result)
     except HTTPException as e:
         logger.exception("[SIMULATOR ERROR] HTTPException flow_id=%s", flow_id)
         detail = e.detail if isinstance(e.detail, (str, dict, list)) else str(e.detail)
         return JSONResponse(
             status_code=e.status_code,
-            content={"success": False, "error": "SIMULATOR_HTTP_ERROR", "detail": detail},
+            content={"success": False, "error": "SIMULATOR_HTTP_ERROR", "detail": detail, "type": type(e).__name__},
         )
     except Exception as e:
+        print("[SIMULATOR ERROR]", repr(e))
+        print("[SIMULATOR TRACEBACK]", traceback.format_exc())
         logger.exception("[SIMULATOR ERROR] flow_id=%s", flow_id)
         return JSONResponse(
             status_code=500,
-            content={"success": False, "error": "SIMULATOR_INTERNAL_ERROR", "detail": str(e)},
+            content={"success": False, "error": "SIMULATOR_INTERNAL_ERROR", "detail": str(e), "type": type(e).__name__},
         )

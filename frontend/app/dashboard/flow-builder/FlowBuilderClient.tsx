@@ -560,8 +560,8 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
         let rawBody = '';
 
         try {
-          const errorJson = await response.json() as { error?: string; detail?: string };
-          backendMessage = errorJson.error || errorJson.detail || null;
+          const errorJson = await response.json() as { error?: string; detail?: string; type?: string };
+          backendMessage = [errorJson.error, errorJson.type, errorJson.detail].filter(Boolean).join(": ") || null;
         } catch {
           rawBody = await response.text();
           backendMessage = rawBody || null;
