@@ -563,10 +563,10 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
 
       const data = await parseApiResponse<any>(response);
       setMessages((prev) => [...prev, { type: 'user', text: userMessage }, { type: 'bot', text: data.reply || '' }]);
-      setCurrentNodeId(data.current_node_id || null);
+      setCurrentNodeId(data.next_node_id || null);
       setCurrentChoices([]);
       const active = flow.edges
-        .filter((e) => e.source === data.current_node_id && (e.sourceHandle === data.selected_edge || (e.data as any)?.sourceHandle === data.selected_edge))
+        .filter((e) => e.source === data.current_node_id && data.selected_edge !== null && (e.sourceHandle === data.selected_edge || (e.data as any)?.sourceHandle === data.selected_edge))
         .map((e) => e.id)
         .filter(Boolean) as string[];
       setActiveEdgeIds(active);
