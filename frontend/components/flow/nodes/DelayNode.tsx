@@ -9,6 +9,8 @@ type DelayNodeData = {
   isStart?: boolean;
   onChange?: (nodeId: string, patch: Record<string, unknown>) => void;
   onToggleStart?: (nodeId: string) => void;
+  is_terminal?: boolean;
+  hasValidationError?: boolean;
 };
 
 export default function DelayNode({ id, data, selected }: NodeProps) {
@@ -17,7 +19,7 @@ export default function DelayNode({ id, data, selected }: NodeProps) {
   return (
     <div
       className={`flow-node ${selected ? 'is-selected' : ''} ${nodeData.running ? 'running' : ''}`}
-      style={{ minWidth: 220, position: 'relative' }}
+      style={{ minWidth: 220, position: 'relative', border: nodeData.hasValidationError ? '2px solid #dc2626' : undefined, boxShadow: nodeData.hasValidationError ? '0 0 0 4px rgba(220,38,38,0.15)' : undefined }}
     >
       {/* Barra verde — tempo e espera */}
       <div
@@ -77,6 +79,10 @@ export default function DelayNode({ id, data, selected }: NodeProps) {
           segundos de espera
         </div>
       </div>
+      <label style={{ display: "flex", gap: 6, fontSize: 11, margin: "4px 10px" }}>
+        <input type="checkbox" checked={!!nodeData.is_terminal} onChange={(e) => nodeData.onChange?.(id, { is_terminal: e.target.checked })} />
+        ✓ Este é o fim do fluxo
+      </label>
 
       <Handle
         type="source"
