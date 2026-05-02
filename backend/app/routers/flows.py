@@ -1282,8 +1282,12 @@ def simulate_tenant_flow(
         graph = get_flow_graph(db=db, tenant_id=tenant_uuid, flow_id=str(flow.id))
         nodes = graph.get("nodes") if isinstance(graph, dict) else []
         edges = graph.get("edges") if isinstance(graph, dict) else []
+        graph_source = str(graph.get("source") or "unknown") if isinstance(graph, dict) else "unknown"
         nodes = nodes if isinstance(nodes, list) else []
         edges = edges if isinstance(edges, list) else []
+        logger.info("[GRAPH SOURCE] %s", graph_source)
+        logger.info("[GRAPH NODES COUNT] %s", len(nodes))
+        logger.info("[GRAPH EDGES COUNT] %s", len(edges))
 
         start_node = next((n for n in nodes if isinstance(n, dict) and isinstance(n.get("data"), dict) and n.get("data", {}).get("isStart")), None)
         if not start_node and nodes:
@@ -1291,15 +1295,10 @@ def simulate_tenant_flow(
             start_node = next((n for n in nodes if str(n.get("id")) not in targets), nodes[0])
 
         if not start_node:
-            result = {
-                "success": True,
-                "reply": "Fluxo sem nodes para simular",
-                "current_node_id": None,
-                "next_node_id": None,
-                "selected_edge": None,
-            }
-            logger.info("[SIMULATOR RESPONSE] %s", result)
-            return JSONResponse(status_code=200, content=result)
+            raise HTTPException(
+                status_code=422,
+                detail=f"Nenhum node encontrado na fonte {graph_source}",
+            )
 
         session_id = payload.session_id or "default"
         message = (payload.message or "").strip()
