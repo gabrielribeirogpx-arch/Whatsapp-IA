@@ -1,11 +1,102 @@
 from __future__ import annotations
 
+import asyncio
+import re
+import unicodedata
 from typing import Any
 
 from sqlalchemy.orm import Session
 
 from app.services.flow_engine_service import get_flow_for_builder
 from app.services.flow_session_service import FlowSessionService
+
+
+def _normalize_text(value: Any) -> str:
+    lowered = str(value or "").strip().lower()
+    no_accents = "".join(c for c in unicodedata.normalize("NFD", lowered) if unicodedata.category(c) != "Mn")
+    no_punct = re.sub(r"[^\w\s]", " ", no_accents)
+    return re.sub(r"\s+", " ", no_punct).strip()
+
+
+def _node_type(node: dict[str, Any] | None) -> str:
+    if not isinstance(node, dict):
+        return ""
+    data = node.get("data") if isinstance(node.get("data"), dict) else {}
+    return str(node.get("type") or data.get("type") or data.get("kind") or "").strip().lower()
+
+
+def _extract_delay_seconds(node: dict[str, Any] | None) -> int:
+    data = node.get("data") if isinstance(node, dict) and isinstance(node.get("data"), dict) else {}
+    raw_delay = data.get("seconds") or data.get("delay") or data.get("duration") or data.get("content") or (node.get("content") if isinstance(node, dict) else None)
+    try:
+        seconds = int(float(str(raw_delay).strip()))
+    except Exception:
+        seconds = 1
+    return max(1, seconds)
+
+
+async def execute_until_message_or_end(
+    graph: dict[str, Any],
+    current_node_id: str | None,
+    user_input: str,
+    context: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    context = context or {}
+    nodes = graph.get("nodes", []) if isinstance(graph, dict) else []
+    edges = graph.get("edges", []) if isinstance(graph, dict) else []
+    node_map = {str(n.get("id")): n for n in nodes if isinstance(n, dict) and n.get("id") is not None}
+
+    def find_next(source_id: str, preferred_handles: list[str] | None = None) -> str | None:
+        outgoing = [e for e in edges if isinstance(e, dict) and str(e.get("source")) == str(source_id)]
+        if not outgoing:
+            return None
+        for handle in preferred_handles or []:
+            for edge in outgoing:
+                sh = str(edge.get("sourceHandle") or (edge.get("data") or {}).get("sourceHandle") or "").strip().lower()
+                if sh == handle:
+                    return str(edge.get("target"))
+        return str(outgoing[0].get("target"))
+
+    cursor = current_node_id
+    normalized_input = _normalize_text(user_input)
+    while cursor:
+        node = node_map.get(str(cursor))
+        if not node:
+            break
+        ntype = _node_type(node)
+        data = node.get("data") if isinstance(node.get("data"), dict) else {}
+
+        if ntype == "message":
+            reply = str(data.get("text") or data.get("content") or data.get("label") or "")
+            return {"reply": reply, "response_node_id": str(cursor), "next_node_id": find_next(str(cursor))}
+
+        if ntype == "condition":
+            raw_condition = str(data.get("condition") or data.get("keywords") or data.get("content") or "")
+            keywords = [_normalize_text(p) for p in raw_condition.replace("\n", ",").split(",") if str(p).strip()]
+            is_true = any(k and (k in normalized_input or normalized_input in k) for k in keywords)
+            cursor = find_next(str(cursor), ["true", "sim"] if is_true else ["false", "nao", "não"])
+            continue
+
+        if ntype == "delay":
+            print("[DELAY NODE HIT]", cursor)
+            seconds = _extract_delay_seconds(node)
+            print("[DELAY SECONDS]", seconds)
+            if seconds <= 5 or context.get("channel") == "simulator":
+                await asyncio.sleep(seconds)
+            else:
+                return {"reply": None, "response_node_id": str(cursor), "next_node_id": find_next(str(cursor), ["default", "", "output"]), "queued": True}
+            cursor = find_next(str(cursor), ["default", "", "output"])
+            print("[DELAY CONTINUE TO]", cursor)
+            print("[DELAY SKIP_REPLY]")
+            continue
+
+        if ntype == "action":
+            cursor = find_next(str(cursor), ["default", "", "output"])
+            continue
+
+        cursor = find_next(str(cursor))
+
+    return {"reply": "", "response_node_id": None, "next_node_id": None}
 
 
 class FlowRuntimeService:
