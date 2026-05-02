@@ -59,6 +59,14 @@ class RenameFlowPayload(BaseModel):
     name: str
 
 
+class DeleteFlowResponse(BaseModel):
+    success: bool = True
+    mode: str = Field(
+        default="hard_delete",
+        description="Modo de remoção aplicado: hard_delete (remoção física) ou soft_delete (marcado como deletado).",
+    )
+
+
 class CanonicalFlowVersionResponse(BaseModel):
     flow_id: str
     version_id: str | None = None
@@ -953,7 +961,7 @@ async def update_tenant_flow(
         raise HTTPException(status_code=500, detail="Erro interno")
 
 
-@crud_router.delete("/{flow_id}")
+@crud_router.delete("/{flow_id}", response_model=DeleteFlowResponse)
 def delete_tenant_flow(
     flow_id: str,
     x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
@@ -963,7 +971,7 @@ def delete_tenant_flow(
     flow = _get_flow_by_identifier(db=db, flow_id=flow_id, tenant_id=tenant_uuid)
 
     if not flow:
-        return {"success": True}
+        return {"success": True, "mode": "hard_delete"}
 
     in_use_query = db.query(Conversation).filter(Conversation.current_flow_id == flow.id)
     if tenant_uuid is not None:
@@ -979,7 +987,7 @@ def delete_tenant_flow(
     try:
         db.delete(flow)
         db.commit()
-        return {"success": True}
+        return {"success": True, "mode": "hard_delete"}
     except Exception:
         db.rollback()
         logger.exception(
