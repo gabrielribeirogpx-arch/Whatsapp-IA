@@ -21,6 +21,7 @@ from app.services.flow_service import resolve_flow_for_message
 from app.services.flow_engine_service import get_flow_graph
 from app.services.flow_engine import get_node_by_id
 from app.services.flow_session_service import FlowSessionService
+from app.services.flow_runtime_service import execute_until_message_or_end
 from app.models.flow import Flow
 from app.services.whatsapp_service import send_whatsapp_buttons, send_whatsapp_message_simple
 from app.services.intent_service import classify_intent, normalize_input, route_intent
@@ -455,9 +456,32 @@ async def webhook(request: Request, db: Session = Depends(get_db)):
         node_message = runtime_result.get("reply")
         response_node_id = runtime_result.get("response_node_id")
         next_node_id = runtime_result.get("next_node_id")
+        is_pending = bool(runtime_result.get("pending") or runtime_result.get("queued"))
 
         print("[NEXT NODE]", next_node_id)
         print("[DELAY RESPONSE NODE]", response_node_id)
+        print("[RUNTIME PENDING]", is_pending)
+
+        if is_pending:
+            runtime_state = execution.state if isinstance(execution.state, dict) else {}
+            runtime_state["pending_delay"] = True
+            runtime_state["pending_delay_at"] = datetime.utcnow().isoformat()
+            runtime_state["pending_delay_node_id"] = response_node_id
+            runtime_state["pending_delay_next_node_id"] = next_node_id
+            runtime_state["pending_delay_tenant_id"] = str(tenant_uuid)
+            runtime_state["pending_delay_wa_id"] = wa_id
+            execution.state = runtime_state
+            execution.current_node_id = next_node_id
+            db.add(execution)
+            db.commit()
+            logger.info(
+                "[RUNTIME PENDING DELAY] execution_id=%s tenant_id=%s wa_id=%s next_node_id=%s",
+                execution.id,
+                tenant_uuid,
+                wa_id,
+                next_node_id,
+            )
+            return {"status": "pending_delay"}
 
         execution.current_node_id = next_node_id
         db.add(execution)
@@ -473,8 +497,15 @@ async def webhook(request: Request, db: Session = Depends(get_db)):
         db.add(execution)
         db.commit()
         return {"status": "message processed"}
-    except Exception:
+    except Exception as exc:
         db.rollback()
+        logger.exception(
+            "[WEBHOOK RUNTIME ERROR] tenant_id=%s wa_id=%s message_id=%s error=%s",
+            tenant_uuid,
+            wa_id,
+            message_id,
+            str(exc),
+        )
         send_whatsapp_message_simple(phone, "⚠️ O sistema está inicializando. Tente novamente em instantes.")
         return {"status": "fallback"}
     finally:
