@@ -357,6 +357,7 @@ def create_flow_route(
     }
 
 
+@crud_router.put("/{flow_id}")
 @router.put("/{flow_id}")
 async def update_flow_route(
     flow_id: str,
@@ -439,7 +440,7 @@ async def update_flow_route(
 
         last_version = db.execute(
             _flow_version_select(db)
-            .where(FlowVersion.flow_id == flow.id, FlowVersion.tenant_id == tenant_uuid)
+            .where(FlowVersion.flow_id == flow.id, FlowVersion.tenant_id == tenant.id)
             .order_by(FlowVersion.version.desc(), FlowVersion.created_at.desc())
             .limit(1)
         ).scalars().first()
