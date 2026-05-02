@@ -14,6 +14,7 @@ from app.services.delay_queue_service import enqueue_delay
 from app.services.flow_analytics_service import FALLBACK, FLOW_FINISH, FLOW_MATCH, FLOW_SEND, FLOW_START, record_flow_event
 from app.services.queue import enqueue_send_message
 from app.utils.phone import normalize_phone
+from app.services.flow_session_service import FlowSessionService
 
 DEFAULT_FLOW_NAME = "default_visual"
 MAX_AUTO_STEPS = 10
@@ -606,6 +607,14 @@ def should_reset_context(message: str, context: dict[str, Any] | None) -> bool:
     return "api" in context and "vender" in normalized_message
 
 
+def _is_reset_command(normalized_message: str) -> bool:
+    return normalized_message in {"menu", "iniciar", "reiniciar", "reset"}
+
+
+def _is_greeting(normalized_message: str) -> bool:
+    return normalized_message == "oi"
+
+
 def _extract_node_data(node: FlowNode | VersionedFlowNode) -> dict[str, Any]:
     metadata = node.metadata_json or {}
     return {
@@ -1022,6 +1031,26 @@ def process_flow_engine(
         flow = _get_or_create_visual_flow(db=db, tenant_id=conversation.tenant_id)
     logger.info("[FLOW SELECTED] %s", flow_id or str(flow.id))
     runtime_graph = _get_current_flow_runtime(db=db, flow=flow, tenant_id=conversation.tenant_id)
+    session_service = FlowSessionService(db)
+    user_identifier = conversation.phone_number
+    normalized_message = _normalize_text(message_text)
+    runtime_session, invalid_reason = session_service.get_runtime_session(conversation.tenant_id, user_identifier, flow)
+
+    if _is_reset_command(normalized_message):
+        session_service.clear_runtime_session(conversation.tenant_id, user_identifier, flow, reason="reset_command")
+        conversation.current_node_id = None
+        conversation.current_flow = None
+    elif runtime_session and invalid_reason:
+        session_service.clear_runtime_session(conversation.tenant_id, user_identifier, flow, reason=invalid_reason)
+        conversation.current_node_id = None
+        conversation.current_flow = None
+    elif runtime_session and runtime_session.current_node_id:
+        parsed_node = _parse_uuid(runtime_session.current_node_id)
+        if parsed_node:
+            conversation.current_flow = flow.id
+            conversation.current_node_id = parsed_node
+            logger.info("[SESSION CONTINUE] node_id=%s", conversation.current_node_id)
+
     initialized_node = _initialize_flow_start_node(
         db=db,
         conversation=conversation,
@@ -1273,6 +1302,8 @@ def process_flow_engine(
         runtime_graph=runtime_graph,
     )
     if not node:
+        if _is_greeting(normalized_message):
+            session_service.clear_runtime_session(conversation.tenant_id, user_identifier, flow, reason="node_missing_on_greeting")
         _reset_to_bot_mode(db=db, conversation=conversation, reason="flow_error_node_not_found")
         return None
 
