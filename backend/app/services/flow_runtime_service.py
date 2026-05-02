@@ -61,13 +61,13 @@ async def execute_node_chain_until_reply(
     def _result(
         *,
         pending: bool,
-        reply: str | None,
+        events: list[dict[str, Any]],
         response_node_id: str | None,
         next_node_id: str | None,
     ) -> dict[str, Any]:
         return {
             "pending": pending,
-            "reply": reply,
+            "events": events,
             "response_node_id": response_node_id,
             "next_node_id": next_node_id,
         }
@@ -90,7 +90,7 @@ async def execute_node_chain_until_reply(
 
     cursor = start_node_id
     normalized_input = _normalize_text(user_input)
-    replies: list[str] = []
+    events: list[dict[str, Any]] = []
     response_node_id: str | None = None
     logger.info("[CORE EXECUTOR START] tenant_id=%s wa_id=%s start_node_id=%s context=%s", tenant_id, wa_id, start_node_id, context)
     while cursor:
@@ -106,7 +106,8 @@ async def execute_node_chain_until_reply(
             logger.info("[MESSAGE SENT] node_id=%s", cursor)
             logger.info("[CORE REPLY BUILT] node_id=%s reply_summary=%s", cursor, _summarize_reply(reply))
             if reply:
-                replies.append(reply)
+                events.append({"type": "send_message", "text": reply})
+                logger.info("[FLOW EVENTS BUILT] node_id=%s events=%s", cursor, events)
             response_node_id = str(cursor)
             next_id = find_next(str(cursor), ["default", "", "output"])
             next_node = node_map.get(str(next_id)) if next_id else None
@@ -116,12 +117,12 @@ async def execute_node_chain_until_reply(
                 logger.info("[AUTO_CONTINUE TO] next_node_id=%s next_type=%s", next_id, next_type)
                 cursor = next_id
                 continue
-            return _result(pending=False, reply="\n\n".join(replies) or None, response_node_id=response_node_id, next_node_id=next_id)
+            return _result(pending=False, events=events, response_node_id=response_node_id, next_node_id=next_id)
 
         if ntype == "condition":
-            if replies:
+            if events:
                 logger.info("[AUTO_CONTINUE PAUSED_AT_CONDITION] node_id=%s", cursor)
-                return _result(pending=False, reply="\n\n".join(replies) or None, response_node_id=response_node_id, next_node_id=str(cursor))
+                return _result(pending=False, events=events, response_node_id=response_node_id, next_node_id=str(cursor))
             raw_condition = str(data.get("condition") or data.get("keywords") or data.get("content") or "")
             keywords = [_normalize_text(p) for p in raw_condition.replace("\n", ",").split(",") if str(p).strip()]
             is_true = any(k and (k in normalized_input or normalized_input in k) for k in keywords)
@@ -132,12 +133,14 @@ async def execute_node_chain_until_reply(
             logger.info("[DELAY NODE HIT] node_id=%s", cursor)
             seconds = _extract_delay_seconds(node)
             logger.info("[DELAY SECONDS] %s", seconds)
+            events.append({"type": "delay", "seconds": seconds})
+            logger.info("[FLOW EVENTS BUILT] node_id=%s events=%s", cursor, events)
             if seconds <= 5 or context.get("channel") == "simulator":
                 await asyncio.sleep(seconds)
             else:
                 return _result(
                     pending=True,
-                    reply=None,
+                    events=events,
                     response_node_id=str(cursor),
                     next_node_id=find_next(str(cursor), ["default", "", "output"]),
                 )
@@ -152,7 +155,7 @@ async def execute_node_chain_until_reply(
 
         cursor = find_next(str(cursor))
 
-    return _result(pending=False, reply="\n\n".join(replies) or None, response_node_id=response_node_id, next_node_id=None)
+    return _result(pending=False, events=events, response_node_id=response_node_id, next_node_id=None)
 
 
 async def execute_until_message_or_end(
