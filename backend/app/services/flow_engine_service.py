@@ -141,13 +141,111 @@ def validate_flow_structure(
     return True, None
 
 
+def validate_flow(flow: dict[str, Any], mode: str = "draft") -> dict[str, Any]:
+    nodes_payload = flow.get("nodes") if isinstance(flow.get("nodes"), list) else []
+    edges_payload = flow.get("edges") if isinstance(flow.get("edges"), list) else []
+    strict_mode = str(mode).lower() == "published"
+    errors: list[str] = []
+    warnings: list[str] = []
+
+    if not nodes_payload:
+        errors.append("Flow inválido: nodes vazio")
+        return {"valid": False, "errors": errors, "warnings": warnings}
+
+    node_ids: set[str] = set()
+    outgoing_count: dict[str, int] = {}
+    condition_handles: dict[str, set[str]] = {}
+    start_nodes: list[str] = []
+
+    for node in nodes_payload:
+        node_id = str((node or {}).get("id") or "").strip()
+        if not node_id:
+            errors.append("Flow inválido: node sem id")
+            continue
+        node_ids.add(node_id)
+        outgoing_count[node_id] = 0
+        condition_handles[node_id] = set()
+
+        data = node.get("data") if isinstance(node.get("data"), dict) else {}
+        node_type = str(node.get("type") or "").strip().lower()
+        is_terminal = bool(data.get("is_terminal") or data.get("isTerminal") or False)
+        if node_type == "message":
+            text = data.get("text") if isinstance(data.get("text"), str) else data.get("content")
+            if not isinstance(text, str) or not text.strip():
+                errors.append(f"Mensagem sem texto ({node_id})")
+
+        if bool(data.get("isStart")):
+            start_nodes.append(node_id)
+
+        if node_type == "message" and not is_terminal:
+            # opcional recomendado: auto-marcar terminal
+            data.setdefault("is_terminal", False)
+
+    for edge in edges_payload:
+        source = str((edge or {}).get("source") or "").strip()
+        target = str((edge or {}).get("target") or "").strip()
+        if not source or not target:
+            errors.append("Edge inválida: falta source ou target")
+            continue
+        if source not in node_ids or target not in node_ids:
+            errors.append("Edge inválida: node inexistente")
+            continue
+        outgoing_count[source] = outgoing_count.get(source, 0) + 1
+        source_handle = str((edge.get("sourceHandle") or (edge.get("data") or {}).get("sourceHandle") or "")).lower()
+        if source_handle:
+            condition_handles.setdefault(source, set()).add(source_handle)
+
+    if len(start_nodes) == 0:
+        errors.append("Flow inválido: sem start node")
+
+    for node in nodes_payload:
+        node_id = str((node or {}).get("id") or "").strip()
+        data = node.get("data") if isinstance(node.get("data"), dict) else {}
+        node_type = str(node.get("type") or "").strip().lower()
+        is_terminal = bool(data.get("is_terminal") or data.get("isTerminal") or False)
+        if node_type == "message" and outgoing_count.get(node_id, 0) == 0 and not is_terminal:
+            data["is_terminal"] = True
+            is_terminal = True
+        if not is_terminal and outgoing_count.get(node_id, 0) < 1:
+            (errors if strict_mode else warnings).append(f"Node sem saída ({node_id})")
+        if node_type == "condition":
+            handles = condition_handles.get(node_id, set())
+            if not {"true", "false"}.issubset(handles):
+                (errors if strict_mode else warnings).append(f"Condition sem caminhos true/false ({node_id})")
+
+    # orphan nodes
+    if start_nodes:
+        reachable = set()
+        adjacency: dict[str, list[str]] = {node_id: [] for node_id in node_ids}
+        for edge in edges_payload:
+            src = str((edge or {}).get("source") or "")
+            dst = str((edge or {}).get("target") or "")
+            if src in adjacency and dst in node_ids:
+                adjacency[src].append(dst)
+        stack = [start_nodes[0]]
+        while stack:
+            cur = stack.pop()
+            if cur in reachable:
+                continue
+            reachable.add(cur)
+            stack.extend(adjacency.get(cur, []))
+        for node_id in node_ids:
+            if node_id not in reachable:
+                (errors if strict_mode else warnings).append(f"Node órfão ({node_id})")
+
+    return {"valid": len(errors) == 0, "errors": errors, "warnings": warnings}
+
+
 def _is_valid_flow_payload(nodes: list[dict[str, Any]] | None, edges: list[dict[str, Any]] | None) -> bool:
     valid, _ = validate_flow_structure(nodes=nodes, edges=edges)
     return valid
 
 
-def validate_flow(nodes: list[dict[str, Any]] | None, edges: list[dict[str, Any]] | None) -> tuple[bool, str | None]:
-    return validate_flow_structure(nodes=nodes, edges=edges)
+def validate_flow_legacy(nodes: list[dict[str, Any]] | None, edges: list[dict[str, Any]] | None) -> tuple[bool, str | None]:
+    result = validate_flow({"nodes": nodes or [], "edges": edges or []}, mode="published")
+    if result["valid"]:
+        return True, None
+    return False, result["errors"][0] if result["errors"] else "Flow inválido"
 
 
 def _get_latest_valid_flow_version(db: Session, flow_id: uuid.UUID) -> FlowVersion | None:
@@ -157,7 +255,7 @@ def _get_latest_valid_flow_version(db: Session, flow_id: uuid.UUID) -> FlowVersi
         .order_by(FlowVersion.version.desc(), FlowVersion.created_at.desc())
     ).scalars().all()
     for version in versions:
-        valid, _ = validate_flow(
+        valid, _ = validate_flow_legacy(
             version.nodes if isinstance(version.nodes, list) else [],
             version.edges if isinstance(version.edges, list) else [],
         )

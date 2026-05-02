@@ -25,6 +25,7 @@ class Flow(TenantMixin, Base):
     stop_words: Mapped[str | None] = mapped_column(Text, nullable=True)
     priority: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
+    status: Mapped[str] = mapped_column(String, nullable=False, default="draft", server_default="draft", index=True)
     current_version_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("flow_versions.id", ondelete="SET NULL"),
@@ -88,6 +89,7 @@ class FlowNode(Base):
     type: Mapped[str] = mapped_column(String, nullable=False)
     content: Mapped[str | None] = mapped_column(Text, nullable=True)
     metadata_json: Mapped[dict | None] = mapped_column("metadata", JSONB, nullable=True)
+    is_terminal: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     position_x: Mapped[int | None] = mapped_column(nullable=True)
     position_y: Mapped[int | None] = mapped_column(nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

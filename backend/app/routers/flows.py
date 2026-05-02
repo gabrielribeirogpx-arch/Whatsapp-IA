@@ -20,7 +20,7 @@ from app.services.flow_engine_service import (
     get_flow_graph,
     invalidate_flow_runtime_cache,
     save_flow_graph,
-    validate_flow_structure,
+    validate_flow as validate_flow_definition,
 )
 from app.services.flow_service import FlowService, create_flow, delete_flow, duplicate_flow, get_flow, get_flows, update_flow
 
@@ -43,6 +43,7 @@ class FlowCreatePayload(BaseModel):
     keywords: str | None = None
     stop_words: str | None = None
     priority: int = 0
+    status: str = "draft"
     nodes: list[dict[str, Any]] = Field(default_factory=list)
     edges: list[dict[str, Any]] = Field(default_factory=list)
 
@@ -118,9 +119,6 @@ def _get_flow_by_identifier(db: Session, flow_id: str, tenant_id: uuid.UUID | No
     return query.first()
 
 
-
-def validate_flow(nodes: list[dict[str, Any]], edges: list[dict[str, Any]]) -> tuple[bool, str | None]:
-    return validate_flow_structure(nodes=nodes, edges=edges)
 
 
 def _flow_versions_columns(db: Session) -> set[str]:
@@ -296,11 +294,11 @@ def validate_flow_payload_or_400(
         elif node_type == "message" and outgoing_count.get(node_id, 0) < 1:
             raise HTTPException(status_code=400, detail="VALIDATION_ERROR: MESSAGE_REQUIRES_OUTPUT")
 
-    valid, error = validate_flow(nodes, edges or [])
-    if not valid:
+    validation = validate_flow_definition({"nodes": nodes, "edges": edges or []}, mode="draft")
+    if not validation["valid"]:
         logger.warning(
             "[FLOW VALIDATION] FLOW_INVALID/INVALID_GRAPH ignorado para não bloquear requisição: %s",
-            error or "VALIDATION_ERROR: FLOW_INVALID",
+            validation["errors"][0] if validation["errors"] else "VALIDATION_ERROR: FLOW_INVALID",
         )
     return nodes, edges
 
@@ -351,9 +349,11 @@ def create_flow_route(
     db.refresh(flow)
     graph = get_flow_graph(db=db, tenant_id=tenant.id, flow_id=str(flow.id))
     normalized_definition = _normalize_flow_response(graph)
+    validation = validate_flow_definition({"nodes": initial_nodes, "edges": initial_edges}, mode="draft")
     return {
         **_serialize_flow(flow),
         "definition": normalized_definition,
+        "validation": validation,
     }
 
 
@@ -411,7 +411,7 @@ async def update_flow_route(
 
         logger.info("[FLOW DEBUG] Flow encontrado ou criado: %s", flow.id)
         for key, value in payload_data.items():
-            if key in {"name", "description", "is_active", "trigger_type", "trigger_value", "keywords", "stop_words", "priority", "version"}:
+            if key in {"name", "description", "is_active", "trigger_type", "trigger_value", "keywords", "stop_words", "priority", "version", "status"}:
                 setattr(flow, key, value)
         if flow.is_active:
             db.query(Flow).filter(
@@ -430,13 +430,7 @@ async def update_flow_route(
                 status_code=400,
                 content={"error": "payload inválido: possível sobrescrita acidental"},
             )
-        try:
-            nodes, edges = validate_flow_payload_or_400(nodes, edges)
-        except HTTPException as exc:
-            _log_flow_version_blocked(flow.id, len(nodes))
-            if persisted_nodes and not raw_nodes and not raw_edges:
-                logger.error("[FLOW VERSION BLOCKED] flow_id=%s reason=empty_payload_would_overwrite_existing", str(flow.id))
-            return JSONResponse(status_code=400, content={"error": exc.detail})
+        validation = validate_flow_definition({"nodes": nodes, "edges": edges}, mode="draft")
 
         last_version = db.execute(
             _flow_version_select(db)
@@ -492,10 +486,7 @@ async def update_flow_route(
         db.commit()
         db.refresh(new_version)
 
-        return {
-            "success": True,
-            "flow_id": flow.id,
-        }
+        return {"flow": _serialize_flow(flow), "validation": validation}
     except HTTPException:
         raise
     except Exception as e:
@@ -558,6 +549,7 @@ def _serialize_flow(flow: Flow) -> dict[str, Any]:
         "stop_words": flow.stop_words,
         "priority": flow.priority,
         "version": flow.version,
+        "status": flow.status,
         "current_version_id": str(flow.current_version_id) if flow.current_version_id else None,
         "created_at": flow.created_at.isoformat() if flow.created_at else None,
         "updated_at": flow.updated_at.isoformat() if flow.updated_at else None,
@@ -1244,9 +1236,12 @@ def publish_tenant_flow_version(
 
     nodes = flow_version.nodes if isinstance(flow_version.nodes, list) else []
     edges = flow_version.edges if isinstance(flow_version.edges, list) else []
-    validate_flow_payload_or_400(nodes, edges)
+    validation = validate_flow_definition({"nodes": nodes, "edges": edges}, mode="published")
+    if validation["errors"]:
+        raise HTTPException(status_code=400, detail={"errors": validation["errors"], "warnings": validation["warnings"]})
 
     FlowService(db).publish_version(flow=flow, flow_version=flow_version)
+    flow.status = "published"
     invalidate_flow_runtime_cache(flow.id)
     db.commit()
     db.refresh(flow)
