@@ -106,7 +106,7 @@ def _get_flow_by_identifier(db: Session, flow_id: str, tenant_id: uuid.UUID | No
     query, _ = _resolve_flow_query(db=db, flow_id=flow_id)
     if tenant_id is not None:
         query = query.filter(Flow.tenant_id == tenant_id)
-    query = query.filter(Flow.deleted_at.is_(None))
+    query = query.filter(Flow.deleted_at.is_(None), Flow.is_deleted.is_(False))
     return query.first()
 
 
@@ -671,7 +671,12 @@ def get_tenant_flow(
     except ValueError:
         raise HTTPException(status_code=404, detail="Flow não encontrado")
 
-    flow = db.query(Flow).filter(Flow.id == parsed_flow_id, Flow.tenant_id == resolved_request_tenant.id).first()
+    flow = db.query(Flow).filter(
+        Flow.id == parsed_flow_id,
+        Flow.tenant_id == resolved_request_tenant.id,
+        Flow.deleted_at.is_(None),
+        Flow.is_deleted.is_(False),
+    ).first()
     if not flow:
         raise HTTPException(status_code=404, detail="Flow não encontrado")
 
@@ -793,6 +798,7 @@ def get_tenant_flow_by_id(
         Flow.id == parsed_flow_id,
         Flow.tenant_id == tenant_uuid,
         Flow.deleted_at.is_(None),
+        Flow.is_deleted.is_(False),
     ).first()
     logger.info("[FLOW GET DEBUG] tenant_id=%s flow_id=%s query_result=%s", str(tenant_uuid), flow_id, str(flow.id) if flow else None)
 

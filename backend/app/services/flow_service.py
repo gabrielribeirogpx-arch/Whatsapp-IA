@@ -192,7 +192,7 @@ def _seed_default_steps(db: Session, flow: Flow) -> None:
 def _get_or_create_default_flow(db: Session, tenant_id) -> Flow:
     flow = db.execute(
         select(Flow)
-        .where(Flow.tenant_id == tenant_id, Flow.name == DEFAULT_FLOW_NAME)
+        .where(Flow.tenant_id == tenant_id, Flow.name == DEFAULT_FLOW_NAME, Flow.deleted_at.is_(None), Flow.is_deleted.is_(False))
         .order_by(Flow.created_at.asc(), Flow.id.asc())
     ).scalars().first()
     if not flow:
@@ -262,7 +262,7 @@ def resolve_flow_for_message(db: Session, tenant_id, message_text: str, conversa
 
     active_flows = db.execute(
         select(Flow)
-        .where(Flow.tenant_id == tenant_id, Flow.is_active.is_(True))
+        .where(Flow.tenant_id == tenant_id, Flow.is_active.is_(True), Flow.deleted_at.is_(None), Flow.is_deleted.is_(False))
         .order_by(Flow.created_at.asc(), Flow.id.asc())
     ).scalars().all()
 
@@ -391,14 +391,14 @@ def create_flow(db: Session, tenant_id, data: dict[str, Any]) -> Flow:
 def get_flows(db: Session, tenant_id) -> list[Flow]:
     return db.execute(
         select(Flow)
-        .where(Flow.tenant_id == tenant_id, Flow.deleted_at.is_(None))
+        .where(Flow.tenant_id == tenant_id, Flow.deleted_at.is_(None), Flow.is_deleted.is_(False))
         .order_by(Flow.created_at.desc(), Flow.id.desc())
     ).scalars().all()
 
 
 def get_flow(db: Session, flow_id, tenant_id) -> Flow | None:
     return db.execute(
-        select(Flow).where(Flow.id == flow_id, Flow.tenant_id == tenant_id, Flow.deleted_at.is_(None))
+        select(Flow).where(Flow.id == flow_id, Flow.tenant_id == tenant_id, Flow.deleted_at.is_(None), Flow.is_deleted.is_(False))
     ).scalars().first()
 
 
