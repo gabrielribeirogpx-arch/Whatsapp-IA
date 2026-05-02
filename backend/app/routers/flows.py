@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import uuid
 import logging
+import asyncio
 from datetime import datetime
 from typing import Any
 
@@ -1262,7 +1263,7 @@ class FlowSimulationPayload(BaseModel):
 
 
 @crud_router.post("/{flow_id}/simulate")
-def simulate_tenant_flow(
+async def simulate_tenant_flow(
     flow_id: str,
     payload: FlowSimulationPayload,
     x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
@@ -1357,6 +1358,46 @@ def simulate_tenant_flow(
                     return str(selected.get("target"))
             return str(outgoing[0].get("target"))
 
+        def _extract_delay_seconds(node: dict[str, Any] | None) -> int:
+            data = node.get("data") if isinstance(node, dict) and isinstance(node.get("data"), dict) else {}
+            raw_delay = data.get("delay") or data.get("seconds") or data.get("duration") or data.get("content") or (node.get("content") if isinstance(node, dict) else None)
+            try:
+                seconds = int(float(str(raw_delay).strip()))
+            except Exception:
+                logger.warning("[DELAY INVALID] node_id=%s raw=%s fallback=1", str((node or {}).get("id")), raw_delay)
+                seconds = 1
+            if seconds <= 0:
+                logger.warning("[DELAY INVALID] node_id=%s raw=%s fallback=1", str((node or {}).get("id")), raw_delay)
+                seconds = 1
+            return seconds
+
+        async def _resolve_operational_nodes(start_node_id: str | None) -> tuple[str, str | None, str | None]:
+            cursor = start_node_id
+            while cursor:
+                node = find_node(cursor)
+                data = node.get("data") if isinstance(node, dict) and isinstance(node.get("data"), dict) else {}
+                node_type = str(data.get("type") or (node.get("type") if isinstance(node, dict) else "") or "").lower()
+
+                if node_type == "delay":
+                    logger.info("[DELAY NODE HIT] node_id=%s", cursor)
+                    seconds = _extract_delay_seconds(node)
+                    logger.info("[DELAY SECONDS] %s", seconds)
+                    await asyncio.sleep(seconds)
+                    cursor = get_next_node_id(cursor, selected_handle="default") or get_next_node_id(cursor, selected_handle="output") or get_next_node_id(cursor)
+                    logger.info("[DELAY CONTINUE TO] next_node_id=%s", cursor)
+                    continue
+
+                if node_type == "action":
+                    cursor = get_next_node_id(cursor, selected_handle="default") or get_next_node_id(cursor, selected_handle="output") or get_next_node_id(cursor)
+                    continue
+
+                reply_text = str(data.get("text") or data.get("content") or data.get("label") or "")
+                next_id = get_next_node_id(cursor)
+                logger.info("[DELAY RESPONSE NODE] node_id=%s", cursor)
+                return reply_text, cursor, next_id
+
+            return "", None, None
+
         simulator_user_identifier = f"simulator:{session_id}"
         sim_session = (
             db.query(FlowSession)
@@ -1422,14 +1463,12 @@ def simulate_tenant_flow(
                         target_id = str(edge.get("target"))
                         target_node = find_node(target_id)
                         target_data = target_node.get("data") if isinstance(target_node, dict) and isinstance(target_node.get("data"), dict) else {}
-                        reply = str(target_data.get("text") or target_data.get("content") or target_data.get("label") or "")
-                        next_node_id = get_next_node_id(target_id)
+                        reply, current_node_id, next_node_id = await _resolve_operational_nodes(target_id)
                     else:
                         reply = "Condição sem saída configurada."
                         next_node_id = None
                 else:
-                    reply = str(data.get("text") or data.get("content") or data.get("label") or "")
-                    next_node_id = get_next_node_id(str(current_node_id))
+                    reply, current_node_id, next_node_id = await _resolve_operational_nodes(str(current_node_id))
 
                 sim_session.current_node_id = next_node_id
                 sim_session.status = "running" if next_node_id else "finished"
