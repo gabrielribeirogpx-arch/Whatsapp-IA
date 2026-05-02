@@ -441,140 +441,31 @@ async def webhook(request: Request, db: Session = Depends(get_db)):
         if not current_node:
             current_node = start_node
 
-        def process_node(node: dict, user_input_value: str) -> str | None:
-            def _normalize_for_condition(value: str) -> str:
-                import re
-                import unicodedata
-
-                lowered = str(value or "").strip().lower()
-                no_accents = "".join(
-                    c for c in unicodedata.normalize("NFD", lowered) if unicodedata.category(c) != "Mn"
-                )
-                no_punct = re.sub(r"[^\w\s]", " ", no_accents)
-                compact = re.sub(r"\s+", " ", no_punct).strip()
-                return compact
-
-            def _extract_condition_keywords(data: dict) -> list[str]:
-                keywords_raw: list[str] = []
-                candidate_fields = [
-                    data.get("keywords"),
-                    data.get("condition"),
-                    data.get("text"),
-                    data.get("content"),
-                    data.get("options"),
-                ]
-
-                for candidate in candidate_fields:
-                    if candidate is None:
-                        continue
-                    if isinstance(candidate, list):
-                        for item in candidate:
-                            if isinstance(item, dict):
-                                val = item.get("label") or item.get("text") or item.get("value")
-                                if val:
-                                    keywords_raw.append(str(val))
-                            elif item is not None:
-                                keywords_raw.append(str(item))
-                    elif isinstance(candidate, dict):
-                        for value in candidate.values():
-                            if value is not None:
-                                keywords_raw.append(str(value))
-                    else:
-                        keywords_raw.append(str(candidate))
-
-                if not keywords_raw:
-                    fallback_visible_fields = ["label", "title", "name", "value", "placeholder"]
-                    for field in fallback_visible_fields:
-                        field_value = data.get(field) or node.get(field)
-                        if field_value:
-                            keywords_raw.append(str(field_value))
-
-                flattened_keywords: list[str] = []
-                for item in keywords_raw:
-                    parts = [part.strip() for part in str(item).replace("\n", ",").split(",")]
-                    flattened_keywords.extend([part for part in parts if part])
-                return flattened_keywords
-
-            node_type = str(node.get("type") or "").lower()
-            if node_type == "message":
-                edge = next((e for e in flow["edges"] if e.get("source") == node.get("id")), None)
-                return edge.get("target") if edge else None
-            if node_type == "condition":
-                data = node.get("data") if isinstance(node.get("data"), dict) else {}
-                keywords_raw = _extract_condition_keywords(data)
-                input_normalized = _normalize_for_condition(user_input_value)
-                keywords_normalized = [_normalize_for_condition(k) for k in keywords_raw if str(k).strip()]
-
-                match = any(
-                    keyword
-                    and (
-                        input_normalized.find(keyword) >= 0
-                        or (len(input_normalized) >= 2 and keyword.find(input_normalized) >= 0)
-                    )
-                    for keyword in keywords_normalized
-                )
-                print("[CONDITION INPUT RAW]", user_input_value)
-                print("[CONDITION INPUT NORMALIZED]", input_normalized)
-                print("[CONDITION KEYWORDS RAW]", keywords_raw)
-                print("[CONDITION KEYWORDS NORMALIZED]", keywords_normalized)
-                print("[CONDITION MATCH]", match)
-
-                condition_edges = [
-                    e for e in flow["edges"] if str(e.get("source")) == str(node.get("id"))
-                ]
-
-                true_values = {"true", "sim"}
-                false_values = {"false", "nao"}
-                expected_values = true_values if match else false_values
-
-                selected_edge = None
-                edge_fields = ("sourceHandle", "source_handle", "output", "label")
-                for edge_candidate in condition_edges:
-                    field_values = {
-                        _normalize_for_condition(edge_candidate.get(field))
-                        for field in edge_fields
-                        if edge_candidate.get(field) is not None
-                    }
-                    if field_values.intersection(expected_values):
-                        selected_edge = edge_candidate
-                        break
-
-                if not selected_edge:
-                    print(
-                        f"[CONDITION ERROR] route_not_found node_id={node.get('id')} match={match} expected={sorted(expected_values)}"
-                    )
-                    return "__CONDITION_STOP__"
-
-                print("[CONDITION EDGE SELECTED]", selected_edge)
-                print("[CONDITION TARGET NODE]", selected_edge.get("target"))
-                return selected_edge.get("target")
-            edge = next((e for e in flow["edges"] if e.get("source") == node.get("id")), None)
-            return edge.get("target") if edge else None
-
         print("[FLOW EXECUTION]", execution.id)
         print("[FLOW VERSION]", published_version.version)
         print("[USER INPUT]", user_input)
         print("[CURRENT NODE]", current_node.get("id"))
 
-        next_node_id = process_node(current_node, user_input)
-        print("[NEXT NODE]", next_node_id)
+        runtime_result = await execute_until_message_or_end(
+            graph=flow,
+            current_node_id=str(current_node.get("id")) if current_node else None,
+            user_input=user_input,
+            context={"channel": "whatsapp"},
+        )
+        node_message = runtime_result.get("reply")
+        response_node_id = runtime_result.get("response_node_id")
+        next_node_id = runtime_result.get("next_node_id")
 
-        if next_node_id == "__CONDITION_STOP__":
-            db.rollback()
-            return {"status": "ignored"}
+        print("[NEXT NODE]", next_node_id)
+        print("[DELAY RESPONSE NODE]", response_node_id)
 
         execution.current_node_id = next_node_id
         db.add(execution)
 
-        next_node = get_node_by_id(flow, next_node_id) if next_node_id else None
-        if next_node:
-            node_message = (next_node.get("data") or {}).get("content") or (next_node.get("data") or {}).get("text")
-            if node_message:
-                send_whatsapp_message_simple(phone, node_message)
-                if str(current_node.get("type") or "").lower() == "condition":
-                    print("[WHATSAPP RESPONSE CONDITION]", node_message)
+        if node_message:
+            send_whatsapp_message_simple(phone, node_message)
 
-        is_terminal = not _has_outgoing_edges(next_node_id, flow["edges"])
+        is_terminal = not _has_outgoing_edges(response_node_id, flow["edges"]) if response_node_id else not next_node_id
         if is_terminal:
             execution.current_node_id = None
             print("[FLOW RUNTIME] session finalized at node", next_node_id)

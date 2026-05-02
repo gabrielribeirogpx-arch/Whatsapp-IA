@@ -24,6 +24,7 @@ from app.services.flow_engine_service import (
     validate_flow as validate_flow_definition,
     validate_flow_graph,
 )
+from app.services.flow_runtime_service import execute_until_message_or_end
 from app.services.flow_service import FlowService, create_flow, delete_flow, duplicate_flow, get_flow, get_flows, update_flow
 
 router = APIRouter()
@@ -1372,31 +1373,14 @@ async def simulate_tenant_flow(
             return seconds
 
         async def _resolve_operational_nodes(start_node_id: str | None) -> tuple[str, str | None, str | None]:
-            cursor = start_node_id
-            while cursor:
-                node = find_node(cursor)
-                data = node.get("data") if isinstance(node, dict) and isinstance(node.get("data"), dict) else {}
-                node_type = str(data.get("type") or (node.get("type") if isinstance(node, dict) else "") or "").lower()
-
-                if node_type == "delay":
-                    logger.info("[DELAY NODE HIT] node_id=%s", cursor)
-                    seconds = _extract_delay_seconds(node)
-                    logger.info("[DELAY SECONDS] %s", seconds)
-                    await asyncio.sleep(seconds)
-                    cursor = get_next_node_id(cursor, selected_handle="default") or get_next_node_id(cursor, selected_handle="output") or get_next_node_id(cursor)
-                    logger.info("[DELAY CONTINUE TO] next_node_id=%s", cursor)
-                    continue
-
-                if node_type == "action":
-                    cursor = get_next_node_id(cursor, selected_handle="default") or get_next_node_id(cursor, selected_handle="output") or get_next_node_id(cursor)
-                    continue
-
-                reply_text = str(data.get("text") or data.get("content") or data.get("label") or "")
-                next_id = get_next_node_id(cursor)
-                logger.info("[DELAY RESPONSE NODE] node_id=%s", cursor)
-                return reply_text, cursor, next_id
-
-            return "", None, None
+            result = await execute_until_message_or_end(
+                graph={"nodes": nodes, "edges": edges},
+                current_node_id=start_node_id,
+                user_input=message,
+                context={"channel": "simulator"},
+            )
+            logger.info("[DELAY RESPONSE NODE] node_id=%s", result.get("response_node_id"))
+            return str(result.get("reply") or ""), result.get("response_node_id"), result.get("next_node_id")
 
         simulator_user_identifier = f"simulator:{session_id}"
         sim_session = (
