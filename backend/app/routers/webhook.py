@@ -21,7 +21,7 @@ from app.services.flow_service import resolve_flow_for_message
 from app.services.flow_engine_service import get_flow_graph
 from app.services.flow_engine import get_node_by_id
 from app.services.flow_session_service import FlowSessionService
-from app.services.flow_runtime_service import execute_until_message_or_end
+from app.services.flow_runtime_service import execute_node_chain_until_reply
 from app.models.flow import Flow
 from app.services.whatsapp_service import send_whatsapp_buttons, send_whatsapp_message_simple
 from app.services.intent_service import classify_intent, normalize_input, route_intent
@@ -447,10 +447,13 @@ async def webhook(request: Request, db: Session = Depends(get_db)):
         print("[USER INPUT]", user_input)
         print("[CURRENT NODE]", current_node.get("id"))
 
-        runtime_result = await execute_until_message_or_end(
+        runtime_result = await execute_node_chain_until_reply(
             graph=flow,
-            current_node_id=str(current_node.get("id")) if current_node else None,
+            start_node_id=str(current_node.get("id")) if current_node else None,
             user_input=user_input,
+            tenant_id=str(tenant_uuid),
+            wa_id=wa_id,
+            db=db,
             context={"channel": "whatsapp"},
         )
         node_message = runtime_result.get("reply")
