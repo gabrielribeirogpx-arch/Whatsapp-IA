@@ -1273,6 +1273,7 @@ def simulate_tenant_flow(
         logger.info("[SIMULATOR START REQUEST]")
         logger.info("[SIMULATOR TENANT] %s", str(tenant_uuid))
         logger.info("[SIMULATOR FLOW_ID] %s", flow_id)
+        print("[SIMULATOR FLOW_ID]", flow_id)
 
         flow = _get_flow_by_identifier(db=db, flow_id=flow_id, tenant_id=tenant_uuid)
         if not flow:

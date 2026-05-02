@@ -33,7 +33,7 @@ def test_post_simulate_contract_response_without_transition(monkeypatch):
     monkeypatch.setattr(
         flows,
         "get_flow_graph",
-        lambda flow_id, db: {
+        lambda **kwargs: {
             "nodes": [
                 {
                     "id": "start",
@@ -68,7 +68,7 @@ def test_post_simulate_does_not_send_whatsapp_and_returns_only_simulation_json(m
     monkeypatch.setattr(
         flows,
         "get_flow_graph",
-        lambda flow_id, db: {
+        lambda **kwargs: {
             "nodes": [
                 {
                     "id": "start",
@@ -102,3 +102,38 @@ def test_post_simulate_does_not_send_whatsapp_and_returns_only_simulation_json(m
         "next_node_id": "start",
         "selected_edge": None,
     }
+
+
+def test_post_simulate_calls_get_flow_graph_with_required_flow_id(monkeypatch):
+    monkeypatch.setattr(flows, "_resolve_tenant_header", lambda _: "tenant-1")
+    monkeypatch.setattr(flows, "_get_flow_by_identifier", lambda **kwargs: _FakeFlow())
+
+    captured = {}
+
+    def _fake_get_flow_graph(*, db, tenant_id, flow_id):
+        captured["db"] = db
+        captured["tenant_id"] = tenant_id
+        captured["flow_id"] = flow_id
+        return {
+            "nodes": [
+                {
+                    "id": "start",
+                    "type": "message",
+                    "data": {"isStart": True, "text": "Olá"},
+                }
+            ],
+            "edges": [],
+        }
+
+    monkeypatch.setattr(flows, "get_flow_graph", _fake_get_flow_graph)
+
+    client = TestClient(_build_test_app())
+    response = client.post(
+        "/api/flows/flow-1/simulate",
+        headers={"X-Tenant-ID": "00000000-0000-0000-0000-000000000001"},
+        json={"message": "oi"},
+    )
+
+    assert response.status_code == 200
+    assert captured["flow_id"] == "flow-1"
+    assert captured["tenant_id"] == "tenant-1"
