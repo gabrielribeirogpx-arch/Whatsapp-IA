@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.orm import load_only
 
 from app.database import get_db
-from app.models import Conversation, Flow, FlowVersion, Tenant
+from app.models import Conversation, Flow, FlowSession, FlowVersion, Tenant
 from app.services.flow_analytics_service import get_flow_analytics
 from app.services.flow_engine_service import (
     get_flow_graph,
@@ -1312,6 +1312,7 @@ def simulate_tenant_flow(
         normalized_message = message.lower()
 
         logger.info("[SIMULATOR SESSION_ID] %s", session_id)
+        logger.info("[SIMULATOR SESSION BACKEND] db")
 
         def find_node(nid: str | None):
             if nid is None:
