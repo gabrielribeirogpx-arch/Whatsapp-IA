@@ -1300,38 +1300,117 @@ def simulate_tenant_flow(
                 detail=f"Nenhum node encontrado na fonte {graph_source}",
             )
 
-        session_id = payload.session_id or "default"
+        session_id = (payload.session_id or "").strip() or "default"
         message = (payload.message or "").strip()
         normalized_message = message.lower()
-        routing_message = normalized_message or "oi"
-        node_id = str(start_node.get("id"))
 
-        def find_node(nid: str):
+        logger.info("[SIMULATOR SESSION_ID] %s", session_id)
+
+        def find_node(nid: str | None):
+            if nid is None:
+                return None
             return next((n for n in nodes if str(n.get("id")) == str(nid)), None)
 
-        reply = ""
+        def get_next_node_id(source_node_id: str, selected_handle: str | None = None) -> str | None:
+            outgoing = [e for e in edges if isinstance(e, dict) and str(e.get("source")) == str(source_node_id)]
+            if not outgoing:
+                return None
+            if selected_handle is not None:
+                selected = next(
+                    (
+                        e
+                        for e in outgoing
+                        if str(e.get("sourceHandle") or (e.get("data") or {}).get("sourceHandle") or "").lower() == selected_handle.lower()
+                    ),
+                    None,
+                )
+                if selected:
+                    return str(selected.get("target"))
+            return str(outgoing[0].get("target"))
+
+        simulator_user_identifier = f"simulator:{session_id}"
+        sim_session = (
+            db.query(FlowSession)
+            .filter(
+                FlowSession.tenant_id == tenant_uuid,
+                FlowSession.flow_id == flow.id,
+                FlowSession.user_identifier == simulator_user_identifier,
+            )
+            .first()
+        )
+        is_new_session = sim_session is None
+        logger.info("[SIMULATOR SESSION NEW] %s", is_new_session)
+
         selected_edge = None
-        current = find_node(node_id)
-        if isinstance(current, dict):
-            data = current.get("data") if isinstance(current.get("data"), dict) else {}
-            reply = str(data.get("text") or data.get("content") or data.get("label") or "")
+        reply = ""
+        current_node_id = None
+        next_node_id = None
 
-        if routing_message in {"sim", "já", "anuncio", "anúncio"}:
-            outgoing = [e for e in edges if isinstance(e, dict) and str(e.get("source")) == node_id]
-            true_edge = next((e for e in outgoing if str(e.get("sourceHandle") or (e.get("data") or {}).get("sourceHandle") or "").lower() == "true"), None)
-            if true_edge:
-                selected_edge = "true"
-                node_id = str(true_edge.get("target"))
-                target_node = find_node(node_id)
-                if isinstance(target_node, dict):
-                    data = target_node.get("data") if isinstance(target_node.get("data"), dict) else {}
-                    reply = str(data.get("text") or data.get("content") or data.get("label") or reply)
+        if is_new_session:
+            start_node_id = str(start_node.get("id"))
+            current_node_id = start_node_id
+            start_data = start_node.get("data") if isinstance(start_node.get("data"), dict) else {}
+            reply = str(start_data.get("text") or start_data.get("content") or start_data.get("label") or "")
+            next_node_id = get_next_node_id(start_node_id)
 
+            sim_session = FlowSession(
+                tenant_id=tenant_uuid,
+                flow_id=flow.id,
+                user_identifier=simulator_user_identifier,
+                conversation_id=None,
+                current_node_id=next_node_id,
+                status="running" if next_node_id else "finished",
+                context={"simulator": True, "session_id": session_id},
+                variables={},
+            )
+            db.add(sim_session)
+            logger.info("[SIMULATOR CURRENT NODE] %s", current_node_id)
+            logger.info("[SIMULATOR NEXT NODE SAVED] %s", next_node_id)
+        else:
+            current_node_id = sim_session.current_node_id
+            logger.info("[SIMULATOR CURRENT NODE] %s", current_node_id)
+
+            if not current_node_id:
+                reply = "Simulação finalizada. Clique em Reiniciar simulação para começar novamente."
+                next_node_id = None
+            else:
+                current = find_node(current_node_id)
+                data = current.get("data") if isinstance(current, dict) and isinstance(current.get("data"), dict) else {}
+                node_type = str(data.get("type") or current.get("type") or "").lower() if isinstance(current, dict) else ""
+
+                if "condition" in node_type:
+                    logger.info("[SIMULATOR CONDITION INPUT] %s", normalized_message)
+                    outgoing = [e for e in edges if isinstance(e, dict) and str(e.get("source")) == str(current_node_id)]
+                    condition_match = "true" if normalized_message in {"sim", "já", "ja", "anuncio", "anúncio"} else "false"
+                    logger.info("[SIMULATOR CONDITION MATCH] %s", condition_match)
+                    edge = next((e for e in outgoing if str(e.get("sourceHandle") or (e.get("data") or {}).get("sourceHandle") or "").lower() == condition_match), None)
+                    if edge is None and outgoing:
+                        edge = outgoing[0]
+                    if edge is not None:
+                        selected_edge = str(edge.get("sourceHandle") or (edge.get("data") or {}).get("sourceHandle") or condition_match)
+                        logger.info("[SIMULATOR EDGE SELECTED] %s", selected_edge)
+                        target_id = str(edge.get("target"))
+                        target_node = find_node(target_id)
+                        target_data = target_node.get("data") if isinstance(target_node, dict) and isinstance(target_node.get("data"), dict) else {}
+                        reply = str(target_data.get("text") or target_data.get("content") or target_data.get("label") or "")
+                        next_node_id = get_next_node_id(target_id)
+                    else:
+                        reply = "Condição sem saída configurada."
+                        next_node_id = None
+                else:
+                    reply = str(data.get("text") or data.get("content") or data.get("label") or "")
+                    next_node_id = get_next_node_id(str(current_node_id))
+
+                sim_session.current_node_id = next_node_id
+                sim_session.status = "running" if next_node_id else "finished"
+                logger.info("[SIMULATOR NEXT NODE SAVED] %s", next_node_id)
+
+        db.commit()
         result = {
             "success": True,
             "reply": reply,
-            "current_node_id": str(start_node.get("id")) if start_node else None,
-            "next_node_id": node_id,
+            "current_node_id": current_node_id,
+            "next_node_id": next_node_id,
             "selected_edge": str(selected_edge) if selected_edge is not None else None,
         }
         logger.info("[SIMULATOR RESPONSE] %s", result)
