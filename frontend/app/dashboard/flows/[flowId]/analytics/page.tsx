@@ -1,10 +1,10 @@
 'use client';
 
-import Link from 'next/link';
 import { useEffect, useState } from 'react';
-import { ArrowLeft, BarChart3, Funnel, GitBranch, MessageSquareText, Sparkles, TrendingUp } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { BarChart3, Funnel, GitBranch, MessageSquareText, Sparkles, TrendingUp } from 'lucide-react';
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
-import { getFlowAnalytics } from '@/lib/api';
+import { deleteFlow, duplicateFlow, getFlowAnalytics, listFlows, updateFlowStatus } from '@/lib/api';
 import { FlowAnalytics } from '@/lib/types';
 
 type Props = { params: { flowId: string } };
@@ -31,10 +31,13 @@ const empty: FlowAnalytics = {
 };
 
 export default function Page({ params }: Props) {
+  const router = useRouter();
   const [period, setPeriod] = useState('7d');
   const [timelineMetric, setTimelineMetric] = useState('entries');
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState<FlowAnalytics>(empty);
+  const [isActive, setIsActive] = useState(false);
+  const [flowStatus, setFlowStatus] = useState<'active' | 'draft' | 'inactive'>('inactive');
 
   useEffect(() => {
     (async () => {
@@ -46,6 +49,24 @@ export default function Page({ params }: Props) {
       }
     })();
   }, [params.flowId, period]);
+
+  useEffect(() => {
+    (async () => {
+      const flows = await listFlows();
+      const flow = flows.find((item) => item.id === params.flowId);
+      if (!flow) return;
+      setIsActive(flow.is_active);
+      const status = (flow as { status?: string }).status;
+      setFlowStatus(flow.is_active ? 'active' : status === 'draft' ? 'draft' : 'inactive');
+    })();
+  }, [params.flowId]);
+
+  const handleToggle = async () => {
+    const next = !isActive;
+    setIsActive(next);
+    setFlowStatus(next ? 'active' : 'inactive');
+    try { await updateFlowStatus(params.flowId, next); } catch { setIsActive(!next); }
+  };
 
   const kpis = [
     ['Entradas', data.summary.entries],
@@ -70,7 +91,7 @@ export default function Page({ params }: Props) {
             <BarChart3 size={22} />
           </div>
           <div>
-            <h1 className='page-title'>Analytics do Flow</h1>
+            <h1 className='page-title'>Analytics do Flow <span className={`status-badge ${flowStatus}`}>{flowStatus === 'active' ? 'Ativo' : flowStatus === 'draft' ? 'Draft' : 'Inativo'}</span></h1>
             <p className='breadcrumb'>Flows &gt; <span>{data.flow_name}</span></p>
           </div>
         </div>
@@ -88,11 +109,27 @@ export default function Page({ params }: Props) {
               </button>
             ))}
           </div>
-          <Link href='/dashboard/flows' className='back-btn' aria-label='Voltar para flows'>
-            <ArrowLeft size={16} />
-          </Link>
         </div>
       </header>
+
+      <div className='container-actions'>
+        <div className='actions-left'>
+          <button className='btn btn-ghost' onClick={() => router.push('/dashboard/flows')}>← Flows</button>
+          <button className='btn btn-primary' onClick={() => router.push(`/dashboard/flow-builder?flow_id=${params.flowId}`)}>Abrir Builder</button>
+          <button className='btn btn-secondary' onClick={() => router.push('/dashboard/flows')}>Editar</button>
+        </div>
+        <div className='actions-right'>
+          <button className='btn btn-primary' onClick={handleToggle}>{isActive ? 'Desativar Flow' : 'Ativar Flow'}</button>
+          <button className='btn btn-secondary' onClick={async () => { await duplicateFlow(params.flowId); }}>Duplicar</button>
+          <button className='btn btn-danger' onClick={async () => { if (window.confirm('Deseja deletar este flow?')) { await deleteFlow(params.flowId); router.push('/dashboard/flows'); } }}>Deletar</button>
+        </div>
+      </div>
+
+      <div className='mobile-actions'>
+        <button className='btn btn-ghost' onClick={() => router.push('/dashboard/flows')}>← Flows</button>
+        <button className='btn btn-primary' onClick={() => router.push(`/dashboard/flow-builder?flow_id=${params.flowId}`)}>Abrir Builder</button>
+        <button className='btn btn-primary' onClick={handleToggle}>{isActive ? 'Desativar' : 'Ativar'}</button>
+      </div>
 
       <div className='kpi-grid'>
         {kpis.map(([label, value], index) => (
@@ -286,6 +323,26 @@ export default function Page({ params }: Props) {
           font-size: 40px;
           font-weight: 800;
         }
+        .status-badge {
+          display: inline-flex;
+          align-items: center;
+          padding: 4px 10px;
+          border-radius: 999px;
+          font-size: 12px;
+          margin-left: 10px;
+          vertical-align: middle;
+        }
+        .status-badge.active { background: #dcfce7; color: #15803d; }
+        .status-badge.draft { background: #fef3c7; color: #b45309; }
+        .status-badge.inactive { background: #e2e8f0; color: #475569; }
+        .container-actions { display: flex; align-items: center; justify-content: space-between; margin: 16px 0 24px; gap: 10px; flex-wrap: wrap; }
+        .actions-left, .actions-right { display: flex; gap: 10px; flex-wrap: wrap; }
+        .btn { border-radius: 10px; padding: 8px 14px; border: 1px solid transparent; font-weight: 600; cursor: pointer; }
+        .btn-primary { background: #16a34a; color: #fff; }
+        .btn-secondary { background: #fff; border-color: #e2e8f0; color: #334155; }
+        .btn-danger { background: #fff; border-color: #fecaca; color: #dc2626; }
+        .btn-ghost { background: transparent; border-color: #e2e8f0; color: #64748b; padding: 6px 10px; }
+        .mobile-actions { display: none; }
         .breadcrumb,
         .secondary-text,
         .period-label {
@@ -568,6 +625,8 @@ export default function Page({ params }: Props) {
             justify-content: flex-start;
             flex-wrap: wrap;
           }
+          .container-actions { display: none; }
+          .mobile-actions { display: flex; gap: 8px; margin: 0 0 16px; flex-wrap: wrap; }
           .funnel-empty { grid-template-columns: 1fr; text-align: center; }
         }
       `}</style>
