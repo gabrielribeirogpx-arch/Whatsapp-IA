@@ -253,7 +253,10 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
   useEffect(() => {
     const handleOutsideClick = (event: MouseEvent) => {
       if (!flowSelectRef.current) return;
-      if (!flowSelectRef.current.contains(event.target as Node)) {
+      const target = event.target;
+      if (!(target instanceof HTMLElement)) return;
+
+      if (!flowSelectRef.current.contains(target)) {
         setIsFlowSelectOpen(false);
       }
     };
