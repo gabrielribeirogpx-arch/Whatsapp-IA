@@ -244,9 +244,15 @@ export type DeleteFlowResponse = {
 };
 
 export type FlowAnalytics = {
-  entries: number;
-  messages_sent: number;
-  finalizations: number;
+  flow_id: string;
+  flow_name: string;
+  period: '24h' | '7d' | '30d' | '90d' | string;
+  summary: { entries: number; messages_sent: number; completed: number; conversion_rate: number; dropoff_rate: number; avg_time_seconds: number; avg_messages_per_user: number; };
+  funnel: Array<{ node_id: string; node_label: string; node_type: string; entries: number; exits: number; dropoff_rate: number; conversion_to_next_rate: number; avg_time_seconds: number; }>;
+  top_dropoffs: Array<{ node_id: string; node_label: string; node_type: string; entries: number; exits: number; dropoff_rate: number; conversion_to_next_rate: number; avg_time_seconds: number; }>;
+  common_replies: Array<{ reply: string; count: number; rate: number }>;
+  timeline: Array<{ date: string; entries: number; messages_sent: number; completed: number }>;
+  insights: Array<{ type: 'warning' | 'info' | 'success' | string; title: string; message: string; node_id?: string | null }>;
 };
 
 export type SystemSettings = {
