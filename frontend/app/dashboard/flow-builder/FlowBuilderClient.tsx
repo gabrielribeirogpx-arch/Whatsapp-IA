@@ -138,7 +138,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
   const router = useRouter();
   const searchParams = useSearchParams();
   const flowIdFromUrl = searchParams.get('flow_id') || searchParams.get('flowId') || _initialFlowId || '';
-  const [flows, setFlows] = useState<Array<{ id: string; name?: string | null; created_at?: string | null; is_active?: boolean }>>([]);
+  const [flows, setFlows] = useState<Array<{ id: string; name?: string | null; created_at?: string | null; is_active?: boolean; status?: string | null; is_published?: boolean | null }>>([]);
   const normalizedFlows = useMemo(
     () =>
       flows.map((flow) => ({
@@ -197,6 +197,11 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
     () => normalizedFlows.find((flow) => flow.id === selectedFlowId) || null,
     [normalizedFlows, selectedFlowId],
   );
+  const getFlowBadge = useCallback((flow: { is_active?: boolean; status?: string | null; is_published?: boolean | null }) => {
+    if (flow.is_active) return { label: 'Ativo', variant: 'flow-badge-active' };
+    if (flow.status === 'draft' || !flow.is_published) return { label: 'Rascunho', variant: 'flow-badge-draft' };
+    return { label: 'Inativo', variant: 'flow-badge-inactive' };
+  }, []);
 
   const parseHttpStatus = useCallback((error: unknown): number | null => {
     if (!(error instanceof Error)) return null;
@@ -1178,7 +1183,10 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
                       <span className="flow-name">
                         {selectedFlow ? (selectedFlow.name || selectedFlow.id) : (normalizedFlows.length === 0 ? 'Nenhum flow disponível' : 'Selecione um flow')}
                       </span>
-                      {selectedFlow?.is_active && <span className="flow-badge">Ativo</span>}
+                      {selectedFlow && (() => {
+                        const badge = getFlowBadge(selectedFlow);
+                        return <span className={`flow-badge ${badge.variant}`}>{badge.label}</span>;
+                      })()}
                     </div>
                   </button>
                   {isFlowSelectOpen && normalizedFlows.length > 0 && (
@@ -1193,7 +1201,10 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
                           }}
                         >
                           <span className="flow-name">{flow.name || flow.id}</span>
-                          {flow.is_active && <span className="flow-badge">Ativo</span>}
+                          {(() => {
+                            const badge = getFlowBadge(flow);
+                            return <span className={`flow-badge ${badge.variant}`}>{badge.label}</span>;
+                          })()}
                         </button>
                       ))}
                     </div>
