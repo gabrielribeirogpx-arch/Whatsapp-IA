@@ -1642,10 +1642,11 @@ input {
 }
 
 .flow-selected-label {
-  display: inline-flex;
+  display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 8px;
-  max-width: 100%;
+  width: 100%;
 }
 
 .flow-name {
@@ -1664,6 +1665,24 @@ input {
   background: #d1fae5;
   border: 1px solid #a7f3d0;
   flex: 0 0 auto;
+}
+
+.flow-badge-active {
+  color: #065f46;
+  background: #d1fae5;
+  border-color: #a7f3d0;
+}
+
+.flow-badge-draft {
+  color: #92400e;
+  background: #fef3c7;
+  border-color: #fde68a;
+}
+
+.flow-badge-inactive {
+  color: #374151;
+  background: #f3f4f6;
+  border-color: #e5e7eb;
 }
 
 .flow-select-dropdown {
@@ -1688,6 +1707,7 @@ input {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 8px;
   text-align: left;
   padding: 10px 12px;
   border-radius: 8px;
