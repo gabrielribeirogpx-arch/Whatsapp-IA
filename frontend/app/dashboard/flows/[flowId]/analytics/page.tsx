@@ -77,7 +77,7 @@ export default function Page({ params }: Props) {
     <div className='flex justify-center w-full'>
       <div className='w-full max-w-[1160px] p-6 pl-7 lg:px-8'>
         <div className='analytics-page'>
-      <header className='analytics-header'>
+      <header className='analytics-header pl-8'>
         <div className='header-left'>
           <div>
             <h1 className='page-title'>Analytics do Flow <span className={`status-badge ${flowStatus}`}>{flowStatus === 'active' ? 'Ativo' : flowStatus === 'draft' ? 'Draft' : 'Inativo'}</span></h1>
