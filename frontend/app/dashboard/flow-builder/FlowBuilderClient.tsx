@@ -572,28 +572,33 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
     [edges, nodes, selectedFlowId],
   );
 
+  const wait = useCallback((ms: number) => new Promise<void>((resolve) => {
+    setTimeout(resolve, ms);
+  }), []);
+
   const playBotResponses = useCallback(async (events: Array<{ type?: string; text?: string; seconds?: number }>) => {
     for (const event of events) {
       if (event?.type === 'delay') {
         const seconds = Number(event.seconds) || 0;
         if (seconds > 0) {
-          setIsTyping(true);
-          await new Promise((resolve) => setTimeout(resolve, seconds * 1000));
-          setIsTyping(false);
+          await wait(seconds * 1000);
         }
         continue;
       }
 
-      if (event?.type === 'send_message') {
+      if (event?.type === 'message' || event?.type === 'send_message') {
         const text = String(event.text || '').trim();
         if (text) {
+          setIsTyping(true);
+          await wait(900);
+          setIsTyping(false);
           setMessages((prev) => [...prev, { type: 'bot', text }]);
         }
       }
     }
 
     setIsTyping(false);
-  }, []);
+  }, [wait]);
 
   const runFlowStep = useCallback(async (userMessage: string) => {
     if (!selectedFlowId || isProcessing) return;
