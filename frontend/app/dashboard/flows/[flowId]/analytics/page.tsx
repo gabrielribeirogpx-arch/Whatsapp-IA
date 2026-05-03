@@ -82,7 +82,8 @@ export default function Page({ params }: Props) {
           <div>
             <div className='flex items-center gap-3'>
               <BarChart3 className='h-5 w-5 text-slate-400' />
-              <h1 className='page-title text-xl'>Analytics do Flow <span className={`status-badge ${flowStatus}`}>{flowStatus === 'active' ? 'Ativo' : flowStatus === 'draft' ? 'Draft' : 'Inativo'}</span></h1>
+              <h1 className='page-title text-xl'>Analytics do Flow</h1>
+              <span className={`status-badge ${flowStatus}`}>{flowStatus === 'active' ? 'Ativo' : flowStatus === 'draft' ? 'Draft' : 'Inativo'}</span>
             </div>
             <p className='breadcrumb'>Flows &gt; <span>{data.flow_name}</span></p>
           </div>
