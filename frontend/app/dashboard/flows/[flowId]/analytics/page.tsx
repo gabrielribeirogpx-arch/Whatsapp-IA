@@ -60,7 +60,9 @@ export default function Page({ params }: Props) {
   );
 
   return (
-    <div className='analytics-page'>
+    <div className='flex justify-center w-full'>
+      <div className='w-full max-w-[1160px] px-6 lg:px-8'>
+        <div className='analytics-page'>
       <header className='analytics-header'>
         <div className='header-left'>
           <div className='analytics-icon' aria-hidden>
@@ -242,11 +244,8 @@ export default function Page({ params }: Props) {
 
       {loading && <div className='secondary-text'>Carregando...</div>}
 
-      <style jsx>{`
+          <style jsx>{`
         .analytics-page {
-          max-width: 1220px;
-          margin: 0 auto;
-          padding: 32px;
           background: #f8fafc;
           color: #0f172a;
         }
@@ -539,11 +538,10 @@ export default function Page({ params }: Props) {
             justify-content: flex-start;
             flex-wrap: wrap;
           }
-          .analytics-page {
-            padding: 20px 14px;
-          }
         }
       `}</style>
+        </div>
+      </div>
     </div>
   );
 }
