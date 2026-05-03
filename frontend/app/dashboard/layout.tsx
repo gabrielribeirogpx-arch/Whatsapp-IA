@@ -37,7 +37,7 @@ function FlowAnalyticsSidebar({ flowId }: { flowId?: string }) {
   };
 
   return (
-    <nav className="dash-sidebar">
+    <nav className="dash-sidebar dash-sidebar-analytics">
       <div className="dash-sidebar-logo">
         <img src="/Logo.svg" alt="Ícone" className="logo-icon" />
         <img src="/Logo2.svg" alt="Logo" className="logo-full" />
