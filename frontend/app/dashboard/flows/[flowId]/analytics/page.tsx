@@ -80,7 +80,10 @@ export default function Page({ params }: Props) {
       <header className='analytics-header pl-8'>
         <div className='header-left'>
           <div>
-            <h1 className='page-title'>Analytics do Flow <span className={`status-badge ${flowStatus}`}>{flowStatus === 'active' ? 'Ativo' : flowStatus === 'draft' ? 'Draft' : 'Inativo'}</span></h1>
+            <div className='flex items-center gap-3'>
+              <BarChart3 className='h-5 w-5 text-slate-400' />
+              <h1 className='page-title text-xl'>Analytics do Flow <span className={`status-badge ${flowStatus}`}>{flowStatus === 'active' ? 'Ativo' : flowStatus === 'draft' ? 'Draft' : 'Inativo'}</span></h1>
+            </div>
             <p className='breadcrumb'>Flows &gt; <span>{data.flow_name}</span></p>
           </div>
         </div>
