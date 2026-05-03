@@ -4,13 +4,49 @@ import Link from 'next/link';
 import { ReactNode } from 'react';
 import { usePathname } from 'next/navigation';
 
+function FlowAnalyticsSidebar({ flowId }: { flowId?: string }) {
+  const flowPath = flowId ? `/dashboard/flows/${flowId}` : '/dashboard/flows';
+  const analyticsPath = flowId ? `/dashboard/flows/${flowId}/analytics` : '/dashboard/flows';
+
+  return (
+    <nav className="dash-sidebar">
+      <div className="dash-sidebar-logo">
+        <img src="/Logo.svg" alt="Ícone" className="logo-icon" />
+        <img src="/Logo2.svg" alt="Logo" className="logo-full" />
+      </div>
+
+      <span className="dash-nav-section">Flow Analytics</span>
+
+      <Link href="/dashboard/flows" className="dash-nav-item">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+        <span className="dash-nav-label">Todos os Flows</span>
+      </Link>
+
+      <Link href={flowPath} className="dash-nav-item">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+        <span className="dash-nav-label">Voltar ao Flow</span>
+      </Link>
+
+      <Link href={analyticsPath} className="dash-nav-item">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 3v18h18"/><rect x="7" y="13" width="3" height="5"/><rect x="12" y="9" width="3" height="9"/><rect x="17" y="6" width="3" height="12"/></svg>
+        <span className="dash-nav-label">Analytics</span>
+      </Link>
+    </nav>
+  );
+}
+
 export default function DashboardLayout({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const isFlowBuilder = pathname.startsWith('/dashboard/flow-builder');
+  const isFlowAnalytics = pathname.includes('/dashboard/flows/') && pathname.endsWith('/analytics');
+
+  const pathnameSegments = pathname.split('/');
+  const flowsIndex = pathnameSegments.indexOf('flows');
+  const flowId = flowsIndex !== -1 ? pathnameSegments[flowsIndex + 1] : undefined;
 
   return (
     <div style={{ display: 'flex', minHeight: '100vh', background: '#F7F8F7', fontFamily: 'Inter, -apple-system, sans-serif' }}>
-      {!isFlowBuilder && (
+      {!isFlowBuilder && !isFlowAnalytics && (
         <nav className="dash-sidebar">
           <div className="dash-sidebar-logo">
             <img src="/Logo.svg" alt="Ícone" className="logo-icon" />
@@ -64,7 +100,9 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
         </nav>
       )}
 
-      <main style={{ flex: 1, minWidth: 0, overflowY: 'auto', padding: isFlowBuilder ? '0' : '32px 24px 32px 16px' }}>{children}</main>
+      {isFlowAnalytics && !isFlowBuilder && <FlowAnalyticsSidebar flowId={flowId} />}
+
+      <main style={{ flex: 1, minWidth: 0, overflowY: 'auto', padding: isFlowBuilder || isFlowAnalytics ? '0' : '32px 24px 32px 16px' }}>{children}</main>
     </div>
   );
 }
