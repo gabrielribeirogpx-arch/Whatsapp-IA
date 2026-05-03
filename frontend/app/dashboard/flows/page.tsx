@@ -169,32 +169,74 @@ export default function FlowsPage() {
       {loading ? (
         <p>Carregando...</p>
       ) : (
-        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-          <thead>
-            <tr>
-              <th align="left">Nome</th>
-              <th align="left">Trigger</th>
-              <th align="left">Valor</th>
-              <th align="left">Ações</th>
-            </tr>
-          </thead>
-          <tbody>
-            {flows.map((flow) => (
-              <tr key={flow.id}>
-                <td>{flow.name}</td>
-                <td>{flow.trigger_type}</td>
-                <td>{flow.trigger_value || '-'}</td>
-                <td style={{ display: 'flex', gap: 8, padding: '8px 0' }}>
-                  <button onClick={() => openEdit(flow)}>Editar</button>
-                  <Link href={`/dashboard/flows/${flow.id}/analytics`}>Analytics</Link>
-                  <button onClick={() => onDuplicate(flow.id)}>Duplicar</button>
-                  <button onClick={() => onDelete(flow.id)}>Deletar</button>
-                  <Link href={`/dashboard/flow-builder?flow_id=${flow.id}`}>Abrir builder</Link>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <div
+          style={{
+            width: '100%',
+            backgroundColor: '#ffffff',
+            border: '1px solid #e5e7eb',
+            borderRadius: 16,
+            boxShadow: '0 10px 30px rgba(15, 23, 42, 0.06)',
+            padding: 20,
+            display: 'grid',
+            gap: 12,
+          }}
+        >
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'minmax(160px, 1.3fr) minmax(120px, 1fr) minmax(150px, 1fr) minmax(90px, 0.8fr) minmax(280px, 1.6fr)',
+              gap: 16,
+              padding: '2px 12px 10px',
+              color: '#6b7280',
+              fontSize: 13,
+              fontWeight: 700,
+            }}
+          >
+            <span>Nome</span>
+            <span>Trigger</span>
+            <span>Valor</span>
+            <span>Status</span>
+            <span>Ações</span>
+          </div>
+
+          {flows.map((flow) => (
+            <div
+              key={flow.id}
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'minmax(160px, 1.3fr) minmax(120px, 1fr) minmax(150px, 1fr) minmax(90px, 0.8fr) minmax(280px, 1.6fr)',
+                gap: 16,
+                alignItems: 'center',
+                border: '1px solid #f3f4f6',
+                borderRadius: 12,
+                padding: 12,
+                transition: 'background-color 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease',
+              }}
+              onMouseEnter={(event) => {
+                event.currentTarget.style.backgroundColor = '#f9fafb';
+                event.currentTarget.style.borderColor = '#e5e7eb';
+                event.currentTarget.style.boxShadow = '0 8px 20px rgba(15, 23, 42, 0.08)';
+              }}
+              onMouseLeave={(event) => {
+                event.currentTarget.style.backgroundColor = '#ffffff';
+                event.currentTarget.style.borderColor = '#f3f4f6';
+                event.currentTarget.style.boxShadow = 'none';
+              }}
+            >
+              <span style={{ fontWeight: 600, color: '#111827' }}>{flow.name}</span>
+              <span style={{ color: '#6b7280' }}>{flow.trigger_type}</span>
+              <span style={{ color: '#6b7280' }}>{flow.trigger_value || '—'}</span>
+              <span style={{ color: '#6b7280' }}>{(flow as FlowItem & { status?: string }).status || '—'}</span>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12 }}>
+                <button onClick={() => openEdit(flow)}>Editar</button>
+                <Link href={`/dashboard/flows/${flow.id}/analytics`}>Analytics</Link>
+                <button onClick={() => onDuplicate(flow.id)}>Duplicar</button>
+                <button onClick={() => onDelete(flow.id)}>Deletar</button>
+                <Link href={`/dashboard/flow-builder?flow_id=${flow.id}`}>Abrir builder</Link>
+              </div>
+            </div>
+          ))}
+        </div>
       )}
 
       {toastMessage && (
