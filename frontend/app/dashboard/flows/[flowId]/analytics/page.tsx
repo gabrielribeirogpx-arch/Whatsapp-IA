@@ -79,9 +79,6 @@ export default function Page({ params }: Props) {
         <div className='analytics-page'>
       <header className='analytics-header'>
         <div className='header-left'>
-          <div className='analytics-icon' aria-hidden>
-            <BarChart3 size={22} />
-          </div>
           <div>
             <h1 className='page-title'>Analytics do Flow <span className={`status-badge ${flowStatus}`}>{flowStatus === 'active' ? 'Ativo' : flowStatus === 'draft' ? 'Draft' : 'Inativo'}</span></h1>
             <p className='breadcrumb'>Flows &gt; <span>{data.flow_name}</span></p>
@@ -279,23 +276,21 @@ export default function Page({ params }: Props) {
         .header-right {
           display: flex;
           align-items: center;
-          gap: 12px;
         }
-        .analytics-icon {
-          width: 42px;
-          height: 42px;
-          border-radius: 12px;
-          display: grid;
-          place-items: center;
-          background: linear-gradient(180deg, #22c55e 0%, #16a34a 100%);
-          color: #ffffff;
-          font-size: 20px;
-          box-shadow: 0 8px 20px rgba(34, 197, 94, 0.26);
+        .header-left {
+          gap: 0;
+        }
+        .header-right {
+          gap: 12px;
         }
         .page-title {
           margin: 0;
-          font-size: 40px;
-          font-weight: 800;
+          font-size: 24px;
+          font-weight: 600;
+          line-height: 1.2;
+        }
+        @media (min-width: 768px) {
+          .page-title { font-size: 30px; }
         }
         .status-badge {
           display: inline-flex;
