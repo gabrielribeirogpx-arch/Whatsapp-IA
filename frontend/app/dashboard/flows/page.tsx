@@ -227,12 +227,82 @@ export default function FlowsPage() {
               <span style={{ color: '#6b7280' }}>{flow.trigger_type}</span>
               <span style={{ color: '#6b7280' }}>{flow.trigger_value || '—'}</span>
               <span style={{ color: '#6b7280' }}>{(flow as FlowItem & { status?: string }).status || '—'}</span>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12 }}>
-                <button onClick={() => openEdit(flow)}>Editar</button>
-                <Link href={`/dashboard/flows/${flow.id}/analytics`}>Analytics</Link>
-                <button onClick={() => onDuplicate(flow.id)}>Duplicar</button>
-                <button onClick={() => onDelete(flow.id)}>Deletar</button>
-                <Link href={`/dashboard/flow-builder?flow_id=${flow.id}`}>Abrir builder</Link>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                <button
+                  onClick={() => openEdit(flow)}
+                  style={{
+                    backgroundColor: '#f3f4f6',
+                    color: '#374151',
+                    border: '1px solid #d1d5db',
+                    borderRadius: 8,
+                    padding: '6px 12px',
+                    fontSize: 13,
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                  }}
+                >
+                  Editar
+                </button>
+                <Link
+                  href={`/dashboard/flows/${flow.id}/analytics`}
+                  style={{
+                    backgroundColor: '#f3f4f6',
+                    color: '#374151',
+                    border: '1px solid #d1d5db',
+                    borderRadius: 8,
+                    padding: '6px 12px',
+                    fontSize: 13,
+                    fontWeight: 600,
+                    textDecoration: 'none',
+                  }}
+                >
+                  Analytics
+                </Link>
+                <button
+                  onClick={() => onDuplicate(flow.id)}
+                  style={{
+                    backgroundColor: '#f3f4f6',
+                    color: '#374151',
+                    border: '1px solid #d1d5db',
+                    borderRadius: 8,
+                    padding: '6px 12px',
+                    fontSize: 13,
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                  }}
+                >
+                  Duplicar
+                </button>
+                <button
+                  onClick={() => onDelete(flow.id)}
+                  style={{
+                    backgroundColor: '#fef2f2',
+                    color: '#b91c1c',
+                    border: '1px solid #fecaca',
+                    borderRadius: 8,
+                    padding: '6px 12px',
+                    fontSize: 13,
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                  }}
+                >
+                  Deletar
+                </button>
+                <Link
+                  href={`/dashboard/flow-builder?flow_id=${flow.id}`}
+                  style={{
+                    backgroundColor: '#2563eb',
+                    color: '#ffffff',
+                    border: '1px solid #1d4ed8',
+                    borderRadius: 8,
+                    padding: '8px 14px',
+                    fontSize: 14,
+                    fontWeight: 700,
+                    textDecoration: 'none',
+                  }}
+                >
+                  Abrir builder
+                </Link>
               </div>
             </div>
           ))}
