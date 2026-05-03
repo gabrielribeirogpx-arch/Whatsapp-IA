@@ -31,6 +31,7 @@ const empty: FlowAnalytics = {
 
 export default function Page({ params }: Props) {
   const [period, setPeriod] = useState('7d');
+  const [timelineMetric, setTimelineMetric] = useState('entries');
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState<FlowAnalytics>(empty);
 
@@ -54,6 +55,9 @@ export default function Page({ params }: Props) {
   ];
 
   const noData = data.summary.entries === 0;
+  const timelineHasRelevantPoints = data.timeline.some(
+    (point) => point.entries > 0 || point.messages_sent > 0 || point.completed > 0,
+  );
 
   return (
     <div className='analytics-page'>
@@ -174,30 +178,66 @@ export default function Page({ params }: Props) {
         </div>
       </div>
 
-      <div className='card card-soft'>
-        <h3 className='section-title'>Performance ao longo do tempo</h3>
+      <div className='card card-soft card-full-width'>
+        <div className='section-header'>
+          <h3 className='section-title'>Performance ao longo do tempo</h3>
+          <select
+            className='metric-select'
+            value={timelineMetric}
+            onChange={(event) => setTimelineMetric(event.target.value)}
+            aria-label='Selecionar métrica do gráfico'
+          >
+            <option value='entries'>Entradas</option>
+            <option value='messages_sent'>Mensagens tratadas</option>
+            <option value='completed'>Concluídos</option>
+          </select>
+        </div>
         <div style={{ height: 280 }}>
-          <ResponsiveContainer>
-            <LineChart data={data.timeline}>
-              <CartesianGrid strokeDasharray='3 3' stroke='#E2E8F0' />
-              <XAxis dataKey='date' stroke='#64748B' />
-              <YAxis stroke='#64748B' />
-              <Tooltip />
-              <Line dataKey='entries' stroke='#2563EB' strokeWidth={2} />
-              <Line dataKey='messages_sent' stroke='#22C55E' strokeWidth={2} />
-              <Line dataKey='completed' stroke='#16A34A' strokeWidth={2} />
-            </LineChart>
-          </ResponsiveContainer>
+          {timelineHasRelevantPoints ? (
+            <ResponsiveContainer>
+              <LineChart data={data.timeline}>
+                <CartesianGrid strokeDasharray='3 3' stroke='#E2E8F0' />
+                <XAxis dataKey='date' stroke='#64748B' />
+                <YAxis stroke='#64748B' />
+                <Tooltip />
+                <Line
+                  dataKey={timelineMetric}
+                  stroke={timelineMetric === 'entries' ? '#2563EB' : timelineMetric === 'messages_sent' ? '#22C55E' : '#16A34A'}
+                  strokeWidth={2}
+                />
+              </LineChart>
+            </ResponsiveContainer>
+          ) : (
+            <div className='timeline-empty'>
+              <div className='timeline-lines' aria-hidden>
+                <span />
+                <span />
+                <span />
+              </div>
+              <p>Nenhum ponto relevante ainda para o período selecionado.</p>
+            </div>
+          )}
         </div>
       </div>
 
-      <div className='card card-soft card-rounded-lg'>
-        <h3 className='section-title'>Insights automáticos</h3>
-        {data.insights.map((insight, idx) => (
-          <div key={idx} className='secondary-text'>
-            <strong className='primary-text'>{insight.title}:</strong> {insight.message}
+      <div className='card card-soft card-rounded-lg card-full-width'>
+        <div className='section-header'>
+          <h3 className='section-title'>Insights automáticos</h3>
+          <span className='coming-soon-badge'>Em breve</span>
+        </div>
+        <p className='secondary-text insights-description'>
+          Aqui você encontrará análises inteligentes para melhorar conversão, reduzir abandonos e acelerar otimizações do flow.
+        </p>
+        {data.insights.length > 0 && (
+          <div className='insights-list'>
+            {data.insights.map((insight, idx) => (
+              <div key={idx} className='insight-item'>
+                <strong className='insight-title'>{insight.title}</strong>
+                <p className='secondary-text'>{insight.message}</p>
+              </div>
+            ))}
           </div>
-        ))}
+        )}
       </div>
 
       {loading && <div className='secondary-text'>Carregando...</div>}
@@ -313,6 +353,9 @@ export default function Page({ params }: Props) {
         .card-rounded-lg {
           border-radius: 22px;
         }
+        .card-full-width {
+          width: 100%;
+        }
         .kpi-top {
           display: flex;
           align-items: center;
@@ -366,6 +409,74 @@ export default function Page({ params }: Props) {
           font-size: 18px;
           color: #0f172a;
         }
+        .section-header {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          gap: 12px;
+          margin-bottom: 14px;
+          flex-wrap: wrap;
+        }
+        .metric-select {
+          border: 1px solid #cbd5e1;
+          background: #fff;
+          color: #0f172a;
+          border-radius: 10px;
+          padding: 8px 12px;
+          font-size: 14px;
+        }
+        .timeline-empty {
+          height: 100%;
+          border: 1px dashed #cbd5e1;
+          border-radius: 14px;
+          display: grid;
+          place-items: center;
+          text-align: center;
+          padding: 20px;
+          color: #64748b;
+          background: linear-gradient(180deg, #f8fafc 0%, #ffffff 100%);
+        }
+        .timeline-lines {
+          width: min(480px, 100%);
+          display: grid;
+          gap: 10px;
+          margin-bottom: 12px;
+        }
+        .timeline-lines span {
+          height: 6px;
+          border-radius: 999px;
+          background: linear-gradient(90deg, #e2e8f0 0%, #f1f5f9 60%, #e2e8f0 100%);
+        }
+        .coming-soon-badge {
+          display: inline-flex;
+          align-items: center;
+          border-radius: 999px;
+          padding: 4px 10px;
+          font-size: 12px;
+          font-weight: 700;
+          color: #1d4ed8;
+          background: #dbeafe;
+        }
+        .insights-description {
+          margin-top: -4px;
+          margin-bottom: 12px;
+        }
+        .insights-list {
+          display: grid;
+          gap: 10px;
+        }
+        .insight-item {
+          border-left: 3px solid #93c5fd;
+          padding-left: 12px;
+        }
+        .insight-title {
+          display: block;
+          color: #0f172a;
+          margin-bottom: 2px;
+        }
+        .insight-item p {
+          margin: 0;
+        }
         .funnel-row {
           margin-bottom: 12px;
         }
@@ -418,7 +529,7 @@ export default function Page({ params }: Props) {
         }
         @media (max-width: 1024px) {
           .kpi-grid {
-            grid-template-columns: repeat(2, minmax(0, 1fr));
+            grid-template-columns: 1fr;
           }
           .main-grid,
           .analytics-header {
@@ -427,6 +538,9 @@ export default function Page({ params }: Props) {
           .header-right {
             justify-content: flex-start;
             flex-wrap: wrap;
+          }
+          .analytics-page {
+            padding: 20px 14px;
           }
         }
       `}</style>
