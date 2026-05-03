@@ -1,6 +1,6 @@
 'use client';
 
-import { CSSProperties, useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 
 import { createFlow, deleteFlow, duplicateFlow, listFlows, updateFlow } from '@/lib/api';
@@ -20,6 +20,7 @@ export default function FlowsPage() {
   const [editingFlow, setEditingFlow] = useState<FlowItem | null>(null);
   const [form, setForm] = useState<FlowPayload>(EMPTY_FORM);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [openDropdown, setOpenDropdown] = useState<string | null>(null);
 
   const [isMobile, setIsMobile] = useState(false);
 
@@ -150,247 +151,84 @@ export default function FlowsPage() {
         padding: 'clamp(16px, 3vw, 32px)',
       }}
     >
-      <div
-        style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'flex-start',
-          gap: 16,
-          marginBottom: 24,
-          flexWrap: 'wrap',
-        }}
-      >
-        <div style={{ display: 'grid', gap: 6 }}>
-          <h1 style={{ margin: 0, fontSize: '2rem', fontWeight: 800, lineHeight: 1.1 }}>Flows</h1>
-          <p style={{ margin: 0, color: '#6b7280' }}>Gerencie automações, gatilhos e versões dos seus fluxos.</p>
-        </div>
-        <button
-          onClick={openCreate}
-          style={{
-            backgroundColor: '#16a34a',
-            color: '#fff',
-            border: 'none',
-            borderRadius: 8,
-            padding: '10px 16px',
-            fontWeight: 700,
-            cursor: 'pointer',
-            marginLeft: 'auto',
-          }}
-        >
-          + Novo fluxo
-        </button>
-      </div>
-
-      {loading ? (
-        <p>Carregando...</p>
-      ) : flows.length === 0 ? (
-        <div
-          style={{
-            width: '100%',
-            backgroundColor: '#ffffff',
-            border: '1px solid #e5e7eb',
-            borderRadius: 16,
-            boxShadow: '0 10px 30px rgba(15, 23, 42, 0.06)',
-            padding: '28px 24px',
-            display: 'grid',
-            gap: 8,
-          }}
-        >
-          <h2 style={{ margin: 0, fontSize: '1.25rem', fontWeight: 700, color: '#111827' }}>Você ainda não criou nenhum fluxo</h2>
-          <p style={{ margin: 0, color: '#6b7280' }}>Crie seu primeiro fluxo para automatizar atendimentos no WhatsApp.</p>
-          <button
-            onClick={openCreate}
-            style={{
-              marginTop: 8,
-              width: 'fit-content',
-              backgroundColor: '#16a34a',
-              color: '#fff',
-              border: 'none',
-              borderRadius: 8,
-              padding: '10px 16px',
-              fontWeight: 700,
-              cursor: 'pointer',
-            }}
-          >
-            + Criar fluxo
+      <div style={{ border: '0.5px solid var(--color-border-tertiary)', borderRadius: 16, overflow: 'hidden', background: 'var(--color-background-primary)' }}>
+        <div style={{ padding: '2rem', borderBottom: '0.5px solid var(--color-border-tertiary)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+          <div>
+            <h1 style={{ fontSize: '24px', fontWeight: 500, margin: 0, color: 'var(--color-text-primary)' }}>Automações</h1>
+            <p style={{ fontSize: '13px', color: 'var(--color-text-secondary)', margin: '6px 0 0' }}>Gerencie fluxos de conversação e gatilhos</p>
+          </div>
+          <button onClick={openCreate} style={{ background: '#075E54', color: 'white', border: 'none', padding: '8px 16px', borderRadius: 'var(--border-radius-md)', fontSize: '13px', fontWeight: 500, cursor: 'pointer' }}>
+            + Novo fluxo
           </button>
         </div>
-      ) : (
-        <div
-          style={{
-            width: '100%',
-            backgroundColor: '#ffffff',
-            border: '1px solid #e5e7eb',
-            borderRadius: 16,
-            boxShadow: '0 10px 30px rgba(15, 23, 42, 0.06)',
-            padding: 20,
-            display: 'grid',
-            gap: 12,
-          }}
-        >
-          {!isMobile && (
-            <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns: 'minmax(160px, 1.3fr) minmax(120px, 1fr) minmax(150px, 1fr) minmax(90px, 0.8fr) minmax(280px, 1.6fr)',
-                gap: 16,
-                padding: '2px 12px 10px',
-                color: '#6b7280',
-                fontSize: 13,
-                fontWeight: 700,
-              }}
-            >
-              <span>Nome</span>
-              <span>Trigger</span>
-              <span>Valor</span>
-              <span>Status</span>
-              <span>Ações</span>
-            </div>
-          )}
 
-          {flows.map((flow) => {
-            const rowStyle: CSSProperties = isMobile
-              ? {
-                  display: 'grid',
-                  gap: 12,
-                  border: '1px solid #f3f4f6',
-                  borderRadius: 12,
-                  padding: 14,
-                  transition: 'background-color 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease',
-                }
-              : {
-                  display: 'grid',
-                  gridTemplateColumns: 'minmax(160px, 1.3fr) minmax(120px, 1fr) minmax(150px, 1fr) minmax(90px, 0.8fr) minmax(280px, 1.6fr)',
-                  gap: 16,
-                  alignItems: 'center',
-                  border: '1px solid #f3f4f6',
-                  borderRadius: 12,
-                  padding: 12,
-                  transition: 'background-color 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease',
-                };
-
-            return (
-            <div
-              key={flow.id}
-              style={rowStyle}
-              onMouseEnter={(event) => {
-                event.currentTarget.style.backgroundColor = '#f9fafb';
-                event.currentTarget.style.borderColor = '#e5e7eb';
-                event.currentTarget.style.boxShadow = '0 8px 20px rgba(15, 23, 42, 0.08)';
-              }}
-              onMouseLeave={(event) => {
-                event.currentTarget.style.backgroundColor = '#ffffff';
-                event.currentTarget.style.borderColor = '#f3f4f6';
-                event.currentTarget.style.boxShadow = 'none';
-              }}
-            >
-              {isMobile ? (
-                <div style={{ display: 'grid', gap: 10 }}>
-                  <div style={{ fontWeight: 700, color: '#111827', fontSize: 16 }}>{flow.name}</div>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'minmax(88px, auto) 1fr', gap: '6px 12px', color: '#4b5563', fontSize: 14 }}>
-                    <span style={{ fontWeight: 600, color: '#6b7280' }}>Trigger</span>
-                    <span>{flow.trigger_type}</span>
-                    <span style={{ fontWeight: 600, color: '#6b7280' }}>Valor</span>
-                    <span>{flow.trigger_value || '—'}</span>
-                    <span style={{ fontWeight: 600, color: '#6b7280' }}>Status</span>
-                    <span>{(flow as FlowItem & { status?: string }).status || '—'}</span>
-                  </div>
-                </div>
-              ) : (
-                <>
-                  <span style={{ fontWeight: 600, color: '#111827' }}>{flow.name}</span>
-                  <span style={{ color: '#6b7280' }}>{flow.trigger_type}</span>
-                  <span style={{ color: '#6b7280' }}>{flow.trigger_value || '—'}</span>
-                  <span style={{ color: '#6b7280' }}>{(flow as FlowItem & { status?: string }).status || '—'}</span>
-                </>
-              )}
-              <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr 1fr' : 'none', gap: 8, alignItems: 'stretch' }}>
-                <button
-                  onClick={() => openEdit(flow)}
-                  style={{
-                    backgroundColor: '#f3f4f6',
-                    color: '#374151',
-                    border: '1px solid #d1d5db',
-                    borderRadius: 8,
-                    padding: isMobile ? '12px 14px' : '6px 12px',
-                    fontSize: 13,
-                    fontWeight: 600,
-                    minHeight: isMobile ? 44 : undefined,
-                    cursor: 'pointer',
-                  }}
-                >
-                  Editar
-                </button>
-                <Link
-                  href={`/dashboard/flows/${flow.id}/analytics`}
-                  style={{
-                    backgroundColor: '#f3f4f6',
-                    color: '#374151',
-                    border: '1px solid #d1d5db',
-                    borderRadius: 8,
-                    padding: isMobile ? '12px 14px' : '6px 12px',
-                    fontSize: 13,
-                    fontWeight: 600,
-                    minHeight: isMobile ? 44 : undefined,
-                    textDecoration: 'none',
-                  }}
-                >
-                  Analytics
-                </Link>
-                <button
-                  onClick={() => onDuplicate(flow.id)}
-                  style={{
-                    backgroundColor: '#f3f4f6',
-                    color: '#374151',
-                    border: '1px solid #d1d5db',
-                    borderRadius: 8,
-                    padding: isMobile ? '12px 14px' : '6px 12px',
-                    fontSize: 13,
-                    fontWeight: 600,
-                    minHeight: isMobile ? 44 : undefined,
-                    cursor: 'pointer',
-                  }}
-                >
-                  Duplicar
-                </button>
-                <button
-                  onClick={() => onDelete(flow.id)}
-                  style={{
-                    backgroundColor: '#fef2f2',
-                    color: '#b91c1c',
-                    border: '1px solid #fecaca',
-                    borderRadius: 8,
-                    padding: isMobile ? '12px 14px' : '6px 12px',
-                    fontSize: 13,
-                    fontWeight: 600,
-                    minHeight: isMobile ? 44 : undefined,
-                    cursor: 'pointer',
-                  }}
-                >
-                  Deletar
-                </button>
-                <Link
-                  href={`/dashboard/flow-builder?flow_id=${flow.id}`}
-                  style={{
-                    backgroundColor: '#2563eb',
-                    color: '#ffffff',
-                    border: '1px solid #1d4ed8',
-                    borderRadius: 8,
-                    padding: isMobile ? '12px 14px' : '8px 14px',
-                    fontSize: 14,
-                    fontWeight: 700,
-                    minHeight: isMobile ? 44 : undefined,
-                    textDecoration: 'none',
-                  }}
-                >
-                  Abrir builder
-                </Link>
-              </div>
-            </div>
-          );
-          })}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '12px', padding: '2rem', borderBottom: '0.5px solid var(--color-border-tertiary)' }}>
+          <div style={{ background: 'var(--color-background-secondary)', padding: '1rem', borderRadius: 'var(--border-radius-md)' }}>
+            <p style={{ fontSize: '11px', color: 'var(--color-text-secondary)', margin: '0 0 10px', fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.5px' }}>Total de fluxos</p>
+            <p style={{ fontSize: '32px', fontWeight: 500, color: 'var(--color-text-primary)', margin: 0 }}>{flows.length}</p>
+          </div>
+          <div style={{ background: 'var(--color-background-secondary)', padding: '1rem', borderRadius: 'var(--border-radius-md)' }}>
+            <p style={{ fontSize: '11px', color: 'var(--color-text-secondary)', margin: '0 0 10px', fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.5px' }}>Publicados</p>
+            <p style={{ fontSize: '32px', fontWeight: 500, color: 'var(--color-text-primary)', margin: 0 }}>{flows.filter((f) => (f as FlowItem & { status?: string }).status === 'published').length}</p>
+          </div>
+          <div style={{ background: 'var(--color-background-secondary)', padding: '1rem', borderRadius: 'var(--border-radius-md)' }}>
+            <p style={{ fontSize: '11px', color: 'var(--color-text-secondary)', margin: '0 0 10px', fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.5px' }}>Rascunhos</p>
+            <p style={{ fontSize: '32px', fontWeight: 500, color: 'var(--color-text-primary)', margin: 0 }}>{flows.filter((f) => (f as FlowItem & { status?: string }).status === 'draft').length}</p>
+          </div>
         </div>
-      )}
+
+        {loading ? (
+          <p style={{ padding: '2rem' }}>Carregando...</p>
+        ) : flows.length === 0 ? (
+          <div style={{ padding: '4rem 2rem', textAlign: 'center', background: 'var(--color-background-secondary)', borderRadius: 'var(--border-radius-md)', margin: '2rem' }}>
+            <p style={{ fontSize: '16px', fontWeight: 500, color: 'var(--color-text-primary)', margin: '0 0 8px' }}>Nenhum fluxo criado ainda</p>
+            <p style={{ fontSize: '13px', color: 'var(--color-text-secondary)', margin: '0 0 1.5rem' }}>Crie seu primeiro fluxo de automação</p>
+            <button onClick={openCreate} style={{ background: '#075E54', color: 'white', border: 'none', padding: '10px 20px', borderRadius: 'var(--border-radius-md)', fontSize: '13px', fontWeight: 500, cursor: 'pointer' }}>
+              + Criar primeiro fluxo
+            </button>
+          </div>
+        ) : (
+          <div style={{ padding: '2rem' }}>
+            <h2 style={{ fontSize: '14px', fontWeight: 500, margin: '0 0 1.5rem', color: 'var(--color-text-primary)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Seus fluxos</h2>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              {flows.map((flow) => {
+                const status = (flow as FlowItem & { status?: string }).status;
+                return (
+                  <div key={flow.id} style={{ background: 'var(--color-background-secondary)', padding: '1.5rem', borderRadius: 'var(--border-radius-md)', border: '0.5px solid var(--color-border-tertiary)', display: 'flex', flexDirection: isMobile ? 'column' : 'row', alignItems: isMobile ? 'flex-start' : 'center', justifyContent: 'space-between', gap: 12, transition: 'all 0.2s', cursor: 'pointer' }}
+                    onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--color-background-primary)'; e.currentTarget.style.borderColor = 'var(--color-border-secondary)'; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.background = 'var(--color-background-secondary)'; e.currentTarget.style.borderColor = 'var(--color-border-tertiary)'; }}>
+                    <div style={{ flex: 1, width: '100%' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '8px', flexWrap: 'wrap' }}>
+                        <h3 style={{ fontSize: '15px', fontWeight: 500, margin: 0, color: 'var(--color-text-primary)' }}>{flow.name}</h3>
+                        {status === 'published' && <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', background: 'var(--color-background-success)', color: 'var(--color-text-success)', padding: '3px 10px', borderRadius: 'var(--border-radius-md)', fontSize: '11px', fontWeight: 500 }}><span style={{ width: '6px', height: '6px', borderRadius: '50%', background: 'var(--color-text-success)' }}></span>Publicado</span>}
+                        {status === 'draft' && <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', background: 'var(--color-background-warning)', color: 'var(--color-text-warning)', padding: '3px 10px', borderRadius: 'var(--border-radius-md)', fontSize: '11px', fontWeight: 500 }}><span style={{ width: '6px', height: '6px', borderRadius: '50%', background: 'var(--color-text-warning)' }}></span>Rascunho</span>}
+                      </div>
+                      <div style={{ display: 'flex', gap: '16px', fontSize: '12px', color: 'var(--color-text-tertiary)', flexWrap: 'wrap' }}>
+                        <span>Trigger: {flow.trigger_type || 'default'}</span>
+                        {flow.trigger_value && <span>Valor: {flow.trigger_value}</span>}
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', gap: '8px', width: isMobile ? '100%' : 'auto', flexWrap: 'wrap', position: 'relative' }}>
+                      <button onClick={(e) => { e.stopPropagation(); openEdit(flow); }} style={{ background: 'transparent', border: '0.5px solid var(--color-border-secondary)', padding: '6px 12px', borderRadius: 'var(--border-radius-md)', fontSize: '12px', cursor: 'pointer', color: 'var(--color-text-primary)', width: isMobile ? '100%' : 'auto' }}>Editar</button>
+                      <Link href={`/dashboard/flows/${flow.id}/analytics`} onClick={(e) => e.stopPropagation()} style={{ background: 'transparent', border: '0.5px solid var(--color-border-secondary)', padding: '6px 12px', borderRadius: 'var(--border-radius-md)', fontSize: '12px', color: 'var(--color-text-primary)', textDecoration: 'none', width: isMobile ? '100%' : 'auto' }}>Analytics</Link>
+                      <Link href={`/dashboard/flow-builder?flow_id=${flow.id}`} onClick={(e) => e.stopPropagation()} style={{ background: '#075E54', color: 'white', border: 'none', padding: '6px 12px', borderRadius: 'var(--border-radius-md)', fontSize: '12px', fontWeight: 500, textDecoration: 'none', width: isMobile ? '100%' : 'auto' }}>Abrir builder</Link>
+                      <div style={{ position: 'relative', width: isMobile ? '100%' : 'auto' }}>
+                        <button onClick={(e) => { e.stopPropagation(); setOpenDropdown(openDropdown === flow.id ? null : flow.id); }} style={{ background: 'transparent', border: '0.5px solid var(--color-border-secondary)', padding: '6px 8px', borderRadius: 'var(--border-radius-md)', fontSize: '16px', cursor: 'pointer', color: 'var(--color-text-primary)', width: isMobile ? '100%' : 'auto' }}>⋯</button>
+                        {openDropdown === flow.id && (
+                          <div style={{ position: 'absolute', right: 0, top: '100%', marginTop: '4px', background: 'var(--color-background-primary)', border: '0.5px solid var(--color-border-secondary)', borderRadius: 'var(--border-radius-md)', boxShadow: '0 4px 12px rgba(0,0,0,0.1)', minWidth: '140px', zIndex: 10 }}>
+                            <button onClick={(e) => { e.stopPropagation(); onDuplicate(flow.id); setOpenDropdown(null); }} style={{ width: '100%', textAlign: 'left', padding: '8px 12px', border: 'none', background: 'transparent', cursor: 'pointer', fontSize: '13px', color: 'var(--color-text-primary)' }}>Duplicar</button>
+                            <button onClick={(e) => { e.stopPropagation(); onDelete(flow.id); setOpenDropdown(null); }} style={{ width: '100%', textAlign: 'left', padding: '8px 12px', border: 'none', background: 'transparent', cursor: 'pointer', fontSize: '13px', color: 'var(--color-text-danger)' }}>Deletar</button>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+      </div>
 
       {toastMessage && (
         <div
