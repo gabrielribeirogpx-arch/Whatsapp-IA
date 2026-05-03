@@ -576,29 +576,33 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
     setTimeout(resolve, ms);
   }), []);
 
+  const randomBetween = useCallback((min: number, max: number) => Math.floor(Math.random() * (max - min + 1)) + min, []);
+
   const playBotResponses = useCallback(async (events: Array<{ type?: string; text?: string; seconds?: number }>) => {
-    for (const event of events) {
-      if (event?.type === 'delay') {
-        const seconds = Number(event.seconds) || 0;
-        if (seconds > 0) {
-          await wait(seconds * 1000);
+    try {
+      for (const event of events) {
+        if (event?.type === 'delay') {
+          const seconds = Number(event.seconds) || 0;
+          if (seconds > 0) {
+            await wait(seconds * 1000);
+          }
+          continue;
         }
-        continue;
-      }
 
-      if (event?.type === 'message' || event?.type === 'send_message') {
-        const text = String(event.text || '').trim();
-        if (text) {
-          setIsTyping(true);
-          await wait(900);
-          setIsTyping(false);
-          setMessages((prev) => [...prev, { type: 'bot', text }]);
+        if (event?.type === 'message' || event?.type === 'send_message') {
+          const text = String(event.text || '').trim();
+          if (text) {
+            setIsTyping(true);
+            await wait(randomBetween(600, 1200));
+            setIsTyping(false);
+            setMessages((prev) => [...prev, { type: 'bot', text }]);
+          }
         }
       }
+    } finally {
+      setIsTyping(false);
     }
-
-    setIsTyping(false);
-  }, [wait]);
+  }, [randomBetween, wait]);
 
   const runFlowStep = useCallback(async (userMessage: string) => {
     if (!selectedFlowId || isProcessing) return;
@@ -1418,7 +1422,22 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
             </div>
           ))}
           {isTyping && (
-            <div className="typing-indicator" style={{ alignSelf: 'flex-start', color: '#6b7280', fontSize: 12 }}>
+            <div
+              className="typing-indicator"
+              style={{
+                alignSelf: 'flex-start',
+                background: '#FFFFFF',
+                padding: '9px 12px',
+                borderRadius: '4px 14px 14px 14px',
+                maxWidth: '85%',
+                fontSize: 12.5,
+                lineHeight: 1.55,
+                color: '#6b7280',
+                border: '1px solid #e4e8e0',
+                boxShadow: '0 1px 4px rgba(0,0,0,0.06)',
+                fontStyle: 'italic',
+              }}
+            >
               digitando...
             </div>
           )}
