@@ -1,12 +1,40 @@
 'use client';
 
 import Link from 'next/link';
-import { ReactNode } from 'react';
-import { usePathname } from 'next/navigation';
+import { ReactNode, useEffect, useState } from 'react';
+import { usePathname, useRouter } from 'next/navigation';
+import { deleteFlow, duplicateFlow, listFlows, updateFlowStatus } from '@/lib/api';
 
 function FlowAnalyticsSidebar({ flowId }: { flowId?: string }) {
-  const flowPath = flowId ? `/dashboard/flows/${flowId}` : '/dashboard/flows';
-  const analyticsPath = flowId ? `/dashboard/flows/${flowId}/analytics` : '/dashboard/flows';
+  const router = useRouter();
+  const [isActive, setIsActive] = useState(false);
+
+  useEffect(() => {
+    if (!flowId) return;
+    (async () => {
+      const flows = await listFlows();
+      const flow = flows.find((item) => item.id === flowId);
+      if (flow) setIsActive(flow.is_active);
+    })();
+  }, [flowId]);
+
+  const handleToggle = async () => {
+    if (!flowId) return;
+    const next = !isActive;
+    setIsActive(next);
+    try {
+      await updateFlowStatus(flowId, next);
+    } catch {
+      setIsActive(!next);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!flowId) return;
+    if (!window.confirm('Deseja deletar este flow?')) return;
+    await deleteFlow(flowId);
+    router.push('/dashboard/flows');
+  };
 
   return (
     <nav className="dash-sidebar">
@@ -17,20 +45,35 @@ function FlowAnalyticsSidebar({ flowId }: { flowId?: string }) {
 
       <span className="dash-nav-section">Flow Analytics</span>
 
-      <Link href="/dashboard/flows" className="dash-nav-item">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+      <button type="button" className="dash-nav-item" onClick={() => router.push('/dashboard/flows')}>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
         <span className="dash-nav-label">Todos os Flows</span>
-      </Link>
+      </button>
 
-      <Link href={flowPath} className="dash-nav-item">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
-        <span className="dash-nav-label">Voltar ao Flow</span>
-      </Link>
+      <button type="button" className="dash-nav-item" onClick={() => flowId && router.push(`/dashboard/flow-builder?flow_id=${flowId}`)}>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="5" cy="5" r="2"/><circle cx="19" cy="5" r="2"/><circle cx="12" cy="19" r="2"/><line x1="7" y1="6.5" x2="10.5" y2="16.5"/><line x1="17" y1="6.5" x2="13.5" y2="16.5"/></svg>
+        <span className="dash-nav-label">Abrir Builder</span>
+      </button>
 
-      <Link href={analyticsPath} className="dash-nav-item">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 3v18h18"/><rect x="7" y="13" width="3" height="5"/><rect x="12" y="9" width="3" height="9"/><rect x="17" y="6" width="3" height="12"/></svg>
-        <span className="dash-nav-label">Analytics</span>
-      </Link>
+      <button type="button" className="dash-nav-item" onClick={() => router.push('/dashboard/flows')}>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
+        <span className="dash-nav-label">Editar</span>
+      </button>
+
+      <button type="button" className="dash-nav-item" onClick={async () => flowId && await duplicateFlow(flowId)}>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><rect x="2" y="2" width="13" height="13" rx="2"/></svg>
+        <span className="dash-nav-label">Duplicar</span>
+      </button>
+
+      <button type="button" className="dash-nav-item" onClick={handleToggle}>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2v10"/><path d="M18.4 5.6a9 9 0 1 1-12.8 0"/></svg>
+        <span className="dash-nav-label" style={{ color: '#16a34a' }}>{isActive ? 'Desativar Flow' : 'Ativar Flow'}</span>
+      </button>
+
+      <button type="button" className="dash-nav-item" onClick={handleDelete}>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>
+        <span className="dash-nav-label" style={{ color: '#dc2626' }}>Deletar</span>
+      </button>
     </nav>
   );
 }

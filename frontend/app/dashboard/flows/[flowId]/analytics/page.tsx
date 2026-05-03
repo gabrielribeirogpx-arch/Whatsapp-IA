@@ -1,10 +1,9 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
 import { BarChart3, Funnel, GitBranch, MessageSquareText, Sparkles, TrendingUp } from 'lucide-react';
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
-import { deleteFlow, duplicateFlow, getFlowAnalytics, listFlows, updateFlowStatus } from '@/lib/api';
+import { getFlowAnalytics, listFlows } from '@/lib/api';
 import { FlowAnalytics } from '@/lib/types';
 
 type Props = { params: { flowId: string } };
@@ -31,7 +30,6 @@ const empty: FlowAnalytics = {
 };
 
 export default function Page({ params }: Props) {
-  const router = useRouter();
   const [period, setPeriod] = useState('7d');
   const [timelineMetric, setTimelineMetric] = useState('entries');
   const [loading, setLoading] = useState(true);
@@ -61,12 +59,6 @@ export default function Page({ params }: Props) {
     })();
   }, [params.flowId]);
 
-  const handleToggle = async () => {
-    const next = !isActive;
-    setIsActive(next);
-    setFlowStatus(next ? 'active' : 'inactive');
-    try { await updateFlowStatus(params.flowId, next); } catch { setIsActive(!next); }
-  };
 
   const kpis = [
     ['Entradas', data.summary.entries],
@@ -112,24 +104,6 @@ export default function Page({ params }: Props) {
         </div>
       </header>
 
-      <div className='container-actions'>
-        <div className='actions-left'>
-          <button className='btn btn-ghost' onClick={() => router.push('/dashboard/flows')}>← Flows</button>
-          <button className='btn btn-primary' onClick={() => router.push(`/dashboard/flow-builder?flow_id=${params.flowId}`)}>Abrir Builder</button>
-          <button className='btn btn-secondary' onClick={() => router.push('/dashboard/flows')}>Editar</button>
-        </div>
-        <div className='actions-right'>
-          <button className='btn btn-primary' onClick={handleToggle}>{isActive ? 'Desativar Flow' : 'Ativar Flow'}</button>
-          <button className='btn btn-secondary' onClick={async () => { await duplicateFlow(params.flowId); }}>Duplicar</button>
-          <button className='btn btn-danger' onClick={async () => { if (window.confirm('Deseja deletar este flow?')) { await deleteFlow(params.flowId); router.push('/dashboard/flows'); } }}>Deletar</button>
-        </div>
-      </div>
-
-      <div className='mobile-actions'>
-        <button className='btn btn-ghost' onClick={() => router.push('/dashboard/flows')}>← Flows</button>
-        <button className='btn btn-primary' onClick={() => router.push(`/dashboard/flow-builder?flow_id=${params.flowId}`)}>Abrir Builder</button>
-        <button className='btn btn-primary' onClick={handleToggle}>{isActive ? 'Desativar' : 'Ativar'}</button>
-      </div>
 
       <div className='kpi-grid'>
         {kpis.map(([label, value], index) => (
@@ -335,14 +309,11 @@ export default function Page({ params }: Props) {
         .status-badge.active { background: #dcfce7; color: #15803d; }
         .status-badge.draft { background: #fef3c7; color: #b45309; }
         .status-badge.inactive { background: #e2e8f0; color: #475569; }
-        .container-actions { display: flex; align-items: center; justify-content: space-between; margin: 16px 0 24px; gap: 10px; flex-wrap: wrap; }
-        .actions-left, .actions-right { display: flex; gap: 10px; flex-wrap: wrap; }
         .btn { border-radius: 10px; padding: 8px 14px; border: 1px solid transparent; font-weight: 600; cursor: pointer; }
         .btn-primary { background: #16a34a; color: #fff; }
         .btn-secondary { background: #fff; border-color: #e2e8f0; color: #334155; }
         .btn-danger { background: #fff; border-color: #fecaca; color: #dc2626; }
         .btn-ghost { background: transparent; border-color: #e2e8f0; color: #64748b; padding: 6px 10px; }
-        .mobile-actions { display: none; }
         .breadcrumb,
         .secondary-text,
         .period-label {
@@ -625,8 +596,6 @@ export default function Page({ params }: Props) {
             justify-content: flex-start;
             flex-wrap: wrap;
           }
-          .container-actions { display: none; }
-          .mobile-actions { display: flex; gap: 8px; margin: 0 0 16px; flex-wrap: wrap; }
           .funnel-empty { grid-template-columns: 1fr; text-align: center; }
         }
       `}</style>
