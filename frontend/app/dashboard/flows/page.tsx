@@ -128,10 +128,42 @@ export default function FlowsPage() {
   };
 
   return (
-    <div style={{ padding: 24 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
-        <h1>Flows</h1>
-        <button onClick={openCreate}>Novo fluxo</button>
+    <div
+      style={{
+        maxWidth: 1120,
+        margin: '0 auto',
+        padding: 'clamp(16px, 3vw, 32px)',
+      }}
+    >
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'flex-start',
+          gap: 16,
+          marginBottom: 24,
+          flexWrap: 'wrap',
+        }}
+      >
+        <div style={{ display: 'grid', gap: 6 }}>
+          <h1 style={{ margin: 0, fontSize: '2rem', fontWeight: 800, lineHeight: 1.1 }}>Flows</h1>
+          <p style={{ margin: 0, color: '#6b7280' }}>Gerencie automações, gatilhos e versões dos seus fluxos.</p>
+        </div>
+        <button
+          onClick={openCreate}
+          style={{
+            backgroundColor: '#16a34a',
+            color: '#fff',
+            border: 'none',
+            borderRadius: 8,
+            padding: '10px 16px',
+            fontWeight: 700,
+            cursor: 'pointer',
+            marginLeft: 'auto',
+          }}
+        >
+          + Novo fluxo
+        </button>
       </div>
 
       {loading ? (
