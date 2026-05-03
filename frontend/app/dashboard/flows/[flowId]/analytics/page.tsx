@@ -447,6 +447,16 @@ export default function Page({ params }: Props) {
           color: #64748b;
           background: linear-gradient(180deg, #f0fdf4 0%, #ffffff 100%);
         }
+        .timeline-empty-icon {
+          width: 40px;
+          height: 40px;
+          border-radius: 12px;
+          background: #dcfce7;
+          color: #16a34a;
+          display: grid;
+          place-items: center;
+          margin: 6px auto 8px;
+        }
         .timeline-lines {
           width: min(480px, 100%);
           display: grid;
@@ -566,8 +576,3 @@ export default function Page({ params }: Props) {
     </div>
   );
 }
-        .timeline-empty-icon {
-          width: 40px; height: 40px; border-radius: 12px;
-          background:#dcfce7; color:#16a34a; display:grid; place-items:center;
-          margin: 6px auto 8px;
-        }
