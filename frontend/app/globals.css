@@ -1698,6 +1698,13 @@ input {
   text-overflow: ellipsis;
 }
 
+
+.flow-select-option-active {
+  background: #e8f1ff;
+  color: #1d4ed8;
+  font-weight: 600;
+}
+
 .flow-select-option:hover {
   background: #f3f4f6;
 }

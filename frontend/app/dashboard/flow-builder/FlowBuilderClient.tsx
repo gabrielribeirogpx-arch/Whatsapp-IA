@@ -1178,7 +1178,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
                       <span className="flow-name">
                         {selectedFlow ? (selectedFlow.name || selectedFlow.id) : (normalizedFlows.length === 0 ? 'Nenhum flow disponível' : 'Selecione um flow')}
                       </span>
-                      {selectedFlowId && selectedFlowId === activeFlowId && <span className="flow-badge">Ativo</span>}
+                      {selectedFlow?.is_active && <span className="flow-badge">Ativo</span>}
                     </div>
                   </button>
                   {isFlowSelectOpen && normalizedFlows.length > 0 && (
@@ -1187,12 +1187,13 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
                         <button
                           key={flow.id}
                           type="button"
-                          className="flow-select-option"
+                          className={`flow-select-option${flow.id === selectedFlowId ? ' flow-select-option-active' : ''}`}
                           onClick={async () => {
                             await handleSelectFlow(flow.id);
                           }}
                         >
-                          {flow.name || flow.id}
+                          <span className="flow-name">{flow.name || flow.id}</span>
+                          {flow.is_active && <span className="flow-badge">Ativo</span>}
                         </button>
                       ))}
                     </div>
