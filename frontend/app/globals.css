@@ -1172,6 +1172,21 @@ input {
   stroke-width: 2;
 }
 
+
+.dashboard-main {
+  flex: 1;
+  min-width: 0;
+  padding: 32px;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+.dashboard-content {
+  width: 100%;
+  max-width: 1180px;
+  margin: 0 auto;
+}
+
 /* ── DASHBOARD SIDEBAR PREMIUM ──────────────────────── */
 .dash-sidebar {
   width: 56px;

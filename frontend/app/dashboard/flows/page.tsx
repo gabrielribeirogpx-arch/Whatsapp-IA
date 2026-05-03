@@ -97,7 +97,7 @@ export default function FlowsPage() {
   const drafts = flows.filter((f) => (f as FlowItem & { status?: string }).status === 'draft').length;
 
   return (
-    <div className="w-full max-w-[1400px] mx-auto px-6 py-6 md:py-8" style={{ fontFamily: 'Inter, -apple-system, sans-serif' }}>
+    <div className="w-full py-6 md:py-8" style={{ fontFamily: 'Inter, -apple-system, sans-serif' }}>
       {/* Header */}
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 28, flexWrap: 'wrap', gap: 12 }}>
         <div>
