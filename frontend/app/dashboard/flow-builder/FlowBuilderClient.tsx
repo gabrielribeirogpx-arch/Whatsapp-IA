@@ -188,6 +188,8 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
   const lastLoadedFlowIdRef = useRef<string | null>(null);
   const hasTriedAutoCreateRef = useRef(false);
   const nodesRef = useRef<Node[]>([]);
+  const playbackIdRef = useRef(0);
+  const isMountedRef = useRef(true);
 
   const flowSelectRef = useRef<HTMLDivElement | null>(null);
   const selectedFlow = useMemo(
@@ -211,6 +213,10 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
       message: error instanceof Error ? error.message : String(error),
     });
   }, [parseHttpStatus]);
+
+  useEffect(() => () => {
+    isMountedRef.current = false;
+  }, []);
 
   useEffect(() => {
     if (urlFlowId && urlFlowId !== selectedFlowId) {
@@ -578,13 +584,19 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
 
   const randomBetween = useCallback((min: number, max: number) => Math.floor(Math.random() * (max - min + 1)) + min, []);
 
-  const playBotResponses = useCallback(async (events: Array<{ type?: string; text?: string; seconds?: number }>) => {
+  const playBotResponses = useCallback(async (
+    events: Array<{ type?: string; text?: string; seconds?: number }>,
+    playbackId: number,
+  ) => {
     try {
       for (const event of events) {
+        if (playbackIdRef.current !== playbackId || !isMountedRef.current) return;
+
         if (event?.type === 'delay') {
           const seconds = Number(event.seconds) || 0;
           if (seconds > 0) {
             await wait(seconds * 1000);
+            if (playbackIdRef.current !== playbackId || !isMountedRef.current) return;
           }
           continue;
         }
@@ -592,21 +604,27 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
         if (event?.type === 'message' || event?.type === 'send_message') {
           const text = String(event.text || '').trim();
           if (text) {
+            if (!isMountedRef.current) return;
             setIsTyping(true);
             await wait(randomBetween(600, 1200));
+            if (playbackIdRef.current !== playbackId || !isMountedRef.current) return;
             setIsTyping(false);
             setMessages((prev) => [...prev, { type: 'bot', text }]);
           }
         }
       }
     } finally {
-      setIsTyping(false);
+      if (isMountedRef.current && playbackIdRef.current === playbackId) {
+        setIsTyping(false);
+      }
     }
   }, [randomBetween, wait]);
 
   const runFlowStep = useCallback(async (userMessage: string) => {
     if (!selectedFlowId || isProcessing) return;
 
+    const playbackId = playbackIdRef.current + 1;
+    playbackIdRef.current = playbackId;
     setMessages((prev) => [...prev, { type: 'user', text: userMessage }]);
     setIsProcessing(true);
 
@@ -650,7 +668,8 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
       const fallbackEvents = backendMessages.length > 0
         ? backendMessages.map((text: string) => ({ type: 'send_message', text }))
         : (fallbackReply ? [{ type: 'send_message', text: fallbackReply }] : [{ type: 'send_message', text: 'Simulação concluída sem resposta textual.' }]);
-      await playBotResponses(events.length > 0 ? events : fallbackEvents);
+      await playBotResponses(events.length > 0 ? events : fallbackEvents, playbackId);
+      if (playbackIdRef.current !== playbackId || !isMountedRef.current) return;
       setCurrentNodeId(data.next_node_id || null);
       setCurrentChoices([]);
       const active = flow.edges
@@ -660,9 +679,13 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
       setActiveEdgeIds(active);
     } catch (error) {
       console.error('[SIMULATOR ERROR] failed to fetch', error);
-      setMessages((prev) => [...prev, { type: 'bot', text: 'Não foi possível iniciar o simulador' }]);
+      if (isMountedRef.current && playbackIdRef.current === playbackId) {
+        setMessages((prev) => [...prev, { type: 'bot', text: 'Não foi possível iniciar o simulador' }]);
+      }
     } finally {
-      setIsProcessing(false);
+      if (isMountedRef.current && playbackIdRef.current === playbackId) {
+        setIsProcessing(false);
+      }
     }
   }, [flow.edges, isProcessing, playBotResponses, selectedFlowId]);
 
