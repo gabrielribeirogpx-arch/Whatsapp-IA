@@ -165,6 +165,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
   const [isSidebarExpanded, setIsSidebarExpanded] = useState(false);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
   const [isTyping, setIsTyping] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
   const [userInputText, setUserInputText] = useState('');
   const [isVersionsModalOpen, setIsVersionsModalOpen] = useState(false);
   const [isLoadingVersions, setIsLoadingVersions] = useState(false);
@@ -571,8 +572,34 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
     [edges, nodes, selectedFlowId],
   );
 
+  const playBotResponses = useCallback(async (events: Array<{ type?: string; text?: string; seconds?: number }>) => {
+    for (const event of events) {
+      if (event?.type === 'delay') {
+        const seconds = Number(event.seconds) || 0;
+        if (seconds > 0) {
+          setIsTyping(true);
+          await new Promise((resolve) => setTimeout(resolve, seconds * 1000));
+          setIsTyping(false);
+        }
+        continue;
+      }
+
+      if (event?.type === 'send_message') {
+        const text = String(event.text || '').trim();
+        if (text) {
+          setMessages((prev) => [...prev, { type: 'bot', text }]);
+        }
+      }
+    }
+
+    setIsTyping(false);
+  }, []);
+
   const runFlowStep = useCallback(async (userMessage: string) => {
-    if (!selectedFlowId) return;
+    if (!selectedFlowId || isProcessing) return;
+
+    setMessages((prev) => [...prev, { type: 'user', text: userMessage }]);
+    setIsProcessing(true);
 
     try {
       const response = await apiFetch(`/api/flows/${selectedFlowId}/simulate`, {
@@ -601,27 +628,20 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
         const statusBadge = `[HTTP ${response.status}]`;
 
         console.error('[SIMULATOR ERROR]', response.status, backendMessage || rawBody);
-        setMessages((prev) => [
-          ...prev,
-          { type: 'user', text: userMessage },
-          { type: 'bot', text: `${statusBadge} ${friendlyMessage}` },
-        ]);
+        setMessages((prev) => [...prev, { type: 'bot', text: `${statusBadge} ${friendlyMessage}` }]);
         return;
       }
 
       const data = await parseApiResponse<any>(response);
+      const events = Array.isArray(data?.events) ? data.events : [];
       const backendMessages = Array.isArray(data?.messages)
         ? data.messages.map((item: unknown) => (typeof item === 'string' ? item.trim() : '')).filter(Boolean)
         : [];
       const fallbackReply = typeof data?.reply === 'string' ? data.reply : '';
-      const botMessages = backendMessages.length > 0
-        ? backendMessages
-        : (fallbackReply ? [fallbackReply] : ['Simulação concluída sem resposta textual.']);
-      setMessages((prev) => [
-        ...prev,
-        { type: 'user', text: userMessage },
-        ...botMessages.map((text: string) => ({ type: 'bot' as const, text })),
-      ]);
+      const fallbackEvents = backendMessages.length > 0
+        ? backendMessages.map((text: string) => ({ type: 'send_message', text }))
+        : (fallbackReply ? [{ type: 'send_message', text: fallbackReply }] : [{ type: 'send_message', text: 'Simulação concluída sem resposta textual.' }]);
+      await playBotResponses(events.length > 0 ? events : fallbackEvents);
       setCurrentNodeId(data.next_node_id || null);
       setCurrentChoices([]);
       const active = flow.edges
@@ -631,9 +651,11 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
       setActiveEdgeIds(active);
     } catch (error) {
       console.error('[SIMULATOR ERROR] failed to fetch', error);
-      setMessages((prev) => [...prev, { type: 'user', text: userMessage }, { type: 'bot', text: 'Não foi possível iniciar o simulador' }]);
+      setMessages((prev) => [...prev, { type: 'bot', text: 'Não foi possível iniciar o simulador' }]);
+    } finally {
+      setIsProcessing(false);
     }
-  }, [flow.edges, selectedFlowId]);
+  }, [flow.edges, isProcessing, playBotResponses, selectedFlowId]);
 
   const handleChoiceClick = useCallback((handleId: string, label: string) => {
     void runFlowStep(label);
