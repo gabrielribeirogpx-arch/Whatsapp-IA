@@ -63,6 +63,10 @@ class RenameFlowPayload(BaseModel):
     name: str
 
 
+class FlowStatusPayload(BaseModel):
+    is_active: bool
+
+
 class DeleteFlowResponse(BaseModel):
     success: bool = True
     mode: str = Field(
@@ -1035,6 +1039,25 @@ def deactivate_tenant_flows(
     )
     db.commit()
     return {"success": True}
+
+
+@crud_router.patch("/{flow_id}/status")
+def update_tenant_flow_status(
+    flow_id: str,
+    payload: FlowStatusPayload,
+    x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
+    db: Session = Depends(get_db),
+):
+    tenant_uuid = _resolve_tenant_header(x_tenant_id)
+    flow = _get_flow_by_identifier(db=db, flow_id=flow_id, tenant_id=tenant_uuid)
+    if not flow:
+        raise HTTPException(status_code=404, detail="Flow não encontrado")
+
+    flow.is_active = payload.is_active
+    db.add(flow)
+    db.commit()
+    db.refresh(flow)
+    return _serialize_flow(flow)
 
 
 @crud_router.put("/{flow_id}/rename")

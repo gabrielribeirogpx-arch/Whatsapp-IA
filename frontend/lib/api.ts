@@ -392,6 +392,14 @@ export async function updateFlow(flowId: string, payload: Partial<FlowPayload>):
   return parseApiResponse<FlowItem>(res);
 }
 
+export async function updateFlowStatus(flowId: string, isActive: boolean): Promise<FlowItem> {
+  const res = await apiFetch(`/api/flows/${flowId}/status`, {
+    method: 'PATCH',
+    body: JSON.stringify({ is_active: isActive }),
+  });
+  return parseApiResponse<FlowItem>(res);
+}
+
 export async function deleteFlow(flowId: string): Promise<DeleteFlowResponse> {
   const res = await apiFetch(`/api/flows/${flowId}`, {
     method: 'DELETE'
