@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { CSSProperties, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 
 import { createFlow, deleteFlow, duplicateFlow, listFlows, updateFlow } from '@/lib/api';
@@ -20,6 +20,8 @@ export default function FlowsPage() {
   const [editingFlow, setEditingFlow] = useState<FlowItem | null>(null);
   const [form, setForm] = useState<FlowPayload>(EMPTY_FORM);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  const [isMobile, setIsMobile] = useState(false);
 
   const showToast = (message: string) => {
     setToastMessage(message);
@@ -56,6 +58,19 @@ export default function FlowsPage() {
 
   useEffect(() => {
     loadFlows();
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const mediaQuery = window.matchMedia('(max-width: 768px)');
+    const applyMatch = (matches: boolean) => setIsMobile(matches);
+
+    applyMatch(mediaQuery.matches);
+
+    const handleChange = (event: MediaQueryListEvent) => applyMatch(event.matches);
+    mediaQuery.addEventListener('change', handleChange);
+    return () => mediaQuery.removeEventListener('change', handleChange);
   }, []);
 
   const openCreate = () => {
@@ -213,37 +228,51 @@ export default function FlowsPage() {
             gap: 12,
           }}
         >
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'minmax(160px, 1.3fr) minmax(120px, 1fr) minmax(150px, 1fr) minmax(90px, 0.8fr) minmax(280px, 1.6fr)',
-              gap: 16,
-              padding: '2px 12px 10px',
-              color: '#6b7280',
-              fontSize: 13,
-              fontWeight: 700,
-            }}
-          >
-            <span>Nome</span>
-            <span>Trigger</span>
-            <span>Valor</span>
-            <span>Status</span>
-            <span>Ações</span>
-          </div>
-
-          {flows.map((flow) => (
+          {!isMobile && (
             <div
-              key={flow.id}
               style={{
                 display: 'grid',
                 gridTemplateColumns: 'minmax(160px, 1.3fr) minmax(120px, 1fr) minmax(150px, 1fr) minmax(90px, 0.8fr) minmax(280px, 1.6fr)',
                 gap: 16,
-                alignItems: 'center',
-                border: '1px solid #f3f4f6',
-                borderRadius: 12,
-                padding: 12,
-                transition: 'background-color 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease',
+                padding: '2px 12px 10px',
+                color: '#6b7280',
+                fontSize: 13,
+                fontWeight: 700,
               }}
+            >
+              <span>Nome</span>
+              <span>Trigger</span>
+              <span>Valor</span>
+              <span>Status</span>
+              <span>Ações</span>
+            </div>
+          )}
+
+          {flows.map((flow) => {
+            const rowStyle: CSSProperties = isMobile
+              ? {
+                  display: 'grid',
+                  gap: 12,
+                  border: '1px solid #f3f4f6',
+                  borderRadius: 12,
+                  padding: 14,
+                  transition: 'background-color 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease',
+                }
+              : {
+                  display: 'grid',
+                  gridTemplateColumns: 'minmax(160px, 1.3fr) minmax(120px, 1fr) minmax(150px, 1fr) minmax(90px, 0.8fr) minmax(280px, 1.6fr)',
+                  gap: 16,
+                  alignItems: 'center',
+                  border: '1px solid #f3f4f6',
+                  borderRadius: 12,
+                  padding: 12,
+                  transition: 'background-color 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease',
+                };
+
+            return (
+            <div
+              key={flow.id}
+              style={rowStyle}
               onMouseEnter={(event) => {
                 event.currentTarget.style.backgroundColor = '#f9fafb';
                 event.currentTarget.style.borderColor = '#e5e7eb';
@@ -255,11 +284,27 @@ export default function FlowsPage() {
                 event.currentTarget.style.boxShadow = 'none';
               }}
             >
-              <span style={{ fontWeight: 600, color: '#111827' }}>{flow.name}</span>
-              <span style={{ color: '#6b7280' }}>{flow.trigger_type}</span>
-              <span style={{ color: '#6b7280' }}>{flow.trigger_value || '—'}</span>
-              <span style={{ color: '#6b7280' }}>{(flow as FlowItem & { status?: string }).status || '—'}</span>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+              {isMobile ? (
+                <div style={{ display: 'grid', gap: 10 }}>
+                  <div style={{ fontWeight: 700, color: '#111827', fontSize: 16 }}>{flow.name}</div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'minmax(88px, auto) 1fr', gap: '6px 12px', color: '#4b5563', fontSize: 14 }}>
+                    <span style={{ fontWeight: 600, color: '#6b7280' }}>Trigger</span>
+                    <span>{flow.trigger_type}</span>
+                    <span style={{ fontWeight: 600, color: '#6b7280' }}>Valor</span>
+                    <span>{flow.trigger_value || '—'}</span>
+                    <span style={{ fontWeight: 600, color: '#6b7280' }}>Status</span>
+                    <span>{(flow as FlowItem & { status?: string }).status || '—'}</span>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <span style={{ fontWeight: 600, color: '#111827' }}>{flow.name}</span>
+                  <span style={{ color: '#6b7280' }}>{flow.trigger_type}</span>
+                  <span style={{ color: '#6b7280' }}>{flow.trigger_value || '—'}</span>
+                  <span style={{ color: '#6b7280' }}>{(flow as FlowItem & { status?: string }).status || '—'}</span>
+                </>
+              )}
+              <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr 1fr' : 'none', gap: 8, alignItems: 'stretch' }}>
                 <button
                   onClick={() => openEdit(flow)}
                   style={{
@@ -267,9 +312,10 @@ export default function FlowsPage() {
                     color: '#374151',
                     border: '1px solid #d1d5db',
                     borderRadius: 8,
-                    padding: '6px 12px',
+                    padding: isMobile ? '12px 14px' : '6px 12px',
                     fontSize: 13,
                     fontWeight: 600,
+                    minHeight: isMobile ? 44 : undefined,
                     cursor: 'pointer',
                   }}
                 >
@@ -282,9 +328,10 @@ export default function FlowsPage() {
                     color: '#374151',
                     border: '1px solid #d1d5db',
                     borderRadius: 8,
-                    padding: '6px 12px',
+                    padding: isMobile ? '12px 14px' : '6px 12px',
                     fontSize: 13,
                     fontWeight: 600,
+                    minHeight: isMobile ? 44 : undefined,
                     textDecoration: 'none',
                   }}
                 >
@@ -297,9 +344,10 @@ export default function FlowsPage() {
                     color: '#374151',
                     border: '1px solid #d1d5db',
                     borderRadius: 8,
-                    padding: '6px 12px',
+                    padding: isMobile ? '12px 14px' : '6px 12px',
                     fontSize: 13,
                     fontWeight: 600,
+                    minHeight: isMobile ? 44 : undefined,
                     cursor: 'pointer',
                   }}
                 >
@@ -312,9 +360,10 @@ export default function FlowsPage() {
                     color: '#b91c1c',
                     border: '1px solid #fecaca',
                     borderRadius: 8,
-                    padding: '6px 12px',
+                    padding: isMobile ? '12px 14px' : '6px 12px',
                     fontSize: 13,
                     fontWeight: 600,
+                    minHeight: isMobile ? 44 : undefined,
                     cursor: 'pointer',
                   }}
                 >
@@ -327,9 +376,10 @@ export default function FlowsPage() {
                     color: '#ffffff',
                     border: '1px solid #1d4ed8',
                     borderRadius: 8,
-                    padding: '8px 14px',
+                    padding: isMobile ? '12px 14px' : '8px 14px',
                     fontSize: 14,
                     fontWeight: 700,
+                    minHeight: isMobile ? 44 : undefined,
                     textDecoration: 'none',
                   }}
                 >
@@ -337,7 +387,8 @@ export default function FlowsPage() {
                 </Link>
               </div>
             </div>
-          ))}
+          );
+          })}
         </div>
       )}
 
