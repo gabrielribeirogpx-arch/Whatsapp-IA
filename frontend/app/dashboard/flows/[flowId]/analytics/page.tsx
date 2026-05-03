@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { BarChart3, Funnel, GitBranch, MessageSquareText, Sparkles, TrendingUp } from 'lucide-react';
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
+import { ChartBarIcon } from '@heroicons/react/24/outline';
 import { getFlowAnalytics, listFlows } from '@/lib/api';
 import { FlowAnalytics } from '@/lib/types';
 
@@ -80,7 +81,10 @@ export default function Page({ params }: Props) {
       <header className='analytics-header pl-8'>
         <div className='header-left'>
           <div>
-            <h1 className='page-title'>Analytics do Flow <span className={`status-badge ${flowStatus}`}>{flowStatus === 'active' ? 'Ativo' : flowStatus === 'draft' ? 'Draft' : 'Inativo'}</span></h1>
+            <div className='flex items-center gap-3'>
+              <ChartBarIcon className='w-5 h-5 text-gray-400' />
+              <h1 className='page-title text-xl'>Analytics do Flow <span className={`status-badge ${flowStatus}`}>{flowStatus === 'active' ? 'Ativo' : flowStatus === 'draft' ? 'Draft' : 'Inativo'}</span></h1>
+            </div>
             <p className='breadcrumb'>Flows &gt; <span>{data.flow_name}</span></p>
           </div>
         </div>
