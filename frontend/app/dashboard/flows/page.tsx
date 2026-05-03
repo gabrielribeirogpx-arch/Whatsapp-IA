@@ -168,6 +168,38 @@ export default function FlowsPage() {
 
       {loading ? (
         <p>Carregando...</p>
+      ) : flows.length === 0 ? (
+        <div
+          style={{
+            width: '100%',
+            backgroundColor: '#ffffff',
+            border: '1px solid #e5e7eb',
+            borderRadius: 16,
+            boxShadow: '0 10px 30px rgba(15, 23, 42, 0.06)',
+            padding: '28px 24px',
+            display: 'grid',
+            gap: 8,
+          }}
+        >
+          <h2 style={{ margin: 0, fontSize: '1.25rem', fontWeight: 700, color: '#111827' }}>Você ainda não criou nenhum fluxo</h2>
+          <p style={{ margin: 0, color: '#6b7280' }}>Crie seu primeiro fluxo para automatizar atendimentos no WhatsApp.</p>
+          <button
+            onClick={openCreate}
+            style={{
+              marginTop: 8,
+              width: 'fit-content',
+              backgroundColor: '#16a34a',
+              color: '#fff',
+              border: 'none',
+              borderRadius: 8,
+              padding: '10px 16px',
+              fontWeight: 700,
+              cursor: 'pointer',
+            }}
+          >
+            + Criar fluxo
+          </button>
+        </div>
       ) : (
         <div
           style={{
