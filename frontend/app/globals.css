@@ -1194,6 +1194,28 @@ input {
   width: 200px;
   box-shadow: 2px 0 16px rgba(0,0,0,0.06);
 }
+.dash-sidebar-analytics {
+  width: 64px;
+}
+
+.dash-sidebar-analytics:hover {
+  width: 64px;
+  box-shadow: none;
+}
+
+.dash-sidebar-analytics .dash-nav-label,
+.dash-sidebar-analytics .dash-nav-section {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+@media (max-width: 767px) {
+  .dash-sidebar-analytics {
+    width: 56px;
+  }
+}
+
 
 .dash-sidebar-logo {
   display: flex;

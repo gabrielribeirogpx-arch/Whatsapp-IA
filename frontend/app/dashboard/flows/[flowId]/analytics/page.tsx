@@ -74,8 +74,8 @@ export default function Page({ params }: Props) {
   );
 
   return (
-    <div className='flex justify-center w-full'>
-      <div className='w-full max-w-7xl mx-auto pl-6 pr-6 md:pl-8 md:pr-8'>
+    <div className='min-h-screen w-full md:ml-16 px-4 md:px-8 py-6'>
+      <div className='w-full max-w-7xl mx-auto'>
         <div className='analytics-page'>
       <header className='analytics-header'>
         <div className='header-left'>
