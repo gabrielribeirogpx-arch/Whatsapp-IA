@@ -197,11 +197,11 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
     () => normalizedFlows.find((flow) => flow.id === selectedFlowId) || null,
     [normalizedFlows, selectedFlowId],
   );
-  const getFlowBadge = useCallback((flow: { is_active?: boolean; status?: string | null; is_published?: boolean | null }) => {
-    if (flow.is_active) return { label: 'Ativo', variant: 'flow-badge-active' };
-    if (flow.status === 'draft' || !flow.is_published) return { label: 'Rascunho', variant: 'flow-badge-draft' };
-    return { label: 'Inativo', variant: 'flow-badge-inactive' };
-  }, []);
+  const getFlowBadge = useCallback((flow: { is_active?: boolean }) => (
+    flow.is_active
+      ? { label: 'Ativo', style: { background: '#DCFCE7', color: '#166534' } }
+      : { label: 'OFF', style: { background: '#F1F5F9', color: '#475569' } }
+  ), []);
 
   const parseHttpStatus = useCallback((error: unknown): number | null => {
     if (!(error instanceof Error)) return null;
@@ -1179,13 +1179,13 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
                     aria-haspopup="listbox"
                     aria-expanded={isFlowSelectOpen}
                   >
-                    <div className="flow-selected-label">
-                      <span className="flow-name">
+                    <div className="flow-selected-label" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, minWidth: 0 }}>
+                      <span className="flow-name" style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                         {selectedFlow ? (selectedFlow.name || selectedFlow.id) : (normalizedFlows.length === 0 ? 'Nenhum flow disponível' : 'Selecione um flow')}
                       </span>
                       {selectedFlow && (() => {
                         const badge = getFlowBadge(selectedFlow);
-                        return <span className={`flow-badge ${badge.variant}`}>{badge.label}</span>;
+                        return <span className="flow-badge" style={badge.style}>{badge.label}</span>;
                       })()}
                     </div>
                   </button>
@@ -1196,14 +1196,15 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
                           key={flow.id}
                           type="button"
                           className={`flow-select-option${flow.id === selectedFlowId ? ' flow-select-option-active' : ''}`}
+                          style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}
                           onClick={async () => {
                             await handleSelectFlow(flow.id);
                           }}
                         >
-                          <span className="flow-name">{flow.name || flow.id}</span>
+                          <span className="flow-name" style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{flow.name || flow.id}</span>
                           {(() => {
                             const badge = getFlowBadge(flow);
-                            return <span className={`flow-badge ${badge.variant}`}>{badge.label}</span>;
+                            return <span className="flow-badge" style={badge.style}>{badge.label}</span>;
                           })()}
                         </button>
                       ))}
