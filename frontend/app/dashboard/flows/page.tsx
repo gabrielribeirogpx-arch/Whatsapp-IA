@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 
-import { createFlow, deleteFlow, duplicateFlow, listFlows, updateFlow } from '@/lib/api';
+import { createFlow, deleteFlow, duplicateFlow, listFlows, updateFlow, updateFlowStatus } from '@/lib/api';
 import { FlowItem, FlowPayload } from '@/lib/types';
 
 const EMPTY_FORM: FlowPayload = {
@@ -93,6 +93,20 @@ export default function FlowsPage() {
     catch { showToast('Erro ao duplicar flow.'); }
   };
 
+  const updateLocalState = (flowId: string, isActive: boolean) => {
+    setFlows((prev) => prev.map((flow) => (flow.id === flowId ? { ...flow, is_active: isActive } : flow)));
+  };
+
+  const handleToggle = async (flowId: string, isActive: boolean) => {
+    updateLocalState(flowId, isActive);
+    try {
+      await updateFlowStatus(flowId, isActive);
+    } catch {
+      updateLocalState(flowId, !isActive);
+      showToast('Erro ao atualizar status do fluxo');
+    }
+  };
+
   const published = flows.filter((f) => (f as FlowItem & { status?: string }).status === 'published').length;
   const drafts = flows.filter((f) => (f as FlowItem & { status?: string }).status === 'draft').length;
 
@@ -151,6 +165,11 @@ export default function FlowsPage() {
                   onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}>
                   <div style={{ flex: 1 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4, flexWrap: 'wrap' }}>
+                      <Switch
+                        checked={flow.is_active}
+                        onChange={(value) => handleToggle(flow.id, value)}
+                        tooltip={flow.is_active ? 'Desativar fluxo' : 'Ativar fluxo'}
+                      />
                       <span style={{ fontSize: 14, fontWeight: 600, color: '#111' }}>{flow.name}</span>
                       {status === 'published' && (
                         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, background: '#f0fdf4', color: '#16a34a', padding: '2px 8px', borderRadius: 6, fontSize: 11, fontWeight: 600 }}>
@@ -224,5 +243,44 @@ export default function FlowsPage() {
         </div>
       )}
     </div>
+  );
+}
+
+function Switch({ checked, onChange, tooltip }: { checked: boolean; onChange: (value: boolean) => void; tooltip: string }) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      title={tooltip}
+      aria-label={tooltip}
+      onClick={(e) => {
+        e.stopPropagation();
+        onChange(!checked);
+      }}
+      style={{
+        width: 36,
+        height: 20,
+        borderRadius: 999,
+        border: 'none',
+        cursor: 'pointer',
+        background: checked ? '#16a34a' : '#9ca3af',
+        padding: 2,
+        display: 'inline-flex',
+        alignItems: 'center',
+        transition: 'background 0.15s ease',
+      }}
+    >
+      <span
+        style={{
+          width: 16,
+          height: 16,
+          borderRadius: '50%',
+          background: '#fff',
+          transform: checked ? 'translateX(16px)' : 'translateX(0)',
+          transition: 'transform 0.15s ease',
+        }}
+      />
+    </button>
   );
 }
