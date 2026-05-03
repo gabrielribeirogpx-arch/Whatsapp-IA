@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useSearchParams } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import ReactFlow, {
   addEdge,
   Background,
@@ -135,8 +135,9 @@ type FlowBuilderClientProps = {
 };
 
 export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilderClientProps) {
+  const router = useRouter();
   const searchParams = useSearchParams();
-  const urlFlowId = searchParams.get('flow_id') || searchParams.get('flowId') || _initialFlowId || '';
+  const flowIdFromUrl = searchParams.get('flow_id') || searchParams.get('flowId') || _initialFlowId || '';
   const [flows, setFlows] = useState<Array<{ id: string; name?: string | null; created_at?: string | null; is_active?: boolean }>>([]);
   const normalizedFlows = useMemo(
     () =>
@@ -146,7 +147,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
       })),
     [flows],
   );
-  const [selectedFlowId, setSelectedFlowId] = useState<string | null>(urlFlowId || null);
+  const [selectedFlowId, setSelectedFlowId] = useState<string | null>(flowIdFromUrl || null);
   const [activeFlowId, setActiveFlowId] = useState<string | null>(null);
   const [isFlowSelectOpen, setIsFlowSelectOpen] = useState(false);
   console.log('FLOW SELECIONADO:', selectedFlowId);
@@ -219,29 +220,8 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
   }, []);
 
   useEffect(() => {
-    if (urlFlowId && urlFlowId !== selectedFlowId) {
-      setSelectedFlowId(urlFlowId);
-      return;
-    }
-    if (urlFlowId || selectedFlowId) return;
-    if (typeof window === 'undefined') return;
-    const storedFlowId = window.localStorage.getItem('flow_builder_flow_id');
-    if (storedFlowId) {
-      setSelectedFlowId(storedFlowId);
-    }
-  }, [selectedFlowId, urlFlowId]);
-
-  useEffect(() => {
-    if (selectedFlowId && !normalizedFlows.find((flow) => flow.id === selectedFlowId)) {
-      setSelectedFlowId(null);
-      return;
-    }
-
-    if (!selectedFlowId && normalizedFlows.length > 0) {
-      const currentActiveFlow = normalizedFlows.find((flow) => flow.is_active);
-      setSelectedFlowId(currentActiveFlow?.id || normalizedFlows[0].id);
-    }
-  }, [normalizedFlows, selectedFlowId]);
+    console.log('[BUILDER FLOW_ID_FROM_URL]', flowIdFromUrl || null);
+  }, [flowIdFromUrl]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -553,17 +533,56 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
   }, [applyLayoutAndSetFlow, buildFlowEdge, buildFlowNode, rfInstance, setEdges, setNodes]);
 
   useEffect(() => {
+    if (normalizedFlows.length === 0) return;
+
+    const firstFlowId = normalizedFlows[0]?.id || null;
+    const currentActiveFlow = normalizedFlows.find((flow) => flow.is_active);
+    const resolvedActiveFlowId = currentActiveFlow?.id || null;
+    const initialFlowId = flowIdFromUrl || resolvedActiveFlowId || firstFlowId;
+
+    if (flowIdFromUrl && normalizedFlows.some((flow) => flow.id === flowIdFromUrl)) {
+      console.log('[BUILDER SELECTED_FLOW_ID]', flowIdFromUrl);
+      setSelectedFlowId((prev) => (prev === flowIdFromUrl ? prev : flowIdFromUrl));
+      if (lastLoadedFlowIdRef.current !== flowIdFromUrl) {
+        console.log('[BUILDER LOAD FLOW]', flowIdFromUrl);
+        void loadFlow(flowIdFromUrl);
+      }
+      return;
+    }
+
+    if (!flowIdFromUrl && initialFlowId) {
+      console.log('[BUILDER USING ACTIVE FALLBACK]', initialFlowId);
+      console.log('[BUILDER SELECTED_FLOW_ID]', initialFlowId);
+      setSelectedFlowId((prev) => (prev === initialFlowId ? prev : initialFlowId));
+      if (lastLoadedFlowIdRef.current !== initialFlowId) {
+        console.log('[BUILDER LOAD FLOW]', initialFlowId);
+        void loadFlow(initialFlowId);
+      }
+      return;
+    }
+
+    if (selectedFlowId && !normalizedFlows.find((flow) => flow.id === selectedFlowId)) {
+      setSelectedFlowId(null);
+    }
+  }, [flowIdFromUrl, loadFlow, normalizedFlows, selectedFlowId]);
+
+  useEffect(() => {
     if (!flows || flows.length === 0) {
       setSelectedFlowId(null);
       lastLoadedFlowIdRef.current = null;
       setNodes([FALLBACK_START_NODE]);
       setEdges([]);
-      return;
     }
-    if (!selectedFlowId) return;
-    if (lastLoadedFlowIdRef.current === selectedFlowId) return;
-    void loadFlow(selectedFlowId);
-  }, [flows, loadFlow, selectedFlowId, setEdges, setNodes]);
+  }, [flows, setEdges, setNodes]);
+
+  const handleSelectFlow = useCallback(async (flowId: string) => {
+    console.log('[BUILDER SELECTED_FLOW_ID]', flowId);
+    setSelectedFlowId(flowId);
+    setIsFlowSelectOpen(false);
+    router.replace(`/dashboard/flow-builder?flow_id=${flowId}`);
+    console.log('[BUILDER LOAD FLOW]', flowId);
+    await loadFlow(flowId);
+  }, [loadFlow, router]);
 
   const flow = useMemo(
     () => ({
@@ -1170,10 +1189,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
                           type="button"
                           className="flow-select-option"
                           onClick={async () => {
-                            console.log('FLOW SELECIONADO:', flow.id);
-                            setSelectedFlowId(flow.id);
-                            setIsFlowSelectOpen(false);
-                            await loadFlow(flow.id);
+                            await handleSelectFlow(flow.id);
                           }}
                         >
                           {flow.name || flow.id}
