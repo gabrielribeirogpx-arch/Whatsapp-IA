@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
+import { ArrowLeft, BarChart3, Funnel, GitBranch, MessageSquareText, Sparkles, TrendingUp } from 'lucide-react';
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { getFlowAnalytics } from '@/lib/api';
 import { FlowAnalytics } from '@/lib/types';
@@ -66,11 +67,11 @@ export default function Page({ params }: Props) {
       <header className='analytics-header'>
         <div className='header-left'>
           <div className='analytics-icon' aria-hidden>
-            📊
+            <BarChart3 size={22} />
           </div>
           <div>
             <h1 className='page-title'>Analytics do Flow</h1>
-            <p className='breadcrumb'>Flows &gt; {data.flow_name}</p>
+            <p className='breadcrumb'>Flows &gt; <span>{data.flow_name}</span></p>
           </div>
         </div>
 
@@ -87,8 +88,8 @@ export default function Page({ params }: Props) {
               </button>
             ))}
           </div>
-          <Link href='/dashboard/flows' className='back-btn'>
-            Voltar
+          <Link href='/dashboard/flows' className='back-btn' aria-label='Voltar para flows'>
+            <ArrowLeft size={16} />
           </Link>
         </div>
       </header>
@@ -97,7 +98,7 @@ export default function Page({ params }: Props) {
         {kpis.map(([label, value], index) => (
           <div key={String(label)} className='card card-soft kpi-card'>
             <div className='kpi-top'>
-              <span className={`kpi-icon kpi-icon-${index}`} aria-hidden />
+              <span className={`kpi-icon kpi-icon-${index}`} aria-hidden><BarChart3 size={15} /></span>
               <div className='kpi-label'>{label}</div>
             </div>
             <div className='kpi-value'>{value}</div>
@@ -117,23 +118,28 @@ export default function Page({ params }: Props) {
 
       <div className='main-grid'>
         <div className='card card-soft'>
-          <h3 className='section-title'>Funil do Flow</h3>
+          <h3 className='section-title'><Funnel size={18} />Funil do Flow</h3>
           {data.funnel.length === 0 ? (
             <div className='funnel-empty'>
-              <svg viewBox='0 0 240 140' className='funnel-illustration' aria-hidden>
+              <svg viewBox='0 0 320 180' className='funnel-illustration' aria-hidden>
                 <defs>
                   <linearGradient id='funnelGradient' x1='0%' y1='0%' x2='100%' y2='100%'>
-                    <stop offset='0%' stopColor='#bfdbfe' />
-                    <stop offset='100%' stopColor='#bbf7d0' />
+                    <stop offset='0%' stopColor='#22c55e' stopOpacity='0.3' />
+                    <stop offset='100%' stopColor='#16a34a' stopOpacity='0.55' />
                   </linearGradient>
                 </defs>
-                <rect x='18' y='24' width='204' height='18' rx='9' fill='url(#funnelGradient)' opacity='0.9' />
-                <rect x='42' y='56' width='156' height='18' rx='9' fill='url(#funnelGradient)' opacity='0.75' />
-                <rect x='72' y='88' width='96' height='18' rx='9' fill='url(#funnelGradient)' opacity='0.6' />
-                <circle cx='120' cy='117' r='8' fill='#60a5fa' opacity='0.8' />
+                <ellipse cx='116' cy='38' rx='92' ry='12' fill='url(#funnelGradient)' />
+                <path d='M24 38h184l-22 35H46z' fill='url(#funnelGradient)' opacity='0.9' />
+                <ellipse cx='116' cy='73' rx='70' ry='10' fill='url(#funnelGradient)' opacity='0.8' />
+                <path d='M46 73h140l-18 30H64z' fill='url(#funnelGradient)' opacity='0.75' />
+                <ellipse cx='116' cy='103' rx='50' ry='8' fill='url(#funnelGradient)' opacity='0.7' />
+                <path d='M64 103h104l-14 25H78z' fill='url(#funnelGradient)' opacity='0.6' />
+                <ellipse cx='116' cy='128' rx='34' ry='6' fill='url(#funnelGradient)' opacity='0.58' />
               </svg>
-              <h4>Sem dados ainda</h4>
-              <p className='secondary-text'>Quando houver tráfego nesse flow, o funil de etapas aparecerá aqui.</p>
+              <div>
+                <h4>Sem dados ainda</h4>
+                <p className='secondary-text'>O funil será exibido assim que houver movimentação de usuários neste flow.</p>
+              </div>
             </div>
           ) : (
             data.funnel.map((n, i) => {
@@ -161,16 +167,16 @@ export default function Page({ params }: Props) {
 
         <div className='side-stack'>
           <div className='card card-soft'>
-          <h3 className='section-title'>Pontos de abandono</h3>
-          {data.top_dropoffs.map((n) => (
+          <h3 className='section-title'><GitBranch size={18} />Pontos de abandono</h3>
+          {data.top_dropoffs.length === 0 ? <div className='side-empty'><span className='side-icon'><GitBranch size={22} /></span><strong>—</strong><span className='secondary-text'>Sem dados suficientes</span></div> : data.top_dropoffs.map((n) => (
             <div key={n.node_id} className='secondary-text'>
               ⚠️ Node “{n.node_label}” — {n.dropoff_rate}% de abandono. Sugestão: simplifique a pergunta.
             </div>
           ))}
         </div>
           <div className='card card-soft'>
-            <h3 className='section-title'>Respostas mais comuns</h3>
-            {data.common_replies.map((r) => (
+            <h3 className='section-title'><MessageSquareText size={18} />Respostas mais comuns</h3>
+            {data.common_replies.length === 0 ? <div className='side-empty'><span className='side-icon'><MessageSquareText size={22} /></span><strong>—</strong><span className='secondary-text'>Sem dados suficientes</span></div> : data.common_replies.map((r) => (
               <div key={r.reply} className='reply-row'>
                 <span>{r.reply}</span>
                 <span className='secondary-text'>{r.rate}%</span>
@@ -182,7 +188,7 @@ export default function Page({ params }: Props) {
 
       <div className='card card-soft card-full-width'>
         <div className='section-header'>
-          <h3 className='section-title'>Performance ao longo do tempo</h3>
+          <h3 className='section-title'><TrendingUp size={18} />Performance ao longo do tempo</h3>
           <select
             className='metric-select'
             value={timelineMetric}
@@ -216,7 +222,8 @@ export default function Page({ params }: Props) {
                 <span />
                 <span />
               </div>
-              <p>Nenhum ponto relevante ainda para o período selecionado.</p>
+              <div className='timeline-empty-icon'><BarChart3 size={18} /></div>
+              <p>Sem dados para o período selecionado</p>
             </div>
           )}
         </div>
@@ -224,7 +231,7 @@ export default function Page({ params }: Props) {
 
       <div className='card card-soft card-rounded-lg card-full-width'>
         <div className='section-header'>
-          <h3 className='section-title'>Insights automáticos</h3>
+          <h3 className='section-title'><Sparkles size={18} />Insights automáticos</h3>
           <span className='coming-soon-badge'>Em breve</span>
         </div>
         <p className='secondary-text insights-description'>
@@ -248,13 +255,14 @@ export default function Page({ params }: Props) {
         .analytics-page {
           background: #f8fafc;
           color: #0f172a;
+          padding: 16px 0 28px;
         }
         .analytics-header {
           display: grid;
           grid-template-columns: 1fr auto;
           align-items: center;
-          gap: 16px;
-          margin-bottom: 24px;
+          gap: 18px;
+          margin-bottom: 30px;
         }
         .header-left,
         .header-right {
@@ -268,14 +276,15 @@ export default function Page({ params }: Props) {
           border-radius: 12px;
           display: grid;
           place-items: center;
-          background: #dbeafe;
-          color: #2563eb;
+          background: linear-gradient(180deg, #22c55e 0%, #16a34a 100%);
+          color: #ffffff;
           font-size: 20px;
+          box-shadow: 0 8px 20px rgba(34, 197, 94, 0.26);
         }
         .page-title {
           margin: 0;
-          font-size: 30px;
-          font-weight: 700;
+          font-size: 40px;
+          font-weight: 800;
         }
         .breadcrumb,
         .secondary-text,
@@ -285,6 +294,7 @@ export default function Page({ params }: Props) {
         .breadcrumb {
           margin: 4px 0 0;
         }
+        .breadcrumb span { color: #16a34a; font-weight: 600; }
         .period-label {
           font-weight: 600;
         }
@@ -293,31 +303,31 @@ export default function Page({ params }: Props) {
           padding: 4px;
           border-radius: 999px;
           border: 1px solid #e5e7eb;
-          background: #ffffff;
+          background: #fff;
           gap: 4px;
         }
         .segment-btn {
           border: none;
           background: transparent;
-          color: #64748b;
+          color: #334155;
           border-radius: 999px;
           padding: 8px 12px;
           cursor: pointer;
           transition: all 0.2s ease;
         }
         .segment-btn:hover {
-          background: #eff6ff;
-          color: #2563eb;
+          background: #f0fdf4;
+          color: #16a34a;
         }
         .segment-btn.active {
-          background: #2563eb;
-          color: #fff;
+          background: #dcfce7;
+          color: #15803d;
         }
         .back-btn {
           color: #64748b;
           text-decoration: none;
           border: 1px solid #e5e7eb;
-          padding: 8px 12px;
+          width: 36px; height: 36px; display:grid; place-items:center;
           border-radius: 10px;
           transition: all 0.2s ease;
         }
@@ -330,24 +340,24 @@ export default function Page({ params }: Props) {
           display: grid;
           grid-template-columns: repeat(5, minmax(0, 1fr));
           gap: 12px;
-          margin-bottom: 18px;
+          margin-bottom: 22px;
         }
         .card {
           margin-bottom: 12px;
-          padding: 16px;
+          padding: 18px 20px;
         }
         .card-soft {
           background: #ffffff;
           border: 1px solid #e5e7eb;
           border-radius: 18px;
-          box-shadow: 0 10px 30px rgba(15, 23, 42, 0.06);
+          box-shadow: 0 4px 20px rgba(2, 6, 23, 0.04);
         }
         .kpi-card {
           transition: transform 0.2s ease, box-shadow 0.25s ease;
         }
         .kpi-card:hover {
           transform: translateY(-3px);
-          box-shadow: 0 18px 34px rgba(15, 23, 42, 0.12);
+          box-shadow: 0 10px 30px rgba(2, 6, 23, 0.08);
         }
         .card-rounded-lg {
           border-radius: 22px;
@@ -364,14 +374,13 @@ export default function Page({ params }: Props) {
         .kpi-icon {
           width: 28px;
           height: 28px;
-          border-radius: 999px;
+          border-radius: 10px;
           display: inline-block;
+          background: #f0fdf4;
+          color: #16a34a;
+          display:grid;
+          place-items:center;
         }
-        .kpi-icon-0 { background: #dbeafe; }
-        .kpi-icon-1 { background: #dcfce7; }
-        .kpi-icon-2 { background: #fee2e2; }
-        .kpi-icon-3 { background: #fef3c7; }
-        .kpi-icon-4 { background: #e0e7ff; }
         .kpi-label {
           color: #64748b;
         }
@@ -407,6 +416,9 @@ export default function Page({ params }: Props) {
           margin: 0 0 14px;
           font-size: 18px;
           color: #0f172a;
+          display:flex;
+          align-items:center;
+          gap:10px;
         }
         .section-header {
           display: flex;
@@ -417,7 +429,7 @@ export default function Page({ params }: Props) {
           flex-wrap: wrap;
         }
         .metric-select {
-          border: 1px solid #cbd5e1;
+          border: 1px solid #e5e7eb;
           background: #fff;
           color: #0f172a;
           border-radius: 10px;
@@ -426,14 +438,14 @@ export default function Page({ params }: Props) {
         }
         .timeline-empty {
           height: 100%;
-          border: 1px dashed #cbd5e1;
+          border: 1px dashed #dcfce7;
           border-radius: 14px;
           display: grid;
           place-items: center;
           text-align: center;
           padding: 20px;
           color: #64748b;
-          background: linear-gradient(180deg, #f8fafc 0%, #ffffff 100%);
+          background: linear-gradient(180deg, #f0fdf4 0%, #ffffff 100%);
         }
         .timeline-lines {
           width: min(480px, 100%);
@@ -453,8 +465,8 @@ export default function Page({ params }: Props) {
           padding: 4px 10px;
           font-size: 12px;
           font-weight: 700;
-          color: #1d4ed8;
-          background: #dbeafe;
+          color: #15803d;
+          background: #dcfce7;
         }
         .insights-description {
           margin-top: -4px;
@@ -497,7 +509,7 @@ export default function Page({ params }: Props) {
         .main-grid {
           display: grid;
           grid-template-columns: 2fr 1fr;
-          gap: 12px;
+          gap: 16px;
         }
         .side-stack {
           display: grid;
@@ -505,11 +517,15 @@ export default function Page({ params }: Props) {
           align-content: start;
         }
         .funnel-empty {
-          min-height: 220px;
+          min-height: 320px;
           display: grid;
-          place-items: center;
-          text-align: center;
-          padding: 18px;
+          grid-template-columns: 1.1fr 1fr;
+          align-items: center;
+          text-align: left;
+          gap: 14px;
+          padding: 24px;
+          background: linear-gradient(180deg, #ffffff 0%, #f8fffb 100%);
+          border-radius: 16px;
         }
         .funnel-empty h4 {
           margin: 6px 0 4px;
@@ -517,10 +533,14 @@ export default function Page({ params }: Props) {
           color: #0f172a;
         }
         .funnel-illustration {
-          width: 220px;
+          width: 340px;
           max-width: 100%;
           margin-bottom: 4px;
+          filter: drop-shadow(0 20px 30px rgba(34, 197, 94, 0.13));
         }
+        .side-empty { min-height: 170px; display:flex; flex-direction:column; justify-content:center; gap:8px; }
+        .side-empty strong { font-size: 34px; color: #0f172a; line-height:1; }
+        .side-icon { width: 46px; height:46px; border-radius: 14px; display:grid; place-items:center; background:#dcfce7; color:#15803d; }
         .reply-row {
           display: flex;
           justify-content: space-between;
@@ -538,6 +558,7 @@ export default function Page({ params }: Props) {
             justify-content: flex-start;
             flex-wrap: wrap;
           }
+          .funnel-empty { grid-template-columns: 1fr; text-align: center; }
         }
       `}</style>
         </div>
@@ -545,3 +566,8 @@ export default function Page({ params }: Props) {
     </div>
   );
 }
+        .timeline-empty-icon {
+          width: 40px; height: 40px; border-radius: 12px;
+          background:#dcfce7; color:#16a34a; display:grid; place-items:center;
+          margin: 6px auto 8px;
+        }
