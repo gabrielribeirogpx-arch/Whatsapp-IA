@@ -11,9 +11,8 @@ from typing import Any
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.models.flow import Flow
+from app.models.flow import Flow, FlowNode
 from app.models.flow_event import FlowEvent
-from app.models.flow_node import FlowNode
 
 logger = logging.getLogger(__name__)
 
