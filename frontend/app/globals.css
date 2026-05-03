@@ -1620,7 +1620,7 @@ input {
   align-items: center;
 }
 
-.flow-select {
+.flow-select-trigger {
   min-width: 240px;
   border-radius: 10px;
   border: 1px solid #d6ddd3;
@@ -1630,19 +1630,30 @@ input {
   font-weight: 500;
   padding: 10px 14px;
   transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  text-align: left;
 }
 
-.flow-select:focus {
+.flow-select-trigger:focus {
   outline: none;
   border-color: #60a5fa;
   box-shadow: 0 0 0 3px rgba(96, 165, 250, 0.24);
 }
 
-.flow-active-badge {
-  position: absolute;
-  right: 10px;
-  top: 50%;
-  transform: translateY(-50%);
+.flow-selected-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+}
+
+.flow-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: min(28vw, 280px);
+}
+
+.flow-badge {
   padding: 2px 8px;
   border-radius: 999px;
   font-size: 11px;
@@ -1650,7 +1661,35 @@ input {
   color: #065f46;
   background: #d1fae5;
   border: 1px solid #a7f3d0;
-  pointer-events: none;
+  flex: 0 0 auto;
+}
+
+.flow-select-dropdown {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  min-width: 100%;
+  background: #fff;
+  border: 1px solid #d6ddd3;
+  border-radius: 10px;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.12);
+  padding: 6px;
+  z-index: 30;
+}
+
+.flow-select-option {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  padding: 8px 10px;
+  border-radius: 8px;
+  font-size: 13px;
+  color: #0f172a;
+}
+
+.flow-select-option:hover {
+  background: #f3f4f6;
 }
 
 .flow-top-btn {
@@ -1761,7 +1800,7 @@ input {
   }
 
   .flow-select-wrapper,
-  .flow-select,
+  .flow-select-trigger,
   .flow-top-btn {
     width: 100%;
   }

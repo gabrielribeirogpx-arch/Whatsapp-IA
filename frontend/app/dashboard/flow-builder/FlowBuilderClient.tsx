@@ -148,6 +148,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
   );
   const [selectedFlowId, setSelectedFlowId] = useState<string | null>(urlFlowId || null);
   const [activeFlowId, setActiveFlowId] = useState<string | null>(null);
+  const [isFlowSelectOpen, setIsFlowSelectOpen] = useState(false);
   console.log('FLOW SELECIONADO:', selectedFlowId);
   console.log('FLOW ATIVO:', activeFlowId);
   console.log('FLOWS DISPONÍVEIS:', flows);
@@ -186,6 +187,13 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
   const lastLoadedFlowIdRef = useRef<string | null>(null);
   const hasTriedAutoCreateRef = useRef(false);
   const nodesRef = useRef<Node[]>([]);
+
+  const flowSelectRef = useRef<HTMLDivElement | null>(null);
+  const selectedFlow = useMemo(
+    () => normalizedFlows.find((flow) => flow.id === selectedFlowId) || null,
+    [normalizedFlows, selectedFlowId],
+  );
+
   const parseHttpStatus = useCallback((error: unknown): number | null => {
     if (!(error instanceof Error)) return null;
     const match = error.message.match(/HTTP\s+(\d{3})/i);
@@ -240,6 +248,22 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
   useEffect(() => {
     nodesRef.current = nodes;
   }, [nodes]);
+
+
+  useEffect(() => {
+    const handleOutsideClick = (event: MouseEvent) => {
+      if (!flowSelectRef.current) return;
+      const target = event.target;
+      if (!(target instanceof HTMLElement)) return;
+
+      if (!flowSelectRef.current.contains(target)) {
+        setIsFlowSelectOpen(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleOutsideClick);
+    return () => document.removeEventListener('mousedown', handleOutsideClick);
+  }, []);
 
   useEffect(() => {
     console.log('NODES:', nodes);
@@ -1068,28 +1092,41 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
           <div className="flow-toolbar-groups">
             <div className="flow-toolbar-section flow-toolbar-left">
               <div className="flow-toolbar-group flow-toolbar-group-select">
-                <div className="flow-select-wrapper">
-                <select
-                  value={selectedFlowId || ''}
-                  onChange={async (e) => {
-                    const id = e.target.value || null;
-                    console.log('FLOW SELECIONADO:', id);
-                    setSelectedFlowId(id);
-                    await loadFlow(id);
-                  }}
-                  className="flow-select"
-                  disabled={normalizedFlows.length === 0}
-                >
-                  <option value="" disabled>
-                    {normalizedFlows.length === 0 ? 'Nenhum flow disponível' : 'Selecione um flow'}
-                  </option>
-                  {normalizedFlows.map((flow) => (
-                    <option key={flow.id} value={flow.id}>
-                      {flow.name || flow.id}
-                    </option>
-                  ))}
-                </select>
-                  {selectedFlowId && selectedFlowId === activeFlowId && <span className="flow-active-badge">Ativo</span>}
+                <div className="flow-select-wrapper" ref={flowSelectRef}>
+                  <button
+                    type="button"
+                    className="flow-select-trigger"
+                    onClick={() => setIsFlowSelectOpen((prev) => !prev)}
+                    disabled={normalizedFlows.length === 0}
+                    aria-haspopup="listbox"
+                    aria-expanded={isFlowSelectOpen}
+                  >
+                    <div className="flow-selected-label">
+                      <span className="flow-name">
+                        {selectedFlow ? (selectedFlow.name || selectedFlow.id) : (normalizedFlows.length === 0 ? 'Nenhum flow disponível' : 'Selecione um flow')}
+                      </span>
+                      {selectedFlowId && selectedFlowId === activeFlowId && <span className="flow-badge">Ativo</span>}
+                    </div>
+                  </button>
+                  {isFlowSelectOpen && normalizedFlows.length > 0 && (
+                    <div className="flow-select-dropdown" role="listbox">
+                      {normalizedFlows.map((flow) => (
+                        <button
+                          key={flow.id}
+                          type="button"
+                          className="flow-select-option"
+                          onClick={async () => {
+                            console.log('FLOW SELECIONADO:', flow.id);
+                            setSelectedFlowId(flow.id);
+                            setIsFlowSelectOpen(false);
+                            await loadFlow(flow.id);
+                          }}
+                        >
+                          {flow.name || flow.id}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
