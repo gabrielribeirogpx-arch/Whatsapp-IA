@@ -3,7 +3,7 @@ import { ReactNode } from 'react';
 
 export default function DashboardLayout({ children }: { children: ReactNode }) {
   return (
-    <div style={{ display: 'flex', minHeight: '100vh', background: '#F7F8F7', fontFamily: 'Inter, -apple-system, sans-serif' }}>
+    <div className="flex min-h-screen" style={{ background: '#F7F8F7', fontFamily: 'Inter, -apple-system, sans-serif' }}>
       <nav className="dash-sidebar">
         <div className="dash-sidebar-logo">
           <img src="/Logo.svg" alt="Ícone" className="logo-icon" />
@@ -56,7 +56,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
         </Link>
       </nav>
 
-      <main style={{ flex: 1, overflowY: 'auto', padding: '32px 24px 32px 12px' }}>{children}</main>
+      <main className="flex-1 overflow-y-auto">{children}</main>
     </div>
   );
 }
