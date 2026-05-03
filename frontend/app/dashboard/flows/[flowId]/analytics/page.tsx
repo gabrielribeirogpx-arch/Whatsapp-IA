@@ -50,7 +50,7 @@ export default function Page({ params }: Props) {
     ['Conversão', `${data.summary.conversion_rate}%`],
     ['Abandono', `${data.summary.dropoff_rate}%`],
     ['Tempo médio', `${Math.round(data.summary.avg_time_seconds)}s`],
-    ['Mensagens/usuário', data.summary.avg_messages_per_user],
+    ['Mensagens tratadas', data.summary.messages_sent],
   ];
 
   const noData = data.summary.entries === 0;
@@ -88,23 +88,49 @@ export default function Page({ params }: Props) {
       </header>
 
       <div className='kpi-grid'>
-        {kpis.map(([label, value]) => (
-          <div key={String(label)} className='card card-soft'>
-            <div className='kpi-label'>{label}</div>
+        {kpis.map(([label, value], index) => (
+          <div key={String(label)} className='card card-soft kpi-card'>
+            <div className='kpi-top'>
+              <span className={`kpi-icon kpi-icon-${index}`} aria-hidden />
+              <div className='kpi-label'>{label}</div>
+            </div>
             <div className='kpi-value'>{value}</div>
+            <div className='kpi-trend secondary-text'>Variação: —</div>
           </div>
         ))}
       </div>
 
       {noData && (
-        <div className='card card-soft empty-state'>
-          Ainda não há dados suficientes. Assim que usuários passarem por este flow, os analytics aparecerão aqui.
+        <div className='card info-card' role='status'>
+          <span className='info-icon' aria-hidden>
+            ℹ️
+          </span>
+          <span>Ainda não há dados suficientes. Assim que usuários passarem por este flow, os analytics aparecerão aqui.</span>
         </div>
       )}
 
-      <div className='card card-soft'>
-        <h3 className='section-title'>Funil do Flow</h3>
-        {data.funnel.map((n, i) => {
+      <div className='main-grid'>
+        <div className='card card-soft'>
+          <h3 className='section-title'>Funil do Flow</h3>
+          {data.funnel.length === 0 ? (
+            <div className='funnel-empty'>
+              <svg viewBox='0 0 240 140' className='funnel-illustration' aria-hidden>
+                <defs>
+                  <linearGradient id='funnelGradient' x1='0%' y1='0%' x2='100%' y2='100%'>
+                    <stop offset='0%' stopColor='#bfdbfe' />
+                    <stop offset='100%' stopColor='#bbf7d0' />
+                  </linearGradient>
+                </defs>
+                <rect x='18' y='24' width='204' height='18' rx='9' fill='url(#funnelGradient)' opacity='0.9' />
+                <rect x='42' y='56' width='156' height='18' rx='9' fill='url(#funnelGradient)' opacity='0.75' />
+                <rect x='72' y='88' width='96' height='18' rx='9' fill='url(#funnelGradient)' opacity='0.6' />
+                <circle cx='120' cy='117' r='8' fill='#60a5fa' opacity='0.8' />
+              </svg>
+              <h4>Sem dados ainda</h4>
+              <p className='secondary-text'>Quando houver tráfego nesse flow, o funil de etapas aparecerá aqui.</p>
+            </div>
+          ) : (
+            data.funnel.map((n, i) => {
           const color = n.dropoff_rate > 40 ? '#EF4444' : n.dropoff_rate > 20 ? '#EAB308' : '#22C55E';
           const pct = i === 0 ? 100 : Math.round((n.entries / (data.funnel[0]?.entries || 1)) * 100);
           return (
@@ -123,11 +149,12 @@ export default function Page({ params }: Props) {
               </small>
             </div>
           );
-        })}
-      </div>
+            })
+          )}
+        </div>
 
-      <div className='split-grid'>
-        <div className='card card-soft'>
+        <div className='side-stack'>
+          <div className='card card-soft'>
           <h3 className='section-title'>Pontos de abandono</h3>
           {data.top_dropoffs.map((n) => (
             <div key={n.node_id} className='secondary-text'>
@@ -135,14 +162,15 @@ export default function Page({ params }: Props) {
             </div>
           ))}
         </div>
-        <div className='card card-soft'>
-          <h3 className='section-title'>Respostas mais comuns</h3>
-          {data.common_replies.map((r) => (
-            <div key={r.reply} className='reply-row'>
-              <span>{r.reply}</span>
-              <span className='secondary-text'>{r.rate}%</span>
-            </div>
-          ))}
+          <div className='card card-soft'>
+            <h3 className='section-title'>Respostas mais comuns</h3>
+            {data.common_replies.map((r) => (
+              <div key={r.reply} className='reply-row'>
+                <span>{r.reply}</span>
+                <span className='secondary-text'>{r.rate}%</span>
+              </div>
+            ))}
+          </div>
         </div>
       </div>
 
@@ -275,17 +303,63 @@ export default function Page({ params }: Props) {
           border-radius: 18px;
           box-shadow: 0 10px 30px rgba(15, 23, 42, 0.06);
         }
+        .kpi-card {
+          transition: transform 0.2s ease, box-shadow 0.25s ease;
+        }
+        .kpi-card:hover {
+          transform: translateY(-3px);
+          box-shadow: 0 18px 34px rgba(15, 23, 42, 0.12);
+        }
         .card-rounded-lg {
           border-radius: 22px;
         }
+        .kpi-top {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          margin-bottom: 8px;
+        }
+        .kpi-icon {
+          width: 28px;
+          height: 28px;
+          border-radius: 999px;
+          display: inline-block;
+        }
+        .kpi-icon-0 { background: #dbeafe; }
+        .kpi-icon-1 { background: #dcfce7; }
+        .kpi-icon-2 { background: #fee2e2; }
+        .kpi-icon-3 { background: #fef3c7; }
+        .kpi-icon-4 { background: #e0e7ff; }
         .kpi-label {
           color: #64748b;
-          margin-bottom: 6px;
         }
         .kpi-value {
           font-size: 28px;
           font-weight: 700;
           color: #0f172a;
+        }
+        .kpi-trend {
+          margin-top: 8px;
+          font-size: 13px;
+        }
+        .info-card {
+          margin-bottom: 14px;
+          padding: 14px 16px;
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          border-radius: 14px;
+          border: 1px solid #cce9df;
+          background: #f2fbf8;
+          color: #134e4a;
+        }
+        .info-icon {
+          width: 26px;
+          height: 26px;
+          border-radius: 999px;
+          display: grid;
+          place-items: center;
+          background: #e0f2fe;
         }
         .section-title {
           margin: 0 0 14px;
@@ -310,10 +384,32 @@ export default function Page({ params }: Props) {
           height: 8px;
           border-radius: 999px;
         }
-        .split-grid {
+        .main-grid {
           display: grid;
-          grid-template-columns: 1fr 1fr;
+          grid-template-columns: 2fr 1fr;
           gap: 12px;
+        }
+        .side-stack {
+          display: grid;
+          gap: 12px;
+          align-content: start;
+        }
+        .funnel-empty {
+          min-height: 220px;
+          display: grid;
+          place-items: center;
+          text-align: center;
+          padding: 18px;
+        }
+        .funnel-empty h4 {
+          margin: 6px 0 4px;
+          font-size: 20px;
+          color: #0f172a;
+        }
+        .funnel-illustration {
+          width: 220px;
+          max-width: 100%;
+          margin-bottom: 4px;
         }
         .reply-row {
           display: flex;
@@ -324,7 +420,7 @@ export default function Page({ params }: Props) {
           .kpi-grid {
             grid-template-columns: repeat(2, minmax(0, 1fr));
           }
-          .split-grid,
+          .main-grid,
           .analytics-header {
             grid-template-columns: 1fr;
           }
