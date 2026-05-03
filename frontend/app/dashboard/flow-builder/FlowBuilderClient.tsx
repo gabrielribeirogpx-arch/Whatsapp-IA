@@ -224,40 +224,6 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
   }, [flowIdFromUrl]);
 
   useEffect(() => {
-    if (normalizedFlows.length === 0) return;
-
-    const firstFlowId = normalizedFlows[0]?.id || null;
-    const currentActiveFlow = normalizedFlows.find((flow) => flow.is_active);
-    const resolvedActiveFlowId = currentActiveFlow?.id || null;
-    const initialFlowId = flowIdFromUrl || resolvedActiveFlowId || firstFlowId;
-
-    if (flowIdFromUrl && normalizedFlows.some((flow) => flow.id === flowIdFromUrl)) {
-      console.log('[BUILDER SELECTED_FLOW_ID]', flowIdFromUrl);
-      setSelectedFlowId((prev) => (prev === flowIdFromUrl ? prev : flowIdFromUrl));
-      if (lastLoadedFlowIdRef.current !== flowIdFromUrl) {
-        console.log('[BUILDER LOAD FLOW]', flowIdFromUrl);
-        void loadFlow(flowIdFromUrl);
-      }
-      return;
-    }
-
-    if (!flowIdFromUrl && initialFlowId) {
-      console.log('[BUILDER USING ACTIVE FALLBACK]', initialFlowId);
-      console.log('[BUILDER SELECTED_FLOW_ID]', initialFlowId);
-      setSelectedFlowId((prev) => (prev === initialFlowId ? prev : initialFlowId));
-      if (lastLoadedFlowIdRef.current !== initialFlowId) {
-        console.log('[BUILDER LOAD FLOW]', initialFlowId);
-        void loadFlow(initialFlowId);
-      }
-      return;
-    }
-
-    if (selectedFlowId && !normalizedFlows.find((flow) => flow.id === selectedFlowId)) {
-      setSelectedFlowId(null);
-    }
-  }, [flowIdFromUrl, loadFlow, normalizedFlows, selectedFlowId]);
-
-  useEffect(() => {
     if (typeof window === 'undefined') return;
     if (!selectedFlowId) {
       window.localStorage.removeItem('flow_builder_flow_id');
@@ -565,6 +531,40 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
       setIsLoading(false);
     }
   }, [applyLayoutAndSetFlow, buildFlowEdge, buildFlowNode, rfInstance, setEdges, setNodes]);
+
+  useEffect(() => {
+    if (normalizedFlows.length === 0) return;
+
+    const firstFlowId = normalizedFlows[0]?.id || null;
+    const currentActiveFlow = normalizedFlows.find((flow) => flow.is_active);
+    const resolvedActiveFlowId = currentActiveFlow?.id || null;
+    const initialFlowId = flowIdFromUrl || resolvedActiveFlowId || firstFlowId;
+
+    if (flowIdFromUrl && normalizedFlows.some((flow) => flow.id === flowIdFromUrl)) {
+      console.log('[BUILDER SELECTED_FLOW_ID]', flowIdFromUrl);
+      setSelectedFlowId((prev) => (prev === flowIdFromUrl ? prev : flowIdFromUrl));
+      if (lastLoadedFlowIdRef.current !== flowIdFromUrl) {
+        console.log('[BUILDER LOAD FLOW]', flowIdFromUrl);
+        void loadFlow(flowIdFromUrl);
+      }
+      return;
+    }
+
+    if (!flowIdFromUrl && initialFlowId) {
+      console.log('[BUILDER USING ACTIVE FALLBACK]', initialFlowId);
+      console.log('[BUILDER SELECTED_FLOW_ID]', initialFlowId);
+      setSelectedFlowId((prev) => (prev === initialFlowId ? prev : initialFlowId));
+      if (lastLoadedFlowIdRef.current !== initialFlowId) {
+        console.log('[BUILDER LOAD FLOW]', initialFlowId);
+        void loadFlow(initialFlowId);
+      }
+      return;
+    }
+
+    if (selectedFlowId && !normalizedFlows.find((flow) => flow.id === selectedFlowId)) {
+      setSelectedFlowId(null);
+    }
+  }, [flowIdFromUrl, loadFlow, normalizedFlows, selectedFlowId]);
 
   useEffect(() => {
     if (!flows || flows.length === 0) {
