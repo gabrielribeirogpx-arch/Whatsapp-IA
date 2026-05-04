@@ -160,8 +160,8 @@ export default function DashboardPage() {
   }, [viewModel.channels]);
 
   return (
-    <div className="w-full bg-[#F8FAFC] px-6 py-6 lg:px-8">
-      <div className="w-full max-w-none space-y-5">
+    <section className="w-full min-w-0 px-6 py-6 lg:px-8">
+      <div className="w-full min-w-0 space-y-5">
       <div className="flex items-center justify-between gap-4 mb-4">
         <div>
           <h1 className="m-0 text-[26px] lg:text-[28px] leading-tight font-bold text-slate-900">Bom dia, Gabriel 👋</h1>
@@ -246,6 +246,6 @@ export default function DashboardPage() {
 
       <div className="flex items-center justify-between gap-4 rounded-2xl border border-slate-100 bg-gradient-to-r from-white via-emerald-50/60 to-white p-5 min-h-[110px] shadow-[0_12px_30px_rgba(15,23,42,0.05)]"><div className="flex items-center gap-4"><div className="h-16 w-16 rounded-2xl bg-emerald-100/70 grid place-items-center"><img src="/icons/dashboard/fluxos.svg" alt="Fluxos" className="h-10 w-10"/></div><div><p className="m-0 text-sm font-semibold text-emerald-600">Dica para você 🚀</p><p className="m-0 text-xl font-bold text-slate-900">Construa fluxos mais inteligentes com o builder visual</p><p className="m-0 text-lg text-slate-600">Use o builder para criar jornadas dinâmicas e personalizadas.</p></div></div><button className="rounded-xl bg-emerald-600 px-5 py-3 font-semibold text-white shadow-[0_8px_20px_rgba(5,150,105,0.25)]">Abrir builder ↗</button></div>
       </div>
-    </div>
+    </section>
   );
 }
