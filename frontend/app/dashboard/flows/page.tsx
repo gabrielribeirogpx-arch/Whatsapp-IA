@@ -246,33 +246,33 @@ export default function FlowsPage() {
       </div>
 
       <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)]">
-        <input
-          value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
-          placeholder="Buscar fluxos..."
-          style={{ border: '1px solid #e8e6e0', borderRadius: 10, padding: '10px 12px', fontSize: 13, color: '#111', outline: 'none', fontFamily: 'inherit', background: '#fff' }}
-        />
-        <select
-          value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value as 'all' | 'active' | 'inactive' | 'draft' | 'published')}
-          style={{ border: '1px solid #e8e6e0', borderRadius: 10, padding: '10px 12px', fontSize: 13, color: '#111', outline: 'none', fontFamily: 'inherit', background: '#fff' }}
-        >
-          <option value="all">Todos os status</option>
-          <option value="active">Ativo</option>
-          <option value="inactive">Inativo</option>
-          <option value="draft">Rascunho</option>
-          <option value="published">Publicado</option>
-        </select>
-        <select
-          value={sortBy}
-          onChange={(e) => setSortBy(e.target.value as 'recent' | 'name' | 'active_first')}
-          style={{ border: '1px solid #e8e6e0', borderRadius: 10, padding: '10px 12px', fontSize: 13, color: '#111', outline: 'none', fontFamily: 'inherit', background: '#fff' }}
-        >
-          <option value="recent">Ordenar: Mais recentes</option>
-          <option value="name">Ordenar: Nome</option>
-          <option value="active_first">Ordenar: Ativos primeiro</option>
-        </select>
+        <div className="flex items-center gap-4">
+          <input
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            placeholder="Buscar fluxos..."
+            className="flex-1 rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none"
+          />
+          <select
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value as 'all' | 'active' | 'inactive' | 'draft' | 'published')}
+            className="w-52 rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none"
+          >
+            <option value="all">Todos os status</option>
+            <option value="active">Ativo</option>
+            <option value="inactive">Inativo</option>
+            <option value="draft">Rascunho</option>
+            <option value="published">Publicado</option>
+          </select>
+          <select
+            value={sortBy}
+            onChange={(e) => setSortBy(e.target.value as 'recent' | 'name' | 'active_first')}
+            className="w-56 rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none"
+          >
+            <option value="recent">Ordenar: Mais recentes</option>
+            <option value="name">Ordenar: Nome</option>
+            <option value="active_first">Ordenar: Ativos primeiro</option>
+          </select>
         </div>
       </div>
 
