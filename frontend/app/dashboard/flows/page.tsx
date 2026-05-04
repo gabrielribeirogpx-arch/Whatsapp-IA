@@ -175,10 +175,10 @@ export default function FlowsPage() {
   }, [flows, searchTerm, sortBy, statusFilter]);
 
   return (
-    <main className="flex-1 bg-slate-50 px-4 py-8 sm:px-6 lg:px-8">
-      <div className="mx-auto w-full max-w-[1240px]" style={{ fontFamily: 'Inter, -apple-system, sans-serif' }}>
+    <main className="flex-1 bg-slate-50 py-6">
+      <div className="max-w-7xl mx-auto px-6 space-y-6" style={{ fontFamily: 'Inter, -apple-system, sans-serif' }}>
       {/* Header */}
-      <div className="mb-8 flex flex-wrap items-start justify-between gap-3">
+      <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 style={{ margin: 0, fontSize: 22, fontWeight: 600, color: '#111', letterSpacing: '-0.02em' }}>Automações</h1>
           <p style={{ margin: '4px 0 0', fontSize: 13, color: '#888' }}>Gerencie fluxos de conversação e gatilhos</p>
@@ -189,7 +189,7 @@ export default function FlowsPage() {
       </div>
 
       {/* Stats */}
-      <div className="mb-6 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {[
           {
             label: 'Total',
@@ -239,7 +239,7 @@ export default function FlowsPage() {
         ))}
       </div>
 
-      <div className="mb-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+      <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
         <div className="grid grid-cols-1 gap-3 md:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)]">
         <input
           value={searchTerm}
@@ -356,7 +356,7 @@ export default function FlowsPage() {
       </div>
 
       <div
-        className="mt-5 rounded-2xl border border-emerald-100 p-5 shadow-sm"
+        className="rounded-2xl border border-emerald-100 p-5 shadow-sm"
         style={{ background: 'linear-gradient(120deg, #ffffff 0%, #f0fdf4 55%, #dcfce7 100%)' }}
       >
         <div className="grid grid-cols-1 items-center gap-4 md:grid-cols-[120px_minmax(0,1fr)_auto]">
