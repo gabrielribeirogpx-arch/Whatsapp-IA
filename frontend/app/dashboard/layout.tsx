@@ -82,13 +82,14 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const isFlowBuilder = pathname.startsWith('/dashboard/flow-builder');
   const isFlowAnalytics = pathname.includes('/dashboard/flows/') && pathname.endsWith('/analytics');
+  const isDashboardActive = pathname === '/dashboard';
 
   const pathnameSegments = pathname.split('/');
   const flowsIndex = pathnameSegments.indexOf('flows');
   const flowId = flowsIndex !== -1 ? pathnameSegments[flowsIndex + 1] : undefined;
 
   return (
-    <div style={{ display: 'flex', minHeight: '100vh', background: '#F7F8F7', fontFamily: 'Inter, -apple-system, sans-serif' }}>
+    <div style={{ display: 'flex', minHeight: '100vh', background: '#FFFFFF', fontFamily: 'Inter, -apple-system, sans-serif' }}>
       {!isFlowBuilder && !isFlowAnalytics && (
         <nav className="dash-sidebar">
           <div className="dash-sidebar-logo">
@@ -98,7 +99,11 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
 
           <span className="dash-nav-section">Principal</span>
 
-          <Link href="/dashboard" className="dash-nav-item">
+          <Link
+            href="/dashboard"
+            className={`dash-nav-item ${isDashboardActive ? 'active' : ''}`}
+            aria-current={isDashboardActive ? 'page' : undefined}
+          >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
             <span className="dash-nav-label">Dashboard</span>
           </Link>

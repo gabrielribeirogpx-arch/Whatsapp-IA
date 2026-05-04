@@ -1243,8 +1243,9 @@ input {
 .dash-nav-item {
   display: flex;
   align-items: center;
+  justify-content: flex-start;
   gap: 10px;
-  padding: 8px;
+  padding: 8px 10px;
   border-radius: 8px;
   font-size: 13px;
   font-weight: 500;
@@ -1275,10 +1276,12 @@ input {
   flex-shrink: 0;
   width: 16px;
   height: 16px;
+  margin-left: 1px;
 }
 
 .dash-nav-label {
   opacity: 0;
+  line-height: 1.2;
   transition: opacity 0.15s;
   white-space: nowrap;
 }
