@@ -207,7 +207,7 @@ export default function DashboardPage() {
   return (
     <section className="w-full min-w-0 px-5 py-6 lg:px-6">
       <div className="w-full min-w-0 space-y-5">
-      <div className="flex items-center justify-between gap-4 mb-4">
+      <div className="mb-4 flex items-center justify-between gap-4 md:mb-6">
         <div>
           <h1 className="text-xl md:text-2xl font-semibold leading-tight text-gray-900">
             {getGreeting()}, Gabriel <span className="text-lg">👋</span>
