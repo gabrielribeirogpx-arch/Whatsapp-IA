@@ -132,16 +132,22 @@ export default function FlowsPage() {
     catch { showToast('Erro ao duplicar flow.'); }
   };
 
-  const updateLocalState = (flowId: string, isActive: boolean) => {
-    setFlows((prev) => prev.map((flow) => (flow.id === flowId ? { ...flow, is_active: isActive } : flow)));
+  const updateLocalState = (flowId: string, newStatus: 'active' | 'inactive') => {
+    const isActive = newStatus === 'active';
+    setFlows((prev) => prev.map((flow) => (flow.id === flowId ? { ...flow, is_active: isActive, status: newStatus } : flow)));
   };
 
-  const handleToggle = async (flowId: string, isActive: boolean) => {
-    updateLocalState(flowId, isActive);
+  const toggleFlowStatus = async (flowId: string) => {
+    const currentFlow = flows.find((flow) => flow.id === flowId);
+    if (!currentFlow) return;
+
+    const newStatus: 'active' | 'inactive' = currentFlow.status === 'active' || currentFlow.is_active ? 'inactive' : 'active';
+    const previousStatus: 'active' | 'inactive' = currentFlow.status === 'active' || currentFlow.is_active ? 'active' : 'inactive';
+    updateLocalState(flowId, newStatus);
     try {
-      await updateFlowStatus(flowId, isActive);
+      await updateFlowStatus(flowId, newStatus === 'active');
     } catch {
-      updateLocalState(flowId, !isActive);
+      updateLocalState(flowId, previousStatus);
       showToast('Erro ao atualizar status do fluxo');
     }
   };
@@ -317,7 +323,7 @@ export default function FlowsPage() {
                     type="button"
                     onClick={(e) => {
                       e.stopPropagation();
-                      handleToggle(flow.id, !flow.is_active);
+                      toggleFlowStatus(flow.id);
                     }}
                     aria-label={flow.is_active ? 'Desativar fluxo' : 'Ativar fluxo'}
                     className="relative h-6 w-11 rounded-full border-0 p-0 transition-colors"
