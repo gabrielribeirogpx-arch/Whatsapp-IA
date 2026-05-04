@@ -199,10 +199,10 @@ export default function DashboardPage() {
   return (
     <section className="w-full min-w-0 px-5 py-6 lg:px-6">
       <div className="w-full min-w-0 space-y-5">
-      <div className="flex items-center justify-between gap-4 mb-4">
+      <div className="mb-4 flex items-center justify-between gap-4 md:mb-6">
         <div>
-          <h1 className="m-0 text-[26px] lg:text-[28px] leading-tight font-bold text-slate-900">Bom dia, Gabriel 👋</h1>
-          <p className="m-0 mt-2 text-sm lg:text-base text-slate-500">Aqui está o resumo das suas conversas hoje.</p>
+          <h1 className="m-0 text-xl font-semibold leading-tight text-gray-900 md:text-2xl">Bom dia, Gabriel <span className="text-lg">👋</span></h1>
+          <p className="m-0 mt-1 text-sm text-gray-500">Aqui está o resumo das suas conversas hoje.</p>
         </div>
         <div className="flex items-center gap-3">
           <span className="text-sm text-slate-500">Período</span>
