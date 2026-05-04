@@ -81,6 +81,25 @@ const getConversationFlowLabel = (conversation: Conversation) => {
   return raw.flow_name || raw.flowName || raw.flow?.name || raw.source || 'Flow';
 };
 
+
+
+const getRelativeConversationTime = (updatedAt?: string | null) => {
+  if (!updatedAt) return 'agora';
+  const date = new Date(updatedAt);
+  if (Number.isNaN(date.getTime())) return 'agora';
+  const diffMs = Date.now() - date.getTime();
+  if (diffMs <= 0) return 'agora';
+
+  const minute = 60 * 1000;
+  const hour = 60 * minute;
+  const day = 24 * hour;
+
+  if (diffMs < minute) return 'agora';
+  if (diffMs < hour) return `${Math.floor(diffMs / minute)}m`;
+  if (diffMs < day) return `${Math.floor(diffMs / hour)}h`;
+  return `${Math.floor(diffMs / day)}d`;
+};
+
 const channelLegendColors: Record<string, string> = {
   whatsapp: '#16A34A',
   'site / chat': '#2563EB',
@@ -217,16 +236,26 @@ export default function DashboardPage() {
           <DashboardChart data={data?.charts?.messages_last_7_days ?? []} />
         )}</div>
 
-        <div className={`${cardClassName} min-h-[390px] p-5`}>
-          <div className="mb-4 flex items-center justify-between">
-            <h3 className="m-0 text-lg font-semibold text-slate-900">Atividade ao vivo</h3>
-            <span className="text-sm text-slate-500"><span className="mr-2 text-emerald-500">●</span>Atualizando agora</span>
+        <div className={`${cardClassName} min-h-[390px] p-5 flex flex-col`}>
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="m-0 text-base font-semibold text-slate-900">Atividade ao vivo</h2>
+            <div className="flex items-center gap-2 text-xs text-slate-500">
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+              Atualizando agora
+            </div>
           </div>
-          {conversationsError ? <p className="text-sm text-red-700">{conversationsError}</p> : liveItems.length === 0 ? <div className="h-[290px] grid place-items-center rounded-xl border border-dashed border-emerald-200 bg-emerald-50/40 text-center"><div><p className="m-0 font-semibold text-slate-700">Sem atividade no momento</p><p className="m-0 mt-1 text-sm text-slate-500">Novas conversas aparecerão aqui em tempo real.</p></div></div> : <div className="space-y-4">{liveItems.map((c, idx) => {
+
+          {conversationsError ? <p className="mt-4 text-sm text-red-700">{conversationsError}</p> : liveItems.length === 0 ? <div className="mt-4 flex flex-1 items-center justify-center rounded-xl border border-dashed border-slate-200 bg-slate-50/60 px-6 text-center"><div><p className="m-0 text-sm font-semibold text-slate-700">Nenhuma atividade recente</p><p className="m-0 mt-1 text-xs text-slate-500">Assim que chegarem novas conversas, elas aparecerão aqui.</p></div></div> : <div className="mt-4 divide-y divide-slate-100">{liveItems.map((c, idx) => {
             const name = c.name || c.phone || 'Contato';
-            const initials = name.split(' ').map((w) => w[0]).slice(0,2).join('').toUpperCase();
-            return <div key={c.id || idx} className="flex items-start justify-between border-b border-slate-100 pb-3 last:border-b-0"><div className="flex gap-3"><div className="flex h-11 w-11 items-center justify-center rounded-full bg-emerald-50 text-sm font-semibold text-emerald-700">{initials}</div><div><p className="m-0 font-semibold text-slate-800">{name}</p><p className="m-0 text-sm text-slate-500">Flow: {getConversationFlowLabel(c)}</p><p className="m-0 text-sm text-slate-600 line-clamp-1">{c.last_message || 'Sem mensagem recente.'}</p></div></div><div className="text-right text-xs text-slate-500">agora<div className="ml-auto mt-2 h-2 w-2 rounded-full bg-emerald-500" /></div></div>;
+            const initials = name.split(' ').filter(Boolean).map((w) => w[0]).slice(0,2).join('').toUpperCase();
+            return <div key={c.id || idx} className="flex items-start gap-3 py-3"><div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-emerald-50 text-sm font-semibold text-emerald-700">{initials || 'CT'}</div><div className="min-w-0 flex-1"><p className="m-0 text-sm font-semibold text-slate-900">{name}</p><p className="m-0 mt-0.5 text-xs text-slate-500">Flow: {getConversationFlowLabel(c)}</p><p className="m-0 mt-0.5 line-clamp-1 text-xs text-slate-500">{c.last_message || 'Sem mensagem recente.'}</p></div><div className="flex shrink-0 flex-col items-end gap-2"><span className="text-xs text-slate-400">{getRelativeConversationTime(c.updated_at)}</span><span className="h-2 w-2 rounded-full bg-emerald-500" /></div></div>;
           })}</div>}
+
+          <div className="mt-4 border-t border-slate-100 pt-3 text-right">
+            <Link href="/dashboard/crm" className="text-sm font-medium text-emerald-600 transition hover:text-emerald-700">
+              Ver todas as conversas →
+            </Link>
+          </div>
         </div>
       </div>
 
