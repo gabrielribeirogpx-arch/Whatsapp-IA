@@ -80,7 +80,7 @@ export default function Page({ params }: Props) {
       <header className='analytics-header'>
         <div className='header-left'>
           <div className='analytics-icon' aria-hidden>
-            <BarChart3 size={22} />
+            <BarChart3 size={16} />
           </div>
           <div>
             <h1 className='page-title'>Analytics do Flow <span className={`status-badge ${flowStatus}`}>{flowStatus === 'active' ? 'Ativo' : flowStatus === 'draft' ? 'Draft' : 'Inativo'}</span></h1>
@@ -282,20 +282,18 @@ export default function Page({ params }: Props) {
           gap: 12px;
         }
         .analytics-icon {
-          width: 42px;
-          height: 42px;
-          border-radius: 12px;
+          width: 32px;
+          height: 32px;
+          border-radius: 8px;
           display: grid;
           place-items: center;
-          background: linear-gradient(180deg, #22c55e 0%, #16a34a 100%);
-          color: #ffffff;
-          font-size: 20px;
-          box-shadow: 0 8px 20px rgba(34, 197, 94, 0.26);
+          background: #f3f4f6;
+          color: #6b7280;
         }
         .page-title {
           margin: 0;
-          font-size: 40px;
-          font-weight: 800;
+          font-size: 20px;
+          font-weight: 600;
         }
         .status-badge {
           display: inline-flex;
