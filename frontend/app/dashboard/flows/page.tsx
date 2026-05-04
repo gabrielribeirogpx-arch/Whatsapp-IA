@@ -244,53 +244,57 @@ export default function FlowsPage() {
       </div>
 
       {/* Stats */}
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
-          gap: 16,
-          borderBottom: '1px solid #E5E7EB',
-          paddingBottom: 16,
-        }}
-      >
-        <div className="relative rounded-2xl border border-gray-100 p-5 shadow-sm transition hover:shadow-md" style={{ background: '#E8F5F3' }}>
-          <div className="flex items-center gap-2.5">
-            <div className="flex h-9 w-9 items-center justify-center rounded-xl text-sm">🔄</div>
-            <span className="text-[11px] font-bold uppercase tracking-[0.08em] text-slate-500">TOTAL DE FLUXOS</span>
+      <div className="grid gap-4 border-b border-gray-200 pb-4 [grid-template-columns:repeat(auto-fit,minmax(280px,1fr))]">
+        <div className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
+          <div className="flex items-start justify-between">
+            <div className="flex items-start gap-4">
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-green-100">
+                <img src="/icons/total de fluxos.svg" alt="Total de fluxos" className="h-5 w-5 opacity-80" />
+              </div>
+              <div>
+                <span className="text-xs uppercase tracking-wide text-gray-500">TOTAL DE FLUXOS</span>
+                <span className="mt-1 block text-2xl font-semibold text-gray-900">{flows.length}</span>
+                <span className="mt-1 block text-sm text-gray-400">Todos os fluxos criados</span>
+              </div>
+            </div>
+            <svg className="self-start opacity-80" width="120" height="44" viewBox="0 0 120 44" fill="none" aria-hidden="true">
+              <path d="M2 34 C14 29, 22 15, 34 17 C48 19, 57 31, 72 26 C86 21, 98 7, 118 9" stroke="#16A34A" strokeWidth="2" strokeLinecap="round" />
+            </svg>
           </div>
-          <div className="mt-3">
-            <span className="block text-[32px] font-semibold leading-none text-slate-900">{flows.length}</span>
-            <span className="mt-1.5 inline-block text-[12px] text-slate-500">Todos os fluxos criados</span>
-          </div>
-          <svg className="absolute bottom-4 right-4" width="52" height="24" viewBox="0 0 52 24" fill="none" aria-hidden="true">
-            <path d="M2 20 C8 18, 12 9, 18 11 C23 13, 27 7, 34 9 C40 10, 45 5, 50 7" stroke="#0F766E" strokeWidth="2" strokeLinecap="round" />
-          </svg>
         </div>
-        <div className="relative rounded-2xl border border-gray-100 p-5 shadow-sm transition hover:shadow-md" style={{ background: '#E8F5F3' }}>
-          <div className="flex items-center gap-2.5">
-            <div className="flex h-9 w-9 items-center justify-center rounded-xl text-sm">✈️</div>
-            <span className="text-[11px] font-bold uppercase tracking-[0.08em] text-slate-500">PUBLICADOS</span>
+        <div className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
+          <div className="flex items-start justify-between">
+            <div className="flex items-start gap-4">
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-100">
+                <img src="/icons/publicados.svg" alt="Publicados" className="h-5 w-5 opacity-80" />
+              </div>
+              <div>
+                <span className="text-xs uppercase tracking-wide text-gray-500">PUBLICADOS</span>
+                <span className="mt-1 block text-2xl font-semibold text-gray-900">{published}</span>
+                <span className="mt-1 block text-sm text-gray-400">Fluxos ativos em produção</span>
+              </div>
+            </div>
+            <svg className="self-start opacity-80" width="120" height="44" viewBox="0 0 120 44" fill="none" aria-hidden="true">
+              <path d="M2 34 C14 28, 24 13, 38 15 C53 17, 61 31, 76 26 C90 21, 102 10, 118 8" stroke="#10B981" strokeWidth="2" strokeLinecap="round" />
+            </svg>
           </div>
-          <div className="mt-3">
-            <span className="block text-[32px] font-semibold leading-none text-slate-900">{published}</span>
-            <span className="mt-1.5 inline-block text-[12px] text-slate-500">Fluxos ativos em produção</span>
-          </div>
-          <svg className="absolute bottom-4 right-4" width="52" height="24" viewBox="0 0 52 24" fill="none" aria-hidden="true">
-            <path d="M2 20 C10 17, 14 12, 20 14 C25 15, 30 9, 36 10 C42 11, 47 6, 50 8" stroke="#0F766E" strokeWidth="2" strokeLinecap="round" />
-          </svg>
         </div>
-        <div className="relative rounded-2xl border border-gray-100 p-5 shadow-sm transition hover:shadow-md" style={{ background: '#FEF3C7' }}>
-          <div className="flex items-center gap-2.5">
-            <div className="flex h-9 w-9 items-center justify-center rounded-xl text-sm">📦</div>
-            <span className="text-[11px] font-bold uppercase tracking-[0.08em] text-slate-500">RASCUNHOS</span>
+        <div className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
+          <div className="flex items-start justify-between">
+            <div className="flex items-start gap-4">
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-orange-100">
+                <img src="/icons/rascunho.svg" alt="Rascunhos" className="h-5 w-5 opacity-80" />
+              </div>
+              <div>
+                <span className="text-xs uppercase tracking-wide text-gray-500">RASCUNHOS</span>
+                <span className="mt-1 block text-2xl font-semibold text-gray-900">{drafts}</span>
+                <span className="mt-1 block text-sm text-gray-400">Aguardando publicação</span>
+              </div>
+            </div>
+            <svg className="self-start opacity-80" width="120" height="44" viewBox="0 0 120 44" fill="none" aria-hidden="true">
+              <path d="M2 33 C16 27, 27 18, 40 20 C54 22, 62 31, 76 26 C90 21, 102 16, 118 10" stroke="#F59E0B" strokeWidth="2" strokeLinecap="round" />
+            </svg>
           </div>
-          <div className="mt-3">
-            <span className="block text-[32px] font-semibold leading-none text-slate-900">{drafts}</span>
-            <span className="mt-1.5 inline-block text-[12px] text-slate-500">Aguardando publicação</span>
-          </div>
-          <svg className="absolute bottom-4 right-4" width="52" height="24" viewBox="0 0 52 24" fill="none" aria-hidden="true">
-            <path d="M2 21 C8 19, 12 13, 18 14 C24 15, 28 10, 34 12 C40 13, 45 9, 50 11" stroke="#92400E" strokeWidth="2" strokeLinecap="round" />
-          </svg>
         </div>
       </div>
 
