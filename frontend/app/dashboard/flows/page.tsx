@@ -171,16 +171,50 @@ export default function FlowsPage() {
       {/* Stats */}
       <div className="mb-6 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {[
-          { label: 'Total de fluxos', value: flows.length, color: '#6366f1' },
-          { label: 'Publicados', value: published, color: '#16a34a' },
-          { label: 'Rascunhos', value: drafts, color: '#d97706' },
+          {
+            label: 'Total',
+            value: flows.length,
+            helperText: 'Todos os fluxos criados',
+            color: '#86efac',
+            iconBg: '#dcfce7',
+            icon: '📊',
+            sparkline: 'M2 20 C8 18, 12 9, 18 11 C23 13, 27 7, 34 9 C40 10, 45 5, 50 7',
+          },
+          {
+            label: 'Publicados',
+            value: published,
+            helperText: 'Fluxos ativos em produção',
+            color: '#10b981',
+            iconBg: '#d1fae5',
+            icon: '✅',
+            sparkline: 'M2 20 C10 17, 14 12, 20 14 C25 15, 30 9, 36 10 C42 11, 47 6, 50 8',
+          },
+          {
+            label: 'Rascunhos',
+            value: drafts,
+            helperText: 'Aguardando publicação',
+            color: '#fb923c',
+            iconBg: '#ffedd5',
+            icon: '📝',
+            sparkline: 'M2 21 C8 19, 12 13, 18 14 C24 15, 28 10, 34 12 C40 13, 45 9, 50 11',
+          },
         ].map((stat) => (
-          <div key={stat.label} className="rounded-2xl border border-slate-200 bg-white p-[18px_20px] shadow-sm">
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
-              <div style={{ width: 8, height: 8, borderRadius: '50%', background: stat.color }} />
-              <span style={{ fontSize: 11, fontWeight: 600, color: '#888', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{stat.label}</span>
+          <div key={stat.label} className="rounded-2xl border border-slate-200 bg-white p-[18px_20px] shadow-sm transition hover:shadow-md">
+            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <div style={{ width: 34, height: 34, borderRadius: 10, background: stat.iconBg, color: stat.color, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14 }}>
+                  {stat.icon}
+                </div>
+                <span style={{ fontSize: 11, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.08em' }}>{stat.label}</span>
+              </div>
+              <svg width="52" height="24" viewBox="0 0 52 24" fill="none" aria-hidden="true">
+                <path d={stat.sparkline} stroke={stat.color} strokeWidth="2" strokeLinecap="round" />
+              </svg>
             </div>
-            <span style={{ fontSize: 34, fontWeight: 600, color: '#111', letterSpacing: '-0.03em' }}>{stat.value}</span>
+            <div style={{ marginTop: 12 }}>
+              <span style={{ fontSize: 34, fontWeight: 700, color: '#0f172a', letterSpacing: '-0.03em', display: 'block', lineHeight: 1.1 }}>{stat.value}</span>
+              <span style={{ marginTop: 6, display: 'inline-block', fontSize: 12, color: '#64748b' }}>{stat.helperText}</span>
+            </div>
           </div>
         ))}
       </div>
