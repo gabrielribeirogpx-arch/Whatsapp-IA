@@ -157,7 +157,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
       )}
 
       <main className="flex-1 min-w-0 w-full overflow-y-auto">
-        {isFlowBuilder || isFlowAnalytics ? children : <div className="w-full px-6 py-6 lg:px-8">{children}</div>}
+        {children}
       </main>
     </div>
   );
