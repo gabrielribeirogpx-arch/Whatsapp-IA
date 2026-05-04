@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { Cell, Pie, PieChart } from 'recharts';
 
 import DashboardChart from '../../components/DashboardChart';
 import { apiFetch, getConversations, listFlows, parseApiResponse } from '../../lib/api';
@@ -212,13 +213,7 @@ export default function DashboardPage() {
           return <div key={flow.name} className="grid grid-cols-[20px_1fr_auto_auto] items-center gap-3"><span className="h-5 w-5 rounded bg-emerald-100" /><span className="text-sm font-medium text-slate-700">{flow.name}</span><span className="text-sm font-semibold text-slate-800">{flow.value}</span><span className="text-sm text-slate-500">{pct}%</span><div className="col-span-4 h-2 rounded-full bg-slate-100"><div className="h-2 rounded-full bg-emerald-500" style={{ width: `${pct}%` }} /></div></div>; })}</div>}
         <div className="mt-4 pt-3 border-t border-slate-100 text-center text-emerald-600 font-semibold">Ver todos os fluxos →</div></div>
 
-        <div className={`${cardClassName} min-h-[280px] p-5`}><p className="m-0 mb-4 text-lg font-semibold text-slate-900">Canais de entrada</p><div className="flex items-center justify-between gap-4"><div className="relative grid h-36 w-full max-w-[180px] aspect-square place-items-center rounded-full" style={{ background: `conic-gradient(${normalizedChannelItems.map((item, index) => {
-          const total = normalizedChannelItems.reduce((sum, c) => sum + c.value, 0) || 1;
-          const start = normalizedChannelItems.slice(0, index).reduce((sum, c) => sum + c.value, 0) / total * 360;
-          const end = (normalizedChannelItems.slice(0, index + 1).reduce((sum, c) => sum + c.value, 0) / total) * 360;
-          const color = channelLegendColors[item.name.toLowerCase()] ?? '#94A3B8';
-          return `${color} ${start}deg ${end}deg`;
-        }).join(', ')})` }}><div className="grid h-24 w-24 place-items-center rounded-full bg-white text-center"><p className="m-0 text-xs text-slate-500">Total</p><p className="m-0 text-2xl font-bold">{totalChannels}</p></div></div><div className="space-y-2 text-sm flex-1">{normalizedChannelItems.map((ch) => <div key={ch.name} className="flex items-center justify-between gap-3"><span className="inline-flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: channelLegendColors[ch.name.toLowerCase()] ?? '#94A3B8' }} />{ch.name}</span><span className="font-semibold text-slate-700">{ch.value}%</span></div>)}</div></div>
+        <div className={`${cardClassName} min-h-[280px] p-5`}><p className="m-0 mb-4 text-lg font-semibold text-slate-900">Canais de entrada</p><div className="flex items-center justify-between gap-4"><div className="relative flex min-h-[190px] items-center justify-center overflow-visible"><PieChart width={190} height={190}><Pie data={normalizedChannelItems} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={52} outerRadius={74} paddingAngle={2} stroke="none">{normalizedChannelItems.map((item) => <Cell key={item.name} fill={channelLegendColors[item.name.toLowerCase()] ?? '#94A3B8'} />)}</Pie></PieChart><div className="pointer-events-none absolute grid h-24 w-24 place-items-center rounded-full bg-white text-center"><p className="m-0 text-xs text-slate-500">Total</p><p className="m-0 text-2xl font-bold">{totalChannels}</p></div></div><div className="space-y-2 text-sm flex-1">{normalizedChannelItems.map((ch) => <div key={ch.name} className="flex items-center justify-between gap-3"><span className="inline-flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: channelLegendColors[ch.name.toLowerCase()] ?? '#94A3B8' }} />{ch.name}</span><span className="font-semibold text-slate-700">{ch.value}%</span></div>)}</div></div>
         <div className="mt-4 pt-3 border-t border-slate-100 text-center text-emerald-600 font-semibold">Ver todos os canais →</div></div>
 
         <div className={`${cardClassName} min-h-[280px] p-5`}><p className="m-0 mb-4 text-lg font-semibold text-slate-900">Desempenho geral</p><div className="space-y-4 text-sm text-slate-700">{['Tempo médio de resposta','Conversas resolvidas','Satisfação (CSAT)','Abandono de conversas'].map((n) => <div key={n} className="grid grid-cols-[1fr_auto_auto_64px] items-center gap-3"><span>{n}</span><span className="font-semibold">—</span><span className="text-emerald-600">↑ 0%</span><span className="h-7 w-16"><Sparkline/></span></div>)}</div>
