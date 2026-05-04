@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 
 import { createFlow, deleteFlow, duplicateFlow, listFlows, updateFlow, updateFlowStatus } from '@/lib/api';
 import { FlowItem, FlowPayload } from '@/lib/types';
@@ -75,6 +76,7 @@ const EMPTY_FORM: FlowPayload = {
 };
 
 export default function FlowsPage() {
+  const router = useRouter();
   const [flows, setFlows] = useState<FlowListItem[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive' | 'draft' | 'published'>('all');
@@ -111,6 +113,9 @@ export default function FlowsPage() {
   useEffect(() => { loadFlows(); }, []);
 
   const openCreate = () => { setEditingFlow(null); setForm(EMPTY_FORM); setIsOpen(true); };
+  const openBuilder = () => {
+    router.push('/dashboard/flow-builder');
+  };
   const openEdit = (flow: FlowItem) => {
     setEditingFlow(flow);
     setForm({ name: flow.name, description: flow.description || '', trigger_type: flow.trigger_type === 'keyword' ? 'keyword' : 'default', trigger_value: flow.trigger_value || '' });
@@ -431,50 +436,42 @@ export default function FlowsPage() {
       </div>
 
       <div
-        className="rounded-2xl border border-emerald-100 p-5 shadow-sm"
-        style={{ background: 'linear-gradient(120deg, #ffffff 0%, #f0fdf4 55%, #dcfce7 100%)' }}
+        className="rounded-2xl p-5 shadow-sm"
+        style={{ background: 'linear-gradient(135deg, #E8F5F3 0%, #D1FAE5 100%)', border: '0.5px solid #A7F3D0' }}
       >
-        <div className="grid grid-cols-1 items-center gap-4 md:grid-cols-[120px_minmax(0,1fr)_auto]">
-          <div
-            style={{
-              width: '100%',
-              maxWidth: 110,
-              minHeight: 88,
-              borderRadius: 14,
-              background: 'rgba(22, 163, 74, 0.08)',
-              border: '1px solid rgba(22, 163, 74, 0.14)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-            }}
-          >
-            <svg width="74" height="62" viewBox="0 0 74 62" fill="none" aria-hidden="true">
-              <rect x="5" y="9" width="64" height="44" rx="10" fill="#ECFDF5" stroke="#A7F3D0" />
-              <circle cx="20" cy="24" r="4" fill="#34D399" />
-              <rect x="29" y="21" width="28" height="6" rx="3" fill="#86EFAC" />
-              <rect x="15" y="33" width="44" height="5" rx="2.5" fill="#BBF7D0" />
-              <path d="M17 44C23 36 32 34 38 38C44 42 50 42 57 35" stroke="#16A34A" strokeWidth="2.5" strokeLinecap="round" />
-            </svg>
+        <div className="flex flex-col items-start gap-4 md:flex-row md:items-center md:justify-between">
+          <div className="flex items-center gap-4">
+            <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-white">
+              <svg width="36" height="36" viewBox="0 0 36 36" fill="none" aria-hidden="true">
+                <rect x="5" y="8" width="26" height="20" rx="5" fill="#ECFDF5" stroke="#6EE7B7" />
+                <circle cx="11" cy="14" r="2.5" fill="#10B981" />
+                <circle cx="25" cy="14" r="2.5" fill="#34D399" />
+                <circle cx="18" cy="22" r="2.5" fill="#059669" />
+                <path d="M13.5 14H22.5" stroke="#10B981" strokeWidth="1.5" strokeLinecap="round" />
+                <path d="M12.8 15.8L16.2 20.2" stroke="#10B981" strokeWidth="1.5" strokeLinecap="round" />
+                <path d="M23.2 15.8L19.8 20.2" stroke="#10B981" strokeWidth="1.5" strokeLinecap="round" />
+              </svg>
+            </div>
+
+            <div>
+              <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-emerald-700">Dica rápida</span>
+              <h3 className="mt-1 text-[16px] font-semibold leading-[1.3] text-slate-900">
+                Construa fluxos mais inteligentes com o builder visual
+              </h3>
+              <p className="mt-1 text-[13px] text-slate-600">
+                Arraste blocos, conecte gatilhos e publique automações em minutos com uma experiência visual guiada.
+              </p>
+            </div>
           </div>
 
-          <div>
-            <span className="inline-flex rounded-full bg-emerald-100 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-emerald-700">
-              Dica rápida
-            </span>
-            <h3 style={{ margin: '10px 0 6px', fontSize: 20, fontWeight: 700, color: '#0f172a', lineHeight: 1.2 }}>
-              Construa fluxos mais inteligentes com o builder visual
-            </h3>
-            <p style={{ margin: 0, color: '#475569', fontSize: 14, maxWidth: 640 }}>
-              Arraste blocos, conecte gatilhos e publique automações em minutos com uma experiência visual guiada.
-            </p>
-          </div>
-
-          <Link
-            href="/dashboard/flow-builder"
-            className="inline-flex w-full items-center justify-center rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white no-underline transition hover:bg-emerald-700 md:w-auto"
+          <button
+            type="button"
+            onClick={openBuilder}
+            className="inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold text-white transition hover:brightness-95"
+            style={{ background: '#10b981' }}
           >
-            Abrir builder
-          </Link>
+            Abrir builder <span aria-hidden="true">↗</span>
+          </button>
         </div>
       </div>
 
