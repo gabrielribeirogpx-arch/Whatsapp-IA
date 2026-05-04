@@ -77,8 +77,8 @@ function SkeletonLine({ width = '100%', height = 12 }: { width?: string; height?
 }
 
 const Sparkline = ({ className = 'h-full w-full' }: { className?: string }) => (
-  <svg viewBox="0 0 84 28" className={className} fill="none" aria-hidden>
-    <path d="M1 25C8 17 12 15 20 18C28 21 34 24 41 20C48 16 53 17 59 14C66 11 72 8 83 2" stroke="#22C55E" strokeWidth="2.2" strokeLinecap="round" opacity="0.75"/>
+  <svg width="64" height="24" viewBox="0 0 64 24" className={className} fill="none" aria-hidden>
+    <path d="M1 22C7 16 11 14 18 16C25 18 30 21 36 18C42 15 47 15 52 13C57 11 61 8 63 4" stroke="#22C55E" strokeWidth="2.2" strokeLinecap="round" opacity="0.75"/>
   </svg>
 );
 
@@ -213,25 +213,25 @@ export default function DashboardPage() {
 
       <div className="grid w-full grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">{kpiMeta.map((item) => {
         const value = viewModel[item.key];
-        return <div key={item.key} className="bg-white rounded-2xl border border-slate-100 shadow-[0_12px_30px_rgba(15,23,42,0.05)] p-4 min-h-[112px] min-w-[160px] flex items-center justify-between">{isLoading ? <div className="grid gap-2 w-full"><SkeletonLine width="35%" /><SkeletonLine width="48%" /><SkeletonLine width="40%" height={20} /></div> :
-          <div className="flex w-full items-end justify-between">
-            <div className="flex items-start gap-3">
+        return <div key={item.key} className="relative overflow-hidden rounded-2xl bg-white border border-slate-100 shadow-[0_12px_30px_rgba(15,23,42,0.05)] p-4 min-h-[104px]">{isLoading ? <div className="grid gap-2 w-full"><SkeletonLine width="35%" /><SkeletonLine width="48%" /><SkeletonLine width="40%" height={20} /></div> :
+          <>
+            <div className="relative z-10 flex h-full items-start gap-3">
               <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-50">
                 <img src={item.icon} alt={item.label} className="h-5 w-5 opacity-90"/>
               </div>
-              <div className="flex flex-col max-w-[120px]">
-                <span className="uppercase text-[11px] font-semibold text-slate-500">{item.label}</span>
-                <span className="text-[24px] font-bold leading-tight text-slate-900">{value}{item.suffix}</span>
-                <p className="m-0 flex items-center gap-1 whitespace-nowrap text-[11px]">
+              <div className="min-w-0 flex flex-col">
+                <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">{item.label}</span>
+                <span className="mt-1 text-2xl font-bold leading-none text-slate-900">{value}{item.suffix}</span>
+                <p className="mt-2 flex items-center gap-1 whitespace-nowrap text-[11px] leading-none">
                   <span className="font-semibold text-emerald-600">↑ 18%</span>
                   <span className="text-slate-500">vs últimos 7 dias</span>
                 </p>
               </div>
             </div>
-            <div className="flex min-w-[60px] items-end justify-end">
-              <Sparkline className="h-[24px] w-[60px]"/>
+            <div className="pointer-events-none absolute bottom-4 right-4 h-6 w-16 overflow-hidden">
+              <Sparkline className="h-6 w-16"/>
             </div>
-          </div>}</div>;
+          </>}</div>;
       })}</div>
 
       <div className="grid w-full grid-cols-1 gap-4 items-stretch xl:grid-cols-[minmax(0,2fr)_minmax(320px,0.9fr)]">
