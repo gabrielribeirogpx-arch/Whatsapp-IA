@@ -46,7 +46,7 @@ const FALLBACK_VIEW_MODEL: DashboardViewModel = {
 };
 
 const cardClassName =
-  'bg-white rounded-2xl border border-slate-100 shadow-[0_18px_45px_rgba(15,23,42,0.06)] p-5 min-h-[118px]';
+  'bg-white rounded-2xl border border-slate-100 shadow-[0_12px_30px_rgba(15,23,42,0.05)] p-5';
 
 function SkeletonLine({ width = '100%', height = 12 }: { width?: string; height?: number }) {
   return <div className="rounded-full bg-gradient-to-r from-emerald-50 via-slate-200 to-emerald-50" style={{ width, height }} />;
@@ -75,6 +75,14 @@ const getConversationFlowLabel = (conversation: Conversation) => {
   };
 
   return raw.flow_name || raw.flowName || raw.flow?.name || raw.source || 'Flow';
+};
+
+const channelLegendColors: Record<string, string> = {
+  whatsapp: '#16A34A',
+  'site / chat': '#2563EB',
+  instagram: '#8B5CF6',
+  facebook: '#F59E0B',
+  outros: '#94A3B8',
 };
 
 export default function DashboardPage() {
@@ -127,50 +135,97 @@ export default function DashboardPage() {
   const totalChannels = viewModel.channels.reduce((acc, c) => acc + c.value, 0);
   const liveItems = uniqueConversations.slice(0, 4);
 
-  return (<div className="bg-[#F8FAFC] p-5 md:p-6 rounded-2xl">
-    <div className="mb-6"><h1 className="m-0 text-2xl font-bold text-slate-900">Dashboard</h1><p className="m-0 mt-1 text-sm text-slate-500">Visão consolidada dos seus fluxos e atendimentos.</p></div>
+  const normalizedChannelItems = useMemo(() => {
+    const base = [
+      { name: 'WhatsApp', value: 0 },
+      { name: 'Site / Chat', value: 0 },
+      { name: 'Instagram', value: 0 },
+      { name: 'Facebook', value: 0 },
+      { name: 'Outros', value: 0 },
+    ];
+    viewModel.channels.forEach((channel) => {
+      const key = channel.name.trim().toLowerCase();
+      const target = base.find((item) => item.name.toLowerCase() === key);
+      if (target) target.value = channel.value;
+      else base[4].value += channel.value;
+    });
+    const total = base.reduce((sum, item) => sum + item.value, 0);
+    if (total === 0) base[0].value = 100;
+    return base;
+  }, [viewModel.channels]);
 
-    <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">{kpiMeta.map((item) => {
-      const value = viewModel[item.key];
-      return <div key={item.key} className={cardClassName}>{isLoading ? <div className="grid gap-3"><SkeletonLine width="30%" /><SkeletonLine width="55%" /><SkeletonLine width="40%" height={24} /></div> :
-        <div className="flex items-center justify-between">
-          <div className="flex items-start gap-3">
-            <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-emerald-50">
-              <img src={item.icon} alt={item.label} className="h-5 w-5 opacity-90"/>
-            </div>
-            <div className="flex flex-col">
-              <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">{item.label}</span>
-              <span className="text-2xl font-semibold text-slate-900">{value}{item.suffix}</span>
-              <span className="text-xs text-emerald-600">+32% vs ontem</span>
-            </div>
-          </div>
-          <div className="h-10 w-16 opacity-80">
-            <Sparkline/>
-          </div>
-        </div>}</div>;
-    })}</div>
-
-    <div className="mb-6 grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,2fr)_minmax(320px,1fr)]">
-      <div className="bg-white rounded-2xl border border-slate-100 shadow-[0_18px_45px_rgba(15,23,42,0.06)] p-2 md:p-3">{dashboardError ? <p className="m-0 p-3 text-sm text-red-700">{dashboardError}</p> : <DashboardChart data={data?.charts?.messages_last_7_days ?? []} />}</div>
-      <div className="bg-white rounded-2xl border border-slate-100 shadow-[0_18px_45px_rgba(15,23,42,0.06)] p-5">
-        <div className="mb-4 flex items-center justify-between"><h3 className="m-0 text-xl font-semibold text-slate-900">Atividade ao vivo</h3><span className="text-sm text-slate-500"><span className="mr-1 text-emerald-500">●</span>Atualizando agora</span></div>
-        {conversationsError ? <p className="text-sm text-red-700">{conversationsError}</p> : liveItems.length === 0 ? <p className="text-sm text-slate-500">Nenhuma atividade recente</p> : <div className="space-y-4">{liveItems.map((c, idx) => {
-          const name = c.name || c.phone || 'Contato';
-          const initials = name.split(' ').map((w) => w[0]).slice(0,2).join('').toUpperCase();
-          return <div key={c.id || idx} className="flex items-start justify-between border-b border-slate-100 pb-3 last:border-b-0"><div className="flex gap-3"><div className="flex h-11 w-11 items-center justify-center rounded-full bg-emerald-50 text-sm font-semibold text-emerald-700">{initials}</div><div><p className="m-0 font-semibold text-slate-800">{name}</p><p className="m-0 text-sm text-slate-500">Flow: {getConversationFlowLabel(c)}</p><p className="m-0 text-sm text-slate-600 line-clamp-1">{c.last_message || 'Sem mensagem recente.'}</p></div></div><div className="text-right text-xs text-slate-500">agora<div className="ml-auto mt-2 h-2 w-2 rounded-full bg-emerald-500" /></div></div>;
-        })}</div>}
+  return (
+    <div className="bg-[#F8FAFC] max-w-[1280px] mx-auto px-6 lg:px-8 py-6 space-y-4 rounded-2xl">
+      <div className="flex items-center justify-between gap-4 mb-4">
+        <div>
+          <h1 className="m-0 text-[42px] leading-none font-bold text-slate-900">Bom dia, Gabriel 👋</h1>
+          <p className="m-0 mt-2 text-[26px] text-slate-500">Aqui está o resumo das suas conversas hoje.</p>
+        </div>
+        <div className="flex items-center gap-3">
+          <span className="text-sm text-slate-500">Período</span>
+          <button className="h-11 rounded-xl border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700">Últimos 7 dias</button>
+          <button className="h-11 w-11 rounded-xl border border-slate-200 bg-white text-slate-500">📅</button>
+          <button className="h-11 px-5 rounded-xl bg-emerald-600 text-white shadow-[0_8px_20px_rgba(5,150,105,0.25)] font-semibold">+ Novo fluxo</button>
+        </div>
       </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">{kpiMeta.map((item) => {
+        const value = viewModel[item.key];
+        return <div key={item.key} className="bg-white rounded-2xl border border-slate-100 shadow-[0_12px_30px_rgba(15,23,42,0.05)] p-4 min-h-[104px] flex items-center justify-between">{isLoading ? <div className="grid gap-2 w-full"><SkeletonLine width="35%" /><SkeletonLine width="48%" /><SkeletonLine width="40%" height={20} /></div> :
+          <>
+            <div className="flex items-start gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-50 shrink-0">
+                <img src={item.icon} alt={item.label} className="h-5 w-5 opacity-90"/>
+              </div>
+              <div className="flex flex-col">
+                <span className="uppercase text-[11px] font-semibold text-slate-500">{item.label}</span>
+                <span className="text-[24px] font-bold text-slate-900 leading-tight">{value}{item.suffix}</span>
+                <span className="text-[11px] text-emerald-600">↑ 18% vs últimos 7 dias</span>
+              </div>
+            </div>
+            <div className="w-16 h-8 self-end">
+              <Sparkline/>
+            </div>
+          </>}</div>;
+      })}</div>
+
+      <div className="grid grid-cols-1 xl:grid-cols-[2fr_1fr] gap-4 items-stretch">
+        <div className={`${cardClassName} min-h-[360px]`}>{dashboardError ? <p className="m-0 p-3 text-sm text-red-700">{dashboardError}</p> : <DashboardChart data={data?.charts?.messages_last_7_days ?? []} />}</div>
+
+        <div className={`${cardClassName} min-h-[360px]`}>
+          <div className="mb-4 flex items-center justify-between">
+            <h3 className="m-0 text-[30px] leading-none font-semibold text-slate-900">Atividade ao vivo</h3>
+            <span className="text-sm text-slate-500"><span className="mr-2 text-emerald-500">●</span>Atualizando agora</span>
+          </div>
+          {conversationsError ? <p className="text-sm text-red-700">{conversationsError}</p> : liveItems.length === 0 ? <div className="h-[290px] grid place-items-center rounded-xl border border-dashed border-emerald-200 bg-emerald-50/40 text-center"><div><p className="m-0 font-semibold text-slate-700">Sem atividade no momento</p><p className="m-0 mt-1 text-sm text-slate-500">Novas conversas aparecerão aqui em tempo real.</p></div></div> : <div className="space-y-4">{liveItems.map((c, idx) => {
+            const name = c.name || c.phone || 'Contato';
+            const initials = name.split(' ').map((w) => w[0]).slice(0,2).join('').toUpperCase();
+            return <div key={c.id || idx} className="flex items-start justify-between border-b border-slate-100 pb-3 last:border-b-0"><div className="flex gap-3"><div className="flex h-11 w-11 items-center justify-center rounded-full bg-emerald-50 text-sm font-semibold text-emerald-700">{initials}</div><div><p className="m-0 font-semibold text-slate-800">{name}</p><p className="m-0 text-sm text-slate-500">Flow: {getConversationFlowLabel(c)}</p><p className="m-0 text-sm text-slate-600 line-clamp-1">{c.last_message || 'Sem mensagem recente.'}</p></div></div><div className="text-right text-xs text-slate-500">agora<div className="ml-auto mt-2 h-2 w-2 rounded-full bg-emerald-500" /></div></div>;
+          })}</div>}
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
+        <div className={cardClassName}><div className="mb-4 flex items-center justify-between"><p className="m-0 text-[28px] font-semibold text-slate-900">Top fluxos</p><button className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs text-slate-600">Por conversas</button></div>
+        {flowsError ? <p className="text-sm text-red-700">{flowsError}</p> : <div className="space-y-3">{(viewModel.topFlows.slice(0,5)).map((flow) => {
+          const pct = Math.max(0, Math.min(100, Math.round(flow.value || 0)));
+          return <div key={flow.name} className="grid grid-cols-[20px_1fr_auto_auto] items-center gap-3"><span className="h-5 w-5 rounded bg-emerald-100" /><span className="text-sm font-medium text-slate-700">{flow.name}</span><span className="text-sm font-semibold text-slate-800">{flow.value}</span><span className="text-sm text-slate-500">{pct}%</span><div className="col-span-4 h-2 rounded-full bg-slate-100"><div className="h-2 rounded-full bg-emerald-500" style={{ width: `${pct}%` }} /></div></div>; })}</div>}
+        <div className="mt-4 pt-3 border-t border-slate-100 text-center text-emerald-600 font-semibold">Ver todos os fluxos →</div></div>
+
+        <div className={cardClassName}><p className="m-0 mb-4 text-[28px] font-semibold text-slate-900">Canais de entrada</p><div className="flex items-center justify-between gap-4"><div className="relative grid h-36 w-36 place-items-center rounded-full" style={{ background: `conic-gradient(${normalizedChannelItems.map((item, index) => {
+          const total = normalizedChannelItems.reduce((sum, c) => sum + c.value, 0) || 1;
+          const start = normalizedChannelItems.slice(0, index).reduce((sum, c) => sum + c.value, 0) / total * 360;
+          const end = (normalizedChannelItems.slice(0, index + 1).reduce((sum, c) => sum + c.value, 0) / total) * 360;
+          const color = channelLegendColors[item.name.toLowerCase()] ?? '#94A3B8';
+          return `${color} ${start}deg ${end}deg`;
+        }).join(', ')})` }}><div className="grid h-24 w-24 place-items-center rounded-full bg-white text-center"><p className="m-0 text-xs text-slate-500">Total</p><p className="m-0 text-2xl font-bold">{totalChannels}</p></div></div><div className="space-y-2 text-sm flex-1">{normalizedChannelItems.map((ch) => <div key={ch.name} className="flex items-center justify-between gap-3"><span className="inline-flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: channelLegendColors[ch.name.toLowerCase()] ?? '#94A3B8' }} />{ch.name}</span><span className="font-semibold text-slate-700">{ch.value}%</span></div>)}</div></div>
+        <div className="mt-4 pt-3 border-t border-slate-100 text-center text-emerald-600 font-semibold">Ver todos os canais →</div></div>
+
+        <div className={cardClassName}><p className="m-0 mb-4 text-[28px] font-semibold text-slate-900">Desempenho geral</p><div className="space-y-4 text-sm text-slate-700">{['Tempo médio de resposta','Conversas resolvidas','Satisfação (CSAT)','Abandono de conversas'].map((n) => <div key={n} className="grid grid-cols-[1fr_auto_auto_54px] items-center gap-3"><span>{n}</span><span className="font-semibold">—</span><span className="text-emerald-600">↑ 0%</span><span className="h-6"><Sparkline/></span></div>)}</div>
+        <div className="mt-4 pt-3 border-t border-slate-100 text-center text-emerald-600 font-semibold">Ver relatório completo →</div></div>
+      </div>
+
+      <div className="flex items-center justify-between gap-4 rounded-2xl border border-slate-100 bg-gradient-to-r from-white via-emerald-50/60 to-white p-5 shadow-[0_12px_30px_rgba(15,23,42,0.05)]"><div className="flex items-center gap-4"><div className="h-20 w-20 rounded-2xl bg-emerald-100/70 grid place-items-center"><img src="/icons/dashboard/fluxos.svg" alt="Fluxos" className="h-14 w-14"/></div><div><p className="m-0 text-sm font-semibold text-emerald-600">Dica para você 🚀</p><p className="m-0 text-[32px] leading-tight font-semibold text-slate-900">Construa fluxos mais inteligentes com o builder visual</p><p className="m-0 text-lg text-slate-600">Use o builder para criar jornadas dinâmicas e personalizadas.</p></div></div><button className="rounded-xl bg-emerald-600 px-5 py-3 font-semibold text-white shadow-[0_8px_20px_rgba(5,150,105,0.25)]">Abrir builder ↗</button></div>
     </div>
-
-    <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
-      <div className={cardClassName}><div className="mb-4 flex items-center justify-between"><p className="m-0 font-bold text-slate-900">Top fluxos</p><button className="rounded-lg border border-slate-200 px-2 py-1 text-xs text-slate-600">Por conversas</button></div>
-      {flowsError ? <p className="text-sm text-red-700">{flowsError}</p> : <div className="space-y-3">{(viewModel.topFlows.slice(0,5)).map((flow, i) => { const pct = Math.round(flow.value || 0); return <div key={flow.name} className="grid grid-cols-[16px_1fr_auto] items-center gap-2"><span className="h-4 w-4 rounded bg-emerald-100" /><span className="text-sm text-slate-700">{flow.name}</span><span className="text-sm font-semibold text-slate-700">{flow.value}</span><div className="col-span-3 h-2 rounded-full bg-slate-100"><div className="h-2 rounded-full bg-emerald-500" style={{ width: `${Math.min(100, pct)}%` }} /></div></div>; })}</div>}</div>
-
-      <div className={cardClassName}><p className="m-0 mb-4 font-bold text-slate-900">Canais de entrada</p><div className="flex items-center gap-4"><div className="relative grid h-36 w-36 place-items-center rounded-full" style={{ background: 'conic-gradient(#16A34A 0deg 360deg)' }}><div className="grid h-24 w-24 place-items-center rounded-full bg-white text-center"><p className="m-0 text-xs text-slate-500">Total</p><p className="m-0 text-2xl font-bold">{totalChannels}</p></div></div><div className="space-y-2 text-sm">{viewModel.channels.map((ch) => <div key={ch.name} className="flex items-center justify-between gap-3"><span className="inline-flex items-center gap-2"><img src="/icons/dashboard/whatsapp.svg" className="h-4 w-4" alt="canal" />{ch.name}</span><span className="font-semibold">{ch.value}%</span></div>)}</div></div></div>
-
-      <div className={cardClassName}><p className="m-0 mb-4 font-bold text-slate-900">Desempenho geral</p><div className="space-y-4 text-sm text-slate-700">{['Tempo médio de resposta','Conversas resolvidas','Satisfação (CSAT)','Abandono de conversas'].map((n) => <div key={n} className="flex items-center justify-between"><span>{n}</span><span className="font-semibold">—</span><span className="text-slate-400">—</span><Sparkline/></div>)}</div></div>
-    </div>
-
-    <div className="mt-6 flex items-center justify-between gap-4 rounded-2xl border border-slate-100 bg-gradient-to-r from-white to-emerald-50 p-5 shadow-[0_18px_45px_rgba(15,23,42,0.06)]"><div className="flex items-center gap-4"><img src="/icons/dashboard/fluxos.svg" alt="Fluxos" className="h-16 w-16"/><div><p className="m-0 text-sm font-semibold text-emerald-600">Dica para você 🚀</p><p className="m-0 text-xl font-semibold text-slate-900">Construa fluxos mais inteligentes com o builder visual</p><p className="m-0 text-sm text-slate-600">Use o builder para criar jornadas dinâmicas e personalizadas.</p></div></div><button className="rounded-xl bg-emerald-600 px-5 py-3 font-semibold text-white">Abrir builder</button></div>
-  </div>);
+  );
 }
