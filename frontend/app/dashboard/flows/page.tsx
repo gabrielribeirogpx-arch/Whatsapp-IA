@@ -177,11 +177,13 @@ export default function FlowsPage() {
                       />
                       <span style={{ fontSize: 14, fontWeight: 600, color: '#111' }}>{flow.name}</span>
                       {flow.is_active ? (
-                        <span className="px-2 py-1 text-xs font-medium rounded-full bg-green-100 text-green-700">
+                        <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700 ring-1 ring-emerald-200">
+                          <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
                           Ativo
                         </span>
                       ) : (
-                        <span className="px-2 py-1 text-xs font-medium rounded-full bg-gray-100 text-gray-500">
+                        <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-500 ring-1 ring-slate-200">
+                          <span className="h-1.5 w-1.5 rounded-full bg-slate-400" />
                           OFF
                         </span>
                       )}
