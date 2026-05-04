@@ -37,6 +37,8 @@ type DashboardViewModel = {
   channels: Array<{ name: string; value: number }>;
 };
 
+type Period = '24h' | '7d' | '30d' | '90d';
+
 const FALLBACK_VIEW_MODEL: DashboardViewModel = {
   activeConversations: 0,
   activeLeads: 0,
@@ -88,6 +90,7 @@ const channelLegendColors: Record<string, string> = {
 };
 
 export default function DashboardPage() {
+  const [period, setPeriod] = useState<Period>('7d');
   const [data, setData] = useState<DashboardData | null>(null);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [flows, setFlows] = useState<FlowItem[]>([]);
@@ -165,7 +168,17 @@ export default function DashboardPage() {
         </div>
         <div className="flex items-center gap-3">
           <span className="text-sm text-slate-500">Período</span>
-          <button className="h-11 rounded-xl border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700">Últimos 7 dias</button>
+          <select
+            value={period}
+            onChange={(e) => setPeriod(e.target.value as Period)}
+            className="h-11 rounded-xl border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700 outline-none transition focus:border-emerald-300 focus:ring-2 focus:ring-emerald-100"
+            aria-label="Selecionar período"
+          >
+            <option value="24h">Últimas 24h</option>
+            <option value="7d">Últimos 7 dias</option>
+            <option value="30d">Últimos 30 dias</option>
+            <option value="90d">Últimos 90 dias</option>
+          </select>
           <button className="h-11 w-11 rounded-xl border border-slate-200 bg-white text-slate-500">📅</button>
           <Link href="/dashboard/flows" className="h-11 px-5 rounded-xl bg-emerald-600 text-white shadow-[0_8px_20px_rgba(5,150,105,0.25)] font-semibold">+ Novo fluxo</Link>
         </div>
@@ -192,7 +205,10 @@ export default function DashboardPage() {
       })}</div>
 
       <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1.75fr)_minmax(320px,0.9fr)] gap-4 items-stretch">
-        <div className={`${cardClassName} min-h-[390px] p-5`}>{dashboardError ? <p className="m-0 p-3 text-sm text-red-700">{dashboardError}</p> : <DashboardChart data={data?.charts?.messages_last_7_days ?? []} />}</div>
+        <div className={`${cardClassName} min-h-[390px] p-5`}>{dashboardError ? <p className="m-0 p-3 text-sm text-red-700">{dashboardError}</p> : (
+          // TODO: aplicar o filtro real por período quando a integração de dados do backend estiver disponível.
+          <DashboardChart data={data?.charts?.messages_last_7_days ?? []} />
+        )}</div>
 
         <div className={`${cardClassName} min-h-[390px] p-5`}>
           <div className="mb-4 flex items-center justify-between">
