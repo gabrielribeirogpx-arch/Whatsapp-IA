@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { CSSProperties, useEffect, useMemo, useState } from 'react';
 
 import DashboardChart from '../../components/DashboardChart';
 import { apiFetch, getConversations, listFlows, parseApiResponse } from '../../lib/api';
@@ -45,34 +45,81 @@ const FALLBACK_VIEW_MODEL: DashboardViewModel = {
   channels: [{ name: 'WhatsApp', value: 100 }],
 };
 
+const cardBaseStyle: CSSProperties = {
+  border: '1px solid #E2E8F0',
+  borderRadius: 16,
+  background: '#FFFFFF',
+  padding: 18,
+  boxShadow: '0 8px 24px rgba(15, 23, 42, 0.04)',
+};
+
+const premiumLabelStyle: CSSProperties = { margin: '0 0 12px', color: '#0F172A', fontWeight: 700 };
+const subtleTextStyle: CSSProperties = { margin: 0, color: '#64748B', fontSize: 14 };
+
+function SkeletonLine({ width = '100%', height = 12 }: { width?: string; height?: number }) {
+  return (
+    <div
+      style={{
+        width,
+        height,
+        borderRadius: 999,
+        background: 'linear-gradient(90deg, #ECFDF5 0%, #E2E8F0 50%, #ECFDF5 100%)',
+      }}
+    />
+  );
+}
+
+function EmptyState({ message }: { message: string }) {
+  return <p style={subtleTextStyle}>{message}</p>;
+}
+
+function ErrorState({ message }: { message: string }) {
+  return <p style={{ ...subtleTextStyle, color: '#B91C1C' }}>{message}</p>;
+}
+
 export default function DashboardPage() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [flows, setFlows] = useState<FlowItem[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+
+  const [dashboardError, setDashboardError] = useState<string | null>(null);
+  const [conversationsError, setConversationsError] = useState<string | null>(null);
+  const [flowsError, setFlowsError] = useState<string | null>(null);
 
   useEffect(() => {
     async function loadDashboardData() {
+      setIsLoading(true);
+
       try {
         const res = await apiFetch('/api/dashboard');
         const payload = await parseApiResponse<DashboardData>(res);
         setData(payload);
+        setDashboardError(null);
       } catch {
         setData(null);
+        setDashboardError('Não foi possível carregar os indicadores do dashboard agora.');
       }
 
       try {
         const payload = await getConversations();
         setConversations(Array.isArray(payload) ? payload : []);
+        setConversationsError(null);
       } catch {
         setConversations([]);
+        setConversationsError('Não foi possível carregar a atividade recente no momento.');
       }
 
       try {
         const payload = await listFlows();
         setFlows(Array.isArray(payload) ? payload : []);
+        setFlowsError(null);
       } catch {
         setFlows([]);
+        setFlowsError('Não foi possível carregar os fluxos neste instante.');
       }
+
+      setIsLoading(false);
     }
 
     void loadDashboardData();
@@ -133,20 +180,13 @@ export default function DashboardPage() {
   }, [data, derivedMessagesToday, flows, uniqueConversations]);
 
   const messagesLast7Days = data?.charts?.messages_last_7_days;
-  const cardBaseStyle = {
-    border: '1px solid #E5E7EB',
-    borderRadius: 16,
-    background: '#FFFFFF',
-    padding: 18,
-    boxShadow: '0 1px 2px rgba(16,24,40,0.04)',
-  };
 
   return (
     <>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
         <div>
-          <h1 style={{ fontSize: 24, fontWeight: 700, color: '#111827', margin: '0 0 4px' }}>Dashboard</h1>
-          <p style={{ fontSize: 14, color: '#6B7280', margin: 0 }}>Visão consolidada dos seus fluxos e atendimentos.</p>
+          <h1 style={{ fontSize: 24, fontWeight: 700, color: '#0F172A', margin: '0 0 4px' }}>Dashboard</h1>
+          <p style={{ fontSize: 14, color: '#64748B', margin: 0 }}>Visão consolidada dos seus fluxos e atendimentos.</p>
         </div>
       </div>
 
@@ -159,47 +199,87 @@ export default function DashboardPage() {
           ['🎯', 'Conversões', viewModel.conversions, '+0.0%'],
         ].map(([icon, label, value, change]) => (
           <div key={String(label)} style={cardBaseStyle}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-              <span style={{ fontSize: 18 }}>{icon}</span>
-              <span style={{ fontSize: 12, color: String(change).startsWith('+') ? '#16A34A' : '#DC2626', fontWeight: 700 }}>
-                {change}
-              </span>
-            </div>
-            <p style={{ margin: '0 0 4px', fontSize: 13, color: '#6B7280' }}>{label}</p>
-            <p style={{ margin: '0 0 8px', fontSize: 24, fontWeight: 700, color: '#111827' }}>{value}</p>
+            {isLoading ? (
+              <div style={{ display: 'grid', gap: 10 }}>
+                <SkeletonLine width="30%" />
+                <SkeletonLine width="55%" />
+                <SkeletonLine width="40%" height={24} />
+              </div>
+            ) : (
+              <>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                  <span style={{ fontSize: 18 }}>{icon}</span>
+                  <span style={{ fontSize: 12, color: String(change).startsWith('+') ? '#16A34A' : '#DC2626', fontWeight: 700 }}>
+                    {change}
+                  </span>
+                </div>
+                <p style={{ margin: '0 0 4px', fontSize: 13, color: '#64748B' }}>{label}</p>
+                <p style={{ margin: '0 0 8px', fontSize: 24, fontWeight: 700, color: '#0F172A' }}>{value}</p>
+              </>
+            )}
           </div>
         ))}
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 16, marginBottom: 20 }}>
         <div style={cardBaseStyle}>
-          <p style={{ margin: '0 0 12px', color: '#111827', fontWeight: 700 }}>Mensagens — últimos 7 dias</p>
-          {messagesLast7Days ? <DashboardChart data={messagesLast7Days} /> : <p style={{ margin: 0, color: '#6B7280' }}>Sem dados para o período.</p>}
+          <p style={premiumLabelStyle}>Mensagens — últimos 7 dias</p>
+          {dashboardError ? (
+            <ErrorState message={dashboardError} />
+          ) : isLoading ? (
+            <div style={{ display: 'grid', gap: 10 }}>
+              <SkeletonLine width="100%" height={160} />
+            </div>
+          ) : messagesLast7Days?.length ? (
+            <DashboardChart data={messagesLast7Days} />
+          ) : (
+            <EmptyState message="Nenhuma atividade recente." />
+          )}
         </div>
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: 16, marginBottom: 20 }}>
         <div style={cardBaseStyle}>
-          <p style={{ margin: '0 0 12px', color: '#111827', fontWeight: 700 }}>Top fluxos</p>
-          {viewModel.topFlows.length ? (
+          <p style={premiumLabelStyle}>Top fluxos</p>
+          {flowsError ? (
+            <ErrorState message={flowsError} />
+          ) : isLoading ? (
+            <div style={{ display: 'grid', gap: 10 }}>
+              <SkeletonLine width="90%" />
+              <SkeletonLine width="80%" />
+              <SkeletonLine width="70%" />
+            </div>
+          ) : viewModel.topFlows.length ? (
             viewModel.topFlows.map((flow, index) => (
-              <p key={flow.name} style={{ margin: '0 0 8px', color: '#374151' }}>
+              <p key={flow.name} style={{ margin: '0 0 8px', color: '#334155' }}>
                 {index + 1}. {flow.name} — {flow.value}%
               </p>
             ))
           ) : (
-            <p style={{ margin: 0, color: '#6B7280' }}>Sem fluxos para exibir.</p>
+            <EmptyState message="Nenhum fluxo com performance recente." />
           )}
         </div>
+
         <div style={cardBaseStyle}>
-          <p style={{ margin: '0 0 12px', color: '#111827', fontWeight: 700 }}>Canais de entrada</p>
-          <ul style={{ margin: 0, paddingLeft: 18, color: '#4B5563', display: 'grid', gap: 8 }}>
-            {viewModel.channels.map((channel) => (
-              <li key={channel.name}>
-                {channel.name}: {channel.value}%
-              </li>
-            ))}
-          </ul>
+          <p style={premiumLabelStyle}>Canais de entrada</p>
+          {conversationsError ? (
+            <ErrorState message={conversationsError} />
+          ) : isLoading ? (
+            <div style={{ display: 'grid', gap: 10 }}>
+              <SkeletonLine width="85%" />
+              <SkeletonLine width="60%" />
+            </div>
+          ) : viewModel.channels.length ? (
+            <ul style={{ margin: 0, paddingLeft: 18, color: '#475569', display: 'grid', gap: 8 }}>
+              {viewModel.channels.map((channel) => (
+                <li key={channel.name}>
+                  {channel.name}: {channel.value}%
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <EmptyState message="Nenhum canal com dados no período." />
+          )}
         </div>
       </div>
     </>
