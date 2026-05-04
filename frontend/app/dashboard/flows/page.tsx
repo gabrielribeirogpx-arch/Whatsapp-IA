@@ -41,29 +41,15 @@ const getFlowConversion = (flow: FlowListItem) => {
   return `${Math.round(value)}%`;
 };
 
-const getFlowStatusBadge = (flow: Pick<FlowListItem, 'status' | 'is_active'>) => {
-  if (flow.status === 'draft') {
-    return {
-      label: 'Rascunho',
-      className: 'bg-yellow-100 text-yellow-700',
-      dotClassName: 'bg-yellow-500',
-    };
-  }
-
-  if (flow.is_active) {
-    return {
-      label: 'Ativo',
-      className: 'bg-green-100 text-green-700',
-      dotClassName: 'bg-green-500',
-    };
-  }
-
-  return {
-    label: 'Inativo',
-    className: 'bg-gray-100 text-gray-600',
-    dotClassName: 'bg-gray-400',
-  };
-};
+const FlowNodeIcon = () => (
+  <svg width="22" height="22" viewBox="0 0 22 22" fill="none" aria-hidden="true">
+    <path d="M6 6H16M6 16H16M6 6V16M16 6V16" stroke="#0F766E" strokeWidth="1.3" strokeLinecap="round" />
+    <circle cx="6" cy="6" r="2.2" fill="#10B981" />
+    <circle cx="16" cy="6" r="2.2" fill="#34D399" />
+    <circle cx="6" cy="16" r="2.2" fill="#34D399" />
+    <circle cx="16" cy="16" r="2.2" fill="#10B981" />
+  </svg>
+);
 
 
 const EMPTY_FORM: FlowPayload = {
@@ -324,48 +310,66 @@ export default function FlowsPage() {
               return (
                 <div
                   key={flow.id}
-                  className="flex flex-col gap-4 rounded-2xl border border-gray-100 bg-white p-5 transition hover:shadow-md lg:flex-row lg:items-center lg:justify-between"
+                  className="flex flex-col gap-4 rounded-2xl bg-white transition hover:shadow-md lg:flex-row lg:items-center lg:justify-between"
+                  style={{ display: 'flex', alignItems: 'center', gap: '1rem', padding: '1.5rem', border: '0.5px solid #E5E7EB' }}
                 >
-                  <div className="min-w-0 flex-1">
-                    <div className="mb-1.5 flex flex-wrap items-center gap-3">
-                      <Switch
-                        checked={flow.is_active}
-                        onChange={(value) => handleToggle(flow.id, value)}
-                        tooltip={flow.is_active ? 'Desativar fluxo' : 'Ativar fluxo'}
-                      />
-                      <div className="inline-flex h-12 w-12 items-center justify-center rounded-xl border border-slate-200 bg-slate-100 text-lg">
-                        ⚡
-                      </div>
-                      <div className="min-w-0">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className="truncate text-sm font-semibold text-slate-900 sm:text-base">{flow.name}</span>
-                          {(() => {
-                            const statusBadge = getFlowStatusBadge(flow);
-                            return (
-                              <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ${statusBadge.className}`}>
-                                <span className={`h-1.5 w-1.5 rounded-full ${statusBadge.dotClassName}`} />
-                                {statusBadge.label}
-                              </span>
-                            );
-                          })()}
-                        </div>
-                        <span className="mt-1 block text-xs text-slate-500">
-                          Trigger: {flow.trigger_type || 'default'}
-                          {flow.trigger_value ? ` · ${flow.trigger_value}` : ''}
-                        </span>
-                        <span className="mt-0.5 block text-xs text-slate-400">{getUpdatedLabel(flow.updated_at)}</span>
-                      </div>
-                    </div>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleToggle(flow.id, !flow.is_active);
+                    }}
+                    aria-label={flow.is_active ? 'Desativar fluxo' : 'Ativar fluxo'}
+                    className="relative h-6 w-11 rounded-full border-0 p-0 transition-colors"
+                    style={{ backgroundColor: flow.is_active ? '#10b981' : '#d1d5db' }}
+                  >
+                    <span
+                      className="absolute top-0.5 h-5 w-5 rounded-full bg-white shadow-sm transition-transform"
+                      style={{ left: flow.is_active ? 22 : 2 }}
+                    />
+                  </button>
+
+                  <div className="flex h-12 w-12 items-center justify-center rounded-xl" style={{ background: '#E8F5F3' }}>
+                    <FlowNodeIcon />
                   </div>
 
-                  <div className="flex w-full flex-wrap items-center gap-2 sm:gap-3 lg:w-auto lg:justify-center">
-                    <div className="rounded-xl bg-gray-50 px-4 py-2 text-sm">
-                      <div className="text-[10px] font-bold uppercase tracking-[0.05em] text-slate-500">Execuções</div>
-                      <div className="text-sm font-bold text-slate-900 sm:text-base">{getFlowExecutions(flow)}</div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="truncate text-sm font-semibold text-slate-900 sm:text-base">{flow.name}</span>
+                      <span
+                        className="inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold"
+                        style={{
+                          background: flow.is_active ? '#D1FAE5' : '#F3F4F6',
+                          color: flow.is_active ? '#065F46' : '#6B7280',
+                        }}
+                      >
+                        {flow.is_active ? 'Ativo' : 'Inativo'}
+                      </span>
                     </div>
-                    <div className="rounded-xl bg-gray-50 px-4 py-2 text-sm">
-                      <div className="text-[10px] font-bold uppercase tracking-[0.05em] text-slate-500">Conversão</div>
-                      <div className="text-sm font-bold text-slate-900 sm:text-base">{getFlowConversion(flow)}</div>
+                    <span className="mt-1 block text-xs text-slate-500">
+                      Trigger: {flow.trigger_type || 'default'}
+                      {flow.trigger_value ? ` · ${flow.trigger_value}` : ''} · {getUpdatedLabel(flow.updated_at)}
+                    </span>
+                  </div>
+
+                  <div className="flex items-center gap-4">
+                    <div className="inline-flex items-center gap-2">
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                        <path d="M3 12L21 4L15 21L11 13L3 12Z" stroke="#64748B" strokeWidth="1.7" strokeLinejoin="round" />
+                      </svg>
+                      <div>
+                        <div className="text-[16px] font-semibold leading-none text-slate-900">{getFlowExecutions(flow)}</div>
+                        <div className="text-[10px] uppercase tracking-[0.04em] text-slate-500">Execuções</div>
+                      </div>
+                    </div>
+                    <div className="inline-flex items-center gap-2">
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                        <path d="M12 4L20 19H4L12 4Z" stroke="#64748B" strokeWidth="1.7" strokeLinejoin="round" />
+                      </svg>
+                      <div>
+                        <div className="text-[16px] font-semibold leading-none text-slate-900">{getFlowConversion(flow)}</div>
+                        <div className="text-[10px] uppercase tracking-[0.04em] text-slate-500">Conversão</div>
+                      </div>
                     </div>
                   </div>
 
@@ -476,44 +480,5 @@ export default function FlowsPage() {
       )}
       </div>
     </main>
-  );
-}
-
-function Switch({ checked, onChange, tooltip }: { checked: boolean; onChange: (value: boolean) => void; tooltip: string }) {
-  return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={checked}
-      title={tooltip}
-      aria-label={tooltip}
-      onClick={(e) => {
-        e.stopPropagation();
-        onChange(!checked);
-      }}
-      style={{
-        width: 36,
-        height: 20,
-        borderRadius: 999,
-        border: 'none',
-        cursor: 'pointer',
-        background: checked ? '#16a34a' : '#9ca3af',
-        padding: 2,
-        display: 'inline-flex',
-        alignItems: 'center',
-        transition: 'background 0.15s ease',
-      }}
-    >
-      <span
-        style={{
-          width: 16,
-          height: 16,
-          borderRadius: '50%',
-          background: '#fff',
-          transform: checked ? 'translateX(16px)' : 'translateX(0)',
-          transition: 'transform 0.15s ease',
-        }}
-      />
-    </button>
   );
 }
