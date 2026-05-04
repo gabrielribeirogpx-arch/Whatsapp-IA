@@ -20,6 +20,9 @@ const EMPTY_FORM: FlowPayload = {
 
 export default function FlowsPage() {
   const [flows, setFlows] = useState<FlowListItem[]>([]);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive' | 'draft' | 'published'>('all');
+  const [sortBy, setSortBy] = useState<'recent' | 'name' | 'active_first'>('recent');
   const [loading, setLoading] = useState(true);
   const [isOpen, setIsOpen] = useState(false);
   const [editingFlow, setEditingFlow] = useState<FlowItem | null>(null);
@@ -114,6 +117,42 @@ export default function FlowsPage() {
 
   const published = flows.filter((f) => f.status === 'published').length;
   const drafts = flows.filter((f) => f.status === 'draft').length;
+  const filteredFlows = useMemo(() => {
+    const normalizedSearch = searchTerm.trim().toLowerCase();
+    const filtered = flows.filter((flow) => {
+      if (normalizedSearch) {
+        const searchableFields = [flow.name, flow.trigger_type, flow.trigger_value ?? '']
+          .join(' ')
+          .toLowerCase();
+        if (!searchableFields.includes(normalizedSearch)) return false;
+      }
+
+      if (statusFilter === 'active' && !flow.is_active) return false;
+      if (statusFilter === 'inactive' && flow.is_active) return false;
+      if (statusFilter === 'draft' && flow.status !== 'draft') return false;
+      if (statusFilter === 'published' && flow.status !== 'published') return false;
+
+      return true;
+    });
+
+    return filtered.sort((a, b) => {
+      if (sortBy === 'name') return a.name.localeCompare(b.name);
+
+      if (sortBy === 'active_first') {
+        if (a.is_active !== b.is_active) return a.is_active ? -1 : 1;
+        return a.name.localeCompare(b.name);
+      }
+
+      const aDate = a.updated_at ? new Date(a.updated_at).getTime() : Number.NaN;
+      const bDate = b.updated_at ? new Date(b.updated_at).getTime() : Number.NaN;
+      const bothHaveValidDate = !Number.isNaN(aDate) && !Number.isNaN(bDate);
+
+      if (bothHaveValidDate && aDate !== bDate) return bDate - aDate;
+      if (!Number.isNaN(aDate) && Number.isNaN(bDate)) return -1;
+      if (Number.isNaN(aDate) && !Number.isNaN(bDate)) return 1;
+      return a.name.localeCompare(b.name);
+    });
+  }, [flows, searchTerm, sortBy, statusFilter]);
 
   return (
     <main className="flex-1 px-6 py-6">
@@ -146,6 +185,35 @@ export default function FlowsPage() {
         ))}
       </div>
 
+      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '2fr 1fr 1fr', gap: 12, marginBottom: 16 }}>
+        <input
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+          placeholder="Buscar fluxos..."
+          style={{ border: '1px solid #e8e6e0', borderRadius: 10, padding: '10px 12px', fontSize: 13, color: '#111', outline: 'none', fontFamily: 'inherit', background: '#fff' }}
+        />
+        <select
+          value={statusFilter}
+          onChange={(e) => setStatusFilter(e.target.value as 'all' | 'active' | 'inactive' | 'draft' | 'published')}
+          style={{ border: '1px solid #e8e6e0', borderRadius: 10, padding: '10px 12px', fontSize: 13, color: '#111', outline: 'none', fontFamily: 'inherit', background: '#fff' }}
+        >
+          <option value="all">Todos os status</option>
+          <option value="active">Ativo</option>
+          <option value="inactive">Inativo</option>
+          <option value="draft">Rascunho</option>
+          <option value="published">Publicado</option>
+        </select>
+        <select
+          value={sortBy}
+          onChange={(e) => setSortBy(e.target.value as 'recent' | 'name' | 'active_first')}
+          style={{ border: '1px solid #e8e6e0', borderRadius: 10, padding: '10px 12px', fontSize: 13, color: '#111', outline: 'none', fontFamily: 'inherit', background: '#fff' }}
+        >
+          <option value="recent">Ordenar: Mais recentes</option>
+          <option value="name">Ordenar: Nome</option>
+          <option value="active_first">Ordenar: Ativos primeiro</option>
+        </select>
+      </div>
+
       {/* Flow list */}
       <div style={{ background: '#fff', border: '1px solid #e8e6e0', borderRadius: 14, overflow: 'hidden', boxShadow: '0 1px 3px rgba(0,0,0,0.04)' }}>
         <div style={{ padding: '16px 20px', borderBottom: '1px solid #f0f0ee' }}>
@@ -154,7 +222,7 @@ export default function FlowsPage() {
 
         {loading ? (
           <div style={{ padding: '48px 20px', textAlign: 'center', color: '#aaa', fontSize: 13 }}>Carregando...</div>
-        ) : flows.length === 0 ? (
+        ) : filteredFlows.length === 0 ? (
           <div style={{ padding: '56px 20px', textAlign: 'center' }}>
             <div style={{ width: 48, height: 48, background: '#f0fdf4', borderRadius: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px', fontSize: 22 }}>⚡</div>
             <p style={{ margin: '0 0 6px', fontSize: 15, fontWeight: 600, color: '#111' }}>Nenhum fluxo criado ainda</p>
@@ -163,9 +231,9 @@ export default function FlowsPage() {
           </div>
         ) : (
           <div>
-            {flows.map((flow, index) => {
+            {filteredFlows.map((flow, index) => {
               return (
-                <div key={flow.id} style={{ padding: '16px 20px', borderBottom: index < flows.length - 1 ? '1px solid #f0f0ee' : 'none', display: 'flex', flexDirection: isMobile ? 'column' : 'row', alignItems: isMobile ? 'flex-start' : 'center', justifyContent: 'space-between', gap: 12, transition: 'background 0.15s' }}
+                <div key={flow.id} style={{ padding: '16px 20px', borderBottom: index < filteredFlows.length - 1 ? '1px solid #f0f0ee' : 'none', display: 'flex', flexDirection: isMobile ? 'column' : 'row', alignItems: isMobile ? 'flex-start' : 'center', justifyContent: 'space-between', gap: 12, transition: 'background 0.15s' }}
                   onMouseEnter={(e) => { e.currentTarget.style.background = '#fafaf9'; }}
                   onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}>
                   <div style={{ flex: 1 }}>
