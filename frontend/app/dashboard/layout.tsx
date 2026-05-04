@@ -89,24 +89,25 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
   const flowId = flowsIndex !== -1 ? pathnameSegments[flowsIndex + 1] : undefined;
 
   return (
-    <div style={{ display: 'flex', minHeight: '100vh', background: '#FFFFFF', fontFamily: 'Inter, -apple-system, sans-serif' }}>
+    <div className="flex min-h-screen bg-[#F8FAFC]" style={{ fontFamily: 'Inter, -apple-system, sans-serif' }}>
       {!isFlowBuilder && !isFlowAnalytics && (
-        <nav className="dash-sidebar">
-          <div className="dash-sidebar-logo">
-            <img src="/Logo.svg" alt="Ícone" className="logo-icon" />
-            <img src="/Logo2.svg" alt="Logo" className="logo-full" />
-          </div>
+        <aside className="w-[240px] flex-shrink-0">
+          <nav className="dash-sidebar">
+            <div className="dash-sidebar-logo">
+              <img src="/Logo.svg" alt="Ícone" className="logo-icon" />
+              <img src="/Logo2.svg" alt="Logo" className="logo-full" />
+            </div>
 
-          <span className="dash-nav-section">Principal</span>
+            <span className="dash-nav-section">Principal</span>
 
-          <Link
-            href="/dashboard"
-            className={`dash-nav-item ${isDashboardActive ? 'active' : ''}`}
-            aria-current={isDashboardActive ? 'page' : undefined}
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
-            <span className="dash-nav-label">Dashboard</span>
-          </Link>
+            <Link
+              href="/dashboard"
+              className={`dash-nav-item ${isDashboardActive ? 'active' : ''}`}
+              aria-current={isDashboardActive ? 'page' : undefined}
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+              <span className="dash-nav-label">Dashboard</span>
+            </Link>
 
           <Link href="/chat" className="dash-nav-item">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
@@ -145,12 +146,19 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33h.01a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h.01a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.01a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
             <span className="dash-nav-label">Configurações</span>
           </Link>
-        </nav>
+          </nav>
+        </aside>
       )}
 
-      {isFlowAnalytics && !isFlowBuilder && <FlowAnalyticsSidebar flowId={flowId} />}
+      {isFlowAnalytics && !isFlowBuilder && (
+        <aside className="w-[240px] flex-shrink-0">
+          <FlowAnalyticsSidebar flowId={flowId} />
+        </aside>
+      )}
 
-      <main style={{ flex: 1, minWidth: 0, overflowY: 'auto', padding: isFlowBuilder || isFlowAnalytics ? '0' : '32px 24px 32px 16px' }}>{children}</main>
+      <main className="flex-1 min-w-0 w-full overflow-y-auto">
+        {isFlowBuilder || isFlowAnalytics ? children : <div className="w-full px-6 py-6 lg:px-8">{children}</div>}
+      </main>
     </div>
   );
 }
