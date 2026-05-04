@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
 import { Cell, Pie, PieChart } from 'recharts';
 
 import DashboardChart from '../../components/DashboardChart';
@@ -166,7 +167,7 @@ export default function DashboardPage() {
           <span className="text-sm text-slate-500">Período</span>
           <button className="h-11 rounded-xl border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700">Últimos 7 dias</button>
           <button className="h-11 w-11 rounded-xl border border-slate-200 bg-white text-slate-500">📅</button>
-          <button className="h-11 px-5 rounded-xl bg-emerald-600 text-white shadow-[0_8px_20px_rgba(5,150,105,0.25)] font-semibold">+ Novo fluxo</button>
+          <Link href="/dashboard/flows" className="h-11 px-5 rounded-xl bg-emerald-600 text-white shadow-[0_8px_20px_rgba(5,150,105,0.25)] font-semibold">+ Novo fluxo</Link>
         </div>
       </div>
 
