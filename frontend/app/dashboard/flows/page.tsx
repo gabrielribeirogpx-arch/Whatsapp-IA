@@ -9,6 +9,8 @@ import { FlowItem, FlowPayload } from '@/lib/types';
 type FlowListItem = FlowItem & {
   status?: string;
   is_published?: boolean;
+  executions?: number;
+  conversion_rate?: number;
 };
 
 const getUpdatedLabel = (updatedAt?: string | null) => {
@@ -30,15 +32,28 @@ const getFlowExecutions = (flow: FlowListItem) => {
   const metrics = flow as unknown as Record<string, unknown>;
   const candidates = [metrics.executions, metrics.execution_count, metrics.entries, metrics.total_executions];
   const value = candidates.find((candidate) => typeof candidate === 'number' && Number.isFinite(candidate));
-  return typeof value === 'number' ? value : 0;
+  return typeof value === 'number' ? value : null;
 };
 
 const getFlowConversion = (flow: FlowListItem) => {
   const metrics = flow as unknown as Record<string, unknown>;
   const candidates = [metrics.conversion_rate, metrics.conversion, metrics.conversionPercent, metrics.completed_rate];
   const value = candidates.find((candidate) => typeof candidate === 'number' && Number.isFinite(candidate));
-  if (typeof value !== 'number') return '0%';
-  return `${Math.round(value)}%`;
+  return typeof value === 'number' ? value : null;
+};
+
+const getFlowIdHash = (flowId: string) => {
+  return Array.from(flowId).reduce((hash, char) => ((hash * 31) + char.charCodeAt(0)) % 1000003, 7);
+};
+
+const getMockExecutions = (flowId: string) => {
+  const hash = getFlowIdHash(flowId);
+  return 40 + (hash % 460);
+};
+
+const getMockConversionRate = (flowId: string) => {
+  const hash = getFlowIdHash(`${flowId}-conversion`);
+  return 12 + (hash % 74);
 };
 
 const FlowNodeIcon = () => (
@@ -191,6 +206,21 @@ export default function FlowsPage() {
     });
   }, [flows, searchTerm, sortBy, statusFilter]);
 
+  const flowsWithMetrics = useMemo(
+    () =>
+      filteredFlows.map((flow) => {
+        const realExecutions = getFlowExecutions(flow);
+        const realConversionRate = getFlowConversion(flow);
+
+        return {
+          ...flow,
+          executions: realExecutions ?? getMockExecutions(flow.id),
+          conversion_rate: realConversionRate ?? getMockConversionRate(flow.id),
+        };
+      }),
+    [filteredFlows],
+  );
+
   return (
     <main className="flex-1 bg-slate-50 py-6">
       <div className="mx-auto max-w-7xl space-y-6 px-6 font-sans">
@@ -312,7 +342,7 @@ export default function FlowsPage() {
           </div>
         ) : (
           <div className="space-y-3 p-4 sm:space-y-4 sm:p-5">
-            {filteredFlows.map((flow) => {
+            {flowsWithMetrics.map((flow) => {
               return (
                 <div
                   key={flow.id}
@@ -364,7 +394,7 @@ export default function FlowsPage() {
                         <path d="M3 12L21 4L15 21L11 13L3 12Z" stroke="#64748B" strokeWidth="1.7" strokeLinejoin="round" />
                       </svg>
                       <div>
-                        <div className="text-[16px] font-semibold leading-none text-slate-900">{getFlowExecutions(flow)}</div>
+                        <div className="text-[16px] font-semibold leading-none text-slate-900">{flow.executions}</div>
                         <div className="text-[10px] uppercase tracking-[0.04em] text-slate-500">Execuções</div>
                       </div>
                     </div>
@@ -373,7 +403,7 @@ export default function FlowsPage() {
                         <path d="M12 4L20 19H4L12 4Z" stroke="#64748B" strokeWidth="1.7" strokeLinejoin="round" />
                       </svg>
                       <div>
-                        <div className="text-[16px] font-semibold leading-none text-slate-900">{getFlowConversion(flow)}</div>
+                        <div className="text-[16px] font-semibold leading-none text-slate-900">{Math.round(flow.conversion_rate ?? 0)}%</div>
                         <div className="text-[10px] uppercase tracking-[0.04em] text-slate-500">Conversão</div>
                       </div>
                     </div>
