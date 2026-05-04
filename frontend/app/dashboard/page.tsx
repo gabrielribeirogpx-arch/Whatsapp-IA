@@ -213,22 +213,25 @@ export default function DashboardPage() {
 
       <div className="grid w-full grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">{kpiMeta.map((item) => {
         const value = viewModel[item.key];
-        return <div key={item.key} className="bg-white rounded-2xl border border-slate-100 shadow-[0_12px_30px_rgba(15,23,42,0.05)] p-4 min-h-[112px] flex items-center justify-between">{isLoading ? <div className="grid gap-2 w-full"><SkeletonLine width="35%" /><SkeletonLine width="48%" /><SkeletonLine width="40%" height={20} /></div> :
-          <>
+        return <div key={item.key} className="bg-white rounded-2xl border border-slate-100 shadow-[0_12px_30px_rgba(15,23,42,0.05)] p-4 min-h-[112px] min-w-[160px] flex items-center justify-between">{isLoading ? <div className="grid gap-2 w-full"><SkeletonLine width="35%" /><SkeletonLine width="48%" /><SkeletonLine width="40%" height={20} /></div> :
+          <div className="flex w-full items-stretch justify-between gap-3">
             <div className="flex items-start gap-3">
               <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-50 shrink-0">
                 <img src={item.icon} alt={item.label} className="h-5 w-5 opacity-90"/>
               </div>
-              <div className="flex flex-col">
+              <div className="flex h-full flex-col justify-between">
                 <span className="uppercase text-[11px] font-semibold text-slate-500">{item.label}</span>
                 <span className="text-[24px] font-bold text-slate-900 leading-tight">{value}{item.suffix}</span>
-                <span className="text-[11px] text-emerald-600">↑ 18% vs últimos 7 dias</span>
+                <p className="m-0 flex items-center gap-1 whitespace-nowrap text-[11px] text-emerald-600">
+                  <span className="font-semibold">↑ 18%</span>
+                  <span className="truncate text-slate-500">vs últimos 7 dias</span>
+                </p>
               </div>
             </div>
             <div className="w-16 h-8 self-end">
               <Sparkline/>
             </div>
-          </>}</div>;
+          </div>}</div>;
       })}</div>
 
       <div className="grid w-full grid-cols-1 gap-4 items-stretch xl:grid-cols-[minmax(0,2fr)_minmax(320px,0.9fr)]">
