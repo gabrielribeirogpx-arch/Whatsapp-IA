@@ -3,11 +3,12 @@
 import { useEffect, useId, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { Cell, Pie, PieChart } from 'recharts';
+import { useRouter } from 'next/navigation';
 import { MessageSquare } from "lucide-react";
 
 import DashboardChart from '../../components/DashboardChart';
-import { apiFetch, getConversations, listFlows, parseApiResponse } from '../../lib/api';
-import { Conversation, FlowItem } from '../../lib/types';
+import { apiFetch, createFlow, getConversations, listFlows, parseApiResponse } from '../../lib/api';
+import { Conversation, FlowItem, FlowPayload } from '../../lib/types';
 
 type DashboardData = {
   charts?: {
@@ -141,9 +142,11 @@ export default function DashboardPage() {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [flows, setFlows] = useState<FlowItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const router = useRouter();
   const [dashboardError, setDashboardError] = useState<string | null>(null);
   const [conversationsError, setConversationsError] = useState<string | null>(null);
   const [flowsError, setFlowsError] = useState<string | null>(null);
+  const [creatingFlow, setCreatingFlow] = useState(false);
 
   useEffect(() => { void (async () => {
     setIsLoading(true);
@@ -153,6 +156,27 @@ export default function DashboardPage() {
     setIsLoading(false);
   })(); }, []);
 
+
+  async function handleCreateFlow() {
+    try {
+      setCreatingFlow(true);
+
+      const created = await createFlow({
+        name: 'Novo fluxo',
+        trigger_type: 'default',
+        trigger_value: '',
+        nodes: [],
+        edges: [],
+      } as FlowPayload & { nodes: unknown[]; edges: unknown[] });
+
+      router.push(`/dashboard/flow-builder?flow_id=${created.id}`);
+    } catch (error) {
+      console.error('Erro ao criar fluxo', error);
+      alert('Não foi possível criar o fluxo agora.');
+    } finally {
+      setCreatingFlow(false);
+    }
+  }
   const uniqueConversations = useMemo(() => {
     const seen = new Set<string>();
     return conversations.filter((conversation) => {
@@ -229,13 +253,15 @@ export default function DashboardPage() {
             <option value="90d">Últimos 90 dias</option>
           </select>
           <button className="h-11 w-11 rounded-xl border border-slate-200 bg-white text-slate-500">📅</button>
-          <Link
-            href="/dashboard/flows"
-            className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-emerald-600 px-5 text-sm font-semibold leading-none text-white shadow-[0_12px_24px_rgba(16,185,129,0.22)] transition hover:bg-emerald-700"
+          <button
+            type="button"
+            onClick={handleCreateFlow}
+            disabled={creatingFlow}
+            className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-emerald-600 px-5 text-sm font-semibold leading-none text-white shadow-[0_12px_24px_rgba(16,185,129,0.22)] transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-70"
           >
             <span className="text-base leading-none">+</span>
-            <span className="leading-none">Novo fluxo</span>
-          </Link>
+            <span className="leading-none">{creatingFlow ? 'Criando...' : 'Novo fluxo'}</span>
+          </button>
         </div>
       </div>
 
