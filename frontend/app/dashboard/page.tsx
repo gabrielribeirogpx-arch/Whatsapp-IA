@@ -53,7 +53,7 @@ function SkeletonLine({ width = '100%', height = 12 }: { width?: string; height?
 }
 
 const Sparkline = () => (
-  <svg viewBox="0 0 84 28" className="h-7 w-[84px]" fill="none" aria-hidden>
+  <svg viewBox="0 0 84 28" className="h-full w-full" fill="none" aria-hidden>
     <path d="M1 25C8 17 12 15 20 18C28 21 34 24 41 20C48 16 53 17 59 14C66 11 72 8 83 2" stroke="#22C55E" strokeWidth="2.2" strokeLinecap="round" opacity="0.75"/>
   </svg>
 );
@@ -133,7 +133,21 @@ export default function DashboardPage() {
     <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">{kpiMeta.map((item) => {
       const value = viewModel[item.key];
       return <div key={item.key} className={cardClassName}>{isLoading ? <div className="grid gap-3"><SkeletonLine width="30%" /><SkeletonLine width="55%" /><SkeletonLine width="40%" height={24} /></div> :
-        <div className="flex items-start justify-between gap-2"><div><div className="mb-3 flex h-11 w-11 items-center justify-center rounded-2xl bg-emerald-50"><img src={item.icon} alt={item.label} className="h-5 w-5 opacity-90"/></div><p className="m-0 text-xs font-semibold uppercase tracking-wide text-slate-500">{item.label}</p><p className="m-0 mt-1 text-3xl font-bold text-slate-900">{value}{item.suffix}</p></div><div className="self-end"><Sparkline/></div></div>}</div>;
+        <div className="flex items-center justify-between">
+          <div className="flex items-start gap-3">
+            <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-emerald-50">
+              <img src={item.icon} alt={item.label} className="h-5 w-5 opacity-90"/>
+            </div>
+            <div className="flex flex-col">
+              <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">{item.label}</span>
+              <span className="text-2xl font-semibold text-slate-900">{value}{item.suffix}</span>
+              <span className="text-xs text-emerald-600">+32% vs ontem</span>
+            </div>
+          </div>
+          <div className="h-10 w-16 opacity-80">
+            <Sparkline/>
+          </div>
+        </div>}</div>;
     })}</div>
 
     <div className="mb-6 grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,2fr)_minmax(320px,1fr)]">
