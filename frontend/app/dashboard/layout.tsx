@@ -5,7 +5,7 @@ import { ReactNode, useEffect, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { deleteFlow, duplicateFlow, listFlows, updateFlowStatus } from '@/lib/api';
 
-function FlowAnalyticsSidebar({ flowId }: { flowId?: string }) {
+function FlowAnalyticsSidebar({ flowId, expanded }: { flowId?: string; expanded: boolean }) {
   const router = useRouter();
   const [isActive, setIsActive] = useState(false);
 
@@ -37,7 +37,7 @@ function FlowAnalyticsSidebar({ flowId }: { flowId?: string }) {
   };
 
   return (
-    <nav className="dash-sidebar">
+    <nav className={`dash-sidebar ${expanded ? 'is-expanded' : ''}`}>
       <div className="dash-sidebar-logo">
         <img src="/Logo.svg" alt="Ícone" className="logo-icon" />
         <img src="/Logo2.svg" alt="Logo" className="logo-full" />
@@ -83,6 +83,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
   const isFlowBuilder = pathname.startsWith('/dashboard/flow-builder');
   const isFlowAnalytics = pathname.includes('/dashboard/flows/') && pathname.endsWith('/analytics');
   const isDashboardActive = pathname === '/dashboard';
+  const [sidebarExpanded, setSidebarExpanded] = useState(false);
 
   const pathnameSegments = pathname.split('/');
   const flowsIndex = pathnameSegments.indexOf('flows');
@@ -91,8 +92,12 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
   return (
     <div className="flex min-h-screen bg-[#F8FAFC]" style={{ fontFamily: 'Inter, -apple-system, sans-serif' }}>
       {!isFlowBuilder && !isFlowAnalytics && (
-        <aside className="w-[56px] flex-shrink-0">
-          <nav className="dash-sidebar">
+        <aside
+          className={`flex-shrink-0 transition-all duration-300 ease-out ${sidebarExpanded ? 'w-[200px]' : 'w-[56px]'}`}
+          onMouseEnter={() => setSidebarExpanded(true)}
+          onMouseLeave={() => setSidebarExpanded(false)}
+        >
+          <nav className={`dash-sidebar ${sidebarExpanded ? 'is-expanded' : ''}`}>
             <div className="dash-sidebar-logo">
               <img src="/Logo.svg" alt="Ícone" className="logo-icon" />
               <img src="/Logo2.svg" alt="Logo" className="logo-full" />
@@ -151,8 +156,12 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
       )}
 
       {isFlowAnalytics && !isFlowBuilder && (
-        <aside className="w-[56px] flex-shrink-0">
-          <FlowAnalyticsSidebar flowId={flowId} />
+        <aside
+          className={`flex-shrink-0 transition-all duration-300 ease-out ${sidebarExpanded ? 'w-[200px]' : 'w-[56px]'}`}
+          onMouseEnter={() => setSidebarExpanded(true)}
+          onMouseLeave={() => setSidebarExpanded(false)}
+        >
+          <FlowAnalyticsSidebar flowId={flowId} expanded={sidebarExpanded} />
         </aside>
       )}
 

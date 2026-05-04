@@ -1178,7 +1178,7 @@ input {
 
 /* ── DASHBOARD SIDEBAR PREMIUM ──────────────────────── */
 .dash-sidebar {
-  width: 56px;
+  width: 100%;
   background: #ffffff;
   border-right: 1px solid #E8EAE6;
   display: flex;
@@ -1194,7 +1194,7 @@ input {
   z-index: 100;
 }
 
-.dash-sidebar:hover {
+.dash-sidebar.is-expanded {
   width: 200px;
   box-shadow: 2px 0 16px rgba(0,0,0,0.06);
 }
@@ -1230,12 +1230,12 @@ input {
   white-space: nowrap;
 }
 
-.dash-sidebar:hover .logo-icon {
+.dash-sidebar.is-expanded .logo-icon {
   opacity: 0;
   width: 0;
 }
 
-.dash-sidebar:hover .logo-full {
+.dash-sidebar.is-expanded .logo-full {
   opacity: 1;
   width: 160px;
 }
@@ -1286,7 +1286,7 @@ input {
   white-space: nowrap;
 }
 
-.dash-sidebar:hover .dash-nav-label {
+.dash-sidebar.is-expanded .dash-nav-label {
   opacity: 1;
 }
 
@@ -1304,7 +1304,7 @@ input {
   transition: opacity 0.15s, height 0.15s;
 }
 
-.dash-sidebar:hover .dash-nav-section {
+.dash-sidebar.is-expanded .dash-nav-section {
   opacity: 1;
   height: auto;
 }
