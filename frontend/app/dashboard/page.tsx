@@ -1,6 +1,6 @@
 'use client';
 
-import { CSSProperties, useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 import DashboardChart from '../../components/DashboardChart';
 import { apiFetch, getConversations, listFlows, parseApiResponse } from '../../lib/api';
@@ -45,36 +45,24 @@ const FALLBACK_VIEW_MODEL: DashboardViewModel = {
   channels: [{ name: 'WhatsApp', value: 100 }],
 };
 
-const cardBaseStyle: CSSProperties = {
-  border: '1px solid #E2E8F0',
-  borderRadius: 16,
-  background: '#FFFFFF',
-  padding: 18,
-  boxShadow: '0 8px 24px rgba(15, 23, 42, 0.04)',
-};
-
-const premiumLabelStyle: CSSProperties = { margin: '0 0 12px', color: '#0F172A', fontWeight: 700 };
-const subtleTextStyle: CSSProperties = { margin: 0, color: '#64748B', fontSize: 14 };
+const cardClassName =
+  'bg-white rounded-2xl border border-slate-100 shadow-[0_18px_45px_rgba(15,23,42,0.06)] p-5 md:p-6 min-h-[150px] transition-shadow duration-200 hover:shadow-[0_20px_50px_rgba(15,23,42,0.09)]';
 
 function SkeletonLine({ width = '100%', height = 12 }: { width?: string; height?: number }) {
   return (
     <div
-      style={{
-        width,
-        height,
-        borderRadius: 999,
-        background: 'linear-gradient(90deg, #ECFDF5 0%, #E2E8F0 50%, #ECFDF5 100%)',
-      }}
+      className="rounded-full bg-gradient-to-r from-emerald-50 via-slate-200 to-emerald-50"
+      style={{ width, height }}
     />
   );
 }
 
 function EmptyState({ message }: { message: string }) {
-  return <p style={subtleTextStyle}>{message}</p>;
+  return <p className="m-0 text-sm text-slate-500">{message}</p>;
 }
 
 function ErrorState({ message }: { message: string }) {
-  return <p style={{ ...subtleTextStyle, color: '#B91C1C' }}>{message}</p>;
+  return <p className="m-0 text-sm text-red-700">{message}</p>;
 }
 
 export default function DashboardPage() {
@@ -182,15 +170,15 @@ export default function DashboardPage() {
   const messagesLast7Days = data?.charts?.messages_last_7_days;
 
   return (
-    <>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
+    <div className="bg-[#F8FAFC] p-5 md:p-6 rounded-2xl">
+      <div className="mb-6 flex items-center justify-between">
         <div>
-          <h1 style={{ fontSize: 24, fontWeight: 700, color: '#0F172A', margin: '0 0 4px' }}>Dashboard</h1>
-          <p style={{ fontSize: 14, color: '#64748B', margin: 0 }}>Visão consolidada dos seus fluxos e atendimentos.</p>
+          <h1 className="m-0 text-2xl font-bold text-slate-900">Dashboard</h1>
+          <p className="m-0 mt-1 text-sm text-slate-500">Visão consolidada dos seus fluxos e atendimentos.</p>
         </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, minmax(0, 1fr))', gap: 14, marginBottom: 20 }}>
+      <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">
         {[
           ['💬', 'Conversas ativas', viewModel.activeConversations, '+0.0%'],
           ['🧠', 'Leads ativos', viewModel.activeLeads, '+0.0%'],
@@ -198,37 +186,37 @@ export default function DashboardPage() {
           ['✅', 'Taxa de resposta', `${viewModel.responseRate}%`, '+0.0%'],
           ['🎯', 'Conversões', viewModel.conversions, '+0.0%'],
         ].map(([icon, label, value, change]) => (
-          <div key={String(label)} style={cardBaseStyle}>
+          <div key={String(label)} className={cardClassName}>
             {isLoading ? (
-              <div style={{ display: 'grid', gap: 10 }}>
+              <div className="grid gap-3">
                 <SkeletonLine width="30%" />
                 <SkeletonLine width="55%" />
                 <SkeletonLine width="40%" height={24} />
               </div>
             ) : (
               <>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-                  <span style={{ fontSize: 18 }}>{icon}</span>
-                  <span style={{ fontSize: 12, color: String(change).startsWith('+') ? '#16A34A' : '#DC2626', fontWeight: 700 }}>
+                <div className="mb-2 flex items-center justify-between">
+                  <span className="text-lg">{icon}</span>
+                  <span className="text-xs font-bold" style={{ color: String(change).startsWith('+') ? '#16A34A' : '#DC2626' }}>
                     {change}
                   </span>
                 </div>
-                <p style={{ margin: '0 0 4px', fontSize: 13, color: '#64748B' }}>{label}</p>
-                <p style={{ margin: '0 0 8px', fontSize: 24, fontWeight: 700, color: '#0F172A' }}>{value}</p>
+                <p className="m-0 mb-1 text-sm text-slate-500">{label}</p>
+                <p className="m-0 text-2xl font-bold text-slate-900">{value}</p>
               </>
             )}
           </div>
         ))}
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 16, marginBottom: 20 }}>
-        <div style={cardBaseStyle}>
-          <p style={premiumLabelStyle}>Mensagens — últimos 7 dias</p>
+      <div className="mb-6 grid grid-cols-1 gap-4 xl:grid-cols-3">
+        <div className={`${cardClassName} xl:col-span-2`}>
+          <p className="m-0 mb-3 font-bold text-slate-900">Mensagens — últimos 7 dias</p>
           {dashboardError ? (
             <ErrorState message={dashboardError} />
           ) : isLoading ? (
-            <div style={{ display: 'grid', gap: 10 }}>
-              <SkeletonLine width="100%" height={160} />
+            <div className="grid gap-3">
+              <SkeletonLine width="100%" height={180} />
             </div>
           ) : messagesLast7Days?.length ? (
             <DashboardChart data={messagesLast7Days} />
@@ -238,39 +226,41 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: 16, marginBottom: 20 }}>
-        <div style={cardBaseStyle}>
-          <p style={premiumLabelStyle}>Top fluxos</p>
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+        <div className={cardClassName}>
+          <p className="m-0 mb-3 font-bold text-slate-900">Top fluxos</p>
           {flowsError ? (
             <ErrorState message={flowsError} />
           ) : isLoading ? (
-            <div style={{ display: 'grid', gap: 10 }}>
+            <div className="grid gap-3">
               <SkeletonLine width="90%" />
               <SkeletonLine width="80%" />
               <SkeletonLine width="70%" />
             </div>
           ) : viewModel.topFlows.length ? (
-            viewModel.topFlows.map((flow, index) => (
-              <p key={flow.name} style={{ margin: '0 0 8px', color: '#334155' }}>
-                {index + 1}. {flow.name} — {flow.value}%
-              </p>
-            ))
+            <div className="grid gap-2">
+              {viewModel.topFlows.map((flow, index) => (
+                <p key={flow.name} className="m-0 text-slate-700">
+                  {index + 1}. {flow.name} — {flow.value}%
+                </p>
+              ))}
+            </div>
           ) : (
             <EmptyState message="Nenhum fluxo com performance recente." />
           )}
         </div>
 
-        <div style={cardBaseStyle}>
-          <p style={premiumLabelStyle}>Canais de entrada</p>
+        <div className={cardClassName}>
+          <p className="m-0 mb-3 font-bold text-slate-900">Canais de entrada</p>
           {conversationsError ? (
             <ErrorState message={conversationsError} />
           ) : isLoading ? (
-            <div style={{ display: 'grid', gap: 10 }}>
+            <div className="grid gap-3">
               <SkeletonLine width="85%" />
               <SkeletonLine width="60%" />
             </div>
           ) : viewModel.channels.length ? (
-            <ul style={{ margin: 0, paddingLeft: 18, color: '#475569', display: 'grid', gap: 8 }}>
+            <ul className="m-0 grid gap-2 pl-5 text-slate-600">
               {viewModel.channels.map((channel) => (
                 <li key={channel.name}>
                   {channel.name}: {channel.value}%
@@ -282,6 +272,6 @@ export default function DashboardPage() {
           )}
         </div>
       </div>
-    </>
+    </div>
   );
 }
