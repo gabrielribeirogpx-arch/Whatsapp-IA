@@ -160,7 +160,7 @@ export default function DashboardPage() {
   }, [viewModel.channels]);
 
   return (
-    <section className="w-full min-w-0 px-6 py-6 lg:px-8">
+    <section className="w-full min-w-0 px-5 py-6 lg:px-6">
       <div className="w-full min-w-0 space-y-5">
       <div className="flex items-center justify-between gap-4 mb-4">
         <div>
