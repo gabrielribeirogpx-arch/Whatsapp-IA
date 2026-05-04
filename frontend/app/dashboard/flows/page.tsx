@@ -292,55 +292,59 @@ export default function FlowsPage() {
             <button onClick={openCreate} style={{ background: '#16a34a', color: '#fff', border: 'none', padding: '9px 20px', borderRadius: 10, fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>+ Criar primeiro fluxo</button>
           </div>
         ) : (
-          <div>
-            {filteredFlows.map((flow, index) => {
+          <div className="space-y-3 p-4 sm:space-y-4 sm:p-5">
+            {filteredFlows.map((flow) => {
               return (
-                <div key={flow.id} className="flex flex-col gap-3 px-5 py-4 transition sm:gap-4 lg:flex-row lg:items-center lg:justify-between" style={{ borderBottom: index < filteredFlows.length - 1 ? '1px solid #f0f0ee' : 'none', transition: 'background 0.15s' }}
-                  onMouseEnter={(e) => { e.currentTarget.style.background = '#fafaf9'; }}
-                  onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4, flexWrap: 'wrap' }}>
+                <div
+                  key={flow.id}
+                  className="flex flex-col gap-4 rounded-2xl border border-gray-100 bg-white p-5 transition hover:shadow-md lg:flex-row lg:items-center lg:justify-between"
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="mb-1.5 flex flex-wrap items-center gap-3">
                       <Switch
                         checked={flow.is_active}
                         onChange={(value) => handleToggle(flow.id, value)}
                         tooltip={flow.is_active ? 'Desativar fluxo' : 'Ativar fluxo'}
                       />
-                      <div style={{ width: 28, height: 28, borderRadius: 8, background: '#f1f5f9', border: '1px solid #e2e8f0', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 13 }}>
+                      <div className="inline-flex h-12 w-12 items-center justify-center rounded-xl border border-slate-200 bg-slate-100 text-lg">
                         ⚡
                       </div>
-                      <span style={{ fontSize: 14, fontWeight: 600, color: '#111' }}>{flow.name}</span>
-                      {flow.is_active ? (
-                        <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700 ring-1 ring-emerald-200">
-                          <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-                          Ativo
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="truncate text-sm font-semibold text-slate-900 sm:text-base">{flow.name}</span>
+                          {flow.is_active ? (
+                            <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700 ring-1 ring-emerald-200">
+                              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                              Ativo
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-500 ring-1 ring-slate-200">
+                              <span className="h-1.5 w-1.5 rounded-full bg-slate-400" />
+                              OFF
+                            </span>
+                          )}
+                        </div>
+                        <span className="mt-1 block text-xs text-slate-500">
+                          Trigger: {flow.trigger_type || 'default'}
+                          {flow.trigger_value ? ` · ${flow.trigger_value}` : ''}
                         </span>
-                      ) : (
-                        <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-500 ring-1 ring-slate-200">
-                          <span className="h-1.5 w-1.5 rounded-full bg-slate-400" />
-                          OFF
-                        </span>
-                      )}
-                    </div>
-                    <span style={{ fontSize: 12, color: '#64748b', display: 'block' }}>
-                      Trigger: {flow.trigger_type || 'default'}{flow.trigger_value ? ` · ${flow.trigger_value}` : ''}
-                    </span>
-                    <span style={{ fontSize: 12, color: '#94a3b8', display: 'block', marginTop: 2 }}>
-                      {getUpdatedLabel(flow.updated_at)}
-                    </span>
-                  </div>
-
-                  <div className="flex w-full flex-wrap items-center gap-2 lg:w-auto">
-                    <div style={{ border: '1px solid #e2e8f0', borderRadius: 10, padding: '6px 10px', background: '#f8fafc', minWidth: 92 }}>
-                      <div style={{ fontSize: 10, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 700 }}>Execuções</div>
-                      <div style={{ fontSize: 14, color: '#0f172a', fontWeight: 700 }}>{getFlowExecutions(flow)}</div>
-                    </div>
-                    <div style={{ border: '1px solid #e2e8f0', borderRadius: 10, padding: '6px 10px', background: '#f8fafc', minWidth: 92 }}>
-                      <div style={{ fontSize: 10, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 700 }}>Conversão</div>
-                      <div style={{ fontSize: 14, color: '#0f172a', fontWeight: 700 }}>{getFlowConversion(flow)}</div>
+                        <span className="mt-0.5 block text-xs text-slate-400">{getUpdatedLabel(flow.updated_at)}</span>
+                      </div>
                     </div>
                   </div>
 
-                  <div className="relative flex w-full flex-wrap items-center gap-2 lg:w-auto lg:justify-end">
+                  <div className="flex w-full flex-wrap items-center gap-2 sm:gap-3 lg:w-auto lg:justify-center">
+                    <div className="rounded-xl bg-gray-50 px-4 py-2 text-sm">
+                      <div className="text-[10px] font-bold uppercase tracking-[0.05em] text-slate-500">Execuções</div>
+                      <div className="text-sm font-bold text-slate-900 sm:text-base">{getFlowExecutions(flow)}</div>
+                    </div>
+                    <div className="rounded-xl bg-gray-50 px-4 py-2 text-sm">
+                      <div className="text-[10px] font-bold uppercase tracking-[0.05em] text-slate-500">Conversão</div>
+                      <div className="text-sm font-bold text-slate-900 sm:text-base">{getFlowConversion(flow)}</div>
+                    </div>
+                  </div>
+
+                  <div className="relative flex w-full flex-wrap items-center gap-2 sm:justify-end lg:w-auto">
                     <button onClick={(e) => { e.stopPropagation(); openEdit(flow); }} style={{ background: 'transparent', border: '1px solid #e8e6e0', padding: '6px 12px', borderRadius: 8, fontSize: 12, cursor: 'pointer', color: '#555', fontWeight: 500, whiteSpace: 'nowrap' }}>Editar</button>
                     <Link href={`/dashboard/flows/${flow.id}/analytics`} onClick={(e) => e.stopPropagation()} style={{ background: 'transparent', border: '1px solid #e8e6e0', padding: '6px 12px', borderRadius: 8, fontSize: 12, color: '#555', textDecoration: 'none', fontWeight: 500, whiteSpace: 'nowrap' }}>Analytics</Link>
                     <Link href={`/dashboard/flow-builder?flow_id=${flow.id}`} onClick={(e) => e.stopPropagation()} style={{ background: '#16a34a', color: '#fff', border: 'none', padding: '6px 14px', borderRadius: 8, fontSize: 12, fontWeight: 600, textDecoration: 'none', whiteSpace: 'nowrap' }}>Abrir builder</Link>
