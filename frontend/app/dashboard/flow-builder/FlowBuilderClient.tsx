@@ -64,12 +64,17 @@ const NODE_PRESETS: Record<FlowNodeKind, { label: string; type: string; data: Re
 
 const initialNodes: Node[] = [];
 const initialEdges: Edge[] = [];
-const FALLBACK_START_NODE: Node = {
-  id: 'start',
+const makeInitialNode = (): Node => ({
+  id: makeNodeId(),
   type: 'message',
-  position: { x: 250, y: 100 },
-  data: { label: 'Início', isStart: true },
-};
+  position: { x: 180, y: 160 },
+  data: {
+    label: 'Mensagem',
+    text: 'Olá! 👋',
+    isStart: true,
+    isEnd: false,
+  },
+});
 
 function randomPosition() {
   return {
@@ -429,7 +434,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
   const loadFlow = useCallback(async (flowId: string | null) => {
     try {
       if (!flowId) {
-        setNodes([FALLBACK_START_NODE]);
+        setNodes([]);
         setEdges([]);
         setShowEmptyFlowWarning(false);
         setFlowSource('version');
@@ -460,7 +465,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
 
       const data = await Promise.race([requestPromise, timeoutPromise]);
       if (!data) {
-        setNodes([FALLBACK_START_NODE]);
+        setNodes([]);
         setEdges([]);
         setShowEmptyFlowWarning(false);
         setFlowSource('version');
@@ -508,10 +513,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
         }),
       }));
 
-      let nodesToRender =
-        formattedNodes.length === 0
-          ? [FALLBACK_START_NODE]
-          : formattedNodes;
+      let nodesToRender = formattedNodes.length === 0 ? [] : formattedNodes;
       let edgesToRender = formattedEdges;
 
       console.log('NODES:', nodesToRender);
@@ -529,7 +531,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
     } catch (err) {
       console.error('Erro ao carregar flow', err);
       setSelectedFlowId(null);
-      setNodes([FALLBACK_START_NODE]);
+      setNodes([]);
       setEdges([]);
     } finally {
       isLoadingFlowRef.current = false;
@@ -558,6 +560,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
     if (!flowIdFromUrl && initialFlowId) {
       console.log('[BUILDER USING ACTIVE FALLBACK]', initialFlowId);
       console.log('[BUILDER SELECTED_FLOW_ID]', initialFlowId);
+      router.replace(`/dashboard/flow-builder?flow_id=${initialFlowId}`);
       setSelectedFlowId((prev) => (prev === initialFlowId ? prev : initialFlowId));
       if (lastLoadedFlowIdRef.current !== initialFlowId) {
         console.log('[BUILDER LOAD FLOW]', initialFlowId);
@@ -569,16 +572,28 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
     if (selectedFlowId && !normalizedFlows.find((flow) => flow.id === selectedFlowId)) {
       setSelectedFlowId(null);
     }
-  }, [flowIdFromUrl, loadFlow, normalizedFlows, selectedFlowId]);
+  }, [flowIdFromUrl, loadFlow, normalizedFlows, router, selectedFlowId]);
 
   useEffect(() => {
     if (!flows || flows.length === 0) {
       setSelectedFlowId(null);
       lastLoadedFlowIdRef.current = null;
-      setNodes([FALLBACK_START_NODE]);
+      setNodes([]);
       setEdges([]);
     }
   }, [flows, setEdges, setNodes]);
+
+  const handleAddInitialBlock = useCallback(async () => {
+    if (!selectedFlowId) return;
+    const nextNodes = [makeInitialNode()];
+    setNodes(nextNodes);
+    setEdges([]);
+    await apiFetch(`/api/flows/${selectedFlowId}`, {
+      method: 'PUT',
+      body: JSON.stringify({ nodes: nextNodes, edges: [] }),
+    });
+    setShowEmptyFlowWarning(false);
+  }, [selectedFlowId, setEdges, setNodes]);
 
   const handleSelectFlow = useCallback(async (flowId: string) => {
     console.log('[BUILDER SELECTED_FLOW_ID]', flowId);
@@ -1040,6 +1055,20 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
   if (isLoading) {
     return <div>Carregando fluxo...</div>;
   }
+  if (!selectedFlowId) {
+    return (
+      <div style={{ padding: 24 }}>
+        <p style={{ marginBottom: 12 }}>Nenhum fluxo selecionado.</p>
+        {normalizedFlows.length === 0 ? (
+          <button type="button" onClick={() => { void createDefaultFlow(); }}>
+            Criar primeiro fluxo
+          </button>
+        ) : null}
+      </div>
+    );
+  }
+
+  const canRenderFlow = selectedFlowId && Array.isArray(safeNodes) && Array.isArray(decoratedEdges);
   return (
     <div className="flow-builder-page" style={{ width: '100%', height: '100vh', display: 'flex' }}>
       <nav
@@ -1354,7 +1383,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
             ))}
           </div>
         )}
-        <ReactFlow
+        {canRenderFlow ? <ReactFlow
           key={flow?.id || 'no-flow'}
           onInit={setRfInstance}
           nodes={safeNodes}
@@ -1383,7 +1412,15 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
           <Background variant={BackgroundVariant.Dots} gap={18} size={1.2} color="rgba(22, 163, 74, 0.18)" />
           <MiniMap nodeBorderRadius={8} pannable style={{ background: '#FFFFFF', border: '1px solid #E8E6E0' }} />
           <Controls />
-        </ReactFlow>
+        </ReactFlow> : null}
+        {safeNodes.length === 0 && (
+          <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 12 }}>
+            <p>Este fluxo ainda não possui blocos.</p>
+            <button type="button" className="flow-top-btn flow-top-btn-primary" onClick={() => { void handleAddInitialBlock(); }}>
+              Adicionar bloco inicial
+            </button>
+          </div>
+        )}
       </main>
       {isSimulatorOpen && (
         <aside style={{

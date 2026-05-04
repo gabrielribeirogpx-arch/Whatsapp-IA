@@ -160,14 +160,33 @@ export default function DashboardPage() {
   async function handleCreateFlow() {
     try {
       setCreatingFlow(true);
+      const initialNodeId = typeof crypto !== 'undefined' && crypto.randomUUID
+        ? crypto.randomUUID()
+        : `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 
       const created = await createFlow({
         name: 'Novo fluxo',
         trigger_type: 'default',
         trigger_value: '',
-        nodes: [],
+        nodes: [
+          {
+            id: initialNodeId,
+            type: 'message',
+            position: { x: 180, y: 160 },
+            data: {
+              label: 'Mensagem',
+              text: 'Olá! 👋',
+              is_start: true,
+              is_end: false,
+            },
+          },
+        ],
         edges: [],
       } as FlowPayload & { nodes: unknown[]; edges: unknown[] });
+
+      if (!created?.id) {
+        throw new Error('Flow criado sem id');
+      }
 
       router.push(`/dashboard/flow-builder?flow_id=${created.id}`);
     } catch (error) {
