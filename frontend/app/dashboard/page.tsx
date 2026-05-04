@@ -49,6 +49,26 @@ const FALLBACK_VIEW_MODEL: DashboardViewModel = {
   channels: [{ name: 'WhatsApp', value: 100 }],
 };
 
+
+function getInitials(name?: string) {
+  if (!name) return '—';
+
+  const normalized = name.trim();
+  if (!normalized) return '—';
+  if (/^\+?\d+$/.test(normalized)) return 'U';
+
+  const parts = normalized.split(' ').filter(Boolean);
+
+  if (parts.length === 1) {
+    return parts[0][0].toUpperCase();
+  }
+
+  const first = parts[0][0];
+  const last = parts[parts.length - 1][0];
+
+  return (first + last).toUpperCase();
+}
+
 const cardClassName =
   'bg-white rounded-2xl border border-slate-100 shadow-[0_12px_30px_rgba(15,23,42,0.05)] p-5';
 
@@ -224,7 +244,8 @@ export default function DashboardPage() {
           </div>
           {conversationsError ? <p className="text-sm text-red-700">{conversationsError}</p> : liveItems.length === 0 ? <div className="h-[290px] grid place-items-center rounded-xl border border-dashed border-emerald-200 bg-emerald-50/40 text-center"><div><p className="m-0 font-semibold text-slate-700">Sem atividade no momento</p><p className="m-0 mt-1 text-sm text-slate-500">Novas conversas aparecerão aqui em tempo real.</p></div></div> : <div className="space-y-4">{liveItems.map((c, idx) => {
             const name = c.name || c.phone || 'Contato';
-            const initials = name.split(' ').map((w) => w[0]).slice(0,2).join('').toUpperCase();
+            const contactName = (c as Conversation & { contact_name?: string | null }).contact_name;
+            const initials = getInitials(c.name || contactName || c.phone);
             return <div key={c.id || idx} className="flex items-start justify-between border-b border-slate-100 pb-3 last:border-b-0"><div className="flex gap-3"><div className="flex h-11 w-11 items-center justify-center rounded-full bg-emerald-50 text-sm font-semibold text-emerald-700">{initials}</div><div><p className="m-0 font-semibold text-slate-800">{name}</p><p className="m-0 text-sm text-slate-500">Flow: {getConversationFlowLabel(c)}</p><p className="m-0 text-sm text-slate-600 line-clamp-1">{c.last_message || 'Sem mensagem recente.'}</p></div></div><div className="text-right text-xs text-slate-500">agora<div className="ml-auto mt-2 h-2 w-2 rounded-full bg-emerald-500" /></div></div>;
           })}</div>}
         </div>
