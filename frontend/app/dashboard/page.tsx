@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useId, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { Cell, Pie, PieChart } from 'recharts';
 
@@ -76,11 +76,23 @@ function SkeletonLine({ width = '100%', height = 12 }: { width?: string; height?
   return <div className="rounded-full bg-gradient-to-r from-emerald-50 via-slate-200 to-emerald-50" style={{ width, height }} />;
 }
 
-const Sparkline = ({ className = 'h-full w-full' }: { className?: string }) => (
-  <svg width="64" height="24" viewBox="0 0 64 24" className={className} fill="none" aria-hidden>
-    <path d="M1 22C7 16 11 14 18 16C25 18 30 21 36 18C42 15 47 15 52 13C57 11 61 8 63 4" stroke="#22C55E" strokeWidth="2.2" strokeLinecap="round" opacity="0.75"/>
-  </svg>
-);
+const Sparkline = ({ className = 'h-full w-full overflow-hidden' }: { className?: string }) => {
+  const gradientId = useId();
+  const linePath = 'M1 22C7 16 11 14 18 16C25 18 30 21 36 18C42 15 47 15 52 13C57 11 61 8 63 4';
+
+  return (
+    <svg width="64" height="24" viewBox="0 0 64 24" className={className} fill="none" aria-hidden>
+      <defs>
+        <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="#22c55e" stopOpacity="0.25" />
+          <stop offset="100%" stopColor="#22c55e" stopOpacity="0" />
+        </linearGradient>
+      </defs>
+      <path d={`${linePath} L 63,24 L 1,24 Z`} fill={`url(#${gradientId})`} />
+      <path d={linePath} stroke="#22C55E" fill="none" strokeWidth="2" strokeLinecap="round" opacity="0.9" />
+    </svg>
+  );
+};
 
 const kpiMeta = [
   { key: 'activeConversations', label: 'Conversas ativas', icon: '/icons/dashboard/conversas.svg', suffix: '' },
