@@ -201,15 +201,18 @@ export default function FlowsPage() {
 
   return (
     <main className="flex-1 bg-slate-50 py-6">
-      <div className="max-w-7xl mx-auto px-6 space-y-6" style={{ fontFamily: 'Inter, -apple-system, sans-serif' }}>
+      <div className="mx-auto max-w-7xl space-y-6 px-6 font-sans">
       {/* Header */}
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h1 style={{ margin: 0, fontSize: 22, fontWeight: 600, color: '#111', letterSpacing: '-0.02em' }}>Automações</h1>
-          <p style={{ margin: '4px 0 0', fontSize: 13, color: '#888' }}>Gerencie fluxos de conversação e gatilhos</p>
+          <h1 className="m-0 text-[22px] font-semibold tracking-[-0.02em] text-slate-900">Automações</h1>
+          <p className="mt-1 text-sm text-slate-500">Gerencie fluxos de conversação e gatilhos</p>
         </div>
-        <button onClick={openCreate} style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#16a34a', color: '#fff', border: 'none', padding: '9px 18px', borderRadius: 10, fontSize: 13, fontWeight: 600, cursor: 'pointer', letterSpacing: '-0.01em' }}>
-          <span style={{ fontSize: 16, lineHeight: 1 }}>+</span> Novo fluxo
+        <button
+          onClick={openCreate}
+          className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-600 px-[18px] py-[9px] text-sm font-semibold tracking-[-0.01em] text-white transition hover:bg-emerald-700"
+        >
+          <span className="text-base leading-none">+</span> Novo fluxo
         </button>
       </div>
 
@@ -270,18 +273,18 @@ export default function FlowsPage() {
         ))}
       </div>
 
-      <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+      <div className="rounded-2xl border border-gray-100 bg-white p-4 shadow-sm">
         <div className="flex items-center gap-4">
           <input
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             placeholder="Buscar fluxos..."
-            className="flex-1 rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none"
+            className="flex-1 rounded-xl border border-gray-100 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none"
           />
           <select
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value as 'all' | 'active' | 'inactive' | 'draft' | 'published')}
-            className="w-52 rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none"
+            className="w-52 rounded-xl border border-gray-100 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none"
           >
             <option value="all">Todos os status</option>
             <option value="active">Ativo</option>
@@ -292,7 +295,7 @@ export default function FlowsPage() {
           <select
             value={sortBy}
             onChange={(e) => setSortBy(e.target.value as 'recent' | 'name' | 'active_first')}
-            className="w-56 rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none"
+            className="w-56 rounded-xl border border-gray-100 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none"
           >
             <option value="recent">Ordenar: Mais recentes</option>
             <option value="name">Ordenar: Nome</option>
@@ -302,19 +305,24 @@ export default function FlowsPage() {
       </div>
 
       {/* Flow list */}
-      <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-        <div style={{ padding: '16px 20px', borderBottom: '1px solid #f0f0ee' }}>
-          <span style={{ fontSize: 11, fontWeight: 600, color: '#888', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Seus fluxos</span>
+      <div className="overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-sm">
+        <div className="border-b border-gray-100 px-5 py-4">
+          <span className="text-xs font-semibold uppercase tracking-[0.05em] text-slate-500">Seus fluxos</span>
         </div>
 
         {loading ? (
-          <div style={{ padding: '48px 20px', textAlign: 'center', color: '#aaa', fontSize: 13 }}>Carregando...</div>
+          <div className="px-5 py-12 text-center text-sm text-slate-400">Carregando...</div>
         ) : filteredFlows.length === 0 ? (
-          <div style={{ padding: '56px 20px', textAlign: 'center' }}>
-            <div style={{ width: 48, height: 48, background: '#f0fdf4', borderRadius: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px', fontSize: 22 }}>⚡</div>
-            <p style={{ margin: '0 0 6px', fontSize: 15, fontWeight: 600, color: '#111' }}>Nenhum fluxo criado ainda</p>
-            <p style={{ margin: '0 0 20px', fontSize: 13, color: '#888' }}>Crie seu primeiro fluxo de automação</p>
-            <button onClick={openCreate} style={{ background: '#16a34a', color: '#fff', border: 'none', padding: '9px 20px', borderRadius: 10, fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>+ Criar primeiro fluxo</button>
+          <div className="px-5 py-14 text-center">
+            <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-emerald-50 text-[22px]">⚡</div>
+            <p className="mb-1.5 text-base font-semibold text-slate-900">Nenhum fluxo criado ainda</p>
+            <p className="mb-5 text-sm text-slate-500">Crie seu primeiro fluxo de automação</p>
+            <button
+              onClick={openCreate}
+              className="rounded-xl bg-emerald-600 px-5 py-[9px] text-sm font-semibold text-white transition hover:bg-emerald-700"
+            >
+              + Criar primeiro fluxo
+            </button>
           </div>
         ) : (
           <div className="space-y-3 p-4 sm:space-y-4 sm:p-5">
@@ -368,15 +376,15 @@ export default function FlowsPage() {
                   </div>
 
                   <div className="relative flex w-full flex-wrap items-center gap-2 sm:justify-end lg:w-auto">
-                    <button onClick={(e) => { e.stopPropagation(); openEdit(flow); }} style={{ background: 'transparent', border: '1px solid #e8e6e0', padding: '6px 12px', borderRadius: 8, fontSize: 12, cursor: 'pointer', color: '#555', fontWeight: 500, whiteSpace: 'nowrap' }}>Editar</button>
-                    <Link href={`/dashboard/flows/${flow.id}/analytics`} onClick={(e) => e.stopPropagation()} style={{ background: 'transparent', border: '1px solid #e8e6e0', padding: '6px 12px', borderRadius: 8, fontSize: 12, color: '#555', textDecoration: 'none', fontWeight: 500, whiteSpace: 'nowrap' }}>Analytics</Link>
-                    <Link href={`/dashboard/flow-builder?flow_id=${flow.id}`} onClick={(e) => e.stopPropagation()} style={{ background: '#16a34a', color: '#fff', border: 'none', padding: '6px 14px', borderRadius: 8, fontSize: 12, fontWeight: 600, textDecoration: 'none', whiteSpace: 'nowrap' }}>Abrir builder</Link>
-                    <div style={{ position: 'relative' }}>
-                      <button onClick={(e) => { e.stopPropagation(); setOpenDropdown(openDropdown === flow.id ? null : flow.id); }} style={{ background: 'transparent', border: '1px solid #e8e6e0', padding: '6px 10px', borderRadius: 8, fontSize: 14, cursor: 'pointer', color: '#555', lineHeight: 1 }}>⋯</button>
+                    <button onClick={(e) => { e.stopPropagation(); openEdit(flow); }} className="whitespace-nowrap rounded-xl border border-gray-100 bg-transparent px-3 py-1.5 text-xs font-semibold text-slate-600 transition hover:shadow-sm">Editar</button>
+                    <Link href={`/dashboard/flows/${flow.id}/analytics`} onClick={(e) => e.stopPropagation()} className="whitespace-nowrap rounded-xl border border-gray-100 bg-transparent px-3 py-1.5 text-xs font-semibold text-slate-600 no-underline transition hover:shadow-sm">Analytics</Link>
+                    <Link href={`/dashboard/flow-builder?flow_id=${flow.id}`} onClick={(e) => e.stopPropagation()} className="whitespace-nowrap rounded-xl bg-emerald-600 px-3.5 py-1.5 text-xs font-semibold text-white no-underline transition hover:bg-emerald-700">Abrir builder</Link>
+                    <div className="relative">
+                      <button onClick={(e) => { e.stopPropagation(); setOpenDropdown(openDropdown === flow.id ? null : flow.id); }} className="rounded-xl border border-gray-100 bg-transparent px-2.5 py-1.5 text-sm leading-none text-slate-600 transition hover:shadow-sm">⋯</button>
                       {openDropdown === flow.id && (
-                        <div style={{ position: 'absolute', right: 0, top: 'calc(100% + 4px)', background: '#fff', border: '1px solid #e8e6e0', borderRadius: 10, boxShadow: '0 8px 24px rgba(0,0,0,0.1)', minWidth: 140, zIndex: 10, overflow: 'hidden' }}>
-                          <button onClick={(e) => { e.stopPropagation(); onDuplicate(flow.id); setOpenDropdown(null); }} style={{ width: '100%', textAlign: 'left', padding: '9px 14px', border: 'none', background: 'transparent', cursor: 'pointer', fontSize: 13, color: '#333' }}>Duplicar</button>
-                          <button onClick={(e) => { e.stopPropagation(); onDelete(flow.id); setOpenDropdown(null); }} style={{ width: '100%', textAlign: 'left', padding: '9px 14px', border: 'none', background: 'transparent', cursor: 'pointer', fontSize: 13, color: '#dc2626' }}>Deletar</button>
+                        <div className="absolute right-0 top-[calc(100%+4px)] z-10 min-w-[140px] overflow-hidden rounded-xl border border-gray-100 bg-white shadow-md">
+                          <button onClick={(e) => { e.stopPropagation(); onDuplicate(flow.id); setOpenDropdown(null); }} className="w-full bg-transparent px-3.5 py-2 text-left text-sm text-slate-700 transition hover:bg-slate-50">Duplicar</button>
+                          <button onClick={(e) => { e.stopPropagation(); onDelete(flow.id); setOpenDropdown(null); }} className="w-full bg-transparent px-3.5 py-2 text-left text-sm text-red-600 transition hover:bg-red-50">Deletar</button>
                         </div>
                       )}
                     </div>
