@@ -100,6 +100,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    allow_origin_regex=ALLOWED_ORIGIN_REGEX,
 )
 
 @app.exception_handler(RequestValidationError)
