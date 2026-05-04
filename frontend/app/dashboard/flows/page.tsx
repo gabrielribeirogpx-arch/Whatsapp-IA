@@ -6,6 +6,11 @@ import Link from 'next/link';
 import { createFlow, deleteFlow, duplicateFlow, listFlows, updateFlow, updateFlowStatus } from '@/lib/api';
 import { FlowItem, FlowPayload } from '@/lib/types';
 
+type FlowListItem = FlowItem & {
+  status?: string;
+  is_published?: boolean;
+};
+
 const EMPTY_FORM: FlowPayload = {
   name: '',
   description: '',
@@ -14,7 +19,7 @@ const EMPTY_FORM: FlowPayload = {
 };
 
 export default function FlowsPage() {
-  const [flows, setFlows] = useState<FlowItem[]>([]);
+  const [flows, setFlows] = useState<FlowListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [isOpen, setIsOpen] = useState(false);
   const [editingFlow, setEditingFlow] = useState<FlowItem | null>(null);
@@ -97,6 +102,31 @@ export default function FlowsPage() {
     setFlows((prev) => prev.map((flow) => (flow.id === flowId ? { ...flow, is_active: isActive } : flow)));
   };
 
+  const getFlowBadge = (flow: FlowListItem) => {
+    if (flow.is_active) {
+      return {
+        label: 'Ativo',
+        containerStyle: { background: '#f0fdf4', color: '#16a34a' },
+        dotColor: '#16a34a',
+      };
+    }
+
+    const isDraft = !flow.is_published && flow.status === 'draft';
+    if (isDraft) {
+      return {
+        label: 'Rascunho',
+        containerStyle: { background: '#fffbeb', color: '#d97706' },
+        dotColor: '#d97706',
+      };
+    }
+
+    return {
+      label: 'OFF',
+      containerStyle: { background: '#f3f4f6', color: '#6b7280' },
+      dotColor: '#6b7280',
+    };
+  };
+
   const handleToggle = async (flowId: string, isActive: boolean) => {
     updateLocalState(flowId, isActive);
     try {
@@ -107,8 +137,8 @@ export default function FlowsPage() {
     }
   };
 
-  const published = flows.filter((f) => (f as FlowItem & { status?: string }).status === 'published').length;
-  const drafts = flows.filter((f) => (f as FlowItem & { status?: string }).status === 'draft').length;
+  const published = flows.filter((f) => f.status === 'published').length;
+  const drafts = flows.filter((f) => f.status === 'draft').length;
 
   return (
     <main className="flex-1 px-6 py-6">
@@ -159,7 +189,7 @@ export default function FlowsPage() {
         ) : (
           <div>
             {flows.map((flow, index) => {
-              const status = (flow as FlowItem & { status?: string }).status;
+              const badge = getFlowBadge(flow);
               return (
                 <div key={flow.id} style={{ padding: '16px 20px', borderBottom: index < flows.length - 1 ? '1px solid #f0f0ee' : 'none', display: 'flex', flexDirection: isMobile ? 'column' : 'row', alignItems: isMobile ? 'flex-start' : 'center', justifyContent: 'space-between', gap: 12, transition: 'background 0.15s' }}
                   onMouseEnter={(e) => { e.currentTarget.style.background = '#fafaf9'; }}
@@ -172,16 +202,20 @@ export default function FlowsPage() {
                         tooltip={flow.is_active ? 'Desativar fluxo' : 'Ativar fluxo'}
                       />
                       <span style={{ fontSize: 14, fontWeight: 600, color: '#111' }}>{flow.name}</span>
-                      {status === 'published' && (
-                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, background: '#f0fdf4', color: '#16a34a', padding: '2px 8px', borderRadius: 6, fontSize: 11, fontWeight: 600 }}>
-                          <span style={{ width: 5, height: 5, borderRadius: '50%', background: '#16a34a' }} />Publicado
-                        </span>
-                      )}
-                      {status === 'draft' && (
-                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, background: '#fffbeb', color: '#d97706', padding: '2px 8px', borderRadius: 6, fontSize: 11, fontWeight: 600 }}>
-                          <span style={{ width: 5, height: 5, borderRadius: '50%', background: '#d97706' }} />Rascunho
-                        </span>
-                      )}
+                      <span
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: 5,
+                          padding: '2px 8px',
+                          borderRadius: 6,
+                          fontSize: 11,
+                          fontWeight: 600,
+                          ...badge.containerStyle,
+                        }}
+                      >
+                        <span style={{ width: 5, height: 5, borderRadius: '50%', background: badge.dotColor }} />{badge.label}
+                      </span>
                     </div>
                     <span style={{ fontSize: 12, color: '#aaa' }}>Trigger: {flow.trigger_type || 'default'}{flow.trigger_value ? ` · ${flow.trigger_value}` : ''}</span>
                   </div>
