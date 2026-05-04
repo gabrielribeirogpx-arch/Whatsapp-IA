@@ -160,7 +160,8 @@ export default function DashboardPage() {
   }, [viewModel.channels]);
 
   return (
-    <div className="bg-[#F8FAFC] max-w-[1320px] mx-auto px-6 lg:px-8 py-6 space-y-5 rounded-2xl">
+    <div className="w-full bg-[#F8FAFC] px-6 py-6 lg:px-8">
+      <div className="w-full max-w-none space-y-5">
       <div className="flex items-center justify-between gap-4 mb-4">
         <div>
           <h1 className="m-0 text-[26px] lg:text-[28px] leading-tight font-bold text-slate-900">Bom dia, Gabriel 👋</h1>
@@ -180,11 +181,17 @@ export default function DashboardPage() {
             <option value="90d">Últimos 90 dias</option>
           </select>
           <button className="h-11 w-11 rounded-xl border border-slate-200 bg-white text-slate-500">📅</button>
-          <Link href="/dashboard/flows" className="h-11 px-5 rounded-xl bg-emerald-600 text-white shadow-[0_8px_20px_rgba(5,150,105,0.25)] font-semibold">+ Novo fluxo</Link>
+          <Link
+            href="/dashboard/flows"
+            className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-emerald-600 px-5 text-sm font-semibold leading-none text-white shadow-[0_12px_24px_rgba(16,185,129,0.22)] transition hover:bg-emerald-700"
+          >
+            <span className="text-base leading-none">+</span>
+            <span className="leading-none">Novo fluxo</span>
+          </Link>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-4">{kpiMeta.map((item) => {
+      <div className="grid w-full grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">{kpiMeta.map((item) => {
         const value = viewModel[item.key];
         return <div key={item.key} className="bg-white rounded-2xl border border-slate-100 shadow-[0_12px_30px_rgba(15,23,42,0.05)] p-4 min-h-[112px] flex items-center justify-between">{isLoading ? <div className="grid gap-2 w-full"><SkeletonLine width="35%" /><SkeletonLine width="48%" /><SkeletonLine width="40%" height={20} /></div> :
           <>
@@ -204,7 +211,7 @@ export default function DashboardPage() {
           </>}</div>;
       })}</div>
 
-      <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1.75fr)_minmax(320px,0.9fr)] gap-4 items-stretch">
+      <div className="grid w-full grid-cols-1 gap-4 items-stretch xl:grid-cols-[minmax(0,2fr)_minmax(320px,0.9fr)]">
         <div className={`${cardClassName} min-h-[390px] p-5`}>{dashboardError ? <p className="m-0 p-3 text-sm text-red-700">{dashboardError}</p> : (
           // TODO: aplicar o filtro real por período quando a integração de dados do backend estiver disponível.
           <DashboardChart data={data?.charts?.messages_last_7_days ?? []} />
@@ -223,7 +230,7 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
+      <div className="grid w-full grid-cols-1 gap-4 xl:grid-cols-3">
         <div className={`${cardClassName} min-h-[280px] p-5`}><div className="mb-4 flex items-center justify-between"><p className="m-0 text-lg font-semibold text-slate-900">Top fluxos</p><button className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs text-slate-600">Por conversas</button></div>
         {flowsError ? <p className="text-sm text-red-700">{flowsError}</p> : <div className="space-y-3">{(viewModel.topFlows.slice(0,5)).map((flow) => {
           const pct = Math.max(0, Math.min(100, Math.round(flow.value || 0)));
@@ -238,6 +245,7 @@ export default function DashboardPage() {
       </div>
 
       <div className="flex items-center justify-between gap-4 rounded-2xl border border-slate-100 bg-gradient-to-r from-white via-emerald-50/60 to-white p-5 min-h-[110px] shadow-[0_12px_30px_rgba(15,23,42,0.05)]"><div className="flex items-center gap-4"><div className="h-16 w-16 rounded-2xl bg-emerald-100/70 grid place-items-center"><img src="/icons/dashboard/fluxos.svg" alt="Fluxos" className="h-10 w-10"/></div><div><p className="m-0 text-sm font-semibold text-emerald-600">Dica para você 🚀</p><p className="m-0 text-xl font-bold text-slate-900">Construa fluxos mais inteligentes com o builder visual</p><p className="m-0 text-lg text-slate-600">Use o builder para criar jornadas dinâmicas e personalizadas.</p></div></div><button className="rounded-xl bg-emerald-600 px-5 py-3 font-semibold text-white shadow-[0_8px_20px_rgba(5,150,105,0.25)]">Abrir builder ↗</button></div>
+      </div>
     </div>
   );
 }
