@@ -76,8 +76,8 @@ function SkeletonLine({ width = '100%', height = 12 }: { width?: string; height?
   return <div className="rounded-full bg-gradient-to-r from-emerald-50 via-slate-200 to-emerald-50" style={{ width, height }} />;
 }
 
-const Sparkline = () => (
-  <svg viewBox="0 0 84 28" className="h-full w-full" fill="none" aria-hidden>
+const Sparkline = ({ className = 'h-full w-full' }: { className?: string }) => (
+  <svg viewBox="0 0 84 28" className={className} fill="none" aria-hidden>
     <path d="M1 25C8 17 12 15 20 18C28 21 34 24 41 20C48 16 53 17 59 14C66 11 72 8 83 2" stroke="#22C55E" strokeWidth="2.2" strokeLinecap="round" opacity="0.75"/>
   </svg>
 );
@@ -214,22 +214,22 @@ export default function DashboardPage() {
       <div className="grid w-full grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">{kpiMeta.map((item) => {
         const value = viewModel[item.key];
         return <div key={item.key} className="bg-white rounded-2xl border border-slate-100 shadow-[0_12px_30px_rgba(15,23,42,0.05)] p-4 min-h-[112px] min-w-[160px] flex items-center justify-between">{isLoading ? <div className="grid gap-2 w-full"><SkeletonLine width="35%" /><SkeletonLine width="48%" /><SkeletonLine width="40%" height={20} /></div> :
-          <div className="flex w-full items-stretch justify-between gap-3">
+          <div className="flex w-full items-end justify-between">
             <div className="flex items-start gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-50 shrink-0">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-50">
                 <img src={item.icon} alt={item.label} className="h-5 w-5 opacity-90"/>
               </div>
-              <div className="flex h-full flex-col justify-between">
+              <div className="flex flex-col max-w-[120px]">
                 <span className="uppercase text-[11px] font-semibold text-slate-500">{item.label}</span>
-                <span className="text-[24px] font-bold text-slate-900 leading-tight">{value}{item.suffix}</span>
-                <p className="m-0 flex items-center gap-1 whitespace-nowrap text-[11px] text-emerald-600">
-                  <span className="font-semibold">↑ 18%</span>
-                  <span className="truncate text-slate-500">vs últimos 7 dias</span>
+                <span className="text-[24px] font-bold leading-tight text-slate-900">{value}{item.suffix}</span>
+                <p className="m-0 flex items-center gap-1 whitespace-nowrap text-[11px]">
+                  <span className="font-semibold text-emerald-600">↑ 18%</span>
+                  <span className="text-slate-500">vs últimos 7 dias</span>
                 </p>
               </div>
             </div>
-            <div className="w-16 h-8 self-end">
-              <Sparkline/>
+            <div className="flex min-w-[60px] items-end justify-end">
+              <Sparkline className="h-[24px] w-[60px]"/>
             </div>
           </div>}</div>;
       })}</div>
