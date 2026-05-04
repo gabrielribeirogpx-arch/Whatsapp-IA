@@ -69,6 +69,14 @@ function getInitials(name?: string) {
   return (first + last).toUpperCase();
 }
 
+function getGreeting() {
+  const hour = new Date().getHours();
+
+  if (hour >= 5 && hour < 12) return 'Bom dia';
+  if (hour >= 12 && hour < 18) return 'Boa tarde';
+  return 'Boa noite';
+}
+
 const cardClassName =
   'bg-white rounded-2xl border border-slate-100 shadow-[0_12px_30px_rgba(15,23,42,0.05)] p-5';
 
@@ -201,8 +209,10 @@ export default function DashboardPage() {
       <div className="w-full min-w-0 space-y-5">
       <div className="mb-4 flex items-center justify-between gap-4 md:mb-6">
         <div>
-          <h1 className="m-0 text-xl font-semibold leading-tight text-gray-900 md:text-2xl">Bom dia, Gabriel <span className="text-lg">👋</span></h1>
-          <p className="m-0 mt-1 text-sm text-gray-500">Aqui está o resumo das suas conversas hoje.</p>
+          <h1 className="text-xl md:text-2xl font-semibold leading-tight text-gray-900">
+            {getGreeting()}, Gabriel <span className="text-lg">👋</span>
+          </h1>
+          <p className="mt-1 text-sm text-gray-500">Aqui está o resumo das suas conversas hoje.</p>
         </div>
         <div className="flex items-center gap-3">
           <span className="text-sm text-slate-500">Período</span>
