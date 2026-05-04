@@ -3,6 +3,7 @@
 import { useEffect, useId, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { Cell, Pie, PieChart } from 'recharts';
+import { MessageSquare } from "lucide-react";
 
 import DashboardChart from '../../components/DashboardChart';
 import { apiFetch, getConversations, listFlows, parseApiResponse } from '../../lib/api';
@@ -244,7 +245,11 @@ export default function DashboardPage() {
           <>
             <div className="relative z-10 flex items-start gap-3">
               <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-50">
-                <img src={item.icon} alt={item.label} className="h-5 w-5 opacity-90"/>
+                {item.key === 'messagesToday' ? (
+                  <MessageSquare className="h-5 w-5 text-emerald-600" />
+                ) : (
+                  <img src={item.icon} alt={item.label} className="h-5 w-5 text-emerald-600"/>
+                )}
               </div>
               <div className="min-w-0 flex flex-col items-start pt-0.5">
                 <span className="text-[11px] font-semibold uppercase leading-tight tracking-wide text-slate-500">{item.label}</span>
