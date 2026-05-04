@@ -218,10 +218,8 @@ export default function DashboardPage() {
             <div className="grid gap-3">
               <SkeletonLine width="100%" height={180} />
             </div>
-          ) : messagesLast7Days?.length ? (
-            <DashboardChart data={messagesLast7Days} />
           ) : (
-            <EmptyState message="Nenhuma atividade recente." />
+            <DashboardChart data={messagesLast7Days ?? []} />
           )}
         </div>
       </div>
