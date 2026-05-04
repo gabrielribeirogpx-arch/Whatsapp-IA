@@ -267,17 +267,22 @@ export default function DashboardPage() {
           <DashboardChart data={data?.charts?.messages_last_7_days ?? []} />
         )}</div>
 
-        <div className={`${cardClassName} min-h-[390px] p-5`}>
-          <div className="mb-4 flex items-center justify-between">
-            <h3 className="m-0 text-lg font-semibold text-slate-900">Atividade ao vivo</h3>
-            <span className="text-sm text-slate-500"><span className="mr-2 text-emerald-500">●</span>Atualizando agora</span>
+        <div className="min-h-[390px] rounded-2xl border border-slate-100 bg-white p-5 shadow-[0_12px_30px_rgba(15,23,42,0.04)]">
+          <div className="flex items-center justify-between">
+            <h3 className="m-0 text-sm font-semibold text-slate-900">Atividade ao vivo</h3>
+            <span className="text-xs text-slate-500 flex items-center gap-2"><span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />Atualizando agora</span>
           </div>
-          {conversationsError ? <p className="text-sm text-red-700">{conversationsError}</p> : liveItems.length === 0 ? <div className="h-[290px] grid place-items-center rounded-xl border border-dashed border-emerald-200 bg-emerald-50/40 text-center"><div><p className="m-0 font-semibold text-slate-700">Sem atividade no momento</p><p className="m-0 mt-1 text-sm text-slate-500">Novas conversas aparecerão aqui em tempo real.</p></div></div> : <div className="space-y-4">{liveItems.map((c, idx) => {
+          {conversationsError ? <p className="mt-4 text-sm text-red-700">{conversationsError}</p> : liveItems.length === 0 ? <div className="mt-4 h-[290px] grid place-items-center rounded-xl border border-dashed border-emerald-200 bg-emerald-50/40 text-center"><div><p className="m-0 font-semibold text-slate-700">Sem atividade no momento</p><p className="m-0 mt-1 text-sm text-slate-500">Novas conversas aparecerão aqui em tempo real.</p></div></div> : <div className="mt-4 divide-y divide-slate-100">{liveItems.map((c, idx) => {
             const name = c.name || c.phone || 'Contato';
             const contactName = (c as Conversation & { contact_name?: string | null }).contact_name;
             const initials = getInitials(c.name || contactName || c.phone);
-            return <div key={c.id || idx} className="flex items-start justify-between border-b border-slate-100 pb-3 last:border-b-0"><div className="flex gap-3"><div className="flex h-11 w-11 items-center justify-center rounded-full bg-emerald-50 text-sm font-semibold text-emerald-700">{initials}</div><div><p className="m-0 font-semibold text-slate-800">{name}</p><p className="m-0 text-sm text-slate-500">Flow: {getConversationFlowLabel(c)}</p><p className="m-0 text-sm text-slate-600 line-clamp-1">{c.last_message || 'Sem mensagem recente.'}</p></div></div><div className="text-right text-xs text-slate-500">agora<div className="ml-auto mt-2 h-2 w-2 rounded-full bg-emerald-500" /></div></div>;
+            return <div key={c.id || idx} className="flex items-start gap-3 py-3"><div className="h-9 w-9 rounded-full bg-emerald-50 text-emerald-700 text-xs font-semibold flex items-center justify-center shrink-0">{initials}</div><div className="min-w-0 flex-1"><p className="m-0 text-sm font-semibold text-slate-800 leading-tight">{name}</p><p className="m-0 text-xs text-slate-500 mt-0.5">Flow: {getConversationFlowLabel(c)}</p><p className="m-0 text-xs text-slate-500 mt-1 line-clamp-1">{c.last_message || 'Sem mensagem recente.'}</p></div><div className="flex shrink-0 items-center gap-2"><span className="text-xs text-slate-400">agora</span><span className="h-2 w-2 rounded-full bg-emerald-500" /></div></div>;
           })}</div>}
+          <div className="mt-4 border-t border-slate-100 pt-4 text-center">
+            <Link href="/chat" className="text-sm font-medium text-emerald-600 hover:text-emerald-700">
+              Ver todas as conversas →
+            </Link>
+          </div>
         </div>
       </div>
 
