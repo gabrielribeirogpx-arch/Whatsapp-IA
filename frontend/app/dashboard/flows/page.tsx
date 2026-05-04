@@ -59,7 +59,6 @@ export default function FlowsPage() {
   const [form, setForm] = useState<FlowPayload>(EMPTY_FORM);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [openDropdown, setOpenDropdown] = useState<string | null>(null);
-  const [isMobile, setIsMobile] = useState(false);
 
   const showToast = (message: string) => {
     setToastMessage(message);
@@ -84,15 +83,6 @@ export default function FlowsPage() {
   };
 
   useEffect(() => { loadFlows(); }, []);
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    const mq = window.matchMedia('(max-width: 768px)');
-    setIsMobile(mq.matches);
-    const handler = (e: MediaQueryListEvent) => setIsMobile(e.matches);
-    mq.addEventListener('change', handler);
-    return () => mq.removeEventListener('change', handler);
-  }, []);
 
   const openCreate = () => { setEditingFlow(null); setForm(EMPTY_FORM); setIsOpen(true); };
   const openEdit = (flow: FlowItem) => {
@@ -185,7 +175,7 @@ export default function FlowsPage() {
   }, [flows, searchTerm, sortBy, statusFilter]);
 
   return (
-    <main className="flex-1 bg-slate-50 px-8 py-8">
+    <main className="flex-1 bg-slate-50 px-4 py-8 sm:px-6 lg:px-8">
       <div className="mx-auto w-full max-w-[1240px]" style={{ fontFamily: 'Inter, -apple-system, sans-serif' }}>
       {/* Header */}
       <div className="mb-8 flex flex-wrap items-start justify-between gap-3">
@@ -250,7 +240,7 @@ export default function FlowsPage() {
       </div>
 
       <div className="mb-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-        <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '2fr 1fr 1fr', gap: 12 }}>
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)]">
         <input
           value={searchTerm}
           onChange={(e) => setSearchTerm(e.target.value)}
@@ -299,7 +289,7 @@ export default function FlowsPage() {
           <div>
             {filteredFlows.map((flow, index) => {
               return (
-                <div key={flow.id} style={{ padding: '16px 20px', borderBottom: index < filteredFlows.length - 1 ? '1px solid #f0f0ee' : 'none', display: 'flex', flexDirection: isMobile ? 'column' : 'row', alignItems: isMobile ? 'flex-start' : 'center', justifyContent: 'space-between', gap: 12, transition: 'background 0.15s' }}
+                <div key={flow.id} className="flex flex-col gap-3 px-5 py-4 transition sm:gap-4 lg:flex-row lg:items-center lg:justify-between" style={{ borderBottom: index < filteredFlows.length - 1 ? '1px solid #f0f0ee' : 'none', transition: 'background 0.15s' }}
                   onMouseEnter={(e) => { e.currentTarget.style.background = '#fafaf9'; }}
                   onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}>
                   <div style={{ flex: 1, minWidth: 0 }}>
@@ -333,7 +323,7 @@ export default function FlowsPage() {
                     </span>
                   </div>
 
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                  <div className="flex w-full flex-wrap items-center gap-2 lg:w-auto">
                     <div style={{ border: '1px solid #e2e8f0', borderRadius: 10, padding: '6px 10px', background: '#f8fafc', minWidth: 92 }}>
                       <div style={{ fontSize: 10, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 700 }}>Execuções</div>
                       <div style={{ fontSize: 14, color: '#0f172a', fontWeight: 700 }}>{getFlowExecutions(flow)}</div>
@@ -344,10 +334,10 @@ export default function FlowsPage() {
                     </div>
                   </div>
 
-                  <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', position: 'relative' }}>
-                    <button onClick={(e) => { e.stopPropagation(); openEdit(flow); }} style={{ background: 'transparent', border: '1px solid #e8e6e0', padding: '6px 12px', borderRadius: 8, fontSize: 12, cursor: 'pointer', color: '#555', fontWeight: 500 }}>Editar</button>
-                    <Link href={`/dashboard/flows/${flow.id}/analytics`} onClick={(e) => e.stopPropagation()} style={{ background: 'transparent', border: '1px solid #e8e6e0', padding: '6px 12px', borderRadius: 8, fontSize: 12, color: '#555', textDecoration: 'none', fontWeight: 500 }}>Analytics</Link>
-                    <Link href={`/dashboard/flow-builder?flow_id=${flow.id}`} onClick={(e) => e.stopPropagation()} style={{ background: '#16a34a', color: '#fff', border: 'none', padding: '6px 14px', borderRadius: 8, fontSize: 12, fontWeight: 600, textDecoration: 'none' }}>Abrir builder</Link>
+                  <div className="relative flex w-full flex-wrap items-center gap-2 lg:w-auto lg:justify-end">
+                    <button onClick={(e) => { e.stopPropagation(); openEdit(flow); }} style={{ background: 'transparent', border: '1px solid #e8e6e0', padding: '6px 12px', borderRadius: 8, fontSize: 12, cursor: 'pointer', color: '#555', fontWeight: 500, whiteSpace: 'nowrap' }}>Editar</button>
+                    <Link href={`/dashboard/flows/${flow.id}/analytics`} onClick={(e) => e.stopPropagation()} style={{ background: 'transparent', border: '1px solid #e8e6e0', padding: '6px 12px', borderRadius: 8, fontSize: 12, color: '#555', textDecoration: 'none', fontWeight: 500, whiteSpace: 'nowrap' }}>Analytics</Link>
+                    <Link href={`/dashboard/flow-builder?flow_id=${flow.id}`} onClick={(e) => e.stopPropagation()} style={{ background: '#16a34a', color: '#fff', border: 'none', padding: '6px 14px', borderRadius: 8, fontSize: 12, fontWeight: 600, textDecoration: 'none', whiteSpace: 'nowrap' }}>Abrir builder</Link>
                     <div style={{ position: 'relative' }}>
                       <button onClick={(e) => { e.stopPropagation(); setOpenDropdown(openDropdown === flow.id ? null : flow.id); }} style={{ background: 'transparent', border: '1px solid #e8e6e0', padding: '6px 10px', borderRadius: 8, fontSize: 14, cursor: 'pointer', color: '#555', lineHeight: 1 }}>⋯</button>
                       {openDropdown === flow.id && (
@@ -369,17 +359,11 @@ export default function FlowsPage() {
         className="mt-5 rounded-2xl border border-emerald-100 p-5 shadow-sm"
         style={{ background: 'linear-gradient(120deg, #ffffff 0%, #f0fdf4 55%, #dcfce7 100%)' }}
       >
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: isMobile ? '1fr' : '120px 1fr auto',
-            alignItems: 'center',
-            gap: 16,
-          }}
-        >
+        <div className="grid grid-cols-1 items-center gap-4 md:grid-cols-[120px_minmax(0,1fr)_auto]">
           <div
             style={{
-              width: isMobile ? '100%' : 110,
+              width: '100%',
+              maxWidth: 110,
               minHeight: 88,
               borderRadius: 14,
               background: 'rgba(22, 163, 74, 0.08)',
@@ -412,8 +396,7 @@ export default function FlowsPage() {
 
           <Link
             href="/dashboard/flow-builder"
-            className="inline-flex items-center justify-center rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white no-underline transition hover:bg-emerald-700"
-            style={{ width: isMobile ? '100%' : 'auto' }}
+            className="inline-flex w-full items-center justify-center rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white no-underline transition hover:bg-emerald-700 md:w-auto"
           >
             Abrir builder
           </Link>
