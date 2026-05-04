@@ -24,11 +24,11 @@ export default function DashboardChart({ data = [] }: DashboardChartProps) {
   const chartData = normalizedData.length ? normalizedData : Array.from({ length: 7 }, (_, index) => { const date = new Date(); date.setDate(date.getDate() - (6 - index)); return { date: formatDateLabel(date.toISOString()), sent: 0, received: 0 }; });
 
   return (
-    <article className="p-4 md:p-5">
+    <article className="h-full overflow-visible">
       <div className="mb-3 flex items-center justify-between"><h2 className="text-lg font-semibold text-slate-900">Mensagens — últimos 7 dias</h2><button type="button" className="rounded-lg border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-600">Diário</button></div>
-      <div style={{ width: '100%', height: 320 }}>
+      <div className="h-[300px] min-h-[300px] w-full overflow-visible">
         <ResponsiveContainer>
-          <AreaChart data={chartData} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
+          <AreaChart data={chartData} margin={{ top: 8, right: 12, left: 0, bottom: 12 }}>
             <defs>
               <linearGradient id="receivedGradient" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#3B82F6" stopOpacity={0.22} /><stop offset="95%" stopColor="#3B82F6" stopOpacity={0} /></linearGradient>
               <linearGradient id="sentGradient" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#16A34A" stopOpacity={0.18} /><stop offset="95%" stopColor="#16A34A" stopOpacity={0} /></linearGradient>
