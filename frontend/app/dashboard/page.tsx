@@ -213,16 +213,16 @@ export default function DashboardPage() {
 
       <div className="grid w-full grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">{kpiMeta.map((item) => {
         const value = viewModel[item.key];
-        return <div key={item.key} className="relative flex min-h-[140px] flex-col overflow-hidden rounded-2xl border border-slate-100 bg-white p-5 shadow-[0_12px_30px_rgba(15,23,42,0.05)]">{isLoading ? <div className="grid w-full gap-2"><SkeletonLine width="35%" /><SkeletonLine width="48%" /><SkeletonLine width="40%" height={20} /></div> :
+        return <div key={item.key} className="relative overflow-hidden rounded-2xl border border-slate-100 bg-white p-4 min-h-[104px] shadow-sm">{isLoading ? <div className="grid w-full gap-2"><SkeletonLine width="35%" /><SkeletonLine width="48%" /><SkeletonLine width="40%" height={20} /></div> :
           <>
-            <div className="relative z-10 flex h-full flex-col">
-              <div className="mb-4 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-50">
+            <div className="relative z-10 flex items-start gap-3">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-50">
                 <img src={item.icon} alt={item.label} className="h-5 w-5 opacity-90"/>
               </div>
-              <div className="min-w-0">
-                <span className="m-0 mb-2 block text-[11px] font-semibold uppercase leading-none tracking-wide text-slate-500">{item.label}</span>
-                <span className="m-0 mb-1 block text-[32px] font-bold leading-none text-slate-900">{value}{item.suffix}</span>
-                <p className="m-0 flex items-center gap-1 whitespace-nowrap text-[11px] leading-none">
+              <div className="min-w-0 flex flex-col items-start pt-0.5">
+                <span className="text-[11px] font-semibold uppercase leading-tight tracking-wide text-slate-500">{item.label}</span>
+                <span className="mt-1 text-2xl font-bold leading-none text-slate-900">{value}{item.suffix}</span>
+                <p className="mt-2 flex items-center gap-1 whitespace-nowrap text-[11px] leading-none">
                   <span className="font-semibold text-emerald-600">↑ 18%</span>
                   <span className="text-slate-500">vs últimos 7 dias</span>
                 </p>
