@@ -215,11 +215,11 @@ export default function DashboardPage() {
         const value = viewModel[item.key];
         return <div key={item.key} className="relative overflow-hidden rounded-2xl bg-white border border-slate-100 shadow-[0_12px_30px_rgba(15,23,42,0.05)] p-4 min-h-[104px]">{isLoading ? <div className="grid gap-2 w-full"><SkeletonLine width="35%" /><SkeletonLine width="48%" /><SkeletonLine width="40%" height={20} /></div> :
           <>
-            <div className="relative z-10 flex h-full items-start gap-3">
+            <div className="relative z-10 grid h-full grid-cols-[40px_1fr] items-start">
               <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-50">
                 <img src={item.icon} alt={item.label} className="h-5 w-5 opacity-90"/>
               </div>
-              <div className="min-w-0 flex flex-col">
+              <div className="min-w-0 flex flex-col items-start">
                 <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">{item.label}</span>
                 <span className="mt-1 text-2xl font-bold leading-none text-slate-900">{value}{item.suffix}</span>
                 <p className="mt-2 flex items-center gap-1 whitespace-nowrap text-[11px] leading-none">
