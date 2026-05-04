@@ -91,7 +91,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
   return (
     <div className="flex min-h-screen bg-[#F8FAFC]" style={{ fontFamily: 'Inter, -apple-system, sans-serif' }}>
       {!isFlowBuilder && !isFlowAnalytics && (
-        <aside className="w-[240px] flex-shrink-0">
+        <aside className="w-[56px] flex-shrink-0">
           <nav className="dash-sidebar">
             <div className="dash-sidebar-logo">
               <img src="/Logo.svg" alt="Ícone" className="logo-icon" />
@@ -151,12 +151,12 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
       )}
 
       {isFlowAnalytics && !isFlowBuilder && (
-        <aside className="w-[240px] flex-shrink-0">
+        <aside className="w-[56px] flex-shrink-0">
           <FlowAnalyticsSidebar flowId={flowId} />
         </aside>
       )}
 
-      <main className="flex-1 min-w-0 w-full overflow-y-auto">
+      <main className="min-w-0 flex-1 overflow-y-auto">
         {children}
       </main>
     </div>
