@@ -94,7 +94,7 @@ const Sparkline = ({ className = 'h-full w-full overflow-hidden' }: { className?
         </filter>
       </defs>
       <path d={`${linePath} L 63,24 L 1,24 Z`} fill={`url(#${gradientId})`} />
-      <path d={linePath} stroke="#22c55e" fill="none" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" opacity="1" filter={`url(#${glowId})`} transform="translate(0 -0.4) scale(1 1.05)" transformOrigin="32px 12px" />
+      <path d={linePath} stroke="#22c55e" fill="none" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" filter={`url(#${glowId})`} />
     </svg>
   );
 };
