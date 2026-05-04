@@ -41,6 +41,31 @@ const getFlowConversion = (flow: FlowListItem) => {
   return `${Math.round(value)}%`;
 };
 
+const getFlowStatusBadge = (flow: Pick<FlowListItem, 'status' | 'is_active'>) => {
+  if (flow.status === 'draft') {
+    return {
+      label: 'Rascunho',
+      className: 'bg-yellow-100 text-yellow-700',
+      dotClassName: 'bg-yellow-500',
+    };
+  }
+
+  if (flow.is_active) {
+    return {
+      label: 'Ativo',
+      className: 'bg-green-100 text-green-700',
+      dotClassName: 'bg-green-500',
+    };
+  }
+
+  return {
+    label: 'Inativo',
+    className: 'bg-gray-100 text-gray-600',
+    dotClassName: 'bg-gray-400',
+  };
+};
+
+
 const EMPTY_FORM: FlowPayload = {
   name: '',
   description: '',
@@ -312,17 +337,15 @@ export default function FlowsPage() {
                       <div className="min-w-0">
                         <div className="flex flex-wrap items-center gap-2">
                           <span className="truncate text-sm font-semibold text-slate-900 sm:text-base">{flow.name}</span>
-                          {flow.is_active ? (
-                            <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700 ring-1 ring-emerald-200">
-                              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-                              Ativo
-                            </span>
-                          ) : (
-                            <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-500 ring-1 ring-slate-200">
-                              <span className="h-1.5 w-1.5 rounded-full bg-slate-400" />
-                              OFF
-                            </span>
-                          )}
+                          {(() => {
+                            const statusBadge = getFlowStatusBadge(flow);
+                            return (
+                              <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ${statusBadge.className}`}>
+                                <span className={`h-1.5 w-1.5 rounded-full ${statusBadge.dotClassName}`} />
+                                {statusBadge.label}
+                              </span>
+                            );
+                          })()}
                         </div>
                         <span className="mt-1 block text-xs text-slate-500">
                           Trigger: {flow.trigger_type || 'default'}
