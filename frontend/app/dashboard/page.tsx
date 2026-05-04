@@ -66,6 +66,17 @@ const kpiMeta = [
   { key: 'conversions', label: 'Conversões', icon: '/icons/dashboard/conversoes.svg', suffix: '' },
 ] as const;
 
+const getConversationFlowLabel = (conversation: Conversation) => {
+  const raw = conversation as Conversation & {
+    flow_name?: string;
+    flowName?: string;
+    flow?: { name?: string };
+    source?: string;
+  };
+
+  return raw.flow_name || raw.flowName || raw.flow?.name || raw.source || 'Flow';
+};
+
 export default function DashboardPage() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -132,7 +143,7 @@ export default function DashboardPage() {
         {conversationsError ? <p className="text-sm text-red-700">{conversationsError}</p> : liveItems.length === 0 ? <p className="text-sm text-slate-500">Nenhuma atividade recente</p> : <div className="space-y-4">{liveItems.map((c, idx) => {
           const name = c.name || c.phone || 'Contato';
           const initials = name.split(' ').map((w) => w[0]).slice(0,2).join('').toUpperCase();
-          return <div key={c.id || idx} className="flex items-start justify-between border-b border-slate-100 pb-3 last:border-b-0"><div className="flex gap-3"><div className="flex h-11 w-11 items-center justify-center rounded-full bg-emerald-50 text-sm font-semibold text-emerald-700">{initials}</div><div><p className="m-0 font-semibold text-slate-800">{name}</p><p className="m-0 text-sm text-slate-500">Flow: {c.flow_name || 'Sem fluxo'}</p><p className="m-0 text-sm text-slate-600 line-clamp-1">{c.last_message || 'Sem mensagem recente.'}</p></div></div><div className="text-right text-xs text-slate-500">agora<div className="ml-auto mt-2 h-2 w-2 rounded-full bg-emerald-500" /></div></div>;
+          return <div key={c.id || idx} className="flex items-start justify-between border-b border-slate-100 pb-3 last:border-b-0"><div className="flex gap-3"><div className="flex h-11 w-11 items-center justify-center rounded-full bg-emerald-50 text-sm font-semibold text-emerald-700">{initials}</div><div><p className="m-0 font-semibold text-slate-800">{name}</p><p className="m-0 text-sm text-slate-500">Flow: {getConversationFlowLabel(c)}</p><p className="m-0 text-sm text-slate-600 line-clamp-1">{c.last_message || 'Sem mensagem recente.'}</p></div></div><div className="text-right text-xs text-slate-500">agora<div className="ml-auto mt-2 h-2 w-2 rounded-full bg-emerald-500" /></div></div>;
         })}</div>}
       </div>
     </div>
