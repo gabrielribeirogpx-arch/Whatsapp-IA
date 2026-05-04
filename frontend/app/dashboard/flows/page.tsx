@@ -365,6 +365,61 @@ export default function FlowsPage() {
         )}
       </div>
 
+      <div
+        className="mt-5 rounded-2xl border border-emerald-100 p-5 shadow-sm"
+        style={{ background: 'linear-gradient(120deg, #ffffff 0%, #f0fdf4 55%, #dcfce7 100%)' }}
+      >
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: isMobile ? '1fr' : '120px 1fr auto',
+            alignItems: 'center',
+            gap: 16,
+          }}
+        >
+          <div
+            style={{
+              width: isMobile ? '100%' : 110,
+              minHeight: 88,
+              borderRadius: 14,
+              background: 'rgba(22, 163, 74, 0.08)',
+              border: '1px solid rgba(22, 163, 74, 0.14)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            <svg width="74" height="62" viewBox="0 0 74 62" fill="none" aria-hidden="true">
+              <rect x="5" y="9" width="64" height="44" rx="10" fill="#ECFDF5" stroke="#A7F3D0" />
+              <circle cx="20" cy="24" r="4" fill="#34D399" />
+              <rect x="29" y="21" width="28" height="6" rx="3" fill="#86EFAC" />
+              <rect x="15" y="33" width="44" height="5" rx="2.5" fill="#BBF7D0" />
+              <path d="M17 44C23 36 32 34 38 38C44 42 50 42 57 35" stroke="#16A34A" strokeWidth="2.5" strokeLinecap="round" />
+            </svg>
+          </div>
+
+          <div>
+            <span className="inline-flex rounded-full bg-emerald-100 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-emerald-700">
+              Dica rápida
+            </span>
+            <h3 style={{ margin: '10px 0 6px', fontSize: 20, fontWeight: 700, color: '#0f172a', lineHeight: 1.2 }}>
+              Construa fluxos mais inteligentes com o builder visual
+            </h3>
+            <p style={{ margin: 0, color: '#475569', fontSize: 14, maxWidth: 640 }}>
+              Arraste blocos, conecte gatilhos e publique automações em minutos com uma experiência visual guiada.
+            </p>
+          </div>
+
+          <Link
+            href="/dashboard/flow-builder"
+            className="inline-flex items-center justify-center rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white no-underline transition hover:bg-emerald-700"
+            style={{ width: isMobile ? '100%' : 'auto' }}
+          >
+            Abrir builder
+          </Link>
+        </div>
+      </div>
+
       {/* Toast */}
       {toastMessage && (
         <div style={{ position: 'fixed', right: 24, bottom: 24, background: '#111', color: '#fff', padding: '10px 16px', borderRadius: 10, fontSize: 13, boxShadow: '0 8px 24px rgba(0,0,0,0.2)', zIndex: 50 }}>
