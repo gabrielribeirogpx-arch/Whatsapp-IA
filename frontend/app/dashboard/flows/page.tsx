@@ -11,6 +11,36 @@ type FlowListItem = FlowItem & {
   is_published?: boolean;
 };
 
+const getUpdatedLabel = (updatedAt?: string | null) => {
+  if (!updatedAt) return 'Atualizado recentemente';
+  const updatedTime = new Date(updatedAt).getTime();
+  if (Number.isNaN(updatedTime)) return 'Atualizado recentemente';
+
+  const diffMs = Date.now() - updatedTime;
+  if (diffMs <= 0) return 'Atualizado recentemente';
+
+  const hours = Math.floor(diffMs / (1000 * 60 * 60));
+  if (hours < 24) return `Atualizado há ${hours} hora${hours === 1 ? '' : 's'}`;
+
+  const days = Math.floor(hours / 24);
+  return `Atualizado há ${days} dia${days === 1 ? '' : 's'}`;
+};
+
+const getFlowExecutions = (flow: FlowListItem) => {
+  const metrics = flow as unknown as Record<string, unknown>;
+  const candidates = [metrics.executions, metrics.execution_count, metrics.entries, metrics.total_executions];
+  const value = candidates.find((candidate) => typeof candidate === 'number' && Number.isFinite(candidate));
+  return typeof value === 'number' ? value : 0;
+};
+
+const getFlowConversion = (flow: FlowListItem) => {
+  const metrics = flow as unknown as Record<string, unknown>;
+  const candidates = [metrics.conversion_rate, metrics.conversion, metrics.conversionPercent, metrics.completed_rate];
+  const value = candidates.find((candidate) => typeof candidate === 'number' && Number.isFinite(candidate));
+  if (typeof value !== 'number') return '0%';
+  return `${Math.round(value)}%`;
+};
+
 const EMPTY_FORM: FlowPayload = {
   name: '',
   description: '',
@@ -272,13 +302,16 @@ export default function FlowsPage() {
                 <div key={flow.id} style={{ padding: '16px 20px', borderBottom: index < filteredFlows.length - 1 ? '1px solid #f0f0ee' : 'none', display: 'flex', flexDirection: isMobile ? 'column' : 'row', alignItems: isMobile ? 'flex-start' : 'center', justifyContent: 'space-between', gap: 12, transition: 'background 0.15s' }}
                   onMouseEnter={(e) => { e.currentTarget.style.background = '#fafaf9'; }}
                   onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}>
-                  <div style={{ flex: 1 }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4, flexWrap: 'wrap' }}>
                       <Switch
                         checked={flow.is_active}
                         onChange={(value) => handleToggle(flow.id, value)}
                         tooltip={flow.is_active ? 'Desativar fluxo' : 'Ativar fluxo'}
                       />
+                      <div style={{ width: 28, height: 28, borderRadius: 8, background: '#f1f5f9', border: '1px solid #e2e8f0', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 13 }}>
+                        ⚡
+                      </div>
                       <span style={{ fontSize: 14, fontWeight: 600, color: '#111' }}>{flow.name}</span>
                       {flow.is_active ? (
                         <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700 ring-1 ring-emerald-200">
@@ -292,7 +325,23 @@ export default function FlowsPage() {
                         </span>
                       )}
                     </div>
-                    <span style={{ fontSize: 12, color: '#aaa' }}>Trigger: {flow.trigger_type || 'default'}{flow.trigger_value ? ` · ${flow.trigger_value}` : ''}</span>
+                    <span style={{ fontSize: 12, color: '#64748b', display: 'block' }}>
+                      Trigger: {flow.trigger_type || 'default'}{flow.trigger_value ? ` · ${flow.trigger_value}` : ''}
+                    </span>
+                    <span style={{ fontSize: 12, color: '#94a3b8', display: 'block', marginTop: 2 }}>
+                      {getUpdatedLabel(flow.updated_at)}
+                    </span>
+                  </div>
+
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                    <div style={{ border: '1px solid #e2e8f0', borderRadius: 10, padding: '6px 10px', background: '#f8fafc', minWidth: 92 }}>
+                      <div style={{ fontSize: 10, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 700 }}>Execuções</div>
+                      <div style={{ fontSize: 14, color: '#0f172a', fontWeight: 700 }}>{getFlowExecutions(flow)}</div>
+                    </div>
+                    <div style={{ border: '1px solid #e2e8f0', borderRadius: 10, padding: '6px 10px', background: '#f8fafc', minWidth: 92 }}>
+                      <div style={{ fontSize: 10, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 700 }}>Conversão</div>
+                      <div style={{ fontSize: 14, color: '#0f172a', fontWeight: 700 }}>{getFlowConversion(flow)}</div>
+                    </div>
                   </div>
 
                   <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', position: 'relative' }}>
