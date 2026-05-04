@@ -213,7 +213,7 @@ export default function DashboardPage() {
 
       <div className="grid w-full grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">{kpiMeta.map((item) => {
         const value = viewModel[item.key];
-        return <div key={item.key} className="relative overflow-hidden rounded-2xl border border-slate-100 bg-white p-4 min-h-[104px] shadow-sm">{isLoading ? <div className="grid w-full gap-2"><SkeletonLine width="35%" /><SkeletonLine width="48%" /><SkeletonLine width="40%" height={20} /></div> :
+        return <div key={item.key} className="relative overflow-hidden rounded-2xl border border-slate-100 bg-white p-4 pb-8 min-h-[104px] shadow-sm">{isLoading ? <div className="grid w-full gap-2"><SkeletonLine width="35%" /><SkeletonLine width="48%" /><SkeletonLine width="40%" height={20} /></div> :
           <>
             <div className="relative z-10 flex items-start gap-3">
               <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-50">
@@ -222,11 +222,11 @@ export default function DashboardPage() {
               <div className="min-w-0 flex flex-col items-start pt-0.5">
                 <span className="text-[11px] font-semibold uppercase leading-tight tracking-wide text-slate-500">{item.label}</span>
                 <span className="mt-1 text-2xl font-bold leading-none text-slate-900">{value}{item.suffix}</span>
-                <p className="mt-2 flex items-center gap-1 whitespace-nowrap text-[11px] leading-none">
-                  <span className="font-semibold text-emerald-600">↑ 18%</span>
-                  <span className="text-slate-500">vs últimos 7 dias</span>
-                </p>
               </div>
+            </div>
+            <div className="absolute bottom-3 left-4 flex items-center gap-1 whitespace-nowrap text-[11px] leading-none">
+              <span className="font-semibold text-emerald-600">↑ 18%</span>
+              <span className="text-slate-500">vs últimos 7 dias</span>
             </div>
             <div className="pointer-events-none absolute bottom-4 right-4 h-6 w-16 overflow-hidden opacity-30">
               <Sparkline className="h-6 w-16"/>
