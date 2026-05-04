@@ -102,31 +102,6 @@ export default function FlowsPage() {
     setFlows((prev) => prev.map((flow) => (flow.id === flowId ? { ...flow, is_active: isActive } : flow)));
   };
 
-  const getFlowBadge = (flow: FlowListItem) => {
-    if (flow.is_active) {
-      return {
-        label: 'Ativo',
-        containerStyle: { background: '#f0fdf4', color: '#16a34a' },
-        dotColor: '#16a34a',
-      };
-    }
-
-    const isDraft = !flow.is_published && flow.status === 'draft';
-    if (isDraft) {
-      return {
-        label: 'Rascunho',
-        containerStyle: { background: '#fffbeb', color: '#d97706' },
-        dotColor: '#d97706',
-      };
-    }
-
-    return {
-      label: 'OFF',
-      containerStyle: { background: '#f3f4f6', color: '#6b7280' },
-      dotColor: '#6b7280',
-    };
-  };
-
   const handleToggle = async (flowId: string, isActive: boolean) => {
     updateLocalState(flowId, isActive);
     try {
@@ -189,7 +164,6 @@ export default function FlowsPage() {
         ) : (
           <div>
             {flows.map((flow, index) => {
-              const badge = getFlowBadge(flow);
               return (
                 <div key={flow.id} style={{ padding: '16px 20px', borderBottom: index < flows.length - 1 ? '1px solid #f0f0ee' : 'none', display: 'flex', flexDirection: isMobile ? 'column' : 'row', alignItems: isMobile ? 'flex-start' : 'center', justifyContent: 'space-between', gap: 12, transition: 'background 0.15s' }}
                   onMouseEnter={(e) => { e.currentTarget.style.background = '#fafaf9'; }}
@@ -202,20 +176,15 @@ export default function FlowsPage() {
                         tooltip={flow.is_active ? 'Desativar fluxo' : 'Ativar fluxo'}
                       />
                       <span style={{ fontSize: 14, fontWeight: 600, color: '#111' }}>{flow.name}</span>
-                      <span
-                        style={{
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: 5,
-                          padding: '2px 8px',
-                          borderRadius: 6,
-                          fontSize: 11,
-                          fontWeight: 600,
-                          ...badge.containerStyle,
-                        }}
-                      >
-                        <span style={{ width: 5, height: 5, borderRadius: '50%', background: badge.dotColor }} />{badge.label}
-                      </span>
+                      {flow.is_active ? (
+                        <span className="px-2 py-1 text-xs font-medium rounded-full bg-green-100 text-green-700">
+                          Ativo
+                        </span>
+                      ) : (
+                        <span className="px-2 py-1 text-xs font-medium rounded-full bg-gray-100 text-gray-500">
+                          OFF
+                        </span>
+                      )}
                     </div>
                     <span style={{ fontSize: 12, color: '#aaa' }}>Trigger: {flow.trigger_type || 'default'}{flow.trigger_value ? ` · ${flow.trigger_value}` : ''}</span>
                   </div>
