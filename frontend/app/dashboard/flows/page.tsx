@@ -200,17 +200,17 @@ export default function FlowsPage() {
   }, [flows, searchTerm, sortBy, statusFilter]);
 
   return (
-    <main className="flex-1 bg-slate-50 py-6">
-      <div className="mx-auto max-w-7xl space-y-6 px-6 font-sans">
+    <main className="flex-1 bg-[#F8FAFC] py-8">
+      <div className="mx-auto max-w-[1320px] space-y-7 px-8 font-sans lg:px-10">
       {/* Header */}
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h1 className="m-0 text-[22px] font-semibold tracking-[-0.02em] text-slate-900">Automações</h1>
+          <h1 className="m-0 text-[28px] font-bold tracking-[-0.02em] text-slate-900">Automações</h1>
           <p className="mt-1 text-sm text-slate-500">Gerencie fluxos de conversação e gatilhos</p>
         </div>
         <button
           onClick={openCreate}
-          className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-600 px-[18px] py-[9px] text-sm font-semibold tracking-[-0.01em] text-white transition hover:bg-emerald-700"
+          className="inline-flex items-center gap-1.5 h-12 rounded-xl bg-emerald-600 px-6 text-sm font-semibold tracking-[-0.01em] text-white shadow-[0_12px_24px_rgba(22,163,74,0.20)] transition hover:bg-emerald-700"
         >
           <span className="text-base leading-none">+</span> Novo fluxo
         </button>
@@ -247,15 +247,15 @@ export default function FlowsPage() {
             sparkline: 'M2 21 C8 19, 12 13, 18 14 C24 15, 28 10, 34 12 C40 13, 45 9, 50 11',
           },
         ].map((stat) => (
-          <div key={stat.label} className="rounded-2xl shadow-sm border border-gray-100 bg-white p-5 transition hover:shadow-md">
+          <div key={stat.label} className="min-h-[132px] rounded-[22px] border border-slate-200/70 bg-white p-6 shadow-[0_18px_45px_rgba(15,23,42,0.06)] transition hover:shadow-[0_18px_45px_rgba(15,23,42,0.08)]">
             <div className="flex items-start justify-between gap-3">
               <div className="flex items-center gap-2.5">
-                <div className={`flex h-9 w-9 items-center justify-center rounded-xl text-sm ${stat.iconBgClass} ${stat.colorClass}`}>
+                <div className={`flex h-14 w-14 items-center justify-center rounded-2xl text-xl ${stat.iconBgClass} ${stat.colorClass}`}>
                   {stat.icon}
                 </div>
                 <span className="text-[11px] font-bold uppercase tracking-[0.08em] text-slate-500">{stat.label}</span>
               </div>
-              <svg width="52" height="24" viewBox="0 0 52 24" fill="none" aria-hidden="true">
+              <svg width="92" height="36" viewBox="0 0 52 24" fill="none" aria-hidden="true">
                 <path
                   d={stat.sparkline}
                   className={stat.colorClass}
@@ -265,26 +265,29 @@ export default function FlowsPage() {
                 />
               </svg>
             </div>
-            <div className="mt-3">
-              <span className="block text-2xl font-semibold text-slate-900">{stat.value}</span>
+            <div className="mt-5">
+              <span className="block text-[30px] font-bold text-slate-900">{stat.value}</span>
               <span className="mt-1.5 inline-block text-xs text-slate-500">{stat.helperText}</span>
             </div>
           </div>
         ))}
       </div>
 
-      <div className="rounded-2xl border border-gray-100 bg-white p-4 shadow-sm">
-        <div className="flex items-center gap-4">
+      <div className="rounded-[22px] border border-slate-200/70 bg-white p-4 shadow-[0_12px_30px_rgba(15,23,42,0.05)]">
+        <div className="flex flex-wrap items-center gap-4 lg:gap-5">
+          <div className="relative min-w-[260px] flex-1">
+          <svg className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M13.5 13.5L18 18" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/><circle cx="8.5" cy="8.5" r="5.75" stroke="currentColor" strokeWidth="1.8"/></svg>
           <input
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             placeholder="Buscar fluxos..."
-            className="flex-1 rounded-xl border border-gray-100 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none"
+            className="h-12 flex-1 rounded-xl border border-slate-200/80 bg-white pl-10 pr-3 text-sm text-slate-900 outline-none"
           />
+          </div>
           <select
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value as 'all' | 'active' | 'inactive' | 'draft' | 'published')}
-            className="w-52 rounded-xl border border-gray-100 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none"
+            className="h-12 w-56 rounded-xl border border-slate-200/80 bg-white px-3 text-sm text-slate-900 outline-none"
           >
             <option value="all">Todos os status</option>
             <option value="active">Ativo</option>
@@ -295,7 +298,7 @@ export default function FlowsPage() {
           <select
             value={sortBy}
             onChange={(e) => setSortBy(e.target.value as 'recent' | 'name' | 'active_first')}
-            className="w-56 rounded-xl border border-gray-100 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none"
+            className="h-12 w-60 rounded-xl border border-slate-200/80 bg-white px-3 text-sm text-slate-900 outline-none"
           >
             <option value="recent">Ordenar: Mais recentes</option>
             <option value="name">Ordenar: Nome</option>
@@ -305,8 +308,8 @@ export default function FlowsPage() {
       </div>
 
       {/* Flow list */}
-      <div className="overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-sm">
-        <div className="border-b border-gray-100 px-5 py-4">
+      <div className="overflow-hidden rounded-[22px] border border-slate-200/70 bg-white shadow-[0_12px_30px_rgba(15,23,42,0.05)]">
+        <div className="border-b border-slate-200/70 px-6 py-5">
           <span className="text-xs font-semibold uppercase tracking-[0.05em] text-slate-500">Seus fluxos</span>
         </div>
 
@@ -314,7 +317,7 @@ export default function FlowsPage() {
           <div className="px-5 py-12 text-center text-sm text-slate-400">Carregando...</div>
         ) : filteredFlows.length === 0 ? (
           <div className="px-5 py-14 text-center">
-            <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-emerald-50 text-[22px]">⚡</div>
+            <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-emerald-50 text-[22px]">◌</div>
             <p className="mb-1.5 text-base font-semibold text-slate-900">Nenhum fluxo criado ainda</p>
             <p className="mb-5 text-sm text-slate-500">Crie seu primeiro fluxo de automação</p>
             <button
@@ -325,12 +328,12 @@ export default function FlowsPage() {
             </button>
           </div>
         ) : (
-          <div className="space-y-3 p-4 sm:space-y-4 sm:p-5">
+          <div className="divide-y divide-slate-200/70">
             {filteredFlows.map((flow) => {
               return (
                 <div
                   key={flow.id}
-                  className="flex flex-col gap-4 rounded-2xl border border-gray-100 bg-white p-5 transition hover:shadow-md lg:flex-row lg:items-center lg:justify-between"
+                  className="flex min-h-[112px] flex-col gap-4 px-6 py-5 transition hover:bg-slate-50/60 lg:flex-row lg:items-center lg:justify-between"
                 >
                   <div className="min-w-0 flex-1">
                     <div className="mb-1.5 flex flex-wrap items-center gap-3">
@@ -339,48 +342,48 @@ export default function FlowsPage() {
                         onChange={(value) => handleToggle(flow.id, value)}
                         tooltip={flow.is_active ? 'Desativar fluxo' : 'Ativar fluxo'}
                       />
-                      <div className="inline-flex h-12 w-12 items-center justify-center rounded-xl border border-slate-200 bg-slate-100 text-lg">
-                        ⚡
+                      <div className={`inline-flex h-16 w-16 items-center justify-center rounded-2xl border ${flow.is_active ? 'border-emerald-200 bg-emerald-50 text-emerald-600' : 'border-slate-200 bg-slate-100 text-slate-500'} text-xl`}>
+                        ◌
                       </div>
                       <div className="min-w-0">
                         <div className="flex flex-wrap items-center gap-2">
-                          <span className="truncate text-sm font-semibold text-slate-900 sm:text-base">{flow.name}</span>
+                          <span className="truncate text-[17px] font-bold text-slate-900">{flow.name}</span>
                           {(() => {
                             const statusBadge = getFlowStatusBadge(flow);
                             return (
-                              <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ${statusBadge.className}`}>
+                              <span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] font-semibold ${statusBadge.className}`}>
                                 <span className={`h-1.5 w-1.5 rounded-full ${statusBadge.dotClassName}`} />
                                 {statusBadge.label}
                               </span>
                             );
                           })()}
                         </div>
-                        <span className="mt-1 block text-xs text-slate-500">
+                        <span className="mt-1 block text-sm text-slate-500">
                           Trigger: {flow.trigger_type || 'default'}
                           {flow.trigger_value ? ` · ${flow.trigger_value}` : ''}
                         </span>
-                        <span className="mt-0.5 block text-xs text-slate-400">{getUpdatedLabel(flow.updated_at)}</span>
+                        <span className="mt-0.5 block text-sm text-slate-400">{getUpdatedLabel(flow.updated_at)}</span>
                       </div>
                     </div>
                   </div>
 
                   <div className="flex w-full flex-wrap items-center gap-2 sm:gap-3 lg:w-auto lg:justify-center">
-                    <div className="rounded-xl bg-gray-50 px-4 py-2 text-sm">
+                    <div className="min-w-[120px] rounded-2xl bg-slate-50 px-5 py-3 text-sm">
                       <div className="text-[10px] font-bold uppercase tracking-[0.05em] text-slate-500">Execuções</div>
-                      <div className="text-sm font-bold text-slate-900 sm:text-base">{getFlowExecutions(flow)}</div>
+                      <div className="text-2xl font-bold text-slate-900">{getFlowExecutions(flow)}</div>
                     </div>
-                    <div className="rounded-xl bg-gray-50 px-4 py-2 text-sm">
+                    <div className="min-w-[120px] rounded-2xl bg-slate-50 px-5 py-3 text-sm">
                       <div className="text-[10px] font-bold uppercase tracking-[0.05em] text-slate-500">Conversão</div>
-                      <div className="text-sm font-bold text-slate-900 sm:text-base">{getFlowConversion(flow)}</div>
+                      <div className="text-2xl font-bold text-slate-900">{getFlowConversion(flow)}</div>
                     </div>
                   </div>
 
                   <div className="relative flex w-full flex-wrap items-center gap-2 sm:justify-end lg:w-auto">
-                    <button onClick={(e) => { e.stopPropagation(); openEdit(flow); }} className="whitespace-nowrap rounded-xl border border-gray-100 bg-transparent px-3 py-1.5 text-xs font-semibold text-slate-600 transition hover:shadow-sm">Editar</button>
-                    <Link href={`/dashboard/flows/${flow.id}/analytics`} onClick={(e) => e.stopPropagation()} className="whitespace-nowrap rounded-xl border border-gray-100 bg-transparent px-3 py-1.5 text-xs font-semibold text-slate-600 no-underline transition hover:shadow-sm">Analytics</Link>
-                    <Link href={`/dashboard/flow-builder?flow_id=${flow.id}`} onClick={(e) => e.stopPropagation()} className="whitespace-nowrap rounded-xl bg-emerald-600 px-3.5 py-1.5 text-xs font-semibold text-white no-underline transition hover:bg-emerald-700">Abrir builder</Link>
+                    <button onClick={(e) => { e.stopPropagation(); openEdit(flow); }} className="h-10 whitespace-nowrap rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-600 transition hover:shadow-sm">Editar</button>
+                    <Link href={`/dashboard/flows/${flow.id}/analytics`} onClick={(e) => e.stopPropagation()} className="h-10 whitespace-nowrap rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-600 no-underline transition hover:shadow-sm">Analytics</Link>
+                    <Link href={`/dashboard/flow-builder?flow_id=${flow.id}`} onClick={(e) => e.stopPropagation()} className="h-10 whitespace-nowrap rounded-xl bg-emerald-600 px-5 text-sm font-semibold text-white no-underline shadow-[0_10px_20px_rgba(22,163,74,0.22)] transition hover:bg-emerald-700">Abrir builder</Link>
                     <div className="relative">
-                      <button onClick={(e) => { e.stopPropagation(); setOpenDropdown(openDropdown === flow.id ? null : flow.id); }} className="rounded-xl border border-gray-100 bg-transparent px-2.5 py-1.5 text-sm leading-none text-slate-600 transition hover:shadow-sm">⋯</button>
+                      <button onClick={(e) => { e.stopPropagation(); setOpenDropdown(openDropdown === flow.id ? null : flow.id); }} className="flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white text-sm leading-none text-slate-600 transition hover:shadow-sm">⋯</button>
                       {openDropdown === flow.id && (
                         <div className="absolute right-0 top-[calc(100%+4px)] z-10 min-w-[140px] overflow-hidden rounded-xl border border-gray-100 bg-white shadow-md">
                           <button onClick={(e) => { e.stopPropagation(); onDuplicate(flow.id); setOpenDropdown(null); }} className="w-full bg-transparent px-3.5 py-2 text-left text-sm text-slate-700 transition hover:bg-slate-50">Duplicar</button>
@@ -397,17 +400,17 @@ export default function FlowsPage() {
       </div>
 
       <div
-        className="rounded-2xl border border-emerald-100 p-5 shadow-sm"
-        style={{ background: 'linear-gradient(120deg, #ffffff 0%, #f0fdf4 55%, #dcfce7 100%)' }}
+        className="rounded-[22px] border border-emerald-100/60 p-6 shadow-[0_14px_30px_rgba(15,23,42,0.05)]"
+        style={{ background: 'linear-gradient(120deg, #ffffff 0%, #f8fffb 52%, #ecfdf5 100%)' }}
       >
         <div className="grid grid-cols-1 items-center gap-4 md:grid-cols-[120px_minmax(0,1fr)_auto]">
           <div
             style={{
               width: '100%',
               maxWidth: 110,
-              minHeight: 88,
+              minHeight: 104,
               borderRadius: 14,
-              background: 'rgba(22, 163, 74, 0.08)',
+              background: 'rgba(22, 163, 74, 0.05)',
               border: '1px solid rgba(22, 163, 74, 0.14)',
               display: 'flex',
               alignItems: 'center',
@@ -424,7 +427,7 @@ export default function FlowsPage() {
           </div>
 
           <div>
-            <span className="inline-flex rounded-full bg-emerald-100 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-emerald-700">
+            <span className="inline-flex rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-emerald-700">
               Dica rápida
             </span>
             <h3 style={{ margin: '10px 0 6px', fontSize: 20, fontWeight: 700, color: '#0f172a', lineHeight: 1.2 }}>
@@ -437,7 +440,7 @@ export default function FlowsPage() {
 
           <Link
             href="/dashboard/flow-builder"
-            className="inline-flex w-full items-center justify-center rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white no-underline transition hover:bg-emerald-700 md:w-auto"
+            className="inline-flex h-11 w-full items-center justify-center rounded-xl bg-emerald-100 px-5 text-sm font-semibold text-emerald-700 no-underline transition hover:bg-emerald-200 md:w-auto"
           >
             Abrir builder
           </Link>
