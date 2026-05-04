@@ -155,10 +155,10 @@ export default function FlowsPage() {
   }, [flows, searchTerm, sortBy, statusFilter]);
 
   return (
-    <main className="flex-1 px-6 py-6">
-      <div className="w-full max-w-[1200px] mx-auto" style={{ fontFamily: 'Inter, -apple-system, sans-serif' }}>
+    <main className="flex-1 bg-slate-50 px-8 py-8">
+      <div className="mx-auto w-full max-w-[1240px]" style={{ fontFamily: 'Inter, -apple-system, sans-serif' }}>
       {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 28, flexWrap: 'wrap', gap: 12 }}>
+      <div className="mb-8 flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 style={{ margin: 0, fontSize: 22, fontWeight: 600, color: '#111', letterSpacing: '-0.02em' }}>Automações</h1>
           <p style={{ margin: '4px 0 0', fontSize: 13, color: '#888' }}>Gerencie fluxos de conversação e gatilhos</p>
@@ -169,13 +169,13 @@ export default function FlowsPage() {
       </div>
 
       {/* Stats */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, marginBottom: 24 }}>
+      <div className="mb-6 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {[
           { label: 'Total de fluxos', value: flows.length, color: '#6366f1' },
           { label: 'Publicados', value: published, color: '#16a34a' },
           { label: 'Rascunhos', value: drafts, color: '#d97706' },
         ].map((stat) => (
-          <div key={stat.label} style={{ background: '#fff', border: '1px solid #e8e6e0', borderRadius: 14, padding: '18px 20px', boxShadow: '0 1px 3px rgba(0,0,0,0.04)' }}>
+          <div key={stat.label} className="rounded-2xl border border-slate-200 bg-white p-[18px_20px] shadow-sm">
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
               <div style={{ width: 8, height: 8, borderRadius: '50%', background: stat.color }} />
               <span style={{ fontSize: 11, fontWeight: 600, color: '#888', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{stat.label}</span>
@@ -185,7 +185,8 @@ export default function FlowsPage() {
         ))}
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '2fr 1fr 1fr', gap: 12, marginBottom: 16 }}>
+      <div className="mb-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+        <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '2fr 1fr 1fr', gap: 12 }}>
         <input
           value={searchTerm}
           onChange={(e) => setSearchTerm(e.target.value)}
@@ -212,10 +213,11 @@ export default function FlowsPage() {
           <option value="name">Ordenar: Nome</option>
           <option value="active_first">Ordenar: Ativos primeiro</option>
         </select>
+        </div>
       </div>
 
       {/* Flow list */}
-      <div style={{ background: '#fff', border: '1px solid #e8e6e0', borderRadius: 14, overflow: 'hidden', boxShadow: '0 1px 3px rgba(0,0,0,0.04)' }}>
+      <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
         <div style={{ padding: '16px 20px', borderBottom: '1px solid #f0f0ee' }}>
           <span style={{ fontSize: 11, fontWeight: 600, color: '#888', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Seus fluxos</span>
         </div>
