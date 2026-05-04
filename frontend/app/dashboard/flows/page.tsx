@@ -189,51 +189,57 @@ export default function FlowsPage() {
       </div>
 
       {/* Stats */}
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+      <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
         {[
           {
-            label: 'Total',
+            label: 'TOTAL DE FLUXOS',
             value: flows.length,
             helperText: 'Todos os fluxos criados',
-            color: '#86efac',
-            iconBg: '#dcfce7',
+            colorClass: 'text-emerald-600',
+            iconBgClass: 'bg-emerald-100',
             icon: '📊',
             sparkline: 'M2 20 C8 18, 12 9, 18 11 C23 13, 27 7, 34 9 C40 10, 45 5, 50 7',
           },
           {
-            label: 'Publicados',
+            label: 'PUBLICADOS',
             value: published,
             helperText: 'Fluxos ativos em produção',
-            color: '#10b981',
-            iconBg: '#d1fae5',
+            colorClass: 'text-amber-600',
+            iconBgClass: 'bg-amber-100',
             icon: '✅',
             sparkline: 'M2 20 C10 17, 14 12, 20 14 C25 15, 30 9, 36 10 C42 11, 47 6, 50 8',
           },
           {
-            label: 'Rascunhos',
+            label: 'RASCUNHOS',
             value: drafts,
             helperText: 'Aguardando publicação',
-            color: '#fb923c',
-            iconBg: '#ffedd5',
+            colorClass: 'text-slate-500',
+            iconBgClass: 'bg-slate-100',
             icon: '📝',
             sparkline: 'M2 21 C8 19, 12 13, 18 14 C24 15, 28 10, 34 12 C40 13, 45 9, 50 11',
           },
         ].map((stat) => (
-          <div key={stat.label} className="rounded-2xl border border-slate-200 bg-white p-[18px_20px] shadow-sm transition hover:shadow-md">
-            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <div style={{ width: 34, height: 34, borderRadius: 10, background: stat.iconBg, color: stat.color, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14 }}>
+          <div key={stat.label} className="rounded-2xl shadow-sm border border-gray-100 bg-white p-5 transition hover:shadow-md">
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-center gap-2.5">
+                <div className={`flex h-9 w-9 items-center justify-center rounded-xl text-sm ${stat.iconBgClass} ${stat.colorClass}`}>
                   {stat.icon}
                 </div>
-                <span style={{ fontSize: 11, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.08em' }}>{stat.label}</span>
+                <span className="text-[11px] font-bold uppercase tracking-[0.08em] text-slate-500">{stat.label}</span>
               </div>
               <svg width="52" height="24" viewBox="0 0 52 24" fill="none" aria-hidden="true">
-                <path d={stat.sparkline} stroke={stat.color} strokeWidth="2" strokeLinecap="round" />
+                <path
+                  d={stat.sparkline}
+                  className={stat.colorClass}
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                />
               </svg>
             </div>
-            <div style={{ marginTop: 12 }}>
-              <span style={{ fontSize: 34, fontWeight: 700, color: '#0f172a', letterSpacing: '-0.03em', display: 'block', lineHeight: 1.1 }}>{stat.value}</span>
-              <span style={{ marginTop: 6, display: 'inline-block', fontSize: 12, color: '#64748b' }}>{stat.helperText}</span>
+            <div className="mt-3">
+              <span className="block text-2xl font-semibold text-slate-900">{stat.value}</span>
+              <span className="mt-1.5 inline-block text-xs text-slate-500">{stat.helperText}</span>
             </div>
           </div>
         ))}
