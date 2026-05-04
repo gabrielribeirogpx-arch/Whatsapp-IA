@@ -78,7 +78,7 @@ def ensure_conversations_columns():
 def _parse_allowed_origins() -> list[str]:
     origins = os.getenv(
         "CORS_ALLOW_ORIGINS",
-        "https://whatsapp-ia-nine.vercel.app,http://localhost:3000",
+        "https://whatsapp-ia-nine.vercel.app,http://localhost:3000,https://frontend-whatsapp-ia-production.up.railway.app",
     )
     parsed = [origin.strip() for origin in origins.split(",") if origin.strip()]
     return parsed or ["*"]
@@ -96,10 +96,7 @@ app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "https://whatsapp-ia-nine.vercel.app",
-        "http://localhost:3000",
-    ],
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
