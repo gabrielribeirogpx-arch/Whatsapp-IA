@@ -216,6 +216,8 @@ export type FlowItem = {
   trigger_type: 'keyword' | 'default' | string;
   trigger_value?: string | null;
   version: number;
+  status?: string;
+  is_published?: boolean;
   created_at?: string | null;
   updated_at?: string | null;
 };
