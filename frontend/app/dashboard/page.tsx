@@ -249,6 +249,7 @@ export default function DashboardPage() {
     if (total === 0) base[0].value = 100;
     return base;
   }, [viewModel.channels]);
+  const safeKpis = Array.isArray(kpiMeta) ? kpiMeta : [];
 
   return (
     <section className="w-full min-w-0 px-5 py-6 lg:px-6">
@@ -292,7 +293,8 @@ export default function DashboardPage() {
       </div>
 
       <div className="grid w-full grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">
-  {(kpiMeta || []).map((item) => {
+  {safeKpis.map((item) => {
+    if (!item) return null;
     const rawValue = viewModel?.[item.key as keyof typeof viewModel];
 
     const value =
@@ -330,7 +332,7 @@ export default function DashboardPage() {
 
             <span className="mt-1 text-2xl font-bold text-slate-900">
               {value}
-              {item.suffix || ''}
+              {item.suffix ?? ''}
             </span>
           </div>
         </div>
