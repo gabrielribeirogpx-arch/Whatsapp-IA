@@ -8,5 +8,10 @@ type FlowBuilderPageProps = {
 
 export default function FlowBuilderPage({ searchParams }: FlowBuilderPageProps) {
   const flowId = searchParams?.flow_id;
-  return <FlowBuilderClient flowId={flowId} />;
+
+  return (
+    <main className="h-screen w-full overflow-hidden">
+      <FlowBuilderClient flowId={flowId} />
+    </main>
+  );
 }
