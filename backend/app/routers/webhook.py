@@ -29,6 +29,7 @@ from app.services.intent_service import classify_intent, normalize_input, route_
 from app.models import Tenant
 from app.utils.phone import normalize_phone
 from app.utils.text import normalize_text
+from app.services.queue import enqueue_incoming_message
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -347,246 +348,29 @@ async def verify(
 
 @router.post("/webhook")
 async def webhook(request: Request, db: Session = Depends(get_db)):
-    tenant_id = request.headers.get("X-Tenant-ID")
-
-    if not tenant_id:
-        tenant_id = "619474df-9dc1-4cd6-bce0-57a9402284bf"
-
-    print("[TENANT USADO]:", tenant_id)
-
     payload = await _parse_webhook_payload(request)
     if not payload:
-        return {"status": "ignored"}
+        return {"status": "received"}
 
-    entry = (payload.get("entry") or [None])[0] or {}
-    changes = (entry.get("changes") or [None])[0] or {}
-    value = changes.get("value") or {}
-    if not value.get("messages"):
-        return {"status": "ignored"}
-    message = value["messages"][0]
-
-    wa_id = message["from"]
-    phone = normalize_phone(wa_id)
-    message_id = (message.get("id") or "").strip()
-    if message["type"] == "interactive":
-        user_input = message["interactive"]["button_reply"]["id"]
-    elif message["type"] == "text":
-        user_input = message["text"]["body"]
-    else:
-        user_input = ""
-
-    user_input = normalize_input(user_input)
-    print("[USER INPUT]:", user_input)
-    intent = classify_intent(user_input)
-    print("[INTENT]:", intent)
-
-    tenant_uuid = UUID(tenant_id)
-    was_inserted = register_processed_message(db=db, tenant_id=tenant_uuid, message_id=message_id)
-    if not was_inserted:
-        logger.info(
-            "[WEBHOOK DUPLICATE SKIPPED] message_id=%s tenant_id=%s wa_id=%s",
-            message_id,
-            tenant_id,
-            wa_id,
-        )
-        return {"status": "ignored"}
-
-    redis_client = get_redis_client()
-    lock_key = f"flow_lock:{tenant_uuid}:{wa_id}"
-    lock_token = str(uuid.uuid4())
-    lock_acquired = redis_client.set(lock_key, lock_token, nx=True, ex=10)
-    if not lock_acquired:
-        logger.info("[RUNTIME LOCKED] tenant_id=%s wa_id=%s", tenant_uuid, wa_id)
-        return {"status": "ignored"}
+    correlation_id: str | None = None
+    try:
+        entry = (payload.get("entry") or [None])[0] or {}
+        changes = (entry.get("changes") or [None])[0] or {}
+        value = changes.get("value") or {}
+        message = (value.get("messages") or [None])[0] or {}
+        correlation_id = (message.get("id") or payload.get("message_id") or "").strip() or None
+        if correlation_id:
+            payload["correlation_id"] = correlation_id
+            payload.setdefault("message_id", correlation_id)
+    except Exception:
+        logger.exception("event=webhook_correlation_parse_error")
 
     try:
-        flow_row = (
-            db.query(Flow)
-            .filter(Flow.tenant_id == tenant_uuid, Flow.is_active.is_(True))
-            .order_by(Flow.created_at.asc(), Flow.id.asc())
-            .first()
-        )
-        if not flow_row:
-            return {"status": "ignored"}
+        enqueue_incoming_message(payload)
+    except Exception:
+        logger.exception("event=webhook_enqueue_error correlation_id=%s", correlation_id)
 
-        published_version = (
-            db.query(FlowVersion)
-            .filter(FlowVersion.flow_id == flow_row.id, FlowVersion.is_published.is_(True))
-            .order_by(FlowVersion.version.desc())
-            .first()
-        )
-        if not published_version:
-            return {"status": "ignored"}
-
-        flow = {"nodes": published_version.nodes or [], "edges": published_version.edges or []}
-        start_node = _find_start_node(flow["nodes"])
-        if not start_node:
-            print("[FLOW ERROR] START_NODE_NOT_FOUND")
-            return {"status": "ignored"}
-
-        execution = (
-            db.query(FlowExecution)
-            .filter(FlowExecution.flow_version_id == published_version.id, FlowExecution.user_phone == phone)
-            .first()
-        )
-        if not execution:
-            print("[FLOW RUNTIME] new_session=true")
-            print("[FLOW RUNTIME] start_node_id=", start_node.get("id"))
-            runtime_result = await execute_node_chain_until_reply(
-                graph=flow,
-                start_node_id=str(start_node.get("id")) if start_node else None,
-                user_input="",
-                tenant_id=str(tenant_uuid),
-                wa_id=wa_id,
-                db=db,
-                context={"channel": "whatsapp"},
-            )
-            events = runtime_result.get("events", [])
-            next_node_id = runtime_result.get("next_node_id")
-            execution = FlowExecution(
-                flow_version_id=published_version.id,
-                user_phone=phone,
-                current_node_id=next_node_id,
-                state={},
-            )
-            db.add(execution)
-            db.commit()
-            db.refresh(execution)
-            is_pending = await _process_runtime_events(
-                events=events,
-                phone=phone,
-                execution=execution,
-                tenant_uuid=tenant_uuid,
-                wa_id=wa_id,
-                db=db,
-            )
-            print("[FLOW RUNTIME] next_node_id=", next_node_id)
-            return {"status": "pending_delay" if is_pending else "message processed"}
-
-        normalized = normalize_text(user_input)
-        force_start = normalized in {"oi", "ola", "menu", "iniciar", "inicio", "reiniciar", "reset"}
-        print("[RUNTIME FORCE START]", force_start)
-
-        if execution.current_node_id is None and not force_start:
-            print("[RUNTIME SESSION COMPLETED] aguardando reset/start explícito")
-            return {"status": "ignored"}
-
-        if force_start:
-            print("[RUNTIME START NODE FOUND]", start_node.get("id"))
-            runtime_result = await execute_node_chain_until_reply(
-                graph=flow,
-                start_node_id=str(start_node.get("id")) if start_node else None,
-                user_input="",
-                tenant_id=str(tenant_uuid),
-                wa_id=wa_id,
-                db=db,
-                context={"channel": "whatsapp"},
-            )
-            events = runtime_result.get("events", [])
-            next_node_id = runtime_result.get("next_node_id")
-            execution.current_node_id = next_node_id
-            execution.state = {}
-            db.add(execution)
-            db.commit()
-            db.refresh(execution)
-            is_pending = await _process_runtime_events(
-                events=events,
-                phone=phone,
-                execution=execution,
-                tenant_uuid=tenant_uuid,
-                wa_id=wa_id,
-                db=db,
-            )
-            db.add(execution)
-            db.commit()
-            print("[RUNTIME SESSION OVERRIDDEN]")
-            print("[WHATSAPP RESPONSE START]")
-            return {"status": "pending_delay" if is_pending else "message processed"}
-
-        execution_state = execution.state if isinstance(execution.state, dict) else {}
-        has_pending_delay = bool(execution_state.get("pending_delay"))
-        pending_next_node_id = execution_state.get("pending_delay_next_node_id")
-        if has_pending_delay and pending_next_node_id:
-            execution.current_node_id = str(pending_next_node_id)
-            _clear_pending_delay_state(execution)
-            db.add(execution)
-            db.commit()
-            db.refresh(execution)
-
-        current_node = get_node_by_id(flow, execution.current_node_id)
-        if not current_node:
-            current_node = start_node
-
-        print("[FLOW EXECUTION]", execution.id)
-        print("[FLOW VERSION]", published_version.version)
-        print("[USER INPUT]", user_input)
-        print("[CURRENT NODE]", current_node.get("id"))
-
-        runtime_result = await execute_node_chain_until_reply(
-            graph=flow,
-            start_node_id=str(current_node.get("id")) if current_node else None,
-            user_input=user_input,
-            tenant_id=str(tenant_uuid),
-            wa_id=wa_id,
-            db=db,
-            context={"channel": "whatsapp"},
-        )
-        events = runtime_result.get("events", [])
-        response_node_id = runtime_result.get("response_node_id")
-        next_node_id = runtime_result.get("next_node_id")
-
-        print("[NEXT NODE]", next_node_id)
-        print("[DELAY RESPONSE NODE]", response_node_id)
-
-        execution.current_node_id = next_node_id
-        if isinstance(execution.state, dict):
-            execution.state["pending_delay_next_node_id"] = next_node_id
-        db.add(execution)
-        db.commit()
-        db.refresh(execution)
-
-        is_pending = await _process_runtime_events(
-            events=events,
-            phone=phone,
-            execution=execution,
-            tenant_uuid=tenant_uuid,
-            wa_id=wa_id,
-            db=db,
-        )
-        if is_pending:
-            return {"status": "pending_delay"}
-
-        _clear_pending_delay_state(execution)
-
-        is_terminal = not _has_outgoing_edges(response_node_id, flow["edges"]) if response_node_id else not next_node_id
-        if is_terminal:
-            execution.current_node_id = None
-            print("[FLOW RUNTIME] session finalized at node", next_node_id)
-
-        db.add(execution)
-        db.commit()
-        return {"status": "message processed"}
-    except Exception as exc:
-        db.rollback()
-        logger.exception(
-            "[WEBHOOK RUNTIME ERROR] tenant_id=%s wa_id=%s message_id=%s error=%s",
-            tenant_uuid,
-            wa_id,
-            message_id,
-            str(exc),
-        )
-        send_whatsapp_message_simple(phone, "⚠️ O sistema está inicializando. Tente novamente em instantes.")
-        return {"status": "fallback"}
-    finally:
-        try:
-            redis_client.eval(
-                "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) else return 0 end",
-                1,
-                lock_key,
-                lock_token,
-            )
-        except Exception:
-            logger.exception("[RUNTIME LOCK RELEASE ERROR] tenant_id=%s wa_id=%s", tenant_uuid, wa_id)
+    return {"status": "received"}
 
 
 @router.post("/webhook/meta")
