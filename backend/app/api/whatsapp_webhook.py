@@ -2,7 +2,7 @@ import os
 
 from fastapi import APIRouter, Query, Request
 
-from app.services.flow_runtime_queue import enqueue_flow_job
+from app.services.queue import enqueue_incoming_message
 
 router = APIRouter()
 
@@ -28,33 +28,8 @@ async def receive(request: Request):
     body = await request.json()
 
     try:
-        entry = body["entry"][0]
-        changes = entry["changes"][0]
-        value = changes["value"]
-
-        messages = value.get("messages")
-
-        if not messages:
-            return {"status": "no message"}
-
-        message = messages[0]
-
-        phone = message["from"]
-        text = message["text"]["body"]
-        message_id = message["id"]
-
-        conversation_id = phone
-        flow_id = os.getenv("DEFAULT_FLOW_ID", "")
-
-        enqueue_flow_job(
-            flow_id=flow_id,
-            conversation_id=conversation_id,
-            message=text,
-            message_id=message_id,
-        )
-
+        enqueue_incoming_message(body)
         return {"status": "queued"}
-
-    except Exception as e:
-        print("[WEBHOOK ERROR]", str(e))
-        return {"status": "error"}
+    except Exception as exc:  # webhook must ACK independent from worker failures
+        print("[WEBHOOK ERROR]", str(exc))
+        return {"status": "accepted"}
