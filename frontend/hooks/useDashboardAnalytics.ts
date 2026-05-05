@@ -15,6 +15,7 @@ type AnalyticsTimeseries = {
 type AnalyticsKpis = {
   conversations?: number;
   leads?: number;
+  messages?: number;
   messages_received?: number;
   messages_sent?: number;
   response_rate?: number;
@@ -51,6 +52,15 @@ export function useDashboardAnalytics() {
   const normalized = useMemo(() => {
     const timeseries = data?.timeseries ?? {};
     const labels = Array.isArray(timeseries.labels) ? timeseries.labels : [];
+    const kpis = data?.kpis ?? {
+      conversations: 0,
+      leads: 0,
+      messages: 0,
+      messages_received: 0,
+      messages_sent: 0,
+      response_rate: 0,
+      conversions: 0,
+    };
 
     const ensure = (values?: number[]) => {
       const source = Array.isArray(values) ? values.map((item) => Number(item) || 0) : [];
@@ -79,14 +89,15 @@ export function useDashboardAnalytics() {
 
     const sum = (arr: number[]) => arr.reduce((acc, value) => acc + value, 0);
     const calculated = {
-      conversations: sum(padded.conversations),
-      leads: sum(padded.leads),
-      messages_received: sum(padded.messages_received),
-      messages_sent: sum(padded.messages_sent),
-      response_rate: padded.messages_received.some((item) => item > 0)
-        ? Number(((sum(padded.messages_sent) / Math.max(sum(padded.messages_received), 1)) * 100).toFixed(1))
-        : 0,
-      conversions: sum(padded.conversions),
+      conversations: Number(kpis.conversations) || sum(padded.conversations),
+      leads: Number(kpis.leads) || sum(padded.leads),
+      messages_received: Number(kpis.messages_received ?? kpis.messages) || sum(padded.messages_received),
+      messages_sent: Number(kpis.messages_sent) || sum(padded.messages_sent),
+      response_rate: Number(kpis.response_rate)
+        || (padded.messages_received.some((item) => item > 0)
+          ? Number(((sum(padded.messages_sent) / Math.max(sum(padded.messages_received), 1)) * 100).toFixed(1))
+          : 0),
+      conversions: Number(kpis.conversions) || sum(padded.conversions),
     };
 
     return { kpis: calculated, timeseries: padded };
