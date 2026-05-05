@@ -36,9 +36,17 @@ export function useDashboardAnalytics() {
     void (async () => {
       setIsLoading(true);
       try {
-        const res = await apiFetch('/api/dashboard/analytics', { method: 'POST' });
+        const res = await apiFetch('/api/dashboard/analytics');
         const payload = await parseApiResponse<AnalyticsResponse>(res);
-        setData(payload ?? null);
+        console.log('analytics response', payload);
+
+        if (!payload) {
+          setData(null);
+          setError(null);
+          return;
+        }
+
+        setData(payload);
         setError(null);
       } catch {
         setData(null);
