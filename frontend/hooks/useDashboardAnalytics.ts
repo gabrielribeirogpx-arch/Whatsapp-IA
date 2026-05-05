@@ -27,6 +27,25 @@ type AnalyticsResponse = {
   timeseries?: AnalyticsTimeseries;
 };
 
+const DEFAULT_KPIS = {
+  conversations: 0,
+  leads: 0,
+  messages: 0,
+  messages_received: 0,
+  messages_sent: 0,
+  response_rate: 0,
+  conversions: 0,
+};
+
+const DEFAULT_SERIES = {
+  labels: [],
+  conversations: [],
+  leads: [],
+  messages_received: [],
+  messages_sent: [],
+  conversions: [],
+};
+
 export function useDashboardAnalytics() {
   const [data, setData] = useState<AnalyticsResponse | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -58,20 +77,12 @@ export function useDashboardAnalytics() {
   }, []);
 
   const normalized = useMemo(() => {
-    const series = data?.timeseries ?? { labels: [], conversations: [], messages_received: [], messages_sent: [] };
+    const series = data?.timeseries ?? DEFAULT_SERIES;
     const labels = Array.isArray(series.labels) ? series.labels : [];
-    const kpis = data?.kpis ?? {
-      conversations: 0,
-      leads: 0,
-      messages: 0,
-      messages_received: 0,
-      messages_sent: 0,
-      response_rate: 0,
-      conversions: 0,
-    };
+    const kpis = data?.kpis ?? DEFAULT_KPIS;
 
     const ensure = (values?: number[]) => {
-      const source = Array.isArray(values) ? values.map((item) => Number(item) || 0) : [];
+      const source = Array.isArray(values) ? (values || []).map((item) => Number(item) || 0) : [];
       if (source.length) return source;
       if (labels.length) return Array.from({ length: labels.length }, () => 0);
       return Array.from({ length: 7 }, () => 0);
@@ -111,5 +122,5 @@ export function useDashboardAnalytics() {
     return { kpis: calculated, timeseries: padded };
   }, [data]);
 
-  return { ...normalized, isLoading, error };
+  return { data, ...normalized, isLoading, error };
 }
