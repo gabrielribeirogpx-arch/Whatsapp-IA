@@ -37,37 +37,42 @@ def _pick_message(payload: dict[str, Any]) -> dict[str, Any] | None:
 def process_incoming_message(payload: dict[str, Any]) -> None:
     raw_correlation = payload.get("correlation_id") or payload.get("message_id")
     correlation_id = str(raw_correlation or "n/a")
-    logger.info("event=incoming_worker_start correlation_id=%s", correlation_id)
+    logger.info("event=incoming_worker_start correlation_id=%s tenant_id=%s phone=%s job_id=%s stage=incoming_worker_start", correlation_id, "n/a", payload.get("phone") or "n/a", payload.get("job_id") or "n/a")
 
     parsed = _pick_message(payload)
     if not parsed:
-        logger.warning("event=incoming_worker_skip reason=no_supported_message correlation_id=%s", correlation_id)
+        logger.warning("event=incoming_worker_skip correlation_id=%s tenant_id=%s phone=%s job_id=%s stage=incoming_worker_parse reason=no_supported_message", correlation_id, "n/a", payload.get("phone") or "n/a", payload.get("job_id") or "n/a")
         return
 
     correlation_id = str(parsed.get("message_id") or correlation_id)
-    logger.info("event=incoming_worker_parsed correlation_id=%s type=text", correlation_id)
+    logger.info("event=incoming_worker_parsed correlation_id=%s tenant_id=%s phone=%s job_id=%s stage=incoming_worker_parse type=text", correlation_id, "n/a", parsed.get("phone") or "n/a", payload.get("job_id") or "n/a")
 
     with SessionLocal() as db:
         phone_number_id = str(parsed.get("phone_number_id") or "").strip()
         tenant = resolve_tenant_by_phone_number_id(db, phone_number_id)
         if not tenant:
             logger.warning(
-                "event=incoming_worker_skip reason=tenant_not_found correlation_id=%s phone_number_id=%s",
+                "event=incoming_worker_skip correlation_id=%s tenant_id=%s phone=%s job_id=%s stage=incoming_worker_tenant reason=tenant_not_found phone_number_id=%s",
                 correlation_id,
+                "n/a",
+                parsed.get("phone") or "n/a",
+                payload.get("job_id") or "n/a",
                 phone_number_id,
             )
             return
 
         logger.info(
-            "event=incoming_worker_tenant_resolved correlation_id=%s tenant_id=%s",
+            "event=incoming_worker_tenant_resolved correlation_id=%s tenant_id=%s phone=%s job_id=%s stage=incoming_worker_tenant",
             correlation_id,
             tenant.id,
+            parsed.get("phone") or "n/a",
+            payload.get("job_id") or "n/a",
         )
 
         with db.begin():
             is_new = register_processed_message(db=db, tenant_id=tenant.id, message_id=correlation_id)
             if not is_new:
-                logger.info("event=incoming_worker_skip reason=duplicate correlation_id=%s", correlation_id)
+                logger.info("event=incoming_worker_skip correlation_id=%s tenant_id=%s phone=%s job_id=%s stage=incoming_worker_dedup reason=duplicate", correlation_id, tenant.id, parsed.get("phone") or "n/a", payload.get("job_id") or "n/a")
                 return
 
         with db.begin():
@@ -122,4 +127,4 @@ def process_incoming_message(payload: dict[str, Any]) -> None:
                 handle_incoming_message(db=db, message=persisted_message, conversation=persisted_conversation)
             logger.info("event=incoming_worker_flow_executed correlation_id=%s", correlation_id)
 
-    logger.info("event=incoming_worker_done correlation_id=%s", correlation_id)
+    logger.info("event=incoming_worker_done correlation_id=%s tenant_id=%s phone=%s job_id=%s stage=incoming_worker_done", correlation_id, payload.get("tenant_id") or "n/a", parsed.get("phone") if parsed else payload.get("phone") or "n/a", payload.get("job_id") or "n/a")

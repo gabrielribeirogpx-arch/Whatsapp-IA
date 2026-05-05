@@ -16,15 +16,21 @@ def send_whatsapp_message(*, message_data: dict[str, Any]) -> None:
     phone = str(message_data.get("phone") or "")
     text = str(message_data.get("text") or "").strip()
     buttons = message_data.get("buttons")
+    correlation_id = str(message_data.get("correlation_id") or message_data.get("message_id") or "n/a")
+    job_id = str(message_data.get("job_id") or "n/a")
+
+    logger.info("event=send_worker_start correlation_id=%s tenant_id=%s phone=%s job_id=%s stage=send_worker_start", correlation_id, tenant_id or "n/a", phone or "n/a", job_id)
 
     tenant_uuid = uuid.UUID(tenant_id)
     with SessionLocal() as db:
         tenant = db.query(Tenant).filter(Tenant.id == tenant_uuid).first()
         if not tenant:
             logger.warning(
-                "event=queue_send_skip reason=tenant_not_found tenant_id=%s phone=%s",
+                "event=queue_send_skip correlation_id=%s tenant_id=%s phone=%s job_id=%s stage=send_worker_resolve reason=tenant_not_found",
+                correlation_id,
                 tenant_id,
                 phone,
+                job_id,
             )
             return
 
@@ -39,9 +45,11 @@ def send_whatsapp_message(*, message_data: dict[str, Any]) -> None:
             send_whatsapp_message(tenant=tenant, phone=phone, text=text)
 
         logger.info(
-            "event=queue_send_success tenant_id=%s phone=%s text_len=%s has_buttons=%s",
+            "event=queue_send_success correlation_id=%s tenant_id=%s phone=%s job_id=%s stage=send_final text_len=%s has_buttons=%s",
+            correlation_id,
             tenant_id,
             phone,
+            job_id,
             len(text),
             bool(buttons),
         )
