@@ -209,6 +209,15 @@ export default function DashboardPage() {
   const totalChannels = viewModel.channels.reduce((acc, c) => acc + c.value, 0);
   const liveItems = uniqueConversations.slice(0, 4);
 
+  const analyticsSeries = {
+    labels: timeseries?.labels ?? [],
+    conversations: timeseries?.conversations ?? [],
+    leads: timeseries?.leads ?? [],
+    messagesReceived: timeseries?.messages_received ?? [],
+    messagesSent: timeseries?.messages_sent ?? [],
+    conversions: timeseries?.conversions ?? [],
+  };
+
   const normalizedChannelItems = useMemo(() => {
     const base = [
       { name: 'WhatsApp', value: 0 },
@@ -286,14 +295,14 @@ export default function DashboardPage() {
               <span className="text-slate-500">vs últimos 7 dias</span>
             </div>
             <div className="pointer-events-none absolute bottom-4 right-4 h-6 w-16 overflow-hidden opacity-30">
-              <Sparkline className="h-6 w-16" values={item.key === "activeConversations" ? timeseries.conversations : item.key === "activeLeads" ? timeseries.leads : item.key === "messagesToday" ? timeseries.messages_received : item.key === "conversions" ? timeseries.conversions : timeseries.messages_sent.map((sent, idx) => { const rec = timeseries.messages_received[idx] ?? 0; return rec > 0 ? Number(((sent / rec) * 100).toFixed(1)) : 0; })}/>
+              <Sparkline className="h-6 w-16" values={item.key === "activeConversations" ? analyticsSeries.conversations : item.key === "activeLeads" ? analyticsSeries.leads : item.key === "messagesToday" ? analyticsSeries.messagesReceived : item.key === "conversions" ? analyticsSeries.conversions : analyticsSeries.messagesSent.map((sent, idx) => { const rec = analyticsSeries.messagesReceived[idx] ?? 0; return rec > 0 ? Number(((sent / rec) * 100).toFixed(1)) || 0 : 0; })}/>
             </div>
           </>}</div>;
       })}</div>
 
       <div className="grid w-full grid-cols-1 gap-4 items-stretch xl:grid-cols-[minmax(0,2fr)_minmax(320px,0.9fr)]">
         <div className={`${cardClassName} min-h-[390px] p-5`}>{dashboardError ? <p className="m-0 p-3 text-sm text-red-700">{dashboardError}</p> : (
-          <DashboardChart data={timeseries.labels.map((label, index) => ({ date: label, received: timeseries.messages_received[index] ?? 0, sent: timeseries.messages_sent[index] ?? 0 }))} />
+          <DashboardChart data={analyticsSeries.labels.map((label, index) => ({ date: label, received: analyticsSeries.messagesReceived[index] ?? 0, sent: analyticsSeries.messagesSent[index] ?? 0 }))} />
         )}</div>
 
         <div className="min-h-[390px] rounded-2xl border border-slate-100 bg-white p-5 shadow-[0_12px_30px_rgba(15,23,42,0.04)]">
