@@ -24,12 +24,12 @@ from app.services.flow_engine import get_node_by_id
 from app.services.flow_session_service import FlowSessionService
 from app.services.flow_runtime_service import execute_node_chain_until_reply
 from app.models.flow import Flow
-from app.services.whatsapp_service import send_whatsapp_buttons, send_whatsapp_message_simple
+from app.services.whatsapp_service import send_whatsapp_buttons
 from app.services.intent_service import classify_intent, normalize_input, route_intent
 from app.models import Tenant
 from app.utils.phone import normalize_phone
 from app.utils.text import normalize_text
-from app.services.queue import enqueue_incoming_message
+from app.services.queue import enqueue_incoming_message, enqueue_send_message
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -76,7 +76,7 @@ async def _process_runtime_events(
             logger.info("[FLOW SEND EVENT] tenant_id=%s wa_id=%s", tenant_uuid, wa_id)
             if event.get("after_delay") is True:
                 logger.info("[FLOW SEND AFTER DELAY] tenant_id=%s wa_id=%s", tenant_uuid, wa_id)
-            send_whatsapp_message_simple(phone, text)
+            enqueue_send_message({"tenant_id": tenant_uuid, "phone": phone, "text": text})
 
     return False
 
@@ -315,10 +315,11 @@ async def _process_meta_webhook(request: Request, db: Session) -> dict[str, str]
             )
             try:
                 if incoming.get("phone"):
-                    send_whatsapp_message_simple(
-                        normalize_phone(incoming["phone"]),
-                        "Tive um problema aqui 😅 mas já estou corrigindo. Pode tentar de novo?",
-                    )
+                    enqueue_send_message({
+                        "tenant_id": tenant_id,
+                        "phone": normalize_phone(incoming["phone"]),
+                        "text": "Tive um problema aqui 😅 mas já estou corrigindo. Pode tentar de novo?",
+                    })
                     logger.warning("[WEBHOOK FALLBACK TRIGGERED] phone=%s", incoming.get("phone"))
             except Exception:
                 logger.exception("Falha ao enviar fallback do webhook")

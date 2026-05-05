@@ -311,7 +311,7 @@ async def send_message(
 
     print(f"[MODE CHECK] current mode={conversation.mode}")
     try:
-        enqueue_send_message(tenant.id, phone, message_text)
+        enqueue_send_message({"tenant_id": tenant.id, "phone": phone, "text": message_text})
     except Exception:
         pass
 
