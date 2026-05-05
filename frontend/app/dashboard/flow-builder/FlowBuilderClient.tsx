@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import ReactFlow, {
+  ReactFlowProvider,
   addEdge,
   Background,
   BackgroundVariant,
@@ -1013,21 +1014,25 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
   );
 
   const safeNodes = useMemo(
-    () =>
-      decoratedNodes.map((node) => ({
-        type: node.type || 'default',
-        ...node,
-      })),
+    () => (Array.isArray(decoratedNodes) ? decoratedNodes : []).map((node) => ({
+      type: node.type || 'default',
+      ...node,
+    })),
     [decoratedNodes],
+  );
+
+  const safeEdges = useMemo(
+    () => (Array.isArray(edges) ? edges : []),
+    [edges],
   );
 
   const decoratedEdges = useMemo(
     () =>
-      edges.map((edge) => ({
+      safeEdges.map((edge) => ({
         ...edge,
         className: activeEdgeIds.includes(edge.id) ? 'flow-edge flow-edge-active' : 'flow-edge',
       })),
-    [activeEdgeIds, edges],
+    [activeEdgeIds, safeEdges],
   );
 
   // Fecha o menu de contexto ao clicar fora
@@ -1354,6 +1359,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
             ))}
           </div>
         )}
+        <ReactFlowProvider>
         <ReactFlow
           key={flow?.id || 'no-flow'}
           onInit={setRfInstance}
@@ -1384,6 +1390,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
           <MiniMap nodeBorderRadius={8} pannable style={{ background: '#FFFFFF', border: '1px solid #E8E6E0' }} />
           <Controls />
         </ReactFlow>
+        </ReactFlowProvider>
       </main>
       {isSimulatorOpen && (
         <aside style={{
