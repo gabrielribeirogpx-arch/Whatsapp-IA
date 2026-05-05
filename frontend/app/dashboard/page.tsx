@@ -208,14 +208,7 @@ export default function DashboardPage() {
 
   const totalChannels = (viewModel.channels || []).reduce((acc, c) => acc + c.value, 0);
   const liveItems = uniqueConversations.slice(0, 4);
-
-  if (!data) {
-    return (
-      <div className="p-6 text-sm text-gray-500">
-        Carregando dashboard...
-      </div>
-    );
-  }
+  const isReady = !!data;
 
   const analyticsSeries = {
     labels: timeseries?.labels ?? [],
@@ -246,7 +239,7 @@ export default function DashboardPage() {
       { name: 'Facebook', value: 0 },
       { name: 'Outros', value: 0 },
     ];
-    viewModel.channels.forEach((channel) => {
+    (viewModel.channels || []).forEach((channel) => {
       const key = channel.name.trim().toLowerCase();
       const target = base.find((item) => item.name.toLowerCase() === key);
       if (target) target.value = channel.value;
@@ -260,6 +253,11 @@ export default function DashboardPage() {
   return (
     <section className="w-full min-w-0 px-5 py-6 lg:px-6">
       <div className="w-full min-w-0 space-y-5">
+      {!isReady && (
+        <div className="p-6 text-sm text-gray-500">
+          Carregando dashboard...
+        </div>
+      )}
       <div className="mb-4 flex items-center justify-between gap-4 md:mb-6">
         <div>
           <h1 className="text-xl md:text-2xl font-semibold leading-tight text-gray-900">
