@@ -7,27 +7,9 @@ import { useRouter } from 'next/navigation';
 import { MessageSquare } from "lucide-react";
 
 import DashboardChart from '../../components/DashboardChart';
-import { apiFetch, createFlow, getConversations, listFlows, parseApiResponse } from '../../lib/api';
+import { createFlow, getConversations, listFlows } from '../../lib/api';
 import { Conversation, FlowItem, FlowPayload } from '../../lib/types';
-
-type DashboardData = {
-  charts?: {
-    messages_last_7_days?: {
-      date: string;
-      sent: number;
-      received: number;
-    }[];
-  };
-  metrics?: {
-    activeConversations?: number;
-    activeLeads?: number;
-    messagesToday?: number;
-    responseRate?: number;
-    conversions?: number;
-  };
-  top_flows?: Array<{ name: string; value?: number }>;
-  channels?: Array<{ name: string; value: number }>;
-};
+import { useDashboardAnalytics } from '../../hooks/useDashboardAnalytics';
 
 type DashboardViewModel = {
   activeConversations: number;
@@ -86,10 +68,13 @@ function SkeletonLine({ width = '100%', height = 12 }: { width?: string; height?
   return <div className="rounded-full bg-gradient-to-r from-emerald-50 via-slate-200 to-emerald-50" style={{ width, height }} />;
 }
 
-const Sparkline = ({ className = 'h-full w-full overflow-hidden' }: { className?: string }) => {
+const Sparkline = ({ values = [], className = 'h-full w-full overflow-hidden' }: { values?: number[]; className?: string }) => {
   const gradientId = useId();
   const glowId = useId();
-  const linePath = 'M1 22C7 16 11 14 18 16C25 18 30 21 36 18C42 15 47 15 52 13C57 11 61 8 63 4';
+  const safeValues = values.length ? values : [0,0,0,0,0,0,0];
+  const maxValue = Math.max(...safeValues, 1);
+  const step = safeValues.length > 1 ? 62 / (safeValues.length - 1) : 62;
+  const linePath = safeValues.map((value, index) => { const x = 1 + (index * step); const y = 22 - ((value / maxValue) * 18); return `${index === 0 ? 'M' : 'L'}${x.toFixed(2)} ${y.toFixed(2)}`; }).join(' ');
 
   return (
     <svg width="64" height="24" viewBox="0 0 64 24" className={className} fill="none" aria-hidden>
@@ -138,23 +123,20 @@ const channelLegendColors: Record<string, string> = {
 
 export default function DashboardPage() {
   const [period, setPeriod] = useState<Period>('7d');
-  const [data, setData] = useState<DashboardData | null>(null);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [flows, setFlows] = useState<FlowItem[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
   const router = useRouter();
-  const [dashboardError, setDashboardError] = useState<string | null>(null);
+  const { kpis, timeseries, isLoading, error: dashboardError } = useDashboardAnalytics();
   const [conversationsError, setConversationsError] = useState<string | null>(null);
   const [flowsError, setFlowsError] = useState<string | null>(null);
   const [creatingFlow, setCreatingFlow] = useState(false);
 
-  useEffect(() => { void (async () => {
-    setIsLoading(true);
-    try { const res = await apiFetch('/api/dashboard'); setData(await parseApiResponse<DashboardData>(res)); setDashboardError(null);} catch { setData(null); setDashboardError('Não foi possível carregar os indicadores do dashboard agora.'); }
-    try { const payload = await getConversations(); setConversations(Array.isArray(payload) ? payload : []); setConversationsError(null);} catch { setConversations([]); setConversationsError('Não foi possível carregar a atividade recente no momento.'); }
-    try { const payload = await listFlows(); setFlows(Array.isArray(payload) ? payload : []); setFlowsError(null);} catch { setFlows([]); setFlowsError('Não foi possível carregar os fluxos neste instante.'); }
-    setIsLoading(false);
-  })(); }, []);
+  useEffect(() => {
+    void (async () => {
+      try { const payload = await getConversations(); setConversations(Array.isArray(payload) ? payload : []); setConversationsError(null);} catch { setConversations([]); setConversationsError('Não foi possível carregar a atividade recente no momento.'); }
+      try { const payload = await listFlows(); setFlows(Array.isArray(payload) ? payload : []); setFlowsError(null);} catch { setFlows([]); setFlowsError('Não foi possível carregar os fluxos neste instante.'); }
+    })();
+  }, []);
 
 
   async function handleCreateFlow() {
@@ -162,7 +144,7 @@ export default function DashboardPage() {
       setCreatingFlow(true);
       const initialNodeId = typeof crypto !== 'undefined' && crypto.randomUUID
         ? crypto.randomUUID()
-        : `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+        : `${Date.now()}`;
 
       const created = await createFlow({
         name: 'Novo fluxo',
@@ -207,24 +189,22 @@ export default function DashboardPage() {
   }, [conversations]);
 
   const viewModel = useMemo<DashboardViewModel>(() => {
-    const fromDashboard = data?.metrics ?? {};
     const flowFallback = flows.length ? flows.slice(0, 5).map((flow) => ({ name: flow.name, value: 0 })) : FALLBACK_VIEW_MODEL.topFlows;
-    const normalizedChannels = (data?.channels ?? []).filter((channel) => channel.name && typeof channel.value === 'number').map((channel) => ({ name: channel.name, value: channel.value }));
     const msgsToday = uniqueConversations.filter((c) => {
       const d = new Date(c.updated_at);
       const now = new Date();
       return !Number.isNaN(d.getTime()) && d.getDate() === now.getDate() && d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
     }).length;
     return {
-      activeConversations: fromDashboard.activeConversations ?? uniqueConversations.length ?? 0,
-      activeLeads: fromDashboard.activeLeads ?? uniqueConversations.filter((conversation) => conversation.mode === 'human').length ?? 0,
-      messagesToday: fromDashboard.messagesToday ?? msgsToday ?? 0,
-      responseRate: fromDashboard.responseRate ?? 0,
-      conversions: fromDashboard.conversions ?? 0,
-      topFlows: data?.top_flows?.length ? data.top_flows.map((flow) => ({ name: flow.name, value: flow.value ?? 0 })) : flowFallback,
-      channels: normalizedChannels.length ? normalizedChannels : FALLBACK_VIEW_MODEL.channels,
+      activeConversations: Number(kpis.conversations) || uniqueConversations.length || 0,
+      activeLeads: Number(kpis.leads) || uniqueConversations.filter((conversation) => conversation.mode === 'human').length || 0,
+      messagesToday: Number(kpis.messages_received) || msgsToday || 0,
+      responseRate: Number(kpis.response_rate) || 0,
+      conversions: Number(kpis.conversions) || 0,
+      topFlows: flowFallback,
+      channels: FALLBACK_VIEW_MODEL.channels,
     };
-  }, [conversations, data, flows, uniqueConversations]);
+  }, [conversations, flows, kpis, uniqueConversations]);
 
   const totalChannels = viewModel.channels.reduce((acc, c) => acc + c.value, 0);
   const liveItems = uniqueConversations.slice(0, 4);
@@ -306,15 +286,14 @@ export default function DashboardPage() {
               <span className="text-slate-500">vs últimos 7 dias</span>
             </div>
             <div className="pointer-events-none absolute bottom-4 right-4 h-6 w-16 overflow-hidden opacity-30">
-              <Sparkline className="h-6 w-16"/>
+              <Sparkline className="h-6 w-16" values={item.key === "activeConversations" ? timeseries.conversations : item.key === "activeLeads" ? timeseries.leads : item.key === "messagesToday" ? timeseries.messages_received : item.key === "conversions" ? timeseries.conversions : timeseries.messages_sent.map((sent, idx) => { const rec = timeseries.messages_received[idx] ?? 0; return rec > 0 ? Number(((sent / rec) * 100).toFixed(1)) : 0; })}/>
             </div>
           </>}</div>;
       })}</div>
 
       <div className="grid w-full grid-cols-1 gap-4 items-stretch xl:grid-cols-[minmax(0,2fr)_minmax(320px,0.9fr)]">
         <div className={`${cardClassName} min-h-[390px] p-5`}>{dashboardError ? <p className="m-0 p-3 text-sm text-red-700">{dashboardError}</p> : (
-          // TODO: aplicar o filtro real por período quando a integração de dados do backend estiver disponível.
-          <DashboardChart data={data?.charts?.messages_last_7_days ?? []} />
+          <DashboardChart data={timeseries.labels.map((label, index) => ({ date: label, received: timeseries.messages_received[index] ?? 0, sent: timeseries.messages_sent[index] ?? 0 }))} />
         )}</div>
 
         <div className="min-h-[390px] rounded-2xl border border-slate-100 bg-white p-5 shadow-[0_12px_30px_rgba(15,23,42,0.04)]">
