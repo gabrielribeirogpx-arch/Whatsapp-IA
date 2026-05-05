@@ -50,8 +50,8 @@ export function useDashboardAnalytics() {
   }, []);
 
   const normalized = useMemo(() => {
-    const timeseries = data?.timeseries ?? {};
-    const labels = Array.isArray(timeseries.labels) ? timeseries.labels : [];
+    const series = data?.timeseries ?? { labels: [], conversations: [], messages_received: [], messages_sent: [] };
+    const labels = Array.isArray(series.labels) ? series.labels : [];
     const kpis = data?.kpis ?? {
       conversations: 0,
       leads: 0,
@@ -69,11 +69,11 @@ export function useDashboardAnalytics() {
       return Array.from({ length: 7 }, () => 0);
     };
 
-    const conversations = ensure(timeseries.conversations);
-    const leads = ensure(timeseries.leads);
-    const messages_received = ensure(timeseries.messages_received);
-    const messages_sent = ensure(timeseries.messages_sent);
-    const conversions = ensure(timeseries.conversions);
+    const conversations = ensure(series.conversations);
+    const leads = ensure(series.leads);
+    const messages_received = ensure(series.messages_received);
+    const messages_sent = ensure(series.messages_sent);
+    const conversions = ensure(series.conversions);
 
     const maxLen = Math.max(labels.length, conversations.length, leads.length, messages_received.length, messages_sent.length, conversions.length);
     const pad = (arr: number[]) => (arr.length === maxLen ? arr : [...arr, ...Array.from({ length: maxLen - arr.length }, () => 0)]);
