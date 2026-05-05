@@ -1012,7 +1012,7 @@ def _send_flow_whatsapp_message(tenant: Tenant, phone: str, text: str) -> None:
     print(f"[FLOW SEND] Enviando: {content}")
     logger.info("[FLOW SEND] Enfileirando mensagem: %s", content)
     try:
-        job_id = enqueue_send_message(tenant_id=tenant.id, phone=phone, text=content)
+        job_id = enqueue_send_message({"tenant_id": tenant.id, "phone": phone, "text": content})
         print(f"[FLOW SEND RESULT] job_id={job_id}")
     except Exception as error:
         print(f"[FLOW ERROR] {error}")
@@ -1023,7 +1023,7 @@ def _send_flow_interactive_buttons(tenant: Tenant, phone: str, text: str, button
     """Enfileira envio de botoes; worker aplica fallback para texto simples se falhar."""
     print(f"[FLOW BUTTON SEND] Tentando enviar botoes: {[b.get('label') for b in buttons]}")
     try:
-        job_id = enqueue_send_message(tenant_id=tenant.id, phone=phone, text=text, buttons=buttons)
+        job_id = enqueue_send_message({"tenant_id": tenant.id, "phone": phone, "text": text, "buttons": buttons})
         print(f"[FLOW BUTTON SEND RESULT] job_id={job_id}")
     except Exception as error:
         print(f"[FLOW BUTTON ERROR] {error} — usando fallback texto em fila")

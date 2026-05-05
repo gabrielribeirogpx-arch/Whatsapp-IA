@@ -6,7 +6,7 @@ import uuid
 from typing import Any
 
 from redis import Redis
-from rq import Queue, get_current_job
+from rq import Queue
 
 try:
     from rq import Retry
@@ -15,7 +15,6 @@ except ImportError:
 
 from app.db.session import SessionLocal
 from app.models import FailedMessage, Tenant
-from app.services.whatsapp_service import send_whatsapp_interactive_buttons, send_whatsapp_message
 
 logger = logging.getLogger(__name__)
 
@@ -46,40 +45,6 @@ def enqueue_incoming_message(payload: dict[str, Any]) -> str:
     )
     return str(job.id)
 
-
-def _send_whatsapp_job(tenant_id: str, phone: str, text: str, buttons: list[dict[str, Any]] | None = None) -> None:
-    job = get_current_job()
-    print("[RQ JOB] processing...")
-    logger.info("[RQ JOB] processing job_id=%s", getattr(job, "id", None))
-
-    tenant_uuid = uuid.UUID(str(tenant_id))
-    with SessionLocal() as db:
-        tenant = db.query(Tenant).filter(Tenant.id == tenant_uuid).first()
-        if not tenant:
-            logger.warning(
-                "event=queue_send_skip reason=tenant_not_found tenant_id=%s phone=%s",
-                tenant_id,
-                phone,
-            )
-            return
-
-        if buttons:
-            send_whatsapp_interactive_buttons(
-                tenant=tenant,
-                phone=phone,
-                body_text=text,
-                buttons=buttons,
-            )
-        else:
-            send_whatsapp_message(tenant=tenant, phone=phone, text=text)
-
-        logger.info(
-            "event=queue_send_success tenant_id=%s phone=%s text_len=%s has_buttons=%s",
-            tenant_id,
-            phone,
-            len(text or ""),
-            bool(buttons),
-        )
 
 
 def _record_failed_message(
@@ -115,10 +80,11 @@ def _on_send_failure(job, connection, type_, value, traceback) -> None:  # noqa:
     if retries_left not in (None, 0):
         return
 
-    tenant_id = (job.args[0] if len(job.args) > 0 else "") or ""
-    phone = (job.args[1] if len(job.args) > 1 else "") or ""
-    text = (job.args[2] if len(job.args) > 2 else "") or ""
-    buttons = job.args[3] if len(job.args) > 3 else None
+    message_data = job.kwargs.get("message_data", {}) if hasattr(job, "kwargs") else {}
+    tenant_id = str(message_data.get("tenant_id") or "")
+    phone = str(message_data.get("phone") or "")
+    text = str(message_data.get("text") or "")
+    buttons = message_data.get("buttons")
     error = f"{type_.__name__}: {value}" if type_ else str(value)
 
     _record_failed_message(
@@ -139,14 +105,12 @@ def _on_send_failure(job, connection, type_, value, traceback) -> None:  # noqa:
     )
 
 
-def enqueue_send_message(
-    tenant_id: uuid.UUID,
-    phone: str,
-    text: str,
-    *,
-    buttons: list[dict[str, Any]] | None = None,
-) -> str | None:
-    content = (text or "").strip()
+def enqueue_send_message(message_data: dict[str, Any]) -> str | None:
+    tenant_id = message_data.get("tenant_id")
+    phone = str(message_data.get("phone") or "")
+    content = str(message_data.get("text") or "").strip()
+    buttons = message_data.get("buttons")
+
     if not content:
         logger.warning("event=queue_send_skip reason=empty_text tenant_id=%s phone=%s", tenant_id, phone)
         return None
@@ -155,27 +119,30 @@ def enqueue_send_message(
         logger.warning("event=queue_send_skip reason=missing_phone tenant_id=%s", tenant_id)
         return None
 
-    print("[QUEUE SEND]", phone)
     queue = get_queue(SEND_QUEUE_NAME)
 
+    payload = {
+        "tenant_id": str(tenant_id),
+        "phone": phone,
+        "text": content,
+        "buttons": buttons if isinstance(buttons, list) else None,
+    }
+
     job = queue.enqueue(
-        _send_whatsapp_job,
-        str(tenant_id),
-        phone,
-        content,
-        buttons,
+        "app.workers.send_worker.send_whatsapp_message",
+        message_data=payload,
         retry=Retry(max=3, interval=[5, 15, 45]) if Retry else None,
+        job_timeout=90,
         failure_ttl=86400,
         result_ttl=3600,
         on_failure=_on_send_failure,
     )
 
-    logger.info("[QUEUE SEND] message enqueued")
     logger.info(
         "event=queue_send_enqueued tenant_id=%s phone=%s job_id=%s has_buttons=%s",
         tenant_id,
         phone,
         job.id,
-        bool(buttons),
+        bool(payload["buttons"]),
     )
     return str(job.id)
