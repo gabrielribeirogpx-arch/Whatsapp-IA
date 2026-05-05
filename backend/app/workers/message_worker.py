@@ -1,0 +1,125 @@
+from __future__ import annotations
+
+import logging
+from datetime import datetime
+from typing import Any
+
+from sqlalchemy import select
+
+from app.db.session import SessionLocal
+from app.models import Message
+from app.services.contact_sync_service import ensure_conversation_contact_link, upsert_contact_for_phone
+from app.services.conversation_service import get_or_create_conversation
+from app.services.idempotency_service import register_processed_message
+from app.services.message_router import handle_incoming_message
+from app.services.message_service import normalize_meta_message
+from app.services.tenant_service import resolve_tenant_by_phone_number_id
+
+logger = logging.getLogger(__name__)
+
+
+def _pick_message(payload: dict[str, Any]) -> dict[str, Any] | None:
+    normalized = normalize_meta_message(payload)
+    if normalized:
+        return normalized[0]
+
+    if payload.get("phone") and payload.get("text"):
+        return {
+            "phone": str(payload.get("phone") or "").strip(),
+            "text": str(payload.get("text") or "").strip(),
+            "message_id": str(payload.get("message_id") or "").strip(),
+            "name": str(payload.get("name") or "Cliente").strip(),
+            "phone_number_id": str(payload.get("phone_number_id") or "").strip(),
+        }
+    return None
+
+
+def process_incoming_message(payload: dict[str, Any]) -> None:
+    raw_correlation = payload.get("correlation_id") or payload.get("message_id")
+    correlation_id = str(raw_correlation or "n/a")
+    logger.info("event=incoming_worker_start correlation_id=%s", correlation_id)
+
+    parsed = _pick_message(payload)
+    if not parsed:
+        logger.warning("event=incoming_worker_skip reason=no_supported_message correlation_id=%s", correlation_id)
+        return
+
+    correlation_id = str(parsed.get("message_id") or correlation_id)
+    logger.info("event=incoming_worker_parsed correlation_id=%s type=text", correlation_id)
+
+    with SessionLocal() as db:
+        phone_number_id = str(parsed.get("phone_number_id") or "").strip()
+        tenant = resolve_tenant_by_phone_number_id(db, phone_number_id)
+        if not tenant:
+            logger.warning(
+                "event=incoming_worker_skip reason=tenant_not_found correlation_id=%s phone_number_id=%s",
+                correlation_id,
+                phone_number_id,
+            )
+            return
+
+        logger.info(
+            "event=incoming_worker_tenant_resolved correlation_id=%s tenant_id=%s",
+            correlation_id,
+            tenant.id,
+        )
+
+        with db.begin():
+            is_new = register_processed_message(db=db, tenant_id=tenant.id, message_id=correlation_id)
+            if not is_new:
+                logger.info("event=incoming_worker_skip reason=duplicate correlation_id=%s", correlation_id)
+                return
+
+        with db.begin():
+            contact = upsert_contact_for_phone(
+                db,
+                tenant_id=tenant.id,
+                phone=str(parsed.get("phone") or ""),
+                name=str(parsed.get("name") or "").strip() or None,
+            )
+            conversation, _ = get_or_create_conversation(
+                db,
+                tenant_id=tenant.id,
+                phone=contact.phone,
+                contact_id=contact.id,
+                message=str(parsed.get("text") or ""),
+            )
+            ensure_conversation_contact_link(conversation, contact)
+            logger.info(
+                "event=incoming_worker_entities_ready correlation_id=%s tenant_id=%s contact_id=%s conversation_id=%s",
+                correlation_id,
+                tenant.id,
+                contact.id,
+                conversation.id,
+            )
+
+        with db.begin():
+            inbound = Message(
+                conversation_id=conversation.id,
+                tenant_id=tenant.id,
+                text=str(parsed.get("text") or ""),
+                from_me=False,
+                created_at=datetime.utcnow(),
+            )
+            db.add(inbound)
+            db.flush()
+            db.refresh(inbound)
+            logger.info(
+                "event=incoming_worker_message_persisted correlation_id=%s message_pk=%s",
+                correlation_id,
+                inbound.id,
+            )
+
+        with db.begin():
+            persisted_message = db.execute(select(Message).where(Message.id == inbound.id)).scalars().first()
+            persisted_conversation, _ = get_or_create_conversation(
+                db,
+                tenant_id=tenant.id,
+                phone=contact.phone,
+                contact_id=contact.id,
+            )
+            if persisted_message and persisted_conversation:
+                handle_incoming_message(db=db, message=persisted_message, conversation=persisted_conversation)
+            logger.info("event=incoming_worker_flow_executed correlation_id=%s", correlation_id)
+
+    logger.info("event=incoming_worker_done correlation_id=%s", correlation_id)
