@@ -122,20 +122,30 @@ export async function apiFetch(path: string, init: RequestInit = {}): Promise<Re
     headers.set('Content-Type', 'application/json');
   }
 
+  const resolvedPath = (() => {
+    if (!/^https?:\/\//.test(path)) return path;
+
+    try {
+      return new URL(path).pathname;
+    } catch {
+      return path;
+    }
+  })();
+
   if (isBrowser) {
     const token = localStorage.getItem(TOKEN_STORAGE_KEY);
     const tenantId = getTenant();
 
-    if (token) {
+    if (token && !headers.has('Authorization')) {
       headers.set('Authorization', `Bearer ${token}`);
     }
 
     const isProtectedApiRoute =
-      path.startsWith('/api') && !path.startsWith('/api/login') && !path.startsWith('/api/register');
+      resolvedPath.startsWith('/api') && !resolvedPath.startsWith('/api/login') && !resolvedPath.startsWith('/api/register');
 
-    if (tenantId && isProtectedApiRoute) {
+    if (tenantId && isProtectedApiRoute && !headers.has('X-Tenant-ID')) {
       headers.set('X-Tenant-ID', tenantId);
-    } else if (isProtectedApiRoute && path.startsWith('/api/flows')) {
+    } else if (isProtectedApiRoute && resolvedPath.startsWith('/api/flows')) {
       throw new Error('Tenant não encontrado para requisições de flow.');
     }
   }
