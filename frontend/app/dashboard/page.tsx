@@ -196,20 +196,26 @@ export default function DashboardPage() {
       return !Number.isNaN(d.getTime()) && d.getDate() === now.getDate() && d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
     }).length;
     return {
-      activeConversations: Number(kpis.conversations) || uniqueConversations.length || 0,
-      activeLeads: Number(kpis.leads) || uniqueConversations.filter((conversation) => conversation.mode === 'human').length || 0,
-      messagesToday: Number(kpis.messages_received) || msgsToday || 0,
-      responseRate: Number(kpis.response_rate) || 0,
-      conversions: Number(kpis.conversions) || 0,
+      activeConversations: Number(kpis?.conversations) || uniqueConversations.length || 0,
+      activeLeads: Number(kpis?.leads) || uniqueConversations.filter((conversation) => conversation.mode === 'human').length || 0,
+      messagesToday: Number(kpis?.messages_received) || msgsToday || 0,
+      responseRate: Number(kpis?.response_rate) || 0,
+      conversions: Number(kpis?.conversions) || 0,
       topFlows: flowFallback,
       channels: FALLBACK_VIEW_MODEL.channels,
     };
   }, [conversations, flows, kpis, uniqueConversations]);
 
-  const totalChannels = viewModel.channels.reduce((acc, c) => acc + c.value, 0);
+  const totalChannels = (viewModel.channels || []).reduce((acc, c) => acc + c.value, 0);
   const liveItems = uniqueConversations.slice(0, 4);
 
-  if (!data) return null;
+  if (!data) {
+    return (
+      <div className="p-6 text-sm text-gray-500">
+        Carregando dashboard...
+      </div>
+    );
+  }
 
   const analyticsSeries = {
     labels: timeseries?.labels ?? [],
@@ -289,7 +295,7 @@ export default function DashboardPage() {
 
       <div className="grid w-full grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">
   {(kpiMeta || []).map((item) => {
-    const rawValue = viewModel[item.key as keyof typeof viewModel];
+    const rawValue = viewModel?.[item.key as keyof typeof viewModel];
 
     const value =
       typeof rawValue === 'number' || typeof rawValue === 'string'
@@ -311,7 +317,11 @@ export default function DashboardPage() {
             {item.key === 'messagesToday' ? (
               <MessageSquare className="h-5 w-5 text-emerald-600" />
             ) : (
-              <img src={item.icon} alt={item.label} className="h-5 w-5" />
+              item.icon ? (
+                <img src={item.icon} alt={item.label} className="h-5 w-5" />
+              ) : (
+                <div className="h-5 w-5 bg-slate-300 rounded" />
+              )
             )}
           </div>
 
@@ -322,7 +332,7 @@ export default function DashboardPage() {
 
             <span className="mt-1 text-2xl font-bold text-slate-900">
               {value}
-              {item.suffix}
+              {item.suffix || ''}
             </span>
           </div>
         </div>
