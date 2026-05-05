@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.models import Conversation, Flow, FlowStep, FlowVersion, Message
 from app.services.flow_engine_service import get_flow_graph, save_flow_graph
+from app.services.cache_service import invalidate_tenant_and_flow_cache
 
 DEFAULT_FLOW_NAME = "default_visual"
 DEFAULT_START_STEP = "inicio"
@@ -139,6 +140,7 @@ class FlowService:
             flow_version.id,
             None,
         )
+        invalidate_tenant_and_flow_cache(str(flow.tenant_id))
 
     def get_flow_with_version(self, flow: Flow) -> dict[str, Any]:
         active_version = flow.current_version
@@ -431,6 +433,7 @@ def update_flow(db: Session, flow_id, tenant_id, data: dict[str, Any]) -> Flow |
     db.add(flow)
     db.flush()
     logger.info("[FLOW UPDATED] flow_id=%s tenant_id=%s", flow.id, tenant_id)
+    invalidate_tenant_and_flow_cache(str(tenant_id))
     return flow
 
 

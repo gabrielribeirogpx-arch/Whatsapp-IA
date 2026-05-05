@@ -19,7 +19,11 @@ engine = create_engine(DATABASE_URL)
 print("[WORKER] Connecting Redis...")
 conn = redis.from_url(REDIS_URL)
 
-listen = ["default"]
+listen = [
+    os.getenv("INCOMING_MESSAGE_QUEUE", "high_priority"),
+    os.getenv("WHATSAPP_SEND_QUEUE", "normal"),
+    os.getenv("LOW_PRIORITY_QUEUE", "low"),
+]
 
 
 class LoggingWorker(Worker):
