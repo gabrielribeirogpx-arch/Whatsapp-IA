@@ -220,6 +220,18 @@ export default function DashboardPage() {
     conversions: timeseries?.conversions ?? [],
   };
 
+  const safeSeries = {
+    labels: timeseries?.labels ?? [],
+    messages_sent: timeseries?.messages_sent ?? [],
+    messages_received: timeseries?.messages_received ?? [],
+  };
+
+  const chartData = safeSeries.labels.map((label, i) => ({
+    name: label,
+    sent: safeSeries.messages_sent[i] || 0,
+    received: safeSeries.messages_received[i] || 0,
+  }));
+
   const normalizedChannelItems = useMemo(() => {
     const base = [
       { name: 'WhatsApp', value: 0 },
@@ -304,7 +316,7 @@ export default function DashboardPage() {
 
       <div className="grid w-full grid-cols-1 gap-4 items-stretch xl:grid-cols-[minmax(0,2fr)_minmax(320px,0.9fr)]">
         <div className={`${cardClassName} min-h-[390px] p-5`}>{dashboardError ? <p className="m-0 p-3 text-sm text-red-700">{dashboardError}</p> : (
-          <DashboardChart data={(analyticsSeries.labels || []).map((label, index) => ({ date: label, received: analyticsSeries.messagesReceived[index] ?? 0, sent: analyticsSeries.messagesSent[index] ?? 0 }))} />
+          chartData.length ? <DashboardChart data={chartData.map((item) => ({ date: item.name, received: item.received, sent: item.sent }))} /> : null
         )}</div>
 
         <div className="min-h-[390px] rounded-2xl border border-slate-100 bg-white p-5 shadow-[0_12px_30px_rgba(15,23,42,0.04)]">
