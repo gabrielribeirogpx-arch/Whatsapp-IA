@@ -27,7 +27,7 @@ import {
   DeleteFlowResponse
 } from './types';
 
-const BASE_URL = process.env.NEXT_PUBLIC_API_URL;
+const API_URL = process.env.NEXT_PUBLIC_API_URL;
 const TENANT_STORAGE_KEY = 'tenant';
 const TOKEN_STORAGE_KEY = 'token';
 const TENANT_ID_STORAGE_KEY = 'tenant_id';
@@ -64,12 +64,12 @@ export function getTenant(): string | null {
 }
 
 function buildApiUrl(path: string) {
-  if (!BASE_URL) {
+  if (!API_URL) {
     throw new Error('NEXT_PUBLIC_API_URL não está configurado.');
   }
 
   if (/^https?:\/\//.test(path)) return path;
-  return `${BASE_URL}${path.startsWith('/') ? path : `/${path}`}`;
+  return `${API_URL}${path.startsWith('/') ? path : `/${path}`}`;
 }
 
 function clearAuthSession() {
@@ -150,7 +150,10 @@ export async function apiFetch(path: string, init: RequestInit = {}): Promise<Re
     }
   }
 
-  const response = await fetch(buildApiUrl(path), {
+  const url = buildApiUrl(path);
+  console.log('API CALL →', url);
+
+  const response = await fetch(url, {
     ...init,
     headers
   });
