@@ -23,6 +23,30 @@ REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 SEND_QUEUE_NAME = os.getenv("WHATSAPP_SEND_QUEUE", "default")
 
 
+INCOMING_QUEUE_NAME = os.getenv("INCOMING_MESSAGE_QUEUE", "default")
+
+
+def get_queue(name: str | None = None) -> Queue:
+    redis_conn = Redis.from_url(REDIS_URL, decode_responses=True)
+    return Queue(name=name or SEND_QUEUE_NAME, connection=redis_conn)
+
+
+def enqueue_incoming_message(payload: dict[str, Any]) -> str:
+    correlation_id = str(payload.get("message_id") or payload.get("correlation_id") or "") or None
+    tenant_hint = payload.get("tenant_id") or payload.get("tenant_hint")
+    job = get_queue(INCOMING_QUEUE_NAME).enqueue(
+        "app.workers.message_worker.process_incoming_message",
+        payload,
+    )
+    logger.info(
+        "event=incoming_message_enqueued correlation_id=%s tenant_hint=%s job_id=%s",
+        correlation_id,
+        tenant_hint,
+        job.id,
+    )
+    return str(job.id)
+
+
 def _send_whatsapp_job(tenant_id: str, phone: str, text: str, buttons: list[dict[str, Any]] | None = None) -> None:
     job = get_current_job()
     print("[RQ JOB] processing...")
@@ -132,8 +156,7 @@ def enqueue_send_message(
         return None
 
     print("[QUEUE SEND]", phone)
-    redis_conn = Redis.from_url(REDIS_URL, decode_responses=True)
-    queue = Queue(name=SEND_QUEUE_NAME, connection=redis_conn)
+    queue = get_queue(SEND_QUEUE_NAME)
 
     job = queue.enqueue(
         _send_whatsapp_job,
