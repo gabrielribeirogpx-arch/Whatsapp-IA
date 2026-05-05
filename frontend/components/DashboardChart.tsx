@@ -20,7 +20,7 @@ function CustomTooltip({ active, payload, label }: TooltipProps) {
 }
 
 export default function DashboardChart({ data = [] }: DashboardChartProps) {
-  const normalizedData = data.map((item) => ({ ...item, date: formatDateLabel(item.date), sent: Number(item.sent) || 0, received: Number(item.received) || 0 }));
+  const normalizedData = (data || []).map((item) => ({ ...item, date: formatDateLabel(item.date), sent: Number(item.sent) || 0, received: Number(item.received) || 0 }));
   const chartData = normalizedData.length ? normalizedData : Array.from({ length: 7 }, (_, index) => { const date = new Date(); date.setDate(date.getDate() - (6 - index)); return { date: formatDateLabel(date.toISOString()), sent: 0, received: 0 }; });
 
   return (

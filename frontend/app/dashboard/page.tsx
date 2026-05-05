@@ -126,7 +126,7 @@ export default function DashboardPage() {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [flows, setFlows] = useState<FlowItem[]>([]);
   const router = useRouter();
-  const { kpis, timeseries, isLoading, error: dashboardError } = useDashboardAnalytics();
+  const { data, kpis, timeseries, isLoading, error: dashboardError } = useDashboardAnalytics();
   const [conversationsError, setConversationsError] = useState<string | null>(null);
   const [flowsError, setFlowsError] = useState<string | null>(null);
   const [creatingFlow, setCreatingFlow] = useState(false);
@@ -209,6 +209,8 @@ export default function DashboardPage() {
   const totalChannels = viewModel.channels.reduce((acc, c) => acc + c.value, 0);
   const liveItems = uniqueConversations.slice(0, 4);
 
+  if (!data) return null;
+
   const analyticsSeries = {
     labels: timeseries?.labels ?? [],
     conversations: timeseries?.conversations ?? [],
@@ -273,7 +275,7 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      <div className="grid w-full grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">{kpiMeta.map((item) => {
+      <div className="grid w-full grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">{(kpiMeta || []).map((item) => {
         const value = viewModel[item.key];
         return <div key={item.key} className="relative overflow-hidden rounded-2xl border border-slate-100 bg-white p-4 pb-8 min-h-[104px] shadow-sm">{isLoading ? <div className="grid w-full gap-2"><SkeletonLine width="35%" /><SkeletonLine width="48%" /><SkeletonLine width="40%" height={20} /></div> :
           <>
@@ -295,14 +297,14 @@ export default function DashboardPage() {
               <span className="text-slate-500">vs últimos 7 dias</span>
             </div>
             <div className="pointer-events-none absolute bottom-4 right-4 h-6 w-16 overflow-hidden opacity-30">
-              <Sparkline className="h-6 w-16" values={item.key === "activeConversations" ? analyticsSeries.conversations : item.key === "activeLeads" ? analyticsSeries.leads : item.key === "messagesToday" ? analyticsSeries.messagesReceived : item.key === "conversions" ? analyticsSeries.conversions : analyticsSeries.messagesSent.map((sent, idx) => { const rec = analyticsSeries.messagesReceived[idx] ?? 0; return rec > 0 ? Number(((sent / rec) * 100).toFixed(1)) || 0 : 0; })}/>
+              <Sparkline className="h-6 w-16" values={item.key === "activeConversations" ? analyticsSeries.conversations : item.key === "activeLeads" ? analyticsSeries.leads : item.key === "messagesToday" ? analyticsSeries.messagesReceived : item.key === "conversions" ? analyticsSeries.conversions : (analyticsSeries.messagesSent || []).map((sent, idx) => { const rec = analyticsSeries.messagesReceived[idx] ?? 0; return rec > 0 ? Number(((sent / rec) * 100).toFixed(1)) || 0 : 0; })}/>
             </div>
           </>}</div>;
       })}</div>
 
       <div className="grid w-full grid-cols-1 gap-4 items-stretch xl:grid-cols-[minmax(0,2fr)_minmax(320px,0.9fr)]">
         <div className={`${cardClassName} min-h-[390px] p-5`}>{dashboardError ? <p className="m-0 p-3 text-sm text-red-700">{dashboardError}</p> : (
-          <DashboardChart data={analyticsSeries.labels.map((label, index) => ({ date: label, received: analyticsSeries.messagesReceived[index] ?? 0, sent: analyticsSeries.messagesSent[index] ?? 0 }))} />
+          <DashboardChart data={(analyticsSeries.labels || []).map((label, index) => ({ date: label, received: analyticsSeries.messagesReceived[index] ?? 0, sent: analyticsSeries.messagesSent[index] ?? 0 }))} />
         )}</div>
 
         <div className="min-h-[390px] rounded-2xl border border-slate-100 bg-white p-5 shadow-[0_12px_30px_rgba(15,23,42,0.04)]">
@@ -310,7 +312,7 @@ export default function DashboardPage() {
             <h3 className="m-0 text-sm font-semibold text-slate-900">Atividade ao vivo</h3>
             <span className="text-xs text-slate-500 flex items-center gap-2"><span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />Atualizando agora</span>
           </div>
-          {conversationsError ? <p className="mt-4 text-sm text-red-700">{conversationsError}</p> : liveItems.length === 0 ? <div className="mt-4 h-[290px] grid place-items-center rounded-xl border border-dashed border-emerald-200 bg-emerald-50/40 text-center"><div><p className="m-0 font-semibold text-slate-700">Sem atividade no momento</p><p className="m-0 mt-1 text-sm text-slate-500">Novas conversas aparecerão aqui em tempo real.</p></div></div> : <div className="mt-4 divide-y divide-slate-100">{liveItems.map((c, idx) => {
+          {conversationsError ? <p className="mt-4 text-sm text-red-700">{conversationsError}</p> : liveItems.length === 0 ? <div className="mt-4 h-[290px] grid place-items-center rounded-xl border border-dashed border-emerald-200 bg-emerald-50/40 text-center"><div><p className="m-0 font-semibold text-slate-700">Sem atividade no momento</p><p className="m-0 mt-1 text-sm text-slate-500">Novas conversas aparecerão aqui em tempo real.</p></div></div> : <div className="mt-4 divide-y divide-slate-100">{(liveItems || []).map((c, idx) => {
             const name = c.name || c.phone || 'Contato';
             const contactName = (c as Conversation & { contact_name?: string | null }).contact_name;
             const initials = getInitials(c.name || contactName || c.phone);
