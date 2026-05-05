@@ -1,4 +1,6 @@
 import logging
+import uuid
+
 from fastapi import Request
 
 from app.services.queue import enqueue_incoming_message
@@ -21,22 +23,27 @@ async def enqueue_webhook_payload(request: Request) -> tuple[bool, str | None]:
         logger.warning("event=webhook_invalid_payload_type type=%s", type(payload).__name__)
         return False, None
 
-    correlation_id: str | None = None
+    correlation_id = str(payload.get("message_id") or "").strip() or str(uuid.uuid4())
+    payload["correlation_id"] = correlation_id
+    payload.setdefault("message_id", correlation_id)
+
     try:
         entry = (payload.get("entry") or [None])[0] or {}
         changes = (entry.get("changes") or [None])[0] or {}
         value = changes.get("value") or {}
         message = (value.get("messages") or [None])[0] or {}
-        correlation_id = (message.get("id") or payload.get("message_id") or "").strip() or None
-        if correlation_id:
+        message_id = str(message.get("id") or "").strip()
+        if message_id:
+            correlation_id = message_id
             payload["correlation_id"] = correlation_id
-            payload.setdefault("message_id", correlation_id)
+            payload["message_id"] = message_id
     except Exception:
-        logger.exception("event=webhook_correlation_parse_error")
+        logger.exception("event=webhook_correlation_parse_error correlation_id=%s stage=webhook_parse", correlation_id)
 
     try:
-        enqueue_incoming_message(payload)
+        job_id = enqueue_incoming_message(payload)
+        logger.info("event=webhook_enqueue_success correlation_id=%s tenant_id=%s phone=%s job_id=%s stage=webhook_enqueue", correlation_id, payload.get("tenant_id") or "n/a", payload.get("phone") or "n/a", job_id)
         return True, correlation_id
     except Exception:
-        logger.exception("event=webhook_enqueue_error correlation_id=%s", correlation_id)
+        logger.exception("event=webhook_enqueue_error correlation_id=%s tenant_id=%s phone=%s job_id=%s stage=webhook_enqueue", correlation_id, payload.get("tenant_id") or "n/a", payload.get("phone") or "n/a", "n/a")
         return False, correlation_id

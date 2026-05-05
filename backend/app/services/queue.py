@@ -31,16 +31,18 @@ def get_queue(name: str | None = None) -> Queue:
 
 
 def enqueue_incoming_message(payload: dict[str, Any]) -> str:
-    correlation_id = str(payload.get("message_id") or payload.get("correlation_id") or "") or None
-    tenant_hint = payload.get("tenant_id") or payload.get("tenant_hint")
+    correlation_id = str(payload.get("correlation_id") or payload.get("message_id") or "n/a")
+    tenant_hint = payload.get("tenant_id") or payload.get("tenant_hint") or "n/a"
+    phone = str(payload.get("phone") or "n/a")
     job = get_queue(INCOMING_QUEUE_NAME).enqueue(
         "app.workers.message_worker.process_incoming_message",
         payload,
     )
     logger.info(
-        "event=incoming_message_enqueued correlation_id=%s tenant_hint=%s job_id=%s",
+        "event=incoming_message_enqueued correlation_id=%s tenant_id=%s phone=%s job_id=%s stage=incoming_enqueue",
         correlation_id,
         tenant_hint,
+        phone,
         job.id,
     )
     return str(job.id)
@@ -108,15 +110,16 @@ def _on_send_failure(job, connection, type_, value, traceback) -> None:  # noqa:
 def enqueue_send_message(message_data: dict[str, Any]) -> str | None:
     tenant_id = message_data.get("tenant_id")
     phone = str(message_data.get("phone") or "")
+    correlation_id = str(message_data.get("correlation_id") or message_data.get("message_id") or "n/a")
     content = str(message_data.get("text") or "").strip()
     buttons = message_data.get("buttons")
 
     if not content:
-        logger.warning("event=queue_send_skip reason=empty_text tenant_id=%s phone=%s", tenant_id, phone)
+        logger.warning("event=queue_send_skip correlation_id=%s tenant_id=%s phone=%s job_id=%s stage=send_enqueue reason=empty_text", correlation_id, tenant_id, phone or "n/a", "n/a")
         return None
 
     if not phone:
-        logger.warning("event=queue_send_skip reason=missing_phone tenant_id=%s", tenant_id)
+        logger.warning("event=queue_send_skip correlation_id=%s tenant_id=%s phone=%s job_id=%s stage=send_enqueue reason=missing_phone", correlation_id, tenant_id, "n/a", "n/a")
         return None
 
     queue = get_queue(SEND_QUEUE_NAME)
@@ -126,6 +129,7 @@ def enqueue_send_message(message_data: dict[str, Any]) -> str | None:
         "phone": phone,
         "text": content,
         "buttons": buttons if isinstance(buttons, list) else None,
+        "correlation_id": correlation_id,
     }
 
     job = queue.enqueue(
@@ -139,7 +143,8 @@ def enqueue_send_message(message_data: dict[str, Any]) -> str | None:
     )
 
     logger.info(
-        "event=queue_send_enqueued tenant_id=%s phone=%s job_id=%s has_buttons=%s",
+        "event=queue_send_enqueued correlation_id=%s tenant_id=%s phone=%s job_id=%s stage=send_enqueue has_buttons=%s",
+        correlation_id,
         tenant_id,
         phone,
         job.id,
