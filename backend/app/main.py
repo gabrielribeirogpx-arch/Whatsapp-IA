@@ -141,6 +141,9 @@ app.include_router(dashboard.router, prefix="/api")
 app.include_router(settings.router, prefix="/api")
 app.include_router(bot_rules.router)
 app.include_router(flows.crud_router, prefix="/api/flows", tags=["flows"])
+# Webhooks ativos:
+# - Canônico (Meta): /webhook (sem prefixo), via app.routers.webhook
+# - Compatibilidade legada: /api/webhook/whatsapp, via app.api.whatsapp_webhook
 app.include_router(webhook.router)
 app.include_router(debug_router)
 app.include_router(flow_runtime_router, prefix="/api")

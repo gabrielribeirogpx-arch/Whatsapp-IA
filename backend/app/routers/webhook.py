@@ -29,7 +29,8 @@ from app.services.intent_service import classify_intent, normalize_input, route_
 from app.models import Tenant
 from app.utils.phone import normalize_phone
 from app.utils.text import normalize_text
-from app.services.queue import enqueue_incoming_message, enqueue_send_message
+from app.services.queue import enqueue_send_message
+from app.services.webhook_ingress import enqueue_webhook_payload
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -349,28 +350,9 @@ async def verify(
 
 @router.post("/webhook")
 async def webhook(request: Request, db: Session = Depends(get_db)):
-    payload = await _parse_webhook_payload(request)
-    if not payload:
-        return {"status": "received"}
-
-    correlation_id: str | None = None
-    try:
-        entry = (payload.get("entry") or [None])[0] or {}
-        changes = (entry.get("changes") or [None])[0] or {}
-        value = changes.get("value") or {}
-        message = (value.get("messages") or [None])[0] or {}
-        correlation_id = (message.get("id") or payload.get("message_id") or "").strip() or None
-        if correlation_id:
-            payload["correlation_id"] = correlation_id
-            payload.setdefault("message_id", correlation_id)
-    except Exception:
-        logger.exception("event=webhook_correlation_parse_error")
-
-    try:
-        enqueue_incoming_message(payload)
-    except Exception:
-        logger.exception("event=webhook_enqueue_error correlation_id=%s", correlation_id)
-
+    # Endpoint canônico de entrada Meta: ACK imediato + enqueue no worker.
+    # Mantemos esse endpoint sem prefixo porque já é usado por integrações atuais.
+    await enqueue_webhook_payload(request)
     return {"status": "received"}
 
 
