@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models import AIConfig, Tenant
+from app.services.cache_service import TTL_TENANT_SECONDS, cache_aside_json
 
 
 class TenantLimitError(RuntimeError):
@@ -66,6 +67,21 @@ def get_tenant_by_phone_number_id(db: Session, phone_id: str | None) -> Tenant |
     return db.execute(select(Tenant).where(Tenant.phone_number_id == phone_id)).scalars().first()
 
 
+def get_tenant_cached(db: Session, tenant_id: uuid.UUID) -> Tenant | None:
+    key = f"tenant:{tenant_id}"
+
+    def _loader():
+        tenant = db.execute(select(Tenant).where(Tenant.id == tenant_id)).scalars().first()
+        if not tenant:
+            return None
+        return {"id": str(tenant.id), "slug": tenant.slug, "name": tenant.name, "phone_number_id": tenant.phone_number_id}
+
+    payload = cache_aside_json(key, TTL_TENANT_SECONDS, _loader)
+    if not payload:
+        return None
+    return db.execute(select(Tenant).where(Tenant.id == uuid.UUID(str(payload["id"])))).scalars().first()
+
+
 def resolve_tenant_by_phone_number_id(db: Session, phone_number_id: str | None) -> Tenant | None:
     return get_tenant_by_phone_number_id(db, phone_number_id)
 
@@ -86,7 +102,7 @@ def get_current_tenant(
         except ValueError as exc:
             raise HTTPException(status_code=401, detail="Tenant ID inválido") from exc
 
-        tenant = db.execute(select(Tenant).where(Tenant.id == parsed_tenant_id)).scalars().first()
+        tenant = get_tenant_cached(db, parsed_tenant_id)
         if not tenant:
             raise HTTPException(status_code=401, detail="Credenciais inválidas")
         return tenant

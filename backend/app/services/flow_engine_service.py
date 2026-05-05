@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.models import Conversation, Flow, FlowEdge, FlowNode, FlowVersion, Tenant
 from app.services.delay_queue_service import enqueue_delay
+from app.services.cache_service import TTL_FLOW_SECONDS, cache_aside_json
 from app.services.flow_analytics_service import FALLBACK, FLOW_FINISH, FLOW_MATCH, FLOW_SEND, FLOW_START, record_flow_event
 from app.services.queue import enqueue_send_message
 from app.utils.phone import normalize_phone
@@ -327,119 +328,124 @@ def _serialize_persisted_flow_graph(
 
 
 def get_flow_for_builder(db: Session, tenant_id: uuid.UUID, flow_id: str) -> dict[str, Any]:
-    flow = resolve_flow(db=db, tenant_id=tenant_id, flow_id=flow_id)
-    selected_version: FlowVersion | None = None
+    cache_key = f"flow:{tenant_id}:{flow_id}"
 
-    if flow.current_version_id:
-        selected_version = db.execute(
-            select(FlowVersion).where(
-                FlowVersion.id == flow.current_version_id,
-                FlowVersion.flow_id == flow.id
-            )
-        ).scalars().first()
+    def _load_builder_flow() -> dict[str, Any]:
+        flow = resolve_flow(db=db, tenant_id=tenant_id, flow_id=flow_id)
+        selected_version: FlowVersion | None = None
 
-    if not selected_version:
-        selected_version = db.execute(
-            select(FlowVersion)
-            .where(FlowVersion.flow_id == flow.id)
-            .order_by(FlowVersion.created_at.desc())
-        ).scalars().first()
+        if flow.current_version_id:
+            selected_version = db.execute(
+                select(FlowVersion).where(
+                    FlowVersion.id == flow.current_version_id,
+                    FlowVersion.flow_id == flow.id
+                )
+            ).scalars().first()
 
-    nodes: list[dict[str, Any]] = []
-    edges: list[dict[str, Any]] = []
-    source_type = "empty"
+        if not selected_version:
+            selected_version = db.execute(
+                select(FlowVersion)
+                .where(FlowVersion.flow_id == flow.id)
+                .order_by(FlowVersion.created_at.desc())
+            ).scalars().first()
 
-    # 🔥 BLOCO CORRETO
-    if selected_version:
-        nodes = selected_version.nodes if isinstance(selected_version.nodes, list) else []
-        raw_edges = selected_version.edges if isinstance(selected_version.edges, list) else []
+        nodes: list[dict[str, Any]] = []
+        edges: list[dict[str, Any]] = []
+        source_type = "empty"
 
-        edges = []
+        # 🔥 BLOCO CORRETO
+        if selected_version:
+            nodes = selected_version.nodes if isinstance(selected_version.nodes, list) else []
+            raw_edges = selected_version.edges if isinstance(selected_version.edges, list) else []
 
-        for edge in raw_edges:
-            if not isinstance(edge, dict):
-                continue
-
-            source_val = str(edge.get("source") or "").strip()
-            target_val = str(edge.get("target") or "").strip()
-
-            # 🔥 IGNORA EDGE INVÁLIDO (ESSA LINHA REMOVE O 400)
-            if not source_val or not target_val:
-                continue
-
-            normalized_edge = {
-                "id": str(edge.get("id") or ""),
-                "source": source_val,
-                "target": target_val,
-                "sourceHandle": edge.get("sourceHandle") or "default",
-                "targetHandle": edge.get("targetHandle") or "default",
-                "type": edge.get("type") or "default",
-                "data": edge.get("data") if isinstance(edge.get("data"), dict) else {}
-            }
-
-            edges.append(normalized_edge)
-
-        source_type = "version"
-
-    # 🔎 VALIDAÇÃO
-    valid, error = validate_flow_structure(nodes=nodes, edges=edges)
-
-    if source_type == "version" and not valid:
-        logger.error(
-            "[FLOW ERROR] load_invalid_current_version flow_id=%s version_id=%s detail=%s",
-            flow.id,
-            selected_version.id if selected_version else None,
-            error,
-        )
-
-        fallback_version = _get_latest_valid_flow_version(db=db, flow_id=flow.id)
-
-        if fallback_version:
-            logger.warning("[FLOW RECOVERY] usando versão válida anterior")
-
-            nodes = fallback_version.nodes if isinstance(fallback_version.nodes, list) else []
-            edges = fallback_version.edges if isinstance(fallback_version.edges, list) else []
-            source_type = "fallback"
-
-    # 🧯 FALLBACK FINAL
-    if not valid or not nodes:
-        fallback_nodes, fallback_edges = _serialize_persisted_flow_graph(
-            db=db,
-            tenant_id=tenant_id,
-            flow_id=flow.id
-        )
-
-        fallback_valid, _ = validate_flow_structure(
-            nodes=fallback_nodes,
-            edges=fallback_edges
-        )
-
-        if fallback_valid:
-            nodes = fallback_nodes
-            edges = fallback_edges
-            source_type = "fallback"
-        else:
-            nodes = []
             edges = []
-            source_type = "empty"
 
-    result = {
-        "flow_id": str(flow.id),
-        "version_id": str(selected_version.id) if selected_version else None,
-        "nodes": nodes,
-        "edges": edges,
-        "source": source_type,
-    }
+            for edge in raw_edges:
+                if not isinstance(edge, dict):
+                    continue
 
-    logger.info(
-        "[FLOW LOAD] flow_id=%s nodes=%s edges=%s source=%s",
-        result["flow_id"],
-        len(result["nodes"]),
-        len(result["edges"]),
-        result["source"],
-    )
+                source_val = str(edge.get("source") or "").strip()
+                target_val = str(edge.get("target") or "").strip()
 
-    return result
+                # 🔥 IGNORA EDGE INVÁLIDO (ESSA LINHA REMOVE O 400)
+                if not source_val or not target_val:
+                    continue
+
+                normalized_edge = {
+                    "id": str(edge.get("id") or ""),
+                    "source": source_val,
+                    "target": target_val,
+                    "sourceHandle": edge.get("sourceHandle") or "default",
+                    "targetHandle": edge.get("targetHandle") or "default",
+                    "type": edge.get("type") or "default",
+                    "data": edge.get("data") if isinstance(edge.get("data"), dict) else {}
+                }
+
+                edges.append(normalized_edge)
+
+            source_type = "version"
+
+        # 🔎 VALIDAÇÃO
+        valid, error = validate_flow_structure(nodes=nodes, edges=edges)
+
+        if source_type == "version" and not valid:
+            logger.error(
+                "[FLOW ERROR] load_invalid_current_version flow_id=%s version_id=%s detail=%s",
+                flow.id,
+                selected_version.id if selected_version else None,
+                error,
+            )
+
+            fallback_version = _get_latest_valid_flow_version(db=db, flow_id=flow.id)
+
+            if fallback_version:
+                logger.warning("[FLOW RECOVERY] usando versão válida anterior")
+
+                nodes = fallback_version.nodes if isinstance(fallback_version.nodes, list) else []
+                edges = fallback_version.edges if isinstance(fallback_version.edges, list) else []
+                source_type = "fallback"
+
+        # 🧯 FALLBACK FINAL
+        if not valid or not nodes:
+            fallback_nodes, fallback_edges = _serialize_persisted_flow_graph(
+                db=db,
+                tenant_id=tenant_id,
+                flow_id=flow.id
+            )
+
+            fallback_valid, _ = validate_flow_structure(
+                nodes=fallback_nodes,
+                edges=fallback_edges
+            )
+
+            if fallback_valid:
+                nodes = fallback_nodes
+                edges = fallback_edges
+                source_type = "fallback"
+            else:
+                nodes = []
+                edges = []
+                source_type = "empty"
+
+        result = {
+            "flow_id": str(flow.id),
+            "version_id": str(selected_version.id) if selected_version else None,
+            "nodes": nodes,
+            "edges": edges,
+            "source": source_type,
+        }
+
+        logger.info(
+            "[FLOW LOAD] flow_id=%s nodes=%s edges=%s source=%s",
+            result["flow_id"],
+            len(result["nodes"]),
+            len(result["edges"]),
+            result["source"],
+        )
+        return result
+
+    cached_result = cache_aside_json(cache_key, TTL_FLOW_SECONDS, _load_builder_flow)
+    return cached_result or {"flow_id": str(flow_id), "version_id": None, "nodes": [], "edges": [], "source": "empty"}
 
 
 def resolve_runtime_flow_graph(db: Session, tenant_id: uuid.UUID, flow_id: str) -> dict[str, Any]:

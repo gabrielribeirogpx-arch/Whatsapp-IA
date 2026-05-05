@@ -15,14 +15,14 @@ except ImportError:
 
 from app.db.session import SessionLocal
 from app.models import FailedMessage, Tenant
+from app.services.cache_service import check_rate_limit
 
 logger = logging.getLogger(__name__)
 
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
-SEND_QUEUE_NAME = os.getenv("WHATSAPP_SEND_QUEUE", "default")
-
-
-INCOMING_QUEUE_NAME = os.getenv("INCOMING_MESSAGE_QUEUE", "default")
+SEND_QUEUE_NAME = os.getenv("WHATSAPP_SEND_QUEUE", "normal")
+INCOMING_QUEUE_NAME = os.getenv("INCOMING_MESSAGE_QUEUE", "high_priority")
+LOW_PRIORITY_QUEUE_NAME = os.getenv("LOW_PRIORITY_QUEUE", "low")
 
 
 def get_queue(name: str | None = None) -> Queue:
@@ -34,6 +34,11 @@ def enqueue_incoming_message(payload: dict[str, Any]) -> str:
     correlation_id = str(payload.get("correlation_id") or payload.get("message_id") or "n/a")
     tenant_hint = payload.get("tenant_id") or payload.get("tenant_hint") or "n/a"
     phone = str(payload.get("phone") or "n/a")
+    tenant_for_limit = str(payload.get("tenant_id") or payload.get("tenant_hint") or "global")
+    if not check_rate_limit(tenant_for_limit, max_per_minute=int(os.getenv("TENANT_RATE_LIMIT_PER_MINUTE", "180"))):
+        logger.warning("event=rate_limit_exceeded tenant_id=%s stage=incoming_enqueue", tenant_for_limit)
+        return "rate_limited"
+
     job = get_queue(INCOMING_QUEUE_NAME).enqueue(
         "app.workers.message_worker.process_incoming_message",
         payload,

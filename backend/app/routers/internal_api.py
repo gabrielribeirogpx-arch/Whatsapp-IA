@@ -1,3 +1,7 @@
+import os
+from redis import Redis
+from rq import Queue
+
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
@@ -36,3 +40,15 @@ async def send_message(
     db: Session = Depends(get_db),
 ):
     return await send_message_api(payload=payload, tenant=tenant, db=db)
+
+
+@router.get("/queue-status")
+def queue_status():
+    redis_conn = Redis.from_url(os.getenv("REDIS_URL", "redis://localhost:6379/0"), decode_responses=True)
+    queue_names = [os.getenv("INCOMING_MESSAGE_QUEUE", "high_priority"), os.getenv("WHATSAPP_SEND_QUEUE", "normal"), os.getenv("LOW_PRIORITY_QUEUE", "low")]
+    data = {}
+    for name in queue_names:
+        q = Queue(name=name, connection=redis_conn)
+        failed = Queue(name=f"failed:{name}", connection=redis_conn)
+        data[name] = {"pending": q.count, "failed": failed.count}
+    return {"queues": data}
