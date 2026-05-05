@@ -43,6 +43,26 @@ class DashboardOut(BaseModel):
     charts: DashboardChartsOut
 
 
+class DashboardAnalyticsKpisOut(BaseModel):
+    conversations: int
+    contacts: int
+    leads: int
+    products: int
+    messages: int
+    conversations_updated_today: int
+    messages_sent_today: int
+    messages_received_today: int
+
+
+class DashboardAnalyticsTimeseriesOut(BaseModel):
+    messages_last_7_days: list[MessagesByDay]
+
+
+class DashboardAnalyticsOut(BaseModel):
+    kpis: DashboardAnalyticsKpisOut
+    timeseries: DashboardAnalyticsTimeseriesOut
+
+
 @router.get("/dashboard", response_model=DashboardOut)
 def get_dashboard(
     db: Session = Depends(get_db),
@@ -149,4 +169,28 @@ def get_dashboard(
             messages_received=messages_received_today,
         ),
         charts=DashboardChartsOut(messages_last_7_days=messages_last_7_days),
+    )
+
+
+@router.get("/dashboard/analytics", response_model=DashboardAnalyticsOut)
+def get_dashboard_analytics(
+    db: Session = Depends(get_db),
+    tenant: Tenant = Depends(get_current_tenant),
+):
+    dashboard = get_dashboard(db=db, tenant=tenant)
+
+    return DashboardAnalyticsOut(
+        kpis=DashboardAnalyticsKpisOut(
+            conversations=dashboard.totals.conversations,
+            contacts=dashboard.totals.contacts,
+            leads=dashboard.totals.leads,
+            products=dashboard.totals.products,
+            messages=dashboard.totals.messages,
+            conversations_updated_today=dashboard.today.conversations_updated,
+            messages_sent_today=dashboard.today.messages_sent,
+            messages_received_today=dashboard.today.messages_received,
+        ),
+        timeseries=DashboardAnalyticsTimeseriesOut(
+            messages_last_7_days=dashboard.charts.messages_last_7_days,
+        ),
     )
