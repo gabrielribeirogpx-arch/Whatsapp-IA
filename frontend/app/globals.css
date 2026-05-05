@@ -74,6 +74,14 @@ input {
   min-width: 56px !important;
   max-width: 56px !important;
   flex-shrink: 0;
+  overflow: hidden;
+  transition:
+    width 300ms cubic-bezier(0.22, 1, 0.36, 1),
+    min-width 300ms cubic-bezier(0.22, 1, 0.36, 1),
+    max-width 300ms cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 250ms ease,
+    background-color 250ms ease;
+  will-change: width, min-width, max-width;
 }
 
 .flow-builder-page .flow-builder-sidebar.is-expanded {
