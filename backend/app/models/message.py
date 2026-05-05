@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, String
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, String
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship, validates
 
@@ -11,6 +11,10 @@ from app.models.mixins import TenantMixin
 
 class Message(TenantMixin, Base):
     __tablename__ = "messages"
+    __table_args__ = (
+        Index("idx_messages_conversation_time", "conversation_id", "created_at"),
+        Index("idx_messages_tenant_time", "tenant_id", "created_at"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     conversation_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("conversations.id"), index=True)

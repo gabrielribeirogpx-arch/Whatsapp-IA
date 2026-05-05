@@ -16,6 +16,7 @@ from app.services.contact_sync_service import ensure_conversation_contact_link, 
 from app.services.conversation_service import get_or_create_conversation
 from app.services.message_router import handle_incoming_message
 from app.services.idempotency_service import register_processed_message
+from app.services.tenant_query import enforce_tenant_filter, require_tenant_id
 from app.services.message_service import normalize_meta_message
 from app.services.realtime_service import sse_broker
 from app.services.flow_service import resolve_flow_for_message
@@ -368,22 +369,26 @@ async def webhook_meta(request: Request, db: Session = Depends(get_db)):
 
 @router.get("/conversations")
 def list_conversations(request: Request, db: Session = Depends(get_db)):
-    tenant_id = _resolve_request_tenant_id(request)
+    tenant_id = require_tenant_id(_resolve_request_tenant_id(request), context="list_conversations")
     query = (
         select(Conversation)
         .options(load_only(Conversation.id, Conversation.phone_number, Conversation.created_at, Conversation.tenant_id))
         .order_by(desc(Conversation.updated_at), desc(Conversation.id))
+        .limit(200)
     )
-    if tenant_id:
-        query = query.where(Conversation.tenant_id == tenant_id)
+    query = enforce_tenant_filter(query, Conversation, tenant_id, context="list_conversations")
 
     conversations = db.execute(query).scalars().all()
 
     response: list[dict[str, str | None]] = []
     for conversation in conversations:
         last_message = db.execute(
-            select(Message)
-            .where(Message.conversation_id == conversation.id)
+            enforce_tenant_filter(
+                select(Message).where(Message.conversation_id == conversation.id),
+                Message,
+                tenant_id,
+                context="list_conversations_last_message",
+            )
             .order_by(desc(Message.created_at), desc(Message.id))
             .limit(1)
         ).scalars().first()
@@ -399,14 +404,16 @@ def list_conversations(request: Request, db: Session = Depends(get_db)):
 
 @router.get("/messages/{conversation_id}")
 def list_messages(conversation_id: UUID, request: Request, db: Session = Depends(get_db)):
-    tenant_id = _resolve_request_tenant_id(request)
-    query = (
+    tenant_id = require_tenant_id(_resolve_request_tenant_id(request), context="list_messages")
+    query = enforce_tenant_filter(
         select(Message)
         .where(Message.conversation_id == conversation_id)
         .order_by(Message.created_at.asc(), Message.id.asc())
+        .limit(500),
+        Message,
+        tenant_id,
+        context="list_messages",
     )
-    if tenant_id:
-        query = query.where(Message.tenant_id == tenant_id)
     messages = db.execute(query).scalars().all()
 
     return [

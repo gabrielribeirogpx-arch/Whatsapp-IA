@@ -15,7 +15,7 @@ def register_processed_message(db: Session, tenant_id: uuid.UUID, message_id: st
         """
         INSERT INTO processed_messages (message_id, tenant_id, created_at)
         VALUES (:message_id, :tenant_id, :created_at)
-        ON CONFLICT (message_id) DO NOTHING
+        ON CONFLICT (tenant_id, message_id) DO NOTHING
         RETURNING message_id
         """
     )
