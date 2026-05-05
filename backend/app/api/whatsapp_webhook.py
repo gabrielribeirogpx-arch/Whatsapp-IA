@@ -2,7 +2,7 @@ import os
 
 from fastapi import APIRouter, Query, Request
 
-from app.services.queue import enqueue_incoming_message
+from app.services.webhook_ingress import enqueue_webhook_payload
 
 router = APIRouter()
 
@@ -25,11 +25,7 @@ def verify(
 
 @router.post("/webhook/whatsapp")
 async def receive(request: Request):
-    body = await request.json()
-
-    try:
-        enqueue_incoming_message(body)
-        return {"status": "queued"}
-    except Exception as exc:  # webhook must ACK independent from worker failures
-        print("[WEBHOOK ERROR]", str(exc))
-        return {"status": "accepted"}
+    # Alias legado para integradores antigos.
+    # Mesmo princípio do endpoint canônico: ACK imediato + enqueue assíncrono.
+    enqueued, _ = await enqueue_webhook_payload(request)
+    return {"status": "queued" if enqueued else "accepted"}
