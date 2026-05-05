@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import ReactFlow, {
-  ReactFlowProvider,
   addEdge,
   Background,
   BackgroundVariant,
@@ -1048,10 +1047,16 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
   return (
     <div className="flow-builder-page" style={{ width: '100%', height: '100vh', display: 'flex' }}>
       <nav
-        className="dash-sidebar"
+        className={`dash-sidebar flow-builder-sidebar ${isSidebarExpanded ? 'is-expanded' : ''}`}
         onMouseEnter={() => setIsSidebarExpanded(true)}
         onMouseLeave={() => setIsSidebarExpanded(false)}
-        style={{ zIndex: 20 }}
+        style={{
+          zIndex: 20,
+          width: isSidebarExpanded ? 200 : 56,
+          minWidth: isSidebarExpanded ? 200 : 56,
+          maxWidth: isSidebarExpanded ? 200 : 56,
+          flexShrink: 0,
+        }}
       >
         <div className="dash-sidebar-logo">
           <img
@@ -1154,7 +1159,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
           Flow recuperado automaticamente
         </div>
       )}
-      <main style={{ flex: 1, background: '#F7F7F5', position: 'relative' }}>
+      <main style={{ flex: 1, background: '#F7F7F5', position: 'relative', minWidth: 0 }}>
         <div className="flow-builder-top-actions">
           {normalizedFlows.length === 0 && (
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -1359,7 +1364,6 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
             ))}
           </div>
         )}
-        <ReactFlowProvider>
         <ReactFlow
           key={flow?.id || 'no-flow'}
           onInit={setRfInstance}
@@ -1390,7 +1394,6 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
           <MiniMap nodeBorderRadius={8} pannable style={{ background: '#FFFFFF', border: '1px solid #E8E6E0' }} />
           <Controls />
         </ReactFlow>
-        </ReactFlowProvider>
       </main>
       {isSimulatorOpen && (
         <aside style={{

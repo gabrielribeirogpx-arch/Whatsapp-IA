@@ -68,6 +68,21 @@ input {
   font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
 }
 
+
+.flow-builder-page .flow-builder-sidebar {
+  width: 56px !important;
+  min-width: 56px !important;
+  max-width: 56px !important;
+  flex-shrink: 0;
+}
+
+.flow-builder-page .flow-builder-sidebar.is-expanded {
+  width: 200px !important;
+  min-width: 200px !important;
+  max-width: 200px !important;
+}
+
+
 /* ── FLOW SIDEBAR BUTTON ───────────────────────────── */
 .flow-sidebar-button {
   display: inline-flex;
