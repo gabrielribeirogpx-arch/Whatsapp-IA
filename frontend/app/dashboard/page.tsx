@@ -123,6 +123,7 @@ const channelLegendColors: Record<string, string> = {
 
 export default function DashboardPage() {
   const [period, setPeriod] = useState<Period>('7d');
+  const [greeting, setGreeting] = useState('Olá');
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [flows, setFlows] = useState<FlowItem[]>([]);
   const router = useRouter();
@@ -136,6 +137,10 @@ export default function DashboardPage() {
       try { const payload = await getConversations(); setConversations(Array.isArray(payload) ? payload : []); setConversationsError(null);} catch { setConversations([]); setConversationsError('Não foi possível carregar a atividade recente no momento.'); }
       try { const payload = await listFlows(); setFlows(Array.isArray(payload) ? payload : []); setFlowsError(null);} catch { setFlows([]); setFlowsError('Não foi possível carregar os fluxos neste instante.'); }
     })();
+  }, []);
+
+  useEffect(() => {
+    setGreeting(getGreeting());
   }, []);
 
 
@@ -262,7 +267,7 @@ export default function DashboardPage() {
       <div className="mb-4 flex items-center justify-between gap-4 md:mb-6">
         <div>
           <h1 className="text-xl md:text-2xl font-semibold leading-tight text-gray-900">
-            {getGreeting()}, Gabriel <span className="text-lg">👋</span>
+            {greeting}, Gabriel <span className="text-lg">👋</span>
           </h1>
           <p className="mt-1 text-sm text-gray-500">Aqui está o resumo das suas conversas hoje.</p>
         </div>
