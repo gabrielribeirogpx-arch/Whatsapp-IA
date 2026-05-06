@@ -113,6 +113,14 @@ const getConversationFlowLabel = (conversation: Conversation) => {
   return raw.flow_name || raw.flowName || raw.flow?.name || raw.source || 'Flow';
 };
 
+
+const periodLabelMap: Record<Period, string> = {
+  '24h': 'últimas 24 horas',
+  '7d': 'últimos 7 dias',
+  '30d': 'últimos 30 dias',
+  '90d': 'últimos 90 dias',
+};
+
 const channelLegendColors: Record<string, string> = {
   whatsapp: '#16A34A',
   'site / chat': '#2563EB',
@@ -238,6 +246,12 @@ export default function DashboardPage() {
     received: safeSeries.messages_received[i] || 0,
   }));
 
+  const xAxisTickInterval =
+    period === '24h' ? 0 :
+    period === '7d' ? 0 :
+    period === '30d' ? 3 :
+    9;
+
   const normalizedChannelItems = useMemo(() => {
     const base = [
       { name: 'WhatsApp', value: 0 },
@@ -352,7 +366,7 @@ export default function DashboardPage() {
 </div>
       <div className="grid w-full grid-cols-1 gap-4 items-stretch xl:grid-cols-[minmax(0,2fr)_minmax(320px,0.9fr)]">
         <div className={`${cardClassName} min-h-[390px] p-5`}>{dashboardError ? <p className="m-0 p-3 text-sm text-red-700">{dashboardError}</p> : (
-          chartData.length ? <DashboardChart data={chartData.map((item) => ({ date: item.name, received: item.received, sent: item.sent }))} /> : null
+          chartData.length ? <DashboardChart title={`Mensagens — ${periodLabelMap[period]}`} data={chartData.map((item) => ({ date: item.name, received: item.received, sent: item.sent }))} xAxisTickInterval={xAxisTickInterval} /> : null
         )}</div>
 
         <div className="min-h-[390px] rounded-2xl border border-slate-100 bg-white p-5 shadow-[0_12px_30px_rgba(15,23,42,0.04)]">

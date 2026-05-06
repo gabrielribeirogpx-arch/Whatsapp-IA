@@ -3,7 +3,7 @@
 import { Area, AreaChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 
 type ChartPoint = { date: string; sent: number; received: number };
-type DashboardChartProps = { data?: ChartPoint[] };
+type DashboardChartProps = { data?: ChartPoint[]; title?: string; xAxisTickInterval?: number };
 type TooltipProps = { active?: boolean; payload?: { value: number; dataKey?: string }[]; label?: string };
 
 function formatDateLabel(dateValue: string) {
@@ -19,13 +19,13 @@ function CustomTooltip({ active, payload, label }: TooltipProps) {
   return <div className="rounded-xl border border-slate-700/40 bg-slate-900 px-3 py-2 text-xs text-slate-100 shadow-xl"><div className="mb-1 font-semibold">{label}</div><div>Enviadas: {sent}</div><div>Recebidas: {received}</div></div>;
 }
 
-export default function DashboardChart({ data = [] }: DashboardChartProps) {
+export default function DashboardChart({ data = [], title = 'Mensagens — últimos 7 dias', xAxisTickInterval = 0 }: DashboardChartProps) {
   const normalizedData = (data || []).map((item) => ({ ...item, date: formatDateLabel(item.date), sent: Number(item.sent) || 0, received: Number(item.received) || 0 }));
   const chartData = normalizedData.length ? normalizedData : Array.from({ length: 7 }, (_, index) => { const date = new Date(); date.setDate(date.getDate() - (6 - index)); return { date: formatDateLabel(date.toISOString()), sent: 0, received: 0 }; });
 
   return (
     <article className="h-full overflow-visible">
-      <div className="mb-3 flex items-center justify-between"><h2 className="text-lg font-semibold text-slate-900">Mensagens — últimos 7 dias</h2><button type="button" className="rounded-lg border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-600">Diário</button></div>
+      <div className="mb-3 flex items-center justify-between"><h2 className="text-lg font-semibold text-slate-900">{title}</h2><button type="button" className="rounded-lg border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-600">Diário</button></div>
       <div className="h-[300px] min-h-[300px] w-full overflow-visible">
         <ResponsiveContainer>
           <AreaChart data={chartData} margin={{ top: 8, right: 12, left: 0, bottom: 12 }}>
@@ -34,7 +34,7 @@ export default function DashboardChart({ data = [] }: DashboardChartProps) {
               <linearGradient id="sentGradient" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#16A34A" stopOpacity={0.18} /><stop offset="95%" stopColor="#16A34A" stopOpacity={0} /></linearGradient>
             </defs>
             <CartesianGrid strokeDasharray="3 3" />
-            <XAxis dataKey="date" />
+            <XAxis dataKey="date" interval={xAxisTickInterval} />
             <YAxis />
             <Tooltip content={<CustomTooltip />} />
             <Legend />
