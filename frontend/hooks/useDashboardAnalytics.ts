@@ -10,6 +10,11 @@ type AnalyticsTimeseries = {
   messages_sent?: number[];
   conversions?: number[];
   labels?: string[];
+  messages_last_7_days?: Array<{
+    date: string;
+    sent: number;
+    received: number;
+  }>;
 };
 
 type AnalyticsKpis = {
@@ -76,7 +81,24 @@ export function useDashboardAnalytics() {
   }, []);
 
   const normalized = useMemo(() => {
-    const series = data?.timeseries ?? DEFAULT_SERIES;
+    const rawSeries = data?.timeseries;
+
+    let adaptedSeries = DEFAULT_SERIES;
+
+    if (rawSeries?.messages_last_7_days) {
+      adaptedSeries = {
+        labels: rawSeries.messages_last_7_days.map((d) => d.date),
+        messages_sent: rawSeries.messages_last_7_days.map((d) => Number(d.sent) || 0),
+        messages_received: rawSeries.messages_last_7_days.map((d) => Number(d.received) || 0),
+        conversations: [],
+        leads: [],
+        conversions: [],
+      };
+    } else {
+      adaptedSeries = rawSeries ?? DEFAULT_SERIES;
+    }
+
+    const series = adaptedSeries;
     const labels = Array.isArray(series.labels) ? series.labels : [];
     const kpis = data?.kpis ?? DEFAULT_KPIS;
 
