@@ -94,6 +94,76 @@ const Sparkline = ({ values = [], className = 'h-full w-full overflow-hidden' }:
   );
 };
 
+
+
+type DashboardTimeseries = {
+  labels?: string[];
+  conversations?: number[];
+  leads?: number[];
+  messages_received?: number[];
+  messages_sent?: number[];
+  conversions?: number[];
+};
+
+function toSafeNumber(value: unknown): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function toSafeArray(values?: number[]): number[] {
+  if (!Array.isArray(values)) return [];
+  return values.map((value) => toSafeNumber(value));
+}
+
+function getKpiSeries(key: (typeof kpiMeta)[number]['key'], timeseries?: DashboardTimeseries): number[] {
+  const safeTimeseries = timeseries ?? {};
+
+  switch (key) {
+    case 'activeConversations':
+      return toSafeArray(safeTimeseries.conversations);
+    case 'activeLeads':
+      return toSafeArray(safeTimeseries.leads);
+    case 'messagesToday':
+      return toSafeArray(safeTimeseries.messages_received);
+    case 'responseRate': {
+      const sent = toSafeArray(safeTimeseries.messages_sent);
+      const received = toSafeArray(safeTimeseries.messages_received);
+      const maxLength = Math.max(sent.length, received.length);
+      return Array.from({ length: maxLength }, (_, index) => {
+        const sentValue = sent[index] ?? 0;
+        const receivedValue = received[index] ?? 0;
+        if (receivedValue <= 0) return 0;
+        return (sentValue / receivedValue) * 100;
+      });
+    }
+    case 'conversions':
+      return toSafeArray(safeTimeseries.conversions);
+    default:
+      return [0, 0, 0, 0, 0, 0, 0];
+  }
+}
+
+function getDeltaPercent(series: number[]): number {
+  const safeSeries = toSafeArray(series);
+  if (!safeSeries.length) return 0;
+
+  const midpoint = Math.floor(safeSeries.length / 2);
+  if (midpoint <= 0) return 0;
+
+  const firstHalf = safeSeries.slice(0, midpoint);
+  const secondHalf = safeSeries.slice(midpoint);
+
+  const firstSum = firstHalf.reduce((sum, value) => sum + value, 0);
+  const secondSum = secondHalf.reduce((sum, value) => sum + value, 0);
+
+  if (firstSum <= 0) {
+    if (secondSum <= 0) return 0;
+    return 100;
+  }
+
+  const delta = ((secondSum - firstSum) / firstSum) * 100;
+  return Number.isFinite(delta) ? Math.round(delta) : 0;
+}
 const kpiMeta = [
   { key: 'activeConversations', label: 'Conversas ativas', icon: '/icons/dashboard/conversas.svg', suffix: '' },
   { key: 'activeLeads', label: 'Leads ativos', icon: '/icons/dashboard/leads.svg', suffix: '' },
@@ -320,45 +390,47 @@ export default function DashboardPage() {
   {safeKpis.map((item) => {
     if (!item) return null;
     const rawValue = viewModel?.[item.key as keyof typeof viewModel];
-
-    const value =
-      typeof rawValue === 'number' || typeof rawValue === 'string'
-        ? rawValue
-        : 0;
+    const value = typeof rawValue === 'number' || typeof rawValue === 'string' ? rawValue : 0;
+    const series = getKpiSeries(item.key, timeseries);
+    const sparklineSeries = series.length ? series : [0, 0, 0, 0, 0, 0, 0];
+    const delta = getDeltaPercent(sparklineSeries);
+    const trendText = period === '7d' ? 'vs últimos 7 dias' : 'vs período anterior';
+    const trendPrefix = delta >= 0 ? '↑' : '↓';
 
     return (
       <div
         key={item.key}
         className="relative overflow-hidden rounded-2xl border border-slate-100 bg-white p-5 min-h-[110px] shadow-[0_10px_30px_rgba(15,23,42,0.06)] transition hover:shadow-[0_18px_40px_rgba(15,23,42,0.10)]"
       >
-       {/* 👇 FUNDO PREMIUM */}
-      <div className="absolute inset-0 opacity-[0.03] bg-[radial-gradient(circle_at_top_left,#22c55e,transparent)] pointer-events-none" />
+        <div className="absolute inset-0 opacity-[0.03] bg-[radial-gradient(circle_at_top_left,#22c55e,transparent)] pointer-events-none" />
 
-  {/* 👇 CONTEÚDO (precisa estar acima) */}
-      <div className="relative z-10 flex items-start gap-3">  
-      
+        <div className="relative z-10 flex items-start gap-3">
           <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-50">
             {item.key === 'messagesToday' ? (
               <MessageSquare className="h-5 w-5 text-emerald-600" />
+            ) : item.icon ? (
+              <img src={item.icon} alt={item.label} className="h-5 w-5" />
             ) : (
-              item.icon ? (
-                <img src={item.icon} alt={item.label} className="h-5 w-5" />
-              ) : (
-                <div className="h-5 w-5 bg-slate-300 rounded" />
-              )
+              <div className="h-5 w-5 rounded bg-slate-300" />
             )}
           </div>
 
-          <div className="min-w-0 flex flex-col items-start pt-0.5">
-            <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-              {item.label}
-            </span>
+          <div className="min-w-0 flex flex-col items-start pt-0.5 pr-24">
+            <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">{item.label}</span>
 
             <span className="mt-1 text-2xl font-bold text-slate-900">
               {value}
               {item.suffix ?? ''}
             </span>
+            <div className="mt-1 flex items-center gap-1">
+              <span className="text-xs text-emerald-600">{trendPrefix} {Math.abs(delta)}%</span>
+              <span className="text-xs text-slate-500">{trendText}</span>
+            </div>
           </div>
+        </div>
+
+        <div className="absolute bottom-4 right-4 h-8 w-20">
+          <Sparkline values={sparklineSeries} />
         </div>
       </div>
     );
