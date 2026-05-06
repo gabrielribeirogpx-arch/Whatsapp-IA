@@ -57,7 +57,6 @@ export function useDashboardAnalytics() {
       try {
         const res = await apiFetch(`${process.env.NEXT_PUBLIC_API_URL}/api/dashboard/analytics`);
         const payload = await parseApiResponse<AnalyticsResponse>(res);
-        console.log('analytics response', payload);
 
         if (!payload) {
           setData(null);
