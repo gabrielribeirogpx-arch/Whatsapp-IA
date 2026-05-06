@@ -10,6 +10,11 @@ type AnalyticsTimeseries = {
   messages_sent?: number[];
   conversions?: number[];
   labels?: string[];
+  messages_last_7_days?: Array<{
+    date: string;
+    sent: number;
+    received: number;
+  }>;
 };
 
 type AnalyticsKpis = {
@@ -27,6 +32,15 @@ type AnalyticsResponse = {
   timeseries?: AnalyticsTimeseries;
 };
 
+type NormalizedSeries = {
+  labels: string[];
+  conversations: number[];
+  leads: number[];
+  messages_received: number[];
+  messages_sent: number[];
+  conversions: number[];
+};
+
 const DEFAULT_KPIS = {
   conversations: 0,
   leads: 0,
@@ -37,7 +51,7 @@ const DEFAULT_KPIS = {
   conversions: 0,
 };
 
-const DEFAULT_SERIES = {
+const DEFAULT_SERIES: NormalizedSeries = {
   labels: [],
   conversations: [],
   leads: [],
@@ -76,7 +90,31 @@ export function useDashboardAnalytics() {
   }, []);
 
   const normalized = useMemo(() => {
-    const series = data?.timeseries ?? DEFAULT_SERIES;
+    const rawSeries = data?.timeseries;
+
+    let adaptedSeries: NormalizedSeries = DEFAULT_SERIES;
+
+    if (rawSeries?.messages_last_7_days) {
+      adaptedSeries = {
+        labels: rawSeries.messages_last_7_days.map((d) => d.date),
+        messages_sent: rawSeries.messages_last_7_days.map((d) => Number(d.sent) || 0),
+        messages_received: rawSeries.messages_last_7_days.map((d) => Number(d.received) || 0),
+        conversations: [],
+        leads: [],
+        conversions: [],
+      };
+    } else {
+      adaptedSeries = {
+        labels: Array.isArray(rawSeries?.labels) ? rawSeries.labels : [],
+        conversations: Array.isArray(rawSeries?.conversations) ? rawSeries.conversations : [],
+        leads: Array.isArray(rawSeries?.leads) ? rawSeries.leads : [],
+        messages_received: Array.isArray(rawSeries?.messages_received) ? rawSeries.messages_received : [],
+        messages_sent: Array.isArray(rawSeries?.messages_sent) ? rawSeries.messages_sent : [],
+        conversions: Array.isArray(rawSeries?.conversions) ? rawSeries.conversions : [],
+      };
+    }
+
+    const series = adaptedSeries;
     const labels = Array.isArray(series.labels) ? series.labels : [];
     const kpis = data?.kpis ?? DEFAULT_KPIS;
 
