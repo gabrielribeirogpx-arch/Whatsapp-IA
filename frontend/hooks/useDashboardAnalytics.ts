@@ -32,6 +32,15 @@ type AnalyticsResponse = {
   timeseries?: AnalyticsTimeseries;
 };
 
+type NormalizedSeries = {
+  labels: string[];
+  conversations: number[];
+  leads: number[];
+  messages_received: number[];
+  messages_sent: number[];
+  conversions: number[];
+};
+
 const DEFAULT_KPIS = {
   conversations: 0,
   leads: 0,
@@ -42,7 +51,7 @@ const DEFAULT_KPIS = {
   conversions: 0,
 };
 
-const DEFAULT_SERIES = {
+const DEFAULT_SERIES: NormalizedSeries = {
   labels: [],
   conversations: [],
   leads: [],
@@ -83,7 +92,7 @@ export function useDashboardAnalytics() {
   const normalized = useMemo(() => {
     const rawSeries = data?.timeseries;
 
-    let adaptedSeries = DEFAULT_SERIES;
+    let adaptedSeries: NormalizedSeries = DEFAULT_SERIES;
 
     if (rawSeries?.messages_last_7_days) {
       adaptedSeries = {
@@ -95,7 +104,14 @@ export function useDashboardAnalytics() {
         conversions: [],
       };
     } else {
-      adaptedSeries = rawSeries ?? DEFAULT_SERIES;
+      adaptedSeries = {
+        labels: Array.isArray(rawSeries?.labels) ? rawSeries.labels : [],
+        conversations: Array.isArray(rawSeries?.conversations) ? rawSeries.conversations : [],
+        leads: Array.isArray(rawSeries?.leads) ? rawSeries.leads : [],
+        messages_received: Array.isArray(rawSeries?.messages_received) ? rawSeries.messages_received : [],
+        messages_sent: Array.isArray(rawSeries?.messages_sent) ? rawSeries.messages_sent : [],
+        conversions: Array.isArray(rawSeries?.conversions) ? rawSeries.conversions : [],
+      };
     }
 
     const series = adaptedSeries;
