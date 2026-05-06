@@ -60,7 +60,9 @@ const DEFAULT_SERIES: NormalizedSeries = {
   conversions: [],
 };
 
-export function useDashboardAnalytics() {
+type DashboardPeriod = '24h' | '7d' | '30d' | '90d';
+
+export function useDashboardAnalytics(period: DashboardPeriod = '7d') {
   const [data, setData] = useState<AnalyticsResponse | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -69,7 +71,7 @@ export function useDashboardAnalytics() {
     void (async () => {
       setIsLoading(true);
       try {
-        const res = await apiFetch(`${process.env.NEXT_PUBLIC_API_URL}/api/dashboard/analytics`);
+        const res = await apiFetch(`${process.env.NEXT_PUBLIC_API_URL}/api/dashboard/analytics?period=${period}`);
         const payload = await parseApiResponse<AnalyticsResponse>(res);
 
         if (!payload) {
@@ -87,7 +89,7 @@ export function useDashboardAnalytics() {
         setIsLoading(false);
       }
     })();
-  }, []);
+  }, [period]);
 
   const normalized = useMemo(() => {
     const rawSeries = data?.timeseries;

@@ -127,7 +127,7 @@ export default function DashboardPage() {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [flows, setFlows] = useState<FlowItem[]>([]);
   const router = useRouter();
-  const { data, kpis, timeseries, isLoading, error: dashboardError } = useDashboardAnalytics();
+  const { data, kpis, timeseries, isLoading, error: dashboardError } = useDashboardAnalytics(period);
   const [conversationsError, setConversationsError] = useState<string | null>(null);
   const [flowsError, setFlowsError] = useState<string | null>(null);
   const [creatingFlow, setCreatingFlow] = useState(false);
