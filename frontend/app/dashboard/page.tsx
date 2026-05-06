@@ -131,6 +131,7 @@ export default function DashboardPage() {
   const [conversationsError, setConversationsError] = useState<string | null>(null);
   const [flowsError, setFlowsError] = useState<string | null>(null);
   const [creatingFlow, setCreatingFlow] = useState(false);
+  const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
     void (async () => {
@@ -143,6 +144,9 @@ export default function DashboardPage() {
     setGreeting(getGreeting());
   }, []);
 
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   async function handleCreateFlow() {
     try {
@@ -213,8 +217,6 @@ export default function DashboardPage() {
 
   const totalChannels = (viewModel.channels || []).reduce((acc, c) => acc + c.value, 0);
   const liveItems = uniqueConversations.slice(0, 4);
-  const isReady = !!data;
-
   const analyticsSeries = {
     labels: timeseries?.labels ?? [],
     conversations: timeseries?.conversations ?? [],
@@ -256,14 +258,17 @@ export default function DashboardPage() {
   }, [viewModel.channels]);
   const safeKpis = Array.isArray(kpiMeta) ? kpiMeta : [];
 
+  if (!mounted || !data) {
+    return (
+      <div className="p-6 text-sm text-gray-500">
+        Carregando dashboard...
+      </div>
+    );
+  }
+
   return (
     <section className="w-full min-w-0 px-5 py-6 lg:px-6">
       <div className="w-full min-w-0 space-y-5">
-      {!isReady && (
-        <div className="p-6 text-sm text-gray-500">
-          Carregando dashboard...
-        </div>
-      )}
       <div className="mb-4 flex items-center justify-between gap-4 md:mb-6">
         <div>
           <h1 className="text-xl md:text-2xl font-semibold leading-tight text-gray-900">
