@@ -422,19 +422,19 @@ export default function DashboardPage() {
               {value}
               {item.suffix ?? ''}
             </span>
+          </div>
+        </div>
 
-            <div className="mt-3 flex w-full items-center justify-between gap-3">
-              <span className="inline-flex items-center gap-1 text-xs leading-none text-emerald-600">
-                {trendPrefix} {Math.abs(delta)}%
-                <span className="font-normal text-slate-500">
-                  {trendText}
-                </span>
-              </span>
+        <div className="relative z-10 mt-3 flex w-full items-center justify-between gap-3">
+          <span className="inline-flex items-center gap-1 text-xs leading-none text-emerald-600">
+            {trendPrefix} {Math.abs(delta)}%
+            <span className="font-normal text-slate-500">
+              {trendText}
+            </span>
+          </span>
 
-              <div className="flex h-7 w-20 shrink-0 items-center justify-end">
-                <Sparkline values={sparklineSeries} className="h-7 w-20" />
-              </div>
-            </div>
+          <div className="flex h-7 w-20 shrink-0 items-center justify-end">
+            <Sparkline values={sparklineSeries} className="h-7 w-20" />
           </div>
         </div>
       </div>
