@@ -71,7 +71,7 @@ class FlowSessionService:
 
         return session, None
 
-    def save_runtime_session(self, *, tenant_id, user_identifier: str, flow: Flow, current_node_id, status: str = "running", context: dict[str, Any] | None = None) -> FlowSession:
+    def save_runtime_session(self, *, tenant_id, user_identifier: str, flow: Flow, current_node_id, status: str = "running", context: dict[str, Any] | None = None, variables: dict[str, Any] | None = None) -> FlowSession:
         now = datetime.utcnow()
         session = (
             self.db.query(FlowSession)
@@ -91,7 +91,7 @@ class FlowSessionService:
                 current_node_id=str(current_node_id) if current_node_id else None,
                 status=status,
                 context=context or {},
-                variables={"flow_version": flow.version},
+                variables={"flow_version": flow.version, **(variables or {})},
                 started_at=now,
                 last_event_at=now,
                 completion_status="running",
@@ -101,9 +101,11 @@ class FlowSessionService:
             session.current_node_id = str(current_node_id) if current_node_id else None
             session.status = status
             session.context = context if context is not None else (session.context or {})
-            variables = dict(session.variables or {})
-            variables["flow_version"] = flow.version
-            session.variables = variables
+            merged_variables = dict(session.variables or {})
+            merged_variables["flow_version"] = flow.version
+            if variables:
+                merged_variables.update(variables)
+            session.variables = merged_variables
             session.last_event_at = now
             if not session.started_at:
                 session.started_at = now

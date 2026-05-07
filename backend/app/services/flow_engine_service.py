@@ -1139,8 +1139,6 @@ def process_flow_engine(
     user_identifier = conversation.phone_number
     normalized_message = _normalize_text(message_text)
     runtime_session, invalid_reason = session_service.get_runtime_session(conversation.tenant_id, user_identifier, flow)
-    session_conversion_emitted = bool(runtime_session and runtime_session.conversion_at)
-
     if _is_reset_command(normalized_message):
         _emit_runtime_event(
             db=db,
@@ -1184,6 +1182,43 @@ def process_flow_engine(
     )
     if conversation.current_node_id is None and not initialized_node:
         return None
+
+    runtime_session = session_service.save_runtime_session(
+        tenant_id=conversation.tenant_id,
+        user_identifier=user_identifier,
+        flow=flow,
+        current_node_id=conversation.current_node_id,
+        context=conversation.context if isinstance(conversation.context, dict) else {},
+    )
+
+    session_variables = dict(runtime_session.variables or {})
+    flow_started_emitted = bool(session_variables.get("analytics.flow_started_emitted"))
+    if not flow_started_emitted:
+        _emit_runtime_event(
+            db=db,
+            tenant_id=conversation.tenant_id,
+            conversation_id=conversation.id,
+            flow_id=flow.id,
+            flow_version_id=current_flow_version_id,
+            node_id=conversation.current_node_id,
+            event_type="flow_started",
+            metadata={
+                "source": "runtime_session_initialized",
+                "flow_version_id": str(current_flow_version_id) if current_flow_version_id else None,
+                "node_id": str(conversation.current_node_id) if conversation.current_node_id else None,
+            },
+            dedupe_bucket_seconds=30,
+        )
+        runtime_session = session_service.save_runtime_session(
+            tenant_id=conversation.tenant_id,
+            user_identifier=user_identifier,
+            flow=flow,
+            current_node_id=conversation.current_node_id,
+            context=runtime_session.context if isinstance(runtime_session.context, dict) else {},
+            variables={"analytics.flow_started_emitted": True},
+        )
+
+    session_conversion_emitted = bool(runtime_session and runtime_session.conversion_at)
 
     msg = _normalize_text(message_text)
     if msg:
@@ -1345,16 +1380,6 @@ def process_flow_engine(
                 print(f"[FLOW INIT] start_node_id={start_node.id}")
                 logger.info("[FLOW INIT] start_node_id=%s", start_node.id)
                 logger.info("[FLOW RECOVERY] node=%s", start_node.id)
-                _emit_runtime_event(
-                    db=db,
-                    tenant_id=conversation.tenant_id,
-                    conversation_id=conversation.id,
-                    flow_id=flow.id,
-                    flow_version_id=current_flow_version_id,
-                    node_id=start_node.id,
-                    event_type="flow_started",
-                    dedupe_bucket_seconds=30,
-                )
             else:
                 print("[FLOW ERROR] no start node found")
                 logger.error("[FLOW ERROR] no start node found")
@@ -1411,16 +1436,6 @@ def process_flow_engine(
             selected_start_node_id = selected_start_edge.target if selected_start_edge else start_node.id
             _set_flow_mode(db=db, conversation=conversation, flow_id=flow.id, node_id=selected_start_node_id)
             logger.info("[FLOW STATE] current=%s next=%s", conversation.current_node_id, selected_start_node_id)
-            _emit_runtime_event(
-                db=db,
-                tenant_id=conversation.tenant_id,
-                conversation_id=conversation.id,
-                flow_id=flow.id,
-                flow_version_id=current_flow_version_id,
-                node_id=selected_start_node_id,
-                event_type="flow_started",
-                dedupe_bucket_seconds=30,
-            )
 
     if conversation.mode == "flow":
         _keep_flow_mode(conversation)
