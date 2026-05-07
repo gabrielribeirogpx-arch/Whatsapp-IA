@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Index, JSON, String
+from sqlalchemy import DateTime, Index, JSON, String
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -26,11 +26,6 @@ class FlowSession(Base):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     tenant_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     flow_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
-    flow_version_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("flow_versions.id", ondelete="SET NULL"),
-        nullable=True,
-    )
     conversation_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
     user_identifier: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
     current_node_id: Mapped[str | None] = mapped_column(String, nullable=True)
