@@ -700,21 +700,26 @@ def _resolve_node_text(node_data: dict[str, Any]) -> str:
 
 
 def tenant_has_active_visual_flow(db: Session, tenant_id: uuid.UUID) -> bool:
-    flow = db.execute(
-        select(Flow.id)
-        .where(Flow.tenant_id == tenant_id, Flow.is_active.is_(True))
-        .order_by(Flow.created_at.asc(), Flow.id.asc())
-        .limit(1)
-    ).scalar_one_or_none()
-    if not flow:
-        return False
+    return get_active_visual_flow(db=db, tenant_id=tenant_id) is not None
 
-    node = db.execute(
-        select(FlowNode.id)
-        .where(FlowNode.tenant_id == tenant_id, FlowNode.flow_id == flow)
-        .limit(1)
-    ).scalar_one_or_none()
-    return bool(node)
+
+def get_active_visual_flow(db: Session, tenant_id: uuid.UUID) -> Flow | None:
+    candidates = db.execute(
+        select(Flow)
+        .where(
+            Flow.tenant_id == tenant_id,
+            Flow.is_active.is_(True),
+            Flow.is_deleted.is_(False),
+        )
+        .order_by(Flow.priority.desc(), Flow.created_at.asc(), Flow.id.asc())
+    ).scalars().all()
+    for flow in candidates:
+        runtime_graph = _get_current_flow_runtime(db=db, flow=flow, tenant_id=tenant_id)
+        nodes = runtime_graph.get("nodes") if isinstance(runtime_graph, dict) else None
+        start_node = _find_start_node(nodes or []) if isinstance(nodes, list) else None
+        if start_node:
+            return flow
+    return None
 
 
 def _get_or_create_visual_flow(db: Session, tenant_id: uuid.UUID) -> Flow:
@@ -1280,7 +1285,11 @@ def process_flow_engine(
             logger.exception("[FLOW SELECT ERROR] tenant_id=%s flow_id=%s", conversation.tenant_id, flow_id)
             return None
     else:
-        flow = _get_or_create_visual_flow(db=db, tenant_id=conversation.tenant_id)
+        flow = get_active_visual_flow(db=db, tenant_id=conversation.tenant_id)
+        if not flow:
+            logger.info("[FLOW ROUTING] active_flow_found=false tenant_id=%s", conversation.tenant_id)
+            return None
+        logger.info("[FLOW ROUTING] active_flow_found=true flow_id=%s", flow.id)
     logger.info("[FLOW SELECTED] %s", flow_id or str(flow.id))
     runtime_graph = _get_current_flow_runtime(db=db, flow=flow, tenant_id=conversation.tenant_id)
     current_flow_version_id = _parse_uuid(runtime_graph.get("version_id") if isinstance(runtime_graph, dict) else None)
@@ -1329,7 +1338,18 @@ def process_flow_engine(
         flow_id=flow.id,
         runtime_graph=runtime_graph,
     )
+    logger.info(
+        "[FLOW ROUTING] session_found=%s session_id=%s",
+        bool(runtime_session),
+        getattr(runtime_session, "id", None),
+    )
+    logger.info(
+        "[FLOW ROUTING] start_node_found=%s node_id=%s",
+        bool(conversation.current_node_id),
+        conversation.current_node_id,
+    )
     if conversation.current_node_id is None and not initialized_node:
+        logger.info("[FLOW ROUTING] using_fallback=true reason=start_node_missing")
         return None
 
     runtime_session = session_service.save_runtime_session(
