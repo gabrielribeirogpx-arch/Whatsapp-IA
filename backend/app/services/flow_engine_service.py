@@ -64,6 +64,41 @@ def _parse_uuid(value: Any) -> uuid.UUID | None:
         return None
 
 
+def _is_valid_flow_node_reference(db: Session, node_id: uuid.UUID | None) -> bool:
+    if node_id is None:
+        return True
+    return db.execute(select(FlowNode.id).where(FlowNode.id == node_id).limit(1)).scalar_one_or_none() is not None
+
+
+def _sanitize_conversation_current_node(db: Session, conversation: Conversation) -> None:
+    if not _is_valid_flow_node_reference(db, conversation.current_node_id):
+        logger.warning(
+            "[FLOW STATE SANITIZE] clearing invalid conversation.current_node_id conversation_id=%s node_id=%s",
+            conversation.id,
+            conversation.current_node_id,
+        )
+        conversation.current_node_id = None
+
+
+def _safe_set_conversation_current_node(
+    db: Session,
+    conversation: Conversation,
+    node: FlowNode | VersionedFlowNode | uuid.UUID | None,
+) -> None:
+    if node is None:
+        conversation.current_node_id = None
+        return
+    if isinstance(node, VersionedFlowNode):
+        conversation.current_node_id = None
+        return
+
+    node_id = node.id if isinstance(node, FlowNode) else _parse_uuid(node)
+    if node_id and _is_valid_flow_node_reference(db, node_id):
+        conversation.current_node_id = node_id
+    else:
+        conversation.current_node_id = None
+
+
 def validate_flow_structure(
     nodes: list[dict[str, Any]] | None,
     edges: list[dict[str, Any]] | None,
@@ -898,7 +933,7 @@ def _initialize_flow_start_node(
         start_node = _find_start_node(node_payload)
         if start_node:
             if is_versioned_runtime:
-                conversation.current_node_id = None
+                _safe_set_conversation_current_node(db, conversation, None)
                 if runtime_session and session_service:
                     session_service.update_session(
                         runtime_session,
@@ -906,9 +941,10 @@ def _initialize_flow_start_node(
                         context=runtime_session.context if isinstance(runtime_session.context, dict) else {},
                     )
             else:
-                conversation.current_node_id = start_node["id"]
+                _safe_set_conversation_current_node(db, conversation, start_node["id"])
                 db.add(conversation)
                 try:
+                    _sanitize_conversation_current_node(db, conversation)
                     db.commit()
                     db.refresh(conversation)
                 except Exception:
@@ -1159,9 +1195,11 @@ def _ensure_conversation_state(conversation: Conversation, message_text: str) ->
 
 
 def set_current_node(conversation: Conversation, node_id: uuid.UUID | None, db: Session) -> None:
-    conversation.current_node_id = node_id
+    _safe_set_conversation_current_node(db, conversation, node_id)
+    _sanitize_conversation_current_node(db, conversation)
     db.add(conversation)
     try:
+        _sanitize_conversation_current_node(db, conversation)
         db.commit()
         db.refresh(conversation)
     except Exception:
@@ -1179,6 +1217,7 @@ def _reset_to_bot_mode(db: Session, conversation: Conversation, reason: str) -> 
     conversation.mode = "bot"
     conversation.current_flow = None
     set_current_node(conversation=conversation, node_id=None, db=db)
+    _sanitize_conversation_current_node(db, conversation)
     db.commit()
     db.refresh(conversation)
     logger.info("[MODE RESET] bot conversation_id=%s reason=%s", conversation.id, reason)
@@ -1407,7 +1446,7 @@ def process_flow_engine(
             metadata={"reason": "reset_command", "abandon_reason": "reset_command"},
         )
         session_service.clear_runtime_session(conversation.tenant_id, user_identifier, flow, reason="reset_command")
-        conversation.current_node_id = None
+        _safe_set_conversation_current_node(db, conversation, None)
         conversation.current_flow = None
     elif runtime_session and invalid_reason:
         _emit_runtime_event(
@@ -1421,13 +1460,13 @@ def process_flow_engine(
             metadata={"reason": invalid_reason, "abandon_reason": invalid_reason},
         )
         session_service.clear_runtime_session(conversation.tenant_id, user_identifier, flow, reason=invalid_reason)
-        conversation.current_node_id = None
+        _safe_set_conversation_current_node(db, conversation, None)
         conversation.current_flow = None
     elif runtime_session and runtime_session.current_node_id:
         parsed_node = _parse_uuid(runtime_session.current_node_id)
         if parsed_node:
             conversation.current_flow = flow.id
-            conversation.current_node_id = parsed_node
+            _safe_set_conversation_current_node(db, conversation, parsed_node)
             logger.info("[SESSION CONTINUE] node_id=%s", conversation.current_node_id)
 
     initialized_node = _initialize_flow_start_node(
@@ -1527,6 +1566,7 @@ def process_flow_engine(
         conversation.context.get("intent"),
         conversation.retries,
     )
+    _sanitize_conversation_current_node(db, conversation)
     db.commit()
     db.refresh(conversation)
 
