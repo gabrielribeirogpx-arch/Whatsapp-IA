@@ -842,6 +842,9 @@ def _initialize_flow_start_node(
                 node_id=start_node["id"],
                 tenant_id=conversation.tenant_id,
                 runtime_graph=runtime_graph,
+                runtime_session=runtime_session,
+                session_service=session_service,
+                flow_version_id=current_flow_version_id,
             )
         logger.error("[FLOW ERROR] Nenhum nó inicial encontrado")
         return None
@@ -1063,18 +1066,6 @@ def set_current_node(conversation: Conversation, node_id: uuid.UUID | None, db: 
 
 
 def _reset_to_bot_mode(db: Session, conversation: Conversation, reason: str) -> None:
-    if reason.startswith("flow_finished") and conversation.current_flow:
-        _emit_runtime_event(
-            db=db,
-            tenant_id=conversation.tenant_id,
-            conversation_id=conversation.id,
-            flow_id=conversation.current_flow,
-            flow_version_id=None,
-            node_id=conversation.current_node_id,
-            event_type="flow_completed",
-            metadata={"reason": reason},
-        )
-
     conversation.mode = "bot"
     conversation.current_flow = None
     set_current_node(conversation=conversation, node_id=None, db=db)
@@ -1088,9 +1079,26 @@ def _advance_to_edge_target(
     conversation: Conversation,
     edge: FlowEdge | VersionedFlowEdge | None,
     runtime_graph: dict[str, Any] | None = None,
+    runtime_session: FlowSession | None = None,
+    session_service: FlowSessionService | None = None,
+    flow_version_id: uuid.UUID | None = None,
 ) -> FlowNode | VersionedFlowNode | None:
     if not edge:
         logger.info("Flow sem proxima aresta, encerrando fluxo conversation_id=%s", conversation.id)
+        if conversation.current_flow:
+            _emit_runtime_event(
+                db=db,
+                tenant_id=conversation.tenant_id,
+                conversation_id=conversation.id,
+                flow_id=conversation.current_flow,
+                flow_version_id=flow_version_id,
+                node_id=conversation.current_node_id,
+                event_type="flow_completed",
+                metadata={"completion_reason": "no_next_edge"},
+                dedupe_bucket_seconds=30,
+            )
+        if runtime_session and session_service:
+            session_service.end_session(runtime_session, completion_status="completed")
         _reset_to_bot_mode(db=db, conversation=conversation, reason="flow_finished_no_next_edge")
         return None
 
@@ -1411,6 +1419,9 @@ def process_flow_engine(
                 flow_id=flow.id,
                 tenant_id=conversation.tenant_id,
                 runtime_graph=runtime_graph,
+                runtime_session=runtime_session,
+                session_service=session_service,
+                flow_version_id=current_flow_version_id,
             )
             if start_node:
                 set_current_node(conversation=conversation, node_id=start_node.id, db=db)
@@ -1505,6 +1516,9 @@ def process_flow_engine(
                 flow_id=flow.id,
                 tenant_id=conversation.tenant_id,
                 runtime_graph=runtime_graph,
+                runtime_session=runtime_session,
+                session_service=session_service,
+                flow_version_id=current_flow_version_id,
             )
             if start_node:
                 conversation.mode = "flow"
@@ -1549,6 +1563,9 @@ def process_flow_engine(
                 flow_id=flow.id,
                 tenant_id=conversation.tenant_id,
                 runtime_graph=runtime_graph,
+                runtime_session=runtime_session,
+                session_service=session_service,
+                flow_version_id=current_flow_version_id,
             )
             if not start_node:
                 return None
@@ -1558,6 +1575,9 @@ def process_flow_engine(
                 flow_id=flow.id,
                 source=start_node.id,
                 runtime_graph=runtime_graph,
+                runtime_session=runtime_session,
+                session_service=session_service,
+                flow_version_id=current_flow_version_id,
             )
             selected_start_edge = None
             for edge in start_edges:
@@ -1693,6 +1713,9 @@ def process_flow_engine(
                 conversation=conversation,
                 edge=_pick_default_edge(edges),
                 runtime_graph=runtime_graph,
+                runtime_session=runtime_session,
+                session_service=session_service,
+                flow_version_id=current_flow_version_id,
             )
             if not node:
                 reached_max_steps = False
@@ -1786,6 +1809,9 @@ def process_flow_engine(
                 conversation=conversation,
                 edge=selected_edge or _pick_default_edge(edges),
                 runtime_graph=runtime_graph,
+                runtime_session=runtime_session,
+                session_service=session_service,
+                flow_version_id=current_flow_version_id,
             )
             if not node:
                 reached_max_steps = False
@@ -1882,6 +1908,9 @@ def process_flow_engine(
                 conversation=conversation,
                 edge=selected_edge,
                 runtime_graph=runtime_graph,
+                runtime_session=runtime_session,
+                session_service=session_service,
+                flow_version_id=current_flow_version_id,
             )
             if not node:
                 reached_max_steps = False
@@ -1907,6 +1936,19 @@ def process_flow_engine(
             next_edge = _pick_default_edge(edges)
             if not next_edge:
                 logger.info("Delay sem proxima aresta conversation_id=%s node_id=%s", conversation.id, node.id)
+                _emit_runtime_event(
+                    db=db,
+                    tenant_id=conversation.tenant_id,
+                    conversation_id=conversation.id,
+                    flow_id=node.flow_id,
+                    flow_version_id=current_flow_version_id,
+                    node_id=node.id,
+                    event_type="flow_completed",
+                    metadata={"completion_reason": "delay_without_next"},
+                    dedupe_bucket_seconds=30,
+                )
+                if runtime_session:
+                    session_service.end_session(runtime_session, completion_status="completed")
                 _reset_to_bot_mode(db=db, conversation=conversation, reason="flow_finished_delay_without_next")
                 reached_max_steps = False
                 break
@@ -1963,6 +2005,9 @@ def process_flow_engine(
                 conversation=conversation,
                 edge=_pick_default_edge(edges),
                 runtime_graph=runtime_graph,
+                runtime_session=runtime_session,
+                session_service=session_service,
+                flow_version_id=current_flow_version_id,
             )
             if not node:
                 reached_max_steps = False
@@ -1978,7 +2023,7 @@ def process_flow_engine(
                 flow_version_id=current_flow_version_id,
                 node_id=node.id,
                 event_type="flow_completed",
-                metadata={"reason": "terminal_node"},
+                metadata={"completion_reason": "terminal_node"},
                 dedupe_bucket_seconds=30,
             )
             session_service.end_session(runtime_session, completion_status="completed")
@@ -1994,6 +2039,9 @@ def process_flow_engine(
             conversation=conversation,
             edge=_pick_default_edge(edges),
             runtime_graph=runtime_graph,
+            runtime_session=runtime_session,
+            session_service=session_service,
+            flow_version_id=current_flow_version_id,
         )
         if not node:
             reached_max_steps = False
