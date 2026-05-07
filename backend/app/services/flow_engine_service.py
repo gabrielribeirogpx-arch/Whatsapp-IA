@@ -552,6 +552,14 @@ def resolve_runtime_flow_graph(db: Session, tenant_id: uuid.UUID, flow_id: str) 
 
     nodes = selected_version.nodes if selected_version and isinstance(selected_version.nodes, list) else []
     edges = selected_version.edges if selected_version and isinstance(selected_version.edges, list) else []
+    logger.info(
+        "[RUNTIME VERSION] flow_id=%s source=%s version_id=%s version_number=%s",
+        flow.id,
+        source,
+        getattr(selected_version, "id", None),
+        getattr(selected_version, "version", None),
+    )
+    logger.info("[NODES COUNT] flow_id=%s runtime_nodes=%s runtime_edges=%s", flow.id, len(nodes), len(edges))
     current_nodes = flow.current_version.nodes if flow.current_version and isinstance(flow.current_version.nodes, list) else []
     current_start_preview = _start_preview_from_nodes(current_nodes)
     published_start_preview = _start_preview_from_nodes(nodes)
@@ -2439,37 +2447,12 @@ def get_flow_graph(db: Session, tenant_id: uuid.UUID, flow_id: str) -> dict[str,
             "nodes": runtime_nodes,
             "edges": runtime_edges if isinstance(runtime_edges, list) else [],
         }
-
-    flows_nodes = (
-        flow.nodes_json
-        if isinstance(flow.nodes_json, list)
-        else flow.nodes if isinstance(flow.nodes, list) else []
-    )
-    flows_edges = (
-        flow.edges_json
-        if isinstance(flow.edges_json, list)
-        else flow.edges if isinstance(flow.edges, list) else []
-    )
-    if flows_nodes:
-        return {
-            "flow_id": str(flow.id),
-            "version_id": runtime_graph.get("version_id"),
-            "source": "flows_json",
-            "nodes": flows_nodes,
-            "edges": flows_edges if isinstance(flows_edges, list) else [],
-        }
-
-    legacy_nodes, legacy_edges = _serialize_persisted_flow_graph(
-        db=db,
-        tenant_id=tenant_id,
-        flow_id=flow.id,
-    )
     return {
         "flow_id": str(flow.id),
         "version_id": runtime_graph.get("version_id"),
-        "source": "flow_nodes",
-        "nodes": legacy_nodes if isinstance(legacy_nodes, list) else [],
-        "edges": legacy_edges if isinstance(legacy_edges, list) else [],
+        "source": runtime_graph.get("source") or "empty",
+        "nodes": runtime_nodes if isinstance(runtime_nodes, list) else [],
+        "edges": runtime_edges if isinstance(runtime_edges, list) else [],
     }
 
 
