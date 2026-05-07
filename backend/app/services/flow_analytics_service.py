@@ -22,6 +22,9 @@ MESSAGE_SENT = "message_sent"
 CONDITION_MATCHED = "condition_matched"
 FLOW_COMPLETED = "flow_completed"
 FLOW_ABANDONED = "flow_abandoned"
+MESSAGE_RECEIVED = "message_received"
+CONVERSION = "conversion"
+ABANDONED = "abandoned"
 
 FLOW_START = FLOW_STARTED
 FLOW_SEND = MESSAGE_SENT
@@ -36,7 +39,26 @@ VALID_EVENT_TYPES = {
     CONDITION_MATCHED,
     FLOW_COMPLETED,
     FLOW_ABANDONED,
+    MESSAGE_RECEIVED,
+    CONVERSION,
+    ABANDONED,
 }
+
+EVENT_TYPE_ALIASES: dict[str, str] = {
+    FLOW_ABANDONED: ABANDONED,
+    ABANDONED: ABANDONED,
+    FLOW_COMPLETED: CONVERSION,
+    CONVERSION: CONVERSION,
+    MESSAGE_SENT: MESSAGE_SENT,
+    MESSAGE_RECEIVED: MESSAGE_RECEIVED,
+    FLOW_STARTED: FLOW_STARTED,
+    NODE_ENTERED: NODE_ENTERED,
+    CONDITION_MATCHED: CONDITION_MATCHED,
+}
+
+
+def _normalize_event_type(event_type: str) -> str:
+    return EVENT_TYPE_ALIASES.get(event_type, event_type)
 
 PERIODS: dict[str, timedelta] = {
     "24h": timedelta(hours=24),
@@ -107,8 +129,8 @@ def get_flow_analytics(db: Session, *, tenant_id: uuid.UUID, flow_id: uuid.UUID,
         select(
             func.date(FlowEvent.created_at).label("dt"),
             func.count().filter(FlowEvent.event_type == FLOW_STARTED).label("entries"),
-            func.count().filter(FlowEvent.event_type == MESSAGE_SENT).label("messages_sent"),
-            func.count().filter(FlowEvent.event_type == FLOW_COMPLETED).label("completed"),
+            func.count().filter(FlowEvent.event_type.in_([MESSAGE_SENT, MESSAGE_RECEIVED])).label("messages_sent"),
+            func.count().filter(FlowEvent.event_type.in_([FLOW_COMPLETED, CONVERSION])).label("completed"),
         )
         .where(
             FlowEvent.tenant_id == tenant_id,
@@ -134,20 +156,22 @@ def get_flow_analytics(db: Session, *, tenant_id: uuid.UUID, flow_id: uuid.UUID,
     for event in events:
         session_key = str(event.conversation_id)
         stats = sessions[session_key]
-        if event.event_type == FLOW_STARTED:
+        normalized_type = _normalize_event_type(event.event_type)
+
+        if normalized_type == FLOW_STARTED:
             stats.entries += 1
             stats.started_at = stats.started_at or event.created_at
-        if event.event_type == MESSAGE_SENT:
+        if normalized_type in {MESSAGE_SENT, MESSAGE_RECEIVED}:
             stats.messages_sent += 1
-        if event.event_type == FLOW_COMPLETED:
+        if normalized_type == CONVERSION:
             stats.completed = True
             stats.finished_at = event.created_at
-        if event.event_type == FLOW_ABANDONED:
+        if normalized_type == ABANDONED:
             stats.abandoned = True
             stats.finished_at = event.created_at
 
         node_id = str(event.node_id) if event.node_id else None
-        if event.event_type == NODE_ENTERED and node_id:
+        if normalized_type == NODE_ENTERED and node_id:
             node_entries[node_id] += 1
             prev = last_node_by_session.get(session_key)
             if prev:
