@@ -4,6 +4,7 @@ import unicodedata
 import uuid
 import logging
 import time
+import hashlib
 from datetime import datetime, timezone
 from dataclasses import dataclass
 from typing import Any
@@ -1113,6 +1114,55 @@ def _send_flow_whatsapp_message(tenant: Tenant, phone: str, text: str) -> None:
     except Exception as error:
         print(f"[FLOW ERROR] {error}")
         logger.exception("[FLOW SEND] Falha inesperada ao enviar mensagem no flow")
+
+
+def enqueue_flow_send_with_tracking(
+    *,
+    db: Session,
+    tenant_id: uuid.UUID,
+    phone: str,
+    text: str,
+    flow_id: uuid.UUID | None = None,
+    flow_version_id: uuid.UUID | None = None,
+    conversation_id: uuid.UUID | None = None,
+    node_id: uuid.UUID | None = None,
+    channel: str = "whatsapp",
+    buttons: list[dict[str, Any]] | None = None,
+    template_or_node_text: str | None = None,
+) -> str | None:
+    content = (text or "").strip()
+    if not content or not phone:
+        return None
+
+    has_buttons = bool(buttons)
+    message_kind = "buttons" if has_buttons else "text"
+    hash_source = (template_or_node_text or content).strip()
+    text_hash = hashlib.sha256(hash_source.encode("utf-8")).hexdigest()[:16] if hash_source else None
+
+    payload: dict[str, Any] = {"tenant_id": tenant_id, "phone": phone, "text": content}
+    if has_buttons:
+        payload["buttons"] = buttons
+
+    job_id = enqueue_send_message(payload)
+
+    if flow_id and conversation_id:
+        _emit_runtime_event(
+            db=db,
+            tenant_id=tenant_id,
+            conversation_id=conversation_id,
+            flow_id=flow_id,
+            flow_version_id=flow_version_id,
+            node_id=node_id,
+            event_type="message_queued",
+            metadata={
+                "channel": channel,
+                "message_kind": message_kind,
+                "has_buttons": has_buttons,
+                "template_or_node_text_hash": text_hash,
+            },
+            dedupe_bucket_seconds=1,
+        )
+    return job_id
 
 
 def _send_flow_interactive_buttons(tenant: Tenant, phone: str, text: str, buttons: list[dict]) -> None:
