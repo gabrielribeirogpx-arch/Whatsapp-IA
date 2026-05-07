@@ -20,7 +20,7 @@ from app.services.tenant_query import enforce_tenant_filter, require_tenant_id
 from app.services.message_service import normalize_meta_message
 from app.services.realtime_service import sse_broker
 from app.services.flow_service import resolve_flow_for_message
-from app.services.flow_engine_service import get_flow_graph
+from app.services.flow_engine_service import get_flow_graph, enqueue_flow_send_with_tracking
 from app.services.flow_engine import get_node_by_id
 from app.services.flow_session_service import FlowSessionService
 from app.services.flow_runtime_service import execute_node_chain_until_reply
@@ -78,7 +78,34 @@ async def _process_runtime_events(
             logger.info("[FLOW SEND EVENT] tenant_id=%s wa_id=%s", tenant_uuid, wa_id)
             if event.get("after_delay") is True:
                 logger.info("[FLOW SEND AFTER DELAY] tenant_id=%s wa_id=%s", tenant_uuid, wa_id)
-            enqueue_send_message({"tenant_id": tenant_uuid, "phone": phone, "text": text})
+            flow_id = None
+            flow_version_id = None
+            node_id = None
+            if execution is not None:
+                flow_version_id = execution.flow_version_id
+                node_id = execution.current_node_id
+                flow_version = db.get(FlowVersion, execution.flow_version_id)
+                flow_id = flow_version.flow_id if flow_version else None
+            conversation = (
+                db.query(Conversation)
+                .filter(Conversation.tenant_id == tenant_uuid, Conversation.phone_number == normalize_phone(phone))
+                .order_by(Conversation.updated_at.desc())
+                .first()
+            )
+
+            enqueue_flow_send_with_tracking(
+                db=db,
+                tenant_id=tenant_uuid,
+                phone=phone,
+                text=text,
+                flow_id=flow_id,
+                flow_version_id=flow_version_id,
+                conversation_id=conversation.id if conversation else None,
+                node_id=node_id,
+                channel="whatsapp",
+                buttons=event.get("buttons") if isinstance(event.get("buttons"), list) else None,
+                template_or_node_text=str(event.get("template_name") or event.get("node_label") or ""),
+            )
 
     return False
 
