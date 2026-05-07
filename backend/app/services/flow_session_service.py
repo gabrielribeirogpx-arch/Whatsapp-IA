@@ -114,6 +114,7 @@ class FlowSessionService:
         return session
 
     def clear_runtime_session(self, tenant_id, user_identifier: str, flow: Flow, reason: str = "manual_reset") -> None:
+        abandoned_reasons = {"expired", "fallback_limit_exceeded", "fallback", "reset_command", "manual_reset"}
         sessions = (
             self.db.query(FlowSession)
             .filter(
@@ -126,7 +127,8 @@ class FlowSessionService:
         for session in sessions:
             session.status = "expired"
             session.current_node_id = None
-            self.end_session(session, completion_status="expired", abandon_reason=reason)
+            completion_status = "abandoned" if reason in abandoned_reasons else "expired"
+            self.end_session(session, completion_status=completion_status, abandon_reason=reason)
         self.db.commit()
         print(f"[SESSION RESET] reason={reason} tenant_id={tenant_id} user={user_identifier} count={len(sessions)}")
 

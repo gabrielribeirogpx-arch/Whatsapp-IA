@@ -944,6 +944,21 @@ def _emit_runtime_event(
     )
 
 
+def _is_terminal_node(node_data: dict[str, Any], edges: list[FlowEdge | VersionedFlowEdge]) -> bool:
+    return bool(node_data.get("is_terminal") or node_data.get("isTerminal")) or len(edges) == 0
+
+
+def _is_conversion_node(node: FlowNode | VersionedFlowNode, node_data: dict[str, Any], flow: Flow) -> bool:
+    if str(node.type or "").strip().lower() != "action":
+        return False
+    if bool(node_data.get("conversion")):
+        return True
+    conversion_nodes = flow.settings.get("conversion_node_ids") if isinstance(flow.settings, dict) else None
+    if isinstance(conversion_nodes, list):
+        return str(node.id) in {str(node_id) for node_id in conversion_nodes}
+    return False
+
+
 def _ensure_conversation_state(conversation: Conversation, message_text: str) -> None:
     if not getattr(conversation, "context", None) or not isinstance(conversation.context, dict):
         conversation.context = {}
@@ -1085,6 +1100,15 @@ def process_flow_engine(
     force_node: uuid.UUID | None = None,
     flow_id: str | None = None,
 ) -> str | None:
+    """
+    Semântica de runtime/sessão:
+    - abandoned: sessão expirada por TTL, reset manual, fallback_limit_exceeded ou fallback para bot.
+    - abandon_reason: persistido em flow_sessions.abandon_reason e também enviado no metadata dos eventos.
+    - conversion: emitido apenas uma vez por sessão quando trigger mínimo é satisfeito
+      (node action com metadata conversion=true ou node id listado em flow.settings.conversion_node_ids).
+    - flow_completed: emitido ao atingir node terminal do grafo.
+    - ended_at: obrigatório para encerramentos finais (completed/abandoned/conversion final) via end_session.
+    """
     normalized_phone = normalize_phone(phone)
     conversation = db.execute(
         select(Conversation)
@@ -1115,6 +1139,7 @@ def process_flow_engine(
     user_identifier = conversation.phone_number
     normalized_message = _normalize_text(message_text)
     runtime_session, invalid_reason = session_service.get_runtime_session(conversation.tenant_id, user_identifier, flow)
+    session_conversion_emitted = bool(runtime_session and runtime_session.conversion_at)
 
     if _is_reset_command(normalized_message):
         _emit_runtime_event(
@@ -1125,7 +1150,7 @@ def process_flow_engine(
             flow_version_id=current_flow_version_id,
             node_id=conversation.current_node_id,
             event_type="abandoned",
-            metadata={"reason": "reset_command"},
+            metadata={"reason": "reset_command", "abandon_reason": "reset_command"},
         )
         session_service.clear_runtime_session(conversation.tenant_id, user_identifier, flow, reason="reset_command")
         conversation.current_node_id = None
@@ -1139,7 +1164,7 @@ def process_flow_engine(
             flow_version_id=current_flow_version_id,
             node_id=conversation.current_node_id,
             event_type="abandoned",
-            metadata={"reason": invalid_reason},
+            metadata={"reason": invalid_reason, "abandon_reason": invalid_reason},
         )
         session_service.clear_runtime_session(conversation.tenant_id, user_identifier, flow, reason=invalid_reason)
         conversation.current_node_id = None
@@ -1238,8 +1263,14 @@ def process_flow_engine(
                     flow_version_id=current_flow_version_id,
                     node_id=conversation.current_node_id,
                     event_type="abandoned",
-                    metadata={"reason": "fallback_limit_exceeded"},
+                    metadata={"reason": "fallback_limit_exceeded", "abandon_reason": "fallback_limit_exceeded"},
                 )
+                if runtime_session:
+                    session_service.end_session(
+                        runtime_session,
+                        completion_status="abandoned",
+                        abandon_reason="fallback_limit_exceeded",
+                    )
                 _reset_to_bot_mode(db=db, conversation=conversation, reason="fallback_limit_exceeded")
                 conversation.retries = 0
                 db.commit()
@@ -1271,7 +1302,7 @@ def process_flow_engine(
                 flow_version_id=current_flow_version_id,
                 node_id=conversation.current_node_id,
                 event_type="abandoned",
-                metadata={"reason": "fallback"},
+                metadata={"reason": "fallback", "abandon_reason": "fallback"},
                 dedupe_bucket_seconds=30,
             )
             db.commit()
@@ -1348,7 +1379,7 @@ def process_flow_engine(
                     flow_version_id=current_flow_version_id,
                     node_id=conversation.current_node_id,
                     event_type="abandoned",
-                    metadata={"reason": "fallback"},
+                    metadata={"reason": "fallback", "abandon_reason": "fallback"},
                     dedupe_bucket_seconds=30,
                 )
                 db.commit()
@@ -1650,17 +1681,20 @@ def process_flow_engine(
             if result:
                 print(f"[FLOW MATCH] condição TRUE: {node.id}")
                 logger.info("[FLOW MATCH] condicao TRUE node=%s conversation_id=%s", node.id, conversation.id)
-                _emit_runtime_event(
-                    db=db,
-                    tenant_id=conversation.tenant_id,
-                    conversation_id=conversation.id,
-                    flow_id=node.flow_id,
-                    flow_version_id=current_flow_version_id,
-                    node_id=node.id,
-                    event_type="conversion",
-                    metadata={"trigger": "condition_match"},
-                    dedupe_bucket_seconds=30,
-                )
+                if runtime_session and not session_conversion_emitted:
+                    _emit_runtime_event(
+                        db=db,
+                        tenant_id=conversation.tenant_id,
+                        conversation_id=conversation.id,
+                        flow_id=node.flow_id,
+                        flow_version_id=current_flow_version_id,
+                        node_id=node.id,
+                        event_type="conversion",
+                        metadata={"trigger": "condition_match"},
+                        dedupe_bucket_seconds=30,
+                    )
+                    session_service.end_session(runtime_session, completion_status="conversion")
+                    session_conversion_emitted = True
             else:
                 print(f"[FLOW MISS] condição FALSE: {node.id}")
                 logger.info("[FLOW MISS] condicao FALSE node=%s conversation_id=%s", node.id, conversation.id)
@@ -1736,6 +1770,20 @@ def process_flow_engine(
         if node_type == "action":
             action_name = str(node_data.get("action") or "").strip()
             content = str(node_data.get("content") or "").strip()
+            if runtime_session and (not session_conversion_emitted) and _is_conversion_node(node, node_data, flow):
+                _emit_runtime_event(
+                    db=db,
+                    tenant_id=conversation.tenant_id,
+                    conversation_id=conversation.id,
+                    flow_id=node.flow_id,
+                    flow_version_id=current_flow_version_id,
+                    node_id=node.id,
+                    event_type="conversion",
+                    metadata={"trigger": "action_conversion_node"},
+                    dedupe_bucket_seconds=30,
+                )
+                session_service.end_session(runtime_session, completion_status="conversion")
+                session_conversion_emitted = True
             if content:
                 collected_messages.append(content)
             elif action_name:
@@ -1752,6 +1800,23 @@ def process_flow_engine(
                 reached_max_steps = False
                 break
             continue
+
+        if runtime_session and _is_terminal_node(node_data, edges):
+            _emit_runtime_event(
+                db=db,
+                tenant_id=conversation.tenant_id,
+                conversation_id=conversation.id,
+                flow_id=node.flow_id,
+                flow_version_id=current_flow_version_id,
+                node_id=node.id,
+                event_type="flow_completed",
+                metadata={"reason": "terminal_node"},
+                dedupe_bucket_seconds=30,
+            )
+            session_service.end_session(runtime_session, completion_status="completed")
+            _reset_to_bot_mode(db=db, conversation=conversation, reason="flow_finished_terminal_node")
+            reached_max_steps = False
+            break
 
         content = (node_data.get("content") or "").strip()
         if content:
