@@ -72,9 +72,20 @@ def send_whatsapp_message(*, message_data: dict[str, Any]) -> None:
         tenant.whatsapp_token = resolved_token
 
         if buttons:
-            send_whatsapp_interactive_buttons(tenant=tenant, phone=phone, body_text=text, buttons=buttons)
+            send_whatsapp_interactive_buttons(
+                phone=phone,
+                body_text=text,
+                buttons=buttons,
+                token=resolved_token,
+                phone_number_id=resolved_phone_number_id,
+            )
         else:
-            send_whatsapp_message(tenant=tenant, phone=phone, text=text)
+            send_whatsapp_message(
+                phone=phone,
+                text=text,
+                token=resolved_token,
+                phone_number_id=resolved_phone_number_id,
+            )
 
         logger.info(
             "event=queue_send_success correlation_id=%s tenant_id=%s phone=%s job_id=%s stage=send_final text_len=%s has_buttons=%s",

@@ -6,7 +6,6 @@ from typing import Any
 import requests
 
 from app.core.whatsapp_config import WHATSAPP_PHONE_NUMBER_ID, WHATSAPP_TOKEN
-from app.models import Tenant
 
 logger = logging.getLogger(__name__)
 
@@ -74,40 +73,32 @@ def enviar_mensagem(numero: str, mensagem: str, *, token: str | None = None, pho
     return send_message(token or "", resolved_phone_number_id or "", numero, mensagem)
 
 
-def send_whatsapp_message(tenant: Tenant, phone: str, text: str) -> dict[str, Any]:
-    if not tenant.whatsapp_token:
-        raise WhatsAppConfigError("tenant.whatsapp_token ausente")
-    if not tenant.phone_number_id:
-        raise WhatsAppConfigError("tenant.phone_number_id ausente")
-
+def send_whatsapp_message(*, phone: str, text: str, token: str, phone_number_id: str) -> dict[str, Any]:
     normalized_phone = re.sub(r"\D", "", phone or "")
     if not normalized_phone:
         raise WhatsAppConfigError("phone inválido para envio")
 
     return send_message(
-        token=tenant.whatsapp_token,
-        phone_number_id=tenant.phone_number_id,
+        token=token,
+        phone_number_id=phone_number_id,
         to=normalized_phone,
         message=text,
     )
 
 
 def send_whatsapp_interactive_buttons(
-    tenant: "Tenant",
+    *,
     phone: str,
     body_text: str,
     buttons: list[dict],
+    token: str,
+    phone_number_id: str,
 ) -> dict:
     """
     Envia mensagem com botões interativos (Reply Buttons) via Meta Cloud API.
     Máximo de 3 botões. Cada botão usa id derivado do label e title (máx 20 chars).
     Se não houver botões válidos, faz fallback para mensagem de texto normal.
     """
-    if not tenant.whatsapp_token:
-        raise WhatsAppConfigError("tenant.whatsapp_token ausente")
-    if not tenant.phone_number_id:
-        raise WhatsAppConfigError("tenant.phone_number_id ausente")
-
     normalized_phone = re.sub(r"\D", "", phone or "")
     if not normalized_phone:
         raise WhatsAppConfigError("phone inválido para envio")
@@ -126,9 +117,9 @@ def send_whatsapp_interactive_buttons(
     ]
 
     if not safe_buttons:
-        return send_whatsapp_message(tenant=tenant, phone=normalized_phone, text=body_text)
+        return send_whatsapp_message(phone=normalized_phone, text=body_text, token=token, phone_number_id=phone_number_id)
 
-    url = f"https://graph.facebook.com/v19.0/{tenant.phone_number_id}/messages"
+    url = f"https://graph.facebook.com/v19.0/{phone_number_id}/messages"
     payload = {
         "messaging_product": "whatsapp",
         "to": normalized_phone,
@@ -144,7 +135,7 @@ def send_whatsapp_interactive_buttons(
         response = requests.post(
             url,
             headers={
-                "Authorization": f"Bearer {tenant.whatsapp_token}",
+                "Authorization": f"Bearer {token}",
                 "Content-Type": "application/json",
             },
             json=payload,
