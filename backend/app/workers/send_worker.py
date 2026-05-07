@@ -7,7 +7,10 @@ from typing import Any
 
 from app.db.session import SessionLocal
 from app.models import Tenant
-from app.services.whatsapp_service import send_whatsapp_interactive_buttons, send_whatsapp_message
+from app.services.whatsapp_service import (
+    send_whatsapp_interactive_buttons,
+    send_whatsapp_message as send_whatsapp_text_message,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -80,7 +83,7 @@ def send_whatsapp_message(*, message_data: dict[str, Any]) -> None:
                 phone_number_id=resolved_phone_number_id,
             )
         else:
-            send_whatsapp_message(
+            send_whatsapp_text_message(
                 phone=phone,
                 text=text,
                 token=resolved_token,
