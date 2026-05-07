@@ -67,6 +67,12 @@ PERIODS: dict[str, timedelta] = {
     "90d": timedelta(days=90),
 }
 
+DEFAULT_PERIOD = "7d"
+
+
+def resolve_analytics_period(period: str | None) -> str:
+    normalized = (period or "").strip().lower()
+    return normalized if normalized in PERIODS else DEFAULT_PERIOD
 
 @dataclass
 class SessionStats:
@@ -91,23 +97,25 @@ def _empty_response(flow_id: str, flow_name: str | None, period: str) -> dict[st
         "period": period,
         "summary": {
             "entries": 0,
+            "messages": 0,
             "messages_sent": 0,
             "completed": 0,
             "conversion_rate": 0,
             "dropoff_rate": 0,
+            "avg_time": 0,
             "avg_time_seconds": 0,
             "avg_messages_per_user": 0,
         },
         "funnel": [],
         "top_dropoffs": [],
         "common_replies": [],
-        "timeline": [],
-        "insights": [],
+        "timeline": None,
+        "insights": None,
     }
 
 
-def get_flow_analytics(db: Session, *, tenant_id: uuid.UUID, flow_id: uuid.UUID, period: str = "7d") -> dict[str, Any]:
-    resolved_period = period if period in PERIODS else "7d"
+def get_flow_analytics(db: Session, *, tenant_id: uuid.UUID, flow_id: uuid.UUID, period: str = DEFAULT_PERIOD) -> dict[str, Any]:
+    resolved_period = resolve_analytics_period(period)
     flow = db.query(Flow).filter(Flow.id == flow_id, Flow.tenant_id == tenant_id).first()
     base = _empty_response(str(flow_id), flow.name if flow else None, resolved_period)
     if not flow:
@@ -235,10 +243,12 @@ def get_flow_analytics(db: Session, *, tenant_id: uuid.UUID, flow_id: uuid.UUID,
 
     summary = {
         "entries": entries,
+        "messages": messages_sent,
         "messages_sent": messages_sent,
         "completed": completed,
         "conversion_rate": _safe_rate(completed, entries),
         "dropoff_rate": _safe_rate(abandoned, entries),
+        "avg_time": avg_time_seconds,
         "avg_time_seconds": avg_time_seconds,
         "avg_messages_per_user": avg_messages_per_user,
     }
@@ -254,7 +264,7 @@ def get_flow_analytics(db: Session, *, tenant_id: uuid.UUID, flow_id: uuid.UUID,
     if summary["conversion_rate"] >= 60 and summary["entries"] > 0:
         insights.append({"type": "success", "title": "Flow saudável", "message": "Boa taxa de conclusão no período analisado.", "node_id": None})
 
-    base.update({"summary": summary, "funnel": funnel, "top_dropoffs": top_dropoffs, "common_replies": common_replies, "timeline": timeline, "insights": insights})
+    base.update({"summary": summary, "funnel": funnel, "top_dropoffs": top_dropoffs, "common_replies": common_replies, "timeline": timeline or None, "insights": insights or None})
     return base
 
 
