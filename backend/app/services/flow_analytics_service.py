@@ -4,7 +4,7 @@ import logging
 import uuid
 from collections import Counter, defaultdict
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -158,15 +158,12 @@ def _build_dataset(db: Session, tenant_id: uuid.UUID, flow_id: uuid.UUID, period
     )
     events = events or []
 
-    for event in events:
-        event.event_type = _normalize_event_type(event.event_type)
-
     return sessions, events
 
 
-def _compute_kpis(sessions: list[_SessionAnalyticsRow], events: list[FlowEvent]) -> dict[str, Any]:
+def _compute_kpis(sessions: list[_SessionAnalyticsRow], normalized_events: list[tuple[FlowEvent, str]]) -> dict[str, Any]:
     entries = len(sessions)
-    handled_messages = sum(1 for event in events if event.event_type in {MESSAGE_SENT, MESSAGE_RECEIVED})
+    handled_messages = sum(1 for _, normalized_type in normalized_events if normalized_type in {MESSAGE_SENT, MESSAGE_RECEIVED})
 
     return {
         "entries": entries,
@@ -177,24 +174,24 @@ def _compute_kpis(sessions: list[_SessionAnalyticsRow], events: list[FlowEvent])
     }
 
 
-def _compute_timeseries(sessions: list[_SessionAnalyticsRow], events: list[FlowEvent]) -> list[dict[str, Any]]:
+def _compute_timeseries(sessions: list[_SessionAnalyticsRow], normalized_events: list[tuple[FlowEvent, str]]) -> list[dict[str, Any]]:
     daily: defaultdict[str, dict[str, Any]] = defaultdict(lambda: {"entries": 0, "conversions": 0, "abandonments": 0, "messages": 0})
 
     for session in sessions:
         if session.created_at:
             daily[session.created_at.date().isoformat()]["entries"] += 1
 
-    for event in events:
-        if event.event_type in {MESSAGE_SENT, MESSAGE_RECEIVED} and event.created_at:
+    for event, normalized_type in normalized_events:
+        if normalized_type in {MESSAGE_SENT, MESSAGE_RECEIVED} and event.created_at:
             daily[event.created_at.date().isoformat()]["messages"] += 1
 
     return [{"date": dt, **metrics} for dt, metrics in sorted(daily.items())]
 
 
-def _compute_funnel(sessions: list[_SessionAnalyticsRow], events: list[FlowEvent], node_map: dict[str, dict[str, str]]) -> list[dict[str, Any]]:
+def _compute_funnel(sessions: list[_SessionAnalyticsRow], normalized_events: list[tuple[FlowEvent, str]], node_map: dict[str, dict[str, str]]) -> list[dict[str, Any]]:
     node_entries: Counter[str] = Counter()
-    for event in events:
-        if event.event_type == NODE_ENTERED and event.node_id:
+    for event, normalized_type in normalized_events:
+        if normalized_type == NODE_ENTERED and event.node_id:
             node_id = str(event.node_id)
             node_entries[node_id] += 1
 
@@ -220,10 +217,10 @@ def _compute_dropoffs(sessions: list[_SessionAnalyticsRow], events: list[FlowEve
     return []
 
 
-def _compute_common_responses(events: list[FlowEvent]) -> list[dict[str, Any]]:
+def _compute_common_responses(normalized_events: list[tuple[FlowEvent, str]]) -> list[dict[str, Any]]:
     counter: Counter[str] = Counter()
-    for event in events:
-        if event.event_type != MESSAGE_RECEIVED:
+    for event, normalized_type in normalized_events:
+        if normalized_type != MESSAGE_RECEIVED:
             continue
         metadata = event.metadata_json if isinstance(event.metadata_json, dict) else {}
         text = metadata.get("text")
@@ -240,17 +237,31 @@ def get_flow_analytics(db: Session, *, tenant_id: uuid.UUID, flow_id: uuid.UUID,
     if not flow:
         return base
 
-    period_start = datetime.now(UTC).replace(tzinfo=None) - PERIODS[resolved_period]
-    sessions, events = _build_dataset(db, tenant_id, flow_id, period_start)
+    try:
+        period_start = datetime.utcnow() - PERIODS[resolved_period]
+        sessions, events = _build_dataset(db, tenant_id, flow_id, period_start)
+        sessions = sessions or []
+        events = events or []
 
-    node_rows = db.query(FlowNode.id, FlowNode.type, FlowNode.label).filter(FlowNode.flow_id == flow_id).all()
-    node_map = {str(node_id): {"type": node_type or "unknown", "label": label or "Node"} for node_id, node_type, label in node_rows}
+        normalized_events = [
+            (event, _normalize_event_type(event.event_type))
+            for event in events
+        ]
 
-    kpis = _compute_kpis(sessions, events)
-    timeseries = _compute_timeseries(sessions, events)
-    funnel = _compute_funnel(sessions, events, node_map)
-    dropoffs = _compute_dropoffs(sessions, events, node_map)
-    common_responses = _compute_common_responses(events)
+        node_rows = db.query(FlowNode.id, FlowNode.type, FlowNode.label).filter(FlowNode.flow_id == flow_id).all()
+        node_map = {str(node_id): {"type": node_type or "unknown", "label": label or "Node"} for node_id, node_type, label in node_rows}
+
+        kpis = _compute_kpis(sessions, normalized_events)
+        timeseries = _compute_timeseries(sessions, normalized_events)
+        funnel = _compute_funnel(sessions, normalized_events, node_map)
+        dropoffs = _compute_dropoffs(sessions, events, node_map)
+        common_responses = _compute_common_responses(normalized_events)
+    except Exception as e:
+        import traceback
+
+        print("FLOW ANALYTICS ERROR:", str(e))
+        traceback.print_exc()
+        raise
 
     entries = kpis["entries"]
     completed = 0
