@@ -32,6 +32,59 @@ crud_router = APIRouter(tags=["flows-crud"])
 logger = logging.getLogger(__name__)
 logger.info("[FLOW API] carregada")
 
+
+def _ensure_published_snapshot_on_activate(db: Session, flow: Flow) -> None:
+    active_version = flow.current_version
+    nodes = active_version.nodes if active_version and isinstance(active_version.nodes, list) else []
+    edges = active_version.edges if active_version and isinstance(active_version.edges, list) else []
+
+    if not nodes:
+        nodes = flow.nodes_json if isinstance(flow.nodes_json, list) else flow.nodes if isinstance(flow.nodes, list) else []
+    if not edges:
+        edges = flow.edges_json if isinstance(flow.edges_json, list) else flow.edges if isinstance(flow.edges, list) else []
+
+    if not isinstance(nodes, list):
+        nodes = []
+    if not isinstance(edges, list):
+        edges = []
+
+    if not nodes:
+        logger.warning("[FLOW ACTIVATE] flow_id=%s sem nodes válidos para publicar snapshot", flow.id)
+        return
+
+    last_version = db.execute(
+        select(FlowVersion).where(FlowVersion.flow_id == flow.id).order_by(FlowVersion.version.desc()).limit(1)
+    ).scalars().first()
+    next_version_number = ((last_version.version if last_version else 0) or 0) + 1
+
+    db.query(FlowVersion).filter(FlowVersion.flow_id == flow.id).update(
+        {FlowVersion.is_active: False, FlowVersion.is_published: False},
+        synchronize_session=False,
+    )
+    fresh_version = FlowVersion(
+        flow_id=flow.id,
+        tenant_id=flow.tenant_id,
+        version=next_version_number,
+        nodes=nodes,
+        edges=edges,
+        snapshot={"nodes": nodes, "edges": edges},
+        is_active=True,
+        is_published=True,
+    )
+    db.add(fresh_version)
+    db.flush()
+    flow.current_version_id = fresh_version.id
+    flow.published_version_id = fresh_version.id
+    flow.version = fresh_version.version
+    logger.info(
+        "[FLOW ACTIVATE SNAPSHOT] flow_id=%s version_id=%s version=%s nodes=%s edges=%s",
+        flow.id,
+        fresh_version.id,
+        fresh_version.version,
+        len(nodes),
+        len(edges),
+    )
+
 class FlowBuilderPayload(BaseModel):
     nodes: list[dict[str, Any]] = Field(default_factory=list)
     edges: list[dict[str, Any]] = Field(default_factory=list)
@@ -1022,8 +1075,10 @@ def activate_tenant_flow(
         {Flow.is_active: False},
         synchronize_session=False,
     )
+    _ensure_published_snapshot_on_activate(db=db, flow=flow)
     flow.is_active = True
     db.add(flow)
+    invalidate_flow_runtime_cache(flow.id)
     db.commit()
     db.refresh(flow)
     return _serialize_flow(flow)
