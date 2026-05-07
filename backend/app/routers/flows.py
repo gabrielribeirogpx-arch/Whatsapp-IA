@@ -16,7 +16,7 @@ from sqlalchemy.orm import load_only
 
 from app.database import get_db
 from app.models import Conversation, Flow, FlowSession, FlowVersion, Tenant
-from app.services.flow_analytics_service import get_flow_analytics
+from app.services.flow_analytics_service import PERIODS, get_flow_analytics, resolve_analytics_period
 from app.services.flow_engine_service import (
     get_flow_graph,
     invalidate_flow_runtime_cache,
@@ -841,7 +841,11 @@ def get_tenant_flow_analytics(
     if not flow:
         raise HTTPException(status_code=404, detail="Flow not found")
 
-    analytics = get_flow_analytics(db=db, tenant_id=tenant_uuid, flow_id=flow.id, period=period)
+    resolved_period = resolve_analytics_period(period)
+    if resolved_period != period:
+        logger.info("[FLOW ANALYTICS] invalid period=%s fallback=%s allowed=%s", period, resolved_period, "|".join(PERIODS.keys()))
+
+    analytics = get_flow_analytics(db=db, tenant_id=tenant_uuid, flow_id=flow.id, period=resolved_period)
     logger.info("[FLOW ANALYTICS] flow_id=%s tenant_id=%s analytics=%s", flow_id, tenant_uuid, analytics)
     return analytics
 
