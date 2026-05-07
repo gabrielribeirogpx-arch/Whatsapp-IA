@@ -527,6 +527,14 @@ def resolve_runtime_flow_graph(db: Session, tenant_id: uuid.UUID, flow_id: str) 
         len(runtime_payload["nodes"]),
         len(runtime_payload["edges"]),
     )
+    logger.info(
+        "[FLOW VERSION] flow_id=%s published_version_id=%s current_version_id=%s selected_version_id=%s source=%s",
+        flow.id,
+        flow.published_version_id,
+        flow.current_version_id,
+        runtime_payload["version_id"],
+        runtime_payload["source"],
+    )
     _FLOW_RUNTIME_CACHE[flow.id] = runtime_payload
     return runtime_payload
 
@@ -1393,6 +1401,13 @@ def _send_flow_interactive_buttons(tenant: Tenant, phone: str, text: str, button
         _send_flow_whatsapp_message(tenant=tenant, phone=phone, text=text)
 
 
+def _text_preview(value: str | None, limit: int = 120) -> str:
+    if not value:
+        return ""
+    text = " ".join(str(value).split())
+    return text[:limit]
+
+
 def process_flow_engine(
     db: Session,
     tenant_id: uuid.UUID,
@@ -1870,6 +1885,12 @@ def process_flow_engine(
                 _send_flow_whatsapp_message(tenant=tenant, phone=conversation_phone, text=text)
                 if first_flow_turn and not consumed_start_message:
                     logger.info("[FLOW RUNTIME] sent_start_message=%s", text)
+                    logger.info(
+                        "[FLOW START CONTENT] node_id=%s source=%s text_preview=%s",
+                        node.id,
+                        (runtime_graph or {}).get("source", "unknown"),
+                        _text_preview(text),
+                    )
                     consumed_start_message = True
                 _emit_runtime_event(
                     db=db,
@@ -1938,6 +1959,12 @@ def process_flow_engine(
                         _send_flow_whatsapp_message(tenant=tenant, phone=conversation_phone, text=text)
                 if first_flow_turn and not consumed_start_message:
                     logger.info("[FLOW RUNTIME] sent_start_message=%s", text)
+                    logger.info(
+                        "[FLOW START CONTENT] node_id=%s source=%s text_preview=%s",
+                        node.id,
+                        (runtime_graph or {}).get("source", "unknown"),
+                        _text_preview(text),
+                    )
                     consumed_start_message = True
                 else:
                     print("[FLOW ERROR] node choice sem texto")
@@ -1975,6 +2002,12 @@ def process_flow_engine(
                         _send_flow_whatsapp_message(tenant=tenant, phone=conversation_phone, text=text)
                 if first_flow_turn and not consumed_start_message:
                     logger.info("[FLOW RUNTIME] sent_start_message=%s", text)
+                    logger.info(
+                        "[FLOW START CONTENT] node_id=%s source=%s text_preview=%s",
+                        node.id,
+                        (runtime_graph or {}).get("source", "unknown"),
+                        _text_preview(text),
+                    )
                     consumed_start_message = True
                 else:
                     print("[FLOW ERROR] node choice sem texto")
