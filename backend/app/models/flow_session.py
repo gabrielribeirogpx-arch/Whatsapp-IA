@@ -24,6 +24,5 @@ class FlowSession(Base):
     status: Mapped[str] = mapped_column(String, nullable=False, default="running", server_default="running")
     context: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     variables: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
-    last_event_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, server_default="now()", index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

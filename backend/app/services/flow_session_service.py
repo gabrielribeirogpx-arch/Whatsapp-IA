@@ -71,7 +71,6 @@ class FlowSessionService:
         return session, None
 
     def save_runtime_session(self, *, tenant_id, user_identifier: str, flow: Flow, current_node_id, status: str = "running", context: dict[str, Any] | None = None, variables: dict[str, Any] | None = None) -> FlowSession:
-        now = datetime.utcnow()
         session = (
             self.db.query(FlowSession)
             .filter(
@@ -91,7 +90,6 @@ class FlowSessionService:
                 status=status,
                 context=context or {},
                 variables={"flow_version": flow.version, **(variables or {})},
-                last_event_at=now,
             )
             self.db.add(session)
         else:
@@ -103,7 +101,6 @@ class FlowSessionService:
             if variables:
                 merged_variables.update(variables)
             session.variables = merged_variables
-            session.last_event_at = now
         self.db.commit()
         self.db.refresh(session)
         return session
@@ -125,14 +122,11 @@ class FlowSessionService:
                 metadata = dict(session.variables or {})
                 metadata["abandon_reason"] = reason
                 session.variables = metadata
-            session.last_event_at = datetime.utcnow()
         self.db.commit()
         print(f"[SESSION RESET] reason={reason} tenant_id={tenant_id} user={user_identifier} count={len(sessions)}")
 
     def update_session(self, session: FlowSession, node_id: str | None, context: dict | None = None, status: str | None = None) -> None:
-        now = datetime.utcnow()
         session.current_node_id = node_id
-        session.last_event_at = now
 
         if context is not None:
             session.context = context
@@ -147,14 +141,12 @@ class FlowSessionService:
         self,
         session: FlowSession,
         *,
-        completion_status: str,
+        status: str,
         ended_at: datetime | None = None,
-        conversion_at: datetime | None = None,
-        abandon_reason: str | None = None,
     ) -> FlowSession:
-        normalized_status = (completion_status or "").lower()
+        normalized_status = (status or "").lower()
         if normalized_status not in FINAL_COMPLETION_STATUSES:
-            raise ValueError(f"Invalid completion_status '{completion_status}'")
+            raise ValueError(f"Invalid status '{status}'")
 
         if (session.status or "").lower() in FINAL_SESSION_STATUSES:
             return session
@@ -165,15 +157,9 @@ class FlowSessionService:
             session.status = "expired"
         elif normalized_status == "conversion":
             session.status = "finished"
-            marker_time = conversion_at or ended_at or datetime.utcnow()
+            marker_time = ended_at or datetime.utcnow()
             metadata = dict(session.variables or {})
             metadata["conversion_at"] = marker_time.isoformat()
             session.variables = metadata
 
-        if abandon_reason is not None:
-            metadata = dict(session.variables or {})
-            metadata["abandon_reason"] = abandon_reason
-            session.variables = metadata
-
-        session.last_event_at = ended_at or datetime.utcnow()
         return session
