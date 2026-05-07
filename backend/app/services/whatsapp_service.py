@@ -66,7 +66,11 @@ def send_message(token: str, phone_number_id: str, to: str, message: str) -> dic
 
 def enviar_mensagem(numero: str, mensagem: str, *, token: str | None = None, phone_number_id: str | None = None) -> dict[str, Any]:
     token = token or os.getenv("WHATSAPP_TOKEN")
-    resolved_phone_number_id = phone_number_id or os.getenv("PHONE_NUMBER_ID")
+    resolved_phone_number_id = (
+        phone_number_id
+        or os.getenv("WHATSAPP_PHONE_NUMBER_ID")
+        or os.getenv("PHONE_NUMBER_ID")
+    )
     return send_message(token or "", resolved_phone_number_id or "", numero, mensagem)
 
 
