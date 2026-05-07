@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import uuid
 from collections import Counter, defaultdict
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from statistics import mean
 from typing import Any
@@ -67,6 +68,15 @@ PERIODS: dict[str, timedelta] = {
 DEFAULT_PERIOD = "7d"
 
 
+@dataclass
+class _SessionAnalyticsRow:
+    conversation_id: uuid.UUID | None
+    completion_status: str | None
+    started_at: datetime | None
+    ended_at: datetime | None
+    conversion_at: datetime | None
+
+
 def resolve_analytics_period(period: str | None) -> str:
     normalized = (period or "").strip().lower()
     return normalized if normalized in PERIODS else DEFAULT_PERIOD
@@ -118,9 +128,15 @@ def _normalize_event_type(event_type: str | None) -> str:
     return EVENT_TYPE_ALIASES.get(event_type, event_type)
 
 
-def _build_dataset(db: Session, tenant_id: uuid.UUID, flow_id: uuid.UUID, since: datetime) -> tuple[list[FlowSession], list[FlowEvent]]:
-    sessions = (
-        db.query(FlowSession)
+def _build_dataset(db: Session, tenant_id: uuid.UUID, flow_id: uuid.UUID, since: datetime) -> tuple[list[_SessionAnalyticsRow], list[FlowEvent]]:
+    session_rows = (
+        db.query(
+            FlowSession.conversation_id,
+            FlowSession.completion_status,
+            FlowSession.started_at,
+            FlowSession.ended_at,
+            FlowSession.conversion_at,
+        )
         .filter(
             FlowSession.tenant_id == tenant_id,
             FlowSession.flow_id == flow_id,
@@ -128,6 +144,16 @@ def _build_dataset(db: Session, tenant_id: uuid.UUID, flow_id: uuid.UUID, since:
         )
         .all()
     )
+    sessions = [
+        _SessionAnalyticsRow(
+            conversation_id=row.conversation_id,
+            completion_status=row.completion_status,
+            started_at=row.started_at,
+            ended_at=row.ended_at,
+            conversion_at=row.conversion_at,
+        )
+        for row in session_rows
+    ]
 
     events = (
         db.query(FlowEvent)
@@ -146,7 +172,7 @@ def _build_dataset(db: Session, tenant_id: uuid.UUID, flow_id: uuid.UUID, since:
     return sessions, events
 
 
-def _compute_kpis(sessions: list[FlowSession], events: list[FlowEvent]) -> dict[str, Any]:
+def _compute_kpis(sessions: list[_SessionAnalyticsRow], events: list[FlowEvent]) -> dict[str, Any]:
     entries = len(sessions)
     conversions = sum(1 for session in sessions if (session.completion_status or "").lower() == "converted")
     abandonments = sum(1 for session in sessions if (session.completion_status or "").lower() == "abandoned")
@@ -168,7 +194,7 @@ def _compute_kpis(sessions: list[FlowSession], events: list[FlowEvent]) -> dict[
     }
 
 
-def _compute_timeseries(sessions: list[FlowSession], events: list[FlowEvent]) -> list[dict[str, Any]]:
+def _compute_timeseries(sessions: list[_SessionAnalyticsRow], events: list[FlowEvent]) -> list[dict[str, Any]]:
     daily: defaultdict[str, dict[str, Any]] = defaultdict(lambda: {"entries": 0, "conversions": 0, "abandonments": 0, "messages": 0})
 
     for session in sessions:
@@ -186,7 +212,7 @@ def _compute_timeseries(sessions: list[FlowSession], events: list[FlowEvent]) ->
     return [{"date": dt, **metrics} for dt, metrics in sorted(daily.items())]
 
 
-def _compute_funnel(sessions: list[FlowSession], events: list[FlowEvent], node_map: dict[str, dict[str, str]]) -> list[dict[str, Any]]:
+def _compute_funnel(sessions: list[_SessionAnalyticsRow], events: list[FlowEvent], node_map: dict[str, dict[str, str]]) -> list[dict[str, Any]]:
     node_entries: Counter[str] = Counter()
     node_sessions: defaultdict[str, set[str]] = defaultdict(set)
     converted_sessions = {
@@ -234,7 +260,7 @@ def _compute_funnel(sessions: list[FlowSession], events: list[FlowEvent], node_m
     return funnel
 
 
-def _compute_dropoffs(sessions: list[FlowSession], events: list[FlowEvent], node_map: dict[str, dict[str, str]]) -> list[dict[str, Any]]:
+def _compute_dropoffs(sessions: list[_SessionAnalyticsRow], events: list[FlowEvent], node_map: dict[str, dict[str, str]]) -> list[dict[str, Any]]:
     last_node_by_session: dict[str, str] = {}
     for event in events:
         if event.event_type == NODE_ENTERED and event.node_id:
