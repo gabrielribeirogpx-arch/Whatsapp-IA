@@ -4,6 +4,7 @@ import unicodedata
 import uuid
 import logging
 import time
+from datetime import datetime, timezone
 from dataclasses import dataclass
 from typing import Any
 
@@ -13,7 +14,7 @@ from sqlalchemy.orm import Session
 from app.models import Conversation, Flow, FlowEdge, FlowNode, FlowVersion, Tenant
 from app.services.delay_queue_service import enqueue_delay
 from app.services.cache_service import TTL_FLOW_SECONDS, cache_aside_json
-from app.services.flow_analytics_service import FALLBACK, FLOW_FINISH, FLOW_MATCH, FLOW_SEND, FLOW_START, record_flow_event
+from app.services.flow_analytics_service import record_flow_event
 from app.services.queue import enqueue_send_message
 from app.utils.phone import normalize_phone
 from app.services.flow_session_service import FlowSessionService
@@ -23,6 +24,7 @@ MAX_AUTO_STEPS = 10
 MAX_RETRIES = 3
 logger = logging.getLogger(__name__)
 _FLOW_RUNTIME_CACHE: dict[uuid.UUID, dict[str, Any]] = {}
+_FLOW_RUNTIME_EVENT_GUARD: set[str] = set()
 STRONG_YES_MATCHES = {"sim", "s", "claro", "quero", "com certeza", "yes"}
 STRONG_NO_MATCHES = {"nao", "n", "negativo", "no"}
 
@@ -905,6 +907,43 @@ def _keep_flow_mode(conversation: Conversation) -> None:
         logger.info("[MODE PROTECTED] mantendo modo flow durante execução")
 
 
+def _emit_runtime_event(
+    db: Session,
+    *,
+    tenant_id: uuid.UUID,
+    conversation_id: uuid.UUID,
+    flow_id: uuid.UUID | None,
+    flow_version_id: uuid.UUID | None,
+    node_id: uuid.UUID | None,
+    event_type: str,
+    metadata: dict[str, Any] | None = None,
+    dedupe_bucket_seconds: int | None = None,
+) -> None:
+    if not flow_id:
+        return
+
+    if dedupe_bucket_seconds and dedupe_bucket_seconds > 0:
+        bucket = int(datetime.now(timezone.utc).timestamp() // dedupe_bucket_seconds)
+        guard_key = f"{conversation_id}:{node_id}:{event_type}:{bucket}"
+        if guard_key in _FLOW_RUNTIME_EVENT_GUARD:
+            return
+        _FLOW_RUNTIME_EVENT_GUARD.add(guard_key)
+
+    payload = dict(metadata or {})
+    if flow_version_id:
+        payload["flow_version_id"] = str(flow_version_id)
+
+    record_flow_event(
+        db=db,
+        tenant_id=tenant_id,
+        conversation_id=conversation_id,
+        flow_id=flow_id,
+        node_id=node_id,
+        event_type=event_type,
+        metadata=payload or None,
+    )
+
+
 def _ensure_conversation_state(conversation: Conversation, message_text: str) -> None:
     if not getattr(conversation, "context", None) or not isinstance(conversation.context, dict):
         conversation.context = {}
@@ -925,13 +964,15 @@ def set_current_node(conversation: Conversation, node_id: uuid.UUID | None, db: 
 
 def _reset_to_bot_mode(db: Session, conversation: Conversation, reason: str) -> None:
     if reason.startswith("flow_finished") and conversation.current_flow:
-        record_flow_event(
+        _emit_runtime_event(
             db=db,
             tenant_id=conversation.tenant_id,
             conversation_id=conversation.id,
             flow_id=conversation.current_flow,
+            flow_version_id=None,
             node_id=conversation.current_node_id,
-            event_type=FLOW_FINISH,
+            event_type="flow_completed",
+            metadata={"reason": reason},
         )
 
     conversation.mode = "bot"
@@ -1069,16 +1110,37 @@ def process_flow_engine(
         flow = _get_or_create_visual_flow(db=db, tenant_id=conversation.tenant_id)
     logger.info("[FLOW SELECTED] %s", flow_id or str(flow.id))
     runtime_graph = _get_current_flow_runtime(db=db, flow=flow, tenant_id=conversation.tenant_id)
+    current_flow_version_id = _parse_uuid(runtime_graph.get("version_id") if isinstance(runtime_graph, dict) else None)
     session_service = FlowSessionService(db)
     user_identifier = conversation.phone_number
     normalized_message = _normalize_text(message_text)
     runtime_session, invalid_reason = session_service.get_runtime_session(conversation.tenant_id, user_identifier, flow)
 
     if _is_reset_command(normalized_message):
+        _emit_runtime_event(
+            db=db,
+            tenant_id=conversation.tenant_id,
+            conversation_id=conversation.id,
+            flow_id=conversation.current_flow or flow.id,
+            flow_version_id=current_flow_version_id,
+            node_id=conversation.current_node_id,
+            event_type="abandoned",
+            metadata={"reason": "reset_command"},
+        )
         session_service.clear_runtime_session(conversation.tenant_id, user_identifier, flow, reason="reset_command")
         conversation.current_node_id = None
         conversation.current_flow = None
     elif runtime_session and invalid_reason:
+        _emit_runtime_event(
+            db=db,
+            tenant_id=conversation.tenant_id,
+            conversation_id=conversation.id,
+            flow_id=conversation.current_flow or flow.id,
+            flow_version_id=current_flow_version_id,
+            node_id=conversation.current_node_id,
+            event_type="abandoned",
+            metadata={"reason": invalid_reason},
+        )
         session_service.clear_runtime_session(conversation.tenant_id, user_identifier, flow, reason=invalid_reason)
         conversation.current_node_id = None
         conversation.current_flow = None
@@ -1099,6 +1161,18 @@ def process_flow_engine(
         return None
 
     msg = _normalize_text(message_text)
+    if msg:
+        _emit_runtime_event(
+            db=db,
+            tenant_id=conversation.tenant_id,
+            conversation_id=conversation.id,
+            flow_id=flow.id,
+            flow_version_id=current_flow_version_id,
+            node_id=conversation.current_node_id,
+            event_type="message_received",
+            metadata={"source": "entry_handler"},
+            dedupe_bucket_seconds=10,
+        )
     first_flow_turn = not had_active_session
     intent: str | None = None
     if conversation.mode != "flow":
@@ -1156,13 +1230,15 @@ def process_flow_engine(
             conversation.retries = (conversation.retries or 0) + 1
             if conversation.retries >= MAX_RETRIES:
                 logger.info("[FALLBACK LIMIT] exceeded → reset")
-                record_flow_event(
+                _emit_runtime_event(
                     db=db,
                     tenant_id=conversation.tenant_id,
                     conversation_id=conversation.id,
                     flow_id=conversation.current_flow,
+                    flow_version_id=current_flow_version_id,
                     node_id=conversation.current_node_id,
-                    event_type=FALLBACK,
+                    event_type="abandoned",
+                    metadata={"reason": "fallback_limit_exceeded"},
                 )
                 _reset_to_bot_mode(db=db, conversation=conversation, reason="fallback_limit_exceeded")
                 conversation.retries = 0
@@ -1187,13 +1263,16 @@ def process_flow_engine(
             )
             logger.info("[FALLBACK] triggered")
             logger.info("[FALLBACK] retries=%s", conversation.retries)
-            record_flow_event(
+            _emit_runtime_event(
                 db=db,
                 tenant_id=conversation.tenant_id,
                 conversation_id=conversation.id,
                 flow_id=conversation.current_flow,
+                flow_version_id=current_flow_version_id,
                 node_id=conversation.current_node_id,
-                event_type=FALLBACK,
+                event_type="abandoned",
+                metadata={"reason": "fallback"},
+                dedupe_bucket_seconds=30,
             )
             db.commit()
             db.refresh(conversation)
@@ -1235,13 +1314,15 @@ def process_flow_engine(
                 print(f"[FLOW INIT] start_node_id={start_node.id}")
                 logger.info("[FLOW INIT] start_node_id=%s", start_node.id)
                 logger.info("[FLOW RECOVERY] node=%s", start_node.id)
-                record_flow_event(
+                _emit_runtime_event(
                     db=db,
                     tenant_id=conversation.tenant_id,
                     conversation_id=conversation.id,
                     flow_id=flow.id,
+                    flow_version_id=current_flow_version_id,
                     node_id=start_node.id,
-                    event_type=FLOW_START,
+                    event_type="flow_started",
+                    dedupe_bucket_seconds=30,
                 )
             else:
                 print("[FLOW ERROR] no start node found")
@@ -1259,13 +1340,16 @@ def process_flow_engine(
                 )
                 logger.info("[FALLBACK] triggered")
                 logger.info("[FALLBACK] retries=%s", conversation.retries)
-                record_flow_event(
+                _emit_runtime_event(
                     db=db,
                     tenant_id=conversation.tenant_id,
                     conversation_id=conversation.id,
                     flow_id=conversation.current_flow,
+                    flow_version_id=current_flow_version_id,
                     node_id=conversation.current_node_id,
-                    event_type=FALLBACK,
+                    event_type="abandoned",
+                    metadata={"reason": "fallback"},
+                    dedupe_bucket_seconds=30,
                 )
                 db.commit()
                 db.refresh(conversation)
@@ -1296,13 +1380,15 @@ def process_flow_engine(
             selected_start_node_id = selected_start_edge.target if selected_start_edge else start_node.id
             _set_flow_mode(db=db, conversation=conversation, flow_id=flow.id, node_id=selected_start_node_id)
             logger.info("[FLOW STATE] current=%s next=%s", conversation.current_node_id, selected_start_node_id)
-            record_flow_event(
+            _emit_runtime_event(
                 db=db,
                 tenant_id=conversation.tenant_id,
                 conversation_id=conversation.id,
                 flow_id=flow.id,
+                flow_version_id=current_flow_version_id,
                 node_id=selected_start_node_id,
-                event_type=FLOW_START,
+                event_type="flow_started",
+                dedupe_bucket_seconds=30,
             )
 
     if conversation.mode == "flow":
@@ -1375,6 +1461,17 @@ def process_flow_engine(
         print(f"[FLOW DEBUG] node.type={node.type}")
         print(f"[FLOW DEBUG] node.data={getattr(node, 'data', None) or node_data}")
         logger.info("Node executado conversation_id=%s node_id=%s node_type=%s", conversation.id, node.id, node_type)
+        _emit_runtime_event(
+            db=db,
+            tenant_id=conversation.tenant_id,
+            conversation_id=conversation.id,
+            flow_id=node.flow_id,
+            flow_version_id=current_flow_version_id,
+            node_id=node.id,
+            event_type="node_entered",
+            metadata={"node_type": node_type, "step": step_index + 1},
+            dedupe_bucket_seconds=10,
+        )
 
         edges = _get_edges(
             db=db,
@@ -1393,13 +1490,16 @@ def process_flow_engine(
                 if first_flow_turn and not consumed_start_message:
                     logger.info("[FLOW RUNTIME] sent_start_message=%s", text)
                     consumed_start_message = True
-                record_flow_event(
+                _emit_runtime_event(
                     db=db,
                     tenant_id=conversation.tenant_id,
                     conversation_id=conversation.id,
                     flow_id=node.flow_id,
+                    flow_version_id=current_flow_version_id,
                     node_id=node.id,
-                    event_type=FLOW_SEND,
+                    event_type="message_sent",
+                    metadata={"channel": "whatsapp"},
+                    dedupe_bucket_seconds=10,
                 )
                 # Após enviar mensagem, zera msg para que nodes seguintes
                 # (condition, choice) não usem a mensagem inicial do usuário
@@ -1550,13 +1650,16 @@ def process_flow_engine(
             if result:
                 print(f"[FLOW MATCH] condição TRUE: {node.id}")
                 logger.info("[FLOW MATCH] condicao TRUE node=%s conversation_id=%s", node.id, conversation.id)
-                record_flow_event(
+                _emit_runtime_event(
                     db=db,
                     tenant_id=conversation.tenant_id,
                     conversation_id=conversation.id,
                     flow_id=node.flow_id,
+                    flow_version_id=current_flow_version_id,
                     node_id=node.id,
-                    event_type=FLOW_MATCH,
+                    event_type="conversion",
+                    metadata={"trigger": "condition_match"},
+                    dedupe_bucket_seconds=30,
                 )
             else:
                 print(f"[FLOW MISS] condição FALSE: {node.id}")
