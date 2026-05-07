@@ -47,13 +47,14 @@ def _extract_start_preview(nodes: list[dict[str, Any]]) -> str:
 
 
 def _publish_fresh_snapshot(db: Session, flow: Flow, *, reason: str) -> FlowVersion | None:
-    active_version = flow.current_version
-    nodes = active_version.nodes if active_version and isinstance(active_version.nodes, list) else []
-    edges = active_version.edges if active_version and isinstance(active_version.edges, list) else []
-    if not nodes:
-        nodes = flow.nodes_json if isinstance(flow.nodes_json, list) else flow.nodes if isinstance(flow.nodes, list) else []
-    if not edges:
-        edges = flow.edges_json if isinstance(flow.edges_json, list) else flow.edges if isinstance(flow.edges, list) else []
+    latest_version = (
+        db.query(FlowVersion)
+        .filter(FlowVersion.flow_id == flow.id)
+        .order_by(FlowVersion.version.desc())
+        .first()
+    )
+    nodes = latest_version.nodes if latest_version and isinstance(latest_version.nodes, list) else []
+    edges = latest_version.edges if latest_version and isinstance(latest_version.edges, list) else []
     if not isinstance(nodes, list):
         nodes = []
     if not isinstance(edges, list):
@@ -87,6 +88,9 @@ def _publish_fresh_snapshot(db: Session, flow: Flow, *, reason: str) -> FlowVers
     flow.published_version_id = fresh_version.id
     flow.version = fresh_version.version
 
+    logger.info("[PUBLISH VERSION] flow_id=%s reason=%s latest_version_id=%s latest_version_number=%s", flow.id, reason, getattr(latest_version, "id", None), getattr(latest_version, "version", None))
+    logger.info("[CURRENT VERSION] flow_id=%s current_version_id=%s published_version_id=%s", flow.id, flow.current_version_id, flow.published_version_id)
+    logger.info("[NODES COUNT] flow_id=%s publish_nodes=%s previous_published_nodes=%s", flow.id, len(nodes), len(published_nodes))
     logger.info("[FLOW PUBLISH] flow_id=%s reason=%s current_version_id=%s published_version_id=%s flow_nodes=%s versioned_nodes=%s", flow.id, reason, flow.current_version_id, flow.published_version_id, len(nodes), len(published_nodes))
     logger.info('[FLOW PUBLISH] current_start_preview="%s"', current_start_preview)
     logger.info('[FLOW PUBLISH] published_start_preview="%s"', published_start_preview)
@@ -550,6 +554,8 @@ async def update_flow_route(
         db.add(new_version)
         db.flush()
         flow.current_version_id = new_version.id
+        db.flush()
+        db.refresh(flow)
         invalidate_flow_runtime_cache(flow.id)
         if flow.is_active:
             logger.info("[FLOW ACTIVE]: %s", flow.id)
@@ -1087,6 +1093,7 @@ def activate_tenant_flow(
         {Flow.is_active: False},
         synchronize_session=False,
     )
+    db.refresh(flow)
     _ensure_published_snapshot_on_activate(db=db, flow=flow)
     flow.is_active = True
     db.add(flow)
@@ -1321,6 +1328,7 @@ def publish_tenant_flow_version(
     if not flow:
         raise HTTPException(status_code=404, detail="Flow not found")
 
+    db.refresh(flow)
     fresh_version = _publish_fresh_snapshot(db=db, flow=flow, reason="publish")
     if not fresh_version:
         raise HTTPException(status_code=422, detail="Flow version not found")
