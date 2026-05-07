@@ -1609,9 +1609,6 @@ def process_flow_engine(
                 flow_id=flow.id,
                 tenant_id=conversation.tenant_id,
                 runtime_graph=runtime_graph,
-                runtime_session=runtime_session,
-                session_service=session_service,
-                flow_version_id=current_flow_version_id,
             )
             if start_node:
                 set_current_node(conversation=conversation, node_id=start_node.id, db=db)
@@ -1705,9 +1702,6 @@ def process_flow_engine(
                 flow_id=flow.id,
                 tenant_id=conversation.tenant_id,
                 runtime_graph=runtime_graph,
-                runtime_session=runtime_session,
-                session_service=session_service,
-                flow_version_id=current_flow_version_id,
             )
             if start_node:
                 conversation.mode = "flow"
@@ -1752,9 +1746,6 @@ def process_flow_engine(
                 flow_id=flow.id,
                 tenant_id=conversation.tenant_id,
                 runtime_graph=runtime_graph,
-                runtime_session=runtime_session,
-                session_service=session_service,
-                flow_version_id=current_flow_version_id,
             )
             if not start_node:
                 return None
