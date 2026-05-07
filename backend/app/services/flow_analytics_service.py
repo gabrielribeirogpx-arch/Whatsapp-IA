@@ -5,7 +5,6 @@ import uuid
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from statistics import mean
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -71,8 +70,7 @@ DEFAULT_PERIOD = "7d"
 @dataclass
 class _SessionAnalyticsRow:
     conversation_id: uuid.UUID | None
-    started_at: datetime | None
-    ended_at: datetime | None
+    created_at: datetime | None
 
 
 def resolve_analytics_period(period: str | None) -> str:
@@ -130,21 +128,19 @@ def _build_dataset(db: Session, tenant_id: uuid.UUID, flow_id: uuid.UUID, since:
     session_rows = (
         db.query(
             FlowSession.conversation_id,
-            FlowSession.started_at,
-            FlowSession.ended_at,
+            FlowSession.created_at,
         )
         .filter(
             FlowSession.tenant_id == tenant_id,
             FlowSession.flow_id == flow_id,
-            FlowSession.started_at >= since,
+            FlowSession.created_at >= since,
         )
         .all()
     )
     sessions = [
         _SessionAnalyticsRow(
             conversation_id=row.conversation_id,
-            started_at=row.started_at,
-            ended_at=row.ended_at,
+            created_at=row.created_at,
         )
         for row in session_rows
     ]
@@ -170,22 +166,13 @@ def _build_dataset(db: Session, tenant_id: uuid.UUID, flow_id: uuid.UUID, since:
 
 def _compute_kpis(sessions: list[_SessionAnalyticsRow], events: list[FlowEvent]) -> dict[str, Any]:
     entries = len(sessions)
-    conversions = sum(1 for session in sessions if session.ended_at is not None)
-    abandonments = sum(1 for session in sessions if session.ended_at is None)
-
-    elapsed_times = [
-        max((session.ended_at - session.started_at).total_seconds(), 0)
-        for session in sessions
-        if session.started_at and session.ended_at
-    ]
-
     handled_messages = sum(1 for event in events if event.event_type in {MESSAGE_SENT, MESSAGE_RECEIVED})
 
     return {
         "entries": entries,
-        "conversion_rate": _safe_rate(conversions, entries),
-        "abandonment_rate": _safe_rate(abandonments, entries),
-        "avg_time_seconds": round(mean(elapsed_times), 2) if elapsed_times else 0,
+        "conversion_rate": 0,
+        "abandonment_rate": 0,
+        "avg_time_seconds": 0,
         "handled_messages": handled_messages,
     }
 
@@ -194,12 +181,8 @@ def _compute_timeseries(sessions: list[_SessionAnalyticsRow], events: list[FlowE
     daily: defaultdict[str, dict[str, Any]] = defaultdict(lambda: {"entries": 0, "conversions": 0, "abandonments": 0, "messages": 0})
 
     for session in sessions:
-        if session.started_at:
-            daily[session.started_at.date().isoformat()]["entries"] += 1
-        if session.ended_at:
-            daily[session.ended_at.date().isoformat()]["conversions"] += 1
-        if session.ended_at is None and session.started_at:
-            daily[session.started_at.date().isoformat()]["abandonments"] += 1
+        if session.created_at:
+            daily[session.created_at.date().isoformat()]["entries"] += 1
 
     for event in events:
         if event.event_type in {MESSAGE_SENT, MESSAGE_RECEIVED} and event.created_at:
@@ -210,37 +193,13 @@ def _compute_timeseries(sessions: list[_SessionAnalyticsRow], events: list[FlowE
 
 def _compute_funnel(sessions: list[_SessionAnalyticsRow], events: list[FlowEvent], node_map: dict[str, dict[str, str]]) -> list[dict[str, Any]]:
     node_entries: Counter[str] = Counter()
-    node_sessions: defaultdict[str, set[str]] = defaultdict(set)
-    converted_sessions = {
-        str(session.conversation_id)
-        for session in sessions
-        if session.ended_at is not None and session.conversation_id
-    }
-
-    last_node_by_session: dict[str, str] = {}
     for event in events:
-        session_key = str(event.conversation_id)
         if event.event_type == NODE_ENTERED and event.node_id:
             node_id = str(event.node_id)
             node_entries[node_id] += 1
-            node_sessions[node_id].add(session_key)
-            last_node_by_session[session_key] = node_id
-
-    abandoned_last_node: Counter[str] = Counter()
-    abandoned_session_keys = {
-        str(session.conversation_id)
-        for session in sessions
-        if session.ended_at is None and session.conversation_id
-    }
-    for session_key in abandoned_session_keys:
-        node_id = last_node_by_session.get(session_key)
-        if node_id:
-            abandoned_last_node[node_id] += 1
 
     funnel: list[dict[str, Any]] = []
     for node_id, entries in node_entries.most_common():
-        sessions_in_node = node_sessions.get(node_id, set())
-        conversions = len(sessions_in_node.intersection(converted_sessions))
         node_meta = node_map.get(node_id, {"label": "Node", "type": "unknown"})
         funnel.append(
             {
@@ -248,8 +207,8 @@ def _compute_funnel(sessions: list[_SessionAnalyticsRow], events: list[FlowEvent
                 "node_label": node_meta["label"],
                 "node_type": node_meta["type"],
                 "entries": entries,
-                "dropoffs": abandoned_last_node.get(node_id, 0),
-                "conversion_rate": _safe_rate(conversions, len(sessions_in_node)),
+                "dropoffs": 0,
+                "conversion_rate": 0,
             }
         )
 
@@ -257,28 +216,8 @@ def _compute_funnel(sessions: list[_SessionAnalyticsRow], events: list[FlowEvent
 
 
 def _compute_dropoffs(sessions: list[_SessionAnalyticsRow], events: list[FlowEvent], node_map: dict[str, dict[str, str]]) -> list[dict[str, Any]]:
-    last_node_by_session: dict[str, str] = {}
-    for event in events:
-        if event.event_type == NODE_ENTERED and event.node_id:
-            last_node_by_session[str(event.conversation_id)] = str(event.node_id)
-
-    dropoff_counter: Counter[str] = Counter()
-    for session in sessions:
-        if session.ended_at is not None or not session.conversation_id:
-            continue
-        last_node = last_node_by_session.get(str(session.conversation_id))
-        if last_node:
-            dropoff_counter[last_node] += 1
-
-    return [
-        {
-            "node_id": node_id,
-            "node_label": node_map.get(node_id, {}).get("label", "Node"),
-            "node_type": node_map.get(node_id, {}).get("type", "unknown"),
-            "count": count,
-        }
-        for node_id, count in dropoff_counter.most_common()
-    ]
+    _ = (sessions, events, node_map)
+    return []
 
 
 def _compute_common_responses(events: list[FlowEvent]) -> list[dict[str, Any]]:
@@ -314,7 +253,7 @@ def get_flow_analytics(db: Session, *, tenant_id: uuid.UUID, flow_id: uuid.UUID,
     common_responses = _compute_common_responses(events)
 
     entries = kpis["entries"]
-    completed = sum(1 for session in sessions if session.ended_at is not None)
+    completed = 0
 
     summary = {
         "entries": entries,
