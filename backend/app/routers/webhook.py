@@ -343,7 +343,6 @@ async def _process_meta_webhook(request: Request, db: Session) -> dict[str, str]
             if (
                 active_session
                 and (active_session.status or "").lower() not in FINAL_SESSION_STATUSES
-                and (active_session.completion_status or "").lower() == "running"
             ):
                 emit_message_received_event(
                     db=db,

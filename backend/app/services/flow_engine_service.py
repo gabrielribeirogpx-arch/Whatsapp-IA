@@ -1446,7 +1446,7 @@ def process_flow_engine(
             variables={"analytics.flow_started_emitted": True},
         )
 
-    session_conversion_emitted = bool(runtime_session and runtime_session.conversion_at)
+    session_conversion_emitted = bool(session_variables.get("conversion_at"))
 
     emit_message_received_event(
         db=db,
