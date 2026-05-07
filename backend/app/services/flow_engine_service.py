@@ -14,6 +14,7 @@ from sqlalchemy import desc, func, select
 from sqlalchemy.orm import Session
 
 from app.models import Conversation, Flow, FlowEdge, FlowNode, FlowVersion, Tenant
+from app.models.flow_session import FlowSession
 from app.services.delay_queue_service import enqueue_delay
 from app.services.cache_service import TTL_FLOW_SECONDS, cache_aside_json
 from app.services.flow_analytics_service import record_flow_event
@@ -870,6 +871,8 @@ def _initialize_flow_start_node(
     conversation: Conversation,
     flow_id: uuid.UUID,
     runtime_graph: dict[str, Any] | None = None,
+    runtime_session: FlowSession | None = None,
+    session_service: FlowSessionService | None = None,
 ) -> FlowNode | VersionedFlowNode | None:
     if runtime_graph:
         nodes = runtime_graph.get("nodes", [])
@@ -889,13 +892,33 @@ def _initialize_flow_start_node(
         for node in nodes
     ]
 
+    is_versioned_runtime = bool(runtime_graph and runtime_graph.get("version_id"))
+
     if conversation.current_node_id is None:
         start_node = _find_start_node(node_payload)
         if start_node:
-            conversation.current_node_id = start_node["id"]
-            db.add(conversation)
-            db.commit()
-            db.refresh(conversation)
+            if is_versioned_runtime:
+                conversation.current_node_id = None
+                if runtime_session and session_service:
+                    session_service.update_session(
+                        runtime_session,
+                        node_id=str(start_node["id"]),
+                        context=runtime_session.context if isinstance(runtime_session.context, dict) else {},
+                    )
+            else:
+                conversation.current_node_id = start_node["id"]
+                db.add(conversation)
+                try:
+                    db.commit()
+                    db.refresh(conversation)
+                except Exception:
+                    db.rollback()
+                    logger.warning(
+                        "[FLOW START WARNING] rollback after failing to persist conversation.current_node_id conversation_id=%s node_id=%s",
+                        conversation.id,
+                        start_node["id"],
+                    )
+                    raise
             logger.info(
                 "[FLOW START] node_id=%s (isStart=%s)",
                 start_node["id"],
@@ -906,12 +929,19 @@ def _initialize_flow_start_node(
                 node_id=start_node["id"],
                 tenant_id=conversation.tenant_id,
                 runtime_graph=runtime_graph,
-                runtime_session=runtime_session,
-                session_service=session_service,
-                flow_version_id=current_flow_version_id,
             )
         logger.error("[FLOW ERROR] Nenhum nó inicial encontrado")
         return None
+
+    if is_versioned_runtime and runtime_session and runtime_session.current_node_id:
+        parsed_runtime_node = _parse_uuid(runtime_session.current_node_id)
+        if parsed_runtime_node:
+            return _get_node(
+                db=db,
+                node_id=parsed_runtime_node,
+                tenant_id=conversation.tenant_id,
+                runtime_graph=runtime_graph,
+            )
 
     if not conversation.current_node_id:
         logger.error("[FLOW ERROR] Nenhum nó inicial encontrado")
@@ -1131,8 +1161,17 @@ def _ensure_conversation_state(conversation: Conversation, message_text: str) ->
 def set_current_node(conversation: Conversation, node_id: uuid.UUID | None, db: Session) -> None:
     conversation.current_node_id = node_id
     db.add(conversation)
-    db.commit()
-    db.refresh(conversation)
+    try:
+        db.commit()
+        db.refresh(conversation)
+    except Exception:
+        db.rollback()
+        logger.warning(
+            "[FLOW STATE WARNING] rollback after failing to persist conversation.current_node_id conversation_id=%s node_id=%s",
+            conversation.id,
+            node_id,
+        )
+        raise
     logger.info("[FLOW STATE SET] node=%s", node_id)
 
 
@@ -1396,6 +1435,8 @@ def process_flow_engine(
         conversation=conversation,
         flow_id=flow.id,
         runtime_graph=runtime_graph,
+        runtime_session=runtime_session,
+        session_service=session_service,
     )
     logger.info(
         "[FLOW ROUTING] session_found=%s session_id=%s",
@@ -1411,11 +1452,19 @@ def process_flow_engine(
         logger.info("[FLOW ROUTING] using_fallback=true reason=start_node_missing")
         return None
 
+    session_node_id = conversation.current_node_id
+    if isinstance(initialized_node, VersionedFlowNode):
+        session_node_id = initialized_node.id
+    elif runtime_session and runtime_session.current_node_id:
+        parsed_node = _parse_uuid(runtime_session.current_node_id)
+        if parsed_node:
+            session_node_id = parsed_node
+
     runtime_session = session_service.save_runtime_session(
         tenant_id=conversation.tenant_id,
         user_identifier=user_identifier,
         flow=flow,
-        current_node_id=conversation.current_node_id,
+        current_node_id=session_node_id,
         context=conversation.context if isinstance(conversation.context, dict) else {},
     )
 
@@ -1441,7 +1490,7 @@ def process_flow_engine(
             tenant_id=conversation.tenant_id,
             user_identifier=user_identifier,
             flow=flow,
-            current_node_id=conversation.current_node_id,
+            current_node_id=session_node_id,
             context=runtime_session.context if isinstance(runtime_session.context, dict) else {},
             variables={"analytics.flow_started_emitted": True},
         )
