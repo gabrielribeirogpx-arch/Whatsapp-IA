@@ -5,6 +5,7 @@ import uuid
 import logging
 import time
 import hashlib
+import json
 from datetime import datetime, timezone
 from dataclasses import dataclass
 from typing import Any
@@ -754,20 +755,78 @@ def find_start_node(flow: Any) -> Any | None:
     return None
 
 
-def _find_start_node(nodes: list[dict[str, Any]]) -> dict[str, Any] | None:
-    # 1. prioridade: novo sistema com flag isStart
+def _find_start_node(nodes: list[Any]) -> Any | None:
+    def _extract_node_fields(node: Any) -> tuple[str, Any, str | None, Any]:
+        source = "dict" if isinstance(node, dict) else "orm"
+        if isinstance(node, dict):
+            data = node.get("data") or {}
+            node_id = node.get("id")
+            node_type = node.get("type")
+            position = node.get("position")
+        else:
+            data = getattr(node, "data", None) or getattr(node, "data_json", None) or {}
+            node_id = getattr(node, "id", None)
+            node_type = getattr(node, "type", None)
+            position = getattr(node, "position", None)
+
+        if isinstance(data, str):
+            try:
+                data = json.loads(data)
+            except (TypeError, ValueError):
+                data = {}
+        if not isinstance(data, dict):
+            data = {}
+
+        return source, node_id, node_type, position, data
+
+    sortable_nodes: list[tuple[Any, Any, Any]] = []
+
+    # 1. prioridade: flag isStart no data
     for node in nodes:
-        if node.get("data", {}).get("isStart") is True:
+        source, node_id, node_type, position, data = _extract_node_fields(node)
+        is_start = data.get("isStart") is True
+        logger.info(
+            "[FLOW START NODE] source=%s node_id=%s is_start=%s",
+            source,
+            node_id,
+            is_start,
+        )
+        sortable_nodes.append((node, position, node_id))
+        if is_start:
+            logger.info(
+                "[FLOW START NODE] selected node_id=%s reason=isStart",
+                node_id,
+            )
             return node
 
-    # 2. fallback: fluxo antigo com choice "Inicio"
+    # 2. fallback por tipo
     for node in nodes:
-        if (
-            node.get("type") == "choice"
-            and str(node.get("data", {}).get("label", "")).lower() == "inicio"
-        ):
+        _, node_id, node_type, _, _ = _extract_node_fields(node)
+        if isinstance(node_type, str) and node_type.lower() in {"start", "trigger", "inicio"}:
+            logger.info(
+                "[FLOW START NODE] selected node_id=%s reason=node_type",
+                node_id,
+            )
             return node
 
+    # 3. fallback por ordenação (position/id)
+    if sortable_nodes:
+        selected, _, selected_id = sorted(
+            sortable_nodes,
+            key=lambda item: (
+                item[1] is None,
+                str(item[1]) if item[1] is not None else "",
+                item[2] is None,
+                str(item[2]) if item[2] is not None else "",
+            ),
+        )[0]
+        logger.info(
+            "[FLOW START NODE] selected node_id=%s reason=position_or_id",
+            selected_id,
+        )
+        return selected
+
+    logger.info("[FLOW START NODE] selected node_id=None reason=empty_nodes")
     return None
 
 
