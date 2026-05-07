@@ -20,7 +20,7 @@ from app.services.tenant_query import enforce_tenant_filter, require_tenant_id
 from app.services.message_service import normalize_meta_message
 from app.services.realtime_service import sse_broker
 from app.services.flow_service import resolve_flow_for_message
-from app.services.flow_engine_service import get_flow_graph, enqueue_flow_send_with_tracking
+from app.services.flow_engine_service import get_flow_graph, enqueue_flow_send_with_tracking, emit_message_received_event
 from app.services.flow_engine import get_node_by_id
 from app.services.flow_session_service import FlowSessionService
 from app.services.flow_runtime_service import execute_node_chain_until_reply
@@ -28,6 +28,7 @@ from app.models.flow import Flow
 from app.services.whatsapp_service import send_whatsapp_buttons
 from app.services.intent_service import classify_intent, normalize_input, route_intent
 from app.models import Tenant
+from app.models.flow_session import FINAL_SESSION_STATUSES, FlowSession
 from app.utils.phone import normalize_phone
 from app.utils.text import normalize_text
 from app.services.queue import enqueue_send_message
@@ -329,6 +330,33 @@ async def _process_meta_webhook(request: Request, db: Session) -> dict[str, str]
                     db.add(conversation)
                 else:
                     logger.info("[FALLBACK ROUTING] tenant=%s conversation=%s", conversation.tenant_id, conversation.id)
+
+            active_session = (
+                db.query(FlowSession)
+                .filter(
+                    FlowSession.tenant_id == conversation.tenant_id,
+                    FlowSession.conversation_id == str(conversation.id),
+                )
+                .order_by(FlowSession.updated_at.desc(), FlowSession.created_at.desc())
+                .first()
+            )
+            if (
+                active_session
+                and (active_session.status or "").lower() not in FINAL_SESSION_STATUSES
+                and (active_session.completion_status or "").lower() == "running"
+            ):
+                emit_message_received_event(
+                    db=db,
+                    tenant_id=conversation.tenant_id,
+                    conversation_id=conversation.id,
+                    flow_id=active_session.flow_id,
+                    flow_version_id=None,
+                    node_id=conversation.current_node_id,
+                    message_text=incoming_message,
+                    source="webhook_active_session",
+                    input_kind=incoming_type,
+                    dedupe_bucket_seconds=3,
+                )
 
             handle_incoming_message(db, inbound_message, conversation)
 

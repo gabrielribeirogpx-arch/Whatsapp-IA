@@ -945,6 +945,40 @@ def _emit_runtime_event(
     )
 
 
+def emit_message_received_event(
+    db: Session,
+    *,
+    tenant_id: uuid.UUID,
+    conversation_id: uuid.UUID,
+    flow_id: uuid.UUID | None,
+    flow_version_id: uuid.UUID | None,
+    node_id: uuid.UUID | None,
+    message_text: str,
+    source: str,
+    input_kind: str = "text",
+    dedupe_bucket_seconds: int = 10,
+) -> None:
+    normalized_text = _normalize_text(message_text)
+    if not normalized_text:
+        return
+
+    _emit_runtime_event(
+        db=db,
+        tenant_id=tenant_id,
+        conversation_id=conversation_id,
+        flow_id=flow_id,
+        flow_version_id=flow_version_id,
+        node_id=node_id,
+        event_type="message_received",
+        metadata={
+            "source": source,
+            "input_kind": input_kind,
+            "normalized_length": len(normalized_text),
+        },
+        dedupe_bucket_seconds=dedupe_bucket_seconds,
+    )
+
+
 def _is_terminal_node(node_data: dict[str, Any], edges: list[FlowEdge | VersionedFlowEdge]) -> bool:
     return bool(node_data.get("is_terminal") or node_data.get("isTerminal")) or len(edges) == 0
 
@@ -1304,19 +1338,18 @@ def process_flow_engine(
 
     session_conversion_emitted = bool(runtime_session and runtime_session.conversion_at)
 
-    msg = _normalize_text(message_text)
-    if msg:
-        _emit_runtime_event(
-            db=db,
-            tenant_id=conversation.tenant_id,
-            conversation_id=conversation.id,
-            flow_id=flow.id,
-            flow_version_id=current_flow_version_id,
-            node_id=conversation.current_node_id,
-            event_type="message_received",
-            metadata={"source": "entry_handler"},
-            dedupe_bucket_seconds=10,
-        )
+    emit_message_received_event(
+        db=db,
+        tenant_id=conversation.tenant_id,
+        conversation_id=conversation.id,
+        flow_id=flow.id,
+        flow_version_id=current_flow_version_id,
+        node_id=conversation.current_node_id,
+        message_text=message_text,
+        source="entry_handler",
+        input_kind="text",
+        dedupe_bucket_seconds=10,
+    )
     first_flow_turn = not had_active_session
     intent: str | None = None
     if conversation.mode != "flow":
