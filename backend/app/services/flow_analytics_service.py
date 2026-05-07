@@ -248,8 +248,8 @@ def get_flow_analytics(db: Session, *, tenant_id: uuid.UUID, flow_id: uuid.UUID,
             for event in events
         ]
 
-        node_rows = db.query(FlowNode.id, FlowNode.type, FlowNode.label).filter(FlowNode.flow_id == flow_id).all()
-        node_map = {str(node_id): {"type": node_type or "unknown", "label": label or "Node"} for node_id, node_type, label in node_rows}
+        node_rows = db.query(FlowNode.id, FlowNode.type, FlowNode.content).filter(FlowNode.flow_id == flow_id).all()
+        node_map = {str(node_id): {"type": node_type or "unknown", "label": node_name or "Node"} for node_id, node_type, node_name in node_rows}
 
         kpis = _compute_kpis(sessions, normalized_events)
         timeseries = _compute_timeseries(sessions, normalized_events)
