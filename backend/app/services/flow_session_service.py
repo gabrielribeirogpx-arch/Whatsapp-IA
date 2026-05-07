@@ -9,6 +9,7 @@ from app.models.flow_session import FlowSession
 
 SESSION_TTL_MINUTES = 30
 FINAL_SESSION_STATUSES = {"finished", "expired", "cancelled"}
+FINAL_COMPLETION_STATUSES = {"completed", "abandoned", "conversion", "expired"}
 
 
 class FlowSessionService:
@@ -71,6 +72,7 @@ class FlowSessionService:
         return session, None
 
     def save_runtime_session(self, *, tenant_id, user_identifier: str, flow: Flow, current_node_id, status: str = "running", context: dict[str, Any] | None = None) -> FlowSession:
+        now = datetime.utcnow()
         session = (
             self.db.query(FlowSession)
             .filter(
@@ -90,6 +92,9 @@ class FlowSessionService:
                 status=status,
                 context=context or {},
                 variables={"flow_version": flow.version},
+                started_at=now,
+                last_event_at=now,
+                completion_status="running",
             )
             self.db.add(session)
         else:
@@ -99,6 +104,11 @@ class FlowSessionService:
             variables = dict(session.variables or {})
             variables["flow_version"] = flow.version
             session.variables = variables
+            session.last_event_at = now
+            if not session.started_at:
+                session.started_at = now
+            if (status or "").lower() not in FINAL_SESSION_STATUSES:
+                session.completion_status = "running"
         self.db.commit()
         self.db.refresh(session)
         return session
@@ -116,17 +126,64 @@ class FlowSessionService:
         for session in sessions:
             session.status = "expired"
             session.current_node_id = None
+            self.end_session(session, completion_status="expired", abandon_reason=reason)
         self.db.commit()
         print(f"[SESSION RESET] reason={reason} tenant_id={tenant_id} user={user_identifier} count={len(sessions)}")
 
     def update_session(self, session: FlowSession, node_id: str | None, context: dict | None = None, status: str | None = None) -> None:
+        now = datetime.utcnow()
         session.current_node_id = node_id
+        session.last_event_at = now
+        if not session.started_at:
+            session.started_at = now
 
         if context is not None:
             session.context = context
 
         if status:
             session.status = status
+            completion_status = self._completion_status_from_runtime_status(status)
+            if completion_status:
+                self.end_session(session, completion_status=completion_status)
+            else:
+                session.completion_status = "running"
 
         self.db.commit()
         self.db.refresh(session)
+
+    def end_session(
+        self,
+        session: FlowSession,
+        *,
+        completion_status: str,
+        ended_at: datetime | None = None,
+        conversion_at: datetime | None = None,
+        abandon_reason: str | None = None,
+    ) -> FlowSession:
+        normalized_status = (completion_status or "").lower()
+        if normalized_status not in FINAL_COMPLETION_STATUSES:
+            raise ValueError(f"Invalid completion_status '{completion_status}'")
+
+        if session.ended_at and (session.completion_status or "").lower() in FINAL_COMPLETION_STATUSES:
+            return session
+
+        now = ended_at or datetime.utcnow()
+        session.ended_at = now
+        session.last_event_at = now
+        session.completion_status = normalized_status
+        if normalized_status == "conversion":
+            session.conversion_at = conversion_at or now
+        if abandon_reason is not None:
+            session.abandon_reason = abandon_reason
+        return session
+
+    @staticmethod
+    def _completion_status_from_runtime_status(status: str | None) -> str | None:
+        normalized = (status or "").lower()
+        if normalized == "finished":
+            return "completed"
+        if normalized == "expired":
+            return "expired"
+        if normalized == "cancelled":
+            return "abandoned"
+        return None
