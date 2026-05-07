@@ -948,6 +948,40 @@ def _is_terminal_node(node_data: dict[str, Any], edges: list[FlowEdge | Versione
     return bool(node_data.get("is_terminal") or node_data.get("isTerminal")) or len(edges) == 0
 
 
+def _emit_node_entered_event(
+    db: Session,
+    *,
+    tenant_id: uuid.UUID,
+    conversation_id: uuid.UUID,
+    flow_id: uuid.UUID,
+    flow_version_id: uuid.UUID | None,
+    node: FlowNode | VersionedFlowNode,
+    node_data: dict[str, Any],
+    edges: list[FlowEdge | VersionedFlowEdge],
+    step: int,
+    source: str,
+) -> None:
+    node_type = str(node.type or "").strip().lower()
+    if node_type.endswith("node"):
+        node_type = node_type[:-4]
+    _emit_runtime_event(
+        db=db,
+        tenant_id=tenant_id,
+        conversation_id=conversation_id,
+        flow_id=flow_id,
+        flow_version_id=flow_version_id,
+        node_id=node.id,
+        event_type="node_entered",
+        metadata={
+            "step": step,
+            "node_type": node_type,
+            "is_terminal": _is_terminal_node(node_data, edges),
+            "source": source,
+        },
+        dedupe_bucket_seconds=10,
+    )
+
+
 def _is_conversion_node(node: FlowNode | VersionedFlowNode, node_data: dict[str, Any], flow: Flow) -> bool:
     if str(node.type or "").strip().lower() != "action":
         return False
@@ -1501,29 +1535,31 @@ def process_flow_engine(
             reached_max_steps = False
             break
         visited_node_ids.add(node.id)
-        node_type = node.type
-        if node_type.endswith("Node"):
-            node_type = node_type[:-4]
         print(f"[FLOW DEBUG] node.type={node.type}")
         print(f"[FLOW DEBUG] node.data={getattr(node, 'data', None) or node_data}")
-        logger.info("Node executado conversation_id=%s node_id=%s node_type=%s", conversation.id, node.id, node_type)
-        _emit_runtime_event(
-            db=db,
-            tenant_id=conversation.tenant_id,
-            conversation_id=conversation.id,
-            flow_id=node.flow_id,
-            flow_version_id=current_flow_version_id,
-            node_id=node.id,
-            event_type="node_entered",
-            metadata={"node_type": node_type, "step": step_index + 1},
-            dedupe_bucket_seconds=10,
-        )
 
         edges = _get_edges(
             db=db,
             flow_id=node.flow_id,
             source=node.id,
             runtime_graph=runtime_graph,
+        )
+        node_type = str(node.type or "").strip().lower()
+        if node_type.endswith("node"):
+            node_type = node_type[:-4]
+        node_entered_source = "manual_resume" if force_node else "runtime"
+        logger.info("Node executado conversation_id=%s node_id=%s node_type=%s", conversation.id, node.id, node_type)
+        _emit_node_entered_event(
+            db=db,
+            tenant_id=conversation.tenant_id,
+            conversation_id=conversation.id,
+            flow_id=node.flow_id,
+            flow_version_id=current_flow_version_id,
+            node=node,
+            node_data=node_data,
+            edges=edges,
+            step=step_index + 1,
+            source=node_entered_source,
         )
 
         if node_type in {"message", "text", "msg", "start"}:
