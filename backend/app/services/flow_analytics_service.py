@@ -71,10 +71,8 @@ DEFAULT_PERIOD = "7d"
 @dataclass
 class _SessionAnalyticsRow:
     conversation_id: uuid.UUID | None
-    completion_status: str | None
     started_at: datetime | None
     ended_at: datetime | None
-    conversion_at: datetime | None
 
 
 def resolve_analytics_period(period: str | None) -> str:
@@ -132,10 +130,8 @@ def _build_dataset(db: Session, tenant_id: uuid.UUID, flow_id: uuid.UUID, since:
     session_rows = (
         db.query(
             FlowSession.conversation_id,
-            FlowSession.completion_status,
             FlowSession.started_at,
             FlowSession.ended_at,
-            FlowSession.conversion_at,
         )
         .filter(
             FlowSession.tenant_id == tenant_id,
@@ -147,13 +143,12 @@ def _build_dataset(db: Session, tenant_id: uuid.UUID, flow_id: uuid.UUID, since:
     sessions = [
         _SessionAnalyticsRow(
             conversation_id=row.conversation_id,
-            completion_status=row.completion_status,
             started_at=row.started_at,
             ended_at=row.ended_at,
-            conversion_at=row.conversion_at,
         )
         for row in session_rows
     ]
+    sessions = sessions or []
 
     events = (
         db.query(FlowEvent)
@@ -165,6 +160,7 @@ def _build_dataset(db: Session, tenant_id: uuid.UUID, flow_id: uuid.UUID, since:
         .order_by(FlowEvent.created_at.asc())
         .all()
     )
+    events = events or []
 
     for event in events:
         event.event_type = _normalize_event_type(event.event_type)
@@ -174,8 +170,8 @@ def _build_dataset(db: Session, tenant_id: uuid.UUID, flow_id: uuid.UUID, since:
 
 def _compute_kpis(sessions: list[_SessionAnalyticsRow], events: list[FlowEvent]) -> dict[str, Any]:
     entries = len(sessions)
-    conversions = sum(1 for session in sessions if (session.completion_status or "").lower() == "converted")
-    abandonments = sum(1 for session in sessions if (session.completion_status or "").lower() == "abandoned")
+    conversions = sum(1 for session in sessions if session.ended_at is not None)
+    abandonments = sum(1 for session in sessions if session.ended_at is None)
 
     elapsed_times = [
         max((session.ended_at - session.started_at).total_seconds(), 0)
@@ -200,10 +196,10 @@ def _compute_timeseries(sessions: list[_SessionAnalyticsRow], events: list[FlowE
     for session in sessions:
         if session.started_at:
             daily[session.started_at.date().isoformat()]["entries"] += 1
-        if session.conversion_at:
-            daily[session.conversion_at.date().isoformat()]["conversions"] += 1
-        if session.ended_at and (session.completion_status or "").lower() == "abandoned":
-            daily[session.ended_at.date().isoformat()]["abandonments"] += 1
+        if session.ended_at:
+            daily[session.ended_at.date().isoformat()]["conversions"] += 1
+        if session.ended_at is None and session.started_at:
+            daily[session.started_at.date().isoformat()]["abandonments"] += 1
 
     for event in events:
         if event.event_type in {MESSAGE_SENT, MESSAGE_RECEIVED} and event.created_at:
@@ -218,7 +214,7 @@ def _compute_funnel(sessions: list[_SessionAnalyticsRow], events: list[FlowEvent
     converted_sessions = {
         str(session.conversation_id)
         for session in sessions
-        if (session.completion_status or "").lower() in {"converted", "conversion", "completed"}
+        if session.ended_at is not None and session.conversation_id
     }
 
     last_node_by_session: dict[str, str] = {}
@@ -234,7 +230,7 @@ def _compute_funnel(sessions: list[_SessionAnalyticsRow], events: list[FlowEvent
     abandoned_session_keys = {
         str(session.conversation_id)
         for session in sessions
-        if (session.completion_status or "").lower() == "abandoned" and session.conversation_id
+        if session.ended_at is None and session.conversation_id
     }
     for session_key in abandoned_session_keys:
         node_id = last_node_by_session.get(session_key)
@@ -268,7 +264,7 @@ def _compute_dropoffs(sessions: list[_SessionAnalyticsRow], events: list[FlowEve
 
     dropoff_counter: Counter[str] = Counter()
     for session in sessions:
-        if (session.completion_status or "").lower() != "abandoned" or not session.conversation_id:
+        if session.ended_at is not None or not session.conversation_id:
             continue
         last_node = last_node_by_session.get(str(session.conversation_id))
         if last_node:
@@ -318,7 +314,7 @@ def get_flow_analytics(db: Session, *, tenant_id: uuid.UUID, flow_id: uuid.UUID,
     common_responses = _compute_common_responses(events)
 
     entries = kpis["entries"]
-    completed = sum(1 for session in sessions if (session.completion_status or "").lower() in {"converted", "conversion", "completed"})
+    completed = sum(1 for session in sessions if session.ended_at is not None)
 
     summary = {
         "entries": entries,
