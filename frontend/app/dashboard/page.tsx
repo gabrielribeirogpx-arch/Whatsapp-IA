@@ -415,22 +415,27 @@ export default function DashboardPage() {
             )}
           </div>
 
-          <div className="min-w-0 flex flex-col items-start pt-0.5 pr-24">
+          <div className="min-w-0 flex-1">
             <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">{item.label}</span>
 
-            <span className="mt-1 text-2xl font-bold text-slate-900">
+            <span className="mt-1 block text-2xl font-bold text-slate-900">
               {value}
               {item.suffix ?? ''}
             </span>
-            <div className="mt-1 flex items-center gap-1">
-              <span className="text-xs text-emerald-600">{trendPrefix} {Math.abs(delta)}%</span>
-              <span className="text-xs text-slate-500">{trendText}</span>
+
+            <div className="mt-3 flex w-full items-center justify-between gap-3">
+              <span className="inline-flex items-center gap-1 text-xs leading-none text-emerald-600">
+                {trendPrefix} {Math.abs(delta)}%
+                <span className="font-normal text-slate-500">
+                  {trendText}
+                </span>
+              </span>
+
+              <div className="flex h-7 w-20 shrink-0 items-center justify-end">
+                <Sparkline values={sparklineSeries} className="h-7 w-20" />
+              </div>
             </div>
           </div>
-        </div>
-
-        <div className="absolute bottom-4 right-4 h-8 w-20">
-          <Sparkline values={sparklineSeries} />
         </div>
       </div>
     );
