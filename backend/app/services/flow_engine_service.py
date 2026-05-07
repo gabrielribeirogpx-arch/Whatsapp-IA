@@ -1169,7 +1169,7 @@ def _advance_to_edge_target(
                 dedupe_bucket_seconds=30,
             )
         if runtime_session and session_service:
-            session_service.end_session(runtime_session, completion_status="completed")
+            session_service.end_session(runtime_session, status="completed")
         _reset_to_bot_mode(db=db, conversation=conversation, reason="flow_finished_no_next_edge")
         return None
 
@@ -1533,8 +1533,7 @@ def process_flow_engine(
                 if runtime_session:
                     session_service.end_session(
                         runtime_session,
-                        completion_status="abandoned",
-                        abandon_reason="fallback_limit_exceeded",
+                        status="abandoned",
                     )
                 _reset_to_bot_mode(db=db, conversation=conversation, reason="fallback_limit_exceeded")
                 conversation.retries = 0
@@ -1957,7 +1956,7 @@ def process_flow_engine(
                         metadata={"trigger": "condition_match"},
                         dedupe_bucket_seconds=30,
                     )
-                    session_service.end_session(runtime_session, completion_status="conversion")
+                    session_service.end_session(runtime_session, status="conversion")
                     session_conversion_emitted = True
             else:
                 print(f"[FLOW MISS] condição FALSE: {node.id}")
@@ -2034,7 +2033,7 @@ def process_flow_engine(
                     dedupe_bucket_seconds=30,
                 )
                 if runtime_session:
-                    session_service.end_session(runtime_session, completion_status="completed")
+                    session_service.end_session(runtime_session, status="completed")
                 _reset_to_bot_mode(db=db, conversation=conversation, reason="flow_finished_delay_without_next")
                 reached_max_steps = False
                 break
@@ -2078,7 +2077,7 @@ def process_flow_engine(
                     metadata={"trigger": "action_conversion_node"},
                     dedupe_bucket_seconds=30,
                 )
-                session_service.end_session(runtime_session, completion_status="conversion")
+                session_service.end_session(runtime_session, status="conversion")
                 session_conversion_emitted = True
             if content:
                 collected_messages.append(content)
@@ -2112,7 +2111,7 @@ def process_flow_engine(
                 metadata={"completion_reason": "terminal_node"},
                 dedupe_bucket_seconds=30,
             )
-            session_service.end_session(runtime_session, completion_status="completed")
+            session_service.end_session(runtime_session, status="completed")
             _reset_to_bot_mode(db=db, conversation=conversation, reason="flow_finished_terminal_node")
             reached_max_steps = False
             break
