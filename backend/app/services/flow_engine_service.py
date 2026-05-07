@@ -630,6 +630,22 @@ def _match_condition_input(normalized_input: str, keywords: list[str]) -> bool |
     )
 
 
+def _find_matched_keyword(normalized_input: str, keywords: list[str]) -> str | None:
+    if not normalized_input:
+        return None
+    for kw in keywords:
+        if not kw:
+            continue
+        if kw == normalized_input:
+            return kw
+    for kw in keywords:
+        if not kw:
+            continue
+        if kw in normalized_input or (len(normalized_input) >= 2 and normalized_input in kw):
+            return kw
+    return None
+
+
 def detect_intent(text: str) -> str | None:
     normalized_text = _normalize_text(text)
     if "api" in normalized_text or "integra" in normalized_text:
@@ -1800,7 +1816,9 @@ def process_flow_engine(
                 if (normalized_kw := _normalize_text(kw))
             ]
 
-            result = bool(_match_condition_input(normalized_input, keywords))
+            match_result = _match_condition_input(normalized_input, keywords)
+            result = bool(match_result)
+            matched_keyword = _find_matched_keyword(normalized_input, keywords) if result else None
 
             print(f"[CONDITION INPUT RAW] {raw_input}")
             print(f"[CONDITION INPUT NORMALIZED] {normalized_input}")
@@ -1841,6 +1859,22 @@ def process_flow_engine(
             route_label = "true" if result else "false"
             print(f"[CONDITION EDGE SELECTED] {route_label} target_id={selected_next}")
             logger.info("[CONDITION EDGE SELECTED] %s target_id=%s", route_label, selected_next)
+            _emit_runtime_event(
+                db=db,
+                tenant_id=conversation.tenant_id,
+                conversation_id=conversation.id,
+                flow_id=node.flow_id,
+                flow_version_id=current_flow_version_id,
+                node_id=node.id,
+                event_type="condition_matched",
+                metadata={
+                    "result": result,
+                    "matched_keyword": matched_keyword,
+                    "route_label": route_label,
+                    "source_node_id": str(node.id),
+                    "target_node_id": str(selected_next) if selected_next else None,
+                },
+            )
 
             node = _advance_to_edge_target(
                 # primeira mensagem só inicializa o fluxo e envia o start node
