@@ -10,6 +10,9 @@ from sqlalchemy.orm import Mapped, mapped_column
 from app.db.base import Base
 
 
+FINAL_SESSION_STATUSES = {"completed", "converted", "abandoned", "expired"}
+
+
 class FlowSession(Base):
     __tablename__ = "flow_sessions"
     __table_args__ = (
