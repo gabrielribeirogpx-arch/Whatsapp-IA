@@ -1037,14 +1037,21 @@ def _emit_node_entered_event(
 
 
 def _is_conversion_node(node: FlowNode | VersionedFlowNode, node_data: dict[str, Any], flow: Flow) -> bool:
-    if str(node.type or "").strip().lower() != "action":
-        return False
-    if bool(node_data.get("conversion")):
-        return True
-    conversion_nodes = flow.settings.get("conversion_node_ids") if isinstance(flow.settings, dict) else None
-    if isinstance(conversion_nodes, list):
-        return str(node.id) in {str(node_id) for node_id in conversion_nodes}
-    return False
+    node_type = str(node.type or "").strip().lower()
+    if node_type.endswith("node"):
+        node_type = node_type[:-4]
+
+    # Regra legada (compatibilidade): apenas action node com conversion=true
+    # ou node id listado em flow.settings.conversion_node_ids.
+    if node_type == "action":
+        if bool(node_data.get("conversion")):
+            return True
+        conversion_nodes = flow.settings.get("conversion_node_ids") if isinstance(flow.settings, dict) else None
+        if isinstance(conversion_nodes, list):
+            return str(node.id) in {str(node_id) for node_id in conversion_nodes}
+
+    # Regra opcional no runtime resolver: tratar tipos de conversão sem depender do frontend.
+    return node_type in {"conversion", "meta", "conversion_goal"}
 
 
 def _ensure_conversation_state(conversation: Conversation, message_text: str) -> None:
