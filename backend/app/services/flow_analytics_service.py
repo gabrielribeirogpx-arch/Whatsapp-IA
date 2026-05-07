@@ -124,7 +124,7 @@ def _normalize_event_type(event_type: str | None) -> str:
     return EVENT_TYPE_ALIASES.get(event_type, event_type)
 
 
-def _build_dataset(db: Session, tenant_id: uuid.UUID, flow_id: uuid.UUID, since: datetime) -> tuple[list[_SessionAnalyticsRow], list[FlowEvent]]:
+def _build_dataset(db: Session, tenant_id: uuid.UUID, flow_id: uuid.UUID, period_start: datetime) -> tuple[list[_SessionAnalyticsRow], list[FlowEvent]]:
     session_rows = (
         db.query(
             FlowSession.conversation_id,
@@ -133,7 +133,7 @@ def _build_dataset(db: Session, tenant_id: uuid.UUID, flow_id: uuid.UUID, since:
         .filter(
             FlowSession.tenant_id == tenant_id,
             FlowSession.flow_id == flow_id,
-            FlowSession.created_at >= since,
+            FlowSession.created_at >= period_start,
         )
         .all()
     )
@@ -151,7 +151,7 @@ def _build_dataset(db: Session, tenant_id: uuid.UUID, flow_id: uuid.UUID, since:
         .filter(
             FlowEvent.tenant_id == tenant_id,
             FlowEvent.flow_id == flow_id,
-            FlowEvent.created_at >= since,
+            FlowEvent.created_at >= period_start,
         )
         .order_by(FlowEvent.created_at.asc())
         .all()
@@ -240,8 +240,8 @@ def get_flow_analytics(db: Session, *, tenant_id: uuid.UUID, flow_id: uuid.UUID,
     if not flow:
         return base
 
-    since = datetime.now(UTC).replace(tzinfo=None) - PERIODS[resolved_period]
-    sessions, events = _build_dataset(db, tenant_id, flow_id, since)
+    period_start = datetime.now(UTC).replace(tzinfo=None) - PERIODS[resolved_period]
+    sessions, events = _build_dataset(db, tenant_id, flow_id, period_start)
 
     node_rows = db.query(FlowNode.id, FlowNode.type, FlowNode.label).filter(FlowNode.flow_id == flow_id).all()
     node_map = {str(node_id): {"type": node_type or "unknown", "label": label or "Node"} for node_id, node_type, label in node_rows}
