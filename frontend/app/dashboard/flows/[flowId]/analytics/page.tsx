@@ -1,47 +1,56 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { BarChart3, Funnel, GitBranch, MessageSquareText, Sparkles, TrendingUp } from 'lucide-react';
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { getFlowAnalytics, listFlows } from '@/lib/api';
-import { FlowAnalytics } from '@/lib/types';
-
 type Props = { params: { flowId: string } };
 
-const periods = ['24h', '7d', '30d', '90d'];
-const empty: FlowAnalytics = {
-  flow_id: '',
-  flow_name: 'Flow',
-  period: '7d',
-  summary: {
-    entries: 0,
-    messages_sent: 0,
-    completed: 0,
-    conversion_rate: 0,
-    dropoff_rate: 0,
-    avg_time_seconds: 0,
-    avg_messages_per_user: 0,
-  },
-  funnel: [],
-  top_dropoffs: [],
-  common_replies: [],
-  timeline: [],
-  insights: [],
+type FlowAnalyticsApi = {
+  flow_id?: string;
+  flow_name?: string;
+  period?: string;
+  kpis?: {
+    entries?: number;
+    conversion_rate?: number;
+    abandonment_rate?: number;
+    avg_time_seconds?: number;
+    handled_messages?: number;
+  };
+  funnel?: Array<{ node_id: string; node_label: string; node_type: string; entries?: number; dropoff_rate?: number; conversion_to_next_rate?: number }>;
+  dropoffs?: Array<{ node_id: string; node_label: string; node_type: string; entries?: number; dropoff_rate?: number; conversion_to_next_rate?: number }>;
+  common_responses?: Array<{ reply?: string; response?: string; count?: number; rate?: number }>;
+  timeseries?: Array<{ date?: string; entries?: number; conversions?: number; abandonments?: number; messages?: number }>;
 };
+
+const periods = ['24h', '7d', '30d', '90d'];
+function formatDuration(totalSeconds?: number) {
+  const seconds = Math.max(0, Math.round(Number(totalSeconds) || 0));
+  const minutes = Math.floor(seconds / 60);
+  const remainingSeconds = seconds % 60;
+
+  if (minutes <= 0) return `${seconds}s`;
+  if (remainingSeconds === 0) return `${minutes}m`;
+  return `${minutes}m ${remainingSeconds}s`;
+}
 
 export default function Page({ params }: Props) {
   const [period, setPeriod] = useState('7d');
   const [timelineMetric, setTimelineMetric] = useState('entries');
   const [loading, setLoading] = useState(true);
-  const [data, setData] = useState<FlowAnalytics>(empty);
-  const [isActive, setIsActive] = useState(false);
+  const [data, setData] = useState<FlowAnalyticsApi | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [flowStatus, setFlowStatus] = useState<'active' | 'draft' | 'inactive'>('inactive');
 
   useEffect(() => {
     (async () => {
       setLoading(true);
+      setError(null);
       try {
-        setData(await getFlowAnalytics(params.flowId, period));
+        setData((await getFlowAnalytics(params.flowId, period)) as FlowAnalyticsApi);
+      } catch {
+        setData(null);
+        setError('Não foi possível carregar os analytics agora. Tente novamente em instantes.');
       } finally {
         setLoading(false);
       }
@@ -53,24 +62,29 @@ export default function Page({ params }: Props) {
       const flows = await listFlows();
       const flow = flows.find((item) => item.id === params.flowId);
       if (!flow) return;
-      setIsActive(flow.is_active);
       const status = (flow as { status?: string }).status;
       setFlowStatus(flow.is_active ? 'active' : status === 'draft' ? 'draft' : 'inactive');
     })();
   }, [params.flowId]);
 
+  const kpis = useMemo(() => [
+    ['Entradas', Number(data?.kpis?.entries ?? 0)],
+    ['Conversão', `${Number(data?.kpis?.conversion_rate ?? 0)}%`],
+    ['Abandono', `${Number(data?.kpis?.abandonment_rate ?? 0)}%`],
+    ['Tempo médio', formatDuration(data?.kpis?.avg_time_seconds)],
+    ['Mensagens tratadas', Number(data?.kpis?.handled_messages ?? 0)],
+  ], [data]);
 
-  const kpis = [
-    ['Entradas', data.summary.entries],
-    ['Conversão', `${data.summary.conversion_rate}%`],
-    ['Abandono', `${data.summary.dropoff_rate}%`],
-    ['Tempo médio', `${Math.round(data.summary.avg_time_seconds)}s`],
-    ['Mensagens tratadas', data.summary.messages_sent],
-  ];
-
-  const noData = data.summary.entries === 0;
-  const timelineHasRelevantPoints = data.timeline.some(
-    (point) => point.entries > 0 || point.messages_sent > 0 || point.completed > 0,
+  const noData = Number(data?.kpis?.entries ?? 0) === 0;
+  const timeseries = (data?.timeseries ?? []).map((point) => ({
+    date: point.date ?? '',
+    entries: Number(point.entries ?? 0),
+    completed: Number(point.conversions ?? 0),
+    abandonments: Number(point.abandonments ?? 0),
+    messages_sent: Number(point.messages ?? 0),
+  }));
+  const timelineHasRelevantPoints = timeseries.some(
+    (point) => point.entries > 0 || point.messages_sent > 0 || point.completed > 0 || point.abandonments > 0,
   );
 
   return (
@@ -84,7 +98,7 @@ export default function Page({ params }: Props) {
           </div>
           <div>
             <h1 className='page-title'>Analytics do Flow <span className={`status-badge ${flowStatus}`}>{flowStatus === 'active' ? 'Ativo' : flowStatus === 'draft' ? 'Draft' : 'Inativo'}</span></h1>
-            <p className='breadcrumb'>Flows &gt; <span>{data.flow_name}</span></p>
+            <p className='breadcrumb'>Flows &gt; <span>{data?.flow_name || 'Flow'}</span></p>
           </div>
         </div>
 
@@ -118,7 +132,14 @@ export default function Page({ params }: Props) {
         ))}
       </div>
 
-      {noData && (
+      {error && (
+        <div className='card info-card' role='alert'>
+          <span className='info-icon' aria-hidden>⚠️</span>
+          <span>{error}</span>
+        </div>
+      )}
+
+      {noData && !error && (
         <div className='card info-card' role='status'>
           <span className='info-icon' aria-hidden>
             ℹ️
@@ -130,7 +151,7 @@ export default function Page({ params }: Props) {
       <div className='main-grid'>
         <div className='card card-soft'>
           <h3 className='section-title'><Funnel size={18} />Funil do Flow</h3>
-          {data.funnel.length === 0 ? (
+          {(data?.funnel ?? []).length === 0 ? (
             <div className='funnel-empty'>
               <svg viewBox='0 0 320 180' className='funnel-illustration' aria-hidden>
                 <defs>
@@ -153,9 +174,10 @@ export default function Page({ params }: Props) {
               </div>
             </div>
           ) : (
-            data.funnel.map((n, i) => {
-          const color = n.dropoff_rate > 40 ? '#EF4444' : n.dropoff_rate > 20 ? '#EAB308' : '#22C55E';
-          const pct = i === 0 ? 100 : Math.round((n.entries / (data.funnel[0]?.entries || 1)) * 100);
+            (data?.funnel ?? []).map((n, i) => {
+          const dropoffRate = Number(n.dropoff_rate ?? 0);
+          const color = dropoffRate > 40 ? '#EF4444' : dropoffRate > 20 ? '#EAB308' : '#22C55E';
+          const pct = i === 0 ? 100 : Math.round(((n.entries ?? 0) / ((data?.funnel ?? [])[0]?.entries || 1)) * 100);
           return (
             <div key={n.node_id} className='funnel-row'>
               <div className='funnel-row-header'>
@@ -168,7 +190,7 @@ export default function Page({ params }: Props) {
                 <div className='progress-fill' style={{ width: `${pct}%`, background: color }} />
               </div>
               <small className='secondary-text'>
-                Entradas {n.entries} • Dropoff {n.dropoff_rate}% • Conversão próximo {n.conversion_to_next_rate}%
+                Entradas {n.entries ?? 0} • Dropoff {n.dropoff_rate ?? 0}% • Conversão próximo {n.conversion_to_next_rate ?? 0}%
               </small>
             </div>
           );
@@ -179,7 +201,7 @@ export default function Page({ params }: Props) {
         <div className='side-stack'>
           <div className='card card-soft'>
           <h3 className='section-title'><GitBranch size={18} />Pontos de abandono</h3>
-          {data.top_dropoffs.length === 0 ? <div className='side-empty'><span className='side-icon'><GitBranch size={22} /></span><strong>—</strong><span className='secondary-text'>Sem dados suficientes</span></div> : data.top_dropoffs.map((n) => (
+          {(data?.dropoffs ?? []).length === 0 ? <div className='side-empty'><span className='side-icon'><GitBranch size={22} /></span><strong>—</strong><span className='secondary-text'>Sem dados suficientes</span></div> : (data?.dropoffs ?? []).map((n) => (
             <div key={n.node_id} className='secondary-text'>
               ⚠️ Node “{n.node_label}” — {n.dropoff_rate}% de abandono. Sugestão: simplifique a pergunta.
             </div>
@@ -187,10 +209,10 @@ export default function Page({ params }: Props) {
         </div>
           <div className='card card-soft'>
             <h3 className='section-title'><MessageSquareText size={18} />Respostas mais comuns</h3>
-            {data.common_replies.length === 0 ? <div className='side-empty'><span className='side-icon'><MessageSquareText size={22} /></span><strong>—</strong><span className='secondary-text'>Sem dados suficientes</span></div> : data.common_replies.map((r) => (
-              <div key={r.reply} className='reply-row'>
-                <span>{r.reply}</span>
-                <span className='secondary-text'>{r.rate}%</span>
+            {(data?.common_responses ?? []).length === 0 ? <div className='side-empty'><span className='side-icon'><MessageSquareText size={22} /></span><strong>—</strong><span className='secondary-text'>Sem dados suficientes</span></div> : (data?.common_responses ?? []).map((r, idx) => (
+              <div key={`${r.reply ?? r.response ?? 'response'}-${idx}`} className='reply-row'>
+                <span>{r.reply ?? r.response ?? '—'}</span>
+                <span className='secondary-text'>{Number(r.rate ?? 0)}%</span>
               </div>
             ))}
           </div>
@@ -214,7 +236,7 @@ export default function Page({ params }: Props) {
         <div style={{ height: 280 }}>
           {timelineHasRelevantPoints ? (
             <ResponsiveContainer>
-              <LineChart data={data.timeline}>
+              <LineChart data={timeseries}>
                 <CartesianGrid strokeDasharray='3 3' stroke='#E2E8F0' />
                 <XAxis dataKey='date' stroke='#64748B' />
                 <YAxis stroke='#64748B' />
@@ -248,16 +270,6 @@ export default function Page({ params }: Props) {
         <p className='secondary-text insights-description'>
           Aqui você encontrará análises inteligentes para melhorar conversão, reduzir abandonos e acelerar otimizações do flow.
         </p>
-        {data.insights.length > 0 && (
-          <div className='insights-list'>
-            {data.insights.map((insight, idx) => (
-              <div key={idx} className='insight-item'>
-                <strong className='insight-title'>{insight.title}</strong>
-                <p className='secondary-text'>{insight.message}</p>
-              </div>
-            ))}
-          </div>
-        )}
       </div>
 
       {loading && <div className='secondary-text'>Carregando...</div>}
