@@ -33,34 +33,44 @@ logger = logging.getLogger(__name__)
 logger.info("[FLOW API] carregada")
 
 
-def _ensure_published_snapshot_on_activate(db: Session, flow: Flow) -> None:
+def _extract_start_preview(nodes: list[dict[str, Any]]) -> str:
+    for node in nodes:
+        if not isinstance(node, dict):
+            continue
+        data = node.get("data") if isinstance(node.get("data"), dict) else {}
+        if not bool(data.get("isStart")):
+            continue
+        raw = data.get("text") or data.get("content") or data.get("label")
+        if isinstance(raw, str):
+            return " ".join(raw.strip().split())[:120]
+    return ""
+
+
+def _publish_fresh_snapshot(db: Session, flow: Flow, *, reason: str) -> FlowVersion | None:
     active_version = flow.current_version
     nodes = active_version.nodes if active_version and isinstance(active_version.nodes, list) else []
     edges = active_version.edges if active_version and isinstance(active_version.edges, list) else []
-
     if not nodes:
         nodes = flow.nodes_json if isinstance(flow.nodes_json, list) else flow.nodes if isinstance(flow.nodes, list) else []
     if not edges:
         edges = flow.edges_json if isinstance(flow.edges_json, list) else flow.edges if isinstance(flow.edges, list) else []
-
     if not isinstance(nodes, list):
         nodes = []
     if not isinstance(edges, list):
         edges = []
-
     if not nodes:
-        logger.warning("[FLOW ACTIVATE] flow_id=%s sem nodes válidos para publicar snapshot", flow.id)
-        return
+        logger.warning("[FLOW PUBLISH] flow_id=%s reason=%s sem nodes para snapshot", flow.id, reason)
+        return None
 
-    last_version = db.execute(
-        select(FlowVersion).where(FlowVersion.flow_id == flow.id).order_by(FlowVersion.version.desc()).limit(1)
-    ).scalars().first()
-    next_version_number = ((last_version.version if last_version else 0) or 0) + 1
+    published_version = flow.published_version
+    published_nodes = published_version.nodes if published_version and isinstance(published_version.nodes, list) else []
+    current_start_preview = _extract_start_preview(nodes)
+    published_start_preview = _extract_start_preview(published_nodes)
 
-    db.query(FlowVersion).filter(FlowVersion.flow_id == flow.id).update(
-        {FlowVersion.is_active: False, FlowVersion.is_published: False},
-        synchronize_session=False,
-    )
+    last_version = db.execute(select(FlowVersion.version).where(FlowVersion.flow_id == flow.id).order_by(FlowVersion.version.desc()).limit(1)).scalar()
+    next_version_number = (last_version or 0) + 1
+
+    db.query(FlowVersion).filter(FlowVersion.flow_id == flow.id).update({FlowVersion.is_active: False, FlowVersion.is_published: False}, synchronize_session=False)
     fresh_version = FlowVersion(
         flow_id=flow.id,
         tenant_id=flow.tenant_id,
@@ -76,14 +86,16 @@ def _ensure_published_snapshot_on_activate(db: Session, flow: Flow) -> None:
     flow.current_version_id = fresh_version.id
     flow.published_version_id = fresh_version.id
     flow.version = fresh_version.version
-    logger.info(
-        "[FLOW ACTIVATE SNAPSHOT] flow_id=%s version_id=%s version=%s nodes=%s edges=%s",
-        flow.id,
-        fresh_version.id,
-        fresh_version.version,
-        len(nodes),
-        len(edges),
-    )
+
+    logger.info("[FLOW PUBLISH] flow_id=%s reason=%s current_version_id=%s published_version_id=%s flow_nodes=%s versioned_nodes=%s", flow.id, reason, flow.current_version_id, flow.published_version_id, len(nodes), len(published_nodes))
+    logger.info('[FLOW PUBLISH] current_start_preview="%s"', current_start_preview)
+    logger.info('[FLOW PUBLISH] published_start_preview="%s"', published_start_preview)
+    logger.info('[FLOW PUBLISH] new_published_start_preview="%s" version_id=%s', _extract_start_preview(nodes), fresh_version.id)
+    return fresh_version
+
+
+def _ensure_published_snapshot_on_activate(db: Session, flow: Flow) -> None:
+    _publish_fresh_snapshot(db=db, flow=flow, reason="activate")
 
 class FlowBuilderPayload(BaseModel):
     nodes: list[dict[str, Any]] = Field(default_factory=list)
@@ -1309,36 +1321,47 @@ def publish_tenant_flow_version(
     if not flow:
         raise HTTPException(status_code=404, detail="Flow not found")
 
-    if payload.version_id:
-        flow_version = db.execute(
-            _flow_version_select(db).where(FlowVersion.id == payload.version_id, FlowVersion.flow_id == flow.id, FlowVersion.tenant_id == tenant_uuid)
-        ).scalars().first()
-    else:
-        flow_version = db.execute(
-            _flow_version_select(db).where(FlowVersion.flow_id == flow.id, FlowVersion.tenant_id == tenant_uuid).order_by(FlowVersion.version.desc()).limit(1)
-        ).scalars().first()
-    if not flow_version:
-        raise HTTPException(status_code=404, detail="Flow version not found")
+    fresh_version = _publish_fresh_snapshot(db=db, flow=flow, reason="publish")
+    if not fresh_version:
+        raise HTTPException(status_code=422, detail="Flow version not found")
 
-    nodes = flow_version.nodes if isinstance(flow_version.nodes, list) else []
-    edges = flow_version.edges if isinstance(flow_version.edges, list) else []
+    nodes = fresh_version.nodes if isinstance(fresh_version.nodes, list) else []
+    edges = fresh_version.edges if isinstance(fresh_version.edges, list) else []
     validation = validate_flow_graph(nodes, edges, mode="publish")
     if validation["errors"]:
         raise HTTPException(status_code=422, detail=validation)
 
-    FlowService(db).publish_version(flow=flow, flow_version=flow_version)
     flow.status = "published"
     invalidate_flow_runtime_cache(flow.id)
     db.commit()
     db.refresh(flow)
-    logger.info("[FLOW PUBLISH] tenant_id=%s flow_id=%s version_id=%s request_id=%s", str(tenant_uuid), str(flow.id), str(flow_version.id), None)
     return _serialize_flow_version_response(
         flow=flow,
         nodes=nodes,
         edges=edges,
-        version_id=flow.published_version_id or flow_version.id,
+        version_id=flow.published_version_id or fresh_version.id,
         version=flow.version,
     )
+
+
+@crud_router.post("/{flow_id}/republish", response_model=FlowVersionResponse)
+def republish_tenant_flow(
+    flow_id: str,
+    x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
+    db: Session = Depends(get_db),
+):
+    tenant_uuid = _resolve_tenant_header(x_tenant_id)
+    flow = _get_flow_by_identifier(db=db, flow_id=flow_id, tenant_id=tenant_uuid)
+    if not flow:
+        raise HTTPException(status_code=404, detail="Flow not found")
+    fresh_version = _publish_fresh_snapshot(db=db, flow=flow, reason="republish")
+    if not fresh_version:
+        raise HTTPException(status_code=422, detail="Flow sem nodes para republicar")
+    flow.status = "published"
+    invalidate_flow_runtime_cache(flow.id)
+    db.commit()
+    db.refresh(flow)
+    return _serialize_flow_version_response(flow=flow, nodes=fresh_version.nodes or [], edges=fresh_version.edges or [], version_id=fresh_version.id, version=fresh_version.version)
 
 
 class FlowSimulationPayload(BaseModel):

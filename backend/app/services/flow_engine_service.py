@@ -488,6 +488,46 @@ def get_flow_for_builder(db: Session, tenant_id: uuid.UUID, flow_id: str) -> dic
     return cached_result or {"flow_id": str(flow_id), "version_id": None, "nodes": [], "edges": [], "source": "empty"}
 
 
+
+
+def _start_preview_from_nodes(nodes: list[dict[str, Any]] | None) -> str:
+    if not isinstance(nodes, list):
+        return ""
+    for node in nodes:
+        if not isinstance(node, dict):
+            continue
+        data = node.get("data") if isinstance(node.get("data"), dict) else {}
+        if not bool(data.get("isStart")):
+            continue
+        raw = data.get("text") or data.get("content") or data.get("label")
+        if isinstance(raw, str):
+            return " ".join(raw.strip().split())[:120]
+    return ""
+
+
+def _republish_from_current_nodes(db: Session, flow: Flow) -> FlowVersion | None:
+    current = flow.current_version
+    nodes = current.nodes if current and isinstance(current.nodes, list) else []
+    edges = current.edges if current and isinstance(current.edges, list) else []
+    if not nodes:
+        nodes = flow.nodes_json if isinstance(flow.nodes_json, list) else flow.nodes if isinstance(flow.nodes, list) else []
+    if not edges:
+        edges = flow.edges_json if isinstance(flow.edges_json, list) else flow.edges if isinstance(flow.edges, list) else []
+    if not isinstance(nodes, list) or not nodes:
+        return None
+    if not isinstance(edges, list):
+        edges = []
+    last_version = db.query(func.max(FlowVersion.version)).filter(FlowVersion.flow_id == flow.id).scalar()
+    next_version = (last_version or 0) + 1
+    db.query(FlowVersion).filter(FlowVersion.flow_id == flow.id).update({FlowVersion.is_active: False, FlowVersion.is_published: False}, synchronize_session=False)
+    v = FlowVersion(flow_id=flow.id, tenant_id=flow.tenant_id, version=next_version, nodes=nodes, edges=edges, snapshot={"nodes": nodes, "edges": edges}, is_active=True, is_published=True)
+    db.add(v)
+    db.flush()
+    flow.current_version_id = v.id
+    flow.published_version_id = v.id
+    flow.version = v.version
+    db.add(flow)
+    return v
 def resolve_runtime_flow_graph(db: Session, tenant_id: uuid.UUID, flow_id: str) -> dict[str, Any]:
     flow = resolve_flow(db=db, tenant_id=tenant_id, flow_id=flow_id)
     cached = _FLOW_RUNTIME_CACHE.get(flow.id)
@@ -512,6 +552,20 @@ def resolve_runtime_flow_graph(db: Session, tenant_id: uuid.UUID, flow_id: str) 
 
     nodes = selected_version.nodes if selected_version and isinstance(selected_version.nodes, list) else []
     edges = selected_version.edges if selected_version and isinstance(selected_version.edges, list) else []
+    current_nodes = flow.current_version.nodes if flow.current_version and isinstance(flow.current_version.nodes, list) else []
+    current_start_preview = _start_preview_from_nodes(current_nodes)
+    published_start_preview = _start_preview_from_nodes(nodes)
+    mismatch = bool(selected_version and selected_version.flow_id != flow.id) or (current_start_preview and published_start_preview and current_start_preview != published_start_preview)
+    if mismatch:
+        logger.warning('[FLOW VERSION MISMATCH] flow_id=%s selected_version_id=%s selected_flow_id=%s current_start_preview="%s" published_start_preview="%s"', flow.id, getattr(selected_version, 'id', None), getattr(selected_version, 'flow_id', None), current_start_preview, published_start_preview)
+        repaired = _republish_from_current_nodes(db=db, flow=flow)
+        if repaired:
+            selected_version = repaired
+            nodes = repaired.nodes if isinstance(repaired.nodes, list) else []
+            edges = repaired.edges if isinstance(repaired.edges, list) else []
+            source = "republished_from_current_nodes"
+            db.commit()
+
     runtime_payload = {
         "flow_id": str(flow.id),
         "version_id": str(selected_version.id) if selected_version else None,
