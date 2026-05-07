@@ -47,7 +47,8 @@ def process_incoming_message(payload: dict[str, Any]) -> None:
     correlation_id = str(parsed.get("message_id") or correlation_id)
     logger.info("event=incoming_worker_parsed correlation_id=%s tenant_id=%s phone=%s job_id=%s stage=incoming_worker_parse type=text", correlation_id, "n/a", parsed.get("phone") or "n/a", payload.get("job_id") or "n/a")
 
-    with SessionLocal() as db:
+    db = SessionLocal()
+    try:
         phone_number_id = str(parsed.get("phone_number_id") or "").strip()
         tenant = resolve_tenant_by_phone_number_id(db, phone_number_id)
         if not tenant:
@@ -69,62 +70,76 @@ def process_incoming_message(payload: dict[str, Any]) -> None:
             payload.get("job_id") or "n/a",
         )
 
-        with db.begin():
-            is_new = register_processed_message(db=db, tenant_id=tenant.id, message_id=correlation_id)
-            if not is_new:
-                logger.info("event=incoming_worker_skip correlation_id=%s tenant_id=%s phone=%s job_id=%s stage=incoming_worker_dedup reason=duplicate", correlation_id, tenant.id, parsed.get("phone") or "n/a", payload.get("job_id") or "n/a")
-                return
+        is_new = register_processed_message(db=db, tenant_id=tenant.id, message_id=correlation_id)
+        if not is_new:
+            logger.info("event=incoming_worker_skip correlation_id=%s tenant_id=%s phone=%s job_id=%s stage=incoming_worker_dedup reason=duplicate", correlation_id, tenant.id, parsed.get("phone") or "n/a", payload.get("job_id") or "n/a")
+            db.commit()
+            return
 
-        with db.begin():
-            contact = upsert_contact_for_phone(
-                db,
-                tenant_id=tenant.id,
-                phone=str(parsed.get("phone") or ""),
-                name=str(parsed.get("name") or "").strip() or None,
-            )
-            conversation, _ = get_or_create_conversation(
-                db,
-                tenant_id=tenant.id,
-                phone=contact.phone,
-                contact_id=contact.id,
-                message=str(parsed.get("text") or ""),
-            )
-            ensure_conversation_contact_link(conversation, contact)
-            logger.info(
-                "event=incoming_worker_entities_ready correlation_id=%s tenant_id=%s contact_id=%s conversation_id=%s",
-                correlation_id,
-                tenant.id,
-                contact.id,
-                conversation.id,
-            )
+        contact = upsert_contact_for_phone(
+            db,
+            tenant_id=tenant.id,
+            phone=str(parsed.get("phone") or ""),
+            name=str(parsed.get("name") or "").strip() or None,
+        )
+        conversation, _ = get_or_create_conversation(
+            db,
+            tenant_id=tenant.id,
+            phone=contact.phone,
+            contact_id=contact.id,
+            message=str(parsed.get("text") or ""),
+        )
+        ensure_conversation_contact_link(conversation, contact)
+        logger.info(
+            "event=incoming_worker_entities_ready correlation_id=%s tenant_id=%s contact_id=%s conversation_id=%s",
+            correlation_id,
+            tenant.id,
+            contact.id,
+            conversation.id,
+        )
 
-        with db.begin():
-            inbound = Message(
-                conversation_id=conversation.id,
-                tenant_id=tenant.id,
-                text=str(parsed.get("text") or ""),
-                from_me=False,
-                created_at=datetime.utcnow(),
-            )
-            db.add(inbound)
-            db.flush()
-            db.refresh(inbound)
-            logger.info(
-                "event=incoming_worker_message_persisted correlation_id=%s message_pk=%s",
-                correlation_id,
-                inbound.id,
-            )
+        inbound = Message(
+            conversation_id=conversation.id,
+            tenant_id=tenant.id,
+            text=str(parsed.get("text") or ""),
+            from_me=False,
+            created_at=datetime.utcnow(),
+        )
+        db.add(inbound)
+        db.flush()
+        db.refresh(inbound)
+        logger.info(
+            "event=incoming_worker_message_persisted correlation_id=%s message_pk=%s",
+            correlation_id,
+            inbound.id,
+        )
 
-        with db.begin():
-            persisted_message = db.execute(select(Message).where(Message.id == inbound.id)).scalars().first()
-            persisted_conversation, _ = get_or_create_conversation(
-                db,
-                tenant_id=tenant.id,
-                phone=contact.phone,
-                contact_id=contact.id,
-            )
-            if persisted_message and persisted_conversation:
+        persisted_message = db.execute(select(Message).where(Message.id == inbound.id)).scalars().first()
+        persisted_conversation, _ = get_or_create_conversation(
+            db,
+            tenant_id=tenant.id,
+            phone=contact.phone,
+            contact_id=contact.id,
+        )
+
+        if persisted_message and persisted_conversation:
+            try:
                 handle_incoming_message(db=db, message=persisted_message, conversation=persisted_conversation)
-            logger.info("event=incoming_worker_flow_executed correlation_id=%s", correlation_id)
+            except Exception:
+                logger.warning(
+                    "event=incoming_worker_tracking_warning correlation_id=%s tenant_id=%s stage=incoming_worker_flow reason=tracking_failed",
+                    correlation_id,
+                    tenant.id,
+                    exc_info=True,
+                )
+        logger.info("event=incoming_worker_flow_executed correlation_id=%s", correlation_id)
+
+        db.commit()
+    except Exception:
+        if db.in_transaction():
+            db.rollback()
+        raise
+    finally:
+        db.close()
 
     logger.info("event=incoming_worker_done correlation_id=%s tenant_id=%s phone=%s job_id=%s stage=incoming_worker_done", correlation_id, payload.get("tenant_id") or "n/a", parsed.get("phone") if parsed else payload.get("phone") or "n/a", payload.get("job_id") or "n/a")
