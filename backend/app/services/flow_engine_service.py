@@ -1479,6 +1479,7 @@ def process_flow_engine(
         _safe_set_conversation_current_node(db, conversation, None)
         conversation.current_flow = None
     elif runtime_session and invalid_reason:
+        old_session_id = runtime_session.id
         _emit_runtime_event(
             db=db,
             tenant_id=conversation.tenant_id,
@@ -1491,7 +1492,35 @@ def process_flow_engine(
         )
         session_service.clear_runtime_session(conversation.tenant_id, user_identifier, flow, reason=invalid_reason)
         _safe_set_conversation_current_node(db, conversation, None)
-        conversation.current_flow = None
+        conversation.current_flow = flow.id
+        conversation.mode = "flow"
+        restart_start_node = _get_start_node(
+            db=db,
+            flow_id=flow.id,
+            tenant_id=conversation.tenant_id,
+            runtime_graph=runtime_graph,
+        )
+        if restart_start_node:
+            restart_node_id = restart_start_node.id
+            if isinstance(restart_start_node, VersionedFlowNode):
+                _safe_set_conversation_current_node(db, conversation, None)
+            else:
+                _safe_set_conversation_current_node(db, conversation, restart_node_id)
+            runtime_session = session_service.save_runtime_session(
+                tenant_id=conversation.tenant_id,
+                user_identifier=user_identifier,
+                flow=flow,
+                current_node_id=restart_node_id,
+                context=conversation.context if isinstance(conversation.context, dict) else {},
+                status="running",
+            )
+            logger.info(
+                "[FLOW SESSION RESTART] old_session_id=%s new_session_id=%s",
+                old_session_id,
+                runtime_session.id,
+            )
+        else:
+            runtime_session = None
     elif runtime_session and runtime_session.current_node_id:
         parsed_node = _parse_uuid(runtime_session.current_node_id)
         if parsed_node:
@@ -1819,6 +1848,10 @@ def process_flow_engine(
         tenant_id=conversation.tenant_id,
         runtime_graph=runtime_graph,
     )
+    if node:
+        preview = (_resolve_node_text(_extract_node_data(node)) or "").strip().replace("\n", " ")
+        logger.info("[FLOW START EXECUTE] node_id=%s text_preview=%s", node.id, preview[:80])
+        logger.info("[FLOW MODE KEEP] mode=flow reason=start_node_found")
     if not node:
         if _is_greeting(normalized_message):
             session_service.clear_runtime_session(conversation.tenant_id, user_identifier, flow, reason="node_missing_on_greeting")
