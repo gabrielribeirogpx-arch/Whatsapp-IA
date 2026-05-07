@@ -1082,16 +1082,26 @@ def _emit_runtime_event(
     payload = dict(metadata or {})
     if flow_version_id:
         payload["flow_version_id"] = str(flow_version_id)
-
-    record_flow_event(
-        db=db,
-        tenant_id=tenant_id,
-        conversation_id=conversation_id,
-        flow_id=flow_id,
-        node_id=node_id,
-        event_type=event_type,
-        metadata=payload or None,
-    )
+    try:
+        record_flow_event(
+            db=db,
+            tenant_id=tenant_id,
+            conversation_id=conversation_id,
+            flow_id=flow_id,
+            flow_version_id=flow_version_id,
+            node_id=node_id,
+            event_type=event_type,
+            metadata=payload or None,
+        )
+    except Exception as exc:
+        logger.warning(
+            "[FLOW RUNTIME EVENT WARNING] event emission failed conversation_id=%s flow_id=%s flow_version_id=%s event_type=%s error=%s",
+            conversation_id,
+            flow_id,
+            flow_version_id,
+            event_type,
+            exc,
+        )
 
 
 def emit_message_received_event(
@@ -1430,6 +1440,11 @@ def process_flow_engine(
     logger.info("[FLOW SELECTED] %s", flow_id or str(flow.id))
     runtime_graph = _get_current_flow_runtime(db=db, flow=flow, tenant_id=conversation.tenant_id)
     current_flow_version_id = _parse_uuid(runtime_graph.get("version_id") if isinstance(runtime_graph, dict) else None)
+    if current_flow_version_id is None:
+        current_flow_version_id = _parse_uuid(
+            getattr(flow, "published_version_id", None)
+            or getattr(flow, "current_version_id", None)
+        )
     session_service = FlowSessionService(db)
     user_identifier = conversation.phone_number
     normalized_message = _normalize_text(message_text)
