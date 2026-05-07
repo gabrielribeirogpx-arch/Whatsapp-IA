@@ -1,6 +1,5 @@
 'use client';
 
-import Link from 'next/link';
 import { FormEvent, useEffect, useState } from 'react';
 
 import { getSystemSettings, updateSystemSettings } from '../../../lib/api';
@@ -66,23 +65,13 @@ export default function SettingsPage() {
     }
   }
 
-  return (
-    <div className="settings-page-wrapper">
-      <nav className="dash-sidebar">
-        <div className="dash-sidebar-logo">
-          <img src="/Logo.svg" alt="Ícone" className="logo-icon" />
-          <img src="/Logo2.svg" alt="Logo" className="logo-full" />
-        </div>
-        <span className="dash-nav-section">Principal</span>
-        <Link href="/dashboard" className="dash-nav-item">
-          <span className="dash-nav-label">Dashboard</span>
-        </Link>
-        <Link href="/dashboard/settings" className="dash-nav-item active">
-          <span className="dash-nav-label">Configurações</span>
-        </Link>
-      </nav>
+  if (loading) {
+    return <div className="p-6 text-sm text-gray-500">Carregando...</div>;
+  }
 
-      <main className="settings-main-content">
+  return (
+    <section className="w-full min-w-0 px-6 py-6">
+      <div className="max-w-4xl mx-auto space-y-6">
         <header className="settings-header">
           <h1>Configurações do sistema</h1>
           <p>Gerencie integração WhatsApp, webhook e preferências gerais.</p>
@@ -168,7 +157,7 @@ export default function SettingsPage() {
             {statusMessage ? <p className={`settings-feedback ${statusType}`}>{statusMessage}</p> : null}
           </div>
         </form>
-      </main>
-    </div>
+      </div>
+    </section>
   );
 }
