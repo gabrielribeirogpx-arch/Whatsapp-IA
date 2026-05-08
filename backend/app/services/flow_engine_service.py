@@ -938,7 +938,7 @@ def get_active_visual_flow(db: Session, tenant_id: uuid.UUID) -> Flow | None:
     for flow in candidates:
         runtime_graph = _get_current_flow_runtime(db=db, flow=flow, tenant_id=tenant_id)
         nodes = runtime_graph.get("nodes") if isinstance(runtime_graph, dict) else None
-        start_node = _find_start_node(nodes or []) if isinstance(nodes, list) else None
+        start_node = _find_real_start_node(nodes or []) if isinstance(nodes, list) else None
         if start_node:
             return flow
     return None
