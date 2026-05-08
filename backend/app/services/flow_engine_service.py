@@ -1626,29 +1626,6 @@ def _send_start_message_on_session_restart(
     start_node_id = _node_get(start_node, "id")
     logger.info("[FLOW START MESSAGE ATTEMPT] node_id=%s node_type=%s", start_node_id, node_type)
 
-    if node_type == "message":
-        text = _resolve_node_text(node_data)
-        job_id = _send_flow_whatsapp_message(tenant=tenant, phone=conversation.phone_number, text=text)
-        if not job_id:
-            logger.error("[FLOW START MESSAGE NOT SENT] node_id=%s", start_node_id)
-            next_node_id = start_node_id
-            _safe_set_conversation_current_node(db, conversation, next_node_id)
-            return session_service.save_runtime_session(
-                tenant_id=conversation.tenant_id,
-                user_identifier=user_identifier,
-                flow=flow,
-                current_node_id=next_node_id,
-                context=conversation.context if isinstance(conversation.context, dict) else {},
-                status="running",
-                variables={"flow_version": published_version_number},
-            )
-        logger.info(
-            "[FLOW START MESSAGE SENT] node_id=%s text_preview=%s",
-            start_node_id,
-            _text_preview(text),
-        )
-        logger.info("[START MESSAGE BEFORE SESSION SAVE] node_id=%s", start_node_id)
-
     start_edges = _get_edges(
         db=db,
         flow_id=flow.id,
@@ -1658,7 +1635,40 @@ def _send_start_message_on_session_restart(
     next_edge = _pick_default_edge(start_edges)
     if next_edge:
         next_node_id = next_edge.target
-    elif node_type != "terminal":
+        logger.info(
+            "[FLOW EDGE ADVANCE AFTER MESSAGE] from_node_id=%s to_node_id=%s edge_id=%s",
+            start_node_id,
+            next_node_id,
+            next_edge.id,
+        )
+
+    if node_type == "message":
+        text = _resolve_node_text(node_data)
+        job_id = _send_flow_whatsapp_message(tenant=tenant, phone=conversation.phone_number, text=text)
+        if not job_id:
+            logger.error("[FLOW START MESSAGE NOT SENT] node_id=%s", start_node_id)
+            if not next_node_id and node_type != "terminal":
+                next_node_id = start_node_id
+            _safe_set_conversation_current_node(db, conversation, next_node_id)
+            runtime_session = session_service.save_runtime_session(
+                tenant_id=conversation.tenant_id,
+                user_identifier=user_identifier,
+                flow=flow,
+                current_node_id=next_node_id,
+                context=conversation.context if isinstance(conversation.context, dict) else {},
+                status="running",
+                variables={"flow_version": published_version_number},
+            )
+            logger.info("[FLOW SESSION SAVE AFTER ADVANCE] current_node_id=%s", next_node_id)
+            return runtime_session
+        logger.info(
+            "[FLOW START MESSAGE SENT] node_id=%s text_preview=%s",
+            start_node_id,
+            _text_preview(text),
+        )
+        logger.info("[START MESSAGE BEFORE SESSION SAVE] node_id=%s", start_node_id)
+
+    if not next_node_id and node_type != "terminal":
         next_node_id = start_node_id
 
     _safe_set_conversation_current_node(db, conversation, next_node_id)
@@ -1671,6 +1681,7 @@ def _send_start_message_on_session_restart(
         status="running",
         variables={"flow_version": published_version_number},
     )
+    logger.info("[FLOW SESSION SAVE AFTER ADVANCE] current_node_id=%s", next_node_id)
     logger.info("[SESSION SAVE AFTER START SEND] node_id=%s", next_node_id)
     return runtime_session
 def process_flow_engine(
@@ -2313,6 +2324,13 @@ def process_flow_engine(
             logger.info("[FLOW NEXT NODE] current_node_id=%s next_node_id=%s", node.id, next_node_id)
             if node_type in {"message", "text", "msg"}:
                 logger.info("[FLOW MESSAGE SENT ADVANCE] from_node_id=%s to_node_id=%s edge_id=%s", node.id, next_node_id, getattr(next_edge, "id", None))
+                if next_edge:
+                    logger.info(
+                        "[FLOW EDGE ADVANCE AFTER MESSAGE] from_node_id=%s to_node_id=%s edge_id=%s",
+                        node.id,
+                        next_node_id,
+                        getattr(next_edge, "id", None),
+                    )
             print(f"[current_node_id] {node.id}")
             print(f"[next_node_id] {next_node_id}")
             node = _advance_to_edge_target(
@@ -2336,6 +2354,7 @@ def process_flow_engine(
                     context=conversation.context if isinstance(conversation.context, dict) else {},
                     status="running",
                 )
+                logger.info("[FLOW SESSION SAVE AFTER ADVANCE] current_node_id=%s", node.id)
             if not node:
                 reached_max_steps = False
                 break
