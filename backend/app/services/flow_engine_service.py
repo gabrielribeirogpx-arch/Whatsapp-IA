@@ -1197,6 +1197,7 @@ def _set_flow_mode(db: Session, conversation: Conversation, flow_id: uuid.UUID, 
 
 def _keep_flow_mode(conversation: Conversation) -> None:
     logger.info("[MODE KEEP] flow conversation_id=%s node_id=%s", conversation.id, conversation.current_node_id)
+    logger.info("[FLOW MODE PRESERVED] mode=flow")
     if conversation.mode == "flow" and conversation.current_node_id:
         logger.info("[MODE PROTECTED] mantendo modo flow durante execução")
 
@@ -1288,7 +1289,7 @@ def _is_terminal_node(node_data: dict[str, Any], edges: list[FlowEdge | Versione
         or node_data.get("isTerminal")
         or node_data.get("endFlow")
         or node_data.get("isEnd")
-    ) or len(edges) == 0
+    )
 
 
 def _emit_node_entered_event(
@@ -1382,6 +1383,29 @@ def _reset_to_bot_mode(db: Session, conversation: Conversation, reason: str) -> 
     logger.info("[MODE RESET] bot conversation_id=%s reason=%s", conversation.id, reason)
 
 
+def _preserve_flow_at_current_node(
+    db: Session,
+    conversation: Conversation,
+    runtime_session: FlowSession | None = None,
+    session_service: FlowSessionService | None = None,
+    user_identifier: str | None = None,
+    flow: Flow | None = None,
+) -> None:
+    if conversation.current_node_id:
+        set_current_node(conversation=conversation, node_id=conversation.current_node_id, db=db)
+    conversation.mode = "flow"
+    _keep_flow_mode(conversation)
+    if runtime_session and session_service and user_identifier and flow:
+        session_service.save_runtime_session(
+            tenant_id=conversation.tenant_id,
+            user_identifier=user_identifier,
+            flow=flow,
+            current_node_id=conversation.current_node_id,
+            context=conversation.context if isinstance(conversation.context, dict) else {},
+            status="running",
+        )
+
+
 def _advance_to_edge_target(
     db: Session,
     conversation: Conversation,
@@ -1390,24 +1414,19 @@ def _advance_to_edge_target(
     runtime_session: FlowSession | None = None,
     session_service: FlowSessionService | None = None,
     flow_version_id: uuid.UUID | None = None,
+    user_identifier: str | None = None,
+    flow: Flow | None = None,
 ) -> FlowNode | VersionedFlowNode | None:
     if not edge:
-        logger.info("Flow sem proxima aresta, encerrando fluxo conversation_id=%s", conversation.id)
-        if conversation.current_flow:
-            _emit_runtime_event(
-                db=db,
-                tenant_id=conversation.tenant_id,
-                conversation_id=conversation.id,
-                flow_id=conversation.current_flow,
-                flow_version_id=flow_version_id,
-                node_id=conversation.current_node_id,
-                event_type="flow_completed",
-                metadata={"completion_reason": "no_next_edge"},
-                dedupe_bucket_seconds=30,
-            )
-        if runtime_session and session_service:
-            session_service.end_session(runtime_session, status="completed")
-        _reset_to_bot_mode(db=db, conversation=conversation, reason="flow_finished_no_next_edge")
+        logger.info("Flow sem proxima aresta, sem nó terminal explícito; aguardando input conversation_id=%s", conversation.id)
+        _preserve_flow_at_current_node(
+            db=db,
+            conversation=conversation,
+            runtime_session=runtime_session,
+            session_service=session_service,
+            user_identifier=user_identifier,
+            flow=flow,
+        )
         return None
 
     if edge.target is None:
@@ -1443,6 +1462,8 @@ def _advance_to_edge_target(
     )
     logger.info("[FLOW STATE] current=%s next=%s", conversation.current_node_id, next_node.id)
     set_current_node(conversation=conversation, node_id=next_node.id, db=db)
+    logger.info("[FLOW NEXT NODE SAVED] next_node_id=%s", next_node.id)
+    _keep_flow_mode(conversation)
     return next_node
 
 
@@ -1943,6 +1964,8 @@ def process_flow_engine(
                 runtime_session=runtime_session,
                 session_service=session_service,
                 flow_version_id=current_flow_version_id,
+                user_identifier=user_identifier,
+                flow=flow,
             )
             selected_start_edge = None
             for edge in start_edges:
@@ -2096,6 +2119,8 @@ def process_flow_engine(
                 runtime_session=runtime_session,
                 session_service=session_service,
                 flow_version_id=current_flow_version_id,
+                user_identifier=user_identifier,
+                flow=flow,
             )
             if node and session_service:
                 runtime_session = session_service.save_runtime_session(
@@ -2213,6 +2238,8 @@ def process_flow_engine(
                 runtime_session=runtime_session,
                 session_service=session_service,
                 flow_version_id=current_flow_version_id,
+                user_identifier=user_identifier,
+                flow=flow,
             )
             if not node:
                 reached_max_steps = False
@@ -2312,6 +2339,8 @@ def process_flow_engine(
                 runtime_session=runtime_session,
                 session_service=session_service,
                 flow_version_id=current_flow_version_id,
+                user_identifier=user_identifier,
+                flow=flow,
             )
             if not node:
                 reached_max_steps = False
@@ -2409,6 +2438,8 @@ def process_flow_engine(
                 runtime_session=runtime_session,
                 session_service=session_service,
                 flow_version_id=current_flow_version_id,
+                user_identifier=user_identifier,
+                flow=flow,
             )
             if not node:
                 reached_max_steps = False
