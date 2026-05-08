@@ -878,12 +878,28 @@ def _is_greeting(normalized_message: str) -> bool:
     return normalized_message == "oi"
 
 
-def _extract_node_data(node: FlowNode | VersionedFlowNode) -> dict[str, Any]:
-    metadata = node.metadata_json or {}
+def _extract_node_data(node: FlowNode | VersionedFlowNode | dict[str, Any]) -> dict[str, Any]:
+    metadata_raw = (
+        _node_get(node, "metadata_json")
+        or _node_get(node, "data")
+        or {}
+    )
+    if isinstance(metadata_raw, str):
+        try:
+            metadata_raw = json.loads(metadata_raw)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            metadata_raw = {}
+    metadata = metadata_raw if isinstance(metadata_raw, dict) else {}
+
+    node_content = _node_get(node, "content")
+    node_type = _node_get(node, "type")
+    node_text = _node_get(node, "text") if isinstance(node, dict) else None
+    node_content_dict = _node_get(node, "content") if isinstance(node, dict) else None
+
     return {
-        "label": metadata.get("label") or node.content or node.type,
-        "text": node.content or metadata.get("text"),
-        "content": node.content,
+        "label": metadata.get("label") or node_content or node_type,
+        "text": metadata.get("text") or metadata.get("message") or metadata.get("content") or node_text or node_content_dict or node_content,
+        "content": node_content,
         "buttons": metadata.get("buttons") if isinstance(metadata.get("buttons"), list) else [],
         "condition": metadata.get("condition"),
         "action": metadata.get("action"),
