@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from dataclasses import dataclass
 from typing import Any
 
+from fastapi import HTTPException
 from sqlalchemy import desc, func, select
 from sqlalchemy.orm import Session
 
@@ -534,20 +535,24 @@ def resolve_runtime_flow_graph(db: Session, tenant_id: uuid.UUID, flow_id: str) 
     if cached:
         return cached
 
-    selected_version = _get_valid_flow_version_by_id(db=db, flow=flow, version_id=flow.published_version_id)
-    source = "published_version"
-    if not selected_version:
+    selected_version = None
+    source = "none"
+    if flow.published_version_id:
+        selected_version = _get_valid_flow_version_by_id(db=db, flow=flow, version_id=flow.published_version_id)
+        source = "published_version"
+        if not selected_version:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Published version inválida para flow {flow.id}. Execute force-republish-current.",
+            )
+    else:
         selected_version = _get_valid_flow_version_by_id(db=db, flow=flow, version_id=flow.current_version_id)
         source = "current_version"
 
     if not selected_version:
-        selected_version = _get_latest_valid_flow_version(db=db, flow_id=flow.id)
-        source = "latest_valid_version"
-        logger.warning(
-            "[FLOW_RUNTIME_FALLBACK] flow_id=%s published_version_id=%s current_version_id=%s",
-            flow.id,
-            flow.published_version_id,
-            flow.current_version_id,
+        raise HTTPException(
+            status_code=409,
+            detail=f"Nenhuma versão executável encontrada para flow {flow.id}.",
         )
 
     nodes = selected_version.nodes if selected_version and isinstance(selected_version.nodes, list) else []
@@ -566,13 +571,10 @@ def resolve_runtime_flow_graph(db: Session, tenant_id: uuid.UUID, flow_id: str) 
     mismatch = bool(selected_version and selected_version.flow_id != flow.id) or (current_start_preview and published_start_preview and current_start_preview != published_start_preview)
     if mismatch:
         logger.warning('[FLOW VERSION MISMATCH] flow_id=%s selected_version_id=%s selected_flow_id=%s current_start_preview="%s" published_start_preview="%s"', flow.id, getattr(selected_version, 'id', None), getattr(selected_version, 'flow_id', None), current_start_preview, published_start_preview)
-        repaired = _republish_from_current_nodes(db=db, flow=flow)
-        if repaired:
-            selected_version = repaired
-            nodes = repaired.nodes if isinstance(repaired.nodes, list) else []
-            edges = repaired.edges if isinstance(repaired.edges, list) else []
-            source = "republished_from_current_nodes"
-            db.commit()
+        raise HTTPException(
+            status_code=409,
+            detail=f"[FLOW VERSION MISMATCH] flow_id={flow.id}. Execute force-republish-current.",
+        )
 
     runtime_payload = {
         "flow_id": str(flow.id),
