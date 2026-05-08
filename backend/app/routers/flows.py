@@ -18,7 +18,7 @@ from sqlalchemy.orm import load_only
 
 from app.database import get_db
 from app.core.redis_client import get_redis_client
-from app.models import Conversation, Flow, FlowEdge, FlowEvent, FlowExecution, FlowNode, FlowSession, FlowVersion, Tenant
+from app.models import Conversation, Flow, FlowEdge, FlowEvent, FlowExecution, FlowNode, FlowSession, FlowStep, FlowVersion, Tenant
 from app.services.flow_analytics_service import PERIODS, get_flow_analytics, resolve_analytics_period
 from app.services.flow_engine_service import (
     get_flow_for_builder,
@@ -419,6 +419,16 @@ def reset_tenant_flows(payload: ResetTenantFlowsPayload, db: Session = Depends(g
                 .delete(synchronize_session=False)
             )
         print(f"[FLOW RESET STEP DONE] step=delete_flow_nodes count={deleted_flow_nodes}", flush=True)
+
+        logger.info("[FLOW RESET STEP] delete_flow_steps")
+        deleted_flow_steps = 0
+        if removable_flow_ids:
+            deleted_flow_steps = (
+                db.query(FlowStep)
+                .filter(FlowStep.flow_id.in_(removable_flow_ids))
+                .delete(synchronize_session=False)
+            )
+        print(f"[FLOW RESET STEP DONE] step=delete_flow_steps count={deleted_flow_steps}", flush=True)
 
         logger.info("[FLOW RESET STEP] delete_flow_versions")
         deleted_flow_versions = 0
