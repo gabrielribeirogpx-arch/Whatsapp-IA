@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from app.schemas.flow import FlowUpdate
-from sqlalchemy import String, cast, inspect, or_, select
+from sqlalchemy import String, cast, inspect, or_, select, text
 from sqlalchemy.orm import Session
 from sqlalchemy.orm import load_only
 
@@ -164,7 +164,7 @@ class DeleteFlowResponse(BaseModel):
 class ResetTenantFlowsPayload(BaseModel):
     tenant_id: uuid.UUID
     confirm: str
-    keep_flow_name: str = "Flow Wazza 2"
+    keep_flow_id: uuid.UUID
 
 
 def _extract_start_node_metadata(nodes: list[dict[str, Any]]) -> tuple[str | None, str]:
@@ -325,68 +325,80 @@ def reset_tenant_flows(payload: ResetTenantFlowsPayload, db: Session = Depends(g
     try:
         tenant_uuid = payload.tenant_id
         print("[FLOW RESET START]", tenant_uuid, flush=True)
-        logger.warning("[FLOW RESET START] tenant_id=%s keep_flow_name=%s", tenant_uuid, payload.keep_flow_name)
+        logger.warning("[FLOW RESET START] tenant_id=%s keep_flow_id=%s", tenant_uuid, payload.keep_flow_id)
 
         if payload.confirm != "RESET_ALL_FLOWS":
             return JSONResponse(status_code=400, content={"ok": False, "error": "INVALID_CONFIRM", "message": "confirm inválido"})
 
-        preserve_flow_name = "2 Flow Wazza"
-        protected_flow_names = {payload.keep_flow_name, preserve_flow_name}
         keep_flow = db.execute(
-            select(Flow)
-            .where(Flow.tenant_id == tenant_uuid, Flow.name.in_(protected_flow_names))
-            .order_by(Flow.created_at.asc())
+            select(Flow).where(Flow.tenant_id == tenant_uuid, Flow.id == payload.keep_flow_id)
         ).scalars().first()
-        keep_flow_id = keep_flow.id if keep_flow else None
+        if not keep_flow:
+            return JSONResponse(status_code=404, content={"ok": False, "error": "KEEP_FLOW_NOT_FOUND", "message": "keep_flow_id não encontrado para o tenant"})
+        keep_flow_id = keep_flow.id
 
-        logger.info("[FLOW RESET STEP] collect_flow_version_ids")
-        version_ids = [
+        logger.info("[FLOW RESET STEP] collect_removable_flows")
+        removable_flow_ids = [
             row[0]
-            for row in db.query(FlowVersion.id)
-            .filter(FlowVersion.tenant_id == tenant_uuid)
+            for row in db.query(Flow.id)
+            .filter(Flow.tenant_id == tenant_uuid, Flow.id != keep_flow_id)
             .all()
         ]
-        print(f"[FLOW RESET STEP DONE] step=collect_flow_version_ids count={len(version_ids)}", flush=True)
+        removable_version_ids = []
+        if removable_flow_ids:
+            removable_version_ids = [
+                row[0]
+                for row in db.query(FlowVersion.id)
+                .filter(FlowVersion.tenant_id == tenant_uuid, FlowVersion.flow_id.in_(removable_flow_ids))
+                .all()
+            ]
+        keep_version_ids = [
+            row[0]
+            for row in db.query(FlowVersion.id)
+            .filter(FlowVersion.tenant_id == tenant_uuid, FlowVersion.flow_id == keep_flow_id)
+            .all()
+        ]
+        print(f"[FLOW RESET STEP DONE] step=collect_removable_flows count={len(removable_flow_ids)}", flush=True)
 
         logger.info("[FLOW RESET STEP] delete_flow_executions")
         deleted_flow_executions = 0
-        if version_ids:
+        if removable_version_ids:
             deleted_flow_executions = (
                 db.query(FlowExecution)
-                .filter(FlowExecution.flow_version_id.in_(version_ids))
+                .filter(FlowExecution.flow_version_id.in_(removable_version_ids))
                 .delete(synchronize_session=False)
             )
         print(f"[FLOW RESET STEP DONE] step=delete_flow_executions count={deleted_flow_executions}", flush=True)
 
+        deleted_keep_flow_executions = 0
+        if keep_version_ids:
+            deleted_keep_flow_executions = (
+                db.query(FlowExecution)
+                .filter(FlowExecution.flow_version_id.in_(keep_version_ids))
+                .delete(synchronize_session=False)
+            )
+        print(f"[FLOW RESET STEP DONE] step=delete_keep_flow_executions count={deleted_keep_flow_executions}", flush=True)
+
         logger.info("[FLOW RESET STEP] delete_flow_sessions")
-        deleted_flow_sessions = db.query(FlowSession).filter(FlowSession.tenant_id == tenant_uuid).delete(synchronize_session=False)
+        deleted_flow_sessions = db.query(FlowSession).filter(FlowSession.tenant_id == tenant_uuid, FlowSession.flow_id.in_(removable_flow_ids)).delete(synchronize_session=False) if removable_flow_ids else 0
         print(f"[FLOW RESET STEP DONE] step=delete_flow_sessions count={deleted_flow_sessions}", flush=True)
 
-        deleted_flow_events = db.query(FlowEvent).filter(FlowEvent.tenant_id == tenant_uuid).delete(synchronize_session=False)
+        deleted_keep_flow_sessions = db.query(FlowSession).filter(FlowSession.tenant_id == tenant_uuid, FlowSession.flow_id == keep_flow_id).delete(synchronize_session=False)
+        print(f"[FLOW RESET STEP DONE] step=delete_keep_flow_sessions count={deleted_keep_flow_sessions}", flush=True)
+
+        deleted_flow_events = db.query(FlowEvent).filter(FlowEvent.tenant_id == tenant_uuid, FlowEvent.flow_id.in_(removable_flow_ids)).delete(synchronize_session=False) if removable_flow_ids else 0
         print(f"[FLOW RESET STEP DONE] step=delete_flow_events count={deleted_flow_events}", flush=True)
 
-        logger.info("[FLOW RESET STEP] delete_archived_flows")
-        conditions = []
-
-        if hasattr(Flow, "is_deleted"):
-            conditions.append(Flow.is_deleted.is_(True))
-
-        if hasattr(Flow, "deleted_at"):
-            conditions.append(Flow.deleted_at.is_not(None))
-
-        if hasattr(Flow, "archived_at"):
-            conditions.append(Flow.archived_at.is_not(None))
-
-        removable_flow_ids: list[uuid.UUID] = []
-        if conditions:
-            removable_flow_ids_query = db.query(Flow.id).filter(Flow.tenant_id == tenant_uuid).filter(or_(*conditions))
-            if keep_flow_id:
-                removable_flow_ids_query = removable_flow_ids_query.filter(Flow.id != keep_flow_id)
-            removable_flow_ids = [row[0] for row in removable_flow_ids_query.all()]
-            deleted_archived_flows = 0
-        else:
-            deleted_archived_flows = 0
-        print(f"[FLOW RESET STEP DONE] step=delete_archived_flows count={deleted_archived_flows}", flush=True)
+        deleted_optional_logs = 0
+        inspector = inspect(db.bind)
+        for optional_table in ("flow_logs", "flow_event_logs"):
+            if inspector.has_table(optional_table) and removable_flow_ids:
+                result = db.execute(
+                    text(f"DELETE FROM {optional_table} WHERE tenant_id = :tenant_id AND flow_id = ANY(:flow_ids)"),
+                    {"tenant_id": tenant_uuid, "flow_ids": removable_flow_ids},
+                )
+                deleted_optional_logs += int(result.rowcount or 0)
+        print(f"[FLOW RESET STEP DONE] step=delete_optional_logs count={deleted_optional_logs}", flush=True)
 
         logger.info("[FLOW RESET STEP] delete_flow_nodes")
         deleted_flow_nodes = 0
@@ -419,6 +431,7 @@ def reset_tenant_flows(payload: ResetTenantFlowsPayload, db: Session = Depends(g
         print(f"[FLOW RESET STEP DONE] step=delete_flow_versions count={deleted_flow_versions}", flush=True)
 
         logger.info("[FLOW RESET STEP] delete_flows")
+        deleted_archived_flows = 0
         if removable_flow_ids:
             deleted_archived_flows = (
                 db.query(Flow)
@@ -446,6 +459,9 @@ def reset_tenant_flows(payload: ResetTenantFlowsPayload, db: Session = Depends(g
                 break
         print(f"[FLOW RESET STEP DONE] step=clear_redis count={redis_deleted}", flush=True)
 
+        remaining_flows = db.query(Flow.id).filter(Flow.tenant_id == tenant_uuid).all()
+        remaining_flow_ids = [str(row[0]) for row in remaining_flows]
+
         db.commit()
         logger.warning(
             "[FLOW RESET DONE] tenant_id=%s keep_flow_id=%s deleted_flow_executions=%s deleted_flow_sessions=%s deleted_flow_events=%s deleted_flow_nodes=%s deleted_flow_edges=%s deleted_flow_versions=%s deleted_archived_flows=%s redis_deleted=%s",
@@ -470,6 +486,9 @@ def reset_tenant_flows(payload: ResetTenantFlowsPayload, db: Session = Depends(g
             "deleted_flow_edges_count": deleted_flow_edges,
             "deleted_flow_versions_count": deleted_flow_versions,
             "deleted_archived_flows_count": deleted_archived_flows,
+            "deleted_flows_count": deleted_archived_flows,
+            "remaining_flows_count": len(remaining_flow_ids),
+            "remaining_flow_ids": remaining_flow_ids,
             "cleared_cache_keys_count": redis_deleted,
         }
     except Exception as e:
