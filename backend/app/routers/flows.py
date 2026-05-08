@@ -18,7 +18,7 @@ from sqlalchemy.orm import load_only
 
 from app.database import get_db
 from app.core.redis_client import get_redis_client
-from app.models import Conversation, Flow, FlowEvent, FlowExecution, FlowSession, FlowVersion, Tenant
+from app.models import Conversation, Flow, FlowEdge, FlowEvent, FlowExecution, FlowNode, FlowSession, FlowVersion, Tenant
 from app.services.flow_analytics_service import PERIODS, get_flow_analytics, resolve_analytics_period
 from app.services.flow_engine_service import (
     get_flow_for_builder,
@@ -365,13 +365,6 @@ def reset_tenant_flows(payload: ResetTenantFlowsPayload, db: Session = Depends(g
         deleted_flow_events = db.query(FlowEvent).filter(FlowEvent.tenant_id == tenant_uuid).delete(synchronize_session=False)
         print(f"[FLOW RESET STEP DONE] step=delete_flow_events count={deleted_flow_events}", flush=True)
 
-        logger.info("[FLOW RESET STEP] delete_flow_versions")
-        versions_query = db.query(FlowVersion).filter(FlowVersion.tenant_id == tenant_uuid)
-        if keep_flow_id:
-            versions_query = versions_query.filter(FlowVersion.flow_id != keep_flow_id)
-        deleted_flow_versions = versions_query.delete(synchronize_session=False)
-        print(f"[FLOW RESET STEP DONE] step=delete_flow_versions count={deleted_flow_versions}", flush=True)
-
         logger.info("[FLOW RESET STEP] delete_archived_flows")
         conditions = []
 
@@ -384,14 +377,55 @@ def reset_tenant_flows(payload: ResetTenantFlowsPayload, db: Session = Depends(g
         if hasattr(Flow, "archived_at"):
             conditions.append(Flow.archived_at.is_not(None))
 
+        removable_flow_ids: list[uuid.UUID] = []
         if conditions:
-            flows_query = db.query(Flow).filter(Flow.tenant_id == tenant_uuid).filter(or_(*conditions))
+            removable_flow_ids_query = db.query(Flow.id).filter(Flow.tenant_id == tenant_uuid).filter(or_(*conditions))
             if keep_flow_id:
-                flows_query = flows_query.filter(Flow.id != keep_flow_id)
-            deleted_archived_flows = flows_query.delete(synchronize_session=False)
+                removable_flow_ids_query = removable_flow_ids_query.filter(Flow.id != keep_flow_id)
+            removable_flow_ids = [row[0] for row in removable_flow_ids_query.all()]
+            deleted_archived_flows = 0
         else:
             deleted_archived_flows = 0
         print(f"[FLOW RESET STEP DONE] step=delete_archived_flows count={deleted_archived_flows}", flush=True)
+
+        logger.info("[FLOW RESET STEP] delete_flow_nodes")
+        deleted_flow_nodes = 0
+        if removable_flow_ids:
+            deleted_flow_nodes = (
+                db.query(FlowNode)
+                .filter(FlowNode.flow_id.in_(removable_flow_ids))
+                .delete(synchronize_session=False)
+            )
+        print(f"[FLOW RESET STEP DONE] step=delete_flow_nodes count={deleted_flow_nodes}", flush=True)
+
+        logger.info("[FLOW RESET STEP] delete_flow_edges")
+        deleted_flow_edges = 0
+        if removable_flow_ids:
+            deleted_flow_edges = (
+                db.query(FlowEdge)
+                .filter(FlowEdge.flow_id.in_(removable_flow_ids))
+                .delete(synchronize_session=False)
+            )
+        print(f"[FLOW RESET STEP DONE] step=delete_flow_edges count={deleted_flow_edges}", flush=True)
+
+        logger.info("[FLOW RESET STEP] delete_flow_versions")
+        deleted_flow_versions = 0
+        if removable_flow_ids:
+            deleted_flow_versions = (
+                db.query(FlowVersion)
+                .filter(FlowVersion.flow_id.in_(removable_flow_ids))
+                .delete(synchronize_session=False)
+            )
+        print(f"[FLOW RESET STEP DONE] step=delete_flow_versions count={deleted_flow_versions}", flush=True)
+
+        logger.info("[FLOW RESET STEP] delete_flows")
+        if removable_flow_ids:
+            deleted_archived_flows = (
+                db.query(Flow)
+                .filter(Flow.id.in_(removable_flow_ids))
+                .delete(synchronize_session=False)
+            )
+        print(f"[FLOW RESET STEP DONE] step=delete_flows count={deleted_archived_flows}", flush=True)
 
         logger.info("[FLOW RESET STEP] clear_redis")
         redis_deleted = 0
@@ -414,12 +448,14 @@ def reset_tenant_flows(payload: ResetTenantFlowsPayload, db: Session = Depends(g
 
         db.commit()
         logger.warning(
-            "[FLOW RESET DONE] tenant_id=%s keep_flow_id=%s deleted_flow_executions=%s deleted_flow_sessions=%s deleted_flow_events=%s deleted_flow_versions=%s deleted_archived_flows=%s redis_deleted=%s",
+            "[FLOW RESET DONE] tenant_id=%s keep_flow_id=%s deleted_flow_executions=%s deleted_flow_sessions=%s deleted_flow_events=%s deleted_flow_nodes=%s deleted_flow_edges=%s deleted_flow_versions=%s deleted_archived_flows=%s redis_deleted=%s",
             tenant_uuid,
             keep_flow_id,
             deleted_flow_executions,
             deleted_flow_sessions,
             deleted_flow_events,
+            deleted_flow_nodes,
+            deleted_flow_edges,
             deleted_flow_versions,
             deleted_archived_flows,
             redis_deleted,
@@ -430,6 +466,8 @@ def reset_tenant_flows(payload: ResetTenantFlowsPayload, db: Session = Depends(g
             "keep_flow_id": str(keep_flow_id) if keep_flow_id else None,
             "deleted_flow_executions_count": deleted_flow_executions,
             "deleted_flow_sessions_count": deleted_flow_sessions,
+            "deleted_flow_nodes_count": deleted_flow_nodes,
+            "deleted_flow_edges_count": deleted_flow_edges,
             "deleted_flow_versions_count": deleted_flow_versions,
             "deleted_archived_flows_count": deleted_archived_flows,
             "cleared_cache_keys_count": redis_deleted,
