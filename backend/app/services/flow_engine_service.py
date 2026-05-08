@@ -27,7 +27,7 @@ DEFAULT_FLOW_NAME = "default_visual"
 MAX_AUTO_STEPS = 10
 MAX_RETRIES = 3
 logger = logging.getLogger(__name__)
-_FLOW_RUNTIME_CACHE: dict[uuid.UUID, dict[str, Any]] = {}
+_FLOW_RUNTIME_CACHE: dict[str, dict[str, Any]] = {}
 _FLOW_RUNTIME_EVENT_GUARD: set[str] = set()
 STRONG_YES_MATCHES = {"sim", "s", "claro", "quero", "com certeza", "yes"}
 STRONG_NO_MATCHES = {"nao", "n", "negativo", "no"}
@@ -54,6 +54,16 @@ class VersionedFlowEdge:
     condition: str | None
 
 
+
+
+def _compute_graph_checksum(nodes: list[dict[str, Any]] | None, edges: list[dict[str, Any]] | None) -> str:
+    payload = {"nodes": nodes if isinstance(nodes, list) else [], "edges": edges if isinstance(edges, list) else []}
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def _runtime_cache_key(tenant_id: uuid.UUID, flow_id: uuid.UUID, version_id: uuid.UUID | None, checksum: str) -> str:
+    return f"{tenant_id}:{flow_id}:{version_id}:{checksum}"
 def _parse_uuid(value: Any) -> uuid.UUID | None:
     if isinstance(value, uuid.UUID):
         return value
@@ -333,8 +343,10 @@ def _get_latest_valid_flow_version(db: Session, flow_id: uuid.UUID) -> FlowVersi
 
 
 def invalidate_flow_runtime_cache(flow_id: uuid.UUID) -> None:
-    _FLOW_RUNTIME_CACHE.pop(flow_id, None)
-    logger.info("[CACHE INVALIDATED] flow_id=%s", flow_id)
+    keys_to_remove = [k for k, v in _FLOW_RUNTIME_CACHE.items() if str(flow_id) in str(k) or (isinstance(v, dict) and str(v.get("flow_id")) == str(flow_id))]
+    for key in keys_to_remove:
+        _FLOW_RUNTIME_CACHE.pop(key, None)
+    logger.info("[CACHE INVALIDATED] flow_id=%s keys_removed=%s", flow_id, len(keys_to_remove))
 
 
 def _get_valid_flow_version_by_id(db: Session, flow: Flow, version_id: uuid.UUID | None) -> FlowVersion | None:
@@ -556,16 +568,7 @@ def _republish_from_current_nodes(db: Session, flow: Flow) -> FlowVersion | None
     return v
 def resolve_runtime_flow_graph(db: Session, tenant_id: uuid.UUID, flow_id: str) -> dict[str, Any]:
     flow = resolve_flow(db=db, tenant_id=tenant_id, flow_id=flow_id)
-    cached = _FLOW_RUNTIME_CACHE.get(flow.id)
-    if cached:
-        cached_nodes = cached.get("nodes") if isinstance(cached, dict) else []
-        logger.info(
-            "[CACHE HIT] cache_key=%s cached_version_id=%s cached_start_text=%s",
-            f"runtime_flow:{flow.id}",
-            cached.get("version_id") if isinstance(cached, dict) else None,
-            _start_preview_from_nodes(cached_nodes if isinstance(cached_nodes, list) else []),
-        )
-        return cached
+    cached = None
 
     selected_version = None
     source = "none"
@@ -661,12 +664,21 @@ def resolve_runtime_flow_graph(db: Session, tenant_id: uuid.UUID, flow_id: str) 
             detail=f"[FLOW VERSION MISMATCH] flow_id={flow.id}. Execute force-republish-current.",
         )
 
+    runtime_nodes = nodes if isinstance(nodes, list) else []
+    runtime_edges = edges if isinstance(edges, list) else []
+    graph_checksum = _compute_graph_checksum(runtime_nodes, runtime_edges)
+    cache_key = _runtime_cache_key(tenant_id, flow.id, getattr(selected_version, "id", None), graph_checksum)
+    cached = _FLOW_RUNTIME_CACHE.get(cache_key)
+    if cached:
+        return cached
     runtime_payload = {
         "flow_id": str(flow.id),
         "version_id": str(selected_version.id) if selected_version else None,
         "source": source,
-        "nodes": nodes if isinstance(nodes, list) else [],
-        "edges": edges if isinstance(edges, list) else [],
+        "graph_checksum": graph_checksum,
+        "cache_key": cache_key,
+        "nodes": runtime_nodes,
+        "edges": runtime_edges,
     }
     start_node_id = None
     for node in runtime_payload["nodes"]:
@@ -702,7 +714,7 @@ def resolve_runtime_flow_graph(db: Session, tenant_id: uuid.UUID, flow_id: str) 
         runtime_payload["version_id"],
         runtime_payload["source"],
     )
-    _FLOW_RUNTIME_CACHE[flow.id] = runtime_payload
+    _FLOW_RUNTIME_CACHE[cache_key] = runtime_payload
     return runtime_payload
 
 

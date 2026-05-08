@@ -3,6 +3,8 @@ from __future__ import annotations
 import uuid
 import logging
 import asyncio
+import hashlib
+import json
 from datetime import datetime
 from typing import Any
 
@@ -36,6 +38,11 @@ logger = logging.getLogger(__name__)
 logger.info("[FLOW API] carregada")
 
 
+
+
+def _graph_checksum(nodes: list[dict[str, Any]], edges: list[dict[str, Any]]) -> str:
+    payload = {"nodes": nodes if isinstance(nodes, list) else [], "edges": edges if isinstance(edges, list) else []}
+    return hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")).hexdigest()
 def _extract_start_preview(nodes: list[dict[str, Any]]) -> str:
     for node in nodes:
         if not isinstance(node, dict):
@@ -1329,7 +1336,7 @@ def force_republish_current_tenant_flow(
 
     nodes, edges = _builder_graph_from_flow(flow)
     if not nodes:
-        raise HTTPException(status_code=422, detail="Builder graph vazio: sem nodes para republicar")
+        raise HTTPException(status_code=400, detail="Builder graph vazio: sem nodes para republicar")
 
     validate_flow_payload_or_400(nodes, edges)
     last_version = db.execute(
@@ -1368,6 +1375,7 @@ def force_republish_current_tenant_flow(
     if not isinstance(validation_errors, list):
         validation_errors = [validation_errors]
 
+    checksum = _graph_checksum(nodes, edges)
     response_payload = {
         "flow_id": str(flow.id),
         "version_id": str(new_version.id),
@@ -1377,6 +1385,7 @@ def force_republish_current_tenant_flow(
         "start_node_id": start_node_id,
         "start_text_preview": start_text_preview,
         "validation_errors": validation_errors,
+        "graph_checksum": checksum,
     }
     logger.info(
         "[FORCE REPUBLISH RESULT] flow_id=%s version_id=%s nodes=%s edges=%s start_node_id=%s validation_errors=%s",
@@ -1473,6 +1482,10 @@ def admin_hard_reset_runtime(
     db.commit()
 
     start_node_id, start_text_preview = _extract_start_node_metadata(nodes)
+    published = flow.published_version
+    pub_nodes = published.nodes if published and isinstance(published.nodes, list) else []
+    pub_edges = published.edges if published and isinstance(published.edges, list) else []
+    pub_start_node_id, pub_start_preview = _extract_start_node_metadata(pub_nodes)
     return {
         "flow_id": str(flow.id),
         "tenant_id": str(tenant_uuid),
@@ -1489,6 +1502,7 @@ def admin_hard_reset_runtime(
 
 
 @crud_router.get("/{flow_id}/admin-runtime-audit")
+@crud_router.get("/{flow_id}/runtime-audit")
 def admin_runtime_audit(
     flow_id: str,
     x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
@@ -1552,14 +1566,21 @@ def admin_runtime_audit(
         key = str(user_identifier or "unknown")
         sessions_by_user[key] = sessions_by_user.get(key, 0) + 1
 
+    published = flow.published_version
+    pub_nodes = published.nodes if published and isinstance(published.nodes, list) else []
+    pub_edges = published.edges if published and isinstance(published.edges, list) else []
+    pub_start_node_id, pub_start_preview = _extract_start_node_metadata(pub_nodes)
     return {
         "flow_id": str(flow.id),
         "tenant_id": str(tenant_uuid),
-        "active_published_version_id": str(flow.published_version_id) if flow.published_version_id else None,
+        "published_version_id": str(flow.published_version_id) if flow.published_version_id else None,
         "current_version_id": str(flow.current_version_id) if flow.current_version_id else None,
         "versions": versions_payload,
         "runtime_source": runtime_source,
         "runtime_graph": runtime_graph,
+        "graph_checksum": _graph_checksum(pub_nodes, pub_edges),
+        "start_node_id": pub_start_node_id,
+        "start_text_preview": pub_start_preview,
         "runtime_sessions_total": sessions_total,
         "runtime_sessions_by_user": sessions_by_user,
         "legacy_text_found": bool(old_text_hits),

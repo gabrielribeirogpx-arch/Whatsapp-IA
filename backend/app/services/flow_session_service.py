@@ -64,10 +64,10 @@ class FlowSessionService:
             print(f"[SESSION INVALID] reason=finalized status={session.status} session_id={session.id}")
             return session, "finalized"
 
-        if session.variables.get("flow_version") != flow.version:
-            print(
-                f"[SESSION INVALID] reason=version_mismatch session_version={session.variables.get('flow_version')} flow_version={flow.version}"
-            )
+        session_version_id = (session.variables or {}).get("flow_version_id")
+        published_version_id = str(getattr(flow, "published_version_id", "") or "")
+        if session_version_id and published_version_id and str(session_version_id) != published_version_id:
+            print(f"[SESSION INVALID] reason=version_mismatch session_version_id={session_version_id} published_version_id={published_version_id}")
             return session, "version_mismatch"
 
         return session, None
@@ -93,7 +93,7 @@ class FlowSessionService:
                 current_node_id=str(current_node_id) if current_node_id else None,
                 status=status,
                 context=context or {},
-                variables={"flow_version": flow.version, **(variables or {})},
+                variables={"flow_version": flow.version, "flow_version_id": str(getattr(flow, "published_version_id", "") or ""), **(variables or {})},
             )
             self.db.add(session)
         else:
@@ -102,6 +102,7 @@ class FlowSessionService:
             session.context = context if context is not None else (session.context or {})
             merged_variables = dict(session.variables or {})
             merged_variables["flow_version"] = flow.version
+            merged_variables["flow_version_id"] = str(getattr(flow, "published_version_id", "") or "")
             if variables:
                 merged_variables.update(variables)
             session.variables = merged_variables
