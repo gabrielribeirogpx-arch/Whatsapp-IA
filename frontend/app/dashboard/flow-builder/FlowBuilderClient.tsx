@@ -64,13 +64,6 @@ const NODE_PRESETS: Record<FlowNodeKind, { label: string; type: string; data: Re
 
 const initialNodes: Node[] = [];
 const initialEdges: Edge[] = [];
-const FALLBACK_START_NODE: Node = {
-  id: 'start',
-  type: 'message',
-  position: { x: 250, y: 100 },
-  data: { label: 'Início', isStart: true },
-};
-
 function randomPosition() {
   return {
     x: Math.floor(Math.random() * 550),
@@ -438,15 +431,17 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
   const loadFlow = useCallback(async (flowId: string | null) => {
     try {
       if (!flowId) {
-        setNodes([FALLBACK_START_NODE]);
+        setNodes([]);
         setEdges([]);
-        setShowEmptyFlowWarning(false);
-        setFlowSource('version');
+        setShowEmptyFlowWarning(true);
+        setFlowSource('none');
+        setOperationError('Nenhum fluxo selecionado para carregar.');
         return;
       }
 
       isLoadingFlowRef.current = true;
       setIsLoading(true);
+      setOperationError(null);
       setNodes([]);
       setEdges([]);
       lastLoadedFlowIdRef.current = flowId;
@@ -469,10 +464,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
 
       const data = await Promise.race([requestPromise, timeoutPromise]);
       if (!data) {
-        setNodes([FALLBACK_START_NODE]);
-        setEdges([]);
-        setShowEmptyFlowWarning(false);
-        setFlowSource('version');
+        throw new Error('Payload vazio ao carregar flow.');
         return;
       }
       const payload = data as {
@@ -492,10 +484,21 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
 
       const safeNodes = normalizedFlow.nodes;
       const safeEdges = normalizedFlow.edges;
-      setFlowSource(payload?.source || 'version');
+      const resolvedSource = payload?.source || 'unknown';
+      setFlowSource(resolvedSource);
       setShowEmptyFlowWarning(!safeNodes || safeNodes.length === 0);
-      console.log('NODES RECEBIDOS:', safeNodes);
-      console.log('EDGES RECEBIDOS:', safeEdges);
+      console.info('[BUILDER LOAD]', {
+        flow_id: flowId,
+        version_id: payload?.current_version_id || payload?.published_version_id || payload?.version_id || null,
+        nodes_count: safeNodes.length,
+        edges_count: safeEdges.length,
+      });
+      console.info('[BUILDER SOURCE]', {
+        source: resolvedSource,
+        nodes_count: safeNodes.length,
+        edges_count: safeEdges.length,
+        version_id: payload?.current_version_id || payload?.published_version_id || payload?.version_id || null,
+      });
 
       const formattedNodes: Node[] = safeNodes.map((n: FlowNodePayload) =>
         buildFlowNode({
@@ -517,14 +520,11 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
         }),
       }));
 
-      let nodesToRender =
-        formattedNodes.length === 0
-          ? [FALLBACK_START_NODE]
-          : formattedNodes;
+      const nodesToRender = formattedNodes;
       let edgesToRender = formattedEdges;
-
-      console.log('NODES:', nodesToRender);
-      console.log('EDGES:', edgesToRender);
+      if (nodesToRender.length === 0) {
+        throw new Error('Graph vazio retornado pelo backend. Verifique versão atual/publicada.');
+      }
 
       const hasStoredPositions = nodesToRender.some((n) => n.position && (n.position.x !== 0 || n.position.y !== 0));
       if (hasStoredPositions) {
@@ -538,8 +538,11 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
     } catch (err) {
       console.error('Erro ao carregar flow', err);
       setSelectedFlowId(null);
-      setNodes([FALLBACK_START_NODE]);
+      setNodes([]);
       setEdges([]);
+      setFlowSource('error');
+      setShowEmptyFlowWarning(true);
+      setOperationError(err instanceof Error ? err.message : 'Falha ao carregar fluxo no Builder.');
     } finally {
       isLoadingFlowRef.current = false;
       setIsLoading(false);
@@ -584,7 +587,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
     if (!flows || flows.length === 0) {
       setSelectedFlowId(null);
       lastLoadedFlowIdRef.current = null;
-      setNodes([FALLBACK_START_NODE]);
+      setNodes([]);
       setEdges([]);
     }
   }, [flows, setEdges, setNodes]);
