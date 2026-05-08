@@ -57,6 +57,7 @@ class VersionedFlowEdge:
     source: uuid.UUID
     target: uuid.UUID
     condition: str | None
+    source_handle: str | None = None
 
 
 
@@ -787,6 +788,11 @@ def _load_flow_version_runtime(flow: Flow, tenant_id: uuid.UUID, flow_version: F
             source=source_id,
             target=target_id,
             condition=str(condition) if condition is not None else None,
+            source_handle=(
+                str(edge_data.get("sourceHandle") or item.get("sourceHandle"))
+                if (edge_data.get("sourceHandle") or item.get("sourceHandle")) is not None
+                else None
+            ),
         )
         edges.append(edge)
         edges_by_source.setdefault(source_id, []).append(edge)
@@ -1244,6 +1250,13 @@ def _is_default_edge(edge: FlowEdge | VersionedFlowEdge) -> bool:
 
 
 def _pick_default_edge(edges: list[FlowEdge | VersionedFlowEdge]) -> FlowEdge | VersionedFlowEdge | None:
+    for edge in edges:
+        source_handle = _normalize_text(
+            getattr(edge, "source_handle", None)
+            or getattr(edge, "sourceHandle", None)
+        )
+        if source_handle in {"sourcehandle/default", "source/default", "default"}:
+            return edge
     for edge in edges:
         if _is_default_edge(edge):
             return edge
@@ -2443,7 +2456,8 @@ def process_flow_engine(
                     to_type,
                 )
                 if node and to_type == "condition":
-                    logger.info("[FLOW WAITING CONDITION INPUT] node_id=%s", node.id)
+                    logger.info("[FLOW WAITING CONDITION INPUT] current_node_id=%s", node.id)
+                    break
             if not node:
                 reached_max_steps = False
                 break
