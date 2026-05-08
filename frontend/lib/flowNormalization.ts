@@ -42,7 +42,7 @@ export function normalizeFlow(flow: FlowLike): NormalizedFlowGraph {
   const persistedEdges = Array.isArray(flow?.raw_edges) ? (flow.raw_edges as FlowEdgePayload[]) : [];
 
   const selectedNodes =
-    versionNodes.length > 1
+    versionNodes.length > 0
       ? versionNodes
       : directNodes.length > 0
       ? directNodes
