@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.orm import load_only
 
 from app.database import get_db
+from app.core.redis_client import get_redis_client
 from app.models import Conversation, Flow, FlowSession, FlowVersion, Tenant
 from app.services.flow_analytics_service import PERIODS, get_flow_analytics, resolve_analytics_period
 from app.services.flow_engine_service import (
@@ -175,6 +176,27 @@ def _builder_graph_from_flow(flow: Flow) -> tuple[list[dict[str, Any]], list[dic
     if not edges and flow.current_version and isinstance(flow.current_version.edges, list):
         edges = flow.current_version.edges
     return (nodes if isinstance(nodes, list) else []), (edges if isinstance(edges, list) else [])
+
+
+def _clear_runtime_related_redis_keys(flow_id: uuid.UUID, tenant_id: uuid.UUID) -> int:
+    redis = get_redis_client()
+    flow_str = str(flow_id)
+    tenant_str = str(tenant_id)
+    cursor = 0
+    deleted = 0
+    while True:
+        cursor, keys = redis.scan(cursor=cursor, count=300)
+        for key in keys or []:
+            key_text = str(key)
+            lowered = key_text.lower()
+            if flow_str not in key_text and tenant_str not in key_text:
+                continue
+            if not any(token in lowered for token in ("flow", "runtime", "session", "tenant")):
+                continue
+            deleted += redis.delete(key_text)
+        if cursor == 0:
+            break
+    return deleted
 
 
 class CanonicalFlowVersionResponse(BaseModel):
@@ -1379,6 +1401,169 @@ def force_republish_current_tenant_flow(
     return {
         **response_payload,
         "new_version_id": str(new_version.id),
+    }
+
+
+@crud_router.post("/{flow_id}/admin-hard-reset-runtime")
+def admin_hard_reset_runtime(
+    flow_id: str,
+    x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
+    db: Session = Depends(get_db),
+):
+    tenant_uuid = _resolve_tenant_header(x_tenant_id)
+    flow = _get_flow_by_identifier(db=db, flow_id=flow_id, tenant_id=tenant_uuid)
+    if not flow:
+        raise HTTPException(status_code=404, detail="Flow not found")
+
+    builder_graph = get_flow_for_builder(db=db, tenant_id=tenant_uuid, flow_id=str(flow.id))
+    nodes = builder_graph.get("nodes") if isinstance(builder_graph, dict) else []
+    edges = builder_graph.get("edges") if isinstance(builder_graph, dict) else []
+    nodes = nodes if isinstance(nodes, list) else []
+    edges = edges if isinstance(edges, list) else []
+    if not nodes:
+        raise HTTPException(status_code=400, detail="Builder graph vazio; reset cancelado sem alterações")
+    validate_flow_payload_or_400(nodes, edges)
+
+    old_versions_count = (
+        db.query(FlowVersion)
+        .filter(FlowVersion.flow_id == flow.id, FlowVersion.tenant_id == tenant_uuid)
+        .count()
+    )
+    db.query(FlowVersion).filter(FlowVersion.flow_id == flow.id, FlowVersion.tenant_id == tenant_uuid).update(
+        {FlowVersion.is_active: False, FlowVersion.is_published: False},
+        synchronize_session=False,
+    )
+    flow.current_version_id = None
+    flow.published_version_id = None
+    db.flush()
+
+    deleted_sessions_count = (
+        db.query(FlowSession)
+        .filter(FlowSession.flow_id == flow.id, FlowSession.tenant_id == tenant_uuid)
+        .delete(synchronize_session=False)
+    )
+
+    cleared_cache_keys_count = _clear_runtime_related_redis_keys(flow.id, tenant_uuid)
+    invalidate_flow_runtime_cache(flow.id)
+
+    last_version = db.execute(
+        select(FlowVersion.version)
+        .where(FlowVersion.flow_id == flow.id, FlowVersion.tenant_id == tenant_uuid)
+        .order_by(FlowVersion.version.desc())
+        .limit(1)
+    ).scalar()
+    next_version_number = (last_version or 0) + 1
+    new_version = FlowVersion(
+        flow_id=flow.id,
+        tenant_id=tenant_uuid,
+        version=next_version_number,
+        nodes=nodes,
+        edges=edges,
+        snapshot={"nodes": nodes, "edges": edges},
+        is_active=True,
+        is_published=True,
+    )
+    db.add(new_version)
+    db.flush()
+    flow.current_version_id = new_version.id
+    flow.published_version_id = new_version.id
+    flow.version = new_version.version
+    flow.status = "published"
+    db.add(flow)
+    db.commit()
+
+    start_node_id, start_text_preview = _extract_start_node_metadata(nodes)
+    return {
+        "flow_id": str(flow.id),
+        "tenant_id": str(tenant_uuid),
+        "new_version_id": str(new_version.id),
+        "new_version_number": new_version.version,
+        "nodes_count": len(nodes),
+        "edges_count": len(edges),
+        "start_node_id": start_node_id,
+        "start_text_preview": start_text_preview,
+        "deleted_or_disabled_versions_count": old_versions_count,
+        "deleted_sessions_count": deleted_sessions_count,
+        "cleared_cache_keys_count": cleared_cache_keys_count,
+    }
+
+
+@crud_router.get("/{flow_id}/admin-runtime-audit")
+def admin_runtime_audit(
+    flow_id: str,
+    x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
+    db: Session = Depends(get_db),
+):
+    tenant_uuid = _resolve_tenant_header(x_tenant_id)
+    flow = _get_flow_by_identifier(db=db, flow_id=flow_id, tenant_id=tenant_uuid)
+    if not flow:
+        raise HTTPException(status_code=404, detail="Flow not found")
+
+    versions = (
+        db.query(FlowVersion)
+        .filter(FlowVersion.flow_id == flow.id, FlowVersion.tenant_id == tenant_uuid)
+        .order_by(FlowVersion.version.desc())
+        .all()
+    )
+    old_markers = [
+        "Boa 👋 Me fala melhor...",
+        "Fala! 👋 Você já usa WhatsApp para vender ou atender clientes?",
+    ]
+    versions_payload: list[dict[str, Any]] = []
+    old_text_hits: list[dict[str, Any]] = []
+    for version in versions:
+        nodes = version.nodes if isinstance(version.nodes, list) else []
+        start_node_id, preview = _extract_start_node_metadata(nodes)
+        has_old = any(marker in preview for marker in old_markers)
+        if has_old:
+            old_text_hits.append({"source": "flow_version", "version_id": str(version.id), "preview": preview})
+        versions_payload.append(
+            {
+                "id": str(version.id),
+                "version": version.version,
+                "is_active": bool(version.is_active),
+                "is_published": bool(version.is_published),
+                "nodes_count": len(nodes),
+                "edges_count": len(version.edges) if isinstance(version.edges, list) else 0,
+                "start_node_id": start_node_id,
+                "start_text_preview": preview,
+            }
+        )
+
+    runtime_source = "unknown"
+    try:
+        runtime_graph = resolve_runtime_flow_graph(db=db, tenant_id=tenant_uuid, flow_id=str(flow.id))
+        runtime_source = str(runtime_graph.get("source") or "unknown")
+        runtime_preview = _extract_start_preview(runtime_graph.get("nodes") if isinstance(runtime_graph.get("nodes"), list) else [])
+        if any(marker in runtime_preview for marker in old_markers):
+            old_text_hits.append({"source": "runtime_graph", "preview": runtime_preview})
+    except HTTPException as exc:
+        runtime_graph = {"error": exc.detail}
+        runtime_source = "error"
+
+    sessions_total = db.query(FlowSession).filter(FlowSession.flow_id == flow.id, FlowSession.tenant_id == tenant_uuid).count()
+    sessions_by_user_rows = (
+        db.query(FlowSession.user_identifier, FlowSession.id)
+        .filter(FlowSession.flow_id == flow.id, FlowSession.tenant_id == tenant_uuid)
+        .all()
+    )
+    sessions_by_user: dict[str, int] = {}
+    for user_identifier, _ in sessions_by_user_rows:
+        key = str(user_identifier or "unknown")
+        sessions_by_user[key] = sessions_by_user.get(key, 0) + 1
+
+    return {
+        "flow_id": str(flow.id),
+        "tenant_id": str(tenant_uuid),
+        "active_published_version_id": str(flow.published_version_id) if flow.published_version_id else None,
+        "current_version_id": str(flow.current_version_id) if flow.current_version_id else None,
+        "versions": versions_payload,
+        "runtime_source": runtime_source,
+        "runtime_graph": runtime_graph,
+        "runtime_sessions_total": sessions_total,
+        "runtime_sessions_by_user": sessions_by_user,
+        "legacy_text_found": bool(old_text_hits),
+        "legacy_text_hits": old_text_hits,
     }
 
 
