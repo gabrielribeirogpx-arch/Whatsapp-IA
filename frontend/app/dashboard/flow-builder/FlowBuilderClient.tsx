@@ -181,6 +181,8 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
   const [validationErrors, setValidationErrors] = useState<FlowValidationIssue[]>([]);
   const [highlightedNodeId, setHighlightedNodeId] = useState<string | null>(null);
   const [operationError, setOperationError] = useState<string | null>(null);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [isForceRepublishing, setIsForceRepublishing] = useState(false);
   const [isEditing] = useState(true);
   const simulationStartedRef = useRef(false);
   const createSimulationSessionId = () => ((typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : String(Date.now()));
@@ -202,6 +204,13 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
       ? { label: 'Ativo', style: { background: '#DCFCE7', color: '#166534' } }
       : { label: 'OFF', style: { background: '#F1F5F9', color: '#475569' } }
   ), []);
+
+  const toast = useMemo(() => ({
+    success: (message: string) => {
+      setToastMessage(message);
+      setTimeout(() => setToastMessage(null), 4000);
+    },
+  }), []);
 
   const parseHttpStatus = useCallback((error: unknown): number | null => {
     if (!(error instanceof Error)) return null;
@@ -905,6 +914,24 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
     }
   }, [selectedFlowId]);
 
+  const handleForceRepublish = useCallback(async () => {
+    if (!selectedFlowId || isForceRepublishing) return;
+
+    setIsForceRepublishing(true);
+    try {
+      const response = await apiFetch(`/api/flows/${selectedFlowId}/force-republish-current`, { method: 'POST' });
+      await parseApiResponse(response);
+      console.log('[FORCE REPUBLISH]', { flowId: selectedFlowId, status: 200 });
+      toast.success('Flow republicado com sucesso');
+      await loadFlow(selectedFlowId);
+      console.log('[PUBLISHED VERSION UPDATED]', { flowId: selectedFlowId });
+    } catch (error) {
+      console.error('[FORCE REPUBLISH] erro ao republicar flow', error);
+    } finally {
+      setIsForceRepublishing(false);
+    }
+  }, [isForceRepublishing, loadFlow, selectedFlowId, toast]);
+
   const handleActivateFlow = useCallback(async () => {
     if (!selectedFlowId) return;
     if (validationErrors.length > 0) return;
@@ -1154,6 +1181,11 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
           {operationError}
         </div>
       )}
+      {toastMessage && (
+        <div style={{ position: 'fixed', right: 24, bottom: 24, background: '#111', color: '#fff', padding: '10px 16px', borderRadius: 10, fontSize: 13, boxShadow: '0 8px 24px rgba(0,0,0,0.2)', zIndex: 60 }}>
+          {toastMessage}
+        </div>
+      )}
       {flowSource === 'fallback' && (
         <div style={{ position: 'absolute', top: showEmptyFlowWarning ? 50 : 12, left: '50%', transform: 'translateX(-50%)', zIndex: 25, background: '#eff6ff', color: '#1d4ed8', border: '1px solid #93c5fd', borderRadius: 8, padding: '6px 10px', fontSize: 12 }}>
           Flow recuperado automaticamente
@@ -1246,6 +1278,17 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
                   disabled={isCreatingFlow}
                 >
                   {isCreatingFlow ? 'Criando...' : '+ Criar novo Flow'}
+                </button>
+                <button
+                  type="button"
+                  className="flow-top-btn flow-top-btn-neutral"
+                  onClick={() => {
+                    void handleForceRepublish();
+                  }}
+                  disabled={!selectedFlowId || isForceRepublishing}
+                  style={{ padding: '6px 10px', fontSize: 12 }}
+                >
+                  {isForceRepublishing ? 'Republicando...' : 'Force Republish'}
                 </button>
                 <button
                   type="button"
