@@ -21,6 +21,8 @@ class FlowSessionService:
             conversation_id=conversation_id,
         ).first()
 
+        logger_payload = {"tenant_id": str(tenant_id), "user_identifier": user_identifier, "flow_id": str(flow.id)}
+        print(f"[FLOW SESSION SAVE] {logger_payload} current_node_id={current_node_id}")
         if not session:
             session = FlowSession(
                 flow_id=flow_id,
@@ -81,6 +83,8 @@ class FlowSessionService:
             .order_by(FlowSession.updated_at.desc(), FlowSession.created_at.desc())
             .first()
         )
+        logger_payload = {"tenant_id": str(tenant_id), "user_identifier": user_identifier, "flow_id": str(flow.id)}
+        print(f"[FLOW SESSION SAVE] {logger_payload} current_node_id={current_node_id}")
         if not session:
             session = FlowSession(
                 tenant_id=tenant_id,
@@ -101,8 +105,10 @@ class FlowSessionService:
             if variables:
                 merged_variables.update(variables)
             session.variables = merged_variables
+        self.db.add(session)
         self.db.commit()
         self.db.refresh(session)
+        print(f"[FLOW SESSION COMMIT] session_id={session.id} current_node_id={session.current_node_id}")
         return session
 
     def clear_runtime_session(self, tenant_id, user_identifier: str, flow: Flow, reason: str = "manual_reset") -> None:

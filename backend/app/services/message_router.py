@@ -23,6 +23,7 @@ def handle_incoming_message(db: Session, message: Message, conversation: Convers
     )
 
     if mode == "flow":
+        print("[FLOW MODE LOCK] mode=flow never_switch_to_bot=true")
         if conversation.current_node_id:
             print("[MODE PROTECTED] mantendo modo flow durante execução")
         else:
@@ -63,8 +64,10 @@ def handle_incoming_message(db: Session, message: Message, conversation: Convers
                 f"reason={'flow_engine_empty_response' if used_fallback else 'none'}"
             )
             if used_fallback:
-                print("[BOT FALLBACK] executando bot")
-                result = handle_bot(db, message, conversation)
+                print("[FALLBACK BLOCKED] reason=active_flow_session")
+                result = result or {}
+                result["fallback"] = False
+                result["response"] = result.get("response") or "Fluxo ativo. Vou continuar pelo fluxo atual."
             base_log_data["mode"] = conversation.mode or mode
             log_conversation_event(
                 db,
