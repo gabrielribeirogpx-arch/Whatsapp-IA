@@ -1,7 +1,7 @@
 """publish and flow session hardening
 
 Revision ID: 20260508_publish_sessions_hardening
-Revises: 20260507_flow_sessions_analytics_fields
+Revises: 7c3d9a1b2f44
 Create Date: 2026-05-08
 """
 from alembic import op
@@ -9,7 +9,7 @@ import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
 revision = '20260508_publish_sessions_hardening'
-down_revision = '20260507_flow_sessions_analytics_fields'
+down_revision = '7c3d9a1b2f44'
 branch_labels = None
 depends_on = None
 
