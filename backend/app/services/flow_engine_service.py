@@ -1644,13 +1644,24 @@ def _send_start_message_on_session_restart(
 
     next_node_id: uuid.UUID | None = None
     start_node_id = _node_get(start_node, "id")
+    logger.info("[FLOW START MESSAGE ATTEMPT] node_id=%s node_type=%s", start_node_id, node_type)
 
     if node_type == "message":
         text = _resolve_node_text(node_data)
         job_id = _send_flow_whatsapp_message(tenant=tenant, phone=conversation.phone_number, text=text)
         if not job_id:
             logger.error("[FLOW START MESSAGE NOT SENT] node_id=%s", start_node_id)
-            return runtime_session
+            next_node_id = start_node_id
+            _safe_set_conversation_current_node(db, conversation, next_node_id)
+            return session_service.save_runtime_session(
+                tenant_id=conversation.tenant_id,
+                user_identifier=user_identifier,
+                flow=flow,
+                current_node_id=next_node_id,
+                context=conversation.context if isinstance(conversation.context, dict) else {},
+                status="running",
+                variables={"flow_version": published_version_number},
+            )
         logger.info(
             "[FLOW START MESSAGE SENT] node_id=%s text_preview=%s",
             start_node_id,
