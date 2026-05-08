@@ -470,6 +470,9 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
       const payload = data as {
         id?: string;
         source?: string;
+        version_id?: string | null;
+        current_version_id?: string | null;
+        published_version_id?: string | null;
         current_version?: { nodes?: unknown[] | null } | null;
         raw_nodes?: unknown[] | null;
       };
