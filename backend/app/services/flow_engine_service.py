@@ -1181,10 +1181,22 @@ def _get_edges(
     ).scalars().all()
 
 
+def _is_default_edge(edge: FlowEdge | VersionedFlowEdge) -> bool:
+    condition = _normalize_text(getattr(edge, "condition", None))
+    if condition in {"", "default", "else", "next"}:
+        return True
+
+    source_handle = _normalize_text(
+        getattr(edge, "source_handle", None)
+        or getattr(edge, "sourceHandle", None)
+        or ((getattr(edge, "data", None) or {}).get("sourceHandle") if isinstance(getattr(edge, "data", None), dict) else None)
+    )
+    return source_handle in {"", "default", "sourcehandle/default", "source/default"}
+
+
 def _pick_default_edge(edges: list[FlowEdge | VersionedFlowEdge]) -> FlowEdge | VersionedFlowEdge | None:
     for edge in edges:
-        condition = _normalize_text(edge.condition)
-        if condition in {"", "default", "else", "next"}:
+        if _is_default_edge(edge):
             return edge
     return edges[0] if edges else None
 
@@ -2299,6 +2311,8 @@ def process_flow_engine(
             next_edge = _pick_default_edge(edges)
             next_node_id = next_edge.target if next_edge else None
             logger.info("[FLOW NEXT NODE] current_node_id=%s next_node_id=%s", node.id, next_node_id)
+            if node_type in {"message", "text", "msg"}:
+                logger.info("[FLOW MESSAGE SENT ADVANCE] from_node_id=%s to_node_id=%s edge_id=%s", node.id, next_node_id, getattr(next_edge, "id", None))
             print(f"[current_node_id] {node.id}")
             print(f"[next_node_id] {next_node_id}")
             node = _advance_to_edge_target(
@@ -2375,6 +2389,7 @@ def process_flow_engine(
 
                 # Persiste o node atual como ponto de espera da resposta
                 set_current_node(conversation=conversation, node_id=node.id, db=db)
+                logger.info("[FLOW WAITING_USER_INPUT] current_node_id=%s node_type=%s", node.id, node_type)
                 reached_max_steps = False
                 break
 
@@ -2417,6 +2432,7 @@ def process_flow_engine(
                     print("[FLOW ERROR] node choice sem texto")
 
                 set_current_node(conversation=conversation, node_id=node.id, db=db)
+                logger.info("[FLOW WAITING_USER_INPUT] current_node_id=%s node_type=%s", node.id, node_type)
                 reached_max_steps = False
                 break
 
@@ -2447,6 +2463,7 @@ def process_flow_engine(
             if not msg:
                 print(f"[FLOW CONDITION WAIT] aguardando resposta no node={node.id}")
                 set_current_node(conversation=conversation, node_id=node.id, db=db)
+                logger.info("[FLOW WAITING_USER_INPUT] current_node_id=%s node_type=%s", node.id, node_type)
                 reached_max_steps = False
                 break
 
