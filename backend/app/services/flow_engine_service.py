@@ -1035,6 +1035,14 @@ def _find_start_node(nodes: list[Any]) -> Any | None:
     return None
 
 
+
+
+def _node_get(node: Any, key: str, default: Any = None) -> Any:
+    if isinstance(node, dict):
+        return node.get(key, default)
+    return getattr(node, key, default)
+
+
 def _get_start_node(
     db: Session,
     flow_id: uuid.UUID,
@@ -1052,9 +1060,9 @@ def _get_start_node(
 
     check_payload = [
         {
-            "id": str(node.id),
-            "type": node.type,
-            "isStart": bool((node.metadata_json or {}).get("isStart")),
+            "id": str(_node_get(node, "id")),
+            "type": _node_get(node, "type"),
+            "isStart": bool((_node_get(node, "metadata_json") or _node_get(node, "data", {}) or {}).get("isStart")),
         }
         for node in nodes
     ]
@@ -1063,8 +1071,9 @@ def _get_start_node(
 
     start_node = find_start_node({"nodes": nodes})
     if start_node:
-        print(f"[FLOW INIT FOUND] node_id={start_node.id}")
-        logger.info("[FLOW INIT FOUND] node_id=%s", start_node.id)
+        start_node_id = _node_get(start_node, "id")
+        print(f"[FLOW INIT FOUND] node_id={start_node_id}")
+        logger.info("[FLOW INIT FOUND] node_id=%s", start_node_id)
         return start_node
 
     return nodes[0] if nodes else None
@@ -1089,9 +1098,9 @@ def _initialize_flow_start_node(
 
     node_payload = [
         {
-            "id": node.id,
-            "type": node.type,
-            "data": node.metadata_json or {},
+            "id": _node_get(node, "id"),
+            "type": _node_get(node, "type"),
+            "data": _node_get(node, "metadata_json") or _node_get(node, "data", {}),
         }
         for node in nodes
     ]
@@ -1699,7 +1708,7 @@ def process_flow_engine(
                 if isinstance(runtime_nodes, list):
                     start_text_preview = _start_preview_from_nodes(runtime_nodes)
             if reloaded_start_node:
-                restart_node_id = reloaded_start_node.id
+                restart_node_id = _node_get(reloaded_start_node, "id")
                 if isinstance(reloaded_start_node, VersionedFlowNode):
                     _safe_set_conversation_current_node(db, conversation, None)
                 else:
@@ -1761,7 +1770,7 @@ def process_flow_engine(
             runtime_graph=runtime_graph,
         )
         if restart_start_node:
-            restart_node_id = restart_start_node.id
+            restart_node_id = _node_get(restart_start_node, "id")
             if isinstance(restart_start_node, VersionedFlowNode):
                 _safe_set_conversation_current_node(db, conversation, None)
             else:
