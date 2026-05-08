@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import uuid
 from datetime import datetime
 from typing import Any
 
@@ -13,10 +14,38 @@ from app.services.conversation_service import get_or_create_conversation
 from app.services.idempotency_service import register_processed_message
 from app.services.message_router import handle_incoming_message
 from app.services.message_service import normalize_meta_message
+from app.core.redis_client import get_redis_client
 from app.services.tenant_service import resolve_tenant_by_phone_number_id
 
 logger = logging.getLogger(__name__)
 
+
+
+DEDUP_TTL_SECONDS = 600
+FLOW_LOCK_TTL_SECONDS = 15
+
+
+def _extract_whatsapp_message_id(payload: dict[str, Any], parsed: dict[str, Any] | None) -> str:
+    candidates = [
+        (parsed or {}).get("message_id"),
+        payload.get("message_id"),
+        payload.get("wamid"),
+        payload.get("id"),
+    ]
+    for candidate in candidates:
+        value = str(candidate or "").strip()
+        if value:
+            return value
+    return ""
+
+
+def _release_session_lock(redis_client: Any, lock_key: str, lock_token: str) -> None:
+    try:
+        current = redis_client.get(lock_key)
+        if current == lock_token:
+            redis_client.delete(lock_key)
+    except Exception:
+        logger.warning("event=incoming_worker_lock_release_warning lock_key=%s", lock_key, exc_info=True)
 
 def _pick_message(payload: dict[str, Any]) -> dict[str, Any] | None:
     normalized = normalize_meta_message(payload)
@@ -44,10 +73,21 @@ def process_incoming_message(payload: dict[str, Any]) -> None:
         logger.warning("event=incoming_worker_skip correlation_id=%s tenant_id=%s phone=%s job_id=%s stage=incoming_worker_parse reason=no_supported_message", correlation_id, "n/a", payload.get("phone") or "n/a", payload.get("job_id") or "n/a")
         return
 
-    correlation_id = str(parsed.get("message_id") or correlation_id)
+    whatsapp_message_id = _extract_whatsapp_message_id(payload, parsed)
+    correlation_id = whatsapp_message_id or str(parsed.get("message_id") or correlation_id)
     logger.info("event=incoming_worker_parsed correlation_id=%s tenant_id=%s phone=%s job_id=%s stage=incoming_worker_parse type=text", correlation_id, "n/a", parsed.get("phone") or "n/a", payload.get("job_id") or "n/a")
 
+    redis_client = get_redis_client()
+    dedup_key = f"wa:processed:{whatsapp_message_id}" if whatsapp_message_id else ""
+    if dedup_key:
+        was_set = bool(redis_client.set(dedup_key, "1", ex=DEDUP_TTL_SECONDS, nx=True))
+        if not was_set:
+            logger.info("[DUPLICATE MESSAGE BLOCKED] message_id=%s", whatsapp_message_id)
+            return
+
     db = SessionLocal()
+    lock_key = ""
+    lock_token = ""
     try:
         phone_number_id = str(parsed.get("phone_number_id") or "").strip()
         tenant = resolve_tenant_by_phone_number_id(db, phone_number_id)
@@ -60,6 +100,13 @@ def process_incoming_message(payload: dict[str, Any]) -> None:
                 payload.get("job_id") or "n/a",
                 phone_number_id,
             )
+            return
+
+        lock_key = f"flow:lock:{tenant.id}:{str(parsed.get('phone') or '').strip()}"
+        lock_token = str(uuid.uuid4())
+        acquired_lock = bool(redis_client.set(lock_key, lock_token, ex=FLOW_LOCK_TTL_SECONDS, nx=True))
+        if not acquired_lock:
+            logger.info("[FLOW LOCKED SKIP] tenant_id=%s phone=%s", tenant.id, parsed.get("phone") or "n/a")
             return
 
         logger.info(
@@ -140,6 +187,9 @@ def process_incoming_message(payload: dict[str, Any]) -> None:
             db.rollback()
         raise
     finally:
+        if lock_key and lock_token:
+            _release_session_lock(redis_client, lock_key, lock_token)
         db.close()
+
 
     logger.info("event=incoming_worker_done correlation_id=%s tenant_id=%s phone=%s job_id=%s stage=incoming_worker_done", correlation_id, payload.get("tenant_id") or "n/a", parsed.get("phone") if parsed else payload.get("phone") or "n/a", payload.get("job_id") or "n/a")
