@@ -37,6 +37,12 @@ crud_router = APIRouter(tags=["flows-crud"])
 logger = logging.getLogger(__name__)
 logger.info("[FLOW API] carregada")
 
+AUDIT_TEXT_MARKERS = [
+    "Boa 👋 Me fala melhor",
+    "Fala! 👋 Você já usa WhatsApp",
+    "Ainda não consegui identificar",
+]
+
 
 
 
@@ -219,6 +225,93 @@ class FlowVersionResponse(CanonicalFlowVersionResponse):
     definition: dict[str, Any]
     is_active: bool
     name: str | None = None
+
+
+@router.get("/tenant-flow-audit")
+def tenant_flow_audit(
+    x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
+    db: Session = Depends(get_db),
+):
+    tenant_uuid = _resolve_tenant_header(x_tenant_id)
+    flows = db.execute(select(Flow).where(Flow.tenant_id == tenant_uuid).order_by(Flow.created_at.asc(), Flow.id.asc())).scalars().all()
+    sessions = db.execute(select(FlowSession).where(FlowSession.tenant_id == tenant_uuid).order_by(FlowSession.updated_at.desc()).limit(500)).scalars().all()
+
+    payload_flows: list[dict[str, Any]] = []
+    payload_sessions: list[dict[str, Any]] = []
+    findings: list[dict[str, Any]] = []
+    for flow in flows:
+        versions = db.execute(
+            select(FlowVersion)
+            .where(FlowVersion.flow_id == flow.id, FlowVersion.tenant_id == tenant_uuid)
+            .order_by(FlowVersion.version.asc(), FlowVersion.created_at.asc())
+        ).scalars().all()
+        version_payload: list[dict[str, Any]] = []
+        contains_texts = {marker: False for marker in AUDIT_TEXT_MARKERS}
+        published_version = next((v for v in versions if v.id == flow.published_version_id), None)
+        published_nodes = published_version.nodes if published_version and isinstance(published_version.nodes, list) else []
+        published_node_ids = {str(n.get("id")) for n in published_nodes if isinstance(n, dict) and n.get("id") is not None}
+
+        for version in versions:
+            nodes = version.nodes if isinstance(version.nodes, list) else []
+            edges = version.edges if isinstance(version.edges, list) else []
+            _, start_text_preview = _extract_start_node_metadata(nodes)
+            nodes_dump = json.dumps(nodes, ensure_ascii=False)
+            for marker in AUDIT_TEXT_MARKERS:
+                if marker in nodes_dump:
+                    contains_texts[marker] = True
+            start_node_id, _ = _extract_start_node_metadata(nodes)
+            version_payload.append({
+                "version": version.version,
+                "id": str(version.id),
+                "is_active": bool(version.is_active),
+                "is_published": bool(version.is_published),
+                "created_at": version.created_at.isoformat() if version.created_at else None,
+                "nodes_count": len(nodes),
+                "edges_count": len(edges),
+                "start_node_id": start_node_id,
+                "start_text_preview": start_text_preview,
+            })
+
+        if len([f for f in flows if f.is_active and not f.is_deleted and f.deleted_at is None]) > 1:
+            findings.append({"flow_id": str(flow.id), "issue": "multiple_active_flows_for_tenant"})
+        if not flow.published_version_id:
+            findings.append({"flow_id": str(flow.id), "issue": "missing_published_version_id"})
+
+        payload_flows.append({
+            "id": str(flow.id),
+            "name": flow.name,
+            "is_active": bool(flow.is_active),
+            "active": bool(flow.is_active),
+            "status": flow.status,
+            "deleted_at": flow.deleted_at.isoformat() if flow.deleted_at else None,
+            "archived_at": getattr(flow, "archived_at", None).isoformat() if getattr(flow, "archived_at", None) else None,
+            "created_at": flow.created_at.isoformat() if flow.created_at else None,
+            "updated_at": flow.updated_at.isoformat() if flow.updated_at else None,
+            "published_version_id": str(flow.published_version_id) if flow.published_version_id else None,
+            "current_version_id": str(flow.current_version_id) if flow.current_version_id else None,
+            "versions_count": len(versions),
+            "contains_texts": contains_texts,
+            "versions": version_payload,
+        })
+
+        for session in [s for s in sessions if s.flow_id == flow.id]:
+            flow_version_id = session.variables.get("flow_version_id") if isinstance(session.variables, dict) else None
+            payload_sessions.append({
+                "flow_id": str(session.flow_id),
+                "flow_version_id": flow_version_id,
+                "current_node_id": session.current_node_id,
+                "status": session.status,
+                "user_identifier": session.user_identifier,
+                "updated_at": session.updated_at.isoformat() if session.updated_at else None,
+                "current_node_in_published_version": bool(session.current_node_id and session.current_node_id in published_node_ids),
+            })
+
+    return {
+        "tenant_id": str(tenant_uuid),
+        "flows": payload_flows,
+        "sessions": payload_sessions,
+        "findings": findings,
+    }
 
 
 def parse_flow_id(flow_id: str):
