@@ -950,16 +950,41 @@ def get_active_visual_flow(db: Session, tenant_id: uuid.UUID) -> Flow | None:
             Flow.tenant_id == tenant_id,
             Flow.is_active.is_(True),
             Flow.is_deleted.is_(False),
+            Flow.deleted_at.is_(None),
         )
         .order_by(Flow.priority.desc(), Flow.created_at.asc(), Flow.id.asc())
     ).scalars().all()
+    eligible: list[Flow] = []
     for flow in candidates:
+        archived_at = getattr(flow, "archived_at", None)
+        if archived_at is not None:
+            continue
+        if not getattr(flow, "published_version_id", None):
+            continue
         runtime_graph = _get_current_flow_runtime(db=db, flow=flow, tenant_id=tenant_id)
         nodes = runtime_graph.get("nodes") if isinstance(runtime_graph, dict) else None
         start_node = _find_real_start_node(nodes or []) if isinstance(nodes, list) else None
         if start_node:
-            return flow
-    return None
+            eligible.append(flow)
+    if len(eligible) > 1:
+        logger.error(
+            "[MULTIPLE_ACTIVE_FLOWS] tenant_id=%s flow_ids=%s",
+            tenant_id,
+            [str(item.id) for item in eligible],
+        )
+        raise HTTPException(status_code=409, detail="Multiple active flows found for tenant")
+    if not eligible:
+        return None
+    selected = eligible[0]
+    logger.info(
+        "[ACTIVE FLOW SELECTED] tenant_id=%s flow_id=%s flow_name=%s published_version_id=%s reason=%s",
+        tenant_id,
+        selected.id,
+        selected.name,
+        selected.published_version_id,
+        "single_eligible_active_flow",
+    )
+    return selected
 
 
 def _get_or_create_visual_flow(db: Session, tenant_id: uuid.UUID) -> Flow:
