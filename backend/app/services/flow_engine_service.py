@@ -1221,6 +1221,34 @@ def _get_node(
     ).scalars().first()
 
 
+def resolve_current_node(
+    flow_data: dict[str, Any] | None,
+    session: FlowSession | None,
+) -> VersionedFlowNode | None:
+    if not isinstance(flow_data, dict) or session is None or not session.current_node_id:
+        return None
+    node_id = _parse_uuid(session.current_node_id)
+    if node_id is None:
+        return None
+    node_map = flow_data.get("node_map") if isinstance(flow_data.get("node_map"), dict) else {}
+    node = node_map.get(node_id)
+    if node:
+        return node
+    nodes = flow_data.get("nodes") if isinstance(flow_data.get("nodes"), list) else []
+    for candidate in nodes:
+        candidate_id = _parse_uuid(_node_get(candidate, "id"))
+        if candidate_id == node_id:
+            return candidate if isinstance(candidate, VersionedFlowNode) else None
+    logger.warning(
+        "[FLOW NODE RESOLUTION FAILED] current_node_id=%s available_nodes=%s flow_version=%s session_version=%s",
+        session.current_node_id,
+        [str(_node_get(candidate, "id")) for candidate in nodes],
+        flow_data.get("version"),
+        (session.variables or {}).get("flow_version") if isinstance(session.variables, dict) else None,
+    )
+    return None
+
+
 def _get_edges(
     db: Session,
     flow_id: uuid.UUID,
@@ -1837,7 +1865,11 @@ def process_flow_engine(
             runtime_session = None
             invalid_reason = None
             _safe_set_conversation_current_node(db, conversation, None)
+            conversation.collected_data = None
+            conversation.pending_input = None
+            conversation.waiting_for_response = False
             conversation.current_flow = flow.id
+            logger.info("[FLOW SESSION RESET FULL] reason=version_mismatch")
             invalidate_flow_runtime_cache(flow.id)
             db.flush()
             db.refresh(flow)
@@ -1943,7 +1975,8 @@ def process_flow_engine(
         else:
             runtime_session = None
     elif runtime_session and runtime_session.current_node_id:
-        parsed_node = _parse_uuid(runtime_session.current_node_id)
+        resolved_runtime_node = resolve_current_node(runtime_graph, runtime_session)
+        parsed_node = _parse_uuid(_node_get(resolved_runtime_node, "id")) if resolved_runtime_node else None
         if parsed_node:
             conversation.current_flow = flow.id
             _safe_set_conversation_current_node(db, conversation, parsed_node)
@@ -1968,14 +2001,15 @@ def process_flow_engine(
         conversation.current_node_id,
     )
     if conversation.current_node_id is None and not initialized_node:
-        logger.info("[FLOW ROUTING] using_fallback=true reason=start_node_missing")
+        logger.info("[FLOW FALLBACK SUPPRESSED] reason=active_flow_session")
         return None
 
     session_node_id = conversation.current_node_id
     if isinstance(initialized_node, VersionedFlowNode):
         session_node_id = initialized_node.id
     elif runtime_session and runtime_session.current_node_id:
-        parsed_node = _parse_uuid(runtime_session.current_node_id)
+        resolved_runtime_node = resolve_current_node(runtime_graph, runtime_session)
+        parsed_node = _parse_uuid(_node_get(resolved_runtime_node, "id")) if resolved_runtime_node else None
         if parsed_node:
             session_node_id = parsed_node
 
@@ -2361,6 +2395,7 @@ def process_flow_engine(
         node_type = str(node.type or "").strip().lower()
         if node_type.endswith("node"):
             node_type = node_type[:-4]
+        logger.info("[FLOW CURRENT NODE] node_id=%s node_type=%s", node.id, node_type)
         node_entered_source = "manual_resume" if force_node else "runtime"
         logger.info("Node executado conversation_id=%s node_id=%s node_type=%s", conversation.id, node.id, node_type)
         _emit_node_entered_event(
@@ -2450,7 +2485,7 @@ def process_flow_engine(
                 if isinstance(to_type, str) and to_type.endswith("node"):
                     to_type = to_type[:-4]
                 logger.info(
-                    "[FLOW ADVANCE AFTER MESSAGE] from_node_id=%s to_node_id=%s to_type=%s",
+                    "[FLOW ADVANCE] from=%s to=%s to_type=%s",
                     from_node_id,
                     node.id if node else None,
                     to_type,
