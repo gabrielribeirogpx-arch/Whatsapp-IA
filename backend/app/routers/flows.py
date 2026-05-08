@@ -327,63 +327,84 @@ def reset_tenant_flows(payload: ResetTenantFlowsPayload, db: Session = Depends(g
 
     tenant_uuid = payload.tenant_id
     logger.warning("[FLOW RESET START] tenant_id=%s keep_flow_name=%s", tenant_uuid, payload.keep_flow_name)
-    keep_flow = db.execute(
-        select(Flow).where(Flow.tenant_id == tenant_uuid, Flow.name == payload.keep_flow_name).order_by(Flow.created_at.asc())
-    ).scalars().first()
-    keep_flow_id = keep_flow.id if keep_flow else None
 
-    deleted_flow_executions = db.query(FlowExecution).filter(FlowExecution.tenant_id == tenant_uuid).delete(synchronize_session=False)
-    deleted_flow_sessions = db.query(FlowSession).filter(FlowSession.tenant_id == tenant_uuid).delete(synchronize_session=False)
-    deleted_flow_events = db.query(FlowEvent).filter(FlowEvent.tenant_id == tenant_uuid).delete(synchronize_session=False)
-    versions_query = db.query(FlowVersion).filter(FlowVersion.tenant_id == tenant_uuid)
-    if keep_flow_id:
-        versions_query = versions_query.filter(FlowVersion.flow_id != keep_flow_id)
-    deleted_flow_versions = versions_query.delete(synchronize_session=False)
+    try:
+        keep_flow = db.execute(
+            select(Flow).where(Flow.tenant_id == tenant_uuid, Flow.name == payload.keep_flow_name).order_by(Flow.created_at.asc())
+        ).scalars().first()
+        keep_flow_id = keep_flow.id if keep_flow else None
 
-    flows_query = db.query(Flow).filter(Flow.tenant_id == tenant_uuid).filter(or_(Flow.is_deleted.is_(True), Flow.archived_at.is_not(None)))
-    if keep_flow_id:
-        flows_query = flows_query.filter(Flow.id != keep_flow_id)
-    deleted_archived_flows = flows_query.delete(synchronize_session=False)
+        logger.info("[FLOW RESET STEP] delete_flow_executions")
+        deleted_flow_executions = db.query(FlowExecution).filter(FlowExecution.tenant_id == tenant_uuid).delete(synchronize_session=False)
 
-    redis_deleted = 0
-    redis = get_redis_client()
-    cursor = 0
-    tenant_token = str(tenant_uuid)
-    while True:
-        cursor, keys = redis.scan(cursor=cursor, count=300)
-        for key in keys or []:
-            key_text = str(key)
-            lowered = key_text.lower()
-            if tenant_token not in key_text:
-                continue
-            if not any(token in lowered for token in ("flow_runtime", "publish_runtime", "session_runtime", "flow", "runtime", "session")):
-                continue
-            redis_deleted += redis.delete(key_text)
-        if cursor == 0:
-            break
+        logger.info("[FLOW RESET STEP] delete_flow_sessions")
+        deleted_flow_sessions = db.query(FlowSession).filter(FlowSession.tenant_id == tenant_uuid).delete(synchronize_session=False)
 
-    db.commit()
-    logger.warning(
-        "[FLOW RESET DONE] tenant_id=%s keep_flow_id=%s deleted_flow_executions=%s deleted_flow_sessions=%s deleted_flow_events=%s deleted_flow_versions=%s deleted_archived_flows=%s redis_deleted=%s",
-        tenant_uuid,
-        keep_flow_id,
-        deleted_flow_executions,
-        deleted_flow_sessions,
-        deleted_flow_events,
-        deleted_flow_versions,
-        deleted_archived_flows,
-        redis_deleted,
-    )
-    return {
-        "success": True,
-        "tenant_id": str(tenant_uuid),
-        "keep_flow_id": str(keep_flow_id) if keep_flow_id else None,
-        "deleted_flow_executions_count": deleted_flow_executions,
-        "deleted_flow_sessions_count": deleted_flow_sessions,
-        "deleted_flow_versions_count": deleted_flow_versions,
-        "deleted_archived_flows_count": deleted_archived_flows,
-        "cleared_cache_keys_count": redis_deleted,
-    }
+        deleted_flow_events = db.query(FlowEvent).filter(FlowEvent.tenant_id == tenant_uuid).delete(synchronize_session=False)
+
+        logger.info("[FLOW RESET STEP] delete_flow_versions")
+        versions_query = db.query(FlowVersion).filter(FlowVersion.tenant_id == tenant_uuid)
+        if keep_flow_id:
+            versions_query = versions_query.filter(FlowVersion.flow_id != keep_flow_id)
+        deleted_flow_versions = versions_query.delete(synchronize_session=False)
+
+        logger.info("[FLOW RESET STEP] delete_archived_flows")
+        flows_query = db.query(Flow).filter(Flow.tenant_id == tenant_uuid).filter(or_(Flow.is_deleted.is_(True), Flow.archived_at.is_not(None)))
+        if keep_flow_id:
+            flows_query = flows_query.filter(Flow.id != keep_flow_id)
+        deleted_archived_flows = flows_query.delete(synchronize_session=False)
+
+        logger.info("[FLOW RESET STEP] clear_redis")
+        redis_deleted = 0
+        redis = get_redis_client()
+        cursor = 0
+        tenant_token = str(tenant_uuid)
+        while True:
+            cursor, keys = redis.scan(cursor=cursor, count=300)
+            for key in keys or []:
+                key_text = str(key)
+                lowered = key_text.lower()
+                if tenant_token not in key_text:
+                    continue
+                if not any(token in lowered for token in ("flow_runtime", "publish_runtime", "session_runtime", "flow", "runtime", "session")):
+                    continue
+                redis_deleted += redis.delete(key_text)
+            if cursor == 0:
+                break
+
+        db.commit()
+        logger.warning(
+            "[FLOW RESET DONE] tenant_id=%s keep_flow_id=%s deleted_flow_executions=%s deleted_flow_sessions=%s deleted_flow_events=%s deleted_flow_versions=%s deleted_archived_flows=%s redis_deleted=%s",
+            tenant_uuid,
+            keep_flow_id,
+            deleted_flow_executions,
+            deleted_flow_sessions,
+            deleted_flow_events,
+            deleted_flow_versions,
+            deleted_archived_flows,
+            redis_deleted,
+        )
+        return {
+            "success": True,
+            "tenant_id": str(tenant_uuid),
+            "keep_flow_id": str(keep_flow_id) if keep_flow_id else None,
+            "deleted_flow_executions_count": deleted_flow_executions,
+            "deleted_flow_sessions_count": deleted_flow_sessions,
+            "deleted_flow_versions_count": deleted_flow_versions,
+            "deleted_archived_flows_count": deleted_archived_flows,
+            "cleared_cache_keys_count": redis_deleted,
+        }
+    except Exception as e:
+        db.rollback()
+        logger.error("[FLOW RESET ERROR] tenant_id=%s traceback=%s", tenant_uuid, traceback.format_exc())
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "error": "RESET_TENANT_FLOWS_FAILED",
+                "message": str(e),
+                "type": e.__class__.__name__,
+            },
+        )
 
 
 def _resolve_flow_query(db: Session, flow_id: str):
