@@ -1676,14 +1676,54 @@ def process_flow_engine(
                 session_version,
                 published_version_number,
             )
+            # Guard: published version changed, abort old in-memory/runtime flow and fully restart from published.
             session_service.clear_runtime_session(conversation.tenant_id, user_identifier, flow, reason="published_version_changed")
             runtime_session = None
             invalid_reason = None
             _safe_set_conversation_current_node(db, conversation, None)
             conversation.current_flow = flow.id
             invalidate_flow_runtime_cache(flow.id)
-            runtime_graph = _get_current_flow_runtime(db=db, flow=flow, tenant_id=conversation.tenant_id)
+            db.flush()
+            db.refresh(flow)
+            runtime_graph = resolve_runtime_flow_graph(db=db, tenant_id=conversation.tenant_id, flow_id=str(flow.id))
             current_flow_version_id = _parse_uuid(runtime_graph.get("version_id") if isinstance(runtime_graph, dict) else None)
+            reloaded_start_node = _get_start_node(
+                db=db,
+                flow_id=flow.id,
+                tenant_id=conversation.tenant_id,
+                runtime_graph=runtime_graph,
+            )
+            start_text_preview = ""
+            if isinstance(runtime_graph, dict):
+                runtime_nodes = runtime_graph.get("nodes")
+                if isinstance(runtime_nodes, list):
+                    start_text_preview = _start_preview_from_nodes(runtime_nodes)
+            if reloaded_start_node:
+                restart_node_id = reloaded_start_node.id
+                if isinstance(reloaded_start_node, VersionedFlowNode):
+                    _safe_set_conversation_current_node(db, conversation, None)
+                else:
+                    _safe_set_conversation_current_node(db, conversation, restart_node_id)
+                runtime_session = session_service.save_runtime_session(
+                    tenant_id=conversation.tenant_id,
+                    user_identifier=user_identifier,
+                    flow=flow,
+                    current_node_id=restart_node_id,
+                    context=conversation.context if isinstance(conversation.context, dict) else {},
+                    status="running",
+                    variables={"flow_version": published_version_number},
+                )
+                logger.info(
+                    "[SESSION RESET RELOAD DONE] published_version=%s start_text_preview=%s",
+                    published_version_number,
+                    start_text_preview,
+                )
+            else:
+                logger.warning(
+                    "[SESSION RESET RELOAD DONE] published_version=%s start_text_preview=%s start_node_missing=true",
+                    published_version_number,
+                    start_text_preview,
+                )
     if _is_reset_command(normalized_message):
         _emit_runtime_event(
             db=db,
