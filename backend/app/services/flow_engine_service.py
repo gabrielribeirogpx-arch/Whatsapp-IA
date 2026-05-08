@@ -569,6 +569,11 @@ def resolve_runtime_flow_graph(db: Session, tenant_id: uuid.UUID, flow_id: str) 
 
     selected_version = None
     source = "none"
+    if not flow.published_version_id:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Flow {flow.id} sem published_version_id. Publique uma versão antes de executar.",
+        )
     if flow.published_version_id:
         selected_version = _get_valid_flow_version_by_id(db=db, flow=flow, version_id=flow.published_version_id)
         source = "published_version"
@@ -622,10 +627,6 @@ def resolve_runtime_flow_graph(db: Session, tenant_id: uuid.UUID, flow_id: str) 
                 start_node_id,
                 validation_errors,
             )
-    else:
-        selected_version = _get_valid_flow_version_by_id(db=db, flow=flow, version_id=flow.current_version_id)
-        source = "current_version"
-
     if not selected_version:
         raise HTTPException(
             status_code=409,
@@ -634,6 +635,11 @@ def resolve_runtime_flow_graph(db: Session, tenant_id: uuid.UUID, flow_id: str) 
 
     nodes = selected_version.nodes if selected_version and isinstance(selected_version.nodes, list) else []
     edges = selected_version.edges if selected_version and isinstance(selected_version.edges, list) else []
+    if not nodes:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Published version vazia para flow {flow.id}.",
+        )
     logger.info(
         "[RUNTIME VERSION] flow_id=%s source=%s version_id=%s version_number=%s",
         flow.id,
