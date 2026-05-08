@@ -46,6 +46,14 @@ def _extract_start_preview(nodes: list[dict[str, Any]]) -> str:
     return ""
 
 
+def _is_terminal_message_node(data: dict[str, Any]) -> bool:
+    return bool(
+        data.get("is_terminal")
+        or data.get("isTerminal")
+        or data.get("endFlow")
+        or data.get("isEnd")
+    )
+
 def _publish_fresh_snapshot(db: Session, flow: Flow, *, reason: str) -> FlowVersion | None:
     latest_version = (
         db.query(FlowVersion)
@@ -391,6 +399,9 @@ def validate_flow_payload_or_400(
             if not {"true", "false"}.issubset(handles):
                 raise HTTPException(status_code=400, detail="VALIDATION_ERROR: CONDITION_REQUIRES_TRUE_FALSE")
         elif node_type == "message" and outgoing_count.get(node_id, 0) < 1:
+            if _is_terminal_message_node(data):
+                logger.info("[FLOW VALIDATION TERMINAL MESSAGE OK] node_id=%s", node_id)
+                continue
             raise HTTPException(status_code=400, detail="VALIDATION_ERROR: MESSAGE_REQUIRES_OUTPUT")
 
     validation = validate_flow_graph(nodes, edges or [], mode="draft")
@@ -1458,6 +1469,7 @@ def publish_tenant_flow_version(
 
     nodes = fresh_version.nodes if isinstance(fresh_version.nodes, list) else []
     edges = fresh_version.edges if isinstance(fresh_version.edges, list) else []
+    validate_flow_payload_or_400(nodes, edges)
     validation = validate_flow_graph(nodes, edges, mode="publish")
     if validation["errors"]:
         raise HTTPException(status_code=422, detail=validation)
@@ -1488,11 +1500,17 @@ def republish_tenant_flow(
     fresh_version = _publish_fresh_snapshot(db=db, flow=flow, reason="republish")
     if not fresh_version:
         raise HTTPException(status_code=422, detail="Flow sem nodes para republicar")
+    nodes = fresh_version.nodes if isinstance(fresh_version.nodes, list) else []
+    edges = fresh_version.edges if isinstance(fresh_version.edges, list) else []
+    validate_flow_payload_or_400(nodes, edges)
+    validation = validate_flow_graph(nodes, edges, mode="publish")
+    if validation["errors"]:
+        raise HTTPException(status_code=422, detail=validation)
     flow.status = "published"
     invalidate_flow_runtime_cache(flow.id)
     db.commit()
     db.refresh(flow)
-    return _serialize_flow_version_response(flow=flow, nodes=fresh_version.nodes or [], edges=fresh_version.edges or [], version_id=fresh_version.id, version=fresh_version.version)
+    return _serialize_flow_version_response(flow=flow, nodes=nodes, edges=edges, version_id=fresh_version.id, version=fresh_version.version)
 
 
 class FlowSimulationPayload(BaseModel):

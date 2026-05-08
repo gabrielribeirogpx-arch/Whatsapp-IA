@@ -187,6 +187,15 @@ def validate_flow_structure(
     return True, None
 
 
+def _is_terminal_message_node(data: dict[str, Any]) -> bool:
+    return bool(
+        data.get("is_terminal")
+        or data.get("isTerminal")
+        or data.get("endFlow")
+        or data.get("isEnd")
+    )
+
+
 def validate_flow_graph(nodes: list[dict[str, Any]] | None, edges: list[dict[str, Any]] | None, mode: str = "draft") -> dict[str, Any]:
     strict_mode = str(mode).lower() in {"published", "publish", "simulate"}
     nodes_payload = nodes if isinstance(nodes, list) else []
@@ -251,7 +260,7 @@ def validate_flow_graph(nodes: list[dict[str, Any]] | None, edges: list[dict[str
     for node_id,node in node_map.items():
         data = node.get("data") if isinstance(node.get("data"), dict) else {}
         node_type = str(node.get("type") or "").strip().lower()
-        is_terminal = bool(data.get("is_terminal") or data.get("isTerminal") or False)
+        is_terminal = _is_terminal_message_node(data)
 
         if node_type == "message":
             text = data.get("text") if isinstance(data.get("text"), str) else data.get("content")
@@ -274,7 +283,9 @@ def validate_flow_graph(nodes: list[dict[str, Any]] | None, edges: list[dict[str
             if not {"true", "false"}.issubset(handles):
                 add_issue(errors, "CONDITION_REQUIRES_TRUE_FALSE", node_id, "Condition precisa ter saída SIM e saída NÃO.")
 
-        if not is_terminal and outgoing.get(node_id, 0) < 1:
+        if node_type == "message" and outgoing.get(node_id, 0) < 1 and is_terminal:
+            logger.info("[FLOW VALIDATION TERMINAL MESSAGE OK] node_id=%s", node_id)
+        elif not is_terminal and outgoing.get(node_id, 0) < 1:
             add_issue(errors if strict_mode else warnings, "NODE_WITHOUT_OUTPUT", node_id, "Este node não tem saída. Conecte a outro node ou marque como final.")
 
     logger.info("[FLOW VALIDATION] mode=%s valid=%s errors=%s warnings=%s", mode, len(errors)==0, len(errors), len(warnings))
