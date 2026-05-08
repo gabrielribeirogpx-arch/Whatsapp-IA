@@ -20,6 +20,7 @@ from app.services.flow_analytics_service import PERIODS, get_flow_analytics, res
 from app.services.flow_engine_service import (
     get_flow_graph,
     invalidate_flow_runtime_cache,
+    resolve_runtime_flow_graph,
     save_flow_graph,
     validate_flow as validate_flow_definition,
     validate_flow_graph,
@@ -1334,13 +1335,38 @@ def force_republish_current_tenant_flow(
     db.refresh(flow)
 
     start_node_id, start_text_preview = _extract_start_node_metadata(nodes)
-    return {
+    runtime_validation = validate_flow_definition({"nodes": nodes, "edges": edges}, mode="published")
+    validation_errors = runtime_validation.get("errors") if isinstance(runtime_validation, dict) else []
+    if not isinstance(validation_errors, list):
+        validation_errors = [validation_errors]
+
+    response_payload = {
         "flow_id": str(flow.id),
-        "new_version_id": str(new_version.id),
+        "version_id": str(new_version.id),
         "version": new_version.version,
         "nodes_count": len(nodes),
+        "edges_count": len(edges),
         "start_node_id": start_node_id,
         "start_text_preview": start_text_preview,
+        "validation_errors": validation_errors,
+    }
+    logger.info(
+        "[FORCE REPUBLISH RESULT] flow_id=%s version_id=%s nodes=%s edges=%s start_node_id=%s validation_errors=%s",
+        flow.id,
+        new_version.id,
+        len(nodes),
+        len(edges),
+        start_node_id,
+        len(validation_errors),
+    )
+    if validation_errors:
+        raise HTTPException(status_code=422, detail=response_payload)
+
+    # confirmação pós-commit de que o runtime resolve sem 409
+    resolve_runtime_flow_graph(db=db, tenant_id=tenant_uuid, flow_id=str(flow.id))
+    return {
+        **response_payload,
+        "new_version_id": str(new_version.id),
     }
 
 

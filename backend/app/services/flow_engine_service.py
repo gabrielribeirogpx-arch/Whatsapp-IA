@@ -1222,7 +1222,12 @@ def emit_message_received_event(
 
 
 def _is_terminal_node(node_data: dict[str, Any], edges: list[FlowEdge | VersionedFlowEdge]) -> bool:
-    return bool(node_data.get("is_terminal") or node_data.get("isTerminal")) or len(edges) == 0
+    return bool(
+        node_data.get("is_terminal")
+        or node_data.get("isTerminal")
+        or node_data.get("endFlow")
+        or node_data.get("isEnd")
+    ) or len(edges) == 0
 
 
 def _emit_node_entered_event(
