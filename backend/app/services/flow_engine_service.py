@@ -2252,6 +2252,10 @@ def process_flow_engine(
                 runtime_session = restart_runtime_session
                 _set_flow_mode(db=db, conversation=conversation, flow_id=flow.id, node_id=selected_start_node_id)
                 logger.info("[FLOW STATE] current=%s next=%s", conversation.current_node_id, selected_start_node_id)
+                db.commit()
+                db.refresh(conversation)
+                logger.info("[FLOW START ADVANCE RETURN] current_node_id=%s", conversation.current_node_id)
+                return None
 
     if conversation.mode == "flow":
         _keep_flow_mode(conversation)
