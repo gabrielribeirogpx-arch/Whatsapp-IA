@@ -1363,7 +1363,13 @@ def force_republish_current_tenant_flow(
         raise HTTPException(status_code=422, detail=response_payload)
 
     # confirmação pós-commit de que o runtime resolve sem 409
-    resolve_runtime_flow_graph(db=db, tenant_id=tenant_uuid, flow_id=str(flow.id))
+    invalidate_flow_runtime_cache(flow.id)
+    try:
+        resolve_runtime_flow_graph(db=db, tenant_id=tenant_uuid, flow_id=str(flow.id))
+    except HTTPException as exc:
+        if exc.status_code == 409:
+            raise HTTPException(status_code=422, detail=exc.detail) from exc
+        raise
     return {
         **response_payload,
         "new_version_id": str(new_version.id),
