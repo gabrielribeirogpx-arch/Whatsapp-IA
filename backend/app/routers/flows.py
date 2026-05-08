@@ -330,8 +330,12 @@ def reset_tenant_flows(payload: ResetTenantFlowsPayload, db: Session = Depends(g
         if payload.confirm != "RESET_ALL_FLOWS":
             return JSONResponse(status_code=400, content={"ok": False, "error": "INVALID_CONFIRM", "message": "confirm inválido"})
 
+        preserve_flow_name = "2 Flow Wazza"
+        protected_flow_names = {payload.keep_flow_name, preserve_flow_name}
         keep_flow = db.execute(
-            select(Flow).where(Flow.tenant_id == tenant_uuid, Flow.name == payload.keep_flow_name).order_by(Flow.created_at.asc())
+            select(Flow)
+            .where(Flow.tenant_id == tenant_uuid, Flow.name.in_(protected_flow_names))
+            .order_by(Flow.created_at.asc())
         ).scalars().first()
         keep_flow_id = keep_flow.id if keep_flow else None
 
@@ -369,10 +373,24 @@ def reset_tenant_flows(payload: ResetTenantFlowsPayload, db: Session = Depends(g
         print(f"[FLOW RESET STEP DONE] step=delete_flow_versions count={deleted_flow_versions}", flush=True)
 
         logger.info("[FLOW RESET STEP] delete_archived_flows")
-        flows_query = db.query(Flow).filter(Flow.tenant_id == tenant_uuid).filter(or_(Flow.is_deleted.is_(True), Flow.archived_at.is_not(None)))
-        if keep_flow_id:
-            flows_query = flows_query.filter(Flow.id != keep_flow_id)
-        deleted_archived_flows = flows_query.delete(synchronize_session=False)
+        conditions = []
+
+        if hasattr(Flow, "is_deleted"):
+            conditions.append(Flow.is_deleted.is_(True))
+
+        if hasattr(Flow, "deleted_at"):
+            conditions.append(Flow.deleted_at.is_not(None))
+
+        if hasattr(Flow, "archived_at"):
+            conditions.append(Flow.archived_at.is_not(None))
+
+        if conditions:
+            flows_query = db.query(Flow).filter(Flow.tenant_id == tenant_uuid).filter(or_(*conditions))
+            if keep_flow_id:
+                flows_query = flows_query.filter(Flow.id != keep_flow_id)
+            deleted_archived_flows = flows_query.delete(synchronize_session=False)
+        else:
+            deleted_archived_flows = 0
         print(f"[FLOW RESET STEP DONE] step=delete_archived_flows count={deleted_archived_flows}", flush=True)
 
         logger.info("[FLOW RESET STEP] clear_redis")
