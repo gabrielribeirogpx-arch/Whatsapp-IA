@@ -161,6 +161,12 @@ class DeleteFlowResponse(BaseModel):
     )
 
 
+class ResetTenantFlowsPayload(BaseModel):
+    tenant_id: uuid.UUID
+    confirm: str
+    keep_flow_name: str = "Flow Wazza 2"
+
+
 def _extract_start_node_metadata(nodes: list[dict[str, Any]]) -> tuple[str | None, str]:
     for node in nodes:
         if not isinstance(node, dict):
@@ -312,6 +318,67 @@ def parse_flow_id(flow_id: str):
         return uuid.UUID(flow_id)
     except Exception:
         return flow_id
+
+
+@router.post("/reset-tenant-flows")
+def reset_tenant_flows(payload: ResetTenantFlowsPayload, db: Session = Depends(get_db)):
+    if payload.confirm != "RESET_ALL_FLOWS":
+        raise HTTPException(status_code=400, detail="confirm inválido")
+
+    tenant_uuid = payload.tenant_id
+    logger.warning("[FLOW RESET START] tenant_id=%s keep_flow_name=%s", tenant_uuid, payload.keep_flow_name)
+    keep_flow = db.execute(
+        select(Flow).where(Flow.tenant_id == tenant_uuid, Flow.name == payload.keep_flow_name).order_by(Flow.created_at.asc())
+    ).scalars().first()
+    keep_flow_id = keep_flow.id if keep_flow else None
+
+    deleted_sessions = db.query(FlowSession).filter(FlowSession.tenant_id == tenant_uuid).delete(synchronize_session=False)
+    versions_query = db.query(FlowVersion).filter(FlowVersion.tenant_id == tenant_uuid)
+    if keep_flow_id:
+        versions_query = versions_query.filter(FlowVersion.flow_id != keep_flow_id)
+    deleted_versions = versions_query.delete(synchronize_session=False)
+
+    flows_query = db.query(Flow).filter(Flow.tenant_id == tenant_uuid).filter(or_(Flow.is_deleted.is_(True), Flow.archived_at.is_not(None)))
+    if keep_flow_id:
+        flows_query = flows_query.filter(Flow.id != keep_flow_id)
+    deleted_archived_flows = flows_query.delete(synchronize_session=False)
+
+    redis_deleted = 0
+    redis = get_redis_client()
+    cursor = 0
+    tenant_token = str(tenant_uuid)
+    while True:
+        cursor, keys = redis.scan(cursor=cursor, count=300)
+        for key in keys or []:
+            key_text = str(key)
+            lowered = key_text.lower()
+            if tenant_token not in key_text:
+                continue
+            if not any(token in lowered for token in ("flow_runtime", "publish_runtime", "session_runtime", "flow", "runtime", "session")):
+                continue
+            redis_deleted += redis.delete(key_text)
+        if cursor == 0:
+            break
+
+    db.commit()
+    logger.warning(
+        "[FLOW RESET DONE] tenant_id=%s keep_flow_id=%s deleted_sessions=%s deleted_versions=%s deleted_archived_flows=%s redis_deleted=%s",
+        tenant_uuid,
+        keep_flow_id,
+        deleted_sessions,
+        deleted_versions,
+        deleted_archived_flows,
+        redis_deleted,
+    )
+    return {
+        "success": True,
+        "tenant_id": str(tenant_uuid),
+        "keep_flow_id": str(keep_flow_id) if keep_flow_id else None,
+        "deleted_sessions": deleted_sessions,
+        "deleted_versions": deleted_versions,
+        "deleted_archived_flows": deleted_archived_flows,
+        "deleted_redis_keys": redis_deleted,
+    }
 
 
 def _resolve_flow_query(db: Session, flow_id: str):

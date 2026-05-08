@@ -33,6 +33,11 @@ STRONG_YES_MATCHES = {"sim", "s", "claro", "quero", "com certeza", "yes"}
 STRONG_NO_MATCHES = {"nao", "n", "negativo", "no"}
 
 
+def _raise_runtime_publish_violation(action: str) -> None:
+    logger.error("[PUBLISH BLOCKED RUNTIME] action=%s", action)
+    raise RuntimeError("Runtime attempted to publish flow version")
+
+
 @dataclass
 class VersionedFlowNode:
     id: uuid.UUID
@@ -544,6 +549,7 @@ def _start_preview_from_nodes(nodes: list[dict[str, Any]] | None) -> str:
 
 
 def _republish_from_current_nodes(db: Session, flow: Flow) -> FlowVersion | None:
+    _raise_runtime_publish_violation("republish_from_current_nodes")
     current = flow.current_version
     nodes = current.nodes if current and isinstance(current.nodes, list) else []
     edges = current.edges if current and isinstance(current.edges, list) else []
@@ -1795,6 +1801,11 @@ def process_flow_engine(
         published_version_number,
         current_version_number,
     )
+    logger.info(
+        "[RUNTIME VERSION STABLE] published_version_id=%s session_version_id=%s",
+        getattr(flow, "published_version_id", None),
+        getattr(runtime_session, "flow_version_id", None) if runtime_session else None,
+    )
     if runtime_session:
         runtime_nodes = runtime_graph.get("nodes") if isinstance(runtime_graph, dict) else []
         logger.info(
@@ -2930,7 +2941,7 @@ def save_flow_graph(db: Session, tenant_id: uuid.UUID, flow_id: str, nodes: list
     db.flush()
     flow.current_version_id = flow_version.id
     if flow.published_version_id is None:
-        flow.published_version_id = flow_version.id
+        logger.warning("[PUBLISH BLOCKED RUNTIME] action=save_flow_graph_auto_publish flow_id=%s", flow.id)
     flow.version = next_version
     db.add(flow)
     if previous_active:
