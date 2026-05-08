@@ -63,3 +63,39 @@ def test_runtime_fallbacks_to_latest_valid(monkeypatch):
     assert isinstance(payload["nodes"], list)
     assert isinstance(payload["edges"], list)
     service.invalidate_flow_runtime_cache(flow.id)
+
+
+def test_runtime_accepts_structurally_valid_published_version_when_validation_has_no_errors(monkeypatch):
+    published_id = uuid.uuid4()
+    flow = _build_flow(published=published_id, current=uuid.uuid4())
+    published = _version(nodes=[{"id": "start", "type": "message", "data": {"isStart": True, "text": "Fala!"}}], edges=[])
+
+    monkeypatch.setattr(service, "resolve_flow", lambda **_: flow)
+    monkeypatch.setattr(service, "_get_valid_flow_version_by_id", lambda **_: None)
+    monkeypatch.setattr(service, "_get_flow_version_by_id", lambda **_: published)
+    monkeypatch.setattr(service, "validate_flow", lambda *_, **__: {"errors": []})
+    monkeypatch.setattr(service, "_get_latest_valid_flow_version", lambda **_: None)
+
+    payload = service.resolve_runtime_flow_graph(db=_DBStub(), tenant_id=flow.tenant_id, flow_id=str(flow.id))
+    assert payload["source"] == "published_version"
+    assert payload["version_id"] == str(published.id)
+    service.invalidate_flow_runtime_cache(flow.id)
+
+
+def test_runtime_raises_for_published_version_without_start_node(monkeypatch):
+    published_id = uuid.uuid4()
+    flow = _build_flow(published=published_id, current=uuid.uuid4())
+    published = _version(nodes=[{"id": "n1", "type": "message", "data": {"text": "sem start"}}], edges=[])
+
+    monkeypatch.setattr(service, "resolve_flow", lambda **_: flow)
+    monkeypatch.setattr(service, "_get_valid_flow_version_by_id", lambda **_: None)
+    monkeypatch.setattr(service, "_get_flow_version_by_id", lambda **_: published)
+    monkeypatch.setattr(service, "validate_flow", lambda *_, **__: {"errors": []})
+    monkeypatch.setattr(service, "_get_latest_valid_flow_version", lambda **_: None)
+
+    try:
+        service.resolve_runtime_flow_graph(db=_DBStub(), tenant_id=flow.tenant_id, flow_id=str(flow.id))
+        assert False, "Expected HTTPException"
+    except Exception as exc:
+        assert getattr(exc, "status_code", None) == 409
+    service.invalidate_flow_runtime_cache(flow.id)
