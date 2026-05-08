@@ -144,6 +144,29 @@ class DeleteFlowResponse(BaseModel):
     )
 
 
+def _extract_start_node_metadata(nodes: list[dict[str, Any]]) -> tuple[str | None, str]:
+    for node in nodes:
+        if not isinstance(node, dict):
+            continue
+        data = node.get("data") if isinstance(node.get("data"), dict) else {}
+        if not bool(data.get("isStart")):
+            continue
+        raw = data.get("text") or data.get("content") or data.get("label")
+        preview = " ".join(str(raw or "").strip().split())[:120]
+        return str(node.get("id")) if node.get("id") is not None else None, preview
+    return None, ""
+
+
+def _builder_graph_from_flow(flow: Flow) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    nodes = flow.nodes_json if isinstance(flow.nodes_json, list) else flow.nodes if isinstance(flow.nodes, list) else []
+    edges = flow.edges_json if isinstance(flow.edges_json, list) else flow.edges if isinstance(flow.edges, list) else []
+    if not nodes and flow.current_version and isinstance(flow.current_version.nodes, list):
+        nodes = flow.current_version.nodes
+    if not edges and flow.current_version and isinstance(flow.current_version.edges, list):
+        edges = flow.current_version.edges
+    return (nodes if isinstance(nodes, list) else []), (edges if isinstance(edges, list) else [])
+
+
 class CanonicalFlowVersionResponse(BaseModel):
     flow_id: str
     version_id: str | None = None
@@ -1208,6 +1231,106 @@ def list_tenant_flow_versions(
     ).scalars().all()
 
     return [_serialize_flow_version(item, flow.current_version_id) for item in versions]
+
+
+@crud_router.get("/{flow_id}/debug-versions")
+def debug_tenant_flow_versions(
+    flow_id: str,
+    x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
+    db: Session = Depends(get_db),
+):
+    tenant_uuid = _resolve_tenant_header(x_tenant_id)
+    flow = _get_flow_by_identifier(db=db, flow_id=flow_id, tenant_id=tenant_uuid)
+    if not flow:
+        raise HTTPException(status_code=404, detail="Flow not found")
+
+    versions = (
+        db.query(FlowVersion)
+        .filter(FlowVersion.flow_id == flow.id, FlowVersion.tenant_id == tenant_uuid)
+        .order_by(FlowVersion.version.desc(), FlowVersion.created_at.desc())
+        .all()
+    )
+    payload_versions: list[dict[str, Any]] = []
+    for version in versions:
+        nodes = version.nodes if isinstance(version.nodes, list) else []
+        start_node_id, start_text_preview = _extract_start_node_metadata(nodes)
+        payload_versions.append(
+            {
+                "id": str(version.id),
+                "version": version.version,
+                "is_active": bool(version.is_active),
+                "is_published": bool(version.is_published),
+                "nodes_count": len(nodes),
+                "start_node_id": start_node_id,
+                "start_text_preview": start_text_preview,
+            }
+        )
+
+    return {
+        "flow": {
+            "id": str(flow.id),
+            "current_version_id": str(flow.current_version_id) if flow.current_version_id else None,
+            "published_version_id": str(flow.published_version_id) if flow.published_version_id else None,
+        },
+        "versions": payload_versions,
+    }
+
+
+@crud_router.post("/{flow_id}/force-republish-current")
+def force_republish_current_tenant_flow(
+    flow_id: str,
+    x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
+    db: Session = Depends(get_db),
+):
+    tenant_uuid = _resolve_tenant_header(x_tenant_id)
+    flow = _get_flow_by_identifier(db=db, flow_id=flow_id, tenant_id=tenant_uuid)
+    if not flow:
+        raise HTTPException(status_code=404, detail="Flow not found")
+
+    nodes, edges = _builder_graph_from_flow(flow)
+    if not nodes:
+        raise HTTPException(status_code=422, detail="Builder graph vazio: sem nodes para republicar")
+
+    validate_flow_payload_or_400(nodes, edges)
+    last_version = db.execute(
+        select(FlowVersion.version).where(FlowVersion.flow_id == flow.id, FlowVersion.tenant_id == tenant_uuid).order_by(FlowVersion.version.desc()).limit(1)
+    ).scalar()
+    next_version_number = (last_version or 0) + 1
+
+    db.query(FlowVersion).filter(FlowVersion.flow_id == flow.id, FlowVersion.tenant_id == tenant_uuid).update(
+        {FlowVersion.is_active: False, FlowVersion.is_published: False},
+        synchronize_session=False,
+    )
+    new_version = FlowVersion(
+        flow_id=flow.id,
+        tenant_id=tenant_uuid,
+        version=next_version_number,
+        nodes=nodes,
+        edges=edges,
+        snapshot={"nodes": nodes, "edges": edges},
+        is_active=True,
+        is_published=True,
+    )
+    db.add(new_version)
+    db.flush()
+    flow.current_version_id = new_version.id
+    flow.published_version_id = new_version.id
+    flow.version = new_version.version
+    flow.status = "published"
+    db.add(flow)
+    invalidate_flow_runtime_cache(flow.id)
+    db.commit()
+    db.refresh(flow)
+
+    start_node_id, start_text_preview = _extract_start_node_metadata(nodes)
+    return {
+        "flow_id": str(flow.id),
+        "new_version_id": str(new_version.id),
+        "version": new_version.version,
+        "nodes_count": len(nodes),
+        "start_node_id": start_node_id,
+        "start_text_preview": start_text_preview,
+    }
 
 
 @crud_router.post("/{flow_id}/versions/restore")
