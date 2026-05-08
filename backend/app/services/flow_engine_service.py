@@ -175,12 +175,18 @@ def validate_flow_structure(
             outgoing_count[str(source)] = outgoing_count.get(str(source), 0) + 1
             print("[EDGE OK]:", source, "->", target)
 
-        for node_id in node_ids:
-            if outgoing_count.get(node_id, 0) < 1:
+        for node in flow["nodes"]:
+            node_id = str(node.get("id") or "")
+            data = node.get("data") if isinstance(node.get("data"), dict) else {}
+            node_type = str(
+                node.get("type")
+                or data.get("type")
+                or data.get("nodeType")
+                or "default"
+            ).strip().lower()
+            is_terminal = _is_terminal_message_node(data)
+            if outgoing_count.get(node_id, 0) < 1 and not (node_type == "message" and is_terminal):
                 raise Exception(f"Flow inválido: node sem saída ({node_id})")
-
-        if start_node_id and outgoing_count.get(start_node_id, 0) < 1:
-            raise Exception("Flow inválido: start sem conexão")
     except Exception as exc:
         return False, str(exc)
 
@@ -344,6 +350,14 @@ def _get_valid_flow_version_by_id(db: Session, flow: Flow, version_id: uuid.UUID
         edges=selected.edges if isinstance(selected.edges, list) else [],
     )
     return selected if valid else None
+
+
+def _get_flow_version_by_id(db: Session, flow: Flow, version_id: uuid.UUID | None) -> FlowVersion | None:
+    if not version_id:
+        return None
+    return db.execute(
+        select(FlowVersion).where(FlowVersion.id == version_id, FlowVersion.flow_id == flow.id)
+    ).scalars().first()
 
 
 def _serialize_persisted_flow_graph(
@@ -552,6 +566,32 @@ def resolve_runtime_flow_graph(db: Session, tenant_id: uuid.UUID, flow_id: str) 
         selected_version = _get_valid_flow_version_by_id(db=db, flow=flow, version_id=flow.published_version_id)
         source = "published_version"
         if not selected_version:
+            invalid_version = _get_flow_version_by_id(db=db, flow=flow, version_id=flow.published_version_id)
+            invalid_nodes = invalid_version.nodes if invalid_version and isinstance(invalid_version.nodes, list) else []
+            invalid_edges = invalid_version.edges if invalid_version and isinstance(invalid_version.edges, list) else []
+            runtime_validation = validate_flow({"nodes": invalid_nodes, "edges": invalid_edges}, mode="published")
+            validation_errors = runtime_validation.get("errors") if isinstance(runtime_validation, dict) else []
+            if not isinstance(validation_errors, list):
+                validation_errors = [validation_errors]
+            start_node_id = None
+            for node in invalid_nodes:
+                if not isinstance(node, dict):
+                    continue
+                data = node.get("data") if isinstance(node.get("data"), dict) else {}
+                if data.get("isStart"):
+                    start_node_id = str(node.get("id") or "") or None
+                    break
+            start_text_preview = _start_preview_from_nodes(invalid_nodes)
+            logger.warning(
+                "[RUNTIME INVALID PUBLISHED VERSION] flow_id=%s version_id=%s nodes_count=%s edges_count=%s validation_errors=%s start_node_id=%s start_text_preview=%s",
+                flow.id,
+                str(flow.published_version_id),
+                len(invalid_nodes),
+                len(invalid_edges),
+                validation_errors,
+                start_node_id,
+                start_text_preview,
+            )
             raise HTTPException(
                 status_code=409,
                 detail=f"Published version inválida para flow {flow.id}. Execute force-republish-current.",
@@ -576,12 +616,14 @@ def resolve_runtime_flow_graph(db: Session, tenant_id: uuid.UUID, flow_id: str) 
         getattr(selected_version, "version", None),
     )
     logger.info("[NODES COUNT] flow_id=%s runtime_nodes=%s runtime_edges=%s", flow.id, len(nodes), len(edges))
-    current_nodes = flow.current_version.nodes if flow.current_version and isinstance(flow.current_version.nodes, list) else []
-    current_start_preview = _start_preview_from_nodes(current_nodes)
-    published_start_preview = _start_preview_from_nodes(nodes)
-    mismatch = bool(selected_version and selected_version.flow_id != flow.id) or (current_start_preview and published_start_preview and current_start_preview != published_start_preview)
+    mismatch = bool(selected_version and selected_version.flow_id != flow.id)
     if mismatch:
-        logger.warning('[FLOW VERSION MISMATCH] flow_id=%s selected_version_id=%s selected_flow_id=%s current_start_preview="%s" published_start_preview="%s"', flow.id, getattr(selected_version, 'id', None), getattr(selected_version, 'flow_id', None), current_start_preview, published_start_preview)
+        logger.warning(
+            "[FLOW VERSION MISMATCH] flow_id=%s selected_version_id=%s selected_flow_id=%s",
+            flow.id,
+            getattr(selected_version, "id", None),
+            getattr(selected_version, "flow_id", None),
+        )
         raise HTTPException(
             status_code=409,
             detail=f"[FLOW VERSION MISMATCH] flow_id={flow.id}. Execute force-republish-current.",
