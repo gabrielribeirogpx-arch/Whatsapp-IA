@@ -400,16 +400,6 @@ def reset_tenant_flows(payload: ResetTenantFlowsPayload, db: Session = Depends(g
                 deleted_optional_logs += int(result.rowcount or 0)
         print(f"[FLOW RESET STEP DONE] step=delete_optional_logs count={deleted_optional_logs}", flush=True)
 
-        logger.info("[FLOW RESET STEP] delete_flow_nodes")
-        deleted_flow_nodes = 0
-        if removable_flow_ids:
-            deleted_flow_nodes = (
-                db.query(FlowNode)
-                .filter(FlowNode.flow_id.in_(removable_flow_ids))
-                .delete(synchronize_session=False)
-            )
-        print(f"[FLOW RESET STEP DONE] step=delete_flow_nodes count={deleted_flow_nodes}", flush=True)
-
         logger.info("[FLOW RESET STEP] delete_flow_edges")
         deleted_flow_edges = 0
         if removable_flow_ids:
@@ -419,6 +409,16 @@ def reset_tenant_flows(payload: ResetTenantFlowsPayload, db: Session = Depends(g
                 .delete(synchronize_session=False)
             )
         print(f"[FLOW RESET STEP DONE] step=delete_flow_edges count={deleted_flow_edges}", flush=True)
+
+        logger.info("[FLOW RESET STEP] delete_flow_nodes")
+        deleted_flow_nodes = 0
+        if removable_flow_ids:
+            deleted_flow_nodes = (
+                db.query(FlowNode)
+                .filter(FlowNode.flow_id.in_(removable_flow_ids))
+                .delete(synchronize_session=False)
+            )
+        print(f"[FLOW RESET STEP DONE] step=delete_flow_nodes count={deleted_flow_nodes}", flush=True)
 
         logger.info("[FLOW RESET STEP] delete_flow_versions")
         deleted_flow_versions = 0
