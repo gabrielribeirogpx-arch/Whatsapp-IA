@@ -88,10 +88,10 @@ def _safe_set_conversation_current_node(
 ) -> None:
     if node is None:
         conversation.current_node_id = None
-        return
+        return None
     if isinstance(node, VersionedFlowNode):
         conversation.current_node_id = None
-        return
+        return None
 
     node_id = node.id if isinstance(node, FlowNode) else _parse_uuid(node)
     if node_id and _is_valid_flow_node_reference(db, node_id):
@@ -1516,25 +1516,27 @@ def _render_choice_prompt(node_data: dict[str, Any], edges: list[FlowEdge | Vers
     return base
 
 
-def _send_flow_whatsapp_message(tenant: Tenant, phone: str, text: str) -> None:
+def _send_flow_whatsapp_message(tenant: Tenant, phone: str, text: str) -> str | None:
     content = (text or "").strip()
     if not content:
         print("[FLOW ERROR] texto vazio no node")
-        return
+        return None
 
     if not phone:
         print("[FLOW ERROR] phone ausente")
         logger.warning("[FLOW SEND] Telefone ausente, mensagem nao enviada")
-        return
+        return None
 
     print(f"[FLOW SEND] Enviando: {content}")
     logger.info("[FLOW SEND] Enfileirando mensagem: %s", content)
     try:
         job_id = enqueue_send_message({"tenant_id": tenant.id, "phone": phone, "text": content})
         print(f"[FLOW SEND RESULT] job_id={job_id}")
+        return str(job_id) if job_id is not None else None
     except Exception as error:
         print(f"[FLOW ERROR] {error}")
         logger.exception("[FLOW SEND] Falha inesperada ao enviar mensagem no flow")
+        return None
 
 
 def enqueue_flow_send_with_tracking(
@@ -1604,6 +1606,64 @@ def _text_preview(value: str | None, limit: int = 120) -> str:
     return text[:limit]
 
 
+
+
+def _send_start_message_on_session_restart(
+    *,
+    db: Session,
+    tenant: Tenant,
+    conversation: Conversation,
+    flow: FlowDefinition,
+    start_node: FlowNode | VersionedFlowNode,
+    runtime_graph: dict[str, Any],
+    runtime_session: FlowSession | None,
+    session_service: FlowSessionService,
+    published_version_number: int | None,
+    user_identifier: str,
+) -> FlowSession | None:
+    node_data = _extract_node_data(start_node)
+    node_type = str(_node_get(start_node, "type") or "").strip().lower()
+    if node_type.endswith("node"):
+        node_type = node_type[:-4]
+
+    next_node_id: uuid.UUID | None = None
+    start_node_id = _node_get(start_node, "id")
+
+    if node_type == "message":
+        text = _resolve_node_text(node_data)
+        job_id = _send_flow_whatsapp_message(tenant=tenant, phone=conversation.phone_number, text=text)
+        if not job_id:
+            logger.error("[FLOW START MESSAGE NOT SENT] node_id=%s", start_node_id)
+            return runtime_session
+        logger.info(
+            "[FLOW START MESSAGE SENT] node_id=%s text_preview=%s",
+            start_node_id,
+            _text_preview(text),
+        )
+
+    start_edges = _get_edges(
+        db=db,
+        flow_id=flow.id,
+        source=start_node_id,
+        runtime_graph=runtime_graph,
+    )
+    next_edge = _pick_default_edge(start_edges)
+    if next_edge:
+        next_node_id = next_edge.target
+    elif node_type != "terminal":
+        next_node_id = start_node_id
+
+    _safe_set_conversation_current_node(db, conversation, next_node_id)
+    runtime_session = session_service.save_runtime_session(
+        tenant_id=conversation.tenant_id,
+        user_identifier=user_identifier,
+        flow=flow,
+        current_node_id=next_node_id,
+        context=conversation.context if isinstance(conversation.context, dict) else {},
+        status="running",
+        variables={"flow_version": published_version_number},
+    )
+    return runtime_session
 def process_flow_engine(
     db: Session,
     tenant_id: uuid.UUID,
@@ -1708,19 +1768,21 @@ def process_flow_engine(
                 if isinstance(runtime_nodes, list):
                     start_text_preview = _start_preview_from_nodes(runtime_nodes)
             if reloaded_start_node:
-                restart_node_id = _node_get(reloaded_start_node, "id")
-                if isinstance(reloaded_start_node, VersionedFlowNode):
-                    _safe_set_conversation_current_node(db, conversation, None)
-                else:
-                    _safe_set_conversation_current_node(db, conversation, restart_node_id)
-                runtime_session = session_service.save_runtime_session(
-                    tenant_id=conversation.tenant_id,
-                    user_identifier=user_identifier,
+                tenant = db.execute(select(Tenant).where(Tenant.id == conversation.tenant_id)).scalars().first()
+                if not tenant:
+                    logger.warning("[SESSION RESET RELOAD DONE] tenant_missing=true")
+                    return None
+                runtime_session = _send_start_message_on_session_restart(
+                    db=db,
+                    tenant=tenant,
+                    conversation=conversation,
                     flow=flow,
-                    current_node_id=restart_node_id,
-                    context=conversation.context if isinstance(conversation.context, dict) else {},
-                    status="running",
-                    variables={"flow_version": published_version_number},
+                    start_node=reloaded_start_node,
+                    runtime_graph=runtime_graph,
+                    runtime_session=runtime_session,
+                    session_service=session_service,
+                    published_version_number=published_version_number,
+                    user_identifier=user_identifier,
                 )
                 logger.info(
                     "[SESSION RESET RELOAD DONE] published_version=%s start_text_preview=%s",
@@ -1770,18 +1832,21 @@ def process_flow_engine(
             runtime_graph=runtime_graph,
         )
         if restart_start_node:
-            restart_node_id = _node_get(restart_start_node, "id")
-            if isinstance(restart_start_node, VersionedFlowNode):
-                _safe_set_conversation_current_node(db, conversation, None)
-            else:
-                _safe_set_conversation_current_node(db, conversation, restart_node_id)
-            runtime_session = session_service.save_runtime_session(
-                tenant_id=conversation.tenant_id,
-                user_identifier=user_identifier,
+            tenant = db.execute(select(Tenant).where(Tenant.id == conversation.tenant_id)).scalars().first()
+            if not tenant:
+                logger.warning("[SESSION RESET RELOAD DONE] tenant_missing=true")
+                return None
+            runtime_session = _send_start_message_on_session_restart(
+                db=db,
+                tenant=tenant,
+                conversation=conversation,
                 flow=flow,
-                current_node_id=restart_node_id,
-                context=conversation.context if isinstance(conversation.context, dict) else {},
-                status="running",
+                start_node=restart_start_node,
+                runtime_graph=runtime_graph,
+                runtime_session=runtime_session,
+                session_service=session_service,
+                published_version_number=published_version_number,
+                user_identifier=user_identifier,
             )
             logger.info(
                 "[FLOW SESSION RESTART] old_session_id=%s new_session_id=%s",
