@@ -2003,16 +2003,30 @@ def process_flow_engine(
                 msg = ""
             elif text:
                 collected_messages.append(text)
+            next_edge = _pick_default_edge(edges)
+            next_node_id = next_edge.target if next_edge else None
+            logger.info("[FLOW NEXT NODE] current_node_id=%s next_node_id=%s", node.id, next_node_id)
+            print(f"[current_node_id] {node.id}")
+            print(f"[next_node_id] {next_node_id}")
             node = _advance_to_edge_target(
                 # primeira mensagem só inicializa o fluxo e envia o start node
                 db=db,
                 conversation=conversation,
-                edge=_pick_default_edge(edges),
+                edge=next_edge,
                 runtime_graph=runtime_graph,
                 runtime_session=runtime_session,
                 session_service=session_service,
                 flow_version_id=current_flow_version_id,
             )
+            if node and session_service:
+                runtime_session = session_service.save_runtime_session(
+                    tenant_id=conversation.tenant_id,
+                    user_identifier=user_identifier,
+                    flow=flow,
+                    current_node_id=node.id,
+                    context=conversation.context if isinstance(conversation.context, dict) else {},
+                    status="running",
+                )
             if not node:
                 reached_max_steps = False
                 break
