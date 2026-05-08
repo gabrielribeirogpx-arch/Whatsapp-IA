@@ -2174,8 +2174,30 @@ def process_flow_engine(
                     break
 
             selected_start_node_id = selected_start_edge.target if selected_start_edge else start_node.id
-            _set_flow_mode(db=db, conversation=conversation, flow_id=flow.id, node_id=selected_start_node_id)
-            logger.info("[FLOW STATE] current=%s next=%s", conversation.current_node_id, selected_start_node_id)
+            tenant = db.execute(select(Tenant).where(Tenant.id == conversation.tenant_id)).scalars().first()
+            if not tenant:
+                logger.warning("[FLOW SEND] Tenant nao encontrado para conversation_id=%s", conversation.id)
+                return None
+            logger.info("[FORCE START SEND BEFORE ADVANCE] start_node_id=%s next_node_id=%s", start_node.id, selected_start_node_id)
+            restart_runtime_session = _send_start_message_on_session_restart(
+                db=db,
+                tenant=tenant,
+                conversation=conversation,
+                flow=flow,
+                start_node=start_node,
+                runtime_graph=runtime_graph,
+                runtime_session=runtime_session,
+                session_service=session_service,
+                published_version_number=published_version_number,
+                user_identifier=user_identifier,
+            )
+            if restart_runtime_session is None:
+                _set_flow_mode(db=db, conversation=conversation, flow_id=flow.id, node_id=start_node.id)
+                logger.warning("[BLOCK ADVANCE START NOT SENT] start_node_id=%s", start_node.id)
+            else:
+                runtime_session = restart_runtime_session
+                _set_flow_mode(db=db, conversation=conversation, flow_id=flow.id, node_id=selected_start_node_id)
+                logger.info("[FLOW STATE] current=%s next=%s", conversation.current_node_id, selected_start_node_id)
 
     if conversation.mode == "flow":
         _keep_flow_mode(conversation)
