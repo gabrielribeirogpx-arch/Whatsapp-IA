@@ -335,8 +335,23 @@ def reset_tenant_flows(payload: ResetTenantFlowsPayload, db: Session = Depends(g
         ).scalars().first()
         keep_flow_id = keep_flow.id if keep_flow else None
 
+        logger.info("[FLOW RESET STEP] collect_flow_version_ids")
+        version_ids = [
+            row[0]
+            for row in db.query(FlowVersion.id)
+            .filter(FlowVersion.tenant_id == tenant_uuid)
+            .all()
+        ]
+        print(f"[FLOW RESET STEP DONE] step=collect_flow_version_ids count={len(version_ids)}", flush=True)
+
         logger.info("[FLOW RESET STEP] delete_flow_executions")
-        deleted_flow_executions = db.query(FlowExecution).filter(FlowExecution.tenant_id == tenant_uuid).delete(synchronize_session=False)
+        deleted_flow_executions = 0
+        if version_ids:
+            deleted_flow_executions = (
+                db.query(FlowExecution)
+                .filter(FlowExecution.flow_version_id.in_(version_ids))
+                .delete(synchronize_session=False)
+            )
         print(f"[FLOW RESET STEP DONE] step=delete_flow_executions count={deleted_flow_executions}", flush=True)
 
         logger.info("[FLOW RESET STEP] delete_flow_sessions")
