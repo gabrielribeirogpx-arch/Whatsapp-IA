@@ -18,6 +18,7 @@ from app.database import get_db
 from app.models import Conversation, Flow, FlowSession, FlowVersion, Tenant
 from app.services.flow_analytics_service import PERIODS, get_flow_analytics, resolve_analytics_period
 from app.services.flow_engine_service import (
+    get_flow_for_builder,
     get_flow_graph,
     invalidate_flow_runtime_cache,
     resolve_runtime_flow_graph,
@@ -1275,16 +1276,21 @@ def debug_tenant_flow_versions(
                 "nodes_count": len(nodes),
                 "start_node_id": start_node_id,
                 "start_text_preview": start_text_preview,
+                "created_at": version.created_at.isoformat() if version.created_at else None,
             }
         )
 
+    builder_graph = get_flow_for_builder(db=db, tenant_id=tenant_uuid, flow_id=str(flow.id))
+    builder_nodes = builder_graph.get("nodes") if isinstance(builder_graph.get("nodes"), list) else []
+
     return {
-        "flow": {
-            "id": str(flow.id),
-            "current_version_id": str(flow.current_version_id) if flow.current_version_id else None,
-            "published_version_id": str(flow.published_version_id) if flow.published_version_id else None,
-        },
+        "flow_id": str(flow.id),
+        "current_version_id": str(flow.current_version_id) if flow.current_version_id else None,
+        "published_version_id": str(flow.published_version_id) if flow.published_version_id else None,
         "versions": payload_versions,
+        "builder_graph": builder_graph,
+        "builder_source": builder_graph.get("source"),
+        "start_text_preview_builder": _extract_start_preview(builder_nodes),
     }
 
 
