@@ -967,87 +967,55 @@ def find_start_node(flow: Any) -> Any | None:
         nodes = flow.get("nodes", [])
     nodes = nodes or []
 
-    for node in nodes:
-        node_data = getattr(node, "data", None)
-        if not isinstance(node_data, dict):
-            node_data = getattr(node, "metadata_json", None)
-        if node_data and node_data.get("isStart") is True:
-            return node
-    return None
+    return _find_real_start_node(nodes)
 
 
-def _find_start_node(nodes: list[Any]) -> Any | None:
-    def _extract_node_fields(node: Any) -> tuple[str, Any, str | None, Any]:
-        source = "dict" if isinstance(node, dict) else "orm"
-        if isinstance(node, dict):
-            data = node.get("data") or {}
-            node_id = node.get("id")
-            node_type = node.get("type")
-            position = node.get("position")
-        else:
-            data = getattr(node, "data", None) or getattr(node, "data_json", None) or {}
-            node_id = getattr(node, "id", None)
-            node_type = getattr(node, "type", None)
-            position = getattr(node, "position", None)
-
-        if isinstance(data, str):
+def _find_real_start_node(nodes: list[Any]) -> Any | None:
+    def _to_dict(payload: Any) -> dict[str, Any]:
+        if isinstance(payload, dict):
+            return payload
+        if isinstance(payload, str):
             try:
-                data = json.loads(data)
+                parsed = json.loads(payload)
+                return parsed if isinstance(parsed, dict) else {}
             except (TypeError, ValueError):
-                data = {}
-        if not isinstance(data, dict):
-            data = {}
+                return {}
+        return {}
 
-        return source, node_id, node_type, position, data
+    def _extract(node: Any) -> tuple[Any, str, str, Any, dict[str, Any], dict[str, Any]]:
+        if isinstance(node, dict):
+            node_id = str(node.get("id") or "")
+            node_type = str(node.get("type") or "")
+            top_level_is_start = node.get("isStart")
+            metadata_json = _to_dict(node.get("metadata_json"))
+            data = _to_dict(node.get("data"))
+        else:
+            node_id = str(getattr(node, "id", "") or "")
+            node_type = str(getattr(node, "type", "") or "")
+            top_level_is_start = getattr(node, "isStart", None)
+            metadata_json = _to_dict(getattr(node, "metadata_json", None))
+            data = _to_dict(getattr(node, "data", None) or getattr(node, "data_json", None))
+        return node, node_id, node_type, top_level_is_start, metadata_json, data
 
-    sortable_nodes: list[tuple[Any, Any, Any]] = []
+    extracted = [_extract(node) for node in nodes]
+    for _, node_id, node_type, top_level_is_start, metadata_json, data in extracted:
+        logger.info("[REAL START NODE CANDIDATE] id=%s type=%s isStart=%s", node_id, node_type, data.get("isStart"))
 
-    # 1. prioridade: flag isStart no data
-    for node in nodes:
-        source, node_id, node_type, position, data = _extract_node_fields(node)
-        is_start = data.get("isStart") is True
-        logger.info(
-            "[FLOW START NODE] source=%s node_id=%s is_start=%s",
-            source,
-            node_id,
-            is_start,
-        )
-        sortable_nodes.append((node, position, node_id))
-        if is_start:
-            logger.info(
-                "[FLOW START NODE] selected node_id=%s reason=isStart",
-                node_id,
-            )
-            return node
+    selected = next((item for item in extracted if item[3] is True), None)
+    if not selected:
+        selected = next((item for item in extracted if item[4].get("isStart") is True), None)
+    if not selected:
+        selected = next((item for item in extracted if item[5].get("isStart") is True), None)
+    if not selected:
+        selected = next((item for item in extracted if item[2].strip().lower() == "start"), None)
+    if not selected:
+        selected = extracted[0] if extracted else None
 
-    # 2. fallback por tipo
-    for node in nodes:
-        _, node_id, node_type, _, _ = _extract_node_fields(node)
-        if isinstance(node_type, str) and node_type.lower() in {"start", "trigger", "inicio"}:
-            logger.info(
-                "[FLOW START NODE] selected node_id=%s reason=node_type",
-                node_id,
-            )
-            return node
-
-    # 3. fallback por ordenação (position/id)
-    if sortable_nodes:
-        selected, _, selected_id = sorted(
-            sortable_nodes,
-            key=lambda item: (
-                item[1] is None,
-                str(item[1]) if item[1] is not None else "",
-                item[2] is None,
-                str(item[2]) if item[2] is not None else "",
-            ),
-        )[0]
-        logger.info(
-            "[FLOW START NODE] selected node_id=%s reason=position_or_id",
-            selected_id,
-        )
-        return selected
-
-    logger.info("[FLOW START NODE] selected node_id=None reason=empty_nodes")
+    if selected:
+        _, node_id, node_type, _, _, data = selected
+        logger.info("[REAL START NODE] id=%s type=%s isStart=%s", node_id, node_type, data.get("isStart"))
+        return selected[0]
+    logger.info("[REAL START NODE] id=None type=None isStart=None")
     return None
 
 
@@ -1085,7 +1053,7 @@ def _get_start_node(
     print(f"[FLOW INIT CHECK] nodes={check_payload}")
     logger.info("[FLOW INIT CHECK] nodes=%s", check_payload)
 
-    start_node = find_start_node({"nodes": nodes})
+    start_node = _find_real_start_node(nodes)
     if start_node:
         start_node_id = _node_get(start_node, "id")
         print(f"[FLOW INIT FOUND] node_id={start_node_id}")
@@ -1124,7 +1092,7 @@ def _initialize_flow_start_node(
     is_versioned_runtime = bool(runtime_graph and runtime_graph.get("version_id"))
 
     if conversation.current_node_id is None:
-        start_node = _find_start_node(node_payload)
+        start_node = _find_real_start_node(node_payload)
         if start_node:
             if is_versioned_runtime:
                 _safe_set_conversation_current_node(db, conversation, None)
@@ -1667,6 +1635,7 @@ def _send_start_message_on_session_restart(
             start_node_id,
             _text_preview(text),
         )
+        logger.info("[START MESSAGE BEFORE SESSION SAVE] node_id=%s", start_node_id)
 
     start_edges = _get_edges(
         db=db,
@@ -1690,6 +1659,7 @@ def _send_start_message_on_session_restart(
         status="running",
         variables={"flow_version": published_version_number},
     )
+    logger.info("[SESSION SAVE AFTER START SEND] node_id=%s", next_node_id)
     return runtime_session
 def process_flow_engine(
     db: Session,
