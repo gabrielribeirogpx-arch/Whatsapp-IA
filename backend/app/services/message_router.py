@@ -64,7 +64,7 @@ def handle_incoming_message(db: Session, message: Message, conversation: Convers
                 f"reason={'flow_engine_empty_response' if used_fallback else 'none'}"
             )
             if used_fallback:
-                print("[FALLBACK BLOCKED] reason=active_flow_session")
+                print("[FLOW FALLBACK SUPPRESSED] reason=active_flow_session")
                 result = result or {}
                 result["fallback"] = False
                 result["response"] = result.get("response") or "Fluxo ativo. Vou continuar pelo fluxo atual."
