@@ -581,20 +581,39 @@ def resolve_runtime_flow_graph(db: Session, tenant_id: uuid.UUID, flow_id: str) 
                 if data.get("isStart"):
                     start_node_id = str(node.get("id") or "") or None
                     break
-            start_text_preview = _start_preview_from_nodes(invalid_nodes)
-            logger.warning(
-                "[RUNTIME INVALID PUBLISHED VERSION] flow_id=%s version_id=%s nodes_count=%s edges_count=%s validation_errors=%s start_node_id=%s start_text_preview=%s",
+
+            should_raise_invalid_published = (
+                invalid_version is None
+                or len(invalid_nodes) == 0
+                or not start_node_id
+                or len(validation_errors) > 0
+            )
+            if should_raise_invalid_published:
+                start_text_preview = _start_preview_from_nodes(invalid_nodes)
+                logger.warning(
+                    "[RUNTIME INVALID PUBLISHED VERSION] flow_id=%s version_id=%s nodes_count=%s edges_count=%s validation_errors=%s start_node_id=%s start_text_preview=%s",
+                    flow.id,
+                    str(flow.published_version_id),
+                    len(invalid_nodes),
+                    len(invalid_edges),
+                    validation_errors,
+                    start_node_id,
+                    start_text_preview,
+                )
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"Published version inválida para flow {flow.id}. Execute force-republish-current.",
+                )
+
+            selected_version = invalid_version
+            logger.info(
+                "[RUNTIME PUBLISHED VERSION OK] flow_id=%s version_id=%s nodes_count=%s edges_count=%s start_node_id=%s validation_errors=%s",
                 flow.id,
                 str(flow.published_version_id),
                 len(invalid_nodes),
                 len(invalid_edges),
-                validation_errors,
                 start_node_id,
-                start_text_preview,
-            )
-            raise HTTPException(
-                status_code=409,
-                detail=f"Published version inválida para flow {flow.id}. Execute force-republish-current.",
+                validation_errors,
             )
     else:
         selected_version = _get_valid_flow_version_by_id(db=db, flow=flow, version_id=flow.current_version_id)
