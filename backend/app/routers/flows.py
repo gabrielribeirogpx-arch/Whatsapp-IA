@@ -322,13 +322,14 @@ def parse_flow_id(flow_id: str):
 
 @router.post("/reset-tenant-flows")
 def reset_tenant_flows(payload: ResetTenantFlowsPayload, db: Session = Depends(get_db)):
-    if payload.confirm != "RESET_ALL_FLOWS":
-        raise HTTPException(status_code=400, detail="confirm inválido")
-
-    tenant_uuid = payload.tenant_id
-    logger.warning("[FLOW RESET START] tenant_id=%s keep_flow_name=%s", tenant_uuid, payload.keep_flow_name)
-
     try:
+        tenant_uuid = payload.tenant_id
+        print("[FLOW RESET START]", tenant_uuid, flush=True)
+        logger.warning("[FLOW RESET START] tenant_id=%s keep_flow_name=%s", tenant_uuid, payload.keep_flow_name)
+
+        if payload.confirm != "RESET_ALL_FLOWS":
+            return JSONResponse(status_code=400, content={"ok": False, "error": "INVALID_CONFIRM", "message": "confirm inválido"})
+
         keep_flow = db.execute(
             select(Flow).where(Flow.tenant_id == tenant_uuid, Flow.name == payload.keep_flow_name).order_by(Flow.created_at.asc())
         ).scalars().first()
@@ -336,23 +337,28 @@ def reset_tenant_flows(payload: ResetTenantFlowsPayload, db: Session = Depends(g
 
         logger.info("[FLOW RESET STEP] delete_flow_executions")
         deleted_flow_executions = db.query(FlowExecution).filter(FlowExecution.tenant_id == tenant_uuid).delete(synchronize_session=False)
+        print(f"[FLOW RESET STEP DONE] step=delete_flow_executions count={deleted_flow_executions}", flush=True)
 
         logger.info("[FLOW RESET STEP] delete_flow_sessions")
         deleted_flow_sessions = db.query(FlowSession).filter(FlowSession.tenant_id == tenant_uuid).delete(synchronize_session=False)
+        print(f"[FLOW RESET STEP DONE] step=delete_flow_sessions count={deleted_flow_sessions}", flush=True)
 
         deleted_flow_events = db.query(FlowEvent).filter(FlowEvent.tenant_id == tenant_uuid).delete(synchronize_session=False)
+        print(f"[FLOW RESET STEP DONE] step=delete_flow_events count={deleted_flow_events}", flush=True)
 
         logger.info("[FLOW RESET STEP] delete_flow_versions")
         versions_query = db.query(FlowVersion).filter(FlowVersion.tenant_id == tenant_uuid)
         if keep_flow_id:
             versions_query = versions_query.filter(FlowVersion.flow_id != keep_flow_id)
         deleted_flow_versions = versions_query.delete(synchronize_session=False)
+        print(f"[FLOW RESET STEP DONE] step=delete_flow_versions count={deleted_flow_versions}", flush=True)
 
         logger.info("[FLOW RESET STEP] delete_archived_flows")
         flows_query = db.query(Flow).filter(Flow.tenant_id == tenant_uuid).filter(or_(Flow.is_deleted.is_(True), Flow.archived_at.is_not(None)))
         if keep_flow_id:
             flows_query = flows_query.filter(Flow.id != keep_flow_id)
         deleted_archived_flows = flows_query.delete(synchronize_session=False)
+        print(f"[FLOW RESET STEP DONE] step=delete_archived_flows count={deleted_archived_flows}", flush=True)
 
         logger.info("[FLOW RESET STEP] clear_redis")
         redis_deleted = 0
@@ -371,6 +377,7 @@ def reset_tenant_flows(payload: ResetTenantFlowsPayload, db: Session = Depends(g
                 redis_deleted += redis.delete(key_text)
             if cursor == 0:
                 break
+        print(f"[FLOW RESET STEP DONE] step=clear_redis count={redis_deleted}", flush=True)
 
         db.commit()
         logger.warning(
@@ -396,13 +403,17 @@ def reset_tenant_flows(payload: ResetTenantFlowsPayload, db: Session = Depends(g
         }
     except Exception as e:
         db.rollback()
-        logger.error("[FLOW RESET ERROR] tenant_id=%s traceback=%s", tenant_uuid, traceback.format_exc())
-        raise HTTPException(
+        import traceback
+        error_trace = traceback.format_exc()
+        print("[FLOW RESET ERROR]", error_trace, flush=True)
+        return JSONResponse(
             status_code=500,
-            detail={
+            content={
+                "ok": False,
                 "error": "RESET_TENANT_FLOWS_FAILED",
-                "message": str(e),
                 "type": e.__class__.__name__,
+                "message": str(e),
+                "trace": error_trace[-4000:],
             },
         )
 
