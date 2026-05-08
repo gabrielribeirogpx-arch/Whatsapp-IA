@@ -2059,6 +2059,15 @@ def process_flow_engine(
                 return None
 
         if not intent:
+            if conversation.mode == "flow" and conversation.current_node_id:
+                logger.info(
+                    "[FALLBACK BLOCKED ACTIVE FLOW] session_id=%s current_node_id=%s",
+                    conversation.id,
+                    conversation.current_node_id,
+                )
+                db.commit()
+                db.refresh(conversation)
+                return None
             conversation.retries = (conversation.retries or 0) + 1
             if conversation.retries >= MAX_RETRIES:
                 logger.info("[FALLBACK LIMIT] exceeded → reset")
@@ -2158,6 +2167,15 @@ def process_flow_engine(
 
         if conversation.mode != "flow":
             if not intent:
+                if conversation.current_node_id:
+                    logger.info(
+                        "[FALLBACK BLOCKED ACTIVE FLOW] session_id=%s current_node_id=%s",
+                        conversation.id,
+                        conversation.current_node_id,
+                    )
+                    db.commit()
+                    db.refresh(conversation)
+                    return None
                 conversation.retries = (conversation.retries or 0) + 1
                 fallback_text = (
                     "Boa 👌 Me fala melhor o que você quer fazer:\n"
@@ -2376,6 +2394,7 @@ def process_flow_engine(
                     )
             print(f"[current_node_id] {node.id}")
             print(f"[next_node_id] {next_node_id}")
+            from_node_id = node.id
             node = _advance_to_edge_target(
                 # primeira mensagem só inicializa o fluxo e envia o start node
                 db=db,
@@ -2398,6 +2417,18 @@ def process_flow_engine(
                     status="running",
                 )
                 logger.info("[FLOW SESSION SAVE AFTER ADVANCE] current_node_id=%s", node.id)
+            if node_type in {"message", "text", "msg"}:
+                to_type = str(getattr(node, "type", "") or "").strip().lower() if node else None
+                if isinstance(to_type, str) and to_type.endswith("node"):
+                    to_type = to_type[:-4]
+                logger.info(
+                    "[FLOW ADVANCE AFTER MESSAGE] from_node_id=%s to_node_id=%s to_type=%s",
+                    from_node_id,
+                    node.id if node else None,
+                    to_type,
+                )
+                if node and to_type == "condition":
+                    logger.info("[FLOW WAITING CONDITION INPUT] node_id=%s", node.id)
             if not node:
                 reached_max_steps = False
                 break
