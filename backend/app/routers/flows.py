@@ -18,7 +18,7 @@ from sqlalchemy.orm import load_only
 
 from app.database import get_db
 from app.core.redis_client import get_redis_client
-from app.models import Conversation, Flow, FlowSession, FlowVersion, Tenant
+from app.models import Conversation, Flow, FlowEvent, FlowExecution, FlowSession, FlowVersion, Tenant
 from app.services.flow_analytics_service import PERIODS, get_flow_analytics, resolve_analytics_period
 from app.services.flow_engine_service import (
     get_flow_for_builder,
@@ -332,11 +332,13 @@ def reset_tenant_flows(payload: ResetTenantFlowsPayload, db: Session = Depends(g
     ).scalars().first()
     keep_flow_id = keep_flow.id if keep_flow else None
 
-    deleted_sessions = db.query(FlowSession).filter(FlowSession.tenant_id == tenant_uuid).delete(synchronize_session=False)
+    deleted_flow_executions = db.query(FlowExecution).filter(FlowExecution.tenant_id == tenant_uuid).delete(synchronize_session=False)
+    deleted_flow_sessions = db.query(FlowSession).filter(FlowSession.tenant_id == tenant_uuid).delete(synchronize_session=False)
+    deleted_flow_events = db.query(FlowEvent).filter(FlowEvent.tenant_id == tenant_uuid).delete(synchronize_session=False)
     versions_query = db.query(FlowVersion).filter(FlowVersion.tenant_id == tenant_uuid)
     if keep_flow_id:
         versions_query = versions_query.filter(FlowVersion.flow_id != keep_flow_id)
-    deleted_versions = versions_query.delete(synchronize_session=False)
+    deleted_flow_versions = versions_query.delete(synchronize_session=False)
 
     flows_query = db.query(Flow).filter(Flow.tenant_id == tenant_uuid).filter(or_(Flow.is_deleted.is_(True), Flow.archived_at.is_not(None)))
     if keep_flow_id:
@@ -362,11 +364,13 @@ def reset_tenant_flows(payload: ResetTenantFlowsPayload, db: Session = Depends(g
 
     db.commit()
     logger.warning(
-        "[FLOW RESET DONE] tenant_id=%s keep_flow_id=%s deleted_sessions=%s deleted_versions=%s deleted_archived_flows=%s redis_deleted=%s",
+        "[FLOW RESET DONE] tenant_id=%s keep_flow_id=%s deleted_flow_executions=%s deleted_flow_sessions=%s deleted_flow_events=%s deleted_flow_versions=%s deleted_archived_flows=%s redis_deleted=%s",
         tenant_uuid,
         keep_flow_id,
-        deleted_sessions,
-        deleted_versions,
+        deleted_flow_executions,
+        deleted_flow_sessions,
+        deleted_flow_events,
+        deleted_flow_versions,
         deleted_archived_flows,
         redis_deleted,
     )
@@ -374,10 +378,11 @@ def reset_tenant_flows(payload: ResetTenantFlowsPayload, db: Session = Depends(g
         "success": True,
         "tenant_id": str(tenant_uuid),
         "keep_flow_id": str(keep_flow_id) if keep_flow_id else None,
-        "deleted_sessions": deleted_sessions,
-        "deleted_versions": deleted_versions,
-        "deleted_archived_flows": deleted_archived_flows,
-        "deleted_redis_keys": redis_deleted,
+        "deleted_flow_executions_count": deleted_flow_executions,
+        "deleted_flow_sessions_count": deleted_flow_sessions,
+        "deleted_flow_versions_count": deleted_flow_versions,
+        "deleted_archived_flows_count": deleted_archived_flows,
+        "cleared_cache_keys_count": redis_deleted,
     }
 
 
