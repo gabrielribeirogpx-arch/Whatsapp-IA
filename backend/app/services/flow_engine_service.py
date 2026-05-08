@@ -334,7 +334,7 @@ def _get_latest_valid_flow_version(db: Session, flow_id: uuid.UUID) -> FlowVersi
 
 def invalidate_flow_runtime_cache(flow_id: uuid.UUID) -> None:
     _FLOW_RUNTIME_CACHE.pop(flow_id, None)
-    logger.info("[FLOW CACHE] invalidated flow_id=%s", flow_id)
+    logger.info("[CACHE INVALIDATED] flow_id=%s", flow_id)
 
 
 def _get_valid_flow_version_by_id(db: Session, flow: Flow, version_id: uuid.UUID | None) -> FlowVersion | None:
@@ -558,6 +558,13 @@ def resolve_runtime_flow_graph(db: Session, tenant_id: uuid.UUID, flow_id: str) 
     flow = resolve_flow(db=db, tenant_id=tenant_id, flow_id=flow_id)
     cached = _FLOW_RUNTIME_CACHE.get(flow.id)
     if cached:
+        cached_nodes = cached.get("nodes") if isinstance(cached, dict) else []
+        logger.info(
+            "[CACHE HIT] cache_key=%s cached_version_id=%s cached_start_text=%s",
+            f"runtime_flow:{flow.id}",
+            cached.get("version_id") if isinstance(cached, dict) else None,
+            _start_preview_from_nodes(cached_nodes if isinstance(cached_nodes, list) else []),
+        )
         return cached
 
     selected_version = None
@@ -655,6 +662,24 @@ def resolve_runtime_flow_graph(db: Session, tenant_id: uuid.UUID, flow_id: str) 
         "nodes": nodes if isinstance(nodes, list) else [],
         "edges": edges if isinstance(edges, list) else [],
     }
+    start_node_id = None
+    for node in runtime_payload["nodes"]:
+        if not isinstance(node, dict):
+            continue
+        data = node.get("data") if isinstance(node.get("data"), dict) else {}
+        if bool(data.get("isStart")):
+            start_node_id = str(node.get("id") or "") or None
+            break
+    start_text_preview = _start_preview_from_nodes(runtime_payload["nodes"])
+    logger.info(
+        "[RUNTIME GRAPH SOURCE] flow_id=%s version_id=%s version=%s source=%s start_node_id=%s start_text_preview=%s",
+        flow.id,
+        runtime_payload["version_id"],
+        getattr(selected_version, "version", None),
+        runtime_payload["source"],
+        start_node_id,
+        start_text_preview,
+    )
     logger.info(
         "[FLOW_RUNTIME_SELECTED] flow_id=%s version_id=%s source=%s nodes=%s edges=%s",
         runtime_payload["flow_id"],
@@ -1626,6 +1651,39 @@ def process_flow_engine(
     user_identifier = conversation.phone_number
     normalized_message = _normalize_text(message_text)
     runtime_session, invalid_reason = session_service.get_runtime_session(conversation.tenant_id, user_identifier, flow)
+    session_version = None
+    if runtime_session and isinstance(runtime_session.variables, dict):
+        session_version = runtime_session.variables.get("flow_version")
+    published_version = getattr(flow, "published_version", None)
+    published_version_number = getattr(published_version, "version", None) if published_version else None
+    current_version_number = getattr(getattr(flow, "current_version", None), "version", None)
+    logger.info(
+        "[FLOW SESSION VERSION] session_version=%s published_version=%s current_version=%s",
+        session_version,
+        published_version_number,
+        current_version_number,
+    )
+    if runtime_session:
+        runtime_nodes = runtime_graph.get("nodes") if isinstance(runtime_graph, dict) else []
+        logger.info(
+            "[SESSION FLOW GRAPH] session_version=%s session_start_text=%s",
+            session_version,
+            _start_preview_from_nodes(runtime_nodes if isinstance(runtime_nodes, list) else []),
+        )
+        if published_version_number is not None and session_version is not None and str(session_version) != str(published_version_number):
+            logger.warning(
+                "[SESSION VERSION MISMATCH] session_version=%s published_version=%s action=reset_session_reload_published",
+                session_version,
+                published_version_number,
+            )
+            session_service.clear_runtime_session(conversation.tenant_id, user_identifier, flow, reason="published_version_changed")
+            runtime_session = None
+            invalid_reason = None
+            _safe_set_conversation_current_node(db, conversation, None)
+            conversation.current_flow = flow.id
+            invalidate_flow_runtime_cache(flow.id)
+            runtime_graph = _get_current_flow_runtime(db=db, flow=flow, tenant_id=conversation.tenant_id)
+            current_flow_version_id = _parse_uuid(runtime_graph.get("version_id") if isinstance(runtime_graph, dict) else None)
     if _is_reset_command(normalized_message):
         _emit_runtime_event(
             db=db,
