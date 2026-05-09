@@ -2258,28 +2258,37 @@ def process_flow_engine(
         user_message_text,
     )
 
-    is_active_session = session_status in {"active", "running"}
-    is_completed_session = session_status in {"completed", "finalized", "expired", "finished"}
-    is_completed_or_expired = session_status in {"completed", "finalized", "expired"}
-    if runtime_session is not None and is_completed_or_expired and not start_trigger:
+    session_exists = runtime_session is not None
+    session_active = bool(runtime_session and session_status not in {"completed", "finalized", "expired"})
+    session_finalized = bool(runtime_session and session_status in {"completed", "finalized", "expired"})
+
+    logger.info(
+        "[FLOW ROUTING] session_exists=%s session_active=%s session_finalized=%s status=%s",
+        session_exists,
+        session_active,
+        session_finalized,
+        session_status or None,
+    )
+
+    if session_finalized and not start_trigger:
         logger.info(
-            "[FLOW COMPLETED SESSION IGNORE_EARLY] session_id=%s status=%s incoming_text=%s",
+            "[FLOW FINALIZED IGNORE MESSAGE] session_id=%s status=%s incoming_text=%s",
             getattr(runtime_session, "id", None),
             session_status,
             user_message_text,
         )
         return None
-    if runtime_session is not None and is_completed_or_expired and start_trigger:
+    if session_finalized and start_trigger:
         logger.info(
-            "[FLOW EXPLICIT RESTART_EARLY] trigger=%s old_session_id=%s",
+            "[FLOW EXPLICIT RESTART] trigger=%s old_session_id=%s",
             normalized_text,
             getattr(runtime_session, "id", None),
         )
 
     runtime_graph = _get_current_flow_runtime(db=db, flow=flow, tenant_id=conversation.tenant_id)
 
-    should_continue = runtime_session is not None and is_active_session and saved_current_node_id is not None and not start_trigger
-    should_restart = runtime_session is not None and is_completed_session and start_trigger
+    should_continue = session_active and saved_current_node_id is not None and not start_trigger
+    should_restart = session_finalized and start_trigger
 
     if should_continue:
         logger.info(
@@ -2288,11 +2297,7 @@ def process_flow_engine(
             saved_current_node_id,
         )
     elif should_restart:
-        logger.info(
-            "[FLOW EXPLICIT RESTART] trigger=%s old_session_id=%s",
-            normalized_text,
-            getattr(runtime_session, "id", None),
-        )
+        logger.info("[FLOW RESTART PATH] trigger=%s", normalized_text)
 
     path = "CONTINUE" if should_continue else "START"
 
@@ -2323,14 +2328,6 @@ def process_flow_engine(
 
     logger.info("[FLOW START PATH]")
     if runtime_session is not None:
-        if not start_trigger:
-            logger.info(
-                "[FLOW COMPLETED SESSION IGNORE] session_id=%s status=%s incoming_text=%s",
-                getattr(runtime_session, "id", None),
-                session_status,
-                user_message_text,
-            )
-            return None
         session_service.end_session(runtime_session, status="abandoned")
 
     start_node = _get_start_node(
