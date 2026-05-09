@@ -73,6 +73,18 @@ class FlowSessionService:
 
         return session, None
 
+    def get_latest_session_for_flow(self, *, tenant_id, user_identifier: str, flow_id) -> FlowSession | None:
+        return (
+            self.db.query(FlowSession)
+            .filter(
+                FlowSession.tenant_id == tenant_id,
+                FlowSession.user_identifier == user_identifier,
+                FlowSession.flow_id == flow_id,
+            )
+            .order_by(FlowSession.updated_at.desc(), FlowSession.created_at.desc())
+            .first()
+        )
+
     def save_runtime_session(self, *, tenant_id, user_identifier: str, flow: Flow, current_node_id, status: str = "running", context: dict[str, Any] | None = None, variables: dict[str, Any] | None = None) -> FlowSession:
         session = (
             self.db.query(FlowSession)
