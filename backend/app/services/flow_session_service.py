@@ -64,14 +64,12 @@ class FlowSessionService:
             print(f"[SESSION INVALID] reason=finalized status={session.status} session_id={session.id}")
             return session, "finalized"
 
-        published_version_id = getattr(flow, "published_version_id", None)
         session_version_id = getattr(session, "flow_version_id", None)
-        if published_version_id is None:
-            print(f"[SESSION INVALID] reason=missing_published_version flow_id={flow.id}")
-            return session, "missing_published_version"
-        if session_version_id is None or str(session_version_id) != str(published_version_id):
-            print(f"[SESSION INVALID] reason=version_mismatch session_version_id={session_version_id} published_version_id={published_version_id}")
-            return session, "version_mismatch"
+        if session_version_id is None:
+            # Legacy sessions created before flow_version_id hardening are not
+            # recoverable in a version-pinned model.
+            print(f"[SESSION INVALID] reason=missing_session_version session_id={session.id}")
+            return session, "missing_session_version"
 
         return session, None
 
@@ -102,7 +100,9 @@ class FlowSessionService:
             self.db.add(session)
         else:
             session.current_node_id = str(current_node_id) if current_node_id else None
-            session.flow_version_id = getattr(flow, "published_version_id", None)
+            # Keep session pinned to the version it started with.
+            if session.flow_version_id is None:
+                session.flow_version_id = getattr(flow, "published_version_id", None)
             session.status = status
             session.context = context if context is not None else (session.context or {})
             merged_variables = dict(session.variables or {})
