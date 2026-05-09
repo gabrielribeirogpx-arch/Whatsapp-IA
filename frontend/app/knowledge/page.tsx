@@ -122,7 +122,7 @@ export default function KnowledgePage() {
       <section className="dashboard-hero">
         <div>
           <h1>Knowledge Base</h1>
-          <p>Alimente a IA com conteúdos próprios do seu tenant para respostas mais precisas.</p>
+          <p>Alimente a IA com conteúdos próprios da sua conta para respostas mais precisas.</p>
         </div>
         <div className="dashboard-actions">
           <Link href="/dashboard" className="secondary-button">
@@ -229,7 +229,7 @@ export default function KnowledgePage() {
               </div>
             ))}
 
-            {!items.length ? <p className="empty-state">Nenhum conteúdo cadastrado para este tenant.</p> : null}
+            {!items.length ? <p className="empty-state">Nenhum conteúdo cadastrado para esta conta.</p> : null}
           </div>
         </article>
       </section>

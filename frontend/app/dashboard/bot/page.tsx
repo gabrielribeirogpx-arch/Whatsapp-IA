@@ -42,7 +42,7 @@ export default function BotRulesPage() {
     setNotice('');
 
     if (!trigger.trim() || !response.trim()) {
-      setError('Preencha trigger e resposta para criar uma regra.');
+      setError('Preencha gatilho e resposta para criar uma regra.');
       return;
     }
 

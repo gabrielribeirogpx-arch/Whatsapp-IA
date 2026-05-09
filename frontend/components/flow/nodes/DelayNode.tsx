@@ -2,7 +2,7 @@
 
 import { Handle, NodeProps, Position } from 'reactflow';
 
-type DelayNodeData = {
+type EsperaNodeData = {
   label?: string;
   content?: string;
   running?: boolean;
@@ -13,8 +13,8 @@ type DelayNodeData = {
   hasValidationError?: boolean;
 };
 
-export default function DelayNode({ id, data, selected }: NodeProps) {
-  const nodeData = (data || {}) as DelayNodeData;
+export default function EsperaNode({ id, data, selected }: NodeProps) {
+  const nodeData = (data || {}) as EsperaNodeData;
 
   return (
     <div
@@ -32,7 +32,7 @@ export default function DelayNode({ id, data, selected }: NodeProps) {
       {/* Header */}
       <div className="flow-node-header" style={{ paddingTop: 14 }}>
         <div className="flow-node-type-dot" style={{ background: '#16a34a' }} />
-        <span className="flow-node-title">{nodeData.label || 'Delay'}</span>
+        <span className="flow-node-title">{nodeData.label || 'Espera'}</span>
         <span
           className="flow-node-badge"
           style={{ background: '#f0fdf4', color: '#15803d' }}
@@ -41,7 +41,7 @@ export default function DelayNode({ id, data, selected }: NodeProps) {
         </span>
         <button
           type="button"
-          title={nodeData.isStart ? 'Node inicial' : 'Marcar como início'}
+          title={nodeData.isStart ? 'Bloco inicial' : 'Marcar como início'}
           onClick={(e) => {
             e.stopPropagation();
             nodeData.onToggleStart?.(id);

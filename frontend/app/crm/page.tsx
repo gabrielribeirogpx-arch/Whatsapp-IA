@@ -54,7 +54,7 @@ export default function CRMPage() {
             {!contacts.length ? (
               <tr>
                 <td colSpan={5} className="empty-state">
-                  Nenhum contato encontrado para este tenant.
+                  Nenhum contato encontrado para esta conta.
                 </td>
               </tr>
             ) : null}

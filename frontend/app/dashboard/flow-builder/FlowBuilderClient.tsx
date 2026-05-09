@@ -1484,11 +1484,11 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
         </div>
         {validationErrors.length > 0 && (
           <div style={{ margin: '8px 0', padding: 10, border: '1px solid #fecaca', borderRadius: 8, background: '#fff1f2', maxWidth: 420 }}>
-            <strong style={{ fontSize: 12 }}>Problemas do Flow</strong>
+            <strong style={{ fontSize: 12 }}>Problemas do fluxo</strong>
             {validationErrors.map((issue, idx) => (
               <div key={`${issue.code}-${idx}`} style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 12, marginTop: 6 }}>
                 <span>⚠️ {issue.message}</span>
-                <button type="button" onClick={() => focusNodeIssue(issue.node_id)} style={{ color: '#b91c1c' }}>Ir para node</button>
+                <button type="button" onClick={() => focusNodeIssue(issue.node_id)} style={{ color: '#b91c1c' }}>Ir para bloco</button>
               </div>
             ))}
           </div>
