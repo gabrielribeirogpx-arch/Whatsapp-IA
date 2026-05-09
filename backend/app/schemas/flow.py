@@ -16,5 +16,9 @@ class EdgeSchema(BaseModel):
 
 
 class FlowUpdate(BaseModel):
-    nodes: List[NodeSchema]
+    name: Optional[str] = None
+    description: Optional[str] = None
+    trigger_type: Optional[str] = None
+    trigger_value: Optional[str] = None
+    nodes: List[NodeSchema] = []
     edges: Optional[List[EdgeSchema]] = []
