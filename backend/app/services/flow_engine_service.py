@@ -22,6 +22,7 @@ from app.services.flow_analytics_service import record_flow_event
 from app.services.queue import enqueue_send_message
 from app.utils.phone import normalize_phone
 from app.services.flow_session_service import FlowSessionService
+from app.core.redis_client import get_redis_client
 
 DEFAULT_FLOW_NAME = "default_visual"
 MAX_AUTO_STEPS = 10
@@ -1671,7 +1672,19 @@ def _render_choice_prompt(node_data: dict[str, Any], edges: list[FlowEdge | Vers
     return base
 
 
-def _send_flow_whatsapp_message(tenant: Tenant, phone: str, text: str) -> str | None:
+def _next_flow_sequence(tenant_id: uuid.UUID, phone: str) -> int | None:
+    normalized_phone = str(phone or "").strip()
+    if not normalized_phone:
+        return None
+    try:
+        redis_client = get_redis_client()
+        return int(redis_client.incr(f"wa:next-seq:{tenant_id}:{normalized_phone}"))
+    except Exception:
+        logger.warning("[FLOW SEND SEQUENCE FALLBACK] tenant_id=%s phone=%s", tenant_id, normalized_phone, exc_info=True)
+        return None
+
+
+def _send_flow_whatsapp_message(tenant: Tenant, phone: str, text: str, **flow_context: Any) -> str | None:
     content = (text or "").strip()
     if not content:
         print("[FLOW ERROR] texto vazio no node")
@@ -1685,7 +1698,15 @@ def _send_flow_whatsapp_message(tenant: Tenant, phone: str, text: str) -> str | 
     print(f"[FLOW SEND] Enviando: {content}")
     logger.info("[FLOW SEND] Enfileirando mensagem: %s", content)
     try:
-        job_id = enqueue_send_message({"tenant_id": tenant.id, "phone": phone, "text": content})
+        payload: dict[str, Any] = {"tenant_id": tenant.id, "phone": phone, "text": content}
+        payload.update({
+            "flow_id": str(flow_context.get("flow_id")) if flow_context.get("flow_id") else None,
+            "flow_version_id": str(flow_context.get("flow_version_id")) if flow_context.get("flow_version_id") else None,
+            "session_id": str(flow_context.get("session_id")) if flow_context.get("session_id") else None,
+            "node_id": str(flow_context.get("node_id")) if flow_context.get("node_id") else None,
+            "sequence_number": flow_context.get("sequence_number") or _next_flow_sequence(tenant.id, phone),
+        })
+        job_id = enqueue_send_message(payload)
         print(f"[FLOW SEND RESULT] job_id={job_id}")
         return str(job_id) if job_id is not None else None
     except Exception as error:
@@ -1717,7 +1738,7 @@ def enqueue_flow_send_with_tracking(
     hash_source = (template_or_node_text or content).strip()
     text_hash = hashlib.sha256(hash_source.encode("utf-8")).hexdigest()[:16] if hash_source else None
 
-    payload: dict[str, Any] = {"tenant_id": tenant_id, "phone": phone, "text": content}
+    payload: dict[str, Any] = {"tenant_id": tenant_id, "phone": phone, "text": content, "flow_id": str(flow_id) if flow_id else None, "flow_version_id": str(flow_version_id) if flow_version_id else None, "session_id": str(conversation_id) if conversation_id else None, "node_id": str(node_id) if node_id else None, "sequence_number": _next_flow_sequence(tenant_id, phone)}
     if has_buttons:
         payload["buttons"] = buttons
 
@@ -1743,11 +1764,11 @@ def enqueue_flow_send_with_tracking(
     return job_id
 
 
-def _send_flow_interactive_buttons(tenant: Tenant, phone: str, text: str, buttons: list[dict]) -> None:
+def _send_flow_interactive_buttons(tenant: Tenant, phone: str, text: str, buttons: list[dict], **flow_context: Any) -> None:
     """Enfileira envio de botoes; worker aplica fallback para texto simples se falhar."""
     print(f"[FLOW BUTTON SEND] Tentando enviar botoes: {[b.get('label') for b in buttons]}")
     try:
-        job_id = enqueue_send_message({"tenant_id": tenant.id, "phone": phone, "text": text, "buttons": buttons})
+        job_id = enqueue_send_message({"tenant_id": tenant.id, "phone": phone, "text": text, "buttons": buttons, "flow_id": str(flow_context.get("flow_id")) if flow_context.get("flow_id") else None, "flow_version_id": str(flow_context.get("flow_version_id")) if flow_context.get("flow_version_id") else None, "session_id": str(flow_context.get("session_id")) if flow_context.get("session_id") else None, "node_id": str(flow_context.get("node_id")) if flow_context.get("node_id") else None, "sequence_number": flow_context.get("sequence_number") or _next_flow_sequence(tenant.id, phone)})
         print(f"[FLOW BUTTON SEND RESULT] job_id={job_id}")
     except Exception as error:
         print(f"[FLOW BUTTON ERROR] {error} — usando fallback texto em fila")
