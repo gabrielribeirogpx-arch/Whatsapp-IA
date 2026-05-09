@@ -155,6 +155,26 @@ class FlowSessionService:
         self.db.commit()
         self.db.refresh(session)
 
+    def reset_runtime_state_for_user_flow(self, *, tenant_id, user_identifier: str, flow_id) -> tuple[int, list]:
+        sessions = (
+            self.db.query(FlowSession)
+            .filter(
+                FlowSession.tenant_id == tenant_id,
+                FlowSession.user_identifier == user_identifier,
+                FlowSession.flow_id == flow_id,
+            )
+            .all()
+        )
+        session_ids = []
+        for session in sessions:
+            session_ids.append(session.id)
+            session.status = "completed"
+            session.current_node_id = None
+            session.context = {}
+            session.variables = {}
+        self.db.commit()
+        return len(sessions), session_ids
+
     def end_session(
         self,
         session: FlowSession,

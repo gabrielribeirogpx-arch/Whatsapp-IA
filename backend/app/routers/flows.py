@@ -30,7 +30,9 @@ from app.services.flow_engine_service import (
     validate_flow_graph,
 )
 from app.services.flow_runtime_service import execute_node_chain_until_reply
+from app.services.flow_session_service import FlowSessionService
 from app.services.flow_service import FlowService, create_flow, delete_flow, duplicate_flow, get_flow, get_flows, update_flow
+from app.services.delay_queue_service import clear_delays_for_runtime_reset
 
 router = APIRouter()
 crud_router = APIRouter(tags=["flows-crud"])
@@ -172,6 +174,13 @@ class ResetTenantFlowsPayload(BaseModel):
     tenant_id: uuid.UUID
     confirm: str
     keep_flow_id: uuid.UUID
+
+
+class ResetFlowRuntimeStatePayload(BaseModel):
+    tenant_id: uuid.UUID
+    phone: str
+    flow_id: uuid.UUID
+    confirm: str
 
 
 def _extract_start_node_metadata(nodes: list[dict[str, Any]]) -> tuple[str | None, str]:
@@ -523,6 +532,60 @@ def reset_tenant_flows(payload: ResetTenantFlowsPayload, db: Session = Depends(g
                 "trace": error_trace[-4000:],
             },
         )
+
+
+@router.post("/admin/reset-flow-runtime-state")
+def reset_flow_runtime_state(payload: ResetFlowRuntimeStatePayload, db: Session = Depends(get_db)):
+    if payload.confirm != "RESET_FLOW_RUNTIME_STATE":
+        raise HTTPException(status_code=400, detail="confirm inválido")
+
+    flow = db.query(Flow).filter(Flow.tenant_id == payload.tenant_id, Flow.id == payload.flow_id).first()
+    if not flow:
+        raise HTTPException(status_code=404, detail="flow não encontrado para o tenant")
+
+    flow_session_service = FlowSessionService(db)
+    deleted_sessions, session_ids = flow_session_service.reset_runtime_state_for_user_flow(
+        tenant_id=payload.tenant_id,
+        user_identifier=payload.phone,
+        flow_id=payload.flow_id,
+    )
+    cleared_delays = clear_delays_for_runtime_reset(
+        tenant_id=payload.tenant_id,
+        user_identifier=payload.phone,
+        flow_id=payload.flow_id,
+        flow_session_ids=session_ids,
+    )
+
+    conversation = db.query(Conversation).filter(
+        Conversation.tenant_id == payload.tenant_id,
+        Conversation.phone_number == payload.phone,
+    ).first()
+    cleared_conversation_state = False
+    if conversation:
+        conversation.current_node_id = None
+        conversation.current_flow = None
+        context = dict(conversation.context or {})
+        for key in ("flow_current_node_id", "pending_input", "waiting_for_response", "pending_flow_state", "flow_session_id", "flow_id"):
+            context.pop(key, None)
+        conversation.context = context
+        db.add(conversation)
+        db.commit()
+        cleared_conversation_state = True
+
+    logger.warning(
+        "[ADMIN FLOW RUNTIME RESET] tenant_id=%s phone=%s flow_id=%s deleted_sessions=%s cleared_delays=%s",
+        payload.tenant_id,
+        payload.phone,
+        payload.flow_id,
+        deleted_sessions,
+        cleared_delays,
+    )
+    return {
+        "success": True,
+        "deleted_sessions": deleted_sessions,
+        "cleared_delays": cleared_delays,
+        "cleared_conversation_state": cleared_conversation_state,
+    }
 
 
 def _resolve_flow_query(db: Session, flow_id: str):
