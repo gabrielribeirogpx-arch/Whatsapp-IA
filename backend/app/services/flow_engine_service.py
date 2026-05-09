@@ -2208,11 +2208,16 @@ def process_flow_engine(
             )
             if candidate_next_node is not None:
                 next_node_id = candidate_next_node_id
+                candidate_next_type = (
+                    candidate_next_node.get("type")
+                    if isinstance(candidate_next_node, dict)
+                    else getattr(candidate_next_node, "type", None)
+                )
                 logger.info(
                     "[START NEXT NODE RESOLVED] start_node_id=%s next_node_id=%s next_node_type=%s",
                     start_node_id,
                     next_node_id,
-                    _node_type(candidate_next_node),
+                    candidate_next_type,
                 )
 
         if next_node_id is None:
