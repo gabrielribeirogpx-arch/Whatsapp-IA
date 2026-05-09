@@ -203,7 +203,7 @@ export default function Page({ params }: Props) {
           <h3 className='section-title'><GitBranch size={18} />Pontos de abandono</h3>
           {(data?.dropoffs ?? []).length === 0 ? <div className='side-empty'><span className='side-icon'><GitBranch size={22} /></span><strong>—</strong><span className='secondary-text'>Sem dados suficientes</span></div> : (data?.dropoffs ?? []).map((n) => (
             <div key={n.node_id} className='secondary-text'>
-              ⚠️ Node “{n.node_label}” — {n.dropoff_rate}% de abandono. Sugestão: simplifique a pergunta.
+              ⚠️ Bloco “{n.node_label}” — {n.dropoff_rate}% de abandono. Sugestão: simplifique a pergunta.
             </div>
           ))}
         </div>

@@ -34,7 +34,7 @@ export default function BotForm({
     <article className="products-form-card">
       <h2>Criar regra</h2>
       <form onSubmit={handleSubmit} className="products-form">
-        <label htmlFor="bot-trigger">Trigger</label>
+        <label htmlFor="bot-trigger">Gatilho</label>
         <input
           id="bot-trigger"
           value={trigger}
@@ -50,7 +50,7 @@ export default function BotForm({
           placeholder="Digite a resposta do bot"
         />
 
-        <label htmlFor="bot-match-type">Tipo de match</label>
+        <label htmlFor="bot-match-type">Tipo de correspondência</label>
         <select
           id="bot-match-type"
           value={matchType}

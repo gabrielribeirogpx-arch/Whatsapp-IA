@@ -41,7 +41,7 @@ export default function MessageNode({ id, data, selected }: NodeProps) {
         </span>
         <button
           type="button"
-          title={nodeData.isStart ? 'Node inicial' : 'Marcar como início'}
+          title={nodeData.isStart ? 'Bloco inicial' : 'Marcar como início'}
           onClick={(e) => {
             e.stopPropagation();
             nodeData.onToggleStart?.(id);

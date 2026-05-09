@@ -427,7 +427,7 @@ export default function FlowsPage() {
                       </span>
                     </div>
                     <span className="mt-1 block text-xs text-slate-500">
-                      Trigger: {flow.trigger_type || 'default'}
+                      Gatilho: {flow.trigger_type || 'default'}
                       {flow.trigger_value ? ` · ${flow.trigger_value}` : ''} · {getUpdatedLabel(flow.updated_at)}
                     </span>
                   </div>
@@ -533,14 +533,14 @@ export default function FlowsPage() {
               </div>
             ))}
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              <label style={{ fontSize: 12, fontWeight: 600, color: '#555' }}>Trigger type</label>
+              <label style={{ fontSize: 12, fontWeight: 600, color: '#555' }}>Tipo de gatilho</label>
               <select value={form.trigger_type} onChange={(e) => setForm((prev) => ({ ...prev, trigger_type: e.target.value as 'keyword' | 'default' }))} style={{ border: '1px solid #e8e6e0', borderRadius: 8, padding: '8px 12px', fontSize: 13, color: '#111', outline: 'none', fontFamily: 'inherit', background: '#fff' }}>
                 <option value="default">default</option>
                 <option value="keyword">keyword</option>
               </select>
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              <label style={{ fontSize: 12, fontWeight: 600, color: '#555' }}>Trigger value</label>
+              <label style={{ fontSize: 12, fontWeight: 600, color: '#555' }}>Valor do gatilho</label>
               <input value={form.trigger_value || ''} onChange={(e) => setForm((prev) => ({ ...prev, trigger_value: e.target.value }))} style={{ border: '1px solid #e8e6e0', borderRadius: 8, padding: '8px 12px', fontSize: 13, color: '#111', outline: 'none', fontFamily: 'inherit' }} />
             </div>
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 4 }}>

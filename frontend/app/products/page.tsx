@@ -135,7 +135,7 @@ export default function ProductsPage() {
               </div>
             ))}
 
-            {!products.length ? <p className="empty-state">Nenhum produto cadastrado para este tenant.</p> : null}
+            {!products.length ? <p className="empty-state">Nenhum produto cadastrado para esta conta.</p> : null}
           </div>
         </article>
 
