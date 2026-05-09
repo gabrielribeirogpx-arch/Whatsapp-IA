@@ -433,7 +433,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
       if (!flowId) {
         setNodes([]);
         setEdges([]);
-        setShowEmptyFlowWarning(true);
+        setShowEmptyFlowWarning(false);
         setFlowSource('none');
         setOperationError('Nenhum fluxo selecionado para carregar.');
         return;
@@ -526,7 +526,14 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
       const nodesToRender = formattedNodes;
       let edgesToRender = formattedEdges;
       if (nodesToRender.length === 0) {
-        throw new Error('Graph vazio retornado pelo backend. Verifique versão atual/publicada.');
+        console.info('[BUILDER EMPTY FLOW]', { flow_id: flowId, nodes_count: 0, edges_count: edgesToRender.length });
+        setNodes([]);
+        setEdges([]);
+        setOperationError(null);
+        setFlowValidationError(null);
+        setValidationWarnings([]);
+        setValidationErrors([]);
+        return;
       }
 
       const hasStoredPositions = nodesToRender.some((n) => n.position && (n.position.x !== 0 || n.position.y !== 0));
@@ -544,7 +551,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
       setNodes([]);
       setEdges([]);
       setFlowSource('error');
-      setShowEmptyFlowWarning(true);
+      setShowEmptyFlowWarning(false);
       setOperationError(err instanceof Error ? err.message : 'Falha ao carregar fluxo no Builder.');
     } finally {
       isLoadingFlowRef.current = false;
@@ -798,6 +805,50 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
     },
     [rfInstance, isSimulatorOpen, setNodes, toggleStartNode, updateNodeData],
   );
+
+  const handleCreateInitialMessage = useCallback(() => {
+    const startNode: Node = {
+      id: makeNodeId(),
+      type: 'message',
+      position: { x: 160, y: 120 },
+      data: {
+        label: 'Mensagem inicial',
+        content: 'Olá! Como posso te ajudar?',
+        isStart: true,
+        onChange: updateNodeData,
+        onToggleStart: toggleStartNode,
+        hasValidationError: false,
+      },
+    };
+
+    setNodes([startNode]);
+    setEdges([]);
+    setShowEmptyFlowWarning(false);
+  }, [setEdges, setNodes, toggleStartNode, updateNodeData]);
+
+  const handleUseSimpleTemplate = useCallback(() => {
+    const startId = makeNodeId();
+    const conditionId = makeNodeId();
+    const yesId = makeNodeId();
+    const noId = makeNodeId();
+
+    const templateNodes: Node[] = [
+      { id: startId, type: 'message', position: { x: 140, y: 80 }, data: { label: 'Mensagem inicial', content: 'Olá! Como posso te ajudar?', isStart: true, onChange: updateNodeData, onToggleStart: toggleStartNode, hasValidationError: false } },
+      { id: conditionId, type: 'condition', position: { x: 140, y: 250 }, data: { label: 'Condição', condition: 'Cliente quer suporte?', onChange: updateNodeData, onToggleStart: toggleStartNode, hasValidationError: false } },
+      { id: yesId, type: 'message', position: { x: -80, y: 430 }, data: { label: 'Resposta A', content: 'Perfeito! Vou te direcionar para o suporte.', onChange: updateNodeData, onToggleStart: toggleStartNode, hasValidationError: false } },
+      { id: noId, type: 'message', position: { x: 360, y: 430 }, data: { label: 'Resposta B', content: 'Sem problemas! Posso te mostrar nossos planos.', onChange: updateNodeData, onToggleStart: toggleStartNode, hasValidationError: false } },
+    ];
+
+    const templateEdges: Edge[] = [
+      { id: `${startId}-${conditionId}`, source: startId, target: conditionId, type: 'default', label: '' },
+      { id: `${conditionId}-${yesId}-sim`, source: conditionId, target: yesId, sourceHandle: 'sim', type: 'default', label: 'sim', data: { condition: 'sim', sourceHandle: 'sim' } },
+      { id: `${conditionId}-${noId}-nao`, source: conditionId, target: noId, sourceHandle: 'nao', type: 'default', label: 'não', data: { condition: 'não', sourceHandle: 'nao' } },
+    ];
+
+    setNodes(templateNodes);
+    setEdges(templateEdges);
+    setShowEmptyFlowWarning(false);
+  }, [setEdges, setNodes, toggleStartNode, updateNodeData]);
 
   const handleSaveFlow = useCallback(async (requireConfirmOverwrite = false) => {
     if (!selectedFlowId) {
@@ -1162,17 +1213,12 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
         </div>
       </nav>
 
-      {showEmptyFlowWarning && (
-        <div style={{ position: 'absolute', top: 12, left: '50%', transform: 'translateX(-50%)', zIndex: 25, background: '#fef3c7', color: '#92400e', border: '1px solid #f59e0b', borderRadius: 8, padding: '8px 12px', fontSize: 13 }}>
-          ⚠️ Flow vazio ou inconsistente
-        </div>
-      )}
       {flowValidationError && (
         <div style={{ position: 'absolute', top: showEmptyFlowWarning ? 50 : 12, right: 16, zIndex: 25, background: '#fef2f2', color: '#b91c1c', border: '1px solid #fca5a5', borderRadius: 8, padding: '8px 12px', fontSize: 13 }}>
           {flowValidationError}
         </div>
       )}
-      {validationWarnings.length > 0 && (
+      {validationWarnings.length > 0 && nodes.length > 0 && (
         <div style={{ position: 'absolute', top: 12, right: 16, zIndex: 25, background: '#fef3c7', color: '#92400e', border: '1px solid #f59e0b', borderRadius: 8, padding: '8px 12px', fontSize: 13 }}>
           ⚠️ {validationWarnings[0]?.message}
         </div>
@@ -1193,7 +1239,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
         </div>
       )}
       {flowSource === 'fallback' && (
-        <div style={{ position: 'absolute', top: showEmptyFlowWarning ? 50 : 12, left: '50%', transform: 'translateX(-50%)', zIndex: 25, background: '#eff6ff', color: '#1d4ed8', border: '1px solid #93c5fd', borderRadius: 8, padding: '6px 10px', fontSize: 12 }}>
+        <div style={{ position: 'absolute', top: 12, left: '50%', transform: 'translateX(-50%)', zIndex: 25, background: '#eff6ff', color: '#1d4ed8', border: '1px solid #93c5fd', borderRadius: 8, padding: '6px 10px', fontSize: 12 }}>
           Flow recuperado automaticamente
         </div>
       )}
@@ -1411,6 +1457,18 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
                 <span className="flow-context-menu-label">{label}</span>
               </button>
             ))}
+          </div>
+        )}
+        {nodes.length === 0 && !isLoading && (
+          <div style={{ position: 'absolute', inset: 0, zIndex: 20, display: 'grid', placeItems: 'center', pointerEvents: 'none' }}>
+            <div style={{ pointerEvents: 'auto', width: 'min(520px, calc(100% - 32px))', background: 'rgba(255,255,255,0.96)', border: '1px solid #e5e7eb', borderRadius: 18, padding: '28px 24px', textAlign: 'center', boxShadow: '0 20px 45px rgba(16,24,40,0.12)' }}>
+              <h3 style={{ margin: 0, fontSize: 24, color: '#111827' }}>Comece seu primeiro fluxo</h3>
+              <p style={{ margin: '10px 0 22px', fontSize: 15, color: '#4b5563' }}>Adicione uma mensagem inicial ou escolha um template.</p>
+              <div style={{ display: 'flex', gap: 12, justifyContent: 'center', flexWrap: 'wrap' }}>
+                <button type="button" onClick={handleCreateInitialMessage} className="flow-top-btn" style={{ minWidth: 220 }}>Adicionar mensagem inicial</button>
+                <button type="button" onClick={handleUseSimpleTemplate} className="flow-top-btn flow-top-btn-secondary" style={{ minWidth: 220 }}>Usar template simples</button>
+              </div>
+            </div>
           </div>
         )}
         <ReactFlow
