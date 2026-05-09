@@ -870,16 +870,19 @@ async def update_flow_route(
         payload = await request.json()
         payload_data = payload if isinstance(payload, dict) else {}
 
-        raw_nodes = payload_data.get("nodes", [])
-        raw_edges = payload_data.get("edges", [])
+        logger.info("[FLOW UPDATE REQUEST] flow_id=%s trigger_type=%s trigger_value=%s", flow_id, payload_data.get("trigger_type"), payload_data.get("trigger_value"))
 
-        logger.info("PAYLOAD REAL: %s", payload_data)
-        logger.info("NODES RECEBIDOS: %s", raw_nodes)
+        raw_nodes = payload_data.get("nodes")
+        raw_edges = payload_data.get("edges")
 
-        if not isinstance(raw_nodes, list):
-            raw_nodes = []
-        if not isinstance(raw_edges, list):
-            raw_edges = []
+        tenant = _resolve_request_tenant(db=db, tenant_id_header=x_tenant_id)
+        flow = _get_flow_by_identifier(db=db, flow_id=flow_id, tenant_id=tenant.id)
+        if not flow:
+            raise HTTPException(status_code=404, detail="Flow não encontrado")
+
+        logger.info("[FLOW DEBUG] Flow encontrado ou criado: %s", flow.id)
+        if not isinstance(raw_nodes, list) or not isinstance(raw_edges, list):
+            raw_nodes, raw_edges = _builder_graph_from_flow(flow)
 
         nodes = []
         for node in raw_nodes:
@@ -893,8 +896,8 @@ async def update_flow_route(
                 }
             )
         nodes = _ensure_start_node(nodes)
-
         edges = raw_edges or []
+
         logger.info("[FLOW SAVE] nodes: %s", len(nodes))
         if not nodes or len(nodes) == 0:
             raise Exception("BLOCK SAVE: flow sem nodes")
@@ -904,13 +907,7 @@ async def update_flow_route(
         if len(start_nodes) > 1:
             raise Exception("Flow só pode ter um node inicial")
         logger.info("VALIDANDO FLOW: nodes=%s", nodes)
-        
-        tenant = _resolve_request_tenant(db=db, tenant_id_header=x_tenant_id)
-        flow = _get_flow_by_identifier(db=db, flow_id=flow_id, tenant_id=tenant.id)
-        if not flow:
-            raise HTTPException(status_code=404, detail="Flow não encontrado")
 
-        logger.info("[FLOW DEBUG] Flow encontrado ou criado: %s", flow.id)
         for key, value in payload_data.items():
             if key in {"name", "description", "is_active", "trigger_type", "trigger_value", "keywords", "stop_words", "priority", "version", "status"}:
                 setattr(flow, key, value)
@@ -988,6 +985,7 @@ async def update_flow_route(
         logger.info("ANTES DO COMMIT")
         db.commit()
         db.refresh(new_version)
+        logger.info("[FLOW UPDATE SAVED] flow_id=%s trigger_type=%s trigger_value=%s", str(flow.id), flow.trigger_type, flow.trigger_value)
 
         return {"flow": _serialize_flow(flow), "validation": validation}
     except HTTPException:
