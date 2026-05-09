@@ -358,15 +358,8 @@ def handle_flow(db: Session, conversation: Conversation, message: Message) -> st
 
 
 def create_flow(db: Session, tenant_id, data: dict[str, Any]) -> Flow:
-    has_active_flow = db.execute(
-        select(Flow.id).where(
-            Flow.tenant_id == tenant_id,
-            Flow.is_active.is_(True),
-        ).limit(1)
-    ).scalar_one_or_none() is not None
-
     requested_active = data.get("is_active")
-    should_activate = bool(requested_active) if requested_active is not None else not has_active_flow
+    should_activate = bool(requested_active) if requested_active is not None else False
 
     if should_activate:
         db.execute(
@@ -388,6 +381,8 @@ def create_flow(db: Session, tenant_id, data: dict[str, Any]) -> Flow:
         stop_words=data.get("stop_words"),
         priority=data.get("priority", 0),
         version=data.get("version", 1),
+        status=data.get("status", "draft"),
+        published_version_id=None,
         nodes=data.get("nodes", []),
         edges=data.get("edges", []),
     )
