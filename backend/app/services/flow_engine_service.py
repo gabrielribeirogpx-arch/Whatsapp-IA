@@ -1820,6 +1820,35 @@ def _is_wait_node_type(node_type: str) -> bool:
     return node_type in {"condition", "input", "question", "wait_user_response", "choice"}
 
 
+
+
+def _finalize_runtime_flow_session(db: Session, conversation: Conversation, flow_session: FlowSession | None, end_node_id: Any) -> None:
+    if flow_session:
+        flow_session.status = "completed"
+        flow_session.current_node_id = None
+        if hasattr(flow_session, "completed_at"):
+            setattr(flow_session, "completed_at", datetime.utcnow())
+        if isinstance(flow_session.context, dict):
+            flow_session.context.pop("pending_input", None)
+            flow_session.context.pop("last_condition", None)
+            flow_session.context.pop("condition", None)
+        if isinstance(flow_session.variables, dict):
+            flow_session.variables.pop("pending_input", None)
+            flow_session.variables.pop("last_condition", None)
+            flow_session.variables.pop("condition", None)
+            flow_session.variables.pop("current_node_id", None)
+        db.add(flow_session)
+
+    if isinstance(conversation.context, dict):
+        conversation.context.pop("pending_input", None)
+        conversation.context.pop("last_condition", None)
+        conversation.context.pop("condition", None)
+        conversation.context["flow_current_node_id"] = None
+
+    conversation.current_node_id = None
+    db.add(conversation)
+    db.commit()
+    logger.info("[FLOW FINISHED] session_id=%s end_node_id=%s", getattr(flow_session, "id", None), end_node_id)
 def run_until_wait_node(
     db: Session,
     flow: Flow,
@@ -1913,6 +1942,18 @@ def run_until_wait_node(
             continue
 
         if node_type in {"message", "text", "msg", "start", "delay", "action"}:
+            if node_type == "delay":
+                delay_seconds = int(float(str(node_data.get("delay") or node_data.get("seconds") or node_data.get("content") or 0)))
+                next_edge = _pick_default_edge(edges)
+                next_target = _edge_target(next_edge) if next_edge else None
+                if delay_seconds > 0 and next_target:
+                    enqueue_delay(session.tenant_id, str(session.phone_number or session.user_identifier or ""), _parse_uuid(next_target), delay_seconds)
+                    logger.info("[DELAY SCHEDULED] delay_node_id=%s seconds=%s next_node_id=%s", _node_get(node, "id"), delay_seconds, next_target)
+                    if flow_session:
+                        flow_session.current_node_id = str(next_target)
+                        db.add(flow_session)
+                    db.commit()
+                    return None
             if node_type in {"message", "text", "msg"}:
                 text = _resolve_node_text(node_data)
                 if text:
@@ -1927,6 +1968,9 @@ def run_until_wait_node(
                             continue
                         _send_flow_whatsapp_message(tenant=tenant, phone=phone, text=text)
                         logger.info("[MANYCHAT MESSAGE SENT] node_id=%s", _node_get(node, "id"))
+                if _is_terminal_message_node(node_data):
+                    _finalize_runtime_flow_session(db=db, conversation=session, flow_session=flow_session, end_node_id=_node_get(node, "id"))
+                    return None
             next_edge = _pick_default_edge(edges)
             next_target = _edge_target(next_edge) if next_edge else None
             message_node_id = _node_get(node, "id")
@@ -1983,15 +2027,7 @@ def run_until_wait_node(
         next_edge = _pick_default_edge(edges)
         node = _get_node(db=db, node_id=_edge_target(next_edge), tenant_id=session.tenant_id, runtime_graph=runtime_graph) if next_edge else None
 
-    if flow_session:
-        flow_session.current_node_id = None
-        flow_session.last_input = incoming_text
-        db.add(flow_session)
-    if isinstance(session.context, dict):
-        session.context["flow_current_node_id"] = None
-    logger.info("[FLOW SESSION STATE SAVED] session_current_node_id=%s conversation_fk_skipped=true", None)
-    db.add(session)
-    db.commit()
+    _finalize_runtime_flow_session(db=db, conversation=session, flow_session=flow_session, end_node_id=_node_get(node, "id") if node else None)
     logger.info("[MANYCHAT FLOW_FINISHED] flow_id=%s", flow.id)
     return None
 
@@ -2213,6 +2249,10 @@ def process_flow_engine(
     if saved_current_node_id is None and isinstance(getattr(runtime_session, "variables", None), dict):
         saved_current_node_id = _parse_uuid(runtime_session.variables.get("current_node_id"))
 
+    is_completed_session = (getattr(runtime_session, "status", "") or "").lower() == "completed"
+    if is_completed_session and not start_trigger:
+        logger.info("[FLOW COMPLETED IGNORE_INPUT] session_id=%s text=%s", getattr(runtime_session, "id", None), user_message_text)
+        return None
     path = "CONTINUE" if saved_current_node_id and not start_trigger else "START"
     logger.info(
         "[FLOW ENTRY DECISION] path=%s text=%s current_node_id=%s session_id=%s",
@@ -2263,7 +2303,7 @@ def process_flow_engine(
     conversation.mode = "flow"
     conversation.current_flow = flow.id
     start_node_id = _parse_uuid(_node_get(start_node, "id"))
-    set_current_node(conversation=conversation, node_id=start_node_id, db=db)
+    conversation.current_node_id = None
 
     next_node_id: uuid.UUID | None = None
     if start_node_id is not None:
