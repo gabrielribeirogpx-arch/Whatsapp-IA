@@ -1915,12 +1915,28 @@ def run_until_wait_node(
                         logger.info("[MANYCHAT MESSAGE SENT] node_id=%s", _node_get(node, "id"))
             next_edge = _pick_default_edge(edges)
             next_target = _edge_target(next_edge) if next_edge else None
-            logger.info("[MANYCHAT ADVANCE] from=%s to=%s", _node_get(node, "id"), next_target)
-            node = _get_node(db=db, node_id=next_target, tenant_id=session.tenant_id, runtime_graph=runtime_graph) if next_edge else None
-            if node and _node_type_slug(node) == "condition":
+            message_node_id = _node_get(node, "id")
+            next_node = _get_node(db=db, node_id=next_target, tenant_id=session.tenant_id, runtime_graph=runtime_graph) if next_edge else None
+            next_node_type = _node_type_slug(next_node) if next_node else None
+            logger.info(
+                "[MESSAGE POST ADVANCE] message_node_id=%s next_node_id=%s next_node_type=%s",
+                message_node_id,
+                next_target,
+                next_node_type,
+            )
+            logger.info("[MANYCHAT ADVANCE] from=%s to=%s", message_node_id, next_target)
+            node = next_node
+            if node and next_node_type == "condition":
                 condition_node_id = _node_get(node, "id")
-                set_current_node(conversation=session, node_id=condition_node_id, db=db)
-                logger.info("[WAITING_NEXT_CONDITION] condition_node_id=%s", condition_node_id)
+                session.current_node_id = _parse_uuid(condition_node_id)
+                db.add(session)
+                db.commit()
+                db.refresh(session)
+                logger.info(
+                    "[WAITING_NEXT_CONDITION] condition_node_id=%s from_message_node_id=%s",
+                    condition_node_id,
+                    message_node_id,
+                )
                 return node
             continue
 
