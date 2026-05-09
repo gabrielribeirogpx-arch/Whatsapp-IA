@@ -2889,18 +2889,30 @@ def process_flow_engine(
                 },
             )
 
-            node = _advance_to_edge_target(
-                # primeira mensagem só inicializa o fluxo e envia o start node
-                db=db,
-                conversation=conversation,
-                edge=selected_edge,
-                runtime_graph=runtime_graph,
-                runtime_session=runtime_session,
-                session_service=session_service,
-                flow_version_id=current_flow_version_id,
-                user_identifier=user_identifier,
-                flow=flow,
-            )
+            selected_target_node = None
+            if selected_edge and _edge_target(selected_edge):
+                selected_target_node = _get_node(
+                    db=db,
+                    node_id=_edge_target(selected_edge),
+                    tenant_id=conversation.tenant_id,
+                    runtime_graph=runtime_graph,
+                )
+
+            if selected_target_node and _node_type_slug(selected_target_node) == "message":
+                node = selected_target_node
+            else:
+                node = _advance_to_edge_target(
+                    # primeira mensagem só inicializa o fluxo e envia o start node
+                    db=db,
+                    conversation=conversation,
+                    edge=selected_edge,
+                    runtime_graph=runtime_graph,
+                    runtime_session=runtime_session,
+                    session_service=session_service,
+                    flow_version_id=current_flow_version_id,
+                    user_identifier=user_identifier,
+                    flow=flow,
+                )
             if not node:
                 reached_max_steps = False
                 break
@@ -2946,7 +2958,7 @@ def process_flow_engine(
                 advanced_type = _node_type_slug(node) if node else None
                 logger.info(
                     "[CONDITION MESSAGE ADVANCED] from_message_node_id=%s to_node_id=%s to_type=%s",
-                    selected_next,
+                    _node_get(selected_target_node, "id") if selected_target_node else selected_next,
                     node.id if node else None,
                     advanced_type,
                 )
