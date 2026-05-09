@@ -131,6 +131,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
   const router = useRouter();
   const searchParams = useSearchParams();
   const flowIdFromUrl = searchParams.get('flow_id') || searchParams.get('flowId') || _initialFlowId || '';
+  const showDebugFlowActionsFlag = process.env.NEXT_PUBLIC_SHOW_DEBUG_FLOW_ACTIONS === 'true';
   const [flows, setFlows] = useState<Array<{ id: string; name?: string | null; created_at?: string | null; is_active?: boolean; status?: string | null; is_published?: boolean | null }>>([]);
   const normalizedFlows = useMemo(
     () =>
@@ -178,6 +179,8 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
   const [operationError, setOperationError] = useState<string | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [isForceRepublishing, setIsForceRepublishing] = useState(false);
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const skipDirtyCheckRef = useRef(true);
   const [isEditing] = useState(true);
   const simulationStartedRef = useRef(false);
   const createSimulationSessionId = () => ((typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : String(Date.now()));
@@ -195,6 +198,20 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
     () => normalizedFlows.find((flow) => flow.id === selectedFlowId) || null,
     [normalizedFlows, selectedFlowId],
   );
+  const canSeeDebugFlowActions = useMemo(() => {
+    if (showDebugFlowActionsFlag) return true;
+    if (typeof window === 'undefined') return false;
+
+    try {
+      const tenantRaw = window.localStorage.getItem('tenant');
+      const parsed = tenantRaw ? JSON.parse(tenantRaw) as Record<string, unknown> : {};
+      const role = String(parsed?.role || parsed?.user_role || parsed?.profile || '').toLowerCase();
+      const isAdminLike = role.includes('admin') || role.includes('dev');
+      return isAdminLike;
+    } catch {
+      return false;
+    }
+  }, [showDebugFlowActionsFlag]);
   const getFlowBadge = useCallback((flow: { is_active?: boolean }) => (
     flow.is_active
       ? { label: 'Ativo', style: { background: '#DCFCE7', color: '#166534' } }
@@ -249,6 +266,14 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
     edgesRef.current = edges;
   }, [edges]);
 
+  useEffect(() => {
+    if (!isFlowHydrated) return;
+    if (skipDirtyCheckRef.current) {
+      skipDirtyCheckRef.current = false;
+      return;
+    }
+    setHasUnsavedChanges(true);
+  }, [edges, isFlowHydrated, nodes]);
 
   useEffect(() => {
     const handleOutsideClick = (event: MouseEvent) => {
@@ -981,6 +1006,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
       const data = await parseApiResponse<{ validation?: { warnings?: FlowValidationIssue[]; errors?: FlowValidationIssue[] } }>(response);
       setValidationWarnings(data?.validation?.warnings || []);
       setValidationErrors(data?.validation?.errors || []);
+      setHasUnsavedChanges(false);
     } catch (error) {
       console.error(error);
       const message = error instanceof Error && error.message ? error.message : 'Erro ao salvar fluxo.';
@@ -1028,14 +1054,21 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
   const handleActivateFlow = useCallback(async () => {
     if (!selectedFlowId) return;
     if (validationErrors.length > 0) return;
+
+    if (hasUnsavedChanges) {
+      await handleSaveFlow();
+    }
+
     const response = await apiFetch(`/api/flows/${selectedFlowId}/publish`, { method: 'POST', body: JSON.stringify({}) });
     await parseApiResponse(response);
+
     const activateResponse = await apiFetch(`/api/flows/${selectedFlowId}/activate`, { method: 'PUT' });
     await parseApiResponse(activateResponse);
 
     setActiveFlowId(selectedFlowId);
     setFlows((prev) => prev.map((flow) => ({ ...flow, is_active: flow.id === selectedFlowId })));
-  }, [selectedFlowId, validationErrors.length]);
+    await loadFlow(selectedFlowId);
+  }, [hasUnsavedChanges, handleSaveFlow, loadFlow, selectedFlowId, validationErrors.length]);
 
   const handleDeactivateFlow = useCallback(async () => {
     const response = await apiFetch('/api/flows/deactivate', {
@@ -1367,17 +1400,19 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
                 >
                   {isCreatingFlow ? 'Criando...' : '+ Criar novo Flow'}
                 </button>
-                <button
-                  type="button"
-                  className="flow-top-btn flow-top-btn-neutral"
-                  onClick={() => {
-                    void handleForceRepublish();
-                  }}
-                  disabled={!selectedFlowId || isForceRepublishing}
-                  style={{ padding: '6px 10px', fontSize: 12 }}
-                >
-                  {isForceRepublishing ? 'Republicando...' : 'Force Republish'}
-                </button>
+                {canSeeDebugFlowActions && (
+                  <button
+                    type="button"
+                    className="flow-top-btn flow-top-btn-neutral"
+                    onClick={() => {
+                      void handleForceRepublish();
+                    }}
+                    disabled={!selectedFlowId || isForceRepublishing}
+                    style={{ padding: '6px 10px', fontSize: 12 }}
+                  >
+                    {isForceRepublishing ? 'Republicando...' : 'Force Republish'}
+                  </button>
+                )}
                 <button
                   type="button"
                   className="flow-top-btn flow-top-btn-secondary"
