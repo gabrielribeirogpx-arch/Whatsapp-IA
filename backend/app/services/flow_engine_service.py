@@ -23,6 +23,7 @@ from app.services.queue import enqueue_send_message
 from app.utils.phone import normalize_phone
 from app.services.flow_session_service import FlowSessionService
 from app.core.redis_client import get_redis_client
+from app.services.delay_queue_service import DELAY_ZSET_KEY
 
 DEFAULT_FLOW_NAME = "default_visual"
 MAX_AUTO_STEPS = 10
@@ -1849,6 +1850,18 @@ def _finalize_runtime_flow_session(db: Session, conversation: Conversation, flow
     conversation.current_node_id = None
     db.add(conversation)
     db.commit()
+    if flow_session:
+        redis_client = get_redis_client()
+        for entry in redis_client.zrange(DELAY_ZSET_KEY, 0, -1):
+            try:
+                raw_entry = entry.decode("utf-8") if isinstance(entry, bytes) else str(entry)
+                payload = json.loads(raw_entry)
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                continue
+            if str(payload.get("flow_session_id") or "") != str(flow_session.id):
+                continue
+            redis_client.zrem(DELAY_ZSET_KEY, entry)
+            logger.info("[DELAY INVALIDATED] flow_session_id=%s payload_next_node_id=%s", flow_session.id, payload.get("next_node_id"))
     logger.info("[FLOW FINISHED] session_id=%s end_node_id=%s", getattr(flow_session, "id", None), end_node_id)
 def run_until_wait_node(
     db: Session,
@@ -1948,7 +1961,17 @@ def run_until_wait_node(
                 next_edge = _pick_default_edge(edges)
                 next_target = _edge_target(next_edge) if next_edge else None
                 if delay_seconds > 0 and next_target:
-                    enqueue_delay(session.tenant_id, str(session.phone_number or session.user_identifier or ""), _parse_uuid(next_target), delay_seconds)
+                    enqueue_delay(
+                        session.tenant_id,
+                        str(session.phone_number or session.user_identifier or ""),
+                        _parse_uuid(next_target),
+                        delay_seconds,
+                        flow_id=flow.id,
+                        flow_session_id=getattr(flow_session, "id", None),
+                        flow_version_id=getattr(flow_session, "flow_version_id", None),
+                        delay_node_id=_parse_uuid(_node_get(node, "id")),
+                        expected_current_node_id=_parse_uuid(_node_get(node, "id")),
+                    )
                     logger.info("[DELAY SCHEDULED] delay_node_id=%s seconds=%s next_node_id=%s", _node_get(node, "id"), delay_seconds, next_target)
                     if flow_session:
                         flow_session.current_node_id = str(next_target)
