@@ -2100,6 +2100,7 @@ def process_flow_engine(
         )
     session_service = FlowSessionService(db)
     user_identifier = conversation.phone_number
+    has_incoming_text = bool((message_text or "").strip())
     normalized_message = _normalize_text(message_text)
     runtime_session, invalid_reason = session_service.get_runtime_session(conversation.tenant_id, user_identifier, flow)
     session_version = None
