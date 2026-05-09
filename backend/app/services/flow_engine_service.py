@@ -1829,6 +1829,8 @@ def run_until_wait_node(
     incoming_text: str | None = None,
 ) -> FlowNode | VersionedFlowNode | None:
     logger.info("[MANYCHAT ENGINE START] start_node_id=%s", start_node_id)
+    session_service = FlowSessionService(db)
+    flow_session, _ = session_service.get_runtime_session(session.tenant_id, session.phone_number, flow)
     node = _get_node(db=db, node_id=start_node_id, tenant_id=session.tenant_id, runtime_graph=runtime_graph) if start_node_id else None
     normalized_input = _normalize_text(incoming_text or "")
     if node:
@@ -1876,7 +1878,19 @@ def run_until_wait_node(
 
         if node_type == "condition":
             if not normalized_input:
-                set_current_node(conversation=session, node_id=_node_get(node, "id"), db=db)
+                target_node_id = _parse_uuid(_node_get(node, "id"))
+                if flow_session:
+                    flow_session.current_node_id = target_node_id
+                    flow_session.last_input = incoming_text
+                    db.add(flow_session)
+                if isinstance(session.context, dict):
+                    session.context["flow_current_node_id"] = str(target_node_id) if target_node_id else None
+                logger.info(
+                    "[FLOW SESSION STATE SAVED] session_current_node_id=%s conversation_fk_skipped=true",
+                    target_node_id,
+                )
+                db.add(session)
+                db.commit()
                 logger.info("[MANYCHAT WAITING_INPUT] node_id=%s", _node_get(node, "id"))
                 return node
             true_edge, false_edge = _resolve_condition_routes(edges)
@@ -1928,10 +1942,19 @@ def run_until_wait_node(
             node = next_node
             if node and next_node_type == "condition":
                 condition_node_id = _node_get(node, "id")
-                session.current_node_id = _parse_uuid(condition_node_id)
+                target_node_id = _parse_uuid(condition_node_id)
+                if flow_session:
+                    flow_session.current_node_id = target_node_id
+                    flow_session.last_input = incoming_text
+                    db.add(flow_session)
+                if isinstance(session.context, dict):
+                    session.context["flow_current_node_id"] = str(target_node_id) if target_node_id else None
+                logger.info(
+                    "[FLOW SESSION STATE SAVED] session_current_node_id=%s conversation_fk_skipped=true",
+                    target_node_id,
+                )
                 db.add(session)
                 db.commit()
-                db.refresh(session)
                 logger.info(
                     "[WAITING_NEXT_CONDITION] condition_node_id=%s from_message_node_id=%s",
                     condition_node_id,
@@ -1941,14 +1964,34 @@ def run_until_wait_node(
             continue
 
         if _is_wait_node_type(node_type):
-            set_current_node(conversation=session, node_id=_node_get(node, "id"), db=db)
+            target_node_id = _parse_uuid(_node_get(node, "id"))
+            if flow_session:
+                flow_session.current_node_id = target_node_id
+                flow_session.last_input = incoming_text
+                db.add(flow_session)
+            if isinstance(session.context, dict):
+                session.context["flow_current_node_id"] = str(target_node_id) if target_node_id else None
+            logger.info(
+                "[FLOW SESSION STATE SAVED] session_current_node_id=%s conversation_fk_skipped=true",
+                target_node_id,
+            )
+            db.add(session)
+            db.commit()
             logger.info("[MANYCHAT WAITING_INPUT] node_id=%s", _node_get(node, "id"))
             return node
 
         next_edge = _pick_default_edge(edges)
         node = _get_node(db=db, node_id=_edge_target(next_edge), tenant_id=session.tenant_id, runtime_graph=runtime_graph) if next_edge else None
 
-    set_current_node(conversation=session, node_id=None, db=db)
+    if flow_session:
+        flow_session.current_node_id = None
+        flow_session.last_input = incoming_text
+        db.add(flow_session)
+    if isinstance(session.context, dict):
+        session.context["flow_current_node_id"] = None
+    logger.info("[FLOW SESSION STATE SAVED] session_current_node_id=%s conversation_fk_skipped=true", None)
+    db.add(session)
+    db.commit()
     logger.info("[MANYCHAT FLOW_FINISHED] flow_id=%s", flow.id)
     return None
 
@@ -2169,8 +2212,6 @@ def process_flow_engine(
     saved_current_node_id = _parse_uuid(getattr(runtime_session, "current_node_id", None))
     if saved_current_node_id is None and isinstance(getattr(runtime_session, "variables", None), dict):
         saved_current_node_id = _parse_uuid(runtime_session.variables.get("current_node_id"))
-    if saved_current_node_id is None:
-        saved_current_node_id = _parse_uuid(conversation.current_node_id)
 
     path = "CONTINUE" if saved_current_node_id and not start_trigger else "START"
     logger.info(
@@ -2197,11 +2238,9 @@ def process_flow_engine(
             start_node_id=saved_current_node_id,
             incoming_text=user_message_text,
         )
-        _safe_set_conversation_current_node(db, conversation, saved_current_node_id)
         conversation.mode = "flow"
         conversation.current_flow = flow.id
         if runtime_session is not None:
-            runtime_session.current_node_id = str(conversation.current_node_id) if conversation.current_node_id else None
             runtime_session.status = "running"
             db.add(runtime_session)
         db.add(conversation)
@@ -2273,11 +2312,6 @@ def process_flow_engine(
         start_node_id=start_node_id,
         incoming_text=None,
     )
-    if next_node_id is None:
-        next_node_id = _parse_uuid(conversation.current_node_id)
-
-    if next_node_id is not None:
-        _safe_set_conversation_current_node(db, conversation, next_node_id)
     runtime_session = session_service.save_runtime_session(
         tenant_id=conversation.tenant_id,
         user_identifier=user_identifier,
