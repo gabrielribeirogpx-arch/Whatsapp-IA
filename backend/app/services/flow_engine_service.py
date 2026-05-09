@@ -2157,6 +2157,9 @@ def process_flow_engine(
         )
     session_service = FlowSessionService(db)
     user_identifier = conversation.phone_number
+    user_message_text = message_text or ""
+    normalized_text = _normalize_text(user_message_text)
+    start_trigger = is_start_trigger(normalized_text)
     has_incoming_text = bool((message_text or "").strip())
     normalized_message = _normalize_text(message_text)
     runtime_session, invalid_reason = session_service.get_runtime_session(conversation.tenant_id, user_identifier, flow)
@@ -2186,6 +2189,48 @@ def process_flow_engine(
         getattr(flow, "published_version_id", None),
         getattr(runtime_session, "flow_version_id", None) if runtime_session else None,
     )
+    if start_trigger:
+        logger.info(
+            "[START TRIGGER EARLY_RESET] text=%s session_id=%s",
+            normalized_text,
+            getattr(runtime_session, "id", None),
+        )
+        session_service.clear_runtime_session(conversation.tenant_id, user_identifier, flow, reason="start_trigger_early_reset")
+        runtime_session = None
+        invalid_reason = None
+        conversation.context = conversation.context if isinstance(conversation.context, dict) else {}
+        conversation.context.pop("current_node_id", None)
+        conversation.current_flow = flow.id
+        conversation.mode = "flow"
+        _safe_set_conversation_current_node(db, conversation, None)
+        start_node = _get_start_node(
+            db=db,
+            flow_id=flow.id,
+            tenant_id=conversation.tenant_id,
+            runtime_graph=runtime_graph,
+        )
+        start_node_id = _parse_uuid(_node_get(start_node, "id")) if start_node else None
+        if start_node_id is None:
+            logger.error("[FLOW ERROR] no start node found")
+            return None
+        _safe_set_conversation_current_node(db, conversation, start_node_id)
+        runtime_session = session_service.save_runtime_session(
+            tenant_id=conversation.tenant_id,
+            user_identifier=user_identifier,
+            flow=flow,
+            current_node_id=start_node_id,
+            context=conversation.context,
+            status="running",
+        )
+        run_until_wait_node(
+            db=db,
+            flow=flow,
+            runtime_graph=runtime_graph,
+            session=runtime_session,
+            start_node_id=start_node_id,
+            incoming_text=user_message_text,
+        )
+        return None
     if runtime_published_version_id != getattr(flow, "published_version_id", None):
         raise RuntimeError("Published version changed during runtime execution")
     if has_incoming_text and runtime_session and original_current_node_id:
@@ -2489,30 +2534,7 @@ def process_flow_engine(
     )
     continuation_start_node_id = session_node_id
     if user_message_text:
-        if is_start_trigger(user_message_text):
-            logger.info(
-                "[START TRIGGER ALLOWED_RESET] session_id=%s incoming_text=%s",
-                getattr(runtime_session, "id", None),
-                user_message_text,
-            )
-            session_service.clear_runtime_session(conversation.tenant_id, user_identifier, flow, reason="start_trigger_reset")
-            conversation.context = conversation.context if isinstance(conversation.context, dict) else {}
-            conversation.context.pop("current_node_id", None)
-            start_node = _get_start_node(db=db, flow_id=flow.id, tenant_id=conversation.tenant_id, runtime_graph=runtime_graph)
-            continuation_start_node_id = _parse_uuid(_node_get(start_node, "id")) if start_node else None
-            if continuation_start_node_id is None:
-                logger.error("[FLOW ERROR] no start node found")
-                return None
-            _safe_set_conversation_current_node(db, conversation, continuation_start_node_id)
-            runtime_session = session_service.save_runtime_session(
-                tenant_id=conversation.tenant_id,
-                user_identifier=user_identifier,
-                flow=flow,
-                current_node_id=continuation_start_node_id,
-                context=conversation.context,
-                status="running",
-            )
-        elif runtime_session:
+        if runtime_session:
             continuation_start_node_id = _parse_uuid(runtime_session.current_node_id) or continuation_start_node_id
             if continuation_start_node_id is None and isinstance(runtime_session.variables, dict):
                 continuation_start_node_id = _parse_uuid(runtime_session.variables.get("current_node_id"))
