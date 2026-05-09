@@ -2231,19 +2231,18 @@ def process_flow_engine(
         return None
 
     _ensure_conversation_state(conversation=conversation, message_text=message_text)
+    user_identifier = conversation.phone_number
+    user_message_text = message_text or ""
+    normalized_text = _normalize_text(user_message_text)
+    start_trigger = is_explicit_start_trigger(normalized_text)
+    session_service = FlowSessionService(db)
+
     if flow_id:
         flow = resolve_flow(db=db, tenant_id=conversation.tenant_id, flow_id=flow_id)
     else:
         flow = get_active_visual_flow(db=db, tenant_id=conversation.tenant_id)
     if not flow:
         return None
-
-    runtime_graph = _get_current_flow_runtime(db=db, flow=flow, tenant_id=conversation.tenant_id)
-    session_service = FlowSessionService(db)
-    user_identifier = conversation.phone_number
-    user_message_text = message_text or ""
-    normalized_text = _normalize_text(user_message_text)
-    start_trigger = is_explicit_start_trigger(normalized_text)
 
     runtime_session, _ = session_service.get_runtime_session(conversation.tenant_id, user_identifier, flow)
     saved_current_node_id = _parse_uuid(getattr(runtime_session, "current_node_id", None))
@@ -2261,14 +2260,23 @@ def process_flow_engine(
 
     is_active_session = session_status in {"active", "running"}
     is_completed_session = session_status in {"completed", "finalized", "expired", "finished"}
-    if runtime_session is not None and is_completed_session and not start_trigger:
+    is_completed_or_expired = session_status in {"completed", "finalized", "expired"}
+    if runtime_session is not None and is_completed_or_expired and not start_trigger:
         logger.info(
-            "[FLOW COMPLETED SESSION IGNORE] session_id=%s status=%s incoming_text=%s",
+            "[FLOW COMPLETED SESSION IGNORE_EARLY] session_id=%s status=%s incoming_text=%s",
             getattr(runtime_session, "id", None),
             session_status,
             user_message_text,
         )
         return None
+    if runtime_session is not None and is_completed_or_expired and start_trigger:
+        logger.info(
+            "[FLOW EXPLICIT RESTART_EARLY] trigger=%s old_session_id=%s",
+            normalized_text,
+            getattr(runtime_session, "id", None),
+        )
+
+    runtime_graph = _get_current_flow_runtime(db=db, flow=flow, tenant_id=conversation.tenant_id)
 
     should_continue = runtime_session is not None and is_active_session and saved_current_node_id is not None and not start_trigger
     should_restart = runtime_session is not None and is_completed_session and start_trigger
