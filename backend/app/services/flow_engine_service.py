@@ -239,10 +239,11 @@ def validate_flow_graph(nodes: list[dict[str, Any]] | None, edges: list[dict[str
     start_nodes: list[str] = []
 
     for node in nodes_payload:
-        node_id = str((node or {}).get("id") or "").strip()
+        node_id = str(_node_id(node)).strip()
         if not node_id:
             add_issue(errors, "NODE_ID_REQUIRED", None, "Node sem id")
             continue
+        node_map[node_id] = node
         outgoing[node_id] = 0
         incoming[node_id] = 0
         condition_handles[node_id] = set()
@@ -253,10 +254,20 @@ def validate_flow_graph(nodes: list[dict[str, Any]] | None, edges: list[dict[str
     if len(start_nodes) != 1:
         add_issue(errors, "SINGLE_START_REQUIRED", None, "Flow precisa ter exatamente 1 start node.")
 
+    node_ids = {str(_node_id(node)) for node in nodes_payload if str(_node_id(node)).strip()}
+    node_ids_sample = list(sorted(node_ids))[:5]
+
     for edge in edges_payload:
-        source = str((edge or {}).get("source") or "").strip()
-        target = str((edge or {}).get("target") or "").strip()
-        if source not in node_map or target not in node_map:
+        source = str(_edge_source(edge) or "").strip()
+        target = str(_edge_target(edge) or "").strip()
+        logger.info(
+            "[FLOW VALIDATION EDGE] source=%s target=%s node_ids_sample=%s edge_raw=%s",
+            source,
+            target,
+            node_ids_sample,
+            edge,
+        )
+        if source not in node_ids or target not in node_ids:
             add_issue(errors, "EDGE_REFERENCE_NOT_FOUND", None, "Edge referencia node inexistente")
             continue
         outgoing[source] += 1
@@ -1276,15 +1287,19 @@ def _get_edges(
 
 def _edge_source(edge: Any) -> Any:
     if isinstance(edge, dict):
+        data = edge.get("data") if isinstance(edge.get("data"), dict) else {}
         return (
             edge.get("source")
+            or edge.get("sourceNodeId")
             or edge.get("source_id")
             or edge.get("from")
             or edge.get("from_node_id")
-            or (edge.get("data") or {}).get("source")
+            or data.get("source")
+            or data.get("sourceNodeId")
         )
     return (
         getattr(edge, "source", None)
+        or getattr(edge, "sourceNodeId", None)
         or getattr(edge, "source_id", None)
         or getattr(edge, "from_node_id", None)
         or getattr(edge, "from", None)
@@ -1293,15 +1308,19 @@ def _edge_source(edge: Any) -> Any:
 
 def _edge_target(edge: Any) -> Any:
     if isinstance(edge, dict):
+        data = edge.get("data") if isinstance(edge.get("data"), dict) else {}
         return (
             edge.get("target")
+            or edge.get("targetNodeId")
             or edge.get("target_id")
             or edge.get("to")
             or edge.get("to_node_id")
-            or (edge.get("data") or {}).get("target")
+            or data.get("target")
+            or data.get("targetNodeId")
         )
     return (
         getattr(edge, "target", None)
+        or getattr(edge, "targetNodeId", None)
         or getattr(edge, "target_id", None)
         or getattr(edge, "to_node_id", None)
         or getattr(edge, "to", None)
