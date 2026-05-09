@@ -2155,18 +2155,11 @@ def process_flow_engine(
                     conversation.context.get("intent") if isinstance(conversation.context, dict) else None,
                     conversation.retries,
                 )
-                return (
-                    "Ainda não consegui identificar o que você precisa. "
-                    "Vamos recomeçar: me diga se você quer vender mais, automatizar atendimento ou integrar com sistema."
-                )
-            fallback_text = (
-                "Boa 👌 Me fala melhor o que você quer fazer:\n"
-                "📈 vender mais\n"
-                "🤖 automatizar atendimento\n"
-                "🔗 integrar com sistema"
-            )
-            logger.info("[FALLBACK] triggered")
-            logger.info("[FALLBACK] retries=%s", conversation.retries)
+                print("[LEGACY FALLBACK HARD BLOCKED]")
+                logger.info("[LEGACY FALLBACK HARD BLOCKED]")
+                return None
+            print("[LEGACY FALLBACK HARD BLOCKED]")
+            logger.info("[LEGACY FALLBACK HARD BLOCKED]")
             _emit_runtime_event(
                 db=db,
                 tenant_id=conversation.tenant_id,
@@ -2180,7 +2173,7 @@ def process_flow_engine(
             )
             db.commit()
             db.refresh(conversation)
-            return fallback_text
+            return None
 
         start_node = _get_start_node(
             db=db,
@@ -2235,14 +2228,8 @@ def process_flow_engine(
                     db.refresh(conversation)
                     return None
                 conversation.retries = (conversation.retries or 0) + 1
-                fallback_text = (
-                    "Boa 👌 Me fala melhor o que você quer fazer:\n"
-                    "📈 vender mais\n"
-                    "🤖 automatizar atendimento\n"
-                    "🔗 integrar com sistema"
-                )
-                logger.info("[FALLBACK] triggered")
-                logger.info("[FALLBACK] retries=%s", conversation.retries)
+                print("[LEGACY FALLBACK HARD BLOCKED]")
+                logger.info("[LEGACY FALLBACK HARD BLOCKED]")
                 _emit_runtime_event(
                     db=db,
                     tenant_id=conversation.tenant_id,
@@ -2256,7 +2243,7 @@ def process_flow_engine(
                 )
                 db.commit()
                 db.refresh(conversation)
-                return fallback_text
+                return None
 
             start_node = _get_start_node(
                 db=db,
@@ -2278,14 +2265,11 @@ def process_flow_engine(
                 user_identifier=user_identifier,
                 flow=flow,
             )
-            selected_start_edge = None
+            selected_start_node_id = start_node.id
             for edge in start_edges:
-                edge_condition = _normalize_text(edge.condition)
-                if intent == edge_condition or (intent and edge_condition and intent in edge_condition):
-                    selected_start_edge = edge
+                if edge.source == start_node.id:
+                    selected_start_node_id = edge.target
                     break
-
-            selected_start_node_id = selected_start_edge.target if selected_start_edge else start_node.id
             tenant = db.execute(select(Tenant).where(Tenant.id == conversation.tenant_id)).scalars().first()
             if not tenant:
                 logger.warning("[FLOW SEND] Tenant nao encontrado para conversation_id=%s", conversation.id)
@@ -2309,7 +2293,17 @@ def process_flow_engine(
             else:
                 runtime_session = restart_runtime_session
                 _set_flow_mode(db=db, conversation=conversation, flow_id=flow.id, node_id=selected_start_node_id)
+                if runtime_session:
+                    runtime_session.current_node_id = str(selected_start_node_id) if selected_start_node_id else None
+                    runtime_session.flow_version_id = flow.published_version_id
+                    db.add(runtime_session)
                 logger.info("[FLOW STATE] current=%s next=%s", conversation.current_node_id, selected_start_node_id)
+                logger.info(
+                    "[FLOW START ADVANCED] from=%s to=%s to_type=%s",
+                    start_node.id,
+                    selected_start_node_id,
+                    (_node_get(_get_node(db=db, node_id=selected_start_node_id, tenant_id=conversation.tenant_id, runtime_graph=runtime_graph), "type") if selected_start_node_id else None),
+                )
                 db.commit()
                 db.refresh(conversation)
                 logger.info("[FLOW START ADVANCE RETURN] current_node_id=%s", conversation.current_node_id)

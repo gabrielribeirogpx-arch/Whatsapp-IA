@@ -31,6 +31,9 @@ def handle_incoming_message(db: Session, message: Message, conversation: Convers
 
         print("[FLOW MODE] usuário em fluxo")
         result = handle_visual_flow_priority(db=db, message=message, conversation=conversation)
+        if not result or not result.get("response"):
+            print("[LEGACY FALLBACK HARD BLOCKED]")
+            return None
         base_log_data["mode"] = conversation.mode or mode
         log_conversation_event(
             db,
@@ -58,16 +61,9 @@ def handle_incoming_message(db: Session, message: Message, conversation: Convers
             db.refresh(conversation)
             print("[MODE SET] flow")
             result = handle_visual_flow_priority(db=db, message=message, conversation=conversation)
-            used_fallback = not bool(result and result.get("response"))
-            print(
-                f"[FLOW ROUTING] using_fallback={used_fallback} "
-                f"reason={'flow_engine_empty_response' if used_fallback else 'none'}"
-            )
-            if used_fallback:
-                print("[FLOW FALLBACK SUPPRESSED] reason=active_flow_session")
-                result = result or {}
-                result["fallback"] = False
-                result["response"] = result.get("response") or "Fluxo ativo. Vou continuar pelo fluxo atual."
+            if not result or not result.get("response"):
+                print("[LEGACY FALLBACK HARD BLOCKED]")
+                return None
             base_log_data["mode"] = conversation.mode or mode
             log_conversation_event(
                 db,
