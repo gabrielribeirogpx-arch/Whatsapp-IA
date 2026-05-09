@@ -7,7 +7,8 @@ import { tenantLogin } from '../../lib/api';
 
 export default function LoginPage() {
   const router = useRouter();
-  const [phoneNumberId, setPhoneNumberId] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
@@ -15,15 +16,14 @@ export default function LoginPage() {
     event.preventDefault();
     setError('');
     setIsLoading(true);
-
     try {
-      const tenant = await tenantLogin(phoneNumberId.trim());
+      const tenant = await tenantLogin(email.trim(), password);
       localStorage.setItem('tenant', JSON.stringify(tenant));
       localStorage.setItem('token', tenant.token);
       localStorage.setItem('tenant_id', tenant.tenant_id);
       router.push('/chat');
     } catch {
-      setError('Não foi possível autenticar o tenant. Verifique os dados e tente novamente.');
+      setError('Email ou senha inválidos.');
     } finally {
       setIsLoading(false);
     }
@@ -32,26 +32,15 @@ export default function LoginPage() {
   return (
     <main className="login-screen">
       <form className="login-card" onSubmit={onSubmit}>
-        <h1>Login do tenant</h1>
-        <p>Entre com seu phone_number_id para acessar o sistema.</p>
-
-        <label htmlFor="phone-number-id">phone_number_id</label>
-        <input
-          id="phone-number-id"
-          value={phoneNumberId}
-          onChange={(event) => setPhoneNumberId(event.target.value)}
-          required
-        />
-
+        <h1>Entrar na Wazza API</h1>
+        <p>Acesse seu workspace com email e senha.</p>
+        <label htmlFor="email">Email</label>
+        <input id="email" type="email" value={email} onChange={(event) => setEmail(event.target.value)} required />
+        <label htmlFor="password">Senha</label>
+        <input id="password" type="password" minLength={8} value={password} onChange={(event) => setPassword(event.target.value)} required />
         {error && <p className="error-text">{error}</p>}
-
-        <button type="submit" className="primary-button" disabled={isLoading}>
-          {isLoading ? 'Entrando...' : 'Entrar'}
-        </button>
-
-        <p className="helper-text">
-          Ainda não tem conta? <a href="/register">Criar conta</a>
-        </p>
+        <button type="submit" className="primary-button" disabled={isLoading}>{isLoading ? 'Entrando...' : 'Entrar'}</button>
+        <p className="helper-text">Ainda não tem conta? <a href="/register">Criar conta</a></p>
       </form>
     </main>
   );
