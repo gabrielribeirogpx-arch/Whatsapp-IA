@@ -2807,6 +2807,7 @@ def process_flow_engine(
             print(f"[FLOW CHECK] avaliando node: {node.id}")
             logger.info("[FLOW RUNTIME] evaluating_condition=%s", node.id)
             logger.info("[FLOW CHECK] avaliando node=%s conversation_id=%s", node.id, conversation.id)
+            condition_node_id = node.id
             raw_condition = str(node_data.get("condition") or node_data.get("content") or "")
 
             # Sem mensagem do usuário — para e aguarda resposta
@@ -2903,6 +2904,61 @@ def process_flow_engine(
             if not node:
                 reached_max_steps = False
                 break
+
+            next_node_type = _node_type_slug(node)
+            if next_node_type == "message":
+                logger.info(
+                    "[CONDITION TARGET MESSAGE] condition_node_id=%s message_node_id=%s",
+                    condition_node_id,
+                    node.id,
+                )
+                text = _resolve_node_text(_node_data(node))
+                if text:
+                    _send_flow_whatsapp_message(tenant=tenant, phone=conversation_phone, text=text)
+                    logger.info(
+                        "[MESSAGE TARGET SENT_AFTER_CONDITION] message_node_id=%s text_preview=%s",
+                        node.id,
+                        _text_preview(text),
+                    )
+                    _emit_runtime_event(
+                        db=db,
+                        tenant_id=conversation.tenant_id,
+                        conversation_id=conversation.id,
+                        flow_id=node.flow_id,
+                        flow_version_id=current_flow_version_id,
+                        node_id=node.id,
+                        event_type="message_sent",
+                        metadata={"channel": "whatsapp", "trigger": "condition_match"},
+                        dedupe_bucket_seconds=10,
+                    )
+                msg = ""
+                node, runtime_session = advance_after_message_node(
+                    db=db,
+                    conversation=conversation,
+                    flow=flow,
+                    current_node=node,
+                    runtime_graph=runtime_graph,
+                    session_service=session_service,
+                    user_identifier=user_identifier,
+                    context=conversation.context if isinstance(conversation.context, dict) else {},
+                    published_version_number=published_version_number,
+                )
+                advanced_type = _node_type_slug(node) if node else None
+                logger.info(
+                    "[CONDITION MESSAGE ADVANCED] from_message_node_id=%s to_node_id=%s to_type=%s",
+                    selected_next,
+                    node.id if node else None,
+                    advanced_type,
+                )
+                if not node:
+                    reached_max_steps = False
+                    break
+                if advanced_type == "condition":
+                    logger.info("[FLOW WAITING CONDITION INPUT] current_node_id=%s", node.id)
+                    reached_max_steps = False
+                    break
+                if advanced_type == "delay":
+                    continue
 
             # Condição resolvida por edge (true/false) — interrompe avaliação atual
             # para manter execução determinística conforme o caminho visual.
