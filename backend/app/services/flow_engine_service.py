@@ -1837,6 +1837,34 @@ def run_until_wait_node(
         )
         if normalized_input and is_start_node:
             logger.warning("[MANYCHAT INVALID_RESTART_BLOCKED] reason=incoming_text_started_at_start_node")
+            recovered_current_node_id = _parse_uuid(getattr(session, "current_node_id", None))
+            session_variables = getattr(session, "variables", None)
+            if recovered_current_node_id is None and isinstance(session_variables, dict):
+                recovered_current_node_id = _parse_uuid(session_variables.get("current_node_id"))
+            session_context = getattr(session, "context", None)
+            if recovered_current_node_id is None and isinstance(session_context, dict):
+                recovered_current_node_id = _parse_uuid(session_context.get("current_node_id"))
+
+            if recovered_current_node_id is not None:
+                logger.info(
+                    "[MANYCHAT RESTART BLOCKED_CONTINUING_FROM_SESSION] current_node_id=%s incoming_text=%s",
+                    recovered_current_node_id,
+                    incoming_text,
+                )
+                run_until_wait_node(
+                    db=db,
+                    flow=flow,
+                    runtime_graph=runtime_graph,
+                    session=session,
+                    start_node_id=recovered_current_node_id,
+                    incoming_text=incoming_text,
+                )
+                return None
+
+            logger.warning(
+                "[MANYCHAT RESTART BLOCKED_LOST_STATE] session_id=%s",
+                getattr(session, "id", None),
+            )
             return None
     steps = 0
     while node and steps < MAX_AUTO_STEPS:
