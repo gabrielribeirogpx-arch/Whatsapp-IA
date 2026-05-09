@@ -2156,6 +2156,14 @@ def process_flow_engine(
     normalized_message = _normalize_text(message_text)
     runtime_session, invalid_reason = session_service.get_runtime_session(conversation.tenant_id, user_identifier, flow)
     loaded_runtime_session = runtime_session
+    original_current_node_id = None
+    original_variables_current_node_id = None
+    if runtime_session:
+        original_current_node_id = _parse_uuid(runtime_session.current_node_id)
+        if isinstance(runtime_session.variables, dict):
+            original_variables_current_node_id = _parse_uuid(runtime_session.variables.get("current_node_id"))
+        if original_current_node_id is None:
+            original_current_node_id = original_variables_current_node_id
     session_version = None
     if runtime_session and isinstance(runtime_session.variables, dict):
         session_version = runtime_session.variables.get("flow_version")
@@ -2175,6 +2183,41 @@ def process_flow_engine(
     )
     if runtime_published_version_id != getattr(flow, "published_version_id", None):
         raise RuntimeError("Published version changed during runtime execution")
+    if has_incoming_text and runtime_session and original_current_node_id:
+        logger.info(
+            "[CONTINUATION BEFORE_RESET] session_id=%s original_current_node_id=%s incoming_text=%s",
+            runtime_session.id,
+            original_current_node_id,
+            message_text,
+        )
+        original_node = _get_node(
+            db=db,
+            node_id=original_current_node_id,
+            tenant_id=conversation.tenant_id,
+            runtime_graph=runtime_graph,
+        )
+        if original_node:
+            logger.info("[CONTINUATION USING_SAVED_NODE] current_node_id=%s", original_current_node_id)
+            if (
+                getattr(runtime_session, "flow_version_id", None) != getattr(flow, "published_version_id", None)
+                and getattr(flow, "published_version_id", None) is not None
+            ):
+                runtime_session.flow_version_id = getattr(flow, "published_version_id", None)
+                if isinstance(runtime_session.variables, dict) and published_version_number is not None:
+                    runtime_session.variables["flow_version"] = published_version_number
+            _safe_set_conversation_current_node(db, conversation, original_current_node_id)
+            conversation.current_flow = flow.id
+            conversation.mode = "flow"
+            logger.info("[RESET SKIPPED_DUE_TO_INCOMING_CONTINUATION]")
+            run_until_wait_node(
+                db=db,
+                flow=flow,
+                runtime_graph=runtime_graph,
+                session=runtime_session,
+                start_node_id=original_current_node_id,
+                incoming_text=message_text,
+            )
+            return None
     if runtime_session:
         runtime_nodes = runtime_graph.get("nodes") if isinstance(runtime_graph, dict) else []
         logger.info(
