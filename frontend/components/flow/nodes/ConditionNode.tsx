@@ -68,11 +68,14 @@ export default function ConditionNode({ id, data, selected }: NodeProps) {
 
       {/* Corpo */}
       <div className="flow-node-body">
+        <div style={{ fontSize: 11, fontWeight: 600, color: '#4b5563', marginBottom: 6 }}>
+          Palavras-chave para seguir pelo Sim
+        </div>
         <input
           className="flow-node-field nodrag"
           value={nodeData.condition || ''}
           onChange={(e) => nodeData.onChange?.(id, { condition: e.target.value })}
-          placeholder="Ex.: plano, preço, valor, quanto custa"
+          placeholder="sim, suporte, ajuda, atendimento"
           style={{ width: '100%', padding: '7px 9px' }}
         />
         <div style={{ marginTop: 5, fontSize: 10.5, color: '#a8b0a0', lineHeight: 1.4 }}>
