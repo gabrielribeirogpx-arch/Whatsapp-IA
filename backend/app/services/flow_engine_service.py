@@ -1722,7 +1722,8 @@ def _send_start_message_on_session_restart(
         source=start_node_id,
         runtime_graph=runtime_graph,
     )
-    next_edge = _pick_default_edge(start_edges)
+    start_out_edges = [edge for edge in start_edges if edge.source == start_node_id]
+    next_edge = _pick_default_edge(start_out_edges)
     if next_edge:
         next_node_id = next_edge.target
         logger.info(
@@ -1761,18 +1762,38 @@ def _send_start_message_on_session_restart(
     if not next_node_id and node_type != "terminal":
         next_node_id = start_node_id
 
+    target_node = _get_node(
+        db=db,
+        node_id=next_node_id,
+        tenant_id=conversation.tenant_id,
+        runtime_graph=runtime_graph,
+    ) if next_node_id else None
+    target_node_type = str(_node_get(target_node, "type") or "").strip().lower() if target_node else None
+
     _safe_set_conversation_current_node(db, conversation, next_node_id)
     runtime_session = session_service.save_runtime_session(
         tenant_id=conversation.tenant_id,
         user_identifier=user_identifier,
         flow=flow,
         current_node_id=next_node_id,
+        flow_version_id=flow.published_version_id,
         context=conversation.context if isinstance(conversation.context, dict) else {},
         status="running",
         variables={"flow_version": published_version_number},
     )
     logger.info("[FLOW SESSION SAVE AFTER ADVANCE] current_node_id=%s", next_node_id)
+    logger.info("[ASSERT NOT START_NODE_AFTER_SEND] saved_current_node_id=%s", next_node_id)
     logger.info("[SESSION SAVE AFTER START SEND] node_id=%s", next_node_id)
+
+    if target_node_type == "condition":
+        logger.info(
+            "[FLOW START ADVANCED] from=%s to=%s to_type=%s",
+            start_node_id,
+            next_node_id,
+            target_node_type,
+        )
+        return runtime_session
+
     return runtime_session
 def process_flow_engine(
     db: Session,
