@@ -1837,22 +1837,7 @@ def run_until_wait_node(
         )
         if normalized_input and is_start_node:
             logger.warning("[MANYCHAT INVALID_RESTART_BLOCKED] reason=incoming_text_started_at_start_node")
-            fallback_node_id = _parse_uuid(getattr(session, "current_node_id", None))
-            if fallback_node_id and fallback_node_id != _node_get(node, "id"):
-                fallback_node = _get_node(
-                    db=db,
-                    node_id=fallback_node_id,
-                    tenant_id=session.tenant_id,
-                    runtime_graph=runtime_graph,
-                )
-                if fallback_node:
-                    node = fallback_node
-                    logger.info(
-                        "[MANYCHAT ACTUAL FIRST NODE] node_id=%s node_type=%s is_start=%s",
-                        _node_get(node, "id"),
-                        _node_type_slug(node),
-                        bool(_extract_node_data(node).get("isStart")),
-                    )
+            return None
     steps = 0
     while node and steps < MAX_AUTO_STEPS:
         steps += 1
@@ -1986,6 +1971,10 @@ def advance_after_message_node(
         _node_type_slug(target_node),
     )
     return target_node, runtime_session
+def _is_continuation_message(incoming_text: str | None, runtime_session: FlowSession | None) -> bool:
+    return bool((incoming_text or "").strip()) and runtime_session is not None
+
+
 def _send_start_message_on_session_restart(
     *,
     db: Session,
@@ -2018,8 +2007,8 @@ def _send_start_message_on_session_restart(
     active_session_id = getattr(runtime_session, "id", None)
     active_current_node_id = getattr(runtime_session, "current_node_id", None) if runtime_session else conversation.current_node_id
 
-    if incoming_text_present and active_session_id and active_current_node_id:
-        logger.warning("[START SEND BLOCKED_ON_INCOMING_TEXT] session_id=%s", active_session_id)
+    if _is_continuation_message(incoming_text, runtime_session):
+        logger.warning("[START SEND HARD_BLOCKED_CONTINUATION] session_id=%s", active_session_id)
         return None
 
     logger.info(
@@ -2135,6 +2124,7 @@ def process_flow_engine(
     has_incoming_text = bool((message_text or "").strip())
     normalized_message = _normalize_text(message_text)
     runtime_session, invalid_reason = session_service.get_runtime_session(conversation.tenant_id, user_identifier, flow)
+    loaded_runtime_session = runtime_session
     session_version = None
     if runtime_session and isinstance(runtime_session.variables, dict):
         session_version = runtime_session.variables.get("flow_version")
@@ -2241,7 +2231,7 @@ def process_flow_engine(
                         flow=flow,
                         start_node=reloaded_start_node,
                         runtime_graph=runtime_graph,
-                        runtime_session=runtime_session,
+                        runtime_session=runtime_session or loaded_runtime_session,
                         session_service=session_service,
                         published_version_number=published_version_number,
                         user_identifier=user_identifier,
@@ -2347,7 +2337,7 @@ def process_flow_engine(
                     flow=flow,
                     start_node=restart_start_node,
                     runtime_graph=runtime_graph,
-                    runtime_session=runtime_session,
+                    runtime_session=runtime_session or loaded_runtime_session,
                     session_service=session_service,
                     published_version_number=published_version_number,
                     user_identifier=user_identifier,
@@ -2433,7 +2423,7 @@ def process_flow_engine(
         )
         if continuation_start_node_id is None:
             logger.error(
-                "[MANYCHAT CONTINUATION NODE RECOVERY FAILED] session_id=%s incoming_text_present=true",
+                "[FLOW CONTINUATION LOST_STATE] session_id=%s incoming_text_present=true",
                 runtime_session.id,
             )
             return None
@@ -2692,7 +2682,7 @@ def process_flow_engine(
                 flow_id=flow.id,
                 source=start_node.id,
                 runtime_graph=runtime_graph,
-                runtime_session=runtime_session,
+                runtime_session=runtime_session or loaded_runtime_session,
                 session_service=session_service,
                 flow_version_id=current_flow_version_id,
                 user_identifier=user_identifier,
@@ -2715,7 +2705,7 @@ def process_flow_engine(
                 flow=flow,
                 start_node=start_node,
                 runtime_graph=runtime_graph,
-                runtime_session=runtime_session,
+                runtime_session=runtime_session or loaded_runtime_session,
                 session_service=session_service,
                 published_version_number=published_version_number,
                 user_identifier=user_identifier,
@@ -2908,7 +2898,7 @@ def process_flow_engine(
                     conversation=conversation,
                     edge=next_edge,
                     runtime_graph=runtime_graph,
-                    runtime_session=runtime_session,
+                    runtime_session=runtime_session or loaded_runtime_session,
                     session_service=session_service,
                     flow_version_id=current_flow_version_id,
                     user_identifier=user_identifier,
@@ -3050,7 +3040,7 @@ def process_flow_engine(
                 conversation=conversation,
                 edge=selected_edge or _pick_default_edge(edges),
                 runtime_graph=runtime_graph,
-                runtime_session=runtime_session,
+                runtime_session=runtime_session or loaded_runtime_session,
                 session_service=session_service,
                 flow_version_id=current_flow_version_id,
                 user_identifier=user_identifier,
@@ -3163,7 +3153,7 @@ def process_flow_engine(
                 conversation=conversation,
                 edge=_pick_default_edge(edges),
                 runtime_graph=runtime_graph,
-                runtime_session=runtime_session,
+                runtime_session=runtime_session or loaded_runtime_session,
                 session_service=session_service,
                 flow_version_id=current_flow_version_id,
                 user_identifier=user_identifier,
