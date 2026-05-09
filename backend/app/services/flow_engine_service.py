@@ -2090,65 +2090,102 @@ def process_flow_engine(
             _start_preview_from_nodes(runtime_nodes if isinstance(runtime_nodes, list) else []),
         )
         if published_version_number is not None and session_version is not None and str(session_version) != str(published_version_number):
-            logger.warning(
-                "[SESSION VERSION MISMATCH] session_version=%s published_version=%s action=reset_session_reload_published",
-                session_version,
-                published_version_number,
-            )
-            # Guard: published version changed, abort old in-memory/runtime flow and fully restart from published.
-            session_service.clear_runtime_session(conversation.tenant_id, user_identifier, flow, reason="published_version_changed")
-            runtime_session = None
-            invalid_reason = None
-            _safe_set_conversation_current_node(db, conversation, None)
-            conversation.collected_data = None
-            conversation.pending_input = None
-            conversation.waiting_for_response = False
-            conversation.current_flow = flow.id
-            logger.info("[FLOW SESSION RESET FULL] reason=version_mismatch")
-            invalidate_flow_runtime_cache(flow.id)
-            db.flush()
-            db.refresh(flow)
-            runtime_graph = resolve_runtime_flow_graph(db=db, tenant_id=conversation.tenant_id, flow_id=str(flow.id))
-            current_flow_version_id = _parse_uuid(runtime_graph.get("version_id") if isinstance(runtime_graph, dict) else None)
-            reloaded_start_node = _get_start_node(
+            current_node_uuid = _parse_uuid(conversation.current_node_id)
+            has_incoming_text = bool((message_text or "").strip())
+            current_node_in_published = _get_node(
                 db=db,
-                flow_id=flow.id,
+                node_id=current_node_uuid,
                 tenant_id=conversation.tenant_id,
                 runtime_graph=runtime_graph,
+            ) if current_node_uuid else None
+            should_soft_recover = (
+                runtime_session is not None
+                and has_incoming_text
+                and conversation.current_flow == flow.id
+                and current_node_uuid is not None
+                and current_node_in_published is not None
             )
-            start_text_preview = ""
-            if isinstance(runtime_graph, dict):
-                runtime_nodes = runtime_graph.get("nodes")
-                if isinstance(runtime_nodes, list):
-                    start_text_preview = _start_preview_from_nodes(runtime_nodes)
-            if reloaded_start_node:
-                tenant = db.execute(select(Tenant).where(Tenant.id == conversation.tenant_id)).scalars().first()
-                if not tenant:
-                    logger.warning("[SESSION RESET RELOAD DONE] tenant_missing=true")
-                    return None
-                runtime_session = _send_start_message_on_session_restart(
-                    db=db,
-                    tenant=tenant,
-                    conversation=conversation,
-                    flow=flow,
-                    start_node=reloaded_start_node,
-                    runtime_graph=runtime_graph,
-                    runtime_session=runtime_session,
-                    session_service=session_service,
-                    published_version_number=published_version_number,
-                    user_identifier=user_identifier,
-                )
-                logger.info(
-                    "[SESSION RESET RELOAD DONE] published_version=%s start_text_preview=%s",
-                    published_version_number,
-                    start_text_preview,
-                )
-            else:
+            if should_soft_recover:
                 logger.warning(
-                    "[SESSION RESET RELOAD DONE] published_version=%s start_text_preview=%s start_node_missing=true",
+                    "[SESSION VERSION MISMATCH SOFT-RECOVER] old_version=%s new_version=%s current_node_id=%s",
+                    session_version,
                     published_version_number,
-                    start_text_preview,
+                    conversation.current_node_id,
                 )
+                if isinstance(runtime_session.variables, dict):
+                    runtime_session.variables["flow_version"] = published_version_number
+                runtime_session.flow_version_id = getattr(flow, "published_version_id", None)
+                invalid_reason = None
+            else:
+                hard_reset_reason = "flow_id_changed"
+                if conversation.current_flow != flow.id:
+                    hard_reset_reason = "flow_id_changed"
+                elif current_node_uuid is None:
+                    hard_reset_reason = "current_node_empty"
+                elif current_node_in_published is None:
+                    hard_reset_reason = "current_node_missing_in_published_graph"
+                elif not has_incoming_text:
+                    hard_reset_reason = "incoming_text_empty"
+                logger.warning(
+                    "[SESSION VERSION MISMATCH HARD-RESET] reason=%s old_version=%s new_version=%s current_node_id=%s",
+                    hard_reset_reason,
+                    session_version,
+                    published_version_number,
+                    conversation.current_node_id,
+                )
+                session_service.clear_runtime_session(conversation.tenant_id, user_identifier, flow, reason="published_version_changed")
+                runtime_session = None
+                invalid_reason = None
+                _safe_set_conversation_current_node(db, conversation, None)
+                conversation.collected_data = None
+                conversation.pending_input = None
+                conversation.waiting_for_response = False
+                conversation.current_flow = flow.id
+                logger.info("[FLOW SESSION RESET FULL] reason=version_mismatch")
+                invalidate_flow_runtime_cache(flow.id)
+                db.flush()
+                db.refresh(flow)
+                runtime_graph = resolve_runtime_flow_graph(db=db, tenant_id=conversation.tenant_id, flow_id=str(flow.id))
+                current_flow_version_id = _parse_uuid(runtime_graph.get("version_id") if isinstance(runtime_graph, dict) else None)
+                reloaded_start_node = _get_start_node(
+                    db=db,
+                    flow_id=flow.id,
+                    tenant_id=conversation.tenant_id,
+                    runtime_graph=runtime_graph,
+                )
+                start_text_preview = ""
+                if isinstance(runtime_graph, dict):
+                    runtime_nodes = runtime_graph.get("nodes")
+                    if isinstance(runtime_nodes, list):
+                        start_text_preview = _start_preview_from_nodes(runtime_nodes)
+                if reloaded_start_node:
+                    tenant = db.execute(select(Tenant).where(Tenant.id == conversation.tenant_id)).scalars().first()
+                    if not tenant:
+                        logger.warning("[SESSION RESET RELOAD DONE] tenant_missing=true")
+                        return None
+                    runtime_session = _send_start_message_on_session_restart(
+                        db=db,
+                        tenant=tenant,
+                        conversation=conversation,
+                        flow=flow,
+                        start_node=reloaded_start_node,
+                        runtime_graph=runtime_graph,
+                        runtime_session=runtime_session,
+                        session_service=session_service,
+                        published_version_number=published_version_number,
+                        user_identifier=user_identifier,
+                    )
+                    logger.info(
+                        "[SESSION RESET RELOAD DONE] published_version=%s start_text_preview=%s",
+                        published_version_number,
+                        start_text_preview,
+                    )
+                else:
+                    logger.warning(
+                        "[SESSION RESET RELOAD DONE] published_version=%s start_text_preview=%s start_node_missing=true",
+                        published_version_number,
+                        start_text_preview,
+                    )
     if _is_reset_command(normalized_message):
         _emit_runtime_event(
             db=db,
