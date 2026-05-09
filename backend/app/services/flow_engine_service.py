@@ -1694,6 +1694,72 @@ def _text_preview(value: str | None, limit: int = 120) -> str:
 
 
 
+
+
+def _node_type_slug(node: FlowNode | VersionedFlowNode | None) -> str:
+    node_type = str(_node_get(node, "type") or "").strip().lower() if node else ""
+    if node_type.endswith("node"):
+        node_type = node_type[:-4]
+    return node_type
+
+
+def _assert_not_persisting_message_node_with_outgoing_edge(
+    *,
+    db: Session,
+    tenant_id: uuid.UUID,
+    flow_id: uuid.UUID,
+    node_id: uuid.UUID | None,
+    runtime_graph: dict[str, Any] | None,
+) -> None:
+    if node_id is None:
+        return
+    node = _get_node(db=db, node_id=node_id, tenant_id=tenant_id, runtime_graph=runtime_graph)
+    if _node_type_slug(node) != "message":
+        return
+    out_edges = _get_edges(db=db, flow_id=flow_id, source=node_id, runtime_graph=runtime_graph)
+    if out_edges:
+        raise RuntimeError("Attempted to save message node with outgoing edge as current_node_id")
+
+
+def advance_after_message_node(
+    *,
+    db: Session,
+    conversation: Conversation,
+    flow: Flow,
+    current_node: FlowNode | VersionedFlowNode,
+    runtime_graph: dict[str, Any],
+    session_service: FlowSessionService,
+    user_identifier: str,
+    context: dict[str, Any],
+    published_version_number: int | None,
+) -> tuple[FlowNode | VersionedFlowNode | None, FlowSession]:
+    current_node_id = _node_get(current_node, "id")
+    edges = _get_edges(db=db, flow_id=flow.id, source=current_node_id, runtime_graph=runtime_graph)
+    next_edge = _pick_default_edge(edges)
+    if not next_edge or not next_edge.target:
+        raise RuntimeError(f"Message node {current_node_id} has no outgoing target")
+    target_node = _get_node(db=db, node_id=next_edge.target, tenant_id=conversation.tenant_id, runtime_graph=runtime_graph)
+    if not target_node:
+        raise RuntimeError(f"Message node target not found: {next_edge.target}")
+    _safe_set_conversation_current_node(db, conversation, next_edge.target)
+    runtime_session = session_service.save_runtime_session(
+        tenant_id=conversation.tenant_id,
+        user_identifier=user_identifier,
+        flow=flow,
+        current_node_id=next_edge.target,
+        flow_version_id=flow.published_version_id,
+        context=context,
+        status="running",
+        variables={"flow_version": published_version_number},
+    )
+    db.commit()
+    logger.info(
+        "[FORCED MESSAGE ADVANCE] from=%s to=%s to_type=%s",
+        current_node_id,
+        next_edge.target,
+        _node_type_slug(target_node),
+    )
+    return target_node, runtime_session
 def _send_start_message_on_session_restart(
     *,
     db: Session,
@@ -1712,45 +1778,25 @@ def _send_start_message_on_session_restart(
     if node_type.endswith("node"):
         node_type = node_type[:-4]
 
-    next_node_id: uuid.UUID | None = None
     start_node_id = _node_get(start_node, "id")
     logger.info("[FLOW START MESSAGE ATTEMPT] node_id=%s node_type=%s", start_node_id, node_type)
 
-    start_edges = _get_edges(
-        db=db,
-        flow_id=flow.id,
-        source=start_node_id,
-        runtime_graph=runtime_graph,
-    )
-    start_out_edges = [edge for edge in start_edges if edge.source == start_node_id]
-    next_edge = _pick_default_edge(start_out_edges)
-    if next_edge:
-        next_node_id = next_edge.target
-        logger.info(
-            "[FLOW EDGE ADVANCE AFTER MESSAGE] from_node_id=%s to_node_id=%s edge_id=%s",
-            start_node_id,
-            next_node_id,
-            next_edge.id,
-        )
 
     if node_type == "message":
         text = _resolve_node_text(node_data)
         job_id = _send_flow_whatsapp_message(tenant=tenant, phone=conversation.phone_number, text=text)
         if not job_id:
             logger.error("[FLOW START MESSAGE NOT SENT] node_id=%s", start_node_id)
-            if not next_node_id and node_type != "terminal":
-                next_node_id = start_node_id
-            _safe_set_conversation_current_node(db, conversation, next_node_id)
             runtime_session = session_service.save_runtime_session(
                 tenant_id=conversation.tenant_id,
                 user_identifier=user_identifier,
                 flow=flow,
-                current_node_id=next_node_id,
+                current_node_id=start_node_id,
+                flow_version_id=flow.published_version_id,
                 context=conversation.context if isinstance(conversation.context, dict) else {},
                 status="running",
                 variables={"flow_version": published_version_number},
             )
-            logger.info("[FLOW SESSION SAVE AFTER ADVANCE] current_node_id=%s", next_node_id)
             return runtime_session
         logger.info(
             "[FLOW START MESSAGE SENT] node_id=%s text_preview=%s",
@@ -1759,41 +1805,30 @@ def _send_start_message_on_session_restart(
         )
         logger.info("[START MESSAGE BEFORE SESSION SAVE] node_id=%s", start_node_id)
 
-    if not next_node_id and node_type != "terminal":
-        next_node_id = start_node_id
+    if node_type == "message":
+        _, runtime_session = advance_after_message_node(
+            db=db,
+            conversation=conversation,
+            flow=flow,
+            current_node=start_node,
+            runtime_graph=runtime_graph,
+            session_service=session_service,
+            user_identifier=user_identifier,
+            context=conversation.context if isinstance(conversation.context, dict) else {},
+            published_version_number=published_version_number,
+        )
+        return runtime_session
 
-    target_node = _get_node(
-        db=db,
-        node_id=next_node_id,
-        tenant_id=conversation.tenant_id,
-        runtime_graph=runtime_graph,
-    ) if next_node_id else None
-    target_node_type = str(_node_get(target_node, "type") or "").strip().lower() if target_node else None
-
-    _safe_set_conversation_current_node(db, conversation, next_node_id)
     runtime_session = session_service.save_runtime_session(
         tenant_id=conversation.tenant_id,
         user_identifier=user_identifier,
         flow=flow,
-        current_node_id=next_node_id,
+        current_node_id=start_node_id,
         flow_version_id=flow.published_version_id,
         context=conversation.context if isinstance(conversation.context, dict) else {},
         status="running",
         variables={"flow_version": published_version_number},
     )
-    logger.info("[FLOW SESSION SAVE AFTER ADVANCE] current_node_id=%s", next_node_id)
-    logger.info("[ASSERT NOT START_NODE_AFTER_SEND] saved_current_node_id=%s", next_node_id)
-    logger.info("[SESSION SAVE AFTER START SEND] node_id=%s", next_node_id)
-
-    if target_node_type == "condition":
-        logger.info(
-            "[FLOW START ADVANCED] from=%s to=%s to_type=%s",
-            start_node_id,
-            next_node_id,
-            target_node_type,
-        )
-        return runtime_session
-
     return runtime_session
 def process_flow_engine(
     db: Session,
@@ -1841,6 +1876,7 @@ def process_flow_engine(
         logger.info("[FLOW ROUTING] active_flow_found=true flow_id=%s", flow.id)
     logger.info("[FLOW SELECTED] %s", flow_id or str(flow.id))
     runtime_graph = _get_current_flow_runtime(db=db, flow=flow, tenant_id=conversation.tenant_id)
+    runtime_published_version_id = getattr(flow, "published_version_id", None)
     current_flow_version_id = _parse_uuid(runtime_graph.get("version_id") if isinstance(runtime_graph, dict) else None)
     if current_flow_version_id is None:
         current_flow_version_id = _parse_uuid(
@@ -1868,6 +1904,8 @@ def process_flow_engine(
         getattr(flow, "published_version_id", None),
         getattr(runtime_session, "flow_version_id", None) if runtime_session else None,
     )
+    if runtime_published_version_id != getattr(flow, "published_version_id", None):
+        raise RuntimeError("Published version changed during runtime execution")
     if runtime_session:
         runtime_nodes = runtime_graph.get("nodes") if isinstance(runtime_graph, dict) else []
         logger.info(
@@ -2034,6 +2072,13 @@ def process_flow_engine(
         if parsed_node:
             session_node_id = parsed_node
 
+    _assert_not_persisting_message_node_with_outgoing_edge(
+        db=db,
+        tenant_id=conversation.tenant_id,
+        flow_id=flow.id,
+        node_id=session_node_id,
+        runtime_graph=runtime_graph,
+    )
     runtime_session = session_service.save_runtime_session(
         tenant_id=conversation.tenant_id,
         user_identifier=user_identifier,
@@ -2059,6 +2104,13 @@ def process_flow_engine(
                 "node_id": str(conversation.current_node_id) if conversation.current_node_id else None,
             },
             dedupe_bucket_seconds=30,
+        )
+        _assert_not_persisting_message_node_with_outgoing_edge(
+            db=db,
+            tenant_id=conversation.tenant_id,
+            flow_id=flow.id,
+            node_id=session_node_id,
+            runtime_graph=runtime_graph,
         )
         runtime_session = session_service.save_runtime_session(
             tenant_id=conversation.tenant_id,
@@ -2379,6 +2431,8 @@ def process_flow_engine(
     visited_node_ids: set[uuid.UUID] = set()
     reached_max_steps = True
     for step_index in range(MAX_AUTO_STEPS):
+        if runtime_published_version_id != getattr(flow, "published_version_id", None):
+            raise RuntimeError("Published version changed during runtime execution")
         logger.info(
             "event=flow_step tenant_id=%s conversation_id=%s step=%s current_node_id=%s",
             conversation.tenant_id,
@@ -2473,28 +2527,48 @@ def process_flow_engine(
             print(f"[current_node_id] {node.id}")
             print(f"[next_node_id] {next_node_id}")
             from_node_id = node.id
-            node = _advance_to_edge_target(
-                # primeira mensagem só inicializa o fluxo e envia o start node
-                db=db,
-                conversation=conversation,
-                edge=next_edge,
-                runtime_graph=runtime_graph,
-                runtime_session=runtime_session,
-                session_service=session_service,
-                flow_version_id=current_flow_version_id,
-                user_identifier=user_identifier,
-                flow=flow,
-            )
-            if node and session_service:
-                runtime_session = session_service.save_runtime_session(
-                    tenant_id=conversation.tenant_id,
+            if node_type in {"message", "text", "msg"} and next_edge:
+                node, runtime_session = advance_after_message_node(
+                    db=db,
+                    conversation=conversation,
+                    flow=flow,
+                    current_node=node,
+                    runtime_graph=runtime_graph,
+                    session_service=session_service,
+                    user_identifier=user_identifier,
+                    context=conversation.context if isinstance(conversation.context, dict) else {},
+                    published_version_number=published_version_number,
+                )
+            else:
+                node = _advance_to_edge_target(
+                    # primeira mensagem só inicializa o fluxo e envia o start node
+                    db=db,
+                    conversation=conversation,
+                    edge=next_edge,
+                    runtime_graph=runtime_graph,
+                    runtime_session=runtime_session,
+                    session_service=session_service,
+                    flow_version_id=current_flow_version_id,
                     user_identifier=user_identifier,
                     flow=flow,
-                    current_node_id=node.id,
-                    context=conversation.context if isinstance(conversation.context, dict) else {},
-                    status="running",
                 )
-                logger.info("[FLOW SESSION SAVE AFTER ADVANCE] current_node_id=%s", node.id)
+                if node and session_service:
+                    _assert_not_persisting_message_node_with_outgoing_edge(
+                        db=db,
+                        tenant_id=conversation.tenant_id,
+                        flow_id=flow.id,
+                        node_id=node.id,
+                        runtime_graph=runtime_graph,
+                    )
+                    runtime_session = session_service.save_runtime_session(
+                        tenant_id=conversation.tenant_id,
+                        user_identifier=user_identifier,
+                        flow=flow,
+                        current_node_id=node.id,
+                        context=conversation.context if isinstance(conversation.context, dict) else {},
+                        status="running",
+                    )
+                    logger.info("[FLOW SESSION SAVE AFTER ADVANCE] current_node_id=%s", node.id)
             if node_type in {"message", "text", "msg"}:
                 to_type = str(getattr(node, "type", "") or "").strip().lower() if node else None
                 if isinstance(to_type, str) and to_type.endswith("node"):
