@@ -2263,8 +2263,9 @@ def process_flow_engine(
     is_completed_session = session_status in {"completed", "finalized", "expired", "finished"}
     if runtime_session is not None and is_completed_session and not start_trigger:
         logger.info(
-            "[FLOW COMPLETED SESSION IGNORE] session_id=%s incoming_text=%s",
+            "[FLOW COMPLETED SESSION IGNORE] session_id=%s status=%s incoming_text=%s",
             getattr(runtime_session, "id", None),
+            session_status,
             user_message_text,
         )
         return None
@@ -2316,8 +2317,9 @@ def process_flow_engine(
     if runtime_session is not None:
         if not start_trigger:
             logger.info(
-                "[FLOW COMPLETED SESSION IGNORE] session_id=%s incoming_text=%s",
+                "[FLOW COMPLETED SESSION IGNORE] session_id=%s status=%s incoming_text=%s",
                 getattr(runtime_session, "id", None),
+                session_status,
                 user_message_text,
             )
             return None
