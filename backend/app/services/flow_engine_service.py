@@ -1805,6 +1805,33 @@ def run_until_wait_node(
     logger.info("[MANYCHAT ENGINE START] start_node_id=%s", start_node_id)
     node = _get_node(db=db, node_id=start_node_id, tenant_id=session.tenant_id, runtime_graph=runtime_graph) if start_node_id else None
     normalized_input = _normalize_text(incoming_text or "")
+    if node:
+        node_data = _extract_node_data(node)
+        is_start_node = bool(node_data.get("isStart"))
+        logger.info(
+            "[MANYCHAT ACTUAL FIRST NODE] node_id=%s node_type=%s is_start=%s",
+            _node_get(node, "id"),
+            _node_type_slug(node),
+            is_start_node,
+        )
+        if normalized_input and is_start_node:
+            logger.warning("[MANYCHAT INVALID_RESTART_BLOCKED] reason=incoming_text_started_at_start_node")
+            fallback_node_id = _parse_uuid(getattr(session, "current_node_id", None))
+            if fallback_node_id and fallback_node_id != _node_get(node, "id"):
+                fallback_node = _get_node(
+                    db=db,
+                    node_id=fallback_node_id,
+                    tenant_id=session.tenant_id,
+                    runtime_graph=runtime_graph,
+                )
+                if fallback_node:
+                    node = fallback_node
+                    logger.info(
+                        "[MANYCHAT ACTUAL FIRST NODE] node_id=%s node_type=%s is_start=%s",
+                        _node_get(node, "id"),
+                        _node_type_slug(node),
+                        bool(_extract_node_data(node).get("isStart")),
+                    )
     steps = 0
     while node and steps < MAX_AUTO_STEPS:
         steps += 1
@@ -2303,12 +2330,21 @@ def process_flow_engine(
         current_node_type,
         user_message_text,
     )
+    continuation_start_node_id = session_node_id
+    if user_message_text and runtime_session and runtime_session.current_node_id:
+        continuation_start_node_id = _parse_uuid(runtime_session.current_node_id) or continuation_start_node_id
+        logger.info(
+            "[MANYCHAT CONTINUATION START NODE] session_current_node_id=%s start_node_id_passed=%s incoming_text=%s",
+            runtime_session.current_node_id,
+            continuation_start_node_id,
+            user_message_text,
+        )
     run_until_wait_node(
         db=db,
         flow=flow,
         runtime_graph=runtime_graph,
         session=runtime_session,
-        start_node_id=session_node_id,
+        start_node_id=continuation_start_node_id,
         incoming_text=user_message_text,
     )
     return None
