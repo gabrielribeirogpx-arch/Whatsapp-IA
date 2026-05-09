@@ -1809,7 +1809,7 @@ def run_until_wait_node(
     while node and steps < MAX_AUTO_STEPS:
         steps += 1
         node_type = _node_type_slug(node)
-        node_data = _node_data(node)
+        node_data = _extract_node_data(node)
         edges = _get_edges(db=db, flow_id=flow.id, source=_node_get(node, "id"), runtime_graph=runtime_graph)
         logger.info("[MANYCHAT NODE EXECUTE] node_id=%s node_type=%s", _node_get(node, "id"), node_type)
 
