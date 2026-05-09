@@ -2193,18 +2193,56 @@ def process_flow_engine(
 
     conversation.mode = "flow"
     conversation.current_flow = flow.id
-    set_current_node(conversation=conversation, node_id=_node_get(start_node, "id"), db=db)
+    start_node_id = _parse_uuid(_node_get(start_node, "id"))
+    set_current_node(conversation=conversation, node_id=start_node_id, db=db)
+
+    next_node_id: uuid.UUID | None = None
+    if start_node_id is not None:
+        outgoing_edges = _get_edges(db=db, flow_id=flow.id, source=start_node_id, runtime_graph=runtime_graph)
+        if outgoing_edges:
+            candidate_next_node_id = _parse_uuid(_edge_target(outgoing_edges[0]))
+            candidate_next_node = (
+                _get_node(db=db, node_id=candidate_next_node_id, tenant_id=conversation.tenant_id, runtime_graph=runtime_graph)
+                if candidate_next_node_id
+                else None
+            )
+            if candidate_next_node is not None:
+                next_node_id = candidate_next_node_id
+                logger.info(
+                    "[START NEXT NODE RESOLVED] start_node_id=%s next_node_id=%s next_node_type=%s",
+                    start_node_id,
+                    next_node_id,
+                    _node_type(candidate_next_node),
+                )
+
+        if next_node_id is None:
+            logger.warning(
+                "[START NEXT NODE NOT FOUND] start_node_id=%s edges_count=%s edges_raw=%s",
+                start_node_id,
+                len(outgoing_edges),
+                [
+                    {
+                        "source": str(_edge_source(edge)),
+                        "target": str(_edge_target(edge)),
+                        "source_handle": _edge_source_handle(edge),
+                    }
+                    for edge in outgoing_edges
+                ],
+            )
 
     run_until_wait_node(
         db=db,
         flow=flow,
         runtime_graph=runtime_graph,
         session=conversation,
-        start_node_id=_parse_uuid(_node_get(start_node, "id")),
+        start_node_id=start_node_id,
         incoming_text=None,
     )
+    if next_node_id is None:
+        next_node_id = _parse_uuid(conversation.current_node_id)
 
-    next_node_id = _parse_uuid(conversation.current_node_id)
+    if next_node_id is not None:
+        _safe_set_conversation_current_node(db, conversation, next_node_id)
     runtime_session = session_service.save_runtime_session(
         tenant_id=conversation.tenant_id,
         user_identifier=user_identifier,
