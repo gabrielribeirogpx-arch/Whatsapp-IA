@@ -195,7 +195,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
   const getFlowBadge = useCallback((flow: { is_active?: boolean }) => (
     flow.is_active
       ? { label: 'Ativo', style: { background: '#DCFCE7', color: '#166534' } }
-      : { label: 'OFF', style: { background: '#F1F5F9', color: '#475569' } }
+      : { label: 'Rascunho', style: { background: '#F3F4F6', color: '#6B7280' } }
   ), []);
 
   const toast = useMemo(() => ({

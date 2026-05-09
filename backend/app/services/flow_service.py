@@ -388,6 +388,7 @@ def create_flow(db: Session, tenant_id, data: dict[str, Any]) -> Flow:
     )
     db.add(flow)
     db.flush()
+    logger.info("[FLOW CREATED DRAFT] flow_id=%s is_active=false", flow.id)
     logger.info(
         "[FLOW CREATE] tenant_id=%s flow_id=%s version_id=%s request_id=%s",
         tenant_id,

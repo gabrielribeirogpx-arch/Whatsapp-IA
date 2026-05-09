@@ -1479,6 +1479,7 @@ def activate_tenant_flow(
     invalidate_flow_runtime_cache(flow.id)
     db.commit()
     db.refresh(flow)
+    logger.info("[FLOW ACTIVATED] flow_id=%s", flow.id)
     return _serialize_flow(flow)
 
 
