@@ -1837,38 +1837,33 @@ def run_until_wait_node(
         )
         if normalized_input and is_start_node:
             logger.warning("[MANYCHAT INVALID_RESTART_BLOCKED] reason=incoming_text_started_at_start_node")
-            recovered_current_node_id = _parse_uuid(getattr(session, "current_node_id", None))
-            session_variables = getattr(session, "variables", None)
-            if recovered_current_node_id is None and isinstance(session_variables, dict):
-                recovered_current_node_id = _parse_uuid(session_variables.get("current_node_id"))
-            session_context = getattr(session, "context", None)
-            if recovered_current_node_id is None and isinstance(session_context, dict):
-                recovered_current_node_id = _parse_uuid(session_context.get("current_node_id"))
-
-            if recovered_current_node_id is not None:
+            runtime_current_node_id = _parse_uuid(getattr(session, "current_node_id", None))
+            if runtime_current_node_id is not None and runtime_current_node_id != _parse_uuid(start_node_id):
                 logger.info(
                     "[MANYCHAT RESTART BLOCKED_CONTINUING_FROM_SESSION] current_node_id=%s incoming_text=%s",
-                    recovered_current_node_id,
+                    runtime_current_node_id,
                     incoming_text,
                 )
-                run_until_wait_node(
+                return run_until_wait_node(
                     db=db,
                     flow=flow,
                     runtime_graph=runtime_graph,
                     session=session,
-                    start_node_id=recovered_current_node_id,
+                    start_node_id=runtime_current_node_id,
                     incoming_text=incoming_text,
                 )
-                return None
-
-            logger.warning(
-                "[MANYCHAT RESTART BLOCKED_LOST_STATE] session_id=%s",
-                getattr(session, "id", None),
-            )
+            logger.warning("[FLOW CONTINUATION LOST_STATE] session_id=%s incoming_text_present=true", getattr(session, "id", None))
             return None
     steps = 0
+    visited_node_ids: set[uuid.UUID] = set()
     while node and steps < MAX_AUTO_STEPS:
         steps += 1
+        current_node_id = _parse_uuid(_node_get(node, "id"))
+        if current_node_id is not None and current_node_id in visited_node_ids:
+            logger.warning("[MANYCHAT LOOP DETECTED] node_id=%s", current_node_id)
+            return None
+        if current_node_id is not None:
+            visited_node_ids.add(current_node_id)
         node_type = _node_type_slug(node)
         node_data = _extract_node_data(node)
         edges = _get_edges(db=db, flow_id=flow.id, source=_node_get(node, "id"), runtime_graph=runtime_graph)
