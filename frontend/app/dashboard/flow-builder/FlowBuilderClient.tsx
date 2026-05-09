@@ -150,6 +150,8 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>(initialEdges);
   const [rfInstance, setRfInstance] = useState<ReactFlowInstance | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [isLoadingFlow, setIsLoadingFlow] = useState(false);
+  const [isFlowHydrated, setIsFlowHydrated] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [messages, setMessages] = useState<Array<{ type: 'bot' | 'user'; text: string }>>([]);
   const [currentChoices, setCurrentChoices] = useState<Array<{ id?: string; label?: string; handleId?: string }>>([]);
@@ -184,6 +186,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
   const lastLoadedFlowIdRef = useRef<string | null>(null);
   const hasTriedAutoCreateRef = useRef(false);
   const nodesRef = useRef<Node[]>([]);
+  const edgesRef = useRef<Edge[]>([]);
   const playbackIdRef = useRef(0);
   const isMountedRef = useRef(true);
 
@@ -242,6 +245,9 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
   useEffect(() => {
     nodesRef.current = nodes;
   }, [nodes]);
+  useEffect(() => {
+    edgesRef.current = edges;
+  }, [edges]);
 
 
   useEffect(() => {
@@ -433,14 +439,19 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
       if (!flowId) {
         setNodes([]);
         setEdges([]);
+        setIsFlowHydrated(true);
+        setIsLoadingFlow(false);
         setShowEmptyFlowWarning(false);
         setFlowSource('none');
         setOperationError('Nenhum fluxo selecionado para carregar.');
         return;
       }
 
+      console.info('[BUILDER HYDRATION START]', { flow_id: flowId });
       isLoadingFlowRef.current = true;
       setIsLoading(true);
+      setIsLoadingFlow(true);
+      setIsFlowHydrated(false);
       setOperationError(null);
       setNodes([]);
       setEdges([]);
@@ -555,9 +566,24 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
       setOperationError(err instanceof Error ? err.message : 'Falha ao carregar fluxo no Builder.');
     } finally {
       isLoadingFlowRef.current = false;
+      console.info('[BUILDER HYDRATION COMPLETE]');
+      console.info('nodes_count=', nodesRef.current.length);
+      console.info('edges_count=', edgesRef.current.length);
+      setIsFlowHydrated(true);
+      setIsLoadingFlow(false);
       setIsLoading(false);
     }
   }, [applyLayoutAndSetFlow, buildFlowEdge, buildFlowNode, rfInstance, setEdges, setNodes]);
+
+  const shouldRenderEmptyState = !isLoadingFlow && isFlowHydrated && nodes.length === 0;
+
+  useEffect(() => {
+    if (shouldRenderEmptyState) {
+      console.info('[EMPTY STATE RENDERED]');
+      console.info('nodes_count=', nodes.length);
+      console.info('edges_count=', edges.length);
+    }
+  }, [edges.length, nodes.length, shouldRenderEmptyState]);
 
   useEffect(() => {
     if (normalizedFlows.length === 0) return;
@@ -1469,14 +1495,26 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
             ))}
           </div>
         )}
-        {nodes.length === 0 && !isLoading && (
+        {isLoadingFlow && (
           <div style={{ position: 'absolute', inset: 0, zIndex: 20, display: 'grid', placeItems: 'center', pointerEvents: 'none' }}>
-            <div style={{ pointerEvents: 'auto', width: 'min(520px, calc(100% - 32px))', background: 'rgba(255,255,255,0.96)', border: '1px solid #e5e7eb', borderRadius: 18, padding: '28px 24px', textAlign: 'center', boxShadow: '0 20px 45px rgba(16,24,40,0.12)' }}>
-              <h3 style={{ margin: 0, fontSize: 24, color: '#111827' }}>Comece seu primeiro fluxo</h3>
-              <p style={{ margin: '10px 0 22px', fontSize: 15, color: '#4b5563' }}>Adicione uma mensagem inicial ou escolha um template.</p>
+            <div style={{ width: 'min(560px, calc(100% - 32px))', borderRadius: 22, border: '1px solid #E5E7EB', background: 'rgba(255,255,255,0.85)', padding: '30px 26px', boxShadow: '0 18px 40px rgba(16,24,40,0.08)' }}>
+              <div style={{ height: 16, borderRadius: 999, background: '#ECFDF3', marginBottom: 14 }} />
+              <div style={{ height: 12, borderRadius: 999, background: '#F3F4F6', marginBottom: 10, width: '80%' }} />
+              <div style={{ height: 12, borderRadius: 999, background: '#F3F4F6', width: '60%' }} />
+            </div>
+          </div>
+        )}
+        {shouldRenderEmptyState && (
+          <div style={{ position: 'absolute', inset: 0, zIndex: 20, display: 'grid', placeItems: 'center', pointerEvents: 'none' }}>
+            <div style={{ pointerEvents: 'auto', width: 'min(640px, calc(100% - 32px))', background: 'linear-gradient(180deg, rgba(255,255,255,0.98) 0%, rgba(247,252,249,0.98) 100%)', border: '1px solid #DCEFE3', borderRadius: 24, padding: '40px 36px', textAlign: 'center', boxShadow: '0 26px 60px rgba(16,24,40,0.12)' }}>
+              <div style={{ width: 66, height: 66, margin: '0 auto 18px', borderRadius: 18, display: 'grid', placeItems: 'center', background: 'radial-gradient(circle at 30% 20%, #D1FAE5, #A7F3D0 70%)', color: '#047857' }}>
+                <Zap size={30} strokeWidth={1.9} />
+              </div>
+              <h3 style={{ margin: 0, fontSize: 30, lineHeight: 1.15, letterSpacing: '-0.02em', color: '#0F172A', fontWeight: 700 }}>Comece seu primeiro fluxo</h3>
+              <p style={{ margin: '14px auto 28px', fontSize: 16, lineHeight: 1.55, color: '#334155', maxWidth: 540 }}>Crie automações para responder clientes, qualificar leads e vender no WhatsApp.</p>
               <div style={{ display: 'flex', gap: 12, justifyContent: 'center', flexWrap: 'wrap' }}>
-                <button type="button" onClick={handleCreateInitialMessage} className="flow-top-btn" style={{ minWidth: 220 }}>Adicionar mensagem inicial</button>
-                <button type="button" onClick={handleUseSimpleTemplate} className="flow-top-btn flow-top-btn-secondary" style={{ minWidth: 220 }}>Usar template simples</button>
+                <button type="button" onClick={handleCreateInitialMessage} className="flow-top-btn" style={{ minWidth: 240, padding: '12px 18px', borderRadius: 12, boxShadow: '0 10px 18px rgba(22,163,74,0.2)' }}>Adicionar mensagem inicial</button>
+                <button type="button" onClick={handleUseSimpleTemplate} className="flow-top-btn flow-top-btn-secondary" style={{ minWidth: 240, padding: '12px 18px', borderRadius: 12, border: '1px solid #86EFAC', color: '#166534', background: '#F0FDF4' }}>Usar template simples</button>
               </div>
             </div>
           </div>
