@@ -1790,6 +1790,71 @@ def _assert_not_persisting_message_node_with_outgoing_edge(
         raise RuntimeError("Attempted to save message node with outgoing edge as current_node_id")
 
 
+def _is_wait_node_type(node_type: str) -> bool:
+    return node_type in {"condition", "input", "question", "wait_user_response", "choice"}
+
+
+def run_until_wait_node(
+    db: Session,
+    flow: Flow,
+    runtime_graph: dict[str, Any],
+    session: Conversation,
+    start_node_id: uuid.UUID | None,
+    incoming_text: str | None = None,
+) -> FlowNode | VersionedFlowNode | None:
+    logger.info("[MANYCHAT ENGINE START] start_node_id=%s", start_node_id)
+    node = _get_node(db=db, node_id=start_node_id, tenant_id=session.tenant_id, runtime_graph=runtime_graph) if start_node_id else None
+    normalized_input = _normalize_text(incoming_text or "")
+    steps = 0
+    while node and steps < MAX_AUTO_STEPS:
+        steps += 1
+        node_type = _node_type_slug(node)
+        node_data = _node_data(node)
+        edges = _get_edges(db=db, flow_id=flow.id, source=_node_get(node, "id"), runtime_graph=runtime_graph)
+        logger.info("[MANYCHAT NODE EXECUTE] node_id=%s node_type=%s", _node_get(node, "id"), node_type)
+
+        if node_type == "condition":
+            if not normalized_input:
+                set_current_node(conversation=session, node_id=_node_get(node, "id"), db=db)
+                logger.info("[MANYCHAT WAITING_INPUT] node_id=%s", _node_get(node, "id"))
+                return node
+            true_edge, false_edge = _resolve_condition_routes(edges)
+            raw_condition = str(node_data.get("condition") or node_data.get("content") or "")
+            keywords = [_normalize_text(kw) for kw in raw_condition.split(",") if _normalize_text(kw)]
+            matched = bool(_match_condition_input(normalized_input, keywords))
+            selected_edge = true_edge if matched else false_edge
+            logger.info("[MANYCHAT CONDITION MATCH] node_id=%s matched=%s", _node_get(node, "id"), matched)
+            logger.info("[MANYCHAT ADVANCE] from=%s to=%s", _node_get(node, "id"), _edge_target(selected_edge) if selected_edge else None)
+            node = _get_node(db=db, node_id=_edge_target(selected_edge), tenant_id=session.tenant_id, runtime_graph=runtime_graph) if selected_edge else None
+            normalized_input = ""
+            continue
+
+        if node_type in {"message", "text", "msg", "start", "delay", "action"}:
+            if node_type in {"message", "text", "msg"}:
+                text = _resolve_node_text(node_data)
+                if text:
+                    tenant = db.get(Tenant, session.tenant_id)
+                    if tenant:
+                        _send_flow_whatsapp_message(tenant=tenant, phone=session.phone_number, text=text)
+                        logger.info("[MANYCHAT MESSAGE SENT] node_id=%s", _node_get(node, "id"))
+            next_edge = _pick_default_edge(edges)
+            logger.info("[MANYCHAT ADVANCE] from=%s to=%s", _node_get(node, "id"), _edge_target(next_edge) if next_edge else None)
+            node = _get_node(db=db, node_id=_edge_target(next_edge), tenant_id=session.tenant_id, runtime_graph=runtime_graph) if next_edge else None
+            continue
+
+        if _is_wait_node_type(node_type):
+            set_current_node(conversation=session, node_id=_node_get(node, "id"), db=db)
+            logger.info("[MANYCHAT WAITING_INPUT] node_id=%s", _node_get(node, "id"))
+            return node
+
+        next_edge = _pick_default_edge(edges)
+        node = _get_node(db=db, node_id=_edge_target(next_edge), tenant_id=session.tenant_id, runtime_graph=runtime_graph) if next_edge else None
+
+    set_current_node(conversation=session, node_id=None, db=db)
+    logger.info("[MANYCHAT FLOW_FINISHED] flow_id=%s", flow.id)
+    return None
+
+
 def advance_after_message_node(
     *,
     db: Session,
@@ -2804,176 +2869,20 @@ def process_flow_engine(
             continue
 
         if node_type == "condition":
-            print(f"[FLOW CHECK] avaliando node: {node.id}")
-            logger.info("[FLOW RUNTIME] evaluating_condition=%s", node.id)
-            logger.info("[FLOW CHECK] avaliando node=%s conversation_id=%s", node.id, conversation.id)
-            condition_node_id = node.id
-            raw_condition = str(node_data.get("condition") or node_data.get("content") or "")
-
-            # Sem mensagem do usuário — para e aguarda resposta
-            if not msg:
-                print(f"[FLOW CONDITION WAIT] aguardando resposta no node={node.id}")
-                set_current_node(conversation=conversation, node_id=node.id, db=db)
-                logger.info("[FLOW WAITING_USER_INPUT] current_node_id=%s node_type=%s", node.id, node_type)
-                reached_max_steps = False
-                break
-
-            raw_input = message_text or ""
-            normalized_input = _normalize_text(raw_input)
-
-            # Suporte a múltiplas palavras/sinônimos separados por vírgula
-            # Exemplo: "vender, vendas, comercial, quero vender"
-            keywords = [
-                normalized_kw
-                for kw in raw_condition.split(",")
-                if (normalized_kw := _normalize_text(kw))
-            ]
-
-            match_result = _match_condition_input(normalized_input, keywords)
-            result = bool(match_result)
-            matched_keyword = _find_matched_keyword(normalized_input, keywords) if result else None
-
-            print(f"[CONDITION INPUT RAW] {raw_input}")
-            print(f"[CONDITION INPUT NORMALIZED] {normalized_input}")
-            print(f"[CONDITION KEYWORDS RAW] {raw_condition}")
-            print(f"[CONDITION KEYWORDS NORMALIZED] {keywords}")
-            print(f"[CONDITION MATCH] {result}")
-            logger.info("[CONDITION INPUT RAW] %s", raw_input)
-            logger.info("[CONDITION INPUT NORMALIZED] %s", normalized_input)
-            logger.info("[CONDITION KEYWORDS RAW] %s", raw_condition)
-            logger.info("[CONDITION KEYWORDS NORMALIZED] %s", keywords)
-            logger.info("[CONDITION MATCH] %s", result)
-            if result:
-                print(f"[FLOW MATCH] condição TRUE: {node.id}")
-                logger.info("[FLOW MATCH] condicao TRUE node=%s conversation_id=%s", node.id, conversation.id)
-                if runtime_session and not session_conversion_emitted:
-                    _emit_runtime_event(
-                        db=db,
-                        tenant_id=conversation.tenant_id,
-                        conversation_id=conversation.id,
-                        flow_id=node.flow_id,
-                        flow_version_id=current_flow_version_id,
-                        node_id=node.id,
-                        event_type="conversion",
-                        metadata={"trigger": "condition_match"},
-                        dedupe_bucket_seconds=30,
-                    )
-                    session_service.end_session(runtime_session, status="conversion")
-                    session_conversion_emitted = True
-            else:
-                print(f"[FLOW MISS] condição FALSE: {node.id}")
-                logger.info("[FLOW MISS] condicao FALSE node=%s conversation_id=%s", node.id, conversation.id)
-
-            true_edge, false_edge = _resolve_condition_routes(edges)
-            true_node_id = true_edge.target if true_edge else None
-            false_node_id = false_edge.target if false_edge else None
-            selected_edge = true_edge if result else false_edge
-            selected_next = true_node_id if result else false_node_id
-            route_label = "true" if result else "false"
-            print(f"[CONDITION EDGE SELECTED] {route_label} target_id={selected_next}")
-            logger.info("[CONDITION EDGE SELECTED] %s target_id=%s", route_label, selected_next)
-            _emit_runtime_event(
+            node = run_until_wait_node(
                 db=db,
-                tenant_id=conversation.tenant_id,
-                conversation_id=conversation.id,
-                flow_id=node.flow_id,
-                flow_version_id=current_flow_version_id,
-                node_id=node.id,
-                event_type="condition_matched",
-                metadata={
-                    "result": result,
-                    "matched_keyword": matched_keyword,
-                    "route_label": route_label,
-                    "source_node_id": str(node.id),
-                    "target_node_id": str(selected_next) if selected_next else None,
-                },
+                flow=flow,
+                runtime_graph=runtime_graph,
+                session=conversation,
+                start_node_id=node.id,
+                incoming_text=message_text,
             )
-
-            selected_target_node = None
-            if selected_edge and _edge_target(selected_edge):
-                selected_target_node = _get_node(
-                    db=db,
-                    node_id=_edge_target(selected_edge),
-                    tenant_id=conversation.tenant_id,
-                    runtime_graph=runtime_graph,
-                )
-
-            if selected_target_node and _node_type_slug(selected_target_node) == "message":
-                node = selected_target_node
-            else:
-                node = _advance_to_edge_target(
-                    # primeira mensagem só inicializa o fluxo e envia o start node
-                    db=db,
-                    conversation=conversation,
-                    edge=selected_edge,
-                    runtime_graph=runtime_graph,
-                    runtime_session=runtime_session,
-                    session_service=session_service,
-                    flow_version_id=current_flow_version_id,
-                    user_identifier=user_identifier,
-                    flow=flow,
-                )
             if not node:
                 reached_max_steps = False
                 break
-
-            next_node_type = _node_type_slug(node)
-            if next_node_type == "message":
-                logger.info(
-                    "[CONDITION TARGET MESSAGE] condition_node_id=%s message_node_id=%s",
-                    condition_node_id,
-                    node.id,
-                )
-                text = _resolve_node_text(_node_data(node))
-                if text:
-                    _send_flow_whatsapp_message(tenant=tenant, phone=conversation_phone, text=text)
-                    logger.info(
-                        "[MESSAGE TARGET SENT_AFTER_CONDITION] message_node_id=%s text_preview=%s",
-                        node.id,
-                        _text_preview(text),
-                    )
-                    _emit_runtime_event(
-                        db=db,
-                        tenant_id=conversation.tenant_id,
-                        conversation_id=conversation.id,
-                        flow_id=node.flow_id,
-                        flow_version_id=current_flow_version_id,
-                        node_id=node.id,
-                        event_type="message_sent",
-                        metadata={"channel": "whatsapp", "trigger": "condition_match"},
-                        dedupe_bucket_seconds=10,
-                    )
-                msg = ""
-                node, runtime_session = advance_after_message_node(
-                    db=db,
-                    conversation=conversation,
-                    flow=flow,
-                    current_node=node,
-                    runtime_graph=runtime_graph,
-                    session_service=session_service,
-                    user_identifier=user_identifier,
-                    context=conversation.context if isinstance(conversation.context, dict) else {},
-                    published_version_number=published_version_number,
-                )
-                advanced_type = _node_type_slug(node) if node else None
-                logger.info(
-                    "[CONDITION MESSAGE ADVANCED] from_message_node_id=%s to_node_id=%s to_type=%s",
-                    _node_get(selected_target_node, "id") if selected_target_node else selected_next,
-                    node.id if node else None,
-                    advanced_type,
-                )
-                if not node:
-                    reached_max_steps = False
-                    break
-                if advanced_type == "condition":
-                    logger.info("[FLOW WAITING CONDITION INPUT] current_node_id=%s", node.id)
-                    reached_max_steps = False
-                    break
-                if advanced_type == "delay":
-                    continue
-
-            # Condição resolvida por edge (true/false) — interrompe avaliação atual
-            # para manter execução determinística conforme o caminho visual.
+            if _node_type_slug(node) == "condition":
+                reached_max_steps = False
+                break
             continue
 
         if node_type == "delay":
