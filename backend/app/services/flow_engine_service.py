@@ -1977,6 +1977,8 @@ def _send_start_message_on_session_restart(
     session_service: FlowSessionService,
     published_version_number: int | None,
     user_identifier: str,
+    incoming_text: str | None = None,
+    reason: str = "session_restart",
 ) -> FlowSession | None:
     node_data = _extract_node_data(start_node)
     node_type = str(_node_get(start_node, "type") or "").strip().lower()
@@ -1984,8 +1986,18 @@ def _send_start_message_on_session_restart(
         node_type = node_type[:-4]
 
     start_node_id = _node_get(start_node, "id")
-    logger.info("[FLOW START MESSAGE ATTEMPT] node_id=%s node_type=%s", start_node_id, node_type)
+    logger.info(
+        "[START SEND ATTEMPT] incoming_text_present=%s session_id=%s current_node_id=%s reason=%s",
+        bool((incoming_text or "").strip()),
+        getattr(runtime_session, "id", None),
+        getattr(runtime_session, "current_node_id", None) if runtime_session else conversation.current_node_id,
+        reason,
+    )
+    if (incoming_text or "").strip():
+        logger.warning("[START SEND BLOCKED_ON_INCOMING_TEXT] session_id=%s", getattr(runtime_session, "id", None))
+        return None
 
+    logger.info("[FLOW START MESSAGE ATTEMPT] node_id=%s node_type=%s", start_node_id, node_type)
 
     if node_type == "message":
         text = _resolve_node_text(node_data)
@@ -2118,7 +2130,6 @@ def process_flow_engine(
         )
         if published_version_number is not None and session_version is not None and str(session_version) != str(published_version_number):
             current_node_uuid = _parse_uuid(conversation.current_node_id)
-            has_incoming_text = bool((message_text or "").strip())
             current_node_in_published = _get_node(
                 db=db,
                 node_id=current_node_uuid,
@@ -2201,6 +2212,8 @@ def process_flow_engine(
                         session_service=session_service,
                         published_version_number=published_version_number,
                         user_identifier=user_identifier,
+                        incoming_text=message_text,
+                        reason="version_mismatch_hard_reset",
                     )
                     logger.info(
                         "[SESSION RESET RELOAD DONE] published_version=%s start_text_preview=%s",
@@ -2265,6 +2278,8 @@ def process_flow_engine(
                 session_service=session_service,
                 published_version_number=published_version_number,
                 user_identifier=user_identifier,
+                incoming_text=message_text,
+                reason="invalid_runtime_session_restart",
             )
             logger.info(
                 "[FLOW SESSION RESTART] old_session_id=%s new_session_id=%s",
@@ -2331,14 +2346,24 @@ def process_flow_engine(
         user_message_text,
     )
     continuation_start_node_id = session_node_id
-    if user_message_text and runtime_session and runtime_session.current_node_id:
+    if user_message_text and runtime_session:
         continuation_start_node_id = _parse_uuid(runtime_session.current_node_id) or continuation_start_node_id
+        if continuation_start_node_id is None and isinstance(runtime_session.variables, dict):
+            continuation_start_node_id = _parse_uuid(runtime_session.variables.get("current_node_id"))
+        if continuation_start_node_id is None and isinstance(conversation.context, dict):
+            continuation_start_node_id = _parse_uuid(conversation.context.get("current_node_id"))
         logger.info(
             "[MANYCHAT CONTINUATION START NODE] session_current_node_id=%s start_node_id_passed=%s incoming_text=%s",
             runtime_session.current_node_id,
             continuation_start_node_id,
             user_message_text,
         )
+        if continuation_start_node_id is None:
+            logger.error(
+                "[MANYCHAT CONTINUATION NODE RECOVERY FAILED] session_id=%s incoming_text_present=true",
+                runtime_session.id,
+            )
+            return None
     run_until_wait_node(
         db=db,
         flow=flow,
@@ -2621,6 +2646,8 @@ def process_flow_engine(
                 session_service=session_service,
                 published_version_number=published_version_number,
                 user_identifier=user_identifier,
+                incoming_text=message_text,
+                reason="force_start_before_advance",
             )
             if restart_runtime_session is None:
                 _set_flow_mode(db=db, conversation=conversation, flow_id=flow.id, node_id=start_node.id)
