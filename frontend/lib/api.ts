@@ -179,19 +179,19 @@ export async function parseApiResponse<T>(res: Response): Promise<T> {
   return res.json();
 }
 
-export async function registerTenant(name: string, phone_number_id: string): Promise<TenantSession> {
+export async function registerTenant(payload: Record<string, string>): Promise<TenantSession> {
   const res = await apiFetch('/api/register', {
     method: 'POST',
-    body: JSON.stringify({ name, phone_number_id })
+    body: JSON.stringify(payload)
   });
 
   return parseApiResponse<TenantSession>(res);
 }
 
-export async function tenantLogin(phone_number_id: string): Promise<TenantSession> {
+export async function tenantLogin(email: string, password: string): Promise<TenantSession> {
   const res = await apiFetch('/api/login', {
     method: 'POST',
-    body: JSON.stringify({ phone_number_id })
+    body: JSON.stringify({ email, password })
   });
 
   return parseApiResponse<TenantSession>(res);

@@ -48,6 +48,7 @@ class Tenant(Base):
         cascade="all, delete-orphan",
     )
     bot_rules: Mapped[list[BotRule]] = relationship(BotRule, back_populates="tenant", cascade="all, delete-orphan")
+    users: Mapped[list["TenantUser"]] = relationship("TenantUser", back_populates="tenant", cascade="all, delete-orphan")
 
 
 class AIConfig(Base):
