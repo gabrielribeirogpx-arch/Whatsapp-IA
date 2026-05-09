@@ -1993,9 +1993,20 @@ def _send_start_message_on_session_restart(
         getattr(runtime_session, "current_node_id", None) if runtime_session else conversation.current_node_id,
         reason,
     )
-    if (incoming_text or "").strip():
-        logger.warning("[START SEND BLOCKED_ON_INCOMING_TEXT] session_id=%s", getattr(runtime_session, "id", None))
+    incoming_text_present = bool((incoming_text or "").strip())
+    active_session_id = getattr(runtime_session, "id", None)
+    active_current_node_id = getattr(runtime_session, "current_node_id", None) if runtime_session else conversation.current_node_id
+
+    if incoming_text_present and active_session_id and active_current_node_id:
+        logger.warning("[START SEND BLOCKED_ON_INCOMING_TEXT] session_id=%s", active_session_id)
         return None
+
+    logger.info(
+        "[START SEND ALLOWED_INITIAL_MESSAGE] incoming_text_present=%s session_id=%s current_node_id=%s",
+        incoming_text_present,
+        active_session_id,
+        active_current_node_id,
+    )
 
     logger.info("[FLOW START MESSAGE ATTEMPT] node_id=%s node_type=%s", start_node_id, node_type)
 
