@@ -115,6 +115,12 @@ class FlowSessionService:
         self.db.commit()
         self.db.refresh(session)
         print(f"[FLOW SESSION COMMIT] session_id={session.id} current_node_id={session.current_node_id}")
+        print(
+            "[FLOW SESSION SAVE OK] "
+            f"current_node_id={session.current_node_id} "
+            f"session_version={getattr(session, 'flow_version_id', None)} "
+            f"published_version={getattr(flow, 'published_version_id', None)}"
+        )
         return session
 
     def clear_runtime_session(self, tenant_id, user_identifier: str, flow: Flow, reason: str = "manual_reset") -> None:
