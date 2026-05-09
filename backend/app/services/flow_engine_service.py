@@ -1835,7 +1835,14 @@ def run_until_wait_node(
                 if text:
                     tenant = db.get(Tenant, session.tenant_id)
                     if tenant:
-                        _send_flow_whatsapp_message(tenant=tenant, phone=session.phone_number, text=text)
+                        phone = getattr(session, "phone_number", None) or getattr(session, "user_identifier", None)
+                        if not phone:
+                            logger.warning("[MANYCHAT SEND FAILED] reason=missing_phone node_id=%s", _node_get(node, "id"))
+                            next_edge = _pick_default_edge(edges)
+                            logger.info("[MANYCHAT ADVANCE] from=%s to=%s", _node_get(node, "id"), _edge_target(next_edge) if next_edge else None)
+                            node = _get_node(db=db, node_id=_edge_target(next_edge), tenant_id=session.tenant_id, runtime_graph=runtime_graph) if next_edge else None
+                            continue
+                        _send_flow_whatsapp_message(tenant=tenant, phone=phone, text=text)
                         logger.info("[MANYCHAT MESSAGE SENT] node_id=%s", _node_get(node, "id"))
             next_edge = _pick_default_edge(edges)
             logger.info("[MANYCHAT ADVANCE] from=%s to=%s", _node_get(node, "id"), _edge_target(next_edge) if next_edge else None)
