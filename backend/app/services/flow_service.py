@@ -230,6 +230,17 @@ def _split_csv_words(value: str | None) -> list[str]:
     return [normalize_text(item) for item in value.split(",") if normalize_text(item)]
 
 
+
+
+def normalize_flow_trigger(trigger_type: str | None, trigger_value: str | None) -> tuple[str, str | None]:
+    normalized_type = (_normalize_text(trigger_type) or "default").strip()
+    if normalized_type not in {"default", "keyword"}:
+        normalized_type = "default"
+    normalized_value = normalize_text(trigger_value) if trigger_value else ""
+    normalized_value = normalized_value.strip()
+    if normalized_type == "keyword" and not normalized_value:
+        raise ValueError("trigger_value é obrigatório para trigger_type=keyword")
+    return normalized_type, normalized_value or None
 def score_flow(flow: Flow, message_text: str) -> int:
     normalized_message = normalize_text(message_text)
     message_tokens = _tokenize_text(message_text)
@@ -364,13 +375,15 @@ def create_flow(db: Session, tenant_id, data: dict[str, Any]) -> Flow:
             .values(is_active=False)
         )
 
+    trigger_type, trigger_value = normalize_flow_trigger(data.get("trigger_type", "default"), data.get("trigger_value"))
+
     flow = Flow(
         tenant_id=tenant_id,
         name=data["name"],
         description=data.get("description"),
         is_active=should_activate,
-        trigger_type=data.get("trigger_type", "default"),
-        trigger_value=data.get("trigger_value"),
+        trigger_type=trigger_type,
+        trigger_value=trigger_value,
         keywords=data.get("keywords"),
         stop_words=data.get("stop_words"),
         priority=data.get("priority", 0),
@@ -415,10 +428,10 @@ def update_flow(db: Session, flow_id, tenant_id, data: dict[str, Any]) -> Flow |
         flow.description = data["description"]
     if "is_active" in data:
         flow.is_active = data["is_active"]
-    if "trigger_type" in data:
-        flow.trigger_type = data["trigger_type"]
-    if "trigger_value" in data:
-        flow.trigger_value = data["trigger_value"]
+    if "trigger_type" in data or "trigger_value" in data:
+        trigger_type, trigger_value = normalize_flow_trigger(data.get("trigger_type", flow.trigger_type), data.get("trigger_value", flow.trigger_value))
+        flow.trigger_type = trigger_type
+        flow.trigger_value = trigger_value
     if "keywords" in data:
         flow.keywords = data["keywords"]
     if "stop_words" in data:

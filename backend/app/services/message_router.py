@@ -1,12 +1,42 @@
 from sqlalchemy.orm import Session
 
-from app.models import Conversation, Message
+from sqlalchemy import select
+
+from app.models import Conversation, Flow, Message
 from app.services.bot_service import handle_bot, handle_visual_flow_priority
 from app.services.conversation_log_service import log_conversation_event
-from app.services.flow_engine_service import get_active_visual_flow, is_explicit_start_trigger
+from app.services.flow_engine_service import get_active_visual_flow, is_flow_trigger
 from app.services.flow_session_service import FlowSessionService
 
 
+
+
+def _resolve_triggered_flow(db: Session, tenant_id, incoming_text: str, *, allow_default_auto_start: bool = False):
+    flows = db.execute(
+        select(Flow)
+        .where(
+            Flow.tenant_id == tenant_id,
+            Flow.is_active.is_(True),
+            Flow.is_deleted.is_(False),
+            Flow.deleted_at.is_(None),
+            Flow.status.in_(["active", "published"]),
+        )
+        .order_by(Flow.priority.desc(), Flow.created_at.asc(), Flow.id.asc())
+    ).scalars().all()
+
+    default_flow = None
+    for flow in flows:
+        trigger_type = (flow.trigger_type or "default").strip().lower()
+        if trigger_type == "keyword" and is_flow_trigger(flow, incoming_text):
+            return flow
+        if trigger_type == "default" and default_flow is None:
+            default_flow = flow
+
+    if default_flow and is_flow_trigger(default_flow, incoming_text):
+        return default_flow
+    if default_flow and allow_default_auto_start:
+        return default_flow
+    return None
 def handle_incoming_message(db: Session, message: Message, conversation: Conversation):
     mode = conversation.mode or "bot"
     base_log_data = {
@@ -44,7 +74,7 @@ def handle_incoming_message(db: Session, message: Message, conversation: Convers
             return False
 
         incoming_text = message.text or ""
-        if is_explicit_start_trigger(incoming_text):
+        if is_flow_trigger(active_flow, incoming_text):
             print(
                 "[ROUTER EXPLICIT FLOW RESTART] "
                 f"tenant_id={conversation.tenant_id} "
@@ -98,7 +128,8 @@ def handle_incoming_message(db: Session, message: Message, conversation: Convers
         return True
 
     if mode == "bot":
-        active_flow = get_active_visual_flow(db=db, tenant_id=conversation.tenant_id)
+        incoming_text = message.text or ""
+        active_flow = _resolve_triggered_flow(db=db, tenant_id=conversation.tenant_id, incoming_text=incoming_text, allow_default_auto_start=False)
         print(
             f"[FLOW ROUTING] active_flow_found={bool(active_flow)} "
             f"flow_id={active_flow.id if active_flow else 'none'}"

@@ -124,9 +124,27 @@ export default function FlowsPage() {
 
   const onSave = async () => {
     if (!form.name.trim()) return;
+    const normalizedTriggerType = form.trigger_type === "keyword" ? "keyword" : "default";
+    const normalizedTriggerValue = (form.trigger_value || "").trim().toLowerCase();
+    if (normalizedTriggerType === "keyword" && !normalizedTriggerValue) {
+      showToast("Trigger keyword é obrigatório.");
+      return;
+    }
+    const payload: FlowPayload = {
+      name: form.name.trim(),
+      description: form.description || "",
+      trigger_type: normalizedTriggerType,
+      trigger_value: normalizedTriggerValue || "",
+    };
     try {
-      if (editingFlow) { await updateFlow(editingFlow.id, form); }
-      else { await createFlow({ ...form, name: form.name.trim(), nodes: [], edges: [] } as FlowPayload & { nodes: unknown[]; edges: unknown[] }); }
+      if (editingFlow) {
+        const updated = await updateFlow(editingFlow.id, payload);
+        setFlows((prev) => prev.map((flow) => (flow.id === editingFlow.id ? { ...flow, ...updated } : flow)));
+      }
+      else {
+        const created = await createFlow({ ...payload, nodes: [], edges: [] } as FlowPayload & { nodes: unknown[]; edges: unknown[] });
+        setFlows((prev) => [created, ...prev]);
+      }
     } catch (error) {
       const status = parseHttpStatus(error);
       logFlowOperationError({ method: editingFlow ? 'PUT' : 'POST', endpoint: editingFlow ? `/api/flows/${editingFlow.id}` : '/api/flows', error });
@@ -134,7 +152,6 @@ export default function FlowsPage() {
       return;
     }
     setIsOpen(false);
-    await loadFlows();
   };
 
   const onDelete = async (flowId: string) => {

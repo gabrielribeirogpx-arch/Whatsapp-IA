@@ -33,7 +33,6 @@ _FLOW_RUNTIME_CACHE: dict[str, dict[str, Any]] = {}
 _FLOW_RUNTIME_EVENT_GUARD: set[str] = set()
 STRONG_YES_MATCHES = {"sim", "s", "claro", "quero", "com certeza", "yes"}
 STRONG_NO_MATCHES = {"nao", "n", "negativo", "no"}
-EXPLICIT_START_TRIGGERS = {"oi", "ola", "menu", "iniciar", "start", "comecar"}
 
 
 def _raise_runtime_publish_violation(action: str) -> None:
@@ -853,9 +852,25 @@ def _normalize_text(value: str | None) -> str:
     return " ".join(cleaned.lower().split())
 
 
-def is_explicit_start_trigger(text: str | None) -> bool:
-    normalized_text = _normalize_text(text or "").strip()
-    return normalized_text in EXPLICIT_START_TRIGGERS
+def normalize_trigger_text(value: str | None) -> str:
+    return _normalize_text(value or "").strip()
+
+
+def is_flow_trigger(flow: Flow, incoming_text: str | None) -> bool:
+    normalized_incoming = normalize_trigger_text(incoming_text)
+    trigger_type = normalize_trigger_text(getattr(flow, "trigger_type", "default") or "default")
+    trigger_value = normalize_trigger_text(getattr(flow, "trigger_value", None))
+    matched = False
+    if trigger_type == "keyword":
+        matched = bool(trigger_value) and normalized_incoming == trigger_value
+    else:
+        matched = bool(trigger_value) and normalized_incoming == trigger_value
+    logger.info("[FLOW TRIGGER CHECK] flow_id=%s trigger_type=%s trigger_value=%s incoming_text=%s matched=%s", getattr(flow, "id", None), trigger_type or "default", trigger_value or None, normalized_incoming, matched)
+    if matched:
+        logger.info("[FLOW TRIGGER MATCHED] flow_id=%s", getattr(flow, "id", None))
+    else:
+        logger.info("[FLOW TRIGGER NOT MATCHED] flow_id=%s", getattr(flow, "id", None))
+    return matched
 
 
 def _match_condition_input(normalized_input: str, keywords: list[str]) -> bool | None:
@@ -2257,7 +2272,6 @@ def process_flow_engine(
     user_identifier = conversation.phone_number
     user_message_text = message_text or ""
     normalized_text = _normalize_text(user_message_text)
-    start_trigger = is_explicit_start_trigger(normalized_text)
     session_service = FlowSessionService(db)
 
     if flow_id:
@@ -2266,6 +2280,8 @@ def process_flow_engine(
         flow = get_active_visual_flow(db=db, tenant_id=conversation.tenant_id)
     if not flow:
         return None
+
+    start_trigger = is_flow_trigger(flow, normalized_text)
 
     state = session_service.get_runtime_session_state(
         tenant_id=conversation.tenant_id,
