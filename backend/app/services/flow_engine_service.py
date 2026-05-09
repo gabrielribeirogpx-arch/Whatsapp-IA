@@ -2267,23 +2267,28 @@ def process_flow_engine(
     if not flow:
         return None
 
-    runtime_session, _ = session_service.get_runtime_session(conversation.tenant_id, user_identifier, flow)
+    state = session_service.get_runtime_session_state(
+        tenant_id=conversation.tenant_id,
+        phone=user_identifier,
+        flow_id=flow.id,
+    )
+    runtime_session = state["session"]
+    session_status = state["status"]
+    session_exists = state["exists"]
+    session_active = state["is_active"]
+    session_finalized = state["is_finalized"]
+
     saved_current_node_id = _parse_uuid(getattr(runtime_session, "current_node_id", None))
     if saved_current_node_id is None and isinstance(getattr(runtime_session, "variables", None), dict):
         saved_current_node_id = _parse_uuid(runtime_session.variables.get("current_node_id"))
 
-    session_status = (getattr(runtime_session, "status", "") or "").strip().lower()
     logger.info(
         "[FLOW ENTRY STATE] session_exists=%s status=%s current_node_id=%s incoming_text=%s",
-        runtime_session is not None,
+        session_exists,
         session_status or None,
         saved_current_node_id,
         user_message_text,
     )
-
-    session_exists = runtime_session is not None
-    session_active = bool(runtime_session and session_status not in {"completed", "finalized", "expired"})
-    session_finalized = bool(runtime_session and session_status in {"completed", "finalized", "expired"})
 
     logger.info(
         "[FLOW ROUTING] session_exists=%s session_active=%s session_finalized=%s status=%s",
@@ -2293,15 +2298,16 @@ def process_flow_engine(
         session_status or None,
     )
 
-    if session_finalized and not start_trigger:
+    explicit_start_trigger = start_trigger
+    if session_finalized and not explicit_start_trigger:
         logger.info(
-            "[FLOW FINALIZED IGNORE MESSAGE] session_id=%s status=%s incoming_text=%s",
+            "[ENGINE FINALIZED HARD BLOCK] session_id=%s status=%s incoming_text=%s",
             getattr(runtime_session, "id", None),
             session_status,
             user_message_text,
         )
         return None
-    if session_finalized and start_trigger:
+    if session_finalized and explicit_start_trigger:
         logger.info(
             "[FLOW EXPLICIT RESTART] trigger=%s old_session_id=%s",
             normalized_text,

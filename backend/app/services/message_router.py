@@ -24,15 +24,16 @@ def handle_incoming_message(db: Session, message: Message, conversation: Convers
     def _check_finalized_flow_block(active_flow):
         if not active_flow:
             return False
-        latest_session = session_service.get_latest_session_for_flow(
+        state = session_service.get_runtime_session_state(
             tenant_id=conversation.tenant_id,
-            user_identifier=conversation.phone_number,
+            phone=conversation.phone_number,
             flow_id=active_flow.id,
         )
-        session_status = ((getattr(latest_session, "status", "") or "").strip().lower())
-        session_exists = latest_session is not None
-        session_finalized = session_status in {"completed", "finalized", "expired"}
-        session_active = session_exists and not session_finalized
+        latest_session = state["session"]
+        session_status = state["status"]
+        session_exists = state["exists"]
+        session_active = state["is_active"]
+        session_finalized = state["is_finalized"]
         print(
             f"[FLOW ROUTING] session_exists={session_exists} "
             f"session_active={session_active} "
