@@ -135,7 +135,7 @@ class FlowBuilderPayload(BaseModel):
 class FlowCreatePayload(BaseModel):
     name: str = "Novo fluxo"
     description: str | None = None
-    is_active: bool = True
+    is_active: bool = False
     trigger_type: str = "default"
     trigger_value: str | None = None
     keywords: str | None = None

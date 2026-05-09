@@ -159,7 +159,7 @@ export default function FlowsPage() {
         setEditingFlow(responseFlow);
       }
       else {
-        const created = await createFlow({ ...payload, nodes: [], edges: [] } as FlowPayload & { nodes: unknown[]; edges: unknown[] });
+        const created = await createFlow({ ...payload, is_active: false, status: "draft", nodes: [], edges: [] } as FlowPayload & { is_active: boolean; status: string; nodes: unknown[]; edges: unknown[] });
         setFlows((prev) => [created, ...prev]);
       }
     } catch (error) {
@@ -423,7 +423,7 @@ export default function FlowsPage() {
                           color: flow.is_active ? '#065F46' : '#6B7280',
                         }}
                       >
-                        {flow.is_active ? 'Ativo' : 'Inativo'}
+                        {flow.is_active ? 'Ativo' : flow.status === 'draft' ? 'Rascunho' : 'Inativo'}
                       </span>
                     </div>
                     <span className="mt-1 block text-xs text-slate-500">
