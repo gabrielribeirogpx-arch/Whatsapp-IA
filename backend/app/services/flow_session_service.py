@@ -73,6 +73,34 @@ class FlowSessionService:
 
         return session, None
 
+
+
+    def get_runtime_session_state(self, tenant_id, phone: str, flow_id) -> dict[str, Any]:
+        session = self.get_latest_session_for_flow(tenant_id=tenant_id, user_identifier=phone, flow_id=flow_id)
+        exists = session is not None
+        status = ((getattr(session, "status", "") or "").strip().lower()) if session else ""
+        current_node_id = getattr(session, "current_node_id", None) if session else None
+
+        is_active = bool(session and status in {"running", "active"} and current_node_id is not None)
+        is_finalized = bool(session and (status in {"completed", "finalized", "expired"} or current_node_id is None))
+
+        print(
+            "[SESSION STATE RESOLVED] "
+            f"session_id={getattr(session, 'id', 'none')} "
+            f"status={status or 'none'} "
+            f"current_node_id={current_node_id} "
+            f"exists={exists} "
+            f"is_active={is_active} "
+            f"is_finalized={is_finalized}"
+        )
+
+        return {
+            "session": session,
+            "exists": exists,
+            "status": status,
+            "is_active": is_active,
+            "is_finalized": is_finalized,
+        }
     def get_latest_session_for_flow(self, *, tenant_id, user_identifier: str, flow_id) -> FlowSession | None:
         return (
             self.db.query(FlowSession)
