@@ -1264,15 +1264,56 @@ def _get_edges(
     ).scalars().all()
 
 
+def _edge_source(edge: Any) -> Any:
+    if isinstance(edge, dict):
+        return (
+            edge.get("source")
+            or edge.get("source_id")
+            or edge.get("from")
+            or edge.get("from_node_id")
+            or (edge.get("data") or {}).get("source")
+        )
+    return (
+        getattr(edge, "source", None)
+        or getattr(edge, "source_id", None)
+        or getattr(edge, "from_node_id", None)
+        or getattr(edge, "from", None)
+    )
+
+
+def _edge_target(edge: Any) -> Any:
+    if isinstance(edge, dict):
+        return (
+            edge.get("target")
+            or edge.get("target_id")
+            or edge.get("to")
+            or edge.get("to_node_id")
+            or (edge.get("data") or {}).get("target")
+        )
+    return (
+        getattr(edge, "target", None)
+        or getattr(edge, "target_id", None)
+        or getattr(edge, "to_node_id", None)
+        or getattr(edge, "to", None)
+    )
+
+
+def _edge_source_handle(edge: Any) -> Any:
+    if isinstance(edge, dict):
+        data = edge.get("data") if isinstance(edge.get("data"), dict) else {}
+        return edge.get("sourceHandle") or edge.get("source_handle") or data.get("sourceHandle") or data.get("source_handle")
+    data = getattr(edge, "data", None)
+    data_dict = data if isinstance(data, dict) else {}
+    return getattr(edge, "source_handle", None) or getattr(edge, "sourceHandle", None) or data_dict.get("sourceHandle") or data_dict.get("source_handle")
+
+
 def _is_default_edge(edge: FlowEdge | VersionedFlowEdge) -> bool:
     condition = _normalize_text(getattr(edge, "condition", None))
     if condition in {"", "default", "else", "next"}:
         return True
 
     source_handle = _normalize_text(
-        getattr(edge, "source_handle", None)
-        or getattr(edge, "sourceHandle", None)
-        or ((getattr(edge, "data", None) or {}).get("sourceHandle") if isinstance(getattr(edge, "data", None), dict) else None)
+        _edge_source_handle(edge)
     )
     return source_handle in {"", "default", "sourcehandle/default", "source/default"}
 
@@ -1280,8 +1321,7 @@ def _is_default_edge(edge: FlowEdge | VersionedFlowEdge) -> bool:
 def _pick_default_edge(edges: list[FlowEdge | VersionedFlowEdge]) -> FlowEdge | VersionedFlowEdge | None:
     for edge in edges:
         source_handle = _normalize_text(
-            getattr(edge, "source_handle", None)
-            or getattr(edge, "sourceHandle", None)
+            _edge_source_handle(edge)
         )
         if source_handle in {"sourcehandle/default", "source/default", "default"}:
             return edge
@@ -1735,18 +1775,33 @@ def advance_after_message_node(
 ) -> tuple[FlowNode | VersionedFlowNode | None, FlowSession]:
     current_node_id = _node_get(current_node, "id")
     edges = _get_edges(db=db, flow_id=flow.id, source=current_node_id, runtime_graph=runtime_graph)
+    if not edges and isinstance(runtime_graph, dict):
+        all_edges = runtime_graph.get("edges") if isinstance(runtime_graph.get("edges"), list) else []
+        current_node_id_str = str(current_node_id)
+        edges = [edge for edge in all_edges if str(_edge_source(edge)) == current_node_id_str]
     next_edge = _pick_default_edge(edges)
-    if not next_edge or not next_edge.target:
-        raise RuntimeError(f"Message node {current_node_id} has no outgoing target")
-    target_node = _get_node(db=db, node_id=next_edge.target, tenant_id=conversation.tenant_id, runtime_graph=runtime_graph)
+    next_target = _edge_target(next_edge) if next_edge else None
+    if not next_edge or not next_target:
+        logger.error(
+            "[FLOW EDGE LOOKUP FAILED] current_node_id=%s edges_count=%s edges_raw=%s node_ids=%s published_version_id=%s flow_id=%s",
+            current_node_id,
+            len(edges),
+            edges,
+            [str(_node_get(n, "id")) for n in (runtime_graph.get("nodes") if isinstance(runtime_graph, dict) and isinstance(runtime_graph.get("nodes"), list) else [])],
+            getattr(flow, "published_version_id", None),
+            flow.id,
+        )
+        logger.warning("[FLOW STUCK_NO_EDGE] current_node_id=%s flow_id=%s", current_node_id, flow.id)
+        return None, session_service.get_runtime_session(conversation.tenant_id, user_identifier, flow)
+    target_node = _get_node(db=db, node_id=next_target, tenant_id=conversation.tenant_id, runtime_graph=runtime_graph)
     if not target_node:
-        raise RuntimeError(f"Message node target not found: {next_edge.target}")
-    _safe_set_conversation_current_node(db, conversation, next_edge.target)
+        raise RuntimeError(f"Message node target not found: {next_target}")
+    _safe_set_conversation_current_node(db, conversation, next_target)
     runtime_session = session_service.save_runtime_session(
         tenant_id=conversation.tenant_id,
         user_identifier=user_identifier,
         flow=flow,
-        current_node_id=next_edge.target,
+        current_node_id=next_target,
         flow_version_id=flow.published_version_id,
         context=context,
         status="running",
@@ -1756,7 +1811,7 @@ def advance_after_message_node(
     logger.info(
         "[FORCED MESSAGE ADVANCE] from=%s to=%s to_type=%s",
         current_node_id,
-        next_edge.target,
+        next_target,
         _node_type_slug(target_node),
     )
     return target_node, runtime_session
@@ -2340,8 +2395,8 @@ def process_flow_engine(
             )
             selected_start_node_id = start_node.id
             for edge in start_edges:
-                if edge.source == start_node.id:
-                    selected_start_node_id = edge.target
+                if str(_edge_source(edge)) == str(start_node.id):
+                    selected_start_node_id = _edge_target(edge) or selected_start_node_id
                     break
             tenant = db.execute(select(Tenant).where(Tenant.id == conversation.tenant_id)).scalars().first()
             if not tenant:
