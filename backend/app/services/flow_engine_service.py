@@ -243,7 +243,6 @@ def validate_flow_graph(nodes: list[dict[str, Any]] | None, edges: list[dict[str
         if not node_id:
             add_issue(errors, "NODE_ID_REQUIRED", None, "Node sem id")
             continue
-        node_map[node_id] = node
         outgoing[node_id] = 0
         incoming[node_id] = 0
         condition_handles[node_id] = set()
@@ -729,7 +728,6 @@ def _load_flow_version_runtime(flow: Flow, tenant_id: uuid.UUID, flow_version: F
     raw_nodes = flow_version.nodes if isinstance(flow_version.nodes, list) else []
     raw_edges = flow_version.edges if isinstance(flow_version.edges, list) else []
     nodes: list[VersionedFlowNode] = []
-    node_map: dict[uuid.UUID, VersionedFlowNode] = {}
     legacy_id_map: dict[str, uuid.UUID] = {}
 
     for item in raw_nodes:
@@ -763,7 +761,6 @@ def _load_flow_version_runtime(flow: Flow, tenant_id: uuid.UUID, flow_version: F
             position_y=int(position.get("y", 0) or 0),
         )
         nodes.append(node)
-        node_map[node_id] = node
         legacy_id_map[str(item.get("id"))] = node_id
 
     edges: list[VersionedFlowEdge] = []
@@ -803,7 +800,7 @@ def _load_flow_version_runtime(flow: Flow, tenant_id: uuid.UUID, flow_version: F
         flow_version.id,
         flow_version.version,
     )
-    return {"nodes": nodes, "edges": edges, "node_map": node_map, "edges_by_source": edges_by_source}
+    return {"nodes": nodes, "edges": edges, "node_map": build_node_map(nodes), "edges_by_source": edges_by_source}
 
 
 def _empty_runtime_graph() -> dict[str, Any]:
@@ -1082,6 +1079,18 @@ def _node_get(node: Any, key: str, default: Any = None) -> Any:
     return getattr(node, key, default)
 
 
+
+
+def _node_id(node: Any) -> str:
+    candidate = (
+        _node_get(node, "id")
+        or _node_get(node, "node_id")
+    )
+    return str(candidate) if candidate is not None else ""
+
+
+def build_node_map(nodes: list[Any]) -> dict[str, Any]:
+    return {str(_node_id(node)): node for node in nodes if _node_id(node)}
 def _get_start_node(
     db: Session,
     flow_id: uuid.UUID,
@@ -1215,7 +1224,8 @@ def _get_node(
     runtime_graph: dict[str, Any] | None = None,
 ) -> FlowNode | VersionedFlowNode | None:
     if runtime_graph:
-        return runtime_graph.get("node_map", {}).get(node_id)
+        node_map = runtime_graph.get("node_map") if isinstance(runtime_graph.get("node_map"), dict) else {}
+        return node_map.get(str(node_id))
     return db.execute(
         select(FlowNode).where(FlowNode.id == node_id, FlowNode.tenant_id == tenant_id)
     ).scalars().first()
@@ -1231,7 +1241,7 @@ def resolve_current_node(
     if node_id is None:
         return None
     node_map = flow_data.get("node_map") if isinstance(flow_data.get("node_map"), dict) else {}
-    node = node_map.get(node_id)
+    node = node_map.get(str(node_id))
     if node:
         return node
     nodes = flow_data.get("nodes") if isinstance(flow_data.get("nodes"), list) else []
@@ -1793,9 +1803,32 @@ def advance_after_message_node(
         )
         logger.warning("[FLOW STUCK_NO_EDGE] current_node_id=%s flow_id=%s", current_node_id, flow.id)
         return None, session_service.get_runtime_session(conversation.tenant_id, user_identifier, flow)
-    target_node = _get_node(db=db, node_id=next_target, tenant_id=conversation.tenant_id, runtime_graph=runtime_graph)
+    nodes = runtime_graph.get("nodes") if isinstance(runtime_graph, dict) and isinstance(runtime_graph.get("nodes"), list) else []
+    node_map = build_node_map(nodes)
+    next_target_str = str(next_target)
+    target_node = node_map.get(next_target_str) or _get_node(
+        db=db,
+        node_id=next_target,
+        tenant_id=conversation.tenant_id,
+        runtime_graph=runtime_graph,
+    )
     if not target_node:
+        logger.error(
+            "[FLOW TARGET LOOKUP FAILED] next_target=%s next_target_type=%s node_map_keys=%s nodes_raw_preview=%s",
+            next_target_str,
+            type(next_target).__name__,
+            list(node_map.keys()),
+            [
+                {"id": _node_id(node), "type": _node_get(node, "type")}
+                for node in nodes[:10]
+            ],
+        )
         raise RuntimeError(f"Message node target not found: {next_target}")
+    logger.info(
+        "[FLOW TARGET FOUND] target_id=%s target_type=%s",
+        next_target_str,
+        _node_get(target_node, "type"),
+    )
     _safe_set_conversation_current_node(db, conversation, next_target)
     runtime_session = session_service.save_runtime_session(
         tenant_id=conversation.tenant_id,
