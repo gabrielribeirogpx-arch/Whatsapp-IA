@@ -1884,9 +1884,17 @@ def run_until_wait_node(
             keywords = [_normalize_text(kw) for kw in raw_condition.split(",") if _normalize_text(kw)]
             matched = bool(_match_condition_input(normalized_input, keywords))
             selected_edge = true_edge if matched else false_edge
-            logger.info("[MANYCHAT CONDITION MATCH] node_id=%s matched=%s", _node_get(node, "id"), matched)
-            logger.info("[MANYCHAT ADVANCE] from=%s to=%s", _node_get(node, "id"), _edge_target(selected_edge) if selected_edge else None)
-            node = _get_node(db=db, node_id=_edge_target(selected_edge), tenant_id=session.tenant_id, runtime_graph=runtime_graph) if selected_edge else None
+            matched_handle = _edge_source_handle(selected_edge) if selected_edge else None
+            target_node_id = _edge_target(selected_edge) if selected_edge else None
+            logger.info(
+                "[CONDITION EVALUATED] condition_node_id=%s incoming_text=%s matched_handle=%s target_node_id=%s",
+                _node_get(node, "id"),
+                incoming_text,
+                matched_handle,
+                target_node_id,
+            )
+            logger.info("[MANYCHAT ADVANCE] from=%s to=%s", _node_get(node, "id"), target_node_id)
+            node = _get_node(db=db, node_id=target_node_id, tenant_id=session.tenant_id, runtime_graph=runtime_graph) if selected_edge else None
             normalized_input = ""
             continue
 
@@ -1906,8 +1914,14 @@ def run_until_wait_node(
                         _send_flow_whatsapp_message(tenant=tenant, phone=phone, text=text)
                         logger.info("[MANYCHAT MESSAGE SENT] node_id=%s", _node_get(node, "id"))
             next_edge = _pick_default_edge(edges)
-            logger.info("[MANYCHAT ADVANCE] from=%s to=%s", _node_get(node, "id"), _edge_target(next_edge) if next_edge else None)
-            node = _get_node(db=db, node_id=_edge_target(next_edge), tenant_id=session.tenant_id, runtime_graph=runtime_graph) if next_edge else None
+            next_target = _edge_target(next_edge) if next_edge else None
+            logger.info("[MANYCHAT ADVANCE] from=%s to=%s", _node_get(node, "id"), next_target)
+            node = _get_node(db=db, node_id=next_target, tenant_id=session.tenant_id, runtime_graph=runtime_graph) if next_edge else None
+            if node and _node_type_slug(node) == "condition":
+                condition_node_id = _node_get(node, "id")
+                set_current_node(conversation=session, node_id=condition_node_id, db=db)
+                logger.info("[WAITING_NEXT_CONDITION] condition_node_id=%s", condition_node_id)
+                return node
             continue
 
         if _is_wait_node_type(node_type):
