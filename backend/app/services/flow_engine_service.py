@@ -2241,7 +2241,16 @@ def process_flow_engine(
         if parsed_node:
             session_node_id = parsed_node
 
-    current_node = _get_node(runtime_graph, session_node_id) if session_node_id else None
+    current_node = (
+        _get_node(
+            db=db,
+            node_id=session_node_id,
+            tenant_id=conversation.tenant_id,
+            runtime_graph=runtime_graph,
+        )
+        if session_node_id
+        else None
+    )
     current_node_type = _node_type_slug(current_node)
     user_message_text = message_text
     logger.info(
