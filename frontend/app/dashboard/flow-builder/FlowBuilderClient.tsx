@@ -827,28 +827,38 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
   }, [setEdges, setNodes, toggleStartNode, updateNodeData]);
 
   const handleUseSimpleTemplate = useCallback(() => {
-    const startId = makeNodeId();
-    const conditionId = makeNodeId();
-    const yesId = makeNodeId();
-    const noId = makeNodeId();
+    const templateSuffix = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const startId = `template-start-message-${templateSuffix}`;
+    const conditionId = `template-condition-${templateSuffix}`;
+    const yesId = `template-response-yes-${templateSuffix}`;
+    const noId = `template-response-no-${templateSuffix}`;
 
     const templateNodes: Node[] = [
-      { id: startId, type: 'message', position: { x: 140, y: 80 }, data: { label: 'Mensagem inicial', content: 'Olá! Como posso te ajudar?', isStart: true, onChange: updateNodeData, onToggleStart: toggleStartNode, hasValidationError: false } },
-      { id: conditionId, type: 'condition', position: { x: 140, y: 250 }, data: { label: 'Condição', condition: 'Cliente quer suporte?', onChange: updateNodeData, onToggleStart: toggleStartNode, hasValidationError: false } },
-      { id: yesId, type: 'message', position: { x: -80, y: 430 }, data: { label: 'Resposta A', content: 'Perfeito! Vou te direcionar para o suporte.', onChange: updateNodeData, onToggleStart: toggleStartNode, hasValidationError: false } },
-      { id: noId, type: 'message', position: { x: 360, y: 430 }, data: { label: 'Resposta B', content: 'Sem problemas! Posso te mostrar nossos planos.', onChange: updateNodeData, onToggleStart: toggleStartNode, hasValidationError: false } },
+      { id: startId, type: 'message', position: { x: 100, y: 200 }, data: { label: 'Mensagem inicial', title: 'Mensagem inicial', content: 'Olá! Como posso te ajudar?', text: 'Olá! Como posso te ajudar?', message: 'Olá! Como posso te ajudar?', isStart: true, onChange: updateNodeData, onToggleStart: toggleStartNode, hasValidationError: false } },
+      { id: conditionId, type: 'condition', position: { x: 420, y: 200 }, data: { label: 'Condição', title: 'Condição', condition: 'Cliente quer suporte?', question: 'Cliente quer suporte?', keywords: ['sim', 'suporte', 'ajuda'], positive: ['sim', 'suporte', 'ajuda'], matchType: 'contains', onChange: updateNodeData, onToggleStart: toggleStartNode, hasValidationError: false } },
+      { id: yesId, type: 'message', position: { x: 760, y: 100 }, data: { label: 'Resposta A', title: 'Resposta A', content: 'Perfeito! Vou te direcionar para o suporte.', text: 'Perfeito! Vou te direcionar para o suporte.', message: 'Perfeito! Vou te direcionar para o suporte.', onChange: updateNodeData, onToggleStart: toggleStartNode, hasValidationError: false } },
+      { id: noId, type: 'message', position: { x: 760, y: 320 }, data: { label: 'Resposta B', title: 'Resposta B', content: 'Sem problemas! Posso te mostrar nossos planos.', text: 'Sem problemas! Posso te mostrar nossos planos.', message: 'Sem problemas! Posso te mostrar nossos planos.', onChange: updateNodeData, onToggleStart: toggleStartNode, hasValidationError: false } },
     ];
 
     const templateEdges: Edge[] = [
-      { id: `${startId}-${conditionId}`, source: startId, target: conditionId, type: 'default', label: '' },
-      { id: `${conditionId}-${yesId}-sim`, source: conditionId, target: yesId, sourceHandle: 'sim', type: 'default', label: 'sim', data: { condition: 'sim', sourceHandle: 'sim' } },
-      { id: `${conditionId}-${noId}-nao`, source: conditionId, target: noId, sourceHandle: 'nao', type: 'default', label: 'não', data: { condition: 'não', sourceHandle: 'nao' } },
+      { id: `${startId}-${conditionId}-default`, source: startId, target: conditionId, sourceHandle: 'default', type: 'default', label: '', data: { sourceHandle: 'default' } },
+      { id: `${conditionId}-${yesId}-true`, source: conditionId, target: yesId, sourceHandle: 'true', type: 'default', label: 'sim', data: { condition: 'sim', sourceHandle: 'true' } },
+      { id: `${conditionId}-${noId}-false`, source: conditionId, target: noId, sourceHandle: 'false', type: 'default', label: 'não', data: { condition: 'não', sourceHandle: 'false' } },
     ];
 
     setNodes(templateNodes);
     setEdges(templateEdges);
     setShowEmptyFlowWarning(false);
-  }, [setEdges, setNodes, toggleStartNode, updateNodeData]);
+    toast.success('Template simples aplicado');
+    console.log('[TEMPLATE SIMPLE APPLIED]');
+    console.log('nodes_count=', templateNodes.length);
+    console.log('edges_count=', templateEdges.length);
+    console.log('edge_sources=', templateEdges.map((edge) => edge.source));
+    console.log('edge_targets=', templateEdges.map((edge) => edge.target));
+    setTimeout(() => {
+      rfInstance?.fitView({ padding: 0.2, duration: 500 });
+    }, 0);
+  }, [rfInstance, setEdges, setNodes, toast, toggleStartNode, updateNodeData]);
 
   const handleSaveFlow = useCallback(async (requireConfirmOverwrite = false) => {
     if (!selectedFlowId) {
