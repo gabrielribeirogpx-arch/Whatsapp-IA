@@ -872,122 +872,78 @@ async def update_flow_route(
 
         logger.info("[FLOW UPDATE REQUEST] flow_id=%s trigger_type=%s trigger_value=%s", flow_id, payload_data.get("trigger_type"), payload_data.get("trigger_value"))
 
-        raw_nodes = payload_data.get("nodes")
-        raw_edges = payload_data.get("edges")
-
         tenant = _resolve_request_tenant(db=db, tenant_id_header=x_tenant_id)
         flow = _get_flow_by_identifier(db=db, flow_id=flow_id, tenant_id=tenant.id)
         if not flow:
             raise HTTPException(status_code=404, detail="Flow não encontrado")
 
-        logger.info("[FLOW DEBUG] Flow encontrado ou criado: %s", flow.id)
-        if not isinstance(raw_nodes, list) or not isinstance(raw_edges, list):
-            raw_nodes, raw_edges = _builder_graph_from_flow(flow)
+        for key in {"name", "description", "is_active", "trigger_type", "trigger_value", "keywords", "stop_words", "priority", "version", "status"}:
+            if key in payload_data:
+                setattr(flow, key, payload_data.get(key))
 
-        nodes = []
-        for node in raw_nodes:
-            normalized_node = node if isinstance(node, dict) else {}
-            nodes.append(
-                {
-                    "id": str(normalized_node.get("id")),
-                    "type": normalized_node.get("type") or "default",
-                    "position": normalized_node.get("position") or {"x": 0, "y": 0},
-                    "data": normalized_node.get("data") or {},
-                }
-            )
-        nodes = _ensure_start_node(nodes)
-        edges = raw_edges or []
-
-        logger.info("[FLOW SAVE] nodes: %s", len(nodes))
-        if not nodes or len(nodes) == 0:
-            raise Exception("BLOCK SAVE: flow sem nodes")
-        start_nodes = [n for n in nodes if n.get("data", {}).get("isStart") is True]
-        if len(start_nodes) == 0:
-            raise Exception("Flow precisa de um node inicial")
-        if len(start_nodes) > 1:
-            raise Exception("Flow só pode ter um node inicial")
-        logger.info("VALIDANDO FLOW: nodes=%s", nodes)
-
-        for key, value in payload_data.items():
-            if key in {"name", "description", "is_active", "trigger_type", "trigger_value", "keywords", "stop_words", "priority", "version", "status"}:
-                setattr(flow, key, value)
         if flow.is_active:
             db.query(Flow).filter(
                 Flow.tenant_id == tenant.id,
                 Flow.id != flow.id,
             ).update({Flow.is_active: False}, synchronize_session=False)
 
-        if not flow.id:
-            raise Exception("Flow sem ID")
+        raw_nodes = payload_data.get("nodes")
+        raw_edges = payload_data.get("edges")
+        should_update_graph = isinstance(raw_nodes, list) and isinstance(raw_edges, list)
 
-        persisted_nodes = flow.current_version.nodes if flow.current_version and isinstance(flow.current_version.nodes, list) else []
-        logger.info("[FLOW SAVE ATTEMPT] flow_id=%s nodes=%s edges=%s", str(flow.id), len(nodes), len(edges))
-        if len(persisted_nodes) > 1 and len(nodes) <= 1:
-            logger.error("[FLOW SAVE BLOCKED] flow_id=%s reason=possible_accidental_overwrite", str(flow.id))
-            return JSONResponse(
-                status_code=400,
-                content={"error": "payload inválido: possível sobrescrita acidental"},
-            )
-        validation = validate_flow_definition({"nodes": nodes, "edges": edges}, mode="draft")
+        if should_update_graph:
+            nodes = []
+            for node in raw_nodes:
+                normalized_node = node if isinstance(node, dict) else {}
+                nodes.append(
+                    {
+                        "id": str(normalized_node.get("id")),
+                        "type": normalized_node.get("type") or "default",
+                        "position": normalized_node.get("position") or {"x": 0, "y": 0},
+                        "data": normalized_node.get("data") or {},
+                    }
+                )
+            nodes = _ensure_start_node(nodes)
+            edges = raw_edges or []
 
-        last_version = db.execute(
-            _flow_version_select(db)
-            .where(FlowVersion.flow_id == flow.id, FlowVersion.tenant_id == tenant.id)
-            .order_by(FlowVersion.version.desc(), FlowVersion.created_at.desc())
-            .limit(1)
-        ).scalars().first()
-        next_version = (last_version.version if last_version else 0) + 1
+            validation = validate_flow_definition({"nodes": nodes, "edges": edges}, mode="draft")
 
-        if flow.current_version:
-            backup_version = FlowVersion(**_flow_version_payload(
+            last_version = db.execute(
+                _flow_version_select(db)
+                .where(FlowVersion.flow_id == flow.id, FlowVersion.tenant_id == tenant.id)
+                .order_by(FlowVersion.version.desc(), FlowVersion.created_at.desc())
+                .limit(1)
+            ).scalars().first()
+            next_version = (last_version.version if last_version else 0) + 1
+
+            new_version = FlowVersion(**_flow_version_payload(
                 db,
                 flow_id=flow.id,
                 tenant_id=tenant.id,
                 version=next_version,
-                snapshot={
-                    "nodes": flow.current_version.nodes or [],
-                    "edges": flow.current_version.edges or [],
-                },
-                nodes=flow.current_version.nodes or [],
-                edges=flow.current_version.edges or [],
+                snapshot={"nodes": nodes, "edges": edges},
+                nodes=nodes,
+                edges=edges,
                 is_active=False,
-            is_published=False,
+                is_published=False,
             ))
-            db.add(backup_version)
+
+            db.add(new_version)
             db.flush()
-            logger.info("[FLOW VERSION CREATE] tenant_id=%s flow_id=%s version_id=%s request_id=%s", str(tenant.id), str(flow.id), str(backup_version.id), None)
-            next_version += 1
+            flow.current_version_id = new_version.id
+            invalidate_flow_runtime_cache(flow.id)
+        else:
+            validation = None
 
-
-        logger.info("ANTES DE CRIAR VERSION flow=%s nodes=%s", flow.id, len(nodes))
-
-        new_version = FlowVersion(**_flow_version_payload(
-            db,
-            flow_id=flow.id,
-            tenant_id=tenant.id,
-            version=next_version,
-            snapshot={"nodes": nodes, "edges": edges},
-            nodes=nodes,
-            edges=edges,
-            is_active=False,
-            is_published=False,
-        ))
-
-        db.add(new_version)
-        db.flush()
-        flow.current_version_id = new_version.id
-        db.flush()
-        db.refresh(flow)
-        invalidate_flow_runtime_cache(flow.id)
-        if flow.is_active:
-            logger.info("[FLOW ACTIVE]: %s", flow.id)
-
-        logger.info("ANTES DO COMMIT")
+        db.add(flow)
         db.commit()
-        db.refresh(new_version)
+        db.refresh(flow)
         logger.info("[FLOW UPDATE SAVED] flow_id=%s trigger_type=%s trigger_value=%s", str(flow.id), flow.trigger_type, flow.trigger_value)
 
-        return {"flow": _serialize_flow(flow), "validation": validation}
+        response = _serialize_flow(flow)
+        if validation is not None:
+            response["validation"] = validation
+        return response
     except HTTPException:
         raise
     except Exception as e:
