@@ -32,6 +32,7 @@ _FLOW_RUNTIME_CACHE: dict[str, dict[str, Any]] = {}
 _FLOW_RUNTIME_EVENT_GUARD: set[str] = set()
 STRONG_YES_MATCHES = {"sim", "s", "claro", "quero", "com certeza", "yes"}
 STRONG_NO_MATCHES = {"nao", "n", "negativo", "no"}
+START_TRIGGERS = {"oi", "ola", "iniciar", "comecar", "menu"}
 
 
 def _raise_runtime_publish_violation(action: str) -> None:
@@ -849,6 +850,10 @@ def _normalize_text(value: str | None) -> str:
     # Remove pontuação e espaços extras para match robusto
     cleaned = "".join(ch for ch in without_accents if ch.isalnum() or ch.isspace())
     return " ".join(cleaned.lower().split())
+
+
+def is_start_trigger(text: str | None) -> bool:
+    return _normalize_text(text or "") in START_TRIGGERS
 
 
 def _match_condition_input(normalized_input: str, keywords: list[str]) -> bool | None:
@@ -2483,24 +2488,48 @@ def process_flow_engine(
         user_message_text,
     )
     continuation_start_node_id = session_node_id
-    if user_message_text and runtime_session:
-        continuation_start_node_id = _parse_uuid(runtime_session.current_node_id) or continuation_start_node_id
-        if continuation_start_node_id is None and isinstance(runtime_session.variables, dict):
-            continuation_start_node_id = _parse_uuid(runtime_session.variables.get("current_node_id"))
-        if continuation_start_node_id is None and isinstance(conversation.context, dict):
-            continuation_start_node_id = _parse_uuid(conversation.context.get("current_node_id"))
-        logger.info(
-            "[MANYCHAT CONTINUATION START NODE] session_current_node_id=%s start_node_id_passed=%s incoming_text=%s",
-            runtime_session.current_node_id,
-            continuation_start_node_id,
-            user_message_text,
-        )
-        if continuation_start_node_id is None:
-            logger.error(
-                "[FLOW CONTINUATION LOST_STATE] session_id=%s incoming_text_present=true",
-                runtime_session.id,
+    if user_message_text:
+        if is_start_trigger(user_message_text):
+            logger.info(
+                "[START TRIGGER ALLOWED_RESET] session_id=%s incoming_text=%s",
+                getattr(runtime_session, "id", None),
+                user_message_text,
             )
-            return None
+            session_service.clear_runtime_session(conversation.tenant_id, user_identifier, flow, reason="start_trigger_reset")
+            conversation.context = conversation.context if isinstance(conversation.context, dict) else {}
+            conversation.context.pop("current_node_id", None)
+            start_node = _get_start_node(db=db, flow_id=flow.id, tenant_id=conversation.tenant_id, runtime_graph=runtime_graph)
+            continuation_start_node_id = _parse_uuid(_node_get(start_node, "id")) if start_node else None
+            if continuation_start_node_id is None:
+                logger.error("[FLOW ERROR] no start node found")
+                return None
+            _safe_set_conversation_current_node(db, conversation, continuation_start_node_id)
+            runtime_session = session_service.save_runtime_session(
+                tenant_id=conversation.tenant_id,
+                user_identifier=user_identifier,
+                flow=flow,
+                current_node_id=continuation_start_node_id,
+                context=conversation.context,
+                status="running",
+            )
+        elif runtime_session:
+            continuation_start_node_id = _parse_uuid(runtime_session.current_node_id) or continuation_start_node_id
+            if continuation_start_node_id is None and isinstance(runtime_session.variables, dict):
+                continuation_start_node_id = _parse_uuid(runtime_session.variables.get("current_node_id"))
+            if continuation_start_node_id is None and isinstance(conversation.context, dict):
+                continuation_start_node_id = _parse_uuid(conversation.context.get("current_node_id"))
+            logger.info(
+                "[MANYCHAT CONTINUATION START NODE] session_current_node_id=%s start_node_id_passed=%s incoming_text=%s",
+                runtime_session.current_node_id,
+                continuation_start_node_id,
+                user_message_text,
+            )
+            if continuation_start_node_id is None:
+                logger.error(
+                    "[FLOW CONTINUATION LOST_STATE] session_id=%s incoming_text_present=true",
+                    runtime_session.id,
+                )
+                return None
     run_until_wait_node(
         db=db,
         flow=flow,
