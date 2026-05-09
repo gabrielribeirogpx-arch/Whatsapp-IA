@@ -2241,20 +2241,24 @@ def process_flow_engine(
         if parsed_node:
             session_node_id = parsed_node
 
-    _assert_not_persisting_message_node_with_outgoing_edge(
+    current_node = _get_node(runtime_graph, session_node_id) if session_node_id else None
+    current_node_type = _node_type_slug(current_node)
+    user_message_text = message_text
+    logger.info(
+        "[MANYCHAT ROUTE CONTINUATION] current_node_id=%s current_node_type=%s incoming_text=%s",
+        session_node_id,
+        current_node_type,
+        user_message_text,
+    )
+    run_until_wait_node(
         db=db,
-        tenant_id=conversation.tenant_id,
-        flow_id=flow.id,
-        node_id=session_node_id,
-        runtime_graph=runtime_graph,
-    )
-    runtime_session = session_service.save_runtime_session(
-        tenant_id=conversation.tenant_id,
-        user_identifier=user_identifier,
         flow=flow,
-        current_node_id=session_node_id,
-        context=conversation.context if isinstance(conversation.context, dict) else {},
+        runtime_graph=runtime_graph,
+        session=runtime_session,
+        start_node_id=session_node_id,
+        incoming_text=user_message_text,
     )
+    return None
 
     session_variables = dict(runtime_session.variables or {})
     flow_started_emitted = bool(session_variables.get("analytics.flow_started_emitted"))
