@@ -77,6 +77,13 @@ def _publish_fresh_snapshot(db: Session, flow: Flow, *, reason: str) -> FlowVers
         return None
 
     validate_flow_payload_or_400(nodes, edges)
+    logger.info(
+        "[PUBLISH EDGES SNAPSHOT] flow_id=%s reason=%s edges_count=%s edges_raw_preview=%s",
+        flow.id,
+        reason,
+        len(edges),
+        edges[:5],
+    )
     checksum = _graph_checksum(nodes, edges)
     start_node_id, start_text_preview = _extract_start_node_metadata(nodes)
 
@@ -1629,6 +1636,12 @@ def force_republish_current_tenant_flow(
         raise HTTPException(status_code=400, detail="Builder graph vazio: sem nodes para republicar")
 
     validate_flow_payload_or_400(nodes, edges)
+    logger.info(
+        "[PUBLISH EDGES SNAPSHOT] flow_id=%s reason=force_republish_current edges_count=%s edges_raw_preview=%s",
+        flow.id,
+        len(edges),
+        edges[:5],
+    )
     last_version = db.execute(
         select(FlowVersion.version).where(FlowVersion.flow_id == flow.id, FlowVersion.tenant_id == tenant_uuid).order_by(FlowVersion.version.desc()).limit(1)
     ).scalar()
