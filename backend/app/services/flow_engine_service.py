@@ -2253,53 +2253,93 @@ def process_flow_engine(
         _safe_set_conversation_current_node(db, conversation, None)
         conversation.current_flow = None
     elif runtime_session and invalid_reason:
-        old_session_id = runtime_session.id
-        _emit_runtime_event(
-            db=db,
-            tenant_id=conversation.tenant_id,
-            conversation_id=conversation.id,
-            flow_id=conversation.current_flow or flow.id,
-            flow_version_id=current_flow_version_id,
-            node_id=conversation.current_node_id,
-            event_type="abandoned",
-            metadata={"reason": invalid_reason, "abandon_reason": invalid_reason},
-        )
-        session_service.clear_runtime_session(conversation.tenant_id, user_identifier, flow, reason=invalid_reason)
-        _safe_set_conversation_current_node(db, conversation, None)
-        conversation.current_flow = flow.id
-        conversation.mode = "flow"
-        restart_start_node = _get_start_node(
-            db=db,
-            flow_id=flow.id,
-            tenant_id=conversation.tenant_id,
-            runtime_graph=runtime_graph,
-        )
-        if restart_start_node:
-            tenant = db.execute(select(Tenant).where(Tenant.id == conversation.tenant_id)).scalars().first()
-            if not tenant:
-                logger.warning("[SESSION RESET RELOAD DONE] tenant_missing=true")
-                return None
-            runtime_session = _send_start_message_on_session_restart(
+        normalized_invalid_reason = str(invalid_reason or "").strip().lower()
+        is_finalized_or_expired_reason = normalized_invalid_reason in {"finalized", "expired", "completed", "finished"}
+        recovered_current_node_id = _parse_uuid(runtime_session.current_node_id)
+        if recovered_current_node_id is None and isinstance(runtime_session.variables, dict):
+            recovered_current_node_id = _parse_uuid(runtime_session.variables.get("current_node_id"))
+        if recovered_current_node_id is None and isinstance(conversation.context, dict):
+            recovered_current_node_id = _parse_uuid(conversation.context.get("current_node_id"))
+        recovered_node = (
+            _get_node(
                 db=db,
-                tenant=tenant,
-                conversation=conversation,
-                flow=flow,
-                start_node=restart_start_node,
+                node_id=recovered_current_node_id,
+                tenant_id=conversation.tenant_id,
                 runtime_graph=runtime_graph,
-                runtime_session=runtime_session,
-                session_service=session_service,
-                published_version_number=published_version_number,
-                user_identifier=user_identifier,
-                incoming_text=message_text,
-                reason="invalid_runtime_session_restart",
             )
-            logger.info(
-                "[FLOW SESSION RESTART] old_session_id=%s new_session_id=%s",
-                old_session_id,
+            if recovered_current_node_id
+            else None
+        )
+        should_soft_reopen = bool(
+            has_incoming_text and is_finalized_or_expired_reason and recovered_current_node_id and recovered_node
+        )
+        if should_soft_reopen:
+            old_status = getattr(runtime_session, "status", None)
+            runtime_session.status = "active"
+            runtime_session.flow_version_id = getattr(flow, "published_version_id", None)
+            runtime_session.current_node_id = recovered_current_node_id
+            if isinstance(runtime_session.variables, dict):
+                runtime_session.variables["current_node_id"] = str(recovered_current_node_id)
+                runtime_session.variables["flow_version"] = published_version_number
+            conversation.current_flow = flow.id
+            conversation.mode = "flow"
+            _safe_set_conversation_current_node(db, conversation, recovered_current_node_id)
+            invalid_reason = None
+            logger.warning(
+                "[SESSION FINALIZED SOFT-REOPEN] session_id=%s old_status=%s current_node_id=%s published_version_id=%s",
                 runtime_session.id,
+                old_status,
+                recovered_current_node_id,
+                getattr(flow, "published_version_id", None),
             )
         else:
-            runtime_session = None
+            old_session_id = runtime_session.id
+            _emit_runtime_event(
+                db=db,
+                tenant_id=conversation.tenant_id,
+                conversation_id=conversation.id,
+                flow_id=conversation.current_flow or flow.id,
+                flow_version_id=current_flow_version_id,
+                node_id=conversation.current_node_id,
+                event_type="abandoned",
+                metadata={"reason": invalid_reason, "abandon_reason": invalid_reason},
+            )
+            session_service.clear_runtime_session(conversation.tenant_id, user_identifier, flow, reason=invalid_reason)
+            _safe_set_conversation_current_node(db, conversation, None)
+            conversation.current_flow = flow.id
+            conversation.mode = "flow"
+            restart_start_node = _get_start_node(
+                db=db,
+                flow_id=flow.id,
+                tenant_id=conversation.tenant_id,
+                runtime_graph=runtime_graph,
+            )
+            if restart_start_node:
+                tenant = db.execute(select(Tenant).where(Tenant.id == conversation.tenant_id)).scalars().first()
+                if not tenant:
+                    logger.warning("[SESSION RESET RELOAD DONE] tenant_missing=true")
+                    return None
+                runtime_session = _send_start_message_on_session_restart(
+                    db=db,
+                    tenant=tenant,
+                    conversation=conversation,
+                    flow=flow,
+                    start_node=restart_start_node,
+                    runtime_graph=runtime_graph,
+                    runtime_session=runtime_session,
+                    session_service=session_service,
+                    published_version_number=published_version_number,
+                    user_identifier=user_identifier,
+                    incoming_text=message_text,
+                    reason="invalid_runtime_session_restart",
+                )
+                logger.info(
+                    "[FLOW SESSION RESTART] old_session_id=%s new_session_id=%s",
+                    old_session_id,
+                    runtime_session.id,
+                )
+            else:
+                runtime_session = None
     elif runtime_session and runtime_session.current_node_id:
         resolved_runtime_node = resolve_current_node(runtime_graph, runtime_session)
         parsed_node = _parse_uuid(_node_get(resolved_runtime_node, "id")) if resolved_runtime_node else None
