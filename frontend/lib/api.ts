@@ -397,12 +397,35 @@ export async function createFlow(payload: FlowPayload): Promise<FlowItem> {
   return parseApiResponse<FlowItem>(res);
 }
 
-export async function updateFlow(flowId: string, payload: Partial<FlowPayload>): Promise<FlowItem> {
-  const res = await apiFetch(`/api/flows/${flowId}`, {
+export type UpdateFlowApiResult = { ok: boolean; status: number; data: FlowItem | null };
+
+export async function updateFlow(
+  flowId: string,
+  payload: Pick<FlowPayload, 'name' | 'description' | 'trigger_type' | 'trigger_value'>
+): Promise<UpdateFlowApiResult> {
+  const endpoint = `/api/flows/${flowId}`;
+  console.info('[FLOW EDIT REQUEST URL]', endpoint);
+  console.info('[FLOW EDIT SAVE PAYLOAD]', payload);
+
+  const res = await apiFetch(endpoint, {
     method: 'PUT',
     body: JSON.stringify(payload)
   });
-  return parseApiResponse<FlowItem>(res);
+
+  console.info('[FLOW EDIT RESPONSE STATUS]', res.status);
+  const bodyText = await res.text();
+  console.info('[FLOW EDIT RESPONSE BODY]', bodyText);
+
+  let bodyJson: FlowItem | null = null;
+  if (bodyText) {
+    try {
+      bodyJson = JSON.parse(bodyText) as FlowItem;
+    } catch {
+      bodyJson = null;
+    }
+  }
+
+  return { ok: res.ok, status: res.status, data: bodyJson };
 }
 
 export async function updateFlowStatus(flowId: string, isActive: boolean): Promise<FlowItem> {

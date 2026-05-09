@@ -20,5 +20,5 @@ class FlowUpdate(BaseModel):
     description: Optional[str] = None
     trigger_type: Optional[str] = None
     trigger_value: Optional[str] = None
-    nodes: List[NodeSchema] = []
-    edges: Optional[List[EdgeSchema]] = []
+    nodes: Optional[List[NodeSchema]] = None
+    edges: Optional[List[EdgeSchema]] = None

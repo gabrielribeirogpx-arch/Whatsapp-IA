@@ -138,11 +138,25 @@ export default function FlowsPage() {
     };
     try {
       if (editingFlow) {
-        console.info("[FLOW EDIT SAVE PAYLOAD]", payload);
-        const updated = await updateFlow(editingFlow.id, payload);
-        console.info("[FLOW EDIT SAVE SUCCESS]", updated);
-        setFlows((prev) => prev.map((flow) => (flow.id === editingFlow.id ? { ...flow, ...updated } : flow)));
-        setEditingFlow(updated);
+        const result = await updateFlow(editingFlow.id, payload);
+        if (!result.ok || !result.data) {
+          showToast(`Não foi possível salvar o flow (HTTP ${result.status}).`);
+          return;
+        }
+        const responseFlow = result.data;
+        setFlows((prev) =>
+          prev.map((flow) =>
+            flow.id === editingFlow.id
+              ? {
+                  ...flow,
+                  ...responseFlow,
+                  trigger_type: responseFlow.trigger_type,
+                  trigger_value: responseFlow.trigger_value,
+                }
+              : flow,
+          ),
+        );
+        setEditingFlow(responseFlow);
       }
       else {
         const created = await createFlow({ ...payload, nodes: [], edges: [] } as FlowPayload & { nodes: unknown[]; edges: unknown[] });
