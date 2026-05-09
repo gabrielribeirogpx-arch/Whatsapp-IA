@@ -243,7 +243,7 @@ def validate_flow_graph(nodes: list[dict[str, Any]] | None, edges: list[dict[str
         if not node_id:
             add_issue(errors, "NODE_ID_REQUIRED", None, "Node sem id")
             continue
-        node_map[node_id] = node
+        node_map[node_id] = node  # CORREÇÃO: inserir node no map
         outgoing[node_id] = 0
         incoming[node_id] = 0
         condition_handles[node_id] = set()
