@@ -49,33 +49,81 @@ export default function RegisterPage() {
   }
 
   return (
-    <main className="login-screen">
-      <form className="login-card" onSubmit={onSubmit}>
-        <h1>Cadastro do tenant</h1>
-        <p>Crie sua conta para começar a operar em modo multi-tenant.</p>
+    <main className="onboarding-shell">
+      <section className="onboarding-hero" aria-hidden="true">
+        <div className="onboarding-glow" />
+        <div className="onboarding-hero-content">
+          <p className="onboarding-kicker">Plataforma SaaS de Conversas</p>
+          <h1>
+            Conecte conversas.
+            <br />
+            Potencialize negócios.
+          </h1>
+          <p className="onboarding-subtitle">
+            Estruture atendimento, automação e inteligência em uma operação única para escalar com segurança.
+          </p>
 
-        <label htmlFor="name">Nome</label>
-        <input id="name" value={name} onChange={(event) => setName(event.target.value)} required />
+          <div className="onboarding-mockup">
+            <div className="mockup-header">
+              <span />
+              <span />
+              <span />
+            </div>
+            <div className="mockup-content">
+              <div className="mockup-card" />
+              <div className="mockup-card short" />
+              <div className="mockup-chart" />
+            </div>
+          </div>
 
-        <label htmlFor="phone-number-id">phone_number_id</label>
-        <input
-          id="phone-number-id"
-          value={phoneNumberId}
-          onChange={(event) => setPhoneNumberId(event.target.value)}
-          required
-        />
+          <ul className="onboarding-badges">
+            <li>✓ Multi-tenant</li>
+            <li>✓ Fluxos automatizados</li>
+            <li>✓ WhatsApp Oficial</li>
+            <li>✓ IA integrada</li>
+          </ul>
+        </div>
+      </section>
 
-        {notice && <p className="notice-text">{notice}</p>}
-        {error && <p className="error-text">{error}</p>}
+      <section className="onboarding-form-section">
+        <form className="onboarding-card" onSubmit={onSubmit}>
+          <div className="onboarding-step">
+            <span>Boas-vindas</span>
+            <strong>1 de 1</strong>
+          </div>
 
-        <button type="submit" className="primary-button" disabled={isLoading}>
-          {isLoading ? 'Processando...' : 'Criar conta'}
-        </button>
+          <h2>Crie sua conta</h2>
+          <p className="onboarding-description">Leva menos de 1 minuto para ativar seu workspace.</p>
 
-        <p className="helper-text">
-          Já tem conta? <a href="/login">Fazer login</a>
-        </p>
-      </form>
+          <label htmlFor="name">Nome</label>
+          <div className="input-wrap">
+            <span>👤</span>
+            <input id="name" value={name} onChange={(event) => setName(event.target.value)} required />
+          </div>
+
+          <label htmlFor="phone-number-id">ID Number</label>
+          <div className="input-wrap">
+            <span>🔐</span>
+            <input
+              id="phone-number-id"
+              value={phoneNumberId}
+              onChange={(event) => setPhoneNumberId(event.target.value)}
+              required
+            />
+          </div>
+
+          {notice && <p className="notice-text">{notice}</p>}
+          {error && <p className="error-text">{error}</p>}
+
+          <button type="submit" className="onboarding-cta" disabled={isLoading}>
+            {isLoading ? 'Processando...' : 'Criar conta'}
+          </button>
+
+          <p className="helper-text onboarding-helper">
+            Já tem conta? <a href="/login">Fazer login</a>
+          </p>
+        </form>
+      </section>
     </main>
   );
 }
