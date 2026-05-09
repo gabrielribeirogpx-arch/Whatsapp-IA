@@ -32,7 +32,7 @@ _FLOW_RUNTIME_CACHE: dict[str, dict[str, Any]] = {}
 _FLOW_RUNTIME_EVENT_GUARD: set[str] = set()
 STRONG_YES_MATCHES = {"sim", "s", "claro", "quero", "com certeza", "yes"}
 STRONG_NO_MATCHES = {"nao", "n", "negativo", "no"}
-START_TRIGGERS = {"oi", "ola", "iniciar", "comecar", "menu"}
+EXPLICIT_START_TRIGGERS = {"oi", "ola", "menu", "iniciar", "start", "comecar"}
 
 
 def _raise_runtime_publish_violation(action: str) -> None:
@@ -852,8 +852,9 @@ def _normalize_text(value: str | None) -> str:
     return " ".join(cleaned.lower().split())
 
 
-def is_start_trigger(text: str | None) -> bool:
-    return _normalize_text(text or "") in START_TRIGGERS
+def is_explicit_start_trigger(text: str | None) -> bool:
+    normalized_text = _normalize_text(text or "").strip()
+    return normalized_text in EXPLICIT_START_TRIGGERS
 
 
 def _match_condition_input(normalized_input: str, keywords: list[str]) -> bool | None:
@@ -2242,25 +2243,49 @@ def process_flow_engine(
     user_identifier = conversation.phone_number
     user_message_text = message_text or ""
     normalized_text = _normalize_text(user_message_text)
-    start_trigger = is_start_trigger(normalized_text)
+    start_trigger = is_explicit_start_trigger(normalized_text)
 
     runtime_session, _ = session_service.get_runtime_session(conversation.tenant_id, user_identifier, flow)
     saved_current_node_id = _parse_uuid(getattr(runtime_session, "current_node_id", None))
     if saved_current_node_id is None and isinstance(getattr(runtime_session, "variables", None), dict):
         saved_current_node_id = _parse_uuid(runtime_session.variables.get("current_node_id"))
 
-    is_completed_session = (getattr(runtime_session, "status", "") or "").lower() == "completed"
-    if is_completed_session and not start_trigger:
-        logger.info("[FLOW COMPLETED IGNORE_INPUT] session_id=%s text=%s", getattr(runtime_session, "id", None), user_message_text)
-        return None
-    path = "CONTINUE" if saved_current_node_id and not start_trigger else "START"
+    session_status = (getattr(runtime_session, "status", "") or "").strip().lower()
     logger.info(
-        "[FLOW ENTRY DECISION] path=%s text=%s current_node_id=%s session_id=%s",
-        path,
-        user_message_text,
+        "[FLOW ENTRY STATE] session_exists=%s status=%s current_node_id=%s incoming_text=%s",
+        runtime_session is not None,
+        session_status or None,
         saved_current_node_id,
-        getattr(runtime_session, "id", None),
+        user_message_text,
     )
+
+    is_active_session = session_status in {"active", "running"}
+    is_completed_session = session_status in {"completed", "finalized", "expired", "finished"}
+    if runtime_session is not None and is_completed_session and not start_trigger:
+        logger.info(
+            "[FLOW COMPLETED SESSION IGNORE] session_id=%s incoming_text=%s",
+            getattr(runtime_session, "id", None),
+            user_message_text,
+        )
+        return None
+
+    should_continue = runtime_session is not None and is_active_session and saved_current_node_id is not None and not start_trigger
+    should_restart = runtime_session is not None and is_completed_session and start_trigger
+
+    if should_continue:
+        logger.info(
+            "[FLOW ACTIVE CONTINUE] session_id=%s current_node_id=%s",
+            getattr(runtime_session, "id", None),
+            saved_current_node_id,
+        )
+    elif should_restart:
+        logger.info(
+            "[FLOW EXPLICIT RESTART] trigger=%s old_session_id=%s",
+            normalized_text,
+            getattr(runtime_session, "id", None),
+        )
+
+    path = "CONTINUE" if should_continue else "START"
 
     published_version_id = _parse_uuid(getattr(flow, "published_version_id", None))
     if path == "CONTINUE":
@@ -2289,6 +2314,13 @@ def process_flow_engine(
 
     logger.info("[FLOW START PATH]")
     if runtime_session is not None:
+        if not start_trigger:
+            logger.info(
+                "[FLOW COMPLETED SESSION IGNORE] session_id=%s incoming_text=%s",
+                getattr(runtime_session, "id", None),
+                user_message_text,
+            )
+            return None
         session_service.end_session(runtime_session, status="abandoned")
 
     start_node = _get_start_node(
