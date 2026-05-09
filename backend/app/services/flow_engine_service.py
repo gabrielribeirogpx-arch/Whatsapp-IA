@@ -2006,10 +2006,18 @@ def _send_start_message_on_session_restart(
     incoming_text_present = bool((incoming_text or "").strip())
     active_session_id = getattr(runtime_session, "id", None)
     active_current_node_id = getattr(runtime_session, "current_node_id", None) if runtime_session else conversation.current_node_id
+    session_status = str(getattr(runtime_session, "status", "") or "").strip().lower()
+    has_recoverable_state = bool(_parse_uuid(active_current_node_id))
 
-    if _is_continuation_message(incoming_text, runtime_session):
-        logger.warning("[START SEND HARD_BLOCKED_CONTINUATION] session_id=%s", active_session_id)
-        return None
+    if incoming_text_present and runtime_session is not None:
+        if session_status in {"active", "running"} and has_recoverable_state:
+            logger.warning("[START SEND HARD_BLOCKED_CONTINUATION] session_id=%s", active_session_id)
+            return None
+        if session_status in {"active", "running"} and not has_recoverable_state:
+            logger.warning("[FLOW CONTINUATION LOST_STATE] session_id=%s incoming_text_present=true", active_session_id)
+            return None
+        if session_status in {"expired", "finalized", "completed", "finished"} and not has_recoverable_state:
+            logger.info("[START SEND ALLOWED_EXPIRED_NO_STATE] session_id=%s status=%s", active_session_id, session_status)
 
     logger.info(
         "[START SEND ALLOWED_INITIAL_MESSAGE] incoming_text_present=%s session_id=%s current_node_id=%s",
