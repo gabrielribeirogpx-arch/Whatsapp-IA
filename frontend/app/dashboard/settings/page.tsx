@@ -1,186 +1,25 @@
 'use client';
-
 import { FormEvent, useEffect, useState } from 'react';
-
-import { getSystemSettings, updateSystemSettings } from '../../../lib/api';
-import { SystemSettingsPayload } from '../../../lib/types';
-
-
-function extractApiDetailMessage(error: unknown): string | null {
-  if (!(error instanceof Error)) return null;
-
-  const payloadStart = error.message.indexOf(':');
-  if (payloadStart === -1) return null;
-
-  const possibleJson = error.message.slice(payloadStart + 1).trim();
-  if (!possibleJson.startsWith('{')) return null;
-
-  try {
-    const parsed = JSON.parse(possibleJson) as { detail?: string };
-    if (typeof parsed.detail === 'string' && parsed.detail.trim()) {
-      return parsed.detail.trim();
-    }
-  } catch {
-    return null;
-  }
-
-  return null;
-}
-
-const INITIAL_FORM: SystemSettingsPayload = {
-  token: '',
-  phone_number_id: '',
-  webhook_url: '',
-  webhook_status: 'inactive',
-  system_name: '',
-  language: 'pt-BR'
-};
+import { createTemplate, createWhatsAppProvider, getSystemSettings, listTemplates, listWhatsAppProviders, submitTemplate, syncTemplates, testWhatsAppProvider, updateSystemSettings } from '../../../lib/api';
+import { SystemSettingsPayload, WhatsAppProvider, WhatsAppTemplate } from '../../../lib/types';
+const INITIAL_FORM: SystemSettingsPayload = { token: '', phone_number_id: '', webhook_url: '', webhook_status: 'inactive', system_name: '', language: 'pt-BR' };
 
 export default function SettingsPage() {
+  const [tab, setTab] = useState<'system'|'connection'|'templates'>('system');
   const [form, setForm] = useState<SystemSettingsPayload>(INITIAL_FORM);
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [statusMessage, setStatusMessage] = useState<string | null>(null);
-  const [statusType, setStatusType] = useState<'success' | 'error'>('success');
-
-  useEffect(() => {
-    async function loadSettings() {
-      try {
-        const data = await getSystemSettings();
-        setForm({
-          token: data.token ?? '',
-          phone_number_id: data.phone_number_id ?? '',
-          webhook_url: data.webhook_url ?? '',
-          webhook_status: data.webhook_status ?? 'inactive',
-          system_name: data.system_name ?? '',
-          language: data.language ?? 'pt-BR'
-        });
-      } catch {
-        setStatusType('error');
-        setStatusMessage('Não foi possível carregar as configurações.');
-      } finally {
-        setLoading(false);
-      }
-    }
-
-    void loadSettings();
-  }, []);
-
-  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setSaving(true);
-    setStatusMessage(null);
-
-    try {
-      await updateSystemSettings({
-        ...form,
-        token: form.token?.trim() || null,
-        phone_number_id: form.phone_number_id?.trim() || null,
-        webhook_url: form.webhook_url?.trim() || null
-      });
-      setStatusType('success');
-      setStatusMessage('Configurações salvas com sucesso.');
-    } catch (error) {
-      setStatusType('error');
-      const detailMessage = extractApiDetailMessage(error);
-      setStatusMessage(detailMessage || 'Erro ao salvar configurações. Tente novamente.');
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  if (loading) {
-    return <div className="p-6 text-sm text-gray-500">Carregando...</div>;
-  }
-
-  return (
-    <section className="w-full min-w-0 px-6 py-6">
-      <div className="max-w-4xl mx-auto space-y-6">
-        <header className="settings-header">
-          <h1>Configurações do sistema</h1>
-          <p>Gerencie integração WhatsApp, webhook e preferências gerais.</p>
-        </header>
-
-        <form className="settings-form" onSubmit={handleSubmit}>
-          <section className="settings-card">
-            <h2>API WhatsApp</h2>
-            <div className="settings-grid">
-              <label>
-                Token
-                <input
-                  type="password"
-                  value={form.token ?? ''}
-                  onChange={(event) => setForm((prev) => ({ ...prev, token: event.target.value }))}
-                  placeholder="Insira o token da API WhatsApp"
-                />
-              </label>
-              <label>
-                Phone Number ID
-                <input
-                  value={form.phone_number_id}
-                  onChange={(event) => setForm((prev) => ({ ...prev, phone_number_id: event.target.value }))}
-                  placeholder="Ex.: 123456789012345"
-                />
-              </label>
-            </div>
-          </section>
-
-          <section className="settings-card">
-            <h2>Webhook</h2>
-            <div className="settings-grid">
-              <label>
-                URL
-                <input
-                  type="url"
-                  value={form.webhook_url ?? ''}
-                  onChange={(event) => setForm((prev) => ({ ...prev, webhook_url: event.target.value }))}
-                  placeholder="https://seu-dominio.com/webhook"
-                />
-              </label>
-              <label>
-                Status
-                <select
-                  value={form.webhook_status}
-                  onChange={(event) => setForm((prev) => ({ ...prev, webhook_status: event.target.value }))}
-                >
-                  <option value="active">Ativo</option>
-                  <option value="inactive">Inativo</option>
-                </select>
-              </label>
-            </div>
-          </section>
-
-          <section className="settings-card">
-            <h2>Geral</h2>
-            <div className="settings-grid">
-              <label>
-                Nome do sistema
-                <input
-                  value={form.system_name}
-                  onChange={(event) => setForm((prev) => ({ ...prev, system_name: event.target.value }))}
-                  placeholder="Nome da sua operação"
-                  required
-                />
-              </label>
-              <label>
-                Idioma
-                <select value={form.language} onChange={(event) => setForm((prev) => ({ ...prev, language: event.target.value }))}>
-                  <option value="pt-BR">Português (Brasil)</option>
-                  <option value="en-US">English (US)</option>
-                  <option value="es-ES">Español</option>
-                </select>
-              </label>
-            </div>
-          </section>
-
-          <div className="settings-actions">
-            <button type="submit" disabled={loading || saving}>
-              {saving ? 'Salvando...' : 'Salvar configurações'}
-            </button>
-            {statusMessage ? <p className={`settings-feedback ${statusType}`}>{statusMessage}</p> : null}
-          </div>
-        </form>
-      </div>
-    </section>
-  );
+  const [providers,setProviders]=useState<WhatsAppProvider[]>([]); const [templates,setTemplates]=useState<WhatsAppTemplate[]>([]);
+  const [providerForm,setProviderForm]=useState({provider_type:'meta_cloud',display_name:'',waba_id:'',phone_number_id:'',business_id:'',access_token:'',api_key:''});
+  const [templateForm,setTemplateForm]=useState({name:'',category:'utility',language:'pt_BR',body_text:'',footer_text:''});
+  useEffect(()=>{(async()=>{const data=await getSystemSettings();setForm({...INITIAL_FORM,...data}); setProviders(await listWhatsAppProviders()); setTemplates(await listTemplates());})()},[]);
+  async function saveSystem(e:FormEvent){e.preventDefault();await updateSystemSettings({...form,token:form.token||null,phone_number_id:form.phone_number_id||null,webhook_url:form.webhook_url||null});}
+  async function addProvider(e:FormEvent){e.preventDefault();await createWhatsAppProvider(providerForm);setProviderForm({provider_type:'meta_cloud',display_name:'',waba_id:'',phone_number_id:'',business_id:'',access_token:'',api_key:''});setProviders(await listWhatsAppProviders());}
+  async function addTemplate(e:FormEvent){e.preventDefault();await createTemplate(templateForm);setTemplates(await listTemplates());}
+  return <section className='w-full min-w-0 px-6 py-6'><div className='max-w-6xl mx-auto space-y-4'><h1 className='text-2xl font-semibold'>Configurações · WhatsApp Business</h1>
+  <div className='flex gap-2'>{['system','connection','templates'].map(t=><button key={t} className='secondary-button' onClick={()=>setTab(t as any)}>{t}</button>)}</div>
+  {tab==='system'&&<form onSubmit={saveSystem} className='settings-card p-4 space-y-3'><input type='password' value={form.token??''} onChange={e=>setForm(p=>({...p,token:e.target.value}))} placeholder='Token atual (ENV fallback preservado)'/><input value={form.phone_number_id??''} onChange={e=>setForm(p=>({...p,phone_number_id:e.target.value}))} placeholder='Phone Number ID'/><button className='primary-button'>Salvar</button></form>}
+  {tab==='connection'&&<div className='space-y-4'><form onSubmit={addProvider} className='settings-card p-4 grid md:grid-cols-2 gap-2'><select value={providerForm.provider_type} onChange={e=>setProviderForm(p=>({...p,provider_type:e.target.value}))}><option value='meta_cloud'>meta_cloud</option><option value='bsp_360dialog'>bsp_360dialog</option><option value='twilio'>twilio</option></select><input value={providerForm.display_name} onChange={e=>setProviderForm(p=>({...p,display_name:e.target.value}))} placeholder='Nome da conexão'/><input value={providerForm.waba_id} onChange={e=>setProviderForm(p=>({...p,waba_id:e.target.value}))} placeholder='WABA ID'/><input value={providerForm.phone_number_id} onChange={e=>setProviderForm(p=>({...p,phone_number_id:e.target.value}))} placeholder='Phone Number ID'/><input value={providerForm.business_id} onChange={e=>setProviderForm(p=>({...p,business_id:e.target.value}))} placeholder='Business ID'/><input type='password' value={providerForm.access_token} onChange={e=>setProviderForm(p=>({...p,access_token:e.target.value}))} placeholder='Access Token'/><button className='primary-button'>Adicionar conexão</button></form>
+  <div className='grid gap-2'>{providers.map(p=><div key={p.id} className='settings-card p-3 flex items-center justify-between'><div><b>{p.display_name||p.provider_type}</b> · {p.status} · {p.is_active?'ativo':'inativo'}<div className='text-xs text-gray-500'>token: {p.access_token_masked||'***'}</div></div><button className='secondary-button' onClick={async()=>{await testWhatsAppProvider(p.id);setProviders(await listWhatsAppProviders());}}>Testar conexão</button></div>)}</div></div>}
+  {tab==='templates'&&<div className='space-y-4'><form onSubmit={addTemplate} className='settings-card p-4 grid gap-2'><input value={templateForm.name} onChange={e=>setTemplateForm(p=>({...p,name:e.target.value}))} placeholder='Nome'/><textarea value={templateForm.body_text} onChange={e=>setTemplateForm(p=>({...p,body_text:e.target.value}))} placeholder='Body text'/><button className='primary-button'>Novo template</button></form><button className='secondary-button' onClick={async()=>{await syncTemplates();setTemplates(await listTemplates());}}>Sincronizar</button>
+  {templates.map(t=><div key={t.id} className='settings-card p-3 flex justify-between'><div>{t.name} · {t.status}</div><button className='secondary-button' onClick={async()=>{await submitTemplate(t.id);setTemplates(await listTemplates());}}>Enviar para aprovação</button></div>)}</div>}
+  </div></section>;
 }
