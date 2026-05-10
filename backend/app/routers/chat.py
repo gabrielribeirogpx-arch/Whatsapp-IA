@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from datetime import datetime
 from typing import List
 from uuid import UUID
@@ -38,6 +39,7 @@ from app.services.tenant_service import (
 from app.services.queue import enqueue_send_message
 
 router = APIRouter(tags=["chat"])
+logger = logging.getLogger(__name__)
 
 
 def _looks_like_name(text: str) -> bool:
@@ -84,71 +86,82 @@ def list_conversations(
     tenant: Tenant = Depends(get_current_tenant),
     db: Session = Depends(get_db),
 ):
-    print("TENANT ID:", tenant.id)
-    items = (
-        db.execute(
-            select(Conversation)
-            .options(
-                load_only(
-                    Conversation.id,
-                    Conversation.tenant_id,
-                    Conversation.contact_id,
-                    Conversation.phone_number,
-                    Conversation.name,
-                    Conversation.avatar_url,
-                    Conversation.mode,
-                    Conversation.updated_at,
-                )
-            )
-            .where(Conversation.tenant_id == tenant.id)
-            .order_by(desc(Conversation.updated_at), desc(Conversation.id))
-        )
-        .scalars()
-        .all()
-    )
-    print("CONVERSAS:", items)
-
-    response: list[ConversationOut] = []
-    seen_phones: set[str] = set()
-    for conversation in items:
-        phone = getattr(conversation, "phone", None) or conversation.phone_number or ""
-        if phone in seen_phones:
-            continue
-        seen_phones.add(phone)
-
-        last_message_item = (
+    try:
+        items = (
             db.execute(
-                select(Message)
-                .where(Message.conversation_id == conversation.id)
-                .order_by(desc(Message.created_at), desc(Message.id))
-                .limit(1)
+                select(Conversation)
+                .options(
+                    load_only(
+                        Conversation.id,
+                        Conversation.tenant_id,
+                        Conversation.contact_id,
+                        Conversation.phone_number,
+                        Conversation.name,
+                        Conversation.avatar_url,
+                        Conversation.mode,
+                        Conversation.updated_at,
+                    )
+                )
+                .where(Conversation.tenant_id == tenant.id)
+                .order_by(desc(Conversation.updated_at), desc(Conversation.id))
             )
             .scalars()
-            .first()
+            .all()
         )
 
-        response.append(
-            ConversationOut(
-                id=conversation.id,
-                tenant_id=conversation.tenant_id,
-                contact_id=conversation.contact_id,
-                phone=phone,
-                name=(
-                    (conversation.name if hasattr(conversation, "name") else None)
-                    or (conversation.contact.name if conversation.contact else None)
-                    or conversation.phone_number
-                    or ""
-                ),
-                avatar_url=conversation.avatar_url,
-                stage=conversation.contact.stage if conversation.contact else "novo",
-                score=conversation.contact.score if conversation.contact else 0,
-                mode=conversation.mode or "bot",
-                last_message=(last_message_item.text if last_message_item else ""),
-                updated_at=conversation.updated_at,
+        response: list[ConversationOut] = []
+        seen_phones: set[str] = set()
+        for conversation in items or []:
+            phone = str(getattr(conversation, "phone", None) or conversation.phone_number or "").strip()
+            if not phone:
+                phone = "desconhecido"
+            if phone in seen_phones:
+                continue
+            seen_phones.add(phone)
+
+            last_message_item = (
+                db.execute(
+                    select(Message)
+                    .where(Message.conversation_id == conversation.id)
+                    .order_by(desc(Message.created_at), desc(Message.id))
+                    .limit(1)
+                )
+                .scalars()
+                .first()
             )
-        )
 
-    return response
+            contact = getattr(conversation, "contact", None)
+            contact_name = getattr(contact, "name", None) if contact else None
+            display_name = (getattr(conversation, "name", None) or contact_name or phone).strip() or phone
+            stage = getattr(contact, "stage", None) if contact else None
+            score = getattr(contact, "score", None) if contact else None
+            last_message = getattr(last_message_item, "text", "") if last_message_item else ""
+
+            response.append(
+                ConversationOut(
+                    id=conversation.id,
+                    tenant_id=conversation.tenant_id,
+                    contact_id=conversation.contact_id,
+                    phone=phone,
+                    name=display_name,
+                    avatar_url=conversation.avatar_url,
+                    stage=stage or "novo",
+                    score=int(score or 0),
+                    mode=conversation.mode or "bot",
+                    last_message=last_message or "",
+                    updated_at=conversation.updated_at or datetime.utcnow(),
+                )
+            )
+
+        return response
+    except Exception as exc:
+        logger.exception(
+            "[CONVERSATIONS LIST ERROR] tenant_id=%s error_type=%s error_message=%s",
+            getattr(tenant, "id", None),
+            type(exc).__name__,
+            str(exc),
+        )
+        return []
 
 
 @router.get("/messages/{phone}", response_model=list[MessageOut])

@@ -213,7 +213,7 @@ export default function DashboardPage() {
 
   useEffect(() => {
     void (async () => {
-      try { const payload = await getConversations(); setConversations(Array.isArray(payload) ? payload : []); setConversationsError(null);} catch { setConversations([]); setConversationsError('Não foi possível carregar a atividade recente no momento.'); }
+      try { const payload = await getConversations(); setConversations(Array.isArray(payload) ? payload : []); setConversationsError(null);} catch { setConversations([]); setConversationsError('Nenhuma atividade recente ainda.'); }
       try { const payload = await listFlows(); setFlows(Array.isArray(payload) ? payload : []); setFlowsError(null);} catch { setFlows([]); setFlowsError('Não foi possível carregar os fluxos neste instante.'); }
     })();
   }, []);
@@ -451,7 +451,7 @@ export default function DashboardPage() {
             <h3 className="m-0 text-sm font-semibold text-slate-900">Atividade ao vivo</h3>
             <span className="text-xs text-slate-500 flex items-center gap-2"><span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />Atualizando agora</span>
           </div>
-          {conversationsError ? <p className="mt-4 text-sm text-red-700">{conversationsError}</p> : liveItems.length === 0 ? <div className="mt-4 h-[290px] grid place-items-center rounded-xl border border-dashed border-emerald-200 bg-emerald-50/40 text-center"><div><p className="m-0 font-semibold text-slate-700">Sem atividade no momento</p><p className="m-0 mt-1 text-sm text-slate-500">Novas conversas aparecerão aqui em tempo real.</p></div></div> : <div className="mt-4 divide-y divide-slate-100">{(liveItems || []).map((c, idx) => {
+          {(conversationsError || liveItems.length === 0) ? <div className="mt-4 h-[290px] grid place-items-center rounded-xl border border-dashed border-emerald-200 bg-emerald-50/40 text-center"><div><p className="m-0 font-semibold text-slate-700">Nenhuma atividade recente ainda.</p><p className="m-0 mt-1 text-sm text-slate-500">Novas conversas aparecerão aqui em tempo real.</p></div></div> : <div className="mt-4 divide-y divide-slate-100">{(liveItems || []).map((c, idx) => {
             const name = c.name || c.phone || 'Contato';
             const contactName = (c as Conversation & { contact_name?: string | null }).contact_name;
             const initials = getInitials(c.name || contactName || c.phone);
