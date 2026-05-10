@@ -63,7 +63,13 @@ def test_webhook_flow_e2e(monkeypatch):
 
     def _run_two_messages_for_tenant(tenant_id: str, phone_number_id: str, branch_text: str):
         db = _FakeDB()
-        conversation = SimpleNamespace(
+        class _ConversationGuard(SimpleNamespace):
+            def __setattr__(self, name, value):
+                if name == "current_node_id" and value:
+                    raise AssertionError("versioned/runtime node id must not be persisted in conversations.current_node_id")
+                super().__setattr__(name, value)
+
+        conversation = _ConversationGuard(
             id=f"conv-{tenant_id}",
             tenant_id=tenant_id,
             phone_number="5511999990001",
@@ -123,8 +129,10 @@ def test_webhook_flow_e2e(monkeypatch):
         message_worker.process_incoming_message({"phone_number_id": phone_number_id, "text": "oi", "message_id": f"{tenant_id}-1"})
         assert sent[-1][1] == "Olá!"
         assert sessions[(tenant_id, "5511999990001")].current_node_id == "condition"
+        assert conversation.current_node_id is None
 
         message_worker.process_incoming_message({"phone_number_id": phone_number_id, "text": branch_text, "message_id": f"{tenant_id}-2"})
+        assert conversation.context.get("flow_current_node_id") == "condition"
         assert sent[-1][1] == "Resposta A"
         assert sessions[(tenant_id, "5511999990001")].status == "completed"
 

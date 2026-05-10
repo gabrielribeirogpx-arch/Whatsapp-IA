@@ -1965,7 +1965,7 @@ def run_until_wait_node(
                 if isinstance(session.context, dict):
                     session.context["flow_current_node_id"] = str(target_node_id) if target_node_id else None
                 logger.info(
-                    "[FLOW SESSION STATE SAVED] session_current_node_id=%s conversation_fk_skipped=true",
+                    "[FLOW SESSION CURRENT_NODE PERSISTED] session_current_node_id=%s conversation_fk_skipped=true",
                     target_node_id,
                 )
                 db.add(session)
@@ -2064,7 +2064,7 @@ def run_until_wait_node(
                 if isinstance(session.context, dict):
                     session.context["flow_current_node_id"] = str(target_node_id) if target_node_id else None
                 logger.info(
-                    "[FLOW SESSION STATE SAVED] session_current_node_id=%s conversation_fk_skipped=true",
+                    "[FLOW SESSION CURRENT_NODE PERSISTED] session_current_node_id=%s conversation_fk_skipped=true",
                     target_node_id,
                 )
                 db.add(session)
@@ -2090,7 +2090,7 @@ def run_until_wait_node(
             if isinstance(session.context, dict):
                 session.context["flow_current_node_id"] = str(target_node_id) if target_node_id else None
             logger.info(
-                "[FLOW SESSION STATE SAVED] session_current_node_id=%s conversation_fk_skipped=true",
+                "[FLOW SESSION CURRENT_NODE PERSISTED] session_current_node_id=%s conversation_fk_skipped=true",
                 target_node_id,
             )
             db.add(session)
