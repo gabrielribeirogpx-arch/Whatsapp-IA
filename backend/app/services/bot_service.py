@@ -297,7 +297,7 @@ def _infer_last_bot_question_from_response(response: str) -> str | None:
     return None
 
 
-def handle_visual_flow_priority(db: Session, message: Message, conversation) -> dict[str, str | bool | None]:
+def handle_visual_flow_priority(db: Session, message: Message, conversation, session_node_id: str | None = None) -> dict[str, str | bool | None]:
     tenant = db.execute(select(Tenant).where(Tenant.id == conversation.tenant_id)).scalars().first()
     print("[FLOW PRIORITY] executando fluxo antes do bot")
     print("[FLOW ENGINE] executando fluxo principal")
@@ -306,6 +306,7 @@ def handle_visual_flow_priority(db: Session, message: Message, conversation) -> 
         tenant_id=conversation.tenant_id,
         phone=conversation.phone_number,
         message_text=message.text or "",
+        session_node_id=session_node_id,
     )
     print("[FLOW] fluxo visual ativo")
     print("[FLOW PRIORITY] fluxo executado, bot ignorado")

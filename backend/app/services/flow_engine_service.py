@@ -2292,6 +2292,7 @@ def process_flow_engine(
     message_text: str = "",
     force_node: uuid.UUID | None = None,
     flow_id: str | None = None,
+    session_node_id: str | None = None,
 ) -> str | None:
     normalized_phone = normalize_phone(phone)
     conversation = db.execute(
@@ -2332,6 +2333,11 @@ def process_flow_engine(
     saved_current_node_id = _parse_uuid(getattr(runtime_session, "current_node_id", None))
     if saved_current_node_id is None and isinstance(getattr(runtime_session, "variables", None), dict):
         saved_current_node_id = _parse_uuid(runtime_session.variables.get("current_node_id"))
+
+    requested_session_node_id = _parse_uuid(session_node_id) if session_node_id else None
+    if requested_session_node_id is not None:
+        saved_current_node_id = requested_session_node_id
+        logger.info("[FLOW CONTINUE USING_SESSION_NODE] session_node_id=%s", requested_session_node_id)
 
     logger.info(
         "[FLOW ENTRY STATE] session_exists=%s status=%s current_node_id=%s incoming_text=%s",
@@ -2384,6 +2390,12 @@ def process_flow_engine(
     published_version_id = _parse_uuid(getattr(flow, "published_version_id", None))
     if path == "CONTINUE":
         logger.info("[FLOW CONTINUE PATH]")
+        if saved_current_node_id is not None:
+            current_graph_node = _get_node(db=db, node_id=saved_current_node_id, tenant_id=conversation.tenant_id, runtime_graph=runtime_graph)
+            if not current_graph_node:
+                logger.error("[FLOW SESSION_NODE_NOT_FOUND_IN_GRAPH] session_node_id=%s flow_id=%s", saved_current_node_id, flow.id)
+                return None
+            logger.info("[FLOW SESSION NODE FOUND] node_type=%s", _node_type_slug(current_graph_node))
         if runtime_session and published_version_id and _parse_uuid(getattr(runtime_session, "flow_version_id", None)) != published_version_id:
             runtime_session.flow_version_id = published_version_id
             db.add(runtime_session)
