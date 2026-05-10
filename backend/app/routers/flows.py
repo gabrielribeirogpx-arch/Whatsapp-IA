@@ -72,6 +72,20 @@ def _is_terminal_message_node(data: dict[str, Any]) -> bool:
         or data.get("isEnd")
     )
 
+def _validate_no_template_ids(nodes: list[dict[str, Any]], edges: list[dict[str, Any]]) -> None:
+    logger.info("[PUBLISHED GRAPH VALIDATION] nodes_count=%s edges_count=%s", len(nodes), len(edges))
+    for node in nodes:
+        node_id = str((node or {}).get("id") or "")
+        if node_id.startswith("template-"):
+            logger.error("[INVALID TEMPLATE NODE ID DETECTED] node_id=%s", node_id)
+            raise RuntimeError("FLOW CONTAINS TEMP NODE IDS")
+    for edge in edges:
+        source_id = str((edge or {}).get("source") or "")
+        target_id = str((edge or {}).get("target") or "")
+        if source_id.startswith("template-") or target_id.startswith("template-"):
+            logger.error("[INVALID TEMPLATE NODE ID DETECTED] edge_source=%s edge_target=%s", source_id, target_id)
+            raise RuntimeError("FLOW CONTAINS TEMP NODE IDS")
+
 def _publish_fresh_snapshot(db: Session, flow: Flow, *, reason: str) -> FlowVersion | None:
     nodes, edges = _builder_graph_from_flow(flow)
     if not nodes:
@@ -79,6 +93,7 @@ def _publish_fresh_snapshot(db: Session, flow: Flow, *, reason: str) -> FlowVers
         return None
 
     validate_flow_payload_or_400(nodes, edges)
+    _validate_no_template_ids(nodes, edges)
     logger.info(
         "[PUBLISH EDGES SNAPSHOT] flow_id=%s reason=%s edges_count=%s edges_raw_preview=%s",
         flow.id,
