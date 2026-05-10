@@ -19,6 +19,7 @@ type DashboardViewModel = {
   conversions: number;
   topFlows: Array<{ name: string; value: number }>;
   channels: Array<{ name: string; value: number }>;
+  performance: { avgResponseTimeSeconds: number | null; resolvedConversations: number; csat: number | null; abandonmentRate: number; };
 };
 
 type Period = '24h' | '7d' | '30d' | '90d';
@@ -30,7 +31,8 @@ const FALLBACK_VIEW_MODEL: DashboardViewModel = {
   responseRate: 0,
   conversions: 0,
   topFlows: [],
-  channels: [{ name: 'WhatsApp', value: 100 }],
+  channels: [],
+  performance: { avgResponseTimeSeconds: null, resolvedConversations: 0, csat: null, abandonmentRate: 0 },
 };
 
 
@@ -205,7 +207,7 @@ export default function DashboardPage() {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [flows, setFlows] = useState<FlowItem[]>([]);
   const router = useRouter();
-  const { data, kpis, timeseries, isLoading, error: dashboardError } = useDashboardAnalytics(period);
+  const { data, summary, kpis, timeseries, isLoading, error: dashboardError } = useDashboardAnalytics(period);
   const [conversationsError, setConversationsError] = useState<string | null>(null);
   const [flowsError, setFlowsError] = useState<string | null>(null);
   const [creatingFlow, setCreatingFlow] = useState(false);
@@ -288,10 +290,16 @@ export default function DashboardPage() {
       messagesToday: Number(kpis?.messages_received) || msgsToday || 0,
       responseRate: Number(kpis?.response_rate) || 0,
       conversions: Number(kpis?.conversions) || 0,
-      topFlows: flowFallback,
-      channels: FALLBACK_VIEW_MODEL.channels,
+      topFlows: (summary?.top_flows || flowFallback).map((f) => ({ name: f.name, value: Number((f as any).conversations ?? (f as any).value ?? 0) })),
+      channels: (summary?.channels || []).map((c) => ({ name: c.channel, value: Number(c.percentage) || 0 })),
+      performance: {
+        avgResponseTimeSeconds: summary?.performance?.avg_response_time_seconds ?? null,
+        resolvedConversations: Number(summary?.performance?.resolved_conversations) || 0,
+        csat: summary?.performance?.csat ?? null,
+        abandonmentRate: Number(summary?.performance?.abandonment_rate) || 0,
+      },
     };
-  }, [conversations, flows, kpis, uniqueConversations]);
+  }, [conversations, flows, kpis, uniqueConversations, summary]);
 
   const totalChannels = (viewModel.channels || []).reduce((acc, c) => acc + c.value, 0);
   const liveItems = uniqueConversations.slice(0, 4);
@@ -337,8 +345,7 @@ export default function DashboardPage() {
       else base[4].value += channel.value;
     });
     const total = base.reduce((sum, item) => sum + item.value, 0);
-    if (total === 0) base[0].value = 100;
-    return base;
+    return total === 0 ? [] : base;
   }, [viewModel.channels]);
   const safeKpis = Array.isArray(kpiMeta) ? kpiMeta : [];
 
@@ -467,15 +474,15 @@ export default function DashboardPage() {
 
       <div className="grid w-full grid-cols-1 gap-4 xl:grid-cols-3">
         <div className={`${cardClassName} min-h-[280px] p-5`}><div className="mb-4 flex items-center justify-between"><p className="m-0 text-lg font-semibold text-slate-900">Top fluxos</p><button className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs text-slate-600">Por conversas</button></div>
-        {flowsError ? <p className="text-sm text-red-700">{flowsError}</p> : <div className="space-y-3">{(viewModel.topFlows.slice(0,5)).map((flow) => {
+        {flowsError ? <p className="text-sm text-red-700">{flowsError}</p> : viewModel.topFlows.length === 0 ? <p className="text-sm text-slate-500">Nenhum fluxo com atividade ainda.</p> : <div className="space-y-3">{(viewModel.topFlows.slice(0,5)).map((flow) => {
           const pct = Math.max(0, Math.min(100, Math.round(flow.value || 0)));
           return <div key={flow.name} className="grid grid-cols-[20px_1fr_auto_auto] items-center gap-3"><span className="h-5 w-5 rounded bg-emerald-100" /><span className="text-sm font-medium text-slate-700">{flow.name}</span><span className="text-sm font-semibold text-slate-800">{flow.value}</span><span className="text-sm text-slate-500">{pct}%</span><div className="col-span-4 h-2 rounded-full bg-slate-100"><div className="h-2 rounded-full bg-emerald-500" style={{ width: `${pct}%` }} /></div></div>; })}</div>}
         <div className="mt-4 pt-3 border-t border-slate-100 text-center text-emerald-600 font-semibold">Ver todos os fluxos →</div></div>
 
-        <div className={`${cardClassName} min-h-[280px] p-5`}><p className="m-0 mb-4 text-lg font-semibold text-slate-900">Canais de entrada</p><div className="flex items-center justify-between gap-4"><div className="relative flex min-h-[190px] items-center justify-center overflow-visible"><PieChart width={190} height={190}><Pie data={normalizedChannelItems} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={52} outerRadius={74} paddingAngle={2} stroke="none">{normalizedChannelItems.map((item) => <Cell key={item.name} fill={channelLegendColors[item.name.toLowerCase()] ?? '#94A3B8'} />)}</Pie></PieChart><div className="pointer-events-none absolute grid h-24 w-24 place-items-center rounded-full bg-white text-center"><p className="m-0 text-xs text-slate-500">Total</p><p className="m-0 text-2xl font-bold">{totalChannels}</p></div></div><div className="space-y-2 text-sm flex-1">{normalizedChannelItems.map((ch) => <div key={ch.name} className="flex items-center justify-between gap-3"><span className="inline-flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: channelLegendColors[ch.name.toLowerCase()] ?? '#94A3B8' }} />{ch.name}</span><span className="font-semibold text-slate-700">{ch.value}%</span></div>)}</div></div>
+        <div className={`${cardClassName} min-h-[280px] p-5`}><p className="m-0 mb-4 text-lg font-semibold text-slate-900">Canais de entrada</p>{normalizedChannelItems.length === 0 ? <p className="text-sm text-slate-500">Nenhum canal com atividade ainda.</p> : <div className="flex items-center justify-between gap-4"><div className="relative flex min-h-[190px] items-center justify-center overflow-visible"><PieChart width={190} height={190}><Pie data={normalizedChannelItems} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={52} outerRadius={74} paddingAngle={2} stroke="none">{normalizedChannelItems.map((item) => <Cell key={item.name} fill={channelLegendColors[item.name.toLowerCase()] ?? '#94A3B8'} />)}</Pie></PieChart><div className="pointer-events-none absolute grid h-24 w-24 place-items-center rounded-full bg-white text-center"><p className="m-0 text-xs text-slate-500">Total</p><p className="m-0 text-2xl font-bold">{totalChannels}</p></div></div><div className="space-y-2 text-sm flex-1">{normalizedChannelItems.map((ch) => <div key={ch.name} className="flex items-center justify-between gap-3"><span className="inline-flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: channelLegendColors[ch.name.toLowerCase()] ?? '#94A3B8' }} />{ch.name}</span><span className="font-semibold text-slate-700">{ch.value}%</span></div>)}</div></div>}
         <div className="mt-4 pt-3 border-t border-slate-100 text-center text-emerald-600 font-semibold">Ver todos os canais →</div></div>
 
-        <div className={`${cardClassName} min-h-[280px] p-5`}><p className="m-0 mb-4 text-lg font-semibold text-slate-900">Desempenho geral</p><div className="space-y-4 text-sm text-slate-700">{['Tempo médio de resposta','Conversas resolvidas','Satisfação (CSAT)','Abandono de conversas'].map((n) => <div key={n} className="grid grid-cols-[1fr_auto_auto_64px] items-center gap-3"><span>{n}</span><span className="font-semibold">—</span><span className="text-emerald-600">↑ 0%</span><span className="h-7 w-16"><Sparkline/></span></div>)}</div>
+        <div className={`${cardClassName} min-h-[280px] p-5`}><p className="m-0 mb-4 text-lg font-semibold text-slate-900">Desempenho geral</p>{viewModel.performance.avgResponseTimeSeconds === null && viewModel.performance.resolvedConversations === 0 && viewModel.performance.csat === null ? <p className="text-sm text-slate-500">Dados insuficientes para calcular.</p> : <div className="space-y-4 text-sm text-slate-700"><div className="grid grid-cols-[1fr_auto] items-center gap-3"><span>Tempo médio de resposta</span><span className="font-semibold">{viewModel.performance.avgResponseTimeSeconds ?? 'Sem dados'}{viewModel.performance.avgResponseTimeSeconds !== null ? 's' : ''}</span></div><div className="grid grid-cols-[1fr_auto] items-center gap-3"><span>Conversas resolvidas</span><span className="font-semibold">{viewModel.performance.resolvedConversations}</span></div><div className="grid grid-cols-[1fr_auto] items-center gap-3"><span>Satisfação (CSAT)</span><span className="font-semibold">{viewModel.performance.csat ?? 'Sem dados'}</span></div><div className="grid grid-cols-[1fr_auto] items-center gap-3"><span>Abandono de conversas</span><span className="font-semibold">{viewModel.performance.abandonmentRate}%</span></div></div>}
         <div className="mt-4 pt-3 border-t border-slate-100 text-center text-emerald-600 font-semibold">Ver relatório completo →</div></div>
       </div>
 
