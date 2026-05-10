@@ -223,6 +223,10 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
       setToastMessage(message);
       setTimeout(() => setToastMessage(null), 4000);
     },
+    error: (message: string) => {
+      setToastMessage(message);
+      setTimeout(() => setToastMessage(null), 4000);
+    },
   }), []);
 
   const parseHttpStatus = useCallback((error: unknown): number | null => {
