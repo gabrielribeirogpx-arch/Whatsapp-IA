@@ -1055,20 +1055,28 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
     if (!selectedFlowId) return;
     if (validationErrors.length > 0) return;
 
-    if (hasUnsavedChanges) {
-      await handleSaveFlow();
+    try {
+      if (hasUnsavedChanges) {
+        await handleSaveFlow();
+      }
+
+      console.log('[PUBLISH REQUEST]', { flowId: selectedFlowId });
+      const response = await apiFetch(`/api/flows/${selectedFlowId}/publish`, { method: 'POST', body: JSON.stringify({}) });
+      const publishData = await parseApiResponse(response);
+      console.log('[PUBLISH RESPONSE]', { flowId: selectedFlowId, status: response.status, payload: publishData });
+
+      const activateResponse = await apiFetch(`/api/flows/${selectedFlowId}/activate`, { method: 'PUT' });
+      await parseApiResponse(activateResponse);
+
+      setActiveFlowId(selectedFlowId);
+      setFlows((prev) => prev.map((flow) => ({ ...flow, is_active: flow.id === selectedFlowId })));
+      await loadFlow(selectedFlowId);
+    } catch (error) {
+      console.error('[PUBLISH ERROR]', { flowId: selectedFlowId, error });
+      const message = error instanceof Error && error.message ? error.message : 'Não foi possível publicar o fluxo.';
+      toast.error(`Falha ao publicar: ${message}`);
     }
-
-    const response = await apiFetch(`/api/flows/${selectedFlowId}/publish`, { method: 'POST', body: JSON.stringify({}) });
-    await parseApiResponse(response);
-
-    const activateResponse = await apiFetch(`/api/flows/${selectedFlowId}/activate`, { method: 'PUT' });
-    await parseApiResponse(activateResponse);
-
-    setActiveFlowId(selectedFlowId);
-    setFlows((prev) => prev.map((flow) => ({ ...flow, is_active: flow.id === selectedFlowId })));
-    await loadFlow(selectedFlowId);
-  }, [hasUnsavedChanges, handleSaveFlow, loadFlow, selectedFlowId, validationErrors.length]);
+  }, [hasUnsavedChanges, handleSaveFlow, loadFlow, selectedFlowId, toast, validationErrors.length]);
 
   const handleDeactivateFlow = useCallback(async () => {
     const response = await apiFetch('/api/flows/deactivate', {

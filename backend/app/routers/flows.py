@@ -86,6 +86,48 @@ def _validate_no_template_ids(nodes: list[dict[str, Any]], edges: list[dict[str,
             logger.error("[INVALID TEMPLATE NODE ID DETECTED] edge_source=%s edge_target=%s", source_id, target_id)
             raise RuntimeError("FLOW CONTAINS TEMP NODE IDS")
 
+
+def _validate_publish_graph_or_raise(nodes: list[dict[str, Any]], edges: list[dict[str, Any]]) -> None:
+    if not isinstance(nodes, list) or len(nodes) == 0:
+        raise ValueError("O fluxo precisa ter ao menos 1 node.")
+    if not isinstance(edges, list):
+        raise ValueError("As conexões (edges) do fluxo são inválidas.")
+
+    node_ids: set[str] = set()
+    has_start_node = False
+    for node in nodes:
+        if not isinstance(node, dict):
+            raise ValueError("Node inválido encontrado no graph.")
+        node_id = str(node.get("id") or "").strip()
+        if not node_id:
+            raise ValueError("Node sem id válido encontrado no graph.")
+        if node_id.startswith("template-"):
+            raise ValueError("O fluxo contém ids temporários (template-*).")
+        node_ids.add(node_id)
+        data = node.get("data") if isinstance(node.get("data"), dict) else {}
+        if bool(data.get("isStart")):
+            has_start_node = True
+
+    if not has_start_node:
+        raise ValueError("O fluxo precisa ter um node inicial (isStart=true).")
+
+    for edge in edges:
+        if not isinstance(edge, dict):
+            raise ValueError("Edge inválido encontrado no graph.")
+        source = str(edge.get("source") or "").strip()
+        target = str(edge.get("target") or "").strip()
+        if not source or not target:
+            raise ValueError("Toda conexão precisa ter source e target.")
+        if source.startswith("template-") or target.startswith("template-"):
+            raise ValueError("O fluxo contém ids temporários (template-*) nas conexões.")
+        if source not in node_ids or target not in node_ids:
+            raise ValueError("Conexão aponta para node inexistente.")
+
+    try:
+        json.dumps({"nodes": nodes, "edges": edges}, ensure_ascii=False)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"Graph não serializável: {exc}") from exc
+
 def _publish_fresh_snapshot(db: Session, flow: Flow, *, reason: str) -> FlowVersion | None:
     nodes, edges = _builder_graph_from_flow(flow)
     if not nodes:
@@ -2060,36 +2102,55 @@ def publish_tenant_flow_version(
     x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
     db: Session = Depends(get_db),
 ):
-    tenant_uuid = _resolve_tenant_header(x_tenant_id)
-    flow = _get_flow_by_identifier(db=db, flow_id=flow_id, tenant_id=tenant_uuid)
-    if not flow:
-        raise HTTPException(status_code=404, detail="Flow not found")
+    logger.info("[PUBLISH FLOW START] flow_id=%s", flow_id)
+    try:
+        tenant_uuid = _resolve_tenant_header(x_tenant_id)
+        flow = _get_flow_by_identifier(db=db, flow_id=flow_id, tenant_id=tenant_uuid)
+        if not flow:
+            raise HTTPException(status_code=404, detail="Flow not found")
 
-    db.refresh(flow)
-    fresh_version = _publish_fresh_snapshot(db=db, flow=flow, reason="publish")
-    if not fresh_version:
-        raise HTTPException(status_code=422, detail="Flow version not found")
+        db.refresh(flow)
+        fresh_version = _publish_fresh_snapshot(db=db, flow=flow, reason="publish")
+        if not fresh_version:
+            raise ValueError("Fluxo sem conteúdo para publicar.")
 
-    nodes = fresh_version.nodes if isinstance(fresh_version.nodes, list) else []
-    edges = fresh_version.edges if isinstance(fresh_version.edges, list) else []
-    validate_flow_payload_or_400(nodes, edges)
-    validation = validate_flow_graph(nodes, edges, mode="publish")
-    if "TESTE FINAL 12345" in _extract_start_preview(_builder_graph_from_flow(flow)[0]) and "TESTE FINAL 12345" not in _extract_start_preview(nodes):
-        raise HTTPException(status_code=409, detail="[PUBLISH SOURCE MISMATCH]")
-    if validation["errors"]:
-        raise HTTPException(status_code=422, detail=validation)
+        nodes = fresh_version.nodes if isinstance(fresh_version.nodes, list) else []
+        edges = fresh_version.edges if isinstance(fresh_version.edges, list) else []
 
-    flow.status = "published"
-    invalidate_flow_runtime_cache(flow.id)
-    db.commit()
-    db.refresh(flow)
-    return _serialize_flow_version_response(
-        flow=flow,
-        nodes=nodes,
-        edges=edges,
-        version_id=flow.published_version_id or fresh_version.id,
-        version=flow.version,
-    )
+        logger.info("[PUBLISH FLOW VALIDATION] flow_id=%s nodes_count=%s edges_count=%s", flow_id, len(nodes), len(edges))
+        _validate_publish_graph_or_raise(nodes, edges)
+        validate_flow_payload_or_400(nodes, edges)
+        validation = validate_flow_graph(nodes, edges, mode="publish")
+        if "TESTE FINAL 12345" in _extract_start_preview(_builder_graph_from_flow(flow)[0]) and "TESTE FINAL 12345" not in _extract_start_preview(nodes):
+            raise ValueError("[PUBLISH SOURCE MISMATCH]")
+        if validation["errors"]:
+            first_error = validation["errors"][0] if validation["errors"] else {}
+            reason = first_error.get("message") if isinstance(first_error, dict) else "Graph inválido para publicação."
+            raise ValueError(reason)
+
+        flow.status = "published"
+        invalidate_flow_runtime_cache(flow.id)
+        db.commit()
+        db.refresh(flow)
+        logger.info("[PUBLISH FLOW SUCCESS] flow_id=%s version_id=%s", flow_id, flow.published_version_id or fresh_version.id)
+        return _serialize_flow_version_response(
+            flow=flow,
+            nodes=nodes,
+            edges=edges,
+            version_id=flow.published_version_id or fresh_version.id,
+            version=flow.version,
+        )
+    except HTTPException:
+        logger.exception("[PUBLISH FLOW FAILED] flow_id=%s", flow_id)
+        raise
+    except ValueError as exc:
+        db.rollback()
+        logger.error("[PUBLISH FLOW FAILED] flow_id=%s reason=%s", flow_id, exc)
+        return JSONResponse(status_code=400, content={"error": "INVALID_FLOW_GRAPH", "message": str(exc)})
+    except Exception as exc:
+        db.rollback()
+        logger.exception("[PUBLISH FLOW FAILED] flow_id=%s", flow_id)
+        return JSONResponse(status_code=500, content={"error": "PUBLISH_FAILED", "message": "Erro inesperado ao publicar fluxo."})
 
 
 @crud_router.post("/{flow_id}/republish", response_model=FlowVersionResponse)
