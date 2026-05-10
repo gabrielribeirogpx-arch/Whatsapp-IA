@@ -1593,9 +1593,9 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
               </div>
               <h3 style={{ margin: 0, fontSize: 30, lineHeight: 1.15, letterSpacing: '-0.02em', color: '#0F172A', fontWeight: 700 }}>Comece seu primeiro fluxo</h3>
               <p style={{ margin: '14px auto 28px', fontSize: 16, lineHeight: 1.55, color: '#334155', maxWidth: 540 }}>Crie automações para responder clientes, qualificar leads e vender no WhatsApp.</p>
-              <div style={{ display: 'flex', gap: 12, justifyContent: 'center', flexWrap: 'wrap' }}>
-                <button type="button" onClick={handleCreateInitialMessage} className="flow-top-btn" style={{ minWidth: 240, padding: '12px 18px', borderRadius: 12, boxShadow: '0 10px 18px rgba(22,163,74,0.2)' }}>Adicionar mensagem inicial</button>
-                <button type="button" onClick={handleUseSimpleTemplate} className="flow-top-btn flow-top-btn-secondary" style={{ minWidth: 240, padding: '12px 18px', borderRadius: 12, border: '1px solid #86EFAC', color: '#166534', background: '#F0FDF4' }}>Usar template simples</button>
+              <div style={{ display: 'flex', gap: 16, justifyContent: 'center', flexWrap: 'wrap' }}>
+                <button type="button" onClick={handleCreateInitialMessage} className="flow-top-btn flex items-center justify-center min-h-11 rounded-xl font-medium transition-all duration-200" style={{ minWidth: 260, padding: '12px 24px', borderRadius: 12, boxShadow: '0 10px 18px rgba(22,163,74,0.2)' }}>Adicionar mensagem inicial</button>
+                <button type="button" onClick={handleUseSimpleTemplate} className="flow-top-btn flow-top-btn-secondary flex items-center justify-center min-h-11 rounded-xl font-medium transition-all duration-200" style={{ minWidth: 260, padding: '12px 24px', borderRadius: 12, border: '1px solid #86EFAC', color: '#166534', background: '#F0FDF4' }}>Usar template simples</button>
               </div>
             </div>
           </div>
