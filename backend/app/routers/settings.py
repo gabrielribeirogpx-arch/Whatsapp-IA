@@ -80,6 +80,9 @@ def update_settings(
         db.add(tenant)
         db.commit()
         db.refresh(tenant)
+
+        if disconnect_whatsapp:
+            print("[SETTINGS DISCONNECTED SUCCESS]", f"tenant_id={tenant_id}")
     except IntegrityError as error:
         db.rollback()
         print("[SETTINGS ERROR]", error)
