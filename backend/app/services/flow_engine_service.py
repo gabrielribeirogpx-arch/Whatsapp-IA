@@ -1970,9 +1970,11 @@ def run_until_wait_node(
             matched_handle = _edge_source_handle(selected_edge) if selected_edge else None
             target_node_id = _edge_target(selected_edge) if selected_edge else None
             logger.info(
-                "[CONDITION EVALUATED] condition_node_id=%s incoming_text=%s matched_handle=%s target_node_id=%s",
+                "[CONDITION EVALUATED] condition_node_id=%s incoming_text=%s matched=%s branch=%s matched_handle=%s target_node_id=%s",
                 _node_get(node, "id"),
                 incoming_text,
+                matched,
+                "true" if matched else "false",
                 matched_handle,
                 target_node_id,
             )

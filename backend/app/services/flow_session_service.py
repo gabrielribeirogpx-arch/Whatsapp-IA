@@ -126,20 +126,38 @@ class FlowSessionService:
         )
         logger_payload = {"tenant_id": str(tenant_id), "user_identifier": user_identifier, "flow_id": str(flow.id)}
         print(f"[FLOW SESSION SAVE] {logger_payload} current_node_id={current_node_id}")
+        safe_current_node_id = str(current_node_id) if current_node_id else None
+        if (
+            session
+            and (session.status or "").lower() in {"running", "active"}
+            and safe_current_node_id is None
+            and session.current_node_id is not None
+            and str(status or "").lower() not in {"completed", "finalized", "expired", "finished"}
+        ):
+            print(
+                "[SESSION CURRENT_NODE_NULL_OVERWRITE_BLOCKED] "
+                f"session_id={session.id} previous_current_node_id={session.current_node_id} requested_status={status}"
+            )
+            safe_current_node_id = str(session.current_node_id)
+
         if not session:
             session = FlowSession(
                 tenant_id=tenant_id,
                 user_identifier=user_identifier,
                 flow_id=flow.id,
                 flow_version_id=getattr(flow, "published_version_id", None),
-                current_node_id=str(current_node_id) if current_node_id else None,
+                current_node_id=safe_current_node_id,
                 status=status,
                 context=context or {},
                 variables={"flow_version": flow.version, "flow_version_id": str(getattr(flow, "published_version_id", "") or ""), **(variables or {})},
             )
             self.db.add(session)
         else:
-            session.current_node_id = str(current_node_id) if current_node_id else None
+            print(
+                "[SESSION CURRENT_NODE BEFORE UPDATE] "
+                f"session_id={session.id} current_node_id={session.current_node_id} requested_current_node_id={safe_current_node_id}"
+            )
+            session.current_node_id = safe_current_node_id
             # Keep session pinned to the version it started with.
             if session.flow_version_id is None:
                 session.flow_version_id = getattr(flow, "published_version_id", None)
@@ -151,6 +169,10 @@ class FlowSessionService:
             if variables:
                 merged_variables.update(variables)
             session.variables = merged_variables
+            print(
+                "[SESSION CURRENT_NODE AFTER UPDATE] "
+                f"session_id={session.id} current_node_id={session.current_node_id}"
+            )
         self.db.add(session)
         self.db.commit()
         self.db.refresh(session)
@@ -184,7 +206,24 @@ class FlowSessionService:
         print(f"[SESSION RESET] reason={reason} tenant_id={tenant_id} user={user_identifier} count={len(sessions)}")
 
     def update_session(self, session: FlowSession, node_id: str | None, context: dict | None = None, status: str | None = None) -> None:
-        session.current_node_id = node_id
+        next_status = str(status or session.status or "").lower()
+        safe_node_id = node_id
+        print(
+            "[SESSION CURRENT_NODE BEFORE UPDATE] "
+            f"session_id={session.id} current_node_id={session.current_node_id} requested_current_node_id={node_id} status={next_status}"
+        )
+        if (
+            (session.status or "").lower() in {"running", "active"}
+            and node_id is None
+            and session.current_node_id is not None
+            and next_status not in {"completed", "finalized", "expired", "finished"}
+        ):
+            print(
+                "[SESSION CURRENT_NODE_NULL_OVERWRITE_BLOCKED] "
+                f"session_id={session.id} previous_current_node_id={session.current_node_id} requested_status={next_status}"
+            )
+            safe_node_id = session.current_node_id
+        session.current_node_id = safe_node_id
 
         if context is not None:
             session.context = context
@@ -194,6 +233,10 @@ class FlowSessionService:
 
         self.db.commit()
         self.db.refresh(session)
+        print(
+            "[SESSION CURRENT_NODE AFTER UPDATE] "
+            f"session_id={session.id} current_node_id={session.current_node_id} status={session.status}"
+        )
 
     def reset_runtime_state_for_user_flow(self, *, tenant_id, user_identifier: str, flow_id) -> tuple[int, list]:
         sessions = (
