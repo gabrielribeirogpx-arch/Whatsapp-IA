@@ -1,33 +1,13 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel, Field
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models import Tenant
+from app.schemas.settings import SettingsOut, SettingsUpdateIn
 from app.services.tenant_service import get_current_tenant
 
 router = APIRouter(tags=["settings"])
-
-
-class SettingsOut(BaseModel):
-    token: str | None = None
-    whatsapp_token: str | None = None
-    phone_number_id: str = ""
-    webhook_url: str | None = None
-    webhook_status: str = "inactive"
-    system_name: str = "WhatsApp IA"
-    language: str = "pt-BR"
-
-
-class SettingsUpdateIn(BaseModel):
-    token: str | None = Field(default=None, max_length=512)
-    whatsapp_token: str | None = Field(default=None, max_length=512)
-    phone_number_id: str | None = Field(default=None, min_length=2, max_length=64)
-    webhook_url: str | None = Field(default=None, max_length=500)
-    webhook_status: str | None = Field(default=None, max_length=32)
-    system_name: str | None = Field(default=None, min_length=2, max_length=150)
-    language: str | None = Field(default=None, min_length=2, max_length=16)
 
 
 def _serialize_settings(tenant: Tenant) -> SettingsOut:
@@ -59,18 +39,29 @@ def update_settings(
     tenant_id = getattr(request.state, "tenant_id", None)
     print("[SETTINGS SAVE]", tenant_id, payload.dict())
     try:
+        disconnect_whatsapp = False
         token_value = payload.whatsapp_token if payload.whatsapp_token is not None else payload.token
         if token_value is not None:
-            tenant.whatsapp_token = token_value.strip() or None
+            normalized_token = token_value.strip() or None
+            tenant.whatsapp_token = normalized_token
+            if normalized_token is None:
+                disconnect_whatsapp = True
 
         if payload.phone_number_id is not None:
-            tenant.phone_number_id = payload.phone_number_id.strip()
+            normalized_phone_number_id = payload.phone_number_id.strip() or None
+            tenant.phone_number_id = normalized_phone_number_id
+            if normalized_phone_number_id is None:
+                disconnect_whatsapp = True
 
         if payload.webhook_url is not None:
             tenant.webhook_url = payload.webhook_url.strip() or None
 
         if payload.webhook_status is not None:
             tenant.webhook_status = payload.webhook_status.strip() or "inactive"
+
+        if disconnect_whatsapp:
+            tenant.webhook_status = "inactive"
+            print("[SETTINGS WHATSAPP DISCONNECTED]", f"tenant_id={tenant_id}")
 
         if payload.system_name is not None:
             tenant.name = payload.system_name.strip()

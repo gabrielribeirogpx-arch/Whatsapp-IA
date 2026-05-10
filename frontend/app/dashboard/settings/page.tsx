@@ -75,6 +75,7 @@ export default function SettingsPage() {
       await updateSystemSettings({
         ...form,
         token: form.token?.trim() || null,
+        phone_number_id: form.phone_number_id?.trim() || null,
         webhook_url: form.webhook_url?.trim() || null
       });
       setStatusType('success');
@@ -119,7 +120,6 @@ export default function SettingsPage() {
                   value={form.phone_number_id}
                   onChange={(event) => setForm((prev) => ({ ...prev, phone_number_id: event.target.value }))}
                   placeholder="Ex.: 123456789012345"
-                  required
                 />
               </label>
             </div>
