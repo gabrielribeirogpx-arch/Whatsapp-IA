@@ -133,7 +133,12 @@ def list_conversations(
                 tenant_id=conversation.tenant_id,
                 contact_id=conversation.contact_id,
                 phone=phone,
-                name=(conversation.name if hasattr(conversation, "name") else None) or conversation.phone_number or "",
+                name=(
+                    (conversation.name if hasattr(conversation, "name") else None)
+                    or (conversation.contact.name if conversation.contact else None)
+                    or conversation.phone_number
+                    or ""
+                ),
                 avatar_url=conversation.avatar_url,
                 stage=conversation.contact.stage if conversation.contact else "novo",
                 score=conversation.contact.score if conversation.contact else 0,

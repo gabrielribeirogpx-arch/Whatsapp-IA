@@ -286,8 +286,14 @@ async def _process_meta_webhook(request: Request, db: Session) -> dict[str, str]
             else:
                 logger.info("Nenhuma conversa encontrada, criando nova para %s", normalized_phone)
 
-            if contact_name and not conversation.name:
+            if contact_name:
                 conversation.name = contact_name
+                contact.name = contact_name
+                logger.info(
+                    "[CONTACT PROFILE NAME SAVED] phone=%s name=%s",
+                    normalized_phone,
+                    contact_name,
+                )
             ensure_conversation_contact_link(conversation, contact)
 
             if conversation.name is None and _looks_like_name(incoming_message):

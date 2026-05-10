@@ -860,11 +860,22 @@ def is_flow_trigger(flow: Flow, incoming_text: str | None) -> bool:
     normalized_incoming = normalize_trigger_text(incoming_text)
     trigger_type = normalize_trigger_text(getattr(flow, "trigger_type", "default") or "default")
     trigger_value = normalize_trigger_text(getattr(flow, "trigger_value", None))
+    default_safe_triggers = ["oi", "olá", "ola", "começar", "iniciar", "menu"]
     matched = False
     if trigger_type == "keyword":
         matched = bool(trigger_value) and normalized_incoming == trigger_value
     else:
-        matched = bool(trigger_value) and normalized_incoming == trigger_value
+        if trigger_value:
+            matched = normalized_incoming == trigger_value
+        else:
+            normalized_defaults = {normalize_trigger_text(item) for item in default_safe_triggers}
+            matched = normalized_incoming in normalized_defaults
+            if matched:
+                logger.info(
+                    "[DEFAULT FLOW TRIGGER MATCHED] flow_id=%s incoming_text=%s",
+                    getattr(flow, "id", None),
+                    normalized_incoming,
+                )
     logger.info("[FLOW TRIGGER CHECK] flow_id=%s trigger_type=%s trigger_value=%s incoming_text=%s matched=%s", getattr(flow, "id", None), trigger_type or "default", trigger_value or None, normalized_incoming, matched)
     if matched:
         logger.info("[FLOW TRIGGER MATCHED] flow_id=%s", getattr(flow, "id", None))
@@ -2436,16 +2447,17 @@ def process_flow_engine(
         start_node_id=start_node_id,
         incoming_text=None,
     )
+    saved_wait_node_id = _parse_uuid(getattr(conversation, "current_node_id", None)) or next_node_id
     runtime_session = session_service.save_runtime_session(
         tenant_id=conversation.tenant_id,
         user_identifier=user_identifier,
         flow=flow,
-        current_node_id=next_node_id,
+        current_node_id=saved_wait_node_id,
         context=conversation.context if isinstance(conversation.context, dict) else {},
         status="running",
-        variables={"current_node_id": str(next_node_id) if next_node_id else None},
+        variables={"current_node_id": str(saved_wait_node_id) if saved_wait_node_id else None},
     )
-    logger.info("[FLOW START SAVED_NEXT_NODE] current_node_id=%s", next_node_id)
+    logger.info("[FLOW START SAVED_WAIT_NODE] current_node_id=%s", saved_wait_node_id)
     db.add(conversation)
     db.add(runtime_session)
     db.commit()
