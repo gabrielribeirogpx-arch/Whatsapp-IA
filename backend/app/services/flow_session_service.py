@@ -9,6 +9,7 @@ from app.models.flow_session import FlowSession
 SESSION_TTL_MINUTES = 30
 FINAL_SESSION_STATUSES = {"finished", "expired", "cancelled"}
 FINAL_COMPLETION_STATUSES = {"completed", "abandoned", "conversion", "expired"}
+ALLOWED_NULL_CURRENT_NODE_REASONS = {"flow_finished", "terminal_node", "no_outgoing_edge", "manual_reset"}
 
 
 class FlowSessionService:
@@ -157,7 +158,11 @@ class FlowSessionService:
                 "[SESSION CURRENT_NODE BEFORE UPDATE] "
                 f"session_id={session.id} current_node_id={session.current_node_id} requested_current_node_id={safe_current_node_id}"
             )
-            session.current_node_id = safe_current_node_id
+            session.current_node_id = self.safe_update_current_node(
+                session=session,
+                next_node_id=safe_current_node_id,
+                reason="save_runtime_session",
+            )
             # Keep session pinned to the version it started with.
             if session.flow_version_id is None:
                 session.flow_version_id = getattr(flow, "published_version_id", None)
@@ -197,7 +202,11 @@ class FlowSessionService:
         )
         for session in sessions:
             session.status = "expired"
-            session.current_node_id = None
+            session.current_node_id = self.safe_update_current_node(
+                session=session,
+                next_node_id=None,
+                reason=reason or "manual_reset",
+            )
             if reason:
                 metadata = dict(session.variables or {})
                 metadata["abandon_reason"] = reason
@@ -223,7 +232,11 @@ class FlowSessionService:
                 f"session_id={session.id} previous_current_node_id={session.current_node_id} requested_status={next_status}"
             )
             safe_node_id = session.current_node_id
-        session.current_node_id = safe_node_id
+        session.current_node_id = self.safe_update_current_node(
+            session=session,
+            next_node_id=safe_node_id,
+            reason="update_session",
+        )
 
         if context is not None:
             session.context = context
@@ -252,11 +265,42 @@ class FlowSessionService:
         for session in sessions:
             session_ids.append(session.id)
             session.status = "completed"
-            session.current_node_id = None
+            session.current_node_id = self.safe_update_current_node(
+                session=session,
+                next_node_id=None,
+                reason="manual_reset",
+            )
             session.context = {}
             session.variables = {}
         self.db.commit()
         return len(sessions), session_ids
+
+    def safe_update_current_node(self, session: FlowSession, next_node_id, reason: str, graph_context: dict[str, Any] | None = None) -> str | None:
+        current_status = str(getattr(session, "status", "") or "").lower()
+        previous_node_id = getattr(session, "current_node_id", None)
+        safe_next_node_id = str(next_node_id) if next_node_id else None
+        reason_slug = str(reason or "").strip().lower()
+        print(
+            "[SESSION CURRENT_NODE BEFORE UPDATE] "
+            f"session_id={getattr(session, 'id', None)} previous_current_node_id={previous_node_id} "
+            f"requested_current_node_id={safe_next_node_id} reason={reason_slug} graph_context={graph_context or {}}"
+        )
+        if (
+            safe_next_node_id is None
+            and current_status in {"running", "active"}
+            and previous_node_id
+            and reason_slug not in ALLOWED_NULL_CURRENT_NODE_REASONS
+        ):
+            print(
+                "[SESSION CURRENT_NODE_NULL_OVERWRITE_BLOCKED] "
+                f"session_id={getattr(session, 'id', None)} previous_current_node_id={previous_node_id} reason={reason_slug}"
+            )
+            safe_next_node_id = str(previous_node_id)
+        print(
+            "[SESSION CURRENT_NODE AFTER UPDATE] "
+            f"session_id={getattr(session, 'id', None)} current_node_id={safe_next_node_id} reason={reason_slug}"
+        )
+        return safe_next_node_id
 
     def end_session(
         self,

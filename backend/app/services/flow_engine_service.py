@@ -1852,8 +1852,14 @@ def _is_wait_node_type(node_type: str) -> bool:
 
 def _finalize_runtime_flow_session(db: Session, conversation: Conversation, flow_session: FlowSession | None, end_node_id: Any) -> None:
     if flow_session:
+        session_service = FlowSessionService(db)
         flow_session.status = "completed"
-        flow_session.current_node_id = None
+        flow_session.current_node_id = session_service.safe_update_current_node(
+            session=flow_session,
+            next_node_id=None,
+            reason="flow_finished",
+            graph_context={"end_node_id": str(end_node_id) if end_node_id else None},
+        )
         if hasattr(flow_session, "completed_at"):
             setattr(flow_session, "completed_at", datetime.utcnow())
         if isinstance(flow_session.context, dict):
@@ -1949,7 +1955,11 @@ def run_until_wait_node(
             if not normalized_input:
                 target_node_id = _parse_uuid(_node_get(node, "id"))
                 if flow_session:
-                    flow_session.current_node_id = target_node_id
+                    flow_session.current_node_id = session_service.safe_update_current_node(
+                        session=flow_session,
+                        next_node_id=target_node_id,
+                        reason="continue_condition_waiting_input",
+                    )
                     flow_session.last_input = incoming_text
                     db.add(flow_session)
                 if isinstance(session.context, dict):
@@ -2002,7 +2012,11 @@ def run_until_wait_node(
                     )
                     logger.info("[DELAY SCHEDULED] delay_node_id=%s seconds=%s next_node_id=%s", _node_get(node, "id"), delay_seconds, next_target)
                     if flow_session:
-                        flow_session.current_node_id = str(next_target)
+                        flow_session.current_node_id = session_service.safe_update_current_node(
+                            session=flow_session,
+                            next_node_id=str(next_target),
+                            reason="delay_next_target",
+                        )
                         db.add(flow_session)
                     db.commit()
                     return None
@@ -2040,7 +2054,11 @@ def run_until_wait_node(
                 condition_node_id = _node_get(node, "id")
                 target_node_id = _parse_uuid(condition_node_id)
                 if flow_session:
-                    flow_session.current_node_id = target_node_id
+                    flow_session.current_node_id = session_service.safe_update_current_node(
+                        session=flow_session,
+                        next_node_id=target_node_id,
+                        reason="message_advance_to_condition",
+                    )
                     flow_session.last_input = incoming_text
                     db.add(flow_session)
                 if isinstance(session.context, dict):
@@ -2062,7 +2080,11 @@ def run_until_wait_node(
         if _is_wait_node_type(node_type):
             target_node_id = _parse_uuid(_node_get(node, "id"))
             if flow_session:
-                flow_session.current_node_id = target_node_id
+                flow_session.current_node_id = session_service.safe_update_current_node(
+                    session=flow_session,
+                    next_node_id=target_node_id,
+                    reason="wait_node",
+                )
                 flow_session.last_input = incoming_text
                 db.add(flow_session)
             if isinstance(session.context, dict):
