@@ -491,6 +491,16 @@ export async function createWhatsAppProvider(payload: Record<string, unknown>): 
   const res = await apiFetch('/api/whatsapp/providers', { method: 'POST', body: JSON.stringify(payload) });
   return parseApiResponse<WhatsAppProvider>(res);
 }
+
+export async function activateWhatsAppProvider(providerId: string): Promise<WhatsAppProvider> {
+  const res = await apiFetch(`/api/whatsapp/providers/${providerId}/activate`, { method: 'POST' });
+  return parseApiResponse<WhatsAppProvider>(res);
+}
+export async function deleteWhatsAppProvider(providerId: string): Promise<void> {
+  const res = await apiFetch(`/api/whatsapp/providers/${providerId}`, { method: 'DELETE' });
+  return parseApiResponse<void>(res);
+}
+
 export async function testWhatsAppProvider(providerId: string) {
   const res = await apiFetch(`/api/whatsapp/providers/${providerId}/test`, { method: 'POST' });
   return parseApiResponse<{ok:boolean;status:string;message:string}>(res);
