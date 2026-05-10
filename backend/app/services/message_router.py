@@ -71,6 +71,8 @@ def handle_incoming_message(db: Session, message: Message, conversation: Convers
         )
         resolved_node_id = session_node_id or variables_node_id or context_node_id
         resolution_source = "session" if session_node_id else ("variables" if variables_node_id else ("context" if context_node_id else "none"))
+        if session_node_id:
+            print(f"[FLOW CONTINUE USING_SESSION_NODE] session_node_id={session_node_id}")
         if resolved_node_id:
             print(f"[CONVERSATION CURRENT_NODE SKIPPED_FOR_VERSIONED_FLOW] resolved_node_id={resolved_node_id} source={resolution_source}")
             if not isinstance(conversation.context, dict):
@@ -142,7 +144,7 @@ def handle_incoming_message(db: Session, message: Message, conversation: Convers
             print("[FLOW MODE] sem node ativo, mantendo flow e tentando retomar")
 
         print("[FLOW MODE] usuário em fluxo")
-        result = handle_visual_flow_priority(db=db, message=message, conversation=conversation)
+        result = handle_visual_flow_priority(db=db, message=message, conversation=conversation, session_node_id=session_node_id)
         if not result or not result.get("response"):
             print("[LEGACY FALLBACK HARD BLOCKED]")
             return None
@@ -175,7 +177,7 @@ def handle_incoming_message(db: Session, message: Message, conversation: Convers
             db.commit()
             db.refresh(conversation)
             print("[MODE SET] flow")
-            result = handle_visual_flow_priority(db=db, message=message, conversation=conversation)
+            result = handle_visual_flow_priority(db=db, message=message, conversation=conversation, session_node_id=session_node_id)
             if not result or not result.get("response"):
                 print("[LEGACY FALLBACK HARD BLOCKED]")
                 return None

@@ -108,7 +108,10 @@ def test_webhook_flow_e2e(monkeypatch):
         monkeypatch.setattr(message_router, "log_conversation_event", lambda *args, **kwargs: None)
         monkeypatch.setattr(message_router, "handle_bot", lambda *args, **kwargs: {"response": "fallback"})
 
-        def _fake_flow_engine(*, db, message, conversation):
+        called_session_nodes = []
+
+        def _fake_flow_engine(*, db, message, conversation, session_node_id=None):
+            called_session_nodes.append(session_node_id)
             key = (conversation.tenant_id, conversation.phone_number)
             text = (message.text or "").lower()
             state = sessions.get(key)
@@ -133,6 +136,7 @@ def test_webhook_flow_e2e(monkeypatch):
 
         message_worker.process_incoming_message({"phone_number_id": phone_number_id, "text": branch_text, "message_id": f"{tenant_id}-2"})
         assert conversation.context.get("flow_current_node_id") == "condition"
+        assert called_session_nodes[-1] == "condition"
         assert sent[-1][1] == "Resposta A"
         assert sessions[(tenant_id, "5511999990001")].status == "completed"
 
