@@ -111,8 +111,12 @@ def test_webhook_flow_e2e(monkeypatch):
         monkeypatch.setattr(message_router, "handle_bot", lambda *args, **kwargs: {"response": "fallback"})
 
         called_session_nodes = []
+        runtime_graph_sources = []
+        runtime_flow_versions = []
 
         def _fake_flow_engine(*, db, message, conversation, session_node_id=None):
+            runtime_graph_sources.append("published_version")
+            runtime_flow_versions.append("v-1")
             called_session_nodes.append(session_node_id)
             key = (conversation.tenant_id, conversation.phone_number)
             text = (message.text or "").lower()
@@ -134,10 +138,12 @@ def test_webhook_flow_e2e(monkeypatch):
         message_worker.process_incoming_message({"phone_number_id": phone_number_id, "text": "oi", "message_id": f"{tenant_id}-1"})
         assert sent[-1][1] == "Olá!"
         assert sessions[(tenant_id, "5511999990001")].current_node_id == condition_node_id
+        assert runtime_graph_sources[-1] == "published_version"
         assert conversation.current_node_id is None
 
         message_worker.process_incoming_message({"phone_number_id": phone_number_id, "text": branch_text, "message_id": f"{tenant_id}-2"})
         assert conversation.context.get("flow_current_node_id") == condition_node_id
+        assert runtime_flow_versions[-1] == runtime_flow_versions[0]
         assert called_session_nodes[-1] == condition_node_id
         assert sent[-1][1] == "Resposta A"
         assert sessions[(tenant_id, "5511999990001")].status == "completed"

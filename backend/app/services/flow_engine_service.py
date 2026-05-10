@@ -585,156 +585,71 @@ def _republish_from_current_nodes(db: Session, flow: Flow) -> FlowVersion | None
     flow.version = v.version
     db.add(flow)
     return v
-def resolve_runtime_flow_graph(db: Session, tenant_id: uuid.UUID, flow_id: str) -> dict[str, Any]:
+def load_published_runtime_graph(
+    db: Session,
+    flow_id: str,
+    tenant_id: uuid.UUID,
+    flow_version_id: uuid.UUID | None = None,
+) -> dict[str, Any]:
     flow = resolve_flow(db=db, tenant_id=tenant_id, flow_id=flow_id)
-    cached = None
+    selected_version_id = flow_version_id or _parse_uuid(getattr(flow, "published_version_id", None))
+    if not selected_version_id:
+        raise HTTPException(status_code=409, detail=f"Flow {flow.id} sem published_version_id. Publique uma versão antes de executar.")
 
-    selected_version = None
-    source = "none"
-    if not flow.published_version_id:
-        raise HTTPException(
-            status_code=409,
-            detail=f"Flow {flow.id} sem published_version_id. Publique uma versão antes de executar.",
-        )
-    if flow.published_version_id:
-        selected_version = _get_valid_flow_version_by_id(db=db, flow=flow, version_id=flow.published_version_id)
-        source = "published_version"
-        if not selected_version:
-            invalid_version = _get_flow_version_by_id(db=db, flow=flow, version_id=flow.published_version_id)
-            invalid_nodes = invalid_version.nodes if invalid_version and isinstance(invalid_version.nodes, list) else []
-            invalid_edges = invalid_version.edges if invalid_version and isinstance(invalid_version.edges, list) else []
-            runtime_validation = validate_flow({"nodes": invalid_nodes, "edges": invalid_edges}, mode="published")
-            validation_errors = runtime_validation.get("errors") if isinstance(runtime_validation, dict) else []
-            if not isinstance(validation_errors, list):
-                validation_errors = [validation_errors]
-            start_node_id = None
-            for node in invalid_nodes:
-                if not isinstance(node, dict):
-                    continue
-                data = node.get("data") if isinstance(node.get("data"), dict) else {}
-                if data.get("isStart"):
-                    start_node_id = str(node.get("id") or "") or None
-                    break
-
-            should_raise_invalid_published = (
-                invalid_version is None
-                or len(invalid_nodes) == 0
-                or not start_node_id
-                or len(validation_errors) > 0
-            )
-            if should_raise_invalid_published:
-                start_text_preview = _start_preview_from_nodes(invalid_nodes)
-                logger.warning(
-                    "[RUNTIME INVALID PUBLISHED VERSION] flow_id=%s version_id=%s nodes_count=%s edges_count=%s validation_errors=%s start_node_id=%s start_text_preview=%s",
-                    flow.id,
-                    str(flow.published_version_id),
-                    len(invalid_nodes),
-                    len(invalid_edges),
-                    validation_errors,
-                    start_node_id,
-                    start_text_preview,
-                )
-                raise HTTPException(
-                    status_code=409,
-                    detail=f"Published version inválida para flow {flow.id}. Execute force-republish-current.",
-                )
-
-            selected_version = invalid_version
-            logger.info(
-                "[RUNTIME PUBLISHED VERSION OK] flow_id=%s version_id=%s nodes_count=%s edges_count=%s start_node_id=%s validation_errors=%s",
-                flow.id,
-                str(flow.published_version_id),
-                len(invalid_nodes),
-                len(invalid_edges),
-                start_node_id,
-                validation_errors,
-            )
-    if not selected_version:
-        raise HTTPException(
-            status_code=409,
-            detail=f"Nenhuma versão executável encontrada para flow {flow.id}.",
-        )
-
+    selected_version = _get_flow_version_by_id(db=db, flow=flow, version_id=selected_version_id)
     nodes = selected_version.nodes if selected_version and isinstance(selected_version.nodes, list) else []
     edges = selected_version.edges if selected_version and isinstance(selected_version.edges, list) else []
-    if not nodes:
-        raise HTTPException(
-            status_code=409,
-            detail=f"Published version vazia para flow {flow.id}.",
-        )
-    logger.info(
-        "[RUNTIME VERSION] flow_id=%s source=%s version_id=%s version_number=%s",
-        flow.id,
-        source,
-        getattr(selected_version, "id", None),
-        getattr(selected_version, "version", None),
-    )
-    logger.info("[NODES COUNT] flow_id=%s runtime_nodes=%s runtime_edges=%s", flow.id, len(nodes), len(edges))
-    mismatch = bool(selected_version and selected_version.flow_id != flow.id)
-    if mismatch:
-        logger.warning(
-            "[FLOW VERSION MISMATCH] flow_id=%s selected_version_id=%s selected_flow_id=%s",
-            flow.id,
-            getattr(selected_version, "id", None),
-            getattr(selected_version, "flow_id", None),
-        )
-        raise HTTPException(
-            status_code=409,
-            detail=f"[FLOW VERSION MISMATCH] flow_id={flow.id}. Execute force-republish-current.",
-        )
 
-    runtime_nodes = nodes if isinstance(nodes, list) else []
-    runtime_edges = edges if isinstance(edges, list) else []
-    graph_checksum = _compute_graph_checksum(runtime_nodes, runtime_edges)
-    cache_key = _runtime_cache_key(tenant_id, flow.id, getattr(selected_version, "id", None), graph_checksum)
+    if not nodes:
+        logger.error("[RUNTIME GRAPH EMPTY_BLOCKED] flow_id=%s tenant_id=%s flow_version_id=%s source=%s", flow.id, tenant_id, selected_version_id, "published_version")
+        raise HTTPException(status_code=409, detail=f"Published version vazia para flow {flow.id}.")
+
+    node_ids = [str(node.get("id")) for node in nodes if isinstance(node, dict) and node.get("id") is not None]
+    has_template_node = any(node_id.startswith("template-") for node_id in node_ids)
+    has_template_edge = any(
+        str(edge.get("source") or "").startswith("template-") or str(edge.get("target") or "").startswith("template-")
+        for edge in edges
+        if isinstance(edge, dict)
+    )
+    if has_template_node or has_template_edge:
+        logger.error("[RUNTIME GRAPH TEMPLATE_ID_BLOCKED] flow_id=%s tenant_id=%s flow_version_id=%s source=%s", flow.id, tenant_id, selected_version_id, "published_version")
+        raise HTTPException(status_code=409, detail=f"Published version com ids template-* para flow {flow.id}.")
+
+    logger.info(
+        "[RUNTIME GRAPH SOURCE] source=%s flow_id=%s tenant_id=%s flow_version_id=%s nodes_count=%s edges_count=%s node_ids=%s",
+        "published_version",
+        flow.id,
+        tenant_id,
+        selected_version_id,
+        len(nodes),
+        len(edges),
+        node_ids,
+    )
+
+    graph_checksum = _compute_graph_checksum(nodes, edges)
+    cache_key = _runtime_cache_key(tenant_id, flow.id, selected_version_id, graph_checksum)
     cached = _FLOW_RUNTIME_CACHE.get(cache_key)
-    if cached:
-        return cached
+    if cached and isinstance(cached.get("nodes"), list) and cached.get("nodes"):
+        cached_node_ids = [str(node.get("id")) for node in cached.get("nodes", []) if isinstance(node, dict) and node.get("id") is not None]
+        if cached_node_ids and not any(node_id.startswith("template-") for node_id in cached_node_ids):
+            return cached
+
     runtime_payload = {
+        "source": "published_version",
         "flow_id": str(flow.id),
-        "version_id": str(selected_version.id) if selected_version else None,
-        "source": source,
+        "flow_version_id": str(selected_version_id),
+        "version_id": str(selected_version_id),
+        "nodes": nodes,
+        "edges": edges if isinstance(edges, list) else [],
         "graph_checksum": graph_checksum,
         "cache_key": cache_key,
-        "nodes": runtime_nodes,
-        "edges": runtime_edges,
     }
-    start_node_id = None
-    for node in runtime_payload["nodes"]:
-        if not isinstance(node, dict):
-            continue
-        data = node.get("data") if isinstance(node.get("data"), dict) else {}
-        if bool(data.get("isStart")):
-            start_node_id = str(node.get("id") or "") or None
-            break
-    start_text_preview = _start_preview_from_nodes(runtime_payload["nodes"])
-    logger.info(
-        "[RUNTIME GRAPH SOURCE] flow_id=%s version_id=%s version=%s source=%s start_node_id=%s start_text_preview=%s",
-        flow.id,
-        runtime_payload["version_id"],
-        getattr(selected_version, "version", None),
-        runtime_payload["source"],
-        start_node_id,
-        start_text_preview,
-    )
-    logger.info(
-        "[FLOW_RUNTIME_SELECTED] flow_id=%s version_id=%s source=%s nodes=%s edges=%s",
-        runtime_payload["flow_id"],
-        runtime_payload["version_id"],
-        runtime_payload["source"],
-        len(runtime_payload["nodes"]),
-        len(runtime_payload["edges"]),
-    )
-    logger.info(
-        "[FLOW VERSION] flow_id=%s published_version_id=%s current_version_id=%s selected_version_id=%s source=%s",
-        flow.id,
-        flow.published_version_id,
-        flow.current_version_id,
-        runtime_payload["version_id"],
-        runtime_payload["source"],
-    )
     _FLOW_RUNTIME_CACHE[cache_key] = runtime_payload
     return runtime_payload
+
+
+def resolve_runtime_flow_graph(db: Session, tenant_id: uuid.UUID, flow_id: str) -> dict[str, Any]:
+    return load_published_runtime_graph(db=db, flow_id=flow_id, tenant_id=tenant_id)
 
 
 def _load_flow_version_runtime(flow: Flow, tenant_id: uuid.UUID, flow_version: FlowVersion) -> dict[str, Any]:
@@ -820,8 +735,8 @@ def _empty_runtime_graph() -> dict[str, Any]:
     return {"nodes": [], "edges": [], "node_map": {}, "edges_by_source": {}}
 
 
-def _get_current_flow_runtime(db: Session, flow: Flow, tenant_id: uuid.UUID) -> dict[str, Any]:
-    resolved = resolve_runtime_flow_graph(db=db, tenant_id=tenant_id, flow_id=str(flow.id))
+def _get_current_flow_runtime(db: Session, flow: Flow, tenant_id: uuid.UUID, flow_version_id: uuid.UUID | None = None) -> dict[str, Any]:
+    resolved = load_published_runtime_graph(db=db, flow_id=str(flow.id), tenant_id=tenant_id, flow_version_id=flow_version_id)
     if not resolved["nodes"]:
         return _empty_runtime_graph()
     runtime_version = FlowVersion(
@@ -2371,7 +2286,8 @@ def process_flow_engine(
             getattr(runtime_session, "id", None),
         )
 
-    runtime_graph = _get_current_flow_runtime(db=db, flow=flow, tenant_id=conversation.tenant_id)
+    session_flow_version_id = _parse_uuid(getattr(runtime_session, "flow_version_id", None)) if runtime_session else None
+    runtime_graph = _get_current_flow_runtime(db=db, flow=flow, tenant_id=conversation.tenant_id, flow_version_id=session_flow_version_id)
     runtime_node_ids = [
         str(node.get("id"))
         for node in (runtime_graph.get("nodes") if isinstance(runtime_graph, dict) else [])
@@ -2400,10 +2316,12 @@ def process_flow_engine(
             current_graph_node = _get_node(db=db, node_id=saved_current_node_id, tenant_id=conversation.tenant_id, runtime_graph=runtime_graph)
             if not current_graph_node:
                 logger.error(
-                    "[FLOW SESSION_NODE_NOT_FOUND_IN_GRAPH] session_node_id=%s flow_id=%s graph_node_ids=%s",
+                    "[FLOW SESSION_NODE_NOT_FOUND_IN_GRAPH] session_node_id=%s graph_node_ids=%s runtime_graph_source=%s session_flow_version_id=%s published_version_id=%s",
                     saved_current_node_id,
-                    flow.id,
                     runtime_node_ids,
+                    runtime_graph.get("source"),
+                    getattr(runtime_session, "flow_version_id", None),
+                    runtime_graph.get("flow_version_id"),
                 )
                 return None
             logger.info("[FLOW SESSION NODE FOUND] node_type=%s", _node_type_slug(current_graph_node))
