@@ -4,8 +4,8 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models.tenant import Tenant
 from app.schemas.whatsapp_business import TenantWhatsAppProviderCreate, TenantWhatsAppProviderOut, TenantWhatsAppProviderUpdate
-from app.services.tenant_service import get_current_tenant
 from app.services import whatsapp_provider_service
+from app.services.tenant_service import get_current_tenant
 
 router = APIRouter(prefix="/api/whatsapp/providers", tags=["whatsapp-providers"])
 
@@ -18,7 +18,7 @@ def get_providers(request: Request, db: Session = Depends(get_db), tenant: Tenan
 
 @router.post("", response_model=TenantWhatsAppProviderOut)
 def create_provider(request: Request, payload: TenantWhatsAppProviderCreate, db: Session = Depends(get_db), tenant: Tenant = Depends(get_current_tenant)):
-    print("[WHATSAPP PROVIDERS CREATE]", f"tenant_id={tenant.id}")
+    print("[WHATSAPP PROVIDER CREATE]", f"tenant_id={tenant.id}")
     return whatsapp_provider_service.create_provider(db, tenant.id, payload)
 
 
@@ -32,6 +32,7 @@ def patch_provider(provider_id: str, payload: TenantWhatsAppProviderUpdate, db: 
 
 @router.post("/{provider_id}/activate", response_model=TenantWhatsAppProviderOut)
 def activate_provider(provider_id: str, db: Session = Depends(get_db), tenant: Tenant = Depends(get_current_tenant)):
+    print("[WHATSAPP PROVIDER ACTIVATE]", f"tenant_id={tenant.id}", f"provider_id={provider_id}")
     try:
         return whatsapp_provider_service.set_active_provider(db, tenant.id, provider_id)
     except ValueError as exc:
@@ -40,6 +41,7 @@ def activate_provider(provider_id: str, db: Session = Depends(get_db), tenant: T
 
 @router.post("/{provider_id}/test")
 def test_provider(provider_id: str, db: Session = Depends(get_db), tenant: Tenant = Depends(get_current_tenant)):
+    print("[WHATSAPP PROVIDER TEST]", f"tenant_id={tenant.id}", f"provider_id={provider_id}")
     try:
         return whatsapp_provider_service.test_provider_connection(db, tenant.id, provider_id)
     except ValueError as exc:

@@ -4,8 +4,8 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models.tenant import Tenant
 from app.schemas.whatsapp_business import WhatsAppTemplateCreate, WhatsAppTemplateOut, WhatsAppTemplateUpdate
-from app.services.tenant_service import get_current_tenant
 from app.services import whatsapp_template_service
+from app.services.tenant_service import get_current_tenant
 
 router = APIRouter(prefix="/api/whatsapp/templates", tags=["whatsapp-templates"])
 
@@ -15,6 +15,7 @@ def get_templates(db: Session = Depends(get_db), tenant: Tenant = Depends(get_cu
 
 @router.post("", response_model=WhatsAppTemplateOut)
 def create_template(payload: WhatsAppTemplateCreate, db: Session = Depends(get_db), tenant: Tenant = Depends(get_current_tenant)):
+    print("[WHATSAPP TEMPLATE CREATE]", f"tenant_id={tenant.id}", f"provider_id={payload.provider_id}")
     return whatsapp_template_service.create_template(db, tenant.id, payload)
 
 @router.patch("/{template_id}", response_model=WhatsAppTemplateOut)
@@ -33,6 +34,7 @@ def remove_template(template_id: str, db: Session = Depends(get_db), tenant: Ten
 
 @router.post("/{template_id}/submit", response_model=WhatsAppTemplateOut)
 def submit_template(template_id: str, db: Session = Depends(get_db), tenant: Tenant = Depends(get_current_tenant)):
+    print("[WHATSAPP TEMPLATE SUBMIT]", f"tenant_id={tenant.id}", f"template_id={template_id}")
     try:
         return whatsapp_template_service.submit_template_placeholder(db, tenant.id, template_id)
     except ValueError as exc:
@@ -40,4 +42,5 @@ def submit_template(template_id: str, db: Session = Depends(get_db), tenant: Ten
 
 @router.post("/sync")
 def sync_templates(db: Session = Depends(get_db), tenant: Tenant = Depends(get_current_tenant)):
+    print("[WHATSAPP TEMPLATE SYNC]", f"tenant_id={tenant.id}")
     return whatsapp_template_service.sync_templates_placeholder(db, tenant.id)
