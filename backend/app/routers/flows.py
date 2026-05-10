@@ -5,7 +5,6 @@ import logging
 import asyncio
 import hashlib
 import json
-import os
 from datetime import datetime
 from typing import Any
 
@@ -2158,22 +2157,25 @@ def publish_tenant_flow_version(
         db.rollback()
         logger.error("[PUBLISH FLOW FAILED] flow_id=%s reason=%s", flow_id, exc)
         return JSONResponse(status_code=400, content={"error": "INVALID_FLOW_GRAPH", "message": str(exc)})
-    except Exception as exc:
+    except Exception as e:
         db.rollback()
-        debug_type = type(exc).__name__
-        debug_message = str(exc)
         logger.exception(
-            "[PUBLISH FLOW UNEXPECTED ERROR] type=%s message=%s flow_id=%s tenant_id=%s",
-            debug_type,
-            debug_message,
+            "[PUBLISH FLOW UNEXPECTED ERROR] flow_id=%s tenant_id=%s type=%s message=%s",
             flow_id,
             x_tenant_id,
+            type(e).__name__,
+            str(e),
         )
-        content = {"error": "PUBLISH_FAILED", "message": "Erro inesperado ao publicar fluxo."}
-        if os.getenv("ENV") != "production" or str(os.getenv("DEBUG_PUBLISH_ERRORS", "")).lower() == "true":
-            content["debug_type"] = debug_type
-            content["debug_message"] = debug_message
-        return JSONResponse(status_code=500, content=content)
+        print("[PUBLISH FLOW UNEXPECTED ERROR]", type(e).__name__, str(e), flush=True)
+        return JSONResponse(
+            status_code=500,
+            content={
+                "error": "PUBLISH_FAILED",
+                "message": "Erro inesperado ao publicar fluxo.",
+                "debug_type": type(e).__name__,
+                "debug_message": str(e),
+            },
+        )
 
 
 @crud_router.post("/{flow_id}/republish", response_model=FlowVersionResponse)
