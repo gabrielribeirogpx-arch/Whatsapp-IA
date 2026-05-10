@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 import logging
-import os
 import uuid
 from typing import Any
 
 from app.db.session import SessionLocal
 from app.core.redis_client import get_redis_client
+from sqlalchemy import select
+
 from app.models import Tenant
+from app.services.whatsapp_credentials_service import WhatsAppCredentialsNotConfiguredError, get_tenant_whatsapp_credentials
 from app.services.whatsapp_service import (
     send_whatsapp_interactive_buttons,
     send_whatsapp_message as send_whatsapp_text_message,
@@ -77,7 +79,7 @@ def send_whatsapp_message(*, message_data: dict[str, Any]) -> None:
             return
 
         with SessionLocal() as db:
-            tenant = db.query(Tenant).filter(Tenant.id == tenant_uuid).first()
+            tenant = db.execute(select(Tenant).where(Tenant.id == tenant_uuid)).scalars().first()
             if not tenant:
                 logger.warning(
                     "event=queue_send_skip correlation_id=%s tenant_id=%s phone=%s job_id=%s stage=send_worker_resolve reason=tenant_not_found",
@@ -88,30 +90,20 @@ def send_whatsapp_message(*, message_data: dict[str, Any]) -> None:
                 )
                 return
 
-        tenant_phone_number_id = str(getattr(tenant, "phone_number_id", "") or "").strip()
-        tenant_token = str(getattr(tenant, "whatsapp_token", "") or "").strip()
-
-        resolved_phone_number_id = (
-            tenant_phone_number_id
-            or str(os.getenv("WHATSAPP_PHONE_NUMBER_ID") or "").strip()
-            or str(os.getenv("PHONE_NUMBER_ID") or "").strip()
-        )
-        resolved_token = tenant_token or str(os.getenv("WHATSAPP_TOKEN") or "").strip()
-
-        if not resolved_phone_number_id or not resolved_token:
+        try:
+            credentials = get_tenant_whatsapp_credentials(tenant_id)
+            resolved_phone_number_id = credentials["phone_number_id"]
+            resolved_token = credentials["token"]
+        except WhatsAppCredentialsNotConfiguredError:
             logger.error(
-                "event=queue_send_error correlation_id=%s tenant_id=%s phone=%s job_id=%s stage=send_worker_resolve reason=missing_whatsapp_credentials has_phone_number_id=%s has_token=%s",
+                "event=queue_send_error correlation_id=%s tenant_id=%s phone=%s job_id=%s stage=send_worker_resolve reason=missing_whatsapp_credentials error=[WHATSAPP NOT CONFIGURED] tenant_id=%s",
                 correlation_id,
                 tenant_id,
                 phone,
                 job_id,
-                bool(resolved_phone_number_id),
-                bool(resolved_token),
+                tenant_id,
             )
             return
-
-        tenant.phone_number_id = resolved_phone_number_id
-        tenant.whatsapp_token = resolved_token
 
         if buttons:
             send_whatsapp_interactive_buttons(

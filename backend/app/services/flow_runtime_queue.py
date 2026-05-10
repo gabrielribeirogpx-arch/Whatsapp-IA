@@ -37,10 +37,15 @@ def run_flow_job(flow_id: str, conversation_id: str, message: str, message_id: s
                 conversation_id=str(conversation_id),
                 input_text=str(message or ""),
             )
+            from app.models import Conversation
             from app.services.whatsapp_service import send_whatsapp_message_cloud
 
+            conversation = db.query(Conversation).filter(Conversation.id == conversation_id).first()
+            if not conversation:
+                return result
+
             for msg in result.get("responses", []):
-                send_whatsapp_message_cloud(conversation_id, msg)
+                send_whatsapp_message_cloud(conversation_id, msg, tenant_id=str(conversation.tenant_id))
 
             logger.info(
                 "[FLOW JOB END] job_id=%s flow_id=%s conversation_id=%s steps=%s status=%s",

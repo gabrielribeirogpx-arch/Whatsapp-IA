@@ -1,9 +1,11 @@
 from fastapi import APIRouter, Request
 
 from app.core.whatsapp_config import WHATSAPP_VERIFY_TOKEN
+from app.models import Tenant
 from app.services.flow_engine import run_flow_from_message
 from app.services.intent_service import classify_intent, route_intent
 from app.services.whatsapp_service import send_whatsapp_message_simple
+from app.database import SessionLocal
 
 router = APIRouter()
 
@@ -45,14 +47,21 @@ async def receive_message(request: Request):
         print("[INTENT]:", intent)
 
         response = run_flow_from_message(phone, text)
+        phone_number_id = value.get("metadata", {}).get("phone_number_id")
+        with SessionLocal() as db:
+            tenant = db.query(Tenant).filter(Tenant.phone_number_id == phone_number_id).first() if phone_number_id else None
+
+        if not tenant:
+            print(f"[WHATSAPP NOT CONFIGURED] tenant_id= metadata_phone_number_id={phone_number_id}")
+            return {"status": "ignored", "message": "Configure sua integração WhatsApp nas configurações."}
         print("FLOW RESPONSE:", response)
 
         messages = response.get("messages") if isinstance(response, dict) else None
         if messages:
             for msg in messages:
-                send_whatsapp_message_simple(phone, msg["content"])
+                send_whatsapp_message_simple(phone, msg["content"], tenant_id=str(tenant.id))
         else:
-            send_whatsapp_message_simple(phone, route_intent(intent))
+            send_whatsapp_message_simple(phone, route_intent(intent), tenant_id=str(tenant.id))
 
     except Exception as e:
         print("ERROR:", str(e))
