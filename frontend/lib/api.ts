@@ -24,7 +24,9 @@ import {
   FlowAnalytics,
   SystemSettings,
   SystemSettingsPayload,
-  DeleteFlowResponse
+  DeleteFlowResponse,
+  WhatsAppProvider,
+  WhatsAppTemplate
 } from './types';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL;
@@ -480,3 +482,20 @@ export async function updateSystemSettings(payload: SystemSettingsPayload): Prom
   });
   return parseApiResponse<SystemSettings>(res);
 }
+
+export async function listWhatsAppProviders(): Promise<WhatsAppProvider[]> {
+  const res = await apiFetch('/api/whatsapp/providers');
+  return parseApiResponse<WhatsAppProvider[]>(res);
+}
+export async function createWhatsAppProvider(payload: Record<string, unknown>): Promise<WhatsAppProvider> {
+  const res = await apiFetch('/api/whatsapp/providers', { method: 'POST', body: JSON.stringify(payload) });
+  return parseApiResponse<WhatsAppProvider>(res);
+}
+export async function testWhatsAppProvider(providerId: string) {
+  const res = await apiFetch(`/api/whatsapp/providers/${providerId}/test`, { method: 'POST' });
+  return parseApiResponse<{ok:boolean;status:string;message:string}>(res);
+}
+export async function listTemplates(): Promise<WhatsAppTemplate[]> { const res = await apiFetch('/api/whatsapp/templates'); return parseApiResponse<WhatsAppTemplate[]>(res); }
+export async function createTemplate(payload: Record<string, unknown>): Promise<WhatsAppTemplate> { const res = await apiFetch('/api/whatsapp/templates', { method:'POST', body: JSON.stringify(payload)}); return parseApiResponse<WhatsAppTemplate>(res); }
+export async function submitTemplate(templateId: string): Promise<WhatsAppTemplate> { const res = await apiFetch(`/api/whatsapp/templates/${templateId}/submit`, {method:'POST'}); return parseApiResponse<WhatsAppTemplate>(res); }
+export async function syncTemplates(){ const res = await apiFetch('/api/whatsapp/templates/sync', {method:'POST'}); return parseApiResponse<{ok:boolean;message:string;count:number}>(res); }
