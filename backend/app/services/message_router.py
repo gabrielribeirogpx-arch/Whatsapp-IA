@@ -50,6 +50,32 @@ def handle_incoming_message(db: Session, message: Message, conversation: Convers
     print(f"[FLOW] node={conversation.current_node_id}")
 
     session_service = FlowSessionService(db)
+    active_flow_for_state = get_active_visual_flow(db=db, tenant_id=conversation.tenant_id)
+    if active_flow_for_state:
+        state = session_service.get_runtime_session_state(
+            tenant_id=conversation.tenant_id,
+            phone=conversation.phone_number,
+            flow_id=active_flow_for_state.id,
+        )
+        latest_session = state["session"]
+        session_node_id = getattr(latest_session, "current_node_id", None) if latest_session else None
+        variables_node_id = (
+            latest_session.variables.get("current_node_id")
+            if latest_session and isinstance(latest_session.variables, dict)
+            else None
+        )
+        context_node_id = (
+            (conversation.context or {}).get("flow_current_node_id")
+            if isinstance(conversation.context, dict)
+            else None
+        )
+        resolved_node_id = session_node_id or variables_node_id or context_node_id
+        if resolved_node_id and str(conversation.current_node_id or "") != str(resolved_node_id):
+            print(f"[FLOW CONTINUE USING_SESSION_NODE] resolved_node_id={resolved_node_id}")
+            conversation.current_node_id = resolved_node_id
+            db.add(conversation)
+            db.commit()
+            db.refresh(conversation)
 
     def _check_finalized_flow_block(active_flow):
         if not active_flow:
