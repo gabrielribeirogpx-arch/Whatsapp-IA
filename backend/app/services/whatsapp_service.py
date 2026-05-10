@@ -1,11 +1,10 @@
 import logging
-import os
 import re
 from typing import Any
 
 import requests
 
-from app.core.whatsapp_config import WHATSAPP_PHONE_NUMBER_ID, WHATSAPP_TOKEN
+from app.services.whatsapp_credentials_service import get_tenant_whatsapp_credentials
 
 logger = logging.getLogger(__name__)
 
@@ -63,14 +62,9 @@ def send_message(token: str, phone_number_id: str, to: str, message: str) -> dic
         raise
 
 
-def enviar_mensagem(numero: str, mensagem: str, *, token: str | None = None, phone_number_id: str | None = None) -> dict[str, Any]:
-    token = token or os.getenv("WHATSAPP_TOKEN")
-    resolved_phone_number_id = (
-        phone_number_id
-        or os.getenv("WHATSAPP_PHONE_NUMBER_ID")
-        or os.getenv("PHONE_NUMBER_ID")
-    )
-    return send_message(token or "", resolved_phone_number_id or "", numero, mensagem)
+def enviar_mensagem(numero: str, mensagem: str, *, tenant_id: str) -> dict[str, Any]:
+    credentials = get_tenant_whatsapp_credentials(tenant_id)
+    return send_message(credentials["token"], credentials["phone_number_id"], numero, mensagem)
 
 
 def send_whatsapp_message(*, phone: str, text: str, token: str, phone_number_id: str) -> dict[str, Any]:
@@ -158,51 +152,17 @@ def send_whatsapp_interactive_buttons(
         raise
 
 
-def send_whatsapp_message_cloud(phone: str, text: str) -> dict[str, Any]:
-    url = f"https://graph.facebook.com/v18.0/{os.getenv('WHATSAPP_PHONE_ID')}/messages"
-
-    headers = {
-        "Authorization": f"Bearer {os.getenv('WHATSAPP_TOKEN')}",
-        "Content-Type": "application/json",
-    }
-
-    data = {
-        "messaging_product": "whatsapp",
-        "to": phone,
-        "type": "text",
-        "text": {"body": text},
-    }
-
-    response = requests.post(url, headers=headers, json=data, timeout=15)
-    print("[WHATSAPP SEND]", response.text)
-    return {"status_code": response.status_code, "body": response.text}
+def send_whatsapp_message_cloud(phone: str, text: str, *, tenant_id: str) -> dict[str, Any]:
+    credentials = get_tenant_whatsapp_credentials(tenant_id)
+    return send_whatsapp_message(phone=phone, text=text, token=credentials["token"], phone_number_id=credentials["phone_number_id"])
 
 
-def send_whatsapp_message_simple(to: str, text: str):
-    url = f"https://graph.facebook.com/v19.0/{WHATSAPP_PHONE_NUMBER_ID}/messages"
-
-    headers = {
-        "Authorization": f"Bearer {WHATSAPP_TOKEN}",
-        "Content-Type": "application/json"
-    }
-
-    payload = {
-        "messaging_product": "whatsapp",
-        "to": to,
-        "type": "text",
-        "text": {
-            "body": text
-        }
-    }
-
-    response = requests.post(url, json=payload, headers=headers)
-
-    print("WHATSAPP RESPONSE:", response.text)
-
-    return response.json()
+def send_whatsapp_message_simple(to: str, text: str, *, tenant_id: str):
+    credentials = get_tenant_whatsapp_credentials(tenant_id)
+    return send_whatsapp_message(phone=to, text=text, token=credentials["token"], phone_number_id=credentials["phone_number_id"])
 
 
-def send_whatsapp_buttons(phone: str, node: dict[str, Any]):
+def send_whatsapp_buttons(phone: str, node: dict[str, Any], *, tenant_id: str):
     buttons = node.get("data", {}).get("buttons", [])
 
     interactive_buttons = [
@@ -231,15 +191,11 @@ def send_whatsapp_buttons(phone: str, node: dict[str, Any]):
         }
     }
 
-    response = requests.post(
-        f"https://graph.facebook.com/v19.0/{WHATSAPP_PHONE_NUMBER_ID}/messages",
-        headers={
-            "Authorization": f"Bearer {WHATSAPP_TOKEN}",
-            "Content-Type": "application/json"
-        },
-        json=payload
+    credentials = get_tenant_whatsapp_credentials(tenant_id)
+    return send_whatsapp_interactive_buttons(
+        phone=phone,
+        body_text=node.get("data", {}).get("content") or "",
+        buttons=buttons,
+        token=credentials["token"],
+        phone_number_id=credentials["phone_number_id"],
     )
-
-    print("BUTTON RESPONSE:", response.text)
-
-    return response.json()
