@@ -71,9 +71,11 @@ def handle_incoming_message(db: Session, message: Message, conversation: Convers
         )
         resolved_node_id = session_node_id or variables_node_id or context_node_id
         resolution_source = "session" if session_node_id else ("variables" if variables_node_id else ("context" if context_node_id else "none"))
-        if resolved_node_id and str(conversation.current_node_id or "") != str(resolved_node_id):
-            print(f"[FLOW CONTINUE USING_SESSION_NODE] resolved_node_id={resolved_node_id}")
-            conversation.current_node_id = resolved_node_id
+        if resolved_node_id:
+            print(f"[CONVERSATION CURRENT_NODE SKIPPED_FOR_VERSIONED_FLOW] resolved_node_id={resolved_node_id} source={resolution_source}")
+            if not isinstance(conversation.context, dict):
+                conversation.context = {}
+            conversation.context["flow_current_node_id"] = str(resolved_node_id)
             db.add(conversation)
             db.commit()
             db.refresh(conversation)
