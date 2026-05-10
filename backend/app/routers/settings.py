@@ -1,5 +1,6 @@
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -80,7 +81,22 @@ def update_settings(
         db.add(tenant)
         db.commit()
         db.refresh(tenant)
+    except IntegrityError as error:
+        db.rollback()
+        print("[SETTINGS ERROR]", error)
+        constraint_name = ""
+        if getattr(error, "orig", None) is not None:
+            constraint_name = getattr(getattr(error.orig, "diag", None), "constraint_name", "") or ""
+
+        message = str(error)
+        if "ix_tenants_phone_number_id" in constraint_name or "ix_tenants_phone_number_id" in message:
+            raise HTTPException(
+                status_code=409,
+                detail="Este Phone Number ID já está vinculado a outro tenant. Use outro número ou desvincule do tenant anterior.",
+            ) from error
+        raise
     except Exception as error:
+        db.rollback()
         print("[SETTINGS ERROR]", error)
         raise
 

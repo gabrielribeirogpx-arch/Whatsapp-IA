@@ -5,6 +5,28 @@ import { FormEvent, useEffect, useState } from 'react';
 import { getSystemSettings, updateSystemSettings } from '../../../lib/api';
 import { SystemSettingsPayload } from '../../../lib/types';
 
+
+function extractApiDetailMessage(error: unknown): string | null {
+  if (!(error instanceof Error)) return null;
+
+  const payloadStart = error.message.indexOf(':');
+  if (payloadStart === -1) return null;
+
+  const possibleJson = error.message.slice(payloadStart + 1).trim();
+  if (!possibleJson.startsWith('{')) return null;
+
+  try {
+    const parsed = JSON.parse(possibleJson) as { detail?: string };
+    if (typeof parsed.detail === 'string' && parsed.detail.trim()) {
+      return parsed.detail.trim();
+    }
+  } catch {
+    return null;
+  }
+
+  return null;
+}
+
 const INITIAL_FORM: SystemSettingsPayload = {
   token: '',
   phone_number_id: '',
@@ -57,9 +79,10 @@ export default function SettingsPage() {
       });
       setStatusType('success');
       setStatusMessage('Configurações salvas com sucesso.');
-    } catch {
+    } catch (error) {
       setStatusType('error');
-      setStatusMessage('Erro ao salvar configurações. Tente novamente.');
+      const detailMessage = extractApiDetailMessage(error);
+      setStatusMessage(detailMessage || 'Erro ao salvar configurações. Tente novamente.');
     } finally {
       setSaving(false);
     }
