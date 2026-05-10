@@ -1015,6 +1015,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
       console.error(error);
       const message = error instanceof Error && error.message ? error.message : 'Erro ao salvar fluxo.';
       setFlowValidationError(message);
+      throw error;
     } finally {
       setIsSaving(false);
     }
@@ -1061,7 +1062,14 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
 
     try {
       if (hasUnsavedChanges) {
-        await handleSaveFlow();
+        console.log('[PUBLISH SAVE BEFORE START]', { flowId: selectedFlowId });
+        try {
+          await handleSaveFlow();
+          console.log('[PUBLISH SAVE BEFORE SUCCESS]', { flowId: selectedFlowId });
+        } catch (saveError) {
+          console.error('[PUBLISH SAVE BEFORE FAILED]', { flowId: selectedFlowId, error: saveError });
+          throw saveError;
+        }
       }
 
       console.log('[PUBLISH REQUEST]', { flowId: selectedFlowId });

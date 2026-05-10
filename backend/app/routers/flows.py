@@ -5,6 +5,7 @@ import logging
 import asyncio
 import hashlib
 import json
+import os
 from datetime import datetime
 from typing import Any
 
@@ -2117,6 +2118,16 @@ def publish_tenant_flow_version(
         nodes = fresh_version.nodes if isinstance(fresh_version.nodes, list) else []
         edges = fresh_version.edges if isinstance(fresh_version.edges, list) else []
 
+        logger.info(
+            "[PUBLISH FLOW GRAPH SNAPSHOT] flow_id=%s tenant_id=%s nodes_count=%s edges_count=%s node_ids=%s edge_pairs=%s raw_graph_keys=%s",
+            flow_id,
+            tenant_uuid,
+            len(nodes),
+            len(edges),
+            [str(node.get("id")) for node in nodes if isinstance(node, dict)],
+            [(str(edge.get("source")), str(edge.get("target"))) for edge in edges if isinstance(edge, dict)],
+            list((getattr(flow, "graph", {}) or {}).keys()) if isinstance(getattr(flow, "graph", {}), dict) else [],
+        )
         logger.info("[PUBLISH FLOW VALIDATION] flow_id=%s nodes_count=%s edges_count=%s", flow_id, len(nodes), len(edges))
         _validate_publish_graph_or_raise(nodes, edges)
         validate_flow_payload_or_400(nodes, edges)
@@ -2149,8 +2160,20 @@ def publish_tenant_flow_version(
         return JSONResponse(status_code=400, content={"error": "INVALID_FLOW_GRAPH", "message": str(exc)})
     except Exception as exc:
         db.rollback()
-        logger.exception("[PUBLISH FLOW FAILED] flow_id=%s", flow_id)
-        return JSONResponse(status_code=500, content={"error": "PUBLISH_FAILED", "message": "Erro inesperado ao publicar fluxo."})
+        debug_type = type(exc).__name__
+        debug_message = str(exc)
+        logger.exception(
+            "[PUBLISH FLOW UNEXPECTED ERROR] type=%s message=%s flow_id=%s tenant_id=%s",
+            debug_type,
+            debug_message,
+            flow_id,
+            x_tenant_id,
+        )
+        content = {"error": "PUBLISH_FAILED", "message": "Erro inesperado ao publicar fluxo."}
+        if os.getenv("ENV") != "production" or str(os.getenv("DEBUG_PUBLISH_ERRORS", "")).lower() == "true":
+            content["debug_type"] = debug_type
+            content["debug_message"] = debug_message
+        return JSONResponse(status_code=500, content=content)
 
 
 @crud_router.post("/{flow_id}/republish", response_model=FlowVersionResponse)
