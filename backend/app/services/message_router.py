@@ -70,12 +70,17 @@ def handle_incoming_message(db: Session, message: Message, conversation: Convers
             else None
         )
         resolved_node_id = session_node_id or variables_node_id or context_node_id
+        resolution_source = "session" if session_node_id else ("variables" if variables_node_id else ("context" if context_node_id else "none"))
         if resolved_node_id and str(conversation.current_node_id or "") != str(resolved_node_id):
             print(f"[FLOW CONTINUE USING_SESSION_NODE] resolved_node_id={resolved_node_id}")
             conversation.current_node_id = resolved_node_id
             db.add(conversation)
             db.commit()
             db.refresh(conversation)
+        elif not resolved_node_id and session_node_id:
+            print("[FLOW CONTINUE USING_SESSION_NODE] keeping session current_node_id precedence")
+        if resolution_source == "context" and session_node_id:
+            print("[FLOW CONTINUE USING_SESSION_NODE] context_node_ignored_due_to_session_precedence=true")
 
     def _check_finalized_flow_block(active_flow):
         if not active_flow:
