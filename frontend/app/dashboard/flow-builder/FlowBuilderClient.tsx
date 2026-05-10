@@ -1074,6 +1074,11 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
 
       console.log('[PUBLISH REQUEST]', { flowId: selectedFlowId });
       const response = await apiFetch(`/api/flows/${selectedFlowId}/publish`, { method: 'POST', body: JSON.stringify({}) });
+      if (!response.ok) {
+        const body = await response.text();
+        console.error('[PUBLISH ERROR BODY]', body);
+        throw new Error(`HTTP ${response.status}: ${body}`);
+      }
       const publishData = await parseApiResponse(response);
       console.log('[PUBLISH RESPONSE]', { flowId: selectedFlowId, status: response.status, payload: publishData });
 
