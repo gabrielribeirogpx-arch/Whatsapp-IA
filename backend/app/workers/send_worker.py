@@ -4,11 +4,16 @@ import logging
 import uuid
 from typing import Any
 
+from rq import get_current_job
+
 from app.db.session import SessionLocal
 from app.core.redis_client import get_redis_client
 from sqlalchemy import select
 
 from app.models import Tenant
+from app.models.conversation import Conversation
+from app.models.message import Message
+from app.services.idempotency_service import register_processed_message
 from app.services.whatsapp_credentials_service import WhatsAppCredentialsNotConfiguredError, get_tenant_whatsapp_credentials
 from app.services.whatsapp_service import (
     send_whatsapp_interactive_buttons,
@@ -16,6 +21,44 @@ from app.services.whatsapp_service import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _record_outbound_message(*, db, tenant_id: uuid.UUID, phone: str, text: str, message_id: str, flow_id: Any = None, flow_version_id: Any = None, flow_session_id: Any = None, node_id: Any = None) -> None:
+    if not register_processed_message(db=db, tenant_id=tenant_id, message_id=message_id):
+        logger.info("[OUTBOUND MESSAGE RECORD SKIPPED_DUPLICATE] tenant_id=%s conversation_id=%s flow_id=%s node_id=%s", tenant_id, "n/a", flow_id, node_id)
+        return
+
+    conversation = (
+        db.execute(
+            select(Conversation)
+            .where(Conversation.tenant_id == tenant_id, Conversation.phone_number == phone)
+            .order_by(Conversation.updated_at.desc(), Conversation.created_at.desc())
+            .limit(1)
+        )
+        .scalars()
+        .first()
+    )
+    if not conversation:
+        return
+
+    outbound = Message(
+        tenant_id=tenant_id,
+        conversation_id=conversation.id,
+        text=text,
+        from_me=True,
+    )
+    conversation.updated_at = outbound.created_at
+    db.add(outbound)
+    db.commit()
+    logger.info(
+        "[OUTBOUND MESSAGE RECORDED] tenant_id=%s conversation_id=%s flow_id=%s node_id=%s status=sent direction=outbound flow_version_id=%s flow_session_id=%s",
+        tenant_id,
+        conversation.id,
+        flow_id,
+        node_id,
+        flow_version_id,
+        flow_session_id,
+    )
 
 
 def _release_send_lock(redis_client: Any, lock_key: str, lock_token: str) -> None:
@@ -39,6 +82,7 @@ def send_whatsapp_message(*, message_data: dict[str, Any]) -> None:
     flow_version_id = message_data.get("flow_version_id")
     session_id = message_data.get("session_id")
     node_id = message_data.get("node_id")
+    flow_session_id = message_data.get("session_id")
 
     logger.info("event=send_worker_start correlation_id=%s tenant_id=%s phone=%s job_id=%s stage=send_worker_start", correlation_id, tenant_id or "n/a", phone or "n/a", job_id)
 
@@ -132,6 +176,21 @@ def send_whatsapp_message(*, message_data: dict[str, Any]) -> None:
         )
         if sequence_number is not None:
             redis_client.set(last_sent_key, sequence_number)
+
+        current_job = get_current_job()
+        dedupe_message_id = str(message_data.get("message_id") or message_data.get("job_id") or getattr(current_job, "id", None) or correlation_id)
+        with SessionLocal() as db:
+            _record_outbound_message(
+                db=db,
+                tenant_id=tenant_uuid,
+                phone=phone,
+                text=text,
+                message_id=f"outbound:{dedupe_message_id}",
+                flow_id=flow_id,
+                flow_version_id=flow_version_id,
+                flow_session_id=flow_session_id,
+                node_id=node_id,
+            )
     finally:
         _release_send_lock(redis_client, lock_key, lock_token)
         logger.info("[OUTBOUND SEND LOCK RELEASED] tenant_id=%s phone=%s", tenant_id, phone)
