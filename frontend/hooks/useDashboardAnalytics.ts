@@ -62,10 +62,23 @@ const DEFAULT_SERIES: NormalizedSeries = {
 
 type DashboardPeriod = '24h' | '7d' | '30d' | '90d';
 
+
+type DashboardSummary = {
+  top_flows?: Array<{ flow_id: string; name: string; conversations: number; conversion_rate: number }>;
+  channels?: Array<{ channel: string; count: number; percentage: number }>;
+  performance?: {
+    avg_response_time_seconds: number | null;
+    resolved_conversations: number;
+    csat: number | null;
+    abandonment_rate: number;
+  };
+};
+
 export function useDashboardAnalytics(period: DashboardPeriod = '7d') {
   const [data, setData] = useState<AnalyticsResponse | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [summary, setSummary] = useState<DashboardSummary | null>(null);
 
   useEffect(() => {
     void (async () => {
@@ -81,9 +94,13 @@ export function useDashboardAnalytics(period: DashboardPeriod = '7d') {
         }
 
         setData(payload);
+        const summaryRes = await apiFetch(`${process.env.NEXT_PUBLIC_API_URL}/api/dashboard/summary?period=${period}`);
+        const summaryPayload = await parseApiResponse<DashboardSummary>(summaryRes);
+        setSummary(summaryPayload ?? null);
         setError(null);
       } catch {
         setData(null);
+        setSummary(null);
         setError('Não foi possível carregar os indicadores do dashboard agora.');
       } finally {
         setIsLoading(false);
@@ -161,5 +178,5 @@ export function useDashboardAnalytics(period: DashboardPeriod = '7d') {
     return { kpis: calculated, timeseries: padded };
   }, [data]);
 
-  return { data, ...normalized, isLoading, error };
+  return { data, summary, ...normalized, isLoading, error };
 }
