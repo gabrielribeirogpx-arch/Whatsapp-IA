@@ -38,20 +38,28 @@ def update_settings(
 ):
     tenant_id = getattr(request.state, "tenant_id", None)
     print("[SETTINGS SAVE]", tenant_id, payload.dict())
+    provided_fields = getattr(payload, "model_fields_set", getattr(payload, "__fields_set__", set()))
     try:
         disconnect_whatsapp = False
-        token_value = payload.whatsapp_token if payload.whatsapp_token is not None else payload.token
-        if token_value is not None:
-            normalized_token = token_value.strip() or None
-            tenant.whatsapp_token = normalized_token
-            if normalized_token is None:
-                disconnect_whatsapp = True
 
-        if payload.phone_number_id is not None:
-            normalized_phone_number_id = payload.phone_number_id.strip() or None
-            tenant.phone_number_id = normalized_phone_number_id
-            if normalized_phone_number_id is None:
+        if "whatsapp_token" in provided_fields or "token" in provided_fields:
+            token_value = payload.whatsapp_token if "whatsapp_token" in provided_fields else payload.token
+            normalized_token = token_value.strip() if isinstance(token_value, str) else token_value
+            if normalized_token in (None, ""):
+                tenant.whatsapp_token = None
                 disconnect_whatsapp = True
+                print("[SETTINGS CLEAR FIELD]", "field=whatsapp_token", f"tenant_id={tenant_id}")
+            else:
+                tenant.whatsapp_token = normalized_token
+
+        if "phone_number_id" in provided_fields:
+            normalized_phone_number_id = payload.phone_number_id.strip() if isinstance(payload.phone_number_id, str) else payload.phone_number_id
+            if normalized_phone_number_id in (None, ""):
+                tenant.phone_number_id = None
+                disconnect_whatsapp = True
+                print("[SETTINGS CLEAR FIELD]", "field=phone_number_id", f"tenant_id={tenant_id}")
+            else:
+                tenant.phone_number_id = normalized_phone_number_id
 
         if payload.webhook_url is not None:
             tenant.webhook_url = payload.webhook_url.strip() or None
