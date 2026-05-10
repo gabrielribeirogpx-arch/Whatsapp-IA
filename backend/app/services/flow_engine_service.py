@@ -2372,6 +2372,12 @@ def process_flow_engine(
         )
 
     runtime_graph = _get_current_flow_runtime(db=db, flow=flow, tenant_id=conversation.tenant_id)
+    runtime_node_ids = [
+        str(node.get("id"))
+        for node in (runtime_graph.get("nodes") if isinstance(runtime_graph, dict) else [])
+        if isinstance(node, dict) and node.get("id") is not None
+    ]
+    logger.info("[RUNTIME GRAPH NODE IDS] flow_id=%s node_ids=%s", flow.id, runtime_node_ids)
 
     should_continue = session_active and saved_current_node_id is not None and not start_trigger
     should_restart = session_finalized and start_trigger
@@ -2393,7 +2399,12 @@ def process_flow_engine(
         if saved_current_node_id is not None:
             current_graph_node = _get_node(db=db, node_id=saved_current_node_id, tenant_id=conversation.tenant_id, runtime_graph=runtime_graph)
             if not current_graph_node:
-                logger.error("[FLOW SESSION_NODE_NOT_FOUND_IN_GRAPH] session_node_id=%s flow_id=%s", saved_current_node_id, flow.id)
+                logger.error(
+                    "[FLOW SESSION_NODE_NOT_FOUND_IN_GRAPH] session_node_id=%s flow_id=%s graph_node_ids=%s",
+                    saved_current_node_id,
+                    flow.id,
+                    runtime_node_ids,
+                )
                 return None
             logger.info("[FLOW SESSION NODE FOUND] node_type=%s", _node_type_slug(current_graph_node))
         if runtime_session and published_version_id and _parse_uuid(getattr(runtime_session, "flow_version_id", None)) != published_version_id:
@@ -2609,6 +2620,42 @@ def save_flow_graph(db: Session, tenant_id: uuid.UUID, flow_id: str, nodes: list
         )
         raise ValueError(error or "Flow inválido")
 
+    node_id_map: dict[str, str] = {}
+    normalized_nodes: list[dict[str, Any]] = []
+    for item in nodes_payload:
+        if not isinstance(item, dict):
+            continue
+        raw_id = str(item.get("id") or "").strip()
+        normalized_id = raw_id
+        try:
+            normalized_id = str(uuid.UUID(raw_id))
+        except (ValueError, TypeError):
+            normalized_id = str(uuid.uuid4())
+        node_id_map[raw_id or normalized_id] = normalized_id
+        node_payload = dict(item)
+        node_payload["id"] = normalized_id
+        normalized_nodes.append(node_payload)
+
+    normalized_edges: list[dict[str, Any]] = []
+    for edge in edges_payload:
+        if not isinstance(edge, dict):
+            continue
+        source_raw = str(edge.get("source") or "").strip()
+        target_raw = str(edge.get("target") or "").strip()
+        source = node_id_map.get(source_raw, source_raw)
+        target = node_id_map.get(target_raw, target_raw)
+        edge_payload = dict(edge)
+        edge_payload["source"] = source
+        edge_payload["target"] = target
+        normalized_edges.append(edge_payload)
+
+    logger.info(
+        "[NORMALIZED FLOW GRAPH] flow_id=%s nodes_count=%s edges_count=%s",
+        flow.id,
+        len(normalized_nodes),
+        len(normalized_edges),
+    )
+
     last_version = db.query(func.max(FlowVersion.version)).filter(FlowVersion.flow_id == flow.id).scalar()
     next_version = (last_version or 0) + 1
 
@@ -2624,8 +2671,8 @@ def save_flow_graph(db: Session, tenant_id: uuid.UUID, flow_id: str, nodes: list
     flow_version = FlowVersion(
         flow_id=flow.id,
         version=next_version,
-        nodes=nodes_payload,
-        edges=edges_payload,
+        nodes=normalized_nodes,
+        edges=normalized_edges,
         is_active=True,
     )
     db.add(flow_version)
@@ -2655,15 +2702,10 @@ def save_flow_graph(db: Session, tenant_id: uuid.UUID, flow_id: str, nodes: list
     db.query(FlowNode).filter(FlowNode.flow_id == flow.id, FlowNode.tenant_id == tenant_id).delete(synchronize_session=False)
     db.flush()
 
-    node_id_map: dict[str, uuid.UUID] = {}
-    for item in nodes_payload:
+    node_uuid_map: dict[str, uuid.UUID] = {}
+    for item in normalized_nodes:
         raw_id = str(item.get("id") or "").strip()
-        node_id = uuid.uuid4()
-        if raw_id:
-            try:
-                node_id = uuid.UUID(raw_id)
-            except ValueError:
-                pass
+        node_id = uuid.UUID(raw_id) if raw_id else uuid.uuid4()
 
         data = item.get("data") or {}
         position = item.get("position") or {}
@@ -2698,15 +2740,15 @@ def save_flow_graph(db: Session, tenant_id: uuid.UUID, flow_id: str, nodes: list
             position_y=int(position.get("y", 0) or 0),
         )
         db.add(node)
-        node_id_map[raw_id or str(node_id)] = node_id
+        node_uuid_map[raw_id or str(node_id)] = node_id
 
     db.flush()
 
-    for item in edges_payload:
+    for item in normalized_edges:
         source_raw = str(item.get("source") or "").strip()
         target_raw = str(item.get("target") or "").strip()
-        source_id = node_id_map.get(source_raw)
-        target_id = node_id_map.get(target_raw)
+        source_id = node_uuid_map.get(source_raw)
+        target_id = node_uuid_map.get(target_raw)
         if not source_id or not target_id:
             continue
 

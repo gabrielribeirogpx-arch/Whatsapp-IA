@@ -61,6 +61,8 @@ def test_webhook_flow_e2e(monkeypatch):
     sent = []
     sessions = {}
 
+    condition_node_id = "127bcf3a-0064-4fce-86b0-5721ba6188e2"
+
     def _run_two_messages_for_tenant(tenant_id: str, phone_number_id: str, branch_text: str):
         db = _FakeDB()
         class _ConversationGuard(SimpleNamespace):
@@ -116,10 +118,10 @@ def test_webhook_flow_e2e(monkeypatch):
             text = (message.text or "").lower()
             state = sessions.get(key)
             if not state:
-                sessions[key] = SimpleNamespace(current_node_id="condition", status="running", variables={"current_node_id": "condition"})
+                sessions[key] = SimpleNamespace(current_node_id=condition_node_id, status="running", variables={"current_node_id": condition_node_id})
                 sent.append((conversation.tenant_id, "Olá!"))
                 return {"response": "Olá!"}
-            print("[CONDITION EVALUATED] condition_node_id=condition incoming_text=suporte matched=true branch=true")
+            print(f"[CONDITION EVALUATED] condition_node_id={condition_node_id} incoming_text=suporte matched=true branch=true")
             if "suporte" in text:
                 sent.append((conversation.tenant_id, "Resposta A"))
                 state.current_node_id = None
@@ -131,12 +133,12 @@ def test_webhook_flow_e2e(monkeypatch):
 
         message_worker.process_incoming_message({"phone_number_id": phone_number_id, "text": "oi", "message_id": f"{tenant_id}-1"})
         assert sent[-1][1] == "Olá!"
-        assert sessions[(tenant_id, "5511999990001")].current_node_id == "condition"
+        assert sessions[(tenant_id, "5511999990001")].current_node_id == condition_node_id
         assert conversation.current_node_id is None
 
         message_worker.process_incoming_message({"phone_number_id": phone_number_id, "text": branch_text, "message_id": f"{tenant_id}-2"})
-        assert conversation.context.get("flow_current_node_id") == "condition"
-        assert called_session_nodes[-1] == "condition"
+        assert conversation.context.get("flow_current_node_id") == condition_node_id
+        assert called_session_nodes[-1] == condition_node_id
         assert sent[-1][1] == "Resposta A"
         assert sessions[(tenant_id, "5511999990001")].status == "completed"
 
