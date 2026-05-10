@@ -121,6 +121,15 @@ function makeNodeId() {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 }
 
+
+const TEMP_ID_PREFIXES = ['template-', 'temp-', 'mock-'];
+
+function flowContainsTemporaryIds(nodes: Array<{ id: string }>, edges: Array<{ id?: string; source: string; target: string }>) {
+  const hasTempId = (value: string) => TEMP_ID_PREFIXES.some((prefix) => value.startsWith(prefix));
+  return nodes.some((node) => hasTempId(node.id))
+    || edges.some((edge) => hasTempId(edge.id || '') || hasTempId(edge.source) || hasTempId(edge.target));
+}
+
 type FlowValidationIssue = { code: string; node_id?: string | null; message: string };
 
 type FlowBuilderClientProps = {
@@ -882,11 +891,10 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
   }, [setEdges, setNodes, toggleStartNode, updateNodeData]);
 
   const handleUseSimpleTemplate = useCallback(() => {
-    const templateSuffix = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    const startId = `template-start-message-${templateSuffix}`;
-    const conditionId = `template-condition-${templateSuffix}`;
-    const yesId = `template-response-yes-${templateSuffix}`;
-    const noId = `template-response-no-${templateSuffix}`;
+    const startId = crypto.randomUUID();
+    const conditionId = crypto.randomUUID();
+    const yesId = crypto.randomUUID();
+    const noId = crypto.randomUUID();
 
     const templateNodes: Node[] = [
       { id: startId, type: 'message', position: { x: 100, y: 200 }, data: { label: 'Mensagem inicial', title: 'Mensagem inicial', content: 'Olá! Como posso te ajudar?', text: 'Olá! Como posso te ajudar?', message: 'Olá! Como posso te ajudar?', isStart: true, onChange: updateNodeData, onToggleStart: toggleStartNode, hasValidationError: false } },
@@ -896,9 +904,9 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
     ];
 
     const templateEdges: Edge[] = [
-      { id: `${startId}-${conditionId}-default`, source: startId, target: conditionId, sourceHandle: 'default', type: 'default', label: '', data: { sourceHandle: 'default' } },
-      { id: `${conditionId}-${yesId}-true`, source: conditionId, target: yesId, sourceHandle: 'true', type: 'default', label: 'sim', data: { condition: 'sim', sourceHandle: 'true' } },
-      { id: `${conditionId}-${noId}-false`, source: conditionId, target: noId, sourceHandle: 'false', type: 'default', label: 'não', data: { condition: 'não', sourceHandle: 'false' } },
+      { id: crypto.randomUUID(), source: startId, target: conditionId, sourceHandle: 'default', type: 'default', label: '', data: { sourceHandle: 'default' } },
+      { id: crypto.randomUUID(), source: conditionId, target: yesId, sourceHandle: 'true', type: 'default', label: 'sim', data: { condition: 'sim', sourceHandle: 'true' } },
+      { id: crypto.randomUUID(), source: conditionId, target: noId, sourceHandle: 'false', type: 'default', label: 'não', data: { condition: 'não', sourceHandle: 'false' } },
     ];
 
     setNodes(templateNodes);
@@ -906,10 +914,11 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
     setShowEmptyFlowWarning(false);
     toast.success('Template simples aplicado');
     console.log('[TEMPLATE SIMPLE APPLIED]');
+    console.log('[TEMPLATE GENERATED UUID IDS]');
+    console.log('node_ids=', templateNodes.map((node) => node.id));
+    console.log('edge_pairs=', templateEdges.map((edge) => `${edge.source}->${edge.target}`));
     console.log('nodes_count=', templateNodes.length);
     console.log('edges_count=', templateEdges.length);
-    console.log('edge_sources=', templateEdges.map((edge) => edge.source));
-    console.log('edge_targets=', templateEdges.map((edge) => edge.target));
     setTimeout(() => {
       rfInstance?.fitView({ padding: 0.2, duration: 500 });
     }, 0);
@@ -994,6 +1003,11 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
       edges: cleanEdges,
     };
 
+    if (flowContainsTemporaryIds(safeFlow.nodes, safeFlow.edges)) {
+      toast.error('Flow contém IDs temporários inválidos.');
+      return;
+    }
+
     if (requireConfirmOverwrite && !confirm('Você está sobrescrevendo o fluxo atual. Deseja continuar?')) {
       return;
     }
@@ -1019,7 +1033,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
     } finally {
       setIsSaving(false);
     }
-  }, [rfInstance, selectedFlowId]);
+  }, [rfInstance, selectedFlowId, toast]);
 
 
 
@@ -1060,6 +1074,13 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
     if (!selectedFlowId) return;
     if (validationErrors.length > 0) return;
 
+    const currentNodes = rfInstance?.getNodes?.() || [];
+    const currentEdges = rfInstance?.getEdges?.() || [];
+    if (flowContainsTemporaryIds(currentNodes, currentEdges)) {
+      toast.error('Flow contém IDs temporários inválidos.');
+      return;
+    }
+
     try {
       if (hasUnsavedChanges) {
         console.log('[PUBLISH SAVE BEFORE START]', { flowId: selectedFlowId });
@@ -1093,7 +1114,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
       const message = error instanceof Error && error.message ? error.message : 'Não foi possível publicar o fluxo.';
       toast.error(`Falha ao publicar: ${message}`);
     }
-  }, [hasUnsavedChanges, handleSaveFlow, loadFlow, selectedFlowId, toast, validationErrors.length]);
+  }, [hasUnsavedChanges, handleSaveFlow, loadFlow, rfInstance, selectedFlowId, toast, validationErrors.length]);
 
   const handleDeactivateFlow = useCallback(async () => {
     const response = await apiFetch('/api/flows/deactivate', {
