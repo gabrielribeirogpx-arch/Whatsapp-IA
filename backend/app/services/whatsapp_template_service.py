@@ -59,9 +59,7 @@ def delete_template(db: Session, tenant_id: UUID, template_id: UUID):
 
 def submit_template_placeholder(db: Session, tenant_id: UUID, template_id: UUID):
     template = _get_template(db, tenant_id, template_id)
-    provider = _resolve_provider(db, tenant_id, template.provider_id)
-    if not provider:
-        raise ValueError("Provider Meta não encontrado para submissão")
+    provider = _resolve_provider_for_submit(db, tenant_id, template)
     token = decrypt_secret(provider.access_token_encrypted)
     if not token:
         raise ValueError("Token do provider inválido")
@@ -156,6 +154,40 @@ def _resolve_provider(db: Session, tenant_id: UUID, provider_id: UUID | None):
     if provider_id:
         query = query.where(TenantWhatsAppProvider.id == provider_id)
     return db.execute(query).scalars().first()
+
+
+def _resolve_provider_for_submit(db: Session, tenant_id: UUID, template: WhatsAppMessageTemplate):
+    if template.provider_id:
+        provider = _resolve_provider(db, tenant_id, template.provider_id)
+        if provider:
+            return provider
+
+    connected = db.execute(
+        select(TenantWhatsAppProvider).where(
+            TenantWhatsAppProvider.tenant_id == tenant_id,
+            TenantWhatsAppProvider.provider_type == "meta_cloud",
+            TenantWhatsAppProvider.status == "connected",
+        )
+    ).scalars().all()
+    if len(connected) == 1:
+        if not template.provider_id:
+            template.provider_id = connected[0].id
+        return connected[0]
+    if len(connected) > 1:
+        raise ValueError("Selecione um provider para este template.")
+
+    active = db.execute(
+        select(TenantWhatsAppProvider).where(
+            TenantWhatsAppProvider.tenant_id == tenant_id,
+            TenantWhatsAppProvider.provider_type == "meta_cloud",
+            TenantWhatsAppProvider.is_active.is_(True),
+        )
+    ).scalars().first()
+    if active:
+        if not template.provider_id:
+            template.provider_id = active.id
+        return active
+    raise ValueError("Nenhum provider Meta conectado para submissão")
 
 
 def _get_template(db: Session, tenant_id: UUID, template_id: UUID):

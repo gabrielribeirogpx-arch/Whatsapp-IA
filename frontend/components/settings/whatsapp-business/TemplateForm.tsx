@@ -5,7 +5,7 @@ import { friendlyToMeta, renderExample } from '@/lib/templateVariableMapper';
 
 const input = 'premium-input w-full';
 
-export default function TemplateForm({ form, setForm, onSubmit, loading, error }: { form: any; setForm: any; onSubmit: any; loading: boolean; error: string }) {
+export default function TemplateForm({ form, setForm, onSubmit, loading, error, providers }: { form: any; setForm: any; onSubmit: any; loading: boolean; error: string; providers: any[] }) {
   const ref = useRef<HTMLTextAreaElement | null>(null);
   const mapped = useMemo(() => friendlyToMeta(form.friendly_body_text || ''), [form.friendly_body_text]);
   const preview = useMemo(() => renderExample(mapped.bodyText, mapped.variables), [mapped.bodyText, mapped.variables]);
@@ -29,6 +29,7 @@ export default function TemplateForm({ form, setForm, onSubmit, loading, error }
     <div className='grid gap-3 md:grid-cols-2 xl:grid-cols-3'>
       <label className='space-y-1 text-xs font-medium text-slate-600'><span>Nome técnico</span><input className={input} value={form.name} onChange={e => setForm((p: any) => ({ ...p, name: e.target.value }))} placeholder='confirmacao_pedido_v1' /></label>
       <label className='space-y-1 text-xs font-medium text-slate-600'><span>Categoria</span><select className={input} value={form.category} onChange={e => setForm((p: any) => ({ ...p, category: e.target.value }))}>{Object.values(TemplateCategoryEnum).map(v => <option key={v} value={v}>{v}</option>)}</select></label>
+      <label className='space-y-1 text-xs font-medium text-slate-600'><span>Provider associado</span><select className={input} value={form.provider_id || ''} onChange={e => setForm((p: any) => ({ ...p, provider_id: e.target.value }))}><option value=''>Selecione um provider</option>{providers.map((provider: any) => <option key={provider.id} value={provider.id}>{provider.display_name || provider.provider_type} · {provider.status === 'connected' ? '🟢 connected' : '⚪ disconnected'}</option>)}</select></label>
     </div>
     <div className='flex items-center justify-between'><span className='text-xs font-medium text-slate-600'>Body</span><VariablePicker onInsert={insertAtCursor} /></div>
     <textarea ref={ref} className={`${input} min-h-24 xl:min-h-28`} value={form.friendly_body_text || ''} onChange={e => setForm((p: any) => ({ ...p, friendly_body_text: e.target.value }))} placeholder='Olá {Primeiro nome}, seu pedido {Número do pedido} saiu para entrega.' />
