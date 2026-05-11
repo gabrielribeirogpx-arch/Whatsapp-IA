@@ -1,9 +1,9 @@
 import { ProviderTypeEnum } from '@/lib/whatsappEnums';
 
-const input = 'w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm shadow-sm outline-none transition focus:border-emerald-400 focus:ring-4 focus:ring-emerald-500/10';
+const input = 'premium-input w-full';
 
 export default function ProviderForm({ form, setForm, onSubmit, loading }: { form: any; setForm: any; onSubmit: any; loading: boolean }) {
-  return <form onSubmit={onSubmit} className='settings-card rounded-2xl border border-slate-200/80 bg-white/95 p-5 shadow-sm'>
+  return <form onSubmit={onSubmit} className='settings-card rounded-2xl border border-[color:var(--surface-border)] bg-white/95 p-5 shadow-[0_14px_34px_-30px_rgba(15,23,42,0.85)]'>
     <div className='mb-4'><h3 className='text-sm font-semibold text-slate-900'>Nova conexão</h3><p className='text-xs text-slate-500'>Configure um provider sem alterar runtime atual.</p></div>
     <div className='grid gap-3 md:grid-cols-2'>
       <label className='space-y-1 text-xs font-medium text-slate-600'><span>Provider</span><select className={input} value={form.provider_type} onChange={e => setForm((p: any) => ({ ...p, provider_type: e.target.value }))}>{Object.values(ProviderTypeEnum).map(v => <option key={v} value={v}>{v}</option>)}</select></label>

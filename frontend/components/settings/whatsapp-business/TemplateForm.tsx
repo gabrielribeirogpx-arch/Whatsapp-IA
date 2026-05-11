@@ -1,9 +1,9 @@
 import { TemplateCategoryEnum } from '@/lib/whatsappEnums';
 
-const input = 'w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm shadow-sm outline-none transition focus:border-emerald-400 focus:ring-4 focus:ring-emerald-500/10';
+const input = 'premium-input w-full';
 
 export default function TemplateForm({ form, setForm, onSubmit, loading, error }: { form: any; setForm: any; onSubmit: any; loading: boolean; error: string }) {
-  return <form onSubmit={onSubmit} className='settings-card rounded-2xl border border-slate-200/80 bg-white/95 p-5 shadow-sm space-y-3'>
+  return <form onSubmit={onSubmit} className='settings-card rounded-2xl border border-[color:var(--surface-border)] bg-white/95 p-5 shadow-[0_14px_34px_-30px_rgba(15,23,42,0.85)] space-y-3'>
     <h3 className='text-sm font-semibold text-slate-900'>Novo template</h3>
     <div className='grid gap-3 md:grid-cols-2'>
       <label className='space-y-1 text-xs font-medium text-slate-600'><span>Nome técnico</span><input className={input} value={form.name} onChange={e => setForm((p: any) => ({ ...p, name: e.target.value }))} placeholder='confirmacao_pedido_v1' /></label>

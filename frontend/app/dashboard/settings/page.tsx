@@ -36,12 +36,16 @@ export default function SettingsPage() {
   const validateTemplate = () => { if (!/^[a-z0-9_]+$/.test(templateForm.name)) return 'Nome do template deve ter lowercase e underscores.'; const re = /\{\{(\d+)\}\}/g; const m: number[] = []; let hit; while ((hit = re.exec(templateForm.body_text)) !== null) m.push(Number(hit[1])); const set = new Set(m); if (set.size !== m.length) return 'Variáveis duplicadas não são permitidas.'; for (let i = 1; i <= m.length; i++) if (!set.has(i)) return 'Variáveis com buracos são inválidas. Ex: {{1}} {{3}}'; return ''; };
   async function run(action: () => Promise<void>, ok: string, err: string) { setLoading(true); try { await action(); setToast(ok); } catch { setToast(err); } finally { setLoading(false); setTimeout(() => setToast(''), 3000); } }
 
-  return <section className='w-full min-w-0 px-4 py-6 md:px-6'>
-    <div className='mx-auto max-w-6xl space-y-5'>
-      <header className='rounded-3xl border border-slate-200 bg-gradient-to-br from-white via-white to-emerald-50/40 p-6 shadow-sm'>
-        <p className='inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700'><MessageSquareText size={14} /> WhatsApp Business Console</p>
-        <h1 className='mt-3 text-2xl font-semibold text-slate-900'>WhatsApp Business Console</h1>
-        <p className='mt-1 text-sm text-slate-600'>Gerencie conexões oficiais Meta, templates aprováveis e futuros providers BSP.</p>
+  return <section className='w-full min-w-0 px-4 py-5 md:px-6 md:py-6'>
+    <div className='mx-auto max-w-6xl space-y-4'>
+      <header className='relative overflow-hidden rounded-3xl border border-[color:var(--surface-border)] bg-gradient-to-br from-white/95 via-white/90 to-emerald-50/70 p-6 shadow-[0_20px_50px_-40px_rgba(2,6,23,0.55)] backdrop-blur-sm md:p-7'>
+        <div className='pointer-events-none absolute -top-10 right-8 h-28 w-28 rounded-full bg-emerald-400/15 blur-2xl' />
+        <p className='inline-flex items-center gap-2 rounded-full border border-emerald-200/80 bg-white/80 px-3 py-1 text-xs font-semibold text-emerald-700 shadow-sm'><MessageSquareText size={14} /> WhatsApp Business Console</p>
+        <div className='mt-3 flex flex-wrap items-center gap-3'>
+          <h1 className='text-2xl font-semibold tracking-tight text-slate-900 md:text-[1.75rem]'>WhatsApp Business Console</h1>
+          <span className='inline-flex items-center rounded-full border border-emerald-300/60 bg-gradient-to-r from-emerald-50 to-white px-3 py-1 text-xs font-semibold text-emerald-700'>Enterprise Ready</span>
+        </div>
+        <p className='mt-2 max-w-2xl text-sm leading-relaxed text-slate-600'>Gerencie conexões oficiais Meta, templates aprováveis e futuros providers BSP.</p>
       </header>
 
       {toast && <div className='rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm shadow-sm'>{toast}</div>}
@@ -53,16 +57,16 @@ export default function SettingsPage() {
           ['Templates pendentes', String(stats.pendingTemplates), Clock3],
           ['Status geral', stats.status, Layers3],
           ['Último sync', stats.lastSync, MessageSquareText]
-        ].map(([label, value, Icon]: any) => <div key={label} className='rounded-2xl border border-slate-200 bg-white p-4 shadow-sm'><p className='inline-flex items-center gap-1 text-xs text-slate-500'><Icon size={12} />{label}</p><p className='mt-2 text-lg font-semibold text-slate-900'>{value}</p><div className='mt-3 h-1.5 rounded-full bg-slate-100'><div className='h-1.5 w-2/3 rounded-full bg-gradient-to-r from-emerald-400 to-emerald-600' /></div></div>)}
+        ].map(([label, value, Icon]: any) => <div key={label} className='group rounded-2xl border border-[color:var(--surface-border)] bg-white/95 p-4 shadow-[0_12px_30px_-28px_rgba(15,23,42,0.75)] transition-all duration-300 hover:-translate-y-0.5 hover:border-emerald-200 hover:shadow-[0_20px_36px_-26px_rgba(16,185,129,0.35)]'><p className='inline-flex items-center gap-1 text-xs font-medium text-slate-500'><Icon size={12} />{label}</p><p className='mt-2 text-lg font-semibold tracking-tight text-slate-900'>{value}</p><div className='mt-3 h-1.5 rounded-full bg-slate-100/90'><div className='h-1.5 w-2/3 rounded-full bg-gradient-to-r from-emerald-400 via-emerald-500 to-emerald-600 transition-all duration-300 group-hover:w-4/5' /></div></div>)}
       </div>
 
-      <div className='flex flex-wrap gap-2 rounded-2xl border border-slate-200 bg-white p-2 shadow-sm'>
-        {tabs.map(({ id, label, icon: Icon }) => <button key={id} onClick={() => setTab(id as any)} className={`inline-flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-medium transition ${tab === id ? 'bg-slate-900 text-white shadow' : 'text-slate-600 hover:bg-slate-100'}`}><Icon size={14} />{label}</button>)}
+      <div className='flex flex-wrap gap-2 rounded-2xl border border-[color:var(--surface-border)] bg-white/90 p-2 shadow-[0_10px_24px_-24px_rgba(15,23,42,0.8)] backdrop-blur'>
+        {tabs.map(({ id, label, icon: Icon }) => <button key={id} onClick={() => setTab(id as any)} className={`inline-flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-medium transition-all duration-200 ${tab === id ? 'bg-slate-900 text-white shadow-md shadow-slate-900/20' : 'text-slate-600 hover:bg-slate-100/90 hover:text-slate-900 active:scale-[0.99]'}`}><Icon size={14} />{label}</button>)}
       </div>
 
-      {tab === 'system' && <form onSubmit={(e: FormEvent) => run(async () => { e.preventDefault(); await updateSystemSettings({ ...form, token: form.token || null, phone_number_id: form.phone_number_id || null, webhook_url: form.webhook_url || null }); }, 'Configurações salvas com sucesso', 'Falha ao salvar configurações')} className='rounded-2xl border border-slate-200 bg-white p-5 shadow-sm space-y-3'>
-        <input type='password' value={form.token ?? ''} onChange={e => setForm(p => ({ ...p, token: e.target.value }))} placeholder='Token atual (ENV fallback preservado)' className='w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm' />
-        <input value={form.phone_number_id ?? ''} onChange={e => setForm(p => ({ ...p, phone_number_id: e.target.value }))} placeholder='Phone Number ID' className='w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm' />
+      {tab === 'system' && <form onSubmit={(e: FormEvent) => run(async () => { e.preventDefault(); await updateSystemSettings({ ...form, token: form.token || null, phone_number_id: form.phone_number_id || null, webhook_url: form.webhook_url || null }); }, 'Configurações salvas com sucesso', 'Falha ao salvar configurações')} className='rounded-2xl border border-[color:var(--surface-border)] bg-white/95 p-5 shadow-[0_14px_34px_-30px_rgba(15,23,42,0.85)] space-y-3'>
+        <input type='password' value={form.token ?? ''} onChange={e => setForm(p => ({ ...p, token: e.target.value }))} placeholder='Token atual (ENV fallback preservado)' className='premium-input w-full' />
+        <input value={form.phone_number_id ?? ''} onChange={e => setForm(p => ({ ...p, phone_number_id: e.target.value }))} placeholder='Phone Number ID' className='premium-input w-full' />
         <button disabled={loading} className='primary-button'>Salvar</button>
       </form>}
       {tab === 'connection' && <ProvidersTab providers={providers} form={providerForm} setForm={setProviderForm} loading={loading} onSubmit={(e: FormEvent) => run(async () => { e.preventDefault(); await createWhatsAppProvider(providerForm); setProviderForm(baseProviderForm); await refresh(); }, 'Conexão salva com sucesso', 'Falha ao salvar conexão')} onTest={(id: string) => run(async () => { await testWhatsAppProvider(id); await refresh(); }, 'Conexão testada com sucesso', 'Falha ao testar conexão')} onActivate={(id: string) => run(async () => { await activateWhatsAppProvider(id); await refresh(); }, 'Conexão ativada com sucesso', 'Falha ao ativar conexão')} onDelete={(id: string) => run(async () => { await deleteWhatsAppProvider(id); await refresh(); }, 'Conexão removida com sucesso', 'Falha ao remover conexão')} />}
