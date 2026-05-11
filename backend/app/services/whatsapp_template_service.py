@@ -1,6 +1,7 @@
 from datetime import datetime
 from uuid import UUID
 import asyncio
+import logging
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -10,13 +11,23 @@ from app.models.tenant_whatsapp_provider import TenantWhatsAppProvider
 from app.models.whatsapp_message_template import WhatsAppMessageTemplate
 from app.utils.encryption import decrypt_secret
 
+logger = logging.getLogger(__name__)
+
 
 def list_templates(db: Session, tenant_id: UUID):
     return db.execute(select(WhatsAppMessageTemplate).where(WhatsAppMessageTemplate.tenant_id == tenant_id)).scalars().all()
 
 
 def create_template(db: Session, tenant_id: UUID, payload):
-    template = WhatsAppMessageTemplate(tenant_id=tenant_id, **payload.model_dump(exclude_unset=True))
+    data = payload.model_dump(exclude_unset=True)
+    body_raw_meta = (data.pop("body_raw_meta", None) or data.get("body_text") or "").strip()
+    body_preview = data.pop("body_preview", None)
+    data["body_text"] = body_raw_meta
+    metadata = dict(data.get("metadata_json") or {})
+    if body_preview is not None:
+        metadata["body_preview"] = body_preview
+    data["metadata_json"] = metadata
+    template = WhatsAppMessageTemplate(tenant_id=tenant_id, **data)
     db.add(template)
     db.commit()
     db.refresh(template)
@@ -25,8 +36,16 @@ def create_template(db: Session, tenant_id: UUID, payload):
 
 def update_template(db: Session, tenant_id: UUID, template_id: UUID, payload):
     template = _get_template(db, tenant_id, template_id)
-    for key, value in payload.model_dump(exclude_unset=True).items():
+    data = payload.model_dump(exclude_unset=True)
+    if "body_raw_meta" in data:
+        data["body_text"] = (data.pop("body_raw_meta") or "").strip()
+    body_preview = data.pop("body_preview", None) if "body_preview" in data else None
+    for key, value in data.items():
         setattr(template, key, value)
+    if "body_preview" in payload.model_fields_set:
+        metadata = dict(template.metadata_json or {})
+        metadata["body_preview"] = body_preview
+        template.metadata_json = metadata
     db.commit()
     db.refresh(template)
     return template
@@ -99,6 +118,15 @@ async def _submit_meta_template(template: WhatsAppMessageTemplate, provider: Ten
         "category": (template.category or "UTILITY").upper(),
         "components": _build_components(template),
     }
+    logger.info(
+        "[WHATSAPP TEMPLATE META PAYLOAD] tenant_id=%s provider_id=%s template_id=%s template_name=%s category=%s body=%s",
+        tenant_id,
+        str(provider.id),
+        str(template.id),
+        template.name,
+        (template.category or "UTILITY").upper(),
+        template.body_text,
+    )
     return await client.post(f"/{provider.waba_id}/message_templates", payload=payload, context={"tenant_id": tenant_id, "provider_id": str(provider.id), "template_id": str(template.id)})
 
 

@@ -38,3 +38,13 @@ class WhatsAppMessageTemplate(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     provider: Mapped["TenantWhatsAppProvider | None"] = relationship("TenantWhatsAppProvider", back_populates="templates")
+
+    @property
+    def body_raw_meta(self) -> str:
+        return self.body_text
+
+    @property
+    def body_preview(self) -> str | None:
+        if isinstance(self.metadata_json, dict):
+            return self.metadata_json.get("body_preview")
+        return None
