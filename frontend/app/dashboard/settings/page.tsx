@@ -5,6 +5,7 @@ import { activateWhatsAppProvider, createTemplate, createWhatsAppProvider, delet
 import { SystemSettingsPayload, WhatsAppProvider, WhatsAppTemplate } from '../../../lib/types';
 import ProvidersTab from '@/components/settings/whatsapp-business/ProvidersTab';
 import TemplatesTab from '@/components/settings/whatsapp-business/TemplatesTab';
+import { ClientDateTime } from '@/components/settings/whatsapp-business/ui';
 import { friendlyToMeta, validateMetaVariables } from '@/lib/templateVariableMapper';
 
 const INITIAL_FORM: SystemSettingsPayload = { token: '', phone_number_id: '', webhook_url: '', webhook_status: 'inactive', system_name: '', language: 'pt-BR' };
@@ -31,7 +32,10 @@ export default function SettingsPage() {
     approvedTemplates: templates.filter(t => t.status === 'approved').length,
     pendingTemplates: templates.filter(t => t.status === 'pending' || t.status === 'submitted').length,
     status: providers.some(p => p.status === 'connected') ? 'Operacional' : 'Sem conexão',
-    lastSync: new Date().toLocaleString('pt-BR')
+    lastSyncAt: providers
+      .map(p => p?.metadata_json?.last_sync_at || p.last_connection_check_at || p.updated_at)
+      .filter(Boolean)
+      .sort((a, b) => new Date(b as string).getTime() - new Date(a as string).getTime())[0] ?? null
   }), [providers, templates]);
 
   const validateTemplate = () => { if (!/^[a-z0-9_]+$/.test(templateForm.name)) return 'Nome do template deve ter lowercase e underscores.'; const mapped = friendlyToMeta(templateForm.friendly_body_text || templateForm.body_text || ''); if (mapped.errors.length) return `${mapped.errors[0]}
@@ -58,8 +62,8 @@ Use uma variável da lista ou remova o marcador.`; return validateMetaVariables(
           ['Templates aprovados', String(stats.approvedTemplates), CheckCircle2],
           ['Templates pendentes', String(stats.pendingTemplates), Clock3],
           ['Status geral', stats.status, Layers3],
-          ['Último sync', stats.lastSync, MessageSquareText]
-        ].map(([label, value, Icon]: any) => <div key={label} className='group rounded-2xl border border-[color:var(--surface-border)] bg-white/95 p-4 shadow-[0_12px_30px_-28px_rgba(15,23,42,0.75)] transition-all duration-300 hover:-translate-y-0.5 hover:border-emerald-200 hover:shadow-[0_20px_36px_-26px_rgba(16,185,129,0.35)]'><p className='inline-flex items-center gap-1 text-xs font-medium text-slate-500'><Icon size={12} />{label}</p><p className='mt-2 text-lg font-semibold tracking-tight text-slate-900'>{value}</p><div className='mt-3 h-1.5 rounded-full bg-slate-100/90'><div className='h-1.5 w-2/3 rounded-full bg-gradient-to-r from-emerald-400 via-emerald-500 to-emerald-600 transition-all duration-300 group-hover:w-4/5' /></div></div>)}
+          ['Último sync', stats.lastSyncAt, MessageSquareText]
+        ].map(([label, value, Icon]: any) => <div key={label} className='group rounded-2xl border border-[color:var(--surface-border)] bg-white/95 p-4 shadow-[0_12px_30px_-28px_rgba(15,23,42,0.75)] transition-all duration-300 hover:-translate-y-0.5 hover:border-emerald-200 hover:shadow-[0_20px_36px_-26px_rgba(16,185,129,0.35)]'><p className='inline-flex items-center gap-1 text-xs font-medium text-slate-500'><Icon size={12} />{label}</p><p className='mt-2 text-lg font-semibold tracking-tight text-slate-900'>{label === 'Último sync' ? <ClientDateTime value={value} fallback='Nunca sincronizado' /> : value}</p><div className='mt-3 h-1.5 rounded-full bg-slate-100/90'><div className='h-1.5 w-2/3 rounded-full bg-gradient-to-r from-emerald-400 via-emerald-500 to-emerald-600 transition-all duration-300 group-hover:w-4/5' /></div></div>)}
       </div>
 
       <div className='flex w-full min-w-0 flex-wrap gap-2 rounded-2xl border border-[color:var(--surface-border)] bg-white/90 p-2 shadow-[0_10px_24px_-24px_rgba(15,23,42,0.8)] backdrop-blur'>

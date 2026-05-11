@@ -1,5 +1,5 @@
 import { CalendarDays, MessageCircleMore } from 'lucide-react';
-import { StatusBadge, toLocalDate } from './ui';
+import { ClientDateTime, StatusBadge } from './ui';
 import { renderExample } from '@/lib/templateVariableMapper';
 
 export default function TemplateCard({ t, onSubmit, loading }: { t: any; onSubmit: any; loading: boolean }) {
@@ -24,7 +24,7 @@ export default function TemplateCard({ t, onSubmit, loading }: { t: any; onSubmi
       </div>
     </div>
     <div className='mt-3 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500'>
-      <span className='inline-flex items-center gap-1'><CalendarDays size={12} />Criado em {toLocalDate(t.created_at)}</span>
+      <span className='inline-flex items-center gap-1'><CalendarDays size={12} />Criado em <ClientDateTime value={t.created_at} /></span>
       <span>Provider associado: {t.provider_id || 'N/D'}</span>
     </div>
     <button disabled={loading} className='secondary-button mt-3 border border-slate-300 bg-white hover:bg-slate-100' onClick={onSubmit}>Enviar para aprovação</button>
