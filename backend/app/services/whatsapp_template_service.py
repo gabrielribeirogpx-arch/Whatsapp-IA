@@ -167,9 +167,12 @@ async def _submit_meta_template(template: WhatsAppMessageTemplate, provider: Ten
         (template.category or "UTILITY").upper(),
         template.body_text,
     )
+    payload_name = (template.name or "").lower()
+    payload_category = (template.category or "UTILITY").upper()
+    payload_body = template.body_text
     print(
-        f"[WHATSAPP TEMPLATE META PAYLOAD] name={(template.name or "").lower()} "
-        f"language=pt_BR category={(template.category or 'UTILITY').upper()} body={template.body_text}"
+        f"[WHATSAPP TEMPLATE META PAYLOAD] name={payload_name} "
+        f"language=pt_BR category={payload_category} body={payload_body}"
     )
     logger.info("[WHATSAPP TEMPLATE META PAYLOAD_FULL] payload=%s", payload)
     response = await client.post(f"/{provider.waba_id}/message_templates", payload=payload, context={"tenant_id": tenant_id, "provider_id": str(provider.id), "template_id": str(template.id)})
