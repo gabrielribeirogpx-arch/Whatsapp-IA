@@ -7,7 +7,7 @@ from app.schemas.whatsapp_business import WhatsAppTemplateCreate, WhatsAppTempla
 from app.services import whatsapp_template_service
 from app.services.tenant_service import get_current_tenant
 
-router = APIRouter(prefix="/api/whatsapp/templates", tags=["whatsapp-templates"])
+router = APIRouter(tags=["whatsapp-templates"])
 
 @router.get("", response_model=list[WhatsAppTemplateOut])
 def get_templates(db: Session = Depends(get_db), tenant: Tenant = Depends(get_current_tenant)):
@@ -34,6 +34,7 @@ def remove_template(template_id: str, db: Session = Depends(get_db), tenant: Ten
 
 @router.post("/{template_id}/submit", response_model=WhatsAppTemplateOut)
 def submit_template(template_id: str, db: Session = Depends(get_db), tenant: Tenant = Depends(get_current_tenant)):
+    print(f"[WHATSAPP TEMPLATE SUBMIT ROUTE HIT] template_id={template_id}")
     print("[WHATSAPP TEMPLATE SUBMIT]", f"tenant_id={tenant.id}", f"template_id={template_id}")
     try:
         return whatsapp_template_service.submit_template_placeholder(db, tenant.id, template_id)
