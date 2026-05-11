@@ -5,10 +5,11 @@ import { activateWhatsAppProvider, createTemplate, createWhatsAppProvider, delet
 import { SystemSettingsPayload, WhatsAppProvider, WhatsAppTemplate } from '../../../lib/types';
 import ProvidersTab from '@/components/settings/whatsapp-business/ProvidersTab';
 import TemplatesTab from '@/components/settings/whatsapp-business/TemplatesTab';
+import { friendlyToMeta, validateMetaVariables } from '@/lib/templateVariableMapper';
 
 const INITIAL_FORM: SystemSettingsPayload = { token: '', phone_number_id: '', webhook_url: '', webhook_status: 'inactive', system_name: '', language: 'pt-BR' };
 const baseProviderForm = { provider_type: 'meta_cloud', display_name: '', waba_id: '', phone_number_id: '', business_id: '', access_token: '', api_key: '' };
-const baseTemplateForm = { name: '', category: 'utility', language: 'pt_BR', body_text: '', footer_text: '' };
+const baseTemplateForm = { name: '', category: 'utility', language: 'pt_BR', body_text: '', friendly_body_text: '', footer_text: '', variables_json: [] as any[] };
 const tabs = [{ id: 'system', label: 'Visão Geral', icon: Layers3 }, { id: 'connection', label: 'Conexões', icon: Building2 }, { id: 'templates', label: 'Templates', icon: MessageSquareText }];
 
 export default function SettingsPage() {
@@ -33,7 +34,8 @@ export default function SettingsPage() {
     lastSync: new Date().toLocaleString('pt-BR')
   }), [providers, templates]);
 
-  const validateTemplate = () => { if (!/^[a-z0-9_]+$/.test(templateForm.name)) return 'Nome do template deve ter lowercase e underscores.'; const re = /\{\{(\d+)\}\}/g; const m: number[] = []; let hit; while ((hit = re.exec(templateForm.body_text)) !== null) m.push(Number(hit[1])); const set = new Set(m); if (set.size !== m.length) return 'Variáveis duplicadas não são permitidas.'; for (let i = 1; i <= m.length; i++) if (!set.has(i)) return 'Variáveis com buracos são inválidas. Ex: {{1}} {{3}}'; return ''; };
+  const validateTemplate = () => { if (!/^[a-z0-9_]+$/.test(templateForm.name)) return 'Nome do template deve ter lowercase e underscores.'; const mapped = friendlyToMeta(templateForm.friendly_body_text || templateForm.body_text || ''); if (mapped.errors.length) return `${mapped.errors[0]}
+Use uma variável da lista ou remova o marcador.`; return validateMetaVariables(mapped.bodyText); };
   async function run(action: () => Promise<void>, ok: string, err: string) { setLoading(true); try { await action(); setToast(ok); } catch { setToast(err); } finally { setLoading(false); setTimeout(() => setToast(''), 3000); } }
 
   return <section className='w-full min-w-0 px-4 py-5 md:px-6 md:py-6'>
@@ -70,7 +72,7 @@ export default function SettingsPage() {
         <button disabled={loading} className='primary-button'>Salvar</button>
       </form>}
       {tab === 'connection' && <ProvidersTab providers={providers} form={providerForm} setForm={setProviderForm} loading={loading} onSubmit={(e: FormEvent) => run(async () => { e.preventDefault(); await createWhatsAppProvider(providerForm); setProviderForm(baseProviderForm); await refresh(); }, 'Conexão salva com sucesso', 'Falha ao salvar conexão')} onTest={(id: string) => run(async () => { await testWhatsAppProvider(id); await refresh(); }, 'Conexão testada com sucesso', 'Falha ao testar conexão')} onActivate={(id: string) => run(async () => { await activateWhatsAppProvider(id); await refresh(); }, 'Conexão ativada com sucesso', 'Falha ao ativar conexão')} onDelete={(id: string) => run(async () => { await deleteWhatsAppProvider(id); await refresh(); }, 'Conexão removida com sucesso', 'Falha ao remover conexão')} />}
-      {tab === 'templates' && <TemplatesTab templates={templates} form={templateForm} setForm={setTemplateForm} error={templateError} loading={loading} onSubmit={(e: FormEvent) => run(async () => { e.preventDefault(); const msg = validateTemplate(); setTemplateError(msg); if (msg) throw new Error(msg); await createTemplate(templateForm); setTemplateForm(baseTemplateForm); await refresh(); }, 'Template criado com sucesso', 'Falha ao criar template')} onSync={() => run(async () => { await syncTemplates(); await refresh(); }, 'Sincronização concluída', 'Erro ao sincronizar templates')} onSubmitTemplate={(id: string) => run(async () => { await submitTemplate(id); await refresh(); }, 'Template enviado para aprovação', 'Falha ao enviar template')} />}
+      {tab === 'templates' && <TemplatesTab templates={templates} form={templateForm} setForm={setTemplateForm} error={templateError} loading={loading} onSubmit={(e: FormEvent) => run(async () => { e.preventDefault(); const msg = validateTemplate(); setTemplateError(msg); if (msg) throw new Error(msg); const mapped = friendlyToMeta(templateForm.friendly_body_text || templateForm.body_text || ''); await createTemplate({ ...templateForm, body_text: mapped.bodyText, variables_json: mapped.variables }); setTemplateForm(baseTemplateForm); await refresh(); }, 'Template criado com sucesso', 'Falha ao criar template')} onSync={() => run(async () => { await syncTemplates(); await refresh(); }, 'Sincronização concluída', 'Erro ao sincronizar templates')} onSubmitTemplate={(id: string) => run(async () => { await submitTemplate(id); await refresh(); }, 'Template enviado para aprovação', 'Falha ao enviar template')} />}
     </div>
   </section>;
 }
