@@ -58,7 +58,9 @@ class WhatsAppTemplateCreate(BaseModel):
     name: str
     category: TemplateCategoryEnum | None = TemplateCategoryEnum.UTILITY
     language: str = "pt_BR"
-    body_text: str
+    body_text: str | None = None
+    body_raw_meta: str | None = None
+    body_preview: str | None = None
     header_json: dict = Field(default_factory=dict)
     footer_text: str | None = None
     buttons_json: list = Field(default_factory=list)
@@ -71,6 +73,8 @@ class WhatsAppTemplateUpdate(BaseModel):
     category: TemplateCategoryEnum | None = None
     language: str | None = None
     body_text: str | None = None
+    body_raw_meta: str | None = None
+    body_preview: str | None = None
     header_json: dict | None = None
     footer_text: str | None = None
     buttons_json: list | None = None
@@ -87,6 +91,8 @@ class WhatsAppTemplateOut(BaseModel):
     language: str
     status: TemplateStatusEnum
     body_text: str
+    body_raw_meta: str
+    body_preview: str | None = None
     header_json: dict = Field(default_factory=dict)
     footer_text: str | None = None
     buttons_json: list = Field(default_factory=list)
