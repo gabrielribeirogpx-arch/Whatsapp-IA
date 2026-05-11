@@ -1,10 +1,12 @@
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models.tenant import Tenant
 from app.schemas.whatsapp_business import WhatsAppTemplateCreate, WhatsAppTemplateOut, WhatsAppTemplateUpdate
 from app.services import whatsapp_template_service
+from app.services.whatsapp_template_service import TemplateSubmitError
 from app.services.tenant_service import get_current_tenant
 
 router = APIRouter(tags=["whatsapp-templates"])
@@ -38,8 +40,13 @@ def submit_template(template_id: str, db: Session = Depends(get_db), tenant: Ten
     print("[WHATSAPP TEMPLATE SUBMIT]", f"tenant_id={tenant.id}", f"template_id={template_id}")
     try:
         return whatsapp_template_service.submit_template_placeholder(db, tenant.id, template_id)
-    except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except TemplateSubmitError as exc:
+        detail = {"detail": exc.detail}
+        if exc.meta_error:
+            detail["meta_error"] = exc.meta_error
+        if exc.meta_code:
+            detail["meta_code"] = exc.meta_code
+        return JSONResponse(status_code=exc.status_code, content=detail)
 
 @router.post("/sync")
 def sync_templates(db: Session = Depends(get_db), tenant: Tenant = Depends(get_current_tenant)):
