@@ -1,0 +1,91 @@
+from datetime import datetime
+
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from app.database import get_db
+from app.models import Tenant, WhatsAppCampaign, WhatsAppCampaignRecipient
+from app.services.tenant_service import get_current_tenant
+
+router = APIRouter(prefix="/api/whatsapp/campaigns", tags=["whatsapp-campaigns"])
+
+
+def _serialize_campaign(c: WhatsAppCampaign) -> dict:
+    return {
+        "id": str(c.id), "name": c.name, "status": c.status, "provider_id": str(c.provider_id), "template_id": str(c.template_id),
+        "total_recipients": c.total_recipients, "total_sent": c.total_sent, "total_delivered": c.total_delivered, "total_read": c.total_read, "total_failed": c.total_failed,
+        "created_at": c.created_at.isoformat() if c.created_at else None,
+    }
+
+
+@router.get("")
+def list_campaigns(db: Session = Depends(get_db), tenant: Tenant = Depends(get_current_tenant)):
+    rows = db.execute(select(WhatsAppCampaign).where(WhatsAppCampaign.tenant_id == tenant.id).order_by(WhatsAppCampaign.created_at.desc())).scalars().all()
+    return [_serialize_campaign(c) for c in rows]
+
+
+@router.post("")
+def create_campaign(payload: dict, db: Session = Depends(get_db), tenant: Tenant = Depends(get_current_tenant)):
+    campaign = WhatsAppCampaign(
+        tenant_id=tenant.id,
+        provider_id=payload.get("provider_id"),
+        template_id=payload.get("template_id"),
+        name=payload.get("name") or "Campanha",
+        status="draft",
+        created_by="console",
+    )
+    db.add(campaign); db.commit(); db.refresh(campaign)
+    return _serialize_campaign(campaign)
+
+
+@router.get("/{campaign_id}")
+def get_campaign(campaign_id: str, db: Session = Depends(get_db), tenant: Tenant = Depends(get_current_tenant)):
+    c = db.execute(select(WhatsAppCampaign).where(WhatsAppCampaign.id == campaign_id, WhatsAppCampaign.tenant_id == tenant.id)).scalars().first()
+    if not c:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+    return _serialize_campaign(c)
+
+
+@router.post("/{campaign_id}/recipients/import")
+def import_recipients(campaign_id: str, payload: dict, db: Session = Depends(get_db), tenant: Tenant = Depends(get_current_tenant)):
+    c = db.execute(select(WhatsAppCampaign).where(WhatsAppCampaign.id == campaign_id, WhatsAppCampaign.tenant_id == tenant.id)).scalars().first()
+    if not c:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+    recipients = payload.get("recipients") or []
+    imported = 0
+    for item in recipients:
+        if not item.get("phone"):
+            continue
+        db.add(WhatsAppCampaignRecipient(campaign_id=c.id, phone=item.get("phone"), first_name=item.get("first_name"), variables_json=item.get("variables_json") or {}))
+        imported += 1
+    c.total_recipients = int(c.total_recipients or 0) + imported
+    db.commit()
+    return {"ok": True, "imported": imported}
+
+
+@router.post("/{campaign_id}/start")
+def start_campaign(campaign_id: str, db: Session = Depends(get_db), tenant: Tenant = Depends(get_current_tenant)):
+    c = db.execute(select(WhatsAppCampaign).where(WhatsAppCampaign.id == campaign_id, WhatsAppCampaign.tenant_id == tenant.id)).scalars().first()
+    if not c:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+    c.status = "running"; c.started_at = c.started_at or datetime.utcnow(); db.commit(); db.refresh(c)
+    return _serialize_campaign(c)
+
+
+@router.post("/{campaign_id}/pause")
+def pause_campaign(campaign_id: str, db: Session = Depends(get_db), tenant: Tenant = Depends(get_current_tenant)):
+    c = db.execute(select(WhatsAppCampaign).where(WhatsAppCampaign.id == campaign_id, WhatsAppCampaign.tenant_id == tenant.id)).scalars().first()
+    if not c:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+    c.status = "paused"; db.commit(); db.refresh(c)
+    return _serialize_campaign(c)
+
+
+@router.get("/{campaign_id}/recipients")
+def list_recipients(campaign_id: str, db: Session = Depends(get_db), tenant: Tenant = Depends(get_current_tenant)):
+    c = db.execute(select(WhatsAppCampaign).where(WhatsAppCampaign.id == campaign_id, WhatsAppCampaign.tenant_id == tenant.id)).scalars().first()
+    if not c:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+    rows = db.execute(select(WhatsAppCampaignRecipient).where(WhatsAppCampaignRecipient.campaign_id == c.id).order_by(WhatsAppCampaignRecipient.created_at.desc())).scalars().all()
+    return [{"id": str(r.id), "campaign_id": str(r.campaign_id), "phone": r.phone, "first_name": r.first_name, "status": r.status, "provider_message_id": r.provider_message_id, "error_message": r.error_message} for r in rows]

@@ -26,7 +26,9 @@ import {
   SystemSettingsPayload,
   DeleteFlowResponse,
   WhatsAppProvider,
-  WhatsAppTemplate
+  WhatsAppTemplate,
+  WhatsAppCampaign,
+  WhatsAppCampaignRecipient
 } from './types';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL;
@@ -509,3 +511,12 @@ export async function listTemplates(): Promise<WhatsAppTemplate[]> { const res =
 export async function createTemplate(payload: Record<string, unknown>): Promise<WhatsAppTemplate> { const res = await apiFetch('/api/whatsapp/templates', { method:'POST', body: JSON.stringify(payload)}); return parseApiResponse<WhatsAppTemplate>(res); }
 export async function submitTemplate(templateId: string): Promise<WhatsAppTemplate> { const res = await apiFetch(`/api/whatsapp/templates/${templateId}/submit`, {method:'POST'}); return parseApiResponse<WhatsAppTemplate>(res); }
 export async function syncTemplates(){ const res = await apiFetch('/api/whatsapp/templates/sync', {method:'POST'}); return parseApiResponse<{ok:boolean;message:string;count:number}>(res); }
+
+
+export async function listWhatsAppCampaigns(): Promise<WhatsAppCampaign[]> { const res = await apiFetch('/api/whatsapp/campaigns'); return parseApiResponse<WhatsAppCampaign[]>(res); }
+export async function createWhatsAppCampaign(payload: Record<string, unknown>): Promise<WhatsAppCampaign> { const res = await apiFetch('/api/whatsapp/campaigns', { method:'POST', body: JSON.stringify(payload)}); return parseApiResponse<WhatsAppCampaign>(res); }
+export async function getWhatsAppCampaign(campaignId: string): Promise<WhatsAppCampaign> { const res = await apiFetch(`/api/whatsapp/campaigns/${campaignId}`); return parseApiResponse<WhatsAppCampaign>(res); }
+export async function importWhatsAppCampaignRecipients(campaignId: string, recipients: Array<Record<string, unknown>>) { const res = await apiFetch(`/api/whatsapp/campaigns/${campaignId}/recipients/import`, { method:'POST', body: JSON.stringify({ recipients })}); return parseApiResponse<{ok:boolean;imported:number}>(res); }
+export async function startWhatsAppCampaign(campaignId: string) { const res = await apiFetch(`/api/whatsapp/campaigns/${campaignId}/start`, { method:'POST' }); return parseApiResponse<WhatsAppCampaign>(res); }
+export async function pauseWhatsAppCampaign(campaignId: string) { const res = await apiFetch(`/api/whatsapp/campaigns/${campaignId}/pause`, { method:'POST' }); return parseApiResponse<WhatsAppCampaign>(res); }
+export async function listWhatsAppCampaignRecipients(campaignId: string): Promise<WhatsAppCampaignRecipient[]> { const res = await apiFetch(`/api/whatsapp/campaigns/${campaignId}/recipients`); return parseApiResponse<WhatsAppCampaignRecipient[]>(res); }

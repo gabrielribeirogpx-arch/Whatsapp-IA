@@ -277,3 +277,27 @@ export type SystemSettingsPayload = {
 
 export type WhatsAppProvider = { id:string; provider_type:string; display_name?:string|null; waba_id?:string|null; phone_number_id?:string|null; business_id?:string|null; is_active:boolean; status:string; metadata_json?: Record<string, any>; last_connection_check_at?: string | null; updated_at?: string; access_token_masked?:string|null };
 export type WhatsAppTemplate = { id:string; name:string; status:string; language:string; category?:string|null; body_text:string; rejection_reason?: string | null; variables_json?: Array<{ position:number; key:string; label:string; example:string }> | null };
+
+export type WhatsAppCampaign = {
+  id: string;
+  name: string;
+  status: string;
+  provider_id: string;
+  template_id: string;
+  total_recipients: number;
+  total_sent: number;
+  total_delivered: number;
+  total_read: number;
+  total_failed: number;
+  created_at?: string;
+};
+
+export type WhatsAppCampaignRecipient = {
+  id: string;
+  campaign_id: string;
+  phone: string;
+  first_name?: string | null;
+  status: string;
+  provider_message_id?: string | null;
+  error_message?: string | null;
+};
