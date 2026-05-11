@@ -2,6 +2,7 @@ from datetime import datetime
 from uuid import UUID
 import asyncio
 import logging
+import re
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -152,8 +153,8 @@ def sync_templates_placeholder(db: Session, tenant_id: UUID):
 async def _submit_meta_template(template: WhatsAppMessageTemplate, provider: TenantWhatsAppProvider, token: str, tenant_id: str) -> dict:
     client = MetaCloudClient(token)
     payload = {
-        "name": template.name,
-        "language": template.language,
+        "name": (template.name or "").lower(),
+        "language": "pt_BR",
         "category": (template.category or "UTILITY").upper(),
         "components": _build_components(template),
     }
@@ -167,9 +168,10 @@ async def _submit_meta_template(template: WhatsAppMessageTemplate, provider: Ten
         template.body_text,
     )
     print(
-        f"[WHATSAPP TEMPLATE META PAYLOAD] name={template.name} "
-        f"language={template.language} category={(template.category or 'UTILITY').upper()} body={template.body_text}"
+        f"[WHATSAPP TEMPLATE META PAYLOAD] name={(template.name or "").lower()} "
+        f"language=pt_BR category={(template.category or 'UTILITY').upper()} body={template.body_text}"
     )
+    logger.info("[WHATSAPP TEMPLATE META PAYLOAD_FULL] payload=%s", payload)
     response = await client.post(f"/{provider.waba_id}/message_templates", payload=payload, context={"tenant_id": tenant_id, "provider_id": str(provider.id), "template_id": str(template.id)})
     print(f"[SUBMIT DEBUG] step=meta_response status_code=200 body={str(response)[:1500]}")
     return response
@@ -181,7 +183,12 @@ async def _list_meta_templates(provider: TenantWhatsAppProvider, token: str, ten
 
 
 def _build_components(template: WhatsAppMessageTemplate) -> list[dict]:
-    components = [{"type": "BODY", "text": template.body_text}]
+    body_component: dict = {"type": "BODY", "text": template.body_text}
+    body_examples = _build_body_examples(template)
+    if body_examples:
+        body_component["example"] = {"body_text": [body_examples]}
+
+    components = [body_component]
     if template.header_json and template.header_json.get("text"):
         components.append({"type": "HEADER", "format": "TEXT", "text": template.header_json.get("text")})
     if template.footer_text:
@@ -194,6 +201,31 @@ def _build_components(template: WhatsAppMessageTemplate) -> list[dict]:
         if btns:
             components.append({"type": "BUTTONS", "buttons": btns})
     return components
+
+
+def _build_body_examples(template: WhatsAppMessageTemplate) -> list[str]:
+    body_text = template.body_text or ""
+    indexes = sorted({int(match) for match in re.findall(r"\{\{(\d+)\}\}", body_text)})
+    if not indexes:
+        return []
+
+    default_examples = {1: "Gabriel", 2: "#4821", 3: "Exemplo 3"}
+    variables_json = template.variables_json if isinstance(template.variables_json, list) else []
+    example_map: dict[int, str] = {}
+
+    for item in variables_json:
+        if not isinstance(item, dict):
+            continue
+        idx = item.get("index") or item.get("position") or item.get("id")
+        key = item.get("key")
+        sample = item.get("example") or item.get("sample") or item.get("value")
+        if isinstance(idx, int) and sample:
+            example_map[idx] = str(sample)
+            continue
+        if isinstance(key, str) and key.isdigit() and sample:
+            example_map[int(key)] = str(sample)
+
+    return [example_map.get(i) or default_examples.get(i) or f"Exemplo {i}" for i in indexes]
 
 
 def _resolve_provider(db: Session, tenant_id: UUID, provider_id: UUID | None):
