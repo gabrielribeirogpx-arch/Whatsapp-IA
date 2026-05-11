@@ -1,5 +1,5 @@
 import { Activity, Building2, Cable, Signal } from 'lucide-react';
-import { StatusBadge, toLocalDate } from './ui';
+import { ClientDateTime, StatusBadge } from './ui';
 
 function qualityColor(quality?: string) {
   if (quality === 'GREEN') return 'text-emerald-700 bg-emerald-100 border-emerald-300';
@@ -21,7 +21,7 @@ export default function ProviderCard({ p, onTest, onActivate, onDelete, loading 
     </div>
     <div className='mt-4 grid gap-2 text-xs text-slate-600 sm:grid-cols-3'>
       <span className='inline-flex items-center gap-1'><Building2 size={12} />Meta: {meta.verified_name || '—'}</span>
-      <span className='inline-flex items-center gap-1'><Signal size={12} />Último sync: {toLocalDate(meta.last_sync_at || p.last_connection_check_at || p.updated_at)}</span>
+      <span className='inline-flex items-center gap-1'><Signal size={12} />Último sync: <ClientDateTime value={meta.last_sync_at || p.last_connection_check_at || p.updated_at} fallback='Nunca sincronizado' /></span>
       <span>Número: {meta.display_phone_number || p.phone_number_id || '—'}</span>
     </div>
     <div className='mt-4 flex flex-wrap gap-2'>

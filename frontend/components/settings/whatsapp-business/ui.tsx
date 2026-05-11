@@ -1,4 +1,7 @@
+'use client';
+
 import { AlertCircle, CheckCircle2, Clock3, Link2Off, PauseCircle, ShieldAlert, Wifi } from 'lucide-react';
+import { useEffect, useState } from 'react';
 
 const badgeStyles: Record<string, string> = {
   connected: 'bg-gradient-to-r from-emerald-500/10 to-emerald-100/80 text-emerald-700 border-emerald-600/20',
@@ -30,4 +33,11 @@ export function toLocalDate(date?: string | null) {
   if (!date) return '—';
   const parsed = new Date(date);
   return Number.isNaN(parsed.valueOf()) ? '—' : parsed.toLocaleString('pt-BR');
+}
+
+export function ClientDateTime({ value, fallback = '—' }: { value?: string | null; fallback?: string }) {
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+  if (!mounted) return <>{fallback}</>;
+  return <>{toLocalDate(value)}</>;
 }
