@@ -4,8 +4,46 @@ import uuid
 from fastapi import Request
 
 from app.services.queue import enqueue_incoming_message
+from app.db.session import SessionLocal
+from app.models.whatsapp_campaign import WhatsAppCampaign, WhatsAppCampaignRecipient
+from sqlalchemy import select
 
 logger = logging.getLogger(__name__)
+
+
+
+
+def _update_campaign_status_from_meta(payload: dict) -> None:
+    try:
+        entry=(payload.get("entry") or [None])[0] or {}
+        change=(entry.get("changes") or [None])[0] or {}
+        value=change.get("value") or {}
+        statuses=value.get("statuses") or []
+        if not statuses:
+            return
+        with SessionLocal() as db:
+            for st in statuses:
+                provider_message_id=str(st.get("id") or "").strip()
+                if not provider_message_id:
+                    continue
+                rec=db.execute(select(WhatsAppCampaignRecipient).where(WhatsAppCampaignRecipient.provider_message_id==provider_message_id)).scalars().first()
+                if not rec:
+                    continue
+                campaign=db.execute(select(WhatsAppCampaign).where(WhatsAppCampaign.id==rec.campaign_id)).scalars().first()
+                status=str(st.get("status") or "").lower()
+                ts_raw=st.get("timestamp")
+                ts=None
+                if ts_raw:
+                    from datetime import datetime
+                    ts=datetime.utcfromtimestamp(int(ts_raw))
+                if status in {"sent","delivered","read","failed"}:
+                    rec.status=status
+                    if status=="delivered": rec.delivered_at=ts; campaign.total_delivered=int(campaign.total_delivered or 0)+1
+                    if status=="read": rec.read_at=ts; campaign.total_read=int(campaign.total_read or 0)+1
+                    if status=="failed": rec.failed_at=ts; campaign.total_failed=int(campaign.total_failed or 0)+1
+            db.commit()
+    except Exception:
+        logger.exception("event=campaign_status_update_error")
 
 
 async def enqueue_webhook_payload(request: Request) -> tuple[bool, str | None]:
@@ -39,6 +77,8 @@ async def enqueue_webhook_payload(request: Request) -> tuple[bool, str | None]:
             payload["message_id"] = message_id
     except Exception:
         logger.exception("event=webhook_correlation_parse_error correlation_id=%s stage=webhook_parse", correlation_id)
+
+    _update_campaign_status_from_meta(payload)
 
     try:
         job_id = enqueue_incoming_message(payload)

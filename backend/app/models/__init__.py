@@ -16,7 +16,9 @@ from app.models.failed_message import FailedMessage
 from app.models.flow_session import FlowSession
 from app.models.user import TenantUser
 
-__all__ = ["Tenant", "AIConfig", "Conversation", "Contact", "Message", "Product", "KnowledgeBase", "KnowledgeChunk", "Lead", "PipelineStage", "BotRule", "ConversationLog", "Flow", "FlowStep", "FlowNode", "FlowEdge", "FlowVersion", "FlowExecution", "ProcessedMessage", "FlowEvent", "FailedMessage", "FlowSession", "TenantUser", "TenantWhatsAppProvider", "WhatsAppMessageTemplate"]
+__all__ = ["Tenant", "AIConfig", "Conversation", "Contact", "Message", "Product", "KnowledgeBase", "KnowledgeChunk", "Lead", "PipelineStage", "BotRule", "ConversationLog", "Flow", "FlowStep", "FlowNode", "FlowEdge", "FlowVersion", "FlowExecution", "ProcessedMessage", "FlowEvent", "FailedMessage", "FlowSession", "TenantUser", "TenantWhatsAppProvider", "WhatsAppMessageTemplate", "WhatsAppCampaign", "WhatsAppCampaignRecipient"]
 
 from app.models.tenant_whatsapp_provider import TenantWhatsAppProvider
 from app.models.whatsapp_message_template import WhatsAppMessageTemplate
+
+from app.models.whatsapp_campaign import WhatsAppCampaign, WhatsAppCampaignRecipient
