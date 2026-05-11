@@ -77,12 +77,19 @@ def ensure_conversations_columns():
 
 
 def _parse_allowed_origins() -> list[str]:
-    origins = os.getenv(
-        "CORS_ALLOW_ORIGINS",
-        "https://whatsapp-ia-nine.vercel.app,http://localhost:3000,https://frontend-whatsapp-ia-production.up.railway.app",
+    default_origins = (
+        "https://whatsapp-ia-nine.vercel.app,"
+        "https://frontend-whatsapp-ia-production.up.railway.app,"
+        "http://localhost:3000,"
+        "http://127.0.0.1:3000"
+    )
+    origins = (
+        os.getenv("CORS_ORIGINS")
+        or os.getenv("CORS_ALLOW_ORIGINS")
+        or default_origins
     )
     parsed = [origin.strip() for origin in origins.split(",") if origin.strip()]
-    return parsed or ["*"]
+    return parsed
 
 
 def _parse_allowed_origin_regex() -> str | None:
