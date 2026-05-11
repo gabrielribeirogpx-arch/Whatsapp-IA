@@ -1,15 +1,15 @@
 import { AlertCircle, CheckCircle2, Clock3, Link2Off, PauseCircle, ShieldAlert, Wifi } from 'lucide-react';
 
 const badgeStyles: Record<string, string> = {
-  connected: 'bg-emerald-500/10 text-emerald-700 border-emerald-600/20',
+  connected: 'bg-gradient-to-r from-emerald-500/10 to-emerald-100/80 text-emerald-700 border-emerald-600/20',
   disconnected: 'bg-slate-500/10 text-slate-700 border-slate-500/20',
   invalid_config: 'bg-rose-500/10 text-rose-700 border-rose-500/20',
-  active: 'bg-green-500/10 text-green-700 border-green-500/20',
+  active: 'bg-gradient-to-r from-green-500/10 to-green-100/80 text-green-700 border-green-500/20',
   inactive: 'bg-zinc-500/10 text-zinc-700 border-zinc-500/20',
   draft: 'bg-zinc-500/10 text-zinc-700 border-zinc-500/20',
   submitted: 'bg-sky-500/10 text-sky-700 border-sky-500/20',
   pending: 'bg-amber-500/10 text-amber-700 border-amber-500/20',
-  approved: 'bg-emerald-500/10 text-emerald-700 border-emerald-500/20',
+  approved: 'bg-gradient-to-r from-emerald-500/10 to-emerald-100/80 text-emerald-700 border-emerald-500/20',
   rejected: 'bg-rose-500/10 text-rose-700 border-rose-500/20',
   paused: 'bg-violet-500/10 text-violet-700 border-violet-500/20'
 };
@@ -23,7 +23,7 @@ const iconMap: Record<string, JSX.Element> = {
 
 export function StatusBadge({ value }: { value: string }) {
   const style = badgeStyles[value] ?? 'bg-slate-500/10 text-slate-700 border-slate-500/20';
-  return <span className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-medium ${style}`}>{iconMap[value]}{value}</span>;
+  return <span className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-semibold capitalize tracking-wide ${style}`}>{iconMap[value]}{value}</span>;
 }
 
 export function toLocalDate(date?: string | null) {
