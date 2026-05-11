@@ -150,7 +150,11 @@ app.include_router(bot_rules.router)
 app.include_router(flows.crud_router, prefix="/api/flows", tags=["flows"])
 app.include_router(flows.router, prefix="/api/admin", tags=["admin"])
 app.include_router(whatsapp_providers.router)
-app.include_router(whatsapp_templates.router)
+app.include_router(
+    whatsapp_templates.router,
+    prefix="/api/whatsapp/templates",
+    tags=["WhatsApp Templates"],
+)
 app.include_router(whatsapp_campaigns.router)
 # Webhooks ativos:
 # - Canônico (Meta): /webhook (sem prefixo), via app.routers.webhook
