@@ -41,7 +41,23 @@ export default function SettingsPage() {
 
   const validateTemplate = () => { if (!/^[a-z0-9_]+$/.test(templateForm.name)) return 'Nome do template deve ter lowercase e underscores.'; const mapped = friendlyToMeta(templateForm.friendly_body_text || templateForm.body_text || ''); if (mapped.errors.length) return `${mapped.errors[0]}
 Use uma variável da lista ou remova o marcador.`; return validateMetaVariables(mapped.bodyText); };
-  async function run(action: () => Promise<void>, ok: string, err: string) { setLoading(true); try { await action(); setToast(ok); } catch { setToast(err); } finally { setLoading(false); setTimeout(() => setToast(''), 3000); } }
+  const parseFriendlyError = (error: unknown, fallback: string) => {
+    if (!(error instanceof Error)) return fallback;
+    const match = error.message.match(/HTTP \d+:\s*([\s\S]*)$/);
+    if (!match?.[1]) return fallback;
+    try {
+      const parsed = JSON.parse(match[1]);
+      const detailPayload = parsed?.detail;
+      const detail = typeof detailPayload === 'string' ? detailPayload : detailPayload?.detail;
+      const metaError = detailPayload?.meta_error;
+      if (detail && metaError) return `Erro ao enviar template: ${detail}\n${metaError}`;
+      if (detail) return `Erro ao enviar template: ${detail}`;
+    } catch {
+      return fallback;
+    }
+    return fallback;
+  };
+  async function run(action: () => Promise<void>, ok: string, err: string) { setLoading(true); try { await action(); setToast(ok); } catch (error) { setToast(parseFriendlyError(error, err)); } finally { setLoading(false); setTimeout(() => setToast(''), 5000); } }
 
   return <section className='w-full min-w-0 px-4 py-6 sm:px-6 lg:px-8'>
     <div className='w-full min-w-0 space-y-5'>

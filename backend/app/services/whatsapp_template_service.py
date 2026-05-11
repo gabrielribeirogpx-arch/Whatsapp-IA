@@ -14,6 +14,15 @@ from app.utils.encryption import decrypt_secret
 logger = logging.getLogger(__name__)
 
 
+class TemplateSubmitError(Exception):
+    def __init__(self, detail: str, status_code: int, meta_error: str | None = None, meta_code: str | int | None = None):
+        super().__init__(detail)
+        self.detail = detail
+        self.status_code = status_code
+        self.meta_error = meta_error
+        self.meta_code = str(meta_code) if meta_code is not None else None
+
+
 def list_templates(db: Session, tenant_id: UUID):
     return db.execute(select(WhatsAppMessageTemplate).where(WhatsAppMessageTemplate.tenant_id == tenant_id)).scalars().all()
 
@@ -58,13 +67,32 @@ def delete_template(db: Session, tenant_id: UUID, template_id: UUID):
 
 
 def submit_template_placeholder(db: Session, tenant_id: UUID, template_id: UUID):
-    template = _get_template(db, tenant_id, template_id)
+    print(f"[SUBMIT DEBUG] step=find_template tenant_id={tenant_id} template_id={template_id}")
+    template = _get_template(db, tenant_id, template_id, raise_not_found=True)
+    print(f"[SUBMIT DEBUG] step=template_found provider_id={template.provider_id}")
+
+    print(f"[SUBMIT DEBUG] step=find_provider provider_id={template.provider_id}")
     provider = _resolve_provider_for_submit(db, tenant_id, template)
+    print(
+        f"[SUBMIT DEBUG] step=provider_found status={provider.status} "
+        f"is_active={provider.is_active} waba_id_present={bool(provider.waba_id)}"
+    )
+
+    if provider.status != "connected":
+        raise TemplateSubmitError("Ative uma conexão Meta conectada antes de enviar templates.", 422)
+    if not provider.waba_id:
+        raise TemplateSubmitError("Provider não possui WABA ID configurado.", 422)
+
     token = decrypt_secret(provider.access_token_encrypted)
     if not token:
-        raise ValueError("Token do provider inválido")
+        raise TemplateSubmitError("Token Meta inválido ou expirado.", 401)
 
     try:
+        print(
+            f"[SUBMIT DEBUG] step=build_meta_payload template_name={template.name} "
+            f"category={template.category} language={template.language}"
+        )
+        print(f"[SUBMIT DEBUG] step=meta_request endpoint=/{provider.waba_id}/message_templates")
         resp = asyncio.run(_submit_meta_template(template, provider, token, str(tenant_id)))
         template.status = "pending"
         template.submitted_at = datetime.utcnow()
@@ -74,9 +102,22 @@ def submit_template_placeholder(db: Session, tenant_id: UUID, template_id: UUID)
         db.refresh(template)
         return template
     except MetaApiError as exc:
+        status_code = int(getattr(exc, "status_code", 500) or 500)
+        response_body = getattr(exc, "response_body", {}) or {}
+        meta_error = response_body.get("error", {}) if isinstance(response_body, dict) else {}
+        meta_message = meta_error.get("message") if isinstance(meta_error, dict) else str(exc)
+        meta_code = meta_error.get("code") if isinstance(meta_error, dict) else None
+        print(
+            f"[SUBMIT DEBUG] step=meta_response status_code={status_code} "
+            f"body={str(response_body)[:1500]}"
+        )
         template.metadata_json = {**(template.metadata_json or {}), "last_error": str(exc)}
         db.commit()
-        raise ValueError(str(exc)) from exc
+        if status_code in {401, 403}:
+            raise TemplateSubmitError("Token Meta inválido ou expirado.", 422, meta_error=meta_message, meta_code=meta_code) from exc
+        if status_code == 404:
+            raise TemplateSubmitError("Meta não encontrou o WABA informado.", 422, meta_error=meta_message, meta_code=meta_code) from exc
+        raise TemplateSubmitError("Erro ao enviar template para Meta.", 422, meta_error=meta_message, meta_code=meta_code) from exc
 
 
 def sync_templates_placeholder(db: Session, tenant_id: UUID):
@@ -125,7 +166,13 @@ async def _submit_meta_template(template: WhatsAppMessageTemplate, provider: Ten
         (template.category or "UTILITY").upper(),
         template.body_text,
     )
-    return await client.post(f"/{provider.waba_id}/message_templates", payload=payload, context={"tenant_id": tenant_id, "provider_id": str(provider.id), "template_id": str(template.id)})
+    print(
+        f"[WHATSAPP TEMPLATE META PAYLOAD] name={template.name} "
+        f"language={template.language} category={(template.category or 'UTILITY').upper()} body={template.body_text}"
+    )
+    response = await client.post(f"/{provider.waba_id}/message_templates", payload=payload, context={"tenant_id": tenant_id, "provider_id": str(provider.id), "template_id": str(template.id)})
+    print(f"[SUBMIT DEBUG] step=meta_response status_code=200 body={str(response)[:1500]}")
+    return response
 
 
 async def _list_meta_templates(provider: TenantWhatsAppProvider, token: str, tenant_id: str) -> dict:
@@ -161,6 +208,7 @@ def _resolve_provider_for_submit(db: Session, tenant_id: UUID, template: WhatsAp
         provider = _resolve_provider(db, tenant_id, template.provider_id)
         if provider:
             return provider
+        raise TemplateSubmitError("Provider associado não encontrado.", 422)
 
     connected = db.execute(
         select(TenantWhatsAppProvider).where(
@@ -174,7 +222,7 @@ def _resolve_provider_for_submit(db: Session, tenant_id: UUID, template: WhatsAp
             template.provider_id = connected[0].id
         return connected[0]
     if len(connected) > 1:
-        raise ValueError("Selecione um provider para este template.")
+        raise TemplateSubmitError("Selecione um provider para este template.", 422)
 
     active = db.execute(
         select(TenantWhatsAppProvider).where(
@@ -186,12 +234,14 @@ def _resolve_provider_for_submit(db: Session, tenant_id: UUID, template: WhatsAp
     if active:
         if not template.provider_id:
             template.provider_id = active.id
+            db.commit()
+            db.refresh(template)
         return active
-    raise ValueError("Nenhum provider Meta conectado para submissão")
+    raise TemplateSubmitError("Ative uma conexão Meta conectada antes de enviar templates.", 422)
 
 
-def _get_template(db: Session, tenant_id: UUID, template_id: UUID):
+def _get_template(db: Session, tenant_id: UUID, template_id: UUID, raise_not_found: bool = False):
     template = db.execute(select(WhatsAppMessageTemplate).where(WhatsAppMessageTemplate.id == template_id, WhatsAppMessageTemplate.tenant_id == tenant_id)).scalars().first()
-    if not template:
-        raise ValueError("Template não encontrado")
+    if not template and raise_not_found:
+        raise TemplateSubmitError("Template não encontrado para este tenant.", 404)
     return template
