@@ -38,8 +38,8 @@ export default function SettingsPage() {
 Use uma variável da lista ou remova o marcador.`; return validateMetaVariables(mapped.bodyText); };
   async function run(action: () => Promise<void>, ok: string, err: string) { setLoading(true); try { await action(); setToast(ok); } catch { setToast(err); } finally { setLoading(false); setTimeout(() => setToast(''), 3000); } }
 
-  return <section className='w-full min-w-0 px-4 py-5 md:px-6 md:py-6'>
-    <div className='mx-auto max-w-6xl space-y-4'>
+  return <section className='w-full min-w-0 px-4 py-5 md:px-6 md:py-6 xl:px-8 2xl:px-10'>
+    <div className='mx-auto w-full max-w-[1600px] space-y-5'>
       <header className='relative overflow-hidden rounded-3xl border border-[color:var(--surface-border)] bg-gradient-to-br from-white/95 via-white/90 to-emerald-50/70 p-6 shadow-[0_20px_50px_-40px_rgba(2,6,23,0.55)] backdrop-blur-sm md:p-7'>
         <div className='pointer-events-none absolute -top-10 right-8 h-28 w-28 rounded-full bg-emerald-400/15 blur-2xl' />
         <p className='inline-flex items-center gap-2 rounded-full border border-emerald-200/80 bg-white/80 px-3 py-1 text-xs font-semibold text-emerald-700 shadow-sm'><MessageSquareText size={14} /> WhatsApp Business Console</p>
@@ -52,7 +52,7 @@ Use uma variável da lista ou remova o marcador.`; return validateMetaVariables(
 
       {toast && <div className='rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm shadow-sm'>{toast}</div>}
 
-      <div className='grid gap-3 sm:grid-cols-2 lg:grid-cols-5'>
+      <div className='grid gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-5'>
         {[
           ['Providers ativos', String(stats.activeProviders), Building2],
           ['Templates aprovados', String(stats.approvedTemplates), CheckCircle2],
