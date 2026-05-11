@@ -102,6 +102,8 @@ ALLOWED_ORIGIN_REGEX = _parse_allowed_origin_regex()
 
 app = FastAPI()
 
+app.add_middleware(TenantContextMiddleware)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
@@ -127,9 +129,6 @@ def on_startup():
     run_migrations()
     Base.metadata.create_all(bind=engine)
     ensure_conversations_columns()
-
-
-app.add_middleware(TenantContextMiddleware)
 
 
 @app.options("/{path:path}")

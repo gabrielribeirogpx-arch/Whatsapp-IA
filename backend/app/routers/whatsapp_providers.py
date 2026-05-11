@@ -19,7 +19,17 @@ def get_providers(request: Request, db: Session = Depends(get_db), tenant: Tenan
 @router.post("", response_model=TenantWhatsAppProviderOut)
 def create_provider(request: Request, payload: TenantWhatsAppProviderCreate, db: Session = Depends(get_db), tenant: Tenant = Depends(get_current_tenant)):
     print("[WHATSAPP PROVIDER CREATE]", f"tenant_id={tenant.id}")
-    return whatsapp_provider_service.create_provider(db, tenant.id, payload)
+    try:
+        return whatsapp_provider_service.create_provider(db, tenant.id, payload)
+    except Exception as exc:
+        print(
+            "[WHATSAPP PROVIDER CREATE ERROR]",
+            f"tenant_id={tenant.id}",
+            f"provider_type={payload.provider_type}",
+            f"exception_type={type(exc).__name__}",
+            f"message={str(exc)[:180]}",
+        )
+        raise HTTPException(status_code=500, detail="Erro ao criar provider. Verifique a configuração e tente novamente.") from exc
 
 
 @router.patch("/{provider_id}", response_model=TenantWhatsAppProviderOut)

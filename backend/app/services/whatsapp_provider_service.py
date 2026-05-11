@@ -21,12 +21,16 @@ def list_providers(db: Session, tenant_id: UUID):
 
 
 def create_provider(db: Session, tenant_id: UUID, payload):
-    data = payload.model_dump(exclude_unset=True)
-    provider = TenantWhatsAppProvider(tenant_id=tenant_id, **_normalize_secret_fields(data))
-    db.add(provider)
-    db.commit()
-    db.refresh(provider)
-    return provider
+    try:
+        data = payload.model_dump(exclude_unset=True)
+        provider = TenantWhatsAppProvider(tenant_id=tenant_id, **_normalize_secret_fields(data))
+        db.add(provider)
+        db.commit()
+        db.refresh(provider)
+        return provider
+    except Exception:
+        db.rollback()
+        raise
 
 
 def update_provider(db: Session, tenant_id: UUID, provider_id: UUID, payload):

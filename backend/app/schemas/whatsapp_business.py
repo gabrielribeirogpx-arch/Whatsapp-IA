@@ -1,7 +1,8 @@
 from datetime import datetime
+from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from app.schemas.whatsapp_enums import ProviderTypeEnum, TemplateCategoryEnum, TemplateStatusEnum
 
@@ -39,12 +40,17 @@ class TenantWhatsAppProviderOut(BaseModel):
     webhook_verify_token: str | None = None
     webhook_url: str | None = None
     is_active: bool
-    status: str
+    status: Literal["disconnected", "connected", "active", "invalid_config"]
     metadata_json: dict = Field(default_factory=dict)
     last_connection_check_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
     model_config = {"from_attributes": True}
+
+    @field_validator("metadata_json", mode="before")
+    @classmethod
+    def ensure_metadata_json(cls, value):
+        return value or {}
 
 
 class WhatsAppTemplateCreate(BaseModel):
