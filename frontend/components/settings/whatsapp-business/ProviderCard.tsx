@@ -2,7 +2,7 @@ import { Activity, Building2, Cable, Signal } from 'lucide-react';
 import { StatusBadge, toLocalDate } from './ui';
 
 export default function ProviderCard({ p, onTest, onActivate, onDelete, loading }: { p: any; onTest: any; onActivate: any; onDelete: any; loading: boolean }) {
-  return <article className={`group rounded-2xl border p-4 transition-all duration-300 ${p.status === 'connected' ? 'border-emerald-200/80 bg-gradient-to-b from-white to-emerald-50/40 shadow-[0_18px_34px_-28px_rgba(16,185,129,0.5)]' : 'border-slate-200/80 bg-gradient-to-b from-white to-slate-50/60 shadow-[0_16px_30px_-28px_rgba(15,23,42,0.8)]'} hover:-translate-y-0.5 hover:shadow-[0_24px_40px_-30px_rgba(15,23,42,0.75)]`}>
+  return <article className={`group w-full min-w-0 rounded-2xl border p-4 transition-all duration-300 ${p.status === 'connected' ? 'border-emerald-200/80 bg-gradient-to-b from-white to-emerald-50/40 shadow-[0_18px_34px_-28px_rgba(16,185,129,0.5)]' : 'border-slate-200/80 bg-gradient-to-b from-white to-slate-50/60 shadow-[0_16px_30px_-28px_rgba(15,23,42,0.8)]'} hover:-translate-y-0.5 hover:shadow-[0_24px_40px_-30px_rgba(15,23,42,0.75)]`}>
     <div className='flex flex-wrap items-start justify-between gap-3'>
       <div className='space-y-2'>
         <p className='inline-flex items-center gap-2 text-sm font-semibold text-slate-900'><span className='rounded-xl border border-emerald-200 bg-emerald-50 p-2 text-emerald-700'><Cable size={14} /></span>{p.display_name || p.provider_type}</p>

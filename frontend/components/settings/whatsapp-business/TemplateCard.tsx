@@ -3,7 +3,7 @@ import { StatusBadge, toLocalDate } from './ui';
 import { renderExample } from '@/lib/templateVariableMapper';
 
 export default function TemplateCard({ t, onSubmit, loading }: { t: any; onSubmit: any; loading: boolean }) {
-  return <article className='rounded-2xl border border-[color:var(--surface-border)] bg-white/95 p-4 shadow-[0_16px_30px_-28px_rgba(15,23,42,0.8)] transition-all duration-300 hover:-translate-y-0.5 hover:border-emerald-200 hover:shadow-[0_24px_40px_-30px_rgba(15,23,42,0.75)]'>
+  return <article className='w-full min-w-0 rounded-2xl border border-[color:var(--surface-border)] bg-white/95 p-4 shadow-[0_16px_30px_-28px_rgba(15,23,42,0.8)] transition-all duration-300 hover:-translate-y-0.5 hover:border-emerald-200 hover:shadow-[0_24px_40px_-30px_rgba(15,23,42,0.75)]'>
     <div className='flex flex-wrap items-start justify-between gap-3'>
       <div>
         <p className='text-sm font-semibold text-slate-900'>{t.name}</p>
