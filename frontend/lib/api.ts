@@ -494,6 +494,11 @@ export async function createWhatsAppProvider(payload: Record<string, unknown>): 
   return parseApiResponse<WhatsAppProvider>(res);
 }
 
+export async function updateWhatsAppProvider(providerId: string, payload: Record<string, unknown>): Promise<WhatsAppProvider> {
+  const res = await apiFetch(`/api/whatsapp/providers/${providerId}`, { method: 'PATCH', body: JSON.stringify(payload) });
+  return parseApiResponse<WhatsAppProvider>(res);
+}
+
 export async function activateWhatsAppProvider(providerId: string): Promise<WhatsAppProvider> {
   const res = await apiFetch(`/api/whatsapp/providers/${providerId}/activate`, { method: 'POST' });
   return parseApiResponse<WhatsAppProvider>(res);

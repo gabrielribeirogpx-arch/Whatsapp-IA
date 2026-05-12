@@ -35,8 +35,15 @@ def create_provider(db: Session, tenant_id: UUID, payload):
 
 def update_provider(db: Session, tenant_id: UUID, provider_id: UUID, payload):
     provider = _get_provider(db, tenant_id, provider_id)
-    for key, value in _normalize_secret_fields(payload.model_dump(exclude_unset=True)).items():
+    incoming = payload.model_dump(exclude_unset=True)
+    for secret_field in ("access_token", "app_secret", "api_key"):
+        if secret_field in incoming and (incoming[secret_field] is None or str(incoming[secret_field]).strip() == ""):
+            incoming.pop(secret_field, None)
+    for key, value in _normalize_secret_fields(incoming).items():
+        if value is None:
+            continue
         setattr(provider, key, value)
+    provider.updated_at = datetime.utcnow()
     db.commit()
     db.refresh(provider)
     return provider
@@ -103,7 +110,10 @@ def _normalize_secret_fields(data: dict):
     mapped = dict(data)
     for source, target in (("access_token", "access_token_encrypted"), ("app_secret", "app_secret_encrypted"), ("api_key", "api_key_encrypted")):
         if source in mapped:
-            mapped[target] = encrypt_secret(mapped.pop(source))
+            secret_value = mapped.pop(source)
+            if secret_value is None or str(secret_value).strip() == "":
+                continue
+            mapped[target] = encrypt_secret(secret_value)
         elif target in mapped and mapped[target]:
             plain = decrypt_secret(mapped[target])
             mapped[target] = encrypt_secret(plain)
