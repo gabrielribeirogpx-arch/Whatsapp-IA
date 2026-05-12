@@ -76,6 +76,41 @@ def ensure_conversations_columns():
         print("❌ Erro ao validar estrutura:", e)
 
 
+
+
+def verify_contacts_columns() -> None:
+    required_columns = {
+        "first_name",
+        "last_name",
+        "email",
+        "tags",
+        "source",
+        "opt_in_status",
+        "last_interaction_at",
+        "custom_fields_json",
+        "updated_at",
+    }
+    try:
+        with engine.begin() as connection:
+            rows = connection.execute(
+                text(
+                    """
+                    SELECT column_name
+                    FROM information_schema.columns
+                    WHERE table_name = 'contacts'
+                    """
+                )
+            ).fetchall()
+        existing_columns = {row[0] for row in rows}
+        missing = sorted(required_columns - existing_columns)
+        if missing:
+            print(f"[DB CHECK] contacts missing columns: {missing}")
+        else:
+            print("[DB CHECK] contacts columns verified")
+    except Exception as exc:
+        print(f"[DB CHECK] contacts verification failed: {exc}")
+
+
 def _parse_allowed_origins() -> list[str]:
     default_origins = (
         "https://whatsapp-ia-nine.vercel.app,"
@@ -129,6 +164,7 @@ def on_startup():
     run_migrations()
     Base.metadata.create_all(bind=engine)
     ensure_conversations_columns()
+    verify_contacts_columns()
 
 
 @app.options("/{path:path}")
