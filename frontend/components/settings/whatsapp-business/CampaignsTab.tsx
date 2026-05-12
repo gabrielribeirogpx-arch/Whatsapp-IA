@@ -113,7 +113,8 @@ export default function CampaignsTab() {
 
   const selectedTemplate = approvedTemplates.find((t) => t.id === templateId);
   const templateBody = selectedTemplate?.body_preview || selectedTemplate?.body_text || '';
-  const templateVariables = useMemo(() => parseTemplateVariables(templateBody), [templateBody]);
+  const templateVariableSource = `${selectedTemplate?.body_text || ''}\n${selectedTemplate?.body_preview || ''}`;
+  const templateVariables = useMemo(() => parseTemplateVariables(templateVariableSource), [templateVariableSource]);
 
   useEffect(() => {
     if (templateId && !approvedTemplates.some((t) => t.id === templateId)) setTemplateId('');
@@ -173,10 +174,28 @@ export default function CampaignsTab() {
 
   const onQuickTest = async () => {
     if (!testPhone || !selectedTemplate || !providerId) return;
+
+    if (templateVariables.length) {
+      for (const key of templateVariables) {
+        const value = (testVariableValues[key] || '').trim();
+        if (!value) {
+          setTestStatus({ type: 'error', message: `Preencha a variável ${key}` });
+          return;
+        }
+      }
+    }
+
     const payloadVariables = templateVariables.reduce<Record<string, string>>((acc, key) => {
-      acc[key] = variableValues[key] || '';
+      const value = (testVariableValues[key] || '').trim();
+      if (value) acc[key] = value;
       return acc;
     }, {});
+
+    console.log('[WHATSAPP TEMPLATE TEST PAYLOAD]', {
+      provider_id: providerId,
+      to: testPhone,
+      variables: payloadVariables
+    });
 
     setTestSending(true);
     setTestStatus(null);
@@ -184,7 +203,7 @@ export default function CampaignsTab() {
       const result = await testSendWhatsAppTemplate(selectedTemplate.id, {
         provider_id: providerId,
         to: testPhone,
-        variables: payloadVariables
+        ...(templateVariables.length ? { variables: payloadVariables } : {})
       });
       setTestStatus({ type: 'success', message: `Teste enviado com sucesso. message_id: ${result.provider_message_id || 'n/a'}` });
     } catch (error) {
