@@ -132,8 +132,8 @@ def process_incoming_message(payload: dict[str, Any]) -> None:
         conversation, _ = get_or_create_conversation(
             db,
             tenant_id=tenant.id,
-            phone=contact.phone,
-            contact_id=contact.id,
+            phone=(contact.phone if contact else str(parsed.get("phone") or "")),
+            contact_id=contact.id if contact else None,
             message=str(parsed.get("text") or ""),
         )
         ensure_conversation_contact_link(conversation, contact)
@@ -141,7 +141,7 @@ def process_incoming_message(payload: dict[str, Any]) -> None:
             "event=incoming_worker_entities_ready correlation_id=%s tenant_id=%s contact_id=%s conversation_id=%s",
             correlation_id,
             tenant.id,
-            contact.id,
+            contact.id if contact else "n/a",
             conversation.id,
         )
 
@@ -165,8 +165,8 @@ def process_incoming_message(payload: dict[str, Any]) -> None:
         persisted_conversation, _ = get_or_create_conversation(
             db,
             tenant_id=tenant.id,
-            phone=contact.phone,
-            contact_id=contact.id,
+            phone=(contact.phone if contact else str(parsed.get("phone") or "")),
+            contact_id=contact.id if contact else None,
         )
 
         if persisted_message and persisted_conversation:

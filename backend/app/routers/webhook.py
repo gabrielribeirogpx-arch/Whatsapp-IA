@@ -278,7 +278,7 @@ async def _process_meta_webhook(request: Request, db: Session) -> dict[str, str]
                     db=db,
                     tenant_id=tenant_id,
                     phone=normalized_phone,
-                    contact_id=contact.id,
+                    contact_id=contact.id if contact else None,
                 )
 
             if existed:
@@ -288,7 +288,8 @@ async def _process_meta_webhook(request: Request, db: Session) -> dict[str, str]
 
             if contact_name:
                 conversation.name = contact_name
-                contact.name = contact_name
+                if contact:
+                    contact.name = contact_name
                 logger.info(
                     "[CONTACT PROFILE NAME SAVED] phone=%s name=%s",
                     normalized_phone,
@@ -298,9 +299,10 @@ async def _process_meta_webhook(request: Request, db: Session) -> dict[str, str]
 
             if conversation.name is None and _looks_like_name(incoming_message):
                 conversation.name = incoming_message.strip()
-            if conversation.name and (not contact.name or contact.name == "Cliente"):
+            if contact and conversation.name and (not contact.name or contact.name == "Cliente"):
                 contact.name = conversation.name
-            contact.last_message_at = datetime.utcnow()
+            if contact:
+                contact.last_message_at = datetime.utcnow()
 
             logger.info("Salvando mensagem de entrada phone=%s conversation_id=%s", normalized_phone, conversation.id)
             inbound_message = Message(
