@@ -106,6 +106,7 @@ export default function CampaignsTab({ standalone = false }: CampaignsTabProps) 
   const [loading, setLoading] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
   const [savedContacts, setSavedContacts] = useState<CRMContact[]>([]);
+  const [contactsLoadError, setContactsLoadError] = useState<string | null>(null);
   const [selectedContactIds, setSelectedContactIds] = useState<string[]>([]);
   const [recipientMode, setRecipientMode] = useState<'csv' | 'saved'>('csv');
   const [contactSearch, setContactSearch] = useState('');
@@ -127,7 +128,14 @@ export default function CampaignsTab({ standalone = false }: CampaignsTabProps) 
     setLoading(true);
     try {
       setCampaigns(await listWhatsAppCampaigns());
-      setSavedContacts(await getContacts());
+      try {
+        setSavedContacts(await getContacts());
+        setContactsLoadError(null);
+      } catch (error) {
+        console.error('[CAMPAIGNS CONTACTS LOAD ERROR]', error);
+        setSavedContacts([]);
+        setContactsLoadError('Não foi possível carregar contatos');
+      }
     } finally {
       setLoading(false);
     }
@@ -438,6 +446,7 @@ export default function CampaignsTab({ standalone = false }: CampaignsTabProps) 
 
         {recipientMode === 'saved' && <div className='space-y-2'>
           <input value={contactSearch} onChange={(e) => setContactSearch(e.target.value)} placeholder='Buscar por nome/telefone' className='premium-input w-full' />
+          {contactsLoadError ? <p className='text-xs text-amber-600'>{contactsLoadError}</p> : null}
           <div className='max-h-40 space-y-1 overflow-auto rounded border p-2'>
             {savedContacts.filter((c) => !contactSearch || `${c.name || ''} ${c.phone}`.toLowerCase().includes(contactSearch.toLowerCase())).map((c) => (
               <label key={c.id} className='flex items-center gap-2 text-xs'>

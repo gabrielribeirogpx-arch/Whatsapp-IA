@@ -6,7 +6,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
-from sqlalchemy import desc, select
+from sqlalchemy import desc, or_, select
 from sqlalchemy.orm import Session, load_only, selectinload
 
 from app.database import get_db
@@ -265,19 +265,77 @@ def list_contacts(
     source: str | None = Query(default=None),
     search: str | None = Query(default=None),
     interacted_after: datetime | None = Query(default=None),
+    last_interaction_after: datetime | None = Query(default=None),
 ):
-    query = select(Contact).options(selectinload(Contact.conversations)).where(Contact.tenant_id == tenant.id)
-    if tag:
-        query = query.where(Contact.tags.ilike(f"%{tag}%"))
-    if source:
-        query = query.where(Contact.source == source)
-    if search:
-        term = f"%{search.strip()}%"
-        query = query.where(or_(Contact.name.ilike(term), Contact.phone.ilike(term)))
-    if interacted_after:
-        query = query.where(Contact.last_interaction_at >= interacted_after)
+    try:
+        query = select(Contact).options(selectinload(Contact.conversations)).where(Contact.tenant_id == tenant.id)
+        clean_tag = (tag or "").strip()
+        clean_source = (source or "").strip()
+        clean_search = (search or "").strip()
+        interacted_filter = last_interaction_after or interacted_after
 
-    return db.execute(query.order_by(desc(Contact.last_interaction_at), desc(Contact.created_at), desc(Contact.id))).scalars().all()
+        if clean_tag:
+            query = query.where(Contact.tags.ilike(f"%{clean_tag}%"))
+        if clean_source:
+            query = query.where(Contact.source == clean_source)
+        if clean_search:
+            term = f"%{clean_search}%"
+            query = query.where(or_(Contact.name.ilike(term), Contact.phone.ilike(term)))
+        if interacted_filter:
+            query = query.where(Contact.last_interaction_at >= interacted_filter)
+
+        contacts = (
+            db.execute(query.order_by(desc(Contact.last_interaction_at), desc(Contact.created_at), desc(Contact.id)))
+            .scalars()
+            .all()
+        )
+
+        items: list[ContactOut] = []
+        for contact in contacts or []:
+            raw_tags = getattr(contact, "tags", None)
+            if isinstance(raw_tags, list):
+                safe_tags = [str(item).strip() for item in raw_tags if str(item).strip()]
+            elif isinstance(raw_tags, str):
+                safe_tags = [item.strip() for item in raw_tags.split(",") if item.strip()]
+            else:
+                safe_tags = []
+
+            custom_fields = getattr(contact, "custom_fields_json", None)
+            safe_custom_fields = custom_fields if isinstance(custom_fields, dict) else {}
+
+            items.append(
+                ContactOut(
+                    id=contact.id,
+                    tenant_id=contact.tenant_id,
+                    phone=contact.phone,
+                    name=contact.name,
+                    first_name=contact.first_name or "",
+                    last_name=contact.last_name or "",
+                    email=contact.email,
+                    tags=safe_tags,
+                    source=contact.source or "whatsapp",
+                    opt_in_status=contact.opt_in_status or "unknown",
+                    custom_fields_json=safe_custom_fields,
+                    avatar_url=contact.avatar_url,
+                    stage=contact.stage,
+                    score=contact.score,
+                    last_message_at=contact.last_message_at,
+                    last_interaction_at=contact.last_interaction_at,
+                    last_message=contact.last_message,
+                    created_at=contact.created_at,
+                    updated_at=contact.updated_at,
+                )
+            )
+
+        return items
+    except Exception as exc:
+        logger.exception(
+            "[CONTACTS LIST ERROR] tenant_id=%s exception_type=%s message=%s",
+            tenant.id,
+            type(exc).__name__,
+            str(exc),
+        )
+        return []
 
 
 @router.post("/send-message", response_model=MessageOut)
