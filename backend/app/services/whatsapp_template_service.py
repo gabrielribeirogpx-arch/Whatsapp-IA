@@ -1,4 +1,5 @@
 from datetime import datetime
+import json
 from uuid import UUID
 import asyncio
 import logging
@@ -104,13 +105,18 @@ def submit_template_placeholder(db: Session, tenant_id: UUID, template_id: UUID)
         return template
     except MetaApiError as exc:
         status_code = int(getattr(exc, "status_code", 500) or 500)
-        response_body = getattr(exc, "response_body", {}) or {}
+        response_body = getattr(exc, "payload", {}) or {}
+        response_text = ""
+        response_headers: dict = {}
+        if isinstance(response_body, dict):
+            response_text = str(response_body.get("raw") or "")
+            response_headers = response_body.get("headers") if isinstance(response_body.get("headers"), dict) else {}
         meta_error = response_body.get("error", {}) if isinstance(response_body, dict) else {}
         meta_message = meta_error.get("message") if isinstance(meta_error, dict) else str(exc)
         meta_code = meta_error.get("code") if isinstance(meta_error, dict) else None
         print(
             f"[SUBMIT DEBUG] step=meta_response status_code={status_code} "
-            f"body={str(response_body)[:1500]}"
+            f"json={str(response_body)[:1500]} text={response_text[:1500]} headers={str(response_headers)[:1000]}"
         )
         template.metadata_json = {**(template.metadata_json or {}), "last_error": str(exc)}
         db.commit()
@@ -175,6 +181,7 @@ async def _submit_meta_template(template: WhatsAppMessageTemplate, provider: Ten
         f"language=pt_BR category={payload_category} body={payload_body}"
     )
     logger.info("[WHATSAPP TEMPLATE META PAYLOAD_FULL] payload=%s", payload)
+    print(f"[WHATSAPP TEMPLATE META PAYLOAD_FULL] payload={json.dumps(payload, ensure_ascii=False)}")
     response = await client.post(f"/{provider.waba_id}/message_templates", payload=payload, context={"tenant_id": tenant_id, "provider_id": str(provider.id), "template_id": str(template.id)})
     print(f"[SUBMIT DEBUG] step=meta_response status_code=200 body={str(response)[:1500]}")
     return response
