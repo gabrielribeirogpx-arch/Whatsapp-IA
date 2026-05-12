@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+import random
 import time
 from datetime import datetime
 
@@ -16,11 +17,22 @@ from app.services.whatsapp_message_service import send_template_message
 
 logger = logging.getLogger(__name__)
 
-RATE_PER_SEC = int(os.getenv("CAMPAIGN_RATE_PER_SECOND", "8"))
 CHUNK_SIZE = int(os.getenv("CAMPAIGN_CHUNK_SIZE", "200"))
+MIN_DELAY_SECONDS = float(os.getenv("CAMPAIGN_MIN_DELAY_SECONDS", "2"))
+MAX_DELAY_SECONDS = float(os.getenv("CAMPAIGN_MAX_DELAY_SECONDS", "4"))
 
 
-def process_campaign(campaign_id: str) -> None:
+def _refresh_campaign_metrics(db, campaign: WhatsAppCampaign) -> None:
+    campaign.total_recipients = db.execute(select(func.count(WhatsAppCampaignRecipient.id)).where(WhatsAppCampaignRecipient.campaign_id == campaign.id)).scalar() or 0
+    campaign.total_sent = db.execute(select(func.count(WhatsAppCampaignRecipient.id)).where(WhatsAppCampaignRecipient.campaign_id == campaign.id, WhatsAppCampaignRecipient.status.in_(["sent", "delivered", "read"]))).scalar() or 0
+    campaign.total_failed = db.execute(select(func.count(WhatsAppCampaignRecipient.id)).where(WhatsAppCampaignRecipient.campaign_id == campaign.id, WhatsAppCampaignRecipient.status == "failed")).scalar() or 0
+    if campaign.total_recipients > 0 and campaign.total_sent + campaign.total_failed >= campaign.total_recipients:
+        campaign.status = "completed"
+        campaign.completed_at = datetime.utcnow()
+    logger.info("[CAMPAIGN METRICS UPDATE] campaign_id=%s total=%s sent=%s failed=%s", campaign.id, campaign.total_recipients, campaign.total_sent, campaign.total_failed)
+
+
+def process_campaign(campaign_id: str, tenant_id: str) -> None:
     redis_conn = Redis.from_url(os.getenv("REDIS_URL", "redis://localhost:6379/0"), decode_responses=True)
     lock_key = f"campaign:lock:{campaign_id}"
     if not redis_conn.set(lock_key, "1", ex=900, nx=True):
@@ -29,7 +41,8 @@ def process_campaign(campaign_id: str) -> None:
 
     try:
         with SessionLocal() as db:
-            campaign = db.execute(select(WhatsAppCampaign).where(WhatsAppCampaign.id == campaign_id)).scalars().first()
+            logger.info("[CAMPAIGN START] campaign_id=%s tenant_id=%s", campaign_id, tenant_id)
+            campaign = db.execute(select(WhatsAppCampaign).where(WhatsAppCampaign.id == campaign_id, WhatsAppCampaign.tenant_id == tenant_id)).scalars().first()
             if not campaign:
                 return
             campaign.status = "running"
@@ -40,7 +53,9 @@ def process_campaign(campaign_id: str) -> None:
             queue = get_queue("normal")
             for rec in pending:
                 rec.status = "queued"
+                logger.info("[CAMPAIGN ENQUEUE] campaign_id=%s recipient_id=%s phone=%s", campaign.id, rec.id, rec.phone)
                 queue.enqueue("app.workers.campaign_worker.process_campaign_recipient", str(rec.id), retry=Retry(max=3, interval=[5, 20, 60]), job_timeout=120)
+            _refresh_campaign_metrics(db, campaign)
             db.commit()
     finally:
         redis_conn.delete(lock_key)
@@ -55,6 +70,7 @@ def process_campaign_recipient(recipient_id: str) -> None:
         if not campaign or campaign.status == "paused":
             return
         try:
+            logger.info("[CAMPAIGN RECIPIENT SEND] campaign_id=%s recipient_id=%s phone=%s", campaign.id, recipient.id, recipient.phone)
             result = send_template_message(
                 db,
                 tenant_id=str(campaign.tenant_id),
@@ -66,13 +82,12 @@ def process_campaign_recipient(recipient_id: str) -> None:
             recipient.status = "sent"
             recipient.sent_at = result.get("sent_at")
             recipient.provider_message_id = result.get("provider_message_id")
-            campaign.total_sent = int(campaign.total_sent or 0) + 1
+            logger.info("[CAMPAIGN RECIPIENT SENT] campaign_id=%s recipient_id=%s provider_message_id=%s", campaign.id, recipient.id, recipient.provider_message_id)
         except Exception as exc:
             recipient.status = "failed"
             recipient.failed_at = datetime.utcnow()
             recipient.error_message = str(exc)[:1000]
-            campaign.total_failed = int(campaign.total_failed or 0) + 1
-        campaign.total_recipients = db.execute(select(func.count(WhatsAppCampaignRecipient.id)).where(WhatsAppCampaignRecipient.campaign_id == campaign.id)).scalar() or 0
-        if RATE_PER_SEC > 0:
-            time.sleep(1 / RATE_PER_SEC)
+            logger.error("[CAMPAIGN RECIPIENT FAILED] campaign_id=%s recipient_id=%s error=%s", campaign.id, recipient.id, recipient.error_message)
+        _refresh_campaign_metrics(db, campaign)
+        time.sleep(random.uniform(MIN_DELAY_SECONDS, MAX_DELAY_SECONDS))
         db.commit()

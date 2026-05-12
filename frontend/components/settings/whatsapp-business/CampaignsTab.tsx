@@ -12,6 +12,8 @@ import {
   listTemplates,
   listWhatsAppCampaigns,
   listWhatsAppProviders,
+  pauseWhatsAppCampaign,
+  startWhatsAppCampaign,
   testSendWhatsAppTemplate
 } from '@/lib/api';
 import { WhatsAppCampaign, WhatsAppProvider, WhatsAppTemplate } from '@/lib/types';
@@ -293,6 +295,14 @@ export default function CampaignsTab() {
     setShowCreate(false);
     await refresh();
   };
+  const onStartCampaign = async (campaignId: string) => {
+    await startWhatsAppCampaign(campaignId);
+    await refresh();
+  };
+  const onPauseCampaign = async (campaignId: string) => {
+    await pauseWhatsAppCampaign(campaignId);
+    await refresh();
+  };
 
   const hasCreateErrors = !name || !providerId || !templateId;
   const hasVariableErrors = templateVariables.some((key) => !variableMapping[key] || (variableMapping[key] === MANUAL_VALUE_FIELD && !manualVariableValues[key]));
@@ -309,7 +319,23 @@ export default function CampaignsTab() {
 
     <CampaignStats><div className='grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5'>{[['campanhas ativas', metrics.active], ['enviados', metrics.sent], ['entregues', metrics.delivered], ['lidos', metrics.read], ['falhas', metrics.failed]].map(([k,v]) => <div key={String(k)} className='rounded-xl border border-slate-200 p-3'><p className='text-xs text-slate-500'>{k}</p><p className='text-xl font-semibold'>{v}</p></div>)}</div></CampaignStats>
 
-    {campaigns.length === 0 ? (<CampaignCard><div className='rounded-xl border border-dashed border-slate-300 bg-slate-50/80 p-8 text-center'><p className='text-sm font-medium text-slate-600'>Nenhuma campanha criada ainda.</p><p className='mt-1 text-xs text-slate-500'>Clique em “Nova campanha” para começar.</p></div></CampaignCard>) : (<div className='space-y-3'>{campaigns.map(c => <CampaignCard key={c.id}><div className='flex items-center justify-between'><div><p className='font-semibold text-slate-900'>{c.name}</p><p className='text-xs text-slate-500'>ID: {c.id}</p></div><CampaignStatusBadge>{c.status}</CampaignStatusBadge></div></CampaignCard>)}</div>)}
+    {campaigns.length === 0 ? (<CampaignCard><div className='rounded-xl border border-dashed border-slate-300 bg-slate-50/80 p-8 text-center'><p className='text-sm font-medium text-slate-600'>Nenhuma campanha criada ainda.</p><p className='mt-1 text-xs text-slate-500'>Clique em “Nova campanha” para começar.</p></div></CampaignCard>) : (<div className='space-y-3'>{campaigns.map(c => {
+      const total = c.total_recipients || 0;
+      const done = (c.total_sent || 0) + (c.total_failed || 0);
+      const progress = total > 0 ? Math.round((done / total) * 100) : 0;
+      return <CampaignCard key={c.id}><div className='space-y-3'>
+        <div className='flex items-center justify-between'><div><p className='font-semibold text-slate-900'>{c.name}</p><p className='text-xs text-slate-500'>ID: {c.id}</p></div><CampaignStatusBadge>{c.status}</CampaignStatusBadge></div>
+        <div className='grid grid-cols-2 gap-2 text-xs text-slate-600 sm:grid-cols-6'>
+          <p>Total: <strong>{total}</strong></p><p>Enviados: <strong>{c.total_sent || 0}</strong></p><p>Falhas: <strong>{c.total_failed || 0}</strong></p><p>Entregues: <strong>{c.total_delivered || 0}</strong></p><p>Lidos: <strong>{c.total_read || 0}</strong></p><p>Progresso: <strong>{progress}%</strong></p>
+        </div>
+        <div className='h-2 rounded-full bg-slate-100'><div className='h-2 rounded-full bg-emerald-500' style={{ width: `${progress}%` }}/></div>
+        <div className='flex gap-2'>
+          {c.status === 'draft' && <button onClick={() => void onStartCampaign(c.id)} className='primary-button'>Iniciar campanha</button>}
+          {c.status === 'running' && <button onClick={() => void onPauseCampaign(c.id)} className='secondary-button'>Pausar</button>}
+          <button onClick={() => void refresh()} className='secondary-button'>Atualizar</button>
+        </div>
+      </div></CampaignCard>;
+    })}</div>)}
 
     {showCreate && <CampaignCreateModal><div className='space-y-3'>
       <h4 className='font-semibold'>Nova campanha</h4>
