@@ -16,14 +16,36 @@ import {
 } from '@/lib/api';
 import { WhatsAppCampaign, WhatsAppProvider, WhatsAppTemplate } from '@/lib/types';
 
-type LeadInput = { phone: string; name?: string; order?: string };
+type LeadInput = { phone: string; fields: Record<string, string> };
+type VariableFieldOption = { value: string; label: string; csvColumn: string };
 
 const APPROVED_STATUS = 'approved';
+const MANUAL_VALUE_FIELD = 'manual_value';
+const VARIABLE_FIELD_OPTIONS: VariableFieldOption[] = [
+  { value: 'first_name', label: 'Primeiro nome', csvColumn: 'primeiro_nome' },
+  { value: 'full_name', label: 'Nome completo', csvColumn: 'nome_completo' },
+  { value: 'phone', label: 'Telefone', csvColumn: 'telefone' },
+  { value: 'email', label: 'E-mail', csvColumn: 'email' },
+  { value: 'company', label: 'Empresa', csvColumn: 'empresa' },
+  { value: 'order_number', label: 'Número do pedido', csvColumn: 'numero_pedido' },
+  { value: 'product', label: 'Produto', csvColumn: 'produto' },
+  { value: 'order_value', label: 'Valor do pedido', csvColumn: 'valor_pedido' },
+  { value: 'order_status', label: 'Status do pedido', csvColumn: 'status_pedido' },
+  { value: 'tracking_link', label: 'Link de rastreio', csvColumn: 'link_rastreio' },
+  { value: 'custom_field', label: 'Campo personalizado', csvColumn: 'campo_personalizado' },
+  { value: MANUAL_VALUE_FIELD, label: 'Valor manual', csvColumn: 'valor_manual' }
+];
 
 function badgeClass(ok: boolean) {
   return ok
     ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
     : 'border-slate-200 bg-slate-100 text-slate-500';
+}
+
+function parseTemplateVariables(rawText: string): string[] {
+  const matches = rawText.match(/\{\{\s*(\d+)\s*\}\}/g) || [];
+  const unique = Array.from(new Set(matches.map((v) => v.replace(/[^\d]/g, ''))));
+  return unique.sort((a, b) => Number(a) - Number(b));
 }
 
 export default function CampaignsTab() {
@@ -38,8 +60,9 @@ export default function CampaignsTab() {
   const [assetsLoading, setAssetsLoading] = useState(false);
   const [leadsText, setLeadsText] = useState('');
   const [testPhone, setTestPhone] = useState('');
-  const [testVar1, setTestVar1] = useState('');
-  const [testVar2, setTestVar2] = useState('');
+  const [variableMapping, setVariableMapping] = useState<Record<string, string>>({});
+  const [manualVariableValues, setManualVariableValues] = useState<Record<string, string>>({});
+  const [testVariableValues, setTestVariableValues] = useState<Record<string, string>>({});
 
   const refresh = async () => {
     setLoading(true);
@@ -87,19 +110,47 @@ export default function CampaignsTab() {
   }, [templates, providerId]);
 
   const selectedTemplate = approvedTemplates.find((t) => t.id === templateId);
+  const templateBody = selectedTemplate?.body_preview || selectedTemplate?.body_text || '';
+  const templateVariables = useMemo(() => parseTemplateVariables(templateBody), [templateBody]);
 
   useEffect(() => {
     if (templateId && !approvedTemplates.some((t) => t.id === templateId)) setTemplateId('');
   }, [approvedTemplates, templateId]);
 
+  useEffect(() => {
+    if (!templateVariables.length) {
+      setVariableMapping({});
+      setManualVariableValues({});
+      setTestVariableValues({});
+      return;
+    }
+    setVariableMapping((prev) => templateVariables.reduce((acc, key) => ({ ...acc, [key]: prev[key] || 'first_name' }), {}));
+    setManualVariableValues((prev) => templateVariables.reduce((acc, key) => ({ ...acc, [key]: prev[key] || '' }), {}));
+    setTestVariableValues((prev) => templateVariables.reduce((acc, key) => ({ ...acc, [key]: prev[key] || '' }), {}));
+  }, [templateVariables]);
+
+  const variableValues = useMemo(() => {
+    return templateVariables.reduce<Record<string, string>>((acc, key) => {
+      const field = variableMapping[key];
+      acc[key] = field === MANUAL_VALUE_FIELD ? manualVariableValues[key] || '' : testVariableValues[key] || '';
+      return acc;
+    }, {});
+  }, [manualVariableValues, templateVariables, testVariableValues, variableMapping]);
+
   const parseLeads = (): LeadInput[] => {
+    const expectedColumns = ['telefone', ...templateVariables.map((key) => VARIABLE_FIELD_OPTIONS.find((item) => item.value === variableMapping[key])?.csvColumn || `variavel_${key}`)];
     return leadsText
       .split('\n')
       .map((line) => line.trim())
       .filter(Boolean)
       .map((line) => {
-        const [phone = '', nameRaw = '', orderRaw = ''] = line.split(',').map((p) => p.trim());
-        return { phone, name: nameRaw || undefined, order: orderRaw || undefined };
+        const values = line.split(',').map((p) => p.trim());
+        const phone = values[0] || '';
+        const fields = expectedColumns.slice(1).reduce<Record<string, string>>((acc, column, index) => {
+          acc[column] = values[index + 1] || '';
+          return acc;
+        }, {});
+        return { phone, fields };
       })
       .filter((item) => item.phone);
   };
@@ -112,12 +163,16 @@ export default function CampaignsTab() {
   };
 
   const renderPreview = () => {
-    const raw = selectedTemplate?.body_preview || selectedTemplate?.body_text || '';
-    return raw.replace(/\{\{\s*1\s*\}\}/g, `**${testVar1 || '{{1}}'}**`).replace(/\{\{\s*2\s*\}\}/g, `**${testVar2 || '{{2}}'}**`);
+    return templateBody.replace(/\{\{\s*(\d+)\s*\}\}/g, (_, key: string) => `**${variableValues[key] || `Variável ${key}`}**`);
   };
 
   const onQuickTest = async () => {
     if (!testPhone || !selectedTemplate) return;
+    const payloadVariables = templateVariables.reduce<Record<string, string>>((acc, key) => {
+      acc[key] = variableValues[key] || '';
+      return acc;
+    }, {});
+    console.log('quick_test_payload', { phone: testPhone, variables: payloadVariables, variable_mapping: variableMapping });
     await sendMessage(testPhone, renderPreview().replace(/\*\*/g, ''));
   };
 
@@ -128,7 +183,7 @@ export default function CampaignsTab() {
     if (leads.length) {
       await importWhatsAppCampaignRecipients(
         created.id,
-        leads.map((item) => ({ phone: item.phone, first_name: item.name, variables_json: { order: item.order } }))
+        leads.map((item) => ({ phone: item.phone, variables_json: item.fields }))
       );
     }
     setName('');
@@ -140,6 +195,8 @@ export default function CampaignsTab() {
   };
 
   const hasCreateErrors = !name || !providerId || !templateId;
+  const hasVariableErrors = templateVariables.some((key) => !variableMapping[key] || (variableMapping[key] === MANUAL_VALUE_FIELD && !manualVariableValues[key]));
+  const csvHeaders = ['telefone', ...templateVariables.map((key) => VARIABLE_FIELD_OPTIONS.find((item) => item.value === variableMapping[key])?.csvColumn || `variavel_${key}`)];
 
   return <div className='space-y-4 rounded-2xl border border-[color:var(--surface-border)] bg-white/95 p-5'>
     <div className='flex items-center justify-between'>
@@ -157,7 +214,6 @@ export default function CampaignsTab() {
     {showCreate && <CampaignCreateModal><div className='space-y-3'>
       <h4 className='font-semibold'>Nova campanha</h4>
       <input value={name} onChange={(e) => setName(e.target.value)} placeholder='Nome da campanha' className='premium-input w-full' />
-
       {assetsLoading ? <div className='space-y-2'><div className='h-11 animate-pulse rounded-xl bg-slate-100'/><div className='h-11 animate-pulse rounded-xl bg-slate-100'/></div> : <>
         <select value={providerId} onChange={(e) => setProviderId(e.target.value)} className='premium-input w-full'>
           <option value=''>Selecione um provider conectado</option>
@@ -168,36 +224,59 @@ export default function CampaignsTab() {
           {approvedTemplates.map((t) => <option key={t.id} value={t.id}>{t.name} • {t.category || 'utility'} • approved</option>)}
         </select>
       </>}
-
       <div className='flex flex-wrap gap-2'>
         <span className={`rounded-full border px-3 py-1 text-xs ${badgeClass(providers.find((p) => p.id === providerId)?.status === 'connected')}`}>Provider {providers.find((p) => p.id === providerId)?.status || 'não selecionado'}</span>
         <span className={`rounded-full border px-3 py-1 text-xs ${badgeClass(!!selectedTemplate)}`}>Template {selectedTemplate ? 'approved' : 'pendente'}</span>
       </div>
 
+      {!!templateVariables.length && <div className='rounded-xl border border-slate-200 bg-white p-3'>
+        <p className='mb-3 text-sm font-semibold text-slate-900'>Mapeamento de variáveis</p>
+        <div className='space-y-3'>
+          {templateVariables.map((key) => (
+            <div key={key} className='rounded-xl border border-slate-200 bg-slate-50 p-3'>
+              <div className='mb-2 flex items-center gap-2'>
+                <span className='rounded-full bg-slate-900 px-2 py-0.5 text-xs font-semibold text-white'>Variável {key}</span>
+                <span className='rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-700'>Obrigatória</span>
+              </div>
+              <select value={variableMapping[key] || 'first_name'} onChange={(e) => setVariableMapping((prev) => ({ ...prev, [key]: e.target.value }))} className='premium-input w-full'>
+                {VARIABLE_FIELD_OPTIONS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+              </select>
+              {variableMapping[key] === MANUAL_VALUE_FIELD && <input value={manualVariableValues[key] || ''} onChange={(e) => setManualVariableValues((prev) => ({ ...prev, [key]: e.target.value }))} placeholder='Digite um valor manual' className='premium-input mt-2 w-full' />}
+            </div>
+          ))}
+        </div>
+      </div>}
+
       {selectedTemplate && <div className='rounded-xl border border-emerald-100 bg-emerald-50/40 p-3 text-sm text-slate-700'><p className='mb-1 font-semibold text-slate-900'>Preview do template</p><p className='whitespace-pre-wrap'>{renderPreview()}</p><p className='mt-2 text-xs text-slate-500'>Categoria: {selectedTemplate.category || 'utility'} • Idioma: {selectedTemplate.language}</p></div>}
 
       <div className='rounded-xl border border-slate-200 bg-slate-50 p-3'>
         <p className='mb-2 text-sm font-semibold'>Teste rápido</p>
-        <div className='grid grid-cols-1 gap-2 md:grid-cols-3'>
+        <div className='space-y-2'>
           <input value={testPhone} onChange={(e) => setTestPhone(e.target.value)} placeholder='Telefone' className='premium-input w-full' />
-          <input value={testVar1} onChange={(e) => setTestVar1(e.target.value)} placeholder='Variável 1' className='premium-input w-full' />
-          <input value={testVar2} onChange={(e) => setTestVar2(e.target.value)} placeholder='Variável 2' className='premium-input w-full' />
+          {templateVariables.map((key) => (
+            <div key={`test-${key}`} className='grid grid-cols-1 gap-2 md:grid-cols-2'>
+              <input value={VARIABLE_FIELD_OPTIONS.find((item) => item.value === variableMapping[key])?.label || ''} readOnly className='premium-input w-full bg-slate-100' placeholder={`Campo da variável ${key}`} />
+              <input value={testVariableValues[key] || ''} onChange={(e) => setTestVariableValues((prev) => ({ ...prev, [key]: e.target.value }))} placeholder={`Valor de teste da variável ${key}`} className='premium-input w-full' />
+            </div>
+          ))}
         </div>
-        <button onClick={() => void onQuickTest()} disabled={!testPhone || !selectedTemplate} className='secondary-button mt-3 inline-flex items-center gap-2'><Send size={14}/>Enviar teste</button>
+        <button onClick={() => void onQuickTest()} disabled={!testPhone || !selectedTemplate || hasVariableErrors} className='secondary-button mt-3 inline-flex items-center gap-2'><Send size={14}/>Enviar teste</button>
       </div>
 
       <div className='rounded-xl border border-slate-200 p-3'>
         <p className='mb-2 text-sm font-semibold'>Importação de leads</p>
-        <textarea value={leadsText} onChange={(e) => setLeadsText(e.target.value)} rows={5} className='premium-input w-full' placeholder='telefone,nome,pedido\n5516999999999,Gabriel,4821' />
+        <p className='mb-2 text-xs text-slate-500'>CSV esperado: {csvHeaders.join(',')}</p>
+        <textarea value={leadsText} onChange={(e) => setLeadsText(e.target.value)} rows={5} className='premium-input w-full' placeholder={`${csvHeaders.join(',')}
+5516999999999,Gabriel,#4821`} />
         <label className='mt-2 block text-xs text-slate-500'>Upload CSV
           <input type='file' accept='.csv,text/csv' onChange={(e) => void onCsvUpload(e)} className='mt-1 block text-xs' />
         </label>
       </div>
 
-      {hasCreateErrors && <p className='text-xs text-amber-600'>Preencha nome, provider conectado e template aprovado para continuar.</p>}
+      {(hasCreateErrors || hasVariableErrors) && <p className='text-xs text-amber-600'>Preencha nome, provider/template e todos os mapeamentos obrigatórios para continuar.</p>}
       <div className='flex justify-end gap-2'>
         <button onClick={() => setShowCreate(false)} className='secondary-button'>Cancelar</button>
-        <button onClick={() => void onCreate()} disabled={hasCreateErrors || loading} className='primary-button inline-flex items-center gap-2'>
+        <button onClick={() => void onCreate()} disabled={hasCreateErrors || hasVariableErrors || loading} className='primary-button inline-flex items-center gap-2'>
           {loading ? <Loader2 size={14} className='animate-spin'/> : null}Criar
         </button>
       </div>
