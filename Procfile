@@ -1,2 +1,2 @@
-web: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+web: cd backend && alembic upgrade head && bash start.sh
 worker: python backend/worker_rq.py

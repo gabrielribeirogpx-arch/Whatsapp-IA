@@ -123,12 +123,17 @@ def process_incoming_message(payload: dict[str, Any]) -> None:
             db.commit()
             return
 
-        contact = upsert_contact_for_phone(
-            db,
-            tenant_id=tenant.id,
-            phone=str(parsed.get("phone") or ""),
-            name=str(parsed.get("name") or "").strip() or None,
-        )
+        try:
+            contact = upsert_contact_for_phone(
+                db,
+                tenant_id=tenant.id,
+                phone=str(parsed.get("phone") or ""),
+                name=str(parsed.get("name") or "").strip() or None,
+            )
+        except Exception as exc:
+            db.rollback()
+            print(f"[CONTACT UPSERT ERROR] {type(exc).__name__}: {str(exc)[:300]}")
+            contact = None
         conversation, _ = get_or_create_conversation(
             db,
             tenant_id=tenant.id,
