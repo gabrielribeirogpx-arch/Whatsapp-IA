@@ -6,6 +6,9 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models import Tenant, WhatsAppCampaign, WhatsAppCampaignRecipient
+from app.models.tenant_whatsapp_provider import TenantWhatsAppProvider
+from app.models.whatsapp_message_template import WhatsAppMessageTemplate
+from app.services.queue import get_queue
 from app.services.tenant_service import get_current_tenant
 
 router = APIRouter(prefix="/api/whatsapp/campaigns", tags=["whatsapp-campaigns"])
@@ -69,7 +72,32 @@ def start_campaign(campaign_id: str, db: Session = Depends(get_db), tenant: Tena
     c = db.execute(select(WhatsAppCampaign).where(WhatsAppCampaign.id == campaign_id, WhatsAppCampaign.tenant_id == tenant.id)).scalars().first()
     if not c:
         raise HTTPException(status_code=404, detail="Campaign not found")
-    c.status = "running"; c.started_at = c.started_at or datetime.utcnow(); db.commit(); db.refresh(c)
+    if c.status == "running":
+        raise HTTPException(status_code=400, detail="Campaign is already running")
+    provider = db.execute(
+        select(TenantWhatsAppProvider).where(
+            TenantWhatsAppProvider.id == c.provider_id,
+            TenantWhatsAppProvider.tenant_id == tenant.id,
+        )
+    ).scalars().first()
+    if not provider or provider.status != "connected":
+        raise HTTPException(status_code=400, detail="Provider is not connected/active")
+    template = db.execute(
+        select(WhatsAppMessageTemplate).where(
+            WhatsAppMessageTemplate.id == c.template_id,
+            WhatsAppMessageTemplate.tenant_id == tenant.id,
+        )
+    ).scalars().first()
+    if not template or str(template.status or "").lower() != "approved":
+        raise HTTPException(status_code=400, detail="Template is not approved")
+    total = db.execute(select(WhatsAppCampaignRecipient).where(WhatsAppCampaignRecipient.campaign_id == c.id)).scalars().all()
+    if not total:
+        raise HTTPException(status_code=400, detail="Campaign has no recipients")
+    c.status = "running"
+    c.started_at = c.started_at or datetime.utcnow()
+    db.commit()
+    get_queue("normal").enqueue("app.workers.campaign_worker.process_campaign", str(c.id), str(tenant.id), job_timeout=600)
+    db.refresh(c)
     return _serialize_campaign(c)
 
 

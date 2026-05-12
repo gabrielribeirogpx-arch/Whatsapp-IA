@@ -10,6 +10,14 @@ from sqlalchemy import select
 
 logger = logging.getLogger(__name__)
 
+def _recalculate_campaign_metrics(db, campaign: WhatsAppCampaign) -> None:
+    rows = db.execute(select(WhatsAppCampaignRecipient).where(WhatsAppCampaignRecipient.campaign_id == campaign.id)).scalars().all()
+    campaign.total_recipients = len(rows)
+    campaign.total_sent = sum(1 for r in rows if r.status in {"sent", "delivered", "read"})
+    campaign.total_delivered = sum(1 for r in rows if r.status in {"delivered", "read"})
+    campaign.total_read = sum(1 for r in rows if r.status == "read")
+    campaign.total_failed = sum(1 for r in rows if r.status == "failed")
+
 
 
 
@@ -38,9 +46,10 @@ def _update_campaign_status_from_meta(payload: dict) -> None:
                     ts=datetime.utcfromtimestamp(int(ts_raw))
                 if status in {"sent","delivered","read","failed"}:
                     rec.status=status
-                    if status=="delivered": rec.delivered_at=ts; campaign.total_delivered=int(campaign.total_delivered or 0)+1
-                    if status=="read": rec.read_at=ts; campaign.total_read=int(campaign.total_read or 0)+1
-                    if status=="failed": rec.failed_at=ts; campaign.total_failed=int(campaign.total_failed or 0)+1
+                    if status=="delivered": rec.delivered_at=ts
+                    if status=="read": rec.read_at=ts
+                    if status=="failed": rec.failed_at=ts
+                    _recalculate_campaign_metrics(db, campaign)
             db.commit()
     except Exception:
         logger.exception("event=campaign_status_update_error")
