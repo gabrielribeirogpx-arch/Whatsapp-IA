@@ -5,17 +5,16 @@ import { activateWhatsAppProvider, createTemplate, createWhatsAppProvider, delet
 import { SystemSettingsPayload, WhatsAppProvider, WhatsAppTemplate } from '../../../lib/types';
 import ProvidersTab from '@/components/settings/whatsapp-business/ProvidersTab';
 import TemplatesTab from '@/components/settings/whatsapp-business/TemplatesTab';
-import CampaignsTab from '@/components/settings/whatsapp-business/CampaignsTab';
 import { ClientDateTime } from '@/components/settings/whatsapp-business/ui';
 import { friendlyToMeta, renderExample, validateMetaVariables } from '@/lib/templateVariableMapper';
 
 const INITIAL_FORM: SystemSettingsPayload = { token: '', phone_number_id: '', webhook_url: '', webhook_status: 'inactive', system_name: '', language: 'pt-BR' };
 const baseProviderForm = { provider_type: 'meta_cloud', display_name: '', waba_id: '', phone_number_id: '', business_id: '', access_token: '', api_key: '' };
 const baseTemplateForm = { name: '', category: 'utility', language: 'pt_BR', provider_id: '', body_text: '', friendly_body_text: '', footer_text: '', variables_json: [] as any[] };
-const tabs = [{ id: 'system', label: 'Visão Geral', icon: Layers3 }, { id: 'connection', label: 'Conexões', icon: Building2 }, { id: 'templates', label: 'Templates', icon: MessageSquareText }, { id: 'campaigns', label: 'Campanhas', icon: MessageSquareText }];
+const tabs = [{ id: 'system', label: 'Visão Geral', icon: Layers3 }, { id: 'connection', label: 'Conexões', icon: Building2 }, { id: 'templates', label: 'Templates', icon: MessageSquareText }];
 
 export default function SettingsPage() {
-  const [tab, setTab] = useState<'system' | 'connection' | 'templates' | 'campaigns'>('system');
+  const [tab, setTab] = useState<'system' | 'connection' | 'templates'>('system');
   const [toast, setToast] = useState('');
   const [loading, setLoading] = useState(false);
   const [form, setForm] = useState<SystemSettingsPayload>(INITIAL_FORM);
@@ -94,7 +93,6 @@ Use uma variável da lista ou remova o marcador.`; return validateMetaVariables(
       </form>}
       {tab === 'connection' && <ProvidersTab providers={providers} form={providerForm} setForm={setProviderForm} loading={loading} onSubmit={(e: FormEvent) => run(async () => { e.preventDefault(); await createWhatsAppProvider(providerForm); setProviderForm(baseProviderForm); await refresh(); }, 'Conexão salva com sucesso', 'Falha ao salvar conexão')} onTest={(id: string) => run(async () => { await testWhatsAppProvider(id); await refresh(); }, 'Conexão testada com sucesso', 'Falha ao testar conexão')} onActivate={(id: string) => run(async () => { await activateWhatsAppProvider(id); await refresh(); }, 'Conexão ativada com sucesso', 'Falha ao ativar conexão')} onDelete={(id: string) => run(async () => { await deleteWhatsAppProvider(id); await refresh(); }, 'Conexão removida com sucesso', 'Falha ao remover conexão')} onEdit={(id: string, payload: Record<string, unknown>) => run(async () => { await updateWhatsAppProvider(id, payload); await testWhatsAppProvider(id); await refresh(); }, 'Conexão atualizada', 'Falha ao atualizar conexão')} />}
       {tab === 'templates' && <TemplatesTab templates={templates} providers={providers} form={templateForm} setForm={setTemplateForm} error={templateError} loading={loading} onSubmit={(e: FormEvent) => run(async () => { e.preventDefault(); const msg = validateTemplate(); setTemplateError(msg); if (msg) throw new Error(msg); const mapped = friendlyToMeta(templateForm.friendly_body_text || templateForm.body_text || ''); await createTemplate({ ...templateForm, provider_id: templateForm.provider_id || null, body_text: mapped.bodyText, body_raw_meta: mapped.bodyText, body_preview: renderExample(mapped.bodyText, mapped.variables), variables_json: mapped.variables }); setTemplateForm(baseTemplateForm); await refresh(); }, 'Template criado com sucesso', 'Falha ao criar template')} onSync={() => run(async () => { await syncTemplates(); await refresh(); }, 'Sincronização concluída', 'Erro ao sincronizar templates')} onSubmitTemplate={(id: string) => run(async () => { await submitTemplate(id); await refresh(); }, 'Template enviado para aprovação', 'Falha ao enviar template')} />}
-      {tab === 'campaigns' && <CampaignsTab />}
     </div>
   </section>;
 }

@@ -97,7 +97,11 @@ function extractVariables(text: string): string[] {
   return Array.from(variables).sort((a, b) => Number(a) - Number(b));
 }
 
-export default function CampaignsTab() {
+type CampaignsTabProps = {
+  standalone?: boolean;
+};
+
+export default function CampaignsTab({ standalone = false }: CampaignsTabProps) {
   const [campaigns, setCampaigns] = useState<WhatsAppCampaign[]>([]);
   const [loading, setLoading] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
@@ -318,9 +322,15 @@ export default function CampaignsTab() {
   const hasVariableErrors = templateVariables.some((key) => !variableMapping[key] || (variableMapping[key] === MANUAL_VALUE_FIELD && !manualVariableValues[key]));
   const csvHeaders = ['telefone', ...templateVariables.map((key) => VARIABLE_FIELD_OPTIONS.find((item) => item.value === variableMapping[key])?.csvColumn || `variavel_${key}`)];
 
-  return <div className='space-y-4 rounded-2xl border border-[color:var(--surface-border)] bg-white/95 p-5'>
+  return <div className={`space-y-4 rounded-2xl border border-[color:var(--surface-border)] bg-white/95 p-5 ${standalone ? 'shadow-[0_20px_50px_-40px_rgba(2,6,23,0.55)]' : ''}`}>
+    {standalone ? (
+      <header className='space-y-2'>
+        <h1 className='inline-flex items-center gap-2 text-2xl font-semibold tracking-tight text-slate-900'><Megaphone size={22}/>Campanhas</h1>
+        <p className='text-sm text-slate-600'>Gerencie disparos, segmentações e campanhas WhatsApp.</p>
+      </header>
+    ) : null}
     <div className='flex items-center justify-between'>
-      <h3 className='inline-flex items-center gap-2 text-lg font-semibold text-slate-900'><Megaphone size={18}/>Campanhas</h3>
+      <h3 className='inline-flex items-center gap-2 text-lg font-semibold text-slate-900'>{standalone ? 'Operação de campanhas' : 'Campanhas'}</h3>
       <div className='flex gap-2'>
         <button onClick={() => void refresh()} className='secondary-button inline-flex items-center gap-2'><RefreshCcw size={14}/>Atualizar</button>
         <button onClick={() => setShowCreate(true)} className='primary-button inline-flex items-center gap-2'><Plus size={14}/>Nova campanha</button>
@@ -342,6 +352,7 @@ export default function CampaignsTab() {
         <div className='flex gap-2'>
           {c.status === 'draft' && <button onClick={() => void onStartCampaign(c.id)} className='primary-button'>Iniciar campanha</button>}
           {c.status === 'running' && <button onClick={() => void onPauseCampaign(c.id)} className='secondary-button'>Pausar</button>}
+          <button className='secondary-button' disabled>Analytics (em breve)</button>
           <button onClick={() => void refresh()} className='secondary-button'>Atualizar</button>
         </div>
       </div></CampaignCard>;
