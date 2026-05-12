@@ -185,11 +185,10 @@ export default function CampaignsTab() {
       }
     }
 
-    const payloadVariables = templateVariables.reduce<Record<string, string>>((acc, key) => {
-      const value = (testVariableValues[key] || '').trim();
-      if (value) acc[key] = value;
-      return acc;
-    }, {});
+    const payloadVariables: Record<string, string> = {};
+    templateVariables.forEach((key) => {
+      payloadVariables[key] = (testVariableValues[key] || '').trim();
+    });
 
     console.log('[WHATSAPP TEMPLATE TEST PAYLOAD]', {
       provider_id: providerId,
@@ -203,7 +202,7 @@ export default function CampaignsTab() {
       const result = await testSendWhatsAppTemplate(selectedTemplate.id, {
         provider_id: providerId,
         to: testPhone,
-        ...(templateVariables.length ? { variables: payloadVariables } : {})
+        variables: payloadVariables
       });
       setTestStatus({ type: 'success', message: `Teste enviado com sucesso. message_id: ${result.provider_message_id || 'n/a'}` });
     } catch (error) {
