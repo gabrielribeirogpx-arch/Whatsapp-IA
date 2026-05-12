@@ -8,10 +8,11 @@ from app.integrations.meta.meta_cloud_client import MetaApiError
 
 from app.database import get_db
 from app.models.tenant import Tenant
+from app.models.whatsapp_message_template import WhatsAppMessageTemplate
 from app.schemas.whatsapp_business import WhatsAppTemplateCreate, WhatsAppTemplateOut, WhatsAppTemplateUpdate
 from app.services import whatsapp_template_service
 from app.services.tenant_service import get_current_tenant
-from app.services.whatsapp_message_service import send_template_message
+from app.services.whatsapp_message_service import extract_template_variables, send_template_message
 from app.services.whatsapp_template_service import TemplateSubmitError
 
 router = APIRouter(tags=["whatsapp-templates"])
@@ -68,8 +69,31 @@ def test_send_template(template_id: str, payload: dict[str, Any], db: Session = 
     if not provider_id or not to:
         raise HTTPException(status_code=400, detail="provider_id e to são obrigatórios")
 
+    template = db.query(WhatsAppMessageTemplate).filter(
+        WhatsAppMessageTemplate.id == template_id,
+        WhatsAppMessageTemplate.tenant_id == str(tenant.id),
+    ).first()
+    if not template:
+        raise HTTPException(status_code=404, detail="Template não encontrado para o tenant.")
+
+    placeholders = extract_template_variables(template.body_text or "")
+    ordered_variables = {str(k): str(v).strip() for k, v in sorted(dict(variables).items(), key=lambda item: int(str(item[0])) if str(item[0]).isdigit() else 10**9)}
+    missing_placeholders = [key for key in placeholders if not ordered_variables.get(key)]
+    if placeholders and missing_placeholders:
+        missing_text = " e ".join([f"{{{{{k}}}}}" for k in missing_placeholders])
+        raise HTTPException(status_code=422, detail=f"Template exige variável {missing_text}, mas elas não foram preenchidas.")
+
     print("[WHATSAPP TEMPLATE TEST SEND]", f"tenant_id={tenant.id}", f"provider_id={provider_id}", f"template_id={template_id}", f"to={to}")
-    print("[WHATSAPP TEMPLATE TEST PAYLOAD]", {"to": to, "type": "template", "template_id": template_id, "variables": variables})
+    print("[WHATSAPP TEMPLATE TEST PAYLOAD]", {"to": to, "type": "template", "template_id": template_id, "variables": ordered_variables})
+    components = [{
+        "type": "body",
+        "parameters": [{"type": "text", "text": ordered_variables[key]} for key in placeholders]
+    }] if placeholders else []
+    print("[WHATSAPP TEMPLATE TEST PAYLOAD_FULL]", {
+        "template": {"name": template.name, "language": template.language or "pt_BR"},
+        "to": to,
+        "components": components,
+    })
 
     try:
         result = send_template_message(
@@ -78,7 +102,7 @@ def test_send_template(template_id: str, payload: dict[str, Any], db: Session = 
             provider_id=provider_id,
             template_id=template_id,
             to=to,
-            variables=variables,
+            variables=ordered_variables,
         )
         print("[WHATSAPP TEMPLATE TEST RESPONSE]", {"provider_message_id": result.get("provider_message_id"), "raw": result.get("raw")})
         return {"ok": True, **result}
@@ -98,4 +122,3 @@ def test_send_template(template_id: str, payload: dict[str, Any], db: Session = 
             "meta_error": meta_message or detail,
             "meta_code": meta_code,
         })
-
