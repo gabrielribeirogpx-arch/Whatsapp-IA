@@ -113,7 +113,8 @@ export default function CampaignsTab() {
 
   const selectedTemplate = approvedTemplates.find((t) => t.id === templateId);
   const templateBody = selectedTemplate?.body_preview || selectedTemplate?.body_text || '';
-  const templateVariables = useMemo(() => parseTemplateVariables(templateBody), [templateBody]);
+  const templateVariableSource = `${selectedTemplate?.body_text || ''}\n${selectedTemplate?.body_preview || ''}`;
+  const templateVariables = useMemo(() => parseTemplateVariables(templateVariableSource), [templateVariableSource]);
 
   useEffect(() => {
     if (templateId && !approvedTemplates.some((t) => t.id === templateId)) setTemplateId('');
@@ -173,10 +174,27 @@ export default function CampaignsTab() {
 
   const onQuickTest = async () => {
     if (!testPhone || !selectedTemplate || !providerId) return;
-    const payloadVariables = templateVariables.reduce<Record<string, string>>((acc, key) => {
-      acc[key] = variableValues[key] || '';
-      return acc;
-    }, {});
+
+    if (templateVariables.length) {
+      for (const key of templateVariables) {
+        const value = (testVariableValues[key] || '').trim();
+        if (!value) {
+          setTestStatus({ type: 'error', message: `Preencha a variável ${key}` });
+          return;
+        }
+      }
+    }
+
+    const payloadVariables: Record<string, string> = {};
+    templateVariables.forEach((key) => {
+      payloadVariables[key] = (testVariableValues[key] || '').trim();
+    });
+
+    console.log('[WHATSAPP TEMPLATE TEST PAYLOAD]', {
+      provider_id: providerId,
+      to: testPhone,
+      variables: payloadVariables
+    });
 
     setTestSending(true);
     setTestStatus(null);
