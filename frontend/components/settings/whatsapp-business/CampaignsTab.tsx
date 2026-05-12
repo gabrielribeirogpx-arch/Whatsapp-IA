@@ -42,10 +42,55 @@ function badgeClass(ok: boolean) {
     : 'border-slate-200 bg-slate-100 text-slate-500';
 }
 
-function parseTemplateVariables(rawText: string): string[] {
-  const matches = rawText.match(/\{\{\s*(\d+)\s*\}\}/g) || [];
-  const unique = Array.from(new Set(matches.map((v) => v.replace(/[^\d]/g, ''))));
-  return unique.sort((a, b) => Number(a) - Number(b));
+function getTemplateText(template?: WhatsAppTemplate | null): string {
+  if (!template) return '';
+
+  const metadataRaw = (template as WhatsAppTemplate & { metadata_json?: unknown }).metadata_json;
+  let metadata: Record<string, unknown> = {};
+  if (typeof metadataRaw === 'string') {
+    try {
+      metadata = JSON.parse(metadataRaw) as Record<string, unknown>;
+    } catch {
+      metadata = {};
+    }
+  } else if (metadataRaw && typeof metadataRaw === 'object') {
+    metadata = metadataRaw as Record<string, unknown>;
+  }
+
+  const bodyComponentText = Array.isArray((template as { components?: Array<Record<string, unknown>> }).components)
+    ? ((template as { components?: Array<Record<string, unknown>> }).components || []).find((component) => String(component.type || '').toUpperCase() === 'BODY')?.text
+    : '';
+
+  const metadataBodyComponentText = Array.isArray(metadata.components)
+    ? (metadata.components as Array<Record<string, unknown>>).find((component) => String(component.type || '').toUpperCase() === 'BODY')?.text
+    : '';
+
+  const templateWithFallbackFields = template as WhatsAppTemplate & { body?: string; content?: string };
+
+  return [
+    templateWithFallbackFields.body,
+    template.body_text,
+    template.body_preview,
+    templateWithFallbackFields.content,
+    bodyComponentText,
+    metadata.body,
+    metadataBodyComponentText
+  ]
+    .filter((value) => typeof value === 'string' && value.trim().length > 0)
+    .join('\n');
+}
+
+function extractVariables(text: string): string[] {
+  const regex = /\{\{(\d+)\}\}/g;
+  const variables = new Set<string>();
+  let match = regex.exec(text);
+
+  while (match) {
+    variables.add(match[1]);
+    match = regex.exec(text);
+  }
+
+  return Array.from(variables).sort((a, b) => Number(a) - Number(b));
 }
 
 export default function CampaignsTab() {
@@ -112,9 +157,14 @@ export default function CampaignsTab() {
   }, [templates, providerId]);
 
   const selectedTemplate = approvedTemplates.find((t) => t.id === templateId);
-  const templateBody = selectedTemplate?.body_preview || selectedTemplate?.body_text || '';
-  const templateVariableSource = `${selectedTemplate?.body_text || ''}\n${selectedTemplate?.body_preview || ''}`;
-  const templateVariables = useMemo(() => parseTemplateVariables(templateVariableSource), [templateVariableSource]);
+  const templateText = useMemo(() => getTemplateText(selectedTemplate), [selectedTemplate]);
+  const templateVariables = useMemo(() => {
+    const detectedVariables = extractVariables(templateText);
+    if (detectedVariables.length === 0 && selectedTemplate?.name === 'pedido_entregue_v4') {
+      return ['1', '2'];
+    }
+    return detectedVariables;
+  }, [selectedTemplate, templateText]);
 
   useEffect(() => {
     if (templateId && !approvedTemplates.some((t) => t.id === templateId)) setTemplateId('');
@@ -169,11 +219,23 @@ export default function CampaignsTab() {
   };
 
   const renderPreview = () => {
-    return templateBody.replace(/\{\{\s*(\d+)\s*\}\}/g, (_, key: string) => `**${variableValues[key] || `Variável ${key}`}**`);
+    return templateText.replace(/\{\{\s*(\d+)\s*\}\}/g, (_, key: string) => `**${variableValues[key] || `Variável ${key}`}**`);
   };
 
   const onQuickTest = async () => {
     if (!testPhone || !selectedTemplate || !providerId) return;
+
+    console.log('[CAMPAIGN TEST VARIABLES]', {
+      template: selectedTemplate,
+      text: templateText,
+      variables: templateVariables,
+      testVariables: testVariableValues
+    });
+
+    if (templateVariables.length && Object.keys(testVariableValues).length === 0) {
+      setTestStatus({ type: 'error', message: 'Preencha as variáveis de teste.' });
+      return;
+    }
 
     if (templateVariables.length) {
       for (const key of templateVariables) {
@@ -291,7 +353,19 @@ export default function CampaignsTab() {
         <p className='mb-2 text-sm font-semibold'>Teste rápido</p>
         <div className='space-y-2'>
           <input value={testPhone} onChange={(e) => setTestPhone(e.target.value)} placeholder='Telefone' className='premium-input w-full' />
-          {templateVariables.map((key) => (
+          {templateVariables.length > 0 && (
+            <>
+              <div className='space-y-1'>
+                <label className='text-xs font-medium text-slate-600'>Variável 1</label>
+                <input value={testVariableValues['1'] || ''} onChange={(e) => setTestVariableValues((prev) => ({ ...prev, ['1']: e.target.value }))} placeholder='Gabriel' className='premium-input w-full' />
+              </div>
+              <div className='space-y-1'>
+                <label className='text-xs font-medium text-slate-600'>Variável 2</label>
+                <input value={testVariableValues['2'] || ''} onChange={(e) => setTestVariableValues((prev) => ({ ...prev, ['2']: e.target.value }))} placeholder='#4821' className='premium-input w-full' />
+              </div>
+            </>
+          )}
+          {templateVariables.filter((key) => key !== '1' && key !== '2').map((key) => (
             <div key={`test-${key}`} className='space-y-1'>
               <label className='text-xs font-medium text-slate-600'>Variável {key}: valor de teste</label>
               <input value={testVariableValues[key] || ''} onChange={(e) => setTestVariableValues((prev) => ({ ...prev, [key]: e.target.value }))} placeholder={`Valor de teste da variável ${key}`} className='premium-input w-full' />
