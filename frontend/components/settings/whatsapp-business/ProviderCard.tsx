@@ -8,7 +8,7 @@ function qualityColor(quality?: string) {
   return 'text-slate-600 bg-slate-100 border-slate-300';
 }
 
-export default function ProviderCard({ p, onTest, onActivate, onDelete, loading }: { p: any; onTest: any; onActivate: any; onDelete: any; loading: boolean }) {
+export default function ProviderCard({ p, onTest, onActivate, onDelete, onEdit, loading }: { p: any; onTest: any; onActivate: any; onDelete: any; onEdit: any; loading: boolean }) {
   const meta = p.metadata_json || {};
   const quality = meta.quality_rating;
   return <article className={`group w-full min-w-0 rounded-2xl border p-4 transition-all duration-300 ${p.status === 'connected' ? 'border-emerald-200/80 bg-gradient-to-b from-white to-emerald-50/40 shadow-[0_18px_34px_-28px_rgba(16,185,129,0.5)]' : 'border-slate-200/80 bg-gradient-to-b from-white to-slate-50/60 shadow-[0_16px_30px_-28px_rgba(15,23,42,0.8)]'} hover:-translate-y-0.5 hover:shadow-[0_24px_40px_-30px_rgba(15,23,42,0.75)]`}>
@@ -27,7 +27,7 @@ export default function ProviderCard({ p, onTest, onActivate, onDelete, loading 
     <div className='mt-4 flex flex-wrap gap-2'>
       <button disabled={loading} className='secondary-button border border-slate-300 bg-white/90 hover:bg-slate-100' onClick={onTest}>Testar</button>
       <button disabled={loading} className='secondary-button border border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100' onClick={onActivate}>{p.is_active ? 'Ativo' : 'Ativar'}</button>
-      <button disabled={loading} className='secondary-button border border-slate-300 bg-white/90 hover:bg-slate-100'>Editar</button>
+      <button disabled={loading} className='secondary-button border border-slate-300 bg-white/90 hover:bg-slate-100' onClick={onEdit}>Editar</button>
       <button disabled={loading} className='secondary-button border border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100' onClick={onDelete}>Remover</button>
     </div>
   </article>;
