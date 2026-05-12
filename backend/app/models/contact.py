@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import DateTime, ForeignKey, Integer, String, UniqueConstraint
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -20,7 +20,16 @@ class Contact(Base):
     stage: Mapped[str] = mapped_column(String, nullable=False, default="novo")
     score: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     last_message_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    first_name: Mapped[str | None] = mapped_column(String, nullable=True)
+    last_name: Mapped[str | None] = mapped_column(String, nullable=True)
+    email: Mapped[str | None] = mapped_column(String, nullable=True)
+    tags: Mapped[str | None] = mapped_column(String, nullable=True)
+    source: Mapped[str | None] = mapped_column(String, nullable=True, default="whatsapp")
+    opt_in_status: Mapped[str | None] = mapped_column(String, nullable=True, default="unknown")
+    last_interaction_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    custom_fields_json: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict, server_default="{}")
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     conversations = relationship("Conversation", back_populates="contact")
 

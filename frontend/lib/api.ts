@@ -543,3 +543,5 @@ export async function importWhatsAppCampaignRecipients(campaignId: string, recip
 export async function startWhatsAppCampaign(campaignId: string) { const res = await apiFetch(`/api/whatsapp/campaigns/${campaignId}/start`, { method:'POST' }); return parseApiResponse<WhatsAppCampaign>(res); }
 export async function pauseWhatsAppCampaign(campaignId: string) { const res = await apiFetch(`/api/whatsapp/campaigns/${campaignId}/pause`, { method:'POST' }); return parseApiResponse<WhatsAppCampaign>(res); }
 export async function listWhatsAppCampaignRecipients(campaignId: string): Promise<WhatsAppCampaignRecipient[]> { const res = await apiFetch(`/api/whatsapp/campaigns/${campaignId}/recipients`); return parseApiResponse<WhatsAppCampaignRecipient[]>(res); }
+
+export async function importWhatsAppCampaignRecipientsFromContacts(campaignId: string, payload: Record<string, unknown>) { const res = await apiFetch(`/api/whatsapp/campaigns/${campaignId}/recipients/import-from-contacts`, { method:'POST', body: JSON.stringify(payload)}); return parseApiResponse<{ok:boolean;imported:number}>(res); }

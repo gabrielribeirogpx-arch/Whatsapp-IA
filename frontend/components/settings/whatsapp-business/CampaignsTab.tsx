@@ -9,6 +9,8 @@ import CampaignStatusBadge from './campaigns/CampaignStatusBadge';
 import {
   createWhatsAppCampaign,
   importWhatsAppCampaignRecipients,
+  importWhatsAppCampaignRecipientsFromContacts,
+  getContacts,
   listTemplates,
   listWhatsAppCampaigns,
   listWhatsAppProviders,
@@ -16,7 +18,7 @@ import {
   startWhatsAppCampaign,
   testSendWhatsAppTemplate
 } from '@/lib/api';
-import { WhatsAppCampaign, WhatsAppProvider, WhatsAppTemplate } from '@/lib/types';
+import { CRMContact, WhatsAppCampaign, WhatsAppProvider, WhatsAppTemplate } from '@/lib/types';
 
 type LeadInput = { phone: string; fields: Record<string, string> };
 type VariableFieldOption = { value: string; label: string; csvColumn: string };
@@ -99,6 +101,10 @@ export default function CampaignsTab() {
   const [campaigns, setCampaigns] = useState<WhatsAppCampaign[]>([]);
   const [loading, setLoading] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
+  const [savedContacts, setSavedContacts] = useState<CRMContact[]>([]);
+  const [selectedContactIds, setSelectedContactIds] = useState<string[]>([]);
+  const [recipientMode, setRecipientMode] = useState<'csv' | 'saved'>('csv');
+  const [contactSearch, setContactSearch] = useState('');
   const [name, setName] = useState('');
   const [providerId, setProviderId] = useState('');
   const [templateId, setTemplateId] = useState('');
@@ -117,6 +123,7 @@ export default function CampaignsTab() {
     setLoading(true);
     try {
       setCampaigns(await listWhatsAppCampaigns());
+      setSavedContacts(await getContacts());
     } finally {
       setLoading(false);
     }
@@ -282,11 +289,14 @@ export default function CampaignsTab() {
     if (!name || !providerId || !templateId) return;
     const created = await createWhatsAppCampaign({ name, provider_id: providerId, template_id: templateId });
     const leads = parseLeads();
-    if (leads.length) {
+    if (recipientMode === 'csv' && leads.length) {
       await importWhatsAppCampaignRecipients(
         created.id,
         leads.map((item) => ({ phone: item.phone, variables_json: item.fields }))
       );
+    }
+    if (recipientMode === 'saved' && selectedContactIds.length) {
+      await importWhatsAppCampaignRecipientsFromContacts(created.id, { contact_ids: selectedContactIds, variables_json: {"1": "first_name", "2": variableMapping["2"] || "custom_fields_json.order_id"}, manual_variable_2: manualVariableValues["2"] || "" });
     }
     setName('');
     setProviderId('');
@@ -403,13 +413,29 @@ export default function CampaignsTab() {
       </div>
 
       <div className='rounded-xl border border-slate-200 p-3'>
-        <p className='mb-2 text-sm font-semibold'>Importação de leads</p>
-        <p className='mb-2 text-xs text-slate-500'>CSV esperado: {csvHeaders.join(',')}</p>
+        <p className='mb-2 text-sm font-semibold'>Destinatários</p>
+        <div className='mb-2 flex gap-2 text-xs'>
+          <button type='button' onClick={() => setRecipientMode('csv')} className={`rounded border px-2 py-1 ${recipientMode === 'csv' ? 'bg-slate-900 text-white' : 'bg-white'}`}>CSV</button>
+          <button type='button' onClick={() => setRecipientMode('saved')} className={`rounded border px-2 py-1 ${recipientMode === 'saved' ? 'bg-slate-900 text-white' : 'bg-white'}`}>Selecionar contatos salvos</button>
+        </div>
+        {recipientMode === 'csv' && <><p className='mb-2 text-xs text-slate-500'>CSV esperado: {csvHeaders.join(',')}</p>
         <textarea value={leadsText} onChange={(e) => setLeadsText(e.target.value)} rows={5} className='premium-input w-full' placeholder={`${csvHeaders.join(',')}
 5516999999999,Gabriel,#4821`} />
         <label className='mt-2 block text-xs text-slate-500'>Upload CSV
           <input type='file' accept='.csv,text/csv' onChange={(e) => void onCsvUpload(e)} className='mt-1 block text-xs' />
-        </label>
+        </label></>}
+
+        {recipientMode === 'saved' && <div className='space-y-2'>
+          <input value={contactSearch} onChange={(e) => setContactSearch(e.target.value)} placeholder='Buscar por nome/telefone' className='premium-input w-full' />
+          <div className='max-h-40 space-y-1 overflow-auto rounded border p-2'>
+            {savedContacts.filter((c) => !contactSearch || `${c.name || ''} ${c.phone}`.toLowerCase().includes(contactSearch.toLowerCase())).map((c) => (
+              <label key={c.id} className='flex items-center gap-2 text-xs'>
+                <input type='checkbox' checked={selectedContactIds.includes(c.id)} onChange={(e) => setSelectedContactIds((prev) => e.target.checked ? [...prev, c.id] : prev.filter((id) => id !== c.id))} />
+                <span>{c.name || c.phone} • {c.phone} • {c.source || 'whatsapp'}</span>
+              </label>
+            ))}
+          </div>
+        </div>}
       </div>
 
       {(hasCreateErrors || hasVariableErrors) && <p className='text-xs text-amber-600'>Preencha nome, provider/template e todos os mapeamentos obrigatórios para continuar.</p>}

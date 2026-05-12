@@ -5,7 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import Tenant, WhatsAppCampaign, WhatsAppCampaignRecipient
+from app.models import Contact, Tenant, WhatsAppCampaign, WhatsAppCampaignRecipient
 from app.models.tenant_whatsapp_provider import TenantWhatsAppProvider
 from app.models.whatsapp_message_template import WhatsAppMessageTemplate
 from app.services.queue import get_queue
@@ -66,6 +66,31 @@ def import_recipients(campaign_id: str, payload: dict, db: Session = Depends(get
     db.commit()
     return {"ok": True, "imported": imported}
 
+
+
+@router.post("/{campaign_id}/recipients/import-from-contacts")
+def import_recipients_from_contacts(campaign_id: str, payload: dict, db: Session = Depends(get_db), tenant: Tenant = Depends(get_current_tenant)):
+    c = db.execute(select(WhatsAppCampaign).where(WhatsAppCampaign.id == campaign_id, WhatsAppCampaign.tenant_id == tenant.id)).scalars().first()
+    if not c:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+    ids = payload.get("contact_ids") or []
+    if not ids:
+        return {"ok": True, "imported": 0}
+    contacts = db.execute(select(Contact).where(Contact.tenant_id == tenant.id, Contact.id.in_(ids))).scalars().all()
+    imported = 0
+    for contact in contacts:
+        exists = db.execute(select(WhatsAppCampaignRecipient).where(WhatsAppCampaignRecipient.campaign_id == c.id, WhatsAppCampaignRecipient.phone == contact.phone)).scalars().first()
+        if exists:
+            continue
+        variables = payload.get("variables_json") or {}
+        custom = contact.custom_fields_json or {}
+        if variables.get("2") in {"custom_fields_json.order_id", "order_id"}:
+            variables["2"] = custom.get("order_id") or payload.get("manual_variable_2") or ""
+        db.add(WhatsAppCampaignRecipient(campaign_id=c.id, phone=contact.phone, first_name=contact.first_name or contact.name, variables_json=variables))
+        imported += 1
+    c.total_recipients = int(c.total_recipients or 0) + imported
+    db.commit()
+    return {"ok": True, "imported": imported}
 
 @router.post("/{campaign_id}/start")
 def start_campaign(campaign_id: str, db: Session = Depends(get_db), tenant: Tenant = Depends(get_current_tenant)):
