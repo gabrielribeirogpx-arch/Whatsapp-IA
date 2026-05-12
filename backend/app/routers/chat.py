@@ -379,15 +379,15 @@ async def send_message(
         db=db,
         tenant_id=tenant_id,
         phone=phone,
-        contact_id=contact.id,
+        contact_id=contact.id if contact else None,
     )
     ensure_conversation_contact_link(conversation, contact)
 
-    if payload.name and payload.name.strip() and payload.name.strip() != contact.name:
+    if contact and payload.name and payload.name.strip() and payload.name.strip() != contact.name:
         contact.name = payload.name.strip()
     if conversation.name is None and _looks_like_name(message_text):
         conversation.name = message_text.strip()
-        if not contact.name or contact.name == "Cliente":
+        if contact and (not contact.name or contact.name == "Cliente"):
             contact.name = conversation.name
     print("NOME CLIENTE:", conversation.name)
 
@@ -417,7 +417,8 @@ async def send_message(
         last_message=message_text,
     )
     consume_usage(tenant, 1)
-    contact.last_message_at = datetime.utcnow()
+    if contact:
+        contact.last_message_at = datetime.utcnow()
     conversation.updated_at = datetime.utcnow()
     db.commit()
     db.refresh(message)
