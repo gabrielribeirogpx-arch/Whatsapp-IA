@@ -78,12 +78,21 @@ export type CRMContact = {
   tenant_id: string;
   phone: string;
   name: string | null;
+  first_name?: string | null;
+  last_name?: string | null;
+  email?: string | null;
+  tags?: string[];
+  source?: string;
+  opt_in_status?: string;
+  last_interaction_at?: string | null;
+  custom_fields_json?: Record<string, any>;
   avatar_url?: string | null;
   stage: string;
   score: number;
   last_message_at?: string | null;
   last_message?: string | null;
   created_at: string;
+  updated_at?: string;
 };
 
 

@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import List
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy import desc, select
 from sqlalchemy.orm import Session, load_only, selectinload
@@ -261,17 +261,23 @@ def get_conversation_logs(
 def list_contacts(
     tenant: Tenant = Depends(get_current_tenant),
     db: Session = Depends(get_db),
+    tag: str | None = Query(default=None),
+    source: str | None = Query(default=None),
+    search: str | None = Query(default=None),
+    interacted_after: datetime | None = Query(default=None),
 ):
-    return (
-        db.execute(
-            select(Contact)
-            .options(selectinload(Contact.conversations))
-            .where(Contact.tenant_id == tenant.id)
-            .order_by(desc(Contact.last_message_at), desc(Contact.created_at), desc(Contact.id))
-        )
-        .scalars()
-        .all()
-    )
+    query = select(Contact).options(selectinload(Contact.conversations)).where(Contact.tenant_id == tenant.id)
+    if tag:
+        query = query.where(Contact.tags.ilike(f"%{tag}%"))
+    if source:
+        query = query.where(Contact.source == source)
+    if search:
+        term = f"%{search.strip()}%"
+        query = query.where(or_(Contact.name.ilike(term), Contact.phone.ilike(term)))
+    if interacted_after:
+        query = query.where(Contact.last_interaction_at >= interacted_after)
+
+    return db.execute(query.order_by(desc(Contact.last_interaction_at), desc(Contact.created_at), desc(Contact.id))).scalars().all()
 
 
 @router.post("/send-message", response_model=MessageOut)
