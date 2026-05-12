@@ -58,10 +58,19 @@ class MetaCloudClient:
 
     def _raise_api_error(self, response: httpx.Response, endpoint: str, context: dict[str, Any]) -> None:
         payload = {}
+        response_headers = {
+            "x-fb-trace-id": response.headers.get("x-fb-trace-id"),
+            "x-fb-request-id": response.headers.get("x-fb-request-id"),
+            "x-business-use-case-usage": response.headers.get("x-business-use-case-usage"),
+            "www-authenticate": response.headers.get("www-authenticate"),
+        }
         try:
             payload = response.json()
         except Exception:
             payload = {"raw": response.text}
+        if isinstance(payload, dict):
+            payload.setdefault("raw", response.text)
+            payload["headers"] = response_headers
 
         err = payload.get("error", {}) if isinstance(payload, dict) else {}
         message = err.get("message") or "Erro ao comunicar com Meta Graph API"
