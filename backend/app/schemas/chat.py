@@ -46,9 +46,9 @@ class ContactOut(BaseModel):
     first_name: str | None = None
     last_name: str | None = None
     email: str | None = None
-    tags: str | None = None
-    source: str | None = None
-    opt_in_status: str | None = None
+    tags: list[str] = Field(default_factory=list)
+    source: str = "whatsapp"
+    opt_in_status: str = "unknown"
     custom_fields_json: dict = Field(default_factory=dict)
     avatar_url: str | None = None
     stage: str
