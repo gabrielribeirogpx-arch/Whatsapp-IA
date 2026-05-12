@@ -128,7 +128,10 @@ export default function CampaignsTab() {
     }
     setVariableMapping((prev) => templateVariables.reduce((acc, key) => ({ ...acc, [key]: prev[key] || 'first_name' }), {}));
     setManualVariableValues((prev) => templateVariables.reduce((acc, key) => ({ ...acc, [key]: prev[key] || '' }), {}));
-    setTestVariableValues((prev) => templateVariables.reduce((acc, key) => ({ ...acc, [key]: prev[key] || '' }), {}));
+    setTestVariableValues((prev) => templateVariables.reduce((acc, key) => ({
+      ...acc,
+      [key]: prev[key] || (key === '1' ? 'Gabriel' : key === '2' ? '#4821' : '')
+    }), {}));
   }, [templateVariables]);
 
   const variableValues = useMemo(() => {
@@ -271,8 +274,8 @@ export default function CampaignsTab() {
         <div className='space-y-2'>
           <input value={testPhone} onChange={(e) => setTestPhone(e.target.value)} placeholder='Telefone' className='premium-input w-full' />
           {templateVariables.map((key) => (
-            <div key={`test-${key}`} className='grid grid-cols-1 gap-2 md:grid-cols-2'>
-              <input value={VARIABLE_FIELD_OPTIONS.find((item) => item.value === variableMapping[key])?.label || ''} readOnly className='premium-input w-full bg-slate-100' placeholder={`Campo da variável ${key}`} />
+            <div key={`test-${key}`} className='space-y-1'>
+              <label className='text-xs font-medium text-slate-600'>Variável {key}: valor de teste</label>
               <input value={testVariableValues[key] || ''} onChange={(e) => setTestVariableValues((prev) => ({ ...prev, [key]: e.target.value }))} placeholder={`Valor de teste da variável ${key}`} className='premium-input w-full' />
             </div>
           ))}
