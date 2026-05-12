@@ -12,7 +12,7 @@ import {
   listTemplates,
   listWhatsAppCampaigns,
   listWhatsAppProviders,
-  sendMessage
+  testSendWhatsAppTemplate
 } from '@/lib/api';
 import { WhatsAppCampaign, WhatsAppProvider, WhatsAppTemplate } from '@/lib/types';
 
@@ -63,6 +63,8 @@ export default function CampaignsTab() {
   const [variableMapping, setVariableMapping] = useState<Record<string, string>>({});
   const [manualVariableValues, setManualVariableValues] = useState<Record<string, string>>({});
   const [testVariableValues, setTestVariableValues] = useState<Record<string, string>>({});
+  const [testStatus, setTestStatus] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [testSending, setTestSending] = useState(false);
 
   const refresh = async () => {
     setLoading(true);
@@ -167,13 +169,28 @@ export default function CampaignsTab() {
   };
 
   const onQuickTest = async () => {
-    if (!testPhone || !selectedTemplate) return;
+    if (!testPhone || !selectedTemplate || !providerId) return;
     const payloadVariables = templateVariables.reduce<Record<string, string>>((acc, key) => {
       acc[key] = variableValues[key] || '';
       return acc;
     }, {});
-    console.log('quick_test_payload', { phone: testPhone, variables: payloadVariables, variable_mapping: variableMapping });
-    await sendMessage(testPhone, renderPreview().replace(/\*\*/g, ''));
+
+    setTestSending(true);
+    setTestStatus(null);
+    try {
+      const result = await testSendWhatsAppTemplate(selectedTemplate.id, {
+        provider_id: providerId,
+        to: testPhone,
+        variables: payloadVariables
+      });
+      setTestStatus({ type: 'success', message: `Teste enviado com sucesso. message_id: ${result.provider_message_id || 'n/a'}` });
+    } catch (error) {
+      const err = error as Error & { meta_error?: string; meta_code?: number | string };
+      const details = [err.message, err.meta_error ? `meta_error: ${err.meta_error}` : '', err.meta_code ? `meta_code: ${err.meta_code}` : ''].filter(Boolean).join(' | ');
+      setTestStatus({ type: 'error', message: details || 'Falha ao enviar teste de template.' });
+    } finally {
+      setTestSending(false);
+    }
   };
 
   const onCreate = async () => {
@@ -260,7 +277,8 @@ export default function CampaignsTab() {
             </div>
           ))}
         </div>
-        <button onClick={() => void onQuickTest()} disabled={!testPhone || !selectedTemplate || hasVariableErrors} className='secondary-button mt-3 inline-flex items-center gap-2'><Send size={14}/>Enviar teste</button>
+        <button onClick={() => void onQuickTest()} disabled={!testPhone || !selectedTemplate || !providerId || hasVariableErrors || testSending} className='secondary-button mt-3 inline-flex items-center gap-2'>{testSending ? <Loader2 size={14} className='animate-spin'/> : <Send size={14}/> }Enviar teste</button>
+        {testStatus && <p className={`mt-2 text-xs ${testStatus.type === 'success' ? 'text-emerald-600' : 'text-rose-600'}`}>{testStatus.message}</p>}
       </div>
 
       <div className='rounded-xl border border-slate-200 p-3'>

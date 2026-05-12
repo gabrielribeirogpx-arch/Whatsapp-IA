@@ -1,13 +1,18 @@
+from typing import Any
+
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
+
+from app.integrations.meta.meta_cloud_client import MetaApiError
 
 from app.database import get_db
 from app.models.tenant import Tenant
 from app.schemas.whatsapp_business import WhatsAppTemplateCreate, WhatsAppTemplateOut, WhatsAppTemplateUpdate
 from app.services import whatsapp_template_service
-from app.services.whatsapp_template_service import TemplateSubmitError
 from app.services.tenant_service import get_current_tenant
+from app.services.whatsapp_message_service import send_template_message
+from app.services.whatsapp_template_service import TemplateSubmitError
 
 router = APIRouter(tags=["whatsapp-templates"])
 
@@ -52,3 +57,45 @@ def submit_template(template_id: str, db: Session = Depends(get_db), tenant: Ten
 def sync_templates(db: Session = Depends(get_db), tenant: Tenant = Depends(get_current_tenant)):
     print("[WHATSAPP TEMPLATE SYNC]", f"tenant_id={tenant.id}")
     return whatsapp_template_service.sync_templates_placeholder(db, tenant.id)
+
+
+@router.post("/{template_id}/test-send")
+def test_send_template(template_id: str, payload: dict[str, Any], db: Session = Depends(get_db), tenant: Tenant = Depends(get_current_tenant)):
+    provider_id = str(payload.get("provider_id") or "").strip()
+    to = str(payload.get("to") or "").strip()
+    variables = payload.get("variables") or {}
+
+    if not provider_id or not to:
+        raise HTTPException(status_code=400, detail="provider_id e to são obrigatórios")
+
+    print("[WHATSAPP TEMPLATE TEST SEND]", f"tenant_id={tenant.id}", f"provider_id={provider_id}", f"template_id={template_id}", f"to={to}")
+    print("[WHATSAPP TEMPLATE TEST PAYLOAD]", {"to": to, "type": "template", "template_id": template_id, "variables": variables})
+
+    try:
+        result = send_template_message(
+            db,
+            tenant_id=str(tenant.id),
+            provider_id=provider_id,
+            template_id=template_id,
+            to=to,
+            variables=variables,
+        )
+        print("[WHATSAPP TEMPLATE TEST RESPONSE]", {"provider_message_id": result.get("provider_message_id"), "raw": result.get("raw")})
+        return {"ok": True, **result}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except MetaApiError as exc:
+        err = exc.payload.get("error") if isinstance(exc.payload, dict) else {}
+        meta_message = err.get("message") if isinstance(err, dict) else None
+        meta_code = err.get("code") if isinstance(err, dict) else None
+        detail = str(exc)
+        sandbox_hint = ""
+        normalized = (meta_message or "").lower()
+        if "recipient phone number not in allowed list" in normalized or "allowed list" in normalized or "not a valid whatsapp user" in normalized:
+            sandbox_hint = " Número não autorizado no ambiente de teste da Meta (adicione o número em WhatsApp > API Setup > To)."
+        return JSONResponse(status_code=exc.status_code, content={
+            "detail": f"{detail}{sandbox_hint}",
+            "meta_error": meta_message or detail,
+            "meta_code": meta_code,
+        })
+

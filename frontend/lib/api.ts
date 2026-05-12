@@ -518,6 +518,24 @@ export async function submitTemplate(templateId: string): Promise<WhatsAppTempla
 export async function syncTemplates(){ const res = await apiFetch('/api/whatsapp/templates/sync', {method:'POST'}); return parseApiResponse<{ok:boolean;message:string;count:number}>(res); }
 
 
+
+export async function testSendWhatsAppTemplate(templateId: string, payload: { provider_id: string; to: string; variables: Record<string, string> }) {
+  const res = await apiFetch(`/api/whatsapp/templates/${templateId}/test-send`, {
+    method: 'POST',
+    body: JSON.stringify(payload)
+  });
+
+  if (!res.ok) {
+    const errorBody = await res.json().catch(() => ({}));
+    const error = new Error(errorBody?.detail || `HTTP ${res.status}`) as Error & { meta_error?: string; meta_code?: number | string };
+    error.meta_error = errorBody?.meta_error;
+    error.meta_code = errorBody?.meta_code;
+    throw error;
+  }
+
+  return res.json() as Promise<{ ok: boolean; provider_message_id?: string; raw?: Record<string, unknown> }>;
+}
+
 export async function listWhatsAppCampaigns(): Promise<WhatsAppCampaign[]> { const res = await apiFetch('/api/whatsapp/campaigns'); return parseApiResponse<WhatsAppCampaign[]>(res); }
 export async function createWhatsAppCampaign(payload: Record<string, unknown>): Promise<WhatsAppCampaign> { const res = await apiFetch('/api/whatsapp/campaigns', { method:'POST', body: JSON.stringify(payload)}); return parseApiResponse<WhatsAppCampaign>(res); }
 export async function getWhatsAppCampaign(campaignId: string): Promise<WhatsAppCampaign> { const res = await apiFetch(`/api/whatsapp/campaigns/${campaignId}`); return parseApiResponse<WhatsAppCampaign>(res); }
