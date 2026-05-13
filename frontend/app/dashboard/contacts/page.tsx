@@ -30,8 +30,10 @@ export default function ContactsPage() {
     setLoading(true);
     setError(null);
     try {
-      const response = await apiFetch('/api/contacts', { cache: 'no-store' });
+      const url = '/api/contacts';
+      const response = await apiFetch(url, { cache: 'no-store' });
       const data = await response.json();
+      console.log('CONTACTS PAGE RAW RESPONSE', data);
 
       if (!response.ok) {
         throw new Error(data?.detail || 'Falha ao carregar contatos');
@@ -45,6 +47,7 @@ export default function ContactsPage() {
             ? data.contacts
             : [];
 
+      console.log('CONTACTS PAGE FINAL ARRAY', contactsArray);
       setContacts(contactsArray);
     } catch (err) {
       setContacts([]);
@@ -115,7 +118,12 @@ export default function ContactsPage() {
   return (
     <div className='space-y-4 p-6'>
       <h1 className='text-2xl font-semibold'>Contatos</h1>
-      <p className='text-sm text-slate-600'>Gerencie contatos do WhatsApp usados em campanhas.</p>
+      <div className='flex items-center justify-between gap-2'>
+        <p className='text-sm text-slate-600'>Gerencie contatos do WhatsApp usados em campanhas.</p>
+        <button className='secondary-button' onClick={() => void loadContacts()} disabled={loading}>
+          {loading ? 'Recarregando...' : 'Recarregar contatos'}
+        </button>
+      </div>
 
       {loading ? <p>Carregando contatos...</p> : null}
       {!loading && error ? <p className='text-sm text-rose-600'>{error}</p> : null}
@@ -132,7 +140,7 @@ export default function ContactsPage() {
                 <th className='p-2'>Tags</th>
                 <th className='p-2'>Última interação</th>
                 <th className='p-2'>Custom fields</th>
-                <th className='p-2'></th>
+                <th className='p-2'>Ações</th>
               </tr>
             </thead>
             <tbody>
