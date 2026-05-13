@@ -2,7 +2,7 @@ from datetime import datetime
 import os
 import uuid
 
-from fastapi import Depends, Header, HTTPException, Query
+from fastapi import Depends, Header, HTTPException, Query, Request
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -87,14 +87,21 @@ def resolve_tenant_by_phone_number_id(db: Session, phone_number_id: str | None) 
 
 
 def get_current_tenant(
+    request: Request,
     x_tenant_slug: str = Header(default="", alias="X-Tenant-Slug"),
     x_tenant_id: str = Header(default="", alias="X-Tenant-Id"),
+    x_tenant_id_alt: str = Header(default="", alias="X-Tenant-ID"),
     tenant_slug: str = Query(default=""),
     tenant_id: str = Query(default=""),
     db: Session = Depends(get_db),
 ) -> Tenant:
-    raw_tenant_id = (x_tenant_id or tenant_id).strip()
+    raw_tenant_id = (x_tenant_id or x_tenant_id_alt or tenant_id).strip()
     slug = (x_tenant_slug or tenant_slug).strip()
+
+    middleware_tenant_id = getattr(request.state, "tenant_id", None)
+
+    if raw_tenant_id and middleware_tenant_id and str(middleware_tenant_id) != str(raw_tenant_id):
+        raise HTTPException(status_code=401, detail="Tenant ID do header não confere com o contexto da requisição")
 
     if raw_tenant_id:
         try:

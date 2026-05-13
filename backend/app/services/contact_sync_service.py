@@ -57,7 +57,7 @@ def upsert_contact_for_phone(
     now = last_interaction_at or datetime.utcnow()
     safe_custom_fields = custom_fields_json if isinstance(custom_fields_json, dict) else {}
 
-    logger.info("[CONTACT UPSERT START] tenant_id=%s phone=%s name=%s", tenant_id, safe_phone, cleaned_name or "n/a")
+    logger.info("[SAVE CONTACT] tenant_id=%s phone=%s name=%s", tenant_id, safe_phone, cleaned_name or "n/a")
 
     contact = db.execute(
         select(Contact).where(Contact.tenant_id == tenant_id, Contact.phone == safe_phone)
@@ -84,7 +84,7 @@ def upsert_contact_for_phone(
         if hasattr(contact, "score") and getattr(contact, "score", None) is None:
             setattr(contact, "score", 0)
         db.add(contact)
-        logger.info("[CONTACT CREATED] tenant_id=%s phone=%s contact_id=%s", tenant_id, safe_phone, contact.id or "pending")
+        logger.info("[SAVE CONTACT CREATED] tenant_id=%s phone=%s name=%s contact_id=%s", tenant_id, safe_phone, cleaned_name or "n/a", contact.id or "pending")
     else:
         if cleaned_name:
             contact.name = cleaned_name
@@ -99,13 +99,13 @@ def upsert_contact_for_phone(
         contact.opt_in_status = "active"
         if not isinstance(getattr(contact, "custom_fields_json", None), dict):
             contact.custom_fields_json = safe_custom_fields
-        logger.info("[CONTACT UPDATED] tenant_id=%s phone=%s contact_id=%s", tenant_id, safe_phone, contact.id)
+        logger.info("[SAVE CONTACT UPDATED] tenant_id=%s phone=%s name=%s contact_id=%s", tenant_id, safe_phone, cleaned_name or (contact.name or "n/a"), contact.id)
 
     if not contact.opt_in_status:
         contact.opt_in_status = "active"
 
     db.flush()
-    logger.info("[CONTACT UPSERT READY] tenant_id=%s phone=%s contact_id=%s", tenant_id, safe_phone, contact.id)
+    logger.info("[SAVE CONTACT READY] tenant_id=%s phone=%s name=%s contact_id=%s", tenant_id, safe_phone, contact.name or "n/a", contact.id)
     return contact
 
 
