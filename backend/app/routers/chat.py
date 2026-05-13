@@ -288,6 +288,17 @@ def list_contacts(
         )
 
         logger.info(
+            "[GET CONTACTS] tenant_id=%s contacts_found=%s",
+            tenant.id,
+            len(contacts),
+        )
+        logger.info(
+            "[GET CONTACTS HEADERS] tenant_id=%s x_tenant_id=%s x_tenant_slug=%s",
+            tenant.id,
+            tenant.id,
+            tenant.slug,
+        )
+        logger.info(
             "[CONTACTS LIST] tenant_id=%s count=%s query_params=%s",
             tenant.id,
             len(contacts),
@@ -304,14 +315,13 @@ def list_contacts(
         print("tenant_id=", tenant.id)
         print("contacts_count=", len(contacts))
 
-        try:
-            print("first_contact=", {
-                "id": str(contacts[0].id),
-                "phone": contacts[0].phone,
-                "name": contacts[0].name,
+        for idx, contact in enumerate(contacts[:3]):
+            print(f"[GET CONTACTS SAMPLE {idx}]", {
+                "id": str(contact.id),
+                "phone": contact.phone,
+                "tenant_id": str(contact.tenant_id),
+                "name": contact.name,
             })
-        except Exception as e:
-            print("first_contact_error=", str(e))
 
         return {
             "success": True,
