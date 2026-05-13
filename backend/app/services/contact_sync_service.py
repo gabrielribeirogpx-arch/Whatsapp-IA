@@ -73,7 +73,7 @@ def upsert_contact_for_phone(
             first_name=first_name,
             last_name=last_name,
             source=source,
-            tags=[],
+            tags_json=[],
             opt_in_status="active",
             last_message_at=now,
             last_interaction_at=now,
@@ -94,8 +94,8 @@ def upsert_contact_for_phone(
         contact.source = source or contact.source
         contact.last_message_at = now
         contact.last_interaction_at = now
-        if getattr(contact, "tags", None) is None:
-            contact.tags = []
+        if getattr(contact, "tags_json", None) is None:
+            contact.tags_json = []
         contact.opt_in_status = "active"
         if not isinstance(getattr(contact, "custom_fields_json", None), dict):
             contact.custom_fields_json = safe_custom_fields

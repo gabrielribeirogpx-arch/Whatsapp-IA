@@ -321,6 +321,15 @@ def list_contacts(
                     "phone": c.phone,
                     "name": c.name,
                     "source": c.source,
+                    "tags_json": c.tags_json or [],
+                    "custom_fields_json": c.custom_fields_json or {},
+                    "last_order_id": c.last_order_id,
+                    "city": c.city,
+                    "company": c.company,
+                    "plan": c.plan,
+                    "lifecycle_stage": c.lifecycle_stage,
+                    "notes": c.notes,
+                    "last_interaction_at": c.last_interaction_at.isoformat() if c.last_interaction_at else None,
                 }
                 for c in contacts
             ]
@@ -550,3 +559,33 @@ async def stream_messages_by_conversation(
             sse_broker.unsubscribe(channel, queue)
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+
+@router.patch("/contacts/{contact_id}/custom-fields")
+def update_contact_custom_fields(
+    contact_id: UUID,
+    payload: dict,
+    tenant: Tenant = Depends(get_current_tenant),
+    db: Session = Depends(get_db),
+):
+    contact = db.execute(select(Contact).where(Contact.tenant_id == tenant.id, Contact.id == contact_id)).scalars().first()
+    if not contact:
+        raise HTTPException(status_code=404, detail="Contato não encontrado")
+
+    current = contact.custom_fields_json if isinstance(contact.custom_fields_json, dict) else {}
+    incoming = payload if isinstance(payload, dict) else {}
+    reserved = {"name", "tags_json", "last_order_id", "city", "company", "plan", "lifecycle_stage", "notes"}
+    custom = {k: v for k, v in incoming.items() if k not in reserved}
+    contact.custom_fields_json = {**current, **custom}
+    if "name" in incoming:
+        contact.name = str(incoming.get("name") or "").strip() or None
+    if "tags_json" in incoming and isinstance(incoming.get("tags_json"), list):
+        contact.tags_json = [str(t).strip() for t in incoming.get("tags_json") if str(t).strip()]
+    for key in ["last_order_id", "city", "company", "plan", "lifecycle_stage", "notes"]:
+        if key in incoming:
+            setattr(contact, key, str(incoming.get(key) or "").strip() or None)
+    contact.updated_at = datetime.utcnow()
+    db.add(contact)
+    db.commit()
+    db.refresh(contact)
+    return {"success": True, "id": str(contact.id), "custom_fields_json": contact.custom_fields_json}
