@@ -9,7 +9,7 @@ from sqlalchemy import select
 
 from app.db.session import SessionLocal
 from app.models import Message
-from app.services.contact_sync_service import ensure_conversation_contact_link, sync_contact_from_message
+from app.services.contact_sync_service import ensure_conversation_contact_link, upsert_contact_for_phone
 from app.services.conversation_service import get_or_create_conversation
 from app.services.idempotency_service import register_processed_message
 from app.services.message_router import handle_incoming_message
@@ -123,32 +123,37 @@ def process_incoming_message(payload: dict[str, Any]) -> None:
             db.commit()
             return
 
+        phone = str(parsed.get("phone") or "").strip()
+        text = str(parsed.get("text") or "")
+        payload_profile_name = (
+            str(((payload.get("contacts") or [{}])[0].get("profile") or {}).get("name") or "").strip()
+            if isinstance(payload.get("contacts"), list)
+            else ""
+        )
+        name = str(parsed.get("name") or "").strip() or payload_profile_name or phone
+
         try:
-            contact = sync_contact_from_message(
-                db,
+            print(f"[CONTACT UPSERT START] tenant_id={tenant.id} phone={phone} name={name}")
+            contact = upsert_contact_for_phone(
+                db=db,
                 tenant_id=tenant.id,
-                phone=str(parsed.get("phone") or ""),
-                name=str(parsed.get("name") or "").strip() or None,
+                phone=phone,
+                name=name,
                 source="whatsapp",
-                last_interaction_at=datetime.utcnow(),
             )
+            db.flush()
+            db.commit()
+            print(f"[CONTACT UPSERT COMMIT OK] contact_id={getattr(contact, 'id', None)} phone={phone}")
         except Exception as exc:
-            if db.in_transaction():
-                db.rollback()
-            logger.exception(
-                "[CONTACT UPSERT ERROR] tenant_id=%s phone=%s contact_id=%s error=%s",
-                tenant.id,
-                str(parsed.get("phone") or ""),
-                "n/a",
-                str(exc)[:300],
-            )
+            db.rollback()
+            print(f"[CONTACT UPSERT ERROR] tenant_id={tenant.id} phone={phone} error={type(exc).__name__}: {str(exc)[:300]}")
             contact = None
         conversation, _ = get_or_create_conversation(
             db,
             tenant_id=tenant.id,
-            phone=(contact.phone if contact else str(parsed.get("phone") or "")),
+            phone=(contact.phone if contact else phone),
             contact_id=contact.id if contact else None,
-            message=str(parsed.get("text") or ""),
+            message=text,
         )
         ensure_conversation_contact_link(conversation, contact)
         logger.info(
@@ -162,7 +167,7 @@ def process_incoming_message(payload: dict[str, Any]) -> None:
         inbound = Message(
             conversation_id=conversation.id,
             tenant_id=tenant.id,
-            text=str(parsed.get("text") or ""),
+            text=text,
             from_me=False,
             created_at=datetime.utcnow(),
         )
@@ -179,7 +184,7 @@ def process_incoming_message(payload: dict[str, Any]) -> None:
         persisted_conversation, _ = get_or_create_conversation(
             db,
             tenant_id=tenant.id,
-            phone=(contact.phone if contact else str(parsed.get("phone") or "")),
+            phone=(contact.phone if contact else phone),
             contact_id=contact.id if contact else None,
         )
 
