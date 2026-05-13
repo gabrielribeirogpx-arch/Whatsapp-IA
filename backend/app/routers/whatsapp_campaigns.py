@@ -77,15 +77,40 @@ def import_recipients_from_contacts(campaign_id: str, payload: dict, db: Session
     if not ids:
         return {"ok": True, "imported": 0}
     contacts = db.execute(select(Contact).where(Contact.tenant_id == tenant.id, Contact.id.in_(ids))).scalars().all()
+    variable_mapping = payload.get("variable_mapping") or {}
+    manual_values = payload.get("manual_variable_values") or {}
+
+    def _resolve_contact_value(contact: Contact, mapping_key: str, template_var: str) -> str:
+        custom = contact.custom_fields_json or {}
+        first_name_from_name = (str(contact.name or "").strip().split(" ", 1)[0] if contact.name else "").strip()
+        if mapping_key == "first_name":
+            return str(contact.first_name or "").strip() or first_name_from_name or "cliente"
+        if mapping_key in {"full_name", "name"}:
+            return str(contact.name or "").strip() or "cliente"
+        if mapping_key == "phone":
+            return str(contact.phone or "").strip()
+        if mapping_key == "email":
+            return str(contact.email or "").strip()
+        if mapping_key == "order_number":
+            return str(custom.get("order_number") or custom.get("pedido") or "").strip()
+        if mapping_key == "manual_value":
+            return str(manual_values.get(template_var) or "").strip()
+        return ""
+
     imported = 0
     for contact in contacts:
         exists = db.execute(select(WhatsAppCampaignRecipient).where(WhatsAppCampaignRecipient.campaign_id == c.id, WhatsAppCampaignRecipient.phone == contact.phone)).scalars().first()
         if exists:
             continue
-        variables = payload.get("variables_json") or {}
-        custom = contact.custom_fields_json or {}
-        if variables.get("2") in {"custom_fields_json.order_id", "order_id"}:
-            variables["2"] = custom.get("order_id") or payload.get("manual_variable_2") or ""
+        first_name_from_name = (str(contact.name or "").strip().split(" ", 1)[0] if contact.name else "").strip()
+        variables = {
+            "first_name": str(contact.first_name or "").strip() or first_name_from_name or "cliente",
+            "name": str(contact.name or "").strip() or "cliente",
+            "phone": str(contact.phone or "").strip(),
+            "order_number": str((contact.custom_fields_json or {}).get("order_number") or "").strip(),
+        }
+        for template_var, mapping_key in variable_mapping.items():
+            variables[str(template_var)] = _resolve_contact_value(contact, str(mapping_key), str(template_var))
         db.add(WhatsAppCampaignRecipient(campaign_id=c.id, phone=contact.phone, first_name=contact.first_name or contact.name, variables_json=variables))
         imported += 1
     c.total_recipients = int(c.total_recipients or 0) + imported
