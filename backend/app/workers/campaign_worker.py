@@ -12,6 +12,7 @@ from sqlalchemy import func, select
 
 from app.db.session import SessionLocal
 from app.models.whatsapp_campaign import WhatsAppCampaign, WhatsAppCampaignRecipient
+from app.models.contact import Contact
 from app.services.queue import get_queue
 from app.services.whatsapp_message_service import send_template_message
 
@@ -70,6 +71,72 @@ def process_campaign_recipient(recipient_id: str) -> None:
         if not campaign or campaign.status == "paused":
             return
         try:
+            contact = db.execute(
+                select(Contact).where(
+                    Contact.tenant_id == campaign.tenant_id,
+                    Contact.phone == recipient.phone,
+                )
+            ).scalars().first()
+            recipient_variables = recipient.variables_json if isinstance(recipient.variables_json, dict) else {}
+            contact_custom_fields = contact.custom_fields_json if contact and isinstance(contact.custom_fields_json, dict) else {}
+            contact_name = str(contact.name or "").strip() if contact else ""
+            first_name_from_name = (contact_name.split(" ", 1)[0] if contact_name else "").strip()
+
+            first_name_value = (
+                str(recipient_variables.get("first_name") or "").strip()
+                or (str(contact.first_name or "").strip() if contact else "")
+                or first_name_from_name
+                or "cliente"
+            )
+            name_value = (
+                str(recipient_variables.get("name") or "").strip()
+                or contact_name
+                or "cliente"
+            )
+            phone_value = (
+                (str(contact.phone or "").strip() if contact else "")
+                or str(recipient.phone or "").strip()
+            )
+            order_number_value = (
+                str(recipient_variables.get("order_number") or "").strip()
+                or str(contact_custom_fields.get("order_number") or "").strip()
+                or str(contact_custom_fields.get("pedido") or "").strip()
+                or ""
+            )
+
+            variables_resolved = {
+                **recipient_variables,
+                "first_name": first_name_value,
+                "name": name_value,
+                "phone": phone_value,
+                "order_number": order_number_value,
+                "1": first_name_value,
+                "2": order_number_value,
+            }
+            missing_variables: list[str] = []
+            if not variables_resolved.get("2"):
+                missing_variables.append("order_number")
+
+            logger.info(
+                "[CAMPAIGN VARIABLES RESOLVE START] campaign_id=%s recipient_id=%s phone=%s",
+                campaign.id,
+                recipient.id,
+                recipient.phone,
+            )
+            logger.info(
+                "[CAMPAIGN VARIABLES RESOLVED] campaign_id=%s recipient_id=%s variables=%s",
+                campaign.id,
+                recipient.id,
+                variables_resolved,
+            )
+            if missing_variables:
+                logger.warning(
+                    "[CAMPAIGN VARIABLES MISSING] campaign_id=%s recipient_id=%s missing=%s",
+                    campaign.id,
+                    recipient.id,
+                    missing_variables,
+                )
+
             logger.info("[CAMPAIGN RECIPIENT SEND] campaign_id=%s recipient_id=%s phone=%s", campaign.id, recipient.id, recipient.phone)
             result = send_template_message(
                 db,
@@ -77,7 +144,7 @@ def process_campaign_recipient(recipient_id: str) -> None:
                 provider_id=str(campaign.provider_id),
                 template_id=str(campaign.template_id),
                 to=recipient.phone,
-                variables=recipient.variables_json,
+                variables=variables_resolved,
             )
             recipient.status = "sent"
             recipient.sent_at = result.get("sent_at")

@@ -26,17 +26,11 @@ type VariableFieldOption = { value: string; label: string; csvColumn: string };
 const APPROVED_STATUS = 'approved';
 const MANUAL_VALUE_FIELD = 'manual_value';
 const VARIABLE_FIELD_OPTIONS: VariableFieldOption[] = [
-  { value: 'first_name', label: 'Primeiro nome', csvColumn: 'primeiro_nome' },
   { value: 'full_name', label: 'Nome completo', csvColumn: 'nome_completo' },
+  { value: 'first_name', label: 'Primeiro nome', csvColumn: 'primeiro_nome' },
   { value: 'phone', label: 'Telefone', csvColumn: 'telefone' },
   { value: 'email', label: 'E-mail', csvColumn: 'email' },
-  { value: 'company', label: 'Empresa', csvColumn: 'empresa' },
-  { value: 'order_number', label: 'Número do pedido', csvColumn: 'numero_pedido' },
-  { value: 'product', label: 'Produto', csvColumn: 'produto' },
-  { value: 'order_value', label: 'Valor do pedido', csvColumn: 'valor_pedido' },
-  { value: 'order_status', label: 'Status do pedido', csvColumn: 'status_pedido' },
-  { value: 'tracking_link', label: 'Link de rastreio', csvColumn: 'link_rastreio' },
-  { value: 'custom_field', label: 'Campo personalizado', csvColumn: 'campo_personalizado' },
+  { value: 'order_number', label: 'Campo personalizado: order_number', csvColumn: 'numero_pedido' },
   { value: MANUAL_VALUE_FIELD, label: 'Valor manual', csvColumn: 'valor_manual' }
 ];
 
@@ -344,7 +338,11 @@ export default function CampaignsTab({ standalone = false }: CampaignsTabProps) 
       );
     }
     if (recipientMode === 'saved' && selectedContactIds.length) {
-      await importWhatsAppCampaignRecipientsFromContacts(created.id, { contact_ids: selectedContactIds, variables_json: {"1": "first_name", "2": variableMapping["2"] || "custom_fields_json.order_id"}, manual_variable_2: manualVariableValues["2"] || "" });
+      await importWhatsAppCampaignRecipientsFromContacts(created.id, {
+        contact_ids: selectedContactIds,
+        variable_mapping: variableMapping,
+        manual_variable_values: manualVariableValues
+      });
     }
     setName('');
     setProviderId('');
