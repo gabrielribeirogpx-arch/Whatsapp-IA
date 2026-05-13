@@ -320,6 +320,9 @@ def list_contacts(
                     "id": str(c.id),
                     "phone": c.phone,
                     "name": c.name,
+                    "first_name": c.first_name,
+                    "last_name": c.last_name,
+                    "email": c.email,
                     "source": c.source,
                     "tags_json": c.tags_json or [],
                     "custom_fields_json": c.custom_fields_json or {},
@@ -594,6 +597,8 @@ def update_contact(
     return {
         "id": str(contact.id),
         "name": contact.name,
+        "phone": contact.phone,
+        "source": contact.source,
         "first_name": contact.first_name,
         "last_name": contact.last_name,
         "email": contact.email,
