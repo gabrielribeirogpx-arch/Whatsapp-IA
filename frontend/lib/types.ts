@@ -81,7 +81,13 @@ export type CRMContact = {
   first_name?: string | null;
   last_name?: string | null;
   email?: string | null;
-  tags?: string[];
+  tags_json?: string[];
+  last_order_id?: string | null;
+  city?: string | null;
+  company?: string | null;
+  plan?: string | null;
+  lifecycle_stage?: string | null;
+  notes?: string | null;
   source?: string;
   opt_in_status?: string;
   last_interaction_at?: string | null;
