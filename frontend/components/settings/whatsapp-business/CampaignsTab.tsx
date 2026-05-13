@@ -529,7 +529,7 @@ export default function CampaignsTab({ standalone = false }: CampaignsTabProps) 
         </div>}
       </div>
 
-      {(hasCreateErrors || hasVariableErrors || hasRecipientVariableErrors) && <p className='text-xs text-amber-600'>Preencha nome, provider/template e todos os mapeamentos obrigatórios para continuar. Se escolher campo personalizado e ele estiver vazio no contato, use Valor fixo.</p>}
+      {(hasCreateErrors || hasVariableErrors || hasRecipientVariableErrors) && <p className='text-xs text-amber-600'>Preencha nome, provider/template e todos os mapeamentos obrigatórios para continuar. Edite o contato em Contatos ou use valor fixo.</p>}
       <div className='flex justify-end gap-2'>
         <button onClick={() => setShowCreate(false)} className='secondary-button'>Cancelar</button>
         <button onClick={() => void onCreate()} disabled={hasCreateErrors || hasVariableErrors || hasRecipientVariableErrors || loading} className='primary-button inline-flex items-center gap-2'>
