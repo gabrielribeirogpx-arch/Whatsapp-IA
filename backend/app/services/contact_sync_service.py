@@ -1,5 +1,6 @@
 from datetime import datetime
 import logging
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -18,50 +19,65 @@ def upsert_contact_for_phone(
     phone: str,
     name: str | None = None,
     source: str = "whatsapp",
+    last_interaction_at: datetime | None = None,
+    custom_fields_json: dict[str, Any] | None = None,
 ) -> Contact | None:
-    try:
-        contact = db.execute(
-            select(Contact).where(Contact.tenant_id == tenant_id, Contact.phone == phone)
-        ).scalars().first()
+    safe_phone = str(phone or "").strip()
+    if not safe_phone:
+        return None
 
-        cleaned_name = (name or "").strip() or None
-        now = datetime.utcnow()
+    cleaned_name = (name or "").strip() or None
+    now = last_interaction_at or datetime.utcnow()
+    safe_custom_fields = custom_fields_json if isinstance(custom_fields_json, dict) else {}
 
-        if not contact:
-            first_name = cleaned_name.split(" ")[0] if cleaned_name else None
-            last_name = " ".join(cleaned_name.split(" ")[1:]) if cleaned_name and len(cleaned_name.split(" ")) > 1 else None
-            contact = Contact(
-                tenant_id=tenant_id,
-                phone=phone,
-                name=cleaned_name or DEFAULT_CONTACT_NAME,
-                first_name=first_name,
-                last_name=last_name,
-                source=source,
-                stage="novo",
-                score=0,
-                last_message_at=now,
-                last_interaction_at=now,
-                custom_fields_json={},
-            )
-            db.add(contact)
-            db.flush()
-            return contact
+    logger.info("[CONTACT UPSERT START] tenant_id=%s phone=%s name=%s", tenant_id, safe_phone, cleaned_name or "n/a")
 
-        if cleaned_name and cleaned_name != contact.name:
+    contact = db.execute(
+        select(Contact).where(Contact.tenant_id == tenant_id, Contact.phone == safe_phone)
+    ).scalars().first()
+
+    if not contact:
+        first_name = cleaned_name.split(" ")[0] if cleaned_name else None
+        last_name = " ".join(cleaned_name.split(" ")[1:]) if cleaned_name and len(cleaned_name.split(" ")) > 1 else None
+        contact = Contact(
+            tenant_id=tenant_id,
+            phone=safe_phone,
+            name=cleaned_name,
+            first_name=first_name,
+            last_name=last_name,
+            source=source,
+            tags=[],
+            opt_in_status="unknown",
+            last_message_at=now,
+            last_interaction_at=now,
+            custom_fields_json=safe_custom_fields,
+        )
+        if hasattr(contact, "stage") and getattr(contact, "stage", None) is None:
+            setattr(contact, "stage", "novo")
+        if hasattr(contact, "score") and getattr(contact, "score", None) is None:
+            setattr(contact, "score", 0)
+        db.add(contact)
+        logger.info("[CONTACT UPSERT CREATED] contact_id=%s", contact.id or "pending")
+    else:
+        if cleaned_name:
             contact.name = cleaned_name
             parts = cleaned_name.split(" ")
-            contact.first_name = parts[0] if parts else contact.first_name
-            contact.last_name = " ".join(parts[1:]) if len(parts) > 1 else contact.last_name
-
-        if source and not contact.source:
-            contact.source = source
-
+            contact.first_name = parts[0] if parts else None
+            contact.last_name = " ".join(parts[1:]) if len(parts) > 1 else None
+        contact.source = source or contact.source
         contact.last_message_at = now
         contact.last_interaction_at = now
-        return contact
-    except Exception as exc:
-        logger.exception("[CONTACT UPSERT ERROR] tenant_id=%s phone=%s error=%s", tenant_id, phone, exc)
-        return None
+        if getattr(contact, "tags", None) is None:
+            contact.tags = []
+        if not getattr(contact, "opt_in_status", None):
+            contact.opt_in_status = "unknown"
+        if not isinstance(getattr(contact, "custom_fields_json", None), dict):
+            contact.custom_fields_json = safe_custom_fields
+        logger.info("[CONTACT UPSERT UPDATED] contact_id=%s", contact.id)
+
+    db.flush()
+    logger.info("[CONTACT UPSERT COMMIT OK] contact_id=%s", contact.id)
+    return contact
 
 
 def ensure_conversation_contact_link(conversation: Conversation, contact: Contact | None) -> None:
