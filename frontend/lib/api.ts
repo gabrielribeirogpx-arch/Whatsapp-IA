@@ -244,7 +244,11 @@ export async function sendMessage(phone: string, message: string, contact_id?: s
 
 export async function getContacts(): Promise<CRMContact[]> {
   const res = await apiFetch('/api/contacts');
-  return parseApiResponse<CRMContact[]>(res);
+  const payload = await parseApiResponse<CRMContact[] | { items?: CRMContact[]; contacts?: CRMContact[] }>(res);
+  if (Array.isArray(payload)) return payload;
+  if (Array.isArray(payload.items)) return payload.items;
+  if (Array.isArray(payload.contacts)) return payload.contacts;
+  return [];
 }
 
 export async function sendMessageToBackend(payload: SendMessagePayload) {

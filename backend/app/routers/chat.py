@@ -257,6 +257,16 @@ def get_conversation_logs(
     return logs
 
 
+
+
+@router.get("/contacts/debug-count")
+def contacts_debug_count(
+    tenant: Tenant = Depends(get_current_tenant),
+    db: Session = Depends(get_db),
+):
+    contacts = db.execute(select(Contact).where(Contact.tenant_id == tenant.id)).scalars().all()
+    phones = [str(getattr(contact, "phone", "") or "") for contact in contacts]
+    return {"tenant_id": str(tenant.id), "count": len(contacts), "phones": phones}
 @router.get("/contacts", response_model=list[ContactOut])
 def list_contacts(
     tenant: Tenant = Depends(get_current_tenant),
@@ -269,8 +279,6 @@ def list_contacts(
 ):
     try:
         query = select(Contact).options(selectinload(Contact.conversations)).where(Contact.tenant_id == tenant.id)
-        if hasattr(Contact, "is_deleted"):
-            query = query.where(Contact.is_deleted.is_(False))
         clean_tag = (tag or "").strip()
         clean_source = (source or "").strip()
         clean_search = (search or "").strip()
@@ -290,6 +298,19 @@ def list_contacts(
             db.execute(query.order_by(desc(Contact.last_interaction_at), desc(Contact.created_at), desc(Contact.id)))
             .scalars()
             .all()
+        )
+
+        logger.info(
+            "[CONTACTS LIST] tenant_id=%s count=%s query_params=%s",
+            tenant.id,
+            len(contacts),
+            {
+                "tag": clean_tag,
+                "source": clean_source,
+                "search": clean_search,
+                "interacted_after": interacted_after.isoformat() if interacted_after else None,
+                "last_interaction_after": last_interaction_after.isoformat() if last_interaction_after else None,
+            },
         )
 
         items: list[ContactOut] = []

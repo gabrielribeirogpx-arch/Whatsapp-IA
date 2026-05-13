@@ -144,6 +144,7 @@ export default function CampaignsTab({ standalone = false }: CampaignsTabProps) 
   const reloadContacts = async () => {
     try {
       const contacts = await getContacts();
+      console.log(`CONTACTS LOADED count=${contacts.length}`);
       setSavedContacts(contacts);
       setContactsLoadError(null);
     } catch (error) {
@@ -447,7 +448,7 @@ export default function CampaignsTab({ standalone = false }: CampaignsTabProps) 
         <p className='mb-2 text-sm font-semibold'>Destinatários</p>
         <div className='mb-2 flex gap-2 text-xs'>
           <button type='button' onClick={() => setRecipientMode('csv')} className={`rounded border px-2 py-1 ${recipientMode === 'csv' ? 'bg-slate-900 text-white' : 'bg-white'}`}>CSV</button>
-          <button type='button' onClick={() => setRecipientMode('saved')} className={`rounded border px-2 py-1 ${recipientMode === 'saved' ? 'bg-slate-900 text-white' : 'bg-white'}`}>Selecionar contatos salvos</button>
+          <button type='button' onClick={() => { setRecipientMode('saved'); void reloadContacts(); }} className={`rounded border px-2 py-1 ${recipientMode === 'saved' ? 'bg-slate-900 text-white' : 'bg-white'}`}>Selecionar contatos salvos</button>
         </div>
         {recipientMode === 'csv' && <><p className='mb-2 text-xs text-slate-500'>CSV esperado: {csvHeaders.join(',')}</p>
         <textarea value={leadsText} onChange={(e) => setLeadsText(e.target.value)} rows={5} className='premium-input w-full' placeholder={`${csvHeaders.join(',')}
@@ -463,7 +464,11 @@ export default function CampaignsTab({ standalone = false }: CampaignsTabProps) 
           </div>
           {contactsLoadError ? <p className='text-xs text-amber-600'>{contactsLoadError}</p> : null}
           <div className='max-h-40 space-y-1 overflow-auto rounded border p-2'>
-            {savedContacts.length === 0 ? <p className='text-xs text-slate-500'>Nenhum contato salvo ainda. Envie uma mensagem para o WhatsApp conectado ou importe via CSV.</p> : savedContacts.filter((c) => !contactSearch || `${c.name || ''} ${c.phone}`.toLowerCase().includes(contactSearch.toLowerCase())).map((c) => (
+            {savedContacts.length === 0 ? <p className='text-xs text-slate-500'>Nenhum contato salvo ainda. Envie uma mensagem para o WhatsApp conectado ou importe via CSV.</p> : savedContacts.filter((c) => {
+              const searchValue = contactSearch.trim().toLowerCase();
+              if (!searchValue) return true;
+              return `${c.name || ''} ${c.phone}`.toLowerCase().includes(searchValue);
+            }).map((c) => (
               <label key={c.id} className='flex items-center gap-2 text-xs'>
                 <input type='checkbox' checked={selectedContactIds.includes(c.id)} onChange={(e) => setSelectedContactIds((prev) => e.target.checked ? [...prev, c.id] : prev.filter((id) => id !== c.id))} />
                 <span>{c.name || c.phone} • {c.phone} • {c.source || 'whatsapp'} • {c.last_interaction_at ? new Date(c.last_interaction_at).toLocaleString() : 'sem interação'}</span>
