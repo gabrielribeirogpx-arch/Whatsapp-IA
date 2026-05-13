@@ -269,6 +269,8 @@ def list_contacts(
 ):
     try:
         query = select(Contact).options(selectinload(Contact.conversations)).where(Contact.tenant_id == tenant.id)
+        if hasattr(Contact, "is_deleted"):
+            query = query.where(Contact.is_deleted.is_(False))
         clean_tag = (tag or "").strip()
         clean_source = (source or "").strip()
         clean_search = (search or "").strip()

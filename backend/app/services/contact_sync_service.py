@@ -12,6 +12,33 @@ logger = logging.getLogger(__name__)
 DEFAULT_CONTACT_NAME = "Cliente"
 
 
+def sync_contact_from_message(
+    db: Session,
+    *,
+    tenant_id,
+    phone: str,
+    name: str | None = None,
+    source: str = "whatsapp",
+    last_interaction_at: datetime | None = None,
+    custom_fields_json: dict[str, Any] | None = None,
+) -> Contact | None:
+    contact = upsert_contact_for_phone(
+        db,
+        tenant_id=tenant_id,
+        phone=phone,
+        name=name,
+        source=source,
+        last_interaction_at=last_interaction_at,
+        custom_fields_json=custom_fields_json,
+    )
+    if not contact:
+        return None
+
+    db.commit()
+    db.refresh(contact)
+    return contact
+
+
 def upsert_contact_for_phone(
     db: Session,
     *,
@@ -47,7 +74,7 @@ def upsert_contact_for_phone(
             last_name=last_name,
             source=source,
             tags=[],
-            opt_in_status="unknown",
+            opt_in_status="active",
             last_message_at=now,
             last_interaction_at=now,
             custom_fields_json=safe_custom_fields,
@@ -57,7 +84,7 @@ def upsert_contact_for_phone(
         if hasattr(contact, "score") and getattr(contact, "score", None) is None:
             setattr(contact, "score", 0)
         db.add(contact)
-        logger.info("[CONTACT UPSERT CREATED] contact_id=%s", contact.id or "pending")
+        logger.info("[CONTACT CREATED] tenant_id=%s phone=%s contact_id=%s", tenant_id, safe_phone, contact.id or "pending")
     else:
         if cleaned_name:
             contact.name = cleaned_name
@@ -69,14 +96,16 @@ def upsert_contact_for_phone(
         contact.last_interaction_at = now
         if getattr(contact, "tags", None) is None:
             contact.tags = []
-        if not getattr(contact, "opt_in_status", None):
-            contact.opt_in_status = "unknown"
+        contact.opt_in_status = "active"
         if not isinstance(getattr(contact, "custom_fields_json", None), dict):
             contact.custom_fields_json = safe_custom_fields
-        logger.info("[CONTACT UPSERT UPDATED] contact_id=%s", contact.id)
+        logger.info("[CONTACT UPDATED] tenant_id=%s phone=%s contact_id=%s", tenant_id, safe_phone, contact.id)
+
+    if not contact.opt_in_status:
+        contact.opt_in_status = "active"
 
     db.flush()
-    logger.info("[CONTACT UPSERT COMMIT OK] contact_id=%s", contact.id)
+    logger.info("[CONTACT UPSERT READY] tenant_id=%s phone=%s contact_id=%s", tenant_id, safe_phone, contact.id)
     return contact
 
 
