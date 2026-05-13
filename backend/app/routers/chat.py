@@ -561,6 +561,46 @@ async def stream_messages_by_conversation(
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 
+
+
+@router.patch("/contacts/{contact_id}")
+def update_contact(
+    contact_id: UUID,
+    payload: dict,
+    tenant: Tenant = Depends(get_current_tenant),
+    db: Session = Depends(get_db),
+):
+    contact = db.execute(select(Contact).where(Contact.tenant_id == tenant.id, Contact.id == contact_id)).scalars().first()
+    if not contact:
+        raise HTTPException(status_code=404, detail="Contato não encontrado")
+
+    if "name" in payload:
+        contact.name = str(payload.get("name") or "").strip() or None
+    if "first_name" in payload:
+        contact.first_name = str(payload.get("first_name") or "").strip() or None
+    if "last_name" in payload:
+        contact.last_name = str(payload.get("last_name") or "").strip() or None
+    if "email" in payload:
+        contact.email = str(payload.get("email") or "").strip() or None
+    if "tags" in payload and isinstance(payload.get("tags"), list):
+        contact.tags_json = [str(tag).strip() for tag in payload.get("tags") if str(tag).strip()]
+    if "custom_fields_json" in payload and isinstance(payload.get("custom_fields_json"), dict):
+        contact.custom_fields_json = payload.get("custom_fields_json") or {}
+
+    contact.updated_at = datetime.utcnow()
+    db.add(contact)
+    db.commit()
+    db.refresh(contact)
+    return {
+        "id": str(contact.id),
+        "name": contact.name,
+        "first_name": contact.first_name,
+        "last_name": contact.last_name,
+        "email": contact.email,
+        "tags_json": contact.tags_json or [],
+        "custom_fields_json": contact.custom_fields_json or {},
+    }
+
 @router.patch("/contacts/{contact_id}/custom-fields")
 def update_contact_custom_fields(
     contact_id: UUID,

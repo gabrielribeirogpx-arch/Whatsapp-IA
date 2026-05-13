@@ -551,6 +551,15 @@ export async function listWhatsAppCampaignRecipients(campaignId: string): Promis
 export async function importWhatsAppCampaignRecipientsFromContacts(campaignId: string, payload: Record<string, unknown>) { const res = await apiFetch(`/api/whatsapp/campaigns/${campaignId}/recipients/import-from-contacts`, { method:'POST', body: JSON.stringify(payload)}); return parseApiResponse<{ok:boolean;imported:number}>(res); }
 
 
+
+export async function updateContact(contactId: string, payload: Record<string, unknown>) {
+  const res = await apiFetch(`/api/contacts/${contactId}`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload)
+  });
+  return parseApiResponse<CRMContact>(res);
+}
+
 export async function updateContactCustomFields(contactId: string, payload: Record<string, unknown>) {
   const res = await apiFetch(`/api/contacts/${contactId}/custom-fields`, {
     method: "PATCH",
