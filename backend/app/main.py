@@ -80,15 +80,10 @@ def ensure_conversations_columns():
 
 def verify_contacts_columns() -> None:
     required_columns = {
+        "tags_json",
+        "custom_fields_json",
         "first_name",
         "last_name",
-        "email",
-        "tags",
-        "source",
-        "opt_in_status",
-        "last_interaction_at",
-        "custom_fields_json",
-        "updated_at",
     }
     try:
         with engine.begin() as connection:
