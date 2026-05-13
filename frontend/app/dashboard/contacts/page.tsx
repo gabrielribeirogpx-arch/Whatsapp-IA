@@ -30,10 +30,13 @@ export default function ContactsPage() {
     setLoading(true);
     setError(null);
     try {
+      console.log('CONTACTS PAGE FETCH START');
       const url = '/api/contacts';
+      console.log('CONTACTS FETCH URL', url);
       const response = await apiFetch(url, { cache: 'no-store' });
+      console.log('CONTACTS FETCH STATUS', response.status);
       const data = await response.json();
-      console.log('CONTACTS PAGE RAW RESPONSE', data);
+      console.log('CONTACTS PAGE RAW', data);
 
       if (!response.ok) {
         throw new Error(data?.detail || 'Falha ao carregar contatos');
@@ -47,7 +50,7 @@ export default function ContactsPage() {
             ? data.contacts
             : [];
 
-      console.log('CONTACTS PAGE FINAL ARRAY', contactsArray);
+      console.log('CONTACTS PAGE ARRAY', contactsArray);
       setContacts(contactsArray);
     } catch (err) {
       setContacts([]);
