@@ -22,16 +22,17 @@ import { CRMContact, WhatsAppCampaign, WhatsAppProvider, WhatsAppTemplate } from
 
 type LeadInput = { phone: string; fields: Record<string, string> };
 type VariableFieldOption = { value: string; label: string; csvColumn: string };
+type VariableMappingPayload = { type: 'contact_field' | 'custom_field' | 'fixed'; field?: string; value?: string };
 
 const APPROVED_STATUS = 'approved';
-const MANUAL_VALUE_FIELD = 'manual_value';
+const FIXED_VALUE_FIELD = 'fixed_value';
 const VARIABLE_FIELD_OPTIONS: VariableFieldOption[] = [
   { value: 'full_name', label: 'Nome completo', csvColumn: 'nome_completo' },
   { value: 'first_name', label: 'Primeiro nome', csvColumn: 'primeiro_nome' },
   { value: 'phone', label: 'Telefone', csvColumn: 'telefone' },
   { value: 'email', label: 'E-mail', csvColumn: 'email' },
   { value: 'order_number', label: 'Campo personalizado: order_number', csvColumn: 'numero_pedido' },
-  { value: MANUAL_VALUE_FIELD, label: 'Valor manual', csvColumn: 'valor_manual' }
+  { value: FIXED_VALUE_FIELD, label: 'Valor fixo', csvColumn: 'valor_fixo' }
 ];
 
 function badgeClass(ok: boolean) {
@@ -240,7 +241,7 @@ export default function CampaignsTab({ standalone = false }: CampaignsTabProps) 
   const variableValues = useMemo(() => {
     return templateVariables.reduce<Record<string, string>>((acc, key) => {
       const field = variableMapping[key];
-      acc[key] = field === MANUAL_VALUE_FIELD ? manualVariableValues[key] || '' : testVariableValues[key] || '';
+      acc[key] = field === FIXED_VALUE_FIELD ? manualVariableValues[key] || '' : testVariableValues[key] || '';
       return acc;
     }, {});
   }, [manualVariableValues, templateVariables, testVariableValues, variableMapping]);
@@ -342,7 +343,18 @@ export default function CampaignsTab({ standalone = false }: CampaignsTabProps) 
       await importWhatsAppCampaignRecipientsFromContacts(created.id, {
         contact_ids: selectedContactIds,
         variable_mapping: variableMapping,
-        manual_variable_values: manualVariableValues
+        manual_variable_values: manualVariableValues,
+        variable_mapping_payload: templateVariables.reduce<Record<string, VariableMappingPayload>>((acc, key) => {
+          const selected = variableMapping[key];
+          if (selected === FIXED_VALUE_FIELD) {
+            acc[key] = { type: 'fixed', value: (manualVariableValues[key] || '').trim() };
+          } else if (selected === 'order_number') {
+            acc[key] = { type: 'custom_field', field: 'order_number' };
+          } else {
+            acc[key] = { type: 'contact_field', field: selected || 'first_name' };
+          }
+          return acc;
+        }, {})
       });
     }
     setName('');
@@ -367,7 +379,7 @@ export default function CampaignsTab({ standalone = false }: CampaignsTabProps) 
   };
 
   const hasCreateErrors = !name || !providerId || !templateId;
-  const hasVariableErrors = templateVariables.some((key) => !variableMapping[key] || (variableMapping[key] === MANUAL_VALUE_FIELD && !manualVariableValues[key]));
+  const hasVariableErrors = templateVariables.some((key) => !variableMapping[key] || (variableMapping[key] === FIXED_VALUE_FIELD && !manualVariableValues[key]));
   const hasRecipientVariableErrors = (() => {
     if (!templateVariables.length) return false;
     if (recipientMode === 'saved') return false;
@@ -375,7 +387,7 @@ export default function CampaignsTab({ standalone = false }: CampaignsTabProps) 
     if (!leads.length) return false;
     return leads.some((lead) => templateVariables.some((key) => {
       const field = variableMapping[key];
-      if (field === MANUAL_VALUE_FIELD) return !(manualVariableValues[key] || '').trim();
+      if (field === FIXED_VALUE_FIELD) return !(manualVariableValues[key] || '').trim();
       const column = VARIABLE_FIELD_OPTIONS.find((item) => item.value === field)?.csvColumn || `variavel_${key}`;
       return !(lead.fields[column] || '').trim();
     }));
@@ -450,7 +462,7 @@ export default function CampaignsTab({ standalone = false }: CampaignsTabProps) 
               <select value={variableMapping[key] || 'first_name'} onChange={(e) => setVariableMapping((prev) => ({ ...prev, [key]: e.target.value }))} className='premium-input w-full'>
                 {VARIABLE_FIELD_OPTIONS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
               </select>
-              {variableMapping[key] === MANUAL_VALUE_FIELD && <input value={manualVariableValues[key] || ''} onChange={(e) => setManualVariableValues((prev) => ({ ...prev, [key]: e.target.value }))} placeholder='Digite um valor manual' className='premium-input mt-2 w-full' />}
+              {variableMapping[key] === FIXED_VALUE_FIELD && <input value={manualVariableValues[key] || ''} onChange={(e) => setManualVariableValues((prev) => ({ ...prev, [key]: e.target.value }))} placeholder='Exemplo: #4821' className='premium-input mt-2 w-full' />}
             </div>
           ))}
         </div>
@@ -517,7 +529,7 @@ export default function CampaignsTab({ standalone = false }: CampaignsTabProps) 
         </div>}
       </div>
 
-      {(hasCreateErrors || hasVariableErrors || hasRecipientVariableErrors) && <p className='text-xs text-amber-600'>Preencha nome, provider/template e todos os mapeamentos obrigatórios para continuar. Faltou preencher order_number.</p>}
+      {(hasCreateErrors || hasVariableErrors || hasRecipientVariableErrors) && <p className='text-xs text-amber-600'>Preencha nome, provider/template e todos os mapeamentos obrigatórios para continuar. Se escolher campo personalizado e ele estiver vazio no contato, use Valor fixo.</p>}
       <div className='flex justify-end gap-2'>
         <button onClick={() => setShowCreate(false)} className='secondary-button'>Cancelar</button>
         <button onClick={() => void onCreate()} disabled={hasCreateErrors || hasVariableErrors || hasRecipientVariableErrors || loading} className='primary-button inline-flex items-center gap-2'>

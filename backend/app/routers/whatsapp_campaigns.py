@@ -67,6 +67,7 @@ def import_recipients(campaign_id: str, payload: dict, db: Session = Depends(get
     if not c:
         raise HTTPException(status_code=404, detail="Campaign not found")
     recipients = payload.get("recipients") or []
+
     imported = 0
     for item in recipients:
         if not item.get("phone"):
@@ -90,6 +91,7 @@ def import_recipients_from_contacts(campaign_id: str, payload: dict, db: Session
     contacts = db.execute(select(Contact).where(Contact.tenant_id == tenant.id, Contact.id.in_(ids))).scalars().all()
     variable_mapping = payload.get("variable_mapping") or {}
     manual_values = payload.get("manual_variable_values") or {}
+    variable_mapping_payload = payload.get("variable_mapping_payload") or {}
 
     def _resolve_contact_value(contact: Contact, mapping_key: str, template_var: str) -> str:
         custom = contact.custom_fields_json or {}
@@ -108,6 +110,32 @@ def import_recipients_from_contacts(campaign_id: str, payload: dict, db: Session
             return str(manual_values.get(template_var) or "").strip()
         return ""
 
+
+    def _resolve_mapping_payload(contact: Contact, template_var: str) -> tuple[str, str | None]:
+        mapping = variable_mapping_payload.get(str(template_var)) or {}
+        mapping_type = str(mapping.get("type") or "").strip()
+        field = str(mapping.get("field") or "").strip()
+        if mapping_type == "fixed":
+            return str(mapping.get("value") or "").strip(), None
+        if mapping_type == "contact_field":
+            if field == "first_name":
+                first_name_from_name = (str(contact.name or "").strip().split(" ", 1)[0] if contact.name else "").strip()
+                return str(contact.first_name or "").strip() or first_name_from_name or "cliente", None
+            if field in {"full_name", "name"}:
+                return str(contact.name or "").strip() or "cliente", None
+            if field == "phone":
+                return str(contact.phone or "").strip(), None
+            if field == "email":
+                return str(contact.email or "").strip(), None
+            return "", None
+        if mapping_type == "custom_field":
+            custom = contact.custom_fields_json if isinstance(contact.custom_fields_json, dict) else {}
+            value = str(custom.get(field) or "").strip()
+            if not value:
+                return "", f"Campo personalizado {field} não existe para este contato. Use valor fixo ou importe esse campo no contato."
+            return value, None
+        return _resolve_contact_value(contact, str(variable_mapping.get(str(template_var)) or ""), str(template_var)), None
+
     imported = 0
     for contact in contacts:
         exists = db.execute(select(WhatsAppCampaignRecipient).where(WhatsAppCampaignRecipient.campaign_id == c.id, WhatsAppCampaignRecipient.phone == contact.phone)).scalars().first()
@@ -120,8 +148,15 @@ def import_recipients_from_contacts(campaign_id: str, payload: dict, db: Session
             "phone": str(contact.phone or "").strip(),
             "order_number": str((contact.custom_fields_json or {}).get("order_number") or "").strip(),
         }
+        mapping_errors: dict[str, str] = {}
         for template_var, mapping_key in variable_mapping.items():
-            variables[str(template_var)] = _resolve_contact_value(contact, str(mapping_key), str(template_var))
+            resolved_value, resolved_error = _resolve_mapping_payload(contact, str(template_var)) if variable_mapping_payload else (_resolve_contact_value(contact, str(mapping_key), str(template_var)), None)
+            variables[str(template_var)] = resolved_value
+            if resolved_error:
+                mapping_errors[str(template_var)] = resolved_error
+        variables["_variable_mapping"] = variable_mapping_payload
+        if mapping_errors:
+            variables["_variable_mapping_errors"] = mapping_errors
         db.add(WhatsAppCampaignRecipient(campaign_id=c.id, phone=contact.phone, first_name=contact.first_name or contact.name, variables_json=variables))
         imported += 1
     c.total_recipients = int(c.total_recipients or 0) + imported

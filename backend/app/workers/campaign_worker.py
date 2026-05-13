@@ -104,18 +104,41 @@ def process_campaign_recipient(recipient_id: str) -> None:
                 or ""
             )
 
+            variable_mapping = recipient_variables.get("_variable_mapping") if isinstance(recipient_variables.get("_variable_mapping"), dict) else {}
+            mapping_errors = recipient_variables.get("_variable_mapping_errors") if isinstance(recipient_variables.get("_variable_mapping_errors"), dict) else {}
             variables_resolved = {
                 **recipient_variables,
                 "first_name": first_name_value,
                 "name": name_value,
                 "phone": phone_value,
                 "order_number": order_number_value,
-                "1": first_name_value,
-                "2": order_number_value,
             }
             missing_variables: list[str] = []
-            if not variables_resolved.get("2"):
-                missing_variables.append("order_number")
+            for template_var, mapping in variable_mapping.items():
+                if not isinstance(mapping, dict):
+                    continue
+                mapping_type = str(mapping.get("type") or "").strip()
+                field = str(mapping.get("field") or "").strip()
+                if mapping_type == "fixed":
+                    variables_resolved[str(template_var)] = str(mapping.get("value") or "").strip()
+                elif mapping_type == "contact_field":
+                    if field == "first_name":
+                        variables_resolved[str(template_var)] = first_name_value
+                    elif field in {"full_name", "name"}:
+                        variables_resolved[str(template_var)] = name_value
+                    elif field == "phone":
+                        variables_resolved[str(template_var)] = phone_value
+                    elif field == "email":
+                        variables_resolved[str(template_var)] = str(contact.email or "").strip() if contact else ""
+                elif mapping_type == "custom_field":
+                    custom_value = str(contact_custom_fields.get(field) or "").strip()
+                    variables_resolved[str(template_var)] = custom_value
+                    if not custom_value:
+                        mapping_errors[str(template_var)] = f"Campo personalizado {field} não existe para este contato. Use valor fixo ou importe esse campo no contato."
+
+            for required in [k for k in variables_resolved.keys() if str(k).isdigit()]:
+                if not str(variables_resolved.get(required) or "").strip():
+                    missing_variables.append(str(required))
 
             logger.info(
                 "[CAMPAIGN VARIABLES RESOLVE START] campaign_id=%s recipient_id=%s phone=%s",
@@ -129,11 +152,15 @@ def process_campaign_recipient(recipient_id: str) -> None:
                 recipient.id,
                 variables_resolved,
             )
-            if missing_variables:
-                missing_label = missing_variables[0]
+            if mapping_errors or missing_variables:
+                missing_label = missing_variables[0] if missing_variables else None
                 recipient.status = "failed_missing_variable"
                 recipient.failed_at = datetime.utcnow()
-                recipient.error_message = f"Variável obrigatória {missing_label} não preenchida."
+                if mapping_errors:
+                    first_var = sorted(mapping_errors.keys(), key=lambda x: int(x) if str(x).isdigit() else 9999)[0]
+                    recipient.error_message = f"Variável {first_var} está vazia porque {str(variable_mapping.get(first_var, {}).get('field') or 'campo personalizado')} não existe no contato."
+                else:
+                    recipient.error_message = f"Variável obrigatória {missing_label} não preenchida."
                 logger.warning(
                     "[CAMPAIGN VARIABLES MISSING] campaign_id=%s recipient_id=%s missing=%s",
                     campaign.id,
