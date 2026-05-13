@@ -18,6 +18,81 @@ logger = logging.getLogger(__name__)
 VAR_PATTERN = re.compile(r"\{\{\s*(\d+)\s*\}\}")
 
 
+def resolve_active_meta_provider_credentials(db: Session, *, tenant_id: str) -> dict[str, str] | None:
+    provider = (
+        db.execute(
+            select(TenantWhatsAppProvider).where(
+                TenantWhatsAppProvider.tenant_id == tenant_id,
+                TenantWhatsAppProvider.provider_type == "meta_cloud",
+                TenantWhatsAppProvider.is_active.is_(True),
+                TenantWhatsAppProvider.status.in_(["connected", "active"]),
+            )
+        )
+        .scalars()
+        .first()
+    )
+    if not provider:
+        return None
+
+    token = decrypt_secret(provider.access_token_encrypted or "")
+    if not token or not provider.phone_number_id:
+        return None
+
+    return {
+        "provider_id": str(provider.id),
+        "token": token,
+        "phone_number_id": str(provider.phone_number_id),
+    }
+
+
+def mark_provider_auth_error(db: Session, *, provider_id: str, error_message: str) -> None:
+    provider = db.execute(select(TenantWhatsAppProvider).where(TenantWhatsAppProvider.id == provider_id)).scalars().first()
+    if not provider:
+        return
+    provider.status = "token_expired"
+    provider.metadata_json = {**(provider.metadata_json or {}), "last_error": error_message}
+    db.add(provider)
+    db.commit()
+
+
+def send_text_message_via_meta(*, token: str, phone_number_id: str, to: str, text: str, context: dict[str, Any]) -> dict[str, Any]:
+    payload = {
+        "messaging_product": "whatsapp",
+        "to": re.sub(r"\D", "", to or ""),
+        "type": "text",
+        "text": {"body": text},
+    }
+    return asyncio.run(MetaCloudClient(token).post(f"/{phone_number_id}/messages", payload=payload, context=context))
+
+
+def send_buttons_message_via_meta(*, token: str, phone_number_id: str, to: str, body_text: str, buttons: list[dict[str, Any]], context: dict[str, Any]) -> dict[str, Any]:
+    safe_buttons = [
+        {
+            "type": "reply",
+            "reply": {
+                "id": str(btn.get("label") or "").strip().lower(),
+                "title": str(btn.get("label") or "")[:20],
+            },
+        }
+        for btn in buttons[:3]
+        if isinstance(btn, dict) and str(btn.get("label") or "").strip()
+    ]
+    if not safe_buttons:
+        return send_text_message_via_meta(token=token, phone_number_id=phone_number_id, to=to, text=body_text, context=context)
+
+    payload = {
+        "messaging_product": "whatsapp",
+        "to": re.sub(r"\D", "", to or ""),
+        "type": "interactive",
+        "interactive": {
+            "type": "button",
+            "body": {"text": body_text},
+            "action": {"buttons": safe_buttons},
+        },
+    }
+    return asyncio.run(MetaCloudClient(token).post(f"/{phone_number_id}/messages", payload=payload, context=context))
+
+
 def extract_template_variables(body_text: str) -> list[str]:
     return sorted({m.group(1) for m in VAR_PATTERN.finditer(body_text or "")}, key=lambda x: int(x))
 

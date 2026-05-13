@@ -14,11 +14,14 @@ from app.models import Tenant
 from app.models.conversation import Conversation
 from app.models.message import Message
 from app.services.idempotency_service import register_processed_message
-from app.services.whatsapp_credentials_service import WhatsAppCredentialsNotConfiguredError, get_tenant_whatsapp_credentials
-from app.services.whatsapp_service import (
-    send_whatsapp_interactive_buttons,
-    send_whatsapp_message as send_whatsapp_text_message,
+from app.services.whatsapp_message_service import (
+    mark_provider_auth_error,
+    resolve_active_meta_provider_credentials,
+    send_buttons_message_via_meta,
+    send_text_message_via_meta,
 )
+from app.services.whatsapp_credentials_service import WhatsAppCredentialsNotConfiguredError, get_tenant_whatsapp_credentials
+from app.integrations.meta.meta_cloud_client import MetaApiError
 
 logger = logging.getLogger(__name__)
 
@@ -134,36 +137,55 @@ def send_whatsapp_message(*, message_data: dict[str, Any]) -> None:
                 )
                 return
 
-        try:
-            credentials = get_tenant_whatsapp_credentials(tenant_id)
-            resolved_phone_number_id = credentials["phone_number_id"]
-            resolved_token = credentials["token"]
-        except WhatsAppCredentialsNotConfiguredError:
-            logger.error(
-                "event=queue_send_error correlation_id=%s tenant_id=%s phone=%s job_id=%s stage=send_worker_resolve reason=missing_whatsapp_credentials error=[WHATSAPP NOT CONFIGURED] tenant_id=%s",
-                correlation_id,
-                tenant_id,
-                phone,
-                job_id,
-                tenant_id,
-            )
-            return
+        provider_id: str | None = None
+        with SessionLocal() as db:
+            active_provider = resolve_active_meta_provider_credentials(db, tenant_id=tenant_id)
 
-        if buttons:
-            send_whatsapp_interactive_buttons(
-                phone=phone,
-                body_text=text,
-                buttons=buttons,
-                token=resolved_token,
-                phone_number_id=resolved_phone_number_id,
-            )
+        if active_provider:
+            resolved_phone_number_id = active_provider["phone_number_id"]
+            resolved_token = active_provider["token"]
+            provider_id = active_provider["provider_id"]
         else:
-            send_whatsapp_text_message(
-                phone=phone,
-                text=text,
-                token=resolved_token,
-                phone_number_id=resolved_phone_number_id,
-            )
+            try:
+                credentials = get_tenant_whatsapp_credentials(tenant_id)
+                resolved_phone_number_id = credentials["phone_number_id"]
+                resolved_token = credentials["token"]
+            except WhatsAppCredentialsNotConfiguredError:
+                logger.error(
+                    "event=queue_send_error correlation_id=%s tenant_id=%s phone=%s job_id=%s stage=send_worker_resolve reason=missing_whatsapp_credentials error=[WHATSAPP NOT CONFIGURED] tenant_id=%s",
+                    correlation_id,
+                    tenant_id,
+                    phone,
+                    job_id,
+                    tenant_id,
+                )
+                return
+
+        context = {"tenant_id": tenant_id, "provider_id": provider_id}
+        try:
+            if buttons:
+                send_buttons_message_via_meta(
+                    to=phone,
+                    body_text=text,
+                    buttons=buttons,
+                    token=resolved_token,
+                    phone_number_id=resolved_phone_number_id,
+                    context=context,
+                )
+            else:
+                send_text_message_via_meta(
+                    to=phone,
+                    text=text,
+                    token=resolved_token,
+                    phone_number_id=resolved_phone_number_id,
+                    context=context,
+                )
+        except MetaApiError as exc:
+            if exc.status_code == 401 and provider_id:
+                logger.error("[WHATSAPP SEND AUTH ERROR] tenant_id=%s provider_id=%s phone=%s", tenant_id, provider_id, phone)
+                with SessionLocal() as db:
+                    mark_provider_auth_error(db, provider_id=provider_id, error_message=str(exc))
+            raise
 
         logger.info(
             "event=queue_send_success correlation_id=%s tenant_id=%s phone=%s job_id=%s stage=send_final text_len=%s has_buttons=%s",
