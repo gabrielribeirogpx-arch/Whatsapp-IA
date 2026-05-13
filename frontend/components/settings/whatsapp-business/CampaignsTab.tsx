@@ -141,6 +141,18 @@ export default function CampaignsTab({ standalone = false }: CampaignsTabProps) 
     }
   };
 
+  const reloadContacts = async () => {
+    try {
+      const contacts = await getContacts();
+      setSavedContacts(contacts);
+      setContactsLoadError(null);
+    } catch (error) {
+      console.error('[CAMPAIGNS CONTACTS RELOAD ERROR]', error);
+      setSavedContacts([]);
+      setContactsLoadError('Não foi possível carregar contatos');
+    }
+  };
+
   const loadAssets = async () => {
     setAssetsLoading(true);
     try {
@@ -445,13 +457,16 @@ export default function CampaignsTab({ standalone = false }: CampaignsTabProps) 
         </label></>}
 
         {recipientMode === 'saved' && <div className='space-y-2'>
-          <input value={contactSearch} onChange={(e) => setContactSearch(e.target.value)} placeholder='Buscar por nome/telefone' className='premium-input w-full' />
+          <div className='flex gap-2'>
+            <input value={contactSearch} onChange={(e) => setContactSearch(e.target.value)} placeholder='Buscar por nome/telefone' className='premium-input w-full' />
+            <button type='button' onClick={() => void reloadContacts()} className='secondary-button whitespace-nowrap'>Recarregar contatos</button>
+          </div>
           {contactsLoadError ? <p className='text-xs text-amber-600'>{contactsLoadError}</p> : null}
           <div className='max-h-40 space-y-1 overflow-auto rounded border p-2'>
-            {savedContacts.filter((c) => !contactSearch || `${c.name || ''} ${c.phone}`.toLowerCase().includes(contactSearch.toLowerCase())).map((c) => (
+            {savedContacts.length === 0 ? <p className='text-xs text-slate-500'>Nenhum contato salvo ainda. Envie uma mensagem para o WhatsApp conectado ou importe via CSV.</p> : savedContacts.filter((c) => !contactSearch || `${c.name || ''} ${c.phone}`.toLowerCase().includes(contactSearch.toLowerCase())).map((c) => (
               <label key={c.id} className='flex items-center gap-2 text-xs'>
                 <input type='checkbox' checked={selectedContactIds.includes(c.id)} onChange={(e) => setSelectedContactIds((prev) => e.target.checked ? [...prev, c.id] : prev.filter((id) => id !== c.id))} />
-                <span>{c.name || c.phone} • {c.phone} • {c.source || 'whatsapp'}</span>
+                <span>{c.name || c.phone} • {c.phone} • {c.source || 'whatsapp'} • {c.last_interaction_at ? new Date(c.last_interaction_at).toLocaleString() : 'sem interação'}</span>
               </label>
             ))}
           </div>

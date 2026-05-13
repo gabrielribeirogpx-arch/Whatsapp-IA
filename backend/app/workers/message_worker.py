@@ -132,7 +132,7 @@ def process_incoming_message(payload: dict[str, Any]) -> None:
             )
         except Exception as exc:
             db.rollback()
-            print(f"[CONTACT UPSERT ERROR] {type(exc).__name__}: {str(exc)[:300]}")
+            logger.exception("[CONTACT UPSERT ERROR] error=%s", str(exc)[:300])
             contact = None
         conversation, _ = get_or_create_conversation(
             db,
