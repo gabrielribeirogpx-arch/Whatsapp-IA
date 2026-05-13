@@ -6,7 +6,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
-from sqlalchemy import desc, or_, select
+from sqlalchemy import desc, select
 from sqlalchemy.orm import Session, load_only, selectinload
 
 from app.database import get_db
@@ -277,22 +277,9 @@ def list_contacts(
     interacted_after: datetime | None = Query(default=None),
     last_interaction_after: datetime | None = Query(default=None),
 ):
+    print("[CONTACTS API HIT]")
     try:
         query = select(Contact).options(selectinload(Contact.conversations)).where(Contact.tenant_id == tenant.id)
-        clean_tag = (tag or "").strip()
-        clean_source = (source or "").strip()
-        clean_search = (search or "").strip()
-        interacted_filter = last_interaction_after or interacted_after
-
-        if clean_tag:
-            query = query.where(Contact.tags.ilike(f"%{clean_tag}%"))
-        if clean_source:
-            query = query.where(Contact.source == clean_source)
-        if clean_search:
-            term = f"%{clean_search}%"
-            query = query.where(or_(Contact.name.ilike(term), Contact.phone.ilike(term)))
-        if interacted_filter:
-            query = query.where(Contact.last_interaction_at >= interacted_filter)
 
         contacts = (
             db.execute(query.order_by(desc(Contact.last_interaction_at), desc(Contact.created_at), desc(Contact.id)))
@@ -305,9 +292,9 @@ def list_contacts(
             tenant.id,
             len(contacts),
             {
-                "tag": clean_tag,
-                "source": clean_source,
-                "search": clean_search,
+                "tag": (tag or "").strip(),
+                "source": (source or "").strip(),
+                "search": (search or "").strip(),
                 "interacted_after": interacted_after.isoformat() if interacted_after else None,
                 "last_interaction_after": last_interaction_after.isoformat() if last_interaction_after else None,
             },
@@ -339,13 +326,18 @@ def list_contacts(
             ]
         }
     except Exception as exc:
+        print(f"[CONTACTS API ERROR] {type(exc).__name__}: {str(exc)}")
         logger.exception(
             "[CONTACTS LIST ERROR] tenant_id=%s exception_type=%s message=%s",
             tenant.id,
             type(exc).__name__,
             str(exc),
         )
-        return []
+        return {
+            "success": True,
+            "items": [],
+            "error": "Não foi possível carregar contatos no momento.",
+        }
 
 
 @router.post("/send-message", response_model=MessageOut)

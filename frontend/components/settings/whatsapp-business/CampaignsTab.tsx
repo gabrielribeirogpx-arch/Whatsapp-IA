@@ -7,6 +7,7 @@ import CampaignCreateModal from './campaigns/CampaignCreateModal';
 import CampaignStats from './campaigns/CampaignStats';
 import CampaignStatusBadge from './campaigns/CampaignStatusBadge';
 import {
+  apiFetch,
   createWhatsAppCampaign,
   importWhatsAppCampaignRecipients,
   importWhatsAppCampaignRecipientsFromContacts,
@@ -124,40 +125,28 @@ export default function CampaignsTab({ standalone = false }: CampaignsTabProps) 
 
 
   const fetchContacts = async () => {
-    const token = localStorage.getItem('token');
-    const apiUrl = process.env.NEXT_PUBLIC_API_URL;
+    const url = '/api/contacts';
+    console.log('CONTACTS FETCH URL', url);
 
-    if (!apiUrl) {
-      throw new Error('NEXT_PUBLIC_API_URL não está configurado.');
-    }
-
-    const response = await fetch(`${apiUrl}/api/contacts`, {
-      headers: {
-        'Content-Type': 'application/json',
-        ...(token ? { Authorization: `Bearer ${token}` } : {})
-      },
+    const response = await apiFetch(url, {
       cache: 'no-store'
     });
+    console.log('CONTACTS FETCH STATUS', response.status);
 
     const data = await response.json();
-
-    console.log('CONTACTS RAW RESPONSE', response);
-    console.log('CONTACTS RAW DATA', data);
+    console.log('CONTACTS FETCH BODY', data);
 
     if (!response.ok) {
       throw new Error(data?.detail || 'Falha ao carregar contatos');
     }
 
-    const contactsArray =
-      Array.isArray(data)
-        ? data
-        : Array.isArray(data?.items)
-          ? data.items
-          : Array.isArray(data?.contacts)
-            ? data.contacts
-            : [];
-
-    console.log('CONTACTS FINAL ARRAY', contactsArray);
+    const contactsArray = Array.isArray(data)
+      ? data
+      : Array.isArray(data?.items)
+        ? data.items
+        : Array.isArray(data?.contacts)
+          ? data.contacts
+          : [];
 
     setSavedContacts(contactsArray);
     setContactsLoadError(null);
