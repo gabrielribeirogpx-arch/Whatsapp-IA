@@ -1,4 +1,5 @@
 from datetime import datetime
+import re
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
@@ -12,6 +13,16 @@ from app.services.queue import get_queue
 from app.services.tenant_service import get_current_tenant
 
 router = APIRouter(prefix="/api/whatsapp/campaigns", tags=["whatsapp-campaigns"])
+
+
+def _extract_template_variables(template: WhatsAppMessageTemplate) -> list[str]:
+    text = "\n".join(
+        [
+            str(getattr(template, "body_text", "") or ""),
+            str(getattr(template, "body_preview", "") or ""),
+        ]
+    )
+    return sorted(set(re.findall(r"\{\{\s*(\d+)\s*\}\}", text)), key=lambda item: int(item))
 
 
 def _serialize_campaign(c: WhatsAppCampaign) -> dict:
@@ -140,9 +151,19 @@ def start_campaign(campaign_id: str, db: Session = Depends(get_db), tenant: Tena
     ).scalars().first()
     if not template or str(template.status or "").lower() != "approved":
         raise HTTPException(status_code=400, detail="Template is not approved")
-    total = db.execute(select(WhatsAppCampaignRecipient).where(WhatsAppCampaignRecipient.campaign_id == c.id)).scalars().all()
-    if not total:
+    recipients = db.execute(select(WhatsAppCampaignRecipient).where(WhatsAppCampaignRecipient.campaign_id == c.id)).scalars().all()
+    if not recipients:
         raise HTTPException(status_code=400, detail="Campaign has no recipients")
+    required_vars = _extract_template_variables(template)
+    if required_vars:
+        for rec in recipients:
+            vars_json = rec.variables_json if isinstance(rec.variables_json, dict) else {}
+            missing = [var for var in required_vars if not str(vars_json.get(var) or "").strip()]
+            if missing:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Faltou preencher {', '.join(missing)}.",
+                )
     c.status = "running"
     c.started_at = c.started_at or datetime.utcnow()
     db.commit()

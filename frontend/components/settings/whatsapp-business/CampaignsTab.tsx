@@ -116,6 +116,7 @@ export default function CampaignsTab({ standalone = false }: CampaignsTabProps) 
   const [testVariableValues, setTestVariableValues] = useState<Record<string, string>>({});
   const [testStatus, setTestStatus] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const [testSending, setTestSending] = useState(false);
+  const [campaignActionError, setCampaignActionError] = useState<string | null>(null);
 
 
   const fetchContacts = async () => {
@@ -328,7 +329,7 @@ export default function CampaignsTab({ standalone = false }: CampaignsTabProps) 
   };
 
   const onCreate = async () => {
-    if (!name || !providerId || !templateId) return;
+    if (!name || !providerId || !templateId || hasRecipientVariableErrors) return;
     const created = await createWhatsAppCampaign({ name, provider_id: providerId, template_id: templateId });
     const leads = parseLeads();
     if (recipientMode === 'csv' && leads.length) {
@@ -352,8 +353,13 @@ export default function CampaignsTab({ standalone = false }: CampaignsTabProps) 
     await refresh();
   };
   const onStartCampaign = async (campaignId: string) => {
-    await startWhatsAppCampaign(campaignId);
-    await refresh();
+    try {
+      setCampaignActionError(null);
+      await startWhatsAppCampaign(campaignId);
+      await refresh();
+    } catch (error) {
+      setCampaignActionError((error as Error).message || 'Falha ao iniciar campanha.');
+    }
   };
   const onPauseCampaign = async (campaignId: string) => {
     await pauseWhatsAppCampaign(campaignId);
@@ -362,6 +368,18 @@ export default function CampaignsTab({ standalone = false }: CampaignsTabProps) 
 
   const hasCreateErrors = !name || !providerId || !templateId;
   const hasVariableErrors = templateVariables.some((key) => !variableMapping[key] || (variableMapping[key] === MANUAL_VALUE_FIELD && !manualVariableValues[key]));
+  const hasRecipientVariableErrors = (() => {
+    if (!templateVariables.length) return false;
+    if (recipientMode === 'saved') return false;
+    const leads = parseLeads();
+    if (!leads.length) return false;
+    return leads.some((lead) => templateVariables.some((key) => {
+      const field = variableMapping[key];
+      if (field === MANUAL_VALUE_FIELD) return !(manualVariableValues[key] || '').trim();
+      const column = VARIABLE_FIELD_OPTIONS.find((item) => item.value === field)?.csvColumn || `variavel_${key}`;
+      return !(lead.fields[column] || '').trim();
+    }));
+  })();
   const csvHeaders = ['telefone', ...templateVariables.map((key) => VARIABLE_FIELD_OPTIONS.find((item) => item.value === variableMapping[key])?.csvColumn || `variavel_${key}`)];
 
   return <div className={`space-y-4 rounded-2xl border border-[color:var(--surface-border)] bg-white/95 p-5 ${standalone ? 'shadow-[0_20px_50px_-40px_rgba(2,6,23,0.55)]' : ''}`}>
@@ -371,6 +389,7 @@ export default function CampaignsTab({ standalone = false }: CampaignsTabProps) 
         <p className='text-sm text-slate-600'>Gerencie disparos, segmentações e campanhas WhatsApp.</p>
       </header>
     ) : null}
+    {campaignActionError ? <p className='rounded-lg border border-rose-200 bg-rose-50 p-2 text-xs text-rose-700'>{campaignActionError}</p> : null}
     <div className='flex items-center justify-between'>
       <h3 className='inline-flex items-center gap-2 text-lg font-semibold text-slate-900'>{standalone ? 'Operação de campanhas' : 'Campanhas'}</h3>
       <div className='flex gap-2'>
@@ -386,7 +405,8 @@ export default function CampaignsTab({ standalone = false }: CampaignsTabProps) 
       const done = (c.total_sent || 0) + (c.total_failed || 0);
       const progress = total > 0 ? Math.round((done / total) * 100) : 0;
       return <CampaignCard key={c.id}><div className='space-y-3'>
-        <div className='flex items-center justify-between'><div><p className='font-semibold text-slate-900'>{c.name}</p><p className='text-xs text-slate-500'>ID: {c.id}</p></div><CampaignStatusBadge>{c.status}</CampaignStatusBadge></div>
+        {campaignActionError ? <p className='rounded-lg border border-rose-200 bg-rose-50 p-2 text-xs text-rose-700'>{campaignActionError}</p> : null}
+    <div className='flex items-center justify-between'><div><p className='font-semibold text-slate-900'>{c.name}</p><p className='text-xs text-slate-500'>ID: {c.id}</p></div><CampaignStatusBadge>{c.status}</CampaignStatusBadge></div>
         <div className='grid grid-cols-2 gap-2 text-xs text-slate-600 sm:grid-cols-6'>
           <p>Total: <strong>{total}</strong></p><p>Enviados: <strong>{c.total_sent || 0}</strong></p><p>Falhas: <strong>{c.total_failed || 0}</strong></p><p>Entregues: <strong>{c.total_delivered || 0}</strong></p><p>Lidos: <strong>{c.total_read || 0}</strong></p><p>Progresso: <strong>{progress}%</strong></p>
         </div>
@@ -497,10 +517,10 @@ export default function CampaignsTab({ standalone = false }: CampaignsTabProps) 
         </div>}
       </div>
 
-      {(hasCreateErrors || hasVariableErrors) && <p className='text-xs text-amber-600'>Preencha nome, provider/template e todos os mapeamentos obrigatórios para continuar.</p>}
+      {(hasCreateErrors || hasVariableErrors || hasRecipientVariableErrors) && <p className='text-xs text-amber-600'>Preencha nome, provider/template e todos os mapeamentos obrigatórios para continuar. Faltou preencher order_number.</p>}
       <div className='flex justify-end gap-2'>
         <button onClick={() => setShowCreate(false)} className='secondary-button'>Cancelar</button>
-        <button onClick={() => void onCreate()} disabled={hasCreateErrors || hasVariableErrors || loading} className='primary-button inline-flex items-center gap-2'>
+        <button onClick={() => void onCreate()} disabled={hasCreateErrors || hasVariableErrors || hasRecipientVariableErrors || loading} className='primary-button inline-flex items-center gap-2'>
           {loading ? <Loader2 size={14} className='animate-spin'/> : null}Criar
         </button>
       </div>

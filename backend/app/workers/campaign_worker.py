@@ -26,7 +26,7 @@ MAX_DELAY_SECONDS = float(os.getenv("CAMPAIGN_MAX_DELAY_SECONDS", "4"))
 def _refresh_campaign_metrics(db, campaign: WhatsAppCampaign) -> None:
     campaign.total_recipients = db.execute(select(func.count(WhatsAppCampaignRecipient.id)).where(WhatsAppCampaignRecipient.campaign_id == campaign.id)).scalar() or 0
     campaign.total_sent = db.execute(select(func.count(WhatsAppCampaignRecipient.id)).where(WhatsAppCampaignRecipient.campaign_id == campaign.id, WhatsAppCampaignRecipient.status.in_(["sent", "delivered", "read"]))).scalar() or 0
-    campaign.total_failed = db.execute(select(func.count(WhatsAppCampaignRecipient.id)).where(WhatsAppCampaignRecipient.campaign_id == campaign.id, WhatsAppCampaignRecipient.status == "failed")).scalar() or 0
+    campaign.total_failed = db.execute(select(func.count(WhatsAppCampaignRecipient.id)).where(WhatsAppCampaignRecipient.campaign_id == campaign.id, WhatsAppCampaignRecipient.status.in_(["failed", "failed_missing_variable"]))).scalar() or 0
     if campaign.total_recipients > 0 and campaign.total_sent + campaign.total_failed >= campaign.total_recipients:
         campaign.status = "completed"
         campaign.completed_at = datetime.utcnow()
@@ -130,12 +130,19 @@ def process_campaign_recipient(recipient_id: str) -> None:
                 variables_resolved,
             )
             if missing_variables:
+                missing_label = missing_variables[0]
+                recipient.status = "failed_missing_variable"
+                recipient.failed_at = datetime.utcnow()
+                recipient.error_message = f"Variável obrigatória {missing_label} não preenchida."
                 logger.warning(
                     "[CAMPAIGN VARIABLES MISSING] campaign_id=%s recipient_id=%s missing=%s",
                     campaign.id,
                     recipient.id,
                     missing_variables,
                 )
+                _refresh_campaign_metrics(db, campaign)
+                db.commit()
+                return
 
             logger.info("[CAMPAIGN RECIPIENT SEND] campaign_id=%s recipient_id=%s phone=%s", campaign.id, recipient.id, recipient.phone)
             result = send_template_message(
