@@ -267,7 +267,7 @@ def contacts_debug_count(
     contacts = db.execute(select(Contact).where(Contact.tenant_id == tenant.id)).scalars().all()
     phones = [str(getattr(contact, "phone", "") or "") for contact in contacts]
     return {"tenant_id": str(tenant.id), "count": len(contacts), "phones": phones}
-@router.get("/contacts", response_model=list[ContactOut])
+@router.get("/contacts")
 def list_contacts(
     tenant: Tenant = Depends(get_current_tenant),
     db: Session = Depends(get_db),
@@ -313,44 +313,31 @@ def list_contacts(
             },
         )
 
-        items: list[ContactOut] = []
-        for contact in contacts or []:
-            raw_tags = getattr(contact, "tags", None)
-            if isinstance(raw_tags, list):
-                safe_tags = [str(item).strip() for item in raw_tags if str(item).strip()]
-            elif isinstance(raw_tags, str):
-                safe_tags = [item.strip() for item in raw_tags.split(",") if item.strip()]
-            else:
-                safe_tags = []
+        print("[CONTACTS API DEBUG]")
+        print("tenant_id=", tenant.id)
+        print("contacts_count=", len(contacts))
 
-            custom_fields = getattr(contact, "custom_fields_json", None)
-            safe_custom_fields = custom_fields if isinstance(custom_fields, dict) else {}
+        try:
+            print("first_contact=", {
+                "id": str(contacts[0].id),
+                "phone": contacts[0].phone,
+                "name": contacts[0].name,
+            })
+        except Exception as e:
+            print("first_contact_error=", str(e))
 
-            items.append(
-                ContactOut(
-                    id=contact.id,
-                    tenant_id=contact.tenant_id,
-                    phone=contact.phone,
-                    name=contact.name,
-                    first_name=contact.first_name or "",
-                    last_name=contact.last_name or "",
-                    email=contact.email,
-                    tags=safe_tags,
-                    source=contact.source or "whatsapp",
-                    opt_in_status=contact.opt_in_status or "unknown",
-                    custom_fields_json=safe_custom_fields,
-                    avatar_url=contact.avatar_url,
-                    stage=contact.stage,
-                    score=contact.score,
-                    last_message_at=contact.last_message_at,
-                    last_interaction_at=contact.last_interaction_at,
-                    last_message=contact.last_message,
-                    created_at=contact.created_at,
-                    updated_at=contact.updated_at,
-                )
-            )
-
-        return items
+        return {
+            "success": True,
+            "items": [
+                {
+                    "id": str(c.id),
+                    "phone": c.phone,
+                    "name": c.name,
+                    "source": c.source,
+                }
+                for c in contacts
+            ]
+        }
     except Exception as exc:
         logger.exception(
             "[CONTACTS LIST ERROR] tenant_id=%s exception_type=%s message=%s",

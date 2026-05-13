@@ -10,7 +10,6 @@ import {
   createWhatsAppCampaign,
   importWhatsAppCampaignRecipients,
   importWhatsAppCampaignRecipientsFromContacts,
-  getContacts,
   listTemplates,
   listWhatsAppCampaigns,
   listWhatsAppProviders,
@@ -109,7 +108,6 @@ export default function CampaignsTab({ standalone = false }: CampaignsTabProps) 
   const [contactsLoadError, setContactsLoadError] = useState<string | null>(null);
   const [selectedContactIds, setSelectedContactIds] = useState<string[]>([]);
   const [recipientMode, setRecipientMode] = useState<'csv' | 'saved'>('csv');
-  const [contactSearch, setContactSearch] = useState('');
   const [name, setName] = useState('');
   const [providerId, setProviderId] = useState('');
   const [templateId, setTemplateId] = useState('');
@@ -124,13 +122,52 @@ export default function CampaignsTab({ standalone = false }: CampaignsTabProps) 
   const [testStatus, setTestStatus] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const [testSending, setTestSending] = useState(false);
 
+
+  const fetchContacts = async () => {
+    const token = localStorage.getItem('token');
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL;
+
+    if (!apiUrl) {
+      throw new Error('NEXT_PUBLIC_API_URL não está configurado.');
+    }
+
+    const response = await fetch(`${apiUrl}/api/contacts`, {
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {})
+      },
+      cache: 'no-store'
+    });
+
+    const data = await response.json();
+
+    console.log('CONTACTS RAW RESPONSE', response);
+    console.log('CONTACTS RAW DATA', data);
+
+    if (!response.ok) {
+      throw new Error(data?.detail || 'Falha ao carregar contatos');
+    }
+
+    const contactsArray =
+      Array.isArray(data)
+        ? data
+        : Array.isArray(data?.items)
+          ? data.items
+          : Array.isArray(data?.contacts)
+            ? data.contacts
+            : [];
+
+    console.log('CONTACTS FINAL ARRAY', contactsArray);
+
+    setSavedContacts(contactsArray);
+    setContactsLoadError(null);
+  };
   const refresh = async () => {
     setLoading(true);
     try {
       setCampaigns(await listWhatsAppCampaigns());
       try {
-        setSavedContacts(await getContacts());
-        setContactsLoadError(null);
+        await fetchContacts();
       } catch (error) {
         console.error('[CAMPAIGNS CONTACTS LOAD ERROR]', error);
         setSavedContacts([]);
@@ -143,10 +180,7 @@ export default function CampaignsTab({ standalone = false }: CampaignsTabProps) 
 
   const reloadContacts = async () => {
     try {
-      const contacts = await getContacts();
-      console.log(`CONTACTS LOADED count=${contacts.length}`);
-      setSavedContacts(contacts);
-      setContactsLoadError(null);
+      await fetchContacts();
     } catch (error) {
       console.error('[CAMPAIGNS CONTACTS RELOAD ERROR]', error);
       setSavedContacts([]);
@@ -459,19 +493,17 @@ export default function CampaignsTab({ standalone = false }: CampaignsTabProps) 
 
         {recipientMode === 'saved' && <div className='space-y-2'>
           <div className='flex gap-2'>
-            <input value={contactSearch} onChange={(e) => setContactSearch(e.target.value)} placeholder='Buscar por nome/telefone' className='premium-input w-full' />
             <button type='button' onClick={() => void reloadContacts()} className='secondary-button whitespace-nowrap'>Recarregar contatos</button>
           </div>
           {contactsLoadError ? <p className='text-xs text-amber-600'>{contactsLoadError}</p> : null}
+          <div className='text-xs text-gray-500'>
+            contatos carregados: {savedContacts.length}
+          </div>
           <div className='max-h-40 space-y-1 overflow-auto rounded border p-2'>
-            {savedContacts.length === 0 ? <p className='text-xs text-slate-500'>Nenhum contato salvo ainda. Envie uma mensagem para o WhatsApp conectado ou importe via CSV.</p> : savedContacts.filter((c) => {
-              const searchValue = contactSearch.trim().toLowerCase();
-              if (!searchValue) return true;
-              return `${c.name || ''} ${c.phone}`.toLowerCase().includes(searchValue);
-            }).map((c) => (
+            {savedContacts.length === 0 ? <p className='text-xs text-slate-500'>Nenhum contato salvo ainda. Envie uma mensagem para o WhatsApp conectado ou importe via CSV.</p> : savedContacts.map((c) => (
               <label key={c.id} className='flex items-center gap-2 text-xs'>
                 <input type='checkbox' checked={selectedContactIds.includes(c.id)} onChange={(e) => setSelectedContactIds((prev) => e.target.checked ? [...prev, c.id] : prev.filter((id) => id !== c.id))} />
-                <span>{c.name || c.phone} • {c.phone} • {c.source || 'whatsapp'} • {c.last_interaction_at ? new Date(c.last_interaction_at).toLocaleString() : 'sem interação'}</span>
+                <span>{c.name || c.phone} • {c.phone} • {c.source || 'whatsapp'}</span>
               </label>
             ))}
           </div>
