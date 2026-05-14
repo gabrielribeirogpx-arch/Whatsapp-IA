@@ -5,6 +5,7 @@ import Avatar from '@/components/Avatar';
 import { apiFetch } from '@/lib/api';
 import { formatDateTimeBR } from '@/lib/date';
 import { Contact } from '@/lib/types';
+import { getWhatsappWindowStatus } from '@/lib/contactStatus';
 
 type Props = { contact?: Contact; open: boolean; onClose: () => void };
 
@@ -100,13 +101,13 @@ export default function CRMContactSidebar({ contact, open, onClose }: Props) {
         <div className='wa-crm-content'>
           <section className='wa-crm-card wa-crm-hero'>
             <div className='wa-crm-contact-head'>
-              <div className={`wa-crm-avatar-glow ${contact.isOnline ? 'is-online' : ''}`}>
+              <div className='wa-crm-avatar-glow'>
                 <Avatar name={profile?.name || contact.name} avatarUrl={profile?.avatar_url || contact.avatarUrl} phone={contact.phone} />
               </div>
               <div>
                 <h3>{profile?.name || contact.name || contact.phone}</h3>
                 <p className='wa-crm-phone'>{contact.phone}</p>
-                <p className={`wa-crm-online ${contact.isOnline ? 'is-online' : ''}`}>{contact.isOnline ? 'Online agora' : 'Offline'} • Último contato: {formatDateTimeBR(profile?.last_interaction_at || contact.lastMessageAt)}</p>
+                <p className='wa-crm-online'>{getWhatsappWindowStatus(profile?.last_interaction_at || contact.lastMessageAt)} • Último contato: {formatDateTimeBR(profile?.last_interaction_at || contact.lastMessageAt)}</p>
               </div>
             </div>
             <div className='wa-crm-badges'>

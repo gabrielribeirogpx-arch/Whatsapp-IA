@@ -56,8 +56,6 @@ export type Contact = {
   score?: number;
   lastMessageAt?: string | null;
   lastMessage: string;
-  isOnline?: boolean;
-  isTyping?: boolean;
   status?: string;
 };
 
