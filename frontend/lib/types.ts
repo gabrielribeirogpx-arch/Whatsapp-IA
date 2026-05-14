@@ -66,6 +66,9 @@ export type ChatMessage = {
   text: string;
   fromMe: boolean;
   time: string;
+  createdAt?: string;
+  status?: 'sent' | 'delivered' | 'read';
+  isNew?: boolean;
 };
 
 export type SendMessagePayload = {

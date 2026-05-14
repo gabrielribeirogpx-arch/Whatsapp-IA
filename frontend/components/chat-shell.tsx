@@ -19,7 +19,10 @@ function toChatMessage(message: Message): ChatMessage {
     id: String(message.id),
     text: message.content,
     fromMe: message.role === 'assistant',
-    time
+    time,
+    createdAt: message.created_at,
+    status: message.role === 'assistant' ? 'read' : 'delivered',
+    isNew: Date.now() - parsedDate.getTime() < 8000
   };
 }
 
