@@ -15,6 +15,7 @@ from app.models.whatsapp_campaign import WhatsAppCampaign, WhatsAppCampaignRecip
 from app.models.contact import Contact
 from app.services.queue import get_queue
 from app.services.whatsapp_message_service import send_template_message
+from app.services.contact_event_service import register_contact_event
 
 logger = logging.getLogger(__name__)
 
@@ -183,6 +184,17 @@ def process_campaign_recipient(recipient_id: str) -> None:
             recipient.status = "sent"
             recipient.sent_at = result.get("sent_at")
             recipient.provider_message_id = result.get("provider_message_id")
+            if contact:
+                register_contact_event(
+                    db,
+                    tenant_id=campaign.tenant_id,
+                    contact_id=contact.id,
+                    event_type="campaign_sent",
+                    title="Campanha enviada",
+                    description=f"Recebeu campanha {campaign.name}",
+                    metadata={"campaign_id": str(campaign.id), "campaign_name": campaign.name},
+                    contact=contact,
+                )
             logger.info("[CAMPAIGN RECIPIENT SENT] campaign_id=%s recipient_id=%s provider_message_id=%s", campaign.id, recipient.id, recipient.provider_message_id)
         except Exception as exc:
             recipient.status = "failed"

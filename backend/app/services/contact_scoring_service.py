@@ -10,10 +10,12 @@ from app.models.contact import Contact
 def apply_event_score(contact: Contact, event_type: str) -> None:
     if event_type == "message_received":
         contact.score = (contact.score or 0) + 5
-    elif event_type == "campaign_received":
-        contact.score = (contact.score or 0) + 10
-    elif event_type == "flow_finished":
-        contact.score = (contact.score or 0) + 20
+    elif event_type in {"campaign_sent", "campaign_received"}:
+        contact.score = max(0, (contact.score or 0) - 2)
+    elif event_type == "flow_started":
+        contact.score = (contact.score or 0) + 3
+    elif event_type in {"flow_completed", "flow_finished"}:
+        contact.score = (contact.score or 0) + 8
 
 
 def apply_inactivity_penalty(db: Session) -> int:

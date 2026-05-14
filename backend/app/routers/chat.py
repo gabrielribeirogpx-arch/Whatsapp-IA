@@ -653,9 +653,13 @@ def get_contact_profile(contact_id: UUID, tenant: Tenant = Depends(get_current_t
     contact = db.execute(select(Contact).where(Contact.tenant_id == tenant.id, Contact.id == contact_id)).scalars().first()
     if not contact:
         raise HTTPException(status_code=404, detail="Contato não encontrado")
-    campaigns_received = db.execute(select(func.count(ContactEvent.id)).where(ContactEvent.tenant_id == tenant.id, ContactEvent.contact_id == contact.id, ContactEvent.type == "campaign_received")).scalar() or 0
-    flows_executed = db.execute(select(func.count(ContactEvent.id)).where(ContactEvent.tenant_id == tenant.id, ContactEvent.contact_id == contact.id, ContactEvent.type.in_(["flow_started", "flow_finished"]))).scalar() or 0
-    return {"contact": {"id": str(contact.id), "tenant_id": str(contact.tenant_id), "name": contact.name, "phone": contact.phone, "avatar_url": contact.avatar_url, "tags_json": contact.tags_json or [], "score": contact.score or 0, "lifecycle_stage": contact.lifecycle_stage, "source": contact.source, "last_interaction_at": contact.last_interaction_at.isoformat() if contact.last_interaction_at else None, "custom_fields_json": contact.custom_fields_json or {}, "notes": contact.notes, "campaigns_received": campaigns_received, "flows_executed": flows_executed}}
+    messages_count = db.execute(select(func.count(ContactEvent.id)).where(ContactEvent.tenant_id == tenant.id, ContactEvent.contact_id == contact.id, ContactEvent.type.in_(["message_received", "message_sent"]))).scalar() or 0
+    campaigns_received = db.execute(select(func.count(ContactEvent.id)).where(ContactEvent.tenant_id == tenant.id, ContactEvent.contact_id == contact.id, ContactEvent.type.in_(["campaign_sent", "campaign_received"]))).scalar() or 0
+    flows_executed = db.execute(select(func.count(ContactEvent.id)).where(ContactEvent.tenant_id == tenant.id, ContactEvent.contact_id == contact.id, ContactEvent.type.in_(["flow_started", "flow_completed", "flow_finished"]))).scalar() or 0
+    inbound_count = db.execute(select(func.count(ContactEvent.id)).where(ContactEvent.tenant_id == tenant.id, ContactEvent.contact_id == contact.id, ContactEvent.type == "message_received")).scalar() or 0
+    outbound_count = db.execute(select(func.count(ContactEvent.id)).where(ContactEvent.tenant_id == tenant.id, ContactEvent.contact_id == contact.id, ContactEvent.type == "message_sent")).scalar() or 0
+    response_rate = int(round((inbound_count / outbound_count) * 100)) if outbound_count else 0
+    return {"contact": {"id": str(contact.id), "tenant_id": str(contact.tenant_id), "name": contact.name, "phone": contact.phone, "avatar_url": contact.avatar_url, "tags_json": contact.tags_json or [], "score": contact.score or 0, "lifecycle_stage": contact.lifecycle_stage, "source": contact.source, "last_interaction_at": contact.last_interaction_at.isoformat() if contact.last_interaction_at else None, "custom_fields_json": contact.custom_fields_json or {}, "notes": contact.notes, "campaigns_received": campaigns_received, "flows_executed": flows_executed, "messages_count": messages_count, "response_rate": response_rate}}
 
 @router.get("/contacts/{contact_id}/events")
 def get_contact_events(contact_id: UUID, tenant: Tenant = Depends(get_current_tenant), db: Session = Depends(get_db)):
