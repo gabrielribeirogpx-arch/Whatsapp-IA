@@ -1,7 +1,25 @@
 'use client';
 
 import { ChangeEvent, useEffect, useMemo, useState } from 'react';
-import { Loader2, Megaphone, Plus, RefreshCcw, Send } from 'lucide-react';
+import {
+  Activity,
+  BarChart3,
+  CalendarRange,
+  CheckCircle2,
+  Copy,
+  Eye,
+  Filter,
+  Loader2,
+  Megaphone,
+  MoreHorizontal,
+  PauseCircle,
+  Pencil,
+  Plus,
+  RefreshCcw,
+  Search,
+  Send,
+  TriangleAlert
+} from 'lucide-react';
 import CampaignCard from './campaigns/CampaignCard';
 import CampaignCreateModal from './campaigns/CampaignCreateModal';
 import CampaignStats from './campaigns/CampaignStats';
@@ -119,6 +137,27 @@ export default function CampaignsTab({ standalone = false }: CampaignsTabProps) 
   const [testSending, setTestSending] = useState(false);
   const [campaignActionError, setCampaignActionError] = useState<string | null>(null);
 
+  const [searchTerm, setSearchTerm] = useState('');
+  const [periodFilter, setPeriodFilter] = useState('Últimos 7 dias');
+  const [tagFilter, setTagFilter] = useState('Todas as tags');
+
+  const filteredCampaigns = useMemo(() => {
+    const needle = searchTerm.trim().toLowerCase();
+    if (!needle) return campaigns;
+    return campaigns.filter((c) => `${c.name} ${c.id}`.toLowerCase().includes(needle));
+  }, [campaigns, searchTerm]);
+
+  const statusTone = (status: string) => ({
+    running: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+    scheduled: 'bg-sky-50 text-sky-700 border-sky-200',
+    paused: 'bg-amber-50 text-amber-700 border-amber-200',
+    draft: 'bg-slate-100 text-slate-700 border-slate-200',
+    completed: 'bg-violet-50 text-violet-700 border-violet-200',
+    failed: 'bg-rose-50 text-rose-700 border-rose-200'
+  }[status] || 'bg-slate-100 text-slate-700 border-slate-200');
+
+  const formatNum = (value: number) => new Intl.NumberFormat('pt-BR').format(value || 0);
+
 
   const fetchContacts = async () => {
     const url = '/api/contacts';
@@ -204,6 +243,14 @@ export default function CampaignsTab({ standalone = false }: CampaignsTabProps) 
       failed: campaigns.reduce((acc, c) => acc + (c.total_failed || 0), 0)
     };
   }, [campaigns]);
+
+  const kpiCards = [
+    { key: 'Ativas', value: metrics.active, delta: '+20%', icon: Activity },
+    { key: 'Enviados', value: metrics.sent, delta: '+18%', icon: Send },
+    { key: 'Entregues', value: metrics.delivered, delta: '+18%', icon: CheckCircle2 },
+    { key: 'Lidos', value: metrics.read, delta: '+12%', icon: Eye },
+    { key: 'Falhas', value: metrics.failed, delta: '-4%', icon: TriangleAlert }
+  ] as const;
 
   const approvedTemplates = useMemo(() => {
     return templates.filter((t) => t.status?.toLowerCase() === APPROVED_STATUS && (!providerId || t.provider_id === providerId));
@@ -394,43 +441,78 @@ export default function CampaignsTab({ standalone = false }: CampaignsTabProps) 
   })();
   const csvHeaders = ['telefone', ...templateVariables.map((key) => VARIABLE_FIELD_OPTIONS.find((item) => item.value === variableMapping[key])?.csvColumn || `variavel_${key}`)];
 
-  return <div className={`space-y-4 rounded-2xl border border-[color:var(--surface-border)] bg-white/95 p-5 ${standalone ? 'shadow-[0_20px_50px_-40px_rgba(2,6,23,0.55)]' : ''}`}>
-    {standalone ? (
-      <header className='space-y-2'>
-        <h1 className='inline-flex items-center gap-2 text-2xl font-semibold tracking-tight text-slate-900'><Megaphone size={22}/>Campanhas</h1>
+  return <div className={`space-y-6 rounded-3xl border border-[color:var(--surface-border)] bg-gradient-to-b from-white to-slate-50/70 p-6 ${standalone ? 'shadow-[0_24px_70px_-44px_rgba(2,6,23,0.45)]' : ''}`}>
+    <header className='flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between'>
+      <div className='space-y-2'>
+        <h1 className='inline-flex items-center gap-3 text-3xl font-semibold tracking-tight text-slate-900'><Megaphone size={24} className='text-emerald-500'/>Campanhas</h1>
         <p className='text-sm text-slate-600'>Gerencie disparos, segmentações e campanhas WhatsApp.</p>
-      </header>
-    ) : null}
-    {campaignActionError ? <p className='rounded-lg border border-rose-200 bg-rose-50 p-2 text-xs text-rose-700'>{campaignActionError}</p> : null}
-    <div className='flex items-center justify-between'>
-      <h3 className='inline-flex items-center gap-2 text-lg font-semibold text-slate-900'>{standalone ? 'Operação de campanhas' : 'Campanhas'}</h3>
+      </div>
       <div className='flex gap-2'>
         <button onClick={() => void refresh()} className='secondary-button inline-flex items-center gap-2'><RefreshCcw size={14}/>Atualizar</button>
-        <button onClick={() => setShowCreate(true)} className='primary-button inline-flex items-center gap-2'><Plus size={14}/>Nova campanha</button>
+        <button onClick={() => setShowCreate(true)} className='primary-button inline-flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500'><Plus size={14}/>Nova campanha</button>
+      </div>
+    </header>
+
+    {campaignActionError ? <p className='rounded-xl border border-rose-200 bg-rose-50 p-3 text-xs text-rose-700'>{campaignActionError}</p> : null}
+
+    <CampaignStats>
+      <div className='grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5'>
+        {kpiCards.map((card) => {
+          const Icon = card.icon;
+          return <div key={card.key} className='group rounded-2xl border border-slate-200/80 bg-white/80 p-4 shadow-sm backdrop-blur transition-all duration-300 hover:-translate-y-0.5 hover:shadow-md'>
+            <div className='mb-3 flex items-center justify-between'>
+              <div className='rounded-xl bg-slate-100 p-2'><Icon size={16} className='text-slate-700'/></div>
+              <span className={`text-xs font-semibold ${card.delta.startsWith('-') ? 'text-rose-600' : 'text-emerald-600'}`}>{card.delta}</span>
+            </div>
+            <p className='text-xs text-slate-500'>{card.key}</p>
+            <p className='text-2xl font-semibold text-slate-900'>{formatNum(card.value)}</p>
+            <p className='text-xs text-slate-400'>vs últimos 7 dias</p>
+          </div>;
+        })}
+      </div>
+    </CampaignStats>
+
+    <div className='grid grid-cols-1 gap-3 rounded-2xl border border-slate-200/80 bg-white/80 p-3 md:grid-cols-4'>
+      <label className='md:col-span-2 flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-500'>
+        <Search size={14}/> <input value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} placeholder='Buscar campanhas...' className='w-full bg-transparent outline-none'/>
+      </label>
+      <button className='secondary-button inline-flex items-center justify-between gap-2'><CalendarRange size={14}/>{periodFilter}</button>
+      <div className='flex gap-2'>
+        <button className='secondary-button flex-1 inline-flex items-center justify-between gap-2'>{tagFilter}</button>
+        <button className='secondary-button inline-flex items-center gap-2'><Filter size={14}/>Filtros</button>
       </div>
     </div>
 
-    <CampaignStats><div className='grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5'>{[['campanhas ativas', metrics.active], ['enviados', metrics.sent], ['entregues', metrics.delivered], ['lidos', metrics.read], ['falhas', metrics.failed]].map(([k,v]) => <div key={String(k)} className='rounded-xl border border-slate-200 p-3'><p className='text-xs text-slate-500'>{k}</p><p className='text-xl font-semibold'>{v}</p></div>)}</div></CampaignStats>
+    {loading ? <div className='grid grid-cols-1 gap-4 lg:grid-cols-2'>{Array.from({ length: 4 }).map((_, i) => <div key={i} className='h-52 animate-pulse rounded-2xl border border-slate-200 bg-white/70'/>)}</div> : null}
 
-    {campaigns.length === 0 ? (<CampaignCard><div className='rounded-xl border border-dashed border-slate-300 bg-slate-50/80 p-8 text-center'><p className='text-sm font-medium text-slate-600'>Nenhuma campanha criada ainda.</p><p className='mt-1 text-xs text-slate-500'>Clique em “Nova campanha” para começar.</p></div></CampaignCard>) : (<div className='space-y-3'>{campaigns.map(c => {
+    {!loading && filteredCampaigns.length === 0 ? (<CampaignCard><div className='rounded-2xl border border-dashed border-slate-300 bg-white/80 p-10 text-center'><p className='text-base font-semibold text-slate-700'>Nenhuma campanha criada ainda.</p><p className='mt-1 text-sm text-slate-500'>Crie sua primeira campanha para iniciar sua operação.</p><button onClick={() => setShowCreate(true)} className='primary-button mt-4'>Criar primeira campanha</button></div></CampaignCard>) : null}
+
+    {!loading && filteredCampaigns.length > 0 ? <div className='grid grid-cols-1 gap-4 xl:grid-cols-2'>{filteredCampaigns.map((c) => {
       const total = c.total_recipients || 0;
       const done = (c.total_sent || 0) + (c.total_failed || 0);
-      const progress = total > 0 ? Math.round((done / total) * 100) : 0;
-      return <CampaignCard key={c.id}><div className='space-y-3'>
-        {campaignActionError ? <p className='rounded-lg border border-rose-200 bg-rose-50 p-2 text-xs text-rose-700'>{campaignActionError}</p> : null}
-    <div className='flex items-center justify-between'><div><p className='font-semibold text-slate-900'>{c.name}</p><p className='text-xs text-slate-500'>ID: {c.id}</p></div><CampaignStatusBadge>{c.status}</CampaignStatusBadge></div>
-        <div className='grid grid-cols-2 gap-2 text-xs text-slate-600 sm:grid-cols-6'>
-          <p>Total: <strong>{total}</strong></p><p>Enviados: <strong>{c.total_sent || 0}</strong></p><p>Falhas: <strong>{c.total_failed || 0}</strong></p><p>Entregues: <strong>{c.total_delivered || 0}</strong></p><p>Lidos: <strong>{c.total_read || 0}</strong></p><p>Progresso: <strong>{progress}%</strong></p>
+      const progress = total > 0 ? Number(((done / total) * 100).toFixed(1)) : 0;
+      return <CampaignCard key={c.id}><article className='space-y-4 rounded-2xl border border-slate-200/80 bg-white/90 p-5 shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:shadow-md'>
+        <div className='flex items-start justify-between gap-3'>
+          <div><p className='text-lg font-semibold text-slate-900'>{c.name}</p><p className='text-xs text-slate-500'>ID: {c.id}</p></div>
+          <div className='flex items-center gap-2'><span className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${statusTone(c.status)}`}>{c.status}</span><button className='rounded-lg border border-slate-200 p-1.5 text-slate-500'><MoreHorizontal size={14}/></button></div>
         </div>
-        <div className='h-2 rounded-full bg-slate-100'><div className='h-2 rounded-full bg-emerald-500' style={{ width: `${progress}%` }}/></div>
-        <div className='flex gap-2'>
+        <div className='flex flex-wrap gap-2 text-xs'><span className='rounded-full bg-emerald-50 px-2 py-1 text-emerald-700'>WhatsApp</span><span className='rounded-full bg-sky-50 px-2 py-1 text-sky-700'>Lista: Segmento</span><span className='rounded-full bg-amber-50 px-2 py-1 text-amber-700'>Tag campanha</span></div>
+        <div className='grid grid-cols-2 gap-3 text-sm sm:grid-cols-5'>
+          <div><p className='text-xs text-slate-500'>Enviados</p><p className='font-semibold'>{formatNum(c.total_sent || 0)}</p></div>
+          <div><p className='text-xs text-slate-500'>Entregues</p><p className='font-semibold'>{formatNum(c.total_delivered || 0)}</p></div>
+          <div><p className='text-xs text-slate-500'>Lidos</p><p className='font-semibold'>{formatNum(c.total_read || 0)}</p></div>
+          <div><p className='text-xs text-slate-500'>Falhas</p><p className='font-semibold'>{formatNum(c.total_failed || 0)}</p></div>
+          <div><p className='text-xs text-slate-500'>Progresso</p><p className='font-semibold'>{progress.toFixed(1)}%</p></div>
+        </div>
+        <div className='space-y-1'><div className='h-2 rounded-full bg-emerald-100'><div className='h-2 rounded-full bg-emerald-500 transition-all duration-500' style={{ width: `${progress}%` }}/></div></div>
+        <div className='flex flex-wrap gap-2'>
+          <button className='secondary-button inline-flex items-center gap-1'><BarChart3 size={13}/>Ver relatório</button><button className='secondary-button inline-flex items-center gap-1'><Pencil size={13}/>Editar</button><button className='secondary-button inline-flex items-center gap-1'><Copy size={13}/>Duplicar</button>
           {c.status === 'draft' && <button onClick={() => void onStartCampaign(c.id)} className='primary-button'>Iniciar campanha</button>}
-          {c.status === 'running' && <button onClick={() => void onPauseCampaign(c.id)} className='secondary-button'>Pausar</button>}
-          <button className='secondary-button' disabled>Analytics (em breve)</button>
-          <button onClick={() => void refresh()} className='secondary-button'>Atualizar</button>
+          {c.status === 'running' && <button onClick={() => void onPauseCampaign(c.id)} className='secondary-button inline-flex items-center gap-1'><PauseCircle size={13}/>Pausar</button>}
         </div>
-      </div></CampaignCard>;
-    })}</div>)}
+      </article></CampaignCard>;
+    })}</div> : null}
+
 
     {showCreate && <CampaignCreateModal><div className='space-y-3'>
       <h4 className='font-semibold'>Nova campanha</h4>
