@@ -3,17 +3,17 @@
 import { Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 
-import ChatShell from '../../components/chat-shell';
+import ChatShell from '@/components/chat-shell';
 
-function ChatPageContent() {
+function InboxPageContent() {
   useSearchParams();
   return <ChatShell />;
 }
 
-export default function ChatPage() {
+export default function InboxPage() {
   return (
     <Suspense fallback={<div className="p-6 text-sm text-slate-500">Carregando inbox...</div>}>
-      <ChatPageContent />
+      <InboxPageContent />
     </Suspense>
   );
 }
