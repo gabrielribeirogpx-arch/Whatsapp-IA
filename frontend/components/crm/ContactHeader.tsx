@@ -12,7 +12,9 @@ function initials(name: string) {
 }
 
 function stableColor(seed: string) {
-  const hash = [...seed].reduce((acc, char) => acc + char.charCodeAt(0), 0);
+  const hash = seed
+    .split("")
+    .reduce((acc, char) => acc + char.charCodeAt(0), 0);
   return COLORS[hash % COLORS.length];
 }
 
