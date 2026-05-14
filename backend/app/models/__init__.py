@@ -22,3 +22,5 @@ from app.models.tenant_whatsapp_provider import TenantWhatsAppProvider
 from app.models.whatsapp_message_template import WhatsAppMessageTemplate
 
 from app.models.whatsapp_campaign import WhatsAppCampaign, WhatsAppCampaignRecipient
+
+from app.models.contact_event import ContactEvent
