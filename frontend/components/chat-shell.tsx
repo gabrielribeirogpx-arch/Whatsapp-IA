@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 
 import ChatWindow from './ChatWindow';
 import Sidebar from './Sidebar';
+import CRMContactSidebar from './inbox/CRMContactSidebar';
 import { getConversations, getMessagesByConversation, sendMessage, updateConversationMode } from '../lib/api';
 import { ChatMessage, Contact, Conversation, ConversationMode, Message } from '../lib/types';
 
@@ -35,6 +36,7 @@ export default function ChatShell() {
   const [modeNotice, setModeNotice] = useState('');
   const [modeError, setModeError] = useState('');
   const [querySelectionMissing, setQuerySelectionMissing] = useState(false);
+  const [crmOpen, setCrmOpen] = useState(false);
 
 
   useEffect(() => {
@@ -151,6 +153,9 @@ export default function ChatShell() {
     if (!selectedContactId) return;
 
     fetchMessages(selectedContactId).catch(() => undefined);
+    if (typeof window !== 'undefined' && window.innerWidth > 1200) {
+      setCrmOpen(true);
+    }
   }, [selectedContactId, fetchMessages]);
 
   useEffect(() => {
@@ -220,6 +225,7 @@ export default function ChatShell() {
 
   function onSelectContact(contactId: string) {
     setSelectedContactId(contactId);
+    setCrmOpen(true);
   }
 
   async function onSend(event: FormEvent<HTMLFormElement>) {
@@ -298,6 +304,7 @@ export default function ChatShell() {
         emptyStateMessage={querySelectionMissing ? 'Conversa ainda não encontrada para este contato.' : undefined}
         onModeChange={handleChangeMode}
       />
+      <CRMContactSidebar contact={selectedContact} open={crmOpen} onClose={() => setCrmOpen(false)} />
     </div>
   );
 }
