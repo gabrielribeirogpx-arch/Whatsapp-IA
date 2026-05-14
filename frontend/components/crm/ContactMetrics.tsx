@@ -5,7 +5,7 @@ export default memo(function ContactMetrics({ profile }: { profile: any }) {
   const metrics = [
     ['Mensagens', profile?.messages_count ?? 0],
     ['Campanhas', profile?.campaigns_received ?? 0],
-    ['Flows', profile?.flows_executed ?? 0],
+    ['Automações', profile?.flows_executed ?? 0],
     ['Última campanha', profile?.last_campaign_at ? new Date(profile.last_campaign_at).toLocaleDateString('pt-BR') : '-'],
     ['Taxa resposta', `${profile?.response_rate ?? 0}%`]
   ];

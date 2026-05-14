@@ -43,9 +43,9 @@ export default function ContactProfilePage({ params }: { params: { id: string } 
 
   const scoreView = useMemo(() => {
     const score = Number(profile?.score || 0);
-    if (score <= 20) return ['Cold', 'bg-sky-100 text-sky-700'];
-    if (score <= 50) return ['Warm', 'bg-amber-100 text-amber-700'];
-    if (score <= 80) return ['Hot', 'bg-orange-100 text-orange-700'];
+    if (score <= 20) return ['Frio', 'bg-sky-100 text-sky-700'];
+    if (score <= 50) return ['Morno', 'bg-amber-100 text-amber-700'];
+    if (score <= 80) return ['Quente', 'bg-orange-100 text-orange-700'];
     return ['VIP', 'bg-violet-100 text-violet-700'];
   }, [profile?.score]);
 
@@ -58,30 +58,30 @@ export default function ContactProfilePage({ params }: { params: { id: string } 
     <aside className='col-span-12 lg:col-span-3 space-y-4'>
       <ContactHeader profile={profile} />
       <ContactSidebar title='Perfil'>
-        <p className='text-sm'>Lifecycle: <span className='rounded-full bg-slate-100 px-2 py-1 text-xs font-medium'>{profile?.lifecycle_stage || 'lead'}</span></p>
-        <p className='mt-2 text-sm'>Score: <span className={`rounded-full px-2 py-1 text-xs font-semibold ${scoreView[1]}`}>{profile?.score ?? 0} • {scoreView[0]}</span></p>
-        <p className='mt-2 text-sm text-slate-600'>Source: {profile?.source || '-'}</p>
-        <p className='mt-2 text-sm text-slate-600'>Última interação: {profile?.last_interaction_at ? new Date(profile.last_interaction_at).toLocaleString('pt-BR') : '-'}</p>
+        <p className='text-sm text-slate-700'>Etapa do cliente: <span className='rounded-full bg-slate-100 px-2 py-1 text-xs font-medium'>{profile?.lifecycle_stage || 'contato'}</span></p>
+        <p className='mt-2 text-sm text-slate-700'>Temperatura: <span className={`rounded-full px-2 py-1 text-xs font-semibold ${scoreView[1]}`}>{profile?.score ?? 0} • {scoreView[0]}</span></p>
+        <p className='mt-2 text-sm text-slate-700'>Origem: {profile?.source || '-'}</p>
+        <p className='mt-2 text-sm text-slate-700'>Último contato: {profile?.last_interaction_at ? new Date(profile.last_interaction_at).toLocaleString('pt-BR') : '-'}</p>
       </ContactSidebar>
-      <ContactSidebar title='Tags'>
+      <ContactSidebar title='Etiquetas'>
         <ContactTags tags={profile?.tags_json || []} />
         <div className='mt-3 flex gap-2'><input className='premium-input w-full' value={tag} onChange={(e) => setTag(e.target.value)} placeholder='Nova tag' /><button className='secondary-button' onClick={async () => { await apiFetch(`/api/contacts/${params.id}/tags`, { method: 'POST', body: JSON.stringify({ tag }) }); setTag(''); await load(); }}>+</button></div>
       </ContactSidebar>
       <div className='grid grid-cols-2 gap-2'>
-        <a className='secondary-button text-center' href={`/dashboard/inbox?contact_id=${params.id}`}>Abrir conversa</a>
-        <button className='secondary-button'>Enviar template</button>
+        <a className='secondary-button text-center' href={`/dashboard/inbox?contact_id=${params.id}`}>Abrir no Inbox</a>
+        <button className='secondary-button'>Enviar campanha</button>
       </div>
     </aside>
     <section className='col-span-12 lg:col-span-6 rounded-2xl border border-slate-200 bg-white/90 p-4 shadow-sm'>
-      <h2 className='mb-3 text-lg font-semibold text-slate-800'>Timeline CRM</h2>
+      <h2 className='mb-3 text-lg font-semibold text-slate-900'>Histórico de atividades</h2>
       <ContactTimeline events={events} loading={loading} />
     </section>
     <aside className='col-span-12 lg:col-span-3 space-y-4'>
       <ContactSidebar title='Métricas'><ContactMetrics profile={profile} /></ContactSidebar>
-      <ContactSidebar title='Notas'>
+      <ContactSidebar title='Observações internas'>
         <ContactNotes notes={notes} note={note} setNote={setNote} onSave={async () => { await apiFetch(`/api/contacts/${params.id}/notes`, { method: 'POST', body: JSON.stringify({ note }) }); setNote(''); await load(); }} />
       </ContactSidebar>
-      <ContactSidebar title='Custom fields'>
+      <ContactSidebar title='Informações personalizadas'>
         {customFields.length === 0 ? <p className='text-sm text-slate-400'>Nenhum campo personalizado.</p> : <div className='space-y-2'>{customFields.map(([k, v]) => <div key={k} className='rounded-lg bg-slate-50 px-3 py-2 text-sm'><span className='font-medium text-slate-700'>{k}</span><span className='text-slate-500'> → {String(v)}</span></div>)}</div>}
       </ContactSidebar>
     </aside>

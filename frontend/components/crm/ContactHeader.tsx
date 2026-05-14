@@ -33,7 +33,7 @@ function ContactHeader({ profile }: Props) {
       </div>
     </div>
     <div className='mt-4 flex flex-wrap gap-2'>
-      {['WhatsApp', 'Lead', 'Cliente', 'VIP'].map((badge) => <span key={badge} className='rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-medium text-slate-700'>{badge}</span>)}
+      {['WhatsApp', 'Contato', 'Cliente', 'VIP'].map((badge) => <span key={badge} className='rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-medium text-slate-700'>{badge}</span>)}
     </div>
   </div>;
 }
