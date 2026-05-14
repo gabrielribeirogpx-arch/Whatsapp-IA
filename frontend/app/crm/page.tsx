@@ -32,7 +32,7 @@ export default function CRMPage() {
       <section className="dashboard-hero">
         <div>
           <h1>CRM de Vendas</h1>
-          <p>Visão de contatos por estágio e score para priorização comercial.</p>
+          <p>Visão de contatos por etapa do cliente e temperatura para priorização comercial.</p>
         </div>
         <Link href="/chat" className="primary-button">Abrir chat</Link>
       </section>
@@ -51,8 +51,8 @@ export default function CRMPage() {
       {editing ? <div className='fixed inset-0 bg-black/30 flex items-center justify-center z-50' onClick={() => setEditing(null)}><div className='bg-white p-4 rounded-lg w-[640px]' onClick={(e) => e.stopPropagation()}>
         <h3>Editar contato</h3>
         <label>Nome<input value={name} onChange={(e) => setName(e.target.value)} className='w-full border p-2' /></label>
-        <label>Tags (csv)<input value={tags} onChange={(e) => setTags(e.target.value)} className='w-full border p-2' /></label>
-        <label>Campos personalizados (JSON)<textarea value={customFields} onChange={(e) => setCustomFields(e.target.value)} className='w-full border p-2 h-40' /></label>
+        <label>Etiquetas (csv)<input value={tags} onChange={(e) => setTags(e.target.value)} className='w-full border p-2' /></label>
+        <label>Informações personalizadas (JSON)<textarea value={customFields} onChange={(e) => setCustomFields(e.target.value)} className='w-full border p-2 h-40' /></label>
         <button className='primary-button mt-3' onClick={async () => { await updateContactCustomFields(editing.id, { ...parsedCustomFields, name, tags_json: tags.split(',').map((t) => t.trim()).filter(Boolean) }); setEditing(null); await load(); }}>Salvar</button>
       </div></div> : null}
     </main>

@@ -7,9 +7,9 @@ import { getPipeline, moveLeadToStage } from '../../lib/api';
 import { PipelineLead, PipelineStage } from '../../lib/types';
 
 const temperatureLabel: Record<string, string> = {
-  hot: 'Hot',
-  warm: 'Warm',
-  cold: 'Cold'
+  hot: 'Quente',
+  warm: 'Morno',
+  cold: 'Frio'
 };
 
 export default function PipelinePage() {
@@ -41,7 +41,7 @@ export default function PipelinePage() {
       await moveLeadToStage(draggingLead.id, stageId);
       await fetchPipeline();
     } catch {
-      setError('Não foi possível mover o lead.');
+      setError('Não foi possível mover o contato.');
     } finally {
       setDraggingLead(null);
     }
@@ -52,7 +52,7 @@ export default function PipelinePage() {
       <section className="dashboard-hero">
         <div>
           <h1>Pipeline de Vendas</h1>
-          <p>Visual Kanban dos leads por estágio.</p>
+          <p>Visual Kanban dos contatos por etapa do cliente.</p>
         </div>
         <div className="dashboard-actions">
           <Link href="/crm" className="secondary-button">
@@ -93,12 +93,12 @@ export default function PipelinePage() {
                   <small>{lead.phone}</small>
                   <p>{lead.last_message || 'Sem interação recente.'}</p>
                   <span className={`lead-temp temp-${lead.temperature}`}>
-                    {temperatureLabel[lead.temperature] || 'Cold'}
+                    {temperatureLabel[lead.temperature] || 'Frio'}
                   </span>
                 </div>
               ))}
 
-              {!stage.leads.length ? <p className="empty-state">Arraste leads para este estágio.</p> : null}
+              {!stage.leads.length ? <p className="empty-state">Arraste contatos para esta etapa.</p> : null}
             </div>
           </article>
         ))}
