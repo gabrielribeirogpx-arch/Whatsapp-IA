@@ -1,12 +1,13 @@
 'use client';
 import { memo } from 'react';
+import { formatDateTimeBR } from '@/lib/date';
 
 export default memo(function ContactMetrics({ profile }: { profile: any }) {
   const metrics = [
     ['Mensagens', profile?.messages_count ?? 0],
     ['Campanhas', profile?.campaigns_received ?? 0],
     ['Automações', profile?.flows_executed ?? 0],
-    ['Última campanha', profile?.last_campaign_at ? new Date(profile.last_campaign_at).toLocaleDateString('pt-BR') : '-'],
+    ['Última campanha', profile?.last_campaign_at ? formatDateTimeBR(profile.last_campaign_at) : '-'],
     ['Taxa resposta', `${profile?.response_rate ?? 0}%`]
   ];
   return <div className='grid grid-cols-1 gap-2'>

@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { apiFetch } from '@/lib/api';
 import { CRMContact } from '@/lib/types';
+import { formatDateTimeBR } from '@/lib/date';
 
 export default function ContactsPage() {
   const [contacts, setContacts] = useState<CRMContact[]>([]);
@@ -37,7 +38,7 @@ export default function ContactsPage() {
                 <td className='p-3'>{(contact.tags_json || []).join(', ') || '-'}</td>
                 <td className='p-3'>{contact.score ?? 0}</td>
                 <td className='p-3'>{contact.lifecycle_stage || '-'}</td>
-                <td className='p-3'>{contact.last_interaction_at || '-'}</td>
+                <td className='p-3'>{formatDateTimeBR(contact.last_interaction_at)}</td>
               </tr>
             ))}
           </tbody>

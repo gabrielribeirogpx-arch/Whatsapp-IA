@@ -8,6 +8,7 @@ import ContactNotes from '@/components/crm/ContactNotes';
 import ContactSidebar from '@/components/crm/ContactSidebar';
 import ContactTags from '@/components/crm/ContactTags';
 import ContactTimeline from '@/components/crm/ContactTimeline';
+import { formatDateTimeBR } from '@/lib/date';
 
 export default function ContactProfilePage({ params }: { params: { id: string } }) {
   const [profile, setProfile] = useState<any>(null);
@@ -107,7 +108,7 @@ export default function ContactProfilePage({ params }: { params: { id: string } 
         <p className='text-sm text-slate-700'>Etapa do cliente: <span className='rounded-full bg-slate-100 px-2 py-1 text-xs font-medium'>{profile?.lifecycle_stage || 'contato'}</span></p>
         <p className='mt-2 text-sm text-slate-700'>Temperatura: <span className={`rounded-full px-2 py-1 text-xs font-semibold ${scoreView[1]}`}>{profile?.score ?? 0} • {scoreView[0]}</span></p>
         <p className='mt-2 text-sm text-slate-700'>Origem: {profile?.source || '-'}</p>
-        <p className='mt-2 text-sm text-slate-700'>Último contato: {profile?.last_interaction_at ? new Date(profile.last_interaction_at).toLocaleString('pt-BR') : '-'}</p>
+        <p className='mt-2 text-sm text-slate-700'>Último contato: {profile?.last_interaction_at ? formatDateTimeBR(profile.last_interaction_at) : '-'}</p>
       </ContactSidebar>
       <ContactSidebar title='Etiquetas'>
         <ContactTags tags={profile?.tags_json || []} />
