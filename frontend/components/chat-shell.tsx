@@ -1,7 +1,7 @@
 'use client';
 
 import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 
 import ChatWindow from './ChatWindow';
 import Sidebar from './Sidebar';
@@ -24,6 +24,7 @@ function toChatMessage(message: Message): ChatMessage {
 
 export default function ChatShell() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [selectedContactId, setSelectedContactId] = useState('');
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -33,6 +34,7 @@ export default function ChatShell() {
   const [modeUpdating, setModeUpdating] = useState(false);
   const [modeNotice, setModeNotice] = useState('');
   const [modeError, setModeError] = useState('');
+  const [querySelectionMissing, setQuerySelectionMissing] = useState(false);
 
 
   useEffect(() => {
@@ -182,11 +184,38 @@ export default function ChatShell() {
   useEffect(() => {
     getConversations()
       .then((items) => {
+        const targetContactId = searchParams.get('contact_id');
+        const targetPhone = searchParams.get('phone');
+        const normalizedTargetPhone = targetPhone ? targetPhone.replace(/\D/g, '') : '';
+
         setConversations(items);
+
+        const matchedConversation = items.find((conversation) => {
+          const byContactId = targetContactId
+            ? String(conversation.contact_id ?? conversation.id) === targetContactId
+            : false;
+
+          const byPhone = normalizedTargetPhone
+            ? conversation.phone.replace(/\D/g, '') === normalizedTargetPhone
+            : false;
+
+          return byContactId || byPhone;
+        });
+
+        if (matchedConversation) {
+          setQuerySelectionMissing(false);
+          setSelectedContactId(String(matchedConversation.contact_id ?? matchedConversation.id));
+          return;
+        }
+
+        if (targetContactId || targetPhone) {
+          setQuerySelectionMissing(true);
+        }
+
         setSelectedContactId((current) => current || (items[0] ? String(items[0].contact_id ?? items[0].id) : ''));
       })
       .catch(() => setConversations([]));
-  }, []);
+  }, [searchParams]);
 
 
   function onSelectContact(contactId: string) {
@@ -266,6 +295,7 @@ export default function ChatShell() {
         modeUpdating={modeUpdating}
         modeNotice={modeNotice}
         modeError={modeError}
+        emptyStateMessage={querySelectionMissing ? 'Conversa ainda não encontrada para este contato.' : undefined}
         onModeChange={handleChangeMode}
       />
     </div>

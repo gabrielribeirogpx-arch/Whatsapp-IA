@@ -16,6 +16,7 @@ type ChatWindowProps = {
   modeUpdating?: boolean;
   modeNotice?: string;
   modeError?: string;
+  emptyStateMessage?: string;
   onModeChange: (mode: ConversationMode) => void;
 };
 
@@ -30,6 +31,7 @@ export default function ChatWindow({
   modeUpdating = false,
   modeNotice,
   modeError,
+  emptyStateMessage,
   onModeChange
 }: ChatWindowProps) {
   const messagesRef = useRef<HTMLElement | null>(null);
@@ -75,7 +77,7 @@ export default function ChatWindow({
         ) : (
           <div>
             <h1>Selecione um contato</h1>
-            <p>Escolha uma conversa para começar.</p>
+            <p>{emptyStateMessage || 'Escolha uma conversa para começar.'}</p>
           </div>
         )}
       </header>
