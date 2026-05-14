@@ -1,6 +1,6 @@
 'use client';
 
-import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 
 import ChatWindow from './ChatWindow';
@@ -41,9 +41,6 @@ export default function ChatShell() {
   const [querySelectionMissing, setQuerySelectionMissing] = useState(false);
   const [crmOpen, setCrmOpen] = useState(false);
 
-  const [typingByConversationId, setTypingByConversationId] = useState<Record<string, number>>({});
-  const typingTimeoutsRef = useRef<Record<string, number>>({});
-
 
   useEffect(() => {
     const token = localStorage.getItem('token');
@@ -65,20 +62,13 @@ export default function ChatShell() {
       const realMessages: Message[] = await getMessagesByConversation(String(conversation.id));
       setMessages(realMessages.map(toChatMessage));
     },
-    [conversations, typingByConversationId]
+    [conversations]
   );
 
 
   const contacts = useMemo<Contact[]>(
     () =>
       conversations.map((conversation) => {
-        const updatedAt = conversation.updated_at ? new Date(conversation.updated_at) : null;
-        const now = Date.now();
-        const elapsed = updatedAt ? now - updatedAt.getTime() : Number.POSITIVE_INFINITY;
-        const isOnline = elapsed <= 2 * 60 * 1000;
-        const typingExpiry = typingByConversationId[String(conversation.id)] ?? 0;
-        const isTyping = typingExpiry > Date.now();
-
         return {
           id: String(conversation.contact_id ?? conversation.id),
           name: conversation.name,
@@ -88,12 +78,10 @@ export default function ChatShell() {
           score: conversation.score,
           lastMessage: conversation.last_message,
           lastMessageAt: conversation.updated_at,
-          isOnline,
-          isTyping,
           status: conversation.mode
         };
       }),
-    [conversations, typingByConversationId]
+    [conversations]
   );
 
   const orderedContacts = useMemo(() => {
@@ -146,14 +134,6 @@ export default function ChatShell() {
   }, [selectedConversation]);
 
 
-  useEffect(() => {
-    return () => {
-      Object.values(typingTimeoutsRef.current).forEach((timeoutId) => {
-        window.clearTimeout(timeoutId);
-      });
-      typingTimeoutsRef.current = {};
-    };
-  }, []);
 
   useEffect(() => {
     if (!modeNotice && !modeError) return;
@@ -195,29 +175,6 @@ export default function ChatShell() {
         payload = JSON.parse(event.data);
       } catch {
         payload = null;
-      }
-
-      if (payload?.type === 'typing' && payload.source === 'bot' && payload.conversation_id) {
-        const conversationId = String(payload.conversation_id);
-        const expiresAt = Date.now() + 4000;
-
-        setTypingByConversationId((current) => ({ ...current, [conversationId]: expiresAt }));
-
-        const existingTimeout = typingTimeoutsRef.current[conversationId];
-        if (existingTimeout) {
-          window.clearTimeout(existingTimeout);
-        }
-
-        typingTimeoutsRef.current[conversationId] = window.setTimeout(() => {
-          setTypingByConversationId((current) => {
-            const next = { ...current };
-            delete next[conversationId];
-            return next;
-          });
-          delete typingTimeoutsRef.current[conversationId];
-        }, 4000);
-
-        return;
       }
 
       fetchMessages(selectedContactId).catch(() => undefined);
