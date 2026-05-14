@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { apiFetch } from '@/lib/api';
 import ContactHeader from '@/components/crm/ContactHeader';
 import ContactMetrics from '@/components/crm/ContactMetrics';
@@ -15,6 +15,8 @@ export default function ContactProfilePage({ params }: { params: { id: string } 
   const [loading, setLoading] = useState(true);
   const [note, setNote] = useState('');
   const [tag, setTag] = useState('');
+  const [highlightedId, setHighlightedId] = useState<string | null>(null);
+  const timelineContainerRef = useRef<HTMLDivElement | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -30,16 +32,60 @@ export default function ContactProfilePage({ params }: { params: { id: string } 
   useEffect(() => { void load(); }, [load]);
 
   useEffect(() => {
-    if (!profile?.conversation_id || typeof window === 'undefined') return;
+    if (!profile?.id || typeof window === 'undefined') return;
     const tenantId = localStorage.getItem('tenant_id');
     const apiUrl = process.env.NEXT_PUBLIC_API_URL;
     if (!tenantId || !apiUrl) return;
+
     const baseUrl = apiUrl.endsWith('/') ? apiUrl.slice(0, -1) : apiUrl;
-    const eventSource = new EventSource(`${baseUrl}/api/sse/messages/${profile.conversation_id}?tenant_id=${encodeURIComponent(tenantId)}`);
-    eventSource.onmessage = () => void load();
-    eventSource.onerror = () => eventSource.close();
-    return () => eventSource.close();
-  }, [profile?.conversation_id, load]);
+    let closed = false;
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    let eventSource: EventSource | null = null;
+
+    const connect = () => {
+      if (closed) return;
+      eventSource = new EventSource(`${baseUrl}/api/crm/contacts/${profile.id}/events/stream?tenant_id=${encodeURIComponent(tenantId)}`);
+      eventSource.onmessage = (msg) => {
+        try {
+          const incoming = JSON.parse(msg.data || '{}');
+          if (!incoming?.id) return;
+
+          setEvents((prev) => {
+            if (prev.some((item) => item.id === incoming.id)) return prev;
+            return [incoming, ...prev];
+          });
+
+          setProfile((prev: any) => prev ? {
+            ...prev,
+            last_interaction_at: incoming.created_at || prev.last_interaction_at,
+            score: (Number(prev.score || 0) + (incoming.type === 'message_received' ? 6 : incoming.type === 'flow_completed' ? 15 : incoming.type === 'message_sent' ? 3 : 2)),
+            messages_count: Number(prev.messages_count || 0) + ((incoming.type === 'message_received' || incoming.type === 'message_sent') ? 1 : 0),
+            campaigns_received: Number(prev.campaigns_received || 0) + (incoming.type === 'campaign_sent' ? 1 : 0),
+            flows_executed: Number(prev.flows_executed || 0) + ((incoming.type === 'flow_started' || incoming.type === 'flow_completed') ? 1 : 0),
+          } : prev);
+
+          setHighlightedId(incoming.id);
+          setTimeout(() => setHighlightedId((current) => (current === incoming.id ? null : current)), 1800);
+          timelineContainerRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
+        } catch {
+          // ignore malformed payloads
+        }
+      };
+
+      eventSource.onerror = () => {
+        eventSource?.close();
+        if (!closed) reconnectTimer = setTimeout(connect, 2000);
+      };
+    };
+
+    connect();
+
+    return () => {
+      closed = true;
+      eventSource?.close();
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+    };
+  }, [profile?.id]);
 
   const scoreView = useMemo(() => {
     const score = Number(profile?.score || 0);
@@ -74,7 +120,7 @@ export default function ContactProfilePage({ params }: { params: { id: string } 
     </aside>
     <section className='col-span-12 lg:col-span-6 rounded-2xl border border-slate-200 bg-white/90 p-4 shadow-sm'>
       <h2 className='mb-3 text-lg font-semibold text-slate-900'>Histórico de atividades</h2>
-      <ContactTimeline events={events} loading={loading} />
+      <ContactTimeline events={events} loading={loading} highlightedId={highlightedId} containerRef={timelineContainerRef} />
     </section>
     <aside className='col-span-12 lg:col-span-3 space-y-4'>
       <ContactSidebar title='Métricas'><ContactMetrics profile={profile} /></ContactSidebar>

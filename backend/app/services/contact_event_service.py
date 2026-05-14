@@ -4,6 +4,7 @@ from datetime import datetime
 
 from app.models.contact_event import ContactEvent
 from app.services.contact_scoring_service import apply_event_score
+from app.services.realtime_service import publish_contact_event
 
 
 def register_contact_event(db, *, tenant_id, contact_id, event_type: str, title: str, description: str | None = None, metadata: dict | None = None, contact=None):
@@ -12,4 +13,6 @@ def register_contact_event(db, *, tenant_id, contact_id, event_type: str, title:
     if contact is not None:
         contact.last_interaction_at = datetime.utcnow()
         apply_event_score(contact, event_type)
+
+    publish_contact_event(tenant_id=tenant_id, contact_id=contact_id, event=event)
     return event

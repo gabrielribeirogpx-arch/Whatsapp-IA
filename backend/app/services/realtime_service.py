@@ -25,3 +25,21 @@ class SSEBroker:
 
 
 sse_broker = SSEBroker()
+
+
+def publish_contact_event(*, tenant_id, contact_id, event) -> None:
+    """Best-effort publish of CRM timeline events to SSE subscribers."""
+    payload = {
+        "id": str(getattr(event, "id", "")),
+        "type": getattr(event, "type", ""),
+        "title": getattr(event, "title", ""),
+        "description": getattr(event, "description", None),
+        "metadata_json": getattr(event, "metadata_json", None) or {},
+        "created_at": getattr(event, "created_at", None).isoformat() if getattr(event, "created_at", None) else None,
+    }
+    channel = f"crm:{tenant_id}:{contact_id}"
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return
+    loop.create_task(sse_broker.publish(channel, payload))

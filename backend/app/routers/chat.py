@@ -578,6 +578,39 @@ async def stream_messages_by_conversation(
 
 
 
+
+
+@router.get("/crm/contacts/{contact_id}/events/stream")
+async def stream_contact_events(
+    contact_id: UUID,
+    tenant: Tenant = Depends(get_current_tenant),
+    db: Session = Depends(get_db),
+):
+    contact = db.execute(
+        select(Contact)
+        .options(load_only(Contact.id))
+        .where(Contact.id == contact_id, Contact.tenant_id == tenant.id)
+    ).scalars().first()
+    if not contact:
+        raise HTTPException(status_code=404, detail="Contato não encontrado")
+
+    channel = f"crm:{tenant.id}:{contact.id}"
+    queue = await sse_broker.subscribe(channel)
+
+    async def event_generator():
+        try:
+            while True:
+                try:
+                    data = await asyncio.wait_for(queue.get(), timeout=20)
+                    yield data
+                except asyncio.TimeoutError:
+                    yield ": ping\n\n"
+        finally:
+            sse_broker.unsubscribe(channel, queue)
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+
 @router.patch("/contacts/{contact_id}")
 def update_contact(
     contact_id: UUID,
