@@ -1141,6 +1141,17 @@ def _initialize_flow_start_node(
                         start_node["id"],
                     )
                     raise
+            if conversation.contact_id:
+                from app.services.contact_event_service import register_contact_event
+                register_contact_event(
+                    db,
+                    tenant_id=conversation.tenant_id,
+                    contact_id=conversation.contact_id,
+                    event_type="flow_started",
+                    title="Flow iniciado",
+                    description="Entrou em automação",
+                    metadata={"flow_id": str(flow_id)},
+                )
             logger.info(
                 "[FLOW START] node_id=%s (isStart=%s)",
                 start_node["id"],
@@ -1767,6 +1778,17 @@ def _is_wait_node_type(node_type: str) -> bool:
 
 def _finalize_runtime_flow_session(db: Session, conversation: Conversation, flow_session: FlowSession | None, end_node_id: Any) -> None:
     if flow_session:
+        if conversation.contact_id:
+            from app.services.contact_event_service import register_contact_event
+            register_contact_event(
+                db,
+                tenant_id=conversation.tenant_id,
+                contact_id=conversation.contact_id,
+                event_type="flow_completed",
+                title="Flow concluído",
+                description="Concluiu automação",
+                metadata={"flow_session_id": str(flow_session.id)},
+            )
         session_service = FlowSessionService(db)
         flow_session.status = "completed"
         flow_session.current_node_id = session_service.safe_update_current_node(
