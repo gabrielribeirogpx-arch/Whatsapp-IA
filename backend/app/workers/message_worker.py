@@ -10,6 +10,7 @@ from sqlalchemy import select
 from app.db.session import SessionLocal
 from app.models import Message
 from app.services.contact_sync_service import ensure_conversation_contact_link, upsert_contact_for_phone
+from app.services.contact_event_service import register_contact_event
 from app.services.conversation_service import get_or_create_conversation
 from app.services.idempotency_service import register_processed_message
 from app.services.message_router import handle_incoming_message
@@ -173,6 +174,15 @@ def process_incoming_message(payload: dict[str, Any]) -> None:
         )
         db.add(inbound)
         db.flush()
+        if contact:
+            register_contact_event(db, tenant_id=tenant.id, contact_id=contact.id, event_type="message_received", title="Mensagem recebida", description=text, contact=contact)
+            lower_text = (text or "").lower()
+            keyword_tags = [("suporte", "suporte"), ("preço", "interesse_preco"), ("comprar", "quente"), ("problema", "risco")]
+            tags = list(contact.tags_json or [])
+            for keyword, tag in keyword_tags:
+                if keyword in lower_text and tag not in tags:
+                    tags.append(tag)
+            contact.tags_json = tags
         db.refresh(inbound)
         logger.info(
             "event=incoming_worker_message_persisted correlation_id=%s message_pk=%s",

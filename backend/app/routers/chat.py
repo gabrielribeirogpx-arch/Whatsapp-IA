@@ -6,11 +6,11 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
-from sqlalchemy import desc, select
+from sqlalchemy import desc, select, func
 from sqlalchemy.orm import Session, load_only, selectinload
 
 from app.database import get_db
-from app.models import Contact, Conversation, ConversationLog, Message, Tenant
+from app.models import Contact, ContactEvent, Conversation, ConversationLog, Message, Tenant
 from app.schemas.chat import (
     ContactOut,
     ConversationOut,
@@ -23,6 +23,7 @@ from app.schemas.chat import (
     ToggleAssignmentResponse,
 )
 from app.services.contact_sync_service import ensure_conversation_contact_link, upsert_contact_for_phone
+from app.services.contact_event_service import register_contact_event
 from app.services.bot_service import handle_bot_activation
 from app.services.conversation_service import get_or_create_conversation
 from app.services.lead_service import get_or_create_lead
@@ -443,6 +444,7 @@ async def send_message(
     consume_usage(tenant, 1)
     if contact:
         contact.last_message_at = datetime.utcnow()
+        register_contact_event(db, tenant_id=tenant.id, contact_id=contact.id, event_type="message_sent", title="Mensagem enviada", description=message_text, contact=contact)
     conversation.updated_at = datetime.utcnow()
     db.commit()
     db.refresh(message)
@@ -644,3 +646,47 @@ def update_contact_custom_fields(
     db.commit()
     db.refresh(contact)
     return {"success": True, "id": str(contact.id), "custom_fields_json": contact.custom_fields_json}
+
+
+@router.get("/contacts/{contact_id}")
+def get_contact_profile(contact_id: UUID, tenant: Tenant = Depends(get_current_tenant), db: Session = Depends(get_db)):
+    contact = db.execute(select(Contact).where(Contact.tenant_id == tenant.id, Contact.id == contact_id)).scalars().first()
+    if not contact:
+        raise HTTPException(status_code=404, detail="Contato não encontrado")
+    campaigns_received = db.execute(select(func.count(ContactEvent.id)).where(ContactEvent.tenant_id == tenant.id, ContactEvent.contact_id == contact.id, ContactEvent.type == "campaign_received")).scalar() or 0
+    flows_executed = db.execute(select(func.count(ContactEvent.id)).where(ContactEvent.tenant_id == tenant.id, ContactEvent.contact_id == contact.id, ContactEvent.type.in_(["flow_started", "flow_finished"]))).scalar() or 0
+    return {"contact": {"id": str(contact.id), "tenant_id": str(contact.tenant_id), "name": contact.name, "phone": contact.phone, "avatar_url": contact.avatar_url, "tags_json": contact.tags_json or [], "score": contact.score or 0, "lifecycle_stage": contact.lifecycle_stage, "source": contact.source, "last_interaction_at": contact.last_interaction_at.isoformat() if contact.last_interaction_at else None, "custom_fields_json": contact.custom_fields_json or {}, "notes": contact.notes, "campaigns_received": campaigns_received, "flows_executed": flows_executed}}
+
+@router.get("/contacts/{contact_id}/events")
+def get_contact_events(contact_id: UUID, tenant: Tenant = Depends(get_current_tenant), db: Session = Depends(get_db)):
+    events = db.execute(select(ContactEvent).where(ContactEvent.tenant_id == tenant.id, ContactEvent.contact_id == contact_id).order_by(desc(ContactEvent.created_at))).scalars().all()
+    return {"items": [{"id": str(e.id), "type": e.type, "title": e.title, "description": e.description, "metadata_json": e.metadata_json or {}, "created_at": e.created_at.isoformat()} for e in events]}
+
+@router.post("/contacts/{contact_id}/notes")
+def add_contact_note(contact_id: UUID, payload: dict, tenant: Tenant = Depends(get_current_tenant), db: Session = Depends(get_db)):
+    contact = db.execute(select(Contact).where(Contact.tenant_id == tenant.id, Contact.id == contact_id)).scalars().first()
+    if not contact:
+        raise HTTPException(status_code=404, detail="Contato não encontrado")
+    note = str(payload.get("note") or "").strip()
+    if not note:
+        raise HTTPException(status_code=400, detail="Nota obrigatória")
+    contact.notes = ((contact.notes or "") + "\n" + note).strip()
+    register_contact_event(db, tenant_id=tenant.id, contact_id=contact.id, event_type="note_added", title="Nota adicionada", description=note, contact=contact)
+    db.commit()
+    return {"ok": True}
+
+@router.post("/contacts/{contact_id}/tags")
+def add_contact_tag(contact_id: UUID, payload: dict, tenant: Tenant = Depends(get_current_tenant), db: Session = Depends(get_db)):
+    contact = db.execute(select(Contact).where(Contact.tenant_id == tenant.id, Contact.id == contact_id)).scalars().first()
+    if not contact:
+        raise HTTPException(status_code=404, detail="Contato não encontrado")
+    tag = str(payload.get("tag") or "").strip()
+    if not tag:
+        raise HTTPException(status_code=400, detail="Tag obrigatória")
+    tags = list(contact.tags_json or [])
+    if tag not in tags:
+        tags.append(tag)
+    contact.tags_json = tags
+    register_contact_event(db, tenant_id=tenant.id, contact_id=contact.id, event_type="tag_added", title="Tag adicionada", description=tag, contact=contact)
+    db.commit()
+    return {"ok": True, "tags_json": tags}
