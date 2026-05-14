@@ -102,7 +102,7 @@ export default function Sidebar({
 
       if (!normalizedSearchTerm) return true;
 
-      const searchFields = [contact.phone, contact.name || '', contact.lastMessage || '']
+      const searchFields = [contact.phone, contact.name || '', contact.lastMessage || '', contact.stage || '']
         .join(' ')
         .toLowerCase();
 
@@ -152,6 +152,8 @@ export default function Sidebar({
           const displayName = contact.name || formatPhone(contact.phone);
           const badge = getBadge(contact.status);
           const relativeTime = formatRelativeTime(contact.lastMessageAt);
+          const temp = (contact.score ?? 0) >= 80 ? 'hot' : (contact.score ?? 0) >= 40 ? 'warm' : 'cold';
+          const unread = contact.status !== 'human' ? 1 : 0;
 
           return (
             <button
@@ -174,7 +176,12 @@ export default function Sidebar({
                     <span className="wa-contact-time">{relativeTime}</span>
                   </div>
                   <p className="wa-contact-preview">{contact.lastMessage || 'Sem mensagens ainda.'}</p>
-                  <div className={`wa-contact-badge ${badge.className}`}>{badge.label}</div>
+                  <div className="wa-contact-meta">
+                    <div className={`wa-contact-temp ${temp}`}>{temp === 'hot' ? 'Quente' : temp === 'warm' ? 'Morno' : 'Frio'}</div>
+                    <div className={`wa-contact-badge ${badge.className}`}>{badge.label}</div>
+                    {contact.stage ? <div className="wa-contact-tag">{contact.stage}</div> : null}
+                    {unread ? <div className="wa-contact-unread">{unread}</div> : null}
+                  </div>
                 </div>
               </div>
             </button>
