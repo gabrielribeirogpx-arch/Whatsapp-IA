@@ -1,17 +1,13 @@
+import { derivePresenceState } from './presence';
+
 export function getWhatsappWindowStatus(lastInteractionAt?: string | null): string {
-  const timestamp = lastInteractionAt ? new Date(lastInteractionAt).getTime() : Number.NaN;
+  const presence = derivePresenceState(lastInteractionAt);
 
-  if (Number.isNaN(timestamp)) {
-    return 'Fora da janela de 24h';
-  }
-
-  const elapsedMs = Date.now() - timestamp;
-
-  if (elapsedMs < 5 * 60 * 1000) {
+  if (presence === 'online' || presence === 'recently_active') {
     return 'Ativo recentemente';
   }
 
-  if (elapsedMs < 24 * 60 * 60 * 1000) {
+  if (presence === 'offline') {
     return 'Janela de atendimento ativa';
   }
 
