@@ -10,7 +10,7 @@ import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
 revision = "20260527_password_reset"
-down_revision = "20260508_publish_sessions_hardening"
+down_revision = "20260508_pub_sess_hard"
 branch_labels = None
 depends_on = None
 
