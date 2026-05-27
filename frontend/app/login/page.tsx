@@ -21,7 +21,7 @@ export default function LoginPage() {
       localStorage.setItem('tenant', JSON.stringify(tenant));
       localStorage.setItem('token', tenant.token);
       localStorage.setItem('tenant_id', tenant.tenant_id);
-      router.push('/chat');
+      router.replace('/dashboard');
     } catch {
       setError('Email ou senha inválidos.');
     } finally {

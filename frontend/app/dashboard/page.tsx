@@ -212,6 +212,20 @@ export default function DashboardPage() {
   const [flowsError, setFlowsError] = useState<string | null>(null);
   const [creatingFlow, setCreatingFlow] = useState(false);
   const [mounted, setMounted] = useState(false);
+  const [showWelcomeToast, setShowWelcomeToast] = useState(false);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    const welcome = params.get('welcome');
+    if (welcome !== '1') return;
+
+    setShowWelcomeToast(true);
+    router.replace('/dashboard');
+
+    const timeoutId = window.setTimeout(() => setShowWelcomeToast(false), 3200);
+    return () => window.clearTimeout(timeoutId);
+  }, [router]);
 
   useEffect(() => {
     void (async () => {
@@ -359,6 +373,11 @@ export default function DashboardPage() {
 
   return (
     <section className="w-full min-w-0 px-5 py-6 lg:px-6">
+      {showWelcomeToast ? (
+        <div className="fixed right-6 top-6 z-[120] rounded-xl border border-emerald-200 bg-white/95 px-4 py-3 text-sm font-medium text-emerald-700 shadow-[0_12px_30px_rgba(16,185,129,0.18)] backdrop-blur">
+          ✅ Conta criada com sucesso. Seu workspace está pronto!
+        </div>
+      ) : null}
       <div className="w-full min-w-0 space-y-5">
       <div className="mb-4 flex items-center justify-between gap-4 md:mb-6">
         <div>
