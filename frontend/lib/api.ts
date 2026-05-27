@@ -184,6 +184,13 @@ export async function parseApiResponse<T>(res: Response): Promise<T> {
 }
 
 export async function registerTenant(payload: Record<string, string>): Promise<TenantSession> {
+  const sanitizedPayload = {
+    ...payload,
+    password: payload.password ? '***' : payload.password,
+    confirm_password: payload.confirm_password ? '***' : payload.confirm_password
+  };
+  console.log('[REGISTER REQUEST]', sanitizedPayload);
+
   const res = await apiFetch('/api/register', {
     method: 'POST',
     body: JSON.stringify(payload)
