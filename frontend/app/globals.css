@@ -2204,6 +2204,11 @@ input {
   border-color: #1c9d66;
   box-shadow: 0 0 0 4px rgba(28, 157, 102, 0.16);
 }
+
+.onboarding-input--error {
+  border-color: #dc2626;
+  box-shadow: 0 0 0 3px rgba(220, 38, 38, 0.16);
+}
 .input-wrap {
   display: flex;
   align-items: center;
