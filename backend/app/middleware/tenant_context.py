@@ -16,6 +16,8 @@ PUBLIC_PATHS = (
     "/redoc",
     "/api/register",
     "/api/login",
+    "/api/forgot-password",
+    "/api/reset-password",
     "/webhook",
     "/api/webhook",
 )

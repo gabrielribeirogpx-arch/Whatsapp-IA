@@ -104,11 +104,13 @@ def _send_reset_email(email: str, reset_link: str) -> None:
 @router.post("/forgot-password")
 def forgot_password(payload: ForgotPasswordRequest, db: Session = Depends(get_db)):
     email = payload.email.strip().lower()
+    print("[PASSWORD RESET REQUEST]", f"email_hint={email[:2]}***")
     if not EMAIL_RE.match(email):
         raise HTTPException(status_code=400, detail="Email inválido")
 
     user = db.execute(select(TenantUser).where(TenantUser.email == email)).scalars().first()
     if user:
+        print("[PASSWORD RESET USER FOUND]", f"user_id={user.id}")
         raw_token = secrets.token_urlsafe(32)
         token_hash = _hash_reset_token(raw_token)
         expires_at = datetime.now(timezone.utc) + timedelta(seconds=RESET_WINDOW_SECONDS)
@@ -116,7 +118,7 @@ def forgot_password(payload: ForgotPasswordRequest, db: Session = Depends(get_db
         db.commit()
         frontend_url = os.getenv("FRONTEND_URL", "http://localhost:3000")
         _send_reset_email(email, f"{frontend_url}/reset-password?token={raw_token}")
-    print("[PASSWORD RESET REQUEST]", f"email_hint={email[:2]}***")
+        print("[PASSWORD RESET EMAIL SENT]", f"user_id={user.id}")
     return {"message": "Se o email existir, enviaremos as instruções de recuperação."}
 
 
