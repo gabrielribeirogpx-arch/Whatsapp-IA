@@ -6,6 +6,7 @@ import { apiFetch } from '@/lib/api';
 import { formatDateTimeBR } from '@/lib/date';
 import { Contact } from '@/lib/types';
 import { getWhatsappWindowStatus } from '@/lib/contactStatus';
+import { useResilientSSE } from '@/lib/useResilientSSE';
 
 type Props = { contact?: Contact; open: boolean; onClose: () => void };
 
@@ -43,36 +44,35 @@ export default function CRMContactSidebar({ contact, open, onClose }: Props) {
     }
   }, []);
 
+
   useEffect(() => {
-    if (contact?.id) void load(contact.id);
-    else {
-      setProfile(null);
-      setEvents([]);
+    if (contact?.id) {
+      void load(contact.id);
+      return;
     }
+    setProfile(null);
+    setEvents([]);
   }, [contact?.id, load]);
 
-  useEffect(() => {
-    if (!contact?.id || typeof window === 'undefined') return;
-    const tenantId = localStorage.getItem('tenant_id');
-    const apiUrl = process.env.NEXT_PUBLIC_API_URL;
-    if (!tenantId || !apiUrl) return;
+  const tenantId = typeof window !== 'undefined' ? localStorage.getItem('tenant_id') : null;
+  const apiUrl = process.env.NEXT_PUBLIC_API_URL;
+  const baseUrl = apiUrl ? (apiUrl.endsWith('/') ? apiUrl.slice(0, -1) : apiUrl) : null;
+  const streamUrl = contact?.id && tenantId && baseUrl
+    ? `${baseUrl}/api/crm/contacts/${contact.id}/events/stream?tenant_id=${encodeURIComponent(tenantId)}`
+    : null;
 
-    const baseUrl = apiUrl.endsWith('/') ? apiUrl.slice(0, -1) : apiUrl;
-    const es = new EventSource(`${baseUrl}/api/crm/contacts/${contact.id}/events/stream?tenant_id=${encodeURIComponent(tenantId)}`);
-
-    es.onmessage = (msg) => {
-      try {
-        const incoming = JSON.parse(msg.data || '{}');
-        if (!incoming?.id) return;
-        setEvents((prev) => (prev.some((i) => i.id === incoming.id) ? prev : [incoming, ...prev]));
-        setProfile((prev: any) => (prev ? { ...prev, last_interaction_at: incoming.created_at || prev.last_interaction_at } : prev));
-        timelineRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
-      } catch {}
-    };
-
-    es.onerror = () => es.close();
-    return () => es.close();
-  }, [contact?.id]);
+  useResilientSSE<any>({
+    url: streamUrl,
+    channel: `crm-contact-events:${contact?.id ?? 'none'}`,
+    enabled: Boolean(contact?.id && tenantId),
+    onEvent: (incoming) => {
+      if (!incoming?.id) return;
+      console.info('[PRESENCE UPDATE]', { contactId: contact?.id, tenantId, eventType: incoming.type });
+      setEvents((prev) => (prev.some((i) => i.id === incoming.id) ? prev : [incoming, ...prev]));
+      setProfile((prev: any) => (prev ? { ...prev, last_interaction_at: incoming.created_at || prev.last_interaction_at } : prev));
+      timelineRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  });
 
   const metrics = useMemo(
     () => [
