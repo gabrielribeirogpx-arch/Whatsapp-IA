@@ -20,6 +20,7 @@ import ChoiceNode from '@/components/flow/nodes/ChoiceNode';
 import ConditionNode from '@/components/flow/nodes/ConditionNode';
 import DelayNode from '@/components/flow/nodes/DelayNode';
 import MessageNode from '@/components/flow/nodes/MessageNode';
+import CreateFlowModal from '@/components/flows/CreateFlowModal';
 import { apiFetch, getFlowGraph, getTenantSessionFromStorage, listFlowVersions, parseApiResponse, restoreFlowVersion } from '@/lib/api';
 import { getLayoutedElements } from '@/lib/autoLayout';
 import { orderChoiceChildrenEdges } from '@/lib/flowChoiceOrdering';
@@ -177,6 +178,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
   const [isLoadingVersions, setIsLoadingVersions] = useState(false);
   const [isRestoringVersion, setIsRestoringVersion] = useState(false);
   const [isCreatingFlow, setIsCreatingFlow] = useState(false);
+  const [isCreateFlowOpen, setIsCreateFlowOpen] = useState(false);
   const [flowVersions, setFlowVersions] = useState<FlowVersionItem[]>([]);
   const [activeVersionId, setActiveVersionId] = useState<string | null>(null);
   const [flowSource, setFlowSource] = useState<string>('version');
@@ -379,9 +381,13 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
     }
   }, [logFlowHttpError, parseHttpStatus]);
 
-  const handleCreateFlow = useCallback(async () => {
-    await createDefaultFlow();
-  }, [createDefaultFlow]);
+  const handleCreateFlow = useCallback(() => {
+    setIsCreateFlowOpen(true);
+  }, []);
+
+  const handleFlowCreated = useCallback((flowId: string) => {
+    setSelectedFlowId(flowId);
+  }, []);
 
   useEffect(() => {
     if (isLoading) return;
@@ -1439,9 +1445,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
                 <button
                   type="button"
                   className="flow-top-btn flow-top-btn-secondary"
-                  onClick={() => {
-                    void handleCreateFlow();
-                  }}
+                  onClick={handleCreateFlow}
                   disabled={isCreatingFlow}
                 >
                   {isCreatingFlow ? 'Criando...' : '+ Criar novo Flow'}
@@ -1631,6 +1635,11 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
           <Controls />
         </ReactFlow>
       </main>
+      <CreateFlowModal
+        open={isCreateFlowOpen}
+        onClose={() => setIsCreateFlowOpen(false)}
+        onCreated={handleFlowCreated}
+      />
       {isSimulatorOpen && (
         <aside style={{
           width: 320,

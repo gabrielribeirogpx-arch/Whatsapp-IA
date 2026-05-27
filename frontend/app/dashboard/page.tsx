@@ -7,8 +7,9 @@ import { useRouter } from 'next/navigation';
 import { MessageSquare, RadioTower, TrendingUp, Zap } from "lucide-react";
 
 import DashboardChart from '../../components/DashboardChart';
-import { createFlow, getConversations, listFlows } from '../../lib/api';
-import { Conversation, FlowItem, FlowPayload } from '../../lib/types';
+import CreateFlowModal from '@/components/flows/CreateFlowModal';
+import { getConversations, listFlows } from '../../lib/api';
+import { Conversation, FlowItem } from '../../lib/types';
 import { useDashboardAnalytics } from '../../hooks/useDashboardAnalytics';
 
 type DashboardViewModel = {
@@ -210,7 +211,7 @@ export default function DashboardPage() {
   const { data, summary, kpis, timeseries, isLoading, error: dashboardError } = useDashboardAnalytics(period);
   const [conversationsError, setConversationsError] = useState<string | null>(null);
   const [flowsError, setFlowsError] = useState<string | null>(null);
-  const [creatingFlow, setCreatingFlow] = useState(false);
+  const [isCreateFlowOpen, setIsCreateFlowOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
   const [showWelcomeToast, setShowWelcomeToast] = useState(false);
 
@@ -242,45 +243,10 @@ export default function DashboardPage() {
     setMounted(true);
   }, []);
 
-  async function handleCreateFlow() {
-    try {
-      setCreatingFlow(true);
-      const initialNodeId = typeof crypto !== 'undefined' && crypto.randomUUID
-        ? crypto.randomUUID()
-        : `${Date.now()}`;
-
-      const created = await createFlow({
-        name: 'Novo fluxo',
-        trigger_type: 'default',
-        trigger_value: '',
-        nodes: [
-          {
-            id: initialNodeId,
-            type: 'message',
-            position: { x: 180, y: 160 },
-            data: {
-              label: 'Mensagem',
-              text: 'Olá! 👋',
-              is_start: true,
-              is_end: false,
-            },
-          },
-        ],
-        edges: [],
-      } as FlowPayload & { nodes: unknown[]; edges: unknown[] });
-
-      if (!created?.id) {
-        throw new Error('Flow criado sem id');
-      }
-
-      router.push(`/dashboard/flow-builder?flow_id=${created.id}`);
-    } catch (error) {
-      console.error('Erro ao criar fluxo', error);
-      alert('Não foi possível criar o fluxo agora.');
-    } finally {
-      setCreatingFlow(false);
-    }
+    function handleFlowCreated(flowId: string) {
+    router.push(`/dashboard/flow-builder?flow_id=${flowId}`);
   }
+
   const uniqueConversations = useMemo(() => {
     const seen = new Set<string>();
     return conversations.filter((conversation) => {
@@ -402,12 +368,11 @@ export default function DashboardPage() {
           <button className="h-11 w-11 rounded-xl border border-slate-200 bg-white text-slate-500">📅</button>
           <button
             type="button"
-            onClick={handleCreateFlow}
-            disabled={creatingFlow}
+            onClick={() => setIsCreateFlowOpen(true)}
             className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-emerald-600 px-5 text-sm font-semibold leading-none text-white shadow-[0_12px_24px_rgba(16,185,129,0.22)] transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-70"
           >
             <span className="text-base leading-none">+</span>
-            <span className="leading-none">{creatingFlow ? 'Criando...' : 'Novo fluxo'}</span>
+            <span className="leading-none">Novo fluxo</span>
           </button>
         </div>
       </div>
@@ -519,6 +484,13 @@ export default function DashboardPage() {
 
       <div className="flex items-center justify-between gap-4 rounded-2xl border border-slate-100 bg-gradient-to-r from-white via-emerald-50/60 to-white p-5 min-h-[110px] shadow-[0_12px_30px_rgba(15,23,42,0.05)]"><div className="flex items-center gap-4"><div className="h-16 w-16 rounded-2xl bg-emerald-100/70 grid place-items-center"><img src="/icons/dashboard/fluxos.svg" alt="Fluxos" className="h-10 w-10"/></div><div><p className="m-0 text-sm font-semibold text-emerald-600">Dica para você 🚀</p><p className="m-0 text-xl font-bold text-slate-900">Construa fluxos mais inteligentes com o builder visual</p><p className="m-0 text-lg text-slate-600">Use o builder para criar jornadas dinâmicas e personalizadas.</p></div></div><button className="rounded-xl bg-emerald-600 px-5 py-3 font-semibold text-white shadow-[0_8px_20px_rgba(5,150,105,0.25)]">Abrir builder ↗</button></div>
       </div>
-    </section>
+    
+      <CreateFlowModal
+        open={isCreateFlowOpen}
+        onClose={() => setIsCreateFlowOpen(false)}
+        onCreated={handleFlowCreated}
+        title="Criar novo fluxo"
+      />
+</section>
   );
 }
