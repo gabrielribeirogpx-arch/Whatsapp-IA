@@ -109,7 +109,7 @@ export default function RegisterPage() {
       localStorage.setItem('tenant', JSON.stringify(tenant));
       localStorage.setItem('token', tenant.token);
       localStorage.setItem('tenant_id', tenant.tenant_id);
-      router.push('/chat');
+      router.replace('/dashboard?welcome=1');
     } catch (e) {
       const message = e instanceof Error ? e.message : '';
       if (message.includes('409')) {
