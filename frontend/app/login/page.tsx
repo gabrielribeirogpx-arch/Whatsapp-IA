@@ -40,6 +40,7 @@ export default function LoginPage() {
         <input id="password" type="password" minLength={8} value={password} onChange={(event) => setPassword(event.target.value)} required />
         {error && <p className="error-text">{error}</p>}
         <button type="submit" className="primary-button" disabled={isLoading}>{isLoading ? 'Entrando...' : 'Entrar'}</button>
+        <p className="helper-text"><a href="/forgot-password">Esqueceu sua senha?</a></p>
         <p className="helper-text">Ainda não tem conta? <a href="/register">Criar conta</a></p>
       </form>
     </main>
