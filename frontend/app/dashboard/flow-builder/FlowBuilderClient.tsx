@@ -177,6 +177,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
   const [isLoadingVersions, setIsLoadingVersions] = useState(false);
   const [isRestoringVersion, setIsRestoringVersion] = useState(false);
   const [isCreatingFlow, setIsCreatingFlow] = useState(false);
+  const [isCreateFlowOpen, setIsCreateFlowOpen] = useState(false);
   const [flowVersions, setFlowVersions] = useState<FlowVersionItem[]>([]);
   const [activeVersionId, setActiveVersionId] = useState<string | null>(null);
   const [flowSource, setFlowSource] = useState<string>('version');
@@ -379,9 +380,13 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
     }
   }, [logFlowHttpError, parseHttpStatus]);
 
-  const handleCreateFlow = useCallback(async () => {
-    await createDefaultFlow();
-  }, [createDefaultFlow]);
+  const handleCreateFlow = useCallback(() => {
+    setIsCreateFlowOpen(true);
+  }, []);
+
+  const handleFlowCreated = useCallback((flowId: string) => {
+    setSelectedFlowId(flowId);
+  }, []);
 
   useEffect(() => {
     if (isLoading) return;
@@ -1439,9 +1444,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
                 <button
                   type="button"
                   className="flow-top-btn flow-top-btn-secondary"
-                  onClick={() => {
-                    void handleCreateFlow();
-                  }}
+                  onClick={handleCreateFlow}
                   disabled={isCreatingFlow}
                 >
                   {isCreatingFlow ? 'Criando...' : '+ Criar novo Flow'}
@@ -1631,6 +1634,11 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
           <Controls />
         </ReactFlow>
       </main>
+      <CreateFlowModal
+        open={isCreateFlowOpen}
+        onClose={() => setIsCreateFlowOpen(false)}
+        onCreated={handleFlowCreated}
+      />
       {isSimulatorOpen && (
         <aside style={{
           width: 320,
