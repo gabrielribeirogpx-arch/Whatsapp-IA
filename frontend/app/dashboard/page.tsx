@@ -7,8 +7,9 @@ import { useRouter } from 'next/navigation';
 import { MessageSquare, RadioTower, TrendingUp, Zap } from "lucide-react";
 
 import DashboardChart from '../../components/DashboardChart';
-import { createFlow, getConversations, listFlows } from '../../lib/api';
-import { Conversation, FlowItem, FlowPayload } from '../../lib/types';
+import CreateFlowModal from '@/components/flows/CreateFlowModal';
+import { getConversations, listFlows } from '../../lib/api';
+import { Conversation, FlowItem } from '../../lib/types';
 import { useDashboardAnalytics } from '../../hooks/useDashboardAnalytics';
 
 type DashboardViewModel = {
