@@ -1,12 +1,12 @@
 'use client';
 
 import { useEffect, useId, useMemo, useState } from 'react';
-import Link from 'next/link';
 import { Cell, Pie, PieChart } from 'recharts';
 import { useRouter } from 'next/navigation';
 import { MessageSquare, RadioTower, TrendingUp, Zap } from "lucide-react";
 
 import DashboardChart from '../../components/DashboardChart';
+import DashboardInsightPanel from '@/components/dashboard/DashboardInsightPanel';
 import CreateFlowModal from '@/components/flows/CreateFlowModal';
 import { getConversations, listFlows } from '../../lib/api';
 import { Conversation, FlowItem } from '../../lib/types';
@@ -24,6 +24,7 @@ type DashboardViewModel = {
 };
 
 type Period = '24h' | '7d' | '30d' | '90d';
+type DetailPanelKey = 'flows' | 'channels' | 'report' | 'conversations' | null;
 
 const FALLBACK_VIEW_MODEL: DashboardViewModel = {
   activeConversations: 0,
@@ -214,6 +215,7 @@ export default function DashboardPage() {
   const [isCreateFlowOpen, setIsCreateFlowOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
   const [showWelcomeToast, setShowWelcomeToast] = useState(false);
+  const [activePanel, setActivePanel] = useState<DetailPanelKey>(null);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -328,6 +330,26 @@ export default function DashboardPage() {
     return total === 0 ? [] : base;
   }, [viewModel.channels]);
   const safeKpis = Array.isArray(kpiMeta) ? kpiMeta : [];
+  const isPanelLoading = (!flows.length && !conversations.length) && (isLoading || !mounted);
+
+  const panelConfig = {
+    flows: {
+      title: 'Todos os fluxos',
+      description: 'Visão completa de status, publicação e ações rápidas.',
+    },
+    channels: {
+      title: 'Todos os canais',
+      description: 'Monitoramento dos canais conectados e saúde da operação.',
+    },
+    report: {
+      title: 'Relatório completo',
+      description: 'Métricas detalhadas com insights e tendências do período.',
+    },
+    conversations: {
+      title: 'Todas as conversas',
+      description: 'Acompanhe últimas interações, filtros e distribuição de atendimento.',
+    },
+  } as const;
 
   if (!mounted || !data) {
     return (
@@ -449,9 +471,9 @@ export default function DashboardPage() {
             return <div key={c.id || idx} className="flex items-start gap-3 py-3"><div className="h-9 w-9 rounded-full bg-emerald-50 text-emerald-700 text-xs font-semibold flex items-center justify-center shrink-0">{initials}</div><div className="min-w-0 flex-1"><p className="m-0 text-sm font-semibold text-slate-800 leading-tight">{name}</p><p className="m-0 text-xs text-slate-500 mt-0.5">Flow: {getConversationFlowLabel(c)}</p><p className="m-0 text-xs text-slate-500 mt-1 line-clamp-1">{c.last_message || 'Sem mensagem recente.'}</p></div><div className="flex shrink-0 items-center gap-2"><span className="text-xs text-slate-400">agora</span><span className="h-2 w-2 rounded-full bg-emerald-500" /></div></div>;
           })}</div>}
           <div className="mt-4 border-t border-slate-100 pt-4 text-center">
-            <Link href="/chat" className="text-sm font-medium text-emerald-600 hover:text-emerald-700">
+            <button type="button" onClick={() => setActivePanel('conversations')} className="text-sm font-medium text-emerald-600 hover:text-emerald-700">
               Ver todas as conversas →
-            </Link>
+            </button>
           </div>
         </div>
       </div>
@@ -466,19 +488,19 @@ export default function DashboardPage() {
             const pct = Math.max(0, Math.min(100, Math.round(flow.value || 0)));
             return <div key={flow.name} className="grid grid-cols-[20px_1fr_auto_auto] items-center gap-3"><span className="h-5 w-5 rounded bg-emerald-100" /><span className="text-sm font-medium text-slate-700">{flow.name}</span><span className="text-sm font-semibold text-slate-800">{flow.value}</span><span className="text-sm text-slate-500">{pct}%</span><div className="col-span-4 h-2 rounded-full bg-slate-100"><div className="h-2 rounded-full bg-emerald-500" style={{ width: `${pct}%` }} /></div></div>;
           })}</div>}
-          <Link href="/dashboard/flows" className="mt-4 inline-flex items-center justify-center border-t border-slate-100 pt-3 text-sm font-semibold text-emerald-600 transition-colors duration-200 hover:text-emerald-700">Ver todos os fluxos →</Link>
+          <button type="button" onClick={() => setActivePanel('flows')} className="mt-4 inline-flex items-center justify-center border-t border-slate-100 pt-3 text-sm font-semibold text-emerald-600 transition-colors duration-200 hover:text-emerald-700">Ver todos os fluxos →</button>
         </div>
 
         <div className={`${cardClassName} flex min-h-[232px] flex-col p-4 sm:p-5`}>
           <p className="m-0 mb-3 text-base font-semibold text-slate-900">Canais de entrada</p>
           {normalizedChannelItems.length === 0 ? <div className="grid flex-1 place-items-center rounded-xl border border-dashed border-emerald-200 bg-gradient-to-b from-emerald-50/60 to-white px-4 text-center"><div className="space-y-2"><span className="mx-auto inline-flex h-9 w-9 items-center justify-center rounded-full border border-emerald-200 bg-white text-emerald-600 shadow-sm"><RadioTower size={16} /></span><p className="m-0 text-sm font-semibold text-slate-800">Nenhum canal conectado</p><p className="m-0 text-xs leading-relaxed text-slate-500">Conecte WhatsApp, Instagram ou Webchat.</p></div></div> : <div className="flex items-center justify-between gap-4"><div className="relative flex min-h-[190px] items-center justify-center overflow-visible"><PieChart width={190} height={190}><Pie data={normalizedChannelItems} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={52} outerRadius={74} paddingAngle={2} stroke="none">{normalizedChannelItems.map((item) => <Cell key={item.name} fill={channelLegendColors[item.name.toLowerCase()] ?? '#94A3B8'} />)}</Pie></PieChart><div className="pointer-events-none absolute grid h-24 w-24 place-items-center rounded-full bg-white text-center"><p className="m-0 text-xs text-slate-500">Total</p><p className="m-0 text-2xl font-bold">{totalChannels}</p></div></div><div className="space-y-2 text-sm flex-1">{normalizedChannelItems.map((ch) => <div key={ch.name} className="flex items-center justify-between gap-3"><span className="inline-flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: channelLegendColors[ch.name.toLowerCase()] ?? '#94A3B8' }} />{ch.name}</span><span className="font-semibold text-slate-700">{ch.value}%</span></div>)}</div></div>}
-          <Link href="/chat" className="mt-4 inline-flex items-center justify-center border-t border-slate-100 pt-3 text-sm font-semibold text-emerald-600 transition-colors duration-200 hover:text-emerald-700">Ver todos os canais →</Link>
+          <button type="button" onClick={() => setActivePanel('channels')} className="mt-4 inline-flex items-center justify-center border-t border-slate-100 pt-3 text-sm font-semibold text-emerald-600 transition-colors duration-200 hover:text-emerald-700">Ver todos os canais →</button>
         </div>
 
         <div className={`${cardClassName} flex min-h-[232px] flex-col p-4 sm:p-5`}>
           <p className="m-0 mb-3 text-base font-semibold text-slate-900">Desempenho geral</p>
           {viewModel.performance.avgResponseTimeSeconds === null && viewModel.performance.resolvedConversations === 0 && viewModel.performance.csat === null ? <div className="flex-1 rounded-xl border border-dashed border-emerald-200 bg-gradient-to-b from-emerald-50/60 to-white p-4"><div className="mb-3 flex items-center gap-2"><span className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-emerald-200 bg-white text-emerald-600 shadow-sm"><TrendingUp size={16} /></span><div><p className="m-0 text-sm font-semibold text-slate-800">Dados aparecerão aqui conforme as conversas acontecerem.</p></div></div><div className="grid grid-cols-2 gap-2">{[1,2,3,4].map((item) => <div key={item} className="rounded-lg border border-emerald-100/70 bg-white/80 p-2.5"><SkeletonLine width="65%" height={8} /><div className="mt-2"><SkeletonLine width="42%" height={10} /></div></div>)}</div></div> : <div className="space-y-2.5 text-sm text-slate-700">{<div className="grid grid-cols-[1fr_auto] items-center rounded-lg border border-slate-100 bg-slate-50/70 px-3 py-2.5"><span>Tempo médio de resposta</span><span className="text-base font-bold text-slate-900">{viewModel.performance.avgResponseTimeSeconds ?? 'Sem dados'}{viewModel.performance.avgResponseTimeSeconds !== null ? 's' : ''}</span></div>}<div className="grid grid-cols-[1fr_auto] items-center rounded-lg border border-slate-100 bg-slate-50/70 px-3 py-2.5"><span>Conversas resolvidas</span><span className="text-base font-bold text-slate-900">{viewModel.performance.resolvedConversations}</span></div><div className="grid grid-cols-[1fr_auto] items-center rounded-lg border border-slate-100 bg-slate-50/70 px-3 py-2.5"><span>Satisfação (CSAT)</span><span className="text-base font-bold text-slate-900">{viewModel.performance.csat ?? 'Sem dados'}</span></div><div className="grid grid-cols-[1fr_auto] items-center rounded-lg border border-slate-100 bg-slate-50/70 px-3 py-2.5"><span>Abandono de conversas</span><span className="text-base font-bold text-slate-900">{viewModel.performance.abandonmentRate}%</span></div></div>}
-          <Link href="/dashboard/settings" className="mt-4 inline-flex items-center justify-center border-t border-slate-100 pt-3 text-sm font-semibold text-emerald-600 transition-colors duration-200 hover:text-emerald-700">Ver relatório completo →</Link>
+          <button type="button" onClick={() => setActivePanel('report')} className="mt-4 inline-flex items-center justify-center border-t border-slate-100 pt-3 text-sm font-semibold text-emerald-600 transition-colors duration-200 hover:text-emerald-700">Ver relatório completo →</button>
         </div>
       </div>
 
@@ -491,6 +513,42 @@ export default function DashboardPage() {
         onCreated={handleFlowCreated}
         title="Criar novo fluxo"
       />
+      <DashboardInsightPanel
+        open={activePanel !== null}
+        loading={isPanelLoading}
+        onClose={() => setActivePanel(null)}
+        title={activePanel ? panelConfig[activePanel].title : ''}
+        description={activePanel ? panelConfig[activePanel].description : ''}
+      >
+        {activePanel === 'flows' ? (
+          flows.length ? (
+            <div className="space-y-3">
+              {flows.map((flow) => {
+                const isPublished = flow.status?.toLowerCase() === 'published';
+                return <div key={flow.id} className="rounded-2xl border border-emerald-100 bg-white/90 p-4 shadow-sm"><div className="flex items-start justify-between gap-3"><div><p className="m-0 text-sm font-semibold text-slate-900">{flow.name}</p><p className="mt-1 text-xs text-slate-500">Status: {isPublished ? 'Publicado' : 'Rascunho'}</p></div><span className={`rounded-full px-2 py-1 text-[11px] font-semibold ${isPublished ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>{isPublished ? 'Publicado' : 'Rascunho'}</span></div><div className="mt-3 flex gap-2"><button className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-700">Editar</button><button className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-medium text-emerald-700">Abrir analytics</button></div></div>;
+              })}
+            </div>
+          ) : <div className="grid min-h-[260px] place-items-center rounded-2xl border border-dashed border-emerald-200 bg-white/70 p-6 text-center"><p className="text-sm font-medium text-slate-600">Sem fluxos por enquanto. Crie um novo fluxo para visualizar detalhes aqui.</p></div>
+        ) : null}
+        {activePanel === 'channels' ? (
+          <div className="space-y-3">
+            {['WhatsApp', 'Instagram', 'Webchat'].map((channel) => <div key={channel} className="flex items-center justify-between rounded-2xl border border-emerald-100 bg-white/90 p-4"><div><p className="m-0 text-sm font-semibold text-slate-900">{channel}</p><p className="mt-1 text-xs text-slate-500">Canal conectado ao dashboard</p></div><span className="rounded-full bg-emerald-100 px-2 py-1 text-[11px] font-semibold text-emerald-700">Ativo</span></div>)}
+          </div>
+        ) : null}
+        {activePanel === 'report' ? (
+          <div className="space-y-4">
+            <div className="grid gap-3 sm:grid-cols-2">{[{ label: 'Conversões', value: viewModel.conversions }, { label: 'Taxa de resposta', value: `${viewModel.responseRate}%` }, { label: 'CSAT', value: viewModel.performance.csat ?? 'Sem dados' }, { label: 'Abandono', value: `${viewModel.performance.abandonmentRate}%` }].map((item) => <div key={item.label} className="rounded-2xl border border-emerald-100 bg-white p-4"><p className="m-0 text-xs uppercase tracking-wide text-slate-500">{item.label}</p><p className="mt-2 text-xl font-bold text-slate-900">{item.value}</p></div>)}</div>
+            <div className="rounded-2xl border border-emerald-100 bg-white p-4"><p className="m-0 text-sm font-semibold text-slate-900">Tendências</p><p className="mt-1 text-sm text-slate-500">As conversões seguiram estáveis no período e a taxa de resposta apresentou melhor consistência nas últimas interações.</p></div>
+          </div>
+        ) : null}
+        {activePanel === 'conversations' ? (
+          liveItems.length ? (
+            <div className="space-y-3">
+              {liveItems.map((conversation) => <div key={conversation.id} className="rounded-2xl border border-emerald-100 bg-white/90 p-4"><div className="flex items-start justify-between gap-3"><div><p className="m-0 text-sm font-semibold text-slate-900">{conversation.name || conversation.phone}</p><p className="mt-1 text-xs text-slate-500">{getConversationFlowLabel(conversation)}</p></div><span className={`rounded-full px-2 py-1 text-[11px] font-semibold ${conversation.mode === 'human' ? 'bg-sky-100 text-sky-700' : 'bg-purple-100 text-purple-700'}`}>{conversation.mode === 'human' ? 'Humano' : 'IA'}</span></div><p className="mt-3 text-sm text-slate-600">{conversation.last_message || 'Sem mensagem recente.'}</p></div>)}
+            </div>
+          ) : <div className="grid min-h-[260px] place-items-center rounded-2xl border border-dashed border-emerald-200 bg-white/70 p-6 text-center"><p className="text-sm font-medium text-slate-600">Nenhuma conversa recente para exibir. Novas conversas aparecerão aqui automaticamente.</p></div>
+        ) : null}
+      </DashboardInsightPanel>
 </section>
   );
 }
