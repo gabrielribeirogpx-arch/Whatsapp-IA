@@ -21,7 +21,7 @@ from app.services.knowledge_service import (
 )
 from app.services.tenant_service import get_current_tenant
 
-router = APIRouter(prefix="/api/knowledge", tags=["knowledge"])
+router = APIRouter(prefix="/knowledge", tags=["knowledge"])
 
 
 @router.post("", response_model=KnowledgeOut)

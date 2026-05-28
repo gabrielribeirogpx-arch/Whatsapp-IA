@@ -229,7 +229,17 @@ export default function KnowledgePage() {
               </div>
             ))}
 
-            {!items.length ? <p className="empty-state">Nenhum conteúdo cadastrado para esta conta.</p> : null}
+            {!items.length ? (
+              <div className="empty-state" style={{ border: '1px solid #1f2937', borderRadius: 12, padding: 16 }}>
+                <strong>Treine sua IA</strong>
+                <p style={{ marginTop: 8 }}>Sua base está vazia. Comece com uma destas opções:</p>
+                <ul style={{ marginTop: 8, paddingLeft: 18 }}>
+                  <li>Upload de PDF com catálogo, políticas ou manuais.</li>
+                  <li>Adicionar URL pública para ingestão automática.</li>
+                  <li>Criar FAQ com perguntas e respostas frequentes.</li>
+                </ul>
+              </div>
+            ) : null}
           </div>
         </article>
       </section>
