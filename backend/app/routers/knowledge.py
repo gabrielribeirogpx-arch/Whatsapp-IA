@@ -16,6 +16,7 @@ from app.services.knowledge_service import (
     create_knowledge_item,
     delete_knowledge_item,
     list_knowledge_items,
+    update_knowledge_item,
     process_pdf_knowledge,
     process_site_knowledge,
 )
@@ -39,6 +40,25 @@ def list_knowledge(
     db: Session = Depends(get_db),
 ):
     return list_knowledge_items(db=db, tenant_id=tenant.id)
+
+
+@router.put("/{knowledge_id}", response_model=KnowledgeOut)
+def update_knowledge(
+    knowledge_id: UUID,
+    payload: KnowledgeCreate,
+    tenant: Tenant = Depends(get_current_tenant),
+    db: Session = Depends(get_db),
+):
+    updated = update_knowledge_item(
+        db=db,
+        tenant_id=tenant.id,
+        knowledge_id=knowledge_id,
+        title=payload.title,
+        content=payload.content,
+    )
+    if not updated:
+        raise HTTPException(status_code=404, detail="Conteúdo não encontrado")
+    return updated
 
 
 @router.delete("/{knowledge_id}")

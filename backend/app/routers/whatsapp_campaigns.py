@@ -61,6 +61,41 @@ def get_campaign(campaign_id: str, db: Session = Depends(get_db), tenant: Tenant
     return _serialize_campaign(c)
 
 
+@router.put("/{campaign_id}")
+def update_campaign(campaign_id: str, payload: dict, db: Session = Depends(get_db), tenant: Tenant = Depends(get_current_tenant)):
+    c = db.execute(select(WhatsAppCampaign).where(WhatsAppCampaign.id == campaign_id, WhatsAppCampaign.tenant_id == tenant.id)).scalars().first()
+    if not c:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+    if c.status not in {"draft", "paused"}:
+        raise HTTPException(status_code=409, detail="Apenas campanhas em rascunho ou pausadas podem ser editadas")
+
+    if "name" in payload:
+        c.name = str(payload.get("name") or "Campanha").strip() or "Campanha"
+    if "provider_id" in payload:
+        c.provider_id = payload.get("provider_id")
+    if "template_id" in payload:
+        c.template_id = payload.get("template_id")
+    if "scheduled_at" in payload:
+        raw_scheduled_at = payload.get("scheduled_at")
+        c.scheduled_at = datetime.fromisoformat(raw_scheduled_at) if raw_scheduled_at else None
+    if "metadata_json" in payload and isinstance(payload.get("metadata_json"), dict):
+        c.metadata_json = payload.get("metadata_json") or {}
+    c.updated_at = datetime.utcnow()
+    db.commit(); db.refresh(c)
+    return _serialize_campaign(c)
+
+
+@router.delete("/{campaign_id}")
+def delete_campaign(campaign_id: str, db: Session = Depends(get_db), tenant: Tenant = Depends(get_current_tenant)):
+    c = db.execute(select(WhatsAppCampaign).where(WhatsAppCampaign.id == campaign_id, WhatsAppCampaign.tenant_id == tenant.id)).scalars().first()
+    if not c:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+    if c.status == "running":
+        raise HTTPException(status_code=409, detail="Pause a campanha antes de excluir")
+    db.delete(c); db.commit()
+    return {"deleted": True}
+
+
 @router.post("/{campaign_id}/recipients/import")
 def import_recipients(campaign_id: str, payload: dict, db: Session = Depends(get_db), tenant: Tenant = Depends(get_current_tenant)):
     c = db.execute(select(WhatsAppCampaign).where(WhatsAppCampaign.id == campaign_id, WhatsAppCampaign.tenant_id == tenant.id)).scalars().first()

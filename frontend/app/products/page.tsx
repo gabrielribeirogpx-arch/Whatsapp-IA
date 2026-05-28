@@ -31,7 +31,7 @@ export default function ProductsPage() {
   useEffect(() => {
     setIsLoading(true);
     loadProducts()
-      .catch(() => setError('Não foi possível carregar os produtos.'))
+      .catch(() => setError('Falha real ao sincronizar produtos. Tente novamente em alguns instantes.'))
       .finally(() => setIsLoading(false));
   }, []);
 
@@ -146,7 +146,7 @@ export default function ProductsPage() {
             {!isLoading && !products.length ? (
               <div className="products-empty-state" role="status">
                 <span className="products-empty-eyebrow">IA de vendas pronta para aprender</span>
-                <h3>Cadastre seu primeiro produto</h3>
+                <h3>Nenhum item criado ainda</h3>
                 <p>
                   Transforme planos, serviços ou ofertas em argumentos de venda para a IA responder com contexto,
                   preço, benefícios e tratamento de objeções no WhatsApp.

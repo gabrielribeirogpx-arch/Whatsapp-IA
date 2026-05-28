@@ -25,7 +25,7 @@ export default function KnowledgePage() {
   }
 
   useEffect(() => {
-    loadKnowledge().catch(() => setError('Não foi possível carregar a base de conhecimento.'));
+    loadKnowledge().catch(() => setError('Falha real ao sincronizar a base de conhecimento. Tente novamente em alguns instantes.'));
   }, []);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -231,8 +231,8 @@ export default function KnowledgePage() {
 
             {!items.length ? (
               <div className="empty-state" style={{ border: '1px solid #1f2937', borderRadius: 12, padding: 16 }}>
-                <strong>Treine sua IA</strong>
-                <p style={{ marginTop: 8 }}>Sua base está vazia. Comece com uma destas opções:</p>
+                <strong>Nenhum item criado ainda</strong>
+                <p style={{ marginTop: 8 }}>Crie seu primeiro conteúdo para treinar respostas contextualizadas. Comece com uma destas opções:</p>
                 <ul style={{ marginTop: 8, paddingLeft: 18 }}>
                   <li>Upload de PDF com catálogo, políticas ou manuais.</li>
                   <li>Adicionar URL pública para ingestão automática.</li>

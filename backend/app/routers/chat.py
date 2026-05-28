@@ -43,6 +43,23 @@ router = APIRouter(tags=["chat"])
 logger = logging.getLogger(__name__)
 
 
+def _serialize_contact_summary(contact: Contact) -> dict:
+    return {
+        "id": str(contact.id),
+        "tenant_id": str(contact.tenant_id),
+        "name": contact.name,
+        "phone": contact.phone,
+        "source": contact.source,
+        "first_name": contact.first_name,
+        "last_name": contact.last_name,
+        "email": contact.email,
+        "tags_json": contact.tags_json or [],
+        "custom_fields_json": contact.custom_fields_json or {},
+        "created_at": contact.created_at.isoformat() if contact.created_at else None,
+        "updated_at": contact.updated_at.isoformat() if contact.updated_at else None,
+    }
+
+
 def _looks_like_name(text: str) -> bool:
     if not text:
         return False
@@ -611,6 +628,40 @@ async def stream_contact_events(
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 
+
+@router.post("/contacts")
+def create_contact(
+    payload: dict,
+    tenant: Tenant = Depends(get_current_tenant),
+    db: Session = Depends(get_db),
+):
+    phone = normalize_phone(str(payload.get("phone") or ""))
+    if not phone:
+        raise HTTPException(status_code=400, detail="Telefone obrigatório")
+
+    existing = db.execute(
+        select(Contact).where(Contact.tenant_id == tenant.id, Contact.phone == phone)
+    ).scalars().first()
+    if existing:
+        raise HTTPException(status_code=409, detail="Contato já existe para este telefone")
+
+    tags = payload.get("tags_json") if isinstance(payload.get("tags_json"), list) else payload.get("tags")
+    contact = Contact(
+        tenant_id=tenant.id,
+        phone=phone,
+        name=str(payload.get("name") or "").strip() or None,
+        first_name=str(payload.get("first_name") or "").strip() or None,
+        last_name=str(payload.get("last_name") or "").strip() or None,
+        email=str(payload.get("email") or "").strip() or None,
+        source=str(payload.get("source") or "whatsapp").strip() or "whatsapp",
+        tags_json=[str(tag).strip() for tag in tags if str(tag).strip()] if isinstance(tags, list) else [],
+        custom_fields_json=payload.get("custom_fields_json") if isinstance(payload.get("custom_fields_json"), dict) else {},
+    )
+    db.add(contact)
+    db.commit()
+    db.refresh(contact)
+    return _serialize_contact_summary(contact)
+
 @router.patch("/contacts/{contact_id}")
 def update_contact(
     contact_id: UUID,
@@ -650,6 +701,57 @@ def update_contact(
         "tags_json": contact.tags_json or [],
         "custom_fields_json": contact.custom_fields_json or {},
     }
+
+
+@router.put("/contacts/{contact_id}")
+def replace_contact(
+    contact_id: UUID,
+    payload: dict,
+    tenant: Tenant = Depends(get_current_tenant),
+    db: Session = Depends(get_db),
+):
+    contact = db.execute(select(Contact).where(Contact.tenant_id == tenant.id, Contact.id == contact_id)).scalars().first()
+    if not contact:
+        raise HTTPException(status_code=404, detail="Contato não encontrado")
+
+    phone = normalize_phone(str(payload.get("phone") or contact.phone or ""))
+    if not phone:
+        raise HTTPException(status_code=400, detail="Telefone obrigatório")
+
+    duplicate = db.execute(
+        select(Contact).where(Contact.tenant_id == tenant.id, Contact.phone == phone, Contact.id != contact.id)
+    ).scalars().first()
+    if duplicate:
+        raise HTTPException(status_code=409, detail="Já existe outro contato com este telefone")
+
+    tags = payload.get("tags_json") if isinstance(payload.get("tags_json"), list) else payload.get("tags")
+    contact.phone = phone
+    contact.name = str(payload.get("name") or "").strip() or None
+    contact.first_name = str(payload.get("first_name") or "").strip() or None
+    contact.last_name = str(payload.get("last_name") or "").strip() or None
+    contact.email = str(payload.get("email") or "").strip() or None
+    contact.source = str(payload.get("source") or "whatsapp").strip() or "whatsapp"
+    contact.tags_json = [str(tag).strip() for tag in tags if str(tag).strip()] if isinstance(tags, list) else []
+    contact.custom_fields_json = payload.get("custom_fields_json") if isinstance(payload.get("custom_fields_json"), dict) else {}
+    contact.updated_at = datetime.utcnow()
+    db.add(contact)
+    db.commit()
+    db.refresh(contact)
+    return _serialize_contact_summary(contact)
+
+
+@router.delete("/contacts/{contact_id}")
+def delete_contact(
+    contact_id: UUID,
+    tenant: Tenant = Depends(get_current_tenant),
+    db: Session = Depends(get_db),
+):
+    contact = db.execute(select(Contact).where(Contact.tenant_id == tenant.id, Contact.id == contact_id)).scalars().first()
+    if not contact:
+        raise HTTPException(status_code=404, detail="Contato não encontrado")
+    db.delete(contact)
+    db.commit()
+    return {"deleted": True}
 
 @router.patch("/contacts/{contact_id}/custom-fields")
 def update_contact_custom_fields(

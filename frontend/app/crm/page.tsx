@@ -20,7 +20,7 @@ export default function CRMPage() {
   };
 
   useEffect(() => {
-    load().catch(() => setError('Não foi possível carregar os contatos.'));
+    load().catch(() => setError('Falha real ao sincronizar contatos. Tente novamente em alguns instantes.'));
   }, []);
 
   const parsedCustomFields = useMemo(() => {
@@ -37,7 +37,16 @@ export default function CRMPage() {
         <Link href="/chat" className="primary-button">Abrir chat</Link>
       </section>
       {error ? <p className="error-text">{error}</p> : null}
-      <section className="crm-table-wrap">
+      {!contacts.length && !error ? (
+        <div className="products-empty-state" role="status">
+          <span className="products-empty-eyebrow">CRM pronto para crescer</span>
+          <h3>Nenhum item criado ainda</h3>
+          <p>Os contatos serão criados a partir das conversas e campanhas. Comece abrindo o chat ou importando uma audiência em campanhas.</p>
+          <Link href="/chat" className="primary-button">Abrir chat</Link>
+        </div>
+      ) : null}
+
+      {contacts.length ? <section className="crm-table-wrap">
         <table className="crm-table"><thead><tr><th>Contato</th><th>Telefone</th><th>Plano</th><th>Cidade</th><th>Última mensagem</th></tr></thead>
           <tbody>
             {contacts.map((contact) => (
@@ -47,7 +56,7 @@ export default function CRMPage() {
             ))}
           </tbody>
         </table>
-      </section>
+      </section> : null}
       {editing ? <div className='fixed inset-0 bg-black/30 flex items-center justify-center z-50' onClick={() => setEditing(null)}><div className='bg-white p-4 rounded-lg w-[640px]' onClick={(e) => e.stopPropagation()}>
         <h3>Editar contato</h3>
         <label>Nome<input value={name} onChange={(e) => setName(e.target.value)} className='w-full border p-2' /></label>
