@@ -71,6 +71,28 @@ def list_knowledge_items(db: Session, tenant_id: uuid.UUID) -> list[KnowledgeBas
     )
 
 
+def update_knowledge_item(db: Session, tenant_id: uuid.UUID, knowledge_id: uuid.UUID, title: str, content: str) -> KnowledgeBase | None:
+    item = (
+        db.execute(
+            select(KnowledgeBase).where(
+                KnowledgeBase.id == knowledge_id,
+                KnowledgeBase.tenant_id == tenant_id,
+            )
+        )
+        .scalars()
+        .first()
+    )
+    if not item:
+        return None
+
+    item.title = title.strip()
+    item.content = content.strip()
+    item.embedding = generate_embedding(content)
+    db.commit()
+    db.refresh(item)
+    return item
+
+
 def delete_knowledge_item(db: Session, tenant_id: uuid.UUID, knowledge_id: uuid.UUID) -> bool:
     item = (
         db.execute(

@@ -24,7 +24,7 @@ export default function PipelinePage() {
       const data = await getPipeline();
       setStages(data);
     } catch {
-      setError('Não foi possível carregar o pipeline.');
+      setError('Falha real ao sincronizar o pipeline. Tente novamente em alguns instantes.');
     } finally {
       setIsLoading(false);
     }
@@ -41,11 +41,13 @@ export default function PipelinePage() {
       await moveLeadToStage(draggingLead.id, stageId);
       await fetchPipeline();
     } catch {
-      setError('Não foi possível mover o contato.');
+      setError('Falha real ao mover o contato. Tente novamente.');
     } finally {
       setDraggingLead(null);
     }
   };
+
+  const totalLeads = stages.reduce((total, stage) => total + stage.leads.length, 0);
 
   return (
     <main className="dashboard-page">
@@ -67,6 +69,23 @@ export default function PipelinePage() {
       {error ? <p className="error-text">{error}</p> : null}
 
       {isLoading ? <p>Carregando pipeline...</p> : null}
+
+      {!isLoading && stages.length > 0 && totalLeads === 0 ? (
+        <div className="products-empty-state" role="status">
+          <span className="products-empty-eyebrow">Pipeline pronto para operar</span>
+          <h3>Nenhum item criado ainda</h3>
+          <p>Novos leads aparecerão automaticamente quando contatos qualificados chegarem pelo WhatsApp. Use o CRM e as conversas para começar a nutrir oportunidades.</p>
+          <Link href="/chat" className="primary-button">Iniciar conversas</Link>
+        </div>
+      ) : null}
+
+      {!isLoading && stages.length === 0 ? (
+        <div className="products-empty-state" role="status">
+          <span className="products-empty-eyebrow">Configuração inicial</span>
+          <h3>Nenhum item criado ainda</h3>
+          <p>Crie etapas do pipeline para organizar leads por qualificação, proposta e fechamento.</p>
+        </div>
+      ) : null}
 
       <section className="pipeline-board">
         {stages.map((stage) => (
