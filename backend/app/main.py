@@ -167,6 +167,9 @@ async def options_handler(path: str):
     return Response(status_code=204)
 
 
+# Compatibilidade com testes e imports legados que ainda usam o nome antigo.
+preflight_handler = options_handler
+
 
 # ✅ ROUTES
 app.include_router(auth.router, prefix="/api")

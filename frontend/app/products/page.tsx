@@ -21,6 +21,7 @@ export default function ProductsPage() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
 
   async function loadProducts() {
     const data = await getProducts();
@@ -28,7 +29,10 @@ export default function ProductsPage() {
   }
 
   useEffect(() => {
-    loadProducts().catch(() => setError('Não foi possível carregar os produtos.'));
+    setIsLoading(true);
+    loadProducts()
+      .catch(() => setError('Não foi possível carregar os produtos.'))
+      .finally(() => setIsLoading(false));
   }, []);
 
   const submitLabel = useMemo(() => (editingId ? 'Salvar alterações' : 'Adicionar produto'), [editingId]);
@@ -119,11 +123,15 @@ export default function ProductsPage() {
         <article className="products-list-card">
           <h2>Lista de produtos</h2>
           <div className="products-list">
-            {products.map((product) => (
+            {isLoading ? <p className="products-loading">Carregando produtos...</p> : null}
+
+            {!isLoading && products.map((product) => (
               <div className="product-card" key={product.id}>
                 <strong>{product.name}</strong>
                 <p>{product.description || 'Sem descrição.'}</p>
                 <small>Preço: {product.price || '-'}</small>
+                {product.benefits ? <small>Benefícios: {product.benefits}</small> : null}
+                {product.objections ? <small>Objeções: {product.objections}</small> : null}
                 <div className="product-actions">
                   <button type="button" className="secondary-button" onClick={() => startEdit(product)}>
                     Editar
@@ -135,7 +143,21 @@ export default function ProductsPage() {
               </div>
             ))}
 
-            {!products.length ? <p className="empty-state">Nenhum produto cadastrado para esta conta.</p> : null}
+            {!isLoading && !products.length ? (
+              <div className="products-empty-state" role="status">
+                <span className="products-empty-eyebrow">IA de vendas pronta para aprender</span>
+                <h3>Cadastre seu primeiro produto</h3>
+                <p>
+                  Transforme planos, serviços ou ofertas em argumentos de venda para a IA responder com contexto,
+                  preço, benefícios e tratamento de objeções no WhatsApp.
+                </p>
+                <ul>
+                  <li>Exemplo: Consultoria Premium — diagnóstico, implantação e suporte.</li>
+                  <li>Exemplo: Plano Mensal — recorrência, bônus e garantia.</li>
+                  <li>Exemplo: Produto físico — diferenciais, prazo e prova social.</li>
+                </ul>
+              </div>
+            ) : null}
           </div>
         </article>
 
