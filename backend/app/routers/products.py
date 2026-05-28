@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -9,16 +9,24 @@ from app.models import Product, Tenant
 from app.schemas.product import ProductCreate, ProductOut, ProductUpdate
 from app.services.tenant_service import get_current_tenant
 
-router = APIRouter(prefix="/api/products", tags=["products"])
+router = APIRouter(prefix="/products", tags=["products"])
 
 
 @router.get("", response_model=list[ProductOut])
 def list_products(
     tenant: Tenant = Depends(get_current_tenant),
     db: Session = Depends(get_db),
+    limit: int = Query(default=50, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
 ):
     return (
-        db.execute(select(Product).where(Product.tenant_id == tenant.id).order_by(Product.created_at.desc(), Product.id.desc()))
+        db.execute(
+            select(Product)
+            .where(Product.tenant_id == tenant.id)
+            .order_by(Product.created_at.desc(), Product.id.desc())
+            .offset(offset)
+            .limit(limit)
+        )
         .scalars()
         .all()
     )
