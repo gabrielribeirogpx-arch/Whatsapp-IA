@@ -10,7 +10,6 @@ import {
   KeyRound,
   LockKeyhole,
   LogOut,
-  PlugZap,
   ShieldCheck,
   Sparkles,
   User,
@@ -199,24 +198,23 @@ export default function SidebarUserProfile({ expanded }: SidebarUserProfileProps
     {
       title: 'Conta',
       items: [
-        { label: 'Meu perfil', description: 'Dados, avatar e identidade', href: '/dashboard/settings#profile', icon: User },
-        { label: 'Preferências', description: 'Notificações e experiência', href: '/dashboard/settings#preferences', icon: Bell }
+        { label: 'Meu perfil', description: 'Dados, avatar e identidade', href: '/dashboard/settings?tab=profile', icon: User },
+        { label: 'Preferências', description: 'Notificações e experiência', href: '/dashboard/settings?tab=preferences', icon: Bell }
       ]
     },
     {
       title: 'Workspace/Admin',
       items: [
-        { label: 'Usuários', description: 'Convide e gerencie o time', href: '/dashboard/settings#users', icon: UsersRound },
-        { label: 'Permissões', description: 'Papéis e acesso por área', href: '/dashboard/settings#permissions', icon: ShieldCheck },
-        { label: 'Segurança', description: 'Sessões e políticas de login', href: '/dashboard/settings#security', icon: LockKeyhole },
-        { label: 'API Keys', description: 'Tokens para integrações', href: '/dashboard/settings#api-keys', icon: KeyRound }
+        { label: 'Usuários', description: 'Convide e gerencie o time', href: '/dashboard/settings?tab=users', icon: UsersRound },
+        { label: 'Permissões', description: 'Papéis e acesso por área', href: '/dashboard/settings?tab=permissions', icon: ShieldCheck },
+        { label: 'Segurança', description: 'Sessões e políticas de login', href: '/dashboard/settings?tab=security', icon: LockKeyhole },
+        { label: 'API Keys', description: 'Tokens para integrações', href: '/dashboard/settings?tab=apikeys', icon: KeyRound }
       ]
     },
     {
       title: 'Sistema',
       items: [
-        { label: 'Billing', description: 'Plano, faturas e limites', href: '/dashboard/settings#billing', icon: CreditCard },
-        { label: 'Integrações', description: 'WhatsApp, CRM e webhooks', href: '/dashboard/settings#integrations', icon: PlugZap }
+        { label: 'Billing', description: 'Plano, faturas e limites', href: '/dashboard/settings?tab=billing', icon: CreditCard }
       ]
     },
     {
