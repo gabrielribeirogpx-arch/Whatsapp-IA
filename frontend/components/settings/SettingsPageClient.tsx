@@ -6,7 +6,7 @@ import SettingsContent from '@/components/settings/SettingsContent';
 import SettingsLayout from '@/components/settings/SettingsLayout';
 import { SettingsTabId, settingsTabIds } from '@/components/settings/SettingsSidebar';
 
-const DEFAULT_TAB: SettingsTabId = 'users';
+const DEFAULT_TAB: SettingsTabId = 'whatsapp-business';
 
 export default function SettingsPageClient() {
   const router = useRouter();

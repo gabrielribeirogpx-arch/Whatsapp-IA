@@ -16,10 +16,10 @@ export default function AccountLayout({ activeTab, onTabChange, children }: Acco
           <div className='pointer-events-none absolute bottom-0 left-1/3 h-24 w-24 rounded-full bg-cyan-300/10 blur-2xl' />
           <p className='inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/10 px-3 py-1 text-xs font-semibold text-emerald-100 shadow-sm backdrop-blur'>Account Hub</p>
           <div className='mt-4 flex flex-wrap items-center gap-3'>
-            <h1 className='text-2xl font-semibold tracking-tight md:text-[1.9rem]'>Conta do usuário</h1>
-            <span className='rounded-full border border-emerald-300/30 bg-emerald-300/10 px-3 py-1 text-xs font-semibold text-emerald-100'>Personal Control Center</span>
+            <h1 className='text-2xl font-semibold tracking-tight md:text-[1.9rem]'>Conta e Workspace</h1>
+            <span className='rounded-full border border-emerald-300/30 bg-emerald-300/10 px-3 py-1 text-xs font-semibold text-emerald-100'>Account + Workspace</span>
           </div>
-          <p className='mt-2 max-w-3xl text-sm leading-relaxed text-slate-300'>Controle seu perfil, preferências e segurança sem misturar dados pessoais com administração do workspace.</p>
+          <p className='mt-2 max-w-3xl text-sm leading-relaxed text-slate-300'>Centralize perfil, preferências, segurança e administração do workspace fora do console operacional do WhatsApp.</p>
         </header>
 
         <div className='grid min-w-0 grid-cols-1 gap-5 lg:grid-cols-[280px_minmax(0,1fr)]'>
