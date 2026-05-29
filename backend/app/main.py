@@ -107,19 +107,33 @@ def verify_contacts_columns() -> None:
         print(f"[DB CHECK] contacts verification failed: {exc}")
 
 
+REQUIRED_CORS_ORIGINS = (
+    "https://frontend-whatsapp-ia-production.up.railway.app",
+    "https://whatsapp-ia-nine.vercel.app",
+)
+
+DEFAULT_CORS_ORIGINS = (
+    *REQUIRED_CORS_ORIGINS,
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+)
+
+
 def _parse_allowed_origins() -> list[str]:
-    default_origins = (
-        "https://whatsapp-ia-nine.vercel.app,"
-        "https://frontend-whatsapp-ia-production.up.railway.app,"
-        "http://localhost:3000,"
-        "http://127.0.0.1:3000"
-    )
-    origins = (
+    configured_origins = (
         os.getenv("CORS_ORIGINS")
         or os.getenv("CORS_ALLOW_ORIGINS")
-        or default_origins
     )
-    parsed = [origin.strip() for origin in origins.split(",") if origin.strip()]
+    candidate_origins = (
+        [origin.strip() for origin in configured_origins.split(",") if origin.strip()]
+        if configured_origins
+        else list(DEFAULT_CORS_ORIGINS)
+    )
+
+    parsed: list[str] = []
+    for origin in [*candidate_origins, *REQUIRED_CORS_ORIGINS]:
+        if origin not in parsed:
+            parsed.append(origin)
     return parsed
 
 
@@ -143,6 +157,15 @@ app.add_middleware(
     allow_headers=["*"],
     allow_origin_regex=ALLOWED_ORIGIN_REGEX,
 )
+
+
+@app.middleware("http")
+async def cors_debug_middleware(request: Request, call_next):
+    origin = request.headers.get("origin")
+    if origin:
+        print(f"[CORS DEBUG] origin={origin} path={request.url.path}", flush=True)
+    return await call_next(request)
+
 
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
