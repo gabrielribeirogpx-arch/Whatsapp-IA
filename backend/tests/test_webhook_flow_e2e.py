@@ -82,7 +82,7 @@ def test_webhook_flow_e2e(monkeypatch):
         )
 
         tenant = SimpleNamespace(id=tenant_id)
-        contact = SimpleNamespace(id=f"ct-{tenant_id}", phone="5511999990001")
+        contact = SimpleNamespace(id=f"ct-{tenant_id}", phone="5511999990001", score=0, tags_json=[])
 
         monkeypatch.setattr(message_worker, "get_redis_client", lambda: _FakeRedis())
         monkeypatch.setattr(message_worker, "SessionLocal", lambda: db)
@@ -91,6 +91,7 @@ def test_webhook_flow_e2e(monkeypatch):
         monkeypatch.setattr(message_worker, "upsert_contact_for_phone", lambda *args, **kwargs: contact)
         monkeypatch.setattr(message_worker, "ensure_conversation_contact_link", lambda *args, **kwargs: None)
         monkeypatch.setattr(message_worker, "get_or_create_conversation", lambda *args, **kwargs: (conversation, False))
+        monkeypatch.setattr(message_worker, "ensure_whatsapp_lead_for_inbound", lambda *args, **kwargs: None)
         monkeypatch.setattr(message_worker, "normalize_meta_message", lambda payload: [{"phone": "5511999990001", "text": payload["text"], "message_id": payload["message_id"], "name": "Cliente", "phone_number_id": payload["phone_number_id"]}])
 
         import app.services.message_router as message_router

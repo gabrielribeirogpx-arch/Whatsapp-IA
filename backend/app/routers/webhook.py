@@ -14,6 +14,7 @@ from app.models import Conversation, Message, FlowExecution, FlowVersion
 from app.schemas.chat import MessageOut
 from app.services.contact_sync_service import ensure_conversation_contact_link, upsert_contact_for_phone
 from app.services.conversation_service import get_or_create_conversation
+from app.services.lead_auto_service import ensure_whatsapp_lead_for_inbound
 from app.services.message_router import handle_incoming_message
 from app.services.idempotency_service import register_processed_message
 from app.services.tenant_query import enforce_tenant_filter, require_tenant_id
@@ -296,6 +297,15 @@ async def _process_meta_webhook(request: Request, db: Session) -> dict[str, str]
                     contact_name,
                 )
             ensure_conversation_contact_link(conversation, contact)
+            ensure_whatsapp_lead_for_inbound(
+                db=db,
+                tenant_id=tenant_id,
+                phone=normalized_phone,
+                contact=contact,
+                conversation=conversation,
+                name=contact_name or conversation.name,
+                message_text=incoming_message,
+            )
 
             if conversation.name is None and _looks_like_name(incoming_message):
                 conversation.name = incoming_message.strip()
