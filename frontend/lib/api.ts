@@ -33,6 +33,7 @@ import {
   AccountProfile,
   AccountPreferences,
   AccountSecurity,
+  AuditLog,
   WorkspaceUser
 } from './types';
 
@@ -618,6 +619,23 @@ export async function getAccountSecurity(): Promise<AccountSecurity> {
 export async function updateAccountPassword(payload: { current_password: string; new_password: string; confirm_password: string }): Promise<{ message: string }> {
   const res = await apiFetch('/api/account/security/password', { method: 'POST', body: JSON.stringify(payload) });
   return parseApiResponse<{ message: string }>(res);
+}
+
+export async function revokeAccountSession(sessionId: string): Promise<{ message: string }> {
+  const res = await apiFetch(`/api/account/security/sessions/${sessionId}/revoke`, { method: 'POST' });
+  return parseApiResponse<{ message: string }>(res);
+}
+
+export async function revokeOtherAccountSessions(): Promise<{ message: string; revoked_count: number }> {
+  const res = await apiFetch('/api/account/security/sessions/revoke-others', { method: 'POST' });
+  return parseApiResponse<{ message: string; revoked_count: number }>(res);
+}
+
+export async function listAuditLogs(filters: { user_id?: string; action?: string; start_date?: string; end_date?: string } = {}): Promise<AuditLog[]> {
+  const params = new URLSearchParams();
+  Object.entries(filters).forEach(([key, value]) => { if (value) params.set(key, value); });
+  const res = await apiFetch(`/api/security/audit${params.toString() ? `?${params.toString()}` : ''}`);
+  return parseApiResponse<AuditLog[]>(res);
 }
 
 export async function listWorkspaceUsers(): Promise<WorkspaceUser[]> {
