@@ -6,10 +6,14 @@ import {
   Bell,
   Building2,
   ChevronRight,
+  CreditCard,
+  Layers3,
   LockKeyhole,
   LogOut,
+  ShieldCheck,
   Sparkles,
-  User
+  User,
+  UsersRound
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { getTenantSessionFromStorage } from '@/lib/api';
@@ -122,7 +126,7 @@ export default function SidebarUserProfile({ expanded }: SidebarUserProfileProps
     if (!button || isMobile) return;
 
     const rect = button.getBoundingClientRect();
-    const menuHeight = 408;
+    const menuHeight = 640;
     const top = Math.max(12, Math.min(rect.bottom - menuHeight, window.innerHeight - menuHeight - 12));
     setMenuPosition({
       top,
@@ -197,6 +201,15 @@ export default function SidebarUserProfile({ expanded }: SidebarUserProfileProps
         { label: 'Meu perfil', description: 'Dados, avatar e identidade', href: '/dashboard/account?tab=profile', icon: User },
         { label: 'Preferências', description: 'Notificações e experiência', href: '/dashboard/account?tab=preferences', icon: Bell },
         { label: 'Segurança', description: 'Sessões e proteção da conta', href: '/dashboard/account?tab=security', icon: LockKeyhole }
+      ]
+    },
+    {
+      title: 'Workspace',
+      items: [
+        { label: 'Usuários', description: 'Convites, seats e time', href: '/dashboard/account?tab=users', icon: UsersRound },
+        { label: 'Permissões', description: 'Papéis e políticas de acesso', href: '/dashboard/account?tab=permissions', icon: ShieldCheck },
+        { label: 'Billing', description: 'Plano, faturas e limites', href: '/dashboard/account?tab=billing', icon: CreditCard },
+        { label: 'Integrações', description: 'Apps e automações do workspace', href: '/dashboard/account?tab=integrations', icon: Layers3 }
       ]
     },
     {

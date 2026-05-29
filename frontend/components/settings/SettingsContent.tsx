@@ -56,14 +56,14 @@ const emptyStates = {
     icon: CreditCard,
     eyebrow: 'Revenue Operations',
     title: 'Billing',
-    description: 'Planos, faturas, limites de uso e add-ons serão apresentados sem sair do Settings Hub.',
+    description: 'Planos, faturas, limites de uso e add-ons ficam centralizados no Account Hub do workspace.',
     roadmap: ['Plano atual e consumo por workspace', 'Faturas, método de pagamento e centros de custo', 'Limites, add-ons e forecast de uso']
   },
   integrations: {
     icon: Layers3,
     eyebrow: 'Integration Catalog',
     title: 'Integrações',
-    description: 'Apps conectados, automações e conectores do workspace serão administrados nesta área.',
+    description: 'Apps conectados, automações e conectores do workspace ficam centralizados no Account Hub.',
     roadmap: ['Catálogo de integrações por área', 'OAuth, webhooks e automações autorizadas', 'Monitoramento de saúde dos conectores']
   }
 } satisfies Partial<Record<SettingsTabId | AccountTabId, { icon: LucideIcon; eyebrow: string; title: string; description: string; roadmap: string[] }>>;
