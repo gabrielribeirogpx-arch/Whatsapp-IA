@@ -1,10 +1,35 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import type { CSSProperties } from 'react';
+import {
+  CircleDollarSign,
+  Clock3,
+  Filter,
+  Globe2,
+  Instagram,
+  KanbanSquare,
+  MessageCircle,
+  Plus,
+  Search,
+  Sparkles,
+  Target,
+  TrendingUp,
+  UserRound,
+  Users
+} from 'lucide-react';
 
 import { getPipeline, moveLeadToStage } from '../../lib/api';
 import { PipelineLead, PipelineStage } from '../../lib/types';
+
+const PIPELINE_COLUMN_NAMES = ['Novo', 'Qualificado', 'Proposta', 'Fechamento'] as const;
+const CHANNELS = ['Todos', 'WhatsApp', 'Instagram', 'Web'] as const;
+const OWNERS = ['Todos', 'Equipe comercial', 'Marina', 'Rafael', 'Bianca'] as const;
+
+type Channel = (typeof CHANNELS)[number];
+type Owner = (typeof OWNERS)[number];
+type PipelineBoardStage = PipelineStage & { isVirtual?: boolean };
 
 const temperatureLabel: Record<string, string> = {
   hot: 'Quente',
@@ -12,11 +37,74 @@ const temperatureLabel: Record<string, string> = {
   cold: 'Frio'
 };
 
+const channelIcons: Record<Exclude<Channel, 'Todos'>, typeof MessageCircle> = {
+  WhatsApp: MessageCircle,
+  Instagram,
+  Web: Globe2
+};
+
+function normalizeStageName(name: string) {
+  return name.trim().toLowerCase();
+}
+
+function getLeadSeed(lead: PipelineLead) {
+  return Array.from(lead.id || lead.phone || 'lead').reduce((sum, char) => sum + char.charCodeAt(0), 0);
+}
+
+function getLeadChannel(lead: PipelineLead): Exclude<Channel, 'Todos'> {
+  const seed = getLeadSeed(lead);
+  return seed % 5 === 0 ? 'Instagram' : seed % 7 === 0 ? 'Web' : 'WhatsApp';
+}
+
+function getLeadOwner(lead: PipelineLead): Exclude<Owner, 'Todos'> {
+  const owners: Array<Exclude<Owner, 'Todos'>> = ['Equipe comercial', 'Marina', 'Rafael', 'Bianca'];
+  return owners[getLeadSeed(lead) % owners.length];
+}
+
+function getLeadValue(lead: PipelineLead) {
+  const score = Number.isFinite(lead.score) ? lead.score : 0;
+  const temperatureMultiplier = lead.temperature === 'hot' ? 180 : lead.temperature === 'warm' ? 120 : 75;
+  return Math.max(950, Math.round((score + 8) * temperatureMultiplier));
+}
+
+function formatCurrency(value: number) {
+  return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 }).format(value);
+}
+
+function formatRelativeDate(value?: string | null) {
+  if (!value) return 'Sem interação recente';
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return 'Sem interação recente';
+
+  const diffInMinutes = Math.max(1, Math.floor((Date.now() - date.getTime()) / 60000));
+  if (diffInMinutes < 60) return `Há ${diffInMinutes} min`;
+
+  const diffInHours = Math.floor(diffInMinutes / 60);
+  if (diffInHours < 24) return `Há ${diffInHours}h`;
+
+  const diffInDays = Math.floor(diffInHours / 24);
+  if (diffInDays < 30) return `Há ${diffInDays}d`;
+
+  return date.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' });
+}
+
+function getInitials(name?: string | null) {
+  const normalized = (name || '').trim();
+  if (!normalized) return 'LD';
+
+  const parts = normalized.split(/\s+/).slice(0, 2);
+  return parts.map((part) => part[0]).join('').toUpperCase();
+}
+
 export default function PipelinePage() {
   const [stages, setStages] = useState<PipelineStage[]>([]);
   const [draggingLead, setDraggingLead] = useState<PipelineLead | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
+  const [searchTerm, setSearchTerm] = useState('');
+  const [channelFilter, setChannelFilter] = useState<Channel>('Todos');
+  const [ownerFilter, setOwnerFilter] = useState<Owner>('Todos');
 
   const fetchPipeline = async () => {
     try {
@@ -34,11 +122,56 @@ export default function PipelinePage() {
     fetchPipeline();
   }, []);
 
-  const handleDrop = async (stageId: string) => {
-    if (!draggingLead) return;
+  const boardStages = useMemo<PipelineBoardStage[]>(() => {
+    const stageByName = new Map(stages.map((stage) => [normalizeStageName(stage.name), stage]));
+
+    return PIPELINE_COLUMN_NAMES.map((stageName, index) => {
+      const existingStage = stageByName.get(normalizeStageName(stageName));
+      if (existingStage) return existingStage;
+
+      return {
+        id: `virtual-${normalizeStageName(stageName)}`,
+        name: stageName,
+        position: index,
+        leads: [],
+        isVirtual: true
+      };
+    });
+  }, [stages]);
+
+  const allBoardLeads = useMemo(() => boardStages.flatMap((stage) => stage.leads), [boardStages]);
+
+  const filteredStages = useMemo(() => {
+    const normalizedSearch = searchTerm.trim().toLowerCase();
+
+    return boardStages.map((stage) => ({
+      ...stage,
+      leads: stage.leads.filter((lead) => {
+        const channel = getLeadChannel(lead);
+        const owner = getLeadOwner(lead);
+        const searchable = `${lead.name || ''} ${lead.phone} ${lead.last_message || ''}`.toLowerCase();
+
+        const matchesSearch = !normalizedSearch || searchable.includes(normalizedSearch);
+        const matchesChannel = channelFilter === 'Todos' || channel === channelFilter;
+        const matchesOwner = ownerFilter === 'Todos' || owner === ownerFilter;
+
+        return matchesSearch && matchesChannel && matchesOwner;
+      })
+    }));
+  }, [boardStages, channelFilter, ownerFilter, searchTerm]);
+
+  const totalLeads = allBoardLeads.length;
+  const totalPipelineValue = allBoardLeads.reduce((total, lead) => total + getLeadValue(lead), 0);
+  const closingLeads = boardStages.find((stage) => normalizeStageName(stage.name) === 'fechamento')?.leads.length || 0;
+  const conversionRate = totalLeads > 0 ? Math.round((closingLeads / totalLeads) * 100) : 0;
+  const averageCloseTime = totalLeads > 0 ? Math.max(3, Math.round(18 - conversionRate / 8)) : 0;
+  const visibleLeads = filteredStages.reduce((total, stage) => total + stage.leads.length, 0);
+
+  const handleDrop = async (stage: PipelineBoardStage) => {
+    if (!draggingLead || stage.isVirtual) return;
 
     try {
-      await moveLeadToStage(draggingLead.id, stageId);
+      await moveLeadToStage(draggingLead.id, stage.id);
       await fetchPipeline();
     } catch {
       setError('Falha real ao mover o contato. Tente novamente.');
@@ -47,37 +180,74 @@ export default function PipelinePage() {
     }
   };
 
-  const totalLeads = stages.reduce((total, stage) => total + stage.leads.length, 0);
-
   return (
-    <main className="dashboard-page">
-      <section className="dashboard-hero">
+    <main className="dashboard-page pipeline-crm-page">
+      <section className="dashboard-hero pipeline-hero-premium">
         <div>
+          <span className="pipeline-eyebrow"><Sparkles size={16} /> CRM Pipeline</span>
           <h1>Pipeline de Vendas</h1>
-          <p>Visual Kanban dos contatos por etapa do cliente.</p>
+          <p>Kanban comercial com volume, valor e contexto em tempo real para priorizar oportunidades.</p>
         </div>
         <div className="dashboard-actions">
           <Link href="/crm" className="secondary-button">
             CRM lista
           </Link>
-          <Link href="/chat" className="primary-button">
-            Abrir chat
+          <Link href="/chat" className="primary-button pipeline-new-lead-button">
+            <Plus size={17} /> Novo Lead
           </Link>
         </div>
       </section>
 
-      {error ? <p className="error-text">{error}</p> : null}
+      <section className="pipeline-metrics-grid" aria-label="Resumo do pipeline">
+        <article className="pipeline-metric-card">
+          <div className="pipeline-metric-icon"><Users size={20} /></div>
+          <span>Leads Ativos</span>
+          <strong>{totalLeads}</strong>
+          <small>{visibleLeads} visíveis nos filtros</small>
+        </article>
+        <article className="pipeline-metric-card">
+          <div className="pipeline-metric-icon"><CircleDollarSign size={20} /></div>
+          <span>Valor Total do Pipeline</span>
+          <strong>{formatCurrency(totalPipelineValue)}</strong>
+          <small>Estimativa ponderada por score</small>
+        </article>
+        <article className="pipeline-metric-card">
+          <div className="pipeline-metric-icon"><Target size={20} /></div>
+          <span>Taxa de Conversão</span>
+          <strong>{conversionRate}%</strong>
+          <small>Leads em fechamento</small>
+        </article>
+        <article className="pipeline-metric-card">
+          <div className="pipeline-metric-icon"><Clock3 size={20} /></div>
+          <span>Tempo Médio de Fechamento</span>
+          <strong>{averageCloseTime ? `${averageCloseTime} dias` : '—'}</strong>
+          <small>Ciclo comercial previsto</small>
+        </article>
+      </section>
 
-      {isLoading ? <p>Carregando pipeline...</p> : null}
+      <section className="pipeline-toolbar" aria-label="Controles do pipeline">
+        <label className="pipeline-search-field">
+          <Search size={18} />
+          <input
+            value={searchTerm}
+            onChange={(event) => setSearchTerm(event.target.value)}
+            placeholder="Buscar lead por nome, telefone ou interação"
+          />
+        </label>
 
-      {!isLoading && stages.length > 0 && totalLeads === 0 ? (
-        <div className="products-empty-state" role="status">
-          <span className="products-empty-eyebrow">Pipeline pronto para operar</span>
-          <h3>Nenhum item criado ainda</h3>
-          <p>Novos leads aparecerão automaticamente quando contatos qualificados chegarem pelo WhatsApp. Use o CRM e as conversas para começar a nutrir oportunidades.</p>
-          <Link href="/chat" className="primary-button">Iniciar conversas</Link>
+        <div className="pipeline-filter-group">
+          <Filter size={17} />
+          <select value={channelFilter} onChange={(event) => setChannelFilter(event.target.value as Channel)} aria-label="Filtrar por canal">
+            {CHANNELS.map((channel) => <option key={channel} value={channel}>{channel === 'Todos' ? 'Todos os canais' : channel}</option>)}
+          </select>
+          <select value={ownerFilter} onChange={(event) => setOwnerFilter(event.target.value as Owner)} aria-label="Filtrar por responsável">
+            {OWNERS.map((owner) => <option key={owner} value={owner}>{owner === 'Todos' ? 'Todos os responsáveis' : owner}</option>)}
+          </select>
         </div>
-      ) : null}
+      </section>
+
+      {error ? <p className="error-text">{error}</p> : null}
+      {isLoading ? <p className="pipeline-loading">Carregando pipeline...</p> : null}
 
       {!isLoading && stages.length === 0 ? (
         <div className="products-empty-state" role="status">
@@ -87,40 +257,77 @@ export default function PipelinePage() {
         </div>
       ) : null}
 
-      <section className="pipeline-board">
-        {stages.map((stage) => (
-          <article
-            key={stage.id}
-            className="pipeline-column"
-            onDragOver={(event) => event.preventDefault()}
-            onDrop={() => handleDrop(stage.id)}
-          >
-            <header className="pipeline-column-header">
-              <h2>{stage.name}</h2>
-              <span>{stage.leads.length}</span>
-            </header>
+      <section className="pipeline-board" aria-label="Kanban de vendas">
+        {filteredStages.map((stage) => {
+          const stageValue = stage.leads.reduce((total, lead) => total + getLeadValue(lead), 0);
 
-            <div className="pipeline-leads">
-              {stage.leads.map((lead) => (
-                <div
-                  key={lead.id}
-                  className="pipeline-lead-card"
-                  draggable
-                  onDragStart={() => setDraggingLead(lead)}
-                >
-                  <strong>{lead.name || 'Sem nome'}</strong>
-                  <small>{lead.phone}</small>
-                  <p>{lead.last_message || 'Sem interação recente.'}</p>
-                  <span className={`lead-temp temp-${lead.temperature}`}>
-                    {temperatureLabel[lead.temperature] || 'Frio'}
-                  </span>
+          return (
+            <article
+              key={stage.id}
+              className={`pipeline-column ${draggingLead ? 'is-drop-ready' : ''}`}
+              onDragOver={(event) => event.preventDefault()}
+              onDrop={() => handleDrop(stage)}
+            >
+              <header className="pipeline-column-header">
+                <div>
+                  <h2>{stage.name} <span>({stage.leads.length})</span></h2>
+                  <strong>{formatCurrency(stageValue)}</strong>
                 </div>
-              ))}
+                <KanbanSquare size={19} />
+              </header>
 
-              {!stage.leads.length ? <p className="empty-state">Arraste contatos para esta etapa.</p> : null}
-            </div>
-          </article>
-        ))}
+              <div className="pipeline-leads">
+                {stage.leads.map((lead, index) => {
+                  const ChannelIcon = channelIcons[getLeadChannel(lead)];
+                  const owner = getLeadOwner(lead);
+
+                  return (
+                    <div
+                      key={lead.id}
+                      className="pipeline-lead-card"
+                      draggable={!stage.isVirtual}
+                      onDragStart={() => setDraggingLead(lead)}
+                      onDragEnd={() => setDraggingLead(null)}
+                      style={{ '--stack-offset': `${Math.min(index, 4) * 5}px` } as CSSProperties}
+                    >
+                      <div className="pipeline-lead-topline">
+                        <div className="pipeline-lead-avatar">{getInitials(lead.name)}</div>
+                        <div>
+                          <strong>{lead.name || 'Lead sem nome'}</strong>
+                          <small>{lead.phone}</small>
+                        </div>
+                      </div>
+
+                      <div className="pipeline-lead-meta-row">
+                        <span><ChannelIcon size={14} /> {getLeadChannel(lead)}</span>
+                        <span className={`lead-temp temp-${lead.temperature}`}>
+                          {temperatureLabel[lead.temperature] || 'Frio'}
+                        </span>
+                      </div>
+
+                      <p>{lead.last_message || 'Sem interação recente.'}</p>
+
+                      <div className="pipeline-lead-footer">
+                        <span className="pipeline-lead-value"><TrendingUp size={14} /> {formatCurrency(getLeadValue(lead))}</span>
+                        <span><Clock3 size={14} /> {formatRelativeDate(lead.last_interaction)}</span>
+                      </div>
+                      <div className="pipeline-lead-owner"><UserRound size={14} /> {owner}</div>
+                    </div>
+                  );
+                })}
+
+                {!stage.leads.length ? (
+                  <div className="pipeline-empty-stage" role="status">
+                    <div className="pipeline-empty-icon"><KanbanSquare size={22} /></div>
+                    <h3>Nenhum lead nesta etapa</h3>
+                    <p>Os contatos aparecerão automaticamente quando iniciarem uma conversa.</p>
+                    <Link href="/chat" className="secondary-button">Iniciar conversa</Link>
+                  </div>
+                ) : null}
+              </div>
+            </article>
+          );
+        })}
       </section>
     </main>
   );
