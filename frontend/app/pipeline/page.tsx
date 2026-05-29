@@ -20,15 +20,15 @@ import {
   Users
 } from 'lucide-react';
 
-import { getPipeline, moveLeadToStage } from '../../lib/api';
-import { PipelineLead, PipelineStage } from '../../lib/types';
+import { getPipeline, listWorkspaceUsers, moveLeadToStage } from '../../lib/api';
+import { PipelineLead, PipelineStage, WorkspaceUser } from '../../lib/types';
 
 const PIPELINE_COLUMN_NAMES = ['Novo', 'Qualificado', 'Proposta', 'Fechamento'] as const;
 const CHANNELS = ['Todos', 'WhatsApp', 'Instagram', 'Web'] as const;
-const OWNERS = ['Todos', 'Equipe comercial', 'Marina', 'Rafael', 'Bianca'] as const;
+const ALL_OWNERS_FILTER = 'Todos';
 
 type Channel = (typeof CHANNELS)[number];
-type Owner = (typeof OWNERS)[number];
+type Owner = typeof ALL_OWNERS_FILTER | string;
 type PipelineBoardStage = PipelineStage & { isVirtual?: boolean };
 
 const temperatureLabel: Record<string, string> = {
@@ -56,9 +56,27 @@ function getLeadChannel(lead: PipelineLead): Exclude<Channel, 'Todos'> {
   return seed % 5 === 0 ? 'Instagram' : seed % 7 === 0 ? 'Web' : 'WhatsApp';
 }
 
-function getLeadOwner(lead: PipelineLead): Exclude<Owner, 'Todos'> {
-  const owners: Array<Exclude<Owner, 'Todos'>> = ['Equipe comercial', 'Marina', 'Rafael', 'Bianca'];
-  return owners[getLeadSeed(lead) % owners.length];
+function getLeadOwnerId(lead: PipelineLead) {
+  return lead.responsible_user_id || lead.assigned_user_id || lead.owner_id || lead.assignee_id || null;
+}
+
+function getLeadOwnerLabel(lead: PipelineLead, users: WorkspaceUser[]) {
+  const ownerId = getLeadOwnerId(lead);
+  if (ownerId) {
+    const user = users.find((item) => item.id === ownerId);
+    return user?.name || user?.email || null;
+  }
+
+  const ownerEmail = lead.responsible_user_email || lead.assigned_user_email || lead.owner_email || null;
+  if (ownerEmail) {
+    const user = users.find((item) => item.email === ownerEmail);
+    return user?.name || user?.email || null;
+  }
+
+  const ownerName = lead.responsible_user_name || lead.assigned_user_name || lead.owner_name || null;
+  if (ownerName && users.some((item) => item.name === ownerName)) return ownerName;
+
+  return null;
 }
 
 function getLeadValue(lead: PipelineLead) {
@@ -102,9 +120,12 @@ export default function PipelinePage() {
   const [draggingLead, setDraggingLead] = useState<PipelineLead | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
+  const [users, setUsers] = useState<WorkspaceUser[]>([]);
+  const [isLoadingUsers, setIsLoadingUsers] = useState(true);
+  const [usersError, setUsersError] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
   const [channelFilter, setChannelFilter] = useState<Channel>('Todos');
-  const [ownerFilter, setOwnerFilter] = useState<Owner>('Todos');
+  const [ownerFilter, setOwnerFilter] = useState<Owner>(ALL_OWNERS_FILTER);
 
   const fetchPipeline = async () => {
     try {
@@ -121,6 +142,42 @@ export default function PipelinePage() {
   useEffect(() => {
     fetchPipeline();
   }, []);
+
+  useEffect(() => {
+    const fetchUsers = async () => {
+      console.log('[PIPELINE USERS LOAD]');
+      setIsLoadingUsers(true);
+      setUsersError('');
+
+      try {
+        const data = await listWorkspaceUsers();
+        setUsers(data);
+
+        if (data.length === 0) {
+          console.log('[PIPELINE USERS EMPTY]');
+          setOwnerFilter(ALL_OWNERS_FILTER);
+          return;
+        }
+
+        console.log('[PIPELINE USERS SUCCESS]', data);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Erro desconhecido ao carregar responsáveis.';
+        console.error('[PIPELINE USERS ERROR]', err);
+        setUsers([]);
+        setUsersError(message);
+        setOwnerFilter(ALL_OWNERS_FILTER);
+      } finally {
+        setIsLoadingUsers(false);
+      }
+    };
+
+    fetchUsers();
+  }, []);
+
+  useEffect(() => {
+    if (ownerFilter === ALL_OWNERS_FILTER) return;
+    if (!users.some((user) => user.id === ownerFilter)) setOwnerFilter(ALL_OWNERS_FILTER);
+  }, [ownerFilter, users]);
 
   const boardStages = useMemo<PipelineBoardStage[]>(() => {
     const stageByName = new Map(stages.map((stage) => [normalizeStageName(stage.name), stage]));
@@ -148,12 +205,12 @@ export default function PipelinePage() {
       ...stage,
       leads: stage.leads.filter((lead) => {
         const channel = getLeadChannel(lead);
-        const owner = getLeadOwner(lead);
+        const ownerId = getLeadOwnerId(lead);
         const searchable = `${lead.name || ''} ${lead.phone} ${lead.last_message || ''}`.toLowerCase();
 
         const matchesSearch = !normalizedSearch || searchable.includes(normalizedSearch);
         const matchesChannel = channelFilter === 'Todos' || channel === channelFilter;
-        const matchesOwner = ownerFilter === 'Todos' || owner === ownerFilter;
+        const matchesOwner = ownerFilter === ALL_OWNERS_FILTER || ownerId === ownerFilter;
 
         return matchesSearch && matchesChannel && matchesOwner;
       })
@@ -240,13 +297,27 @@ export default function PipelinePage() {
           <select value={channelFilter} onChange={(event) => setChannelFilter(event.target.value as Channel)} aria-label="Filtrar por canal">
             {CHANNELS.map((channel) => <option key={channel} value={channel}>{channel === 'Todos' ? 'Todos os canais' : channel}</option>)}
           </select>
-          <select value={ownerFilter} onChange={(event) => setOwnerFilter(event.target.value as Owner)} aria-label="Filtrar por responsável">
-            {OWNERS.map((owner) => <option key={owner} value={owner}>{owner === 'Todos' ? 'Todos os responsáveis' : owner}</option>)}
+          <select
+            value={ownerFilter}
+            onChange={(event) => setOwnerFilter(event.target.value)}
+            aria-label="Filtrar por responsável"
+            disabled={isLoadingUsers || Boolean(usersError) || users.length === 0}
+          >
+            {isLoadingUsers ? <option value={ALL_OWNERS_FILTER}>Carregando responsáveis...</option> : null}
+            {!isLoadingUsers && usersError ? <option value={ALL_OWNERS_FILTER}>Erro ao carregar responsáveis</option> : null}
+            {!isLoadingUsers && !usersError && users.length === 0 ? <option value={ALL_OWNERS_FILTER}>Nenhum responsável cadastrado</option> : null}
+            {!isLoadingUsers && !usersError && users.length > 0 ? (
+              <>
+                <option value={ALL_OWNERS_FILTER}>Todos os responsáveis</option>
+                {users.map((user) => <option key={user.id} value={user.id}>{user.name || user.email}</option>)}
+              </>
+            ) : null}
           </select>
         </div>
       </section>
 
       {error ? <p className="error-text">{error}</p> : null}
+      {usersError ? <p className="error-text">Falha real ao carregar responsáveis: {usersError}</p> : null}
       {isLoading ? <p className="pipeline-loading">Carregando pipeline...</p> : null}
 
       {!isLoading && stages.length === 0 ? (
@@ -279,7 +350,7 @@ export default function PipelinePage() {
               <div className="pipeline-leads">
                 {stage.leads.map((lead, index) => {
                   const ChannelIcon = channelIcons[getLeadChannel(lead)];
-                  const owner = getLeadOwner(lead);
+                  const owner = getLeadOwnerLabel(lead, users);
 
                   return (
                     <div
@@ -311,7 +382,7 @@ export default function PipelinePage() {
                         <span className="pipeline-lead-value"><TrendingUp size={14} /> {formatCurrency(getLeadValue(lead))}</span>
                         <span><Clock3 size={14} /> {formatRelativeDate(lead.last_interaction)}</span>
                       </div>
-                      <div className="pipeline-lead-owner"><UserRound size={14} /> {owner}</div>
+                      <div className="pipeline-lead-owner"><UserRound size={14} /> {owner || 'Sem responsável'}</div>
                     </div>
                   );
                 })}

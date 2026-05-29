@@ -226,6 +226,16 @@ export type PipelineLead = {
   score: number;
   stage_id: string | null;
   last_interaction: string | null;
+  responsible_user_id?: string | null;
+  assigned_user_id?: string | null;
+  owner_id?: string | null;
+  assignee_id?: string | null;
+  responsible_user_email?: string | null;
+  assigned_user_email?: string | null;
+  owner_email?: string | null;
+  responsible_user_name?: string | null;
+  assigned_user_name?: string | null;
+  owner_name?: string | null;
 };
 
 export type PipelineStage = {
