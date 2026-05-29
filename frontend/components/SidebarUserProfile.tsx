@@ -6,14 +6,10 @@ import {
   Bell,
   Building2,
   ChevronRight,
-  CreditCard,
-  KeyRound,
   LockKeyhole,
   LogOut,
-  ShieldCheck,
   Sparkles,
-  User,
-  UsersRound
+  User
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { getTenantSessionFromStorage } from '@/lib/api';
@@ -126,7 +122,7 @@ export default function SidebarUserProfile({ expanded }: SidebarUserProfileProps
     if (!button || isMobile) return;
 
     const rect = button.getBoundingClientRect();
-    const menuHeight = 584;
+    const menuHeight = 408;
     const top = Math.max(12, Math.min(rect.bottom - menuHeight, window.innerHeight - menuHeight - 12));
     setMenuPosition({
       top,
@@ -198,23 +194,9 @@ export default function SidebarUserProfile({ expanded }: SidebarUserProfileProps
     {
       title: 'Conta',
       items: [
-        { label: 'Meu perfil', description: 'Dados, avatar e identidade', href: '/dashboard/settings?tab=profile', icon: User },
-        { label: 'Preferências', description: 'Notificações e experiência', href: '/dashboard/settings?tab=preferences', icon: Bell }
-      ]
-    },
-    {
-      title: 'Workspace/Admin',
-      items: [
-        { label: 'Usuários', description: 'Convide e gerencie o time', href: '/dashboard/settings?tab=users', icon: UsersRound },
-        { label: 'Permissões', description: 'Papéis e acesso por área', href: '/dashboard/settings?tab=permissions', icon: ShieldCheck },
-        { label: 'Segurança', description: 'Sessões e políticas de login', href: '/dashboard/settings?tab=security', icon: LockKeyhole },
-        { label: 'API Keys', description: 'Tokens para integrações', href: '/dashboard/settings?tab=apikeys', icon: KeyRound }
-      ]
-    },
-    {
-      title: 'Sistema',
-      items: [
-        { label: 'Billing', description: 'Plano, faturas e limites', href: '/dashboard/settings?tab=billing', icon: CreditCard }
+        { label: 'Meu perfil', description: 'Dados, avatar e identidade', href: '/dashboard/account?tab=profile', icon: User },
+        { label: 'Preferências', description: 'Notificações e experiência', href: '/dashboard/account?tab=preferences', icon: Bell },
+        { label: 'Segurança', description: 'Sessões e proteção da conta', href: '/dashboard/account?tab=security', icon: LockKeyhole }
       ]
     },
     {

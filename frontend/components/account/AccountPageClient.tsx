@@ -2,31 +2,31 @@
 
 import { useMemo } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
+import AccountLayout from '@/components/account/AccountLayout';
+import { AccountTabId, accountTabIds } from '@/components/account/AccountSidebar';
 import SettingsContent from '@/components/settings/SettingsContent';
-import SettingsLayout from '@/components/settings/SettingsLayout';
-import { SettingsTabId, settingsTabIds } from '@/components/settings/SettingsSidebar';
 
-const DEFAULT_TAB: SettingsTabId = 'users';
+const DEFAULT_TAB: AccountTabId = 'profile';
 
-export default function SettingsPageClient() {
+export default function AccountPageClient() {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
 
-  const activeTab = useMemo<SettingsTabId>(() => {
+  const activeTab = useMemo<AccountTabId>(() => {
     const requestedTab = searchParams.get('tab');
-    return settingsTabIds.includes(requestedTab as SettingsTabId) ? requestedTab as SettingsTabId : DEFAULT_TAB;
+    return accountTabIds.includes(requestedTab as AccountTabId) ? requestedTab as AccountTabId : DEFAULT_TAB;
   }, [searchParams]);
 
-  const handleTabChange = (tab: SettingsTabId) => {
+  const handleTabChange = (tab: AccountTabId) => {
     const nextParams = new URLSearchParams(searchParams.toString());
     nextParams.set('tab', tab);
     router.push(`${pathname}?${nextParams.toString()}`);
   };
 
   return (
-    <SettingsLayout activeTab={activeTab} onTabChange={handleTabChange}>
+    <AccountLayout activeTab={activeTab} onTabChange={handleTabChange}>
       <SettingsContent activeTab={activeTab} />
-    </SettingsLayout>
+    </AccountLayout>
   );
 }
