@@ -22,9 +22,34 @@ Backend:
 - `OPENAI_API_KEY`
 - `OPENAI_MODEL` (opcional, padrão: `gpt-4o-mini`)
 - `DATABASE_URL` (opcional)
+- `TURNSTILE_SECRET_KEY` (obrigatório em produção/staging para validar Cloudflare Turnstile)
+- `TURNSTILE_ENABLED` (opcional; padrão `true`)
+- `TURNSTILE_DISABLED` (opcional; use apenas localmente/em testes controlados)
+- `TURNSTILE_DEV_BYPASS` (opcional; permite o token local de desenvolvimento fora de produção)
 
 Frontend:
 - `NEXT_PUBLIC_API_URL` (ex: `http://localhost:8000`)
+- `NEXT_PUBLIC_TURNSTILE_SITE_KEY` (chave pública do widget Cloudflare Turnstile)
+
+## Proteção anti-bot (Cloudflare Turnstile)
+Os fluxos públicos de maior risco (`/login`, `/register` e `/forgot-password`) usam Cloudflare Turnstile no frontend e validação server-side no backend antes de consultar/criar credenciais. A API também aplica rate limit básico em memória por IP e por hash de email para reduzir brute force, spam e enumeração.
+
+### Setup produção/staging
+1. Crie um widget no Cloudflare Turnstile para os domínios públicos do Wazza API.
+2. Configure no frontend `NEXT_PUBLIC_TURNSTILE_SITE_KEY`.
+3. Configure no backend `TURNSTILE_SECRET_KEY` e mantenha `TURNSTILE_ENABLED=true` em staging/produção.
+4. Monitore os logs `[TURNSTILE VALIDATION SUCCESS]` e `[TURNSTILE VALIDATION FAILED]`; tokens nunca são logados.
+
+### Fallback de desenvolvimento
+Em desenvolvimento local, quando `NEXT_PUBLIC_TURNSTILE_SITE_KEY` e `TURNSTILE_SECRET_KEY` não estão configurados, o frontend emite um token local (`dev-turnstile-token`) e o backend aceita esse token em `localhost`/`127.0.0.1` ou quando `ENV=development`/`TURNSTILE_DEV_BYPASS=true`. Para testes automatizados, também é possível definir `TURNSTILE_DISABLED=true` em ambiente não público.
+
+### Checklist licitação-ready
+- Login, onboarding e recuperação de senha protegidos com Turnstile discreto e responsivo.
+- Validação obrigatória no backend, com fail-closed quando a secret não está configurada em produção/staging.
+- Rate limit por IP e identificador de email nos endpoints públicos.
+- Respostas de login e recuperação mantêm mensagens genéricas para reduzir enumeração.
+- Observabilidade padronizada sem exposição de tokens ou secrets.
+- Riscos residuais: rate limit em memória deve ser migrado para Redis/WAF em múltiplas réplicas; validar domínios permitidos no painel Cloudflare e acompanhar falsos positivos em rede móvel/lenta.
 
 ## Fluxo principal (Webhook)
 1. `POST /webhook` recebe mensagem da Meta.

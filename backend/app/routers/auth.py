@@ -11,17 +11,22 @@ import time
 import unicodedata
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models import PasswordResetToken, Tenant, TenantUser
 from app.schemas.auth import ForgotPasswordRequest, LoginRequest, RegisterRequest, ResetPasswordRequest, TenantAuthResponse
+from app.security.turnstile import enforce_rate_limit, get_client_ip, validate_turnstile_or_raise
 
 router = APIRouter(tags=["auth"])
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 RESET_WINDOW_SECONDS = int(os.getenv("PASSWORD_RESET_TTL_SECONDS", "1800"))
+
+
+def _rate_identity(email: str) -> str:
+    return hashlib.sha256(email.strip().lower().encode("utf-8")).hexdigest()[:16]
 
 
 def _slugify(value: str) -> str:
@@ -102,8 +107,13 @@ def _send_reset_email(email: str, reset_link: str) -> None:
 
 
 @router.post("/forgot-password")
-def forgot_password(payload: ForgotPasswordRequest, db: Session = Depends(get_db)):
+def forgot_password(payload: ForgotPasswordRequest, request: Request, db: Session = Depends(get_db)):
     email = payload.email.strip().lower()
+    client_ip = get_client_ip(request)
+    email_hash = _rate_identity(email)
+    enforce_rate_limit(key=f"forgot:ip:{client_ip}", limit=10, window_seconds=900)
+    enforce_rate_limit(key=f"forgot:email:{email_hash}", limit=4, window_seconds=3600)
+    validate_turnstile_or_raise(token=payload.turnstile_token, request=request, action="forgot-password")
     print("[PASSWORD RESET REQUEST]", f"email_hint={email[:2]}***")
     if not EMAIL_RE.match(email):
         raise HTTPException(status_code=400, detail="Email inválido")
@@ -146,7 +156,13 @@ def reset_password(payload: ResetPasswordRequest, db: Session = Depends(get_db))
 
 
 @router.post("/register", response_model=TenantAuthResponse)
-def register(payload: RegisterRequest, db: Session = Depends(get_db)):
+def register(payload: RegisterRequest, request: Request, db: Session = Depends(get_db)):
+    client_ip = get_client_ip(request)
+    email_hash = _rate_identity(payload.email)
+    enforce_rate_limit(key=f"register:ip:{client_ip}", limit=8, window_seconds=3600)
+    enforce_rate_limit(key=f"register:email:{email_hash}", limit=3, window_seconds=3600)
+    validate_turnstile_or_raise(token=payload.turnstile_token, request=request, action="register")
+
     if payload.password != payload.confirm_password:
         raise HTTPException(status_code=400, detail="As senhas não coincidem")
     if not EMAIL_RE.match(payload.email.strip().lower()):
@@ -155,7 +171,7 @@ def register(payload: RegisterRequest, db: Session = Depends(get_db)):
     email = payload.email.strip().lower()
     existing_email = db.execute(select(TenantUser.id).where(TenantUser.email == email)).scalars().first()
     if existing_email is not None:
-        raise HTTPException(status_code=409, detail="Email já cadastrado")
+        raise HTTPException(status_code=409, detail="Não foi possível criar a conta com estes dados")
 
     tenant = Tenant(name=payload.business_name.strip(), slug=_build_unique_slug(db, payload.business_name), phone_number_id=payload.whatsapp_number.strip(), ai_mode="vendedor")
     db.add(tenant)
@@ -171,8 +187,14 @@ def register(payload: RegisterRequest, db: Session = Depends(get_db)):
 
 
 @router.post("/login", response_model=TenantAuthResponse)
-def login(payload: LoginRequest, db: Session = Depends(get_db)):
+def login(payload: LoginRequest, request: Request, db: Session = Depends(get_db)):
     email = payload.email.strip().lower()
+    client_ip = get_client_ip(request)
+    email_hash = _rate_identity(email)
+    enforce_rate_limit(key=f"login:ip:{client_ip}", limit=20, window_seconds=900)
+    enforce_rate_limit(key=f"login:email:{email_hash}", limit=8, window_seconds=900)
+    validate_turnstile_or_raise(token=payload.turnstile_token, request=request, action="login")
+
     user = db.execute(select(TenantUser).where(TenantUser.email == email)).scalars().first()
     if not user or not _verify_password(payload.password, user.password_hash):
         raise HTTPException(status_code=401, detail="Credenciais inválidas")

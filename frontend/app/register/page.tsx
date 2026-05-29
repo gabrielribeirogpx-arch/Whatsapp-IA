@@ -2,6 +2,7 @@
 
 import { FormEvent, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import TurnstileWidget from '../../components/TurnstileWidget';
 import { registerTenant } from '../../lib/api';
 
 type RegisterForm = {
@@ -37,6 +38,8 @@ export default function RegisterPage() {
   const [error, setError] = useState('');
   const [fieldErrors, setFieldErrors] = useState<Partial<Record<keyof RegisterForm, string>>>({});
   const [form, setForm] = useState<RegisterForm>(INITIAL_FORM);
+  const [turnstileToken, setTurnstileToken] = useState('');
+  const [turnstileKey, setTurnstileKey] = useState(0);
 
   const passwordOk = useMemo(() => form.password.length >= 8 && form.password === form.confirm_password, [form.password, form.confirm_password]);
 
@@ -89,6 +92,11 @@ export default function RegisterPage() {
       return;
     }
 
+    if (!turnstileToken) {
+      setError('Conclua a validação de segurança para finalizar o onboarding.');
+      return;
+    }
+
     const payload: RegisterForm = {
       ...form,
       full_name: form.full_name.trim(),
@@ -105,15 +113,17 @@ export default function RegisterPage() {
     setError('');
     console.log('[ONBOARDING FINAL PAYLOAD]', { ...payload, password: '***', confirm_password: '***' });
     try {
-      const tenant = await registerTenant(payload);
+      const tenant = await registerTenant(payload, turnstileToken);
       localStorage.setItem('tenant', JSON.stringify(tenant));
       localStorage.setItem('token', tenant.token);
       localStorage.setItem('tenant_id', tenant.tenant_id);
       router.replace('/dashboard?welcome=1');
     } catch (e) {
       const message = e instanceof Error ? e.message : '';
+      setTurnstileToken('');
+      setTurnstileKey((value) => value + 1);
       if (message.includes('409')) {
-        setError('Email já cadastrado.');
+        setError('Não foi possível criar a conta com estes dados.');
       } else if (message.includes('intended_use')) {
         setFieldErrors((prev) => ({ ...prev, intended_use: 'Uso pretendido é obrigatório e deve ter ao menos 2 caracteres.' }));
         setStep(3);
@@ -133,8 +143,8 @@ export default function RegisterPage() {
   {step===1 && <><label className="onboarding-label">Nome completo</label><input className={`onboarding-input ${hasError('full_name') ? 'onboarding-input--error' : ''}`} value={form.full_name} onChange={e=>updateField('full_name', e.target.value)} required />{fieldErrors.full_name && <p className="error-text">{fieldErrors.full_name}</p>}<label className="onboarding-label">Email</label><input className={`onboarding-input ${hasError('email') ? 'onboarding-input--error' : ''}`} type="email" value={form.email} onChange={e=>updateField('email', e.target.value)} required />{fieldErrors.email && <p className="error-text">{fieldErrors.email}</p>}<label className="onboarding-label">Senha</label><input className={`onboarding-input ${hasError('password') ? 'onboarding-input--error' : ''}`} type="password" minLength={8} value={form.password} onChange={e=>updateField('password', e.target.value)} required /><label className="onboarding-label">Confirmar senha</label><input className={`onboarding-input ${hasError('confirm_password') ? 'onboarding-input--error' : ''}`} type="password" minLength={8} value={form.confirm_password} onChange={e=>updateField('confirm_password', e.target.value)} required />{fieldErrors.confirm_password && <p className="error-text">{fieldErrors.confirm_password}</p>}</>}
   {step===2 && <><label className="onboarding-label">Nome do negócio</label><input className={`onboarding-input ${hasError('business_name') ? 'onboarding-input--error' : ''}`} value={form.business_name} onChange={e=>updateField('business_name', e.target.value)} required />{fieldErrors.business_name && <p className="error-text">{fieldErrors.business_name}</p>}<label className="onboarding-label">Segmento</label><input className={`onboarding-input ${hasError('business_segment') ? 'onboarding-input--error' : ''}`} value={form.business_segment} onChange={e=>updateField('business_segment', e.target.value)} required />{fieldErrors.business_segment && <p className="error-text">{fieldErrors.business_segment}</p>}<label className="onboarding-label">Tamanho do time (opcional)</label><input className="onboarding-input" value={form.team_size} onChange={e=>updateField('team_size', e.target.value)} /></>}
   {step===3 && <><label className="onboarding-label">Número WhatsApp</label><input className={`onboarding-input ${hasError('whatsapp_number') ? 'onboarding-input--error' : ''}`} value={form.whatsapp_number} onChange={e=>updateField('whatsapp_number', e.target.value)} required />{fieldErrors.whatsapp_number && <p className="error-text">{fieldErrors.whatsapp_number}</p>}<label className="onboarding-label">Volume mensal (opcional)</label><input className="onboarding-input" value={form.monthly_message_volume} onChange={e=>updateField('monthly_message_volume', e.target.value)} /><label className="onboarding-label">Uso pretendido</label><input className={`onboarding-input ${hasError('intended_use') ? 'onboarding-input--error' : ''}`} value={form.intended_use} onChange={e=>updateField('intended_use', e.target.value)} required />{fieldErrors.intended_use && <p className="error-text">{fieldErrors.intended_use}</p>}</>}
-  {step===4 && <p className="onboarding-description">Revise os dados e finalize a criação do seu workspace.</p>}
+  {step===4 && <><p className="onboarding-description">Revise os dados e finalize a criação do seu workspace.</p><TurnstileWidget key={turnstileKey} action="register" token={turnstileToken} onToken={setTurnstileToken} onError={setError} /></>}
   </div>{error && <p className="error-text">{error}</p>}
-  <div className="onboarding-actions">{step>1 && <button type="button" className="onboarding-cta" onClick={prev}>Voltar</button>}{step<4 ? <button type="button" className="onboarding-cta" onClick={next}>Continuar</button> : <button type="submit" className="onboarding-cta" disabled={isLoading}>{isLoading ? 'Processando...' : 'Finalizar'}</button>}</div>
+  <div className="onboarding-actions">{step>1 && <button type="button" className="onboarding-cta" onClick={prev}>Voltar</button>}{step<4 ? <button type="button" className="onboarding-cta" onClick={next}>Continuar</button> : <button type="submit" className="onboarding-cta" disabled={isLoading || !turnstileToken}>{isLoading ? 'Processando...' : 'Finalizar'}</button>}</div>
 </form></section></main>;
 }
