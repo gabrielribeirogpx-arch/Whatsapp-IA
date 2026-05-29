@@ -13,6 +13,7 @@ from app.services.contact_sync_service import ensure_conversation_contact_link, 
 from app.services.contact_event_service import register_contact_event
 from app.services.conversation_service import get_or_create_conversation
 from app.services.idempotency_service import register_processed_message
+from app.services.lead_auto_service import ensure_whatsapp_lead_for_inbound
 from app.services.message_router import handle_incoming_message
 from app.services.message_service import normalize_meta_message
 from app.core.redis_client import get_redis_client
@@ -157,6 +158,15 @@ def process_incoming_message(payload: dict[str, Any]) -> None:
             message=text,
         )
         ensure_conversation_contact_link(conversation, contact)
+        ensure_whatsapp_lead_for_inbound(
+            db=db,
+            tenant_id=tenant.id,
+            phone=(contact.phone if contact else phone),
+            contact=contact,
+            conversation=conversation,
+            name=name,
+            message_text=text,
+        )
         logger.info(
             "event=incoming_worker_entities_ready correlation_id=%s tenant_id=%s contact_id=%s conversation_id=%s",
             correlation_id,

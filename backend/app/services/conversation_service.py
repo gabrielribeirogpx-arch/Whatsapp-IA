@@ -50,8 +50,11 @@ def get_or_create_conversation(db: Session, tenant_id, phone: str, contact_id=No
         )
         db.add(conversation)
         try:
-            with db.begin_nested():
+            if db.in_transaction():
                 db.flush()
+            else:
+                with db.begin_nested():
+                    db.flush()
         except IntegrityError:
             conversation = db.execute(
                 select(Conversation)

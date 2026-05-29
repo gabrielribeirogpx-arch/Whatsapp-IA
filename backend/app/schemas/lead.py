@@ -14,6 +14,10 @@ class LeadOut(BaseModel):
     stage_id: uuid.UUID | None = None
     temperature: LeadTemperature = LeadTemperature.COLD
     score: int
+    source: str = "whatsapp"
+    owner_id: uuid.UUID | None = None
+    contact_id: uuid.UUID | None = None
+    conversation_id: uuid.UUID | None = None
     last_message: str | None = None
     last_contact_at: datetime
     last_interaction: datetime | None = None
@@ -37,6 +41,10 @@ class PipelineLeadOut(BaseModel):
     last_message: str | None = None
     temperature: LeadTemperature
     score: int
+    source: str = "whatsapp"
+    owner_id: uuid.UUID | None = None
+    contact_id: uuid.UUID | None = None
+    conversation_id: uuid.UUID | None = None
     stage_id: uuid.UUID | None = None
     last_interaction: datetime | None = None
 
