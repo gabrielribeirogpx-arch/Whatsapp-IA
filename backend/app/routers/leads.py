@@ -17,7 +17,7 @@ from app.schemas.lead import (
     PipelineLeadOut,
     PipelineStageOut,
 )
-from app.services.pipeline_service import ensure_pipeline_stages
+from app.services.pipeline_service import ensure_pipeline_stages, reorder_pipeline_stages
 from app.services.tenant_service import get_current_tenant
 
 router = APIRouter(tags=["leads"])
@@ -29,8 +29,16 @@ class PipelineStageCreate(BaseModel):
 
 
 class PipelineStageUpdate(BaseModel):
-    name: str = Field(min_length=1, max_length=100)
-    position: int = Field(ge=0)
+    name: str | None = Field(default=None, min_length=1, max_length=100)
+    position: int | None = Field(default=None, ge=0)
+
+
+class PipelineStageReorderRequest(BaseModel):
+    stage_ids: list[uuid.UUID] = Field(min_length=1)
+
+
+def _serialize_stage(stage: PipelineStage, leads: list[PipelineLeadOut] | None = None) -> PipelineStageOut:
+    return PipelineStageOut(id=stage.id, name=stage.name, position=stage.position, leads=leads or [])
 
 
 def _get_stage_or_404(db: Session, tenant_id: uuid.UUID, stage_id: uuid.UUID) -> PipelineStage:
@@ -43,6 +51,18 @@ def _get_stage_or_404(db: Session, tenant_id: uuid.UUID, stage_id: uuid.UUID) ->
     if not stage:
         raise HTTPException(status_code=404, detail="Etapa do pipeline não encontrada")
     return stage
+
+
+def _ordered_stages(db: Session, tenant_id: uuid.UUID) -> list[PipelineStage]:
+    return (
+        db.execute(
+            select(PipelineStage)
+            .where(PipelineStage.tenant_id == tenant_id)
+            .order_by(PipelineStage.position.asc(), PipelineStage.created_at.asc(), PipelineStage.id.asc())
+        )
+        .scalars()
+        .all()
+    )
 
 
 @router.get("/leads", response_model=list[LeadOut])
@@ -86,7 +106,7 @@ def get_pipeline(
     tenant: Tenant = Depends(get_current_tenant),
     db: Session = Depends(get_db),
 ):
-    stages = ensure_pipeline_stages(db, tenant.id)
+    stages = ensure_pipeline_stages(db, tenant.id, workspace_profile=tenant.workspace_profile)
 
     leads = (
         db.execute(
@@ -109,15 +129,16 @@ def get_pipeline(
             grouped[target_stage_id] = []
         grouped[target_stage_id].append(PipelineLeadOut.model_validate(lead))
 
-    return [
-        PipelineStageOut(
-            id=stage.id,
-            name=stage.name,
-            position=stage.position,
-            leads=grouped.get(stage.id, []),
-        )
-        for stage in sorted(stages, key=lambda item: item.position)
-    ]
+    return [_serialize_stage(stage, grouped.get(stage.id, [])) for stage in sorted(stages, key=lambda item: item.position)]
+
+
+@router.get("/pipeline/stages", response_model=list[PipelineStageOut])
+def list_pipeline_stages(
+    tenant: Tenant = Depends(get_current_tenant),
+    db: Session = Depends(get_db),
+):
+    stages = ensure_pipeline_stages(db, tenant.id, workspace_profile=tenant.workspace_profile)
+    return [_serialize_stage(stage) for stage in sorted(stages, key=lambda item: item.position)]
 
 
 @router.post("/pipeline", response_model=PipelineStageOut)
@@ -126,22 +147,24 @@ def create_pipeline_stage(
     tenant: Tenant = Depends(get_current_tenant),
     db: Session = Depends(get_db),
 ):
-    ensure_pipeline_stages(db, tenant.id)
-    position = payload.position
-    if position is None:
-        position = db.execute(
-            select(func.coalesce(func.max(PipelineStage.position), -1)).where(PipelineStage.tenant_id == tenant.id)
-        ).scalar_one() + 1
+    ensure_pipeline_stages(db, tenant.id, workspace_profile=tenant.workspace_profile)
+    max_position = db.execute(
+        select(func.coalesce(func.max(PipelineStage.position), -1)).where(PipelineStage.tenant_id == tenant.id)
+    ).scalar_one()
+    position = max_position + 1 if payload.position is None else min(payload.position, max_position + 1)
 
-    stage = PipelineStage(tenant_id=tenant.id, name=payload.name.strip(), position=position)
-    db.add(stage)
     try:
+        stage = PipelineStage(tenant_id=tenant.id, name=payload.name.strip(), position=max_position + 1)
+        db.add(stage)
+        db.flush()
+        existing_stages = [item for item in _ordered_stages(db, tenant.id) if item.id != stage.id]
+        reorder_pipeline_stages(db, existing_stages, extra_stage=stage, insert_position=position)
         db.commit()
     except IntegrityError as exc:
         db.rollback()
         raise HTTPException(status_code=409, detail="Já existe uma etapa com este nome ou posição") from exc
     db.refresh(stage)
-    return PipelineStageOut(id=stage.id, name=stage.name, position=stage.position, leads=[])
+    return _serialize_stage(stage)
 
 
 @router.put("/pipeline/{stage_id}", response_model=PipelineStageOut)
@@ -152,15 +175,44 @@ def update_pipeline_stage(
     db: Session = Depends(get_db),
 ):
     stage = _get_stage_or_404(db, tenant.id, stage_id)
-    stage.name = payload.name.strip()
-    stage.position = payload.position
+    if payload.name is not None:
+        stage.name = payload.name.strip()
     try:
+        if payload.position is not None and payload.position != stage.position:
+            stages = [item for item in _ordered_stages(db, tenant.id) if item.id != stage.id]
+            reorder_pipeline_stages(db, stages, extra_stage=stage, insert_position=payload.position)
         db.commit()
     except IntegrityError as exc:
         db.rollback()
         raise HTTPException(status_code=409, detail="Já existe uma etapa com este nome ou posição") from exc
     db.refresh(stage)
-    return PipelineStageOut(id=stage.id, name=stage.name, position=stage.position, leads=[])
+    return _serialize_stage(stage)
+
+
+@router.patch("/pipeline/reorder", response_model=list[PipelineStageOut])
+def reorder_pipeline(
+    payload: PipelineStageReorderRequest,
+    tenant: Tenant = Depends(get_current_tenant),
+    db: Session = Depends(get_db),
+):
+    stages = ensure_pipeline_stages(db, tenant.id, workspace_profile=tenant.workspace_profile)
+    stage_by_id = {stage.id: stage for stage in stages}
+    requested_ids = payload.stage_ids
+    if len(set(requested_ids)) != len(requested_ids):
+        raise HTTPException(status_code=422, detail="A lista de etapas contém duplicidades")
+    missing_ids = [stage_id for stage_id in requested_ids if stage_id not in stage_by_id]
+    if missing_ids:
+        raise HTTPException(status_code=404, detail="Uma ou mais etapas não pertencem ao tenant atual")
+
+    ordered = [stage_by_id[stage_id] for stage_id in requested_ids]
+    remaining = [stage for stage in sorted(stages, key=lambda item: item.position) if stage.id not in set(requested_ids)]
+    try:
+        reorder_pipeline_stages(db, ordered + remaining)
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Não foi possível reordenar as etapas") from exc
+    return [_serialize_stage(stage) for stage in _ordered_stages(db, tenant.id)]
 
 
 @router.delete("/pipeline/{stage_id}")
@@ -169,7 +221,7 @@ def delete_pipeline_stage(
     tenant: Tenant = Depends(get_current_tenant),
     db: Session = Depends(get_db),
 ):
-    stages = ensure_pipeline_stages(db, tenant.id)
+    stages = ensure_pipeline_stages(db, tenant.id, workspace_profile=tenant.workspace_profile)
     stage = _get_stage_or_404(db, tenant.id, stage_id)
     fallback = next((item for item in stages if item.id != stage.id), None)
     lead_count = db.execute(
@@ -184,6 +236,8 @@ def delete_pipeline_stage(
         for lead in leads:
             lead.stage_id = fallback.id
     db.delete(stage)
+    db.flush()
+    reorder_pipeline_stages(db, [item for item in stages if item.id != stage.id])
     db.commit()
     return {"deleted": True}
 

@@ -245,6 +245,13 @@ export type PipelineStage = {
   leads: PipelineLead[];
 };
 
+export type PipelineStagePayload = {
+  name?: string;
+  position?: number;
+};
+
+export type WorkspaceProfile = 'private_sales' | 'government';
+
 
 export type FlowChoiceButton = {
   id: string;
@@ -349,6 +356,7 @@ export type SystemSettings = {
   webhook_status: string;
   system_name: string;
   language: string;
+  workspace_profile: WorkspaceProfile;
 };
 
 export type SystemSettingsPayload = {
@@ -358,6 +366,7 @@ export type SystemSettingsPayload = {
   webhook_status: string;
   system_name: string;
   language: string;
+  workspace_profile: WorkspaceProfile;
 };
 
 export type WhatsAppProvider = { id:string; provider_type:string; display_name?:string|null; waba_id?:string|null; phone_number_id?:string|null; business_id?:string|null; is_active:boolean; status:string; metadata_json?: Record<string, any>; last_connection_check_at?: string | null; updated_at?: string; access_token_masked?:string|null };

@@ -16,7 +16,10 @@ DEFAULT_SYSTEM_PROMPT = "Você é um assistente de vendas altamente persuasivo, 
 
 class Tenant(Base):
     __tablename__ = "tenants"
-    __table_args__ = (CheckConstraint("ai_mode IN ('atendente', 'vendedor')", name="ck_tenants_ai_mode"),)
+    __table_args__ = (
+        CheckConstraint("ai_mode IN ('atendente', 'vendedor')", name="ck_tenants_ai_mode"),
+        CheckConstraint("workspace_profile IN ('private_sales', 'government')", name="ck_tenants_workspace_profile"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     name: Mapped[str] = mapped_column(String(150), nullable=False)
@@ -34,6 +37,7 @@ class Tenant(Base):
     is_blocked: Mapped[bool] = mapped_column(default=False)
     admin_password: Mapped[str] = mapped_column(String(255), default="admin123")
     ai_mode: Mapped[str] = mapped_column(String(32), default="atendente", server_default="atendente")
+    workspace_profile: Mapped[str] = mapped_column(String(32), default="private_sales", server_default="private_sales")
 
     ai_config: Mapped["AIConfig | None"] = relationship(back_populates="tenant", uselist=False, cascade="all, delete-orphan")
     products: Mapped[list[Product]] = relationship(Product, back_populates="tenant", cascade="all, delete-orphan")

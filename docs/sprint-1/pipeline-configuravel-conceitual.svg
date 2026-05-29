@@ -1,0 +1,43 @@
+<svg width="1280" height="760" viewBox="0 0 1280 760" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1280" height="760" rx="36" fill="#F8FAFC"/>
+  <rect x="40" y="36" width="1200" height="96" rx="28" fill="#0F172A"/>
+  <circle cx="1130" cy="70" r="70" fill="#34D399" opacity="0.22"/>
+  <text x="80" y="78" fill="#A7F3D0" font-family="Inter, Arial" font-size="18" font-weight="700">Configurações → Pipeline</text>
+  <text x="80" y="112" fill="white" font-family="Inter, Arial" font-size="30" font-weight="800">Pipeline configurável para POC Sprint 1</text>
+  <rect x="40" y="160" width="278" height="560" rx="28" fill="white" stroke="#E2E8F0"/>
+  <text x="72" y="204" fill="#64748B" font-family="Inter, Arial" font-size="14" font-weight="800">CONFIGURAÇÕES</text>
+  <rect x="64" y="234" width="230" height="70" rx="18" fill="#F1F5F9"/>
+  <text x="92" y="264" fill="#334155" font-family="Inter, Arial" font-size="16" font-weight="700">WhatsApp Business</text>
+  <text x="92" y="286" fill="#64748B" font-family="Inter, Arial" font-size="12">Providers e templates</text>
+  <rect x="64" y="320" width="230" height="78" rx="18" fill="#0F172A"/>
+  <text x="92" y="352" fill="white" font-family="Inter, Arial" font-size="17" font-weight="800">Pipeline</text>
+  <text x="92" y="375" fill="#CBD5E1" font-family="Inter, Arial" font-size="12">Etapas do Kanban e CRM</text>
+  <rect x="342" y="160" width="898" height="560" rx="28" fill="white" stroke="#E2E8F0"/>
+  <text x="382" y="210" fill="#065F46" font-family="Inter, Arial" font-size="14" font-weight="800">PERFIL DO WORKSPACE</text>
+  <rect x="382" y="232" width="250" height="96" rx="22" fill="#ECFDF5" stroke="#A7F3D0"/>
+  <text x="410" y="270" fill="#064E3B" font-family="Inter, Arial" font-size="19" font-weight="800">private_sales</text>
+  <text x="410" y="296" fill="#047857" font-family="Inter, Arial" font-size="13">Funil comercial padrão</text>
+  <rect x="650" y="232" width="250" height="96" rx="22" fill="#FFFFFF" stroke="#E2E8F0"/>
+  <text x="678" y="270" fill="#0F172A" font-family="Inter, Arial" font-size="19" font-weight="800">government</text>
+  <text x="678" y="296" fill="#64748B" font-family="Inter, Arial" font-size="13">Sem protocolos/SLA nesta sprint</text>
+  <rect x="382" y="356" width="560" height="58" rx="18" fill="#F8FAFC" stroke="#E2E8F0"/>
+  <text x="410" y="392" fill="#94A3B8" font-family="Inter, Arial" font-size="16">Nome da nova etapa</text>
+  <rect x="960" y="356" width="210" height="58" rx="18" fill="#0F172A"/>
+  <text x="1000" y="392" fill="white" font-family="Inter, Arial" font-size="16" font-weight="800">+ Criar etapa</text>
+  <g font-family="Inter, Arial">
+    <rect x="382" y="450" width="788" height="70" rx="20" fill="#FFFFFF" stroke="#E2E8F0"/>
+    <text x="418" y="492" fill="#64748B" font-size="15" font-weight="800">#1</text>
+    <text x="472" y="482" fill="#0F172A" font-size="18" font-weight="800">Novo</text>
+    <text x="472" y="504" fill="#64748B" font-size="13">12 leads · stage_id preservado</text>
+    <rect x="1010" y="468" width="56" height="34" rx="12" fill="#F8FAFC" stroke="#E2E8F0"/><text x="1030" y="491" fill="#475569" font-size="14">↑</text>
+    <rect x="1080" y="468" width="70" height="34" rx="12" fill="#ECFDF5"/><text x="1098" y="491" fill="#047857" font-size="13" font-weight="800">Editar</text>
+    <rect x="382" y="536" width="788" height="70" rx="20" fill="#FFFFFF" stroke="#E2E8F0"/>
+    <text x="418" y="578" fill="#64748B" font-size="15" font-weight="800">#2</text>
+    <text x="472" y="568" fill="#0F172A" font-size="18" font-weight="800">Qualificado</text>
+    <text x="472" y="590" fill="#64748B" font-size="13">8 leads · stage_id preservado</text>
+    <rect x="1010" y="554" width="56" height="34" rx="12" fill="#F8FAFC" stroke="#E2E8F0"/><text x="1030" y="577" fill="#475569" font-size="14">↓</text>
+    <rect x="1080" y="554" width="70" height="34" rx="12" fill="#ECFDF5"/><text x="1098" y="577" fill="#047857" font-size="13" font-weight="800">Editar</text>
+    <rect x="382" y="622" width="250" height="58" rx="18" fill="#ECFDF5" stroke="#A7F3D0"/>
+    <text x="410" y="657" fill="#047857" font-size="14" font-weight="800">Screenshot conceitual embutido</text>
+  </g>
+</svg>

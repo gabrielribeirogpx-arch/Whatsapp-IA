@@ -5,6 +5,7 @@ import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { Bell, Building2, CheckCircle2, Clock3, CreditCard, Globe2, KeyRound, Layers3, LockKeyhole, LogOut, Mail, MessageSquareText, Pencil, Plus, Save, ShieldCheck, Smartphone, User, UsersRound, XCircle } from 'lucide-react';
 import ProvidersTab from '@/components/settings/whatsapp-business/ProvidersTab';
 import TemplatesTab from '@/components/settings/whatsapp-business/TemplatesTab';
+import PipelineSettingsTab from '@/components/settings/PipelineSettingsTab';
 import { ClientDateTime } from '@/components/settings/whatsapp-business/ui';
 import { activateWhatsAppProvider, createTemplate, createWhatsAppProvider, deactivateWorkspaceUser, deleteWhatsAppProvider, getAccountMe, getAccountSecurity, getSystemSettings, inviteWorkspaceUser, listTemplates, listWhatsAppProviders, listWorkspaceUsers, revokeAccountSession, revokeOtherAccountSessions, submitTemplate, syncTemplates, testWhatsAppProvider, updateAccountPassword, updateAccountPreferences, updateAccountProfile, updateSystemSettings, updateWhatsAppProvider, updateWorkspaceUser } from '@/lib/api';
 import { AccountMe, AccountPreferences, AccountProfile, AccountSecurity, SystemSettingsPayload, WhatsAppProvider, WhatsAppTemplate, WorkspaceUser } from '@/lib/types';
@@ -12,7 +13,7 @@ import { friendlyToMeta, renderExample, validateMetaVariables } from '@/lib/temp
 import { SettingsTabId } from './SettingsSidebar';
 import { AccountTabId } from '@/components/account/AccountSidebar';
 
-const INITIAL_FORM: SystemSettingsPayload = { token: '', phone_number_id: '', webhook_url: '', webhook_status: 'inactive', system_name: '', language: 'pt-BR' };
+const INITIAL_FORM: SystemSettingsPayload = { token: '', phone_number_id: '', webhook_url: '', webhook_status: 'inactive', system_name: '', language: 'pt-BR', workspace_profile: 'private_sales' };
 const baseProviderForm = { provider_type: 'meta_cloud', display_name: '', waba_id: '', phone_number_id: '', business_id: '', access_token: '', api_key: '' };
 const baseTemplateForm = { name: '', category: 'utility', language: 'pt_BR', provider_id: '', body_text: '', friendly_body_text: '', footer_text: '', variables_json: [] as any[] };
 const whatsappTabs = [{ id: 'system', label: 'Visão Geral', icon: Layers3 }, { id: 'connection', label: 'Conexões', icon: Building2 }, { id: 'templates', label: 'Templates', icon: MessageSquareText }];
@@ -20,6 +21,7 @@ const roleLabels: Record<string, string> = { owner: 'Administrador', admin: 'Adm
 
 export default function SettingsContent({ activeTab }: { activeTab: SettingsTabId | AccountTabId }) {
   if (activeTab === 'apikeys' || activeTab === 'whatsapp-business') return <WhatsAppBusinessConsole />;
+  if (activeTab === 'pipeline') return <PipelineSettingsTab />;
   if (activeTab === 'profile') return <ProfileTab />;
   if (activeTab === 'preferences') return <PreferencesTab />;
   if (activeTab === 'security') return <SecurityTab />;

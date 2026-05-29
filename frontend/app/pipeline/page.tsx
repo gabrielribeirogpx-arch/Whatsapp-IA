@@ -23,13 +23,12 @@ import {
 import { getPipeline, listWorkspaceUsers, moveLeadToStage } from '../../lib/api';
 import { PipelineLead, PipelineStage, WorkspaceUser } from '../../lib/types';
 
-const PIPELINE_COLUMN_NAMES = ['Novo', 'Qualificado', 'Proposta', 'Fechamento'] as const;
 const CHANNELS = ['Todos', 'WhatsApp', 'Instagram', 'Web'] as const;
 const ALL_OWNERS_FILTER = 'Todos';
 
 type Channel = (typeof CHANNELS)[number];
 type Owner = typeof ALL_OWNERS_FILTER | string;
-type PipelineBoardStage = PipelineStage & { isVirtual?: boolean };
+type PipelineBoardStage = PipelineStage;
 
 const temperatureLabel: Record<string, string> = {
   hot: 'Quente',
@@ -42,10 +41,6 @@ const channelIcons: Record<Exclude<Channel, 'Todos'>, typeof MessageCircle> = {
   Instagram,
   Web: Globe2
 };
-
-function normalizeStageName(name: string) {
-  return name.trim().toLowerCase();
-}
 
 function getLeadSeed(lead: PipelineLead) {
   return Array.from(lead.id || lead.phone || 'lead').reduce((sum, char) => sum + char.charCodeAt(0), 0);
@@ -180,20 +175,7 @@ export default function PipelinePage() {
   }, [ownerFilter, users]);
 
   const boardStages = useMemo<PipelineBoardStage[]>(() => {
-    const stageByName = new Map(stages.map((stage) => [normalizeStageName(stage.name), stage]));
-
-    return PIPELINE_COLUMN_NAMES.map((stageName, index) => {
-      const existingStage = stageByName.get(normalizeStageName(stageName));
-      if (existingStage) return existingStage;
-
-      return {
-        id: `virtual-${normalizeStageName(stageName)}`,
-        name: stageName,
-        position: index,
-        leads: [],
-        isVirtual: true
-      };
-    });
+    return [...stages].sort((a, b) => a.position - b.position);
   }, [stages]);
 
   const allBoardLeads = useMemo(() => boardStages.flatMap((stage) => stage.leads), [boardStages]);
@@ -219,13 +201,13 @@ export default function PipelinePage() {
 
   const totalLeads = allBoardLeads.length;
   const totalPipelineValue = allBoardLeads.reduce((total, lead) => total + getLeadValue(lead), 0);
-  const closingLeads = boardStages.find((stage) => normalizeStageName(stage.name) === 'fechamento')?.leads.length || 0;
+  const closingLeads = boardStages.at(-1)?.leads.length || 0;
   const conversionRate = totalLeads > 0 ? Math.round((closingLeads / totalLeads) * 100) : 0;
   const averageCloseTime = totalLeads > 0 ? Math.max(3, Math.round(18 - conversionRate / 8)) : 0;
   const visibleLeads = filteredStages.reduce((total, stage) => total + stage.leads.length, 0);
 
   const handleDrop = async (stage: PipelineBoardStage) => {
-    if (!draggingLead || stage.isVirtual) return;
+    if (!draggingLead) return;
 
     try {
       await moveLeadToStage(draggingLead.id, stage.id);
@@ -356,7 +338,7 @@ export default function PipelinePage() {
                     <div
                       key={lead.id}
                       className="pipeline-lead-card"
-                      draggable={!stage.isVirtual}
+                      draggable
                       onDragStart={() => setDraggingLead(lead)}
                       onDragEnd={() => setDraggingLead(null)}
                       style={{ '--stack-offset': `${Math.min(index, 4) * 5}px` } as CSSProperties}
