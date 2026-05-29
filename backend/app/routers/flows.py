@@ -19,9 +19,10 @@ from sqlalchemy.orm import load_only
 
 from app.database import get_db
 from app.core.redis_client import get_redis_client
-from app.models import Conversation, Flow, FlowEdge, FlowEvent, FlowExecution, FlowNode, FlowSession, FlowStep, FlowVersion, Tenant
+from app.models import Conversation, Flow, FlowEdge, FlowEvent, FlowExecution, FlowNode, FlowSession, FlowStep, FlowVersion, Tenant, TenantUser
 from app.services.flow_analytics_service import PERIODS, get_flow_analytics, resolve_analytics_period
 from app.services.audit_service import write_audit_log
+from app.routers.account import get_current_user
 from app.services.flow_engine_service import (
     get_flow_for_builder,
     get_flow_graph,
@@ -263,6 +264,67 @@ def _builder_graph_from_flow(flow: Flow) -> tuple[list[dict[str, Any]], list[dic
     if not edges and flow.current_version and isinstance(flow.current_version.edges, list):
         edges = flow.current_version.edges
     return (nodes if isinstance(nodes, list) else []), (edges if isinstance(edges, list) else [])
+
+
+def _request_client_host(request: Request | None) -> str | None:
+    return request.client.host if request is not None and request.client is not None else None
+
+
+def _flow_audit_metadata(
+    *,
+    flow: Flow,
+    current_user: TenantUser | None,
+    request: Request | None,
+    extra: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    metadata: dict[str, Any] = {
+        "flow_id": str(flow.id),
+        "flow_name": flow.name,
+        "user_email": getattr(current_user, "email", None),
+        "user_name": getattr(current_user, "full_name", None),
+        "ip": _request_client_host(request),
+    }
+    if extra:
+        metadata.update(extra)
+    return metadata
+
+
+def _write_flow_audit_log(
+    db: Session,
+    *,
+    action: str,
+    tenant_id: uuid.UUID,
+    flow: Flow,
+    current_user: TenantUser | None,
+    request: Request | None,
+    metadata: dict[str, Any] | None = None,
+) -> bool:
+    current_user_id = getattr(current_user, "id", None)
+    logger.info(
+        "[FLOW AUDIT USER] current_user=%s current_user_id=%s",
+        current_user,
+        current_user_id,
+    )
+    if current_user is None or current_user_id is None:
+        logger.warning("[FLOW AUDIT WARNING] No authenticated user found")
+        return False
+
+    write_audit_log(
+        db,
+        action=action,
+        tenant_id=tenant_id,
+        user_id=current_user_id,
+        entity_type="flow",
+        entity_id=flow.id,
+        metadata=_flow_audit_metadata(
+            flow=flow,
+            current_user=current_user,
+            request=request,
+            extra=metadata,
+        ),
+        request=request,
+    )
+    return True
 
 
 def _clear_runtime_related_redis_keys(flow_id: uuid.UUID, tenant_id: uuid.UUID) -> int:
@@ -879,6 +941,7 @@ def create_flow_route(
     payload: FlowCreatePayload | None = None,
     x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
     db: Session = Depends(get_db),
+    current_user: TenantUser = Depends(get_current_user),
 ):
     tenant = _resolve_request_tenant(db=db, tenant_id_header=x_tenant_id)
     payload_data = payload.model_dump(exclude_unset=True) if payload else {}
@@ -906,7 +969,14 @@ def create_flow_route(
         edges=initial_edges,
     )
     db.add(flow)
-    write_audit_log(db, action="FLOW_CREATED", tenant_id=tenant.id, entity_type="flow", entity_id=flow.id, metadata={"name": flow.name}, request=request)
+    _write_flow_audit_log(
+        db,
+        action="FLOW_CREATED",
+        tenant_id=tenant.id,
+        flow=flow,
+        current_user=current_user,
+        request=request,
+    )
     db.commit()
     db.refresh(flow)
     graph = get_flow_graph(db=db, tenant_id=tenant.id, flow_id=str(flow.id))
@@ -931,6 +1001,7 @@ async def update_flow_route(
     request: Request,
     x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
     db: Session = Depends(get_db),
+    current_user: TenantUser = Depends(get_current_user),
 ):
     try:
         payload = await request.json()
@@ -1002,6 +1073,15 @@ async def update_flow_route(
             validation = None
 
         db.add(flow)
+        _write_flow_audit_log(
+            db,
+            action="FLOW_UPDATED",
+            tenant_id=tenant.id,
+            flow=flow,
+            current_user=current_user,
+            request=request,
+            metadata={"graph_updated": should_update_graph},
+        )
         db.commit()
         db.refresh(flow)
         logger.info("[FLOW UPDATE SAVED] flow_id=%s trigger_type=%s trigger_value=%s", str(flow.id), flow.trigger_type, flow.trigger_value)
@@ -1034,12 +1114,22 @@ def delete_flow_route(
     request: Request,
     x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
     db: Session = Depends(get_db),
+    current_user: TenantUser = Depends(get_current_user),
 ):
     tenant = _resolve_request_tenant(db=db, tenant_id_header=x_tenant_id)
+    flow = get_flow(db=db, flow_id=flow_id, tenant_id=tenant.id)
     deleted = delete_flow(db=db, flow_id=flow_id, tenant_id=tenant.id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Flow not found")
-    write_audit_log(db, action="FLOW_DELETED", tenant_id=tenant.id, entity_type="flow", entity_id=flow_id, request=request)
+    if flow:
+        _write_flow_audit_log(
+            db,
+            action="FLOW_DELETED",
+            tenant_id=tenant.id,
+            flow=flow,
+            current_user=current_user,
+            request=request,
+        )
     db.commit()
     return {"status": "deleted"}
 
@@ -1087,6 +1177,8 @@ def _rename_flow_name(
     flow_id: str,
     payload: RenameFlowPayload,
     tenant_id: uuid.UUID | None,
+    request: Request,
+    current_user: TenantUser,
 ) -> dict[str, Any]:
     flow = _get_flow_by_identifier(db=db, flow_id=flow_id, tenant_id=tenant_id)
     if not flow:
@@ -1098,7 +1190,16 @@ def _rename_flow_name(
 
     flow.name = normalized_name
     db.add(flow)
-    write_audit_log(db, action="FLOW_PUBLISHED" if payload.is_active else "FLOW_UPDATED", tenant_id=tenant_uuid, entity_type="flow", entity_id=flow.id, metadata={"is_active": payload.is_active}, request=request)
+    if tenant_id is not None:
+        _write_flow_audit_log(
+            db,
+            action="FLOW_UPDATED",
+            tenant_id=tenant_id,
+            flow=flow,
+            current_user=current_user,
+            request=request,
+            metadata={"renamed": True},
+        )
     db.commit()
     db.refresh(flow)
     return _serialize_flow(flow)
@@ -1260,6 +1361,7 @@ def create_tenant_flow(
     request: Request,
     x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
     db: Session = Depends(get_db),
+    current_user: TenantUser = Depends(get_current_user),
 ):
     try:
         logger.info("[FLOW CREATE START]")
@@ -1272,9 +1374,9 @@ def create_tenant_flow(
         )
         logger.info(
             "[FLOW CREATE USER] user_id=%s request_state_user_id=%s audit_user_id=%s",
+            getattr(current_user, "id", None),
             getattr(request.state, "user_id", None),
-            getattr(request.state, "user_id", None),
-            None,
+            getattr(current_user, "id", None),
         )
         payload_data = payload.model_dump()
         logger.info("[FLOW CREATE PAYLOAD] %s", payload_data)
@@ -1318,13 +1420,20 @@ def create_tenant_flow(
             data={"name": payload_data.get("name")},
         )
         first_version = flow_service.create_version(flow=flow, tenant_id=tenant_uuid, nodes=initial_nodes, edges=initial_edges)
-        write_audit_log(db, action="FLOW_CREATED", tenant_id=tenant_uuid, entity_type="flow", entity_id=flow.id, metadata={"name": flow.name}, request=request)
+        _write_flow_audit_log(
+            db,
+            action="FLOW_CREATED",
+            tenant_id=tenant_uuid,
+            flow=flow,
+            current_user=current_user,
+            request=request,
+        )
         logger.info(
             "[FLOW CREATE DB COMMIT] tenant_id=%s flow_id=%s version_id=%s audit_user_id=%s",
             tenant_uuid,
             flow.id,
             first_version.id if first_version else flow.current_version_id,
-            None,
+            current_user.id,
         )
         db.commit()
         db.refresh(flow)
@@ -1436,6 +1545,7 @@ async def update_tenant_flow(
     request: Request,
     x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
     db: Session = Depends(get_db),
+    current_user: TenantUser = Depends(get_current_user),
 ):
     try:
         tenant_uuid = _resolve_tenant_header(x_tenant_id)
@@ -1524,7 +1634,15 @@ async def update_tenant_flow(
         )
 
         invalidate_flow_runtime_cache(flow.id)
-        write_audit_log(db, action="FLOW_UPDATED", tenant_id=tenant_uuid, entity_type="flow", entity_id=flow.id, metadata={"version_id": str(nova.id), "nodes_count": len(nodes_json), "edges_count": len(edges_json)}, request=request)
+        _write_flow_audit_log(
+            db,
+            action="FLOW_UPDATED",
+            tenant_id=tenant_uuid,
+            flow=flow,
+            current_user=current_user,
+            request=request,
+            metadata={"version_id": str(nova.id), "nodes_count": len(nodes_json), "edges_count": len(edges_json)},
+        )
         if flow.is_active:
             logger.info("[FLOW ACTIVE]: %s", flow.id)
         db.commit()
@@ -1553,6 +1671,7 @@ def delete_tenant_flow(
     request: Request,
     x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
     db: Session = Depends(get_db),
+    current_user: TenantUser = Depends(get_current_user),
 ):
     tenant_uuid = _resolve_tenant_header(x_tenant_id)
     flow = _get_flow_by_identifier(db=db, flow_id=flow_id, tenant_id=tenant_uuid)
@@ -1568,12 +1687,28 @@ def delete_tenant_flow(
     if is_in_use:
         flow.is_deleted = True
         flow.deleted_at = datetime.utcnow()
-        write_audit_log(db, action="FLOW_DELETED", tenant_id=tenant_uuid, entity_type="flow", entity_id=flow.id, metadata={"mode": "soft_delete"}, request=request)
+        _write_flow_audit_log(
+            db,
+            action="FLOW_DELETED",
+            tenant_id=tenant_uuid,
+            flow=flow,
+            current_user=current_user,
+            request=request,
+            metadata={"mode": "soft_delete"},
+        )
         db.commit()
         return {"success": True, "mode": "soft_delete"}
 
     try:
-        write_audit_log(db, action="FLOW_DELETED", tenant_id=tenant_uuid, entity_type="flow", entity_id=flow.id, metadata={"mode": "hard_delete"}, request=request)
+        _write_flow_audit_log(
+            db,
+            action="FLOW_DELETED",
+            tenant_id=tenant_uuid,
+            flow=flow,
+            current_user=current_user,
+            request=request,
+            metadata={"mode": "hard_delete"},
+        )
         db.delete(flow)
         db.commit()
         return {"success": True, "mode": "hard_delete"}
@@ -1585,7 +1720,15 @@ def delete_tenant_flow(
         )
         flow.is_deleted = True
         flow.deleted_at = datetime.utcnow()
-        write_audit_log(db, action="FLOW_DELETED", tenant_id=tenant_uuid, entity_type="flow", entity_id=flow.id, metadata={"mode": "soft_delete_fallback"}, request=request)
+        _write_flow_audit_log(
+            db,
+            action="FLOW_DELETED",
+            tenant_id=tenant_uuid,
+            flow=flow,
+            current_user=current_user,
+            request=request,
+            metadata={"mode": "soft_delete_fallback"},
+        )
         db.commit()
         return {"success": True, "mode": "soft_delete"}
 
@@ -1596,6 +1739,7 @@ def activate_tenant_flow(
     request: Request,
     x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
     db: Session = Depends(get_db),
+    current_user: TenantUser = Depends(get_current_user),
 ):
     tenant_uuid = _resolve_tenant_header(x_tenant_id)
     flow = _get_flow_by_identifier(db=db, flow_id=flow_id, tenant_id=tenant_uuid)
@@ -1613,7 +1757,15 @@ def activate_tenant_flow(
     flow.is_active = True
     db.add(flow)
     invalidate_flow_runtime_cache(flow.id)
-    write_audit_log(db, action="FLOW_PUBLISHED", tenant_id=tenant_uuid, entity_type="flow", entity_id=flow.id, metadata={"published_version_id": str(flow.published_version_id) if flow.published_version_id else None}, request=request)
+    _write_flow_audit_log(
+        db,
+        action="FLOW_PUBLISHED",
+        tenant_id=tenant_uuid,
+        flow=flow,
+        current_user=current_user,
+        request=request,
+        metadata={"published_version_id": str(flow.published_version_id) if flow.published_version_id else None},
+    )
     db.commit()
     db.refresh(flow)
     logger.info("[FLOW ACTIVATED] flow_id=%s", flow.id)
@@ -1622,10 +1774,16 @@ def activate_tenant_flow(
 
 @crud_router.post("/deactivate")
 def deactivate_tenant_flows(
+    request: Request,
     x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
     db: Session = Depends(get_db),
+    current_user: TenantUser = Depends(get_current_user),
 ):
     tenant_uuid = _resolve_tenant_header(x_tenant_id)
+    active_flows = db.query(Flow).filter(
+        Flow.tenant_id == tenant_uuid,
+        Flow.is_active.is_(True),
+    ).all()
 
     db.query(Flow).filter(
         Flow.tenant_id == tenant_uuid,
@@ -1633,6 +1791,17 @@ def deactivate_tenant_flows(
         {Flow.is_active: False},
         synchronize_session=False,
     )
+    for flow in active_flows:
+        flow.is_active = False
+        _write_flow_audit_log(
+            db,
+            action="FLOW_UNPUBLISHED",
+            tenant_id=tenant_uuid,
+            flow=flow,
+            current_user=current_user,
+            request=request,
+            metadata={"scope": "tenant_deactivate"},
+        )
     db.commit()
     return {"success": True}
 
@@ -1644,6 +1813,7 @@ def update_tenant_flow_status(
     request: Request,
     x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
     db: Session = Depends(get_db),
+    current_user: TenantUser = Depends(get_current_user),
 ):
     tenant_uuid = _resolve_tenant_header(x_tenant_id)
     flow = _get_flow_by_identifier(db=db, flow_id=flow_id, tenant_id=tenant_uuid)
@@ -1652,6 +1822,17 @@ def update_tenant_flow_status(
 
     flow.is_active = payload.is_active
     db.add(flow)
+    if payload.is_active:
+        _ensure_published_snapshot_on_activate(db=db, flow=flow)
+    _write_flow_audit_log(
+        db,
+        action="FLOW_PUBLISHED" if payload.is_active else "FLOW_UNPUBLISHED",
+        tenant_id=tenant_uuid,
+        flow=flow,
+        current_user=current_user,
+        request=request,
+        metadata={"is_active": payload.is_active},
+    )
     db.commit()
     db.refresh(flow)
     return _serialize_flow(flow)
@@ -1661,8 +1842,10 @@ def update_tenant_flow_status(
 def rename_tenant_flow(
     flow_id: str,
     payload: RenameFlowPayload,
+    request: Request,
     x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
     db: Session = Depends(get_db),
+    current_user: TenantUser = Depends(get_current_user),
 ):
     tenant_uuid = _resolve_tenant_header(x_tenant_id)
     return _rename_flow_name(
@@ -1670,6 +1853,8 @@ def rename_tenant_flow(
         flow_id=flow_id,
         payload=payload,
         tenant_id=tenant_uuid,
+        request=request,
+        current_user=current_user,
     )
 
 
@@ -1677,8 +1862,10 @@ def rename_tenant_flow(
 def rename_flow_route(
     flow_id: str,
     payload: RenameFlowPayload,
+    request: Request,
     x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
     db: Session = Depends(get_db),
+    current_user: TenantUser = Depends(get_current_user),
 ):
     tenant = _resolve_request_tenant(db=db, tenant_id_header=x_tenant_id)
     return _rename_flow_name(
@@ -1686,6 +1873,8 @@ def rename_flow_route(
         flow_id=flow_id,
         payload=payload,
         tenant_id=tenant.id,
+        request=request,
+        current_user=current_user,
     )
 
 
