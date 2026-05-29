@@ -1,5 +1,6 @@
 import logging
 import uuid
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -9,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models import Lead, PipelineStage, Tenant
-from app.models.lead import LeadStage
+from app.models.lead import LeadStage, LeadStatus
 from app.schemas.lead import (
     LeadMoveRequest,
     LeadOut,
@@ -18,6 +19,7 @@ from app.schemas.lead import (
     PipelineLeadOut,
     PipelineStageOut,
 )
+from app.services.audit_service import write_audit_log
 from app.services.pipeline_service import ensure_pipeline_stages, reorder_pipeline_stages
 from app.services.tenant_service import get_current_tenant
 
@@ -40,7 +42,7 @@ class PipelineStageReorderRequest(BaseModel):
 
 
 def _serialize_stage(stage: PipelineStage, leads: list[PipelineLeadOut] | None = None) -> PipelineStageOut:
-    return PipelineStageOut(id=stage.id, name=stage.name, position=stage.position, leads=leads or [])
+    return PipelineStageOut(id=stage.id, name=stage.name, position=stage.position, is_final_stage=bool(getattr(stage, "is_final_stage", False)), leads=leads or [])
 
 
 def _get_stage_or_404(db: Session, tenant_id: uuid.UUID, stage_id: uuid.UUID) -> PipelineStage:
@@ -100,7 +102,7 @@ def list_leads(
     return (
         db.execute(
             select(Lead)
-            .where(Lead.tenant_id == tenant.id)
+            .where(Lead.tenant_id == tenant.id, Lead.status == LeadStatus.ACTIVE.value)
             .order_by(desc(Lead.last_contact_at), desc(Lead.id))
         )
         .scalars()
@@ -140,7 +142,7 @@ def get_pipeline(
     leads = (
         db.execute(
             select(Lead)
-            .where(Lead.tenant_id == tenant.id)
+            .where(Lead.tenant_id == tenant.id, Lead.status != LeadStatus.DELETED.value)
             .order_by(desc(Lead.score), desc(Lead.last_interaction), desc(Lead.created_at))
         )
         .scalars()
@@ -298,11 +300,60 @@ def move_lead(
     if not target_stage:
         raise HTTPException(status_code=404, detail="Stage não encontrado")
 
+    previous_stage_id = lead.stage_id
     lead.stage_id = target_stage.id
+    lead.entered_stage_at = datetime.utcnow()
+    lead.updated_at = datetime.utcnow()
+    action = "LEAD_CONVERTED" if target_stage.is_final_stage else "LEAD_MOVED"
+    if target_stage.is_final_stage:
+        lead.status = LeadStatus.CONVERTED.value
+    else:
+        lead.status = LeadStatus.ACTIVE.value
+    write_audit_log(
+        db,
+        action=action,
+        tenant_id=tenant.id,
+        user_id=lead.owner_id,
+        entity_type="lead",
+        entity_id=lead.id,
+        metadata={
+            "from_stage_id": str(previous_stage_id) if previous_stage_id else None,
+            "to_stage_id": str(target_stage.id),
+            "to_stage": target_stage.name,
+            "event": "Lead concluído" if target_stage.is_final_stage else "Lead movido de etapa",
+        },
+    )
 
     db.commit()
     db.refresh(lead)
     return lead
+
+
+@router.delete("/leads/{lead_id}")
+def delete_lead(
+    lead_id: uuid.UUID,
+    tenant: Tenant = Depends(get_current_tenant),
+    db: Session = Depends(get_db),
+):
+    lead = db.execute(
+        select(Lead).where(Lead.id == lead_id, Lead.tenant_id == tenant.id)
+    ).scalars().first()
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead não encontrado")
+
+    lead.status = LeadStatus.DELETED.value
+    lead.updated_at = datetime.utcnow()
+    write_audit_log(
+        db,
+        action="LEAD_DELETED",
+        tenant_id=tenant.id,
+        user_id=lead.owner_id,
+        entity_type="lead",
+        entity_id=lead.id,
+        metadata={"phone": lead.phone, "event": "Lead removido"},
+    )
+    db.commit()
+    return {"deleted": True}
 
 
 @router.get("/leads/stats", response_model=LeadStatsOut)

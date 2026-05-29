@@ -38,6 +38,27 @@ def get_default_pipeline_stage_names(workspace_profile: str | None = None) -> li
     return DEFAULT_PIPELINE_STAGES_BY_PROFILE[normalized]
 
 
+def ensure_single_final_stage(db: Session, tenant_id) -> PipelineStage | None:
+    stages = (
+        db.execute(
+            select(PipelineStage)
+            .where(PipelineStage.tenant_id == tenant_id)
+            .order_by(PipelineStage.position.asc(), PipelineStage.created_at.asc(), PipelineStage.id.asc())
+        )
+        .scalars()
+        .all()
+    )
+    if not stages:
+        return None
+
+    final_stages = [stage for stage in stages if bool(getattr(stage, "is_final_stage", False))]
+    selected = final_stages[0] if final_stages else stages[-1]
+    for stage in stages:
+        stage.is_final_stage = stage.id == selected.id
+    db.flush()
+    return selected
+
+
 def ensure_pipeline_stages(
     db: Session,
     tenant_id,
@@ -49,17 +70,24 @@ def ensure_pipeline_stages(
         db.execute(
             select(PipelineStage)
             .where(PipelineStage.tenant_id == tenant_id)
-            .order_by(PipelineStage.position.asc(), PipelineStage.created_at.asc())
+            .order_by(PipelineStage.position.asc(), PipelineStage.created_at.asc(), PipelineStage.id.asc())
         )
         .scalars()
         .all()
     )
     if stages:
+        ensure_single_final_stage(db, tenant_id)
         return stages
 
+    stage_names = get_default_pipeline_stage_names(workspace_profile)
     created: list[PipelineStage] = []
-    for index, stage_name in enumerate(get_default_pipeline_stage_names(workspace_profile)):
-        stage = PipelineStage(tenant_id=tenant_id, name=stage_name, position=index)
+    for index, stage_name in enumerate(stage_names):
+        stage = PipelineStage(
+            tenant_id=tenant_id,
+            name=stage_name,
+            position=index,
+            is_final_stage=index == len(stage_names) - 1,
+        )
         db.add(stage)
         created.append(stage)
 
@@ -69,6 +97,18 @@ def ensure_pipeline_stages(
         for stage in created:
             db.refresh(stage)
     return created
+
+
+def get_first_pipeline_stage(
+    db: Session,
+    tenant_id,
+    workspace_profile: str | None = None,
+) -> PipelineStage | None:
+    stages = ensure_pipeline_stages(db, tenant_id, workspace_profile=workspace_profile)
+    stage = next(iter(sorted(stages, key=lambda item: (item.position, item.created_at, item.id))), None)
+    if stage:
+        print("[PIPELINE FIRST STAGE]", f"tenant_id={tenant_id}", f"stage_id={stage.id}", f"stage={stage.name}")
+    return stage
 
 
 def reorder_pipeline_stages(
@@ -92,5 +132,10 @@ def reorder_pipeline_stages(
 
     for index, stage in enumerate(ordered):
         stage.position = index
+
+    final_stage = next((stage for stage in ordered if bool(getattr(stage, "is_final_stage", False))), ordered[-1] if ordered else None)
+    for stage in ordered:
+        stage.is_final_stage = bool(final_stage and stage.id == final_stage.id)
+
     db.flush()
     return ordered

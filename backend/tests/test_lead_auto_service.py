@@ -57,7 +57,7 @@ def test_ensure_whatsapp_lead_for_inbound_creates_linked_lead_and_audit(monkeypa
     contact = SimpleNamespace(id="contact-1", phone="+55 (11) 99999-0001", name="Cliente")
     conversation = SimpleNamespace(id="conversation-1")
 
-    monkeypatch.setattr(lead_auto_service, "ensure_pipeline_stages", lambda _db, _tenant_id: [stage])
+    monkeypatch.setattr(lead_auto_service, "get_first_pipeline_stage", lambda _db, _tenant_id: stage)
     monkeypatch.setattr(lead_auto_service, "write_audit_log", lambda db, **kwargs: db.audit_rows.append(kwargs))
 
     result = lead_auto_service.ensure_whatsapp_lead_for_inbound(
@@ -84,7 +84,7 @@ def test_ensure_whatsapp_lead_for_inbound_creates_linked_lead_and_audit(monkeypa
     assert db.audit_rows[0]["metadata"]["automatic"] is True
     output = capsys.readouterr().out
     assert "[LEAD AUTO CREATED]" in output
-    assert "[PIPELINE AUTO CREATED]" in output
+    assert "[PIPELINE INSERT]" in output
     assert "[AUDIT LEAD CREATED]" in output
 
 
@@ -95,7 +95,7 @@ def test_ensure_whatsapp_lead_for_inbound_updates_existing_without_audit(monkeyp
     conversation = SimpleNamespace(id="conversation-1")
 
     stage = SimpleNamespace(id="stage-novo", name="Novo")
-    monkeypatch.setattr(lead_auto_service, "ensure_pipeline_stages", lambda _db, _tenant_id: [stage])
+    monkeypatch.setattr(lead_auto_service, "get_first_pipeline_stage", lambda _db, _tenant_id: stage)
     monkeypatch.setattr(lead_auto_service, "write_audit_log", lambda db, **kwargs: db.audit_rows.append(kwargs))
 
     result = lead_auto_service.ensure_whatsapp_lead_for_inbound(
@@ -114,3 +114,29 @@ def test_ensure_whatsapp_lead_for_inbound_updates_existing_without_audit(monkeyp
     assert existing.conversation_id == "conversation-1"
     assert existing.last_message == "Nova mensagem"
     assert db.audit_rows == []
+
+
+def test_ensure_whatsapp_lead_for_inbound_logs_new_conversation_activity(monkeypatch):
+    db = _FakeDB()
+    stage = SimpleNamespace(id="stage-novo", name="Novo")
+    contact = SimpleNamespace(id="contact-1", phone="5511999990001", name="Cliente", email="c@example.com")
+    conversation = SimpleNamespace(id="conversation-1")
+
+    monkeypatch.setattr(lead_auto_service, "get_first_pipeline_stage", lambda _db, _tenant_id: stage)
+    monkeypatch.setattr(lead_auto_service, "write_audit_log", lambda db, **kwargs: db.audit_rows.append(kwargs))
+
+    result = lead_auto_service.ensure_whatsapp_lead_for_inbound(
+        db,
+        tenant_id="tenant-1",
+        phone="5511999990001",
+        contact=contact,
+        conversation=conversation,
+        name="Cliente",
+        message_text="Oi",
+        conversation_created=True,
+    )
+
+    assert result is not None
+    assert result.lead.email == "c@example.com"
+    assert [row["action"] for row in db.audit_rows] == ["LEAD_CREATED", "CONVERSATION_STARTED"]
+    assert db.audit_rows[1]["metadata"]["event"] == "Nova conversa iniciada"

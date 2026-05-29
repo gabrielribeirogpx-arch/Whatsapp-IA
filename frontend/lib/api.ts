@@ -350,6 +350,22 @@ export async function crawlKnowledgeSite(payload: KnowledgeCrawlPayload): Promis
   return parseApiResponse<KnowledgeCrawlResult>(res);
 }
 
+
+export type DashboardActivity = {
+  id: string;
+  type: string;
+  title: string;
+  description?: string | null;
+  entity_type?: string | null;
+  entity_id?: string | null;
+  created_at: string;
+};
+
+export async function getDashboardActivity(): Promise<DashboardActivity[]> {
+  const res = await apiFetch('/api/dashboard/activity');
+  return parseApiResponse<DashboardActivity[]>(res);
+}
+
 export async function getPipeline(): Promise<PipelineStage[]> {
   const res = await apiFetch('/api/pipeline');
   return parseApiResponse<PipelineStage[]>(res);
