@@ -21,6 +21,7 @@ from app.database import get_db
 from app.core.redis_client import get_redis_client
 from app.models import Conversation, Flow, FlowEdge, FlowEvent, FlowExecution, FlowNode, FlowSession, FlowStep, FlowVersion, Tenant
 from app.services.flow_analytics_service import PERIODS, get_flow_analytics, resolve_analytics_period
+from app.services.audit_service import write_audit_log
 from app.services.flow_engine_service import (
     get_flow_for_builder,
     get_flow_graph,
