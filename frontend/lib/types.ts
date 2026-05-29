@@ -21,6 +21,45 @@ export type Message = {
   created_at: string;
 };
 
+export type AccountProfile = {
+  id: string;
+  name: string;
+  email: string;
+  avatar_url?: string | null;
+  company?: string | null;
+  job_title?: string | null;
+  role: string;
+};
+
+export type AccountPreferences = {
+  language: string;
+  timezone: string;
+  email_notifications: boolean;
+  whatsapp_notifications: boolean;
+};
+
+export type AccountSecurity = {
+  last_login_at?: string | null;
+  active_sessions: Array<{ id: string; device: string; location?: string | null; last_seen_at?: string | null; status: string }>;
+  history: Array<{ event: string; description?: string | null; created_at?: string | null }>;
+  mfa_status: string;
+};
+
+export type AccountMe = {
+  profile: AccountProfile;
+  preferences: AccountPreferences;
+  security: AccountSecurity;
+};
+
+export type WorkspaceUser = {
+  id: string;
+  name: string;
+  email: string;
+  role: string;
+  status: string;
+  last_access_at?: string | null;
+};
+
 export type TenantSession = {
   tenant_id: string;
   token: string;

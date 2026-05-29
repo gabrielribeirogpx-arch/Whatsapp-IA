@@ -28,7 +28,12 @@ import {
   WhatsAppProvider,
   WhatsAppTemplate,
   WhatsAppCampaign,
-  WhatsAppCampaignRecipient
+  WhatsAppCampaignRecipient,
+  AccountMe,
+  AccountProfile,
+  AccountPreferences,
+  AccountSecurity,
+  WorkspaceUser
 } from './types';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL;
@@ -587,4 +592,50 @@ export async function forgotPassword(email: string, turnstileToken: string): Pro
 export async function resetPassword(token: string, new_password: string, confirm_password: string): Promise<{ message: string }> {
   const res = await apiFetch('/api/reset-password', { method: 'POST', body: JSON.stringify({ token, new_password, confirm_password }) });
   return parseApiResponse<{ message: string }>(res);
+}
+
+
+export async function getAccountMe(): Promise<AccountMe> {
+  const res = await apiFetch('/api/account/me');
+  return parseApiResponse<AccountMe>(res);
+}
+
+export async function updateAccountProfile(payload: Partial<AccountProfile>): Promise<AccountProfile> {
+  const res = await apiFetch('/api/account/profile', { method: 'PUT', body: JSON.stringify(payload) });
+  return parseApiResponse<AccountProfile>(res);
+}
+
+export async function updateAccountPreferences(payload: AccountPreferences): Promise<AccountPreferences> {
+  const res = await apiFetch('/api/account/preferences', { method: 'PUT', body: JSON.stringify(payload) });
+  return parseApiResponse<AccountPreferences>(res);
+}
+
+export async function getAccountSecurity(): Promise<AccountSecurity> {
+  const res = await apiFetch('/api/account/security');
+  return parseApiResponse<AccountSecurity>(res);
+}
+
+export async function updateAccountPassword(payload: { current_password: string; new_password: string; confirm_password: string }): Promise<{ message: string }> {
+  const res = await apiFetch('/api/account/security/password', { method: 'POST', body: JSON.stringify(payload) });
+  return parseApiResponse<{ message: string }>(res);
+}
+
+export async function listWorkspaceUsers(): Promise<WorkspaceUser[]> {
+  const res = await apiFetch('/api/workspace/users');
+  return parseApiResponse<WorkspaceUser[]>(res);
+}
+
+export async function inviteWorkspaceUser(payload: { name: string; email: string; role: string }): Promise<WorkspaceUser> {
+  const res = await apiFetch('/api/workspace/users', { method: 'POST', body: JSON.stringify(payload) });
+  return parseApiResponse<WorkspaceUser>(res);
+}
+
+export async function updateWorkspaceUser(userId: string, payload: { name?: string; role?: string; status?: string }): Promise<WorkspaceUser> {
+  const res = await apiFetch(`/api/workspace/users/${userId}`, { method: 'PATCH', body: JSON.stringify(payload) });
+  return parseApiResponse<WorkspaceUser>(res);
+}
+
+export async function deactivateWorkspaceUser(userId: string): Promise<WorkspaceUser> {
+  const res = await apiFetch(`/api/workspace/users/${userId}/deactivate`, { method: 'POST' });
+  return parseApiResponse<WorkspaceUser>(res);
 }
