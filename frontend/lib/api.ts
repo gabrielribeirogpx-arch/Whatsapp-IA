@@ -183,26 +183,28 @@ export async function parseApiResponse<T>(res: Response): Promise<T> {
   return res.json();
 }
 
-export async function registerTenant(payload: Record<string, string>): Promise<TenantSession> {
+export async function registerTenant(payload: Record<string, string>, turnstileToken: string): Promise<TenantSession> {
+  const requestPayload = { ...payload, turnstile_token: turnstileToken };
   const sanitizedPayload = {
-    ...payload,
+    ...requestPayload,
     password: payload.password ? '***' : payload.password,
-    confirm_password: payload.confirm_password ? '***' : payload.confirm_password
+    confirm_password: payload.confirm_password ? '***' : payload.confirm_password,
+    turnstile_token: turnstileToken ? '***' : turnstileToken
   };
   console.log('[REGISTER REQUEST]', sanitizedPayload);
 
   const res = await apiFetch('/api/register', {
     method: 'POST',
-    body: JSON.stringify(payload)
+    body: JSON.stringify(requestPayload)
   });
 
   return parseApiResponse<TenantSession>(res);
 }
 
-export async function tenantLogin(email: string, password: string): Promise<TenantSession> {
+export async function tenantLogin(email: string, password: string, turnstileToken: string): Promise<TenantSession> {
   const res = await apiFetch('/api/login', {
     method: 'POST',
-    body: JSON.stringify({ email, password })
+    body: JSON.stringify({ email, password, turnstile_token: turnstileToken })
   });
 
   return parseApiResponse<TenantSession>(res);
@@ -577,8 +579,8 @@ export async function updateContactCustomFields(contactId: string, payload: Reco
   return parseApiResponse(res);
 }
 
-export async function forgotPassword(email: string): Promise<{ message: string }> {
-  const res = await apiFetch('/api/forgot-password', { method: 'POST', body: JSON.stringify({ email }) });
+export async function forgotPassword(email: string, turnstileToken: string): Promise<{ message: string }> {
+  const res = await apiFetch('/api/forgot-password', { method: 'POST', body: JSON.stringify({ email, turnstile_token: turnstileToken }) });
   return parseApiResponse<{ message: string }>(res);
 }
 

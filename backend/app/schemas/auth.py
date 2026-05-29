@@ -16,11 +16,13 @@ class RegisterRequest(BaseModel):
     intended_use: str = Field(min_length=2, max_length=200)
     team_size: str | None = Field(default=None, max_length=64)
     monthly_message_volume: str | None = Field(default=None, max_length=64)
+    turnstile_token: str | None = Field(default=None, max_length=4096)
 
 
 class LoginRequest(BaseModel):
     email: str = Field(min_length=5, max_length=255)
     password: str = Field(min_length=8, max_length=128)
+    turnstile_token: str | None = Field(default=None, max_length=4096)
 
 
 class TenantAuthResponse(BaseModel):
@@ -31,6 +33,7 @@ class TenantAuthResponse(BaseModel):
 
 class ForgotPasswordRequest(BaseModel):
     email: str = Field(min_length=5, max_length=255)
+    turnstile_token: str | None = Field(default=None, max_length=4096)
 
 
 class ResetPasswordRequest(BaseModel):
