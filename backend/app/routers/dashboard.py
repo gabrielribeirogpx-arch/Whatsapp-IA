@@ -3,7 +3,7 @@ from datetime import datetime, timedelta
 import logging
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
@@ -401,7 +401,11 @@ def get_dashboard_summary(
     start_datetime = now_utc - timedelta(days=days)
 
     flow_rows = db.execute(
-        select(FlowEvent.flow_id, func.count(func.distinct(FlowEvent.conversation_id)).label("conversations"))
+        select(
+            FlowEvent.flow_id,
+            func.count(func.distinct(FlowEvent.conversation_id)).label("conversations"),
+            func.sum(case((FlowEvent.event_type.in_(["FLOW_COMPLETED", "flow_completed", "FLOW_FINISH", "CONVERSION"]), 1), else_=0)).label("completed"),
+        )
         .where(
             FlowEvent.tenant_id == tenant.id,
             FlowEvent.created_at >= start_datetime,
@@ -421,11 +425,12 @@ def get_dashboard_summary(
     top_flows: list[DashboardTopFlowOut] = []
     for row in flow_rows:
         conversations = int(row.conversations or 0)
+        completed = int(getattr(row, "completed", 0) or 0)
         top_flows.append(DashboardTopFlowOut(
             flow_id=str(row.flow_id),
             name=flow_names.get(row.flow_id, "Fluxo"),
             conversations=conversations,
-            conversion_rate=0,
+            conversion_rate=round((completed / conversations) * 100, 2) if conversations else 0,
         ))
 
     conversations = db.execute(

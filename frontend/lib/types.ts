@@ -317,6 +317,12 @@ export type FlowItem = {
   is_published?: boolean;
   created_at?: string | null;
   updated_at?: string | null;
+  total_entries: number;
+  total_completions: number;
+  conversion_rate: number;
+  last_execution_at?: string | null;
+  published: boolean;
+  draft: boolean;
 };
 
 export type FlowVersionItem = {
