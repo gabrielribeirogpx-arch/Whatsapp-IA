@@ -1,3 +1,4 @@
+import logging
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -21,6 +22,7 @@ from app.services.pipeline_service import ensure_pipeline_stages, reorder_pipeli
 from app.services.tenant_service import get_current_tenant
 
 router = APIRouter(tags=["leads"])
+logger = logging.getLogger(__name__)
 
 
 class PipelineStageCreate(BaseModel):
@@ -42,6 +44,16 @@ def _serialize_stage(stage: PipelineStage, leads: list[PipelineLeadOut] | None =
 
 
 def _get_stage_or_404(db: Session, tenant_id: uuid.UUID, stage_id: uuid.UUID) -> PipelineStage:
+    tenant_stage_count = db.execute(
+        select(func.count(PipelineStage.id)).where(PipelineStage.tenant_id == tenant_id)
+    ).scalar_one()
+    logger.info(
+        "[PIPELINE UPDATE LOOKUP] stage_id=%s tenant_id=%s tenant_stage_count=%s model=%s",
+        stage_id,
+        tenant_id,
+        tenant_stage_count,
+        f"{PipelineStage.__module__}.{PipelineStage.__name__}",
+    )
     stage = db.execute(
         select(PipelineStage).where(
             PipelineStage.id == stage_id,
@@ -49,7 +61,22 @@ def _get_stage_or_404(db: Session, tenant_id: uuid.UUID, stage_id: uuid.UUID) ->
         )
     ).scalars().first()
     if not stage:
+        logger.warning(
+            "[PIPELINE UPDATE NOT FOUND] stage_id=%s tenant_id=%s tenant_stage_count=%s model=%s",
+            stage_id,
+            tenant_id,
+            tenant_stage_count,
+            f"{PipelineStage.__module__}.{PipelineStage.__name__}",
+        )
         raise HTTPException(status_code=404, detail="Etapa do pipeline não encontrada")
+    logger.info(
+        "[PIPELINE UPDATE FOUND] stage_id=%s tenant_id=%s tenant_stage_count=%s model=%s loaded_stage_id=%s",
+        stage_id,
+        tenant_id,
+        tenant_stage_count,
+        f"{stage.__class__.__module__}.{stage.__class__.__name__}",
+        stage.id,
+    )
     return stage
 
 
@@ -106,7 +133,9 @@ def get_pipeline(
     tenant: Tenant = Depends(get_current_tenant),
     db: Session = Depends(get_db),
 ):
-    stages = ensure_pipeline_stages(db, tenant.id, workspace_profile=tenant.workspace_profile)
+    stages = ensure_pipeline_stages(
+        db, tenant.id, workspace_profile=tenant.workspace_profile, commit_created=True
+    )
 
     leads = (
         db.execute(
@@ -137,7 +166,9 @@ def list_pipeline_stages(
     tenant: Tenant = Depends(get_current_tenant),
     db: Session = Depends(get_db),
 ):
-    stages = ensure_pipeline_stages(db, tenant.id, workspace_profile=tenant.workspace_profile)
+    stages = ensure_pipeline_stages(
+        db, tenant.id, workspace_profile=tenant.workspace_profile, commit_created=True
+    )
     return [_serialize_stage(stage) for stage in sorted(stages, key=lambda item: item.position)]
 
 
@@ -174,6 +205,12 @@ def update_pipeline_stage(
     tenant: Tenant = Depends(get_current_tenant),
     db: Session = Depends(get_db),
 ):
+    logger.info(
+        "[PIPELINE UPDATE REQUEST] stage_id=%s tenant_id=%s payload=%s",
+        stage_id,
+        tenant.id,
+        payload.model_dump(exclude_none=True),
+    )
     stage = _get_stage_or_404(db, tenant.id, stage_id)
     if payload.name is not None:
         stage.name = payload.name.strip()

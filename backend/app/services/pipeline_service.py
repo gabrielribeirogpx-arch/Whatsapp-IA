@@ -38,7 +38,13 @@ def get_default_pipeline_stage_names(workspace_profile: str | None = None) -> li
     return DEFAULT_PIPELINE_STAGES_BY_PROFILE[normalized]
 
 
-def ensure_pipeline_stages(db: Session, tenant_id, workspace_profile: str | None = None) -> list[PipelineStage]:
+def ensure_pipeline_stages(
+    db: Session,
+    tenant_id,
+    workspace_profile: str | None = None,
+    *,
+    commit_created: bool = False,
+) -> list[PipelineStage]:
     stages = (
         db.execute(
             select(PipelineStage)
@@ -58,6 +64,10 @@ def ensure_pipeline_stages(db: Session, tenant_id, workspace_profile: str | None
         created.append(stage)
 
     db.flush()
+    if commit_created:
+        db.commit()
+        for stage in created:
+            db.refresh(stage)
     return created
 
 
