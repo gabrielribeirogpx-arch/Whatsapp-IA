@@ -305,6 +305,7 @@ async def _process_meta_webhook(request: Request, db: Session) -> dict[str, str]
                 conversation=conversation,
                 name=contact_name or conversation.name,
                 message_text=incoming_message,
+                conversation_created=not existed,
             )
 
             if conversation.name is None and _looks_like_name(incoming_message):

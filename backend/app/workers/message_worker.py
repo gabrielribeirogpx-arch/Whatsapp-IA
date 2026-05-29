@@ -166,6 +166,7 @@ def process_incoming_message(payload: dict[str, Any]) -> None:
             conversation=conversation,
             name=name,
             message_text=text,
+            conversation_created=False,
         )
         logger.info(
             "event=incoming_worker_entities_ready correlation_id=%s tenant_id=%s contact_id=%s conversation_id=%s",

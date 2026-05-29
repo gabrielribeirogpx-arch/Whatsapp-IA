@@ -7,7 +7,8 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
-from app.models import Contact, Conversation, Flow, FlowEvent, FlowSession, Lead, Message, Product, Tenant
+from app.models import AuditLog, Contact, Conversation, Flow, FlowEvent, FlowSession, Lead, Message, PipelineStage, Product, Tenant
+from app.models.lead import LeadStatus
 from app.services.tenant_service import get_current_tenant
 
 router = APIRouter(tags=["dashboard"])
@@ -47,6 +48,9 @@ class DashboardOut(BaseModel):
 
 
 class DashboardAnalyticsKpisOut(BaseModel):
+    active_conversations: int
+    active_leads: int
+    messages_today: int
     conversations: int
     contacts: int
     leads: int
@@ -87,6 +91,18 @@ class DashboardPerformanceOut(BaseModel):
     abandonment_rate: float
 
 
+
+
+class DashboardActivityOut(BaseModel):
+    id: str
+    type: str
+    title: str
+    description: str | None = None
+    entity_type: str | None = None
+    entity_id: str | None = None
+    created_at: datetime
+
+
 class DashboardSummaryOut(BaseModel):
     top_flows: list[DashboardTopFlowOut]
     channels: list[DashboardChannelOut]
@@ -110,7 +126,7 @@ def get_dashboard(
     ).scalar() or 0
 
     leads_total = db.execute(
-        select(func.count(Lead.id)).where(Lead.tenant_id == tenant.id)
+        select(func.count(Lead.id)).where(Lead.tenant_id == tenant.id, Lead.status == LeadStatus.ACTIVE.value)
     ).scalar() or 0
 
     products_total = db.execute(
@@ -187,6 +203,9 @@ def get_dashboard(
     return DashboardOut(
         tenant_id=str(tenant.id),
         totals=DashboardTotalsOut(
+            active_conversations=conversations_total,
+            active_leads=leads_total,
+            messages_today=messages_sent_period + messages_received_period,
             conversations=conversations_total,
             contacts=contacts_total,
             leads=leads_total,
@@ -231,7 +250,7 @@ def get_dashboard_analytics(
     leads_total = db.execute(
         select(func.count(Lead.id)).where(
             Lead.tenant_id == tenant.id,
-            Lead.created_at >= start_datetime,
+            Lead.status == LeadStatus.ACTIVE.value,
         )
     ).scalar() or 0
 
@@ -266,10 +285,12 @@ def get_dashboard_analytics(
     ).scalar() or 0
 
     conversions_total = db.execute(
-        select(func.count(Lead.id)).where(
+        select(func.count(Lead.id))
+        .join(PipelineStage, Lead.stage_id == PipelineStage.id)
+        .where(
             Lead.tenant_id == tenant.id,
-            Lead.stage == "fechado",
-            Lead.created_at >= start_datetime,
+            PipelineStage.tenant_id == tenant.id,
+            PipelineStage.is_final_stage.is_(True),
         )
     ).scalar() or 0
 
@@ -307,8 +328,12 @@ def get_dashboard_analytics(
             )
         )
 
+    print("[DASHBOARD METRICS]", f"tenant_id={tenant.id}", f"active_conversations={conversations_total}", f"active_leads={leads_total}", f"messages_today={messages_sent_period + messages_received_period}", f"conversions={conversions_total}")
     return DashboardAnalyticsOut(
         kpis=DashboardAnalyticsKpisOut(
+            active_conversations=conversations_total,
+            active_leads=leads_total,
+            messages_today=messages_sent_period + messages_received_period,
             conversations=conversations_total,
             contacts=contacts_total,
             leads=leads_total,
@@ -323,6 +348,45 @@ def get_dashboard_analytics(
             messages_last_7_days=messages_last_7_days,
         ),
     )
+
+
+@router.get("/dashboard/activity", response_model=list[DashboardActivityOut])
+def get_dashboard_activity(
+    limit: int = Query(default=20, ge=1, le=100),
+    db: Session = Depends(get_db),
+    tenant: Tenant = Depends(get_current_tenant),
+):
+    actions = ["LEAD_CREATED", "LEAD_MOVED", "LEAD_CONVERTED", "LEAD_DELETED", "CONVERSATION_STARTED"]
+    rows = (
+        db.execute(
+            select(AuditLog)
+            .where(AuditLog.tenant_id == tenant.id, AuditLog.action.in_(actions))
+            .order_by(AuditLog.created_at.desc(), AuditLog.id.desc())
+            .limit(limit)
+        )
+        .scalars()
+        .all()
+    )
+    titles = {
+        "LEAD_CREATED": "Novo lead criado",
+        "LEAD_MOVED": "Lead movido de etapa",
+        "LEAD_CONVERTED": "Lead concluído",
+        "LEAD_DELETED": "Lead removido",
+        "CONVERSATION_STARTED": "Nova conversa iniciada",
+    }
+    print("[LIVE ACTIVITY]", f"tenant_id={tenant.id}", f"count={len(rows)}")
+    return [
+        DashboardActivityOut(
+            id=str(row.id),
+            type=row.action,
+            title=str((row.metadata_json or {}).get("event") or titles.get(row.action, row.action)),
+            description=str((row.metadata_json or {}).get("phone") or (row.metadata_json or {}).get("to_stage") or "") or None,
+            entity_type=row.entity_type,
+            entity_id=row.entity_id,
+            created_at=row.created_at,
+        )
+        for row in rows
+    ]
 
 
 @router.get("/dashboard/summary", response_model=DashboardSummaryOut)

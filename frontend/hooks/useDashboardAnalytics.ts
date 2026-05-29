@@ -18,6 +18,9 @@ type AnalyticsTimeseries = {
 };
 
 type AnalyticsKpis = {
+  active_conversations?: number;
+  active_leads?: number;
+  messages_today?: number;
   conversations?: number;
   leads?: number;
   messages?: number;
@@ -42,6 +45,9 @@ type NormalizedSeries = {
 };
 
 const DEFAULT_KPIS = {
+  active_conversations: 0,
+  active_leads: 0,
+  messages_today: 0,
   conversations: 0,
   leads: 0,
   messages: 0,
@@ -164,10 +170,11 @@ export function useDashboardAnalytics(period: DashboardPeriod = '7d') {
 
     const sum = (arr: number[]) => arr.reduce((acc, value) => acc + value, 0);
     const calculated = {
-      conversations: Number(kpis.conversations) || sum(padded.conversations),
-      leads: Number(kpis.leads) || sum(padded.leads),
-      messages_received: Number(kpis.messages_received ?? kpis.messages) || sum(padded.messages_received),
+      conversations: Number(kpis.active_conversations ?? kpis.conversations) || sum(padded.conversations),
+      leads: Number(kpis.active_leads ?? kpis.leads) || sum(padded.leads),
+      messages_received: Number(kpis.messages_received ?? kpis.messages_today ?? kpis.messages) || sum(padded.messages_received),
       messages_sent: Number(kpis.messages_sent) || sum(padded.messages_sent),
+      messages_today: Number(kpis.messages_today) || Number(kpis.messages_sent || 0) + Number(kpis.messages_received || 0) || sum(padded.messages_sent) + sum(padded.messages_received),
       response_rate: Number(kpis.response_rate)
         || (padded.messages_received.some((item) => item > 0)
           ? Number(((sum(padded.messages_sent) / Math.max(sum(padded.messages_received), 1)) * 100).toFixed(1))

@@ -5,20 +5,19 @@ from dataclasses import dataclass
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.models import Contact, Conversation, Lead, PipelineStage, TenantUser
-from app.models.lead import LeadStage
+from app.models.lead import LeadSource, LeadStage, LeadStatus
 from app.services.audit_service import write_audit_log
-from app.services.pipeline_service import ensure_pipeline_stages
+from app.services.pipeline_service import get_first_pipeline_stage
 from app.utils.phone import normalize_phone
 
 logger = logging.getLogger(__name__)
 
-WHATSAPP_SOURCE = "whatsapp"
+WHATSAPP_SOURCE = LeadSource.WHATSAPP.value
 LEAD_CREATED_ACTION = "LEAD_CREATED"
-DEFAULT_PIPELINE_STAGE_NAME = "Novo"
 
 
 @dataclass(frozen=True)
@@ -50,22 +49,9 @@ def _resolve_default_owner_id(db: Session, tenant_id: UUID) -> UUID | None:
 
 
 def _resolve_new_pipeline_stage(db: Session, tenant_id: UUID) -> PipelineStage | None:
-    existing_stage_count = db.execute(
-        select(PipelineStage.id).where(PipelineStage.tenant_id == tenant_id).limit(1)
-    ).scalars().first()
-
-    stages = ensure_pipeline_stages(db, tenant_id)
-    stage = next(
-        (item for item in stages if item.name.strip().lower() == DEFAULT_PIPELINE_STAGE_NAME.lower()),
-        stages[0] if stages else None,
-    )
-    print(
-        "[PIPELINE AUTO CREATED]"
-        if existing_stage_count is None
-        else "[PIPELINE AUTO CREATED] stage=Novo status=ready"
-    )
+    stage = get_first_pipeline_stage(db, tenant_id)
+    print("[PIPELINE INSERT]", f"tenant_id={tenant_id}", f"stage_id={getattr(stage, 'id', None)}")
     return stage
-
 
 def ensure_whatsapp_lead_for_inbound(
     db: Session,
@@ -77,6 +63,7 @@ def ensure_whatsapp_lead_for_inbound(
     name: str | None = None,
     message_text: str | None = None,
     occurred_at: datetime | None = None,
+    conversation_created: bool = False,
 ) -> AutoLeadResult | None:
     """Ensure every inbound WhatsApp message is represented in CRM and pipeline.
 
@@ -90,20 +77,28 @@ def ensure_whatsapp_lead_for_inbound(
 
     now = occurred_at or datetime.utcnow()
     lead = db.execute(
-        select(Lead).where(Lead.tenant_id == tenant_id, Lead.phone == normalized_phone)
+        select(Lead).where(
+            Lead.tenant_id == tenant_id,
+            Lead.status == LeadStatus.ACTIVE.value,
+            or_(Lead.phone == normalized_phone, Lead.contact_id == contact.id) if contact else (Lead.phone == normalized_phone),
+        )
     ).scalars().first()
 
     if lead:
+        print("[LEAD FOUND]", f"tenant_id={tenant_id}", f"lead_id={lead.id}", f"phone={normalized_phone}")
         if contact and not lead.contact_id:
             lead.contact_id = contact.id
         if conversation and not lead.conversation_id:
             lead.conversation_id = conversation.id
         if name and (not lead.name or lead.name == normalized_phone):
             lead.name = name
+        if contact and getattr(contact, "email", None) and not getattr(lead, "email", None):
+            lead.email = contact.email
         if message_text is not None:
             lead.last_message = message_text
         lead.last_interaction = now
         lead.last_contact_at = now
+        lead.updated_at = now
         if not lead.source:
             lead.source = WHATSAPP_SOURCE
         if lead.score is None:
@@ -122,14 +117,18 @@ def ensure_whatsapp_lead_for_inbound(
         stage_id=pipeline_stage.id if pipeline_stage else None,
         temperature="cold",
         score=0,
+        email=getattr(contact, "email", None) if contact else None,
         source=WHATSAPP_SOURCE,
+        status=LeadStatus.ACTIVE.value,
         owner_id=_resolve_default_owner_id(db, tenant_id),
         contact_id=contact.id if contact else None,
         conversation_id=conversation.id if conversation else None,
         last_message=message_text,
         last_interaction=now,
         last_contact_at=now,
+        entered_stage_at=now,
         created_at=now,
+        updated_at=now,
     )
     db.add(lead)
     db.flush()
@@ -150,9 +149,20 @@ def ensure_whatsapp_lead_for_inbound(
             "pipeline_stage_id": str(pipeline_stage.id) if pipeline_stage else None,
             "pipeline_stage": pipeline_stage.name if pipeline_stage else None,
             "automatic": True,
+            "event": "Novo lead criado",
         },
     )
     print("[AUDIT LEAD CREATED]", f"tenant_id={tenant_id}", f"lead_id={lead.id}")
+    if conversation_created and conversation:
+        write_audit_log(
+            db,
+            action="CONVERSATION_STARTED",
+            tenant_id=tenant_id,
+            user_id=lead.owner_id,
+            entity_type="conversation",
+            entity_id=conversation.id,
+            metadata={"phone": normalized_phone, "lead_id": str(lead.id), "event": "Nova conversa iniciada"},
+        )
     logger.info(
         "event=lead_auto_created tenant_id=%s lead_id=%s contact_id=%s conversation_id=%s source=%s",
         tenant_id,

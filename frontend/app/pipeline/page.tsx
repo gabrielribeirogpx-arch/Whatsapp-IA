@@ -42,13 +42,11 @@ const channelIcons: Record<Exclude<Channel, 'Todos'>, typeof MessageCircle> = {
   Web: Globe2
 };
 
-function getLeadSeed(lead: PipelineLead) {
-  return Array.from(lead.id || lead.phone || 'lead').reduce((sum, char) => sum + char.charCodeAt(0), 0);
-}
-
 function getLeadChannel(lead: PipelineLead): Exclude<Channel, 'Todos'> {
-  const seed = getLeadSeed(lead);
-  return seed % 5 === 0 ? 'Instagram' : seed % 7 === 0 ? 'Web' : 'WhatsApp';
+  const source = String(lead.source || '').toLowerCase();
+  if (source === 'instagram') return 'Instagram';
+  if (source === 'webchat' || source === 'api') return 'Web';
+  return 'WhatsApp';
 }
 
 function getLeadOwnerId(lead: PipelineLead) {
@@ -72,16 +70,6 @@ function getLeadOwnerLabel(lead: PipelineLead, users: WorkspaceUser[]) {
   if (ownerName && users.some((item) => item.name === ownerName)) return ownerName;
 
   return null;
-}
-
-function getLeadValue(lead: PipelineLead) {
-  const score = Number.isFinite(lead.score) ? lead.score : 0;
-  const temperatureMultiplier = lead.temperature === 'hot' ? 180 : lead.temperature === 'warm' ? 120 : 75;
-  return Math.max(950, Math.round((score + 8) * temperatureMultiplier));
-}
-
-function formatCurrency(value: number) {
-  return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 }).format(value);
 }
 
 function formatRelativeDate(value?: string | null) {
@@ -200,10 +188,13 @@ export default function PipelinePage() {
   }, [boardStages, channelFilter, ownerFilter, searchTerm]);
 
   const totalLeads = allBoardLeads.length;
-  const totalPipelineValue = allBoardLeads.reduce((total, lead) => total + getLeadValue(lead), 0);
-  const closingLeads = boardStages.at(-1)?.leads.length || 0;
-  const conversionRate = totalLeads > 0 ? Math.round((closingLeads / totalLeads) * 100) : 0;
-  const averageCloseTime = totalLeads > 0 ? Math.max(3, Math.round(18 - conversionRate / 8)) : 0;
+  const convertedLeads = boardStages.find((stage) => stage.is_final_stage)?.leads.length || 0;
+  const conversionRate = totalLeads > 0 ? Math.round((convertedLeads / totalLeads) * 100) : 0;
+  const oldestStageEntry = allBoardLeads
+    .map((lead) => lead.entered_stage_at ? new Date(lead.entered_stage_at).getTime() : null)
+    .filter((value): value is number => typeof value === 'number' && Number.isFinite(value))
+    .sort((a, b) => a - b)[0];
+  const maxStageAgeDays = oldestStageEntry ? Math.max(1, Math.floor((Date.now() - oldestStageEntry) / 86400000)) : 0;
   const visibleLeads = filteredStages.reduce((total, stage) => total + stage.leads.length, 0);
 
   const handleDrop = async (stage: PipelineBoardStage) => {
@@ -246,9 +237,9 @@ export default function PipelinePage() {
         </article>
         <article className="pipeline-metric-card">
           <div className="pipeline-metric-icon"><CircleDollarSign size={20} /></div>
-          <span>Valor Total do Pipeline</span>
-          <strong>{formatCurrency(totalPipelineValue)}</strong>
-          <small>Estimativa ponderada por score</small>
+          <span>Leads no Pipeline</span>
+          <strong>{totalLeads}</strong>
+          <small>Dados reais do banco</small>
         </article>
         <article className="pipeline-metric-card">
           <div className="pipeline-metric-icon"><Target size={20} /></div>
@@ -258,8 +249,8 @@ export default function PipelinePage() {
         </article>
         <article className="pipeline-metric-card">
           <div className="pipeline-metric-icon"><Clock3 size={20} /></div>
-          <span>Tempo Médio de Fechamento</span>
-          <strong>{averageCloseTime ? `${averageCloseTime} dias` : '—'}</strong>
+          <span>SLA na Etapa</span>
+          <strong>{maxStageAgeDays ? `${maxStageAgeDays} dias` : '—'}</strong>
           <small>Ciclo comercial previsto</small>
         </article>
       </section>
@@ -312,7 +303,7 @@ export default function PipelinePage() {
 
       <section className="pipeline-board" aria-label="Kanban de vendas">
         {filteredStages.map((stage) => {
-          const stageValue = stage.leads.reduce((total, lead) => total + getLeadValue(lead), 0);
+          const stageValue = stage.leads.length;
 
           return (
             <article
@@ -324,7 +315,7 @@ export default function PipelinePage() {
               <header className="pipeline-column-header">
                 <div>
                   <h2>{stage.name} <span>({stage.leads.length})</span></h2>
-                  <strong>{formatCurrency(stageValue)}</strong>
+                  <strong>{stageValue} leads</strong>
                 </div>
                 <KanbanSquare size={19} />
               </header>
@@ -361,10 +352,10 @@ export default function PipelinePage() {
                       <p>{lead.last_message || 'Sem interação recente.'}</p>
 
                       <div className="pipeline-lead-footer">
-                        <span className="pipeline-lead-value"><TrendingUp size={14} /> {formatCurrency(getLeadValue(lead))}</span>
+                        <span className="pipeline-lead-value"><TrendingUp size={14} /> Score {lead.score}</span>
                         <span><Clock3 size={14} /> {formatRelativeDate(lead.last_interaction)}</span>
                       </div>
-                      <div className="pipeline-lead-owner"><UserRound size={14} /> {owner || 'Sem responsável'}</div>
+                      <div className="pipeline-lead-owner"><UserRound size={14} /> {owner || 'Sem responsável'} · Tempo na etapa: {formatRelativeDate(lead.entered_stage_at)}</div>
                     </div>
                   );
                 })}

@@ -8,7 +8,7 @@ import { MessageSquare, RadioTower, TrendingUp, Zap } from "lucide-react";
 import DashboardChart from '../../components/DashboardChart';
 import DashboardInsightPanel from '@/components/dashboard/DashboardInsightPanel';
 import CreateFlowModal from '@/components/flows/CreateFlowModal';
-import { getConversations, listFlows } from '../../lib/api';
+import { getConversations, getDashboardActivity, listFlows, type DashboardActivity } from '../../lib/api';
 import { Conversation, FlowItem } from '../../lib/types';
 import { useDashboardAnalytics } from '../../hooks/useDashboardAnalytics';
 
@@ -37,6 +37,17 @@ const FALLBACK_VIEW_MODEL: DashboardViewModel = {
   performance: { avgResponseTimeSeconds: null, resolvedConversations: 0, csat: null, abandonmentRate: 0 },
 };
 
+
+function formatRelativeTime(value?: string | null) {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  const diffInMinutes = Math.max(1, Math.floor((Date.now() - date.getTime()) / 60000));
+  if (diffInMinutes < 60) return `há ${diffInMinutes} min`;
+  const diffInHours = Math.floor(diffInMinutes / 60);
+  if (diffInHours < 24) return `há ${diffInHours}h`;
+  return date.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' });
+}
 
 function getInitials(name?: string) {
   if (!name) return '—';
@@ -208,10 +219,12 @@ export default function DashboardPage() {
   const [greeting, setGreeting] = useState('Olá');
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [flows, setFlows] = useState<FlowItem[]>([]);
+  const [activities, setActivities] = useState<DashboardActivity[]>([]);
   const router = useRouter();
   const { data, summary, kpis, timeseries, isLoading, error: dashboardError } = useDashboardAnalytics(period);
   const [conversationsError, setConversationsError] = useState<string | null>(null);
   const [flowsError, setFlowsError] = useState<string | null>(null);
+  const [activitiesError, setActivitiesError] = useState<string | null>(null);
   const [isCreateFlowOpen, setIsCreateFlowOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
   const [showWelcomeToast, setShowWelcomeToast] = useState(false);
@@ -234,6 +247,7 @@ export default function DashboardPage() {
     void (async () => {
       try { const payload = await getConversations(); setConversations(Array.isArray(payload) ? payload : []); setConversationsError(null);} catch { setConversations([]); setConversationsError('Nenhuma atividade recente ainda.'); }
       try { const payload = await listFlows(); setFlows(Array.isArray(payload) ? payload : []); setFlowsError(null);} catch { setFlows([]); setFlowsError('Não foi possível carregar os fluxos neste instante.'); }
+      try { const payload = await getDashboardActivity(); setActivities(Array.isArray(payload) ? payload : []); setActivitiesError(null);} catch { setActivities([]); setActivitiesError('Nenhuma atividade recente ainda.'); }
     })();
   }, []);
 
@@ -271,7 +285,7 @@ export default function DashboardPage() {
     return {
       activeConversations: Number(kpis?.conversations) || uniqueConversations.length || 0,
       activeLeads: Number(kpis?.leads) || uniqueConversations.filter((conversation) => conversation.mode === 'human').length || 0,
-      messagesToday: Number(kpis?.messages_received) || msgsToday || 0,
+      messagesToday: Number((kpis as any)?.messages_today) || Number(kpis?.messages_received || 0) + Number(kpis?.messages_sent || 0) || msgsToday || 0,
       responseRate: Number(kpis?.response_rate) || 0,
       conversions: Number(kpis?.conversions) || 0,
       topFlows: (summary?.top_flows || flowFallback).map((f) => ({ name: f.name, value: Number((f as any).conversations ?? (f as any).value ?? 0) })),
@@ -286,7 +300,7 @@ export default function DashboardPage() {
   }, [conversations, flows, kpis, uniqueConversations, summary]);
 
   const totalChannels = (viewModel.channels || []).reduce((acc, c) => acc + c.value, 0);
-  const liveItems = uniqueConversations.slice(0, 4);
+  const liveItems = activities.slice(0, 4);
   const analyticsSeries = {
     labels: timeseries?.labels ?? [],
     conversations: timeseries?.conversations ?? [],
@@ -466,11 +480,9 @@ export default function DashboardPage() {
             <h3 className="m-0 text-sm font-semibold text-slate-900">Atividade ao vivo</h3>
             <span className="text-xs text-slate-500 flex items-center gap-2"><span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />Atualizando agora</span>
           </div>
-          {(conversationsError || liveItems.length === 0) ? <div className="mt-4 h-[290px] grid place-items-center rounded-xl border border-dashed border-emerald-200 bg-emerald-50/40 text-center"><div><p className="m-0 font-semibold text-slate-700">Nenhuma atividade recente ainda.</p><p className="m-0 mt-1 text-sm text-slate-500">Novas conversas aparecerão aqui em tempo real.</p></div></div> : <div className="mt-4 divide-y divide-slate-100">{(liveItems || []).map((c, idx) => {
-            const name = c.name || c.phone || 'Contato';
-            const contactName = (c as Conversation & { contact_name?: string | null }).contact_name;
-            const initials = getInitials(c.name || contactName || c.phone);
-            return <div key={c.id || idx} className="flex items-start gap-3 py-3"><div className="h-9 w-9 rounded-full bg-emerald-50 text-emerald-700 text-xs font-semibold flex items-center justify-center shrink-0">{initials}</div><div className="min-w-0 flex-1"><p className="m-0 text-sm font-semibold text-slate-800 leading-tight">{name}</p><p className="m-0 text-xs text-slate-500 mt-0.5">Flow: {getConversationFlowLabel(c)}</p><p className="m-0 text-xs text-slate-500 mt-1 line-clamp-1">{c.last_message || 'Sem mensagem recente.'}</p></div><div className="flex shrink-0 items-center gap-2"><span className="text-xs text-slate-400">agora</span><span className="h-2 w-2 rounded-full bg-emerald-500" /></div></div>;
+          {(activitiesError || liveItems.length === 0) ? <div className="mt-4 h-[290px] grid place-items-center rounded-xl border border-dashed border-emerald-200 bg-emerald-50/40 text-center"><div><p className="m-0 font-semibold text-slate-700">Nenhuma atividade recente ainda.</p><p className="m-0 mt-1 text-sm text-slate-500">Eventos reais do CRM aparecerão aqui em tempo real.</p></div></div> : <div className="mt-4 divide-y divide-slate-100">{(liveItems || []).map((item, idx) => {
+            const initials = getInitials(item.title);
+            return <div key={item.id || idx} className="flex items-start gap-3 py-3"><div className="h-9 w-9 rounded-full bg-emerald-50 text-emerald-700 text-xs font-semibold flex items-center justify-center shrink-0">{initials}</div><div className="min-w-0 flex-1"><p className="m-0 text-sm font-semibold text-slate-800 leading-tight">{item.title}</p><p className="m-0 text-xs text-slate-500 mt-0.5">{item.description || item.type}</p></div><div className="flex shrink-0 items-center gap-2"><span className="text-xs text-slate-400">{formatRelativeTime(item.created_at)}</span><span className="h-2 w-2 rounded-full bg-emerald-500" /></div></div>;
           })}</div>}
           <div className="mt-4 border-t border-slate-100 pt-4 text-center">
             <button type="button" onClick={() => setActivePanel('conversations')} className="text-sm font-medium text-emerald-600 hover:text-emerald-700">
@@ -544,9 +556,9 @@ export default function DashboardPage() {
           </div>
         ) : null}
         {activePanel === 'conversations' ? (
-          liveItems.length ? (
+          uniqueConversations.length ? (
             <div className="space-y-3">
-              {liveItems.map((conversation) => <div key={conversation.id} className="rounded-2xl border border-emerald-100 bg-white/90 p-4"><div className="flex items-start justify-between gap-3"><div><p className="m-0 text-sm font-semibold text-slate-900">{conversation.name || conversation.phone}</p><p className="mt-1 text-xs text-slate-500">{getConversationFlowLabel(conversation)}</p></div><span className={`rounded-full px-2 py-1 text-[11px] font-semibold ${conversation.mode === 'human' ? 'bg-sky-100 text-sky-700' : 'bg-purple-100 text-purple-700'}`}>{conversation.mode === 'human' ? 'Humano' : 'IA'}</span></div><p className="mt-3 text-sm text-slate-600">{conversation.last_message || 'Sem mensagem recente.'}</p></div>)}
+              {uniqueConversations.slice(0, 10).map((conversation) => <div key={conversation.id} className="rounded-2xl border border-emerald-100 bg-white/90 p-4"><div className="flex items-start justify-between gap-3"><div><p className="m-0 text-sm font-semibold text-slate-900">{conversation.name || conversation.phone}</p><p className="mt-1 text-xs text-slate-500">{getConversationFlowLabel(conversation)}</p></div><span className={`rounded-full px-2 py-1 text-[11px] font-semibold ${conversation.mode === 'human' ? 'bg-sky-100 text-sky-700' : 'bg-purple-100 text-purple-700'}`}>{conversation.mode === 'human' ? 'Humano' : 'IA'}</span></div><p className="mt-3 text-sm text-slate-600">{conversation.last_message || 'Sem mensagem recente.'}</p></div>)}
             </div>
           ) : <div className="grid min-h-[260px] place-items-center rounded-2xl border border-dashed border-emerald-200 bg-white/70 p-6 text-center"><p className="text-sm font-medium text-slate-600">Nenhuma conversa recente para exibir. Novas conversas aparecerão aqui automaticamente.</p></div>
         ) : null}

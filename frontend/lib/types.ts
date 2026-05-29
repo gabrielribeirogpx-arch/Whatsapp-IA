@@ -226,6 +226,10 @@ export type PipelineLead = {
   score: number;
   stage_id: string | null;
   last_interaction: string | null;
+  entered_stage_at?: string | null;
+  source?: string | null;
+  status?: string | null;
+  email?: string | null;
   responsible_user_id?: string | null;
   assigned_user_id?: string | null;
   owner_id?: string | null;
@@ -242,6 +246,7 @@ export type PipelineStage = {
   id: string;
   name: string;
   position: number;
+  is_final_stage?: boolean;
   leads: PipelineLead[];
 };
 
