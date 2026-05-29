@@ -13,6 +13,7 @@ import {
   SendMessagePayload,
   TenantSession,
   PipelineStage,
+  PipelineStagePayload,
   BotRule,
   BotRulePayload,
   FlowGraphPayload,
@@ -351,6 +352,35 @@ export async function crawlKnowledgeSite(payload: KnowledgeCrawlPayload): Promis
 
 export async function getPipeline(): Promise<PipelineStage[]> {
   const res = await apiFetch('/api/pipeline');
+  return parseApiResponse<PipelineStage[]>(res);
+}
+
+export async function listPipelineStages(): Promise<PipelineStage[]> {
+  const res = await apiFetch('/api/pipeline/stages');
+  return parseApiResponse<PipelineStage[]>(res);
+}
+
+export async function createPipelineStage(payload: Required<Pick<PipelineStagePayload, 'name'>> & Pick<PipelineStagePayload, 'position'>): Promise<PipelineStage> {
+  const res = await apiFetch('/api/pipeline', {
+    method: 'POST',
+    body: JSON.stringify(payload)
+  });
+  return parseApiResponse<PipelineStage>(res);
+}
+
+export async function updatePipelineStage(stageId: string, payload: PipelineStagePayload): Promise<PipelineStage> {
+  const res = await apiFetch(`/api/pipeline/${stageId}`, {
+    method: 'PUT',
+    body: JSON.stringify(payload)
+  });
+  return parseApiResponse<PipelineStage>(res);
+}
+
+export async function reorderPipelineStages(stageIds: string[]): Promise<PipelineStage[]> {
+  const res = await apiFetch('/api/pipeline/reorder', {
+    method: 'PATCH',
+    body: JSON.stringify({ stage_ids: stageIds })
+  });
   return parseApiResponse<PipelineStage[]>(res);
 }
 

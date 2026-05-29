@@ -1,6 +1,6 @@
-import { KeyRound, MessageSquareText, type LucideIcon } from 'lucide-react';
+import { KanbanSquare, KeyRound, MessageSquareText, type LucideIcon } from 'lucide-react';
 
-export type SettingsTabId = 'whatsapp-business' | 'apikeys';
+export type SettingsTabId = 'whatsapp-business' | 'apikeys' | 'pipeline';
 
 type SettingsNavItem = {
   id: SettingsTabId;
@@ -20,7 +20,8 @@ export const settingsNavGroups: SettingsNavGroup[] = [
     title: 'WhatsApp Business Console',
     items: [
       { id: 'whatsapp-business', label: 'WhatsApp Business', description: 'Console Meta, providers, templates e conexões oficiais', icon: MessageSquareText, badge: 'Ativo' },
-      { id: 'apikeys', label: 'API Keys', description: 'Tokens, Cloud API e credenciais operacionais do WhatsApp', icon: KeyRound }
+      { id: 'apikeys', label: 'API Keys', description: 'Tokens, Cloud API e credenciais operacionais do WhatsApp', icon: KeyRound },
+      { id: 'pipeline', label: 'Pipeline', description: 'Etapas configuráveis do Kanban e do CRM', icon: KanbanSquare, badge: 'Sprint 1' }
     ]
   }
 ];

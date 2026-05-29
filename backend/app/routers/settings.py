@@ -19,6 +19,7 @@ def _serialize_settings(tenant: Tenant) -> SettingsOut:
         webhook_status=tenant.webhook_status or "inactive",
         system_name=tenant.name or "WhatsApp IA",
         language=tenant.language or "pt-BR",
+        workspace_profile=tenant.workspace_profile or "private_sales",
     )
 
 
@@ -76,6 +77,9 @@ def update_settings(
 
         if payload.language is not None:
             tenant.language = payload.language.strip()
+
+        if payload.workspace_profile is not None:
+            tenant.workspace_profile = payload.workspace_profile
 
         db.add(tenant)
         db.commit()
