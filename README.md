@@ -31,6 +31,43 @@ Frontend:
 - `NEXT_PUBLIC_API_URL` (ex: `http://localhost:8000`)
 - `NEXT_PUBLIC_TURNSTILE_SITE_KEY` (chave pública do widget Cloudflare Turnstile)
 
+
+## Railway Deployment Notes
+
+O deploy do backend no Railway depende da instalação do runtime Python pelo Railpack/mise antes da instalação das dependências do projeto. Foi registrado um incidente em que o build falhou nessa etapa inicial com erro semelhante a:
+
+```text
+Failed to install core:python@3.11.9:
+No GitHub artifact attestations found
+```
+
+A causa operacional foi uma incompatibilidade/falha de verificação de GitHub Artifact Attestations no fluxo mise/Railpack para o artefato Python resolvido pelo Railway. Como a falha acontece antes do `pip install`, alterar `requirements.txt` não resolve o problema.
+
+Variável obrigatória nos serviços Python do Railway enquanto esse comportamento puder ocorrer:
+
+```env
+MISE_PYTHON_GITHUB_ATTESTATIONS=false
+```
+
+Impacto esperado:
+- estabiliza a instalação do runtime Python no Railway/Railpack;
+- permite que o build avance para instalação de dependências e start da aplicação;
+- não altera versão Python, dependências nem pipeline funcional da aplicação;
+- deve ser mantida como dependência operacional documentada até validação segura de remoção em staging.
+
+### Python runtime atual
+
+A versão Python versionada no repositório está em `runtime.txt` como `python-3.11`. Não existem atualmente `.python-version`, `mise.toml`, `railpack-plan.json` ou `nixpacks.toml` versionados no repositório. No incidente observado, o Railway/Railpack resolveu esse runtime para `core:python@3.11.9` via mise.
+
+### Known Railway Issues
+
+- **GitHub Attestations no mise/Railpack:** se o build falhar com `No GitHub artifact attestations found`, confirmar `MISE_PYTHON_GITHUB_ATTESTATIONS=false` nos serviços Python e redeployar.
+- **Build cache:** se o erro persistir após corrigir variáveis, executar redeploy com cache limpo e confirmar que o commit e o ambiente Railway corretos estão selecionados.
+- **Imports case-sensitive no Linux:** Railway executa em Linux; imports devem respeitar exatamente maiúsculas/minúsculas dos nomes de arquivos.
+- **Deploy troubleshooting:** identificar primeiro se a falha ocorre na instalação do runtime, instalação de dependências, migrations/start do backend, worker ou build do frontend.
+
+Para detalhes operacionais, variáveis críticas, serviços Railway, Postgres, Redis, worker, backend e frontend, consulte `docs/infrastructure/railway.md`.
+
 ## Proteção anti-bot (Cloudflare Turnstile)
 Os fluxos públicos de maior risco (`/login`, `/register` e `/forgot-password`) usam Cloudflare Turnstile no frontend e validação server-side no backend antes de consultar/criar credenciais. A API também aplica rate limit básico em memória por IP e por hash de email para reduzir brute force, spam e enumeração.
 
