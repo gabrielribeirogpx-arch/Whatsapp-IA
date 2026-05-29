@@ -910,6 +910,11 @@ def create_flow_route(
     graph = get_flow_graph(db=db, tenant_id=tenant.id, flow_id=str(flow.id))
     normalized_definition = _normalize_flow_response(graph)
     validation = validate_flow_definition({"nodes": initial_nodes, "edges": initial_edges}, mode="draft")
+    logger.info(
+        "[FLOW CREATED SUCCESS] flow_id=%s tenant_id=%s",
+        flow.id,
+        tenant.id,
+    )
     return {
         **_serialize_flow(flow),
         "definition": normalized_definition,

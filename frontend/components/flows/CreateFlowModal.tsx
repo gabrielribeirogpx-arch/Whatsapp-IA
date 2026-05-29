@@ -9,7 +9,7 @@ type CreateMode = 'blank' | 'welcome';
 type Props = {
   open: boolean;
   onClose: () => void;
-  onCreated: (flowId: string) => void;
+  onCreated: (flowId: string, flowName?: string | null) => void;
   title?: string;
 };
 
@@ -20,6 +20,8 @@ export default function CreateFlowModal({ open, onClose, onCreated, title = 'Cri
   if (!open) return null;
 
   async function handleCreate(mode: CreateMode) {
+    let responseDebug: { status: number; body: unknown; rawBody: string } | null = null;
+
     try {
       setError(null);
       setIsSubmitting(mode);
@@ -40,11 +42,20 @@ export default function CreateFlowModal({ open, onClose, onCreated, title = 'Cri
         } : { nodes: [], edges: [] }),
       };
 
-      const created = await createFlow(payload as FlowPayload & { nodes: unknown[]; edges: unknown[] });
+      console.info('[FLOW CREATE REQUEST]', payload);
+
+      const created = await createFlow(
+        payload as FlowPayload & { nodes: unknown[]; edges: unknown[] },
+        ({ status, body, rawBody }) => {
+          responseDebug = { status, body, rawBody };
+          console.info('[FLOW CREATE RESPONSE]', { status, body, rawBody });
+        }
+      );
       if (!created?.id) throw new Error('Flow criado sem id');
-      onCreated(created.id);
+      onCreated(created.id, created.name);
       onClose();
     } catch (e) {
+      console.error('[FLOW CREATE ERROR]', { error: e, response: responseDebug });
       console.error('Erro ao criar flow', e);
       setError('Não foi possível criar o flow agora.');
     } finally {

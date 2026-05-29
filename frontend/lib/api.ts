@@ -412,12 +412,56 @@ export async function listFlows(): Promise<FlowItem[]> {
   return parseApiResponse<FlowItem[]>(res);
 }
 
-export async function createFlow(payload: FlowPayload): Promise<FlowItem> {
-  const res = await apiFetch('/api/flows', {
+type CreateFlowDebugInfo = {
+  url: string;
+  status: number;
+  body: unknown;
+  rawBody: string;
+};
+
+export async function createFlow(
+  payload: FlowPayload,
+  onDebug?: (info: CreateFlowDebugInfo) => void
+): Promise<FlowItem> {
+  const endpoint = '/api/flows';
+  const res = await apiFetch(endpoint, {
     method: 'POST',
     body: JSON.stringify(payload)
   });
-  return parseApiResponse<FlowItem>(res);
+
+  const rawBody = await res.text();
+  let body: unknown = null;
+  if (rawBody) {
+    try {
+      body = JSON.parse(rawBody);
+    } catch {
+      body = rawBody;
+    }
+  }
+
+  const debugInfo = {
+    url: res.url || buildApiUrl(endpoint),
+    status: res.status,
+    body,
+    rawBody
+  };
+
+  console.info('[FLOW CREATE API CLIENT]', {
+    url: debugInfo.url,
+    status: debugInfo.status,
+    json: debugInfo.body
+  });
+  onDebug?.(debugInfo);
+
+  if (!res.ok) {
+    throw new Error(`HTTP ${res.status}: ${rawBody}`);
+  }
+
+  if (res.status === 204) {
+    return undefined as FlowItem;
+  }
+
+  return body as FlowItem;
 }
 
 export type UpdateFlowApiResult = { ok: boolean; status: number; data: FlowItem | null };
