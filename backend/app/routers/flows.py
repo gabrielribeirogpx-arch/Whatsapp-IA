@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import uuid
 import logging
+import traceback
 import asyncio
 import hashlib
 import json
@@ -1259,46 +1260,105 @@ def create_tenant_flow(
     x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
     db: Session = Depends(get_db),
 ):
-    tenant_uuid = _resolve_tenant_header(x_tenant_id)
-    payload_data = payload.model_dump()
-    logger.info("[FLOW CREATE PAYLOAD] %s", payload_data)
-    logger.info("[FLOW CREATE NODES] %s", payload_data.get("nodes"))
-    logger.info("[FLOW CREATE EDGES] %s", payload_data.get("edges"))
-    if not isinstance(payload_data.get("nodes"), list) or not isinstance(payload_data.get("edges"), list):
-        raise HTTPException(status_code=400, detail="Payload inválido")
+    try:
+        logger.info("[FLOW CREATE START]")
+        tenant_uuid = _resolve_tenant_header(x_tenant_id)
+        logger.info(
+            "[FLOW CREATE TENANT] tenant_id=%s header_present=%s request_state_tenant_id=%s",
+            tenant_uuid,
+            bool(x_tenant_id),
+            getattr(request.state, "tenant_id", None),
+        )
+        logger.info(
+            "[FLOW CREATE USER] user_id=%s request_state_user_id=%s audit_user_id=%s",
+            getattr(request.state, "user_id", None),
+            getattr(request.state, "user_id", None),
+            None,
+        )
+        payload_data = payload.model_dump()
+        logger.info("[FLOW CREATE PAYLOAD] %s", payload_data)
+        logger.info("[FLOW CREATE NODES] %s", payload_data.get("nodes"))
+        logger.info("[FLOW CREATE EDGES] %s", payload_data.get("edges"))
+        if not isinstance(payload_data.get("nodes"), list) or not isinstance(payload_data.get("edges"), list):
+            raise HTTPException(status_code=400, detail="Payload inválido")
 
-    initial_nodes = payload_data.get("nodes") or []
-    initial_edges = payload_data.get("edges") or []
-    logger.info("[FLOW CREATE INPUT] tenant_id=%s nodes_count=%s edges_count=%s", str(tenant_uuid), len(initial_nodes), len(initial_edges))
-    # TEMP DEBUG
-    print(
-        "CREATE FLOW:",
-        {
-            "name": payload_data.get("name"),
-            "description": payload_data.get("description"),
-            "is_active": payload_data.get("is_active"),
-            "trigger_type": payload_data.get("trigger_type"),
-            "priority": payload_data.get("priority"),
-            "nodes_count": len(initial_nodes),
-            "edges_count": len(initial_edges),
-        },
-    )
-    flow_service = FlowService(db)
-    flow = flow_service.create_flow(
-        tenant_id=tenant_uuid,
-        data={"name": payload_data.get("name")},
-    )
-    first_version = flow_service.create_version(flow=flow, tenant_id=tenant_uuid, nodes=initial_nodes, edges=initial_edges)
-    write_audit_log(db, action="FLOW_CREATED", tenant_id=tenant_uuid, entity_type="flow", entity_id=flow.id, metadata={"name": flow.name}, request=request)
-    db.commit()
-    db.refresh(flow)
-    return _serialize_flow_version_response(
-        flow=flow,
-        nodes=flow.current_version.nodes if flow.current_version else [],
-        edges=flow.current_version.edges if flow.current_version else [],
-        version_id=first_version.id if first_version else flow.current_version_id,
-        version=flow.version,
-    )
+        initial_nodes = payload_data.get("nodes") or []
+        initial_edges = payload_data.get("edges") or []
+        logger.info("[FLOW CREATE INPUT] tenant_id=%s nodes_count=%s edges_count=%s", str(tenant_uuid), len(initial_nodes), len(initial_edges))
+        # TEMP DEBUG
+        print(
+            "CREATE FLOW:",
+            {
+                "name": payload_data.get("name"),
+                "description": payload_data.get("description"),
+                "is_active": payload_data.get("is_active"),
+                "trigger_type": payload_data.get("trigger_type"),
+                "priority": payload_data.get("priority"),
+                "nodes_count": len(initial_nodes),
+                "edges_count": len(initial_edges),
+            },
+        )
+        flow_service = FlowService(db)
+        logger.info(
+            "[FLOW CREATE DB INSERT] tenant_id=%s flow_required_fields=%s version_required_fields=%s audit_enabled=%s",
+            tenant_uuid,
+            {
+                "name": payload_data.get("name"),
+                "trigger_type": payload_data.get("trigger_type"),
+                "priority": payload_data.get("priority"),
+                "status": payload_data.get("status"),
+                "is_active": payload_data.get("is_active"),
+            },
+            {"nodes_count": len(initial_nodes), "edges_count": len(initial_edges), "version": 1},
+            True,
+        )
+        flow = flow_service.create_flow(
+            tenant_id=tenant_uuid,
+            data={"name": payload_data.get("name")},
+        )
+        first_version = flow_service.create_version(flow=flow, tenant_id=tenant_uuid, nodes=initial_nodes, edges=initial_edges)
+        write_audit_log(db, action="FLOW_CREATED", tenant_id=tenant_uuid, entity_type="flow", entity_id=flow.id, metadata={"name": flow.name}, request=request)
+        logger.info(
+            "[FLOW CREATE DB COMMIT] tenant_id=%s flow_id=%s version_id=%s audit_user_id=%s",
+            tenant_uuid,
+            flow.id,
+            first_version.id if first_version else flow.current_version_id,
+            None,
+        )
+        db.commit()
+        db.refresh(flow)
+        logger.info(
+            "[FLOW CREATE SUCCESS] tenant_id=%s flow_id=%s version_id=%s",
+            tenant_uuid,
+            flow.id,
+            first_version.id if first_version else flow.current_version_id,
+        )
+        return _serialize_flow_version_response(
+            flow=flow,
+            nodes=flow.current_version.nodes if flow.current_version else [],
+            edges=flow.current_version.edges if flow.current_version else [],
+            version_id=first_version.id if first_version else flow.current_version_id,
+            version=flow.version,
+        )
+    except Exception as e:
+        failing_frame = traceback.extract_tb(e.__traceback__)[-1] if e.__traceback__ else None
+        logger.exception("[FLOW CREATE EXCEPTION]")
+        if failing_frame:
+            logger.error(
+                "[FLOW CREATE EXCEPTION] raised_at=%s:%s in %s line=%s",
+                failing_frame.filename,
+                failing_frame.lineno,
+                failing_frame.name,
+                failing_frame.line,
+            )
+        print(traceback.format_exc())
+        return JSONResponse(
+            status_code=500,
+            content={
+                "error": str(e),
+                "type": type(e).__name__,
+            },
+        )
 
 
 @crud_router.get("")
