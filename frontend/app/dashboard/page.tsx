@@ -245,7 +245,9 @@ export default function DashboardPage() {
     setMounted(true);
   }, []);
 
-    function handleFlowCreated(flowId: string) {
+  function handleFlowCreated(flowId: string, flowName?: string | null) {
+    console.info('[FLOW CREATED CALLBACK]', { flow_id: flowId, flow_name: flowName });
+    console.info('[FLOW CREATE REDIRECT]', { url: `/dashboard/flow-builder?flow_id=${flowId}` });
     router.push(`/dashboard/flow-builder?flow_id=${flowId}`);
   }
 

@@ -385,7 +385,8 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
     setIsCreateFlowOpen(true);
   }, []);
 
-  const handleFlowCreated = useCallback((flowId: string) => {
+  const handleFlowCreated = useCallback((flowId: string, flowName?: string | null) => {
+    console.info('[FLOW CREATED CALLBACK]', { flow_id: flowId, flow_name: flowName });
     setSelectedFlowId(flowId);
   }, []);
 
