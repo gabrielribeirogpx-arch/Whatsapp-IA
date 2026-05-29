@@ -1,6 +1,7 @@
 'use client';
 
 import { FormEvent, useMemo, useState } from 'react';
+import { CheckCircle2, XCircle } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import TurnstileWidget from '../../components/TurnstileWidget';
 import { registerTenant } from '../../lib/api';
@@ -41,7 +42,15 @@ export default function RegisterPage() {
   const [turnstileToken, setTurnstileToken] = useState('');
   const [turnstileKey, setTurnstileKey] = useState(0);
 
-  const passwordOk = useMemo(() => form.password.length >= 8 && form.password === form.confirm_password, [form.password, form.confirm_password]);
+  const passwordRules = useMemo(() => ([
+    ['Mínimo 8 caracteres', form.password.length >= 8],
+    ['Maiúscula', /[A-Z]/.test(form.password)],
+    ['Minúscula', /[a-z]/.test(form.password)],
+    ['Número', /\d/.test(form.password)],
+    ['Especial', /[^A-Za-z0-9]/.test(form.password)]
+  ] as const), [form.password]);
+  const strongPassword = passwordRules.every(([, ok]) => ok);
+  const passwordOk = useMemo(() => strongPassword && form.password === form.confirm_password, [strongPassword, form.password, form.confirm_password]);
 
   const updateField = (field: keyof RegisterForm, value: string) => {
     setForm((prev) => ({ ...prev, [field]: value }));
@@ -56,7 +65,7 @@ export default function RegisterPage() {
       if (!form.email.trim()) nextErrors.email = 'Informe um email válido.';
       if (!form.password.trim()) nextErrors.password = 'Informe uma senha.';
       if (!form.confirm_password.trim()) nextErrors.confirm_password = 'Confirme sua senha.';
-      if (!passwordOk) nextErrors.confirm_password = 'Senha mínima de 8 caracteres e confirmação idêntica.';
+      if (!passwordOk) nextErrors.confirm_password = 'A senha deve cumprir a política forte e a confirmação precisa ser idêntica.';
     }
 
     if (targetStep >= 2) {
@@ -140,7 +149,7 @@ export default function RegisterPage() {
 
   return <main className="onboarding-shell"><section className="onboarding-hero" aria-hidden="true"><div className="onboarding-glow" /><div className="onboarding-hero-content"><p className="onboarding-kicker">Wazza API</p><h1>Atendimento WhatsApp em padrão SaaS.</h1><p className="onboarding-subtitle">Onboarding profissional para escalar seu time com automação, CRM e IA.</p></div></section><section className="onboarding-form-section"><form className="onboarding-card" onSubmit={submit}><div className="onboarding-step"><span>Etapa {step}</span><strong>{step} de 4</strong></div><h2>Crie sua conta</h2>
 <div className="onboarding-fields">
-  {step===1 && <><label className="onboarding-label">Nome completo</label><input className={`onboarding-input ${hasError('full_name') ? 'onboarding-input--error' : ''}`} value={form.full_name} onChange={e=>updateField('full_name', e.target.value)} required />{fieldErrors.full_name && <p className="error-text">{fieldErrors.full_name}</p>}<label className="onboarding-label">Email</label><input className={`onboarding-input ${hasError('email') ? 'onboarding-input--error' : ''}`} type="email" value={form.email} onChange={e=>updateField('email', e.target.value)} required />{fieldErrors.email && <p className="error-text">{fieldErrors.email}</p>}<label className="onboarding-label">Senha</label><input className={`onboarding-input ${hasError('password') ? 'onboarding-input--error' : ''}`} type="password" minLength={8} value={form.password} onChange={e=>updateField('password', e.target.value)} required /><label className="onboarding-label">Confirmar senha</label><input className={`onboarding-input ${hasError('confirm_password') ? 'onboarding-input--error' : ''}`} type="password" minLength={8} value={form.confirm_password} onChange={e=>updateField('confirm_password', e.target.value)} required />{fieldErrors.confirm_password && <p className="error-text">{fieldErrors.confirm_password}</p>}</>}
+  {step===1 && <><label className="onboarding-label">Nome completo</label><input className={`onboarding-input ${hasError('full_name') ? 'onboarding-input--error' : ''}`} value={form.full_name} onChange={e=>updateField('full_name', e.target.value)} required />{fieldErrors.full_name && <p className="error-text">{fieldErrors.full_name}</p>}<label className="onboarding-label">Email</label><input className={`onboarding-input ${hasError('email') ? 'onboarding-input--error' : ''}`} type="email" value={form.email} onChange={e=>updateField('email', e.target.value)} required />{fieldErrors.email && <p className="error-text">{fieldErrors.email}</p>}<label className="onboarding-label">Senha</label><input className={`onboarding-input ${hasError('password') ? 'onboarding-input--error' : ''}`} type="password" minLength={8} value={form.password} onChange={e=>updateField('password', e.target.value)} required /><div className="grid gap-2 rounded-2xl border border-slate-200 bg-slate-50 p-3 text-xs sm:grid-cols-2">{passwordRules.map(([label, ok]) => <span key={label} className={`inline-flex items-center gap-2 font-semibold ${ok ? 'text-emerald-700' : 'text-slate-500'}`}>{ok ? <CheckCircle2 size={14} /> : <XCircle size={14} />} {label}</span>)}</div><label className="onboarding-label">Confirmar senha</label><input className={`onboarding-input ${hasError('confirm_password') ? 'onboarding-input--error' : ''}`} type="password" minLength={8} value={form.confirm_password} onChange={e=>updateField('confirm_password', e.target.value)} required />{fieldErrors.confirm_password && <p className="error-text">{fieldErrors.confirm_password}</p>}</>}
   {step===2 && <><label className="onboarding-label">Nome do negócio</label><input className={`onboarding-input ${hasError('business_name') ? 'onboarding-input--error' : ''}`} value={form.business_name} onChange={e=>updateField('business_name', e.target.value)} required />{fieldErrors.business_name && <p className="error-text">{fieldErrors.business_name}</p>}<label className="onboarding-label">Segmento</label><input className={`onboarding-input ${hasError('business_segment') ? 'onboarding-input--error' : ''}`} value={form.business_segment} onChange={e=>updateField('business_segment', e.target.value)} required />{fieldErrors.business_segment && <p className="error-text">{fieldErrors.business_segment}</p>}<label className="onboarding-label">Tamanho do time (opcional)</label><input className="onboarding-input" value={form.team_size} onChange={e=>updateField('team_size', e.target.value)} /></>}
   {step===3 && <><label className="onboarding-label">Número WhatsApp</label><input className={`onboarding-input ${hasError('whatsapp_number') ? 'onboarding-input--error' : ''}`} value={form.whatsapp_number} onChange={e=>updateField('whatsapp_number', e.target.value)} required />{fieldErrors.whatsapp_number && <p className="error-text">{fieldErrors.whatsapp_number}</p>}<label className="onboarding-label">Volume mensal (opcional)</label><input className="onboarding-input" value={form.monthly_message_volume} onChange={e=>updateField('monthly_message_volume', e.target.value)} /><label className="onboarding-label">Uso pretendido</label><input className={`onboarding-input ${hasError('intended_use') ? 'onboarding-input--error' : ''}`} value={form.intended_use} onChange={e=>updateField('intended_use', e.target.value)} required />{fieldErrors.intended_use && <p className="error-text">{fieldErrors.intended_use}</p>}</>}
   {step===4 && <><p className="onboarding-description">Revise os dados e finalize a criação do seu workspace.</p><TurnstileWidget key={turnstileKey} action="register" token={turnstileToken} onToken={setTurnstileToken} onError={setError} /></>}

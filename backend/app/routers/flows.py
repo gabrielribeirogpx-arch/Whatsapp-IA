@@ -873,6 +873,7 @@ def list_flows(
 
 @router.post("/")
 def create_flow_route(
+    request: Request,
     payload: FlowCreatePayload | None = None,
     x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
     db: Session = Depends(get_db),
@@ -903,6 +904,7 @@ def create_flow_route(
         edges=initial_edges,
     )
     db.add(flow)
+    write_audit_log(db, action="FLOW_CREATED", tenant_id=tenant.id, entity_type="flow", entity_id=flow.id, metadata={"name": flow.name}, request=request)
     db.commit()
     db.refresh(flow)
     graph = get_flow_graph(db=db, tenant_id=tenant.id, flow_id=str(flow.id))
@@ -1022,6 +1024,7 @@ async def update_flow_route(
 @router.delete("/{flow_id}")
 def delete_flow_route(
     flow_id: uuid.UUID,
+    request: Request,
     x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
     db: Session = Depends(get_db),
 ):
@@ -1029,6 +1032,7 @@ def delete_flow_route(
     deleted = delete_flow(db=db, flow_id=flow_id, tenant_id=tenant.id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Flow not found")
+    write_audit_log(db, action="FLOW_DELETED", tenant_id=tenant.id, entity_type="flow", entity_id=flow_id, request=request)
     db.commit()
     return {"status": "deleted"}
 
@@ -1087,6 +1091,7 @@ def _rename_flow_name(
 
     flow.name = normalized_name
     db.add(flow)
+    write_audit_log(db, action="FLOW_PUBLISHED" if payload.is_active else "FLOW_UPDATED", tenant_id=tenant_uuid, entity_type="flow", entity_id=flow.id, metadata={"is_active": payload.is_active}, request=request)
     db.commit()
     db.refresh(flow)
     return _serialize_flow(flow)
@@ -1245,6 +1250,7 @@ def save_tenant_flow(
 @crud_router.post("", response_model=FlowVersionResponse)
 def create_tenant_flow(
     payload: FlowCreatePayload,
+    request: Request,
     x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
     db: Session = Depends(get_db),
 ):
@@ -1278,6 +1284,7 @@ def create_tenant_flow(
         data={"name": payload_data.get("name")},
     )
     first_version = flow_service.create_version(flow=flow, tenant_id=tenant_uuid, nodes=initial_nodes, edges=initial_edges)
+    write_audit_log(db, action="FLOW_CREATED", tenant_id=tenant_uuid, entity_type="flow", entity_id=flow.id, metadata={"name": flow.name}, request=request)
     db.commit()
     db.refresh(flow)
     return _serialize_flow_version_response(
@@ -1451,6 +1458,7 @@ async def update_tenant_flow(
         )
 
         invalidate_flow_runtime_cache(flow.id)
+        write_audit_log(db, action="FLOW_UPDATED", tenant_id=tenant_uuid, entity_type="flow", entity_id=flow.id, metadata={"version_id": str(nova.id), "nodes_count": len(nodes_json), "edges_count": len(edges_json)}, request=request)
         if flow.is_active:
             logger.info("[FLOW ACTIVE]: %s", flow.id)
         db.commit()
@@ -1476,6 +1484,7 @@ async def update_tenant_flow(
 @crud_router.delete("/{flow_id}", response_model=DeleteFlowResponse)
 def delete_tenant_flow(
     flow_id: str,
+    request: Request,
     x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
     db: Session = Depends(get_db),
 ):
@@ -1493,10 +1502,12 @@ def delete_tenant_flow(
     if is_in_use:
         flow.is_deleted = True
         flow.deleted_at = datetime.utcnow()
+        write_audit_log(db, action="FLOW_DELETED", tenant_id=tenant_uuid, entity_type="flow", entity_id=flow.id, metadata={"mode": "soft_delete"}, request=request)
         db.commit()
         return {"success": True, "mode": "soft_delete"}
 
     try:
+        write_audit_log(db, action="FLOW_DELETED", tenant_id=tenant_uuid, entity_type="flow", entity_id=flow.id, metadata={"mode": "hard_delete"}, request=request)
         db.delete(flow)
         db.commit()
         return {"success": True, "mode": "hard_delete"}
@@ -1508,6 +1519,7 @@ def delete_tenant_flow(
         )
         flow.is_deleted = True
         flow.deleted_at = datetime.utcnow()
+        write_audit_log(db, action="FLOW_DELETED", tenant_id=tenant_uuid, entity_type="flow", entity_id=flow.id, metadata={"mode": "soft_delete_fallback"}, request=request)
         db.commit()
         return {"success": True, "mode": "soft_delete"}
 
@@ -1515,6 +1527,7 @@ def delete_tenant_flow(
 @crud_router.put("/{flow_id}/activate")
 def activate_tenant_flow(
     flow_id: str,
+    request: Request,
     x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
     db: Session = Depends(get_db),
 ):
@@ -1534,6 +1547,7 @@ def activate_tenant_flow(
     flow.is_active = True
     db.add(flow)
     invalidate_flow_runtime_cache(flow.id)
+    write_audit_log(db, action="FLOW_PUBLISHED", tenant_id=tenant_uuid, entity_type="flow", entity_id=flow.id, metadata={"published_version_id": str(flow.published_version_id) if flow.published_version_id else None}, request=request)
     db.commit()
     db.refresh(flow)
     logger.info("[FLOW ACTIVATED] flow_id=%s", flow.id)
@@ -1561,6 +1575,7 @@ def deactivate_tenant_flows(
 def update_tenant_flow_status(
     flow_id: str,
     payload: FlowStatusPayload,
+    request: Request,
     x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
     db: Session = Depends(get_db),
 ):

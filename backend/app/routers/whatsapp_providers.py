@@ -6,6 +6,9 @@ from app.models.tenant import Tenant
 from app.schemas.whatsapp_business import TenantWhatsAppProviderCreate, TenantWhatsAppProviderOut, TenantWhatsAppProviderUpdate
 from app.services import whatsapp_provider_service
 from app.services.tenant_service import get_current_tenant
+from app.routers.account import get_current_user
+from app.models import TenantUser
+from app.services.audit_service import write_audit_log
 
 router = APIRouter(prefix="/api/whatsapp/providers", tags=["whatsapp-providers"])
 
@@ -17,10 +20,12 @@ def get_providers(request: Request, db: Session = Depends(get_db), tenant: Tenan
 
 
 @router.post("", response_model=TenantWhatsAppProviderOut)
-def create_provider(request: Request, payload: TenantWhatsAppProviderCreate, db: Session = Depends(get_db), tenant: Tenant = Depends(get_current_tenant)):
+def create_provider(request: Request, payload: TenantWhatsAppProviderCreate, db: Session = Depends(get_db), tenant: Tenant = Depends(get_current_tenant), user: TenantUser = Depends(get_current_user)):
     print("[WHATSAPP PROVIDER CREATE]", f"tenant_id={tenant.id}")
     try:
-        return whatsapp_provider_service.create_provider(db, tenant.id, payload)
+        provider = whatsapp_provider_service.create_provider(db, tenant.id, payload)
+        write_audit_log(db, action="WHATSAPP_PROVIDER_UPDATED", tenant_id=tenant.id, user_id=user.id, entity_type="whatsapp_provider", entity_id=provider.id, metadata={"operation": "create", "provider_type": provider.provider_type}, request=request, commit=True)
+        return provider
     except Exception as exc:
         print(
             "[WHATSAPP PROVIDER CREATE ERROR]",
@@ -33,18 +38,24 @@ def create_provider(request: Request, payload: TenantWhatsAppProviderCreate, db:
 
 
 @router.patch("/{provider_id}", response_model=TenantWhatsAppProviderOut)
-def patch_provider(provider_id: str, payload: TenantWhatsAppProviderUpdate, db: Session = Depends(get_db), tenant: Tenant = Depends(get_current_tenant)):
+def patch_provider(provider_id: str, payload: TenantWhatsAppProviderUpdate, request: Request, db: Session = Depends(get_db), tenant: Tenant = Depends(get_current_tenant), user: TenantUser = Depends(get_current_user)):
     try:
-        return whatsapp_provider_service.update_provider(db, tenant.id, provider_id, payload)
+        provider = whatsapp_provider_service.update_provider(db, tenant.id, provider_id, payload)
+        fields = payload.model_dump(exclude_unset=True).keys()
+        action = "API_KEY_UPDATED" if any(field in {"api_key", "access_token"} for field in fields) else "WHATSAPP_PROVIDER_UPDATED"
+        write_audit_log(db, action=action, tenant_id=tenant.id, user_id=user.id, entity_type="whatsapp_provider", entity_id=provider.id, metadata={"operation": "update", "fields": sorted(fields)}, request=request, commit=True)
+        return provider
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @router.post("/{provider_id}/activate", response_model=TenantWhatsAppProviderOut)
-def activate_provider(provider_id: str, db: Session = Depends(get_db), tenant: Tenant = Depends(get_current_tenant)):
+def activate_provider(provider_id: str, request: Request, db: Session = Depends(get_db), tenant: Tenant = Depends(get_current_tenant), user: TenantUser = Depends(get_current_user)):
     print("[WHATSAPP PROVIDER ACTIVATE]", f"tenant_id={tenant.id}", f"provider_id={provider_id}")
     try:
-        return whatsapp_provider_service.set_active_provider(db, tenant.id, provider_id)
+        provider = whatsapp_provider_service.set_active_provider(db, tenant.id, provider_id)
+        write_audit_log(db, action="WHATSAPP_PROVIDER_UPDATED", tenant_id=tenant.id, user_id=user.id, entity_type="whatsapp_provider", entity_id=provider.id, metadata={"operation": "activate"}, request=request, commit=True)
+        return provider
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
@@ -59,8 +70,9 @@ def test_provider(provider_id: str, db: Session = Depends(get_db), tenant: Tenan
 
 
 @router.delete("/{provider_id}", status_code=204)
-def remove_provider(provider_id: str, db: Session = Depends(get_db), tenant: Tenant = Depends(get_current_tenant)):
+def remove_provider(provider_id: str, request: Request, db: Session = Depends(get_db), tenant: Tenant = Depends(get_current_tenant), user: TenantUser = Depends(get_current_user)):
     try:
         whatsapp_provider_service.delete_provider(db, tenant.id, provider_id)
+        write_audit_log(db, action="WHATSAPP_PROVIDER_UPDATED", tenant_id=tenant.id, user_id=user.id, entity_type="whatsapp_provider", entity_id=provider_id, metadata={"operation": "delete"}, request=request, commit=True)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc

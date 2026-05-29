@@ -2,6 +2,7 @@
 
 import { FormEvent, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
+import { CheckCircle2, XCircle } from "lucide-react";
 
 import { resetPassword } from "../../lib/api";
 
@@ -13,6 +14,14 @@ export default function ResetPasswordClient() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+  const passwordRules = useMemo(() => ([
+    ["Mínimo 8 caracteres", newPassword.length >= 8],
+    ["Maiúscula", /[A-Z]/.test(newPassword)],
+    ["Minúscula", /[a-z]/.test(newPassword)],
+    ["Número", /\d/.test(newPassword)],
+    ["Especial", /[^A-Za-z0-9]/.test(newPassword)]
+  ] as const), [newPassword]);
+  const strongPassword = passwordRules.every(([, ok]) => ok);
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -21,6 +30,11 @@ export default function ResetPasswordClient() {
 
     if (!token) {
       setError("Token ausente.");
+      return;
+    }
+
+    if (!strongPassword) {
+      setError("A senha deve cumprir todos os requisitos de segurança.");
       return;
     }
 
@@ -53,6 +67,9 @@ export default function ResetPasswordClient() {
           onChange={(e) => setNewPassword(e.target.value)}
           placeholder="Nova senha"
         />
+        <div className="grid gap-2 rounded-2xl border border-slate-200 bg-slate-50 p-3 text-xs sm:grid-cols-2">
+          {passwordRules.map(([label, ok]) => <span key={label} className={`inline-flex items-center gap-2 font-semibold ${ok ? "text-emerald-700" : "text-slate-500"}`}>{ok ? <CheckCircle2 size={14} /> : <XCircle size={14} />} {label}</span>)}
+        </div>
         <input
           type="password"
           minLength={8}

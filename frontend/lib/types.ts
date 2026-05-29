@@ -40,9 +40,29 @@ export type AccountPreferences = {
 
 export type AccountSecurity = {
   last_login_at?: string | null;
-  active_sessions: Array<{ id: string; device: string; location?: string | null; last_seen_at?: string | null; status: string }>;
+  last_login_ip?: string | null;
+  active_sessions_count: number;
+  blocked_login_attempts: number;
+  turnstile_status: string;
+  protection_status: string;
+  active_sessions: Array<{ id: string; device: string; ip_address?: string | null; location?: string | null; user_agent?: string | null; last_seen_at?: string | null; created_at?: string | null; revoked_at?: string | null; status: string; is_current?: boolean }>;
   history: Array<{ event: string; description?: string | null; created_at?: string | null }>;
   mfa_status: string;
+};
+
+export type AuditLog = {
+  id: string;
+  tenant_id?: string | null;
+  user_id?: string | null;
+  user_name?: string | null;
+  user_email?: string | null;
+  action: string;
+  entity_type?: string | null;
+  entity_id?: string | null;
+  metadata_json: Record<string, unknown>;
+  ip_address?: string | null;
+  user_agent?: string | null;
+  created_at?: string | null;
 };
 
 export type AccountMe = {

@@ -7,15 +7,15 @@ import json
 import os
 import secrets
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Request
-from sqlalchemy import select
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
+from sqlalchemy import select, func
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import Tenant, TenantUser
+from app.models import AuditLog, Tenant, TenantUser, UserSession
 from app.schemas.account import (
     AccountMeOut,
     AccountProfileOut,
@@ -27,9 +27,12 @@ from app.schemas.account import (
     WorkspaceUserInviteIn,
     WorkspaceUserOut,
     WorkspaceUserUpdateIn,
+    AuditLogOut,
 )
 from app.services.tenant_service import get_current_tenant
-from app.routers.auth import _hash_password, _verify_password
+from app.services.audit_service import serialize_audit_log, write_audit_log
+from app.services.session_service import hash_session_token, serialize_user_session
+from app.routers.auth import _hash_password, _verify_password, validate_password_policy
 
 router = APIRouter(tags=["account"])
 
@@ -52,6 +55,12 @@ def _decode_token(token: str) -> dict:
     return payload
 
 
+def _current_token_hash(authorization: str) -> str | None:
+    if not authorization.lower().startswith("bearer "):
+        return None
+    return hash_session_token(authorization.split(" ", 1)[1].strip())
+
+
 def get_current_user(
     request: Request,
     authorization: str = Header(default=""),
@@ -60,13 +69,22 @@ def get_current_user(
 ) -> TenantUser:
     if not authorization.lower().startswith("bearer "):
         raise HTTPException(status_code=401, detail="Token obrigatório")
-    payload = _decode_token(authorization.split(" ", 1)[1].strip())
+    raw_token = authorization.split(" ", 1)[1].strip()
+    payload = _decode_token(raw_token)
     if str(payload.get("tenant_id")) != str(tenant.id):
         raise HTTPException(status_code=401, detail="Token não pertence ao tenant atual")
     email = str(payload.get("email") or "").strip().lower()
     user = db.execute(select(TenantUser).where(TenantUser.tenant_id == tenant.id, TenantUser.email == email)).scalars().first()
     if not user:
         raise HTTPException(status_code=401, detail="Usuário não encontrado")
+    token_hash = hash_session_token(raw_token)
+    session = db.execute(select(UserSession).where(UserSession.session_token_hash == token_hash)).scalars().first()
+    if session and session.revoked_at is not None:
+        raise HTTPException(status_code=401, detail="Sessão encerrada")
+    if session:
+        session.last_seen_at = datetime.utcnow()
+        db.add(session)
+        db.commit()
     return user
 
 
@@ -102,33 +120,46 @@ def _workspace_user(user: TenantUser) -> WorkspaceUserOut:
     )
 
 
-def _security(user: TenantUser) -> AccountSecurityOut:
-    now = datetime.now(timezone.utc)
-    active_sessions = [
-        {
-            "id": "current",
-            "device": "Navegador atual",
-            "location": "Sessão autenticada",
-            "last_seen_at": (user.last_login_at or now).isoformat(),
-            "status": "Ativa",
-        }
-    ]
+def _security(db: Session, user: TenantUser, authorization: str = "") -> AccountSecurityOut:
+    now = datetime.utcnow()
+    current_hash = _current_token_hash(authorization)
+    sessions = db.execute(
+        select(UserSession)
+        .where(UserSession.tenant_id == user.tenant_id, UserSession.user_id == user.id)
+        .order_by(UserSession.revoked_at.asc().nullsfirst(), UserSession.last_seen_at.desc())
+    ).scalars().all()
+    active_sessions = [session for session in sessions if session.revoked_at is None]
+    last_success = db.execute(
+        select(AuditLog)
+        .where(AuditLog.tenant_id == user.tenant_id, AuditLog.user_id == user.id, AuditLog.action == "LOGIN_SUCCESS")
+        .order_by(AuditLog.created_at.desc())
+        .limit(1)
+    ).scalars().first()
+    since = now - timedelta(days=30)
+    blocked_attempts = db.execute(
+        select(func.count(AuditLog.id))
+        .where(AuditLog.tenant_id == user.tenant_id, AuditLog.action == "LOGIN_FAILED", AuditLog.created_at >= since)
+    ).scalar() or 0
     history = [
         {"event": "Conta criada", "description": "Administrador inicial do workspace", "created_at": user.created_at.isoformat() if user.created_at else None},
-        {"event": "Último login", "description": "Acesso validado por senha", "created_at": user.last_login_at.isoformat() if user.last_login_at else None},
-        {"event": "Senha atualizada", "description": "Credenciais protegidas com hash seguro", "created_at": user.password_changed_at.isoformat() if user.password_changed_at else None},
+        {"event": "Último login", "description": "Acesso validado por senha e Turnstile", "created_at": user.last_login_at.isoformat() if user.last_login_at else None},
+        {"event": "Senha atualizada", "description": "Credenciais protegidas com política forte", "created_at": user.password_changed_at.isoformat() if user.password_changed_at else None},
     ]
     return AccountSecurityOut(
         last_login_at=user.last_login_at,
-        active_sessions=active_sessions,
+        last_login_ip=last_success.ip_address if last_success else None,
+        active_sessions_count=len(active_sessions),
+        blocked_login_attempts=int(blocked_attempts),
+        turnstile_status="Ativo",
+        protection_status="Protegido",
+        active_sessions=[serialize_user_session(item, current_token_hash=current_hash) for item in active_sessions],
         history=history,
-        mfa_status="Em breve",
+        mfa_status="Não configurado",
     )
 
-
 @router.get("/account/me", response_model=AccountMeOut)
-def get_account_me(tenant: Tenant = Depends(get_current_tenant), user: TenantUser = Depends(get_current_user)):
-    return AccountMeOut(profile=_profile(user, tenant), preferences=_preferences(user, tenant), security=_security(user))
+def get_account_me(authorization: str = Header(default=""), db: Session = Depends(get_db), tenant: Tenant = Depends(get_current_tenant), user: TenantUser = Depends(get_current_user)):
+    return AccountMeOut(profile=_profile(user, tenant), preferences=_preferences(user, tenant), security=_security(db, user, authorization))
 
 
 @router.put("/account/profile", response_model=AccountProfileOut)
@@ -159,19 +190,21 @@ def update_preferences(payload: AccountPreferencesUpdateIn, db: Session = Depend
 
 
 @router.get("/account/security", response_model=AccountSecurityOut)
-def get_security(user: TenantUser = Depends(get_current_user)):
-    return _security(user)
+def get_security(authorization: str = Header(default=""), db: Session = Depends(get_db), user: TenantUser = Depends(get_current_user)):
+    return _security(db, user, authorization)
 
 
 @router.post("/account/security/password")
 def update_password(payload: AccountPasswordUpdateIn, db: Session = Depends(get_db), user: TenantUser = Depends(get_current_user)):
     if payload.new_password != payload.confirm_password:
         raise HTTPException(status_code=400, detail="As senhas não coincidem")
+    validate_password_policy(payload.new_password)
     if not _verify_password(payload.current_password, user.password_hash):
         raise HTTPException(status_code=400, detail="Senha atual incorreta")
     user.password_hash = _hash_password(payload.new_password)
     user.password_changed_at = datetime.utcnow()
     db.add(user)
+    write_audit_log(db, action="PASSWORD_CHANGED", tenant_id=user.tenant_id, user_id=user.id, entity_type="tenant_user", entity_id=user.id)
     db.commit()
     return {"message": "Senha alterada com sucesso."}
 
@@ -198,6 +231,8 @@ def invite_workspace_user(payload: WorkspaceUserInviteIn, db: Session = Depends(
         company=tenant.name,
     )
     db.add(invited)
+    db.flush()
+    write_audit_log(db, action="USER_CREATED", tenant_id=tenant.id, user_id=user.id, entity_type="tenant_user", entity_id=invited.id, metadata={"email": email, "role": payload.role})
     db.commit()
     db.refresh(invited)
     return _workspace_user(invited)
@@ -215,6 +250,7 @@ def update_workspace_user(user_id: UUID, payload: WorkspaceUserUpdateIn, db: Ses
     if payload.status is not None:
         target.status = payload.status
     db.add(target)
+    write_audit_log(db, action="USER_UPDATED", tenant_id=tenant.id, user_id=user.id, entity_type="tenant_user", entity_id=target.id, metadata={"role": target.role, "status": target.status})
     db.commit()
     db.refresh(target)
     return _workspace_user(target)
@@ -229,6 +265,60 @@ def deactivate_workspace_user(user_id: UUID, db: Session = Depends(get_db), tena
         raise HTTPException(status_code=400, detail="Você não pode desativar a própria sessão administrativa")
     target.status = "inactive"
     db.add(target)
+    write_audit_log(db, action="USER_DISABLED", tenant_id=tenant.id, user_id=user.id, entity_type="tenant_user", entity_id=target.id)
     db.commit()
     db.refresh(target)
     return _workspace_user(target)
+
+
+@router.post("/account/security/sessions/{session_id}/revoke")
+def revoke_session(session_id: UUID, authorization: str = Header(default=""), db: Session = Depends(get_db), user: TenantUser = Depends(get_current_user)):
+    session = db.execute(select(UserSession).where(UserSession.tenant_id == user.tenant_id, UserSession.user_id == user.id, UserSession.id == session_id)).scalars().first()
+    if not session or session.revoked_at is not None:
+        raise HTTPException(status_code=404, detail="Sessão não encontrada")
+    session.revoked_at = datetime.utcnow()
+    db.add(session)
+    write_audit_log(db, action="SESSION_REVOKED", tenant_id=user.tenant_id, user_id=user.id, entity_type="user_session", entity_id=session.id)
+    db.commit()
+    print("[SESSION REVOKED]", f"session_id={session.id}", f"user_id={user.id}")
+    return {"message": "Sessão encerrada."}
+
+
+@router.post("/account/security/sessions/revoke-others")
+def revoke_other_sessions(authorization: str = Header(default=""), db: Session = Depends(get_db), user: TenantUser = Depends(get_current_user)):
+    current_hash = _current_token_hash(authorization)
+    sessions = db.execute(select(UserSession).where(UserSession.tenant_id == user.tenant_id, UserSession.user_id == user.id, UserSession.revoked_at.is_(None))).scalars().all()
+    count = 0
+    for session in sessions:
+        if current_hash and session.session_token_hash == current_hash:
+            continue
+        session.revoked_at = datetime.utcnow()
+        db.add(session)
+        count += 1
+    write_audit_log(db, action="SESSION_REVOKED", tenant_id=user.tenant_id, user_id=user.id, entity_type="user_session", metadata={"revoked_count": count, "scope": "others"})
+    db.commit()
+    print("[SESSION REVOKED]", f"scope=others user_id={user.id} count={count}")
+    return {"message": "Outras sessões encerradas.", "revoked_count": count}
+
+
+@router.get("/security/audit", response_model=list[AuditLogOut])
+def list_audit_logs(
+    user_id: UUID | None = Query(default=None),
+    action: str | None = Query(default=None),
+    start_date: datetime | None = Query(default=None),
+    end_date: datetime | None = Query(default=None),
+    db: Session = Depends(get_db),
+    tenant: Tenant = Depends(get_current_tenant),
+    user: TenantUser = Depends(get_current_user),
+):
+    query = select(AuditLog).where(AuditLog.tenant_id == tenant.id).order_by(AuditLog.created_at.desc()).limit(200)
+    if user_id:
+        query = query.where(AuditLog.user_id == user_id)
+    if action:
+        query = query.where(AuditLog.action == action)
+    if start_date:
+        query = query.where(AuditLog.created_at >= start_date)
+    if end_date:
+        query = query.where(AuditLog.created_at <= end_date)
+    rows = db.execute(query).scalars().all()
+    return [serialize_audit_log(row) for row in rows]

@@ -40,7 +40,12 @@ class AccountPreferencesUpdateIn(BaseModel):
 
 class AccountSecurityOut(BaseModel):
     last_login_at: datetime | None = None
-    active_sessions: list[dict[str, str | None]]
+    last_login_ip: str | None = None
+    active_sessions_count: int = 0
+    blocked_login_attempts: int = 0
+    turnstile_status: str = "Ativo"
+    protection_status: str = "Protegido"
+    active_sessions: list[dict]
     history: list[dict[str, str | None]]
     mfa_status: str
 
@@ -76,3 +81,18 @@ class WorkspaceUserUpdateIn(BaseModel):
     name: str | None = Field(default=None, min_length=2, max_length=150)
     role: str | None = Field(default=None, max_length=32)
     status: str | None = Field(default=None, max_length=32)
+
+
+class AuditLogOut(BaseModel):
+    id: UUID
+    tenant_id: UUID | None = None
+    user_id: UUID | None = None
+    user_name: str | None = None
+    user_email: str | None = None
+    action: str
+    entity_type: str | None = None
+    entity_id: str | None = None
+    metadata_json: dict = Field(default_factory=dict)
+    ip_address: str | None = None
+    user_agent: str | None = None
+    created_at: datetime | None = None

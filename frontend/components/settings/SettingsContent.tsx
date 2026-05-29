@@ -1,11 +1,12 @@
 'use client';
 
+import Link from 'next/link';
 import { FormEvent, useEffect, useMemo, useState } from 'react';
-import { Bell, Building2, CheckCircle2, Clock3, CreditCard, Globe2, KeyRound, Layers3, LockKeyhole, Mail, MessageSquareText, Pencil, Plus, Save, ShieldCheck, Smartphone, User, UsersRound } from 'lucide-react';
+import { Bell, Building2, CheckCircle2, Clock3, CreditCard, Globe2, KeyRound, Layers3, LockKeyhole, LogOut, Mail, MessageSquareText, Pencil, Plus, Save, ShieldCheck, Smartphone, User, UsersRound, XCircle } from 'lucide-react';
 import ProvidersTab from '@/components/settings/whatsapp-business/ProvidersTab';
 import TemplatesTab from '@/components/settings/whatsapp-business/TemplatesTab';
 import { ClientDateTime } from '@/components/settings/whatsapp-business/ui';
-import { activateWhatsAppProvider, createTemplate, createWhatsAppProvider, deactivateWorkspaceUser, deleteWhatsAppProvider, getAccountMe, getAccountSecurity, getSystemSettings, inviteWorkspaceUser, listTemplates, listWhatsAppProviders, listWorkspaceUsers, submitTemplate, syncTemplates, testWhatsAppProvider, updateAccountPassword, updateAccountPreferences, updateAccountProfile, updateSystemSettings, updateWhatsAppProvider, updateWorkspaceUser } from '@/lib/api';
+import { activateWhatsAppProvider, createTemplate, createWhatsAppProvider, deactivateWorkspaceUser, deleteWhatsAppProvider, getAccountMe, getAccountSecurity, getSystemSettings, inviteWorkspaceUser, listTemplates, listWhatsAppProviders, listWorkspaceUsers, revokeAccountSession, revokeOtherAccountSessions, submitTemplate, syncTemplates, testWhatsAppProvider, updateAccountPassword, updateAccountPreferences, updateAccountProfile, updateSystemSettings, updateWhatsAppProvider, updateWorkspaceUser } from '@/lib/api';
 import { AccountMe, AccountPreferences, AccountProfile, AccountSecurity, SystemSettingsPayload, WhatsAppProvider, WhatsAppTemplate, WorkspaceUser } from '@/lib/types';
 import { friendlyToMeta, renderExample, validateMetaVariables } from '@/lib/templateVariableMapper';
 import { SettingsTabId } from './SettingsSidebar';
@@ -48,6 +49,23 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 
 function inputClass() { return 'w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100'; }
 function fmtDate(value?: string | null) { return value ? new Date(value).toLocaleString('pt-BR') : 'Ainda não registrado'; }
+
+function passwordRules(value: string) {
+  return [
+    ['Mínimo 8 caracteres', value.length >= 8],
+    ['Maiúscula', /[A-Z]/.test(value)],
+    ['Minúscula', /[a-z]/.test(value)],
+    ['Número', /\d/.test(value)],
+    ['Especial', /[^A-Za-z0-9]/.test(value)]
+  ] as const;
+}
+
+function PasswordChecklist({ value }: { value: string }) {
+  return <div className='grid gap-2 rounded-2xl border border-slate-200 bg-slate-50 p-3 text-xs sm:grid-cols-2'>
+    {passwordRules(value).map(([label, ok]) => <span key={label} className={`inline-flex items-center gap-2 font-semibold ${ok ? 'text-emerald-700' : 'text-slate-500'}`}>{ok ? <CheckCircle2 size={14} /> : <XCircle size={14} />} {label}</span>)}
+  </div>;
+}
+
 function initials(name?: string) { return (name || 'WA').split(' ').map(p => p[0]).join('').slice(0, 2).toUpperCase(); }
 
 function useAccountData() {
@@ -102,13 +120,31 @@ function Toggle({ icon: Icon, title, desc, checked, onChange }: { icon: any; tit
 }
 
 function SecurityTab() {
-  const [security, setSecurity] = useState<AccountSecurity | null>(null); const [toast, setToast] = useState(''); const [password, setPassword] = useState({ current_password: '', new_password: '', confirm_password: '' });
-  useEffect(() => { getAccountSecurity().then(setSecurity); }, []);
-  const save = async (event: FormEvent) => { event.preventDefault(); await updateAccountPassword(password); setPassword({ current_password: '', new_password: '', confirm_password: '' }); setSecurity(await getAccountSecurity()); setToast('Senha alterada com sucesso.'); setTimeout(() => setToast(''), 3000); };
-  return <Card><HubHeader icon={LockKeyhole} eyebrow='Trust & Security' title='Segurança' description='Gerencie senha, sessões ativas e histórico básico da conta. MFA segue no roadmap enterprise.' />
-    <div className='grid gap-6 p-5 md:grid-cols-[minmax(0,1fr)_340px] md:p-6'><form onSubmit={save} className='rounded-3xl border border-slate-200 p-5'><h3 className='flex items-center gap-2 text-lg font-semibold text-slate-950'><KeyRound size={18} /> Alterar senha</h3><div className='mt-5 grid gap-4'><Field label='Senha atual'><input className={inputClass()} type='password' value={password.current_password} onChange={e => setPassword({ ...password, current_password: e.target.value })} /></Field><Field label='Nova senha'><input className={inputClass()} type='password' value={password.new_password} onChange={e => setPassword({ ...password, new_password: e.target.value })} /></Field><Field label='Confirmar nova senha'><input className={inputClass()} type='password' value={password.confirm_password} onChange={e => setPassword({ ...password, confirm_password: e.target.value })} /></Field><button className='rounded-2xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white'>Atualizar senha</button>{toast && <p className='text-sm font-semibold text-emerald-700'>{toast}</p>}</div></form>
-      <div className='space-y-4'><div className='rounded-3xl border border-slate-200 p-5'><p className='text-xs font-semibold uppercase tracking-[0.16em] text-slate-400'>Último login</p><p className='mt-2 text-sm font-semibold text-slate-950'>{fmtDate(security?.last_login_at)}</p><p className='mt-4 rounded-2xl bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-700'>MFA: {security?.mfa_status || 'Em breve'}</p></div><div className='rounded-3xl border border-slate-200 p-5'><p className='font-semibold text-slate-950'>Sessões ativas</p>{security?.active_sessions.map(s => <div key={s.id} className='mt-3 rounded-2xl bg-slate-50 p-3 text-sm'><b>{s.device}</b><p className='text-slate-500'>{s.status} · {fmtDate(s.last_seen_at)}</p></div>)}</div></div>
-      <div className='md:col-span-2 rounded-3xl border border-slate-200 p-5'><p className='font-semibold text-slate-950'>Histórico básico</p><div className='mt-4 grid gap-3 md:grid-cols-3'>{security?.history.map(item => <div key={item.event} className='rounded-2xl bg-slate-50 p-4'><p className='text-sm font-semibold text-slate-950'>{item.event}</p><p className='mt-1 text-xs text-slate-500'>{item.description}</p><p className='mt-3 text-xs font-semibold text-slate-400'>{fmtDate(item.created_at)}</p></div>)}</div></div>
+  const [security, setSecurity] = useState<AccountSecurity | null>(null);
+  const [toast, setToast] = useState('');
+  const [password, setPassword] = useState({ current_password: '', new_password: '', confirm_password: '' });
+  const refresh = async () => setSecurity(await getAccountSecurity());
+  useEffect(() => { refresh(); }, []);
+  const save = async (event: FormEvent) => { event.preventDefault(); await updateAccountPassword(password); setPassword({ current_password: '', new_password: '', confirm_password: '' }); await refresh(); setToast('Senha alterada com sucesso.'); setTimeout(() => setToast(''), 3000); };
+  const revoke = async (sessionId: string) => { await revokeAccountSession(sessionId); await refresh(); setToast('Sessão encerrada.'); setTimeout(() => setToast(''), 3000); };
+  const revokeOthers = async () => { const result = await revokeOtherAccountSessions(); await refresh(); setToast(`${result.revoked_count} sessão(ões) encerrada(s).`); setTimeout(() => setToast(''), 3000); };
+  const metrics = [
+    ['Último login', fmtDate(security?.last_login_at), Clock3],
+    ['IP do último login', security?.last_login_ip || 'Sem registro', Globe2],
+    ['Sessões ativas', String(security?.active_sessions_count ?? 0), Smartphone],
+    ['Tentativas bloqueadas', String(security?.blocked_login_attempts ?? 0), ShieldCheck],
+    ['Turnstile', security?.turnstile_status || 'Ativo', CheckCircle2],
+    ['Proteção', security?.protection_status || 'Protegido', LockKeyhole]
+  ];
+  return <Card><HubHeader icon={LockKeyhole} eyebrow='Trust & Security' title='Segurança' description='Recursos enterprise reais: política forte de senha, sessões ativas revogáveis, Turnstile e trilha operacional.' />
+    <div className='grid gap-6 p-5 md:p-6'>
+      {toast && <p className='rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-700'>{toast}</p>}
+      <div className='flex flex-wrap items-center justify-between gap-3'><div><h3 className='text-lg font-semibold text-slate-950'>Dashboard de segurança</h3><p className='text-sm text-slate-500'>Indicadores operacionais atualizados a partir de sessões e auditoria.</p></div><Link href='/dashboard/security/audit' className='rounded-2xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50'>Abrir audit trail</Link></div><div className='grid gap-3 sm:grid-cols-2 lg:grid-cols-3'>{metrics.map(([label, value, Icon]: any) => <div key={label} className='rounded-3xl border border-slate-200 bg-white p-5 shadow-sm'><p className='flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.14em] text-slate-400'><Icon size={14} /> {label}</p><p className='mt-3 text-lg font-semibold text-slate-950'>{value}</p></div>)}</div>
+      <div className='grid gap-6 lg:grid-cols-[minmax(0,1fr)_420px]'>
+        <form onSubmit={save} className='rounded-3xl border border-slate-200 p-5'><h3 className='flex items-center gap-2 text-lg font-semibold text-slate-950'><KeyRound size={18} /> Alterar senha</h3><div className='mt-5 grid gap-4'><Field label='Senha atual'><input className={inputClass()} type='password' value={password.current_password} onChange={e => setPassword({ ...password, current_password: e.target.value })} /></Field><Field label='Nova senha'><input className={inputClass()} type='password' value={password.new_password} onChange={e => setPassword({ ...password, new_password: e.target.value })} /></Field><PasswordChecklist value={password.new_password} /><Field label='Confirmar nova senha'><input className={inputClass()} type='password' value={password.confirm_password} onChange={e => setPassword({ ...password, confirm_password: e.target.value })} /></Field><button className='rounded-2xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white'>Atualizar senha</button></div></form>
+        <div className='rounded-3xl border border-slate-200 p-5'><div className='flex items-center justify-between gap-3'><div><p className='font-semibold text-slate-950'>Sessões ativas</p><p className='text-sm text-slate-500'>Encerre remotamente dispositivos que não reconhece.</p></div><button type='button' onClick={revokeOthers} className='rounded-2xl border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50'>Encerrar outras</button></div><div className='mt-4 space-y-3'>{security?.active_sessions.map(s => <div key={s.id} className='rounded-2xl bg-slate-50 p-4 text-sm'><div className='flex items-start justify-between gap-3'><div><b className='text-slate-950'>{s.device}</b>{s.is_current && <span className='ml-2 rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-semibold text-emerald-700'>Atual</span>}<p className='mt-1 text-slate-500'>IP {s.ip_address || 'desconhecido'} · Última atividade {fmtDate(s.last_seen_at)}</p></div><button type='button' disabled={s.is_current} onClick={() => revoke(s.id)} className='inline-flex items-center gap-1 rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700 disabled:cursor-not-allowed disabled:opacity-50'><LogOut size={13} /> Encerrar</button></div></div>)}{!security?.active_sessions.length && <p className='rounded-2xl bg-slate-50 p-4 text-sm text-slate-500'>Nenhuma sessão ativa encontrada.</p>}</div></div>
+      </div>
+      <div className='rounded-3xl border border-slate-200 p-5'><p className='font-semibold text-slate-950'>Histórico de segurança</p><div className='mt-4 grid gap-3 md:grid-cols-3'>{security?.history.map(item => <div key={item.event} className='rounded-2xl bg-slate-50 p-4'><p className='text-sm font-semibold text-slate-950'>{item.event}</p><p className='mt-1 text-xs text-slate-500'>{item.description}</p><p className='mt-3 text-xs font-semibold text-slate-400'>{fmtDate(item.created_at)}</p></div>)}</div></div>
     </div></Card>;
 }
 
