@@ -19,7 +19,7 @@ export default function SettingsLayout({ activeTab, onTabChange, children }: Set
             <h1 className='text-2xl font-semibold tracking-tight md:text-[1.9rem]'>Administração do workspace</h1>
             <span className='rounded-full border border-emerald-300/30 bg-emerald-300/10 px-3 py-1 text-xs font-semibold text-emerald-100'>Enterprise Control Center</span>
           </div>
-          <p className='mt-2 max-w-3xl text-sm leading-relaxed text-slate-300'>Centralize perfil, preferências, usuários, segurança, integrações e billing em um hub único com navegação contextual.</p>
+          <p className='mt-2 max-w-3xl text-sm leading-relaxed text-slate-300'>Centralize usuários, permissões, API Keys, integrações e billing em um hub administrativo separado da conta do usuário.</p>
         </header>
 
         <div className='grid min-w-0 grid-cols-1 gap-5 lg:grid-cols-[280px_minmax(0,1fr)]'>

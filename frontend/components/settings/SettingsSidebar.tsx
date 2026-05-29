@@ -1,6 +1,6 @@
-import { Bell, CreditCard, KeyRound, LockKeyhole, ShieldCheck, User, UsersRound, type LucideIcon } from 'lucide-react';
+import { CreditCard, KeyRound, MessageSquareText, Plug, ShieldCheck, UsersRound, type LucideIcon } from 'lucide-react';
 
-export type SettingsTabId = 'profile' | 'preferences' | 'users' | 'permissions' | 'security' | 'apikeys' | 'billing';
+export type SettingsTabId = 'users' | 'permissions' | 'apikeys' | 'billing' | 'integrations' | 'whatsapp-business';
 
 type SettingsNavItem = {
   id: SettingsTabId;
@@ -17,25 +17,19 @@ type SettingsNavGroup = {
 
 export const settingsNavGroups: SettingsNavGroup[] = [
   {
-    title: 'Conta',
-    items: [
-      { id: 'profile', label: 'Meu Perfil', description: 'Identidade, avatar e dados pessoais', icon: User },
-      { id: 'preferences', label: 'Preferências', description: 'Notificações e experiência', icon: Bell }
-    ]
-  },
-  {
     title: 'Workspace/Admin',
     items: [
       { id: 'users', label: 'Usuários', description: 'Convites, seats e gestão do time', icon: UsersRound },
       { id: 'permissions', label: 'Permissões', description: 'Papéis, áreas e políticas de acesso', icon: ShieldCheck },
-      { id: 'security', label: 'Segurança', description: 'Sessões, SSO e hardening', icon: LockKeyhole },
-      { id: 'apikeys', label: 'API Keys', description: 'Tokens, Meta Cloud API e webhooks', icon: KeyRound, badge: 'Ativo' }
+      { id: 'apikeys', label: 'API Keys', description: 'Tokens, Meta Cloud API e webhooks', icon: KeyRound, badge: 'Ativo' },
+      { id: 'billing', label: 'Billing', description: 'Plano, faturas, limites e add-ons', icon: CreditCard }
     ]
   },
   {
-    title: 'Sistema',
+    title: 'Integrações',
     items: [
-      { id: 'billing', label: 'Billing', description: 'Plano, faturas, limites e add-ons', icon: CreditCard }
+      { id: 'integrations', label: 'Integrações', description: 'Catálogo de apps e automações do workspace', icon: Plug },
+      { id: 'whatsapp-business', label: 'WhatsApp Business', description: 'Console Meta, providers e templates oficiais', icon: MessageSquareText, badge: 'Ativo' }
     ]
   }
 ];
@@ -47,7 +41,7 @@ export default function SettingsSidebar({ activeTab, onTabChange }: { activeTab:
     <aside className='sticky top-5 h-fit overflow-hidden rounded-3xl border border-[color:var(--surface-border)] bg-white/95 p-3 shadow-[0_18px_44px_-34px_rgba(15,23,42,0.75)] backdrop-blur'>
       <div className='border-b border-slate-100 px-3 pb-3 pt-2'>
         <p className='text-xs font-semibold uppercase tracking-[0.18em] text-slate-400'>Configurações</p>
-        <p className='mt-1 text-sm text-slate-600'>Escolha uma área sem sair do hub.</p>
+        <p className='mt-1 text-sm text-slate-600'>Administre usuários, acesso, integrações e billing do workspace.</p>
       </div>
       <nav className='mt-3 space-y-4'>
         {settingsNavGroups.map(group => (

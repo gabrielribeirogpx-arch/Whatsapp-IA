@@ -9,6 +9,7 @@ import { activateWhatsAppProvider, createTemplate, createWhatsAppProvider, delet
 import { SystemSettingsPayload, WhatsAppProvider, WhatsAppTemplate } from '@/lib/types';
 import { friendlyToMeta, renderExample, validateMetaVariables } from '@/lib/templateVariableMapper';
 import { SettingsTabId } from './SettingsSidebar';
+import { AccountTabId } from '@/components/account/AccountSidebar';
 
 const INITIAL_FORM: SystemSettingsPayload = { token: '', phone_number_id: '', webhook_url: '', webhook_status: 'inactive', system_name: '', language: 'pt-BR' };
 const baseProviderForm = { provider_type: 'meta_cloud', display_name: '', waba_id: '', phone_number_id: '', business_id: '', access_token: '', api_key: '' };
@@ -48,8 +49,8 @@ const emptyStates = {
     icon: LockKeyhole,
     eyebrow: 'Trust & Security',
     title: 'Segurança',
-    description: 'Sessões, SSO, políticas de login e controles de segurança avançados ficarão aqui.',
-    roadmap: ['Sessões ativas e revogação remota', 'SSO/SAML e MFA obrigatório', 'Allowlist de IP e alertas de risco']
+    description: 'Sessões pessoais, login, MFA e controles de segurança da sua conta ficam aqui.',
+    roadmap: ['Sessões ativas e revogação remota', 'MFA e chaves de recuperação', 'Alertas de login e dispositivos confiáveis']
   },
   billing: {
     icon: CreditCard,
@@ -57,11 +58,18 @@ const emptyStates = {
     title: 'Billing',
     description: 'Planos, faturas, limites de uso e add-ons serão apresentados sem sair do Settings Hub.',
     roadmap: ['Plano atual e consumo por workspace', 'Faturas, método de pagamento e centros de custo', 'Limites, add-ons e forecast de uso']
+  },
+  integrations: {
+    icon: Layers3,
+    eyebrow: 'Integration Catalog',
+    title: 'Integrações',
+    description: 'Apps conectados, automações e conectores do workspace serão administrados nesta área.',
+    roadmap: ['Catálogo de integrações por área', 'OAuth, webhooks e automações autorizadas', 'Monitoramento de saúde dos conectores']
   }
-} satisfies Partial<Record<SettingsTabId, { icon: LucideIcon; eyebrow: string; title: string; description: string; roadmap: string[] }>>;
+} satisfies Partial<Record<SettingsTabId | AccountTabId, { icon: LucideIcon; eyebrow: string; title: string; description: string; roadmap: string[] }>>;
 
-export default function SettingsContent({ activeTab }: { activeTab: SettingsTabId }) {
-  if (activeTab === 'apikeys') return <WhatsAppBusinessConsole />;
+export default function SettingsContent({ activeTab }: { activeTab: SettingsTabId | AccountTabId }) {
+  if (activeTab === 'apikeys' || activeTab === 'whatsapp-business') return <WhatsAppBusinessConsole />;
 
   const state = emptyStates[activeTab];
   if (!state) return null;
