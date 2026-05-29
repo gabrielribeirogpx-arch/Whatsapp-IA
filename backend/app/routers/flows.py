@@ -20,7 +20,7 @@ from sqlalchemy.orm import load_only
 from app.database import get_db
 from app.core.redis_client import get_redis_client
 from app.models import Conversation, Flow, FlowEdge, FlowEvent, FlowExecution, FlowNode, FlowSession, FlowStep, FlowVersion, Tenant, TenantUser
-from app.services.flow_analytics_service import PERIODS, get_flow_analytics, resolve_analytics_period
+from app.services.flow_analytics_service import PERIODS, get_flow_analytics, get_flow_list_metrics, resolve_analytics_period
 from app.services.audit_service import write_audit_log
 from app.routers.account import get_current_user
 from app.services.flow_engine_service import (
@@ -932,7 +932,8 @@ def list_flows(
     db: Session = Depends(get_db),
 ):
     tenant = _resolve_request_tenant(db=db, tenant_id_header=x_tenant_id)
-    return [_serialize_flow(item) for item in get_flows(db=db, tenant_id=tenant.id)]
+    metrics = get_flow_list_metrics(db=db, tenant_id=tenant.id)
+    return [_serialize_flow(item, metrics=metrics.get(item.id)) for item in get_flows(db=db, tenant_id=tenant.id)]
 
 
 @router.post("/")
@@ -1151,7 +1152,10 @@ def _resolve_request_tenant(db: Session, tenant_id_header: str | None) -> Tenant
     return tenant
 
 
-def _serialize_flow(flow: Flow) -> dict[str, Any]:
+def _serialize_flow(flow: Flow, metrics: dict[str, Any] | None = None) -> dict[str, Any]:
+    published = bool(flow.published_version_id or flow.is_active or flow.status in {"active", "published"})
+    draft = not published or flow.status in {"draft", "inactive"}
+    flow_metrics = metrics or {}
     return {
         "id": str(flow.id),
         "tenant_id": str(flow.tenant_id),
@@ -1168,6 +1172,13 @@ def _serialize_flow(flow: Flow) -> dict[str, Any]:
         "current_version_id": str(flow.current_version_id) if flow.current_version_id else None,
         "created_at": flow.created_at.isoformat() if flow.created_at else None,
         "updated_at": flow.updated_at.isoformat() if flow.updated_at else None,
+        "total_entries": int(flow_metrics.get("total_entries") or 0),
+        "total_completions": int(flow_metrics.get("total_completions") or 0),
+        "conversion_rate": float(flow_metrics.get("conversion_rate") or 0),
+        "last_execution_at": flow_metrics.get("last_execution_at"),
+        "published": published,
+        "draft": draft,
+        "is_published": published,
     }
 
 
@@ -1477,7 +1488,8 @@ def list_tenant_flows(
     db: Session = Depends(get_db),
 ):
     tenant_uuid = _resolve_tenant_header(x_tenant_id)
-    return [_serialize_flow(item) for item in get_flows(db=db, tenant_id=tenant_uuid)]
+    metrics = get_flow_list_metrics(db=db, tenant_id=tenant_uuid)
+    return [_serialize_flow(item, metrics=metrics.get(item.id)) for item in get_flows(db=db, tenant_id=tenant_uuid)]
 
 
 @crud_router.get("/{flow_id}", response_model=FlowVersionResponse)

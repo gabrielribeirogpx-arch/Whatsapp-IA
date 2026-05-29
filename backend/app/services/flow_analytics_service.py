@@ -3,58 +3,90 @@ from __future__ import annotations
 import logging
 import uuid
 from collections import Counter, defaultdict
-from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any
 
+from sqlalchemy import case, func
 from sqlalchemy.orm import Session
 
-from app.models.flow import Flow, FlowNode
+from app.models.flow import Flow, FlowExecution, FlowExecutionEvent, FlowNode
+from app.models.lead import Lead, LeadStatus
+from app.models.pipeline_stage import PipelineStage
 from app.models.flow_event import FlowEvent
 from app.models.flow_session import FlowSession
 
 logger = logging.getLogger(__name__)
 
-FLOW_STARTED = "flow_started"
-NODE_ENTERED = "node_entered"
-MESSAGE_SENT = "message_sent"
-CONDITION_MATCHED = "condition_matched"
-FLOW_COMPLETED = "flow_completed"
-FLOW_ABANDONED = "flow_abandoned"
-MESSAGE_RECEIVED = "message_received"
-CONVERSION = "conversion"
-ABANDONED = "abandoned"
+FLOW_STARTED = "FLOW_STARTED"
+NODE_ENTERED = "NODE_ENTERED"
+NODE_EXITED = "NODE_EXITED"
+FLOW_COMPLETED = "FLOW_COMPLETED"
+FLOW_ABANDONED = "FLOW_ABANDONED"
+MESSAGE_SENT = "MESSAGE_SENT"
+MESSAGE_RECEIVED = "MESSAGE_RECEIVED"
+CONDITION_MATCHED = "CONDITION_MATCHED"
 
 FLOW_START = "FLOW_START"
 FLOW_SEND = "FLOW_SEND"
 FLOW_MATCH = "FLOW_MATCH"
 FLOW_FINISH = "FLOW_FINISH"
+CONVERSION = "CONVERSION"
+ABANDONED = "ABANDONED"
 
 VALID_EVENT_TYPES = {
     FLOW_STARTED,
     NODE_ENTERED,
-    MESSAGE_SENT,
-    CONDITION_MATCHED,
+    NODE_EXITED,
     FLOW_COMPLETED,
     FLOW_ABANDONED,
+    MESSAGE_SENT,
     MESSAGE_RECEIVED,
+    CONDITION_MATCHED,
+    FLOW_START,
+    FLOW_SEND,
+    FLOW_MATCH,
+    FLOW_FINISH,
     CONVERSION,
     ABANDONED,
+    "flow_started",
+    "node_entered",
+    "node_exited",
+    "flow_completed",
+    "flow_abandoned",
+    "message_sent",
+    "message_queued",
+    "message_received",
+    "condition_matched",
+    "conversion",
+    "abandoned",
 }
 
 EVENT_TYPE_ALIASES: dict[str, str] = {
-    FLOW_START: FLOW_STARTED,
     FLOW_STARTED: FLOW_STARTED,
-    FLOW_SEND: MESSAGE_SENT,
-    MESSAGE_SENT: MESSAGE_SENT,
-    FLOW_MATCH: CONDITION_MATCHED,
-    CONDITION_MATCHED: CONDITION_MATCHED,
-    FLOW_FINISH: FLOW_COMPLETED,
+    "flow_started": FLOW_STARTED,
+    FLOW_START: FLOW_STARTED,
+    NODE_ENTERED: NODE_ENTERED,
+    "node_entered": NODE_ENTERED,
+    NODE_EXITED: NODE_EXITED,
+    "node_exited": NODE_EXITED,
     FLOW_COMPLETED: FLOW_COMPLETED,
-    FLOW_ABANDONED: ABANDONED,
-    ABANDONED: ABANDONED,
+    "flow_completed": FLOW_COMPLETED,
+    FLOW_FINISH: FLOW_COMPLETED,
+    CONVERSION: FLOW_COMPLETED,
+    "conversion": FLOW_COMPLETED,
+    FLOW_ABANDONED: FLOW_ABANDONED,
+    "flow_abandoned": FLOW_ABANDONED,
+    ABANDONED: FLOW_ABANDONED,
+    "abandoned": FLOW_ABANDONED,
+    MESSAGE_SENT: MESSAGE_SENT,
+    "message_sent": MESSAGE_SENT,
+    "message_queued": MESSAGE_SENT,
+    FLOW_SEND: MESSAGE_SENT,
     MESSAGE_RECEIVED: MESSAGE_RECEIVED,
-    CONVERSION: CONVERSION,
+    "message_received": MESSAGE_RECEIVED,
+    CONDITION_MATCHED: CONDITION_MATCHED,
+    "condition_matched": CONDITION_MATCHED,
+    FLOW_MATCH: CONDITION_MATCHED,
 }
 
 PERIODS: dict[str, timedelta] = {
@@ -63,14 +95,9 @@ PERIODS: dict[str, timedelta] = {
     "30d": timedelta(days=30),
     "90d": timedelta(days=90),
 }
-
 DEFAULT_PERIOD = "7d"
-
-
-@dataclass
-class _SessionAnalyticsRow:
-    conversation_id: uuid.UUID | None
-    created_at: datetime | None
+FINAL_STATUSES = {"completed", "converted", "conversion"}
+ABANDONED_STATUSES = {"abandoned", "expired"}
 
 
 def resolve_analytics_period(period: str | None) -> str:
@@ -79,12 +106,17 @@ def resolve_analytics_period(period: str | None) -> str:
 
 
 def _safe_rate(numerator: float, denominator: float) -> float:
-    if denominator <= 0:
-        return 0.0
-    return round((numerator / denominator) * 100, 2)
+    return round((numerator / denominator) * 100, 2) if denominator else 0.0
+
+
+def _normalize_event_type(event_type: str | None) -> str:
+    if not event_type:
+        return ""
+    return EVENT_TYPE_ALIASES.get(event_type, EVENT_TYPE_ALIASES.get(event_type.upper(), event_type.upper()))
 
 
 def _empty_response(flow_id: str, flow_name: str | None, period: str) -> dict[str, Any]:
+    timeline: list[dict[str, Any]] = []
     return {
         "flow_id": flow_id,
         "flow_name": flow_name or "Flow",
@@ -112,24 +144,259 @@ def _empty_response(flow_id: str, flow_name: str | None, period: str) -> dict[st
         "top_dropoffs": [],
         "common_responses": [],
         "common_replies": [],
-        "timeseries": [],
-        "timeline": None,
-        "insights": None,
+        "timeseries": timeline,
+        "timeline": timeline,
+        "insights": [],
     }
 
 
-def _normalize_event_type(event_type: str | None) -> str:
-    if not event_type:
-        return ""
-    return EVENT_TYPE_ALIASES.get(event_type, event_type)
+def _coerce_uuid(value: Any) -> uuid.UUID | None:
+    if isinstance(value, uuid.UUID):
+        return value
+    try:
+        return uuid.UUID(str(value)) if value else None
+    except (TypeError, ValueError):
+        return None
 
 
-def _build_dataset(db: Session, tenant_id: uuid.UUID, flow_id: uuid.UUID, period_start: datetime) -> tuple[list[_SessionAnalyticsRow], list[FlowEvent]]:
-    session_rows = (
-        db.query(
-            FlowSession.conversation_id,
-            FlowSession.created_at,
+
+def _complete_flow_crm_integration(
+    db: Session,
+    *,
+    tenant_id: uuid.UUID,
+    flow_id: uuid.UUID,
+    contact_id: uuid.UUID | None,
+    conversation_id: uuid.UUID | None,
+    user_phone: str | None,
+    occurred_at: datetime,
+) -> None:
+    if not contact_id and not conversation_id and not user_phone:
+        return
+
+    lead = (
+        db.query(Lead)
+        .filter(
+            Lead.tenant_id == tenant_id,
+            Lead.status == LeadStatus.ACTIVE.value,
         )
+        .filter(
+            (Lead.contact_id == contact_id) if contact_id else (Lead.conversation_id == conversation_id) if conversation_id else (Lead.phone == user_phone)
+        )
+        .first()
+    )
+    if not lead and user_phone:
+        lead = Lead(
+            tenant_id=tenant_id,
+            phone=user_phone,
+            name=user_phone,
+            contact_id=contact_id,
+            conversation_id=conversation_id,
+            source="whatsapp",
+            status=LeadStatus.ACTIVE.value,
+            last_interaction=occurred_at,
+            last_contact_at=occurred_at,
+            entered_stage_at=occurred_at,
+            created_at=occurred_at,
+            updated_at=occurred_at,
+        )
+        db.add(lead)
+        db.flush()
+
+    if not lead:
+        return
+
+    final_stage = (
+        db.query(PipelineStage)
+        .filter(PipelineStage.tenant_id == tenant_id, PipelineStage.is_final_stage.is_(True))
+        .order_by(PipelineStage.position.desc(), PipelineStage.created_at.desc())
+        .first()
+    )
+    if final_stage and lead.stage_id != final_stage.id:
+        lead.stage_id = final_stage.id
+        lead.stage = final_stage.name
+        lead.entered_stage_at = occurred_at
+    if contact_id and not lead.contact_id:
+        lead.contact_id = contact_id
+    if conversation_id and not lead.conversation_id:
+        lead.conversation_id = conversation_id
+    lead.last_interaction = occurred_at
+    lead.last_contact_at = occurred_at
+    lead.updated_at = occurred_at
+    db.add(lead)
+
+def _find_execution(
+    db: Session,
+    *,
+    tenant_id: uuid.UUID,
+    flow_id: uuid.UUID,
+    conversation_id: uuid.UUID,
+    flow_version_id: uuid.UUID | None,
+) -> FlowExecution | None:
+    query = (
+        db.query(FlowExecution)
+        .filter(
+            FlowExecution.tenant_id == tenant_id,
+            FlowExecution.flow_id == flow_id,
+            FlowExecution.conversation_id == conversation_id,
+        )
+        .order_by(FlowExecution.started_at.desc(), FlowExecution.updated_at.desc())
+    )
+    if flow_version_id:
+        version_match = query.filter(FlowExecution.flow_version_id == flow_version_id).first()
+        if version_match:
+            return version_match
+    return query.first()
+
+
+def record_flow_event(
+    db: Session,
+    *,
+    tenant_id: uuid.UUID,
+    conversation_id: uuid.UUID,
+    flow_id: uuid.UUID | None,
+    flow_version_id: uuid.UUID | None,
+    node_id: uuid.UUID | str | None,
+    event_type: str,
+    user_id: str | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> None:
+    if event_type not in VALID_EVENT_TYPES:
+        logger.warning("event=flow_event_skip reason=invalid_type event_type=%s", event_type)
+        return
+    normalized_type = _normalize_event_type(event_type)
+    node_text = str(node_id) if node_id else None
+    metadata_payload = metadata or {}
+
+    db.add(
+        FlowEvent(
+            tenant_id=tenant_id,
+            conversation_id=conversation_id,
+            flow_id=flow_id,
+            flow_version_id=flow_version_id,
+            node_id=_coerce_uuid(node_id),
+            event_type=normalized_type,
+            user_id=user_id,
+            metadata_json=metadata_payload,
+        )
+    )
+
+    if not flow_id:
+        return
+
+    execution = _find_execution(
+        db,
+        tenant_id=tenant_id,
+        flow_id=flow_id,
+        conversation_id=conversation_id,
+        flow_version_id=flow_version_id,
+    )
+    if not execution:
+        latest_session = (
+            db.query(FlowSession)
+            .filter(
+                FlowSession.tenant_id == tenant_id,
+                FlowSession.flow_id == flow_id,
+                FlowSession.conversation_id == str(conversation_id),
+            )
+            .order_by(FlowSession.created_at.desc(), FlowSession.updated_at.desc())
+            .first()
+        )
+        if latest_session:
+            execution = FlowExecution(
+                id=latest_session.id,
+                tenant_id=tenant_id,
+                flow_id=flow_id,
+                flow_version_id=latest_session.flow_version_id or flow_version_id,
+                conversation_id=conversation_id,
+                user_phone=latest_session.user_identifier,
+                started_at=latest_session.created_at or datetime.utcnow(),
+                status=latest_session.status or "running",
+                current_node=latest_session.current_node_id,
+                current_node_id=latest_session.current_node_id,
+                completed=(latest_session.status or "").lower() in FINAL_STATUSES,
+                state=latest_session.context if isinstance(latest_session.context, dict) else {},
+            )
+            db.add(execution)
+            db.flush()
+    if not execution and normalized_type in {FLOW_STARTED, NODE_ENTERED, MESSAGE_SENT, MESSAGE_RECEIVED}:
+        execution = FlowExecution(
+            tenant_id=tenant_id,
+            flow_id=flow_id,
+            flow_version_id=flow_version_id,
+            contact_id=_coerce_uuid(metadata_payload.get("contact_id")),
+            conversation_id=conversation_id,
+            user_phone=user_id or metadata_payload.get("phone"),
+            started_at=datetime.utcnow(),
+            status="running",
+            current_node=node_text,
+            current_node_id=node_text,
+            completed=False,
+            state={},
+        )
+        db.add(execution)
+        db.flush()
+
+    if not execution:
+        return
+
+    now = datetime.utcnow()
+    if normalized_type == FLOW_STARTED and not execution.started_at:
+        execution.started_at = now
+    if normalized_type == NODE_ENTERED and node_text:
+        execution.current_node = node_text
+        execution.current_node_id = node_text
+    if normalized_type == FLOW_COMPLETED:
+        execution.status = "completed"
+        execution.completed = True
+        execution.completed_at = now
+        if flow_id:
+            _complete_flow_crm_integration(
+                db,
+                tenant_id=tenant_id,
+                flow_id=flow_id,
+                contact_id=execution.contact_id or _coerce_uuid(metadata_payload.get("contact_id")),
+                conversation_id=conversation_id,
+                user_phone=execution.user_phone or user_id or metadata_payload.get("phone"),
+                occurred_at=now,
+            )
+    elif normalized_type == FLOW_ABANDONED:
+        execution.status = "abandoned"
+        execution.completed = False
+        execution.completed_at = now
+    execution.updated_at = now
+    db.add(FlowExecutionEvent(execution_id=execution.id, node_id=node_text, event_type=normalized_type, created_at=now))
+
+
+def _node_label(node: FlowNode) -> str:
+    metadata = node.metadata_json if isinstance(node.metadata_json, dict) else {}
+    for key in ("label", "title", "content", "text"):
+        value = metadata.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()[:80]
+    return (node.content or "Bloco")[:80]
+
+
+def _node_map(db: Session, flow_id: uuid.UUID) -> dict[str, dict[str, str]]:
+    rows = db.query(FlowNode).filter(FlowNode.flow_id == flow_id).all()
+    return {str(row.id): {"type": row.type or "unknown", "label": _node_label(row)} for row in rows}
+
+
+def _load_executions(db: Session, tenant_id: uuid.UUID, flow_id: uuid.UUID, period_start: datetime) -> list[FlowExecution]:
+    executions = (
+        db.query(FlowExecution)
+        .filter(
+            FlowExecution.tenant_id == tenant_id,
+            FlowExecution.flow_id == flow_id,
+            FlowExecution.started_at >= period_start,
+        )
+        .order_by(FlowExecution.started_at.asc())
+        .all()
+    )
+    if executions:
+        return executions
+
+    sessions = (
+        db.query(FlowSession)
         .filter(
             FlowSession.tenant_id == tenant_id,
             FlowSession.flow_id == flow_id,
@@ -137,97 +404,89 @@ def _build_dataset(db: Session, tenant_id: uuid.UUID, flow_id: uuid.UUID, period
         )
         .all()
     )
-    sessions = [
-        _SessionAnalyticsRow(
-            conversation_id=row.conversation_id,
-            created_at=row.created_at,
+    fallback: list[FlowExecution] = []
+    for session in sessions:
+        started_at = session.created_at or datetime.utcnow()
+        completed = (session.status or "").lower() in FINAL_STATUSES
+        fallback.append(
+            FlowExecution(
+                id=session.id,
+                tenant_id=tenant_id,
+                flow_id=flow_id,
+                flow_version_id=session.flow_version_id,
+                conversation_id=_coerce_uuid(session.conversation_id),
+                user_phone=session.user_identifier,
+                started_at=started_at,
+                completed_at=session.updated_at if completed else None,
+                status=session.status,
+                current_node=session.current_node_id,
+                current_node_id=session.current_node_id,
+                completed=completed,
+                state={},
+                updated_at=session.updated_at,
+            )
         )
-        for row in session_rows
-    ]
-    sessions = sessions or []
+    return fallback
 
-    events = (
+
+def _load_events(db: Session, tenant_id: uuid.UUID, flow_id: uuid.UUID, period_start: datetime) -> list[tuple[Any, str, str | None, datetime | None]]:
+    execution_ids = [row.id for row in db.query(FlowExecution.id).filter(FlowExecution.tenant_id == tenant_id, FlowExecution.flow_id == flow_id, FlowExecution.started_at >= period_start).all()]
+    events: list[tuple[Any, str, str | None, datetime | None]] = []
+    if execution_ids:
+        for event in db.query(FlowExecutionEvent).filter(FlowExecutionEvent.execution_id.in_(execution_ids)).order_by(FlowExecutionEvent.created_at.asc()).all():
+            events.append((event, _normalize_event_type(event.event_type), event.node_id, event.created_at))
+    if events:
+        return events
+
+    legacy_events = (
         db.query(FlowEvent)
-        .filter(
-            FlowEvent.tenant_id == tenant_id,
-            FlowEvent.flow_id == flow_id,
-            FlowEvent.created_at >= period_start,
-        )
+        .filter(FlowEvent.tenant_id == tenant_id, FlowEvent.flow_id == flow_id, FlowEvent.created_at >= period_start)
         .order_by(FlowEvent.created_at.asc())
         .all()
     )
-    events = events or []
-
-    return sessions, events
+    return [(event, _normalize_event_type(event.event_type), str(event.node_id) if event.node_id else None, event.created_at) for event in legacy_events]
 
 
-def _compute_kpis(sessions: list[_SessionAnalyticsRow], normalized_events: list[tuple[FlowEvent, str]]) -> dict[str, Any]:
-    entries = len(sessions)
-    handled_messages = sum(1 for _, normalized_type in normalized_events if normalized_type in {MESSAGE_SENT, MESSAGE_RECEIVED})
-
-    return {
-        "entries": entries,
-        "conversion_rate": 0,
-        "abandonment_rate": 0,
-        "avg_time_seconds": 0,
-        "handled_messages": handled_messages,
-    }
-
-
-def _compute_timeseries(sessions: list[_SessionAnalyticsRow], normalized_events: list[tuple[FlowEvent, str]]) -> list[dict[str, Any]]:
-    daily: defaultdict[str, dict[str, Any]] = defaultdict(lambda: {"entries": 0, "conversions": 0, "abandonments": 0, "messages": 0})
-
-    for session in sessions:
-        if session.created_at:
-            daily[session.created_at.date().isoformat()]["entries"] += 1
-
-    for event, normalized_type in normalized_events:
-        if normalized_type in {MESSAGE_SENT, MESSAGE_RECEIVED} and event.created_at:
-            daily[event.created_at.date().isoformat()]["messages"] += 1
-
-    return [{"date": dt, **metrics} for dt, metrics in sorted(daily.items())]
-
-
-def _compute_funnel(sessions: list[_SessionAnalyticsRow], normalized_events: list[tuple[FlowEvent, str]], node_map: dict[str, dict[str, str]]) -> list[dict[str, Any]]:
-    node_entries: Counter[str] = Counter()
-    for event, normalized_type in normalized_events:
-        if normalized_type == NODE_ENTERED and event.node_id:
-            node_id = str(event.node_id)
-            node_entries[node_id] += 1
-
-    funnel: list[dict[str, Any]] = []
-    for node_id, entries in node_entries.most_common():
-        node_meta = node_map.get(node_id, {"label": "Node", "type": "unknown"})
-        funnel.append(
-            {
-                "node_id": node_id,
-                "node_label": node_meta["label"],
-                "node_type": node_meta["type"],
-                "entries": entries,
-                "dropoffs": 0,
-                "conversion_rate": 0,
-            }
+def get_flow_list_metrics(db: Session, *, tenant_id: uuid.UUID) -> dict[uuid.UUID, dict[str, Any]]:
+    rows = (
+        db.query(
+            FlowExecution.flow_id,
+            func.count(FlowExecution.id),
+            func.sum(case((FlowExecution.completed.is_(True), 1), else_=0)),
+            func.max(FlowExecution.started_at),
         )
+        .filter(FlowExecution.tenant_id == tenant_id, FlowExecution.flow_id.isnot(None))
+        .group_by(FlowExecution.flow_id)
+        .all()
+    )
+    metrics: dict[uuid.UUID, dict[str, Any]] = {}
+    for flow_id, total_entries, total_completions, last_execution_at in rows:
+        entries = int(total_entries or 0)
+        completions = int(total_completions or 0)
+        metrics[flow_id] = {
+            "total_entries": entries,
+            "total_completions": completions,
+            "conversion_rate": _safe_rate(completions, entries),
+            "last_execution_at": last_execution_at.isoformat() if last_execution_at else None,
+        }
 
-    return funnel
-
-
-def _compute_dropoffs(sessions: list[_SessionAnalyticsRow], events: list[FlowEvent], node_map: dict[str, dict[str, str]]) -> list[dict[str, Any]]:
-    _ = (sessions, events, node_map)
-    return []
-
-
-def _compute_common_responses(normalized_events: list[tuple[FlowEvent, str]]) -> list[dict[str, Any]]:
-    counter: Counter[str] = Counter()
-    for event, normalized_type in normalized_events:
-        if normalized_type != MESSAGE_RECEIVED:
-            continue
-        metadata = event.metadata_json if isinstance(event.metadata_json, dict) else {}
-        text = metadata.get("text")
-        if isinstance(text, str) and text.strip():
-            counter[text.strip()] += 1
-
-    return [{"text": text, "count": count} for text, count in counter.most_common(8)]
+    legacy_rows = (
+        db.query(FlowSession.flow_id, func.count(FlowSession.id), func.max(FlowSession.created_at))
+        .filter(FlowSession.tenant_id == tenant_id)
+        .group_by(FlowSession.flow_id)
+        .all()
+    )
+    for flow_id, total_entries, last_execution_at in legacy_rows:
+        metrics.setdefault(
+            flow_id,
+            {
+                "total_entries": int(total_entries or 0),
+                "total_completions": 0,
+                "conversion_rate": 0,
+                "last_execution_at": last_execution_at.isoformat() if last_execution_at else None,
+            },
+        )
+    return metrics
 
 
 def get_flow_analytics(db: Session, *, tenant_id: uuid.UUID, flow_id: uuid.UUID, period: str = DEFAULT_PERIOD) -> dict[str, Any]:
@@ -237,65 +496,111 @@ def get_flow_analytics(db: Session, *, tenant_id: uuid.UUID, flow_id: uuid.UUID,
     if not flow:
         return base
 
-    try:
-        period_start = datetime.utcnow() - PERIODS[resolved_period]
-        sessions, events = _build_dataset(db, tenant_id, flow_id, period_start)
-        sessions = sessions or []
-        events = events or []
+    period_start = datetime.utcnow() - PERIODS[resolved_period]
+    executions = _load_executions(db, tenant_id, flow_id, period_start)
+    events = _load_events(db, tenant_id, flow_id, period_start)
+    node_map = _node_map(db, flow_id)
 
-        normalized_events = [
-            (event, _normalize_event_type(event.event_type))
-            for event in events
-        ]
+    entries = len(executions)
+    completed = sum(1 for execution in executions if bool(execution.completed) or (execution.status or "").lower() in FINAL_STATUSES)
+    abandoned = sum(1 for execution in executions if (execution.status or "").lower() in ABANDONED_STATUSES)
+    handled_messages = sum(1 for _, normalized_type, _, _ in events if normalized_type in {MESSAGE_SENT, MESSAGE_RECEIVED})
 
-        node_rows = db.query(FlowNode.id, FlowNode.type, FlowNode.content).filter(FlowNode.flow_id == flow_id).all()
-        node_map = {str(node_id): {"type": node_type or "unknown", "label": node_name or "Node"} for node_id, node_type, node_name in node_rows}
+    durations = []
+    for execution in executions:
+        if execution.started_at and execution.completed_at:
+            seconds = (execution.completed_at - execution.started_at).total_seconds()
+            if seconds >= 0:
+                durations.append(seconds)
+    avg_time_seconds = round(sum(durations) / len(durations), 2) if durations else 0
 
-        kpis = _compute_kpis(sessions, normalized_events)
-        timeseries = _compute_timeseries(sessions, normalized_events)
-        funnel = _compute_funnel(sessions, normalized_events, node_map)
-        dropoffs = _compute_dropoffs(sessions, events, node_map)
-        common_responses = _compute_common_responses(normalized_events)
-    except Exception as e:
-        import traceback
+    node_entries: Counter[str] = Counter()
+    node_exits: Counter[str] = Counter()
+    for _, normalized_type, node_id, _ in events:
+        if not node_id:
+            continue
+        if normalized_type == NODE_ENTERED:
+            node_entries[str(node_id)] += 1
+        elif normalized_type in {NODE_EXITED, FLOW_COMPLETED, FLOW_ABANDONED}:
+            node_exits[str(node_id)] += 1
 
-        print("FLOW ANALYTICS ERROR:", str(e))
-        traceback.print_exc()
-        raise
+    funnel = []
+    total_node_entries = sum(node_entries.values())
+    for node_id, count in node_entries.most_common():
+        meta = node_map.get(node_id, {"label": "Bloco", "type": "unknown"})
+        exits = min(node_exits[node_id], count)
+        dropoff_rate = _safe_rate(max(count - exits, 0), count)
+        funnel.append({
+            "node_id": node_id,
+            "node_label": meta["label"],
+            "node_type": meta["type"],
+            "entries": count,
+            "exits": exits,
+            "dropoffs": max(count - exits, 0),
+            "dropoff_rate": dropoff_rate,
+            "conversion_to_next_rate": _safe_rate(exits, count),
+            "avg_time_seconds": 0,
+            "conversion_rate": _safe_rate(count, total_node_entries),
+        })
 
-    entries = kpis["entries"]
-    completed = 0
+    daily: defaultdict[str, dict[str, Any]] = defaultdict(lambda: {"entries": 0, "messages_sent": 0, "messages": 0, "completed": 0, "conversions": 0, "abandonments": 0})
+    for execution in executions:
+        if execution.started_at:
+            daily[execution.started_at.date().isoformat()]["entries"] += 1
+        if execution.completed_at and (execution.completed or (execution.status or "").lower() in FINAL_STATUSES):
+            bucket = execution.completed_at.date().isoformat()
+            daily[bucket]["completed"] += 1
+            daily[bucket]["conversions"] += 1
+        if execution.completed_at and (execution.status or "").lower() in ABANDONED_STATUSES:
+            daily[execution.completed_at.date().isoformat()]["abandonments"] += 1
+    for _, normalized_type, _, created_at in events:
+        if created_at and normalized_type in {MESSAGE_SENT, MESSAGE_RECEIVED}:
+            bucket = created_at.date().isoformat()
+            daily[bucket]["messages_sent"] += 1
+            daily[bucket]["messages"] += 1
+    timeline = [{"date": date, **metrics} for date, metrics in sorted(daily.items())]
+
+    responses: Counter[str] = Counter()
+    legacy_response_total = 0
+    for event, normalized_type, _, _ in events:
+        if normalized_type != MESSAGE_RECEIVED:
+            continue
+        metadata = getattr(event, "metadata_json", None)
+        if isinstance(metadata, dict):
+            text = metadata.get("text") or metadata.get("reply")
+            if isinstance(text, str) and text.strip():
+                responses[text.strip()] += 1
+                legacy_response_total += 1
+    common_replies = [{"reply": text, "count": count, "rate": _safe_rate(count, legacy_response_total)} for text, count in responses.most_common(8)]
 
     summary = {
         "entries": entries,
-        "messages": kpis["handled_messages"],
-        "messages_sent": kpis["handled_messages"],
+        "messages": handled_messages,
+        "messages_sent": handled_messages,
         "completed": completed,
-        "conversion_rate": kpis["conversion_rate"],
-        "dropoff_rate": kpis["abandonment_rate"],
-        "avg_time": kpis["avg_time_seconds"],
-        "avg_time_seconds": kpis["avg_time_seconds"],
-        "avg_messages_per_user": round(kpis["handled_messages"] / entries, 2) if entries else 0,
+        "conversion_rate": _safe_rate(completed, entries),
+        "dropoff_rate": _safe_rate(abandoned, entries),
+        "avg_time": avg_time_seconds,
+        "avg_time_seconds": avg_time_seconds,
+        "avg_messages_per_user": round(handled_messages / entries, 2) if entries else 0,
     }
-
-    base.update(
-        {
-            "kpis": kpis,
-            "funnel": funnel,
-            "dropoffs": dropoffs,
-            "top_dropoffs": dropoffs[:5],
-            "common_responses": common_responses,
-            "common_replies": [{"reply": item["text"], "count": item["count"], "rate": _safe_rate(item["count"], sum(x["count"] for x in common_responses) or 1)} for item in common_responses],
-            "timeseries": timeseries,
-            "summary": summary,
-            "timeline": timeseries,
-        }
-    )
+    dropoffs = sorted([item for item in funnel if item["dropoff_rate"] > 0], key=lambda item: item["dropoff_rate"], reverse=True)
+    base.update({
+        "summary": summary,
+        "kpis": {
+            "entries": entries,
+            "conversion_rate": summary["conversion_rate"],
+            "abandonment_rate": summary["dropoff_rate"],
+            "avg_time_seconds": avg_time_seconds,
+            "handled_messages": handled_messages,
+        },
+        "funnel": funnel,
+        "dropoffs": dropoffs,
+        "top_dropoffs": dropoffs[:5],
+        "common_responses": common_replies,
+        "common_replies": common_replies,
+        "timeseries": timeline,
+        "timeline": timeline,
+        "insights": [],
+    })
     return base
-
-
-def record_flow_event(db: Session, *, tenant_id: uuid.UUID, conversation_id: uuid.UUID, flow_id: uuid.UUID | None, flow_version_id: uuid.UUID | None, node_id: uuid.UUID | None, event_type: str, user_id: str | None = None, metadata: dict[str, Any] | None = None) -> None:
-    if event_type not in VALID_EVENT_TYPES:
-        logger.warning("event=flow_event_skip reason=invalid_type event_type=%s", event_type)
-        return
-    db.add(FlowEvent(tenant_id=tenant_id, conversation_id=conversation_id, flow_id=flow_id, flow_version_id=flow_version_id, node_id=node_id, event_type=event_type, user_id=user_id, metadata_json=metadata or {}))

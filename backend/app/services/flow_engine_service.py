@@ -1141,6 +1141,17 @@ def _initialize_flow_start_node(
                         start_node["id"],
                     )
                     raise
+            _emit_runtime_event(
+                db=db,
+                tenant_id=conversation.tenant_id,
+                conversation_id=conversation.id,
+                flow_id=flow_id,
+                flow_version_id=_parse_uuid(runtime_graph.get("version_id")) if isinstance(runtime_graph, dict) else None,
+                node_id=_parse_uuid(start_node.get("id")),
+                event_type="FLOW_STARTED",
+                metadata={"contact_id": str(conversation.contact_id) if conversation.contact_id else None, "source": "initialize_start_node"},
+                dedupe_bucket_seconds=1,
+            )
             if conversation.contact_id:
                 from app.services.contact_event_service import register_contact_event
                 register_contact_event(
@@ -1422,7 +1433,7 @@ def emit_message_received_event(
         flow_id=flow_id,
         flow_version_id=flow_version_id,
         node_id=node_id,
-        event_type="message_received",
+        event_type="MESSAGE_RECEIVED",
         metadata={
             "source": source,
             "input_kind": input_kind,
@@ -1464,7 +1475,7 @@ def _emit_node_entered_event(
         flow_id=flow_id,
         flow_version_id=flow_version_id,
         node_id=node.id,
-        event_type="node_entered",
+        event_type="NODE_ENTERED",
         metadata={
             "step": step,
             "node_type": node_type,
@@ -1711,7 +1722,7 @@ def enqueue_flow_send_with_tracking(
             flow_id=flow_id,
             flow_version_id=flow_version_id,
             node_id=node_id,
-            event_type="message_queued",
+            event_type="MESSAGE_SENT",
             metadata={
                 "channel": channel,
                 "message_kind": message_kind,
@@ -1778,6 +1789,18 @@ def _is_wait_node_type(node_type: str) -> bool:
 
 def _finalize_runtime_flow_session(db: Session, conversation: Conversation, flow_session: FlowSession | None, end_node_id: Any) -> None:
     if flow_session:
+        end_node_uuid = _parse_uuid(end_node_id)
+        _emit_runtime_event(
+            db=db,
+            tenant_id=conversation.tenant_id,
+            conversation_id=conversation.id,
+            flow_id=getattr(flow_session, "flow_id", None),
+            flow_version_id=getattr(flow_session, "flow_version_id", None),
+            node_id=end_node_uuid,
+            event_type="FLOW_COMPLETED",
+            metadata={"flow_session_id": str(flow_session.id), "contact_id": str(conversation.contact_id) if conversation.contact_id else None},
+            dedupe_bucket_seconds=1,
+        )
         if conversation.contact_id:
             from app.services.contact_event_service import register_contact_event
             register_contact_event(
@@ -1886,6 +1909,19 @@ def run_until_wait_node(
         node_type = _node_type_slug(node)
         node_data = _extract_node_data(node)
         edges = _get_edges(db=db, flow_id=flow.id, source=_node_get(node, "id"), runtime_graph=runtime_graph)
+        current_node_uuid = _parse_uuid(_node_get(node, "id"))
+        _emit_node_entered_event(
+            db=db,
+            tenant_id=session.tenant_id,
+            conversation_id=session.id,
+            flow_id=flow.id,
+            flow_version_id=getattr(flow_session, "flow_version_id", None),
+            node=node,
+            node_data=node_data,
+            edges=edges,
+            step=steps,
+            source="runtime_loop",
+        )
         logger.info("[MANYCHAT NODE EXECUTE] node_id=%s node_type=%s", _node_get(node, "id"), node_type)
 
         if node_type == "condition":
@@ -1972,10 +2008,33 @@ def run_until_wait_node(
                         _send_flow_whatsapp_message(tenant=tenant, phone=phone, text=text)
                         logger.info("[MANYCHAT MESSAGE SENT] node_id=%s", _node_get(node, "id"))
                 if _is_terminal_message_node(node_data):
+                    _emit_runtime_event(
+                        db=db,
+                        tenant_id=session.tenant_id,
+                        conversation_id=session.id,
+                        flow_id=flow.id,
+                        flow_version_id=getattr(flow_session, "flow_version_id", None),
+                        node_id=current_node_uuid,
+                        event_type="NODE_EXITED",
+                        metadata={"source": "terminal_message"},
+                        dedupe_bucket_seconds=1,
+                    )
                     _finalize_runtime_flow_session(db=db, conversation=session, flow_session=flow_session, end_node_id=_node_get(node, "id"))
                     return None
             next_edge = _pick_default_edge(edges)
             next_target = _edge_target(next_edge) if next_edge else None
+            if next_target:
+                _emit_runtime_event(
+                    db=db,
+                    tenant_id=session.tenant_id,
+                    conversation_id=session.id,
+                    flow_id=flow.id,
+                    flow_version_id=getattr(flow_session, "flow_version_id", None),
+                    node_id=current_node_uuid,
+                    event_type="NODE_EXITED",
+                    metadata={"source": "default_edge", "next_node_id": str(next_target)},
+                    dedupe_bucket_seconds=1,
+                )
             message_node_id = _node_get(node, "id")
             next_node = _get_node(db=db, node_id=next_target, tenant_id=session.tenant_id, runtime_graph=runtime_graph) if next_edge else None
             next_node_type = _node_type_slug(next_node) if next_node else None

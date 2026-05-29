@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { BarChart3, Funnel, GitBranch, MessageSquareText, Sparkles, TrendingUp } from 'lucide-react';
+import { BarChart3, Funnel, GitBranch, MessageSquareText, TrendingUp } from 'lucide-react';
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { getFlowAnalytics, listFlows } from '@/lib/api';
 type Props = { params: { flowId: string } };
@@ -260,16 +260,6 @@ export default function Page({ params }: Props) {
             </div>
           )}
         </div>
-      </div>
-
-      <div className='card card-soft card-rounded-lg card-full-width'>
-        <div className='section-header'>
-          <h3 className='section-title'><Sparkles size={18} />Insights automáticos</h3>
-          <span className='coming-soon-badge'>Em breve</span>
-        </div>
-        <p className='secondary-text insights-description'>
-          Aqui você encontrará análises inteligentes para melhorar conversão, reduzir abandonos e acelerar otimizações do flow.
-        </p>
       </div>
 
       {loading && <div className='secondary-text'>Carregando...</div>}

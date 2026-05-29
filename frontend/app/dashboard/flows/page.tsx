@@ -10,8 +10,6 @@ import { FlowItem, FlowPayload } from '@/lib/types';
 type FlowListItem = FlowItem & {
   status?: string;
   is_published?: boolean;
-  executions?: number;
-  conversion_rate?: number;
 };
 
 const getUpdatedLabel = (updatedAt?: string | null) => {
@@ -27,34 +25,6 @@ const getUpdatedLabel = (updatedAt?: string | null) => {
 
   const days = Math.floor(hours / 24);
   return `Atualizado há ${days} dia${days === 1 ? '' : 's'}`;
-};
-
-const getFlowExecutions = (flow: FlowListItem) => {
-  const metrics = flow as unknown as Record<string, unknown>;
-  const candidates = [metrics.executions, metrics.execution_count, metrics.entries, metrics.total_executions];
-  const value = candidates.find((candidate) => typeof candidate === 'number' && Number.isFinite(candidate));
-  return typeof value === 'number' ? value : null;
-};
-
-const getFlowConversion = (flow: FlowListItem) => {
-  const metrics = flow as unknown as Record<string, unknown>;
-  const candidates = [metrics.conversion_rate, metrics.conversion, metrics.conversionPercent, metrics.completed_rate];
-  const value = candidates.find((candidate) => typeof candidate === 'number' && Number.isFinite(candidate));
-  return typeof value === 'number' ? value : null;
-};
-
-const getFlowIdHash = (flowId: string) => {
-  return Array.from(flowId).reduce((hash, char) => ((hash * 31) + char.charCodeAt(0)) % 1000003, 7);
-};
-
-const getMockExecutions = (flowId: string) => {
-  const hash = getFlowIdHash(flowId);
-  return 40 + (hash % 460);
-};
-
-const getMockConversionRate = (flowId: string) => {
-  const hash = getFlowIdHash(`${flowId}-conversion`);
-  return 12 + (hash % 74);
 };
 
 const FlowNodeIcon = () => (
@@ -207,8 +177,8 @@ export default function FlowsPage() {
     }
   };
 
-  const published = flows.filter((f) => f.status === 'published' || f.status === 'active').length;
-  const drafts = flows.filter((f) => f.status === 'draft' || f.status === 'inactive').length;
+  const published = flows.filter((f) => f.published).length;
+  const drafts = flows.filter((f) => f.draft).length;
   const filteredFlows = useMemo(() => {
     const normalizedSearch = searchTerm.trim().toLowerCase();
     const filtered = flows.filter((flow) => {
@@ -221,8 +191,8 @@ export default function FlowsPage() {
 
       if (statusFilter === 'active' && !flow.is_active) return false;
       if (statusFilter === 'inactive' && flow.is_active) return false;
-      if (statusFilter === 'draft' && flow.status !== 'draft') return false;
-      if (statusFilter === 'published' && flow.status !== 'published') return false;
+      if (statusFilter === 'draft' && !flow.draft) return false;
+      if (statusFilter === 'published' && !flow.published) return false;
 
       return true;
     });
@@ -246,20 +216,6 @@ export default function FlowsPage() {
     });
   }, [flows, searchTerm, sortBy, statusFilter]);
 
-  const flowsWithMetrics = useMemo(
-    () =>
-      filteredFlows.map((flow) => {
-        const realExecutions = getFlowExecutions(flow);
-        const realConversionRate = getFlowConversion(flow);
-
-        return {
-          ...flow,
-          executions: realExecutions ?? getMockExecutions(flow.id),
-          conversion_rate: realConversionRate ?? getMockConversionRate(flow.id),
-        };
-      }),
-    [filteredFlows],
-  );
 
   return (
     <main className="flex-1 bg-slate-50 py-6">
@@ -386,7 +342,7 @@ export default function FlowsPage() {
           </div>
         ) : (
           <div className="space-y-3 p-4 sm:space-y-4 sm:p-5">
-            {flowsWithMetrics.map((flow) => {
+            {filteredFlows.map((flow) => {
               return (
                 <div
                   key={flow.id}
@@ -438,7 +394,7 @@ export default function FlowsPage() {
                         <path d="M3 12L21 4L15 21L11 13L3 12Z" stroke="#64748B" strokeWidth="1.7" strokeLinejoin="round" />
                       </svg>
                       <div>
-                        <div className="text-[16px] font-semibold leading-none text-slate-900">{flow.executions}</div>
+                        <div className="text-[16px] font-semibold leading-none text-slate-900">{flow.total_entries}</div>
                         <div className="text-[10px] uppercase tracking-[0.04em] text-slate-500">Execuções</div>
                       </div>
                     </div>
@@ -447,7 +403,7 @@ export default function FlowsPage() {
                         <path d="M12 4L20 19H4L12 4Z" stroke="#64748B" strokeWidth="1.7" strokeLinejoin="round" />
                       </svg>
                       <div>
-                        <div className="text-[16px] font-semibold leading-none text-slate-900">{Math.round(flow.conversion_rate ?? 0)}%</div>
+                        <div className="text-[16px] font-semibold leading-none text-slate-900">{Number(flow.conversion_rate || 0).toFixed(2)}%</div>
                         <div className="text-[10px] uppercase tracking-[0.04em] text-slate-500">Conversão</div>
                       </div>
                     </div>

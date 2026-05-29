@@ -133,8 +133,27 @@ class FlowExecution(Base):
     __tablename__ = "flow_executions"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    flow_version_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("flow_versions.id"), nullable=False, index=True)
-    user_phone: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    tenant_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=True, index=True)
+    flow_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("flows.id"), nullable=True, index=True)
+    contact_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("contacts.id"), nullable=True, index=True)
+    conversation_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("conversations.id"), nullable=True, index=True)
+    flow_version_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("flow_versions.id"), nullable=True, index=True)
+    user_phone: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
+    started_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow, index=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    status: Mapped[str] = mapped_column(String(40), nullable=False, default="running", server_default="running", index=True)
+    current_node: Mapped[str | None] = mapped_column(String, nullable=True)
+    completed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false", index=True)
     current_node_id: Mapped[str | None] = mapped_column(String, nullable=True)
     state: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class FlowExecutionEvent(Base):
+    __tablename__ = "flow_execution_events"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    execution_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("flow_executions.id", ondelete="CASCADE"), nullable=False, index=True)
+    node_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
+    event_type: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow, index=True)
