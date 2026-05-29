@@ -1,12 +1,12 @@
 'use client';
 
 import { FormEvent, useEffect, useMemo, useState } from 'react';
-import { ArrowUpRight, Building2, CheckCircle2, Clock3, CreditCard, Layers3, LockKeyhole, MessageSquareText, Rocket, ShieldCheck, Sparkles, User, UsersRound, type LucideIcon } from 'lucide-react';
+import { Bell, Building2, CheckCircle2, Clock3, CreditCard, Globe2, KeyRound, Layers3, LockKeyhole, Mail, MessageSquareText, Pencil, Plus, Save, ShieldCheck, Smartphone, User, UsersRound } from 'lucide-react';
 import ProvidersTab from '@/components/settings/whatsapp-business/ProvidersTab';
 import TemplatesTab from '@/components/settings/whatsapp-business/TemplatesTab';
 import { ClientDateTime } from '@/components/settings/whatsapp-business/ui';
-import { activateWhatsAppProvider, createTemplate, createWhatsAppProvider, deleteWhatsAppProvider, getSystemSettings, listTemplates, listWhatsAppProviders, submitTemplate, syncTemplates, testWhatsAppProvider, updateSystemSettings, updateWhatsAppProvider } from '@/lib/api';
-import { SystemSettingsPayload, WhatsAppProvider, WhatsAppTemplate } from '@/lib/types';
+import { activateWhatsAppProvider, createTemplate, createWhatsAppProvider, deactivateWorkspaceUser, deleteWhatsAppProvider, getAccountMe, getAccountSecurity, getSystemSettings, inviteWorkspaceUser, listTemplates, listWhatsAppProviders, listWorkspaceUsers, submitTemplate, syncTemplates, testWhatsAppProvider, updateAccountPassword, updateAccountPreferences, updateAccountProfile, updateSystemSettings, updateWhatsAppProvider, updateWorkspaceUser } from '@/lib/api';
+import { AccountMe, AccountPreferences, AccountProfile, AccountSecurity, SystemSettingsPayload, WhatsAppProvider, WhatsAppTemplate, WorkspaceUser } from '@/lib/types';
 import { friendlyToMeta, renderExample, validateMetaVariables } from '@/lib/templateVariableMapper';
 import { SettingsTabId } from './SettingsSidebar';
 import { AccountTabId } from '@/components/account/AccountSidebar';
@@ -15,102 +15,118 @@ const INITIAL_FORM: SystemSettingsPayload = { token: '', phone_number_id: '', we
 const baseProviderForm = { provider_type: 'meta_cloud', display_name: '', waba_id: '', phone_number_id: '', business_id: '', access_token: '', api_key: '' };
 const baseTemplateForm = { name: '', category: 'utility', language: 'pt_BR', provider_id: '', body_text: '', friendly_body_text: '', footer_text: '', variables_json: [] as any[] };
 const whatsappTabs = [{ id: 'system', label: 'Visão Geral', icon: Layers3 }, { id: 'connection', label: 'Conexões', icon: Building2 }, { id: 'templates', label: 'Templates', icon: MessageSquareText }];
-
-const emptyStates = {
-  profile: {
-    icon: User,
-    eyebrow: 'Identity Center',
-    title: 'Meu Perfil',
-    description: 'Dados pessoais, avatar, assinatura e presença no workspace serão concentrados aqui.',
-    roadmap: ['Avatar corporativo e status de disponibilidade', 'Assinatura de atendimento e idioma preferido', 'Auditoria de alterações do perfil']
-  },
-  preferences: {
-    icon: Sparkles,
-    eyebrow: 'Personalização',
-    title: 'Preferências',
-    description: 'Ajustes de notificações, densidade visual e experiência individual estão no roadmap.',
-    roadmap: ['Notificações por canal e prioridade', 'Tema, densidade e atalhos do painel', 'Preferências por produto e inbox']
-  },
-  users: {
-    icon: UsersRound,
-    eyebrow: 'Admin Console',
-    title: 'Usuários',
-    description: 'Gerenciamento de equipe, seats e convites será liberado em um módulo enterprise dedicado.',
-    roadmap: ['Convites com expiração e domínio permitido', 'Seats por função e área de negócio', 'Status de usuário e trilha de auditoria']
-  },
-  permissions: {
-    icon: ShieldCheck,
-    eyebrow: 'Governança',
-    title: 'Permissões',
-    description: 'Papéis granulares e políticas de acesso por área serão exibidos nesta aba.',
-    roadmap: ['RBAC por módulo e ação crítica', 'Políticas por time, fila e campanha', 'Aprovações para operações sensíveis']
-  },
-  security: {
-    icon: LockKeyhole,
-    eyebrow: 'Trust & Security',
-    title: 'Segurança',
-    description: 'Sessões pessoais, login, MFA e controles de segurança da sua conta ficam aqui.',
-    roadmap: ['Sessões ativas e revogação remota', 'MFA e chaves de recuperação', 'Alertas de login e dispositivos confiáveis']
-  },
-  billing: {
-    icon: CreditCard,
-    eyebrow: 'Revenue Operations',
-    title: 'Billing',
-    description: 'Planos, faturas, limites de uso e add-ons ficam centralizados no Account Hub do workspace.',
-    roadmap: ['Plano atual e consumo por workspace', 'Faturas, método de pagamento e centros de custo', 'Limites, add-ons e forecast de uso']
-  },
-  integrations: {
-    icon: Layers3,
-    eyebrow: 'Integration Catalog',
-    title: 'Integrações',
-    description: 'Apps conectados, automações e conectores do workspace ficam centralizados no Account Hub.',
-    roadmap: ['Catálogo de integrações por área', 'OAuth, webhooks e automações autorizadas', 'Monitoramento de saúde dos conectores']
-  }
-} satisfies Partial<Record<SettingsTabId | AccountTabId, { icon: LucideIcon; eyebrow: string; title: string; description: string; roadmap: string[] }>>;
+const roleLabels: Record<string, string> = { owner: 'Administrador', admin: 'Admin', member: 'Membro', analyst: 'Analista', viewer: 'Leitura' };
 
 export default function SettingsContent({ activeTab }: { activeTab: SettingsTabId | AccountTabId }) {
   if (activeTab === 'apikeys' || activeTab === 'whatsapp-business') return <WhatsAppBusinessConsole />;
-
-  const state = emptyStates[activeTab];
-  if (!state) return null;
-  const Icon = state.icon;
-
-  return (
-    <div className='overflow-hidden rounded-3xl border border-[color:var(--surface-border)] bg-white/95 shadow-[0_18px_44px_-34px_rgba(15,23,42,0.75)]'>
-      <div className='relative border-b border-slate-100 bg-gradient-to-br from-white via-slate-50 to-emerald-50/50 p-6 md:p-8'>
-        <div className='pointer-events-none absolute right-8 top-6 h-24 w-24 rounded-full bg-emerald-300/20 blur-2xl' />
-        <p className='inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-white/80 px-3 py-1 text-xs font-semibold text-emerald-700 shadow-sm'><Icon size={14} /> {state.eyebrow}</p>
-        <h2 className='mt-4 text-2xl font-semibold tracking-tight text-slate-950'>{state.title}</h2>
-        <p className='mt-2 max-w-2xl text-sm leading-relaxed text-slate-600'>{state.description}</p>
-      </div>
-
-      <div className='grid gap-5 p-5 md:grid-cols-[minmax(0,1fr)_320px] md:p-6'>
-        <div className='relative overflow-hidden rounded-3xl border border-dashed border-slate-200/50 bg-gradient-to-br from-slate-950 via-slate-900 to-slate-800 p-6 text-white shadow-[0_24px_54px_-38px_rgba(15,23,42,0.9)]'>
-          <div className='pointer-events-none absolute -right-10 -top-10 h-32 w-32 rounded-full bg-emerald-400/25 blur-3xl' />
-          <div className='flex h-14 w-14 items-center justify-center rounded-2xl border border-white/10 bg-white/10 text-emerald-200'>
-            <Rocket size={24} />
-          </div>
-          <p className='mt-5 text-xs font-semibold uppercase tracking-[0.18em] text-emerald-200'>Em breve</p>
-          <h3 className='mt-2 text-xl font-semibold tracking-tight'>Experiência premium em construção</h3>
-          <p className='mt-2 max-w-xl text-sm leading-relaxed text-slate-300'>Esta área já possui navegação própria para evitar conteúdo incorreto. O módulo completo entra no roadmap Enterprise com a mesma experiência administrativa do restante do produto.</p>
-          <button type='button' className='mt-6 inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white px-4 py-2 text-sm font-semibold text-slate-950 shadow-sm'>Roadmap Enterprise <ArrowUpRight size={14} /></button>
-        </div>
-
-        <div className='rounded-3xl border border-slate-200 bg-white p-5 shadow-[0_14px_34px_-30px_rgba(15,23,42,0.85)]'>
-          <p className='text-sm font-semibold text-slate-950'>Roadmap Enterprise</p>
-          <div className='mt-4 space-y-3'>
-            {state.roadmap.map(item => (
-              <div key={item} className='flex gap-3 rounded-2xl border border-slate-100 bg-slate-50/80 p-3'>
-                <span className='mt-1 h-2 w-2 rounded-full bg-emerald-500 shadow-[0_0_0_4px_rgba(16,185,129,0.12)]' />
-                <p className='text-sm leading-snug text-slate-600'>{item}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-    </div>
-  );
+  if (activeTab === 'profile') return <ProfileTab />;
+  if (activeTab === 'preferences') return <PreferencesTab />;
+  if (activeTab === 'security') return <SecurityTab />;
+  if (activeTab === 'users') return <UsersTab />;
+  if (activeTab === 'permissions') return <PermissionsTab />;
+  if (activeTab === 'billing') return <BillingTab />;
+  if (activeTab === 'integrations') return <IntegrationsTab />;
+  return null;
 }
+
+function Card({ children, className = '' }: { children: React.ReactNode; className?: string }) {
+  return <div className={`rounded-3xl border border-[color:var(--surface-border)] bg-white/95 shadow-[0_18px_44px_-34px_rgba(15,23,42,0.75)] ${className}`}>{children}</div>;
+}
+
+function HubHeader({ icon: Icon, eyebrow, title, description }: { icon: any; eyebrow: string; title: string; description: string }) {
+  return <div className='relative border-b border-slate-100 bg-gradient-to-br from-white via-slate-50 to-emerald-50/50 p-6 md:p-8'>
+    <div className='pointer-events-none absolute right-8 top-6 h-24 w-24 rounded-full bg-emerald-300/20 blur-2xl' />
+    <p className='inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-white/80 px-3 py-1 text-xs font-semibold text-emerald-700 shadow-sm'><Icon size={14} /> {eyebrow}</p>
+    <h2 className='mt-4 text-2xl font-semibold tracking-tight text-slate-950'>{title}</h2>
+    <p className='mt-2 max-w-3xl text-sm leading-relaxed text-slate-600'>{description}</p>
+  </div>;
+}
+
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return <label className='block'><span className='text-xs font-semibold uppercase tracking-[0.14em] text-slate-500'>{label}</span><div className='mt-2'>{children}</div></label>;
+}
+
+function inputClass() { return 'w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100'; }
+function fmtDate(value?: string | null) { return value ? new Date(value).toLocaleString('pt-BR') : 'Ainda não registrado'; }
+function initials(name?: string) { return (name || 'WA').split(' ').map(p => p[0]).join('').slice(0, 2).toUpperCase(); }
+
+function useAccountData() {
+  const [data, setData] = useState<AccountMe | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [toast, setToast] = useState('');
+  const refresh = async () => { setLoading(true); try { setData(await getAccountMe()); } finally { setLoading(false); } };
+  useEffect(() => { refresh(); }, []);
+  return { data, setData, loading, toast, setToast, refresh };
+}
+
+function ProfileTab() {
+  const { data, setData, loading, toast, setToast } = useAccountData();
+  const [form, setForm] = useState<Partial<AccountProfile>>({});
+  useEffect(() => { if (data?.profile) setForm(data.profile); }, [data]);
+  const save = async (event: FormEvent) => { event.preventDefault(); const updated = await updateAccountProfile(form); setData(data ? { ...data, profile: updated } : data); setToast('Perfil atualizado com sucesso.'); setTimeout(() => setToast(''), 3000); };
+  return <Card><HubHeader icon={User} eyebrow='Identity Center' title='Meu Perfil' description='Atualize os dados que aparecem para o time, auditoria e atendimento do workspace.' />
+    <form onSubmit={save} className='grid gap-6 p-5 md:grid-cols-[220px_minmax(0,1fr)] md:p-6'>
+      <div className='rounded-3xl border border-slate-200 bg-slate-50 p-5 text-center'>
+        <div className='mx-auto flex h-24 w-24 items-center justify-center overflow-hidden rounded-3xl bg-slate-950 text-2xl font-bold text-white'>{form.avatar_url ? <img src={form.avatar_url} alt='' className='h-full w-full object-cover' /> : initials(form.name)}</div>
+        <p className='mt-4 text-sm font-semibold text-slate-950'>{form.name || 'Carregando...'}</p><p className='text-xs text-slate-500'>{roleLabels[form.role || 'owner'] || form.role}</p>
+      </div>
+      <div className='grid gap-4 md:grid-cols-2'>
+        <Field label='Nome'><input className={inputClass()} value={form.name || ''} onChange={e => setForm({ ...form, name: e.target.value })} required /></Field>
+        <Field label='Email'><input className={inputClass()} type='email' value={form.email || ''} onChange={e => setForm({ ...form, email: e.target.value })} required /></Field>
+        <Field label='Avatar URL'><input className={inputClass()} value={form.avatar_url || ''} onChange={e => setForm({ ...form, avatar_url: e.target.value })} placeholder='https://...' /></Field>
+        <Field label='Empresa'><input className={inputClass()} value={form.company || ''} onChange={e => setForm({ ...form, company: e.target.value })} /></Field>
+        <Field label='Cargo'><input className={inputClass()} value={form.job_title || ''} onChange={e => setForm({ ...form, job_title: e.target.value })} placeholder='Head de Operações' /></Field>
+        <div className='flex items-end'><button disabled={loading} className='inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-slate-950/15'><Save size={16} /> Salvar alterações</button></div>
+        {toast && <p className='md:col-span-2 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-700'>{toast}</p>}
+      </div>
+    </form></Card>;
+}
+
+function PreferencesTab() {
+  const { data, setData, toast, setToast } = useAccountData();
+  const [form, setForm] = useState<AccountPreferences>({ language: 'pt-BR', timezone: 'America/Sao_Paulo', email_notifications: true, whatsapp_notifications: true });
+  useEffect(() => { if (data?.preferences) setForm(data.preferences); }, [data]);
+  const save = async (event: FormEvent) => { event.preventDefault(); const updated = await updateAccountPreferences(form); setData(data ? { ...data, preferences: updated } : data); setToast('Preferências salvas.'); setTimeout(() => setToast(''), 3000); };
+  return <Card><HubHeader icon={Bell} eyebrow='Personalização' title='Preferências' description='Configure idioma, timezone e canais de notificação para sua operação diária.' />
+    <form onSubmit={save} className='grid gap-5 p-5 md:grid-cols-2 md:p-6'>
+      <Field label='Idioma'><select className={inputClass()} value={form.language} onChange={e => setForm({ ...form, language: e.target.value })}><option value='pt-BR'>Português (Brasil)</option><option value='en-US'>English (US)</option><option value='es-ES'>Español</option></select></Field>
+      <Field label='Timezone'><select className={inputClass()} value={form.timezone} onChange={e => setForm({ ...form, timezone: e.target.value })}><option value='America/Sao_Paulo'>America/São Paulo</option><option value='America/New_York'>America/New York</option><option value='Europe/Lisbon'>Europe/Lisbon</option><option value='UTC'>UTC</option></select></Field>
+      <Toggle icon={Mail} title='Notificações por email' desc='Alertas de convites, segurança e campanhas.' checked={form.email_notifications} onChange={v => setForm({ ...form, email_notifications: v })} />
+      <Toggle icon={Smartphone} title='Notificações WhatsApp' desc='Avisos operacionais e handoffs críticos.' checked={form.whatsapp_notifications} onChange={v => setForm({ ...form, whatsapp_notifications: v })} />
+      <button className='inline-flex items-center justify-center gap-2 rounded-2xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white'><Save size={16} /> Salvar preferências</button>{toast && <p className='rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-700'>{toast}</p>}
+    </form></Card>;
+}
+
+function Toggle({ icon: Icon, title, desc, checked, onChange }: { icon: any; title: string; desc: string; checked: boolean; onChange: (value: boolean) => void }) {
+  return <button type='button' onClick={() => onChange(!checked)} className={`flex items-center justify-between gap-4 rounded-3xl border p-5 text-left ${checked ? 'border-emerald-200 bg-emerald-50' : 'border-slate-200 bg-white'}`}><span className='flex gap-3'><span className='flex h-11 w-11 items-center justify-center rounded-2xl bg-white text-emerald-600'><Icon size={18} /></span><span><span className='block text-sm font-semibold text-slate-950'>{title}</span><span className='text-sm text-slate-500'>{desc}</span></span></span><span className={`h-6 w-11 rounded-full p-1 transition ${checked ? 'bg-emerald-500' : 'bg-slate-300'}`}><span className={`block h-4 w-4 rounded-full bg-white transition ${checked ? 'translate-x-5' : ''}`} /></span></button>;
+}
+
+function SecurityTab() {
+  const [security, setSecurity] = useState<AccountSecurity | null>(null); const [toast, setToast] = useState(''); const [password, setPassword] = useState({ current_password: '', new_password: '', confirm_password: '' });
+  useEffect(() => { getAccountSecurity().then(setSecurity); }, []);
+  const save = async (event: FormEvent) => { event.preventDefault(); await updateAccountPassword(password); setPassword({ current_password: '', new_password: '', confirm_password: '' }); setSecurity(await getAccountSecurity()); setToast('Senha alterada com sucesso.'); setTimeout(() => setToast(''), 3000); };
+  return <Card><HubHeader icon={LockKeyhole} eyebrow='Trust & Security' title='Segurança' description='Gerencie senha, sessões ativas e histórico básico da conta. MFA segue no roadmap enterprise.' />
+    <div className='grid gap-6 p-5 md:grid-cols-[minmax(0,1fr)_340px] md:p-6'><form onSubmit={save} className='rounded-3xl border border-slate-200 p-5'><h3 className='flex items-center gap-2 text-lg font-semibold text-slate-950'><KeyRound size={18} /> Alterar senha</h3><div className='mt-5 grid gap-4'><Field label='Senha atual'><input className={inputClass()} type='password' value={password.current_password} onChange={e => setPassword({ ...password, current_password: e.target.value })} /></Field><Field label='Nova senha'><input className={inputClass()} type='password' value={password.new_password} onChange={e => setPassword({ ...password, new_password: e.target.value })} /></Field><Field label='Confirmar nova senha'><input className={inputClass()} type='password' value={password.confirm_password} onChange={e => setPassword({ ...password, confirm_password: e.target.value })} /></Field><button className='rounded-2xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white'>Atualizar senha</button>{toast && <p className='text-sm font-semibold text-emerald-700'>{toast}</p>}</div></form>
+      <div className='space-y-4'><div className='rounded-3xl border border-slate-200 p-5'><p className='text-xs font-semibold uppercase tracking-[0.16em] text-slate-400'>Último login</p><p className='mt-2 text-sm font-semibold text-slate-950'>{fmtDate(security?.last_login_at)}</p><p className='mt-4 rounded-2xl bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-700'>MFA: {security?.mfa_status || 'Em breve'}</p></div><div className='rounded-3xl border border-slate-200 p-5'><p className='font-semibold text-slate-950'>Sessões ativas</p>{security?.active_sessions.map(s => <div key={s.id} className='mt-3 rounded-2xl bg-slate-50 p-3 text-sm'><b>{s.device}</b><p className='text-slate-500'>{s.status} · {fmtDate(s.last_seen_at)}</p></div>)}</div></div>
+      <div className='md:col-span-2 rounded-3xl border border-slate-200 p-5'><p className='font-semibold text-slate-950'>Histórico básico</p><div className='mt-4 grid gap-3 md:grid-cols-3'>{security?.history.map(item => <div key={item.event} className='rounded-2xl bg-slate-50 p-4'><p className='text-sm font-semibold text-slate-950'>{item.event}</p><p className='mt-1 text-xs text-slate-500'>{item.description}</p><p className='mt-3 text-xs font-semibold text-slate-400'>{fmtDate(item.created_at)}</p></div>)}</div></div>
+    </div></Card>;
+}
+
+function UsersTab() {
+  const [users, setUsers] = useState<WorkspaceUser[]>([]); const [invite, setInvite] = useState({ name: '', email: '', role: 'member' }); const [toast, setToast] = useState(''); const refresh = async () => setUsers(await listWorkspaceUsers());
+  useEffect(() => { refresh(); }, []);
+  const submit = async (e: FormEvent) => { e.preventDefault(); await inviteWorkspaceUser(invite); setInvite({ name: '', email: '', role: 'member' }); await refresh(); setToast('Convite criado com status pendente.'); setTimeout(() => setToast(''), 3000); };
+  const changeRole = async (user: WorkspaceUser, role: string) => { await updateWorkspaceUser(user.id, { role }); await refresh(); };
+  const deactivate = async (user: WorkspaceUser) => { await deactivateWorkspaceUser(user.id); await refresh(); };
+  return <Card><HubHeader icon={UsersRound} eyebrow='Admin Console' title='Usuários' description='Tabela real do workspace com administrador atual, convites e ações de edição/desativação.' />
+    <div className='p-5 md:p-6'><form onSubmit={submit} className='grid gap-3 rounded-3xl border border-slate-200 bg-slate-50 p-4 md:grid-cols-[1fr_1fr_180px_auto]'><input className={inputClass()} placeholder='Nome do usuário' value={invite.name} onChange={e => setInvite({ ...invite, name: e.target.value })} /><input className={inputClass()} placeholder='email@empresa.com' value={invite.email} onChange={e => setInvite({ ...invite, email: e.target.value })} /><select className={inputClass()} value={invite.role} onChange={e => setInvite({ ...invite, role: e.target.value })}><option value='member'>Membro</option><option value='admin'>Admin</option><option value='analyst'>Analista</option><option value='viewer'>Leitura</option></select><button className='inline-flex items-center justify-center gap-2 rounded-2xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white'><Plus size={16} /> Convidar usuário</button></form>{toast && <p className='mt-3 text-sm font-semibold text-emerald-700'>{toast}</p>}
+      <div className='mt-5 overflow-hidden rounded-3xl border border-slate-200'><table className='w-full text-left text-sm'><thead className='bg-slate-50 text-xs uppercase tracking-[0.14em] text-slate-500'><tr><th className='p-4'>Nome</th><th>Email</th><th>Função</th><th>Status</th><th>Último acesso</th><th>Ações</th></tr></thead><tbody className='divide-y divide-slate-100'>{users.map(user => <tr key={user.id} className='bg-white'><td className='p-4 font-semibold text-slate-950'>{user.name}</td><td className='text-slate-600'>{user.email}</td><td><select className='rounded-xl border border-slate-200 px-3 py-2 text-sm' value={user.role} onChange={e => changeRole(user, e.target.value)}><option value='owner'>Administrador</option><option value='admin'>Admin</option><option value='member'>Membro</option><option value='analyst'>Analista</option><option value='viewer'>Leitura</option></select></td><td><span className={`rounded-full px-3 py-1 text-xs font-semibold ${user.status === 'active' ? 'bg-emerald-50 text-emerald-700' : user.status === 'invited' ? 'bg-blue-50 text-blue-700' : 'bg-slate-100 text-slate-500'}`}>{user.status}</span></td><td className='text-slate-500'>{fmtDate(user.last_access_at)}</td><td><button onClick={() => changeRole(user, user.role)} className='mr-2 inline-flex items-center gap-1 text-xs font-semibold text-slate-700'><Pencil size={13} /> Editar</button><button onClick={() => deactivate(user)} className='text-xs font-semibold text-rose-600'>Desativar</button></td></tr>)}</tbody></table></div></div></Card>;
+}
+
+function PermissionsTab() { const roles = [{ name: 'Owner', desc: 'Controle total do workspace, billing, integrações e RBAC.' }, { name: 'Admin', desc: 'Gerencia usuários, fluxos, campanhas e configurações operacionais.' }, { name: 'Member', desc: 'Opera inbox, CRM, campanhas e automações liberadas.' }, { name: 'Viewer', desc: 'Acesso somente leitura para auditoria e liderança.' }]; return <Card><HubHeader icon={ShieldCheck} eyebrow='Governança' title='Permissões' description='RBAC permanece no roadmap, mas a política alvo já está clara: papéis por módulo, ações críticas e escopos de workspace.' /><div className='grid gap-4 p-5 md:grid-cols-4 md:p-6'>{roles.map(r => <div key={r.name} className='rounded-3xl border border-slate-200 p-5'><p className='text-lg font-semibold text-slate-950'>{r.name}</p><p className='mt-2 text-sm leading-relaxed text-slate-600'>{r.desc}</p></div>)}</div></Card>; }
+function BillingTab() { const limits = ['1.000 mensagens/mês', '1 workspace', 'Até 5 usuários', 'WhatsApp Business básico']; return <Card><HubHeader icon={CreditCard} eyebrow='Revenue Operations' title='Billing' description='Resumo financeiro sem integração de cobrança: plano atual, status e limites operacionais da POC.' /><div className='grid gap-5 p-5 md:grid-cols-[320px_1fr] md:p-6'><div className='rounded-3xl bg-slate-950 p-6 text-white'><p className='text-sm text-emerald-200'>Plano atual</p><h3 className='mt-2 text-3xl font-bold'>Starter POC</h3><p className='mt-4 inline-flex rounded-full bg-emerald-400/15 px-3 py-1 text-sm font-semibold text-emerald-200'>Status: Ativo</p></div><div className='grid gap-3 md:grid-cols-2'>{limits.map(limit => <div key={limit} className='flex items-center gap-3 rounded-2xl border border-slate-200 p-4'><CheckCircle2 className='text-emerald-500' size={18} /><span className='text-sm font-semibold text-slate-700'>{limit}</span></div>)}</div></div></Card>; }
+function IntegrationsTab() { const integrations = [{ name: 'WhatsApp Business', status: 'Configurável', icon: Smartphone, desc: 'Providers, tokens, WABA e templates oficiais.' }, { name: 'Webhooks', status: 'Disponível', icon: Globe2, desc: 'Eventos de entrada e callbacks para automações.' }, { name: 'APIs', status: 'Operacional', icon: Layers3, desc: 'Endpoints protegidos por tenant e token.' }]; return <Card><HubHeader icon={Layers3} eyebrow='Integration Catalog' title='Integrações' description='Visão executiva dos conectores essenciais do workspace com status visual.' /><div className='grid gap-4 p-5 md:grid-cols-3 md:p-6'>{integrations.map(item => <div key={item.name} className='rounded-3xl border border-slate-200 p-5'><div className='flex items-center justify-between'><span className='flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-50 text-emerald-600'><item.icon size={20} /></span><span className='rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700'>{item.status}</span></div><h3 className='mt-5 text-lg font-semibold text-slate-950'>{item.name}</h3><p className='mt-2 text-sm text-slate-600'>{item.desc}</p></div>)}</div></Card>; }
+
 
 function WhatsAppBusinessConsole() {
   const [tab, setTab] = useState<'system' | 'connection' | 'templates'>('system');

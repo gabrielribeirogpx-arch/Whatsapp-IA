@@ -203,5 +203,9 @@ def login(payload: LoginRequest, request: Request, db: Session = Depends(get_db)
     if not tenant:
         raise HTTPException(status_code=401, detail="Credenciais inválidas")
 
+    user.last_login_at = datetime.utcnow()
+    db.add(user)
+    db.commit()
+
     token = _create_token(str(tenant.id), user.email)
     return TenantAuthResponse(tenant_id=tenant.id, slug=tenant.slug, token=token)

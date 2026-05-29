@@ -20,6 +20,7 @@ from app.routers import knowledge
 from app.routers import leads
 from app.routers import dashboard
 from app.routers import settings
+from app.routers import account
 from app.routers import bot_rules
 from app.routers import flows
 from app.routers import whatsapp_providers, whatsapp_templates, whatsapp_campaigns
@@ -180,6 +181,7 @@ app.include_router(knowledge.router, prefix="/api")
 app.include_router(leads.router, prefix="/api")
 app.include_router(dashboard.router, prefix="/api")
 app.include_router(settings.router, prefix="/api")
+app.include_router(account.router, prefix="/api")
 app.include_router(bot_rules.router)
 app.include_router(flows.crud_router, prefix="/api/flows", tags=["flows"])
 app.include_router(flows.router, prefix="/api/admin", tags=["admin"])
