@@ -1,0 +1,132 @@
+'use client';
+
+import { memo } from 'react';
+import type { CSSProperties } from 'react';
+import { Handle, Position } from 'reactflow';
+
+type SourceHandle = {
+  id?: string;
+  label?: string;
+  color?: string;
+};
+
+type CompactFlowNodeProps = {
+  id: string;
+  selected?: boolean;
+  running?: boolean;
+  title: string;
+  emoji: string;
+  badge: string;
+  badgeTone: { background: string; color: string };
+  accent: string;
+  summary: string;
+  meta?: string;
+  chips?: string[];
+  sourceHandles?: SourceHandle[];
+  isStart?: boolean;
+  hasValidationError?: boolean;
+  onToggleStart?: (nodeId: string) => void;
+};
+
+function CompactFlowNode({
+  id,
+  selected,
+  running,
+  title,
+  emoji,
+  badge,
+  badgeTone,
+  accent,
+  summary,
+  meta,
+  chips = [],
+  sourceHandles,
+  isStart,
+  hasValidationError,
+  onToggleStart,
+}: CompactFlowNodeProps) {
+  const handles = sourceHandles?.length ? sourceHandles : [{ id: undefined, color: accent }];
+  const handleStep = handles.length > 1 ? 24 : 0;
+  const firstHandleTop = handles.length > 1 ? 68 - ((handles.length - 1) * handleStep) / 2 : 55;
+
+  return (
+    <div
+      className={`flow-node flow-node-compact ${selected ? 'is-selected' : ''} ${running ? 'running' : ''}`}
+      style={{
+        '--flow-node-accent': accent,
+        border: hasValidationError ? '2px solid #dc2626' : undefined,
+        boxShadow: hasValidationError ? '0 0 0 4px rgba(220,38,38,0.15)' : undefined,
+      } as CSSProperties}
+    >
+      <div className="flow-node-header-bar" style={{ background: accent }} />
+      <Handle type="target" position={Position.Left} />
+
+      <div className="flow-node-compact-header">
+        <span className="flow-node-emoji" aria-hidden="true">{emoji}</span>
+        <div className="flow-node-compact-title-wrap">
+          <span className="flow-node-title">{title}</span>
+          {meta ? <span className="flow-node-compact-meta">{meta}</span> : null}
+        </div>
+        <span className="flow-node-badge" style={badgeTone}>{badge}</span>
+        <button
+          type="button"
+          className={`flow-node-start-button nodrag ${isStart ? 'is-start' : ''}`}
+          title={isStart ? 'Bloco inicial' : 'Marcar como início'}
+          onClick={(event) => {
+            event.stopPropagation();
+            onToggleStart?.(id);
+          }}
+        >
+          {isStart ? '▶ Início' : '▶'}
+        </button>
+      </div>
+
+      <div className="flow-node-compact-body">
+        <p className="flow-node-summary">{summary || 'Clique para configurar no painel lateral'}</p>
+        {chips.length > 0 ? (
+          <div className="flow-node-chip-row">
+            {chips.slice(0, 3).map((chip) => (
+              <span key={chip} className="flow-node-chip">{chip}</span>
+            ))}
+            {chips.length > 3 ? <span className="flow-node-chip flow-node-chip-muted">+{chips.length - 3}</span> : null}
+          </div>
+        ) : null}
+      </div>
+
+      {handles.map((handle, index) => (
+        <Handle
+          key={handle.id || 'default'}
+          id={handle.id}
+          type="source"
+          position={Position.Right}
+          title={handle.label}
+          style={{
+            top: firstHandleTop + index * handleStep,
+            right: -6,
+            width: 10,
+            height: 10,
+            background: '#fff',
+            border: `2px solid ${handle.color || accent}`,
+            borderRadius: '50%',
+            cursor: 'crosshair',
+            zIndex: 10,
+          }}
+        />
+      ))}
+    </div>
+  );
+}
+
+export const truncateText = (value: unknown, maxLength: number, fallback = 'Não configurado') => {
+  const text = String(value || '').trim();
+  if (!text) return fallback;
+  return text.length > maxLength ? `${text.slice(0, maxLength).trim()}...` : text;
+};
+
+export const fileNameFromUrl = (value: unknown, fallback: string) => {
+  const text = String(value || '').trim();
+  if (!text) return fallback;
+  return text.split('/').pop()?.split('?')[0] || text;
+};
+
+export default memo(CompactFlowNode);

@@ -1,103 +1,38 @@
 'use client';
 
-import { Handle, NodeProps, Position } from 'reactflow';
+import { NodeProps } from 'reactflow';
+import CompactFlowNode from './CompactFlowNode';
 
-type EsperaNodeData = {
+type DelayNodeData = {
   label?: string;
   content?: string;
+  delay?: string | number;
+  seconds?: string | number;
   running?: boolean;
   isStart?: boolean;
-  onChange?: (nodeId: string, patch: Record<string, unknown>) => void;
   onToggleStart?: (nodeId: string) => void;
-  is_terminal?: boolean;
   hasValidationError?: boolean;
 };
 
-export default function EsperaNode({ id, data, selected }: NodeProps) {
-  const nodeData = (data || {}) as EsperaNodeData;
+export default function DelayNode({ id, data, selected }: NodeProps) {
+  const nodeData = (data || {}) as DelayNodeData;
+  const value = nodeData.seconds || nodeData.delay || nodeData.content || '3';
 
   return (
-    <div
-      className={`flow-node ${selected ? 'is-selected' : ''} ${nodeData.running ? 'running' : ''}`}
-      style={{ minWidth: 220, position: 'relative', border: nodeData.hasValidationError ? '2px solid #dc2626' : undefined, boxShadow: nodeData.hasValidationError ? '0 0 0 4px rgba(220,38,38,0.15)' : undefined }}
-    >
-      {/* Barra verde — tempo e espera */}
-      <div
-        className="flow-node-header-bar"
-        style={{ background: 'linear-gradient(90deg, #16a34a, #22c55e)' }}
-      />
-
-      <Handle type="target" position={Position.Left} />
-
-      {/* Header */}
-      <div className="flow-node-header" style={{ paddingTop: 14 }}>
-        <div className="flow-node-type-dot" style={{ background: '#16a34a' }} />
-        <span className="flow-node-title">{nodeData.label || 'Espera'}</span>
-        <span
-          className="flow-node-badge"
-          style={{ background: '#f0fdf4', color: '#15803d' }}
-        >
-          ⏱
-        </span>
-        <button
-          type="button"
-          title={nodeData.isStart ? 'Bloco inicial' : 'Marcar como início'}
-          onClick={(e) => {
-            e.stopPropagation();
-            nodeData.onToggleStart?.(id);
-          }}
-          style={{
-            marginLeft: 'auto',
-            background: nodeData.isStart ? '#16A34A' : 'transparent',
-            border: nodeData.isStart ? 'none' : '1px solid #D1D5DB',
-            borderRadius: 6,
-            padding: '2px 6px',
-            cursor: 'pointer',
-            fontSize: 10,
-            fontWeight: 600,
-            color: nodeData.isStart ? '#fff' : '#9CA3AF',
-            display: 'flex',
-            alignItems: 'center',
-            gap: 3,
-            transition: 'all 0.15s',
-          }}
-        >
-          {nodeData.isStart ? '▶ Início' : '▶'}
-        </button>
-      </div>
-
-      {/* Corpo */}
-      <div className="flow-node-body">
-        <input
-          className="flow-node-field nodrag"
-          value={nodeData.content || ''}
-          onChange={(e) => nodeData.onChange?.(id, { content: e.target.value })}
-          placeholder="Segundos (ex: 3)"
-          style={{ width: '100%', padding: '7px 9px' }}
-        />
-        <div style={{ marginTop: 6, fontSize: 10.5, color: '#a8b0a0' }}>
-          segundos de espera
-        </div>
-      </div>
-      <label style={{ display: "flex", gap: 6, fontSize: 11, margin: "4px 10px" }}>
-        <input type="checkbox" checked={!!nodeData.is_terminal} onChange={(e) => nodeData.onChange?.(id, { is_terminal: e.target.checked })} />
-        ✓ Este é o fim do fluxo
-      </label>
-
-      <Handle
-        type="source"
-        position={Position.Right}
-        style={{
-          right: -6,
-          width: 10,
-          height: 10,
-          background: '#fff',
-          border: '2px solid #16a34a',
-          borderRadius: '50%',
-          cursor: 'crosshair',
-          zIndex: 10,
-        }}
-      />
-    </div>
+    <CompactFlowNode
+      id={id}
+      selected={selected}
+      running={nodeData.running}
+      title="Delay"
+      emoji="⏱️"
+      badge="WAIT"
+      badgeTone={{ background: '#ecfeff', color: '#0e7490' }}
+      accent="linear-gradient(90deg, #0891b2, #06b6d4)"
+      summary={`Aguardar ${value}s`}
+      meta="Pausa no fluxo"
+      isStart={nodeData.isStart}
+      hasValidationError={nodeData.hasValidationError}
+      onToggleStart={nodeData.onToggleStart}
+    />
   );
 }
