@@ -1,287 +1,300 @@
+-- Investigação final de multi-tenant / WhatsApp runtime.
+--
+-- Execute em produção com psql usando o DATABASE_URL correto:
+--   psql "$DATABASE_URL" -f backend/sql/multi_tenant_final_investigation.sql
+--
+-- Observação de schema:
+-- - O model SQLAlchemy usa a tabela tenant_whatsapp_providers, não whatsapp_providers.
+-- - A seção "2b" abaixo também tenta consultar whatsapp_providers apenas se uma view/tabela
+--   legada com esse nome existir no banco.
+
 \pset pager off
-\pset null '(null)'
-\echo '== multi_tenant_final_investigation =='
-\echo 'Target conversation_id: b51fef94-1be8-456e-93a9-69ca4a8ea18c'
-\echo 'Target flow_id:         50f7b54f-2ccd-4203-bb82-f946f4a9f078'
-\echo 'Target lead_id:         8de6a070-1290-494f-b274-cb6de8660e69'
-\echo 'Expected tenant_id:     b0c1a7d5-587b-476f-89d1-5596c02dad5d'
-\echo ''
+\set ON_ERROR_STOP on
 
-\echo '1) Tenant ownership for the target records'
+\echo '0. Parâmetros investigados'
 WITH params AS (
     SELECT
-        'b51fef94-1be8-456e-93a9-69ca4a8ea18c'::uuid AS conversation_id,
-        '50f7b54f-2ccd-4203-bb82-f946f4a9f078'::uuid AS flow_id,
-        '8de6a070-1290-494f-b274-cb6de8660e69'::uuid AS lead_id,
-        'b0c1a7d5-587b-476f-89d1-5596c02dad5d'::uuid AS expected_tenant_id
-), target_records AS (
-    SELECT
-        'conversation' AS record_type,
-        c.id AS record_id,
-        c.tenant_id,
-        c.phone_number AS phone,
-        c.contact_id,
-        c.current_flow AS related_flow_id,
-        c.updated_at
-    FROM conversations c
-    JOIN params p ON p.conversation_id = c.id
-
-    UNION ALL
-
-    SELECT
-        'flow' AS record_type,
-        f.id AS record_id,
-        f.tenant_id,
-        NULL::text AS phone,
-        NULL::uuid AS contact_id,
-        f.id AS related_flow_id,
-        f.updated_at
-    FROM flows f
-    JOIN params p ON p.flow_id = f.id
-
-    UNION ALL
-
-    SELECT
-        'lead' AS record_type,
-        l.id AS record_id,
-        l.tenant_id,
-        l.phone,
-        l.contact_id,
-        l.conversation_id AS related_flow_id,
-        l.updated_at
-    FROM leads l
-    JOIN params p ON p.lead_id = l.id
+        '5516994361408'::text AS target_phone,
+        '50f7b54f-2ccd-4203-bb82-f946f4a9f078'::uuid AS target_flow_id,
+        '876969468828520'::text AS target_phone_number_id,
+        'b0c1a7d5-587b-476f-89d1-5596c02dad5d'::uuid AS runtime_tenant_id,
+        'd89f177f-74dd-40e8-9496-7facaea76aaf'::uuid AS manual_config_tenant_id
 )
-SELECT
-    tr.record_type,
-    tr.record_id,
-    tr.tenant_id,
-    t.name AS tenant_name,
-    t.slug AS tenant_slug,
-    (tr.tenant_id = p.expected_tenant_id) AS is_expected_tenant,
-    tr.phone,
-    tr.contact_id,
-    tr.related_flow_id,
-    tr.updated_at
-FROM target_records tr
-CROSS JOIN params p
-LEFT JOIN tenants t ON t.id = tr.tenant_id
-ORDER BY tr.record_type;
+SELECT * FROM params;
 
-\echo ''
-\echo '2) Definitive tenant classification from target record ownership'
-WITH params AS (
-    SELECT 'b0c1a7d5-587b-476f-89d1-5596c02dad5d'::uuid AS expected_tenant_id
-), target_tenants AS (
-    SELECT tenant_id, 'conversation' AS source FROM conversations WHERE id = 'b51fef94-1be8-456e-93a9-69ca4a8ea18c'::uuid
-    UNION ALL
-    SELECT tenant_id, 'flow' AS source FROM flows WHERE id = '50f7b54f-2ccd-4203-bb82-f946f4a9f078'::uuid
-    UNION ALL
-    SELECT tenant_id, 'lead' AS source FROM leads WHERE id = '8de6a070-1290-494f-b274-cb6de8660e69'::uuid
-), scored AS (
-    SELECT
-        tt.tenant_id,
-        count(*) AS matching_target_records,
-        array_agg(tt.source ORDER BY tt.source) AS evidence_sources
-    FROM target_tenants tt
-    GROUP BY tt.tenant_id
-), classified AS (
-    SELECT
-        s.*,
-        (s.tenant_id = p.expected_tenant_id) AS is_expected_tenant,
-        dense_rank() OVER (ORDER BY s.matching_target_records DESC, (s.tenant_id = p.expected_tenant_id) DESC, s.tenant_id) AS tenant_rank
-    FROM scored s
-    CROSS JOIN params p
-)
+\echo '1. TODOS os tenants existentes'
 SELECT
-    CASE
-        WHEN tenant_rank = 1 THEN 'tenant_correto'
-        ELSE 'tenant_incorreto'
-    END AS classification,
+    id,
+    name,
+    slug,
+    phone_number_id,
+    webhook_url,
+    webhook_status,
+    plan,
+    is_blocked
+FROM tenants
+ORDER BY id;
+
+\echo '2. Todos os providers em tenant_whatsapp_providers'
+SELECT
+    id,
+    tenant_id,
+    COALESCE(display_name, provider_type) AS provider_name,
+    provider_type,
+    is_active,
+    status,
+    phone_number_id,
+    waba_id,
+    business_id,
+    updated_at,
+    created_at
+FROM tenant_whatsapp_providers
+ORDER BY tenant_id, is_active DESC, updated_at DESC NULLS LAST, created_at DESC NULLS LAST;
+
+\echo '2b. Compatibilidade: whatsapp_providers, se existir como tabela/view'
+DO $$
+BEGIN
+    IF to_regclass('public.whatsapp_providers') IS NOT NULL THEN
+        RAISE NOTICE 'public.whatsapp_providers existe; execute manualmente: SELECT id, tenant_id, provider_name, is_active, status, phone_number_id, waba_id FROM whatsapp_providers;';
+    ELSE
+        RAISE NOTICE 'public.whatsapp_providers não existe; use public.tenant_whatsapp_providers.';
+    END IF;
+END $$;
+
+\echo '3. Conversas do número 5516994361408 com tenant_id'
+WITH params AS (SELECT '5516994361408'::text AS target_phone)
+SELECT
+    c.id,
     c.tenant_id,
-    t.name AS tenant_name,
     t.slug AS tenant_slug,
-    c.is_expected_tenant,
-    c.matching_target_records,
-    c.evidence_sources
-FROM classified c
+    c.phone_number,
+    c.name,
+    c.mode,
+    c.current_flow AS current_flow_id,
+    c.current_node_id,
+    c.created_at,
+    c.updated_at
+FROM conversations c
 LEFT JOIN tenants t ON t.id = c.tenant_id
-ORDER BY c.tenant_rank, c.tenant_id;
+JOIN params p ON c.phone_number = p.target_phone
+ORDER BY c.updated_at DESC NULLS LAST, c.created_at DESC NULLS LAST;
 
-\echo ''
-\echo '3) Meta providers for target tenants (provider correto/incorreto candidates)'
-WITH params AS (
-    SELECT 'b0c1a7d5-587b-476f-89d1-5596c02dad5d'::uuid AS expected_tenant_id
-), target_tenants AS (
-    SELECT tenant_id FROM conversations WHERE id = 'b51fef94-1be8-456e-93a9-69ca4a8ea18c'::uuid
-    UNION
-    SELECT tenant_id FROM flows WHERE id = '50f7b54f-2ccd-4203-bb82-f946f4a9f078'::uuid
-    UNION
-    SELECT tenant_id FROM leads WHERE id = '8de6a070-1290-494f-b274-cb6de8660e69'::uuid
-    UNION
-    SELECT expected_tenant_id FROM params
-), tenant_scores AS (
-    SELECT
-        tenant_id,
-        count(*) AS hits
-    FROM (
-        SELECT tenant_id FROM conversations WHERE id = 'b51fef94-1be8-456e-93a9-69ca4a8ea18c'::uuid
-        UNION ALL
-        SELECT tenant_id FROM flows WHERE id = '50f7b54f-2ccd-4203-bb82-f946f4a9f078'::uuid
-        UNION ALL
-        SELECT tenant_id FROM leads WHERE id = '8de6a070-1290-494f-b274-cb6de8660e69'::uuid
-    ) s
-    GROUP BY tenant_id
-), ranked_tenants AS (
-    SELECT
-        tt.tenant_id,
-        COALESCE(ts.hits, 0) AS hits,
-        dense_rank() OVER (ORDER BY COALESCE(ts.hits, 0) DESC, (tt.tenant_id = p.expected_tenant_id) DESC, tt.tenant_id) AS tenant_rank
-    FROM target_tenants tt
-    CROSS JOIN params p
-    LEFT JOIN tenant_scores ts ON ts.tenant_id = tt.tenant_id
-), provider_rows AS (
-    SELECT
-        CASE WHEN rt.tenant_rank = 1 THEN 'provider_tenant_correto' ELSE 'provider_tenant_incorreto' END AS classification,
-        p.id AS provider_id,
-        p.tenant_id,
-        t.name AS tenant_name,
-        t.slug AS tenant_slug,
-        p.provider_type,
-        p.display_name,
-        p.is_active,
-        p.status,
-        p.phone_number_id,
-        p.waba_id,
-        p.business_id,
-        (p.access_token_encrypted IS NOT NULL AND length(trim(p.access_token_encrypted)) > 0) AS has_access_token,
-        p.created_at,
-        p.updated_at,
-        rt.hits AS target_record_hits
-    FROM tenant_whatsapp_providers p
-    JOIN ranked_tenants rt ON rt.tenant_id = p.tenant_id
-    LEFT JOIN tenants t ON t.id = p.tenant_id
-    WHERE p.provider_type = 'meta_cloud'
-)
-SELECT *
-FROM provider_rows
-ORDER BY classification, is_active DESC, updated_at DESC NULLS LAST;
-
-\echo ''
-\echo '4) Same phone_number_id in multiple tenants (all duplicates)'
-WITH duplicate_phone_numbers AS (
-    SELECT phone_number_id
-    FROM tenant_whatsapp_providers
-    WHERE provider_type = 'meta_cloud'
-      AND phone_number_id IS NOT NULL
-      AND length(trim(phone_number_id)) > 0
-    GROUP BY phone_number_id
-    HAVING count(DISTINCT tenant_id) > 1
-)
+\echo '4. Flow 50f7b54f-2ccd-4203-bb82-f946f4a9f078 com tenant_id'
+WITH params AS (SELECT '50f7b54f-2ccd-4203-bb82-f946f4a9f078'::uuid AS target_flow_id)
 SELECT
-    p.phone_number_id,
-    p.id AS provider_id,
-    p.tenant_id,
-    t.name AS tenant_name,
+    f.id,
+    f.tenant_id,
     t.slug AS tenant_slug,
-    p.display_name,
-    p.is_active,
-    p.status,
-    p.waba_id,
-    p.business_id,
-    (p.access_token_encrypted IS NOT NULL AND length(trim(p.access_token_encrypted)) > 0) AS has_access_token,
-    p.updated_at
-FROM tenant_whatsapp_providers p
-JOIN duplicate_phone_numbers d ON d.phone_number_id = p.phone_number_id
-LEFT JOIN tenants t ON t.id = p.tenant_id
-WHERE p.provider_type = 'meta_cloud'
-ORDER BY p.phone_number_id, p.is_active DESC, p.updated_at DESC NULLS LAST, p.tenant_id;
+    f.name,
+    f.status,
+    f.is_active,
+    f.is_deleted,
+    f.trigger_type,
+    f.trigger_value,
+    f.priority,
+    f.current_version_id,
+    f.published_version_id,
+    f.created_at,
+    f.updated_at,
+    f.deleted_at
+FROM flows f
+LEFT JOIN tenants t ON t.id = f.tenant_id
+JOIN params p ON f.id = p.target_flow_id;
 
-\echo ''
-\echo '5) Duplicate phone_number_id restricted to providers attached to target tenants'
-WITH target_tenants AS (
-    SELECT tenant_id FROM conversations WHERE id = 'b51fef94-1be8-456e-93a9-69ca4a8ea18c'::uuid
-    UNION
-    SELECT tenant_id FROM flows WHERE id = '50f7b54f-2ccd-4203-bb82-f946f4a9f078'::uuid
-    UNION
-    SELECT tenant_id FROM leads WHERE id = '8de6a070-1290-494f-b274-cb6de8660e69'::uuid
-    UNION
-    SELECT 'b0c1a7d5-587b-476f-89d1-5596c02dad5d'::uuid
-), target_provider_phones AS (
-    SELECT DISTINCT phone_number_id
-    FROM tenant_whatsapp_providers p
-    JOIN target_tenants tt ON tt.tenant_id = p.tenant_id
-    WHERE p.provider_type = 'meta_cloud'
-      AND p.phone_number_id IS NOT NULL
-      AND length(trim(p.phone_number_id)) > 0
-)
+\echo '5a. Webhooks/mensagens inbound recebidos do número via messages + conversations'
+WITH params AS (SELECT '5516994361408'::text AS target_phone)
 SELECT
-    p.phone_number_id,
-    p.id AS provider_id,
-    p.tenant_id,
-    t.name AS tenant_name,
+    m.id AS message_id,
+    m.tenant_id,
     t.slug AS tenant_slug,
-    p.display_name,
-    p.is_active,
-    p.status,
-    p.waba_id,
-    p.business_id,
-    (p.access_token_encrypted IS NOT NULL AND length(trim(p.access_token_encrypted)) > 0) AS has_access_token,
-    p.updated_at
-FROM tenant_whatsapp_providers p
-JOIN target_provider_phones tp ON tp.phone_number_id = p.phone_number_id
-LEFT JOIN tenants t ON t.id = p.tenant_id
-WHERE p.provider_type = 'meta_cloud'
-ORDER BY p.phone_number_id, p.is_active DESC, p.updated_at DESC NULLS LAST, p.tenant_id;
+    m.conversation_id,
+    c.phone_number,
+    m.from_me,
+    m.created_at,
+    LEFT(m.text, 300) AS text_preview
+FROM messages m
+JOIN conversations c ON c.id = m.conversation_id
+LEFT JOIN tenants t ON t.id = m.tenant_id
+JOIN params p ON c.phone_number = p.target_phone
+WHERE m.from_me = false
+ORDER BY m.created_at DESC;
 
-\echo ''
-\echo '6) Safe correction plan preview when expected tenant is the correct tenant'
+\echo '5b. Idempotência de webhooks processados por tenant (sem telefone bruto no schema)'
+SELECT
+    tenant_id,
+    COUNT(*) AS processed_message_count,
+    MIN(created_at) AS first_processed_at,
+    MAX(created_at) AS last_processed_at
+FROM processed_messages
+GROUP BY tenant_id
+ORDER BY last_processed_at DESC NULLS LAST;
+
+\echo '6. Tenant associado ao phone_number_id=876969468828520'
+WITH params AS (SELECT '876969468828520'::text AS target_phone_number_id)
+SELECT
+    'tenants.phone_number_id' AS source,
+    t.id AS tenant_id,
+    t.slug AS tenant_slug,
+    t.name AS tenant_name,
+    NULL::uuid AS provider_id,
+    NULL::text AS provider_name,
+    t.phone_number_id,
+    NULL::boolean AS is_active,
+    NULL::text AS status,
+    NULL::timestamp AS updated_at
+FROM tenants t
+JOIN params p ON t.phone_number_id = p.target_phone_number_id
+UNION ALL
+SELECT
+    'tenant_whatsapp_providers.phone_number_id' AS source,
+    pvd.tenant_id,
+    t.slug AS tenant_slug,
+    t.name AS tenant_name,
+    pvd.id AS provider_id,
+    COALESCE(pvd.display_name, pvd.provider_type) AS provider_name,
+    pvd.phone_number_id,
+    pvd.is_active,
+    pvd.status,
+    pvd.updated_at
+FROM tenant_whatsapp_providers pvd
+LEFT JOIN tenants t ON t.id = pvd.tenant_id
+JOIN params p ON pvd.phone_number_id = p.target_phone_number_id
+ORDER BY source, is_active DESC NULLS LAST, updated_at DESC NULLS LAST;
+
+\echo '7. Verificar se o mesmo phone_number_id existe em mais de um tenant'
+SELECT
+    phone_number_id,
+    COUNT(DISTINCT tenant_id) AS tenant_count,
+    ARRAY_AGG(DISTINCT tenant_id ORDER BY tenant_id) AS tenant_ids,
+    ARRAY_AGG(id ORDER BY updated_at DESC NULLS LAST) AS provider_ids
+FROM tenant_whatsapp_providers
+WHERE phone_number_id IS NOT NULL AND BTRIM(phone_number_id) <> ''
+GROUP BY phone_number_id
+HAVING COUNT(DISTINCT tenant_id) > 1
+ORDER BY tenant_count DESC, phone_number_id;
+
+\echo '8. Diagnóstico objetivo: runtime tenant vs tenant de configuração manual'
 WITH params AS (
-    SELECT 'b0c1a7d5-587b-476f-89d1-5596c02dad5d'::uuid AS expected_tenant_id
-), target_tenants AS (
-    SELECT tenant_id, 'conversation' AS source FROM conversations WHERE id = 'b51fef94-1be8-456e-93a9-69ca4a8ea18c'::uuid
-    UNION ALL
-    SELECT tenant_id, 'flow' AS source FROM flows WHERE id = '50f7b54f-2ccd-4203-bb82-f946f4a9f078'::uuid
-    UNION ALL
-    SELECT tenant_id, 'lead' AS source FROM leads WHERE id = '8de6a070-1290-494f-b274-cb6de8660e69'::uuid
-), expected_is_correct AS (
-    SELECT bool_and(tenant_id = p.expected_tenant_id) AS value
-    FROM target_tenants tt
-    CROSS JOIN params p
-), expected_provider AS (
-    SELECT p.*
-    FROM tenant_whatsapp_providers p
-    CROSS JOIN params prm
-    WHERE p.tenant_id = prm.expected_tenant_id
-      AND p.provider_type = 'meta_cloud'
-    ORDER BY p.is_active DESC, p.updated_at DESC NULLS LAST
+    SELECT
+        '5516994361408'::text AS target_phone,
+        '50f7b54f-2ccd-4203-bb82-f946f4a9f078'::uuid AS target_flow_id,
+        '876969468828520'::text AS target_phone_number_id,
+        'b0c1a7d5-587b-476f-89d1-5596c02dad5d'::uuid AS runtime_tenant_id,
+        'd89f177f-74dd-40e8-9496-7facaea76aaf'::uuid AS manual_config_tenant_id
+), runtime AS (
+    SELECT p.runtime_tenant_id AS tenant_id, t.slug, t.name, t.phone_number_id
+    FROM params p
+    LEFT JOIN tenants t ON t.id = p.runtime_tenant_id
+), manual AS (
+    SELECT p.manual_config_tenant_id AS tenant_id, t.slug, t.name, t.phone_number_id
+    FROM params p
+    LEFT JOIN tenants t ON t.id = p.manual_config_tenant_id
+), runtime_provider AS (
+    SELECT pvd.*
+    FROM params p
+    JOIN tenant_whatsapp_providers pvd ON pvd.tenant_id = p.runtime_tenant_id
+    WHERE pvd.provider_type = 'meta_cloud' AND pvd.is_active = true
+    ORDER BY pvd.updated_at DESC NULLS LAST
     LIMIT 1
-), movable_provider AS (
-    SELECT p.*
-    FROM tenant_whatsapp_providers p
-    CROSS JOIN params prm
-    WHERE p.provider_type = 'meta_cloud'
-      AND p.tenant_id <> prm.expected_tenant_id
-      AND p.phone_number_id IS NOT NULL
-      AND length(trim(p.phone_number_id)) > 0
-      AND EXISTS (
-          SELECT 1
-          FROM tenant_whatsapp_providers ep
-          WHERE ep.tenant_id = prm.expected_tenant_id
-            AND ep.provider_type = 'meta_cloud'
-            AND ep.phone_number_id = p.phone_number_id
-      )
-    ORDER BY p.is_active DESC, p.updated_at DESC NULLS LAST
+), manual_provider AS (
+    SELECT pvd.*
+    FROM params p
+    JOIN tenant_whatsapp_providers pvd ON pvd.tenant_id = p.manual_config_tenant_id
+    WHERE pvd.phone_number_id = p.target_phone_number_id OR pvd.is_active = true
+    ORDER BY (pvd.phone_number_id = p.target_phone_number_id) DESC, pvd.is_active DESC, pvd.updated_at DESC NULLS LAST
     LIMIT 1
+), conversation_tenants AS (
+    SELECT ARRAY_AGG(DISTINCT c.tenant_id ORDER BY c.tenant_id) AS tenant_ids
+    FROM conversations c
+    JOIN params p ON c.phone_number = p.target_phone
+), flow_tenant AS (
+    SELECT f.tenant_id
+    FROM flows f
+    JOIN params p ON f.id = p.target_flow_id
 )
 SELECT
-    CASE
-        WHEN NOT COALESCE((SELECT value FROM expected_is_correct), false) THEN 'do_not_apply_expected_tenant_not_confirmed'
-        WHEN EXISTS (SELECT 1 FROM expected_provider) THEN 'activate_or_update_existing_provider_in_expected_tenant'
-        WHEN EXISTS (SELECT 1 FROM movable_provider) THEN 'move_provider_to_expected_tenant_inside_transaction_after_manual_approval'
-        ELSE 'recreate_provider_meta_in_expected_tenant_with_known_meta_credentials'
-    END AS recommended_action,
-    (SELECT id FROM expected_provider) AS expected_tenant_provider_id,
-    (SELECT id FROM movable_provider) AS movable_provider_id,
-    (SELECT tenant_id FROM movable_provider) AS movable_provider_current_tenant_id,
-    'No data-changing statement is executed by this investigation script.' AS safety_note;
+    'tenant_correto_runtime' AS item,
+    r.tenant_id,
+    r.slug,
+    r.name,
+    r.phone_number_id,
+    NULL::uuid AS provider_id,
+    NULL::text AS provider_name,
+    NULL::boolean AS provider_is_active,
+    NULL::text AS provider_status,
+    NULL::text AS provider_phone_number_id,
+    NULL::text AS evidence
+FROM runtime r
+UNION ALL
+SELECT
+    'tenant_incorreto_configuracao_manual' AS item,
+    m.tenant_id,
+    m.slug,
+    m.name,
+    m.phone_number_id,
+    NULL::uuid,
+    NULL::text,
+    NULL::boolean,
+    NULL::text,
+    NULL::text,
+    NULL::text
+FROM manual m
+UNION ALL
+SELECT
+    'provider_usado_pelo_runtime' AS item,
+    rp.tenant_id,
+    t.slug,
+    t.name,
+    t.phone_number_id,
+    rp.id,
+    COALESCE(rp.display_name, rp.provider_type),
+    rp.is_active,
+    rp.status,
+    rp.phone_number_id,
+    'runtime seleciona provider meta_cloud ativo do tenant da conversa' AS evidence
+FROM runtime_provider rp
+LEFT JOIN tenants t ON t.id = rp.tenant_id
+UNION ALL
+SELECT
+    'provider_configurado_manualmente' AS item,
+    mp.tenant_id,
+    t.slug,
+    t.name,
+    t.phone_number_id,
+    mp.id,
+    COALESCE(mp.display_name, mp.provider_type),
+    mp.is_active,
+    mp.status,
+    mp.phone_number_id,
+    'provider encontrado no tenant onde a configuração manual foi feita' AS evidence
+FROM manual_provider mp
+LEFT JOIN tenants t ON t.id = mp.tenant_id
+UNION ALL
+SELECT
+    'evidencia_conversas_numero' AS item,
+    NULL::uuid,
+    NULL::text,
+    NULL::text,
+    NULL::text,
+    NULL::uuid,
+    NULL::text,
+    NULL::boolean,
+    NULL::text,
+    NULL::text,
+    COALESCE(ct.tenant_ids::text, '{}') AS evidence
+FROM conversation_tenants ct
+UNION ALL
+SELECT
+    'evidencia_flow_tenant' AS item,
+    ft.tenant_id,
+    t.slug,
+    t.name,
+    t.phone_number_id,
+    NULL::uuid,
+    NULL::text,
+    NULL::boolean,
+    NULL::text,
+    NULL::text,
+    'tenant_id do flow informado' AS evidence
+FROM flow_tenant ft
+LEFT JOIN tenants t ON t.id = ft.tenant_id;
