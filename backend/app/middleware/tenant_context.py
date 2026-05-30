@@ -23,11 +23,20 @@ PUBLIC_PATHS = (
 )
 
 
+GLOBAL_READONLY_PATHS = (
+    "/api/admin/multi-tenant-investigation",
+)
+
+
 def _is_public_path(path: str) -> bool:
     for public_path in PUBLIC_PATHS:
         if path == public_path or path.startswith(f"{public_path}/"):
             return True
     return False
+
+
+def _is_global_readonly_path(path: str) -> bool:
+    return path in GLOBAL_READONLY_PATHS
 
 
 class TenantContextMiddleware(BaseHTTPMiddleware):
@@ -38,6 +47,13 @@ class TenantContextMiddleware(BaseHTTPMiddleware):
         path = request.url.path
         if _is_public_path(path):
             return await call_next(request)
+
+        if _is_global_readonly_path(path):
+            set_current_tenant_id(None)
+            try:
+                return await call_next(request)
+            finally:
+                set_current_tenant_id(None)
 
         tenant_header = (request.headers.get("x-tenant-id") or "").strip()
         if not tenant_header:
