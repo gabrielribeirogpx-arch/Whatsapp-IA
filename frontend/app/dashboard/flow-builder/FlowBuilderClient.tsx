@@ -157,6 +157,229 @@ function flowContainsTemporaryIds(nodes: Array<{ id: string }>, edges: Array<{ i
 
 type FlowValidationIssue = { code: string; node_id?: string | null; message: string };
 
+
+type EditorButton = { id?: string; label?: string; handleId?: string; next?: string };
+type EditorRow = { id?: string; title?: string; handleId?: string };
+type EditorSection = { title?: string; rows?: EditorRow[] };
+
+const toText = (value: unknown) => (typeof value === 'string' ? value : value == null ? '' : String(value));
+const fieldHandleId = (value: string, fallback: string) => value.toLowerCase().trim().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '') || fallback;
+const getBuilderNodeKind = (node?: Node | null) => String(node?.type || 'message').toLowerCase();
+const getBuilderNodeTitle = (node?: Node | null) => NODE_PRESETS[getBuilderNodeKind(node) as FlowNodeKind]?.label || 'Node';
+const getMiniMapNodeColor = (type: string) => {
+  const normalized = type.toLowerCase();
+  if (['message', 'image_node', 'document_node'].includes(normalized)) return '#3b82f6';
+  if (['buttons_node', 'list_node'].includes(normalized)) return '#16a34a';
+  if (['choice', 'condition', 'delay', 'action'].includes(normalized)) return '#f97316';
+  return '#94a3b8';
+};
+
+function FlowNodeEditorPanel({
+  node,
+  draft,
+  onDraftChange,
+  onSave,
+  onClose,
+  onUpload,
+  isUploading,
+  uploadError,
+}: {
+  node: Node | null;
+  draft: Record<string, unknown>;
+  onDraftChange: (patch: Record<string, unknown>) => void;
+  onSave: () => void;
+  onClose: () => void;
+  onUpload: (file: File | null, mediaType: 'image' | 'document') => void;
+  isUploading: boolean;
+  uploadError: string | null;
+}) {
+  if (!node) return null;
+  const kind = getBuilderNodeKind(node);
+  const title = getBuilderNodeTitle(node);
+  const buttons = ((draft.buttons as EditorButton[] | undefined) || []).slice(0, kind === 'buttons_node' ? 3 : undefined);
+  const sections = ((draft.sections as EditorSection[] | undefined) || [{ title: 'Opções', rows: [] }]);
+  const rows = sections.flatMap((section) => section.rows || []);
+  const updateButton = (index: number, label: string) => {
+    const next = [...buttons];
+    next[index] = { ...next[index], label, handleId: fieldHandleId(label, `option_${index + 1}`) };
+    onDraftChange({ buttons: next });
+  };
+  const addButton = () => {
+    const nextIndex = buttons.length + 1;
+    if (kind === 'buttons_node' && buttons.length >= 3) return;
+    onDraftChange({ buttons: [...buttons, { id: `${node.id}-button-${nextIndex}`, label: `Opção ${nextIndex}`, handleId: `option_${nextIndex}` }] });
+  };
+  const updateRow = (index: number, titleValue: string) => {
+    const baseSection = sections[0] || { title: 'Opções', rows: [] };
+    const nextRows = [...(baseSection.rows || [])];
+    nextRows[index] = { ...nextRows[index], title: titleValue, handleId: fieldHandleId(titleValue, `option_${index + 1}`) };
+    onDraftChange({ sections: [{ ...baseSection, rows: nextRows }, ...sections.slice(1)] });
+  };
+  const addRow = () => {
+    const baseSection = sections[0] || { title: 'Opções', rows: [] };
+    const nextRows = [...(baseSection.rows || [])];
+    const nextIndex = nextRows.length + 1;
+    nextRows.push({ id: `${node.id}-row-${nextIndex}`, title: `Opção ${nextIndex}`, handleId: `option_${nextIndex}` });
+    onDraftChange({ sections: [{ ...baseSection, rows: nextRows }, ...sections.slice(1)] });
+  };
+  const removeRow = (index: number) => {
+    const baseSection = sections[0] || { title: 'Opções', rows: [] };
+    onDraftChange({ sections: [{ ...baseSection, rows: (baseSection.rows || []).filter((_, rowIndex) => rowIndex !== index) }, ...sections.slice(1)] });
+  };
+
+  return (
+    <aside className="flow-node-editor-panel">
+      <div className="flow-node-editor-header">
+        <div>
+          <span className="flow-node-editor-kicker">Editar bloco</span>
+          <h3>{title}</h3>
+        </div>
+        <button type="button" onClick={onClose} aria-label="Fechar painel">×</button>
+      </div>
+
+      <div className="flow-node-editor-content">
+        {kind === 'message' && (
+          <label className="flow-editor-field">
+            Mensagem
+            <textarea value={toText(draft.content)} onChange={(event) => onDraftChange({ content: event.target.value })} placeholder="Digite a mensagem..." />
+          </label>
+        )}
+
+        {kind === 'image_node' && (
+          <>
+            <label className="flow-editor-field">
+              Arquivo
+              <input type="file" accept="image/*" disabled={isUploading} onChange={(event) => onUpload(event.target.files?.[0] || null, 'image')} />
+            </label>
+            <label className="flow-editor-field">
+              URL da imagem
+              <input value={toText(draft.media_url)} onChange={(event) => onDraftChange({ media_url: event.target.value })} placeholder="https://..." />
+            </label>
+            <label className="flow-editor-field">
+              Legenda
+              <textarea value={toText(draft.caption)} onChange={(event) => onDraftChange({ caption: event.target.value })} placeholder="Legenda opcional" />
+            </label>
+          </>
+        )}
+
+        {kind === 'document_node' && (
+          <>
+            <label className="flow-editor-field">
+              Arquivo
+              <input type="file" accept="application/pdf,.pdf,.doc,.docx" disabled={isUploading} onChange={(event) => onUpload(event.target.files?.[0] || null, 'document')} />
+            </label>
+            <label className="flow-editor-field">
+              URL do documento
+              <input value={toText(draft.document_url)} onChange={(event) => onDraftChange({ document_url: event.target.value })} placeholder="https://..." />
+            </label>
+            <label className="flow-editor-field">
+              Nome
+              <input value={toText(draft.filename)} onChange={(event) => onDraftChange({ filename: event.target.value })} placeholder="cardapio.pdf" />
+            </label>
+            <label className="flow-editor-field">
+              Legenda
+              <textarea value={toText(draft.caption)} onChange={(event) => onDraftChange({ caption: event.target.value })} placeholder="Legenda opcional" />
+            </label>
+          </>
+        )}
+
+        {kind === 'buttons_node' && (
+          <>
+            <label className="flow-editor-field">
+              Texto principal
+              <textarea value={toText(draft.body_text)} onChange={(event) => onDraftChange({ body_text: event.target.value })} placeholder="Como posso ajudar?" />
+            </label>
+            <div className="flow-editor-repeatable">
+              <strong>Botões ({buttons.length}/3)</strong>
+              {buttons.map((button, index) => (
+                <div key={button.id || index} className="flow-editor-row">
+                  <input value={button.label || ''} onChange={(event) => updateButton(index, event.target.value)} placeholder={`Botão ${index + 1}`} />
+                  <button type="button" onClick={() => onDraftChange({ buttons: buttons.filter((_, buttonIndex) => buttonIndex !== index) })}>Remover</button>
+                </div>
+              ))}
+              <button type="button" className="flow-editor-secondary-btn" onClick={addButton} disabled={buttons.length >= 3}>+ Adicionar botão</button>
+            </div>
+          </>
+        )}
+
+        {kind === 'list_node' && (
+          <>
+            <div className="flow-editor-info-card"><strong>Tipo:</strong> WhatsApp Interactive List <span>META LIST</span></div>
+            <label className="flow-editor-field">
+              Texto principal
+              <textarea value={toText(draft.body_text)} onChange={(event) => onDraftChange({ body_text: event.target.value })} placeholder="Escolha uma opção" />
+            </label>
+            <div className="flow-editor-repeatable">
+              <strong>Itens ({rows.length})</strong>
+              {rows.map((row, index) => (
+                <div key={row.id || index} className="flow-editor-row">
+                  <input value={row.title || ''} onChange={(event) => updateRow(index, event.target.value)} placeholder={`Item ${index + 1}`} />
+                  <button type="button" onClick={() => removeRow(index)}>Remover</button>
+                </div>
+              ))}
+              <button type="button" className="flow-editor-secondary-btn" onClick={addRow}>+ Adicionar item</button>
+            </div>
+          </>
+        )}
+
+        {kind === 'choice' && (
+          <>
+            <div className="flow-editor-info-card"><strong>Tipo:</strong> Lógica interna do fluxo <span>LOGIC</span></div>
+            <label className="flow-editor-field">
+              Texto
+              <textarea value={toText(draft.content)} onChange={(event) => onDraftChange({ content: event.target.value })} placeholder="Roteamento interno" />
+            </label>
+            <div className="flow-editor-repeatable">
+              <strong>Opções de roteamento</strong>
+              {buttons.map((button, index) => (
+                <div key={button.id || index} className="flow-editor-row">
+                  <input value={button.label || ''} onChange={(event) => updateButton(index, event.target.value)} placeholder={`Opção ${index + 1}`} />
+                  <button type="button" onClick={() => onDraftChange({ buttons: buttons.filter((_, buttonIndex) => buttonIndex !== index) })}>Remover</button>
+                </div>
+              ))}
+              <button type="button" className="flow-editor-secondary-btn" onClick={addButton}>+ Adicionar opção</button>
+            </div>
+          </>
+        )}
+
+        {kind === 'condition' && (
+          <label className="flow-editor-field">
+            Regras / palavras-chave
+            <textarea value={toText(draft.condition)} onChange={(event) => onDraftChange({ condition: event.target.value })} placeholder="sim, suporte, ajuda" />
+            <small>Separe múltiplas palavras por vírgula. Saídas: Sim e Não.</small>
+          </label>
+        )}
+
+        {kind === 'delay' && (
+          <label className="flow-editor-field">
+            Tempo em segundos
+            <input type="number" min="0" value={toText(draft.content || draft.delay || draft.seconds)} onChange={(event) => onDraftChange({ content: event.target.value })} />
+          </label>
+        )}
+
+        {kind === 'action' && (
+          <label className="flow-editor-field">
+            Nome da ação
+            <input value={toText(draft.action)} onChange={(event) => onDraftChange({ action: event.target.value })} placeholder="Ex.: notificar equipe" />
+          </label>
+        )}
+
+        <label className="flow-editor-checkbox">
+          <input type="checkbox" checked={!!draft.is_terminal} onChange={(event) => onDraftChange({ is_terminal: event.target.checked })} />
+          Este é o fim do fluxo
+        </label>
+        {uploadError ? <div className="flow-editor-error">{uploadError}</div> : null}
+        {isUploading ? <div className="flow-editor-muted">Enviando arquivo...</div> : null}
+      </div>
+
+      <div className="flow-node-editor-footer">
+        <button type="button" className="flow-editor-secondary-btn" onClick={onClose}>Cancelar</button>
+        <button type="button" className="flow-editor-save-btn" onClick={onSave}>Salvar bloco</button>
+      </div>
+    </aside>
+  );
+}
+
 type FlowBuilderClientProps = {
   flowId?: string;
 };
@@ -191,6 +414,10 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
   const [messages, setMessages] = useState<Array<{ type: 'bot' | 'user'; text: string }>>([]);
   const [currentChoices, setCurrentChoices] = useState<Array<{ id?: string; label?: string; handleId?: string }>>([]);
   const [currentNodeId, setCurrentNodeId] = useState<string | null>(null);
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const [nodeEditorDraft, setNodeEditorDraft] = useState<Record<string, unknown>>({});
+  const [isMediaUploading, setIsMediaUploading] = useState(false);
+  const [mediaUploadError, setMediaUploadError] = useState<string | null>(null);
   const [activeEdgeIds, setActiveEdgeIds] = useState<string[]>([]);
   const [isSimulatorOpen, setIsSimulatorOpen] = useState(false);
   const [isSidebarExpanded, setIsSidebarExpanded] = useState(false);
@@ -233,6 +460,15 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
     () => normalizedFlows.find((flow) => flow.id === selectedFlowId) || null,
     [normalizedFlows, selectedFlowId],
   );
+  const selectedNode = useMemo(
+    () => nodes.find((node) => node.id === selectedNodeId) || null,
+    [nodes, selectedNodeId],
+  );
+  useEffect(() => {
+    if (!selectedNode) return;
+    setNodeEditorDraft((prev) => (Object.keys(prev).length === 0 ? { ...(selectedNode.data as Record<string, unknown>) } : prev));
+  }, [selectedNode]);
+
   const canSeeDebugFlowActions = useMemo(() => {
     if (showDebugFlowActionsFlag) return true;
     if (typeof window === 'undefined') return false;
@@ -452,6 +688,44 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
       }),
     );
   }, [setNodes]);
+
+  const openNodeEditor = useCallback((node: Node) => {
+    setSelectedNodeId(node.id);
+    setNodeEditorDraft({ ...(node.data as Record<string, unknown>) });
+    setMediaUploadError(null);
+  }, []);
+
+  const closeNodeEditor = useCallback(() => {
+    setSelectedNodeId(null);
+    setNodeEditorDraft({});
+    setMediaUploadError(null);
+  }, []);
+
+  const saveNodeEditor = useCallback(() => {
+    if (!selectedNodeId) return;
+    updateNodeData(selectedNodeId, nodeEditorDraft);
+    setHasUnsavedChanges(true);
+  }, [nodeEditorDraft, selectedNodeId, updateNodeData]);
+
+  const uploadEditorMedia = useCallback(async (file: File | null, mediaType: 'image' | 'document') => {
+    if (!file) return;
+    setMediaUploadError(null);
+    setIsMediaUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      const response = await apiFetch('/api/flow-media/upload', { method: 'POST', body: formData });
+      const result = await parseApiResponse<{ url: string; filename?: string }>(response);
+      setNodeEditorDraft((prev) => ({
+        ...prev,
+        ...(mediaType === 'image' ? { media_url: result.url } : { document_url: result.url, filename: result.filename || prev.filename }),
+      }));
+    } catch (error) {
+      setMediaUploadError(error instanceof Error ? error.message : 'Falha ao enviar arquivo');
+    } finally {
+      setIsMediaUploading(false);
+    }
+  }, []);
 
   const toggleStartNode = useCallback((nodeId: string) => {
     setNodes((prev) =>
@@ -1303,52 +1577,41 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
           />
         </div>
 
-        <span className="dash-nav-section">Blocos</span>
+        <span className="dash-nav-section">Comunicação</span>
+        {([
+          { kind: 'message' as FlowNodeKind, label: 'Mensagem', icon: MessageSquare },
+          { kind: 'image_node' as FlowNodeKind, label: 'Imagem', icon: ImageIcon },
+          { kind: 'document_node' as FlowNodeKind, label: 'Documento', icon: FileText },
+        ]).map(({ kind, label, icon: Icon }) => (
+          <button key={kind} type="button" className="dash-nav-item" onClick={() => addNode(kind)} title={label} style={{ border: 'none', background: 'none', cursor: 'pointer', width: '100%', textAlign: 'left' }}>
+            <Icon size={18} strokeWidth={1.8} className="text-current" />
+            <span className="dash-nav-label">{label}</span>
+          </button>
+        ))}
 
-        <button type="button" className="dash-nav-item" onClick={() => addNode('message')} title="Mensagem" style={{ border: 'none', background: 'none', cursor: 'pointer', width: '100%', textAlign: 'left' }}>
-          <MessageSquare size={18} strokeWidth={1.8} className="text-current" />
-          <span className="dash-nav-label">Mensagem</span>
-        </button>
+        <span className="dash-nav-section">Interação</span>
+        {([
+          { kind: 'buttons_node' as FlowNodeKind, label: 'Botões', icon: MousePointerClick },
+          { kind: 'list_node' as FlowNodeKind, label: 'Lista', icon: ListChecks },
+        ]).map(({ kind, label, icon: Icon }) => (
+          <button key={kind} type="button" className="dash-nav-item" onClick={() => addNode(kind)} title={label} style={{ border: 'none', background: 'none', cursor: 'pointer', width: '100%', textAlign: 'left' }}>
+            <Icon size={18} strokeWidth={1.8} className="text-current" />
+            <span className="dash-nav-label">{label}</span>
+          </button>
+        ))}
 
-        <button type="button" className="dash-nav-item" onClick={() => addNode('choice')} title="Escolha" style={{ border: 'none', background: 'none', cursor: 'pointer', width: '100%', textAlign: 'left' }}>
-          <ListChecks size={18} strokeWidth={1.8} className="text-current" />
-          <span className="dash-nav-label">Escolha</span>
-        </button>
-
-        <button type="button" className="dash-nav-item" onClick={() => addNode('image_node')} title="Imagem" style={{ border: 'none', background: 'none', cursor: 'pointer', width: '100%', textAlign: 'left' }}>
-          <ImageIcon size={18} strokeWidth={1.8} className="text-current" />
-          <span className="dash-nav-label">Imagem</span>
-        </button>
-
-        <button type="button" className="dash-nav-item" onClick={() => addNode('document_node')} title="Documento" style={{ border: 'none', background: 'none', cursor: 'pointer', width: '100%', textAlign: 'left' }}>
-          <FileText size={18} strokeWidth={1.8} className="text-current" />
-          <span className="dash-nav-label">Documento</span>
-        </button>
-
-        <button type="button" className="dash-nav-item" onClick={() => addNode('buttons_node')} title="Botões" style={{ border: 'none', background: 'none', cursor: 'pointer', width: '100%', textAlign: 'left' }}>
-          <MousePointerClick size={18} strokeWidth={1.8} className="text-current" />
-          <span className="dash-nav-label">Botões</span>
-        </button>
-
-        <button type="button" className="dash-nav-item" onClick={() => addNode('list_node')} title="Lista" style={{ border: 'none', background: 'none', cursor: 'pointer', width: '100%', textAlign: 'left' }}>
-          <ListChecks size={18} strokeWidth={1.8} className="text-current" />
-          <span className="dash-nav-label">Lista</span>
-        </button>
-
-        <button type="button" className="dash-nav-item" onClick={() => addNode('condition')} title="Condição" style={{ border: 'none', background: 'none', cursor: 'pointer', width: '100%', textAlign: 'left' }}>
-          <GitBranch size={18} strokeWidth={1.8} className="text-current" />
-          <span className="dash-nav-label">Condição</span>
-        </button>
-
-        <button type="button" className="dash-nav-item" onClick={() => addNode('delay')} title="Delay" style={{ border: 'none', background: 'none', cursor: 'pointer', width: '100%', textAlign: 'left' }}>
-          <Clock size={18} strokeWidth={1.8} className="text-current" />
-          <span className="dash-nav-label">Delay</span>
-        </button>
-
-        <button type="button" className="dash-nav-item" onClick={() => addNode('action')} title="Ação" style={{ border: 'none', background: 'none', cursor: 'pointer', width: '100%', textAlign: 'left' }}>
-          <Zap size={18} strokeWidth={1.8} className="text-current" />
-          <span className="dash-nav-label">Ação</span>
-        </button>
+        <span className="dash-nav-section">Lógica</span>
+        {([
+          { kind: 'choice' as FlowNodeKind, label: 'Escolha', icon: ListChecks },
+          { kind: 'condition' as FlowNodeKind, label: 'Condição', icon: GitBranch },
+          { kind: 'delay' as FlowNodeKind, label: 'Delay', icon: Clock },
+          { kind: 'action' as FlowNodeKind, label: 'Ação', icon: Zap },
+        ]).map(({ kind, label, icon: Icon }) => (
+          <button key={kind} type="button" className="dash-nav-item" onClick={() => addNode(kind)} title={label} style={{ border: 'none', background: 'none', cursor: 'pointer', width: '100%', textAlign: 'left' }}>
+            <Icon size={18} strokeWidth={1.8} className="text-current" />
+            <span className="dash-nav-label">{label}</span>
+          </button>
+        ))}
 
         <div className="dash-nav-divider" />
 
@@ -1678,6 +1941,12 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
           onConnect={onConnect}
+          onNodeClick={(_, node) => openNodeEditor(node)}
+          onSelectionChange={({ nodes: selectedNodes }) => {
+            if (selectedNodes.length === 1) {
+              openNodeEditor(selectedNodes[0]);
+            }
+          }}
           onContextMenu={(e) => {
             e.preventDefault();
             const mainRect = (e.currentTarget as HTMLElement).getBoundingClientRect();
@@ -1697,10 +1966,29 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
           maxZoom={4}
         >
           <Background variant={BackgroundVariant.Dots} gap={18} size={1.2} color="rgba(22, 163, 74, 0.18)" />
-          <MiniMap nodeBorderRadius={8} pannable style={{ background: '#FFFFFF', border: '1px solid #E8E6E0' }} />
+          <MiniMap
+            nodeBorderRadius={8}
+            pannable
+            zoomable
+            nodeColor={(node) => getMiniMapNodeColor(String(node.type || ''))}
+            nodeStrokeColor={(node) => (node.id === selectedNodeId ? '#111827' : getMiniMapNodeColor(String(node.type || '')))}
+            nodeStrokeWidth={3}
+            maskColor="rgba(15, 23, 42, 0.08)"
+            style={{ background: '#FFFFFF', border: '1px solid #D9E7DD', borderRadius: 14, boxShadow: '0 12px 30px rgba(15,23,42,0.08)' }}
+          />
           <Controls />
         </ReactFlow>
       </main>
+      <FlowNodeEditorPanel
+        node={selectedNode}
+        draft={nodeEditorDraft}
+        onDraftChange={(patch) => setNodeEditorDraft((prev) => ({ ...prev, ...patch }))}
+        onSave={saveNodeEditor}
+        onClose={closeNodeEditor}
+        onUpload={(file, mediaType) => { void uploadEditorMedia(file, mediaType); }}
+        isUploading={isMediaUploading}
+        uploadError={mediaUploadError}
+      />
       <CreateFlowModal
         open={isCreateFlowOpen}
         onClose={() => setIsCreateFlowOpen(false)}
