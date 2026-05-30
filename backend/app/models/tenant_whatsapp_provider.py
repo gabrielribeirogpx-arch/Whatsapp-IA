@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Index, String, Text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, String, Text, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -13,6 +13,12 @@ class TenantWhatsAppProvider(Base):
     __table_args__ = (
         Index("ix_tenant_whatsapp_providers_tenant_provider", "tenant_id", "provider_type"),
         Index("ix_tenant_whatsapp_providers_tenant_active", "tenant_id", "is_active"),
+        Index(
+            "uq_tenant_whatsapp_provider_phone_number_owner",
+            "phone_number_id",
+            unique=True,
+            postgresql_where=text("phone_number_id IS NOT NULL AND btrim(phone_number_id) <> ''"),
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)

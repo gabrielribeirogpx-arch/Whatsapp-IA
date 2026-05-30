@@ -1,11 +1,11 @@
 from fastapi import APIRouter, Request
 
 from app.core.whatsapp_config import WHATSAPP_VERIFY_TOKEN
-from app.models import Tenant
 from app.services.flow_engine import run_flow_from_message
 from app.services.intent_service import classify_intent, route_intent
 from app.services.whatsapp_service import send_whatsapp_message_simple
 from app.database import SessionLocal
+from app.services.tenant_service import resolve_tenant_by_phone_number_id
 
 router = APIRouter()
 
@@ -49,7 +49,7 @@ async def receive_message(request: Request):
         response = run_flow_from_message(phone, text)
         phone_number_id = value.get("metadata", {}).get("phone_number_id")
         with SessionLocal() as db:
-            tenant = db.query(Tenant).filter(Tenant.phone_number_id == phone_number_id).first() if phone_number_id else None
+            tenant = resolve_tenant_by_phone_number_id(db, phone_number_id)
 
         if not tenant:
             print(f"[WHATSAPP NOT CONFIGURED] tenant_id= metadata_phone_number_id={phone_number_id}")

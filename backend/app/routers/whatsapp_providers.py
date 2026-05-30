@@ -5,6 +5,7 @@ from app.database import get_db
 from app.models.tenant import Tenant
 from app.schemas.whatsapp_business import TenantWhatsAppProviderCreate, TenantWhatsAppProviderOut, TenantWhatsAppProviderUpdate
 from app.services import whatsapp_provider_service
+from app.services.whatsapp_provider_service import DuplicatePhoneNumberProviderError
 from app.services.tenant_service import get_current_tenant
 from app.routers.account import get_current_user
 from app.models import TenantUser
@@ -26,6 +27,8 @@ def create_provider(request: Request, payload: TenantWhatsAppProviderCreate, db:
         provider = whatsapp_provider_service.create_provider(db, tenant.id, payload)
         write_audit_log(db, action="WHATSAPP_PROVIDER_UPDATED", tenant_id=tenant.id, user_id=user.id, entity_type="whatsapp_provider", entity_id=provider.id, metadata={"operation": "create", "provider_type": provider.provider_type}, request=request, commit=True)
         return provider
+    except DuplicatePhoneNumberProviderError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except Exception as exc:
         print(
             "[WHATSAPP PROVIDER CREATE ERROR]",
@@ -45,6 +48,8 @@ def patch_provider(provider_id: str, payload: TenantWhatsAppProviderUpdate, requ
         action = "API_KEY_UPDATED" if any(field in {"api_key", "access_token"} for field in fields) else "WHATSAPP_PROVIDER_UPDATED"
         write_audit_log(db, action=action, tenant_id=tenant.id, user_id=user.id, entity_type="whatsapp_provider", entity_id=provider.id, metadata={"operation": "update", "fields": sorted(fields)}, request=request, commit=True)
         return provider
+    except DuplicatePhoneNumberProviderError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
@@ -56,6 +61,8 @@ def activate_provider(provider_id: str, request: Request, db: Session = Depends(
         provider = whatsapp_provider_service.set_active_provider(db, tenant.id, provider_id)
         write_audit_log(db, action="WHATSAPP_PROVIDER_UPDATED", tenant_id=tenant.id, user_id=user.id, entity_type="whatsapp_provider", entity_id=provider.id, metadata={"operation": "activate"}, request=request, commit=True)
         return provider
+    except DuplicatePhoneNumberProviderError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 

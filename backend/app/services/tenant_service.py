@@ -1,5 +1,6 @@
 from datetime import datetime
 import os
+import logging
 import uuid
 
 from fastapi import Depends, Header, HTTPException, Query, Request
@@ -8,7 +9,10 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models import AIConfig, Tenant
+from app.models.tenant_whatsapp_provider import TenantWhatsAppProvider
 from app.services.cache_service import TTL_TENANT_SECONDS, cache_aside_json
+
+logger = logging.getLogger(__name__)
 
 
 class TenantLimitError(RuntimeError):
@@ -64,7 +68,42 @@ def get_or_create_default_tenant(db: Session) -> Tenant:
 def get_tenant_by_phone_number_id(db: Session, phone_id: str | None) -> Tenant | None:
     if not phone_id:
         return None
-    return db.execute(select(Tenant).where(Tenant.phone_number_id == phone_id)).scalars().first()
+    normalized = str(phone_id).strip()
+    if not normalized:
+        return None
+
+    provider = (
+        db.execute(
+            select(TenantWhatsAppProvider)
+            .where(TenantWhatsAppProvider.phone_number_id == normalized)
+            .order_by(
+                TenantWhatsAppProvider.is_active.desc(),
+                TenantWhatsAppProvider.updated_at.desc(),
+                TenantWhatsAppProvider.created_at.desc(),
+            )
+        )
+        .scalars()
+        .first()
+    )
+    if provider:
+        tenant = db.execute(select(Tenant).where(Tenant.id == provider.tenant_id)).scalars().first()
+        logger.info(
+            "[TENANT PHONE RESOLUTION] source=tenant_whatsapp_providers phone_number_id=%s tenant_id=%s provider_id=%s status=%s is_active=%s",
+            normalized,
+            provider.tenant_id,
+            provider.id,
+            provider.status,
+            provider.is_active,
+        )
+        return tenant
+
+    tenant = db.execute(select(Tenant).where(Tenant.phone_number_id == normalized)).scalars().first()
+    logger.info(
+        "[TENANT PHONE RESOLUTION] source=tenants_legacy phone_number_id=%s tenant_id=%s",
+        normalized,
+        tenant.id if tenant else None,
+    )
+    return tenant
 
 
 def get_tenant_cached(db: Session, tenant_id: uuid.UUID) -> Tenant | None:
