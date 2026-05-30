@@ -1,6 +1,6 @@
 """persist flow executions and execution events
 
-Revision ID: 20260529_flow_execution_analytics
+Revision ID: 20260529_flow_exec_analytics
 Revises: 20260529_crm_operational
 Create Date: 2026-05-29
 """
@@ -8,7 +8,7 @@ from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
-revision = "20260529_flow_execution_analytics"
+revision = "20260529_flow_exec_analytics"
 down_revision = "20260529_crm_operational"
 branch_labels = None
 depends_on = None
