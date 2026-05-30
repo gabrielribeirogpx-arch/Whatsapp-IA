@@ -135,6 +135,7 @@ def enqueue_send_message(message_data: dict[str, Any]) -> str | None:
         "text": content,
         "buttons": buttons if isinstance(buttons, list) else None,
         "correlation_id": correlation_id,
+        "conversation_id": str(message_data.get("conversation_id") or "") or None,
     }
 
     job = queue.enqueue(

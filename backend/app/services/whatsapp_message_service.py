@@ -18,30 +18,71 @@ logger = logging.getLogger(__name__)
 VAR_PATTERN = re.compile(r"\{\{\s*(\d+)\s*\}\}")
 
 
-def resolve_active_meta_provider_credentials(db: Session, *, tenant_id: str) -> dict[str, str] | None:
-    provider = (
+def resolve_active_meta_provider_credentials(db: Session, *, tenant_id: str, conversation_id: str | None = None) -> dict[str, str] | None:
+    providers = (
         db.execute(
-            select(TenantWhatsAppProvider).where(
+            select(TenantWhatsAppProvider)
+            .where(
                 TenantWhatsAppProvider.tenant_id == tenant_id,
                 TenantWhatsAppProvider.provider_type == "meta_cloud",
-                TenantWhatsAppProvider.is_active.is_(True),
-                TenantWhatsAppProvider.status.in_(["connected", "active"]),
             )
+            .order_by(TenantWhatsAppProvider.is_active.desc(), TenantWhatsAppProvider.updated_at.desc())
         )
         .scalars()
-        .first()
+        .all()
+    )
+    active_providers = [provider for provider in providers if provider.is_active]
+    logger.info(
+        "[PROVIDER RESOLUTION] tenant_id=%s conversation_id=%s provider_count=%s active_count=%s providers=%s",
+        tenant_id,
+        conversation_id or "n/a",
+        len(providers),
+        len(active_providers),
+        [
+            {
+                "provider_id": str(provider.id),
+                "provider_name": provider.display_name,
+                "is_active": provider.is_active,
+                "status": provider.status,
+                "phone_number_id": provider.phone_number_id,
+                "updated_at": provider.updated_at.isoformat() if provider.updated_at else None,
+            }
+            for provider in providers
+        ],
+    )
+
+    provider = active_providers[0] if active_providers else None
+    logger.info(
+        "[PROVIDER RESOLUTION] tenant_id=%s conversation_id=%s provider_id=%s phone_number_id=%s",
+        tenant_id,
+        conversation_id or "n/a",
+        str(provider.id) if provider else None,
+        provider.phone_number_id if provider else None,
     )
     if not provider:
         return None
 
     token = decrypt_secret(provider.access_token_encrypted or "")
+    logger.info(
+        "[META TOKEN SOURCE] provider_id=%s is_active=%s updated_at=%s token_exists=%s token_length=%s",
+        provider.id,
+        provider.is_active,
+        provider.updated_at.isoformat() if provider.updated_at else None,
+        bool(token),
+        len(token or ""),
+    )
     if not token or not provider.phone_number_id:
         return None
 
     return {
         "provider_id": str(provider.id),
+        "provider_name": str(provider.display_name or provider.provider_type),
         "token": token,
+        "token_length": str(len(token)),
         "phone_number_id": str(provider.phone_number_id),
+        "status": str(provider.status),
+        "is_active": str(provider.is_active),
+        "updated_at": provider.updated_at.isoformat() if provider.updated_at else "",
     }
 
 
@@ -127,7 +168,7 @@ def send_template_message(db: Session, *, tenant_id: str, provider_id: str, temp
         "type": "template",
         "template": {"name": template.name, "language": {"code": language_code or template.language or "pt_BR"}, "components": components},
     }
-    context = {"tenant_id": tenant_id, "provider_id": provider_id, "template_id": template_id}
+    context = {"tenant_id": tenant_id, "provider_id": provider_id, "template_id": template_id, "token_length": len(token or "")}
     client = MetaCloudClient(token)
 
     for attempt in range(1, 4):

@@ -86,6 +86,7 @@ def send_whatsapp_message(*, message_data: dict[str, Any]) -> None:
     session_id = message_data.get("session_id")
     node_id = message_data.get("node_id")
     flow_session_id = message_data.get("session_id")
+    conversation_id = str(message_data.get("conversation_id") or "") or None
 
     logger.info("event=send_worker_start correlation_id=%s tenant_id=%s phone=%s job_id=%s stage=send_worker_start", correlation_id, tenant_id or "n/a", phone or "n/a", job_id)
 
@@ -136,20 +137,51 @@ def send_whatsapp_message(*, message_data: dict[str, Any]) -> None:
                     job_id,
                 )
                 return
+            if not conversation_id:
+                conversation = (
+                    db.execute(
+                        select(Conversation.id)
+                        .where(Conversation.tenant_id == tenant_uuid, Conversation.phone_number == phone)
+                        .order_by(Conversation.updated_at.desc(), Conversation.created_at.desc())
+                        .limit(1)
+                    )
+                    .scalars()
+                    .first()
+                )
+                conversation_id = str(conversation) if conversation else None
 
         provider_id: str | None = None
         with SessionLocal() as db:
-            active_provider = resolve_active_meta_provider_credentials(db, tenant_id=tenant_id)
+            active_provider = resolve_active_meta_provider_credentials(db, tenant_id=tenant_id, conversation_id=conversation_id)
 
         if active_provider:
             resolved_phone_number_id = active_provider["phone_number_id"]
             resolved_token = active_provider["token"]
             provider_id = active_provider["provider_id"]
+            logger.info(
+                "[SEND WORKER PROVIDER] provider_id=%s provider_name=%s token_exists=%s token_length=%s phone_number_id=%s status=%s is_active=%s updated_at=%s",
+                provider_id,
+                active_provider.get("provider_name"),
+                bool(resolved_token),
+                len(resolved_token or ""),
+                resolved_phone_number_id,
+                active_provider.get("status"),
+                active_provider.get("is_active"),
+                active_provider.get("updated_at"),
+            )
         else:
             try:
                 credentials = get_tenant_whatsapp_credentials(tenant_id)
                 resolved_phone_number_id = credentials["phone_number_id"]
                 resolved_token = credentials["token"]
+                logger.warning(
+                    "[SEND WORKER PROVIDER] provider_id=%s provider_name=%s token_exists=%s token_length=%s phone_number_id=%s source=legacy_credentials",
+                    None,
+                    "legacy_credentials",
+                    bool(resolved_token),
+                    len(resolved_token or ""),
+                    resolved_phone_number_id,
+                )
             except WhatsAppCredentialsNotConfiguredError:
                 logger.error(
                     "event=queue_send_error correlation_id=%s tenant_id=%s phone=%s job_id=%s stage=send_worker_resolve reason=missing_whatsapp_credentials error=[WHATSAPP NOT CONFIGURED] tenant_id=%s",
@@ -161,7 +193,7 @@ def send_whatsapp_message(*, message_data: dict[str, Any]) -> None:
                 )
                 return
 
-        context = {"tenant_id": tenant_id, "provider_id": provider_id}
+        context = {"tenant_id": tenant_id, "provider_id": provider_id, "token_length": len(resolved_token or "")}
         try:
             if buttons:
                 send_buttons_message_via_meta(
