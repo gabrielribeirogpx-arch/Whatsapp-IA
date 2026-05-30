@@ -512,6 +512,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
   const isMountedRef = useRef(true);
 
   const flowSelectRef = useRef<HTMLDivElement | null>(null);
+  const flowCanvasRef = useRef<HTMLElement | null>(null);
   const selectedFlow = useMemo(
     () => normalizedFlows.find((flow) => flow.id === selectedFlowId) || null,
     [normalizedFlows, selectedFlowId],
@@ -750,10 +751,16 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
   }, [setNodes]);
 
   const openNodeEditor = useCallback((node: Node, source: 'click' | 'selection' = 'click') => {
+    const canvasWidthBefore = flowCanvasRef.current?.getBoundingClientRect().width ?? 0;
     console.info('[NODE CLICK]', { node_id: node.id, node_type: node.type, source });
+    console.info('[FLOW CANVAS WIDTH BEFORE]', canvasWidthBefore);
 
     if (selectedNodeIdRef.current === node.id) {
       console.info('[NODE PANEL OPEN]', { node_id: node.id, node_type: node.type, source, skipped: 'already-open' });
+      console.info('[DRAWER MODE ACTIVE]', { node_id: node.id, width: 420 });
+      requestAnimationFrame(() => {
+        console.info('[FLOW CANVAS WIDTH AFTER]', flowCanvasRef.current?.getBoundingClientRect().width ?? 0);
+      });
       return;
     }
 
@@ -770,6 +777,15 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
     setNodeEditorDraft({});
     setMediaUploadError(null);
   }, []);
+
+  useEffect(() => {
+    if (!selectedNodeId) return;
+
+    console.info('[DRAWER MODE ACTIVE]', { node_id: selectedNodeId, width: 420 });
+    requestAnimationFrame(() => {
+      console.info('[FLOW CANVAS WIDTH AFTER]', flowCanvasRef.current?.getBoundingClientRect().width ?? 0);
+    });
+  }, [selectedNodeId]);
 
   const saveNodeEditor = useCallback(async () => {
     if (!selectedNodeId) return;
@@ -1756,7 +1772,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
           Flow recuperado automaticamente
         </div>
       )}
-      <main style={{ flex: 1, background: '#F7F7F5', position: 'relative', minWidth: 0 }}>
+      <main ref={flowCanvasRef} style={{ flex: 1, background: '#F7F7F5', position: 'relative', minWidth: 0 }}>
         <div className="flow-builder-breadcrumb" aria-label="Breadcrumb">
           <Link href="/dashboard/flows">Fluxos</Link>
           <span aria-hidden="true">›</span>
@@ -1828,47 +1844,15 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
               </div>
             </div>
 
-            <div className="flow-toolbar-section flow-toolbar-center">
-              <div className="flow-toolbar-group flow-toolbar-group-main">
-                <button
-                  type="button"
-                  className="flow-top-btn flow-top-btn-primary"
-                  onClick={handleActivateFlow}
-                  disabled={!selectedFlowId || validationErrors.length > 0}
-                >
-                  Ativar Flow
-                </button>
-              </div>
-
-              <div className="flow-toolbar-group flow-toolbar-group-secondary">
+            <div className="flow-toolbar-section flow-toolbar-center" aria-label="Ações do flow">
+              <div className="flow-toolbar-group flow-toolbar-group-primary-actions">
                 <button
                   type="button"
                   className="flow-top-btn flow-top-btn-secondary"
                   onClick={handleCreateFlow}
                   disabled={isCreatingFlow}
                 >
-                  {isCreatingFlow ? 'Criando...' : '+ Criar novo Flow'}
-                </button>
-                {canSeeDebugFlowActions && (
-                  <button
-                    type="button"
-                    className="flow-top-btn flow-top-btn-neutral"
-                    onClick={() => {
-                      void handleForceRepublish();
-                    }}
-                    disabled={!selectedFlowId || isForceRepublishing}
-                    style={{ padding: '6px 10px', fontSize: 12 }}
-                  >
-                    {isForceRepublishing ? 'Republicando...' : 'Force Republish'}
-                  </button>
-                )}
-                <button
-                  type="button"
-                  className="flow-top-btn flow-top-btn-secondary"
-                  onClick={handleDeactivateFlow}
-                  disabled={!activeFlowId}
-                >
-                  Desativar Flow
+                  {isCreatingFlow ? 'Criando...' : 'Novo'}
                 </button>
                 <button
                   type="button"
@@ -1887,46 +1871,54 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
                   <History size={14} />
                   Histórico
                 </button>
-              </div>
+                {!isSimulatorOpen && (
+                  <button
+                    type="button"
+                    className="flow-top-btn flow-top-btn-simulate"
+                    onClick={() => {
+                      setIsSimulatorOpen(true);
+                      if (simulationStartedRef.current || nodes.length === 0) return;
 
-              <div className="flow-toolbar-group flow-toolbar-group-danger">
+                      simulationStartedRef.current = true;
+                      setMessages([]);
+                      setCurrentChoices([]);
+                      setCurrentNodeId(null);
+                      setActiveEdgeIds([]);
+                      setIsTyping(false);
+
+                      const markedStart = nodes.find((node) => (node.data as { isStart?: boolean }).isStart);
+                      const incomingTargets = new Set(edges.map((edge) => edge.target));
+                      const startNode = markedStart || nodes.find((node) => !incomingTargets.has(node.id)) || nodes[0];
+                      if (startNode) {
+                        void runFlowStep('oi');
+                      }
+                    }}
+                  >
+                    Simular
+                  </button>
+                )}
                 <button
                   type="button"
-                  className="flow-top-btn flow-top-btn-danger"
-                  onClick={deleteFlow}
-                  disabled={!selectedFlowId}
+                  className="flow-top-btn flow-top-btn-primary"
+                  onClick={handleActivateFlow}
+                  disabled={!selectedFlowId || validationErrors.length > 0}
                 >
-                  Excluir
+                  Ativar
                 </button>
               </div>
-            </div>
-
-            <div className="flow-toolbar-section flow-toolbar-right">
-              {!isSimulatorOpen && (
-                <button
-                  type="button"
-                  className="flow-top-btn flow-top-btn-simulate"
-                  onClick={() => {
-                    setIsSimulatorOpen(true);
-                    if (simulationStartedRef.current || nodes.length === 0) return;
-
-                    simulationStartedRef.current = true;
-                    setMessages([]);
-                    setCurrentChoices([]);
-                    setCurrentNodeId(null);
-                    setActiveEdgeIds([]);
-                    setIsTyping(false);
-
-                    const markedStart = nodes.find((node) => (node.data as { isStart?: boolean }).isStart);
-                    const incomingTargets = new Set(edges.map((edge) => edge.target));
-                    const startNode = markedStart || nodes.find((node) => !incomingTargets.has(node.id)) || nodes[0];
-                    if (startNode) {
-                      void runFlowStep('oi');
-                    }
-                  }}
-                >
-                  ▶ Simular fluxo
-                </button>
+              {canSeeDebugFlowActions && (
+                <div className="flow-toolbar-group flow-toolbar-group-debug">
+                  <button
+                    type="button"
+                    className="flow-top-btn flow-top-btn-neutral"
+                    onClick={() => {
+                      void handleForceRepublish();
+                    }}
+                    disabled={!selectedFlowId || isForceRepublishing}
+                  >
+                    {isForceRepublishing ? 'Republicando...' : 'Force Republish'}
+                  </button>
+                </div>
               )}
             </div>
           </div>
@@ -1981,6 +1973,15 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
                 <span className="flow-context-menu-label">{label}</span>
               </button>
             ))}
+            <div className="flow-context-menu-divider" />
+            <button
+              type="button"
+              onClick={() => { setContextMenu(null); void deleteFlow(); }}
+              disabled={!selectedFlowId}
+              className="flow-context-menu-item flow-context-menu-danger flex items-center gap-2 px-3 py-2 rounded-md transition-all duration-150"
+            >
+              Excluir flow
+            </button>
           </div>
         )}
         {isLoadingFlow && (
@@ -2049,16 +2050,26 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
           <Controls />
         </ReactFlow>
       </main>
-      <FlowNodeEditorPanel
-        node={selectedNode}
-        draft={nodeEditorDraft}
-        onDraftChange={handleNodeEditorDraftChange}
-        onSave={saveNodeEditor}
-        onClose={closeNodeEditor}
-        onUpload={(file, mediaType) => { void uploadEditorMedia(file, mediaType); }}
-        isUploading={isMediaUploading}
-        uploadError={mediaUploadError}
-      />
+      {selectedNode && (
+        <>
+          <button
+            type="button"
+            className="flow-node-editor-backdrop"
+            onClick={closeNodeEditor}
+            aria-label="Fechar editor de bloco"
+          />
+          <FlowNodeEditorPanel
+            node={selectedNode}
+            draft={nodeEditorDraft}
+            onDraftChange={handleNodeEditorDraftChange}
+            onSave={saveNodeEditor}
+            onClose={closeNodeEditor}
+            onUpload={(file, mediaType) => { void uploadEditorMedia(file, mediaType); }}
+            isUploading={isMediaUploading}
+            uploadError={mediaUploadError}
+          />
+        </>
+      )}
       <CreateFlowModal
         open={isCreateFlowOpen}
         onClose={() => setIsCreateFlowOpen(false)}
