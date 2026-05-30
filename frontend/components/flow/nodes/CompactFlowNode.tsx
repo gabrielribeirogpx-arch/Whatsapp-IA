@@ -1,6 +1,6 @@
 'use client';
 
-import { memo } from 'react';
+import { memo, useEffect, useMemo } from 'react';
 import type { CSSProperties } from 'react';
 import { Handle, Position } from 'reactflow';
 
@@ -45,9 +45,13 @@ function CompactFlowNode({
   hasValidationError,
   onToggleStart,
 }: CompactFlowNodeProps) {
-  const handles = sourceHandles?.length ? sourceHandles : [{ id: undefined, color: accent }];
+  const handles = useMemo(() => (sourceHandles?.length ? sourceHandles : [{ id: undefined, color: accent }]), [accent, sourceHandles]);
   const handleStep = handles.length > 1 ? 24 : 0;
   const firstHandleTop = handles.length > 1 ? 68 - ((handles.length - 1) * handleStep) / 2 : 55;
+
+  useEffect(() => {
+    console.debug('[NODE RERENDER]', { node_id: id, title, selected, handle_count: handles.length });
+  });
 
   return (
     <div

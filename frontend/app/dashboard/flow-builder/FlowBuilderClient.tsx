@@ -415,6 +415,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
   const [currentChoices, setCurrentChoices] = useState<Array<{ id?: string; label?: string; handleId?: string }>>([]);
   const [currentNodeId, setCurrentNodeId] = useState<string | null>(null);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const selectedNodeIdRef = useRef<string | null>(null);
   const [nodeEditorDraft, setNodeEditorDraft] = useState<Record<string, unknown>>({});
   const [isMediaUploading, setIsMediaUploading] = useState(false);
   const [mediaUploadError, setMediaUploadError] = useState<string | null>(null);
@@ -468,6 +469,10 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
     if (!selectedNode) return;
     setNodeEditorDraft((prev) => (Object.keys(prev).length === 0 ? { ...(selectedNode.data as Record<string, unknown>) } : prev));
   }, [selectedNode]);
+
+  useEffect(() => {
+    selectedNodeIdRef.current = selectedNodeId;
+  }, [selectedNodeId]);
 
   const canSeeDebugFlowActions = useMemo(() => {
     if (showDebugFlowActionsFlag) return true;
@@ -689,13 +694,23 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
     );
   }, [setNodes]);
 
-  const openNodeEditor = useCallback((node: Node) => {
+  const openNodeEditor = useCallback((node: Node, source: 'click' | 'selection' = 'click') => {
+    console.info('[NODE CLICK]', { node_id: node.id, node_type: node.type, source });
+
+    if (selectedNodeIdRef.current === node.id) {
+      console.info('[NODE PANEL OPEN]', { node_id: node.id, node_type: node.type, source, skipped: 'already-open' });
+      return;
+    }
+
+    selectedNodeIdRef.current = node.id;
+    console.info('[NODE PANEL OPEN]', { node_id: node.id, node_type: node.type, source });
     setSelectedNodeId(node.id);
-    setNodeEditorDraft({ ...(node.data as Record<string, unknown>) });
+    setNodeEditorDraft({ ...((node.data || {}) as Record<string, unknown>) });
     setMediaUploadError(null);
   }, []);
 
   const closeNodeEditor = useCallback(() => {
+    selectedNodeIdRef.current = null;
     setSelectedNodeId(null);
     setNodeEditorDraft({});
     setMediaUploadError(null);
@@ -703,9 +718,25 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
 
   const saveNodeEditor = useCallback(() => {
     if (!selectedNodeId) return;
+    console.info('[NODE SAVE]', { node_id: selectedNodeId, patch_keys: Object.keys(nodeEditorDraft) });
     updateNodeData(selectedNodeId, nodeEditorDraft);
     setHasUnsavedChanges(true);
   }, [nodeEditorDraft, selectedNodeId, updateNodeData]);
+
+  const handleNodeEditorDraftChange = useCallback((patch: Record<string, unknown>) => {
+    console.info('[NODE PANEL UPDATE]', { node_id: selectedNodeIdRef.current, patch_keys: Object.keys(patch) });
+    setNodeEditorDraft((prev) => ({ ...prev, ...patch }));
+  }, []);
+
+  const handleReactFlowNodeClick = useCallback((_: unknown, node: Node) => {
+    openNodeEditor(node, 'click');
+  }, [openNodeEditor]);
+
+  const handleReactFlowSelectionChange = useCallback(({ nodes: selectedNodes }: { nodes: Node[] }) => {
+    if (selectedNodes.length === 1) {
+      openNodeEditor(selectedNodes[0], 'selection');
+    }
+  }, [openNodeEditor]);
 
   const uploadEditorMedia = useCallback(async (file: File | null, mediaType: 'image' | 'document') => {
     if (!file) return;
@@ -1941,12 +1972,8 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
           onConnect={onConnect}
-          onNodeClick={(_, node) => openNodeEditor(node)}
-          onSelectionChange={({ nodes: selectedNodes }) => {
-            if (selectedNodes.length === 1) {
-              openNodeEditor(selectedNodes[0]);
-            }
-          }}
+          onNodeClick={handleReactFlowNodeClick}
+          onSelectionChange={handleReactFlowSelectionChange}
           onContextMenu={(e) => {
             e.preventDefault();
             const mainRect = (e.currentTarget as HTMLElement).getBoundingClientRect();
@@ -1982,7 +2009,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
       <FlowNodeEditorPanel
         node={selectedNode}
         draft={nodeEditorDraft}
-        onDraftChange={(patch) => setNodeEditorDraft((prev) => ({ ...prev, ...patch }))}
+        onDraftChange={handleNodeEditorDraftChange}
         onSave={saveNodeEditor}
         onClose={closeNodeEditor}
         onUpload={(file, mediaType) => { void uploadEditorMedia(file, mediaType); }}
