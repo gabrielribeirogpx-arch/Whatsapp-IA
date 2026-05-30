@@ -52,9 +52,9 @@ export default function ProvidersTab(props: any) {
         </div>
         <div className='grid gap-3 sm:grid-cols-2'>
           <input className='premium-input' value={editForm.display_name} onChange={(e) => setEditForm(prev => ({ ...prev, display_name: e.target.value }))} placeholder='Nome da conexão' />
-          <input className='premium-input' value={editForm.waba_id} onChange={(e) => setEditForm(prev => ({ ...prev, waba_id: e.target.value }))} placeholder='WABA ID' />
+          <input className='premium-input' value={editForm.waba_id} onChange={(e) => setEditForm(prev => ({ ...prev, waba_id: e.target.value }))} placeholder='WABA ID (WhatsApp Business Account)' />
           <input className='premium-input' value={editForm.phone_number_id} onChange={(e) => setEditForm(prev => ({ ...prev, phone_number_id: e.target.value }))} placeholder='Phone Number ID' />
-          <input className='premium-input' value={editForm.business_id} onChange={(e) => setEditForm(prev => ({ ...prev, business_id: e.target.value }))} placeholder='Business ID' />
+          <input className='premium-input' value={editForm.business_id} onChange={(e) => setEditForm(prev => ({ ...prev, business_id: e.target.value }))} placeholder='Business Manager ID' />
           <input type='password' className='premium-input sm:col-span-2' value={editForm.access_token} onChange={(e) => setEditForm(prev => ({ ...prev, access_token: e.target.value }))} placeholder='Cole novo token apenas se quiser substituir' />
         </div>
         <p className='text-xs text-slate-500'>Dica: Deixe o token em branco para manter o atual.</p>

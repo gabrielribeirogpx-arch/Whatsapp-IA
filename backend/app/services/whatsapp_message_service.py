@@ -45,6 +45,8 @@ def resolve_active_meta_provider_credentials(db: Session, *, tenant_id: str, con
                 "is_active": provider.is_active,
                 "status": provider.status,
                 "phone_number_id": provider.phone_number_id,
+                "waba_id": provider.waba_id,
+                "business_id": provider.business_id,
                 "updated_at": provider.updated_at.isoformat() if provider.updated_at else None,
             }
             for provider in providers
@@ -53,11 +55,13 @@ def resolve_active_meta_provider_credentials(db: Session, *, tenant_id: str, con
 
     provider = active_providers[0] if active_providers else None
     logger.info(
-        "[PROVIDER RESOLUTION] tenant_id=%s conversation_id=%s provider_id=%s phone_number_id=%s",
+        "[PROVIDER RESOLUTION] tenant_id=%s conversation_id=%s provider_id=%s phone_number_id=%s waba_id=%s business_id=%s",
         tenant_id,
         conversation_id or "n/a",
         str(provider.id) if provider else None,
         provider.phone_number_id if provider else None,
+        provider.waba_id if provider else None,
+        provider.business_id if provider else None,
     )
     if not provider:
         return None
@@ -80,6 +84,8 @@ def resolve_active_meta_provider_credentials(db: Session, *, tenant_id: str, con
         "token": token,
         "token_length": str(len(token)),
         "phone_number_id": str(provider.phone_number_id),
+        "waba_id": str(provider.waba_id or ""),
+        "business_id": str(provider.business_id or ""),
         "status": str(provider.status),
         "is_active": str(provider.is_active),
         "updated_at": provider.updated_at.isoformat() if provider.updated_at else "",

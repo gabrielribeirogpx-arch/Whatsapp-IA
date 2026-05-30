@@ -20,6 +20,18 @@ PROVIDER_REQUIRED_FIELDS = {
 }
 
 
+def _log_provider_save(*, provider: TenantWhatsAppProvider, action: str) -> None:
+    logger.info(
+        "[PROVIDER SAVE] action=%s provider_id=%s provider_type=%s business_id=%s waba_id=%s phone_number_id=%s",
+        action,
+        provider.id,
+        provider.provider_type,
+        provider.business_id,
+        provider.waba_id,
+        provider.phone_number_id,
+    )
+
+
 def list_providers(db: Session, tenant_id: UUID):
     providers = db.execute(select(TenantWhatsAppProvider).where(TenantWhatsAppProvider.tenant_id == tenant_id)).scalars().all()
     logger.info(
@@ -35,6 +47,8 @@ def list_providers(db: Session, tenant_id: UUID):
                 "is_active": provider.is_active,
                 "status": provider.status,
                 "phone_number_id": provider.phone_number_id,
+                "waba_id": provider.waba_id,
+                "business_id": provider.business_id,
                 "updated_at": provider.updated_at.isoformat() if provider.updated_at else None,
             }
             for provider in providers
@@ -50,6 +64,7 @@ def create_provider(db: Session, tenant_id: UUID, payload):
         db.add(provider)
         db.commit()
         db.refresh(provider)
+        _log_provider_save(provider=provider, action="create")
         return provider
     except Exception:
         db.rollback()
@@ -79,6 +94,7 @@ def update_provider(db: Session, tenant_id: UUID, provider_id: UUID, payload):
         provider.updated_at.isoformat() if provider.updated_at else None,
         token_was_updated,
     )
+    _log_provider_save(provider=provider, action="update")
     return provider
 
 
