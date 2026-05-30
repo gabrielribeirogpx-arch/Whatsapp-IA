@@ -34,6 +34,7 @@ from app.utils.phone import normalize_phone
 from app.utils.text import normalize_text
 from app.services.queue import enqueue_send_message
 from app.services.webhook_ingress import enqueue_webhook_payload
+from app.services.tenant_service import resolve_tenant_by_phone_number_id
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -229,11 +230,7 @@ async def _process_meta_webhook(request: Request, db: Session) -> dict[str, str]
                 phone_number_id,
             )
 
-            tenant = (
-                db.query(Tenant)
-                .filter(Tenant.phone_number_id == phone_number_id)
-                .first()
-            )
+            tenant = resolve_tenant_by_phone_number_id(db, phone_number_id)
             if not tenant:
                 logger.warning(
                     "[WEBHOOK ERROR] tenant_not_found phone_number_id=%s phone=%s",

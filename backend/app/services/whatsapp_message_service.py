@@ -105,6 +105,13 @@ def resolve_active_meta_provider_credentials(db: Session, *, tenant_id: str, con
     )
 
     provider = active_providers[0] if active_providers else None
+    if providers and not provider:
+        logger.warning(
+            "[PROVIDER RESOLUTION] tenant_id=%s conversation_id=%s provider_id=%s reason=no_active_meta_provider",
+            tenant_id,
+            conversation_id or "n/a",
+            None,
+        )
     logger.info(
         "[PROVIDER RESOLUTION] tenant_id=%s conversation_id=%s provider_id=%s phone_number_id=%s waba_id=%s business_id=%s",
         tenant_id,

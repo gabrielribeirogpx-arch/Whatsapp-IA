@@ -21,6 +21,49 @@ PROVIDER_REQUIRED_FIELDS = {
 }
 
 
+class DuplicatePhoneNumberProviderError(ValueError):
+    """Raised when a WhatsApp phone_number_id is already owned by another tenant."""
+
+
+def _clean_phone_number_id(value: object) -> str:
+    return str(value or "").strip()
+
+
+def _assert_phone_number_id_available(
+    db: Session,
+    *,
+    tenant_id: UUID,
+    phone_number_id: object,
+    provider_id: UUID | str | None = None,
+) -> None:
+    normalized = _clean_phone_number_id(phone_number_id)
+    if not normalized:
+        return
+
+    query = select(TenantWhatsAppProvider).where(TenantWhatsAppProvider.phone_number_id == normalized)
+    if provider_id:
+        query = query.where(TenantWhatsAppProvider.id != provider_id)
+
+    conflict = db.execute(query).scalars().first()
+    if not conflict:
+        return
+
+    logger.warning(
+        "[PROVIDER PHONE NUMBER CONFLICT] requested_tenant_id=%s requested_provider_id=%s phone_number_id=%s existing_provider_id=%s existing_tenant_id=%s existing_status=%s existing_is_active=%s",
+        tenant_id,
+        provider_id,
+        normalized,
+        conflict.id,
+        conflict.tenant_id,
+        conflict.status,
+        conflict.is_active,
+    )
+    raise DuplicatePhoneNumberProviderError(
+        "phone_number_id já está associado a outro tenant/provider. "
+        f"phone_number_id={normalized} provider_id={conflict.id} tenant_id={conflict.tenant_id}"
+    )
+
+
 def _log_provider_save(*, provider: TenantWhatsAppProvider, action: str) -> None:
     logger.info(
         "[PROVIDER SAVE] action=%s provider_id=%s provider_type=%s business_id=%s waba_id=%s phone_number_id=%s",
@@ -61,6 +104,7 @@ def list_providers(db: Session, tenant_id: UUID):
 def create_provider(db: Session, tenant_id: UUID, payload):
     try:
         data = payload.model_dump(exclude_unset=True)
+        _assert_phone_number_id_available(db, tenant_id=tenant_id, phone_number_id=data.get("phone_number_id"))
         provider = TenantWhatsAppProvider(tenant_id=tenant_id, **_normalize_secret_fields(data))
         db.add(provider)
         db.commit()
@@ -75,6 +119,8 @@ def create_provider(db: Session, tenant_id: UUID, payload):
 def update_provider(db: Session, tenant_id: UUID, provider_id: UUID, payload):
     provider = _get_provider(db, tenant_id, provider_id)
     incoming = payload.model_dump(exclude_unset=True)
+    if "phone_number_id" in incoming:
+        _assert_phone_number_id_available(db, tenant_id=tenant_id, phone_number_id=incoming.get("phone_number_id"), provider_id=provider.id)
     token_was_updated = "access_token" in incoming and str(incoming.get("access_token") or "").strip() != ""
     for secret_field in ("access_token", "app_secret", "api_key"):
         if secret_field in incoming and (incoming[secret_field] is None or str(incoming[secret_field]).strip() == ""):
@@ -101,6 +147,7 @@ def update_provider(db: Session, tenant_id: UUID, provider_id: UUID, payload):
 
 def set_active_provider(db: Session, tenant_id: UUID, provider_id: UUID):
     provider = _get_provider(db, tenant_id, provider_id)
+    _assert_phone_number_id_available(db, tenant_id=tenant_id, phone_number_id=provider.phone_number_id, provider_id=provider.id)
     db.execute(update(TenantWhatsAppProvider).where(TenantWhatsAppProvider.tenant_id == tenant_id).values(is_active=False))
     provider.is_active = True
     provider.status = "active"
@@ -330,6 +377,8 @@ def test_provider_connection(db: Session, tenant_id: UUID, provider_id: UUID):
 
 def _normalize_secret_fields(data: dict):
     mapped = dict(data)
+    if "phone_number_id" in mapped and mapped["phone_number_id"] is not None:
+        mapped["phone_number_id"] = _clean_phone_number_id(mapped["phone_number_id"]) or None
     for source, target in (("access_token", "access_token_encrypted"), ("app_secret", "app_secret_encrypted"), ("api_key", "api_key_encrypted")):
         if source in mapped:
             secret_value = mapped.pop(source)
