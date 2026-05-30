@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useEffect, useMemo } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import SettingsContent from '@/components/settings/SettingsContent';
 import SettingsLayout from '@/components/settings/SettingsLayout';
@@ -13,10 +13,19 @@ export default function SettingsPageClient() {
   const pathname = usePathname();
   const searchParams = useSearchParams();
 
-  const activeTab = useMemo<SettingsTabId>(() => {
-    const requestedTab = searchParams.get('tab');
-    return settingsTabIds.includes(requestedTab as SettingsTabId) ? requestedTab as SettingsTabId : DEFAULT_TAB;
-  }, [searchParams]);
+  const requestedTab = searchParams.get('tab');
+
+  const activeTab = useMemo<SettingsTabId>(() => (
+    settingsTabIds.includes(requestedTab as SettingsTabId) ? requestedTab as SettingsTabId : DEFAULT_TAB
+  ), [requestedTab]);
+
+  useEffect(() => {
+    if (!requestedTab || settingsTabIds.includes(requestedTab as SettingsTabId)) return;
+
+    const nextParams = new URLSearchParams(searchParams.toString());
+    nextParams.set('tab', DEFAULT_TAB);
+    router.replace(`${pathname}?${nextParams.toString()}`, { scroll: false });
+  }, [pathname, requestedTab, router, searchParams]);
 
   const handleTabChange = (tab: SettingsTabId) => {
     const nextParams = new URLSearchParams(searchParams.toString());
