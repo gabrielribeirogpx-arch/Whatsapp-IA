@@ -36,7 +36,33 @@ def _node_type(node: dict[str, Any] | None) -> str:
     if not isinstance(node, dict):
         return ""
     data = node.get("data") if isinstance(node.get("data"), dict) else {}
-    return str(node.get("type") or data.get("type") or data.get("kind") or "").strip().lower()
+    raw_type = str(node.get("type") or data.get("type") or data.get("kind") or "").strip().lower()
+    aliases = {
+        "imagenode": "image_node",
+        "image": "image_node",
+        "documentnode": "document_node",
+        "document": "document_node",
+        "buttonsnode": "buttons_node",
+        "buttons": "buttons_node",
+        "listnode": "list_node",
+        "list": "list_node",
+    }
+    return aliases.get(raw_type, raw_type)
+
+
+def _option_handle(value: Any, fallback: str) -> str:
+    normalized = _normalize_text(value).replace(" ", "_")
+    return normalized or fallback
+
+
+def _list_sections(data: dict[str, Any]) -> list[dict[str, Any]]:
+    sections = data.get("sections") if isinstance(data.get("sections"), list) else []
+    rows = data.get("rows") if isinstance(data.get("rows"), list) else []
+    if sections:
+        return sections
+    if rows:
+        return [{"title": "Opções", "rows": rows}]
+    return []
 
 
 def _extract_delay_seconds(node: dict[str, Any] | None) -> int:
@@ -118,6 +144,72 @@ async def execute_node_chain_until_reply(
                 cursor = next_id
                 continue
             return _result(pending=False, events=events, response_node_id=response_node_id, next_node_id=next_id)
+
+        if ntype == "image_node":
+            media_url = str(data.get("media_url") or data.get("url") or "").strip()
+            caption = str(data.get("caption") or "").strip()
+            if media_url:
+                events.append({"type": "send_image", "media_url": media_url, "caption": caption})
+            response_node_id = str(cursor)
+            cursor = find_next(str(cursor), ["default", "", "output"])
+            continue
+
+        if ntype == "document_node":
+            document_url = str(data.get("document_url") or data.get("url") or "").strip()
+            filename = str(data.get("filename") or "").strip()
+            caption = str(data.get("caption") or "").strip()
+            if document_url:
+                events.append({"type": "send_document", "document_url": document_url, "filename": filename, "caption": caption})
+            response_node_id = str(cursor)
+            cursor = find_next(str(cursor), ["default", "", "output"])
+            continue
+
+        if ntype == "buttons_node":
+            buttons = data.get("buttons") if isinstance(data.get("buttons"), list) else []
+            normalized_buttons = []
+            matched_handle = None
+            for index, button in enumerate(buttons[:3]):
+                if not isinstance(button, dict):
+                    continue
+                label = str(button.get("label") or button.get("title") or "").strip()
+                if not label:
+                    continue
+                handle = str(button.get("handleId") or button.get("id") or _option_handle(label, f"button_{index + 1}"))
+                normalized_buttons.append({"id": handle, "label": label, "handleId": handle})
+                if normalized_input and _normalize_text(label) == normalized_input or (normalized_input and _normalize_text(handle) == normalized_input):
+                    matched_handle = handle
+            body_text = str(data.get("body_text") or data.get("content") or "").strip()
+            if normalized_input and matched_handle:
+                events.append({"type": "analytics", "event_type": "BUTTON_CLICKED", "node_id": str(cursor), "option_id": matched_handle})
+                cursor = find_next(str(cursor), [matched_handle])
+                continue
+            if body_text and normalized_buttons:
+                events.append({"type": "send_buttons", "body_text": body_text, "buttons": normalized_buttons})
+            response_node_id = str(cursor)
+            return _result(pending=False, events=events, response_node_id=response_node_id, next_node_id=str(cursor))
+
+        if ntype == "list_node":
+            sections = _list_sections(data)
+            flat_rows: list[dict[str, Any]] = []
+            for section in sections:
+                if isinstance(section, dict):
+                    flat_rows.extend([row for row in section.get("rows", []) if isinstance(row, dict)])
+            matched_handle = None
+            for index, row in enumerate(flat_rows):
+                label = str(row.get("title") or row.get("label") or "").strip()
+                handle = str(row.get("handleId") or row.get("id") or _option_handle(label, f"row_{index + 1}"))
+                if normalized_input and (_normalize_text(label) == normalized_input or _normalize_text(handle) == normalized_input):
+                    matched_handle = handle
+                    break
+            body_text = str(data.get("body_text") or data.get("content") or "").strip()
+            if normalized_input and matched_handle:
+                events.append({"type": "analytics", "event_type": "LIST_SELECTED", "node_id": str(cursor), "option_id": matched_handle})
+                cursor = find_next(str(cursor), [matched_handle])
+                continue
+            if body_text and sections:
+                events.append({"type": "send_list", "body_text": body_text, "sections": sections})
+            response_node_id = str(cursor)
+            return _result(pending=False, events=events, response_node_id=response_node_id, next_node_id=str(cursor))
 
         if ntype == "condition":
             if events:
@@ -243,9 +335,29 @@ class FlowRuntimeService:
                 data = {}
 
             if node_type == "message":
-                text = data.get("text") or data.get("message") or "..."
+                text = data.get("text") or data.get("message") or data.get("content") or "..."
                 responses.append(str(text))
 
+                next_id = self._get_next_node(node_id, edges)
+                current_node = node_map.get(next_id)
+
+            elif _node_type(current_node) == "image_node":
+                responses.append({"type": "image", "media_url": data.get("media_url"), "caption": data.get("caption")})
+                next_id = self._get_next_node(node_id, edges)
+                current_node = node_map.get(next_id)
+
+            elif _node_type(current_node) == "document_node":
+                responses.append({"type": "document", "document_url": data.get("document_url"), "filename": data.get("filename"), "caption": data.get("caption")})
+                next_id = self._get_next_node(node_id, edges)
+                current_node = node_map.get(next_id)
+
+            elif _node_type(current_node) == "buttons_node":
+                responses.append({"type": "buttons", "body_text": data.get("body_text") or data.get("content"), "buttons": (data.get("buttons") or [])[:3]})
+                next_id = self._get_next_node(node_id, edges)
+                current_node = node_map.get(next_id)
+
+            elif _node_type(current_node) == "list_node":
+                responses.append({"type": "list", "body_text": data.get("body_text") or data.get("content"), "sections": _list_sections(data)})
                 next_id = self._get_next_node(node_id, edges)
                 current_node = node_map.get(next_id)
 

@@ -152,6 +152,100 @@ def send_whatsapp_interactive_buttons(
         raise
 
 
+def _post_cloud_message(*, phone: str, token: str, phone_number_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    if not token:
+        raise WhatsAppConfigError("WHATSAPP_TOKEN não configurado")
+    if not phone_number_id:
+        raise WhatsAppConfigError("PHONE_NUMBER_ID do tenant não configurado")
+    normalized_phone = re.sub(r"\D", "", phone or "")
+    if not normalized_phone:
+        raise WhatsAppConfigError("Telefone de destino inválido")
+
+    url = f"https://graph.facebook.com/v19.0/{phone_number_id}/messages"
+    payload = {**payload, "messaging_product": "whatsapp", "to": normalized_phone}
+    try:
+        response = requests.post(
+            url,
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+            json=payload,
+            timeout=15,
+        )
+        if response.status_code != 200:
+            print("[META ERROR]", response.text)
+        response.raise_for_status()
+        return response.json()
+    except requests.HTTPError:
+        logger.exception(
+            "Erro HTTP ao enviar rich message para %s. status=%s body=%s",
+            phone,
+            response.status_code if 'response' in locals() else None,
+            response.text if 'response' in locals() else None,
+        )
+        raise
+    except requests.RequestException:
+        logger.exception("Erro de conexão ao enviar rich message para %s", phone)
+        raise
+
+
+def send_whatsapp_image(*, phone: str, media_url: str, caption: str = "", token: str, phone_number_id: str) -> dict[str, Any]:
+    return _post_cloud_message(
+        phone=phone,
+        token=token,
+        phone_number_id=phone_number_id,
+        payload={"type": "image", "image": {"link": media_url, **({"caption": caption} if caption else {})}},
+    )
+
+
+def send_whatsapp_document(*, phone: str, document_url: str, filename: str = "", caption: str = "", token: str, phone_number_id: str) -> dict[str, Any]:
+    document: dict[str, Any] = {"link": document_url}
+    if filename:
+        document["filename"] = filename
+    if caption:
+        document["caption"] = caption
+    return _post_cloud_message(
+        phone=phone,
+        token=token,
+        phone_number_id=phone_number_id,
+        payload={"type": "document", "document": document},
+    )
+
+
+def send_whatsapp_interactive_list(*, phone: str, body_text: str, sections: list[dict], token: str, phone_number_id: str, button_text: str = "Ver opções") -> dict[str, Any]:
+    safe_sections: list[dict[str, Any]] = []
+    for section_index, section in enumerate(sections or []):
+        if not isinstance(section, dict):
+            continue
+        rows = []
+        for row_index, row in enumerate(section.get("rows") or []):
+            if not isinstance(row, dict):
+                continue
+            title = str(row.get("title") or row.get("label") or "").strip()[:24]
+            if not title:
+                continue
+            rows.append({
+                "id": str(row.get("id") or row.get("handleId") or f"row_{section_index + 1}_{row_index + 1}"),
+                "title": title,
+                **({"description": str(row.get("description"))[:72]} if row.get("description") else {}),
+            })
+        if rows:
+            safe_sections.append({"title": str(section.get("title") or f"Seção {section_index + 1}")[:24], "rows": rows})
+    if not safe_sections:
+        return send_whatsapp_message(phone=phone, text=body_text, token=token, phone_number_id=phone_number_id)
+    return _post_cloud_message(
+        phone=phone,
+        token=token,
+        phone_number_id=phone_number_id,
+        payload={
+            "type": "interactive",
+            "interactive": {
+                "type": "list",
+                "body": {"text": body_text},
+                "action": {"button": button_text[:20] or "Ver opções", "sections": safe_sections},
+            },
+        },
+    )
+
+
 def send_whatsapp_message_cloud(phone: str, text: str, *, tenant_id: str) -> dict[str, Any]:
     credentials = get_tenant_whatsapp_credentials(tenant_id)
     return send_whatsapp_message(phone=phone, text=text, token=credentials["token"], phone_number_id=credentials["phone_number_id"])
@@ -160,6 +254,21 @@ def send_whatsapp_message_cloud(phone: str, text: str, *, tenant_id: str) -> dic
 def send_whatsapp_message_simple(to: str, text: str, *, tenant_id: str):
     credentials = get_tenant_whatsapp_credentials(tenant_id)
     return send_whatsapp_message(phone=to, text=text, token=credentials["token"], phone_number_id=credentials["phone_number_id"])
+
+
+def send_whatsapp_image_cloud(phone: str, media_url: str, caption: str = "", *, tenant_id: str) -> dict[str, Any]:
+    credentials = get_tenant_whatsapp_credentials(tenant_id)
+    return send_whatsapp_image(phone=phone, media_url=media_url, caption=caption, token=credentials["token"], phone_number_id=credentials["phone_number_id"])
+
+
+def send_whatsapp_document_cloud(phone: str, document_url: str, filename: str = "", caption: str = "", *, tenant_id: str) -> dict[str, Any]:
+    credentials = get_tenant_whatsapp_credentials(tenant_id)
+    return send_whatsapp_document(phone=phone, document_url=document_url, filename=filename, caption=caption, token=credentials["token"], phone_number_id=credentials["phone_number_id"])
+
+
+def send_whatsapp_list_cloud(phone: str, body_text: str, sections: list[dict], *, tenant_id: str) -> dict[str, Any]:
+    credentials = get_tenant_whatsapp_credentials(tenant_id)
+    return send_whatsapp_interactive_list(phone=phone, body_text=body_text, sections=sections, token=credentials["token"], phone_number_id=credentials["phone_number_id"])
 
 
 def send_whatsapp_buttons(phone: str, node: dict[str, Any], *, tenant_id: str):

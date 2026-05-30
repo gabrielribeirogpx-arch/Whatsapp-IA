@@ -38,14 +38,31 @@ def run_flow_job(flow_id: str, conversation_id: str, message: str, message_id: s
                 input_text=str(message or ""),
             )
             from app.models import Conversation
-            from app.services.whatsapp_service import send_whatsapp_message_cloud
+            from app.services.whatsapp_service import (
+                send_whatsapp_document_cloud,
+                send_whatsapp_image_cloud,
+                send_whatsapp_list_cloud,
+                send_whatsapp_message_cloud,
+                send_whatsapp_buttons,
+            )
 
             conversation = db.query(Conversation).filter(Conversation.id == conversation_id).first()
             if not conversation:
                 return result
 
             for msg in result.get("responses", []):
-                send_whatsapp_message_cloud(conversation_id, msg, tenant_id=str(conversation.tenant_id))
+                if isinstance(msg, dict):
+                    kind = str(msg.get("type") or "").lower()
+                    if kind == "image":
+                        send_whatsapp_image_cloud(conversation.phone_number, str(msg.get("media_url") or ""), str(msg.get("caption") or ""), tenant_id=str(conversation.tenant_id))
+                    elif kind == "document":
+                        send_whatsapp_document_cloud(conversation.phone_number, str(msg.get("document_url") or ""), str(msg.get("filename") or ""), str(msg.get("caption") or ""), tenant_id=str(conversation.tenant_id))
+                    elif kind == "buttons":
+                        send_whatsapp_buttons(conversation.phone_number, {"data": {"content": msg.get("body_text"), "buttons": msg.get("buttons") or []}}, tenant_id=str(conversation.tenant_id))
+                    elif kind == "list":
+                        send_whatsapp_list_cloud(conversation.phone_number, str(msg.get("body_text") or ""), msg.get("sections") or [], tenant_id=str(conversation.tenant_id))
+                    continue
+                send_whatsapp_message_cloud(conversation.phone_number, str(msg), tenant_id=str(conversation.tenant_id))
 
             logger.info(
                 "[FLOW JOB END] job_id=%s flow_id=%s conversation_id=%s steps=%s status=%s",

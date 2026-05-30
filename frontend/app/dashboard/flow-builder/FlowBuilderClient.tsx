@@ -14,13 +14,16 @@ import ReactFlow, {
 } from 'reactflow';
 import type { Connection, Edge, Node, ReactFlowInstance } from 'reactflow';
 import 'reactflow/dist/style.css';
-import { Clock, GitBranch, History, ListChecks, MessageSquare, RotateCcw, Zap } from 'lucide-react';
+import { Clock, FileText, GitBranch, History, Image as ImageIcon, ListChecks, MessageSquare, MousePointerClick, RotateCcw, Zap } from 'lucide-react';
 
 import ActionNode from '@/components/flow/nodes/ActionNode';
 import ChoiceNode from '@/components/flow/nodes/ChoiceNode';
 import ConditionNode from '@/components/flow/nodes/ConditionNode';
 import DelayNode from '@/components/flow/nodes/DelayNode';
 import MessageNode from '@/components/flow/nodes/MessageNode';
+import { DocumentNode, ImageNode } from '@/components/flow/nodes/RichMediaNode';
+import ButtonsNode from '@/components/flow/nodes/ButtonsNode';
+import ListNode from '@/components/flow/nodes/ListNode';
 import CreateFlowModal from '@/components/flows/CreateFlowModal';
 import { apiFetch, getFlowGraph, getTenantSessionFromStorage, listFlowVersions, parseApiResponse, restoreFlowVersion } from '@/lib/api';
 import { getLayoutedElements } from '@/lib/autoLayout';
@@ -36,6 +39,14 @@ const nodeTypes = {
   condition: ConditionNode,
   delay: DelayNode,
   action: ActionNode,
+  image_node: ImageNode,
+  document_node: DocumentNode,
+  buttons_node: ButtonsNode,
+  list_node: ListNode,
+  IMAGE_NODE: ImageNode,
+  DOCUMENT_NODE: DocumentNode,
+  BUTTONS_NODE: ButtonsNode,
+  LIST_NODE: ListNode,
   messageNode: MessageNode,
   choiceNode: ChoiceNode,
   conditionNode: ConditionNode,
@@ -43,7 +54,7 @@ const nodeTypes = {
   actionNode: ActionNode,
 };
 
-type FlowNodeKind = 'message' | 'choice' | 'condition' | 'delay' | 'action';
+type FlowNodeKind = 'message' | 'choice' | 'condition' | 'delay' | 'action' | 'image_node' | 'document_node' | 'buttons_node' | 'list_node';
 type FlowConnection = Connection & { sourceHandle?: string | null };
 
 const NODE_PRESETS: Record<FlowNodeKind, { label: string; type: string; data: Record<string, unknown> }> = {
@@ -62,6 +73,18 @@ const NODE_PRESETS: Record<FlowNodeKind, { label: string; type: string; data: Re
   condition: { label: 'Condição', type: 'condition', data: { condition: '' } },
   delay: { label: 'Delay', type: 'delay', data: { content: '3' } },
   action: { label: 'Ação', type: 'action', data: { action: '' } },
+  image_node: { label: 'Imagem', type: 'image_node', data: { media_url: '', caption: '' } },
+  document_node: { label: 'Documento', type: 'document_node', data: { document_url: '', filename: '', caption: '' } },
+  buttons_node: {
+    label: 'Botões',
+    type: 'buttons_node',
+    data: { body_text: '', buttons: [{ id: 'button-1', label: 'Vendas', handleId: 'vendas' }, { id: 'button-2', label: 'Suporte', handleId: 'suporte' }] },
+  },
+  list_node: {
+    label: 'Lista',
+    type: 'list_node',
+    data: { body_text: '', sections: [{ title: 'Opções', rows: [{ id: 'row-1', title: 'Vendas', handleId: 'vendas' }, { id: 'row-2', title: 'Suporte', handleId: 'suporte' }] }] },
+  },
 };
 
 const initialNodes: Node[] = [];
@@ -455,7 +478,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
         data: {
           ...node.data,
           isStart: node.data?.isStart ?? false,
-          buttons: node.type === 'choice' ? normalizeChoiceButtons(node.id, node.data?.buttons) : node.data?.buttons,
+          buttons: node.type === 'choice' ? normalizeChoiceButtons(node.id, node.data?.buttons) : (node.type === 'buttons_node' ? normalizeChoiceButtons(node.id, node.data?.buttons).slice(0, 3) : node.data?.buttons),
           label: node.data?.label || node.data?.content || `Node ${node.id}`,
           onChange: updateNodeData,
           onToggleStart: toggleStartNode,
@@ -973,7 +996,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
     const payloadNodes: FlowNodePayload[] = realFlowNodes.map((node) => {
       const nodeData = node.data || {};
       // Remove funções e campos não serializáveis
-      const { onChange, ...cleanData } = nodeData as Record<string, unknown>;
+      const { onChange, onToggleStart, running, hasValidationError, ...cleanData } = nodeData as Record<string, unknown>;
 
       return {
         id: node.id,
@@ -1292,6 +1315,26 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
           <span className="dash-nav-label">Escolha</span>
         </button>
 
+        <button type="button" className="dash-nav-item" onClick={() => addNode('image_node')} title="Imagem" style={{ border: 'none', background: 'none', cursor: 'pointer', width: '100%', textAlign: 'left' }}>
+          <ImageIcon size={18} strokeWidth={1.8} className="text-current" />
+          <span className="dash-nav-label">Imagem</span>
+        </button>
+
+        <button type="button" className="dash-nav-item" onClick={() => addNode('document_node')} title="Documento" style={{ border: 'none', background: 'none', cursor: 'pointer', width: '100%', textAlign: 'left' }}>
+          <FileText size={18} strokeWidth={1.8} className="text-current" />
+          <span className="dash-nav-label">Documento</span>
+        </button>
+
+        <button type="button" className="dash-nav-item" onClick={() => addNode('buttons_node')} title="Botões" style={{ border: 'none', background: 'none', cursor: 'pointer', width: '100%', textAlign: 'left' }}>
+          <MousePointerClick size={18} strokeWidth={1.8} className="text-current" />
+          <span className="dash-nav-label">Botões</span>
+        </button>
+
+        <button type="button" className="dash-nav-item" onClick={() => addNode('list_node')} title="Lista" style={{ border: 'none', background: 'none', cursor: 'pointer', width: '100%', textAlign: 'left' }}>
+          <ListChecks size={18} strokeWidth={1.8} className="text-current" />
+          <span className="dash-nav-label">Lista</span>
+        </button>
+
         <button type="button" className="dash-nav-item" onClick={() => addNode('condition')} title="Condição" style={{ border: 'none', background: 'none', cursor: 'pointer', width: '100%', textAlign: 'left' }}>
           <GitBranch size={18} strokeWidth={1.8} className="text-current" />
           <span className="dash-nav-label">Condição</span>
@@ -1581,6 +1624,10 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
             {([
               { kind: 'message' as FlowNodeKind, label: 'Mensagem', icon: MessageSquare },
               { kind: 'choice' as FlowNodeKind, label: 'Escolha', icon: ListChecks },
+              { kind: 'image_node' as FlowNodeKind, label: 'Imagem', icon: ImageIcon },
+              { kind: 'document_node' as FlowNodeKind, label: 'Documento', icon: FileText },
+              { kind: 'buttons_node' as FlowNodeKind, label: 'Botões', icon: MousePointerClick },
+              { kind: 'list_node' as FlowNodeKind, label: 'Lista', icon: ListChecks },
               { kind: 'condition' as FlowNodeKind, label: 'Condição', icon: GitBranch },
               { kind: 'delay' as FlowNodeKind, label: 'Delay', icon: Clock },
               { kind: 'action' as FlowNodeKind, label: 'Ação', icon: Zap },

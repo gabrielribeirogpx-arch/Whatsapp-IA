@@ -25,6 +25,8 @@ FLOW_ABANDONED = "FLOW_ABANDONED"
 MESSAGE_SENT = "MESSAGE_SENT"
 MESSAGE_RECEIVED = "MESSAGE_RECEIVED"
 CONDITION_MATCHED = "CONDITION_MATCHED"
+BUTTON_CLICKED = "BUTTON_CLICKED"
+LIST_SELECTED = "LIST_SELECTED"
 
 FLOW_START = "FLOW_START"
 FLOW_SEND = "FLOW_SEND"
@@ -42,6 +44,8 @@ VALID_EVENT_TYPES = {
     MESSAGE_SENT,
     MESSAGE_RECEIVED,
     CONDITION_MATCHED,
+    BUTTON_CLICKED,
+    LIST_SELECTED,
     FLOW_START,
     FLOW_SEND,
     FLOW_MATCH,
@@ -57,6 +61,8 @@ VALID_EVENT_TYPES = {
     "message_queued",
     "message_received",
     "condition_matched",
+    "button_clicked",
+    "list_selected",
     "conversion",
     "abandoned",
 }
@@ -87,6 +93,10 @@ EVENT_TYPE_ALIASES: dict[str, str] = {
     CONDITION_MATCHED: CONDITION_MATCHED,
     "condition_matched": CONDITION_MATCHED,
     FLOW_MATCH: CONDITION_MATCHED,
+    BUTTON_CLICKED: BUTTON_CLICKED,
+    "button_clicked": BUTTON_CLICKED,
+    LIST_SELECTED: LIST_SELECTED,
+    "list_selected": LIST_SELECTED,
 }
 
 PERIODS: dict[str, timedelta] = {

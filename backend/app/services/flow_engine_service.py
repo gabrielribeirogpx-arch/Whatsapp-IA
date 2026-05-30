@@ -24,6 +24,7 @@ from app.utils.phone import normalize_phone
 from app.services.flow_session_service import FlowSessionService
 from app.core.redis_client import get_redis_client
 from app.services.delay_queue_service import DELAY_ZSET_KEY
+from app.services.whatsapp_service import send_whatsapp_document_cloud, send_whatsapp_image_cloud, send_whatsapp_list_cloud
 
 DEFAULT_FLOW_NAME = "default_visual"
 MAX_AUTO_STEPS = 10
@@ -1466,7 +1467,9 @@ def _emit_node_entered_event(
     source: str,
 ) -> None:
     node_type = str(node.type or "").strip().lower()
-    if node_type.endswith("node"):
+    if node_type.endswith("_node"):
+        node_type = node_type[:-5]
+    elif node_type.endswith("node"):
         node_type = node_type[:-4]
     _emit_runtime_event(
         db=db,
@@ -1488,7 +1491,9 @@ def _emit_node_entered_event(
 
 def _is_conversion_node(node: FlowNode | VersionedFlowNode, node_data: dict[str, Any], flow: Flow) -> bool:
     node_type = str(node.type or "").strip().lower()
-    if node_type.endswith("node"):
+    if node_type.endswith("_node"):
+        node_type = node_type[:-5]
+    elif node_type.endswith("node"):
         node_type = node_type[:-4]
 
     # Regra legada (compatibilidade): apenas action node com conversion=true
@@ -1758,7 +1763,9 @@ def _text_preview(value: str | None, limit: int = 120) -> str:
 
 def _node_type_slug(node: FlowNode | VersionedFlowNode | None) -> str:
     node_type = str(_node_get(node, "type") or "").strip().lower() if node else ""
-    if node_type.endswith("node"):
+    if node_type.endswith("_node"):
+        node_type = node_type[:-5]
+    elif node_type.endswith("node"):
         node_type = node_type[:-4]
     return node_type
 
@@ -1782,7 +1789,7 @@ def _assert_not_persisting_message_node_with_outgoing_edge(
 
 
 def _is_wait_node_type(node_type: str) -> bool:
-    return node_type in {"condition", "input", "question", "wait_user_response", "choice"}
+    return node_type in {"condition", "input", "question", "wait_user_response", "choice", "buttons", "list", "buttons_node", "list_node"}
 
 
 
@@ -1924,6 +1931,71 @@ def run_until_wait_node(
         )
         logger.info("[MANYCHAT NODE EXECUTE] node_id=%s node_type=%s", _node_get(node, "id"), node_type)
 
+        if node_type in {"buttons", "buttons_node"}:
+            raw_buttons = node_data.get("buttons") if isinstance(node_data.get("buttons"), list) else []
+            buttons = [button for button in raw_buttons[:3] if isinstance(button, dict) and str(button.get("label") or button.get("title") or "").strip()]
+            selected_handle = None
+            for index, button in enumerate(buttons):
+                label = str(button.get("label") or button.get("title") or "").strip()
+                handle = str(button.get("handleId") or button.get("id") or _normalize_text(label).replace(" ", "_") or f"button_{index + 1}")
+                if normalized_input and (_normalize_text(label) == normalized_input or _normalize_text(handle) == normalized_input):
+                    selected_handle = handle
+                    _emit_runtime_event(
+                        db=db, tenant_id=session.tenant_id, conversation_id=session.id, flow_id=flow.id,
+                        flow_version_id=getattr(flow_session, "flow_version_id", None), node_id=current_node_uuid,
+                        event_type="BUTTON_CLICKED", metadata={"option_id": selected_handle, "label": label}, dedupe_bucket_seconds=1,
+                    )
+                    break
+            if selected_handle:
+                node = _get_node(db=db, node_id=_edge_target(next((edge for edge in edges if _edge_source_handle(edge) == selected_handle), None)), tenant_id=session.tenant_id, runtime_graph=runtime_graph)
+                normalized_input = ""
+                continue
+            tenant = db.get(Tenant, session.tenant_id)
+            phone = getattr(session, "phone_number", None) or getattr(session, "user_identifier", None)
+            body_text = str(node_data.get("body_text") or node_data.get("content") or "").strip()
+            if tenant and phone and body_text and buttons:
+                _send_flow_interactive_buttons(tenant=tenant, phone=phone, text=body_text, buttons=buttons, flow_id=flow.id, flow_version_id=getattr(flow_session, "flow_version_id", None), session_id=session.id, node_id=current_node_uuid)
+            if flow_session:
+                flow_session.current_node_id = session_service.safe_update_current_node(session=flow_session, next_node_id=current_node_uuid, reason="buttons_waiting_input")
+                db.add(flow_session)
+            db.commit()
+            return node
+
+        if node_type in {"list", "list_node"}:
+            sections = node_data.get("sections") if isinstance(node_data.get("sections"), list) else []
+            if not sections and isinstance(node_data.get("rows"), list):
+                sections = [{"title": "Opções", "rows": node_data.get("rows")}]
+            selected_handle = None
+            for section in sections:
+                if not isinstance(section, dict):
+                    continue
+                for index, row in enumerate([row for row in section.get("rows", []) if isinstance(row, dict)]):
+                    label = str(row.get("title") or row.get("label") or "").strip()
+                    handle = str(row.get("handleId") or row.get("id") or _normalize_text(label).replace(" ", "_") or f"row_{index + 1}")
+                    if normalized_input and (_normalize_text(label) == normalized_input or _normalize_text(handle) == normalized_input):
+                        selected_handle = handle
+                        _emit_runtime_event(
+                            db=db, tenant_id=session.tenant_id, conversation_id=session.id, flow_id=flow.id,
+                            flow_version_id=getattr(flow_session, "flow_version_id", None), node_id=current_node_uuid,
+                            event_type="LIST_SELECTED", metadata={"option_id": selected_handle, "label": label}, dedupe_bucket_seconds=1,
+                        )
+                        break
+                if selected_handle:
+                    break
+            if selected_handle:
+                node = _get_node(db=db, node_id=_edge_target(next((edge for edge in edges if _edge_source_handle(edge) == selected_handle), None)), tenant_id=session.tenant_id, runtime_graph=runtime_graph)
+                normalized_input = ""
+                continue
+            phone = getattr(session, "phone_number", None) or getattr(session, "user_identifier", None)
+            body_text = str(node_data.get("body_text") or node_data.get("content") or "").strip()
+            if phone and body_text and sections:
+                send_whatsapp_list_cloud(phone, body_text, sections, tenant_id=str(session.tenant_id))
+            if flow_session:
+                flow_session.current_node_id = session_service.safe_update_current_node(session=flow_session, next_node_id=current_node_uuid, reason="list_waiting_input")
+                db.add(flow_session)
+            db.commit()
+            return node
+
         if node_type == "condition":
             if not normalized_input:
                 target_node_id = _parse_uuid(_node_get(node, "id"))
@@ -1966,7 +2038,7 @@ def run_until_wait_node(
             normalized_input = ""
             continue
 
-        if node_type in {"message", "text", "msg", "start", "delay", "action"}:
+        if node_type in {"message", "text", "msg", "start", "delay", "action", "image", "image_node", "document", "document_node"}:
             if node_type == "delay":
                 delay_seconds = int(float(str(node_data.get("delay") or node_data.get("seconds") or node_data.get("content") or 0)))
                 next_edge = _pick_default_edge(edges)
@@ -1993,6 +2065,21 @@ def run_until_wait_node(
                         db.add(flow_session)
                     db.commit()
                     return None
+            if node_type in {"image", "image_node"}:
+                media_url = str(node_data.get("media_url") or node_data.get("url") or "").strip()
+                caption = str(node_data.get("caption") or "").strip()
+                phone = getattr(session, "phone_number", None) or getattr(session, "user_identifier", None)
+                if phone and media_url:
+                    send_whatsapp_image_cloud(phone, media_url, caption, tenant_id=str(session.tenant_id))
+                    logger.info("[MANYCHAT IMAGE SENT] node_id=%s", _node_get(node, "id"))
+            if node_type in {"document", "document_node"}:
+                document_url = str(node_data.get("document_url") or node_data.get("url") or "").strip()
+                filename = str(node_data.get("filename") or "").strip()
+                caption = str(node_data.get("caption") or "").strip()
+                phone = getattr(session, "phone_number", None) or getattr(session, "user_identifier", None)
+                if phone and document_url:
+                    send_whatsapp_document_cloud(phone, document_url, filename, caption, tenant_id=str(session.tenant_id))
+                    logger.info("[MANYCHAT DOCUMENT SENT] node_id=%s", _node_get(node, "id"))
             if node_type in {"message", "text", "msg"}:
                 text = _resolve_node_text(node_data)
                 if text:
@@ -2199,7 +2286,9 @@ def _send_start_message_on_session_restart(
 ) -> FlowSession | None:
     node_data = _extract_node_data(start_node)
     node_type = str(_node_get(start_node, "type") or "").strip().lower()
-    if node_type.endswith("node"):
+    if node_type.endswith("_node"):
+        node_type = node_type[:-5]
+    elif node_type.endswith("node"):
         node_type = node_type[:-4]
 
     start_node_id = _node_get(start_node, "id")
