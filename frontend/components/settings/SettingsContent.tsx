@@ -16,7 +16,7 @@ import { AccountTabId } from '@/components/account/AccountSidebar';
 const INITIAL_FORM: SystemSettingsPayload = { token: '', phone_number_id: '', webhook_url: '', webhook_status: 'inactive', system_name: '', language: 'pt-BR', workspace_profile: 'private_sales' };
 const baseProviderForm = { provider_type: 'meta_cloud', display_name: '', waba_id: '', phone_number_id: '', business_id: '', access_token: '', api_key: '' };
 const baseTemplateForm = { name: '', category: 'utility', language: 'pt_BR', provider_id: '', body_text: '', friendly_body_text: '', footer_text: '', variables_json: [] as any[] };
-const whatsappTabs = [{ id: 'system', label: 'Visão Geral', icon: Layers3 }, { id: 'connection', label: 'Conexões', icon: Building2 }, { id: 'templates', label: 'Templates', icon: MessageSquareText }];
+const whatsappTabs = [{ id: 'overview', label: 'Visão Geral', icon: Layers3 }, { id: 'connection', label: 'Conexões', icon: Building2 }, { id: 'templates', label: 'Templates', icon: MessageSquareText }, { id: 'api-keys', label: 'API Keys', icon: KeyRound }, { id: 'webhooks', label: 'Webhooks', icon: Globe2 }] as const;
 const roleLabels: Record<string, string> = { owner: 'Administrador', admin: 'Admin', member: 'Membro', analyst: 'Analista', viewer: 'Leitura' };
 
 export default function SettingsContent({ activeTab }: { activeTab: SettingsTabId | AccountTabId }) {
@@ -167,7 +167,7 @@ function IntegrationsTab() { const integrations = [{ name: 'WhatsApp Business', 
 
 
 function WhatsAppBusinessConsole() {
-  const [tab, setTab] = useState<'system' | 'connection' | 'templates'>('system');
+  const [tab, setTab] = useState<(typeof whatsappTabs)[number]['id']>('overview');
   const [toast, setToast] = useState('');
   const [loading, setLoading] = useState(false);
   const [form, setForm] = useState<SystemSettingsPayload>(INITIAL_FORM);
@@ -210,39 +210,40 @@ function WhatsAppBusinessConsole() {
   };
   async function run(action: () => Promise<void>, ok: string, err: string) { setLoading(true); try { await action(); setToast(ok); } catch (error) { setToast(parseFriendlyError(error, err)); } finally { setLoading(false); setTimeout(() => setToast(''), 5000); } }
 
-  return <div className='w-full min-w-0 space-y-5'>
-    <header className='relative overflow-hidden rounded-3xl border border-[color:var(--surface-border)] bg-gradient-to-br from-white/95 via-white/90 to-emerald-50/70 p-6 shadow-[0_20px_50px_-40px_rgba(2,6,23,0.55)] backdrop-blur-sm md:p-7'>
-      <div className='pointer-events-none absolute -top-10 right-8 h-28 w-28 rounded-full bg-emerald-400/15 blur-2xl' />
-      <p className='inline-flex items-center gap-2 rounded-full border border-emerald-200/80 bg-white/80 px-3 py-1 text-xs font-semibold text-emerald-700 shadow-sm'><MessageSquareText size={14} /> API Keys & WhatsApp Business</p>
-      <div className='mt-3 flex flex-wrap items-center gap-3'>
-        <h1 className='text-2xl font-semibold tracking-tight text-slate-900 md:text-[1.75rem]'>WhatsApp Business Console</h1>
-        <span className='inline-flex items-center rounded-full border border-emerald-300/60 bg-gradient-to-r from-emerald-50 to-white px-3 py-1 text-xs font-semibold text-emerald-700'>Enterprise Ready</span>
-      </div>
-      <p className='mt-2 max-w-2xl text-sm leading-relaxed text-slate-600'>Gerencie tokens, conexões oficiais Meta, templates aprováveis e futuros providers BSP sem quebrar a experiência atual.</p>
-    </header>
+  const saveSettings = (e: FormEvent, ok: string) => run(async () => { e.preventDefault(); await updateSystemSettings({ ...form, token: form.token || null, phone_number_id: form.phone_number_id || null, webhook_url: form.webhook_url || null }); }, ok, 'Falha ao salvar configurações');
+  const overviewItems = [
+    { label: 'Status', value: stats.status, icon: Layers3 },
+    { label: 'Providers', value: `${stats.activeProviders} ativos`, icon: Building2 },
+    { label: 'Templates', value: `${stats.approvedTemplates} aprovados`, icon: CheckCircle2 },
+    { label: 'Sync', value: stats.lastSyncAt, icon: MessageSquareText }
+  ];
+
+  return <div className='w-full min-w-0 space-y-4'>
+    <div className='flex min-h-[52px] flex-col justify-center gap-2 rounded-2xl border border-[color:var(--surface-border)] bg-white/95 px-4 py-3 shadow-[0_12px_30px_-28px_rgba(15,23,42,0.75)] sm:flex-row sm:items-center sm:justify-between'>
+      <div className='min-w-0'><h1 className='text-xl font-semibold tracking-tight text-slate-950'>WhatsApp</h1><p className='mt-0.5 text-xs text-slate-500'>Configurações operacionais do canal.</p></div>
+      <div className='flex flex-wrap items-center gap-2 text-xs font-semibold text-slate-600'><span className={`rounded-full px-2.5 py-1 ${stats.status === 'Operacional' ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>{stats.status}</span><span className='rounded-full bg-slate-100 px-2.5 py-1 text-slate-600'>{providers.length} conexões</span></div>
+    </div>
 
     {toast && <div className='rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm shadow-sm'>{toast}</div>}
 
-    <div className='grid w-full min-w-0 grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5'>
+    <div className='grid w-full min-w-0 grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5'>
       {[
         ['Providers ativos', String(stats.activeProviders), Building2],
         ['Templates aprovados', String(stats.approvedTemplates), CheckCircle2],
         ['Templates pendentes', String(stats.pendingTemplates), Clock3],
         ['Status geral', stats.status, Layers3],
         ['Último sync', stats.lastSyncAt, MessageSquareText]
-      ].map(([label, value, Icon]: any) => <div key={label} className='group rounded-2xl border border-[color:var(--surface-border)] bg-white/95 p-4 shadow-[0_12px_30px_-28px_rgba(15,23,42,0.75)] transition-all duration-300 hover:-translate-y-0.5 hover:border-emerald-200 hover:shadow-[0_20px_36px_-26px_rgba(16,185,129,0.35)]'><p className='inline-flex items-center gap-1 text-xs font-medium text-slate-500'><Icon size={12} />{label}</p><p className='mt-2 text-lg font-semibold tracking-tight text-slate-900'>{label === 'Último sync' ? <ClientDateTime value={value} fallback='Nunca sincronizado' /> : value}</p><div className='mt-3 h-1.5 rounded-full bg-slate-100/90'><div className='h-1.5 w-2/3 rounded-full bg-gradient-to-r from-emerald-400 via-emerald-500 to-emerald-600 transition-all duration-300 group-hover:w-4/5' /></div></div>)}
+      ].map(([label, value, Icon]: any) => <div key={label} className='group rounded-2xl border border-[color:var(--surface-border)] bg-white/95 p-3 shadow-[0_12px_30px_-28px_rgba(15,23,42,0.75)] transition-all duration-300 hover:-translate-y-0.5 hover:border-emerald-200 hover:shadow-[0_20px_36px_-26px_rgba(16,185,129,0.35)]'><p className='inline-flex items-center gap-1 text-xs font-medium text-slate-500'><Icon size={12} />{label}</p><p className='mt-1.5 truncate text-lg font-semibold tracking-tight text-slate-900'>{label === 'Último sync' ? <ClientDateTime value={value} fallback='Nunca sincronizado' /> : value}</p></div>)}
     </div>
 
     <div className='flex w-full min-w-0 flex-wrap gap-2 rounded-2xl border border-[color:var(--surface-border)] bg-white/90 p-2 shadow-[0_10px_24px_-24px_rgba(15,23,42,0.8)] backdrop-blur'>
-      {whatsappTabs.map(({ id, label, icon: Icon }) => <button key={id} onClick={() => setTab(id as any)} className={`inline-flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-medium transition-all duration-200 ${tab === id ? 'bg-slate-900 text-white shadow-md shadow-slate-900/20' : 'text-slate-600 hover:bg-slate-100/90 hover:text-slate-900 active:scale-[0.99]'}`}><Icon size={14} />{label}</button>)}
+      {whatsappTabs.map(({ id, label, icon: Icon }) => <button key={id} type='button' onClick={() => setTab(id)} className={`inline-flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-medium transition-all duration-200 ${tab === id ? 'bg-slate-900 text-white shadow-md shadow-slate-900/20' : 'text-slate-600 hover:bg-slate-100/90 hover:text-slate-900 active:scale-[0.99]'}`}><Icon size={14} />{label}</button>)}
     </div>
 
-    {tab === 'system' && <form onSubmit={(e: FormEvent) => run(async () => { e.preventDefault(); await updateSystemSettings({ ...form, token: form.token || null, phone_number_id: form.phone_number_id || null, webhook_url: form.webhook_url || null }); }, 'Configurações salvas com sucesso', 'Falha ao salvar configurações')} className='w-full min-w-0 space-y-3 rounded-2xl border border-[color:var(--surface-border)] bg-white/95 p-5 shadow-[0_14px_34px_-30px_rgba(15,23,42,0.85)]'>
-      <input type='password' value={form.token ?? ''} onChange={e => setForm(p => ({ ...p, token: e.target.value }))} placeholder='Token atual (ENV fallback preservado)' className='premium-input w-full' />
-      <input value={form.phone_number_id ?? ''} onChange={e => setForm(p => ({ ...p, phone_number_id: e.target.value }))} placeholder='Phone Number ID' className='premium-input w-full' />
-      <button disabled={loading} className='primary-button'>Salvar</button>
-    </form>}
+    {tab === 'overview' && <div className='grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]'><Card className='overflow-hidden'><div className='border-b border-slate-100 px-5 py-4'><h2 className='text-base font-semibold text-slate-950'>Visão Geral</h2><p className='mt-1 text-sm text-slate-500'>Resumo técnico do canal e atalhos de configuração.</p></div><div className='grid gap-3 p-5 sm:grid-cols-2'>{overviewItems.map(({ label, value, icon: Icon }) => <div key={label} className='rounded-2xl border border-slate-200 bg-slate-50 p-4'><p className='inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.12em] text-slate-500'><Icon size={13} />{label}</p><p className='mt-2 text-sm font-semibold text-slate-950'>{label === 'Sync' ? <ClientDateTime value={value as string | null} fallback='Nunca sincronizado' /> : value as string}</p></div>)}</div></Card><Card className='p-5'><h3 className='text-sm font-semibold text-slate-950'>Ações rápidas</h3><div className='mt-4 grid gap-2'><button type='button' onClick={() => setTab('connection')} className='rounded-xl border border-slate-200 px-4 py-3 text-left text-sm font-semibold text-slate-700 transition hover:border-emerald-200 hover:bg-emerald-50/50'>Gerenciar conexões</button><button type='button' onClick={() => setTab('templates')} className='rounded-xl border border-slate-200 px-4 py-3 text-left text-sm font-semibold text-slate-700 transition hover:border-emerald-200 hover:bg-emerald-50/50'>Revisar templates</button><button type='button' onClick={() => setTab('api-keys')} className='rounded-xl border border-slate-200 px-4 py-3 text-left text-sm font-semibold text-slate-700 transition hover:border-emerald-200 hover:bg-emerald-50/50'>Atualizar credenciais</button></div></Card></div>}
     {tab === 'connection' && <ProvidersTab providers={providers} form={providerForm} setForm={setProviderForm} loading={loading} onSubmit={(e: FormEvent) => run(async () => { e.preventDefault(); await createWhatsAppProvider(providerForm); setProviderForm(baseProviderForm); await refresh(); }, 'Conexão salva com sucesso', 'Falha ao salvar conexão')} onTest={(id: string) => run(async () => { await testWhatsAppProvider(id); await refresh(); }, 'Conexão testada com sucesso', 'Falha ao testar conexão')} onActivate={(id: string) => run(async () => { await activateWhatsAppProvider(id); await refresh(); }, 'Conexão ativada com sucesso', 'Falha ao ativar conexão')} onDelete={(id: string) => run(async () => { await deleteWhatsAppProvider(id); await refresh(); }, 'Conexão removida com sucesso', 'Falha ao remover conexão')} onEdit={(id: string, payload: Record<string, unknown>) => run(async () => { await updateWhatsAppProvider(id, payload); await testWhatsAppProvider(id); await refresh(); }, 'Conexão atualizada', 'Falha ao atualizar conexão')} />}
     {tab === 'templates' && <TemplatesTab templates={templates} providers={providers} form={templateForm} setForm={setTemplateForm} error={templateError} loading={loading} onSubmit={(e: FormEvent) => run(async () => { e.preventDefault(); const msg = validateTemplate(); setTemplateError(msg); if (msg) throw new Error(msg); const mapped = friendlyToMeta(templateForm.friendly_body_text || templateForm.body_text || ''); await createTemplate({ ...templateForm, provider_id: templateForm.provider_id || null, body_text: mapped.bodyText, body_raw_meta: mapped.bodyText, body_preview: renderExample(mapped.bodyText, mapped.variables), variables_json: mapped.variables }); setTemplateForm(baseTemplateForm); await refresh(); }, 'Template criado com sucesso', 'Falha ao criar template')} onSync={() => run(async () => { await syncTemplates(); await refresh(); }, 'Sincronização concluída', 'Erro ao sincronizar templates')} onSubmitTemplate={(id: string) => run(async () => { await submitTemplate(id); await refresh(); }, 'Template enviado para aprovação', 'Falha ao enviar template')} />}
+    {tab === 'api-keys' && <form onSubmit={(e: FormEvent) => saveSettings(e, 'Credenciais salvas com sucesso')} className='w-full min-w-0 space-y-4 rounded-2xl border border-[color:var(--surface-border)] bg-white/95 p-5 shadow-[0_14px_34px_-30px_rgba(15,23,42,0.85)]'><div><h2 className='text-base font-semibold text-slate-950'>API Keys</h2><p className='mt-1 text-sm text-slate-500'>Token e identificador do número usados pelo runtime.</p></div><div className='grid gap-3 md:grid-cols-2'><input type='password' value={form.token ?? ''} onChange={e => setForm(p => ({ ...p, token: e.target.value }))} placeholder='Token atual (ENV fallback preservado)' className='premium-input w-full' /><input value={form.phone_number_id ?? ''} onChange={e => setForm(p => ({ ...p, phone_number_id: e.target.value }))} placeholder='Phone Number ID' className='premium-input w-full' /></div><button disabled={loading} className='primary-button'>Salvar credenciais</button></form>}
+    {tab === 'webhooks' && <form onSubmit={(e: FormEvent) => saveSettings(e, 'Webhook salvo com sucesso')} className='w-full min-w-0 space-y-4 rounded-2xl border border-[color:var(--surface-border)] bg-white/95 p-5 shadow-[0_14px_34px_-30px_rgba(15,23,42,0.85)]'><div><h2 className='text-base font-semibold text-slate-950'>Webhooks</h2><p className='mt-1 text-sm text-slate-500'>Endpoint de recebimento e status operacional.</p></div><div className='grid gap-3 md:grid-cols-[minmax(0,1fr)_220px]'><input value={form.webhook_url ?? ''} onChange={e => setForm(p => ({ ...p, webhook_url: e.target.value }))} placeholder='URL do webhook' className='premium-input w-full' /><select value={form.webhook_status ?? 'inactive'} onChange={e => setForm(p => ({ ...p, webhook_status: e.target.value }))} className='premium-input w-full'><option value='active'>Ativo</option><option value='inactive'>Inativo</option><option value='pending'>Pendente</option></select></div><button disabled={loading} className='primary-button'>Salvar webhook</button></form>}
   </div>;
 }
