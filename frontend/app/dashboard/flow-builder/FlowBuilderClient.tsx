@@ -138,6 +138,51 @@ const buildFlowEdge = (edge: any): Edge => {
   };
 };
 
+
+const serializeFlowGraph = (nodes: Node[], edges: Edge[]) => {
+  const payloadNodes: FlowNodePayload[] = nodes.map((node) => {
+    const nodeData = node.data || {};
+    const { onChange, onToggleStart, running, hasValidationError, ...cleanData } = nodeData as Record<string, unknown>;
+
+    return {
+      id: node.id,
+      type: node.type || 'message',
+      position: node.position || { x: 0, y: 0 },
+      data: {
+        ...cleanData,
+        isStart: !!cleanData.isStart,
+      },
+    };
+  });
+
+  const nodeTypeById = new Map(nodes.map((node) => [node.id, node.type]));
+  const cleanEdges = edges
+    .filter((edge) => edge.source && edge.target)
+    .map((edge) => {
+      const sourceNodeType = nodeTypeById.get(edge.source);
+      const normalizedSourceHandle =
+        sourceNodeType === 'condition'
+          ? edge.sourceHandle === 'false'
+            ? 'false'
+            : 'true'
+          : edge.sourceHandle ?? 'default';
+
+      return {
+        id: edge.id,
+        source: edge.source,
+        target: edge.target,
+        sourceHandle: normalizedSourceHandle,
+        targetHandle: edge.targetHandle ?? 'default',
+        type: edge.type ?? 'default',
+      };
+    });
+
+  return {
+    nodes: payloadNodes,
+    edges: cleanEdges,
+  };
+};
+
 function makeNodeId() {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
     return crypto.randomUUID();
@@ -187,7 +232,7 @@ function FlowNodeEditorPanel({
   node: Node | null;
   draft: Record<string, unknown>;
   onDraftChange: (patch: Record<string, unknown>) => void;
-  onSave: () => void;
+  onSave: () => void | Promise<void>;
   onClose: () => void;
   onUpload: (file: File | null, mediaType: 'image' | 'document') => void;
   isUploading: boolean;
@@ -374,7 +419,17 @@ function FlowNodeEditorPanel({
 
       <div className="flow-node-editor-footer">
         <button type="button" className="flow-editor-secondary-btn" onClick={onClose}>Cancelar</button>
-        <button type="button" className="flow-editor-save-btn" onClick={onSave}>Salvar bloco</button>
+        <button
+          type="button"
+          className="flow-editor-save-btn"
+          onClick={() => {
+            console.info('[NODE SAVE CLICK]', { node_id: node.id, node_type: node.type });
+            console.info('[NODE SAVE PAYLOAD]', { node_id: node.id, payload: draft });
+            void onSave();
+          }}
+        >
+          Salvar bloco
+        </button>
       </div>
     </aside>
   );
@@ -716,12 +771,69 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
     setMediaUploadError(null);
   }, []);
 
-  const saveNodeEditor = useCallback(() => {
+  const saveNodeEditor = useCallback(async () => {
     if (!selectedNodeId) return;
-    console.info('[NODE SAVE]', { node_id: selectedNodeId, patch_keys: Object.keys(nodeEditorDraft) });
+
+    const updatedNodes = nodesRef.current.map((node) => (
+      node.id === selectedNodeId
+        ? {
+          ...node,
+          data: {
+            ...node.data,
+            ...nodeEditorDraft,
+          },
+        }
+        : node
+    ));
+    const safeFlow = serializeFlowGraph(updatedNodes, edgesRef.current);
+    const endpoint = selectedFlowId ? `/api/flows/${selectedFlowId}` : null;
+
+    console.info('[NODE SAVE PAYLOAD]', {
+      node_id: selectedNodeId,
+      endpoint,
+      method: 'PUT',
+      payload: safeFlow,
+    });
+
     updateNodeData(selectedNodeId, nodeEditorDraft);
     setHasUnsavedChanges(true);
-  }, [nodeEditorDraft, selectedNodeId, updateNodeData]);
+
+    if (!selectedFlowId) {
+      const error = new Error('Fluxo não selecionado.');
+      console.error('[NODE SAVE ERROR]', { node_id: selectedNodeId, error });
+      toast.error('✗ Erro ao salvar');
+      return;
+    }
+
+    if (flowContainsTemporaryIds(safeFlow.nodes, safeFlow.edges)) {
+      const error = new Error('Flow contém IDs temporários inválidos.');
+      console.error('[NODE SAVE ERROR]', { node_id: selectedNodeId, error });
+      toast.error('✗ Erro ao salvar');
+      return;
+    }
+
+    setFlowValidationError(null);
+    setIsSaving(true);
+    try {
+      const response = await apiFetch(endpoint, {
+        method: 'PUT',
+        body: JSON.stringify(safeFlow),
+      });
+      const data = await parseApiResponse<{ validation?: { warnings?: FlowValidationIssue[]; errors?: FlowValidationIssue[] } }>(response);
+      setValidationWarnings(data?.validation?.warnings || []);
+      setValidationErrors(data?.validation?.errors || []);
+      setHasUnsavedChanges(false);
+      console.info('[NODE SAVE SUCCESS]', { node_id: selectedNodeId, endpoint, method: 'PUT' });
+      toast.success('✓ Bloco salvo');
+    } catch (error) {
+      console.error('[NODE SAVE ERROR]', { node_id: selectedNodeId, endpoint, method: 'PUT', error });
+      const message = error instanceof Error && error.message ? error.message : 'Erro ao salvar bloco.';
+      setFlowValidationError(message);
+      toast.error('✗ Erro ao salvar');
+    } finally {
+      setIsSaving(false);
+    }
+  }, [nodeEditorDraft, selectedFlowId, selectedNodeId, toast, updateNodeData]);
 
   const handleNodeEditorDraftChange = useCallback((patch: Record<string, unknown>) => {
     console.info('[NODE PANEL UPDATE]', { node_id: selectedNodeIdRef.current, patch_keys: Object.keys(patch) });
@@ -1266,78 +1378,10 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
       return;
     }
 
-    if (!rfInstance) {
-      console.error('ReactFlow não inicializado');
-      return;
-    }
-
-    const flow = rfInstance.toObject() as {
-      nodes?: Array<{
-        id: string;
-        type?: string;
-        position?: { x: number; y: number };
-        data?: Record<string, unknown>;
-      }>;
-      edges?: Array<Record<string, unknown>>;
-    };
-
-    flow.nodes = (flow.nodes || []).map((n) => ({
-      ...n,
-      id: n.id,
-      type: n.type || 'default',
-      position: n.position || { x: 0, y: 0 },
-      data: {
-        ...n.data,
-        isStart: !!n.data?.isStart,
-      },
-    }));
-
-    flow.edges = flow.edges || [];
-
-    const realFlow = rfInstance?.toObject?.() || flow;
-    const realFlowNodes = Array.isArray(realFlow.nodes) ? (realFlow.nodes as Node[]) : [];
-    const realFlowEdges = Array.isArray(realFlow.edges) ? (realFlow.edges as Edge[]) : [];
-
-    const payloadNodes: FlowNodePayload[] = realFlowNodes.map((node) => {
-      const nodeData = node.data || {};
-      // Remove funções e campos não serializáveis
-      const { onChange, onToggleStart, running, hasValidationError, ...cleanData } = nodeData as Record<string, unknown>;
-
-      return {
-        id: node.id,
-        type: node.type || 'message',
-        position: node.position,
-        data: cleanData,
-      };
-    });
-
-    const nodeTypeById = new Map(realFlowNodes.map((node) => [node.id, node.type]));
-
-    const cleanEdges = realFlowEdges
-      .filter((edge) => edge.source && edge.target)
-      .map((edge) => {
-        const sourceNodeType = nodeTypeById.get(edge.source);
-        const normalizedSourceHandle =
-          sourceNodeType === 'condition'
-            ? edge.sourceHandle === 'false'
-              ? 'false'
-              : 'true'
-            : edge.sourceHandle ?? 'default';
-
-        return {
-          id: edge.id,
-          source: edge.source,
-          target: edge.target,
-          sourceHandle: normalizedSourceHandle,
-          targetHandle: edge.targetHandle ?? 'default',
-          type: edge.type ?? 'default',
-        };
-      });
-
-    const safeFlow = {
-      nodes: payloadNodes,
-      edges: cleanEdges,
-    };
+    const realFlow = rfInstance?.toObject?.();
+    const realFlowNodes = Array.isArray(realFlow?.nodes) ? (realFlow?.nodes as Node[]) : nodesRef.current;
+    const realFlowEdges = Array.isArray(realFlow?.edges) ? (realFlow?.edges as Edge[]) : edgesRef.current;
+    const safeFlow = serializeFlowGraph(realFlowNodes, realFlowEdges);
 
     if (flowContainsTemporaryIds(safeFlow.nodes, safeFlow.edges)) {
       toast.error('Flow contém IDs temporários inválidos.');
@@ -1370,7 +1414,6 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
       setIsSaving(false);
     }
   }, [rfInstance, selectedFlowId, toast]);
-
 
 
   const openVersionsModal = useCallback(async () => {
