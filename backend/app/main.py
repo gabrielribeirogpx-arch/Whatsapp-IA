@@ -26,6 +26,7 @@ from app.routers import bot_rules
 from app.routers import flows
 from app.routers import flow_media
 from app.routers import whatsapp_providers, whatsapp_templates, whatsapp_campaigns
+from app.routers import admin_investigation
 from app.middleware.tenant_context import TenantContextMiddleware
 from app.api.debug import router as debug_router
 from app.api.flow_runtime import router as flow_runtime_router
@@ -220,6 +221,7 @@ app.include_router(
     tags=["WhatsApp Templates"],
 )
 app.include_router(whatsapp_campaigns.router)
+app.include_router(admin_investigation.router)
 # Webhooks ativos:
 # - Canônico (Meta): /webhook (sem prefixo), via app.routers.webhook
 # - Compatibilidade legada: /api/webhook/whatsapp, via app.api.whatsapp_webhook
