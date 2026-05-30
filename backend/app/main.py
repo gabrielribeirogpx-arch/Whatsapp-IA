@@ -1,4 +1,5 @@
 from fastapi import FastAPI, Request
+from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response
@@ -23,6 +24,7 @@ from app.routers import settings
 from app.routers import account
 from app.routers import bot_rules
 from app.routers import flows
+from app.routers import flow_media
 from app.routers import whatsapp_providers, whatsapp_templates, whatsapp_campaigns
 from app.middleware.tenant_context import TenantContextMiddleware
 from app.api.debug import router as debug_router
@@ -147,6 +149,8 @@ ALLOWED_ORIGIN_REGEX = _parse_allowed_origin_regex()
 
 app = FastAPI()
 
+app.mount("/uploads", StaticFiles(directory=os.getenv("FLOW_MEDIA_STATIC_DIR", "uploads"), check_dir=False), name="uploads")
+
 app.add_middleware(TenantContextMiddleware)
 
 app.add_middleware(
@@ -207,6 +211,7 @@ app.include_router(settings.router, prefix="/api")
 app.include_router(account.router, prefix="/api")
 app.include_router(bot_rules.router)
 app.include_router(flows.crud_router, prefix="/api/flows", tags=["flows"])
+app.include_router(flow_media.router)
 app.include_router(flows.router, prefix="/api/admin", tags=["admin"])
 app.include_router(whatsapp_providers.router)
 app.include_router(
