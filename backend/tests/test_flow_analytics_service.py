@@ -108,3 +108,47 @@ def test_flow_list_metrics_are_derived_from_executions():
     assert metrics[flow_id]["total_entries"] == 2
     assert metrics[flow_id]["total_completions"] == 1
     assert metrics[flow_id]["conversion_rate"] == 50
+
+
+def test_record_flow_event_keeps_versioned_runtime_node_out_of_flow_events_fk():
+    from app.models.flow_event import FlowEvent
+    from app.services.flow_analytics_service import record_flow_event
+
+    tenant_id = uuid.uuid4()
+    flow_id = uuid.uuid4()
+    flow_version_id = uuid.uuid4()
+    conversation_id = uuid.uuid4()
+    versioned_node_id = uuid.uuid4()
+
+    class _RecordingDB(_DB):
+        def __init__(self):
+            super().__init__(flow=SimpleNamespace(id=flow_id, tenant_id=tenant_id, name="Flow"), executions=[], events=[], nodes=[], sessions=[])
+            self.added = []
+            self.flushes = 0
+
+        def add(self, item):
+            self.added.append(item)
+
+        def flush(self):
+            self.flushes += 1
+
+    db = _RecordingDB()
+
+    record_flow_event(
+        db=db,
+        tenant_id=tenant_id,
+        conversation_id=conversation_id,
+        flow_id=flow_id,
+        flow_version_id=flow_version_id,
+        node_id=versioned_node_id,
+        event_type=NODE_ENTERED,
+        metadata={"source": "published_version"},
+    )
+
+    flow_event = next(item for item in db.added if isinstance(item, FlowEvent))
+    assert flow_event.node_id is None
+    assert flow_event.metadata_json["runtime_node_id"] == str(versioned_node_id)
+    assert flow_event.metadata_json["node_id_unpersisted"] is True
+
+    execution_event = db.added[-1]
+    assert execution_event.node_id == str(versioned_node_id)
