@@ -66,6 +66,12 @@ def test_worker_provider_token(db: Session = Depends(get_db), tenant: Tenant = D
     return whatsapp_provider_service.test_worker_active_provider_connection(db, tenant.id)
 
 
+@router.post("/diagnostics/runtime-send")
+def runtime_send_diagnostics(db: Session = Depends(get_db), tenant: Tenant = Depends(get_current_tenant)):
+    print("[WHATSAPP PROVIDER RUNTIME SEND DIAGNOSTIC]", f"tenant_id={tenant.id}")
+    return whatsapp_provider_service.runtime_send_diagnostics(db, tenant.id)
+
+
 @router.post("/{provider_id}/test")
 def test_provider(provider_id: str, db: Session = Depends(get_db), tenant: Tenant = Depends(get_current_tenant)):
     print("[WHATSAPP PROVIDER TEST]", f"tenant_id={tenant.id}", f"provider_id={provider_id}")
