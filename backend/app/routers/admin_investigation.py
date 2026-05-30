@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
@@ -11,12 +12,15 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/api/admin", tags=["admin-investigation"])
 
 TARGET_CONVERSATION_ID = "b51fef94-1be8-456e-93a9-69ca4a8ea18c"
 TARGET_FLOW_ID = "50f7b54f-2ccd-4203-bb82-f946f4a9f078"
 TARGET_LEAD_ID = "8de6a070-1290-494f-b274-cb6de8660e69"
 TARGET_PHONE_NUMBER_ID = "876969468828520"
+FINAL_ENDPOINT_URL = "POST /api/admin/multi-tenant-investigation"
 
 
 def _jsonable(value: Any) -> Any:
@@ -52,6 +56,8 @@ def multi_tenant_investigation(db: Session = Depends(get_db)) -> dict[str, Any]:
     This endpoint intentionally only executes SELECT statements and does not expose
     WhatsApp tokens or any other encrypted secret columns.
     """
+
+    logger.info("[MULTI TENANT INVESTIGATION] running global read-only tenant diagnostic")
 
     params = {
         "conversation_id": TARGET_CONVERSATION_ID,
@@ -471,6 +477,7 @@ def multi_tenant_investigation(db: Session = Depends(get_db)) -> dict[str, Any]:
     return {
         "readonly": True,
         "endpoint_status": "temporary_investigation_endpoint",
+        "endpoint_url": FINAL_ENDPOINT_URL,
         "params": {
             "conversation_id": TARGET_CONVERSATION_ID,
             "flow_id": TARGET_FLOW_ID,
@@ -478,6 +485,7 @@ def multi_tenant_investigation(db: Session = Depends(get_db)) -> dict[str, Any]:
             "phone_number_id": TARGET_PHONE_NUMBER_ID,
         },
         "tenants": tenants,
+        "providers": providers_meta,
         "providers_meta": providers_meta,
         "conversation": conversation,
         "flow": flow,
@@ -485,8 +493,10 @@ def multi_tenant_investigation(db: Session = Depends(get_db)) -> dict[str, Any]:
         "lead": lead,
         "lead_records": lead_records,
         "conversation_messages": conversation_messages,
+        "phone_number_associations": phone_number_associations,
         "phone_number_id_associations": phone_number_associations,
         "records_associated_to_phone_number_id": scoped_records,
+        "duplicate_phone_numbers": duplicate_phone_number_ids,
         "duplicate_phone_number_ids": duplicate_phone_number_ids,
         "target_phone_number_id_duplicate": target_phone_duplicate,
         "tenant_correto": tenant_correto,
