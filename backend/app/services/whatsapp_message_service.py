@@ -6,7 +6,7 @@ import re
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.integrations.meta.meta_cloud_client import MetaApiError, MetaCloudClient
@@ -16,6 +16,57 @@ from app.utils.encryption import decrypt_secret
 
 logger = logging.getLogger(__name__)
 VAR_PATTERN = re.compile(r"\{\{\s*(\d+)\s*\}\}")
+
+
+def _provider_resolution_row(provider: TenantWhatsAppProvider) -> dict[str, Any]:
+    return {
+        "provider_id": str(provider.id),
+        "tenant_id": str(provider.tenant_id),
+        "is_active": provider.is_active,
+        "status": provider.status,
+        "updated_at": provider.updated_at.isoformat() if provider.updated_at else None,
+    }
+
+
+def _log_related_meta_provider_resolution(
+    db: Session,
+    *,
+    provider: TenantWhatsAppProvider,
+    tenant_id: str,
+    conversation_id: str | None,
+) -> None:
+    phone_number_id = str(provider.phone_number_id or "").strip()
+    waba_id = str(provider.waba_id or "").strip()
+    business_id = str(provider.business_id or "").strip()
+    clauses = []
+    if phone_number_id:
+        clauses.append(TenantWhatsAppProvider.phone_number_id == phone_number_id)
+    if waba_id:
+        clauses.append(TenantWhatsAppProvider.waba_id == waba_id)
+    if business_id:
+        clauses.append(TenantWhatsAppProvider.business_id == business_id)
+
+    related_providers: list[TenantWhatsAppProvider] = []
+    if clauses:
+        related_providers = (
+            db.execute(
+                select(TenantWhatsAppProvider)
+                .where(TenantWhatsAppProvider.provider_type == "meta_cloud", or_(*clauses))
+                .order_by(TenantWhatsAppProvider.updated_at.desc())
+            )
+            .scalars()
+            .all()
+        )
+
+    logger.info(
+        "[PROVIDER RESOLUTION] tenant_id=%s conversation_id=%s selected_provider_id=%s same_phone_number_id=%s same_waba_id=%s same_business_id=%s",
+        tenant_id,
+        conversation_id or "n/a",
+        provider.id,
+        [_provider_resolution_row(item) for item in related_providers if phone_number_id and item.phone_number_id == phone_number_id],
+        [_provider_resolution_row(item) for item in related_providers if waba_id and item.waba_id == waba_id],
+        [_provider_resolution_row(item) for item in related_providers if business_id and item.business_id == business_id],
+    )
 
 
 def resolve_active_meta_provider_credentials(db: Session, *, tenant_id: str, conversation_id: str | None = None) -> dict[str, str] | None:
@@ -67,19 +118,19 @@ def resolve_active_meta_provider_credentials(db: Session, *, tenant_id: str, con
         return None
 
     token = decrypt_secret(provider.access_token_encrypted or "")
+    _log_related_meta_provider_resolution(db, provider=provider, tenant_id=tenant_id, conversation_id=conversation_id)
     logger.info(
-        "[META TOKEN SOURCE] provider_id=%s is_active=%s updated_at=%s token_exists=%s token_length=%s",
+        "[META TOKEN SOURCE] provider_id=%s token_length=%s source=%s",
         provider.id,
-        provider.is_active,
-        provider.updated_at.isoformat() if provider.updated_at else None,
-        bool(token),
         len(token or ""),
+        "provider",
     )
     if not token or not provider.phone_number_id:
         return None
 
     return {
         "provider_id": str(provider.id),
+        "tenant_id": str(provider.tenant_id),
         "provider_name": str(provider.display_name or provider.provider_type),
         "token": token,
         "token_length": str(len(token)),

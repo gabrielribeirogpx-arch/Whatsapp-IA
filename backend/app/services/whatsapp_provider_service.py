@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.integrations.meta.meta_cloud_client import MetaApiError, MetaCloudClient
 from app.models.tenant_whatsapp_provider import TenantWhatsAppProvider
+from app.services.whatsapp_credentials_service import WhatsAppCredentialsNotConfiguredError, get_tenant_whatsapp_credentials
 from app.services.whatsapp_message_service import resolve_active_meta_provider_credentials
 from app.utils.encryption import decrypt_secret, encrypt_secret
 
@@ -144,12 +145,17 @@ def test_worker_active_provider_connection(db: Session, tenant_id: UUID):
         return {"me": me, "phone": phone}
 
     logger.info(
-        "[SEND WORKER PROVIDER] provider_id=%s provider_name=%s token_exists=%s token_length=%s phone_number_id=%s action=diagnostic",
+        "[SEND WORKER PROVIDER] provider_id=%s tenant_id=%s provider_name=%s phone_number_id=%s waba_id=%s business_id=%s status=%s is_active=%s token_exists=%s token_length=%s action=diagnostic",
         provider_id,
+        tenant_id,
         active_provider.get("provider_name"),
+        phone_number_id,
+        active_provider.get("waba_id"),
+        active_provider.get("business_id"),
+        active_provider.get("status"),
+        active_provider.get("is_active"),
         bool(token),
         len(token or ""),
-        phone_number_id,
     )
     try:
         checks = asyncio.run(_run_checks())
@@ -175,6 +181,96 @@ def test_worker_active_provider_connection(db: Session, tenant_id: UUID):
         "token_length": len(token or ""),
         "me": checks["me"],
         "phone": checks["phone"],
+    }
+
+
+def runtime_send_diagnostics(db: Session, tenant_id: UUID) -> dict:
+    active_provider = resolve_active_meta_provider_credentials(db, tenant_id=str(tenant_id), conversation_id="runtime-send-diagnostic")
+    source = "provider"
+    provider_id = None
+    provider_name = None
+    phone_number_id = None
+    waba_id = None
+    business_id = None
+    status = None
+    is_active = None
+
+    if active_provider:
+        token = active_provider["token"]
+        provider_id = active_provider["provider_id"]
+        provider_name = active_provider.get("provider_name")
+        phone_number_id = active_provider["phone_number_id"]
+        waba_id = active_provider.get("waba_id")
+        business_id = active_provider.get("business_id")
+        status = active_provider.get("status")
+        is_active = active_provider.get("is_active")
+    else:
+        source = "legacy"
+        try:
+            credentials = get_tenant_whatsapp_credentials(str(tenant_id))
+        except WhatsAppCredentialsNotConfiguredError:
+            return {
+                "provider_id": None,
+                "tenant_id": str(tenant_id),
+                "phone_number_id": None,
+                "waba_id": None,
+                "business_id": None,
+                "token_valid": False,
+                "source": source,
+                "meta_response": {"error": "missing_whatsapp_credentials"},
+            }
+        token = credentials["token"]
+        phone_number_id = credentials["phone_number_id"]
+        provider_name = "legacy_credentials"
+        status = "legacy"
+        is_active = False
+
+    logger.info(
+        "[SEND WORKER PROVIDER] provider_id=%s tenant_id=%s provider_name=%s phone_number_id=%s waba_id=%s business_id=%s status=%s is_active=%s token_exists=%s token_length=%s source=%s action=runtime_send_diagnostic",
+        provider_id,
+        tenant_id,
+        provider_name,
+        phone_number_id,
+        waba_id,
+        business_id,
+        status,
+        is_active,
+        bool(token),
+        len(token or ""),
+        source,
+    )
+
+    async def _run_checks() -> dict:
+        client = MetaCloudClient(token)
+        context = {"tenant_id": str(tenant_id), "provider_id": provider_id, "token_length": len(token or ""), "source": source}
+        me = await client.get("/me", params={"fields": "id,name"}, context={**context, "graph_check": "me"})
+        phone = await client.get(
+            f"/{phone_number_id}",
+            params={"fields": "verified_name,display_phone_number,quality_rating,status"},
+            context={**context, "graph_check": "phone_number"},
+        )
+        return {"me": me, "phone_number": phone}
+
+    try:
+        meta_response = asyncio.run(_run_checks())
+        token_valid = True
+    except MetaApiError as exc:
+        meta_response = {
+            "error": str(exc),
+            "status_code": exc.status_code,
+            "payload": exc.payload,
+        }
+        token_valid = False
+
+    return {
+        "provider_id": provider_id,
+        "tenant_id": str(tenant_id),
+        "phone_number_id": phone_number_id,
+        "waba_id": waba_id,
+        "business_id": business_id,
+        "token_valid": token_valid,
+        "source": source,
+        "meta_response": meta_response,
     }
 
 def delete_provider(db: Session, tenant_id: UUID, provider_id: UUID):

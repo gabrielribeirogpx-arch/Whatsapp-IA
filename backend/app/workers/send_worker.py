@@ -159,16 +159,17 @@ def send_whatsapp_message(*, message_data: dict[str, Any]) -> None:
             resolved_token = active_provider["token"]
             provider_id = active_provider["provider_id"]
             logger.info(
-                "[SEND WORKER PROVIDER] provider_id=%s provider_name=%s token_exists=%s token_length=%s phone_number_id=%s waba_id=%s business_id=%s status=%s is_active=%s updated_at=%s send_endpoint=/%s/messages",
+                "[SEND WORKER PROVIDER] provider_id=%s tenant_id=%s provider_name=%s phone_number_id=%s waba_id=%s business_id=%s status=%s is_active=%s token_exists=%s token_length=%s updated_at=%s send_endpoint=/%s/messages",
                 provider_id,
+                tenant_id,
                 active_provider.get("provider_name"),
-                bool(resolved_token),
-                len(resolved_token or ""),
                 resolved_phone_number_id,
                 active_provider.get("waba_id"),
                 active_provider.get("business_id"),
                 active_provider.get("status"),
                 active_provider.get("is_active"),
+                bool(resolved_token),
+                len(resolved_token or ""),
                 active_provider.get("updated_at"),
                 resolved_phone_number_id,
             )
@@ -178,12 +179,17 @@ def send_whatsapp_message(*, message_data: dict[str, Any]) -> None:
                 resolved_phone_number_id = credentials["phone_number_id"]
                 resolved_token = credentials["token"]
                 logger.warning(
-                    "[SEND WORKER PROVIDER] provider_id=%s provider_name=%s token_exists=%s token_length=%s phone_number_id=%s source=legacy_credentials",
+                    "[SEND WORKER PROVIDER] provider_id=%s tenant_id=%s provider_name=%s phone_number_id=%s waba_id=%s business_id=%s status=%s is_active=%s token_exists=%s token_length=%s source=legacy_credentials",
                     None,
+                    tenant_id,
                     "legacy_credentials",
+                    resolved_phone_number_id,
+                    None,
+                    None,
+                    "legacy",
+                    False,
                     bool(resolved_token),
                     len(resolved_token or ""),
-                    resolved_phone_number_id,
                 )
             except WhatsAppCredentialsNotConfiguredError:
                 logger.error(

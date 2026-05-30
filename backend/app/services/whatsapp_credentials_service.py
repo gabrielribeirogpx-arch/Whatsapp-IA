@@ -35,6 +35,7 @@ def get_tenant_whatsapp_credentials(tenant_id: str) -> dict[str, str]:
     allow_fallback = str(os.getenv("ALLOW_GLOBAL_WHATSAPP_FALLBACK", "")).strip().lower() == "true"
     if token and phone_number_id:
         logger.info("[WHATSAPP SEND USING TENANT CREDENTIALS] tenant_id=%s phone_number_id=%s", tenant_id, phone_number_id)
+        logger.info("[META TOKEN SOURCE] provider_id=%s token_length=%s source=%s", None, len(token or ""), "legacy")
         return {"token": token, "phone_number_id": phone_number_id}
 
     if allow_fallback:
@@ -45,6 +46,7 @@ def get_tenant_whatsapp_credentials(tenant_id: str) -> dict[str, str]:
         )
         if fallback_token and fallback_phone_number_id:
             logger.warning("[GLOBAL WHATSAPP FALLBACK USED] tenant_id=%s", tenant_id)
+            logger.info("[META TOKEN SOURCE] provider_id=%s token_length=%s source=%s", None, len(fallback_token or ""), "legacy")
             return {"token": fallback_token, "phone_number_id": fallback_phone_number_id}
 
     raise WhatsAppCredentialsNotConfiguredError(tenant_id=tenant_id)
