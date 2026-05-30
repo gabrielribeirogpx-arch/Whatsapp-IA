@@ -174,6 +174,12 @@ const serializeFlowGraph = (nodes: Node[], edges: Edge[]) => {
         sourceHandle: normalizedSourceHandle,
         targetHandle: edge.targetHandle ?? 'default',
         type: edge.type ?? 'default',
+        label: edge.label ?? normalizedSourceHandle,
+        data: {
+          ...(edge.data || {}),
+          condition: edge.data?.condition ?? edge.label ?? normalizedSourceHandle,
+          sourceHandle: normalizedSourceHandle,
+        },
       };
     });
 
@@ -223,7 +229,6 @@ function FlowNodeEditorPanel({
   node,
   draft,
   onDraftChange,
-  onSave,
   onClose,
   onUpload,
   isUploading,
@@ -232,7 +237,6 @@ function FlowNodeEditorPanel({
   node: Node | null;
   draft: Record<string, unknown>;
   onDraftChange: (patch: Record<string, unknown>) => void;
-  onSave: () => void | Promise<void>;
   onClose: () => void;
   onUpload: (file: File | null, mediaType: 'image' | 'document') => void;
   isUploading: boolean;
@@ -416,21 +420,6 @@ function FlowNodeEditorPanel({
         {uploadError ? <div className="flow-editor-error">{uploadError}</div> : null}
         {isUploading ? <div className="flow-editor-muted">Enviando arquivo...</div> : null}
       </div>
-
-      <div className="flow-node-editor-footer">
-        <button type="button" className="flow-editor-secondary-btn" onClick={onClose}>Cancelar</button>
-        <button
-          type="button"
-          className="flow-editor-save-btn"
-          onClick={() => {
-            console.info('[NODE SAVE CLICK]', { node_id: node.id, node_type: node.type });
-            console.info('[NODE SAVE PAYLOAD]', { node_id: node.id, payload: draft });
-            void onSave();
-          }}
-        >
-          Salvar bloco
-        </button>
-      </div>
     </aside>
   );
 }
@@ -438,6 +427,11 @@ function FlowNodeEditorPanel({
 type FlowBuilderClientProps = {
   flowId?: string;
 };
+
+type FlowSaveStatus = 'idle' | 'saving' | 'success' | 'error';
+
+const UNSAVED_CHANGES_MESSAGE = 'Você possui alterações não salvas. Deseja sair mesmo assim?';
+const AUTOSAVE_DELAY_MS = 5000;
 
 export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilderClientProps) {
   const router = useRouter();
@@ -466,6 +460,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
   const [isLoadingFlow, setIsLoadingFlow] = useState(false);
   const [isFlowHydrated, setIsFlowHydrated] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [flowSaveStatus, setFlowSaveStatus] = useState<FlowSaveStatus>('idle');
   const [messages, setMessages] = useState<Array<{ type: 'bot' | 'user'; text: string }>>([]);
   const [currentChoices, setCurrentChoices] = useState<Array<{ id?: string; label?: string; handleId?: string }>>([]);
   const [currentNodeId, setCurrentNodeId] = useState<string | null>(null);
@@ -495,9 +490,11 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
   const [validationErrors, setValidationErrors] = useState<FlowValidationIssue[]>([]);
   const [highlightedNodeId, setHighlightedNodeId] = useState<string | null>(null);
   const [operationError, setOperationError] = useState<string | null>(null);
-  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [toastMessage, setToastMessage] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const [isForceRepublishing, setIsForceRepublishing] = useState(false);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const flowDirty = hasUnsavedChanges;
+  const setFlowDirty = setHasUnsavedChanges;
   const skipDirtyCheckRef = useRef(true);
   const [isEditing] = useState(true);
   const simulationStartedRef = useRef(false);
@@ -508,6 +505,8 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
   const hasTriedAutoCreateRef = useRef(false);
   const nodesRef = useRef<Node[]>([]);
   const edgesRef = useRef<Edge[]>([]);
+  const isSavingRef = useRef(false);
+  const saveStatusTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const playbackIdRef = useRef(0);
   const isMountedRef = useRef(true);
 
@@ -552,11 +551,11 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
 
   const toast = useMemo(() => ({
     success: (message: string) => {
-      setToastMessage(message);
+      setToastMessage({ message, type: 'success' });
       setTimeout(() => setToastMessage(null), 4000);
     },
     error: (message: string) => {
-      setToastMessage(message);
+      setToastMessage({ message, type: 'error' });
       setTimeout(() => setToastMessage(null), 4000);
     },
   }), []);
@@ -578,9 +577,35 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
     });
   }, [parseHttpStatus]);
 
+  const clearSaveStatusTimer = useCallback(() => {
+    if (saveStatusTimeoutRef.current) {
+      clearTimeout(saveStatusTimeoutRef.current);
+      saveStatusTimeoutRef.current = null;
+    }
+  }, []);
+
+  const markFlowDirty = useCallback((reason: string, details?: Record<string, unknown>) => {
+    console.info('[NODE DIRTY]', { flow_id: selectedFlowId, reason, ...details });
+    setFlowDirty(true);
+    setFlowSaveStatus('idle');
+  }, [selectedFlowId, setFlowDirty]);
+
+  const confirmUnsavedNavigation = useCallback(() => {
+    if (!flowDirty) return true;
+    return window.confirm(UNSAVED_CHANGES_MESSAGE);
+  }, [flowDirty]);
+
+  const saveButtonLabel = useMemo(() => {
+    if (flowSaveStatus === 'saving') return 'Salvando...';
+    if (flowSaveStatus === 'success') return 'Salvo agora';
+    if (flowSaveStatus === 'error') return 'Erro ao salvar';
+    return '✓ Salvar alterações';
+  }, [flowSaveStatus]);
+
   useEffect(() => () => {
     isMountedRef.current = false;
-  }, []);
+    clearSaveStatusTimer();
+  }, [clearSaveStatusTimer]);
 
   useEffect(() => {
     console.log('[BUILDER FLOW_ID_FROM_URL]', flowIdFromUrl || null);
@@ -603,13 +628,68 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
   }, [edges]);
 
   useEffect(() => {
-    if (!isFlowHydrated) return;
+    if (!isFlowHydrated || isSavingRef.current) return;
     if (skipDirtyCheckRef.current) {
       skipDirtyCheckRef.current = false;
       return;
     }
-    setHasUnsavedChanges(true);
-  }, [edges, isFlowHydrated, nodes]);
+    console.info('[NODE DIRTY]', {
+      flow_id: selectedFlowId,
+      reason: 'graph_changed',
+      nodes_count: nodes.length,
+      edges_count: edges.length,
+    });
+    setFlowDirty(true);
+    setFlowSaveStatus('idle');
+  }, [edges, isFlowHydrated, nodes, selectedFlowId]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (!flowDirty) return;
+      event.preventDefault();
+      event.returnValue = UNSAVED_CHANGES_MESSAGE;
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [flowDirty]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const handlePopState = () => {
+      if (!flowDirty) return;
+      if (window.confirm(UNSAVED_CHANGES_MESSAGE)) return;
+      window.history.pushState(null, '', window.location.href);
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, [flowDirty]);
+
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+
+    const handleDocumentClick = (event: MouseEvent) => {
+      if (!flowDirty) return;
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      const anchor = target.closest('a[href]');
+      if (!(anchor instanceof HTMLAnchorElement)) return;
+      const url = new URL(anchor.href, window.location.href);
+      if (url.origin !== window.location.origin) return;
+      if (url.pathname === window.location.pathname && url.search === window.location.search) return;
+      if (window.confirm(UNSAVED_CHANGES_MESSAGE)) return;
+
+      event.preventDefault();
+      event.stopPropagation();
+    };
+
+    document.addEventListener('click', handleDocumentClick, true);
+    return () => document.removeEventListener('click', handleDocumentClick, true);
+  }, [flowDirty]);
 
   useEffect(() => {
     const handleOutsideClick = (event: MouseEvent) => {
@@ -787,74 +867,15 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
     });
   }, [selectedNodeId]);
 
-  const saveNodeEditor = useCallback(async () => {
-    if (!selectedNodeId) return;
-
-    const updatedNodes = nodesRef.current.map((node) => (
-      node.id === selectedNodeId
-        ? {
-          ...node,
-          data: {
-            ...node.data,
-            ...nodeEditorDraft,
-          },
-        }
-        : node
-    ));
-    const safeFlow = serializeFlowGraph(updatedNodes, edgesRef.current);
-    const endpoint = selectedFlowId ? `/api/flows/${selectedFlowId}` : null;
-
-    console.info('[NODE SAVE PAYLOAD]', {
-      node_id: selectedNodeId,
-      endpoint,
-      method: 'PUT',
-      payload: safeFlow,
-    });
-
-    updateNodeData(selectedNodeId, nodeEditorDraft);
-    setHasUnsavedChanges(true);
-
-    if (!selectedFlowId) {
-      const error = new Error('Fluxo não selecionado.');
-      console.error('[NODE SAVE ERROR]', { node_id: selectedNodeId, error });
-      toast.error('✗ Erro ao salvar');
-      return;
-    }
-
-    if (flowContainsTemporaryIds(safeFlow.nodes, safeFlow.edges)) {
-      const error = new Error('Flow contém IDs temporários inválidos.');
-      console.error('[NODE SAVE ERROR]', { node_id: selectedNodeId, error });
-      toast.error('✗ Erro ao salvar');
-      return;
-    }
-
-    setFlowValidationError(null);
-    setIsSaving(true);
-    try {
-      const response = await apiFetch(endpoint, {
-        method: 'PUT',
-        body: JSON.stringify(safeFlow),
-      });
-      const data = await parseApiResponse<{ validation?: { warnings?: FlowValidationIssue[]; errors?: FlowValidationIssue[] } }>(response);
-      setValidationWarnings(data?.validation?.warnings || []);
-      setValidationErrors(data?.validation?.errors || []);
-      setHasUnsavedChanges(false);
-      console.info('[NODE SAVE SUCCESS]', { node_id: selectedNodeId, endpoint, method: 'PUT' });
-      toast.success('✓ Bloco salvo');
-    } catch (error) {
-      console.error('[NODE SAVE ERROR]', { node_id: selectedNodeId, endpoint, method: 'PUT', error });
-      const message = error instanceof Error && error.message ? error.message : 'Erro ao salvar bloco.';
-      setFlowValidationError(message);
-      toast.error('✗ Erro ao salvar');
-    } finally {
-      setIsSaving(false);
-    }
-  }, [nodeEditorDraft, selectedFlowId, selectedNodeId, toast, updateNodeData]);
-
   const handleNodeEditorDraftChange = useCallback((patch: Record<string, unknown>) => {
-    console.info('[NODE PANEL UPDATE]', { node_id: selectedNodeIdRef.current, patch_keys: Object.keys(patch) });
+    const nodeId = selectedNodeIdRef.current;
+    console.info('[NODE CHANGED]', { node_id: nodeId, patch_keys: Object.keys(patch) });
     setNodeEditorDraft((prev) => ({ ...prev, ...patch }));
-  }, []);
+    if (nodeId) {
+      updateNodeData(nodeId, patch);
+      markFlowDirty('node_changed', { node_id: nodeId, patch_keys: Object.keys(patch) });
+    }
+  }, [markFlowDirty, updateNodeData]);
 
   const handleReactFlowNodeClick = useCallback((_: unknown, node: Node) => {
     openNodeEditor(node, 'click');
@@ -875,16 +896,25 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
       formData.append('file', file);
       const response = await apiFetch('/api/flow-media/upload', { method: 'POST', body: formData });
       const result = await parseApiResponse<{ url: string; filename?: string }>(response);
+      const patch = mediaType === 'image'
+        ? { media_url: result.url }
+        : { document_url: result.url, filename: result.filename || nodeEditorDraft.filename };
       setNodeEditorDraft((prev) => ({
         ...prev,
-        ...(mediaType === 'image' ? { media_url: result.url } : { document_url: result.url, filename: result.filename || prev.filename }),
+        ...patch,
       }));
+      const nodeId = selectedNodeIdRef.current;
+      if (nodeId) {
+        console.info('[NODE CHANGED]', { node_id: nodeId, patch_keys: Object.keys(patch), media_type: mediaType });
+        updateNodeData(nodeId, patch);
+        markFlowDirty('media_uploaded', { node_id: nodeId, media_type: mediaType, url: result.url });
+      }
     } catch (error) {
       setMediaUploadError(error instanceof Error ? error.message : 'Falha ao enviar arquivo');
     } finally {
       setIsMediaUploading(false);
     }
-  }, []);
+  }, [markFlowDirty, nodeEditorDraft.filename, updateNodeData]);
 
   const toggleStartNode = useCallback((nodeId: string) => {
     setNodes((prev) =>
@@ -945,12 +975,17 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
         setIsLoadingFlow(false);
         setShowEmptyFlowWarning(false);
         setFlowSource('none');
+        setFlowDirty(false);
+        setFlowSaveStatus('idle');
         setOperationError('Nenhum fluxo selecionado para carregar.');
         return;
       }
 
       console.info('[BUILDER HYDRATION START]', { flow_id: flowId });
       isLoadingFlowRef.current = true;
+      skipDirtyCheckRef.current = true;
+      setFlowDirty(false);
+      setFlowSaveStatus('idle');
       setIsLoading(true);
       setIsLoadingFlow(true);
       setIsFlowHydrated(false);
@@ -1131,13 +1166,14 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
   }, [flows, setEdges, setNodes]);
 
   const handleSelectFlow = useCallback(async (flowId: string) => {
+    if (flowId !== selectedFlowId && !confirmUnsavedNavigation()) return;
     console.log('[BUILDER SELECTED_FLOW_ID]', flowId);
     setSelectedFlowId(flowId);
     setIsFlowSelectOpen(false);
     router.replace(`/dashboard/flow-builder?flow_id=${flowId}`);
     console.log('[BUILDER LOAD FLOW]', flowId);
     await loadFlow(flowId);
-  }, [loadFlow, router]);
+  }, [confirmUnsavedNavigation, loadFlow, router, selectedFlowId]);
 
   const flow = useMemo(
     () => ({
@@ -1388,9 +1424,13 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
     }, 0);
   }, [rfInstance, setEdges, setNodes, toast, toggleStartNode, updateNodeData]);
 
-  const handleSaveFlow = useCallback(async (requireConfirmOverwrite = false) => {
+  const handleSaveFlow = useCallback(async (requireConfirmOverwrite = false, options?: { autosave?: boolean; showToast?: boolean }) => {
+    const isAutosave = !!options?.autosave;
+    const shouldShowToast = options?.showToast ?? !isAutosave;
+
     if (!selectedFlowId) {
-      console.error('selectedFlowId não definido');
+      console.error('[FLOW SAVE ERROR]', { reason: 'selectedFlowId não definido' });
+      setFlowSaveStatus('error');
       return;
     }
 
@@ -1398,9 +1438,12 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
     const realFlowNodes = Array.isArray(realFlow?.nodes) ? (realFlow?.nodes as Node[]) : nodesRef.current;
     const realFlowEdges = Array.isArray(realFlow?.edges) ? (realFlow?.edges as Edge[]) : edgesRef.current;
     const safeFlow = serializeFlowGraph(realFlowNodes, realFlowEdges);
+    const endpoint = `/api/flows/${selectedFlowId}`;
 
     if (flowContainsTemporaryIds(safeFlow.nodes, safeFlow.edges)) {
-      toast.error('Flow contém IDs temporários inválidos.');
+      setFlowSaveStatus('error');
+      toast.error('✗ Falha ao salvar fluxo');
+      console.error('[FLOW SAVE ERROR]', { flow_id: selectedFlowId, endpoint, reason: 'temporary_ids' });
       return;
     }
 
@@ -1408,29 +1451,72 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
       return;
     }
     setFlowValidationError(null);
+    clearSaveStatusTimer();
 
-    console.log('SAVING PAYLOAD:', safeFlow);
+    console.info(isAutosave ? '[AUTOSAVE START]' : '[FLOW SAVE START]', { flow_id: selectedFlowId, endpoint, method: 'PUT' });
+    console.info('[FLOW SAVE PAYLOAD]', {
+      flow_id: selectedFlowId,
+      endpoint,
+      method: 'PUT',
+      nodes_count: safeFlow.nodes.length,
+      edges_count: safeFlow.edges.length,
+      payload: safeFlow,
+    });
 
+    isSavingRef.current = true;
     setIsSaving(true);
+    setFlowSaveStatus('saving');
     try {
-      const response = await apiFetch(`/api/flows/${selectedFlowId}`, {
+      const response = await apiFetch(endpoint, {
         method: 'PUT',
         body: JSON.stringify(safeFlow),
       });
       const data = await parseApiResponse<{ validation?: { warnings?: FlowValidationIssue[]; errors?: FlowValidationIssue[] } }>(response);
       setValidationWarnings(data?.validation?.warnings || []);
       setValidationErrors(data?.validation?.errors || []);
-      setHasUnsavedChanges(false);
+      setFlowDirty(false);
+      setFlowSaveStatus('success');
+      console.info('[FLOW SAVE SUCCESS]', { flow_id: selectedFlowId, endpoint, method: 'PUT' });
+      if (isAutosave) {
+        console.info('[AUTOSAVE SUCCESS]', { flow_id: selectedFlowId, endpoint, method: 'PUT' });
+      }
+      if (shouldShowToast) {
+        toast.success('✓ Fluxo salvo com sucesso');
+      }
+      saveStatusTimeoutRef.current = setTimeout(() => {
+        setFlowSaveStatus('idle');
+        saveStatusTimeoutRef.current = null;
+      }, 3000);
     } catch (error) {
-      console.error(error);
+      console.error('[FLOW SAVE ERROR]', { flow_id: selectedFlowId, endpoint, method: 'PUT', error });
+      if (isAutosave) {
+        console.error('[AUTOSAVE ERROR]', { flow_id: selectedFlowId, endpoint, method: 'PUT', error });
+      }
       const message = error instanceof Error && error.message ? error.message : 'Erro ao salvar fluxo.';
       setFlowValidationError(message);
+      setFlowSaveStatus('error');
+      if (shouldShowToast) {
+        toast.error('✗ Falha ao salvar fluxo');
+      }
       throw error;
     } finally {
+      isSavingRef.current = false;
       setIsSaving(false);
     }
-  }, [rfInstance, selectedFlowId, toast]);
+  }, [clearSaveStatusTimer, rfInstance, selectedFlowId, toast]);
 
+
+  useEffect(() => {
+    if (!flowDirty || !selectedFlowId || isSaving) return;
+
+    const timeoutId = setTimeout(() => {
+      void handleSaveFlow(false, { autosave: true, showToast: false }).catch(() => {
+        // handleSaveFlow already logs [AUTOSAVE ERROR] and keeps the flow dirty for retry/manual save.
+      });
+    }, AUTOSAVE_DELAY_MS);
+
+    return () => clearTimeout(timeoutId);
+  }, [flowDirty, handleSaveFlow, isSaving, selectedFlowId]);
 
   const openVersionsModal = useCallback(async () => {
     if (!selectedFlowId) return;
@@ -1477,7 +1563,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
     }
 
     try {
-      if (hasUnsavedChanges) {
+      if (flowDirty) {
         console.log('[PUBLISH SAVE BEFORE START]', { flowId: selectedFlowId });
         try {
           await handleSaveFlow();
@@ -1509,7 +1595,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
       const message = error instanceof Error && error.message ? error.message : 'Não foi possível publicar o fluxo.';
       toast.error(`Falha ao publicar: ${message}`);
     }
-  }, [hasUnsavedChanges, handleSaveFlow, loadFlow, rfInstance, selectedFlowId, toast, validationErrors.length]);
+  }, [flowDirty, handleSaveFlow, loadFlow, rfInstance, selectedFlowId, toast, validationErrors.length]);
 
   const handleDeactivateFlow = useCallback(async () => {
     const response = await apiFetch('/api/flows/deactivate', {
@@ -1708,17 +1794,17 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
         <button
           type="button"
           className="dash-nav-item"
-          onClick={() => void handleSaveFlow(true)}
-          disabled={isSaving}
-          title={isEditing ? 'Salvar fluxo' : 'Visualização'}
-          style={{ border: 'none', background: 'none', cursor: isSaving ? 'not-allowed' : 'pointer', width: '100%', textAlign: 'left', opacity: isSaving ? 0.6 : 1 }}
+          onClick={() => void handleSaveFlow(false, { showToast: true })}
+          disabled={isSaving || !selectedFlowId}
+          title={isEditing ? 'Salvar alterações' : 'Visualização'}
+          style={{ border: flowDirty ? '1px solid #22c55e' : 'none', background: flowDirty ? '#ecfdf5' : 'none', cursor: isSaving ? 'not-allowed' : 'pointer', width: '100%', textAlign: 'left', opacity: isSaving ? 0.6 : 1 }}
         >
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/>
             <polyline points="17 21 17 13 7 13 7 21"/>
             <polyline points="7 3 7 8 15 8"/>
           </svg>
-          <span className="dash-nav-label">{isSaving ? 'Salvando...' : 'Salvar fluxo'}</span>
+          <span className="dash-nav-label">{saveButtonLabel}</span>
         </button>
 
         <div style={{ marginTop: 'auto' }}>
@@ -1763,8 +1849,8 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
         </div>
       )}
       {toastMessage && (
-        <div style={{ position: 'fixed', right: 24, bottom: 24, background: '#111', color: '#fff', padding: '10px 16px', borderRadius: 10, fontSize: 13, boxShadow: '0 8px 24px rgba(0,0,0,0.2)', zIndex: 60 }}>
-          {toastMessage}
+        <div style={{ position: 'fixed', right: 24, bottom: 24, background: toastMessage.type === 'success' ? '#16a34a' : '#dc2626', color: '#fff', padding: '10px 16px', borderRadius: 10, fontSize: 13, boxShadow: '0 8px 24px rgba(0,0,0,0.2)', zIndex: 60 }}>
+          {toastMessage.message}
         </div>
       )}
       {flowSource === 'fallback' && (
@@ -1777,6 +1863,11 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
           <Link href="/dashboard/flows">Fluxos</Link>
           <span aria-hidden="true">›</span>
           <span>{selectedFlow ? (selectedFlow.name || selectedFlow.id) : 'Selecione um fluxo'}</span>
+          {flowDirty && (
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, color: '#b45309', background: '#fffbeb', border: '1px solid #f59e0b', borderRadius: 999, padding: '3px 9px', fontSize: 12, fontWeight: 600 }}>
+              ● Alterações não salvas
+            </span>
+          )}
           <span aria-hidden="true">›</span>
           <strong>Builder</strong>
         </div>
@@ -1813,6 +1904,9 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
                       <span className="flow-name" style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                         {selectedFlow ? (selectedFlow.name || selectedFlow.id) : (normalizedFlows.length === 0 ? 'Nenhum flow disponível' : 'Selecione um flow')}
                       </span>
+                      {flowDirty && (
+                        <span className="flow-badge" style={{ background: '#FEF3C7', color: '#92400E' }}>● Alterações não salvas</span>
+                      )}
                       {selectedFlow && (() => {
                         const badge = getFlowBadge(selectedFlow);
                         return <span className="flow-badge" style={badge.style}>{badge.label}</span>;
@@ -2062,7 +2156,6 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
             node={selectedNode}
             draft={nodeEditorDraft}
             onDraftChange={handleNodeEditorDraftChange}
-            onSave={saveNodeEditor}
             onClose={closeNodeEditor}
             onUpload={(file, mediaType) => { void uploadEditorMedia(file, mediaType); }}
             isUploading={isMediaUploading}
