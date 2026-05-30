@@ -258,6 +258,45 @@ def _find_execution(
     return query.first()
 
 
+def _resolve_persisted_flow_event_node_id(
+    db: Session,
+    *,
+    tenant_id: uuid.UUID,
+    flow_id: uuid.UUID | None,
+    node_id: uuid.UUID | str | None,
+    metadata_payload: dict[str, Any],
+) -> uuid.UUID | None:
+    coerced_node_id = _coerce_uuid(node_id)
+    if not coerced_node_id:
+        return None
+    if not flow_id:
+        metadata_payload.setdefault("runtime_node_id", str(coerced_node_id))
+        metadata_payload.setdefault("node_id_unpersisted", True)
+        return None
+
+    persisted_node = (
+        db.query(FlowNode.id)
+        .filter(
+            FlowNode.id == coerced_node_id,
+            FlowNode.tenant_id == tenant_id,
+            FlowNode.flow_id == flow_id,
+        )
+        .first()
+    )
+    if persisted_node:
+        return coerced_node_id
+
+    metadata_payload.setdefault("runtime_node_id", str(coerced_node_id))
+    metadata_payload.setdefault("node_id_unpersisted", True)
+    logger.warning(
+        "event=flow_event_node_unpersisted flow_id=%s tenant_id=%s runtime_node_id=%s",
+        flow_id,
+        tenant_id,
+        coerced_node_id,
+    )
+    return None
+
+
 def record_flow_event(
     db: Session,
     *,
@@ -275,7 +314,14 @@ def record_flow_event(
         return
     normalized_type = _normalize_event_type(event_type)
     node_text = str(node_id) if node_id else None
-    metadata_payload = metadata or {}
+    metadata_payload = dict(metadata or {})
+    persisted_node_id = _resolve_persisted_flow_event_node_id(
+        db,
+        tenant_id=tenant_id,
+        flow_id=flow_id,
+        node_id=node_id,
+        metadata_payload=metadata_payload,
+    )
 
     db.add(
         FlowEvent(
@@ -283,7 +329,7 @@ def record_flow_event(
             conversation_id=conversation_id,
             flow_id=flow_id,
             flow_version_id=flow_version_id,
-            node_id=_coerce_uuid(node_id),
+            node_id=persisted_node_id,
             event_type=normalized_type,
             user_id=user_id,
             metadata_json=metadata_payload,
