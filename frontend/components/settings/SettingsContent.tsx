@@ -20,7 +20,7 @@ const whatsappTabs = [{ id: 'overview', label: 'Visão Geral', icon: Layers3 }, 
 const roleLabels: Record<string, string> = { owner: 'Administrador', admin: 'Admin', member: 'Membro', analyst: 'Analista', viewer: 'Leitura' };
 
 export default function SettingsContent({ activeTab }: { activeTab: SettingsTabId | AccountTabId }) {
-  if (activeTab === 'apikeys' || activeTab === 'whatsapp-business') return <WhatsAppBusinessConsole />;
+  if (activeTab === 'whatsapp-business') return <WhatsAppBusinessConsole />;
   if (activeTab === 'pipeline') return <PipelineSettingsTab />;
   if (activeTab === 'profile') return <ProfileTab />;
   if (activeTab === 'preferences') return <PreferencesTab />;
