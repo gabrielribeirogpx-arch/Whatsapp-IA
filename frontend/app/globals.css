@@ -97,6 +97,44 @@ input {
 }
 
 
+.flow-builder-breadcrumb {
+  position: absolute;
+  top: 14px;
+  left: 24px;
+  right: 24px;
+  z-index: 18;
+  display: flex;
+  min-width: 0;
+  max-width: calc(100% - 48px);
+  align-items: center;
+  gap: 8px;
+  overflow: hidden;
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.2;
+  pointer-events: auto;
+}
+
+.flow-builder-breadcrumb a {
+  color: #16a34a;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.flow-builder-breadcrumb span,
+.flow-builder-breadcrumb strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.flow-builder-breadcrumb strong {
+  color: #0f172a;
+  font-weight: 700;
+}
+
+
 /* ── FLOW SIDEBAR BUTTON ───────────────────────────── */
 .flow-sidebar-button {
   display: inline-flex;
@@ -1714,7 +1752,7 @@ input {
 
 .flow-builder-top-actions {
   position: absolute;
-  top: 14px;
+  top: 38px;
   right: 24px;
   left: 96px;
   z-index: 12;
@@ -1980,8 +2018,15 @@ input {
 }
 
 @media (max-width: 900px) {
+  .flow-builder-breadcrumb {
+    top: 8px;
+    left: 12px;
+    right: 12px;
+    max-width: calc(100% - 24px);
+  }
+
   .flow-builder-top-actions {
-    top: 10px;
+    top: 34px;
     left: 72px;
     right: 12px;
   }

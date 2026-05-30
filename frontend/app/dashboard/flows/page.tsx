@@ -110,7 +110,7 @@ export default function FlowsPage() {
       if (editingFlow) {
         const result = await updateFlow(editingFlow.id, payload);
         if (!result.ok || !result.data) {
-          showToast(`Não foi possível salvar o flow (HTTP ${result.status}).`);
+          showToast(`Não foi possível salvar o fluxo (HTTP ${result.status}).`);
           return;
         }
         const responseFlow = result.data;
@@ -135,17 +135,17 @@ export default function FlowsPage() {
     } catch (error) {
       const status = parseHttpStatus(error);
       logFlowOperationError({ method: editingFlow ? 'PUT' : 'POST', endpoint: editingFlow ? `/api/flows/${editingFlow.id}` : '/api/flows', error });
-      showToast(`Não foi possível salvar o flow${status ? ` (HTTP ${status})` : ''}.`);
+      showToast(`Não foi possível salvar o fluxo${status ? ` (HTTP ${status})` : ''}.`);
       return;
     }
-    showToast(editingFlow ? "Flow atualizado com sucesso." : "Flow criado com sucesso.");
+    showToast(editingFlow ? "Fluxo atualizado com sucesso." : "Fluxo criado com sucesso.");
     setIsOpen(false);
   };
 
   const onDelete = async (flowId: string) => {
     try {
       const response = await deleteFlow(flowId);
-      showToast(response.success && response.mode === 'soft_delete' ? 'Flow em uso, removido da visualização' : 'Flow deletado com sucesso');
+      showToast(response.success && response.mode === 'soft_delete' ? 'Fluxo em uso, removido da visualização' : 'Fluxo deletado com sucesso');
       await loadFlows();
     } catch (error) {
       showToast(`Não foi possível deletar${parseHttpStatus(error) ? ` (HTTP ${parseHttpStatus(error)})` : ''}.`);
@@ -153,8 +153,8 @@ export default function FlowsPage() {
   };
 
   const onDuplicate = async (flowId: string) => {
-    try { await duplicateFlow(flowId); showToast('Flow duplicado!'); await loadFlows(); }
-    catch { showToast('Erro ao duplicar flow.'); }
+    try { await duplicateFlow(flowId); showToast('Fluxo duplicado!'); await loadFlows(); }
+    catch { showToast('Erro ao duplicar fluxo.'); }
   };
 
   const updateLocalState = (flowId: string, newStatus: 'active' | 'inactive') => {
@@ -223,8 +223,8 @@ export default function FlowsPage() {
       {/* Header */}
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h1 className="m-0 text-[22px] font-semibold tracking-[-0.02em] text-slate-900">Automações</h1>
-          <p className="mt-1 text-sm text-slate-500">Gerencie fluxos de conversação e gatilhos</p>
+          <h1 className="m-0 text-[22px] font-semibold tracking-[-0.02em] text-slate-900">Fluxos</h1>
+          <p className="mt-1 text-sm text-slate-500">Gerencie a listagem, o builder e os analytics dos fluxos</p>
         </div>
         <button
           onClick={openCreate}
