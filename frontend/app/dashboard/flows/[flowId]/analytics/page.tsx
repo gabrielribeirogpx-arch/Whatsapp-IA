@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import { BarChart3, Funnel, GitBranch, MessageSquareText, TrendingUp } from 'lucide-react';
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
@@ -97,8 +98,14 @@ export default function Page({ params }: Props) {
             <BarChart3 size={16} />
           </div>
           <div>
-            <h1 className='page-title'>Analytics do Flow <span className={`status-badge ${flowStatus}`}>{flowStatus === 'active' ? 'Ativo' : flowStatus === 'draft' ? 'Draft' : 'Inativo'}</span></h1>
-            <p className='breadcrumb'>Flows &gt; <span>{data?.flow_name || 'Flow'}</span></p>
+            <h1 className='page-title'>Analytics do fluxo <span className={`status-badge ${flowStatus}`}>{flowStatus === 'active' ? 'Ativo' : flowStatus === 'draft' ? 'Rascunho' : 'Inativo'}</span></h1>
+            <nav className='breadcrumb' aria-label='Breadcrumb'>
+              <Link href='/dashboard/flows'>Fluxos</Link>
+              <span aria-hidden='true'>›</span>
+              <span>{data?.flow_name || 'Fluxo'}</span>
+              <span aria-hidden='true'>›</span>
+              <strong>Analytics</strong>
+            </nav>
           </div>
         </div>
 
@@ -144,13 +151,13 @@ export default function Page({ params }: Props) {
           <span className='info-icon' aria-hidden>
             ℹ️
           </span>
-          <span>Ainda não há dados suficientes. Assim que usuários passarem por este flow, os analytics aparecerão aqui.</span>
+          <span>Ainda não há dados suficientes. Assim que usuários passarem por este fluxo, os analytics aparecerão aqui.</span>
         </div>
       )}
 
       <div className='main-grid'>
         <div className='card card-soft'>
-          <h3 className='section-title'><Funnel size={18} />Funil do Flow</h3>
+          <h3 className='section-title'><Funnel size={18} />Funil do fluxo</h3>
           {(data?.funnel ?? []).length === 0 ? (
             <div className='funnel-empty'>
               <svg viewBox='0 0 320 180' className='funnel-illustration' aria-hidden>
@@ -170,7 +177,7 @@ export default function Page({ params }: Props) {
               </svg>
               <div>
                 <h4>Sem dados ainda</h4>
-                <p className='secondary-text'>O funil será exibido assim que houver movimentação de usuários neste flow.</p>
+                <p className='secondary-text'>O funil será exibido assim que houver movimentação de usuários neste fluxo.</p>
               </div>
             </div>
           ) : (
@@ -321,8 +328,14 @@ export default function Page({ params }: Props) {
         }
         .breadcrumb {
           margin: 4px 0 0;
+          display: flex;
+          flex-wrap: wrap;
+          gap: 8px;
+          align-items: center;
         }
+        .breadcrumb a { color: #16a34a; font-weight: 700; text-decoration: none; }
         .breadcrumb span { color: #16a34a; font-weight: 600; }
+        .breadcrumb strong { color: #0f172a; font-weight: 700; }
         .period-label {
           font-weight: 600;
         }

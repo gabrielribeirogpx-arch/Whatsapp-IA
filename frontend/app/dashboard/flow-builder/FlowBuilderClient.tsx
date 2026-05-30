@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import ReactFlow, {
   addEdge,
@@ -1326,12 +1327,22 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
 
         <div style={{ marginTop: 'auto' }}>
           <div className="dash-nav-divider" />
-          <a href="/dashboard" className="dash-nav-item" title="Dashboard" style={{ textDecoration: 'none' }}>
+          <Link href="/dashboard/flows" className="dash-nav-item active" title="Lista de fluxos" style={{ textDecoration: 'none' }}>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <polyline points="15 18 9 12 15 6"/>
             </svg>
-            <span className="dash-nav-label">Voltar</span>
-          </a>
+            <span className="dash-nav-label">Fluxos</span>
+          </Link>
+          {selectedFlowId && (
+            <Link href={`/dashboard/flows/${selectedFlowId}/analytics`} className="dash-nav-item" title="Analytics do fluxo" style={{ textDecoration: 'none' }}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="18" y1="20" x2="18" y2="10"/>
+                <line x1="12" y1="20" x2="12" y2="4"/>
+                <line x1="6" y1="20" x2="6" y2="14"/>
+              </svg>
+              <span className="dash-nav-label">Analytics</span>
+            </Link>
+          )}
         </div>
       </nav>
 
@@ -1366,6 +1377,13 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
         </div>
       )}
       <main style={{ flex: 1, background: '#F7F7F5', position: 'relative', minWidth: 0 }}>
+        <div className="flow-builder-breadcrumb" aria-label="Breadcrumb">
+          <Link href="/dashboard/flows">Fluxos</Link>
+          <span aria-hidden="true">›</span>
+          <span>{selectedFlow ? (selectedFlow.name || selectedFlow.id) : 'Selecione um fluxo'}</span>
+          <span aria-hidden="true">›</span>
+          <strong>Builder</strong>
+        </div>
         <div className="flow-builder-top-actions">
           {normalizedFlows.length === 0 && (
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
