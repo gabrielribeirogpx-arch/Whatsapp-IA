@@ -148,7 +148,7 @@ def test_meta_provider_create_succeeds_after_hidden_provider_phone_release():
         metadata_json={
             "previous_phone_number_id": "876969468828520",
             "hidden_provider": True,
-            "remediation": "20260601_release_hidden_provider_phone",
+            "remediation": "20260601_release_hidden_phone",
         },
     )
     db.add(hidden_provider)

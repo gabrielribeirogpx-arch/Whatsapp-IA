@@ -1,6 +1,6 @@
 """whatsapp campaigns runtime
 
-Revision ID: 20260511_whatsapp_campaigns_runtime
+Revision ID: 20260511_wa_campaign_runtime
 Revises: 20260510_whatsapp_business
 Create Date: 2026-05-11
 """
@@ -9,7 +9,7 @@ from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
-revision = "20260511_whatsapp_campaigns_runtime"
+revision = "20260511_wa_campaign_runtime"
 down_revision = "20260510_whatsapp_business"
 branch_labels = None
 depends_on = None

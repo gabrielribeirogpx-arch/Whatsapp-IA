@@ -1,7 +1,7 @@
 """saas flow engine core tables
 
 Revision ID: 20260430_saas_flow_engine_core
-Revises: 20260430_flow_guardrails_and_backups
+Revises: 20260430_flow_guard_backups
 Create Date: 2026-04-30
 """
 
@@ -10,7 +10,7 @@ import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
 revision = "20260430_saas_flow_engine_core"
-down_revision = "20260430_flow_guardrails_and_backups"
+down_revision = "20260430_flow_guard_backups"
 branch_labels = None
 depends_on = None
 

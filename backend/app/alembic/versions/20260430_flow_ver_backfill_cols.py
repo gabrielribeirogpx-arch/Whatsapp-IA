@@ -1,15 +1,15 @@
 """ensure flow_versions tenant_id and snapshot columns exist safely
 
-Revision ID: 20260430_flow_versions_backfill_columns_safe
-Revises: 20260430_flow_guardrails_and_backups
+Revision ID: 20260430_flow_ver_backfill_cols
+Revises: 20260430_flow_guard_backups
 Create Date: 2026-04-30
 """
 
 from alembic import op
 
 
-revision = "20260430_flow_versions_backfill_columns_safe"
-down_revision = "20260430_flow_guardrails_and_backups"
+revision = "20260430_flow_ver_backfill_cols"
+down_revision = "20260430_flow_guard_backups"
 branch_labels = None
 depends_on = None
 

@@ -1,21 +1,21 @@
 """release hidden WhatsApp phone number provider lock
 
-Revision ID: 20260601_release_hidden_provider_phone
-Revises: 20260529_flow_exec_analytics
+Revision ID: 20260601_release_hidden_phone
+Revises: 20260530_whatsapp_phone_owner
 Create Date: 2026-06-01
 """
 from alembic import op
 import sqlalchemy as sa
 
-revision = "20260601_release_hidden_provider_phone"
-down_revision = "20260529_flow_exec_analytics"
+revision = "20260601_release_hidden_phone"
+down_revision = "20260530_whatsapp_phone_owner"
 branch_labels = None
 depends_on = None
 
 TARGET_PHONE_NUMBER_ID = "876969468828520"
 HIDDEN_PROVIDER_ID = "bb2848cc-782f-4f59-a2b7-8860d3c9bc61"
 HIDDEN_PROVIDER_TENANT_ID = "b0c1a7d5-587b-476f-89d1-5596c02dad5d"
-REMEDIATION_ID = "20260601_release_hidden_provider_phone"
+REMEDIATION_ID = "20260601_release_hidden_phone"
 OWNERSHIP_MIGRATION_ID = "20260530_whatsapp_phone_owner"
 
 

@@ -1,13 +1,13 @@
 """force contacts columns
 
 Revision ID: 20260512_force_contacts_columns
-Revises: 20260512_fix_contacts_missing_columns
+Revises: 20260512_fix_contacts_cols
 """
 
 from alembic import op
 
 revision = "20260512_force_contacts_columns"
-down_revision = "20260512_fix_contacts_missing_columns"
+down_revision = "20260512_fix_contacts_cols"
 branch_labels = None
 depends_on = None
 

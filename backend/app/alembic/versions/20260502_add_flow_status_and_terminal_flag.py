@@ -1,7 +1,7 @@
 """add flow status and terminal flag
 
-Revision ID: 20260502_add_flow_status_terminal
-Revises: 20260430_add_fields_to_flow_sessions
+Revision ID: 20260502_flow_status_terminal
+Revises: 20260430_flow_sessions_fields
 Create Date: 2026-05-02
 """
 
@@ -9,8 +9,8 @@ from alembic import op
 import sqlalchemy as sa
 
 
-revision = "20260502_add_flow_status_terminal"
-down_revision = "20260430_add_fields_to_flow_sessions"
+revision = "20260502_flow_status_terminal"
+down_revision = "20260430_flow_sessions_fields"
 branch_labels = None
 depends_on = None
 

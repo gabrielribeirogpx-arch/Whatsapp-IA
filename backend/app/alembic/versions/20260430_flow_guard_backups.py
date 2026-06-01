@@ -1,7 +1,7 @@
 """flow guardrails and backup columns
 
-Revision ID: 20260430_flow_guardrails_and_backups
-Revises: 20260430_flow_sessions_state
+Revision ID: 20260430_flow_guard_backups
+Revises: 20260430_flow_sessions_fields
 Create Date: 2026-04-30
 """
 
@@ -11,8 +11,8 @@ from sqlalchemy.dialects import postgresql
 
 
 # revision identifiers, used by Alembic.
-revision = "20260430_flow_guardrails_and_backups"
-down_revision = "20260430_flow_sessions_state"
+revision = "20260430_flow_guard_backups"
+down_revision = "20260430_flow_sessions_fields"
 branch_labels = None
 depends_on = None
 

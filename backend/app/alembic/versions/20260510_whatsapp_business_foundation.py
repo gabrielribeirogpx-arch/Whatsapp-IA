@@ -1,7 +1,7 @@
 """whatsapp business foundation
 
 Revision ID: 20260510_whatsapp_business
-Revises: 20260510_conversations_current_node_runtime_obsolete
+Revises: 20260510_conv_node_runtime
 Create Date: 2026-05-10
 """
 
@@ -10,7 +10,7 @@ import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
 revision = '20260510_whatsapp_business'
-down_revision = '20260510_conversations_current_node_runtime_obsolete'
+down_revision = '20260510_conv_node_runtime'
 branch_labels = None
 depends_on = None
 

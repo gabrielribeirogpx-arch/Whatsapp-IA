@@ -1,14 +1,14 @@
 """tenant performance and idempotency hardening
 
 Revision ID: 20260505_tenant_perf_idempotency
-Revises: 20260502_add_flow_status_terminal
+Revises: 20260502_flow_status_terminal
 Create Date: 2026-05-05
 """
 
 from alembic import op
 
 revision = "20260505_tenant_perf_idempotency"
-down_revision = "20260502_add_flow_status_terminal"
+down_revision = "20260502_flow_status_terminal"
 branch_labels = None
 depends_on = None
 

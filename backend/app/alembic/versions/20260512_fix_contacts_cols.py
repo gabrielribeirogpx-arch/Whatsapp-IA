@@ -1,6 +1,6 @@
 """fix missing contacts columns in production
 
-Revision ID: 20260512_fix_contacts_missing_columns
+Revision ID: 20260512_fix_contacts_cols
 Revises: 20260512_contacts_campaign_base
 """
 
@@ -8,7 +8,7 @@ from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
-revision = "20260512_fix_contacts_missing_columns"
+revision = "20260512_fix_contacts_cols"
 down_revision = "20260512_contacts_campaign_base"
 branch_labels = None
 depends_on = None
