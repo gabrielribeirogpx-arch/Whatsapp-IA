@@ -13,6 +13,43 @@ FINAL_COMPLETION_STATUSES = {"completed", "abandoned", "conversion", "expired"}
 ALLOWED_NULL_CURRENT_NODE_REASONS = {"flow_finished", "terminal_node", "no_outgoing_edge", "manual_reset"}
 
 
+def _context_flow_current_node_id(context: dict[str, Any] | None) -> Any:
+    return context.get("flow_current_node_id") if isinstance(context, dict) else None
+
+
+def _log_session_node(
+    phase: str,
+    *,
+    session: FlowSession | None,
+    current_node_id: Any = None,
+    flow_current_node_id: Any = None,
+    executed_node_id: Any = None,
+    next_node_id: Any = None,
+    status: Any = None,
+    reason: str | None = None,
+) -> None:
+    resolved_current_node_id = (
+        current_node_id
+        if current_node_id is not None
+        else getattr(session, "current_node_id", None)
+    )
+    resolved_flow_current_node_id = (
+        flow_current_node_id
+        if flow_current_node_id is not None
+        else _context_flow_current_node_id(getattr(session, "context", None))
+    )
+    print(
+        f"[SESSION NODE {phase}] "
+        f"session_id={getattr(session, 'id', None)} "
+        f"current_node_id={resolved_current_node_id} "
+        f"flow_current_node_id={resolved_flow_current_node_id} "
+        f"node_id_executado={executed_node_id} "
+        f"next_node_id={next_node_id} "
+        f"status={status if status is not None else getattr(session, 'status', None)} "
+        f"reason={reason or ''}"
+    )
+
+
 class FlowSessionService:
     def __init__(self, db):
         self.db = db
@@ -23,8 +60,18 @@ class FlowSessionService:
             conversation_id=conversation_id,
         ).first()
 
-        logger_payload = {"tenant_id": str(tenant_id), "user_identifier": user_identifier, "flow_id": str(flow.id)}
-        print(f"[FLOW SESSION SAVE] {logger_payload} current_node_id={current_node_id}")
+        print(
+            f"[FLOW SESSION GET_OR_CREATE] flow_id={flow_id} "
+            f"conversation_id={conversation_id} found={bool(session)} "
+            f"current_node_id={getattr(session, 'current_node_id', None)}"
+        )
+        _log_session_node(
+            "BEFORE",
+            session=session,
+            executed_node_id=None,
+            next_node_id=getattr(session, "current_node_id", None),
+            reason="get_or_create_session",
+        )
         if not session:
             session = FlowSession(
                 flow_id=flow_id,
@@ -33,8 +80,30 @@ class FlowSessionService:
                 context={},
             )
             self.db.add(session)
+            _log_session_node(
+                "AFTER",
+                session=session,
+                executed_node_id=None,
+                next_node_id=session.current_node_id,
+                reason="get_or_create_session",
+            )
             self.db.commit()
             self.db.refresh(session)
+            _log_session_node(
+                "PERSIST",
+                session=session,
+                executed_node_id=None,
+                next_node_id=session.current_node_id,
+                reason="get_or_create_session",
+            )
+        else:
+            _log_session_node(
+                "AFTER",
+                session=session,
+                executed_node_id=None,
+                next_node_id=session.current_node_id,
+                reason="get_or_create_session",
+            )
 
         return session
 
@@ -115,7 +184,19 @@ class FlowSessionService:
             .first()
         )
 
-    def save_runtime_session(self, *, tenant_id, user_identifier: str, flow: Flow, current_node_id, status: str = "running", context: dict[str, Any] | None = None, variables: dict[str, Any] | None = None) -> FlowSession:
+    def save_runtime_session(
+        self,
+        *,
+        tenant_id,
+        user_identifier: str,
+        flow: Flow,
+        current_node_id,
+        status: str = "running",
+        context: dict[str, Any] | None = None,
+        variables: dict[str, Any] | None = None,
+        executed_node_id: Any = None,
+        next_node_id: Any = None,
+    ) -> FlowSession:
         session = (
             self.db.query(FlowSession)
             .filter(
@@ -128,6 +209,16 @@ class FlowSessionService:
         )
         logger_payload = {"tenant_id": str(tenant_id), "user_identifier": user_identifier, "flow_id": str(flow.id)}
         print(f"[FLOW SESSION SAVE] {logger_payload} current_node_id={current_node_id}")
+        requested_next_node_id = next_node_id if next_node_id is not None else current_node_id
+        _log_session_node(
+            "BEFORE",
+            session=session,
+            flow_current_node_id=_context_flow_current_node_id(context),
+            executed_node_id=executed_node_id,
+            next_node_id=requested_next_node_id,
+            status=status,
+            reason="save_runtime_session",
+        )
         safe_current_node_id = str(current_node_id) if current_node_id else None
         if (
             session
@@ -179,10 +270,26 @@ class FlowSessionService:
                 "[SESSION CURRENT_NODE AFTER UPDATE] "
                 f"session_id={session.id} current_node_id={session.current_node_id}"
             )
+        _log_session_node(
+            "AFTER",
+            session=session,
+            flow_current_node_id=_context_flow_current_node_id(context if context is not None else getattr(session, "context", None)),
+            executed_node_id=executed_node_id,
+            next_node_id=requested_next_node_id,
+            status=status,
+            reason="save_runtime_session",
+        )
         self.db.add(session)
         self.db.commit()
         self.db.refresh(session)
         print(f"[FLOW SESSION COMMIT] session_id={session.id} current_node_id={session.current_node_id}")
+        _log_session_node(
+            "PERSIST",
+            session=session,
+            executed_node_id=executed_node_id,
+            next_node_id=requested_next_node_id,
+            reason="save_runtime_session",
+        )
         print(
             "[FLOW SESSION SAVE OK] "
             f"current_node_id={session.current_node_id} "
@@ -203,9 +310,26 @@ class FlowSessionService:
         )
         for session in sessions:
             session.status = "expired"
+            _log_session_node(
+                "BEFORE",
+                session=session,
+                executed_node_id=session.current_node_id,
+                next_node_id=None,
+                status=session.status,
+                reason=reason or "manual_reset",
+            )
             session.current_node_id = self.safe_update_current_node(
                 session=session,
                 next_node_id=None,
+                reason=reason or "manual_reset",
+                graph_context={"executed_node_id": session.current_node_id},
+            )
+            _log_session_node(
+                "AFTER",
+                session=session,
+                executed_node_id=session.current_node_id,
+                next_node_id=None,
+                status=session.status,
                 reason=reason or "manual_reset",
             )
             if reason:
@@ -213,11 +337,37 @@ class FlowSessionService:
                 metadata["abandon_reason"] = reason
                 session.variables = metadata
         self.db.commit()
+        for session in sessions:
+            _log_session_node(
+                "PERSIST",
+                session=session,
+                executed_node_id=session.current_node_id,
+                next_node_id=None,
+                reason=reason or "manual_reset",
+            )
         print(f"[SESSION RESET] reason={reason} tenant_id={tenant_id} user={user_identifier} count={len(sessions)}")
 
-    def update_session(self, session: FlowSession, node_id: str | None, context: dict | None = None, status: str | None = None) -> None:
+    def update_session(
+        self,
+        session: FlowSession,
+        node_id: str | None,
+        context: dict | None = None,
+        status: str | None = None,
+        executed_node_id: Any = None,
+        next_node_id: Any = None,
+    ) -> None:
         next_status = str(status or session.status or "").lower()
         safe_node_id = node_id
+        requested_next_node_id = next_node_id if next_node_id is not None else node_id
+        _log_session_node(
+            "BEFORE",
+            session=session,
+            flow_current_node_id=_context_flow_current_node_id(context),
+            executed_node_id=executed_node_id,
+            next_node_id=requested_next_node_id,
+            status=next_status,
+            reason="update_session",
+        )
         print(
             "[SESSION CURRENT_NODE BEFORE UPDATE] "
             f"session_id={session.id} current_node_id={session.current_node_id} requested_current_node_id={node_id} status={next_status}"
@@ -245,11 +395,27 @@ class FlowSessionService:
         if status:
             session.status = status
 
+        _log_session_node(
+            "AFTER",
+            session=session,
+            flow_current_node_id=_context_flow_current_node_id(context if context is not None else getattr(session, "context", None)),
+            executed_node_id=executed_node_id,
+            next_node_id=requested_next_node_id,
+            status=session.status,
+            reason="update_session",
+        )
         self.db.commit()
         self.db.refresh(session)
         print(
             "[SESSION CURRENT_NODE AFTER UPDATE] "
             f"session_id={session.id} current_node_id={session.current_node_id} status={session.status}"
+        )
+        _log_session_node(
+            "PERSIST",
+            session=session,
+            executed_node_id=executed_node_id,
+            next_node_id=requested_next_node_id,
+            reason="update_session",
         )
 
     def reset_runtime_state_for_user_flow(self, *, tenant_id, user_identifier: str, flow_id) -> tuple[int, list]:
@@ -266,14 +432,39 @@ class FlowSessionService:
         for session in sessions:
             session_ids.append(session.id)
             session.status = "completed"
+            _log_session_node(
+                "BEFORE",
+                session=session,
+                executed_node_id=session.current_node_id,
+                next_node_id=None,
+                status=session.status,
+                reason="reset_runtime_state_for_user_flow",
+            )
             session.current_node_id = self.safe_update_current_node(
                 session=session,
                 next_node_id=None,
                 reason="manual_reset",
+                graph_context={"executed_node_id": session.current_node_id},
             )
             session.context = {}
             session.variables = {}
+            _log_session_node(
+                "AFTER",
+                session=session,
+                executed_node_id=session.current_node_id,
+                next_node_id=None,
+                status=session.status,
+                reason="reset_runtime_state_for_user_flow",
+            )
         self.db.commit()
+        for session in sessions:
+            _log_session_node(
+                "PERSIST",
+                session=session,
+                executed_node_id=session.current_node_id,
+                next_node_id=None,
+                reason="reset_runtime_state_for_user_flow",
+            )
         return len(sessions), session_ids
 
     def safe_update_current_node(self, session: FlowSession, next_node_id, reason: str, graph_context: dict[str, Any] | None = None) -> str | None:
@@ -281,6 +472,14 @@ class FlowSessionService:
         previous_node_id = getattr(session, "current_node_id", None)
         safe_next_node_id = str(next_node_id) if next_node_id else None
         reason_slug = str(reason or "").strip().lower()
+        _log_session_node(
+            "BEFORE",
+            session=session,
+            executed_node_id=(graph_context or {}).get("executed_node_id"),
+            next_node_id=safe_next_node_id,
+            status=current_status,
+            reason=f"safe_update_current_node:{reason_slug}",
+        )
         print(
             "[SESSION CURRENT_NODE BEFORE UPDATE] "
             f"session_id={getattr(session, 'id', None)} previous_current_node_id={previous_node_id} "
@@ -300,6 +499,15 @@ class FlowSessionService:
         print(
             "[SESSION CURRENT_NODE AFTER UPDATE] "
             f"session_id={getattr(session, 'id', None)} current_node_id={safe_next_node_id} reason={reason_slug}"
+        )
+        _log_session_node(
+            "AFTER",
+            session=session,
+            current_node_id=safe_next_node_id,
+            executed_node_id=(graph_context or {}).get("executed_node_id"),
+            next_node_id=safe_next_node_id,
+            status=current_status,
+            reason=f"safe_update_current_node:{reason_slug}",
         )
         return safe_next_node_id
 

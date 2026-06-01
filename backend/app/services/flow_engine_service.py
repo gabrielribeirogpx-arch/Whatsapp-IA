@@ -1836,6 +1836,33 @@ def _is_wait_node_type(node_type: str) -> bool:
 
 
 
+
+
+def _log_session_node_transition(
+    phase: str,
+    *,
+    flow_session: FlowSession | None,
+    conversation: Conversation | None = None,
+    executed_node_id: Any = None,
+    next_node_id: Any = None,
+    current_node_id: Any = None,
+    reason: str | None = None,
+) -> None:
+    context = getattr(conversation, "context", None)
+    flow_current_node_id = context.get("flow_current_node_id") if isinstance(context, dict) else None
+    logger.info(
+        "[SESSION NODE %s] session_id=%s current_node_id=%s flow_current_node_id=%s "
+        "node_id_executado=%s next_node_id=%s status=%s reason=%s",
+        phase,
+        getattr(flow_session, "id", None),
+        current_node_id if current_node_id is not None else getattr(flow_session, "current_node_id", None),
+        flow_current_node_id,
+        executed_node_id,
+        next_node_id,
+        getattr(flow_session, "status", None),
+        reason or "",
+    )
+
 def _finalize_runtime_flow_session(db: Session, conversation: Conversation, flow_session: FlowSession | None, end_node_id: Any) -> None:
     logger.info(
         "[SESSION FINALIZE CALL] session_id=%s flow_id=%s current_node_id=%s end_node_id=%s",
@@ -1850,6 +1877,14 @@ def _finalize_runtime_flow_session(db: Session, conversation: Conversation, flow
         getattr(conversation, "id", None),
     )
     logger.info("[SESSION FINALIZE STACK] %s", " | ".join(traceback.format_stack(limit=12)))
+    _log_session_node_transition(
+        "BEFORE",
+        flow_session=flow_session,
+        conversation=conversation,
+        executed_node_id=end_node_id,
+        next_node_id=None,
+        reason="finalize_runtime_flow_session",
+    )
     if flow_session:
         end_node_uuid = _parse_uuid(end_node_id)
         _emit_runtime_event(
@@ -1880,7 +1915,10 @@ def _finalize_runtime_flow_session(db: Session, conversation: Conversation, flow
             session=flow_session,
             next_node_id=None,
             reason="flow_finished",
-            graph_context={"end_node_id": str(end_node_id) if end_node_id else None},
+            graph_context={
+                "end_node_id": str(end_node_id) if end_node_id else None,
+                "executed_node_id": str(end_node_id) if end_node_id else None,
+            },
         )
         if hasattr(flow_session, "completed_at"):
             setattr(flow_session, "completed_at", datetime.utcnow())
@@ -1902,8 +1940,24 @@ def _finalize_runtime_flow_session(db: Session, conversation: Conversation, flow
         conversation.context["flow_current_node_id"] = None
 
     conversation.current_node_id = None
+    _log_session_node_transition(
+        "AFTER",
+        flow_session=flow_session,
+        conversation=conversation,
+        executed_node_id=end_node_id,
+        next_node_id=None,
+        reason="finalize_runtime_flow_session",
+    )
     db.add(conversation)
     db.commit()
+    _log_session_node_transition(
+        "PERSIST",
+        flow_session=flow_session,
+        conversation=conversation,
+        executed_node_id=end_node_id,
+        next_node_id=None,
+        reason="finalize_runtime_flow_session",
+    )
     if flow_session:
         redis_client = get_redis_client()
         for entry in redis_client.zrange(DELAY_ZSET_KEY, 0, -1):
@@ -2031,10 +2085,39 @@ def run_until_wait_node(
             body_text = str(node_data.get("body_text") or node_data.get("content") or "").strip()
             if tenant and phone and body_text and buttons:
                 _send_flow_interactive_buttons(tenant=tenant, phone=phone, text=body_text, buttons=buttons, flow_id=flow.id, flow_version_id=getattr(flow_session, "flow_version_id", None), session_id=session.id, node_id=current_node_uuid)
+            _log_session_node_transition(
+                "BEFORE",
+                flow_session=flow_session,
+                conversation=session,
+                executed_node_id=_node_get(node, "id"),
+                next_node_id=current_node_uuid,
+                reason="buttons_waiting_input",
+            )
             if flow_session:
-                flow_session.current_node_id = session_service.safe_update_current_node(session=flow_session, next_node_id=current_node_uuid, reason="buttons_waiting_input")
+                flow_session.current_node_id = session_service.safe_update_current_node(
+                    session=flow_session,
+                    next_node_id=current_node_uuid,
+                    reason="buttons_waiting_input",
+                    graph_context={"executed_node_id": str(_node_get(node, "id")) if _node_get(node, "id") else None},
+                )
                 db.add(flow_session)
+            _log_session_node_transition(
+                "AFTER",
+                flow_session=flow_session,
+                conversation=session,
+                executed_node_id=_node_get(node, "id"),
+                next_node_id=current_node_uuid,
+                reason="buttons_waiting_input",
+            )
             db.commit()
+            _log_session_node_transition(
+                "PERSIST",
+                flow_session=flow_session,
+                conversation=session,
+                executed_node_id=_node_get(node, "id"),
+                next_node_id=current_node_uuid,
+                reason="buttons_waiting_input",
+            )
             return node
 
         if node_type in {"list", "list_node"}:
@@ -2079,31 +2162,85 @@ def run_until_wait_node(
             body_text = str(node_data.get("body_text") or node_data.get("content") or "").strip()
             if phone and body_text and sections:
                 send_whatsapp_list_cloud(phone, body_text, sections, tenant_id=str(session.tenant_id))
+            _log_session_node_transition(
+                "BEFORE",
+                flow_session=flow_session,
+                conversation=session,
+                executed_node_id=_node_get(node, "id"),
+                next_node_id=current_node_uuid,
+                reason="list_waiting_input",
+            )
             if flow_session:
-                flow_session.current_node_id = session_service.safe_update_current_node(session=flow_session, next_node_id=current_node_uuid, reason="list_waiting_input")
+                flow_session.current_node_id = session_service.safe_update_current_node(
+                    session=flow_session,
+                    next_node_id=current_node_uuid,
+                    reason="list_waiting_input",
+                    graph_context={"executed_node_id": str(_node_get(node, "id")) if _node_get(node, "id") else None},
+                )
                 db.add(flow_session)
+            _log_session_node_transition(
+                "AFTER",
+                flow_session=flow_session,
+                conversation=session,
+                executed_node_id=_node_get(node, "id"),
+                next_node_id=current_node_uuid,
+                reason="list_waiting_input",
+            )
             db.commit()
+            _log_session_node_transition(
+                "PERSIST",
+                flow_session=flow_session,
+                conversation=session,
+                executed_node_id=_node_get(node, "id"),
+                next_node_id=current_node_uuid,
+                reason="list_waiting_input",
+            )
             return node
 
         if node_type == "condition":
             if not normalized_input:
                 target_node_id = _parse_uuid(_node_get(node, "id"))
+                _log_session_node_transition(
+                    "BEFORE",
+                    flow_session=flow_session,
+                    conversation=session,
+                    executed_node_id=_node_get(node, "id"),
+                    next_node_id=target_node_id,
+                    reason="continue_condition_waiting_input",
+                )
                 if flow_session:
                     flow_session.current_node_id = session_service.safe_update_current_node(
                         session=flow_session,
                         next_node_id=target_node_id,
                         reason="continue_condition_waiting_input",
+                        graph_context={"executed_node_id": str(_node_get(node, "id")) if _node_get(node, "id") else None},
                     )
                     flow_session.last_input = incoming_text
                     db.add(flow_session)
                 if isinstance(session.context, dict):
                     session.context["flow_current_node_id"] = str(target_node_id) if target_node_id else None
+                _log_session_node_transition(
+                    "AFTER",
+                    flow_session=flow_session,
+                    conversation=session,
+                    executed_node_id=_node_get(node, "id"),
+                    next_node_id=target_node_id,
+                    reason="continue_condition_waiting_input",
+                )
                 logger.info(
                     "[FLOW SESSION CURRENT_NODE PERSISTED] session_current_node_id=%s conversation_fk_skipped=true",
                     target_node_id,
                 )
                 db.add(session)
                 db.commit()
+                _log_session_node_transition(
+                    "PERSIST",
+                    flow_session=flow_session,
+                    conversation=session,
+                    executed_node_id=_node_get(node, "id"),
+                    next_node_id=target_node_id,
+                    reason="continue_condition_waiting_input",
+                )
                 logger.info("[MANYCHAT WAITING_INPUT] node_id=%s", _node_get(node, "id"))
                 return node
             true_edge, false_edge = _resolve_condition_routes(edges)
@@ -2162,6 +2299,7 @@ def run_until_wait_node(
                             session=flow_session,
                             next_node_id=str(next_target),
                             reason="delay_next_target",
+                            graph_context={"executed_node_id": str(_node_get(node, "id"))},
                         )
                         db.add(flow_session)
                     db.commit()
@@ -2292,22 +2430,47 @@ def run_until_wait_node(
             if node and next_node_type == "condition":
                 condition_node_id = _node_get(node, "id")
                 target_node_id = _parse_uuid(condition_node_id)
+                _log_session_node_transition(
+                    "BEFORE",
+                    flow_session=flow_session,
+                    conversation=session,
+                    executed_node_id=message_node_id,
+                    next_node_id=target_node_id,
+                    reason="message_advance_to_condition",
+                )
                 if flow_session:
                     flow_session.current_node_id = session_service.safe_update_current_node(
                         session=flow_session,
                         next_node_id=target_node_id,
                         reason="message_advance_to_condition",
+                        graph_context={"executed_node_id": str(message_node_id) if message_node_id else None},
                     )
                     flow_session.last_input = incoming_text
                     db.add(flow_session)
                 if isinstance(session.context, dict):
                     session.context["flow_current_node_id"] = str(target_node_id) if target_node_id else None
+                _log_session_node_transition(
+                    "AFTER",
+                    flow_session=flow_session,
+                    conversation=session,
+                    executed_node_id=message_node_id,
+                    next_node_id=target_node_id,
+                    reason="message_advance_to_condition",
+                )
                 logger.info(
                     "[FLOW SESSION CURRENT_NODE PERSISTED] session_current_node_id=%s conversation_fk_skipped=true",
                     target_node_id,
                 )
                 db.add(session)
                 db.commit()
+                _log_session_node_transition(
+                    "PERSIST",
+                    flow_session=flow_session,
+                    conversation=session,
+                    executed_node_id=message_node_id,
+                    next_node_id=target_node_id,
+                    reason="message_advance_to_condition",
+                )
                 logger.info(
                     "[WAITING_NEXT_CONDITION] condition_node_id=%s from_message_node_id=%s",
                     condition_node_id,
@@ -2318,22 +2481,47 @@ def run_until_wait_node(
 
         if _is_wait_node_type(node_type):
             target_node_id = _parse_uuid(_node_get(node, "id"))
+            _log_session_node_transition(
+                "BEFORE",
+                flow_session=flow_session,
+                conversation=session,
+                executed_node_id=_node_get(node, "id"),
+                next_node_id=target_node_id,
+                reason="wait_node",
+            )
             if flow_session:
                 flow_session.current_node_id = session_service.safe_update_current_node(
                     session=flow_session,
                     next_node_id=target_node_id,
                     reason="wait_node",
+                    graph_context={"executed_node_id": str(_node_get(node, "id")) if _node_get(node, "id") else None},
                 )
                 flow_session.last_input = incoming_text
                 db.add(flow_session)
             if isinstance(session.context, dict):
                 session.context["flow_current_node_id"] = str(target_node_id) if target_node_id else None
+            _log_session_node_transition(
+                "AFTER",
+                flow_session=flow_session,
+                conversation=session,
+                executed_node_id=_node_get(node, "id"),
+                next_node_id=target_node_id,
+                reason="wait_node",
+            )
             logger.info(
                 "[FLOW SESSION CURRENT_NODE PERSISTED] session_current_node_id=%s conversation_fk_skipped=true",
                 target_node_id,
             )
             db.add(session)
             db.commit()
+            _log_session_node_transition(
+                "PERSIST",
+                flow_session=flow_session,
+                conversation=session,
+                executed_node_id=_node_get(node, "id"),
+                next_node_id=target_node_id,
+                reason="wait_node",
+            )
             logger.info("[MANYCHAT WAITING_INPUT] node_id=%s", _node_get(node, "id"))
             return node
 
@@ -2451,6 +2639,8 @@ def advance_after_message_node(
         context=context,
         status="running",
         variables={"flow_version": published_version_number},
+        executed_node_id=current_node_id,
+        next_node_id=next_target,
     )
     db.commit()
     logger.info(
@@ -2532,6 +2722,8 @@ def _send_start_message_on_session_restart(
                 context=conversation.context if isinstance(conversation.context, dict) else {},
                 status="running",
                 variables={"flow_version": published_version_number},
+                executed_node_id=start_node_id,
+                next_node_id=start_node_id,
             )
             return runtime_session
         logger.info(
@@ -2563,6 +2755,8 @@ def _send_start_message_on_session_restart(
         context=conversation.context if isinstance(conversation.context, dict) else {},
         status="running",
         variables={"flow_version": published_version_number},
+        executed_node_id=start_node_id,
+        next_node_id=start_node_id,
     )
     return runtime_session
 def process_flow_engine(
@@ -2786,6 +2980,8 @@ def process_flow_engine(
         context=conversation.context if isinstance(conversation.context, dict) else {},
         status="running",
         variables={"current_node_id": str(saved_wait_node_id) if saved_wait_node_id else None},
+        executed_node_id=start_node_id,
+        next_node_id=saved_wait_node_id,
     )
     logger.info("[FLOW START SAVED_WAIT_NODE] current_node_id=%s", saved_wait_node_id)
     db.add(conversation)

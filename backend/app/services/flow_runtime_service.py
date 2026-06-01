@@ -481,7 +481,7 @@ class FlowRuntimeService:
             else:
                 next_id = self._get_next_node(node_id, edges)
 
-            session_service.update_session(session, next_id, status=status)
+            session_service.update_session(session, next_id, status=status, executed_node_id=node_id, next_node_id=next_id)
             steps += 1
 
             if status in {"waiting_input", "waiting_choice"}:
@@ -491,7 +491,7 @@ class FlowRuntimeService:
 
         if not current_node and status == "running":
             status = "finished"
-            session_service.update_session(session, session.current_node_id, status=status)
+            session_service.update_session(session, session.current_node_id, status=status, executed_node_id=getattr(session, "current_node_id", None), next_node_id=session.current_node_id)
 
         return {
             "responses": responses,

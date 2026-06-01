@@ -75,12 +75,30 @@ def handle_incoming_message(db: Session, message: Message, conversation: Convers
             print(f"[FLOW CONTINUE USING_SESSION_NODE] session_node_id={session_node_id}")
         if resolved_node_id:
             print(f"[CONVERSATION CURRENT_NODE SKIPPED_FOR_VERSIONED_FLOW] resolved_node_id={resolved_node_id} source={resolution_source}")
+            print(
+                f"[SESSION NODE BEFORE] session_id={getattr(latest_session, 'id', None)} "
+                f"current_node_id={session_node_id} flow_current_node_id={context_node_id} "
+                f"node_id_executado=None next_node_id={resolved_node_id} "
+                f"status={getattr(latest_session, 'status', None)} reason=message_router_context_sync"
+            )
             if not isinstance(conversation.context, dict):
                 conversation.context = {}
             conversation.context["flow_current_node_id"] = str(resolved_node_id)
+            print(
+                f"[SESSION NODE AFTER] session_id={getattr(latest_session, 'id', None)} "
+                f"current_node_id={session_node_id} flow_current_node_id={conversation.context.get('flow_current_node_id')} "
+                f"node_id_executado=None next_node_id={resolved_node_id} "
+                f"status={getattr(latest_session, 'status', None)} reason=message_router_context_sync"
+            )
             db.add(conversation)
             db.commit()
             db.refresh(conversation)
+            print(
+                f"[SESSION NODE PERSIST] session_id={getattr(latest_session, 'id', None)} "
+                f"current_node_id={session_node_id} flow_current_node_id={(conversation.context or {}).get('flow_current_node_id') if isinstance(conversation.context, dict) else None} "
+                f"node_id_executado=None next_node_id={resolved_node_id} "
+                f"status={getattr(latest_session, 'status', None)} reason=message_router_context_sync"
+            )
         elif not resolved_node_id and session_node_id:
             print("[FLOW CONTINUE USING_SESSION_NODE] keeping session current_node_id precedence")
         if resolution_source == "context" and session_node_id:

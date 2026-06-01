@@ -3,6 +3,21 @@ from __future__ import annotations
 from typing import Any
 
 
+def _log_session_node(phase: str, session: Any, executed_node_id: Any = None, next_node_id: Any = None, reason: str = "") -> None:
+    context = getattr(session, "context", None)
+    flow_current_node_id = context.get("flow_current_node_id") if isinstance(context, dict) else None
+    print(
+        f"[SESSION NODE {phase}] "
+        f"session_id={getattr(session, 'id', None)} "
+        f"current_node_id={getattr(session, 'current_node_id', None)} "
+        f"flow_current_node_id={flow_current_node_id} "
+        f"node_id_executado={executed_node_id} "
+        f"next_node_id={next_node_id} "
+        f"status={getattr(session, 'status', None)} "
+        f"reason={reason}"
+    )
+
+
 class FlowEngine:
     def get_start_node(self, flow: dict[str, Any]) -> dict[str, Any] | None:
         nodes = flow.get("nodes", []) if isinstance(flow, dict) else []
@@ -71,7 +86,9 @@ class FlowEngine:
 
         while current_node and steps < 20:
             current_node_id = str(current_node.get("id") or "")
+            _log_session_node("BEFORE", session, executed_node_id=current_node_id, next_node_id=current_node_id, reason="run_flow_execute_node")
             session.current_node_id = current_node_id
+            _log_session_node("AFTER", session, executed_node_id=current_node_id, next_node_id=current_node_id, reason="run_flow_execute_node")
             messages.extend(self.process_node(current_node, session))
 
             if getattr(session, "status", "running") == "waiting_input":
@@ -80,11 +97,16 @@ class FlowEngine:
             next_node = self.get_next_node(flow, current_node_id)
             if next_node is None:
                 finished = True
+                _log_session_node("BEFORE", session, executed_node_id=current_node_id, next_node_id=None, reason="run_flow_no_next_node")
                 session.current_node_id = None
+                _log_session_node("AFTER", session, executed_node_id=current_node_id, next_node_id=None, reason="run_flow_no_next_node")
                 break
 
             current_node = next_node
-            session.current_node_id = str(current_node.get("id") or "")
+            next_node_id = str(current_node.get("id") or "")
+            _log_session_node("BEFORE", session, executed_node_id=current_node_id, next_node_id=next_node_id, reason="run_flow_advance")
+            session.current_node_id = next_node_id
+            _log_session_node("AFTER", session, executed_node_id=current_node_id, next_node_id=next_node_id, reason="run_flow_advance")
             steps += 1
 
         return {"messages": messages, "next_node": session.current_node_id, "finished": finished}
@@ -199,9 +221,12 @@ def run_flow_from_message(user_id: str, text: str):
                 }
 
             print("[FORCE START]:", start_node["id"])
+            _log_session_node("BEFORE", session, executed_node_id=start_node["id"], next_node_id=start_node["id"], reason="force_start")
             session.current_node_id = start_node["id"]
+            _log_session_node("AFTER", session, executed_node_id=start_node["id"], next_node_id=start_node["id"], reason="force_start")
             db.add(session)
             db.commit()
+            _log_session_node("PERSIST", session, executed_node_id=start_node["id"], next_node_id=start_node["id"], reason="force_start")
             return {
                 "messages": [
                     {
@@ -226,7 +251,10 @@ def run_flow_from_message(user_id: str, text: str):
             edges = flow_data.get("edges", []) if isinstance(flow_data.get("edges"), list) else []
             for edge in edges:
                 if isinstance(edge, dict) and str(edge.get("source") or "") == current_node:
-                    session.current_node_id = str(edge.get("target") or "") or None
+                    target_node_id = str(edge.get("target") or "") or None
+                    _log_session_node("BEFORE", session, executed_node_id=current_node, next_node_id=target_node_id, reason="waiting_input_advance")
+                    session.current_node_id = target_node_id
+                    _log_session_node("AFTER", session, executed_node_id=current_node, next_node_id=target_node_id, reason="waiting_input_advance")
                     break
 
         node = get_node_by_id(flow_data, session.current_node_id)
@@ -252,6 +280,7 @@ def run_flow_from_message(user_id: str, text: str):
 
         db.add(session)
         db.commit()
+        _log_session_node("PERSIST", session, executed_node_id=getattr(session, "current_node_id", None), next_node_id=getattr(session, "current_node_id", None), reason="run_flow_from_message_commit")
 
         if not result or "messages" not in result:
             return {
