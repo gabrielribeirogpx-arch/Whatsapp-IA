@@ -600,6 +600,19 @@ def load_published_runtime_graph(
     selected_version = _get_flow_version_by_id(db=db, flow=flow, version_id=selected_version_id)
     nodes = selected_version.nodes if selected_version and isinstance(selected_version.nodes, list) else []
     edges = selected_version.edges if selected_version and isinstance(selected_version.edges, list) else []
+    logger.info(
+        "[RUNTIME GRAPH LOAD] flow_id=%s tenant_id=%s requested_flow_version_id=%s selected_flow_version_id=%s "
+        "flow.published_version_id=%s flow.current_version_id=%s nodes_count=%s edges_count=%s checksum=%s",
+        flow.id,
+        tenant_id,
+        flow_version_id,
+        selected_version_id,
+        getattr(flow, "published_version_id", None),
+        getattr(flow, "current_version_id", None),
+        len(nodes),
+        len(edges),
+        _compute_graph_checksum(nodes, edges) if nodes or edges else None,
+    )
 
     if not nodes:
         logger.error("[RUNTIME GRAPH EMPTY_BLOCKED] flow_id=%s tenant_id=%s flow_version_id=%s source=%s", flow.id, tenant_id, selected_version_id, "published_version")
@@ -633,6 +646,15 @@ def load_published_runtime_graph(
     if cached and isinstance(cached.get("nodes"), list) and cached.get("nodes"):
         cached_node_ids = [str(node.get("id")) for node in cached.get("nodes", []) if isinstance(node, dict) and node.get("id") is not None]
         if cached_node_ids and not any(node_id.startswith("template-") for node_id in cached_node_ids):
+            logger.info(
+                "[RUNTIME GRAPH LOAD] flow_id=%s tenant_id=%s flow_version_id=%s source=memory_cache nodes_count=%s edges_count=%s node_ids=%s",
+                flow.id,
+                tenant_id,
+                selected_version_id,
+                len(cached.get("nodes", [])),
+                len(cached.get("edges", [])) if isinstance(cached.get("edges"), list) else 0,
+                cached_node_ids,
+            )
             return cached
 
     runtime_payload = {
@@ -723,13 +745,22 @@ def _load_flow_version_runtime(flow: Flow, tenant_id: uuid.UUID, flow_version: F
         edges.append(edge)
         edges_by_source.setdefault(source_id, []).append(edge)
 
+    node_map = build_node_map(nodes)
     logger.info(
         "[FLOW VERSION LOADED] flow_id=%s version_id=%s version=%s",
         flow.id,
         flow_version.id,
         flow_version.version,
     )
-    return {"nodes": nodes, "edges": edges, "node_map": build_node_map(nodes), "edges_by_source": edges_by_source}
+    logger.info(
+        "[NODES_BY_ID KEYS] flow_id=%s version_id=%s keys=%s nodes_count=%s edges_count=%s",
+        flow.id,
+        flow_version.id,
+        list(node_map.keys()),
+        len(nodes),
+        len(edges),
+    )
+    return {"nodes": nodes, "edges": edges, "node_map": node_map, "edges_by_source": edges_by_source}
 
 
 def _empty_runtime_graph() -> dict[str, Any]:
@@ -2123,6 +2154,16 @@ def run_until_wait_node(
                 ],
                 _node_get(next_node, "id") if next_node else None,
             )
+            logger.info(
+                "[EDGE RESOLUTION] flow_id=%s flow_version_id=%s current_node=%s edge_count=%s next_target=%s next_node=%s nodes_by_id_keys=%s",
+                flow.id,
+                getattr(flow_session, "flow_version_id", None),
+                message_node_id,
+                len(edges),
+                next_target,
+                _node_get(next_node, "id") if next_node else None,
+                list((runtime_graph.get("node_map") if isinstance(runtime_graph, dict) and isinstance(runtime_graph.get("node_map"), dict) else {}).keys()),
+            )
             if next_target:
                 _emit_runtime_event(
                     db=db,
@@ -2261,6 +2302,17 @@ def advance_after_message_node(
             for edge in edges
         ],
         _node_get(preview_next_node, "id") if preview_next_node else None,
+    )
+    runtime_node_map = runtime_graph.get("node_map") if isinstance(runtime_graph, dict) and isinstance(runtime_graph.get("node_map"), dict) else {}
+    logger.info(
+        "[EDGE RESOLUTION] flow_id=%s flow_version_id=%s current_node=%s edge_count=%s next_target=%s next_node=%s nodes_by_id_keys=%s",
+        flow.id,
+        runtime_graph.get("version_id") if isinstance(runtime_graph, dict) else None,
+        current_node_id,
+        len(edges),
+        next_target,
+        _node_get(preview_next_node, "id") if preview_next_node else None,
+        list(runtime_node_map.keys()),
     )
     if not next_edge or not next_target:
         logger.info(

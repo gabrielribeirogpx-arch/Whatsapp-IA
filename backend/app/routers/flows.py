@@ -54,6 +54,81 @@ AUDIT_TEXT_MARKERS = [
 def _graph_checksum(nodes: list[dict[str, Any]], edges: list[dict[str, Any]]) -> str:
     payload = {"nodes": nodes if isinstance(nodes, list) else [], "edges": edges if isinstance(edges, list) else []}
     return hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")).hexdigest()
+
+
+def _graph_node_ids(nodes: list[dict[str, Any]] | None) -> list[str]:
+    return [str(node.get("id")) for node in (nodes or []) if isinstance(node, dict) and node.get("id") is not None]
+
+
+def _graph_edge_pairs(edges: list[dict[str, Any]] | None) -> list[dict[str, str | None]]:
+    pairs: list[dict[str, str | None]] = []
+    for edge in edges or []:
+        if not isinstance(edge, dict):
+            continue
+        pairs.append(
+            {
+                "id": str(edge.get("id")) if edge.get("id") is not None else None,
+                "source": str(edge.get("source")) if edge.get("source") is not None else None,
+                "target": str(edge.get("target")) if edge.get("target") is not None else None,
+                "sourceHandle": str(edge.get("sourceHandle")) if edge.get("sourceHandle") is not None else None,
+            }
+        )
+    return pairs
+
+
+def _log_publish_graph_snapshot(*, label: str, flow: Flow, nodes: list[dict[str, Any]], edges: list[dict[str, Any]], version: FlowVersion | None = None) -> None:
+    logger.info(
+        "[%s] flow_id=%s tenant_id=%s version_id=%s version=%s nodes_count=%s edges_count=%s checksum=%s start_text_preview=%s",
+        label,
+        flow.id,
+        getattr(flow, "tenant_id", None),
+        getattr(version, "id", None),
+        getattr(version, "version", None),
+        len(nodes),
+        len(edges),
+        _graph_checksum(nodes, edges) if nodes or edges else None,
+        _extract_start_preview(nodes),
+    )
+    logger.info("[PUBLISHED NODES] flow_id=%s node_ids=%s nodes=%s", flow.id, _graph_node_ids(nodes), nodes)
+    logger.info("[PUBLISHED EDGES] flow_id=%s edge_pairs=%s edges=%s", flow.id, _graph_edge_pairs(edges), edges)
+
+
+def _log_publish_source_divergence(*, flow: Flow, published_version: FlowVersion | None, candidate_nodes: list[dict[str, Any]], candidate_edges: list[dict[str, Any]]) -> None:
+    flow_nodes = getattr(flow, "nodes", None) if isinstance(getattr(flow, "nodes", None), list) else []
+    flow_nodes_json = getattr(flow, "nodes_json", None) if isinstance(getattr(flow, "nodes_json", None), list) else []
+    flow_edges = getattr(flow, "edges", None) if isinstance(getattr(flow, "edges", None), list) else []
+    flow_edges_json = getattr(flow, "edges_json", None) if isinstance(getattr(flow, "edges_json", None), list) else []
+    published_nodes = published_version.nodes if published_version and isinstance(published_version.nodes, list) else []
+    published_edges = published_version.edges if published_version and isinstance(published_version.edges, list) else []
+    flow_version_nodes = candidate_nodes if isinstance(candidate_nodes, list) else []
+    flow_version_edges = candidate_edges if isinstance(candidate_edges, list) else []
+    logger.info(
+        "[PUBLISH GRAPH] flow_id=%s current_version_id=%s published_version_id=%s "
+        "flow.nodes_count=%s flow.nodes_json_count=%s published_nodes_count=%s flow_version.nodes_count=%s "
+        "flow.edges_count=%s flow.edges_json_count=%s published_edges_count=%s flow_version.edges_count=%s "
+        "flow.nodes_checksum=%s flow.nodes_json_checksum=%s published_graph_checksum=%s flow_version.graph_checksum=%s "
+        "flow.nodes_ids=%s flow.nodes_json_ids=%s published_nodes_ids=%s flow_version.nodes_ids=%s",
+        flow.id,
+        getattr(flow, "current_version_id", None),
+        getattr(flow, "published_version_id", None),
+        len(flow_nodes),
+        len(flow_nodes_json),
+        len(published_nodes),
+        len(flow_version_nodes),
+        len(flow_edges),
+        len(flow_edges_json),
+        len(published_edges),
+        len(flow_version_edges),
+        _graph_checksum(flow_nodes, flow_edges) if flow_nodes or flow_edges else None,
+        _graph_checksum(flow_nodes_json, flow_edges_json) if flow_nodes_json or flow_edges_json else None,
+        _graph_checksum(published_nodes, published_edges) if published_nodes or published_edges else None,
+        _graph_checksum(flow_version_nodes, flow_version_edges) if flow_version_nodes or flow_version_edges else None,
+        _graph_node_ids(flow_nodes),
+        _graph_node_ids(flow_nodes_json),
+        _graph_node_ids(published_nodes),
+        _graph_node_ids(flow_version_nodes),
+    )
+
 def _extract_start_preview(nodes: list[dict[str, Any]]) -> str:
     for node in nodes:
         if not isinstance(node, dict):
@@ -155,7 +230,40 @@ def _publish_fresh_snapshot(db: Session, flow: Flow, *, reason: str) -> FlowVers
         .order_by(FlowVersion.version.desc())
         .first()
     )
+    _log_publish_source_divergence(
+        flow=flow,
+        published_version=getattr(flow, "published_version", None),
+        candidate_nodes=nodes,
+        candidate_edges=edges,
+    )
     if latest_published and latest_published.graph_checksum == checksum:
+        db.query(FlowVersion).filter(FlowVersion.flow_id == flow.id, FlowVersion.tenant_id == flow.tenant_id).update(
+            {FlowVersion.is_active: False, FlowVersion.is_published: False},
+            synchronize_session=False,
+        )
+        latest_published.nodes = nodes
+        latest_published.edges = edges
+        latest_published.snapshot = {"nodes": nodes, "edges": edges}
+        latest_published.graph_checksum = checksum
+        latest_published.start_node_id = start_node_id
+        latest_published.start_text_preview = start_text_preview
+        latest_published.created_from_source = "builder_graph"
+        latest_published.is_active = True
+        latest_published.is_published = True
+        flow.current_version_id = latest_published.id
+        flow.published_version_id = latest_published.id
+        flow.version = latest_published.version
+        _persist_builder_graph(flow, nodes, edges)
+        db.add(latest_published)
+        db.add(flow)
+        db.flush()
+        _log_publish_graph_snapshot(label="PUBLISH GRAPH", flow=flow, nodes=nodes, edges=edges, version=latest_published)
+        logger.info(
+            "[PUBLISH GRAPH REUSED] flow_id=%s version_id=%s checksum=%s reason=same_checksum_marked_published",
+            flow.id,
+            latest_published.id,
+            checksum,
+        )
         return latest_published
 
     db.query(FlowVersion).filter(FlowVersion.flow_id == flow.id, FlowVersion.tenant_id == flow.tenant_id).update({FlowVersion.is_active: False, FlowVersion.is_published: False}, synchronize_session=False)
@@ -180,6 +288,10 @@ def _publish_fresh_snapshot(db: Session, flow: Flow, *, reason: str) -> FlowVers
     flow.current_version_id = fresh_version.id
     flow.published_version_id = fresh_version.id
     flow.version = fresh_version.version
+    _persist_builder_graph(flow, nodes, edges)
+    db.add(flow)
+    db.flush()
+    _log_publish_graph_snapshot(label="PUBLISH GRAPH", flow=flow, nodes=nodes, edges=edges, version=fresh_version)
     logger.info("[PUBLISH GRAPH SOURCE] flow_id=%s nodes_count=%s edges_count=%s checksum=%s start_text_preview=%s", flow.id, len(nodes), len(edges), checksum, start_text_preview)
     return fresh_version
 
@@ -2456,6 +2568,12 @@ def publish_tenant_flow_version(
         nodes = fresh_version.nodes if isinstance(fresh_version.nodes, list) else []
         edges = fresh_version.edges if isinstance(fresh_version.edges, list) else []
 
+        _log_publish_source_divergence(
+            flow=flow,
+            published_version=fresh_version,
+            candidate_nodes=nodes,
+            candidate_edges=edges,
+        )
         logger.info(
             "[PUBLISH FLOW GRAPH SNAPSHOT] flow_id=%s tenant_id=%s nodes_count=%s edges_count=%s node_ids=%s edge_pairs=%s raw_graph_keys=%s",
             flow_id,
@@ -2481,6 +2599,7 @@ def publish_tenant_flow_version(
         invalidate_flow_runtime_cache(flow.id)
         db.commit()
         db.refresh(flow)
+        _log_publish_graph_snapshot(label="PUBLISH GRAPH", flow=flow, nodes=nodes, edges=edges, version=fresh_version)
         logger.info("[PUBLISH FLOW SUCCESS] flow_id=%s version_id=%s", flow_id, flow.published_version_id or fresh_version.id)
         return _serialize_flow_version_response(
             flow=flow,
