@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import logging
 import uuid
 from typing import Any
@@ -24,6 +25,12 @@ from app.services.whatsapp_credentials_service import WhatsAppCredentialsNotConf
 from app.integrations.meta.meta_cloud_client import MetaApiError
 
 logger = logging.getLogger(__name__)
+
+
+def _token_hash(token: str | None) -> str:
+    if not token:
+        return ""
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()[:16]
 
 
 def _record_outbound_message(*, db, tenant_id: uuid.UUID, phone: str, text: str, message_id: str, flow_id: Any = None, flow_version_id: Any = None, flow_session_id: Any = None, node_id: Any = None) -> None:
@@ -87,6 +94,7 @@ def send_whatsapp_message(*, message_data: dict[str, Any]) -> None:
     node_id = message_data.get("node_id")
     flow_session_id = message_data.get("session_id")
     conversation_id = str(message_data.get("conversation_id") or "") or None
+    is_flow_message = bool(flow_id or flow_version_id or session_id or node_id or sequence_number_raw is not None)
 
     logger.info("event=send_worker_start correlation_id=%s tenant_id=%s phone=%s job_id=%s stage=send_worker_start", correlation_id, tenant_id or "n/a", phone or "n/a", job_id)
 
@@ -202,7 +210,58 @@ def send_whatsapp_message(*, message_data: dict[str, Any]) -> None:
                 )
                 return
 
-        context = {"tenant_id": tenant_id, "provider_id": provider_id, "token_length": len(resolved_token or "")}
+        token_hash = _token_hash(resolved_token)
+        waba_id = active_provider.get("waba_id") if active_provider else None
+        business_id = active_provider.get("business_id") if active_provider else None
+        business_account_id = waba_id or business_id
+        provider_source = "active_provider" if active_provider else "legacy_credentials"
+        meta_endpoint = f"/{resolved_phone_number_id}/messages"
+        context = {
+            "tenant_id": tenant_id,
+            "provider_id": provider_id,
+            "token_length": len(resolved_token or ""),
+            "token_hash": token_hash,
+            "phone_number_id": resolved_phone_number_id,
+            "business_account_id": business_account_id,
+            "waba_id": waba_id,
+            "business_id": business_id,
+            "source": provider_source,
+            "flow_id": flow_id,
+            "flow_version_id": flow_version_id,
+            "session_id": session_id,
+            "node_id": node_id,
+            "sequence_number": sequence_number,
+        }
+        if is_flow_message:
+            logger.info(
+                "[FLOW MESSAGE PROVIDER] tenant_id=%s flow_id=%s flow_version_id=%s session_id=%s node_id=%s sequence_number=%s provider_id=%s phone_number_id=%s business_account_id=%s waba_id=%s business_id=%s token_hash=%s provider_source=%s provider_updated_at=%s message_text=%s",
+                tenant_id,
+                flow_id,
+                flow_version_id,
+                session_id,
+                node_id,
+                sequence_number,
+                provider_id,
+                resolved_phone_number_id,
+                business_account_id,
+                waba_id,
+                business_id,
+                token_hash,
+                provider_source,
+                active_provider.get("updated_at") if active_provider else None,
+                text,
+            )
+            logger.info(
+                "[FLOW MESSAGE META REQUEST] endpoint=%s phone_number_id=%s provider_id=%s tenant_id=%s flow_id=%s session_id=%s node_id=%s sequence_number=%s",
+                meta_endpoint,
+                resolved_phone_number_id,
+                provider_id,
+                tenant_id,
+                flow_id,
+                session_id,
+                node_id,
+                sequence_number,
+            )
         try:
             if buttons:
                 send_buttons_message_via_meta(
