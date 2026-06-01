@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from typing import Any, Dict, List, Optional
 
 
@@ -10,9 +10,16 @@ class NodeSchema(BaseModel):
 
 
 class EdgeSchema(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
     id: Optional[str] = None
     source: Optional[str] = None
     target: Optional[str] = None
+    sourceHandle: Optional[str] = None
+    targetHandle: Optional[str] = None
+    type: Optional[str] = None
+    label: Optional[Any] = None
+    data: Optional[Dict[str, Any]] = None
 
 
 class FlowUpdate(BaseModel):
