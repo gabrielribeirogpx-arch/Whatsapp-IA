@@ -189,7 +189,10 @@ const serializeFlowGraph = (nodes: Node[], edges: Edge[]) => {
   };
 };
 
-const getFlowGraphSignature = (flow: { nodes: FlowNodePayload[]; edges: FlowEdgePayload[] }) => JSON.stringify(flow);
+const getFlowGraphSignature = (flow: { nodes: FlowNodePayload[]; edges: FlowEdgePayload[] }) => JSON.stringify({
+  nodes: [...flow.nodes].sort((a, b) => String(a.id).localeCompare(String(b.id))),
+  edges: [...flow.edges].sort((a, b) => String(a.id || `${a.source}->${a.target}:${a.sourceHandle || ''}`).localeCompare(String(b.id || `${b.source}->${b.target}:${b.sourceHandle || ''}`))),
+});
 
 function makeNodeId() {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -632,19 +635,35 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
 
   useEffect(() => {
     if (!isFlowHydrated) return;
+
+    const savedSignature = lastPersistedFlowSignatureRef.current;
+    const currentSignature = getFlowGraphSignature(serializeFlowGraph(nodes, edges));
+    const dirty = !!savedSignature && currentSignature !== savedSignature;
+    console.info('[DIRTY CHECK]', {
+      flow_id: selectedFlowId,
+      saved_signature: savedSignature,
+      current_signature: currentSignature,
+      dirty,
+    });
+
     if (skipDirtyCheckRef.current) {
       skipDirtyCheckRef.current = false;
+      setFlowDirty(dirty);
+      if (dirty) setFlowSaveStatus('idle');
       return;
     }
-    console.info('[NODE DIRTY]', {
-      flow_id: selectedFlowId,
-      reason: 'graph_changed',
-      nodes_count: nodes.length,
-      edges_count: edges.length,
-    });
-    setFlowDirty(true);
-    setFlowSaveStatus('idle');
-  }, [edges, isFlowHydrated, nodes, selectedFlowId]);
+
+    setFlowDirty(dirty);
+    if (dirty) {
+      console.info('[NODE DIRTY]', {
+        flow_id: selectedFlowId,
+        reason: 'graph_changed',
+        nodes_count: nodes.length,
+        edges_count: edges.length,
+      });
+      setFlowSaveStatus('idle');
+    }
+  }, [edges, isFlowHydrated, nodes, selectedFlowId, setFlowDirty]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -959,7 +978,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
     if (nextNodes.length === 0) {
       setNodes(nextNodes);
       setEdges(nextEdges);
-      return;
+      return { nodes: nextNodes, edges: nextEdges };
     }
 
     const orderedEdges = orderChoiceChildrenEdges(nextNodes, nextEdges);
@@ -967,6 +986,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
     setNodes(layoutedNodes);
     setEdges(layoutedEdges);
     requestAnimationFrame(() => { rfInstance?.fitView(); });
+    return { nodes: layoutedNodes, edges: layoutedEdges };
   }, [rfInstance, setEdges, setNodes]);
 
   const loadFlow = useCallback(async (flowId: string | null) => {
@@ -1096,8 +1116,8 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
         lastPersistedFlowSignatureRef.current = getFlowGraphSignature(serializeFlowGraph(nodesToRender, orderedEdges));
         requestAnimationFrame(() => { rfInstance?.fitView(); });
       } else {
-        applyLayoutAndSetFlow(nodesToRender, edgesToRender);
-        lastPersistedFlowSignatureRef.current = getFlowGraphSignature(serializeFlowGraph(nodesToRender, edgesToRender));
+        const layoutedFlow = applyLayoutAndSetFlow(nodesToRender, edgesToRender);
+        lastPersistedFlowSignatureRef.current = getFlowGraphSignature(serializeFlowGraph(layoutedFlow.nodes, layoutedFlow.edges));
       }
     } catch (err) {
       console.error('Erro ao carregar flow', err);
@@ -1486,8 +1506,15 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
       setValidationErrors(data?.validation?.errors || []);
       const savedSignature = getFlowGraphSignature(safeFlow);
       const currentSignature = getFlowGraphSignature(getCurrentSerializedFlow());
+      const dirty = currentSignature !== savedSignature;
+      console.info('[DIRTY CHECK]', {
+        flow_id: selectedFlowId,
+        saved_signature: savedSignature,
+        current_signature: currentSignature,
+        dirty,
+      });
       lastPersistedFlowSignatureRef.current = savedSignature;
-      setFlowDirty(currentSignature !== savedSignature);
+      setFlowDirty(dirty);
       setFlowSaveStatus('success');
       console.info('[FLOW SAVE SUCCESS]', { flow_id: selectedFlowId, endpoint, method: 'PUT' });
       if (isAutosave) {
