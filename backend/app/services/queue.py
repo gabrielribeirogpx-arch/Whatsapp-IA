@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+import subprocess
 import uuid
 from typing import Any
 
@@ -23,6 +24,36 @@ REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 SEND_QUEUE_NAME = os.getenv("WHATSAPP_SEND_QUEUE", "normal")
 INCOMING_QUEUE_NAME = os.getenv("INCOMING_MESSAGE_QUEUE", "high_priority")
 LOW_PRIORITY_QUEUE_NAME = os.getenv("LOW_PRIORITY_QUEUE", "low")
+
+
+def _runtime_commit() -> str:
+    for env_name in (
+        "API_COMMIT",
+        "WORKER_COMMIT",
+        "GIT_COMMIT",
+        "RENDER_GIT_COMMIT",
+        "RAILWAY_GIT_COMMIT_SHA",
+        "VERCEL_GIT_COMMIT_SHA",
+        "HEROKU_SLUG_COMMIT",
+        "SOURCE_VERSION",
+        "COMMIT_SHA",
+    ):
+        commit = str(os.getenv(env_name) or "").strip()
+        if commit:
+            return commit
+
+    try:
+        completed = subprocess.run(
+            ["git", "rev-parse", "--short=12", "HEAD"],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=2,
+        )
+    except Exception:
+        return "unknown"
+
+    return completed.stdout.strip() or "unknown"
 
 
 def get_queue(name: str | None = None) -> Queue:
@@ -150,6 +181,17 @@ def enqueue_send_message(message_data: dict[str, Any]) -> str | None:
         if value is not None:
             payload[key] = str(value)
 
+    logger.info(
+        "[FLOW QUEUE ENQUEUE] job_id=%s flow_id=%s session_id=%s node_id=%s sequence_number=%s message_text=%s api_commit=%s",
+        "pending",
+        payload.get("flow_id"),
+        payload.get("session_id"),
+        payload.get("node_id"),
+        payload.get("sequence_number"),
+        content,
+        _runtime_commit(),
+    )
+
     job = queue.enqueue(
         "app.workers.send_worker.send_whatsapp_message",
         message_data=payload,
@@ -158,6 +200,17 @@ def enqueue_send_message(message_data: dict[str, Any]) -> str | None:
         failure_ttl=86400,
         result_ttl=3600,
         on_failure=_on_send_failure,
+    )
+
+    logger.info(
+        "[FLOW QUEUE ENQUEUE] job_id=%s flow_id=%s session_id=%s node_id=%s sequence_number=%s message_text=%s api_commit=%s",
+        job.id,
+        payload.get("flow_id"),
+        payload.get("session_id"),
+        payload.get("node_id"),
+        payload.get("sequence_number"),
+        content,
+        _runtime_commit(),
     )
 
     logger.info(
