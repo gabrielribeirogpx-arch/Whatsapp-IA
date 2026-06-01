@@ -114,6 +114,10 @@ def _release_send_lock(redis_client: Any, lock_key: str, lock_token: str) -> Non
 
 
 def send_whatsapp_message(*, message_data: dict[str, Any]) -> None:
+    commit = _runtime_commit()
+    print("[SEND_WORKER FILE]", __file__)
+    print("[SEND_WORKER COMMIT]", commit)
+    print("[SEND_WORKER FUNCTION EXECUTED]")
     tenant_id = str(message_data.get("tenant_id") or "")
     phone = str(message_data.get("phone") or "")
     text = str(message_data.get("text") or "").strip()
@@ -140,9 +144,21 @@ def send_whatsapp_message(*, message_data: dict[str, Any]) -> None:
     )
     logger.info(
         "[WORKER VERSION CHECK] commit=%s provider_id=%s message_text=%s",
-        _runtime_commit(),
+        commit,
         payload_provider_id,
         text,
+    )
+    logger.info(
+        "[FLOW QUEUE DEQUEUE] job_id=%s flow_id=%s session_id=%s node_id=%s sequence_number=%s message_text=%s worker_commit=%s worker_file=%s queue_name=%s",
+        job_id,
+        flow_id,
+        session_id,
+        node_id,
+        sequence_number_raw,
+        text,
+        commit,
+        __file__,
+        getattr(current_job, "origin", None),
     )
     logger.info("event=send_worker_start correlation_id=%s tenant_id=%s phone=%s job_id=%s stage=send_worker_start", correlation_id, tenant_id or "n/a", phone or "n/a", job_id)
 

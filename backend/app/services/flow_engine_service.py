@@ -6,6 +6,7 @@ import logging
 import time
 import hashlib
 import json
+import traceback
 from datetime import datetime, timezone
 from dataclasses import dataclass
 from typing import Any
@@ -1836,6 +1837,19 @@ def _is_wait_node_type(node_type: str) -> bool:
 
 
 def _finalize_runtime_flow_session(db: Session, conversation: Conversation, flow_session: FlowSession | None, end_node_id: Any) -> None:
+    logger.info(
+        "[SESSION FINALIZE CALL] session_id=%s flow_id=%s current_node_id=%s end_node_id=%s",
+        getattr(flow_session, "id", None),
+        getattr(flow_session, "flow_id", None),
+        getattr(flow_session, "current_node_id", None),
+        end_node_id,
+    )
+    logger.info(
+        "[SESSION FINALIZE REASON] reason=flow_finished status_before=%s conversation_id=%s",
+        getattr(flow_session, "status", None),
+        getattr(conversation, "id", None),
+    )
+    logger.info("[SESSION FINALIZE STACK] %s", " | ".join(traceback.format_stack(limit=12)))
     if flow_session:
         end_node_uuid = _parse_uuid(end_node_id)
         _emit_runtime_event(
@@ -1971,6 +1985,14 @@ def run_until_wait_node(
             source="runtime_loop",
         )
         logger.info("[MANYCHAT NODE EXECUTE] node_id=%s node_type=%s", _node_get(node, "id"), node_type)
+        logger.info(
+            "[NODE EXECUTE] flow_id=%s session_id=%s current_node_id=%s next_node_id=%s node_type=%s",
+            flow.id,
+            getattr(flow_session, "id", None),
+            _node_get(node, "id"),
+            None,
+            node_type,
+        )
 
         if node_type in {"buttons", "buttons_node"}:
             raw_buttons = node_data.get("buttons") if isinstance(node_data.get("buttons"), list) else []
@@ -1988,7 +2010,20 @@ def run_until_wait_node(
                     )
                     break
             if selected_handle:
-                node = _get_node(db=db, node_id=_edge_target(next((edge for edge in edges if _edge_source_handle(edge) == selected_handle), None)), tenant_id=session.tenant_id, runtime_graph=runtime_graph)
+                next_node_id = _edge_target(next((edge for edge in edges if _edge_source_handle(edge) == selected_handle), None))
+                logger.info(
+                    "[NEXT NODE RESOLVED] flow_id=%s session_id=%s current_node_id=%s next_node_id=%s node_type=%s",
+                    flow.id, getattr(flow_session, "id", None), _node_get(node, "id"), next_node_id, node_type,
+                )
+                logger.info(
+                    "[NODE COMPLETE] flow_id=%s session_id=%s current_node_id=%s next_node_id=%s node_type=%s",
+                    flow.id, getattr(flow_session, "id", None), _node_get(node, "id"), next_node_id, node_type,
+                )
+                node = _get_node(db=db, node_id=next_node_id, tenant_id=session.tenant_id, runtime_graph=runtime_graph)
+                logger.info(
+                    "[NEXT NODE EXECUTE] flow_id=%s session_id=%s current_node_id=%s next_node_id=%s node_type=%s",
+                    flow.id, getattr(flow_session, "id", None), _node_get(node, "id") if node else None, None, _node_type_slug(node) if node else None,
+                )
                 normalized_input = ""
                 continue
             tenant = db.get(Tenant, session.tenant_id)
@@ -2024,7 +2059,20 @@ def run_until_wait_node(
                 if selected_handle:
                     break
             if selected_handle:
-                node = _get_node(db=db, node_id=_edge_target(next((edge for edge in edges if _edge_source_handle(edge) == selected_handle), None)), tenant_id=session.tenant_id, runtime_graph=runtime_graph)
+                next_node_id = _edge_target(next((edge for edge in edges if _edge_source_handle(edge) == selected_handle), None))
+                logger.info(
+                    "[NEXT NODE RESOLVED] flow_id=%s session_id=%s current_node_id=%s next_node_id=%s node_type=%s",
+                    flow.id, getattr(flow_session, "id", None), _node_get(node, "id"), next_node_id, node_type,
+                )
+                logger.info(
+                    "[NODE COMPLETE] flow_id=%s session_id=%s current_node_id=%s next_node_id=%s node_type=%s",
+                    flow.id, getattr(flow_session, "id", None), _node_get(node, "id"), next_node_id, node_type,
+                )
+                node = _get_node(db=db, node_id=next_node_id, tenant_id=session.tenant_id, runtime_graph=runtime_graph)
+                logger.info(
+                    "[NEXT NODE EXECUTE] flow_id=%s session_id=%s current_node_id=%s next_node_id=%s node_type=%s",
+                    flow.id, getattr(flow_session, "id", None), _node_get(node, "id") if node else None, None, _node_type_slug(node) if node else None,
+                )
                 normalized_input = ""
                 continue
             phone = getattr(session, "phone_number", None) or getattr(session, "user_identifier", None)
@@ -2075,7 +2123,19 @@ def run_until_wait_node(
                 target_node_id,
             )
             logger.info("[MANYCHAT ADVANCE] from=%s to=%s", _node_get(node, "id"), target_node_id)
+            logger.info(
+                "[NEXT NODE RESOLVED] flow_id=%s session_id=%s current_node_id=%s next_node_id=%s node_type=%s",
+                flow.id, getattr(flow_session, "id", None), _node_get(node, "id"), target_node_id, node_type,
+            )
+            logger.info(
+                "[NODE COMPLETE] flow_id=%s session_id=%s current_node_id=%s next_node_id=%s node_type=%s",
+                flow.id, getattr(flow_session, "id", None), _node_get(node, "id"), target_node_id, node_type,
+            )
             node = _get_node(db=db, node_id=target_node_id, tenant_id=session.tenant_id, runtime_graph=runtime_graph) if selected_edge else None
+            logger.info(
+                "[NEXT NODE EXECUTE] flow_id=%s session_id=%s current_node_id=%s next_node_id=%s node_type=%s",
+                flow.id, getattr(flow_session, "id", None), _node_get(node, "id") if node else None, None, _node_type_slug(node) if node else None,
+            )
             normalized_input = ""
             continue
 
@@ -2133,7 +2193,15 @@ def run_until_wait_node(
                             logger.info("[MANYCHAT ADVANCE] from=%s to=%s", _node_get(node, "id"), _edge_target(next_edge) if next_edge else None)
                             node = _get_node(db=db, node_id=_edge_target(next_edge), tenant_id=session.tenant_id, runtime_graph=runtime_graph) if next_edge else None
                             continue
-                        _send_flow_whatsapp_message(tenant=tenant, phone=phone, text=text)
+                        _send_flow_whatsapp_message(
+                            tenant=tenant,
+                            phone=phone,
+                            text=text,
+                            flow_id=flow.id,
+                            flow_version_id=getattr(flow_session, "flow_version_id", None),
+                            session_id=getattr(flow_session, "id", None),
+                            node_id=current_node_uuid,
+                        )
                         logger.info("[MANYCHAT MESSAGE SENT] node_id=%s", _node_get(node, "id"))
             next_edge = _pick_default_edge(edges)
             next_target = _edge_target(next_edge) if next_edge else None
@@ -2194,6 +2262,10 @@ def run_until_wait_node(
                     _node_get(node, "id"),
                     None,
                 )
+                logger.info(
+                    "[NODE COMPLETE] flow_id=%s session_id=%s current_node_id=%s next_node_id=%s node_type=%s",
+                    flow.id, getattr(flow_session, "id", None), _node_get(node, "id"), None, node_type,
+                )
                 _finalize_runtime_flow_session(db=db, conversation=session, flow_session=flow_session, end_node_id=_node_get(node, "id"))
                 return None
             next_node_type = _node_type_slug(next_node) if next_node else None
@@ -2203,8 +2275,20 @@ def run_until_wait_node(
                 next_target,
                 next_node_type,
             )
+            logger.info(
+                "[NEXT NODE RESOLVED] flow_id=%s session_id=%s current_node_id=%s next_node_id=%s node_type=%s",
+                flow.id, getattr(flow_session, "id", None), message_node_id, next_target, node_type,
+            )
+            logger.info(
+                "[NODE COMPLETE] flow_id=%s session_id=%s current_node_id=%s next_node_id=%s node_type=%s",
+                flow.id, getattr(flow_session, "id", None), message_node_id, next_target, node_type,
+            )
             logger.info("[MANYCHAT ADVANCE] from=%s to=%s", message_node_id, next_target)
             node = next_node
+            logger.info(
+                "[NEXT NODE EXECUTE] flow_id=%s session_id=%s current_node_id=%s next_node_id=%s node_type=%s",
+                flow.id, getattr(flow_session, "id", None), _node_get(node, "id") if node else None, None, _node_type_slug(node) if node else None,
+            )
             if node and next_node_type == "condition":
                 condition_node_id = _node_get(node, "id")
                 target_node_id = _parse_uuid(condition_node_id)

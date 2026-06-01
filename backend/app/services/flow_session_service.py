@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+import traceback
 from typing import Any
 
 from app.models.flow import Flow
@@ -310,10 +311,22 @@ class FlowSessionService:
         ended_at: datetime | None = None,
     ) -> FlowSession:
         normalized_status = (status or "").lower()
+        print(
+            "[SESSION FINALIZE CALL] "
+            f"session_id={getattr(session, 'id', None)} "
+            f"requested_status={status} current_status={getattr(session, 'status', None)} "
+            f"current_node_id={getattr(session, 'current_node_id', None)}"
+        )
+        print(f"[SESSION FINALIZE REASON] normalized_status={normalized_status}")
+        print("[SESSION FINALIZE STACK] " + " | ".join(traceback.format_stack(limit=12)))
         if normalized_status not in FINAL_COMPLETION_STATUSES:
             raise ValueError(f"Invalid status '{status}'")
 
         if (session.status or "").lower() in FINAL_SESSION_STATUSES:
+            print(
+                "[SESSION FINALIZE REASON] "
+                f"session_id={getattr(session, 'id', None)} already_final_status={session.status}"
+            )
             return session
 
         if normalized_status == "completed":
