@@ -51,8 +51,18 @@ class MetaCloudClient:
                 return response.json()
             except (httpx.TimeoutException, httpx.TransportError) as exc:
                 if attempt == 3:
-                    logger.error("[META API ERROR] transport tenant_id=%s provider_id=%s template_id=%s graph_endpoint=%s status_code=%s token_length=%s detail=%s",
-                                 context.get("tenant_id"), context.get("provider_id"), context.get("template_id"), endpoint_path, 0, context.get("token_length", len(self.access_token or "")), str(exc))
+                    logger.error(
+                        "[META API ERROR] transport tenant_id=%s provider_id=%s template_id=%s graph_endpoint=%s phone_number_id=%s status_code=%s token_hash=%s token_length=%s detail=%s",
+                        context.get("tenant_id"),
+                        context.get("provider_id"),
+                        context.get("template_id"),
+                        endpoint_path,
+                        context.get("phone_number_id"),
+                        0,
+                        context.get("token_hash"),
+                        context.get("token_length", len(self.access_token or "")),
+                        str(exc),
+                    )
                     raise MetaApiError("Falha de conexão com a Meta. Tente novamente.", status_code=503) from exc
                 await asyncio.sleep(attempt * 0.4)
 
@@ -75,8 +85,19 @@ class MetaCloudClient:
         err = payload.get("error", {}) if isinstance(payload, dict) else {}
         message = err.get("message") or "Erro ao comunicar com Meta Graph API"
         friendly = _friendly_error(message, response.status_code)
-        logger.error("[META API ERROR] tenant_id=%s provider_id=%s template_id=%s graph_endpoint=%s status_code=%s token_length=%s graph_check=%s meta_message=%s",
-                     context.get("tenant_id"), context.get("provider_id"), context.get("template_id"), endpoint, response.status_code, context.get("token_length", len(self.access_token or "")), context.get("graph_check"), message)
+        logger.error(
+            "[META API ERROR] tenant_id=%s provider_id=%s template_id=%s graph_endpoint=%s phone_number_id=%s status_code=%s token_hash=%s token_length=%s graph_check=%s meta_message=%s",
+            context.get("tenant_id"),
+            context.get("provider_id"),
+            context.get("template_id"),
+            endpoint,
+            context.get("phone_number_id"),
+            response.status_code,
+            context.get("token_hash"),
+            context.get("token_length", len(self.access_token or "")),
+            context.get("graph_check"),
+            message,
+        )
         raise MetaApiError(friendly, status_code=response.status_code, payload=payload)
 
 

@@ -129,6 +129,14 @@ def enqueue_send_message(message_data: dict[str, Any]) -> str | None:
 
     queue = get_queue(SEND_QUEUE_NAME)
 
+    passthrough_keys = (
+        "flow_id",
+        "flow_version_id",
+        "session_id",
+        "node_id",
+        "sequence_number",
+        "message_id",
+    )
     payload = {
         "tenant_id": str(tenant_id),
         "phone": phone,
@@ -137,6 +145,10 @@ def enqueue_send_message(message_data: dict[str, Any]) -> str | None:
         "correlation_id": correlation_id,
         "conversation_id": str(message_data.get("conversation_id") or "") or None,
     }
+    for key in passthrough_keys:
+        value = message_data.get(key)
+        if value is not None:
+            payload[key] = str(value)
 
     job = queue.enqueue(
         "app.workers.send_worker.send_whatsapp_message",
