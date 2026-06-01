@@ -256,6 +256,56 @@ def _extract_start_node_metadata(nodes: list[dict[str, Any]]) -> tuple[str | Non
     return None, ""
 
 
+
+
+def _normalize_flow_edges(edges: list[Any] | None) -> list[dict[str, Any]]:
+    normalized_edges: list[dict[str, Any]] = []
+    for edge in edges or []:
+        if hasattr(edge, "model_dump"):
+            raw_edge = edge.model_dump(exclude_none=True)
+        elif isinstance(edge, dict):
+            raw_edge = dict(edge)
+        else:
+            raw_edge = {
+                "id": getattr(edge, "id", None),
+                "source": getattr(edge, "source", None),
+                "target": getattr(edge, "target", None),
+                "sourceHandle": getattr(edge, "sourceHandle", None),
+                "targetHandle": getattr(edge, "targetHandle", None),
+                "type": getattr(edge, "type", None),
+                "label": getattr(edge, "label", None),
+                "data": getattr(edge, "data", None),
+            }
+        data = raw_edge.get("data") if isinstance(raw_edge.get("data"), dict) else {}
+        source_handle = raw_edge.get("sourceHandle") or raw_edge.get("source_handle") or data.get("sourceHandle") or data.get("source_handle")
+        target_handle = raw_edge.get("targetHandle") or raw_edge.get("target_handle") or data.get("targetHandle") or data.get("target_handle")
+        label = raw_edge.get("label")
+        condition = data.get("condition") or label or source_handle
+        normalized_data = dict(data)
+        if condition is not None:
+            normalized_data["condition"] = condition
+        if source_handle is not None:
+            normalized_data["sourceHandle"] = source_handle
+        normalized_edge = {
+            "id": str(raw_edge.get("id")) if raw_edge.get("id") is not None else None,
+            "source": str(raw_edge.get("source")) if raw_edge.get("source") is not None else None,
+            "target": str(raw_edge.get("target")) if raw_edge.get("target") is not None else None,
+            "sourceHandle": str(source_handle) if source_handle is not None else None,
+            "targetHandle": str(target_handle) if target_handle is not None else None,
+            "type": raw_edge.get("type") or "default",
+            "label": label if label is not None else condition,
+            "data": normalized_data,
+        }
+        normalized_edges.append({key: value for key, value in normalized_edge.items() if value is not None})
+    return normalized_edges
+
+
+def _persist_builder_graph(flow: Flow, nodes: list[dict[str, Any]], edges: list[dict[str, Any]]) -> None:
+    flow.nodes_json = nodes
+    flow.edges_json = edges
+    flow.nodes = nodes
+    flow.edges = edges
+
 def _builder_graph_from_flow(flow: Flow) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     nodes = flow.nodes_json if isinstance(flow.nodes_json, list) else flow.nodes if isinstance(flow.nodes, list) else []
     edges = flow.edges_json if isinstance(flow.edges_json, list) else flow.edges if isinstance(flow.edges, list) else []
@@ -1042,7 +1092,15 @@ async def update_flow_route(
                     }
                 )
             nodes = _ensure_start_node(nodes)
-            edges = raw_edges or []
+            edges = _normalize_flow_edges(raw_edges)
+            logger.info(
+                "[FLOW UPDATE GRAPH PAYLOAD] flow_id=%s nodes_count=%s edges_count=%s edge_pairs=%s edges_raw=%s",
+                flow.id,
+                len(nodes),
+                len(edges),
+                [(edge.get("source"), edge.get("target")) for edge in edges],
+                edges,
+            )
 
             validation = validate_flow_definition({"nodes": nodes, "edges": edges}, mode="draft")
 
@@ -1069,6 +1127,8 @@ async def update_flow_route(
             db.add(new_version)
             db.flush()
             flow.current_version_id = new_version.id
+            flow.version = new_version.version
+            _persist_builder_graph(flow, nodes, edges)
             invalidate_flow_runtime_cache(flow.id)
         else:
             validation = None
@@ -1084,6 +1144,8 @@ async def update_flow_route(
             metadata={"graph_updated": should_update_graph},
         )
         db.commit()
+        logger.info("[FLOW STORED GRAPH] flow_id=%s flow.nodes=%s flow.edges=%s", str(flow.id), getattr(flow, "nodes", None), getattr(flow, "edges", None))
+        logger.info("[FLOW STORED GRAPH JSON] flow_id=%s flow.nodes_json=%s flow.edges_json=%s", str(flow.id), getattr(flow, "nodes_json", None), getattr(flow, "edges_json", None))
         db.refresh(flow)
         logger.info("[FLOW UPDATE SAVED] flow_id=%s trigger_type=%s trigger_value=%s", str(flow.id), flow.trigger_type, flow.trigger_value)
 
@@ -1605,14 +1667,7 @@ async def update_tenant_flow(
             )
         nodes = _ensure_start_node(nodes)
         edges = payload_model.edges or []
-        edges_json = [
-            {
-                "id": getattr(edge, "id", None),
-                "source": getattr(edge, "source", None),
-                "target": getattr(edge, "target", None),
-            }
-            for edge in edges
-        ]
+        edges_json = _normalize_flow_edges(edges)
         nodes_json = nodes
         logger.info("[FLOW SAVE OK] nodes=%s edges=%s", len(nodes_json), len(edges_json))
         logger.info("VALIDANDO FLOW: nodes=%s", nodes)
@@ -1658,6 +1713,8 @@ async def update_tenant_flow(
         if flow.is_active:
             logger.info("[FLOW ACTIVE]: %s", flow.id)
         db.commit()
+        logger.info("[FLOW STORED GRAPH] flow_id=%s flow.nodes=%s flow.edges=%s", str(flow.id), getattr(flow, "nodes", None), getattr(flow, "edges", None))
+        logger.info("[FLOW STORED GRAPH JSON] flow_id=%s flow.nodes_json=%s flow.edges_json=%s", str(flow.id), getattr(flow, "nodes_json", None), getattr(flow, "edges_json", None))
 
         logger.info("[FLOW SAVE] tenant_id=%s flow_id=%s version_id=%s request_id=%s nodes_count=%s edges_count=%s", str(tenant_uuid), str(flow.id), str(nova.id), None, len(nodes_json), len(edges_json))
         db.refresh(flow)

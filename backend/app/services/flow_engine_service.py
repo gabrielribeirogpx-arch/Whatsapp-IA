@@ -1245,14 +1245,24 @@ def resolve_current_node(
 def _get_edges(
     db: Session,
     flow_id: uuid.UUID,
-    source: uuid.UUID,
+    source: uuid.UUID | str | None,
     runtime_graph: dict[str, Any] | None = None,
 ) -> list[FlowEdge | VersionedFlowEdge]:
     if runtime_graph:
-        return runtime_graph.get("edges_by_source", {}).get(source, [])
+        edges_by_source = runtime_graph.get("edges_by_source", {}) if isinstance(runtime_graph.get("edges_by_source"), dict) else {}
+        source_uuid = _parse_uuid(source)
+        direct_edges = edges_by_source.get(source) or (edges_by_source.get(source_uuid) if source_uuid else None) or edges_by_source.get(str(source))
+        if direct_edges:
+            return direct_edges
+        source_text = str(source_uuid or source or "")
+        all_edges = runtime_graph.get("edges") if isinstance(runtime_graph.get("edges"), list) else []
+        return [edge for edge in all_edges if str(_edge_source(edge)) == source_text]
+    source_uuid = _parse_uuid(source)
+    if source_uuid is None:
+        return []
     return db.execute(
         select(FlowEdge)
-        .where(FlowEdge.flow_id == flow_id, FlowEdge.source == source)
+        .where(FlowEdge.flow_id == flow_id, FlowEdge.source == source_uuid)
         .order_by(FlowEdge.id.asc())
     ).scalars().all()
 
@@ -2094,22 +2104,25 @@ def run_until_wait_node(
                             continue
                         _send_flow_whatsapp_message(tenant=tenant, phone=phone, text=text)
                         logger.info("[MANYCHAT MESSAGE SENT] node_id=%s", _node_get(node, "id"))
-                if _is_terminal_message_node(node_data):
-                    _emit_runtime_event(
-                        db=db,
-                        tenant_id=session.tenant_id,
-                        conversation_id=session.id,
-                        flow_id=flow.id,
-                        flow_version_id=getattr(flow_session, "flow_version_id", None),
-                        node_id=current_node_uuid,
-                        event_type="NODE_EXITED",
-                        metadata={"source": "terminal_message"},
-                        dedupe_bucket_seconds=1,
-                    )
-                    _finalize_runtime_flow_session(db=db, conversation=session, flow_session=flow_session, end_node_id=_node_get(node, "id"))
-                    return None
             next_edge = _pick_default_edge(edges)
             next_target = _edge_target(next_edge) if next_edge else None
+            message_node_id = _node_get(node, "id")
+            next_node = _get_node(db=db, node_id=next_target, tenant_id=session.tenant_id, runtime_graph=runtime_graph) if next_edge and next_target else None
+            logger.info(
+                "[FLOW EDGE RESOLUTION] current_node=%s edge_count=%s outgoing_edges=%s next_node=%s",
+                message_node_id,
+                len(edges),
+                [
+                    {
+                        "id": str(_node_get(edge, "id")),
+                        "source": str(_edge_source(edge)),
+                        "target": str(_edge_target(edge)),
+                        "sourceHandle": _edge_source_handle(edge),
+                    }
+                    for edge in edges
+                ],
+                _node_get(next_node, "id") if next_node else None,
+            )
             if next_target:
                 _emit_runtime_event(
                     db=db,
@@ -2122,8 +2135,26 @@ def run_until_wait_node(
                     metadata={"source": "default_edge", "next_node_id": str(next_target)},
                     dedupe_bucket_seconds=1,
                 )
-            message_node_id = _node_get(node, "id")
-            next_node = _get_node(db=db, node_id=next_target, tenant_id=session.tenant_id, runtime_graph=runtime_graph) if next_edge else None
+            if _is_terminal_message_node(node_data) and not next_node:
+                _emit_runtime_event(
+                    db=db,
+                    tenant_id=session.tenant_id,
+                    conversation_id=session.id,
+                    flow_id=flow.id,
+                    flow_version_id=getattr(flow_session, "flow_version_id", None),
+                    node_id=current_node_uuid,
+                    event_type="NODE_EXITED",
+                    metadata={"source": "terminal_message"},
+                    dedupe_bucket_seconds=1,
+                )
+                logger.info(
+                    "[FLOW FINISH CHECK] reason=%s current_node=%s next_node=%s",
+                    "terminal_message_without_next_node",
+                    _node_get(node, "id"),
+                    None,
+                )
+                _finalize_runtime_flow_session(db=db, conversation=session, flow_session=flow_session, end_node_id=_node_get(node, "id"))
+                return None
             next_node_type = _node_type_slug(next_node) if next_node else None
             logger.info(
                 "[MESSAGE POST ADVANCE] message_node_id=%s next_node_id=%s next_node_type=%s",
@@ -2184,6 +2215,12 @@ def run_until_wait_node(
         next_edge = _pick_default_edge(edges)
         node = _get_node(db=db, node_id=_edge_target(next_edge), tenant_id=session.tenant_id, runtime_graph=runtime_graph) if next_edge else None
 
+    logger.info(
+        "[FLOW FINISH CHECK] reason=%s current_node=%s next_node=%s",
+        "no_next_node_or_max_steps",
+        _node_get(node, "id") if node else None,
+        None,
+    )
     _finalize_runtime_flow_session(db=db, conversation=session, flow_session=flow_session, end_node_id=_node_get(node, "id") if node else None)
     logger.info("[MANYCHAT FLOW_FINISHED] flow_id=%s", flow.id)
     return None
@@ -2209,7 +2246,29 @@ def advance_after_message_node(
         edges = [edge for edge in all_edges if str(_edge_source(edge)) == current_node_id_str]
     next_edge = _pick_default_edge(edges)
     next_target = _edge_target(next_edge) if next_edge else None
+    preview_next_node = _get_node(db=db, node_id=next_target, tenant_id=conversation.tenant_id, runtime_graph=runtime_graph) if next_edge and next_target else None
+    logger.info(
+        "[FLOW EDGE RESOLUTION] current_node=%s edge_count=%s outgoing_edges=%s next_node=%s",
+        current_node_id,
+        len(edges),
+        [
+            {
+                "id": str(_node_get(edge, "id")),
+                "source": str(_edge_source(edge)),
+                "target": str(_edge_target(edge)),
+                "sourceHandle": _edge_source_handle(edge),
+            }
+            for edge in edges
+        ],
+        _node_get(preview_next_node, "id") if preview_next_node else None,
+    )
     if not next_edge or not next_target:
+        logger.info(
+            "[FLOW FINISH CHECK] reason=%s current_node=%s next_node=%s",
+            "missing_message_next_edge",
+            current_node_id,
+            None,
+        )
         logger.error(
             "[FLOW EDGE LOOKUP FAILED] current_node_id=%s edges_count=%s edges_raw=%s node_ids=%s published_version_id=%s flow_id=%s",
             current_node_id,
