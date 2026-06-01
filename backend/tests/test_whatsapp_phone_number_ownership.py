@@ -134,6 +134,58 @@ def test_provider_phone_number_id_must_be_exclusive_across_tenants():
         )
 
 
+def test_meta_provider_create_succeeds_after_hidden_provider_phone_release():
+    db = _FakeDB()
+    hidden_tenant_id = uuid.UUID("b0c1a7d5-587b-476f-89d1-5596c02dad5d")
+    new_owner = _tenant(db, name="New Owner", slug="new-owner")
+    hidden_provider = TenantWhatsAppProvider(
+        id=uuid.UUID("bb2848cc-782f-4f59-a2b7-8860d3c9bc61"),
+        tenant_id=hidden_tenant_id,
+        provider_type="meta_cloud",
+        phone_number_id=None,
+        is_active=False,
+        status="disconnected",
+        metadata_json={
+            "previous_phone_number_id": "876969468828520",
+            "hidden_provider": True,
+            "remediation": "20260601_release_hidden_provider_phone",
+        },
+    )
+    db.add(hidden_provider)
+
+    provider = create_provider(
+        db,
+        new_owner.id,
+        _Payload(
+            provider_type="meta_cloud",
+            phone_number_id="876969468828520",
+            display_name="Meta definitivo",
+        ),
+    )
+
+    assert provider.phone_number_id == "876969468828520"
+    assert provider.tenant_id == new_owner.id
+    assert hidden_provider.phone_number_id is None
+
+
+def test_duplicate_protection_still_blocks_non_released_phone_numbers():
+    db = _FakeDB()
+    owner = _tenant(db, name="Owner", slug="owner")
+    other = _tenant(db, name="Other", slug="other")
+    create_provider(
+        db,
+        owner.id,
+        _Payload(provider_type="meta_cloud", phone_number_id="555000111222"),
+    )
+
+    with pytest.raises(DuplicatePhoneNumberProviderError):
+        create_provider(
+            db,
+            other.id,
+            _Payload(provider_type="meta_cloud", phone_number_id="555000111222"),
+        )
+
+
 def test_provider_create_conflict_returns_diagnostic_payload_and_log(caplog):
     db = _FakeDB()
     owner = _tenant(db, name="Owner", slug="owner")
