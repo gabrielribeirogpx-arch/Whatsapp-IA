@@ -1,14 +1,14 @@
 """mark conversations.current_node_id as runtime-obsolete
 
-Revision ID: 20260510_conversations_current_node_runtime_obsolete
-Revises: 20260507_processed_messages_tenant_message_unique
+Revision ID: 20260510_conv_node_runtime
+Revises: 20260507_proc_msg_tenant_unique
 Create Date: 2026-05-10
 """
 
 from alembic import op
 
-revision = "20260510_conversations_current_node_runtime_obsolete"
-down_revision = "20260507_processed_messages_tenant_message_unique"
+revision = "20260510_conv_node_runtime"
+down_revision = "20260507_proc_msg_tenant_unique"
 branch_labels = None
 depends_on = None
 

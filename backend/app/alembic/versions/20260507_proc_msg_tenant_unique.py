@@ -1,13 +1,13 @@
 """ensure processed_messages tenant/message uniqueness for idempotency
 
-Revision ID: 20260507_processed_messages_tenant_message_unique
+Revision ID: 20260507_proc_msg_tenant_unique
 Revises: 20260507_flow_sessions_analytics
 Create Date: 2026-05-07
 """
 
 from alembic import op
 
-revision = "20260507_processed_messages_tenant_message_unique"
+revision = "20260507_proc_msg_tenant_unique"
 down_revision = "20260507_flow_sessions_analytics"
 branch_labels = None
 depends_on = None

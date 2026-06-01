@@ -1,7 +1,7 @@
 """add user state fields to flow_sessions
 
-Revision ID: 20260430_flow_sessions_state
-Revises: 20260415_add_name_to_conversations
+Revision ID: 20260430_flow_sessions_fields
+Revises: 20260415_conv_name
 Create Date: 2026-04-30
 """
 
@@ -10,8 +10,8 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision = "20260430_flow_sessions_state"
-down_revision = "20260415_add_name_to_conversations"
+revision = "20260430_flow_sessions_fields"
+down_revision = "20260415_conv_name"
 branch_labels = None
 depends_on = None
 

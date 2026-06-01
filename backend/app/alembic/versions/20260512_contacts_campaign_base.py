@@ -1,7 +1,7 @@
 """contacts campaign base fields
 
 Revision ID: 20260512_contacts_campaign_base
-Revises: 20260511_whatsapp_campaigns_runtime
+Revises: 20260511_wa_campaign_runtime
 """
 
 from alembic import op
@@ -9,7 +9,7 @@ import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
 revision = "20260512_contacts_campaign_base"
-down_revision = "20260511_whatsapp_campaigns_runtime"
+down_revision = "20260511_wa_campaign_runtime"
 branch_labels = None
 depends_on = None
 
