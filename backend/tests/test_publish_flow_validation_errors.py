@@ -101,3 +101,92 @@ def test_graph_valido_publica(monkeypatch):
     response = flows.publish_tenant_flow_version('flow-id', flows.PublishFlowPayload(), x_tenant_id=None, db=DummyDB())
 
     assert response == {'ok': True}
+
+
+def test_publish_fresh_snapshot_republishes_latest_matching_checksum(monkeypatch):
+    tenant_id = uuid4()
+    flow_id = uuid4()
+    old_published_id = uuid4()
+    latest_id = uuid4()
+    nodes = [
+        {'id': 'n1', 'type': 'message', 'data': {'isStart': True, 'text': 'Inicio'}},
+        {'id': 'n2', 'type': 'message', 'data': {'text': 'Aguarde'}},
+        {'id': 'n3', 'type': 'message', 'data': {'text': 'Aguarde mais um momento'}},
+        {'id': 'n4', 'type': 'message', 'data': {'text': 'Quase lá'}},
+        {'id': 'n5', 'type': 'message', 'data': {'text': 'Fim'}},
+    ]
+    edges = [
+        {'source': 'n1', 'target': 'n2'},
+        {'source': 'n2', 'target': 'n3'},
+        {'source': 'n3', 'target': 'n4'},
+        {'source': 'n4', 'target': 'n5'},
+    ]
+    latest_version = SimpleNamespace(
+        id=latest_id,
+        version=7,
+        nodes=nodes,
+        edges=edges,
+        snapshot={'nodes': nodes, 'edges': edges},
+        graph_checksum=flows._graph_checksum(nodes, edges),
+        start_node_id=None,
+        start_text_preview=None,
+        created_from_source=None,
+        is_active=False,
+        is_published=False,
+    )
+    flow = SimpleNamespace(
+        id=flow_id,
+        tenant_id=tenant_id,
+        nodes_json=nodes,
+        edges_json=edges,
+        nodes=None,
+        edges=None,
+        current_version=None,
+        current_version_id=uuid4(),
+        published_version_id=old_published_id,
+        published_version=SimpleNamespace(id=old_published_id, nodes=nodes[:4], edges=edges[:3]),
+        version=6,
+    )
+
+    class ScalarResult:
+        def scalar(self):
+            return latest_version.version
+
+    class Query:
+        def filter(self, *_args, **_kwargs):
+            return self
+
+        def order_by(self, *_args, **_kwargs):
+            return self
+
+        def first(self):
+            return latest_version
+
+        def update(self, values, synchronize_session=False):
+            latest_version.is_active = values.get(flows.FlowVersion.is_active, values.get('is_active', latest_version.is_active))
+            latest_version.is_published = values.get(flows.FlowVersion.is_published, values.get('is_published', latest_version.is_published))
+            return 1
+
+    class DB:
+        def query(self, *_args, **_kwargs):
+            return Query()
+
+        def execute(self, *_args, **_kwargs):
+            return ScalarResult()
+
+        def add(self, _obj):
+            return None
+
+        def flush(self):
+            return None
+
+    monkeypatch.setattr(flows, 'validate_flow_payload_or_400', lambda _nodes, _edges: None)
+    published = flows._publish_fresh_snapshot(db=DB(), flow=flow, reason='publish')
+
+    assert published is latest_version
+    assert latest_version.is_active is True
+    assert latest_version.is_published is True
+    assert flow.published_version_id == latest_id
+    assert flow.current_version_id == latest_id
+    assert len(published.nodes) == 5
+    assert published.nodes[2]['data']['text'] == 'Aguarde mais um momento'
