@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import os
 import subprocess
+import time
 import uuid
 from functools import lru_cache
 from typing import Any
@@ -28,6 +30,15 @@ from app.services.whatsapp_credentials_service import WhatsAppCredentialsNotConf
 from app.integrations.meta.meta_cloud_client import MetaApiError
 
 logger = logging.getLogger(__name__)
+
+
+SEND_LOCK_TTL_SECONDS = int(os.getenv("SEND_LOCK_TTL_SECONDS", "120"))
+SEND_LOCK_WAIT_TIMEOUT_SECONDS = float(os.getenv("SEND_LOCK_WAIT_TIMEOUT_SECONDS", "45"))
+SEND_LOCK_RETRY_INTERVAL_SECONDS = float(os.getenv("SEND_LOCK_RETRY_INTERVAL_SECONDS", "0.25"))
+
+
+class SendLockNotAcquiredError(RuntimeError):
+    pass
 
 
 def _token_hash(token: str | None) -> str:
@@ -104,13 +115,304 @@ def _record_outbound_message(*, db, tenant_id: uuid.UUID, phone: str, text: str,
     )
 
 
-def _release_send_lock(redis_client: Any, lock_key: str, lock_token: str) -> None:
+def _remaining_lock_ttl(redis_client: Any, lock_key: str) -> int | None:
     try:
-        current = redis_client.get(lock_key)
-        if current == lock_token:
-            redis_client.delete(lock_key)
+        return int(redis_client.ttl(lock_key))
     except Exception:
-        logger.warning("[OUTBOUND SEND LOCK RELEASED] lock_key=%s release_error=true", lock_key, exc_info=True)
+        logger.warning("[LOCK TTL] lock_key=%s ttl_error=true", lock_key, exc_info=True)
+        return None
+
+
+def _lock_log_context(
+    *,
+    lock_key: str,
+    tenant_id: str,
+    phone: str,
+    conversation_id: str | None,
+    job_id: str,
+    flow_id: Any,
+    flow_version_id: Any,
+    session_id: Any,
+    node_id: Any,
+    sequence_number: Any,
+    ttl: int | None,
+) -> tuple[Any, ...]:
+    return (
+        lock_key,
+        tenant_id or "n/a",
+        phone or "n/a",
+        conversation_id or "n/a",
+        ttl if ttl is not None else "n/a",
+        job_id or "n/a",
+        flow_id or "n/a",
+        flow_version_id or "n/a",
+        session_id or "n/a",
+        node_id or "n/a",
+        sequence_number if sequence_number is not None else "n/a",
+    )
+
+
+def _log_lock_ttl(
+    redis_client: Any,
+    *,
+    lock_key: str,
+    tenant_id: str,
+    phone: str,
+    conversation_id: str | None,
+    job_id: str,
+    flow_id: Any,
+    flow_version_id: Any,
+    session_id: Any,
+    node_id: Any,
+    sequence_number: Any,
+) -> int | None:
+    ttl = _remaining_lock_ttl(redis_client, lock_key)
+    logger.info(
+        "[LOCK TTL] lock_key=%s tenant_id=%s phone=%s conversation_id=%s ttl_remaining=%s job_id=%s flow_id=%s flow_version_id=%s session_id=%s node_id=%s sequence_number=%s",
+        *_lock_log_context(
+            lock_key=lock_key,
+            tenant_id=tenant_id,
+            phone=phone,
+            conversation_id=conversation_id,
+            job_id=job_id,
+            flow_id=flow_id,
+            flow_version_id=flow_version_id,
+            session_id=session_id,
+            node_id=node_id,
+            sequence_number=sequence_number,
+            ttl=ttl,
+        ),
+    )
+    return ttl
+
+
+def _send_lock_value(
+    *,
+    lock_token: str,
+    job_id: str,
+    tenant_id: str,
+    phone: str,
+    conversation_id: str | None,
+    flow_id: Any,
+    flow_version_id: Any,
+    session_id: Any,
+    node_id: Any,
+    sequence_number: Any,
+) -> str:
+    return json.dumps(
+        {
+            "token": lock_token,
+            "job_id": job_id,
+            "tenant_id": tenant_id,
+            "phone": phone,
+            "conversation_id": conversation_id,
+            "flow_id": str(flow_id) if flow_id else None,
+            "flow_version_id": str(flow_version_id) if flow_version_id else None,
+            "session_id": str(session_id) if session_id else None,
+            "node_id": str(node_id) if node_id else None,
+            "sequence_number": str(sequence_number) if sequence_number is not None else None,
+            "created_at": time.time(),
+        },
+        sort_keys=True,
+    )
+
+
+def _lock_value_matches_token(current_value: Any, lock_token: str) -> bool:
+    if current_value == lock_token:
+        return True
+    try:
+        decoded = json.loads(str(current_value or ""))
+    except (TypeError, ValueError):
+        return False
+    return decoded.get("token") == lock_token
+
+
+def _acquire_send_lock(
+    redis_client: Any,
+    *,
+    lock_key: str,
+    lock_token: str,
+    tenant_id: str,
+    phone: str,
+    conversation_id: str | None,
+    job_id: str,
+    flow_id: Any,
+    flow_version_id: Any,
+    session_id: Any,
+    node_id: Any,
+    sequence_number: Any,
+    wait_timeout_seconds: float = SEND_LOCK_WAIT_TIMEOUT_SECONDS,
+    retry_interval_seconds: float = SEND_LOCK_RETRY_INTERVAL_SECONDS,
+    lock_ttl_seconds: int = SEND_LOCK_TTL_SECONDS,
+) -> bool:
+    lock_value = _send_lock_value(
+        lock_token=lock_token,
+        job_id=job_id,
+        tenant_id=tenant_id,
+        phone=phone,
+        conversation_id=conversation_id,
+        flow_id=flow_id,
+        flow_version_id=flow_version_id,
+        session_id=session_id,
+        node_id=node_id,
+        sequence_number=sequence_number,
+    )
+    deadline = time.monotonic() + max(0.0, wait_timeout_seconds)
+    attempt = 0
+
+    while True:
+        attempt += 1
+        ttl_before = _remaining_lock_ttl(redis_client, lock_key)
+        logger.info(
+            "[LOCK ACQUIRE ATTEMPT] lock_key=%s tenant_id=%s phone=%s conversation_id=%s ttl_remaining=%s job_id=%s flow_id=%s flow_version_id=%s session_id=%s node_id=%s sequence_number=%s attempt=%s",
+            *_lock_log_context(
+                lock_key=lock_key,
+                tenant_id=tenant_id,
+                phone=phone,
+                conversation_id=conversation_id,
+                job_id=job_id,
+                flow_id=flow_id,
+                flow_version_id=flow_version_id,
+                session_id=session_id,
+                node_id=node_id,
+                sequence_number=sequence_number,
+                ttl=ttl_before,
+            ),
+            attempt,
+        )
+        if redis_client.set(lock_key, lock_value, ex=lock_ttl_seconds, nx=True):
+            ttl_after = _log_lock_ttl(
+                redis_client,
+                lock_key=lock_key,
+                tenant_id=tenant_id,
+                phone=phone,
+                conversation_id=conversation_id,
+                job_id=job_id,
+                flow_id=flow_id,
+                flow_version_id=flow_version_id,
+                session_id=session_id,
+                node_id=node_id,
+                sequence_number=sequence_number,
+            )
+            logger.info(
+                "[LOCK ACQUIRE SUCCESS] lock_key=%s tenant_id=%s phone=%s conversation_id=%s ttl_remaining=%s job_id=%s flow_id=%s flow_version_id=%s session_id=%s node_id=%s sequence_number=%s attempt=%s",
+                *_lock_log_context(
+                    lock_key=lock_key,
+                    tenant_id=tenant_id,
+                    phone=phone,
+                    conversation_id=conversation_id,
+                    job_id=job_id,
+                    flow_id=flow_id,
+                    flow_version_id=flow_version_id,
+                    session_id=session_id,
+                    node_id=node_id,
+                    sequence_number=sequence_number,
+                    ttl=ttl_after,
+                ),
+                attempt,
+            )
+            return True
+
+        ttl_after = _log_lock_ttl(
+            redis_client,
+            lock_key=lock_key,
+            tenant_id=tenant_id,
+            phone=phone,
+            conversation_id=conversation_id,
+            job_id=job_id,
+            flow_id=flow_id,
+            flow_version_id=flow_version_id,
+            session_id=session_id,
+            node_id=node_id,
+            sequence_number=sequence_number,
+        )
+        holder = redis_client.get(lock_key)
+        if time.monotonic() >= deadline:
+            logger.warning(
+                "[LOCK ACQUIRE FAILURE] lock_key=%s tenant_id=%s phone=%s conversation_id=%s ttl_remaining=%s job_id=%s flow_id=%s flow_version_id=%s session_id=%s node_id=%s sequence_number=%s attempt=%s holder=%s",
+                *_lock_log_context(
+                    lock_key=lock_key,
+                    tenant_id=tenant_id,
+                    phone=phone,
+                    conversation_id=conversation_id,
+                    job_id=job_id,
+                    flow_id=flow_id,
+                    flow_version_id=flow_version_id,
+                    session_id=session_id,
+                    node_id=node_id,
+                    sequence_number=sequence_number,
+                    ttl=ttl_after,
+                ),
+                attempt,
+                holder,
+            )
+            return False
+
+        logger.info(
+            "[LOCK ACQUIRE FAILURE] lock_key=%s tenant_id=%s phone=%s conversation_id=%s ttl_remaining=%s job_id=%s flow_id=%s flow_version_id=%s session_id=%s node_id=%s sequence_number=%s attempt=%s waiting=true holder=%s",
+            *_lock_log_context(
+                lock_key=lock_key,
+                tenant_id=tenant_id,
+                phone=phone,
+                conversation_id=conversation_id,
+                job_id=job_id,
+                flow_id=flow_id,
+                flow_version_id=flow_version_id,
+                session_id=session_id,
+                node_id=node_id,
+                sequence_number=sequence_number,
+                ttl=ttl_after,
+            ),
+            attempt,
+            holder,
+        )
+        time.sleep(max(0.05, retry_interval_seconds))
+
+
+def _release_send_lock(
+    redis_client: Any,
+    lock_key: str,
+    lock_token: str,
+    *,
+    tenant_id: str = "n/a",
+    phone: str = "n/a",
+    conversation_id: str | None = None,
+    job_id: str = "n/a",
+    flow_id: Any = None,
+    flow_version_id: Any = None,
+    session_id: Any = None,
+    node_id: Any = None,
+    sequence_number: Any = None,
+) -> None:
+    try:
+        ttl_before = _remaining_lock_ttl(redis_client, lock_key)
+        current = redis_client.get(lock_key)
+        released = False
+        if _lock_value_matches_token(current, lock_token):
+            redis_client.delete(lock_key)
+            released = True
+        ttl_after = _remaining_lock_ttl(redis_client, lock_key)
+        logger.info(
+            "[LOCK RELEASE] lock_key=%s tenant_id=%s phone=%s conversation_id=%s ttl_remaining=%s job_id=%s flow_id=%s flow_version_id=%s session_id=%s node_id=%s sequence_number=%s released=%s ttl_before=%s current_value=%s",
+            *_lock_log_context(
+                lock_key=lock_key,
+                tenant_id=tenant_id,
+                phone=phone,
+                conversation_id=conversation_id,
+                job_id=job_id,
+                flow_id=flow_id,
+                flow_version_id=flow_version_id,
+                session_id=session_id,
+                node_id=node_id,
+                sequence_number=sequence_number,
+                ttl=ttl_after,
+            ),
+            released,
+            ttl_before if ttl_before is not None else "n/a",
+            current,
+        )
+    except Exception:
+        logger.warning("[LOCK RELEASE] lock_key=%s tenant_id=%s phone=%s conversation_id=%s job_id=%s release_error=true", lock_key, tenant_id, phone, conversation_id or "n/a", job_id, exc_info=True)
 
 
 def send_whatsapp_message(*, message_data: dict[str, Any]) -> None:
@@ -166,11 +468,23 @@ def send_whatsapp_message(*, message_data: dict[str, Any]) -> None:
     last_sent_key = f"wa:last-sent-seq:{tenant_id}:{phone}"
     lock_token = str(uuid.uuid4())
     redis_client = get_redis_client()
-    lock_acquired = bool(redis_client.set(lock_key, lock_token, ex=30, nx=True))
+    lock_acquired = _acquire_send_lock(
+        redis_client,
+        lock_key=lock_key,
+        lock_token=lock_token,
+        tenant_id=tenant_id,
+        phone=phone,
+        conversation_id=conversation_id,
+        job_id=job_id,
+        flow_id=flow_id,
+        flow_version_id=flow_version_id,
+        session_id=session_id,
+        node_id=node_id,
+        sequence_number=sequence_number_raw,
+    )
     if not lock_acquired:
-        logger.info("[OUTBOUND SEND LOCK ACQUIRED] tenant_id=%s phone=%s acquired=false", tenant_id, phone)
         logger.warning("[WORKER EXIT FAILURE] job_id=%s reason=send_lock_not_acquired", job_id)
-        return
+        raise SendLockNotAcquiredError(f"send lock not acquired for job_id={job_id} lock_key={lock_key}")
     logger.info("[OUTBOUND SEND LOCK ACQUIRED] tenant_id=%s phone=%s acquired=true", tenant_id, phone)
 
     try:
@@ -409,5 +723,18 @@ def send_whatsapp_message(*, message_data: dict[str, Any]) -> None:
         logger.exception("[WORKER EXIT FAILURE] job_id=%s reason=unhandled_exception", job_id)
         raise
     finally:
-        _release_send_lock(redis_client, lock_key, lock_token)
+        _release_send_lock(
+            redis_client,
+            lock_key,
+            lock_token,
+            tenant_id=tenant_id,
+            phone=phone,
+            conversation_id=conversation_id,
+            job_id=job_id,
+            flow_id=flow_id,
+            flow_version_id=flow_version_id,
+            session_id=session_id,
+            node_id=node_id,
+            sequence_number=sequence_number_raw,
+        )
         logger.info("[OUTBOUND SEND LOCK RELEASED] tenant_id=%s phone=%s", tenant_id, phone)
