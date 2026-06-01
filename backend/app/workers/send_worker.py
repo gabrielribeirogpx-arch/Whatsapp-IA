@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import os
+import subprocess
 import uuid
+from functools import lru_cache
 from typing import Any
 
 from rq import get_current_job
@@ -31,6 +34,36 @@ def _token_hash(token: str | None) -> str:
     if not token:
         return ""
     return hashlib.sha256(token.encode("utf-8")).hexdigest()[:16]
+
+
+@lru_cache(maxsize=1)
+def _runtime_commit() -> str:
+    for env_name in (
+        "WORKER_COMMIT",
+        "GIT_COMMIT",
+        "RENDER_GIT_COMMIT",
+        "RAILWAY_GIT_COMMIT_SHA",
+        "VERCEL_GIT_COMMIT_SHA",
+        "HEROKU_SLUG_COMMIT",
+        "SOURCE_VERSION",
+        "COMMIT_SHA",
+    ):
+        commit = str(os.getenv(env_name) or "").strip()
+        if commit:
+            return commit
+
+    try:
+        completed = subprocess.run(
+            ["git", "rev-parse", "--short=12", "HEAD"],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=2,
+        )
+    except Exception:
+        return "unknown"
+
+    return completed.stdout.strip() or "unknown"
 
 
 def _record_outbound_message(*, db, tenant_id: uuid.UUID, phone: str, text: str, message_id: str, flow_id: Any = None, flow_version_id: Any = None, flow_session_id: Any = None, node_id: Any = None) -> None:
@@ -95,7 +128,14 @@ def send_whatsapp_message(*, message_data: dict[str, Any]) -> None:
     flow_session_id = message_data.get("session_id")
     conversation_id = str(message_data.get("conversation_id") or "") or None
     is_flow_message = bool(flow_id or flow_version_id or session_id or node_id or sequence_number_raw is not None)
+    payload_provider_id = str(message_data.get("provider_id") or "unresolved")
 
+    logger.info(
+        "[WORKER VERSION CHECK] commit=%s provider_id=%s message_text=%s",
+        _runtime_commit(),
+        payload_provider_id,
+        text,
+    )
     logger.info("event=send_worker_start correlation_id=%s tenant_id=%s phone=%s job_id=%s stage=send_worker_start", correlation_id, tenant_id or "n/a", phone or "n/a", job_id)
 
     lock_key = f"wa:send-lock:{tenant_id}:{phone}"
@@ -262,6 +302,15 @@ def send_whatsapp_message(*, message_data: dict[str, Any]) -> None:
                 node_id,
                 sequence_number,
             )
+        logger.info(
+            "[META PRE REQUEST] provider_id=%s phone_number_id=%s token_hash=%s token_length=%s message=%s",
+            provider_id,
+            resolved_phone_number_id,
+            token_hash,
+            len(resolved_token or ""),
+            text,
+        )
+
         try:
             if buttons:
                 send_buttons_message_via_meta(
