@@ -29,7 +29,7 @@ import { apiFetch, getFlowGraph, getTenantSessionFromStorage, listFlowVersions, 
 import { getLayoutedElements } from '@/lib/autoLayout';
 import { orderChoiceChildrenEdges } from '@/lib/flowChoiceOrdering';
 import { normalizeFlow } from '@/lib/flowNormalization';
-import { FlowNodePayload, FlowVersionItem } from '@/lib/types';
+import { FlowEdgePayload, FlowNodePayload, FlowVersionItem } from '@/lib/types';
 
 const FETCH_TIMEOUT_MS = 8000;
 
@@ -97,7 +97,7 @@ function randomPosition() {
 }
 
 
-const safeString = (v?: string | null) => (v ? v : '');
+const safeString = (v?: unknown) => (typeof v === 'string' ? v : v == null ? '' : String(v));
 const toHandleId = (value: string, fallback: string) => {
   const normalized = value.toLowerCase().trim().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
   return normalized || fallback;
@@ -156,7 +156,7 @@ const serializeFlowGraph = (nodes: Node[], edges: Edge[]) => {
   });
 
   const nodeTypeById = new Map(nodes.map((node) => [node.id, node.type]));
-  const cleanEdges = edges
+  const cleanEdges: FlowEdgePayload[] = edges
     .filter((edge) => edge.source && edge.target)
     .map((edge) => {
       const sourceNodeType = nodeTypeById.get(edge.source);
@@ -174,10 +174,10 @@ const serializeFlowGraph = (nodes: Node[], edges: Edge[]) => {
         sourceHandle: normalizedSourceHandle,
         targetHandle: edge.targetHandle ?? 'default',
         type: edge.type ?? 'default',
-        label: edge.label ?? normalizedSourceHandle,
+        label: safeString(edge.label ?? normalizedSourceHandle),
         data: {
           ...(edge.data || {}),
-          condition: edge.data?.condition ?? edge.label ?? normalizedSourceHandle,
+          condition: edge.data?.condition ?? safeString(edge.label ?? normalizedSourceHandle),
           sourceHandle: normalizedSourceHandle,
         },
       };
@@ -188,6 +188,8 @@ const serializeFlowGraph = (nodes: Node[], edges: Edge[]) => {
     edges: cleanEdges,
   };
 };
+
+const getFlowGraphSignature = (flow: { nodes: FlowNodePayload[]; edges: FlowEdgePayload[] }) => JSON.stringify(flow);
 
 function makeNodeId() {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -506,6 +508,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
   const nodesRef = useRef<Node[]>([]);
   const edgesRef = useRef<Edge[]>([]);
   const isSavingRef = useRef(false);
+  const lastPersistedFlowSignatureRef = useRef<string | null>(null);
   const saveStatusTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const playbackIdRef = useRef(0);
   const isMountedRef = useRef(true);
@@ -628,7 +631,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
   }, [edges]);
 
   useEffect(() => {
-    if (!isFlowHydrated || isSavingRef.current) return;
+    if (!isFlowHydrated) return;
     if (skipDirtyCheckRef.current) {
       skipDirtyCheckRef.current = false;
       return;
@@ -1081,6 +1084,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
         setFlowValidationError(null);
         setValidationWarnings([]);
         setValidationErrors([]);
+        lastPersistedFlowSignatureRef.current = getFlowGraphSignature(serializeFlowGraph([], []));
         return;
       }
 
@@ -1089,9 +1093,11 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
         const orderedEdges = orderChoiceChildrenEdges(nodesToRender, edgesToRender);
         setNodes(nodesToRender);
         setEdges(orderedEdges);
+        lastPersistedFlowSignatureRef.current = getFlowGraphSignature(serializeFlowGraph(nodesToRender, orderedEdges));
         requestAnimationFrame(() => { rfInstance?.fitView(); });
       } else {
         applyLayoutAndSetFlow(nodesToRender, edgesToRender);
+        lastPersistedFlowSignatureRef.current = getFlowGraphSignature(serializeFlowGraph(nodesToRender, edgesToRender));
       }
     } catch (err) {
       console.error('Erro ao carregar flow', err);
@@ -1424,6 +1430,13 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
     }, 0);
   }, [rfInstance, setEdges, setNodes, toast, toggleStartNode, updateNodeData]);
 
+  const getCurrentSerializedFlow = useCallback(() => {
+    const realFlow = rfInstance?.toObject?.();
+    const realFlowNodes = Array.isArray(realFlow?.nodes) ? (realFlow.nodes as Node[]) : nodesRef.current;
+    const realFlowEdges = Array.isArray(realFlow?.edges) ? (realFlow.edges as Edge[]) : edgesRef.current;
+    return serializeFlowGraph(realFlowNodes, realFlowEdges);
+  }, [rfInstance]);
+
   const handleSaveFlow = useCallback(async (requireConfirmOverwrite = false, options?: { autosave?: boolean; showToast?: boolean }) => {
     const isAutosave = !!options?.autosave;
     const shouldShowToast = options?.showToast ?? !isAutosave;
@@ -1434,10 +1447,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
       return;
     }
 
-    const realFlow = rfInstance?.toObject?.();
-    const realFlowNodes = Array.isArray(realFlow?.nodes) ? (realFlow?.nodes as Node[]) : nodesRef.current;
-    const realFlowEdges = Array.isArray(realFlow?.edges) ? (realFlow?.edges as Edge[]) : edgesRef.current;
-    const safeFlow = serializeFlowGraph(realFlowNodes, realFlowEdges);
+    const safeFlow = getCurrentSerializedFlow();
     const endpoint = `/api/flows/${selectedFlowId}`;
 
     if (flowContainsTemporaryIds(safeFlow.nodes, safeFlow.edges)) {
@@ -1474,7 +1484,10 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
       const data = await parseApiResponse<{ validation?: { warnings?: FlowValidationIssue[]; errors?: FlowValidationIssue[] } }>(response);
       setValidationWarnings(data?.validation?.warnings || []);
       setValidationErrors(data?.validation?.errors || []);
-      setFlowDirty(false);
+      const savedSignature = getFlowGraphSignature(safeFlow);
+      const currentSignature = getFlowGraphSignature(getCurrentSerializedFlow());
+      lastPersistedFlowSignatureRef.current = savedSignature;
+      setFlowDirty(currentSignature !== savedSignature);
       setFlowSaveStatus('success');
       console.info('[FLOW SAVE SUCCESS]', { flow_id: selectedFlowId, endpoint, method: 'PUT' });
       if (isAutosave) {
@@ -1503,7 +1516,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
       isSavingRef.current = false;
       setIsSaving(false);
     }
-  }, [clearSaveStatusTimer, rfInstance, selectedFlowId, toast]);
+  }, [clearSaveStatusTimer, getCurrentSerializedFlow, selectedFlowId, toast]);
 
 
   useEffect(() => {
@@ -1563,7 +1576,9 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
     }
 
     try {
-      if (flowDirty) {
+      const currentSignature = getFlowGraphSignature(getCurrentSerializedFlow());
+      const hasUnpersistedBuilderGraph = flowDirty || currentSignature !== lastPersistedFlowSignatureRef.current;
+      if (hasUnpersistedBuilderGraph) {
         console.log('[PUBLISH SAVE BEFORE START]', { flowId: selectedFlowId });
         try {
           await handleSaveFlow();
@@ -1595,7 +1610,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
       const message = error instanceof Error && error.message ? error.message : 'Não foi possível publicar o fluxo.';
       toast.error(`Falha ao publicar: ${message}`);
     }
-  }, [flowDirty, handleSaveFlow, loadFlow, rfInstance, selectedFlowId, toast, validationErrors.length]);
+  }, [flowDirty, getCurrentSerializedFlow, handleSaveFlow, loadFlow, rfInstance, selectedFlowId, toast, validationErrors.length]);
 
   const handleDeactivateFlow = useCallback(async () => {
     const response = await apiFetch('/api/flows/deactivate', {
@@ -1656,6 +1671,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
       const orderedEdges = orderChoiceChildrenEdges(restoredNodes, restoredEdges);
       setNodes(restoredNodes);
       setEdges(orderedEdges);
+      lastPersistedFlowSignatureRef.current = getFlowGraphSignature(serializeFlowGraph(restoredNodes, orderedEdges));
       setActiveVersionId(versionId);
       setFlowVersions((prev) => prev.map((item) => ({ ...item, is_current: item.id === versionId })));
       requestAnimationFrame(() => { rfInstance?.fitView(); });
