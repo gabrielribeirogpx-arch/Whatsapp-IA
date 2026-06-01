@@ -9,7 +9,7 @@ from typing import Any
 from sqlalchemy import case, func
 from sqlalchemy.orm import Session
 
-from app.models.flow import Flow, FlowExecution, FlowExecutionEvent, FlowNode
+from app.models.flow import Flow, FlowExecution, FlowExecutionEvent, FlowNode, FlowVersion
 from app.models.lead import Lead, LeadStatus
 from app.models.pipeline_stage import PipelineStage
 from app.models.flow_event import FlowEvent
@@ -285,6 +285,28 @@ def _resolve_persisted_flow_event_node_id(
     )
     if persisted_node:
         return coerced_node_id
+
+    candidate_versions = (
+        db.query(FlowVersion.id, FlowVersion.nodes)
+        .filter(FlowVersion.flow_id == flow_id, FlowVersion.tenant_id == tenant_id)
+        .order_by(FlowVersion.is_published.desc(), FlowVersion.is_active.desc(), FlowVersion.created_at.desc())
+        .all()
+    )
+    version_with_node = next(
+        (version_id for version_id, version_nodes in candidate_versions if any(str(node.get("id")) == str(coerced_node_id) for node in (version_nodes or []) if isinstance(node, dict))),
+        None,
+    )
+    if version_with_node:
+        metadata_payload.setdefault("runtime_node_id", str(coerced_node_id))
+        metadata_payload.setdefault("node_id_version_only", True)
+        logger.info(
+            "event=flow_event_node_version_only flow_id=%s tenant_id=%s runtime_node_id=%s flow_version_id=%s",
+            flow_id,
+            tenant_id,
+            coerced_node_id,
+            version_with_node,
+        )
+        return None
 
     metadata_payload.setdefault("runtime_node_id", str(coerced_node_id))
     metadata_payload.setdefault("node_id_unpersisted", True)

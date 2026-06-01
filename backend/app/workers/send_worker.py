@@ -119,7 +119,8 @@ def send_whatsapp_message(*, message_data: dict[str, Any]) -> None:
     text = str(message_data.get("text") or "").strip()
     buttons = message_data.get("buttons")
     correlation_id = str(message_data.get("correlation_id") or message_data.get("message_id") or "n/a")
-    job_id = str(message_data.get("job_id") or "n/a")
+    current_job = get_current_job()
+    job_id = str(message_data.get("job_id") or getattr(current_job, "id", None) or "n/a")
     sequence_number_raw = message_data.get("sequence_number")
     flow_id = message_data.get("flow_id")
     flow_version_id = message_data.get("flow_version_id")
@@ -130,6 +131,13 @@ def send_whatsapp_message(*, message_data: dict[str, Any]) -> None:
     is_flow_message = bool(flow_id or flow_version_id or session_id or node_id or sequence_number_raw is not None)
     payload_provider_id = str(message_data.get("provider_id") or "unresolved")
 
+    logger.info(
+        "[WORKER ENTRY] job_id=%s message=%s flow_id=%s sequence_number=%s",
+        job_id,
+        text,
+        flow_id,
+        sequence_number_raw,
+    )
     logger.info(
         "[WORKER VERSION CHECK] commit=%s provider_id=%s message_text=%s",
         _runtime_commit(),
@@ -145,6 +153,7 @@ def send_whatsapp_message(*, message_data: dict[str, Any]) -> None:
     lock_acquired = bool(redis_client.set(lock_key, lock_token, ex=30, nx=True))
     if not lock_acquired:
         logger.info("[OUTBOUND SEND LOCK ACQUIRED] tenant_id=%s phone=%s acquired=false", tenant_id, phone)
+        logger.warning("[WORKER EXIT FAILURE] job_id=%s reason=send_lock_not_acquired", job_id)
         return
     logger.info("[OUTBOUND SEND LOCK ACQUIRED] tenant_id=%s phone=%s acquired=true", tenant_id, phone)
 
@@ -160,6 +169,7 @@ def send_whatsapp_message(*, message_data: dict[str, Any]) -> None:
         logger.info("[OUTBOUND SEND SEQUENCE] tenant_id=%s phone=%s flow_id=%s flow_version_id=%s session_id=%s node_id=%s current_sequence=%s last_sent_sequence=%s", tenant_id, phone, flow_id, flow_version_id, session_id, node_id, sequence_number, last_sent_seq)
         if sequence_number is not None and last_sent_seq is not None and sequence_number < last_sent_seq:
             logger.warning("[OUTBOUND STALE MESSAGE DROPPED] tenant_id=%s phone=%s flow_id=%s session_id=%s node_id=%s sequence_number=%s last_sent_sequence=%s", tenant_id, phone, flow_id, session_id, node_id, sequence_number, last_sent_seq)
+            logger.warning("[WORKER EXIT FAILURE] job_id=%s reason=stale_sequence sequence_number=%s last_sent_sequence=%s", job_id, sequence_number, last_sent_seq)
             return
 
         try:
@@ -172,6 +182,7 @@ def send_whatsapp_message(*, message_data: dict[str, Any]) -> None:
                 phone or "n/a",
                 job_id,
             )
+            logger.error("[WORKER EXIT FAILURE] job_id=%s reason=invalid_tenant_id", job_id)
             return
 
         with SessionLocal() as db:
@@ -184,6 +195,7 @@ def send_whatsapp_message(*, message_data: dict[str, Any]) -> None:
                     phone,
                     job_id,
                 )
+                logger.warning("[WORKER EXIT FAILURE] job_id=%s reason=tenant_not_found", job_id)
                 return
             if not conversation_id:
                 conversation = (
@@ -248,6 +260,7 @@ def send_whatsapp_message(*, message_data: dict[str, Any]) -> None:
                     job_id,
                     tenant_id,
                 )
+                logger.error("[WORKER EXIT FAILURE] job_id=%s reason=missing_whatsapp_credentials", job_id)
                 return
 
         token_hash = _token_hash(resolved_token)
@@ -303,6 +316,12 @@ def send_whatsapp_message(*, message_data: dict[str, Any]) -> None:
                 sequence_number,
             )
         logger.info(
+            "[WORKER BEFORE META] provider_id=%s phone_number_id=%s message=%s",
+            provider_id,
+            resolved_phone_number_id,
+            text,
+        )
+        logger.info(
             "[META PRE REQUEST] provider_id=%s phone_number_id=%s token_hash=%s token_length=%s message=%s",
             provider_id,
             resolved_phone_number_id,
@@ -311,9 +330,10 @@ def send_whatsapp_message(*, message_data: dict[str, Any]) -> None:
             text,
         )
 
+        meta_response: dict[str, Any] | None = None
         try:
             if buttons:
-                send_buttons_message_via_meta(
+                meta_response = send_buttons_message_via_meta(
                     to=phone,
                     body_text=text,
                     buttons=buttons,
@@ -322,18 +342,25 @@ def send_whatsapp_message(*, message_data: dict[str, Any]) -> None:
                     context=context,
                 )
             else:
-                send_text_message_via_meta(
+                meta_response = send_text_message_via_meta(
                     to=phone,
                     text=text,
                     token=resolved_token,
                     phone_number_id=resolved_phone_number_id,
                     context=context,
                 )
+            logger.info(
+                "[WORKER AFTER META] provider_id=%s phone_number_id=%s meta_response=%s",
+                provider_id,
+                resolved_phone_number_id,
+                meta_response,
+            )
         except MetaApiError as exc:
             if exc.status_code == 401 and provider_id:
                 logger.error("[WHATSAPP SEND AUTH ERROR] tenant_id=%s provider_id=%s phone=%s", tenant_id, provider_id, phone)
                 with SessionLocal() as db:
                     mark_provider_auth_error(db, provider_id=provider_id, error_message=str(exc))
+            logger.error("[WORKER EXIT FAILURE] job_id=%s reason=meta_api_error status_code=%s error=%s", job_id, exc.status_code, exc)
             raise
 
         logger.info(
@@ -348,7 +375,6 @@ def send_whatsapp_message(*, message_data: dict[str, Any]) -> None:
         if sequence_number is not None:
             redis_client.set(last_sent_key, sequence_number)
 
-        current_job = get_current_job()
         dedupe_message_id = str(message_data.get("message_id") or message_data.get("job_id") or getattr(current_job, "id", None) or correlation_id)
         with SessionLocal() as db:
             _record_outbound_message(
@@ -362,6 +388,10 @@ def send_whatsapp_message(*, message_data: dict[str, Any]) -> None:
                 flow_session_id=flow_session_id,
                 node_id=node_id,
             )
+        logger.info("[WORKER EXIT SUCCESS] job_id=%s", job_id)
+    except Exception:
+        logger.exception("[WORKER EXIT FAILURE] job_id=%s reason=unhandled_exception", job_id)
+        raise
     finally:
         _release_send_lock(redis_client, lock_key, lock_token)
         logger.info("[OUTBOUND SEND LOCK RELEASED] tenant_id=%s phone=%s", tenant_id, phone)
