@@ -73,15 +73,24 @@ def normalize_meta_message(payload: dict[str, Any]) -> list[dict[str, str | None
             for message in value.get("messages", []):
                 message_type = sanitize_text(message.get("type", ""))
                 text = ""
+                interactive_type = ""
+                interactive_reply_id = ""
+                interactive_reply_title = ""
                 if message_type == "text":
                     text = sanitize_text(message.get("text", {}).get("body", ""))
                 elif message_type == "interactive":
                     interactive = message.get("interactive", {})
-                    interactive_type = interactive.get("type", "")
+                    interactive_type = sanitize_text(interactive.get("type", ""))
                     if interactive_type == "button_reply":
-                        text = sanitize_text(interactive.get("button_reply", {}).get("id", ""))
+                        reply = interactive.get("button_reply", {})
+                        interactive_reply_id = sanitize_text(reply.get("id", ""))
+                        interactive_reply_title = sanitize_text(reply.get("title", ""))
+                        text = interactive_reply_id
                     elif interactive_type == "list_reply":
-                        text = sanitize_text(interactive.get("list_reply", {}).get("id", ""))
+                        reply = interactive.get("list_reply", {})
+                        interactive_reply_id = sanitize_text(reply.get("id", ""))
+                        interactive_reply_title = sanitize_text(reply.get("title", ""))
+                        text = interactive_reply_id
 
                 phone = sanitize_phone(message.get("from", "") or fallback_phone)
                 if not phone:
@@ -96,6 +105,11 @@ def normalize_meta_message(payload: dict[str, Any]) -> list[dict[str, str | None
                         "phone_number_id": phone_number_id,
                         "name": sanitize_text(contacts[0].get("profile", {}).get("name", "")) if contacts else "",
                         "message_id": sanitize_text(message.get("id", "")),
+                        "interactive_type": interactive_type or None,
+                        "interactive_reply_id": interactive_reply_id or None,
+                        "interactive_reply_title": interactive_reply_title or None,
+                        "selected_row_id": interactive_reply_id if interactive_type == "list_reply" else None,
+                        "selected_title": interactive_reply_title if interactive_type == "list_reply" else None,
                     }
                 )
 

@@ -1688,8 +1688,9 @@ def _choice_options_from_node(node_data: dict[str, Any], edges: list[FlowEdge | 
         label = str(button.get("label") or button.get("title") or "").strip()
         if not label:
             continue
-        handle = str(button.get("handleId") or button.get("id") or _normalize_text(label).replace(" ", "_") or f"choice_{index + 1}")
-        options.append({"id": handle, "label": label, "handleId": handle})
+        option_value = str(button.get("value") or button.get("option_value") or button.get("handleId") or button.get("id") or label).strip()
+        handle = str(button.get("handleId") or option_value or button.get("id") or _normalize_text(label).replace(" ", "_") or f"choice_{index + 1}")
+        options.append({"id": handle, "label": label, "value": option_value, "handleId": handle})
     if options:
         return options
     for index, edge in enumerate(edges):
@@ -1697,7 +1698,7 @@ def _choice_options_from_node(node_data: dict[str, Any], edges: list[FlowEdge | 
         if not label:
             continue
         handle = _edge_source_handle(edge) or _normalize_text(label).replace(" ", "_") or f"choice_{index + 1}"
-        options.append({"id": handle, "label": label, "handleId": handle})
+        options.append({"id": handle, "label": label, "value": handle, "handleId": handle})
     return options
 
 
@@ -1727,7 +1728,8 @@ def _resolve_choice_option(input_text: str, options: list[dict[str, Any]]) -> di
     for option in options:
         label = str(option.get("label") or "").strip()
         handle = str(option.get("handleId") or option.get("id") or "").strip()
-        if _normalize_text(label) == normalized_input or _normalize_text(handle) == normalized_input:
+        value = str(option.get("value") or "").strip()
+        if _normalize_text(label) == normalized_input or _normalize_text(handle) == normalized_input or _normalize_text(value) == normalized_input:
             return option
     return None
 
@@ -2191,25 +2193,40 @@ def run_until_wait_node(
             )
             if selected_option:
                 selected_handle = str(selected_option.get("handleId") or selected_option.get("id") or "")
+                selected_title = str(selected_option.get("label") or "")
+                option_value = selected_handle
                 logger.info(
-                    "[CHOICE LIST RESPONSE] flow_id=%s session_id=%s node_id=%s option_id=%s label=%s incoming_text=%s",
-                    flow.id, getattr(flow_session, "id", None), _node_get(node, "id"), selected_handle, selected_option.get("label"), incoming_text,
+                    "[CHOICE LIST RESPONSE] flow_id=%s session_id=%s node_id=%s selected_row_id=%s selected_title=%s incoming_text=%s",
+                    flow.id, getattr(flow_session, "id", None), _node_get(node, "id"), selected_handle, selected_title, incoming_text,
                 )
                 selected_edge = _find_edge_for_handle(edges, selected_handle)
                 next_node_id = _edge_target(selected_edge) if selected_edge else None
                 logger.info(
-                    "[CHOICE OPTION RESOLVED] flow_id=%s session_id=%s node_id=%s option_id=%s next_node_id=%s",
-                    flow.id, getattr(flow_session, "id", None), _node_get(node, "id"), selected_handle, next_node_id,
+                    "[CHOICE OPTION RESOLVED] flow_id=%s session_id=%s node_id=%s option_value=%s next_node=%s",
+                    flow.id, getattr(flow_session, "id", None), _node_get(node, "id"), option_value, next_node_id,
                 )
+                if flow_session:
+                    flow_session.context = {
+                        **(flow_session.context or {}),
+                        "waiting_choice": False,
+                        "last_interactive_list_reply_id": selected_handle,
+                        "last_interactive_list_reply_title": selected_title,
+                        "selected_row_id": selected_handle,
+                        "selected_title": selected_title,
+                        "selected_choice_option_value": option_value,
+                        "selected_choice_raw_value": str(selected_option.get("value") or ""),
+                        "selected_choice_target_node_id": str(next_node_id) if next_node_id else None,
+                    }
+                    db.add(flow_session)
                 _emit_runtime_event(
                     db=db, tenant_id=session.tenant_id, conversation_id=session.id, flow_id=flow.id,
                     flow_version_id=getattr(flow_session, "flow_version_id", None), node_id=current_node_uuid,
-                    event_type="LIST_SELECTED", metadata={"option_id": selected_handle, "label": selected_option.get("label"), "source": "choice"}, dedupe_bucket_seconds=1,
+                    event_type="LIST_SELECTED", metadata={"option_id": selected_handle, "label": selected_title, "source": "choice"}, dedupe_bucket_seconds=1,
                 )
                 node = _get_node(db=db, node_id=next_node_id, tenant_id=session.tenant_id, runtime_graph=runtime_graph) if selected_edge else None
                 logger.info(
-                    "[CHOICE FLOW CONTINUE] flow_id=%s session_id=%s current_node_id=%s next_node_id=%s next_node_type=%s",
-                    flow.id, getattr(flow_session, "id", None), _node_get(node, "id") if node else current_node_uuid, next_node_id, _node_type_slug(node) if node else None,
+                    "[CHOICE FLOW CONTINUE] flow_id=%s session_id=%s source_handle=%s target_node=%s next_node_type=%s",
+                    flow.id, getattr(flow_session, "id", None), selected_handle, next_node_id, _node_type_slug(node) if node else None,
                 )
                 normalized_input = ""
                 continue
@@ -3059,6 +3076,30 @@ def process_flow_engine(
         if isinstance(node, dict) and node.get("id") is not None
     ]
     logger.info("[RUNTIME GRAPH NODE IDS] flow_id=%s node_ids=%s", flow.id, runtime_node_ids)
+
+    if runtime_session and isinstance(getattr(runtime_session, "context", None), dict):
+        session_context = runtime_session.context or {}
+        selected_row_id = str(session_context.get("selected_row_id") or session_context.get("last_interactive_list_reply_id") or user_message_text or "").strip()
+        selected_title = str(session_context.get("selected_title") or session_context.get("last_interactive_list_reply_title") or "").strip()
+        choice_node_id = _parse_uuid(session_context.get("choice_node_id"))
+        if choice_node_id and selected_row_id and session_context.get("waiting_choice") is True:
+            choice_node = _get_node(db=db, node_id=choice_node_id, tenant_id=conversation.tenant_id, runtime_graph=runtime_graph)
+            choice_node_type = _node_type_slug(choice_node) if choice_node else ""
+            if choice_node_type == "choice":
+                choice_edges = _get_edges(db=db, flow_id=flow.id, source=choice_node_id, runtime_graph=runtime_graph)
+                choice_options = _choice_options_from_node(_extract_node_data(choice_node), choice_edges)
+                selected_option = _resolve_choice_option(selected_row_id, choice_options) or (
+                    _resolve_choice_option(selected_title, choice_options) if selected_title else None
+                )
+                if selected_option:
+                    saved_current_node_id = choice_node_id
+                    logger.info(
+                        "[FLOW CONTINUE USING_CHOICE_REPLY] session_id=%s choice_node_id=%s selected_row_id=%s selected_title=%s",
+                        getattr(runtime_session, "id", None),
+                        choice_node_id,
+                        selected_row_id,
+                        selected_title,
+                    )
 
     current_graph_node = None
     current_node_type = ""
