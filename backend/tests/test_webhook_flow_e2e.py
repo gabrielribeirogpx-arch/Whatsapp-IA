@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 os.environ.setdefault("DATABASE_URL", "sqlite+pysqlite:///:memory:")
 
+from app.models.lead import Lead
 from app.workers import message_worker
 
 
@@ -153,3 +154,86 @@ def test_webhook_flow_e2e(monkeypatch):
     _run_two_messages_for_tenant("tenant-B", "pnid-B", "suporte")
     assert [item[0] for item in sent] == ["tenant-A", "tenant-A", "tenant-B", "tenant-B"]
     print("[WEBHOOK FLOW E2E TEST PASS]")
+
+
+def test_existing_lead_inbound_message_continues_to_flow_and_sends_reply(monkeypatch):
+    sent = []
+    tenant_id = "tenant-existing"
+    phone_number_id = "pnid-existing"
+    phone = "5511999990001"
+    existing_lead = Lead(
+        tenant_id=tenant_id,
+        phone=phone,
+        score=0,
+        source="whatsapp",
+        status="active",
+    )
+
+    class _ExistingLeadDB(_FakeDB):
+        def __init__(self):
+            super().__init__()
+            self.added_leads = []
+
+        def add(self, obj):
+            if obj.__class__.__name__ == "Lead":
+                self.added_leads.append(obj)
+                return
+            super().add(obj)
+
+        def execute(self, statement):
+            text_sql = str(statement)
+            if "FROM leads" in text_sql:
+                return SimpleNamespace(scalars=lambda: SimpleNamespace(first=lambda: existing_lead))
+            if "FROM messages" in text_sql:
+                return SimpleNamespace(scalars=lambda: SimpleNamespace(first=lambda: self.messages[-1]))
+            return SimpleNamespace(scalars=lambda: SimpleNamespace(first=lambda: None, all=lambda: []))
+
+    db = _ExistingLeadDB()
+    conversation = SimpleNamespace(
+        id="conv-existing",
+        tenant_id=tenant_id,
+        phone_number=phone,
+        mode="bot",
+        current_node_id=None,
+        context={},
+        conversation_state=None,
+    )
+    tenant = SimpleNamespace(id=tenant_id)
+    contact = SimpleNamespace(id="ct-existing", phone=phone, score=0, tags_json=[], email=None)
+
+    monkeypatch.setattr(message_worker, "get_redis_client", lambda: _FakeRedis())
+    monkeypatch.setattr(message_worker, "SessionLocal", lambda: db)
+    monkeypatch.setattr(message_worker, "resolve_tenant_by_phone_number_id", lambda _db, _pnid: tenant if _pnid == phone_number_id else None)
+    monkeypatch.setattr(message_worker, "register_processed_message", lambda **kwargs: True)
+    monkeypatch.setattr(message_worker, "upsert_contact_for_phone", lambda *args, **kwargs: contact)
+    monkeypatch.setattr(message_worker, "ensure_conversation_contact_link", lambda *args, **kwargs: None)
+    monkeypatch.setattr(message_worker, "get_or_create_conversation", lambda *args, **kwargs: (conversation, False))
+    monkeypatch.setattr(message_worker, "normalize_meta_message", lambda payload: [{"phone": phone, "text": payload["text"], "message_id": payload["message_id"], "name": "Cliente", "phone_number_id": payload["phone_number_id"]}])
+
+    import app.services.message_router as message_router
+
+    class _SessionService:
+        def __init__(self, _db):
+            pass
+
+        def get_runtime_session_state(self, tenant_id, phone, flow_id):
+            return {"session": None, "exists": False, "status": "", "is_active": False, "is_finalized": False}
+
+    monkeypatch.setattr(message_router, "FlowSessionService", _SessionService)
+    monkeypatch.setattr(message_router, "get_active_visual_flow", lambda **kwargs: SimpleNamespace(id="flow-existing"))
+    monkeypatch.setattr(message_router, "_resolve_triggered_flow", lambda **kwargs: SimpleNamespace(id="flow-existing"))
+    monkeypatch.setattr(message_router, "log_conversation_event", lambda *args, **kwargs: None)
+
+    def _fake_flow_engine(*, db, message, conversation, session_node_id=None):
+        sent.append("Resposta WhatsApp")
+        return {"response": "Resposta WhatsApp"}
+
+    monkeypatch.setattr(message_router, "handle_visual_flow_priority", _fake_flow_engine)
+
+    message_worker.process_incoming_message({"phone_number_id": phone_number_id, "text": "oi", "message_id": "existing-1"})
+
+    assert db.added_leads == []
+    assert existing_lead.contact_id == "ct-existing"
+    assert existing_lead.conversation_id == "conv-existing"
+    assert existing_lead.last_message == "oi"
+    assert sent == ["Resposta WhatsApp"]

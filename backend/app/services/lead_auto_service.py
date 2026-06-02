@@ -5,7 +5,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import or_, select
+from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.models import Contact, Conversation, Lead, PipelineStage, TenantUser
@@ -53,6 +54,79 @@ def _resolve_new_pipeline_stage(db: Session, tenant_id: UUID) -> PipelineStage |
     print("[PIPELINE INSERT]", f"tenant_id={tenant_id}", f"stage_id={getattr(stage, 'id', None)}")
     return stage
 
+
+def _log_lead_event(tag: str, **fields) -> None:
+    details = " ".join(f"{key}={value}" for key, value in fields.items())
+    print(tag, details)
+    logger.info("%s %s", tag, details)
+
+
+def _lookup_lead_by_phone(db: Session, *, tenant_id: UUID, normalized_phone: str) -> Lead | None:
+    _log_lead_event("[LEAD LOOKUP]", tenant_id=tenant_id, phone=normalized_phone)
+    return db.execute(
+        select(Lead).where(
+            Lead.tenant_id == tenant_id,
+            Lead.phone == normalized_phone,
+        )
+    ).scalars().first()
+
+
+def _lookup_lead_by_contact(db: Session, *, tenant_id: UUID, contact: Contact | None) -> Lead | None:
+    if not contact:
+        return None
+    return db.execute(
+        select(Lead).where(
+            Lead.tenant_id == tenant_id,
+            Lead.contact_id == contact.id,
+        )
+    ).scalars().first()
+
+
+def _apply_inbound_lead_updates(
+    db: Session,
+    *,
+    lead: Lead,
+    tenant_id: UUID,
+    normalized_phone: str,
+    contact: Contact | None,
+    conversation: Conversation | None,
+    name: str | None,
+    message_text: str | None,
+    now: datetime,
+) -> None:
+    if not lead.phone:
+        lead.phone = normalized_phone
+    if contact and not lead.contact_id:
+        lead.contact_id = contact.id
+    if conversation and not lead.conversation_id:
+        lead.conversation_id = conversation.id
+    if name and (not lead.name or lead.name == normalized_phone):
+        lead.name = name
+    if contact and getattr(contact, "email", None) and not getattr(lead, "email", None):
+        lead.email = contact.email
+    if message_text is not None:
+        lead.last_message = message_text
+    lead.last_interaction = now
+    lead.last_contact_at = now
+    lead.updated_at = now
+    if not lead.source:
+        lead.source = WHATSAPP_SOURCE
+    if lead.score is None:
+        lead.score = 0
+    if not lead.stage_id:
+        lead.stage_id = getattr(_resolve_new_pipeline_stage(db, tenant_id), "id", None)
+
+
+def _flush_new_lead(db: Session, lead: Lead) -> None:
+    if hasattr(db, "begin_nested"):
+        with db.begin_nested():
+            db.add(lead)
+            db.flush()
+        return
+    db.add(lead)
+    db.flush()
+
+
 def ensure_whatsapp_lead_for_inbound(
     db: Session,
     *,
@@ -76,35 +150,23 @@ def ensure_whatsapp_lead_for_inbound(
         return None
 
     now = occurred_at or datetime.utcnow()
-    lead = db.execute(
-        select(Lead).where(
-            Lead.tenant_id == tenant_id,
-            Lead.status == LeadStatus.ACTIVE.value,
-            or_(Lead.phone == normalized_phone, Lead.contact_id == contact.id) if contact else (Lead.phone == normalized_phone),
-        )
-    ).scalars().first()
+    lead = _lookup_lead_by_phone(db, tenant_id=tenant_id, normalized_phone=normalized_phone)
+    if not lead:
+        lead = _lookup_lead_by_contact(db, tenant_id=tenant_id, contact=contact)
 
     if lead:
-        print("[LEAD FOUND]", f"tenant_id={tenant_id}", f"lead_id={lead.id}", f"phone={normalized_phone}")
-        if contact and not lead.contact_id:
-            lead.contact_id = contact.id
-        if conversation and not lead.conversation_id:
-            lead.conversation_id = conversation.id
-        if name and (not lead.name or lead.name == normalized_phone):
-            lead.name = name
-        if contact and getattr(contact, "email", None) and not getattr(lead, "email", None):
-            lead.email = contact.email
-        if message_text is not None:
-            lead.last_message = message_text
-        lead.last_interaction = now
-        lead.last_contact_at = now
-        lead.updated_at = now
-        if not lead.source:
-            lead.source = WHATSAPP_SOURCE
-        if lead.score is None:
-            lead.score = 0
-        if not lead.stage_id:
-            lead.stage_id = getattr(_resolve_new_pipeline_stage(db, tenant_id), "id", None)
+        _log_lead_event("[LEAD FOUND]", tenant_id=tenant_id, lead_id=lead.id, phone=normalized_phone)
+        _apply_inbound_lead_updates(
+            db,
+            lead=lead,
+            tenant_id=tenant_id,
+            normalized_phone=normalized_phone,
+            contact=contact,
+            conversation=conversation,
+            name=name,
+            message_text=message_text,
+            now=now,
+        )
         db.flush()
         return AutoLeadResult(lead=lead, created=False, pipeline_stage=None)
 
@@ -130,10 +192,29 @@ def ensure_whatsapp_lead_for_inbound(
         created_at=now,
         updated_at=now,
     )
-    db.add(lead)
-    db.flush()
+    try:
+        _flush_new_lead(db, lead)
+    except IntegrityError:
+        recovered = _lookup_lead_by_phone(db, tenant_id=tenant_id, normalized_phone=normalized_phone)
+        if not recovered:
+            raise
+        _log_lead_event("[LEAD DUPLICATE RECOVERED]", tenant_id=tenant_id, lead_id=recovered.id, phone=normalized_phone)
+        _apply_inbound_lead_updates(
+            db,
+            lead=recovered,
+            tenant_id=tenant_id,
+            normalized_phone=normalized_phone,
+            contact=contact,
+            conversation=conversation,
+            name=name,
+            message_text=message_text,
+            now=now,
+        )
+        db.flush()
+        _log_lead_event("[FLOW CONTINUING AFTER LEAD RECOVERY]", tenant_id=tenant_id, lead_id=recovered.id, phone=normalized_phone)
+        return AutoLeadResult(lead=recovered, created=False, pipeline_stage=None)
 
-    print("[LEAD AUTO CREATED]", f"tenant_id={tenant_id}", f"lead_id={lead.id}", f"phone={normalized_phone}")
+    _log_lead_event("[LEAD CREATED]", tenant_id=tenant_id, lead_id=lead.id, phone=normalized_phone)
     write_audit_log(
         db,
         action=LEAD_CREATED_ACTION,
