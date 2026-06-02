@@ -2284,6 +2284,13 @@ def run_until_wait_node(
                 len(choice_options),
                 _payload_summary({"body_text": choice_body_text, "sections": choice_sections, "options": choice_options}),
             )
+            if selected_option is None and choice_context.get("waiting_choice"):
+                logger.warning(
+                    "[CHOICE RESUME NO_SELECTION_RESEND] "
+                    "session_id=%s node_id=%s resending interactive list",
+                    getattr(flow_session, "id", None),
+                    _node_get(node, "id"),
+                )
             if selected_option:
                 selected_handle = str(selected_option.get("handleId") or selected_option.get("id") or "")
                 selected_title = str(selected_option.get("label") or "")
