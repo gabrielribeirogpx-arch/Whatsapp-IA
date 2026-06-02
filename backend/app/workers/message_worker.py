@@ -24,6 +24,30 @@ from app.services.tenant_service import resolve_tenant_by_phone_number_id
 logger = logging.getLogger(__name__)
 
 
+def _choice_log_context(session: FlowSession | None, selected_row_id: str = "", selected_title: str = "") -> dict[str, Any]:
+    context = session.context if session and isinstance(getattr(session, "context", None), dict) else {}
+    return {
+        "session_id": getattr(session, "id", None),
+        "node_id": getattr(session, "current_node_id", None) or context.get("choice_node_id"),
+        "selected_row_id": selected_row_id or context.get("selected_row_id") or context.get("last_interactive_list_reply_id"),
+        "selected_title": selected_title or context.get("selected_title") or context.get("last_interactive_list_reply_title"),
+    }
+
+
+def _log_choice_message_marker(marker: str, session: FlowSession | None, *, selected_row_id: str = "", selected_title: str = "", correlation_id: str = "n/a", reason: str = "n/a") -> None:
+    data = _choice_log_context(session, selected_row_id, selected_title)
+    logger.info(
+        "%s session_id=%s node_id=%s selected_row_id=%s selected_title=%s worker_id=%s correlation_id=%s reason=%s source=message_worker",
+        marker,
+        data.get("session_id"),
+        data.get("node_id"),
+        data.get("selected_row_id"),
+        data.get("selected_title"),
+        _worker_id(),
+        correlation_id,
+        reason,
+    )
+
 def _worker_id() -> str:
     return str(os.getenv("WORKER_ID") or os.getenv("HOSTNAME") or os.getpid())
 
@@ -35,7 +59,15 @@ def _persist_interactive_reply_context(db, session: FlowSession | None, parsed: 
     selected_row_id = str(parsed.get("selected_row_id") or parsed.get("interactive_reply_id") or "").strip()
     selected_title = str(parsed.get("selected_title") or parsed.get("interactive_reply_title") or "").strip()
     if interactive_type != "list_reply" or not selected_row_id:
+        _log_choice_message_marker("[CHOICE RESUME SKIPPED]", session, selected_row_id=selected_row_id, selected_title=selected_title, reason=f"not_list_reply_or_missing_selected_row_id interactive_type={interactive_type}")
+        _log_choice_message_marker("[CHOICE RESUME REASON]", session, selected_row_id=selected_row_id, selected_title=selected_title, reason=f"interactive_type={interactive_type} selected_row_id_present={bool(selected_row_id)}")
         return
+    _log_choice_message_marker("[CHOICE MESSAGE RECEIVED]", session, selected_row_id=selected_row_id, selected_title=selected_title, correlation_id=correlation_id, reason="persist_interactive_reply_context")
+    if session and isinstance(getattr(session, "context", None), dict) and session.context.get("waiting_choice") is True:
+        _log_choice_message_marker("[CHOICE WAITING SESSION FOUND]", session, selected_row_id=selected_row_id, selected_title=selected_title, correlation_id=correlation_id, reason="persist_interactive_reply_context")
+    else:
+        _log_choice_message_marker("[CHOICE RESUME SKIPPED]", session, selected_row_id=selected_row_id, selected_title=selected_title, reason="active_session_not_waiting_choice")
+        _log_choice_message_marker("[CHOICE RESUME REASON]", session, selected_row_id=selected_row_id, selected_title=selected_title, reason=f"waiting_choice={((session.context or {}).get('waiting_choice') if session and isinstance(getattr(session, 'context', None), dict) else None)}")
     set_current_node_write_reason(session, "process_incoming_message_persist_interactive_reply_context_context_only")
     session.context = {
         **(session.context or {}),
@@ -116,7 +148,17 @@ def process_incoming_message(payload: dict[str, Any]) -> None:
 
     whatsapp_message_id = _extract_whatsapp_message_id(payload, parsed)
     correlation_id = whatsapp_message_id or str(parsed.get("message_id") or correlation_id)
-    logger.info("event=incoming_worker_parsed correlation_id=%s tenant_id=%s phone=%s job_id=%s stage=incoming_worker_parse type=text", correlation_id, "n/a", parsed.get("phone") or "n/a", payload.get("job_id") or "n/a")
+    logger.info(
+        "event=incoming_worker_parsed correlation_id=%s tenant_id=%s phone=%s job_id=%s stage=incoming_worker_parse type=%s interactive_type=%s selected_row_id=%s selected_title=%s",
+        correlation_id,
+        "n/a",
+        parsed.get("phone") or "n/a",
+        payload.get("job_id") or "n/a",
+        parsed.get("type") or "text",
+        parsed.get("interactive_type") or "n/a",
+        parsed.get("selected_row_id") or parsed.get("interactive_reply_id") or "n/a",
+        parsed.get("selected_title") or parsed.get("interactive_reply_title") or "n/a",
+    )
 
     redis_client = get_redis_client()
     dedup_key = f"wa:processed:{whatsapp_message_id}" if whatsapp_message_id else ""
@@ -280,8 +322,17 @@ def process_incoming_message(payload: dict[str, Any]) -> None:
                     .order_by(FlowSession.updated_at.desc(), FlowSession.created_at.desc())
                     .first()
                 )
+            selected_row_id = str(parsed.get("selected_row_id") or parsed.get("interactive_reply_id") or "").strip()
+            selected_title = str(parsed.get("selected_title") or parsed.get("interactive_reply_title") or "").strip()
+            if str(parsed.get("interactive_type") or "").strip() == "list_reply":
+                _log_choice_message_marker("[CHOICE MESSAGE RECEIVED]", active_session, selected_row_id=selected_row_id, selected_title=selected_title, correlation_id=correlation_id, reason="persist_interactive_reply_context")
             if active_session and (active_session.status or "").lower() not in FINAL_SESSION_STATUSES:
+                if isinstance(getattr(active_session, "context", None), dict) and active_session.context.get("waiting_choice") is True:
+                    _log_choice_message_marker("[CHOICE WAITING SESSION FOUND]", active_session, selected_row_id=selected_row_id, selected_title=selected_title, correlation_id=correlation_id, reason="persist_interactive_reply_context")
                 _persist_interactive_reply_context(db, active_session, parsed, correlation_id=correlation_id)
+            elif str(parsed.get("interactive_type") or "").strip() == "list_reply":
+                _log_choice_message_marker("[CHOICE RESUME SKIPPED]", active_session, selected_row_id=selected_row_id, selected_title=selected_title, reason="no_active_non_final_session")
+                _log_choice_message_marker("[CHOICE RESUME REASON]", active_session, selected_row_id=selected_row_id, selected_title=selected_title, reason=f"active_session={bool(active_session)} status={getattr(active_session, 'status', None)}")
             try:
                 handle_incoming_message(db=db, message=persisted_message, conversation=persisted_conversation)
             except Exception:
