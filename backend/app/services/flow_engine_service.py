@@ -1783,6 +1783,11 @@ def _resolve_choice_option(input_text: str, options: list[dict[str, Any]]) -> di
         value = str(option.get("value") or "").strip()
         if _normalize_text(label) == normalized_input or _normalize_text(handle) == normalized_input or _normalize_text(value) == normalized_input:
             return option
+    for option in options:
+        handle = str(option.get("handleId") or option.get("id") or "")
+        label = str(option.get("label") or option.get("title") or "")
+        if input_text.strip() in (handle.strip(), label.strip()):
+            return option
     return None
 
 
@@ -2252,7 +2257,16 @@ def run_until_wait_node(
                 input_waiting_choice,
                 input_choice_node_id,
             )
-            selected_option = _resolve_choice_option(incoming_text or "", choice_options)
+            flow_context = flow_session.context if flow_session and isinstance(flow_session.context, dict) else {}
+            effective_input = (
+                flow_context.get("selected_row_id")
+                or flow_context.get("last_interactive_list_reply_id")
+                or incoming_text
+                or ""
+            )
+            selected_option = _resolve_choice_option(effective_input, choice_options)
+            if not selected_option and incoming_text and effective_input != incoming_text:
+                selected_option = _resolve_choice_option(incoming_text, choice_options)
             logger.info(
                 "[CHOICE RESOLVE RESULT] selected_option=%s selected_handle=%s selected_label=%s",
                 _payload_summary(selected_option),
@@ -3285,7 +3299,7 @@ def process_flow_engine(
     logger.info("[RUNTIME GRAPH NODE IDS] flow_id=%s node_ids=%s", flow.id, runtime_node_ids)
 
     session_context = runtime_session.context if runtime_session and isinstance(getattr(runtime_session, "context", None), dict) else {}
-    selected_row_id = str(session_context.get("selected_row_id") or session_context.get("last_interactive_list_reply_id") or user_message_text or "").strip()
+    selected_row_id = str(session_context.get("selected_row_id") or session_context.get("last_interactive_list_reply_id") or "").strip()
     selected_title = str(session_context.get("selected_title") or session_context.get("last_interactive_list_reply_title") or "").strip()
     choice_node_id = _parse_uuid(session_context.get("choice_node_id"))
     waiting_choice = session_context.get("waiting_choice") is True
