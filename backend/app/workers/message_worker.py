@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 import os
 import uuid
@@ -22,6 +23,39 @@ from app.core.redis_client import get_redis_client
 from app.services.tenant_service import resolve_tenant_by_phone_number_id
 
 logger = logging.getLogger(__name__)
+
+
+def _json_log_payload(payload: Any) -> str:
+    try:
+        return json.dumps(payload, default=str, ensure_ascii=False, sort_keys=True)
+    except Exception:
+        return str(payload)
+
+
+def _direct_message_debug_fields(payload: dict[str, Any]) -> dict[str, str]:
+    interactive = payload.get("interactive") if isinstance(payload.get("interactive"), dict) else {}
+    list_reply = interactive.get("list_reply") if isinstance(interactive.get("list_reply"), dict) else {}
+    message_type = payload.get("type") or ("interactive" if payload.get("interactive_type") or payload.get("selected_row_id") or payload.get("interactive_reply_id") else "")
+    interactive_type = payload.get("interactive_type") or interactive.get("type") or ("list_reply" if payload.get("selected_row_id") else "")
+    return {
+        "message_type": str(message_type or "").strip(),
+        "interactive_type": str(interactive_type or "").strip(),
+        "interactive_list_reply_id": str(list_reply.get("id") or payload.get("selected_row_id") or payload.get("interactive_reply_id") or "").strip(),
+        "interactive_list_reply_title": str(list_reply.get("title") or payload.get("selected_title") or payload.get("interactive_reply_title") or "").strip(),
+    }
+
+
+def _log_direct_message_marker(marker: str, payload: dict[str, Any]) -> None:
+    fields = _direct_message_debug_fields(payload)
+    logger.info(
+        "%s message.type=%s interactive.type=%s interactive.list_reply.id=%s interactive.list_reply.title=%s payload=%s source=message_worker_direct_payload",
+        marker,
+        fields["message_type"] or "n/a",
+        fields["interactive_type"] or "n/a",
+        fields["interactive_list_reply_id"] or "n/a",
+        fields["interactive_list_reply_title"] or "n/a",
+        _json_log_payload(payload),
+    )
 
 
 def _choice_log_context(session: FlowSession | None, selected_row_id: str = "", selected_title: str = "") -> dict[str, Any]:
@@ -125,14 +159,34 @@ def _pick_message(payload: dict[str, Any]) -> dict[str, Any] | None:
     if normalized:
         return normalized[0]
 
-    if payload.get("phone") and payload.get("text"):
-        return {
+    selected_row_id = str(payload.get("selected_row_id") or payload.get("interactive_reply_id") or "").strip()
+    selected_title = str(payload.get("selected_title") or payload.get("interactive_reply_title") or "").strip()
+    interactive_type = str(payload.get("interactive_type") or ("list_reply" if selected_row_id else "")).strip()
+    text = str(payload.get("text") or selected_row_id or "").strip()
+    if payload.get("phone") and text:
+        _log_direct_message_marker("[META RAW MESSAGE]", payload)
+        _log_direct_message_marker("[MESSAGE TYPE DETECTED]", payload)
+        direct_message = {
             "phone": str(payload.get("phone") or "").strip(),
-            "text": str(payload.get("text") or "").strip(),
+            "text": text,
+            "type": str(payload.get("type") or ("interactive" if interactive_type else "text")).strip(),
             "message_id": str(payload.get("message_id") or "").strip(),
             "name": str(payload.get("name") or "Cliente").strip(),
             "phone_number_id": str(payload.get("phone_number_id") or "").strip(),
+            "interactive_type": interactive_type or None,
+            "interactive_reply_id": selected_row_id or None,
+            "interactive_reply_title": selected_title or None,
+            "selected_row_id": selected_row_id or None,
+            "selected_title": selected_title or None,
         }
+        if interactive_type == "list_reply":
+            _log_direct_message_marker("[INTERACTIVE LIST DETECTED]", payload)
+            _log_direct_message_marker("[INTERACTIVE LIST PARSED]", direct_message)
+        _log_direct_message_marker("[MESSAGE NORMALIZED]", direct_message)
+        return direct_message
+
+    if payload.get("phone"):
+        _log_direct_message_marker("[MESSAGE TYPE DETECTED]", payload)
     return None
 
 
