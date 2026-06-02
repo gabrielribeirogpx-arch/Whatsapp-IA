@@ -151,6 +151,8 @@ class FlowSessionService:
         exists = session is not None
         status = ((getattr(session, "status", "") or "").strip().lower()) if session else ""
         current_node_id = getattr(session, "current_node_id", None) if session else None
+        if current_node_id is None and isinstance(getattr(session, "variables", None), dict):
+            current_node_id = session.variables.get("current_node_id")
 
         is_active = bool(session and status in {"running", "active"} and current_node_id is not None)
         is_finalized = bool(session and (status in {"completed", "finalized", "expired"} or current_node_id is None))
