@@ -2745,6 +2745,15 @@ def run_until_wait_node(
                 return None
             next_node_type = _node_type_slug(next_node) if next_node else None
             logger.info(
+                "[NEXT NODE FOUND] flow_id=%s session_id=%s current_node_id=%s next_node_id=%s next_node_type=%s source=%s",
+                flow.id,
+                getattr(flow_session, "id", None),
+                message_node_id,
+                next_target,
+                next_node_type,
+                "run_until_wait_node:message_default_edge",
+            )
+            logger.info(
                 "[MESSAGE POST ADVANCE] message_node_id=%s next_node_id=%s next_node_type=%s",
                 message_node_id,
                 next_target,
@@ -2763,6 +2772,15 @@ def run_until_wait_node(
             logger.info(
                 "[NEXT NODE EXECUTE] flow_id=%s session_id=%s current_node_id=%s next_node_id=%s node_type=%s",
                 flow.id, getattr(flow_session, "id", None), _node_get(node, "id") if node else None, None, _node_type_slug(node) if node else None,
+            )
+            logger.info(
+                "[EXECUTING NEXT NODE] flow_id=%s session_id=%s current_node_id=%s next_node_id=%s next_node_type=%s source=%s",
+                flow.id,
+                getattr(flow_session, "id", None),
+                message_node_id,
+                _node_get(node, "id") if node else None,
+                _node_type_slug(node) if node else None,
+                "run_until_wait_node:message_default_edge",
             )
             if node and next_node_type == "condition":
                 condition_node_id = _node_get(node, "id")
@@ -2967,6 +2985,15 @@ def advance_after_message_node(
         next_target_str,
         _node_get(target_node, "type"),
     )
+    logger.info(
+        "[NEXT NODE FOUND] flow_id=%s session_id=%s current_node_id=%s next_node_id=%s next_node_type=%s source=%s",
+        flow.id,
+        None,
+        current_node_id,
+        next_target_str,
+        _node_type_slug(target_node),
+        "advance_after_message_node",
+    )
     _safe_set_conversation_current_node(db, conversation, next_target)
     runtime_session = session_service.save_runtime_session(
         tenant_id=conversation.tenant_id,
@@ -2985,6 +3012,13 @@ def advance_after_message_node(
         current_node_id,
         next_target,
         _node_type_slug(target_node),
+    )
+    logger.warning(
+        "[NEXT NODE RETURN INTERRUPT] return=advance_after_message_node:target_node_runtime_session current_node_id=%s next_node_id=%s next_node_type=%s detail=%s",
+        current_node_id,
+        next_target,
+        _node_type_slug(target_node),
+        "caller must continue execution or the saved next node will not run immediately",
     )
     return target_node, runtime_session
 def _is_continuation_message(incoming_text: str | None, runtime_session: FlowSession | None) -> bool:
@@ -3071,7 +3105,7 @@ def _send_start_message_on_session_restart(
         logger.info("[START MESSAGE BEFORE SESSION SAVE] node_id=%s", start_node_id)
 
     if node_type == "message":
-        _, runtime_session = advance_after_message_node(
+        next_node, runtime_session = advance_after_message_node(
             db=db,
             conversation=conversation,
             flow=flow,
@@ -3081,6 +3115,31 @@ def _send_start_message_on_session_restart(
             user_identifier=user_identifier,
             context=conversation.context if isinstance(conversation.context, dict) else {},
             published_version_number=published_version_number,
+        )
+        next_node_id = _parse_uuid(_node_get(next_node, "id")) if next_node else None
+        next_node_type = _node_type_slug(next_node) if next_node else None
+        logger.info(
+            "[EXECUTING NEXT NODE] flow_id=%s session_id=%s current_node_id=%s next_node_id=%s next_node_type=%s source=%s",
+            flow.id,
+            getattr(runtime_session, "id", None),
+            start_node_id,
+            next_node_id,
+            next_node_type,
+            "_send_start_message_on_session_restart",
+        )
+        if next_node_id is None:
+            logger.warning(
+                "[NEXT NODE RETURN INTERRUPT] return=_send_start_message_on_session_restart:return_runtime_session reason=missing_next_node current_node_id=%s",
+                start_node_id,
+            )
+            return runtime_session
+        run_until_wait_node(
+            db=db,
+            flow=flow,
+            runtime_graph=runtime_graph,
+            session=conversation,
+            start_node_id=next_node_id,
+            incoming_text=None,
         )
         return runtime_session
 

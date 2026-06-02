@@ -166,11 +166,32 @@ async def execute_node_chain_until_reply(
             next_id = find_next(str(cursor), ["default", "", "output"])
             next_node = node_map.get(str(next_id)) if next_id else None
             next_type = _node_type(next_node)
+            logger.info(
+                "[NEXT NODE FOUND] current_node_id=%s next_node_id=%s next_node_type=%s source=%s",
+                cursor,
+                next_id,
+                next_type,
+                "flow_runtime_service:message",
+            )
             if next_type in {"delay", "action", "message", "choice", "buttons_node", "list_node"}:
                 logger.info("[MESSAGE HAS AUTO_CONTINUE] node_id=%s", cursor)
                 logger.info("[AUTO_CONTINUE TO] next_node_id=%s next_type=%s", next_id, next_type)
+                logger.info(
+                    "[EXECUTING NEXT NODE] current_node_id=%s next_node_id=%s next_node_type=%s source=%s",
+                    cursor,
+                    next_id,
+                    next_type,
+                    "flow_runtime_service:message",
+                )
                 cursor = next_id
                 continue
+            logger.warning(
+                "[NEXT NODE RETURN INTERRUPT] return=execute_node_chain_until_reply:message_result current_node_id=%s next_node_id=%s next_node_type=%s detail=%s",
+                cursor,
+                next_id,
+                next_type,
+                "next node is saved in result but is not auto-executed because its type is not in the auto-continue set",
+            )
             return _result(pending=False, events=events, response_node_id=response_node_id, next_node_id=next_id)
 
         if ntype == "image_node":
