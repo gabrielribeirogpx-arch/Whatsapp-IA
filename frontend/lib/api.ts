@@ -599,8 +599,14 @@ export async function listWhatsAppProviders(): Promise<WhatsAppProvider[]> {
   return parseApiResponse<WhatsAppProvider[]>(res);
 }
 export async function createWhatsAppProvider(payload: Record<string, unknown>): Promise<WhatsAppProvider> {
-  const res = await apiFetch('/api/whatsapp/providers', { method: 'POST', body: JSON.stringify(payload) });
-  return parseApiResponse<WhatsAppProvider>(res);
+  const response = await apiFetch('/api/whatsapp/providers', { method: 'POST', body: JSON.stringify(payload) });
+  if (response.status === 409) {
+    console.error(
+      "[PROVIDER CREATE ERROR]",
+      await response.clone().text()
+    );
+  }
+  return parseApiResponse<WhatsAppProvider>(response);
 }
 
 export async function updateWhatsAppProvider(providerId: string, payload: Record<string, unknown>): Promise<WhatsAppProvider> {

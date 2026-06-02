@@ -80,6 +80,99 @@ class DuplicatePhoneNumberProviderError(ValueError):
         return payload
 
 
+def _provider_deleted_at(provider: TenantWhatsAppProvider | None):
+    if not provider:
+        return None
+    return getattr(provider, "deleted_at", None)
+
+
+def _provider_conflict_log_row(provider: TenantWhatsAppProvider | None) -> dict | None:
+    if not provider:
+        return None
+    deleted_at = _provider_deleted_at(provider)
+    return {
+        "provider_id": str(provider.id),
+        "tenant_id": str(provider.tenant_id),
+        "provider": provider.provider_type,
+        "name": provider.display_name,
+        "phone_number_id": provider.phone_number_id,
+        "waba_id": provider.waba_id,
+        "business_id": provider.business_id,
+        "is_active": provider.is_active,
+        "status": provider.status,
+        "deleted_at": deleted_at.isoformat() if deleted_at else None,
+    }
+
+
+def _apply_not_deleted_filter(query):
+    deleted_at_column = getattr(TenantWhatsAppProvider, "deleted_at", None)
+    if deleted_at_column is not None:
+        query = query.where(deleted_at_column.is_(None))
+    return query
+
+
+def _find_provider_conflict(db: Session, *conditions):
+    query = select(TenantWhatsAppProvider).where(*conditions)
+    query = _apply_not_deleted_filter(query)
+    return db.execute(query).scalars().first()
+
+
+def _log_provider_create_conflict_check(
+    db: Session, *, tenant_id: UUID, data: dict
+) -> dict[str, TenantWhatsAppProvider | None]:
+    provider = data.get("provider_type")
+    name = str(data.get("display_name") or "").strip() or None
+    phone_number_id = _clean_phone_number_id(data.get("phone_number_id")) or None
+    waba_id = str(data.get("waba_id") or "").strip() or None
+
+    existing_provider_by_phone = (
+        _find_provider_conflict(
+            db, TenantWhatsAppProvider.phone_number_id == phone_number_id
+        )
+        if phone_number_id
+        else None
+    )
+    existing_provider_by_waba = (
+        _find_provider_conflict(
+            db,
+            TenantWhatsAppProvider.waba_id == waba_id,
+        )
+        if waba_id
+        else None
+    )
+    existing_provider_by_name = (
+        _find_provider_conflict(
+            db,
+            TenantWhatsAppProvider.tenant_id == tenant_id,
+            TenantWhatsAppProvider.display_name == name,
+        )
+        if name
+        else None
+    )
+
+    conflicts = {
+        "existing_provider_by_phone": existing_provider_by_phone,
+        "existing_provider_by_waba": existing_provider_by_waba,
+        "existing_provider_by_name": existing_provider_by_name,
+    }
+    logger.info(
+        "[PROVIDER CREATE REQUEST] tenant_id=%s provider=%s name=%s phone_number_id=%s waba_id=%s",
+        tenant_id,
+        provider,
+        name,
+        phone_number_id,
+        waba_id,
+    )
+    logger.info(
+        "[PROVIDER CONFLICT CHECK] tenant_id=%s existing_provider_by_phone=%s existing_provider_by_waba=%s existing_provider_by_name=%s",
+        tenant_id,
+        _provider_conflict_log_row(existing_provider_by_phone),
+        _provider_conflict_log_row(existing_provider_by_waba),
+        _provider_conflict_log_row(existing_provider_by_name),
+    )
+    return conflicts
+
+
 def _clean_phone_number_id(value: object) -> str:
     return str(value or "").strip()
 
@@ -99,6 +192,7 @@ def _assert_phone_number_id_available(
     query = select(TenantWhatsAppProvider).where(
         TenantWhatsAppProvider.phone_number_id == normalized
     )
+    query = _apply_not_deleted_filter(query)
     if provider_id:
         query = query.where(TenantWhatsAppProvider.id != provider_id)
 
@@ -110,7 +204,8 @@ def _assert_phone_number_id_available(
     metadata = conflict.metadata_json or {}
     ownership_migration = metadata.get("remediation") or None
     hidden_provider = str(conflict.tenant_id) != str(tenant_id)
-    soft_delete = False
+    deleted_at = _provider_deleted_at(conflict)
+    soft_delete = deleted_at is not None
     blocking_provider = {
         "provider_id": str(conflict.id),
         "tenant_id": str(conflict.tenant_id),
@@ -123,6 +218,7 @@ def _assert_phone_number_id_available(
         "status": conflict.status,
         "created_at": conflict.created_at.isoformat() if conflict.created_at else None,
         "updated_at": conflict.updated_at.isoformat() if conflict.updated_at else None,
+        "deleted_at": deleted_at.isoformat() if deleted_at else None,
         "metadata_remediation": ownership_migration,
     }
     reason = (
@@ -130,7 +226,15 @@ def _assert_phone_number_id_available(
         f"já existe tenant_whatsapp_providers.id={conflict.id} "
         f"tenant_id={conflict.tenant_id} com o mesmo phone_number_id. "
         f"hidden_provider={hidden_provider}; soft_delete={soft_delete}; "
+        f"provider_id={conflict.id}; is_active={conflict.is_active}; "
+        f"deleted_at={deleted_at.isoformat() if deleted_at else None}; "
         f"ownership_migration={ownership_migration or 'not_detected'}."
+        + (
+            " Provider inativo encontrado: reative/atualize o provider existente "
+            "em vez de criar outra conexão com o mesmo phone_number_id."
+            if not conflict.is_active
+            else ""
+        )
     )
     logger.warning(
         "[PROVIDER PHONE NUMBER CONFLICT] requested_tenant_id=%s requested_provider_id=%s phone_number_id=%s existing_provider_id=%s existing_tenant_id=%s existing_status=%s existing_is_active=%s validation=%s hidden_provider=%s soft_delete=%s ownership_migration=%s",
@@ -147,6 +251,14 @@ def _assert_phone_number_id_available(
         ownership_migration,
     )
     if action == "create":
+        logger.warning(
+            "[PROVIDER CONFLICT REASON] provider_id=%s is_active=%s deleted_at=%s tenant_id=%s reason=%s",
+            conflict.id,
+            conflict.is_active,
+            deleted_at.isoformat() if deleted_at else None,
+            conflict.tenant_id,
+            reason,
+        )
         logger.warning(
             "[PROVIDER CREATE CONFLICT] provider_id=%s tenant_id=%s phone_number_id=%s reason=%s",
             conflict.id,
@@ -217,6 +329,7 @@ def list_providers(db: Session, tenant_id: UUID):
 def create_provider(db: Session, tenant_id: UUID, payload):
     try:
         data = payload.model_dump(exclude_unset=True)
+        _log_provider_create_conflict_check(db, tenant_id=tenant_id, data=data)
         _assert_phone_number_id_available(
             db,
             tenant_id=tenant_id,
