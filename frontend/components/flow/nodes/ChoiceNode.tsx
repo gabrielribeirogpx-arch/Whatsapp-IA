@@ -1,9 +1,10 @@
 'use client';
 
+import { useEffect } from 'react';
 import { NodeProps } from 'reactflow';
 import CompactFlowNode, { truncateText } from './CompactFlowNode';
 
-type ChoiceButton = { id?: string; label?: string; handleId?: string; next?: string };
+type ChoiceButton = { id?: string; label?: string; value?: string; handleId?: string; next?: string };
 type ChoiceNodeData = {
   label?: string;
   content?: string;
@@ -16,12 +17,26 @@ type ChoiceNodeData = {
 
 const toHandleId = (value: string, fallback: string) => value.toLowerCase().trim().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '') || fallback;
 
-export default function ChoiceNode({ id, data, selected }: NodeProps) {
+export default function ChoiceNode({ id, data, selected, isConnectable }: NodeProps) {
   const nodeData = (data || {}) as ChoiceNodeData;
   const buttons = (nodeData.buttons || []).map((button, index) => {
-    const label = button.label || `Opção ${index + 1}`;
-    return { ...button, label, handleId: button.handleId || toHandleId(label, `option_${index + 1}`) };
+    const optionValue = button.value || button.label || button.id || `option_${index + 1}`;
+    const label = button.label || button.value || `Opção ${index + 1}`;
+    return { ...button, label, value: optionValue, handleId: button.handleId || toHandleId(optionValue, `option_${index + 1}`) };
   });
+
+
+  useEffect(() => {
+    buttons.forEach((button) => {
+      console.debug('[CHOICE HANDLE RENDER]', {
+        node_id: id,
+        id: button.handleId,
+        type: 'source',
+        isConnectable,
+        option_value: button.value,
+      });
+    });
+  }, [buttons, id, isConnectable]);
 
   return (
     <CompactFlowNode
@@ -39,7 +54,8 @@ export default function ChoiceNode({ id, data, selected }: NodeProps) {
       isStart={nodeData.isStart}
       hasValidationError={nodeData.hasValidationError}
       onToggleStart={nodeData.onToggleStart}
-      sourceHandles={buttons.map((button) => ({ id: button.handleId, label: button.label, color: '#f97316' }))}
+      isConnectable={isConnectable}
+      sourceHandles={buttons.map((button) => ({ id: button.handleId, label: button.label, color: '#f97316', optionValue: button.value }))}
     />
   );
 }

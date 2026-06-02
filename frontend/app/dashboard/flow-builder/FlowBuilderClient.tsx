@@ -56,6 +56,14 @@ const nodeTypes = {
 
 type FlowNodeKind = 'message' | 'choice' | 'condition' | 'delay' | 'action' | 'image_node' | 'document_node' | 'buttons_node' | 'list_node';
 type FlowConnection = Connection & { sourceHandle?: string | null };
+type ChoiceConnectDebug = {
+  nodeId: string;
+  handleId: string | null;
+  handleType: string | null;
+  optionValue?: string;
+  isConnectable?: boolean;
+  completed?: boolean;
+};
 
 const NODE_PRESETS: Record<FlowNodeKind, { label: string; type: string; data: Record<string, unknown> }> = {
   message: { label: 'Mensagem', type: 'message', data: { content: '' } },
@@ -103,13 +111,15 @@ const toHandleId = (value: string, fallback: string) => {
   return normalized || fallback;
 };
 
-const normalizeChoiceButtons = (nodeId: string, buttons: Array<{ id?: string; label?: string; handleId?: string; next?: string }> = []) =>
+const normalizeChoiceButtons = (nodeId: string, buttons: Array<{ id?: string; label?: string; value?: string; handleId?: string; next?: string }> = []) =>
   buttons.map((button, index) => {
-    const defaultLabel = button.label || `Opção ${index + 1}`;
+    const defaultLabel = button.label || button.value || `Opção ${index + 1}`;
+    const optionValue = button.value || button.label || button.id || defaultLabel;
     return {
       id: button.id || `${nodeId}-button-${index + 1}`,
       label: defaultLabel,
-      handleId: toHandleId(button.handleId || defaultLabel, `option_${index + 1}`),
+      value: optionValue,
+      handleId: toHandleId(button.handleId || optionValue, `option_${index + 1}`),
       next: button.next || '',
     };
   });
@@ -510,6 +520,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
   const hasTriedAutoCreateRef = useRef(false);
   const nodesRef = useRef<Node[]>([]);
   const edgesRef = useRef<Edge[]>([]);
+  const choiceConnectDebugRef = useRef<ChoiceConnectDebug | null>(null);
   const isSavingRef = useRef(false);
   const lastPersistedFlowSignatureRef = useRef<string | null>(null);
   const saveStatusTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -1333,11 +1344,79 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
     void runFlowStep(text);
   }, [runFlowStep]);
 
+  const getChoiceHandleDebug = useCallback((nodeId?: string | null, handleId?: string | null, handleType?: string | null) => {
+    const node = nodesRef.current.find((item) => item.id === nodeId);
+    if (!node || node.type !== 'choice') return null;
+
+    const buttons = Array.isArray((node.data as { buttons?: unknown }).buttons)
+      ? ((node.data as { buttons?: Array<{ id?: string; label?: string; value?: string; handleId?: string }> }).buttons || [])
+      : [];
+    const option = buttons.find((button) => button.handleId === handleId);
+
+    return {
+      nodeId: node.id,
+      handleId: handleId || null,
+      handleType: handleType || null,
+      id: handleId || null,
+      type: handleType || null,
+      isConnectable: node.connectable ?? true,
+      optionValue: option?.value || option?.label || option?.id || handleId || undefined,
+      option_value: option?.value || option?.label || option?.id || handleId || undefined,
+    };
+  }, []);
+
+  const onConnectStart = useCallback((_event: unknown, params: { nodeId?: string | null; handleId?: string | null; handleType?: string | null }) => {
+    const debug = getChoiceHandleDebug(params.nodeId, params.handleId, params.handleType);
+    if (!debug) return;
+
+    choiceConnectDebugRef.current = {
+      nodeId: debug.nodeId,
+      handleId: debug.handleId,
+      handleType: debug.handleType,
+      optionValue: debug.optionValue,
+      isConnectable: debug.isConnectable,
+      completed: false,
+    };
+    console.debug('[CHOICE CONNECT START]', debug);
+  }, [getChoiceHandleDebug]);
+
+  const onConnectEnd = useCallback(() => {
+    const pending = choiceConnectDebugRef.current;
+    if (!pending) return;
+
+    console.debug('[CHOICE CONNECT END]', {
+      node_id: pending.nodeId,
+      id: pending.handleId,
+      type: pending.handleType,
+      isConnectable: pending.isConnectable,
+      option_value: pending.optionValue,
+      completed: !!pending.completed,
+    });
+    choiceConnectDebugRef.current = null;
+  }, []);
+
   const onConnect = useCallback((params: FlowConnection) => {
     const sourceHandle = params.sourceHandle?.toString() || null;
     const source = safeString(params.source);
     const target = safeString(params.target);
     const targetHandle = safeString(params.targetHandle);
+    const choiceDebug = getChoiceHandleDebug(source, sourceHandle, 'source');
+    if (choiceDebug) {
+      choiceConnectDebugRef.current = {
+        nodeId: choiceDebug.nodeId,
+        handleId: choiceDebug.handleId,
+        handleType: choiceDebug.handleType,
+        optionValue: choiceDebug.optionValue,
+        isConnectable: choiceDebug.isConnectable,
+        completed: true,
+      };
+      console.debug('[CHOICE CONNECT END]', {
+        ...choiceDebug,
+        target,
+        targetHandle,
+        completed: true,
+      });
+    }
 
     setEdges((eds) => addEdge({
       ...params,
@@ -1352,7 +1431,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
         sourceHandle: sourceHandle || undefined,
       },
     }, eds));
-  }, [setEdges]);
+  }, [getChoiceHandleDebug, setEdges]);
 
 
   const addNode = useCallback(
@@ -2153,6 +2232,8 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
           onConnect={onConnect}
+          onConnectStart={onConnectStart}
+          onConnectEnd={onConnectEnd}
           onNodeClick={handleReactFlowNodeClick}
           onSelectionChange={handleReactFlowSelectionChange}
           onContextMenu={(e) => {

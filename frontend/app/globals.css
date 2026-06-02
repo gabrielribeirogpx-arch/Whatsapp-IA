@@ -3501,7 +3501,20 @@ input {
   min-height: 110px;
   max-height: 128px;
   position: relative;
-  contain: layout paint style;
+  overflow: visible;
+  contain: layout style;
+}
+
+.flow-node-source-handle {
+  pointer-events: auto;
+  z-index: 30;
+}
+
+.flow-node-source-handle::after {
+  content: '';
+  position: absolute;
+  inset: -8px;
+  border-radius: 999px;
 }
 
 .flow-node-compact-header {
