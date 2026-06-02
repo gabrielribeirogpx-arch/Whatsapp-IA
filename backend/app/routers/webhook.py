@@ -2,6 +2,7 @@ from datetime import datetime
 import asyncio
 import os
 import logging
+import json
 from uuid import UUID
 import uuid
 
@@ -27,7 +28,7 @@ from app.services.flow_engine import get_node_by_id
 from app.services.flow_session_service import FlowSessionService
 from app.services.flow_runtime_service import execute_node_chain_until_reply
 from app.models.flow import Flow
-from app.services.whatsapp_service import send_whatsapp_buttons
+from app.services.whatsapp_service import send_whatsapp_buttons, send_whatsapp_message_simple
 from app.services.intent_service import classify_intent, normalize_input, route_intent
 from app.models import Tenant
 from app.models.flow_session import FINAL_SESSION_STATUSES, FlowSession
@@ -39,6 +40,14 @@ from app.services.tenant_service import resolve_tenant_by_phone_number_id
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+
+def _payload_summary(payload: object, limit: int = 1200) -> str:
+    try:
+        encoded = json.dumps(payload, default=str, ensure_ascii=False, sort_keys=True)
+    except Exception:
+        encoded = str(payload)
+    return encoded[:limit] + ("..." if len(encoded) > limit else "")
 
 
 def _worker_id() -> str:
@@ -111,13 +120,28 @@ async def _process_runtime_events(
                 logger.info("[FLOW SESSION SAVED] execution_id=%s tenant_id=%s wa_id=%s", execution.id, tenant_uuid, wa_id)
             return True
 
-        if event_type == "send_message":
-            text = str(event.get("text") or "").strip()
+        if event_type in {"send_message", "send_list"}:
+            text = str(event.get("text") or event.get("body_text") or "").strip()
             if not text:
                 continue
-            logger.info("[FLOW SEND EVENT] tenant_id=%s wa_id=%s", tenant_uuid, wa_id)
+            logger.info("[FLOW SEND EVENT] tenant_id=%s wa_id=%s event_type=%s", tenant_uuid, wa_id, event_type)
             if event.get("after_delay") is True:
                 logger.info("[FLOW SEND AFTER DELAY] tenant_id=%s wa_id=%s", tenant_uuid, wa_id)
+            if db is None:
+                if event_type == "send_message":
+                    send_whatsapp_message_simple(phone, text)
+                    continue
+                enqueue_send_message({
+                    "tenant_id": tenant_uuid,
+                    "phone": phone,
+                    "text": text,
+                    "interactive_type": "list",
+                    "sections": event.get("sections") if isinstance(event.get("sections"), list) else [],
+                    "options": event.get("options") if isinstance(event.get("options"), list) else [],
+                    "node_type": "choice",
+                })
+                continue
+
             flow_id = None
             flow_version_id = None
             node_id = None
@@ -133,6 +157,36 @@ async def _process_runtime_events(
                 .first()
             )
 
+            if event_type == "send_list":
+                sections = event.get("sections") if isinstance(event.get("sections"), list) else []
+                options = event.get("options") if isinstance(event.get("options"), list) else []
+                payload = {
+                    "tenant_id": tenant_uuid,
+                    "phone": phone,
+                    "text": text,
+                    "interactive_type": "list",
+                    "sections": sections,
+                    "options": options,
+                    "flow_id": str(flow_id) if flow_id else None,
+                    "flow_version_id": str(flow_version_id) if flow_version_id else None,
+                    "session_id": str(conversation.id) if conversation else None,
+                    "node_id": str(node_id) if node_id else None,
+                    "node_type": "choice",
+                    "conversation_id": str(conversation.id) if conversation else None,
+                }
+                job_id = enqueue_send_message(payload)
+                logger.info(
+                    "[CHOICE LIST ENQUEUED] session_id=%s node_id=%s flow_id=%s interactive_type=%s job_id=%s options_count=%s payload_summary=%s",
+                    payload.get("session_id"),
+                    payload.get("node_id"),
+                    payload.get("flow_id"),
+                    payload.get("interactive_type"),
+                    job_id,
+                    len(options),
+                    _payload_summary({"text": text, "sections": sections, "options": options}),
+                )
+                continue
+
             enqueue_flow_send_with_tracking(
                 db=db,
                 tenant_id=tenant_uuid,
@@ -143,7 +197,7 @@ async def _process_runtime_events(
                 conversation_id=conversation.id if conversation else None,
                 node_id=node_id,
                 channel="whatsapp",
-                buttons=event.get("buttons") if isinstance(event.get("buttons"), list) else None,
+                buttons=event.get("buttons") if isinstance(event.get("buttons", []), list) else None,
                 template_or_node_text=str(event.get("template_name") or event.get("node_label") or ""),
             )
 
