@@ -1,3 +1,4 @@
+import json
 import logging
 import uuid
 
@@ -9,6 +10,14 @@ from app.models.whatsapp_campaign import WhatsAppCampaign, WhatsAppCampaignRecip
 from sqlalchemy import select
 
 logger = logging.getLogger(__name__)
+
+
+def _json_log_payload(payload: object) -> str:
+    try:
+        return json.dumps(payload, default=str, ensure_ascii=False, sort_keys=True)
+    except Exception:
+        return str(payload)
+
 
 def _recalculate_campaign_metrics(db, campaign: WhatsAppCampaign) -> None:
     rows = db.execute(select(WhatsAppCampaignRecipient).where(WhatsAppCampaignRecipient.campaign_id == campaign.id)).scalars().all()
@@ -69,6 +78,8 @@ async def enqueue_webhook_payload(request: Request) -> tuple[bool, str | None]:
     if not isinstance(payload, dict):
         logger.warning("event=webhook_invalid_payload_type type=%s", type(payload).__name__)
         return False, None
+
+    logger.info("[META WEBHOOK RAW PAYLOAD] payload=%s", _json_log_payload(payload))
 
     correlation_id = str(payload.get("message_id") or "").strip() or str(uuid.uuid4())
     payload["correlation_id"] = correlation_id
