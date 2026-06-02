@@ -115,3 +115,109 @@ def test_pick_message_accepts_direct_interactive_list_reply_without_text(monkeyp
     assert parsed["text"] == "opcao_2"
     assert parsed["interactive_type"] == "list_reply"
     assert parsed["selected_row_id"] == "opcao_2"
+
+
+def test_pick_message_logs_normalize_output_and_raw_payload(caplog):
+    from app.workers import message_worker
+
+    payload = {
+        "entry": [
+            {
+                "changes": [
+                    {
+                        "value": {
+                            "metadata": {"phone_number_id": "123"},
+                            "contacts": [{"wa_id": "5511999990000", "profile": {"name": "Cliente"}}],
+                            "messages": [
+                                {
+                                    "id": "wamid.3",
+                                    "from": "5511999990000",
+                                    "type": "interactive",
+                                    "interactive": {
+                                        "type": "list_reply",
+                                        "list_reply": {"id": "opcao_3", "title": "Opção 3"},
+                                    },
+                                }
+                            ],
+                        }
+                    }
+                ]
+            }
+        ]
+    }
+
+    with caplog.at_level("INFO"):
+        parsed = message_worker._pick_message(payload)
+
+    log_text = "\n".join(record.getMessage() for record in caplog.records)
+    assert "[META WORKER RAW PAYLOAD]" in log_text
+    assert "[NORMALIZE_META_MESSAGE INPUT]" in log_text
+    assert "[NORMALIZE_META_MESSAGE COMPLETE] count=1" in log_text
+    assert "[NORMALIZE_META_MESSAGE OUTPUT] count=1 payload_shape=entry_count=1 message_count=1" in log_text
+    assert '"selected_row_id": "opcao_3"' in log_text
+    assert parsed is not None
+    assert parsed["selected_row_id"] == "opcao_3"
+
+
+def test_pick_message_logs_unsupported_parse_reason(caplog, monkeypatch):
+    from app.workers import message_worker
+
+    monkeypatch.setattr(message_worker, "normalize_meta_message", lambda payload: [])
+
+    with caplog.at_level("WARNING"):
+        parsed = message_worker._pick_message({"entry": [], "message_id": "wamid.empty"})
+
+    log_text = "\n".join(record.getMessage() for record in caplog.records)
+    assert parsed is None
+    assert "[MESSAGE PARSE UNSUPPORTED] reason=no_supported_message" in log_text
+    assert "payload_shape=entry_count=0 message_count=0" in log_text
+
+
+class _DummyWebhookRequest:
+    def __init__(self, payload):
+        self._payload = payload
+
+    async def json(self):
+        return self._payload
+
+
+def test_enqueue_webhook_payload_logs_complete_meta_payload(caplog, monkeypatch):
+    from app.services import webhook_ingress
+
+    payload = {
+        "entry": [
+            {
+                "changes": [
+                    {
+                        "value": {
+                            "metadata": {"phone_number_id": "123"},
+                            "messages": [
+                                {
+                                    "id": "wamid.raw",
+                                    "from": "5511999990000",
+                                    "type": "interactive",
+                                    "interactive": {
+                                        "type": "list_reply",
+                                        "list_reply": {"id": "opcao_raw", "title": "Opção raw"},
+                                    },
+                                }
+                            ],
+                        }
+                    }
+                ]
+            }
+        ]
+    }
+    monkeypatch.setattr(webhook_ingress, "_update_campaign_status_from_meta", lambda payload: None)
+    monkeypatch.setattr(webhook_ingress, "enqueue_incoming_message", lambda payload: "job-raw")
+
+    import asyncio
+
+    with caplog.at_level("INFO"):
+        enqueued, correlation_id = asyncio.run(webhook_ingress.enqueue_webhook_payload(_DummyWebhookRequest(payload)))
+
+    log_text = "\n".join(record.getMessage() for record in caplog.records)
+    assert enqueued is True
+    assert correlation_id == "wamid.raw"
+    assert "[META WEBHOOK RAW PAYLOAD]" in log_text
+    assert '"id": "opcao_raw"' in log_text

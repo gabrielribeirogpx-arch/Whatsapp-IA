@@ -91,6 +91,7 @@ def extract_whatsapp_messages(payload: dict[str, Any]) -> list[dict[str, str]]:
 
 
 def normalize_meta_message(payload: dict[str, Any]) -> list[dict[str, str | None]]:
+    logger.info("[NORMALIZE_META_MESSAGE INPUT] payload=%s", _json_log_payload(payload))
     normalized: list[dict[str, str | None]] = []
     entries = payload.get("entry", [])
 
@@ -149,4 +150,5 @@ def normalize_meta_message(payload: dict[str, Any]) -> list[dict[str, str | None
                 _log_meta_message_marker("[MESSAGE NORMALIZED]", message=message, payload=normalized_message)
                 normalized.append(normalized_message)
 
+    logger.info("[NORMALIZE_META_MESSAGE COMPLETE] count=%s normalized=%s", len(normalized), _json_log_payload(normalized))
     return normalized

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import subprocess
 import uuid
 from datetime import datetime
 from typing import Any
@@ -23,6 +24,54 @@ from app.core.redis_client import get_redis_client
 from app.services.tenant_service import resolve_tenant_by_phone_number_id
 
 logger = logging.getLogger(__name__)
+
+
+def _runtime_commit_sha() -> str:
+    for env_name in (
+        "WORKER_COMMIT",
+        "API_COMMIT",
+        "GIT_COMMIT",
+        "RENDER_GIT_COMMIT",
+        "RAILWAY_GIT_COMMIT_SHA",
+        "VERCEL_GIT_COMMIT_SHA",
+        "HEROKU_SLUG_COMMIT",
+        "SOURCE_VERSION",
+        "COMMIT_SHA",
+    ):
+        commit = str(os.getenv(env_name) or "").strip()
+        if commit:
+            return commit
+
+    try:
+        completed = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=2,
+        )
+    except Exception:
+        return "unknown"
+
+    return completed.stdout.strip() or "unknown"
+
+
+def _payload_shape(payload: dict[str, Any]) -> str:
+    entries = payload.get("entry")
+    if not isinstance(entries, list):
+        return f"missing_or_invalid_entry type={type(entries).__name__}"
+    message_count = 0
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        for change in entry.get("changes", []) if isinstance(entry.get("changes"), list) else []:
+            if not isinstance(change, dict):
+                continue
+            value = change.get("value") if isinstance(change.get("value"), dict) else {}
+            messages = value.get("messages")
+            if isinstance(messages, list):
+                message_count += len(messages)
+    return f"entry_count={len(entries)} message_count={message_count}"
 
 
 def _json_log_payload(payload: Any) -> str:
@@ -155,7 +204,9 @@ def _release_session_lock(redis_client: Any, lock_key: str, lock_token: str) -> 
         logger.warning("event=incoming_worker_lock_release_warning lock_key=%s", lock_key, exc_info=True)
 
 def _pick_message(payload: dict[str, Any]) -> dict[str, Any] | None:
+    logger.info("[META WORKER RAW PAYLOAD] payload=%s", _json_log_payload(payload))
     normalized = normalize_meta_message(payload)
+    logger.info("[NORMALIZE_META_MESSAGE OUTPUT] count=%s payload_shape=%s normalized=%s", len(normalized), _payload_shape(payload), _json_log_payload(normalized))
     if normalized:
         return normalized[0]
 
@@ -187,13 +238,29 @@ def _pick_message(payload: dict[str, Any]) -> dict[str, Any] | None:
 
     if payload.get("phone"):
         _log_direct_message_marker("[MESSAGE TYPE DETECTED]", payload)
+    logger.warning(
+        "[MESSAGE PARSE UNSUPPORTED] reason=no_supported_message payload_shape=%s has_phone=%s has_text=%s has_selected_row_id=%s payload=%s",
+        _payload_shape(payload),
+        bool(payload.get("phone")),
+        bool(str(payload.get("text") or "").strip()),
+        bool(selected_row_id),
+        _json_log_payload(payload),
+    )
     return None
 
 
 def process_incoming_message(payload: dict[str, Any]) -> None:
     raw_correlation = payload.get("correlation_id") or payload.get("message_id")
     correlation_id = str(raw_correlation or "n/a")
-    logger.info("event=incoming_worker_start correlation_id=%s tenant_id=%s phone=%s job_id=%s stage=incoming_worker_start", correlation_id, "n/a", payload.get("phone") or "n/a", payload.get("job_id") or "n/a")
+    logger.info(
+        "event=incoming_worker_start correlation_id=%s tenant_id=%s phone=%s job_id=%s stage=incoming_worker_start worker_id=%s commit_sha=%s",
+        correlation_id,
+        "n/a",
+        payload.get("phone") or "n/a",
+        payload.get("job_id") or "n/a",
+        _worker_id(),
+        _runtime_commit_sha(),
+    )
 
     parsed = _pick_message(payload)
     if not parsed:

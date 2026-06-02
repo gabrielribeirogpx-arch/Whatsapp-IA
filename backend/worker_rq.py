@@ -1,4 +1,5 @@
 import os
+import subprocess
 
 import redis
 from rq import Connection, Queue, Worker
@@ -18,6 +19,37 @@ engine = create_engine(DATABASE_URL)
 
 print("[WORKER] Connecting Redis...")
 conn = redis.from_url(REDIS_URL)
+
+
+def runtime_commit_sha() -> str:
+    for env_name in (
+        "WORKER_COMMIT",
+        "API_COMMIT",
+        "GIT_COMMIT",
+        "RENDER_GIT_COMMIT",
+        "RAILWAY_GIT_COMMIT_SHA",
+        "VERCEL_GIT_COMMIT_SHA",
+        "HEROKU_SLUG_COMMIT",
+        "SOURCE_VERSION",
+        "COMMIT_SHA",
+    ):
+        commit = str(os.getenv(env_name) or "").strip()
+        if commit:
+            return commit
+
+    try:
+        completed = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=2,
+        )
+    except Exception:
+        return "unknown"
+
+    return completed.stdout.strip() or "unknown"
+
 
 listen = [
     os.getenv("INCOMING_MESSAGE_QUEUE", "high_priority"),
@@ -39,7 +71,7 @@ class LoggingWorker(Worker):
 
 
 if __name__ == "__main__":
-    print("[RQ WORKER] started")
+    print(f"[RQ WORKER] started commit_sha={runtime_commit_sha()} queues={','.join(listen)}")
     with Connection(conn):
         worker = LoggingWorker(list(map(Queue, listen)))
         worker.work()
