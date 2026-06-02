@@ -3476,7 +3476,10 @@ def process_flow_engine(
         session_context_for_routing.get("waiting_choice") is True
         and (session_context_for_routing.get("selected_row_id") or session_context_for_routing.get("last_interactive_list_reply_id"))
     )
+    saved_current_node_present = saved_current_node_id is not None
     start_trigger_match = bool(start_trigger)
+
+    # Proteção 1: sessão aguardando resposta de choice com selected_row_id
     if is_pending_choice_reply and start_trigger_match:
         _log_choice_runtime_marker(
             "[FLOW RESTART DETECTED]",
@@ -3494,7 +3497,24 @@ def process_flow_engine(
             saved_current_node_id,
         )
         start_trigger_match = False
-    saved_current_node_present = saved_current_node_id is not None
+
+    # Proteção 2 (NOVA): sessão ativa com current_node sendo um choice node
+    # impede que texto livre (ex: "Oi") destrua a sessão em espera
+    elif (
+        start_trigger_match
+        and session_active
+        and saved_current_node_present
+        and current_node_type == "choice"
+    ):
+        logger.warning(
+            "[FLOW RESTART BLOCKED_CHOICE_WAITING] reason=active_choice_node_prevents_restart "
+            "trigger=%s session_id=%s current_node_id=%s current_node_type=%s",
+            normalized_text,
+            getattr(runtime_session, "id", None),
+            saved_current_node_id,
+            current_node_type,
+        )
+        start_trigger_match = False
     session_running_with_current_node = bool(
         runtime_session
         and session_status in {"running", "active"}
