@@ -1719,6 +1719,11 @@ def _safe_payload_json(payload: Any) -> str:
     return json.dumps(payload, default=str, ensure_ascii=False, sort_keys=True)
 
 
+def _payload_summary(payload: Any, limit: int = 1200) -> str:
+    encoded = _safe_payload_json(payload)
+    return encoded[:limit] + ("..." if len(encoded) > limit else "")
+
+
 def _choice_options_from_node(node_data: dict[str, Any], edges: list[FlowEdge | VersionedFlowEdge]) -> list[dict[str, Any]]:
     raw_buttons = node_data.get("buttons") if isinstance(node_data.get("buttons"), list) else []
     options: list[dict[str, Any]] = []
@@ -1944,7 +1949,7 @@ def _send_flow_interactive_list(tenant: Tenant, phone: str, text: str, sections:
             "sequence_number": flow_context.get("sequence_number") or _next_flow_sequence(tenant.id, phone),
         }
         logger.info(
-            "[CHOICE LIST ENQUEUED] flow_id=%s session_id=%s node_id=%s node_type=%s message_type=%s interactive_type=%s options_count=%s payload_json=%s",
+            "[CHOICE LIST ENQUEUED] flow_id=%s session_id=%s node_id=%s node_type=%s message_type=%s interactive_type=%s options_count=%s payload_summary=%s",
             payload.get("flow_id"),
             payload.get("session_id"),
             payload.get("node_id"),
@@ -1952,7 +1957,7 @@ def _send_flow_interactive_list(tenant: Tenant, phone: str, text: str, sections:
             "interactive",
             "list",
             len(options or []),
-            _safe_payload_json(payload),
+            _payload_summary(payload),
         )
         return enqueue_send_message(payload)
     except Exception:
@@ -2216,12 +2221,20 @@ def run_until_wait_node(
         )
 
         if node_type == "choice":
+            logger.info(
+                "[CHOICE NODE ENTER] session_id=%s node_id=%s flow_id=%s interactive_type=%s payload_summary=%s",
+                getattr(flow_session, "id", None),
+                _node_get(node, "id"),
+                flow.id,
+                "list",
+                _payload_summary({"node_type": node_type, "node_data_keys": sorted(node_data.keys()), "edges_count": len(edges)}),
+            )
             choice_options = _choice_options_from_node(node_data, edges)
             choice_body_text = _choice_body_text(node_data)
             choice_sections = _choice_sections(choice_options)
             selected_option = _resolve_choice_option(incoming_text or "", choice_options)
             logger.info(
-                "[CHOICE LIST GENERATED] flow_id=%s session_id=%s node_id=%s node_type=%s message_type=%s interactive_type=%s options_count=%s payload_json=%s",
+                "[CHOICE LIST GENERATED] flow_id=%s session_id=%s node_id=%s node_type=%s message_type=%s interactive_type=%s options_count=%s payload_summary=%s",
                 flow.id,
                 getattr(flow_session, "id", None),
                 _node_get(node, "id"),
@@ -2229,7 +2242,7 @@ def run_until_wait_node(
                 "interactive",
                 "list",
                 len(choice_options),
-                _safe_payload_json({"body_text": choice_body_text, "sections": choice_sections, "options": choice_options}),
+                _payload_summary({"body_text": choice_body_text, "sections": choice_sections, "options": choice_options}),
             )
             if selected_option:
                 selected_handle = str(selected_option.get("handleId") or selected_option.get("id") or "")

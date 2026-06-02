@@ -67,6 +67,14 @@ def _list_sections(data: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 
+def _diagnostic_payload_summary(payload: Any, limit: int = 1200) -> str:
+    try:
+        encoded = json.dumps(payload, default=str, ensure_ascii=False, sort_keys=True)
+    except Exception:
+        encoded = str(payload)
+    return encoded[:limit] + ("..." if len(encoded) > limit else "")
+
+
 def _safe_payload_json(payload: Any) -> str:
     return json.dumps(payload, default=str, ensure_ascii=False, sort_keys=True)
 
@@ -232,6 +240,16 @@ async def execute_node_chain_until_reply(
             return _result(pending=False, events=events, response_node_id=response_node_id, next_node_id=str(cursor))
 
         if ntype == "choice":
+            diagnostic_flow_id = context.get("flow_id") or context.get("flow_version_id") or "n/a"
+            diagnostic_session_id = context.get("session_id") or wa_id or "n/a"
+            logger.info(
+                "[CHOICE NODE ENTER] session_id=%s node_id=%s flow_id=%s interactive_type=%s payload_summary=%s",
+                diagnostic_session_id,
+                cursor,
+                diagnostic_flow_id,
+                "list",
+                _diagnostic_payload_summary({"node_type": ntype, "node_data_keys": sorted(data.keys())}),
+            )
             choice_options = _choice_options(data)
             matched_option = None
             for option in choice_options:
@@ -244,7 +262,15 @@ async def execute_node_chain_until_reply(
             body_text = str(data.get("body_text") or data.get("content") or "Escolha uma opção:").strip()
             rows = [{"id": str(option.get("id") or option.get("handleId") or f"choice_{index + 1}"), "title": str(option.get("label") or "")[:24]} for index, option in enumerate(choice_options) if str(option.get("label") or "").strip()]
             sections = [{"title": "Opções", "rows": rows}] if rows else []
-            logger.info("[CHOICE LIST GENERATED] node_id=%s options_count=%s payload_json=%s", cursor, len(choice_options), _safe_payload_json({"body_text": body_text, "sections": sections, "options": choice_options}))
+            logger.info(
+                "[CHOICE LIST GENERATED] session_id=%s node_id=%s flow_id=%s interactive_type=%s options_count=%s payload_summary=%s",
+                diagnostic_session_id,
+                cursor,
+                diagnostic_flow_id,
+                "list",
+                len(choice_options),
+                _diagnostic_payload_summary({"body_text": body_text, "sections": sections, "options": choice_options}),
+            )
             if normalized_input and matched_option:
                 matched_handle = str(matched_option.get("handleId") or matched_option.get("id") or "")
                 matched_title = str(matched_option.get("label") or "")
@@ -258,7 +284,15 @@ async def execute_node_chain_until_reply(
                 continue
             if body_text and sections:
                 events.append({"type": "send_list", "body_text": body_text, "sections": sections, "interactive_type": "list", "options": choice_options})
-                logger.info("[CHOICE LIST ENQUEUED] node_id=%s options_count=%s", cursor, len(choice_options))
+                logger.info(
+                    "[CHOICE LIST ENQUEUED] session_id=%s node_id=%s flow_id=%s interactive_type=%s options_count=%s payload_summary=%s",
+                    diagnostic_session_id,
+                    cursor,
+                    diagnostic_flow_id,
+                    "list",
+                    len(choice_options),
+                    _diagnostic_payload_summary(events[-1]),
+                )
             response_node_id = str(cursor)
             return _result(pending=False, events=events, response_node_id=response_node_id, next_node_id=str(cursor))
 

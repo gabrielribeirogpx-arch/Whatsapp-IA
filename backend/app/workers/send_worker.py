@@ -33,6 +33,14 @@ from app.integrations.meta.meta_cloud_client import MetaApiError
 logger = logging.getLogger(__name__)
 
 
+def _payload_summary(payload: Any, limit: int = 1200) -> str:
+    try:
+        encoded = json.dumps(payload, default=str, ensure_ascii=False, sort_keys=True)
+    except Exception:
+        encoded = str(payload)
+    return encoded[:limit] + ("..." if len(encoded) > limit else "")
+
+
 SEND_LOCK_TTL_SECONDS = int(os.getenv("SEND_LOCK_TTL_SECONDS", "120"))
 SEND_LOCK_WAIT_TIMEOUT_SECONDS = float(os.getenv("SEND_LOCK_WAIT_TIMEOUT_SECONDS", "45"))
 SEND_LOCK_RETRY_INTERVAL_SECONDS = float(os.getenv("SEND_LOCK_RETRY_INTERVAL_SECONDS", "0.25"))
@@ -452,6 +460,17 @@ def send_whatsapp_message(*, message_data: dict[str, Any]) -> None:
         len(options or buttons or []) if isinstance(options or buttons, list) else 0,
         json.dumps(message_data, default=str, ensure_ascii=False, sort_keys=True),
     )
+    if interactive_type == "list":
+        logger.info(
+            "[CHOICE LIST RECEIVED BY WORKER] session_id=%s node_id=%s flow_id=%s interactive_type=%s job_id=%s options_count=%s payload_summary=%s",
+            session_id,
+            node_id,
+            flow_id,
+            interactive_type,
+            job_id,
+            len(options or []),
+            _payload_summary({"text": text, "sections": sections, "options": options}),
+        )
 
     logger.info(
         "[WORKER ENTRY] job_id=%s message=%s flow_id=%s sequence_number=%s",
@@ -699,7 +718,16 @@ def send_whatsapp_message(*, message_data: dict[str, Any]) -> None:
                     phone_number_id=resolved_phone_number_id,
                     context=context,
                 )
-                logger.info("[CHOICE LIST SENT] flow_id=%s session_id=%s node_id=%s options_count=%s", flow_id, session_id, node_id, len(options or []))
+                logger.info(
+                    "[CHOICE LIST SENT] session_id=%s node_id=%s flow_id=%s interactive_type=%s options_count=%s meta_response=%s payload_summary=%s",
+                    session_id,
+                    node_id,
+                    flow_id,
+                    interactive_type,
+                    len(options or []),
+                    _payload_summary(meta_response),
+                    _payload_summary({"text": text, "sections": sections, "options": options}),
+                )
             elif buttons:
                 logger.info(
                     "[META INTERACTIVE PAYLOAD] flow_id=%s session_id=%s node_id=%s node_type=%s message_type=%s options_count=%s payload_json=%s",
@@ -734,6 +762,17 @@ def send_whatsapp_message(*, message_data: dict[str, Any]) -> None:
                 meta_response,
             )
         except MetaApiError as exc:
+            if interactive_type == "list":
+                logger.error(
+                    "[CHOICE LIST SEND ERROR] session_id=%s node_id=%s flow_id=%s interactive_type=%s status_code=%s error=%s payload_summary=%s",
+                    session_id,
+                    node_id,
+                    flow_id,
+                    interactive_type,
+                    exc.status_code,
+                    exc,
+                    _payload_summary({"text": text, "sections": sections, "options": options}),
+                )
             if exc.status_code == 401 and provider_id:
                 logger.error("[WHATSAPP SEND AUTH ERROR] tenant_id=%s provider_id=%s phone=%s", tenant_id, provider_id, phone)
                 with SessionLocal() as db:

@@ -21,6 +21,15 @@ from app.services.cache_service import check_rate_limit
 
 logger = logging.getLogger(__name__)
 
+
+def _payload_summary(payload: Any, limit: int = 1200) -> str:
+    try:
+        encoded = json.dumps(payload, default=str, ensure_ascii=False, sort_keys=True)
+    except Exception:
+        encoded = str(payload)
+    return encoded[:limit] + ("..." if len(encoded) > limit else "")
+
+
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 SEND_QUEUE_NAME = os.getenv("WHATSAPP_SEND_QUEUE", "normal")
 INCOMING_QUEUE_NAME = os.getenv("INCOMING_MESSAGE_QUEUE", "high_priority")
@@ -235,6 +244,18 @@ def enqueue_send_message(message_data: dict[str, Any]) -> str | None:
         content,
         _runtime_commit(),
     )
+
+    if payload.get("interactive_type") == "list":
+        logger.info(
+            "[CHOICE LIST ENQUEUED] session_id=%s node_id=%s flow_id=%s interactive_type=%s job_id=%s options_count=%s payload_summary=%s",
+            payload.get("session_id"),
+            payload.get("node_id"),
+            payload.get("flow_id"),
+            payload.get("interactive_type"),
+            job.id,
+            len(payload.get("options") or []),
+            _payload_summary({"text": payload.get("text"), "sections": payload.get("sections"), "options": payload.get("options")}),
+        )
 
     logger.info(
         "event=queue_send_enqueued correlation_id=%s tenant_id=%s phone=%s job_id=%s stage=send_enqueue has_buttons=%s",
