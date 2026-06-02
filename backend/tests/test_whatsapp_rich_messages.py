@@ -120,8 +120,8 @@ def test_choice_node_generates_interactive_list_and_follows_selected_edge():
     assert first["events"][1]["type"] == "send_list"
     assert first["events"][1]["interactive_type"] == "list"
     assert first["events"][1]["options"] == [
-        {"id": "vendas", "label": "Vendas", "handleId": "vendas"},
-        {"id": "suporte", "label": "Suporte", "handleId": "suporte"},
+        {"id": "vendas", "label": "Vendas", "value": "vendas", "handleId": "vendas"},
+        {"id": "suporte", "label": "Suporte", "value": "suporte", "handleId": "suporte"},
     ]
     assert first["events"][1]["sections"] == [{"title": "Opções", "rows": [{"id": "vendas", "title": "Vendas"}, {"id": "suporte", "title": "Suporte"}]}]
     assert first["next_node_id"] == "choice"

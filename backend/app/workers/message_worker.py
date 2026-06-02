@@ -9,6 +9,7 @@ from sqlalchemy import select
 
 from app.db.session import SessionLocal
 from app.models import Message
+from app.models.flow_session import FINAL_SESSION_STATUSES, FlowSession
 from app.services.contact_sync_service import ensure_conversation_contact_link, upsert_contact_for_phone
 from app.services.contact_event_service import register_contact_event
 from app.services.conversation_service import get_or_create_conversation
@@ -20,6 +21,31 @@ from app.core.redis_client import get_redis_client
 from app.services.tenant_service import resolve_tenant_by_phone_number_id
 
 logger = logging.getLogger(__name__)
+
+
+def _persist_interactive_reply_context(db, session: FlowSession | None, parsed: dict[str, Any]) -> None:
+    if not session:
+        return
+    interactive_type = str(parsed.get("interactive_type") or "").strip()
+    selected_row_id = str(parsed.get("selected_row_id") or parsed.get("interactive_reply_id") or "").strip()
+    selected_title = str(parsed.get("selected_title") or parsed.get("interactive_reply_title") or "").strip()
+    if interactive_type != "list_reply" or not selected_row_id:
+        return
+    session.context = {
+        **(session.context or {}),
+        "last_interactive_type": interactive_type,
+        "last_interactive_list_reply_id": selected_row_id,
+        "last_interactive_list_reply_title": selected_title,
+        "selected_row_id": selected_row_id,
+        "selected_title": selected_title,
+    }
+    db.add(session)
+    logger.info(
+        "[CHOICE LIST RESPONSE] session_id=%s selected_row_id=%s selected_title=%s source=message_worker",
+        session.id,
+        selected_row_id,
+        selected_title,
+    )
 
 
 
@@ -230,6 +256,17 @@ def process_incoming_message(payload: dict[str, Any]) -> None:
         )
 
         if persisted_message and persisted_conversation:
+            active_session = (
+                db.query(FlowSession)
+                .filter(
+                    FlowSession.tenant_id == tenant.id,
+                    FlowSession.conversation_id == str(persisted_conversation.id),
+                )
+                .order_by(FlowSession.updated_at.desc(), FlowSession.created_at.desc())
+                .first()
+            )
+            if active_session and (active_session.status or "").lower() not in FINAL_SESSION_STATUSES:
+                _persist_interactive_reply_context(db, active_session, parsed)
             try:
                 handle_incoming_message(db=db, message=persisted_message, conversation=persisted_conversation)
             except Exception:

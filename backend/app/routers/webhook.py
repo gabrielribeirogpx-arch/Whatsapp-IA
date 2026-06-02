@@ -40,6 +40,31 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
+def _persist_interactive_reply_context(db: Session, session: FlowSession | None, incoming: dict) -> None:
+    if not session:
+        return
+    interactive_type = str(incoming.get("interactive_type") or "").strip()
+    selected_row_id = str(incoming.get("selected_row_id") or incoming.get("interactive_reply_id") or "").strip()
+    selected_title = str(incoming.get("selected_title") or incoming.get("interactive_reply_title") or "").strip()
+    if interactive_type != "list_reply" or not selected_row_id:
+        return
+    session.context = {
+        **(session.context or {}),
+        "last_interactive_type": interactive_type,
+        "last_interactive_list_reply_id": selected_row_id,
+        "last_interactive_list_reply_title": selected_title,
+        "selected_row_id": selected_row_id,
+        "selected_title": selected_title,
+    }
+    db.add(session)
+    logger.info(
+        "[CHOICE LIST RESPONSE] session_id=%s selected_row_id=%s selected_title=%s source=webhook",
+        session.id,
+        selected_row_id,
+        selected_title,
+    )
+
+
 
 async def _process_runtime_events(
     *,
@@ -360,6 +385,7 @@ async def _process_meta_webhook(request: Request, db: Session) -> dict[str, str]
                 active_session
                 and (active_session.status or "").lower() not in FINAL_SESSION_STATUSES
             ):
+                _persist_interactive_reply_context(db, active_session, incoming)
                 emit_message_received_event(
                     db=db,
                     tenant_id=conversation.tenant_id,

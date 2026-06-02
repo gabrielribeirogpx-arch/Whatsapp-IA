@@ -80,8 +80,9 @@ def _choice_options(data: dict[str, Any]) -> list[dict[str, Any]]:
         label = str(button.get("label") or button.get("title") or "").strip()
         if not label:
             continue
-        handle = str(button.get("handleId") or button.get("id") or _option_handle(label, f"choice_{index + 1}"))
-        options.append({"id": handle, "label": label, "handleId": handle})
+        option_value = str(button.get("value") or button.get("option_value") or button.get("handleId") or button.get("id") or label).strip()
+        handle = str(button.get("handleId") or option_value or button.get("id") or _option_handle(label, f"choice_{index + 1}"))
+        options.append({"id": handle, "label": label, "value": option_value, "handleId": handle})
     return options
 
 def _extract_delay_seconds(node: dict[str, Any] | None) -> int:
@@ -236,7 +237,8 @@ async def execute_node_chain_until_reply(
             for option in choice_options:
                 label = str(option.get("label") or "").strip()
                 handle = str(option.get("handleId") or option.get("id") or "").strip()
-                if normalized_input and (_normalize_text(label) == normalized_input or _normalize_text(handle) == normalized_input):
+                value = str(option.get("value") or "").strip()
+                if normalized_input and (_normalize_text(label) == normalized_input or _normalize_text(handle) == normalized_input or _normalize_text(value) == normalized_input):
                     matched_option = option
                     break
             body_text = str(data.get("body_text") or data.get("content") or "Escolha uma opção:").strip()
@@ -245,11 +247,13 @@ async def execute_node_chain_until_reply(
             logger.info("[CHOICE LIST GENERATED] node_id=%s options_count=%s payload_json=%s", cursor, len(choice_options), _safe_payload_json({"body_text": body_text, "sections": sections, "options": choice_options}))
             if normalized_input and matched_option:
                 matched_handle = str(matched_option.get("handleId") or matched_option.get("id") or "")
-                logger.info("[CHOICE LIST RESPONSE] node_id=%s option_id=%s label=%s", cursor, matched_handle, matched_option.get("label"))
+                matched_title = str(matched_option.get("label") or "")
+                option_value = matched_handle
+                logger.info("[CHOICE LIST RESPONSE] node_id=%s selected_row_id=%s selected_title=%s", cursor, matched_handle, matched_title)
                 events.append({"type": "analytics", "event_type": "LIST_SELECTED", "node_id": str(cursor), "option_id": matched_handle})
                 next_choice_node = find_next(str(cursor), [matched_handle])
-                logger.info("[CHOICE OPTION RESOLVED] node_id=%s option_id=%s next_node_id=%s", cursor, matched_handle, next_choice_node)
-                logger.info("[CHOICE FLOW CONTINUE] node_id=%s next_node_id=%s", cursor, next_choice_node)
+                logger.info("[CHOICE OPTION RESOLVED] node_id=%s option_value=%s next_node=%s", cursor, option_value, next_choice_node)
+                logger.info("[CHOICE FLOW CONTINUE] node_id=%s source_handle=%s target_node=%s", cursor, matched_handle, next_choice_node)
                 cursor = next_choice_node
                 continue
             if body_text and sections:
