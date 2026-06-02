@@ -104,6 +104,33 @@ def _provider_conflict_log_row(provider: TenantWhatsAppProvider | None) -> dict 
     }
 
 
+def _provider_list_log_row(provider: TenantWhatsAppProvider) -> dict:
+    deleted_at = _provider_deleted_at(provider)
+    return {
+        "provider_id": str(provider.id),
+        "tenant_id": str(provider.tenant_id),
+        "provider_type": provider.provider_type,
+        "display_name": provider.display_name,
+        "is_active": provider.is_active,
+        "status": provider.status,
+        "phone_number_id": provider.phone_number_id,
+        "waba_id": provider.waba_id,
+        "business_id": provider.business_id,
+        "deleted_at": deleted_at.isoformat() if deleted_at else None,
+        "updated_at": provider.updated_at.isoformat() if provider.updated_at else None,
+    }
+
+
+def _provider_list_filter_state() -> dict:
+    deleted_at_column = getattr(TenantWhatsAppProvider, "deleted_at", None)
+    return {
+        "tenant_id": "exact",
+        "is_active": "not_applied",
+        "deleted_at": "IS NULL" if deleted_at_column is not None else "not_mapped",
+        "provider_type": "not_applied",
+    }
+
+
 def _apply_not_deleted_filter(query):
     deleted_at_column = getattr(TenantWhatsAppProvider, "deleted_at", None)
     if deleted_at_column is not None:
@@ -292,14 +319,43 @@ def _log_provider_save(*, provider: TenantWhatsAppProvider, action: str) -> None
 
 
 def list_providers(db: Session, tenant_id: UUID):
-    providers = (
-        db.execute(
-            select(TenantWhatsAppProvider).where(
-                TenantWhatsAppProvider.tenant_id == tenant_id
-            )
+    filter_state = _provider_list_filter_state()
+    logger.info(
+        "[WHATSAPP PROVIDERS LIST QUERY] tenant_id=%s filters=%s",
+        tenant_id,
+        filter_state,
+    )
+
+    base_query = select(TenantWhatsAppProvider).where(
+        TenantWhatsAppProvider.tenant_id == tenant_id
+    )
+    tenant_providers = db.execute(base_query).scalars().all()
+
+    list_query = _apply_not_deleted_filter(base_query).order_by(
+        TenantWhatsAppProvider.is_active.desc(),
+        TenantWhatsAppProvider.updated_at.desc(),
+        TenantWhatsAppProvider.created_at.desc(),
+    )
+    providers = db.execute(list_query).scalars().all()
+
+    listed_provider_ids = {str(provider.id) for provider in providers}
+    hidden_providers = [
+        provider
+        for provider in tenant_providers
+        if str(provider.id) not in listed_provider_ids
+    ]
+    for provider in hidden_providers:
+        logger.warning(
+            "[PROVIDER HIDDEN FROM LIST] tenant_id=%s filters=%s provider=%s",
+            tenant_id,
+            filter_state,
+            _provider_list_log_row(provider),
         )
-        .scalars()
-        .all()
+
+    logger.info(
+        "[WHATSAPP PROVIDERS LIST RESULT] count=%s provider_ids=%s",
+        len(providers),
+        [str(provider.id) for provider in providers],
     )
     logger.info(
         "[PROVIDER RESOLUTION] tenant_id=%s conversation_id=%s provider_count=%s active_count=%s providers=%s",
@@ -307,21 +363,7 @@ def list_providers(db: Session, tenant_id: UUID):
         "n/a",
         len(providers),
         sum(1 for provider in providers if provider.is_active),
-        [
-            {
-                "provider_id": str(provider.id),
-                "provider_name": provider.display_name,
-                "is_active": provider.is_active,
-                "status": provider.status,
-                "phone_number_id": provider.phone_number_id,
-                "waba_id": provider.waba_id,
-                "business_id": provider.business_id,
-                "updated_at": (
-                    provider.updated_at.isoformat() if provider.updated_at else None
-                ),
-            }
-            for provider in providers
-        ],
+        [_provider_list_log_row(provider) for provider in providers],
     )
     return providers
 

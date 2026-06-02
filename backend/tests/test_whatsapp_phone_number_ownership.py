@@ -15,6 +15,7 @@ from app.services.tenant_service import resolve_tenant_by_phone_number_id
 from app.services.whatsapp_provider_service import (
     DuplicatePhoneNumberProviderError,
     create_provider,
+    list_providers,
     update_provider,
 )
 
@@ -269,3 +270,31 @@ def test_tenant_resolution_prefers_provider_owner_over_legacy_tenant_phone():
     resolved = resolve_tenant_by_phone_number_id(db, "876969468828520")
 
     assert resolved.id == owner.id
+
+
+def test_provider_list_logs_query_result_and_returns_active_provider(caplog):
+    db = _FakeDB()
+    tenant = _tenant(db, name="Owner", slug="owner")
+    provider = create_provider(
+        db,
+        tenant.id,
+        _Payload(
+            provider_type="meta_cloud",
+            phone_number_id="876969468828520",
+            display_name="Meta Cloud",
+            is_active=True,
+            status="active",
+        ),
+    )
+
+    caplog.set_level(logging.INFO, logger="app.services.whatsapp_provider_service")
+    providers = list_providers(db, tenant.id)
+
+    assert [item.id for item in providers] == [provider.id]
+    assert providers[0].tenant_id == tenant.id
+    assert providers[0].is_active is True
+    assert "[WHATSAPP PROVIDERS LIST QUERY]" in caplog.text
+    assert "[WHATSAPP PROVIDERS LIST RESULT]" in caplog.text
+    assert f"provider_ids=['{provider.id}']" in caplog.text
+    assert "provider_type" in caplog.text
+    assert "deleted_at" in caplog.text
