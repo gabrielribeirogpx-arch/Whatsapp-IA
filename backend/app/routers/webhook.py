@@ -1,5 +1,6 @@
 from datetime import datetime
 import asyncio
+import os
 import logging
 from uuid import UUID
 import uuid
@@ -40,7 +41,11 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
-def _persist_interactive_reply_context(db: Session, session: FlowSession | None, incoming: dict) -> None:
+def _worker_id() -> str:
+    return str(os.getenv("WORKER_ID") or os.getenv("HOSTNAME") or os.getpid())
+
+
+def _persist_interactive_reply_context(db: Session, session: FlowSession | None, incoming: dict, *, correlation_id: str = "n/a") -> None:
     if not session:
         return
     interactive_type = str(incoming.get("interactive_type") or "").strip()
@@ -55,12 +60,19 @@ def _persist_interactive_reply_context(db: Session, session: FlowSession | None,
         "last_interactive_list_reply_title": selected_title,
         "selected_row_id": selected_row_id,
         "selected_title": selected_title,
+        "correlation_id": correlation_id,
+        "last_interactive_message_id": correlation_id,
     }
     db.add(session)
     logger.info(
-        "[CHOICE LIST RESPONSE] session_id=%s selected_row_id=%s selected_title=%s source=webhook",
+        "[CHOICE LIST RESPONSE] session_id=%s current_node_id=%s choice_node_id=%s selected_row_id=%s target_node_id=%s worker_id=%s correlation_id=%s source=webhook selected_title=%s",
         session.id,
+        getattr(session, "current_node_id", None),
+        (session.context or {}).get("choice_node_id") if isinstance(session.context, dict) else None,
         selected_row_id,
+        (session.context or {}).get("selected_choice_target_node_id") if isinstance(session.context, dict) else None,
+        _worker_id(),
+        correlation_id,
         selected_title,
     )
 
@@ -385,7 +397,7 @@ async def _process_meta_webhook(request: Request, db: Session) -> dict[str, str]
                 active_session
                 and (active_session.status or "").lower() not in FINAL_SESSION_STATUSES
             ):
-                _persist_interactive_reply_context(db, active_session, incoming)
+                _persist_interactive_reply_context(db, active_session, incoming, correlation_id=str(incoming.get("message_id") or incoming.get("correlation_id") or "n/a"))
                 emit_message_received_event(
                     db=db,
                     tenant_id=conversation.tenant_id,
