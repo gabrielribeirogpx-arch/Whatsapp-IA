@@ -432,10 +432,22 @@ def send_whatsapp_message(*, message_data: dict[str, Any]) -> None:
     flow_version_id = message_data.get("flow_version_id")
     session_id = message_data.get("session_id")
     node_id = message_data.get("node_id")
+    node_type = message_data.get("node_type")
     flow_session_id = message_data.get("session_id")
     conversation_id = str(message_data.get("conversation_id") or "") or None
     is_flow_message = bool(flow_id or flow_version_id or session_id or node_id or sequence_number_raw is not None)
     payload_provider_id = str(message_data.get("provider_id") or "unresolved")
+    message_type = "interactive" if isinstance(buttons, list) and buttons else "text"
+    logger.info(
+        "[SEND WORKER MESSAGE TYPE] flow_id=%s session_id=%s node_id=%s node_type=%s message_type=%s options_count=%s payload_json=%s",
+        flow_id,
+        session_id,
+        node_id,
+        node_type,
+        message_type,
+        len(buttons or []) if isinstance(buttons, list) else 0,
+        json.dumps(message_data, default=str, ensure_ascii=False, sort_keys=True),
+    )
 
     logger.info(
         "[WORKER ENTRY] job_id=%s message=%s flow_id=%s sequence_number=%s",
@@ -613,6 +625,7 @@ def send_whatsapp_message(*, message_data: dict[str, Any]) -> None:
             "flow_version_id": flow_version_id,
             "session_id": session_id,
             "node_id": node_id,
+            "node_type": node_type,
             "sequence_number": sequence_number,
         }
         if is_flow_message:
@@ -663,6 +676,16 @@ def send_whatsapp_message(*, message_data: dict[str, Any]) -> None:
         meta_response: dict[str, Any] | None = None
         try:
             if buttons:
+                logger.info(
+                    "[META INTERACTIVE PAYLOAD] flow_id=%s session_id=%s node_id=%s node_type=%s message_type=%s options_count=%s payload_json=%s",
+                    flow_id,
+                    session_id,
+                    node_id,
+                    node_type,
+                    "interactive",
+                    len(buttons or []) if isinstance(buttons, list) else 0,
+                    json.dumps({"body_text": text, "buttons": buttons, "interactive": {"type": "button"}}, default=str, ensure_ascii=False, sort_keys=True),
+                )
                 meta_response = send_buttons_message_via_meta(
                     to=phone,
                     body_text=text,
