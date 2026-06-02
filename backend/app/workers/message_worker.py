@@ -158,16 +158,36 @@ def process_incoming_message(payload: dict[str, Any]) -> None:
             message=text,
         )
         ensure_conversation_contact_link(conversation, contact)
-        ensure_whatsapp_lead_for_inbound(
-            db=db,
-            tenant_id=tenant.id,
-            phone=(contact.phone if contact else phone),
-            contact=contact,
-            conversation=conversation,
-            name=name,
-            message_text=text,
-            conversation_created=False,
-        )
+        lead_phone = contact.phone if contact else phone
+        contact_id = contact.id if contact else None
+        try:
+            ensure_whatsapp_lead_for_inbound(
+                db=db,
+                tenant_id=tenant.id,
+                phone=lead_phone,
+                contact=contact,
+                conversation=conversation,
+                name=name,
+                message_text=text,
+                conversation_created=False,
+            )
+        except Exception:
+            logger.warning(
+                "[FLOW CONTINUING AFTER LEAD RECOVERY] tenant_id=%s phone=%s reason=lead_creation_failed",
+                tenant.id,
+                lead_phone,
+                exc_info=True,
+            )
+            if db.in_transaction():
+                db.rollback()
+            conversation, _ = get_or_create_conversation(
+                db,
+                tenant_id=tenant.id,
+                phone=lead_phone,
+                contact_id=contact_id,
+                message=text,
+            )
+            ensure_conversation_contact_link(conversation, contact)
         logger.info(
             "event=incoming_worker_entities_ready correlation_id=%s tenant_id=%s contact_id=%s conversation_id=%s",
             correlation_id,

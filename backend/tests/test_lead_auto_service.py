@@ -3,6 +3,8 @@ from __future__ import annotations
 import os
 from types import SimpleNamespace
 
+from sqlalchemy.exc import IntegrityError
+
 os.environ.setdefault("DATABASE_URL", "sqlite+pysqlite:///:memory:")
 
 from app.models.lead import Lead
@@ -83,7 +85,7 @@ def test_ensure_whatsapp_lead_for_inbound_creates_linked_lead_and_audit(monkeypa
     assert db.audit_rows[0]["action"] == "LEAD_CREATED"
     assert db.audit_rows[0]["metadata"]["automatic"] is True
     output = capsys.readouterr().out
-    assert "[LEAD AUTO CREATED]" in output
+    assert "[LEAD CREATED]" in output
     assert "[PIPELINE INSERT]" in output
     assert "[AUDIT LEAD CREATED]" in output
 
@@ -114,6 +116,62 @@ def test_ensure_whatsapp_lead_for_inbound_updates_existing_without_audit(monkeyp
     assert existing.conversation_id == "conversation-1"
     assert existing.last_message == "Nova mensagem"
     assert db.audit_rows == []
+
+
+
+
+class _FakeDBWithDuplicate(_FakeDB):
+    def __init__(self, recovered_lead):
+        super().__init__(existing_lead=None)
+        self.recovered_lead = recovered_lead
+        self.lead_queries = 0
+        self.rolled_back = False
+
+    def execute(self, statement):
+        text = str(statement)
+        if "FROM leads" in text:
+            self.lead_queries += 1
+            if self.lead_queries >= 3:
+                return _FakeExecuteResult(self.recovered_lead)
+            return _FakeExecuteResult(None)
+        return super().execute(statement)
+
+    def flush(self):
+        self.flushed += 1
+        if self.flushed == 1:
+            raise IntegrityError("insert leads", {}, Exception("duplicate key value violates unique constraint"))
+
+
+def test_ensure_whatsapp_lead_for_inbound_recovers_duplicate_insert(monkeypatch, capsys):
+    recovered = Lead(tenant_id="tenant-1", phone="5511999990001", score=0)
+    db = _FakeDBWithDuplicate(recovered)
+    stage = SimpleNamespace(id="stage-novo", name="Novo")
+    contact = SimpleNamespace(id="contact-1", phone="5511999990001", name="Cliente")
+    conversation = SimpleNamespace(id="conversation-1")
+
+    monkeypatch.setattr(lead_auto_service, "get_first_pipeline_stage", lambda _db, _tenant_id: stage)
+    monkeypatch.setattr(lead_auto_service, "write_audit_log", lambda db, **kwargs: db.audit_rows.append(kwargs))
+
+    result = lead_auto_service.ensure_whatsapp_lead_for_inbound(
+        db,
+        tenant_id="tenant-1",
+        phone="5511999990001",
+        contact=contact,
+        conversation=conversation,
+        name="Cliente",
+        message_text="Oi de novo",
+    )
+
+    assert result is not None
+    assert result.created is False
+    assert result.lead is recovered
+    assert recovered.contact_id == "contact-1"
+    assert recovered.conversation_id == "conversation-1"
+    assert recovered.last_message == "Oi de novo"
+    assert db.audit_rows == []
+    output = capsys.readouterr().out
+    assert "[LEAD DUPLICATE RECOVERED]" in output
+    assert "[FLOW CONTINUING AFTER LEAD RECOVERY]" in output
 
 
 def test_ensure_whatsapp_lead_for_inbound_logs_new_conversation_activity(monkeypatch):
