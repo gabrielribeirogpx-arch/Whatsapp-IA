@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import uuid
 from datetime import datetime
 from typing import Any
@@ -23,7 +24,11 @@ from app.services.tenant_service import resolve_tenant_by_phone_number_id
 logger = logging.getLogger(__name__)
 
 
-def _persist_interactive_reply_context(db, session: FlowSession | None, parsed: dict[str, Any]) -> None:
+def _worker_id() -> str:
+    return str(os.getenv("WORKER_ID") or os.getenv("HOSTNAME") or os.getpid())
+
+
+def _persist_interactive_reply_context(db, session: FlowSession | None, parsed: dict[str, Any], *, correlation_id: str = "n/a") -> None:
     if not session:
         return
     interactive_type = str(parsed.get("interactive_type") or "").strip()
@@ -38,12 +43,19 @@ def _persist_interactive_reply_context(db, session: FlowSession | None, parsed: 
         "last_interactive_list_reply_title": selected_title,
         "selected_row_id": selected_row_id,
         "selected_title": selected_title,
+        "correlation_id": correlation_id,
+        "last_interactive_message_id": correlation_id,
     }
     db.add(session)
     logger.info(
-        "[CHOICE LIST RESPONSE] session_id=%s selected_row_id=%s selected_title=%s source=message_worker",
+        "[CHOICE LIST RESPONSE] session_id=%s current_node_id=%s choice_node_id=%s selected_row_id=%s target_node_id=%s worker_id=%s correlation_id=%s source=message_worker selected_title=%s",
         session.id,
+        getattr(session, "current_node_id", None),
+        (session.context or {}).get("choice_node_id") if isinstance(session.context, dict) else None,
         selected_row_id,
+        (session.context or {}).get("selected_choice_target_node_id") if isinstance(session.context, dict) else None,
+        _worker_id(),
+        correlation_id,
         selected_title,
     )
 
@@ -256,17 +268,19 @@ def process_incoming_message(payload: dict[str, Any]) -> None:
         )
 
         if persisted_message and persisted_conversation:
-            active_session = (
-                db.query(FlowSession)
-                .filter(
-                    FlowSession.tenant_id == tenant.id,
-                    FlowSession.conversation_id == str(persisted_conversation.id),
+            active_session = None
+            if hasattr(db, "query"):
+                active_session = (
+                    db.query(FlowSession)
+                    .filter(
+                        FlowSession.tenant_id == tenant.id,
+                        FlowSession.conversation_id == str(persisted_conversation.id),
+                    )
+                    .order_by(FlowSession.updated_at.desc(), FlowSession.created_at.desc())
+                    .first()
                 )
-                .order_by(FlowSession.updated_at.desc(), FlowSession.created_at.desc())
-                .first()
-            )
             if active_session and (active_session.status or "").lower() not in FINAL_SESSION_STATUSES:
-                _persist_interactive_reply_context(db, active_session, parsed)
+                _persist_interactive_reply_context(db, active_session, parsed, correlation_id=correlation_id)
             try:
                 handle_incoming_message(db=db, message=persisted_message, conversation=persisted_conversation)
             except Exception:

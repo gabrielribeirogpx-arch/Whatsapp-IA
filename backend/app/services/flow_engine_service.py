@@ -3,6 +3,7 @@ from __future__ import annotations
 import unicodedata
 import uuid
 import logging
+import os
 import time
 import hashlib
 import json
@@ -31,6 +32,45 @@ DEFAULT_FLOW_NAME = "default_visual"
 MAX_AUTO_STEPS = 10
 MAX_RETRIES = 3
 logger = logging.getLogger(__name__)
+
+
+def _runtime_worker_id() -> str:
+    return str(os.getenv("WORKER_ID") or os.getenv("HOSTNAME") or os.getpid())
+
+
+def _runtime_correlation_id(context: dict[str, Any] | None = None, fallback: str | None = None) -> str:
+    if isinstance(context, dict):
+        for key in ("correlation_id", "message_id", "last_interactive_message_id"):
+            value = str(context.get(key) or "").strip()
+            if value:
+                return value
+    return str(fallback or "n/a")
+
+
+def _log_choice_runtime_marker(
+    marker: str,
+    *,
+    session_id: Any = None,
+    current_node_id: Any = None,
+    choice_node_id: Any = None,
+    selected_row_id: Any = None,
+    target_node_id: Any = None,
+    worker_id: str | None = None,
+    correlation_id: str | None = None,
+) -> None:
+    logger.info(
+        "%s session_id=%s current_node_id=%s choice_node_id=%s selected_row_id=%s target_node_id=%s worker_id=%s correlation_id=%s",
+        marker,
+        session_id,
+        current_node_id,
+        choice_node_id,
+        selected_row_id,
+        target_node_id,
+        worker_id or _runtime_worker_id(),
+        correlation_id or "n/a",
+    )
+
+
 _FLOW_RUNTIME_CACHE: dict[str, dict[str, Any]] = {}
 _FLOW_RUNTIME_EVENT_GUARD: set[str] = set()
 STRONG_YES_MATCHES = {"sim", "s", "claro", "quero", "com certeza", "yes"}
@@ -2195,15 +2235,31 @@ def run_until_wait_node(
                 selected_handle = str(selected_option.get("handleId") or selected_option.get("id") or "")
                 selected_title = str(selected_option.get("label") or "")
                 option_value = selected_handle
-                logger.info(
-                    "[CHOICE LIST RESPONSE] flow_id=%s session_id=%s node_id=%s selected_row_id=%s selected_title=%s incoming_text=%s",
-                    flow.id, getattr(flow_session, "id", None), _node_get(node, "id"), selected_handle, selected_title, incoming_text,
-                )
                 selected_edge = _find_edge_for_handle(edges, selected_handle)
                 next_node_id = _edge_target(selected_edge) if selected_edge else None
+                flow_context = flow_session.context if flow_session and isinstance(flow_session.context, dict) else {}
+                correlation_id = _runtime_correlation_id(flow_context)
+                _log_choice_runtime_marker(
+                    "[CHOICE LIST RESPONSE]",
+                    session_id=getattr(flow_session, "id", None),
+                    current_node_id=_node_get(node, "id"),
+                    choice_node_id=_node_get(node, "id"),
+                    selected_row_id=selected_handle,
+                    target_node_id=next_node_id,
+                    correlation_id=correlation_id,
+                )
+                _log_choice_runtime_marker(
+                    "[CHOICE OPTION RESOLVED]",
+                    session_id=getattr(flow_session, "id", None),
+                    current_node_id=_node_get(node, "id"),
+                    choice_node_id=_node_get(node, "id"),
+                    selected_row_id=selected_handle,
+                    target_node_id=next_node_id,
+                    correlation_id=correlation_id,
+                )
                 logger.info(
-                    "[CHOICE OPTION RESOLVED] flow_id=%s session_id=%s node_id=%s option_value=%s next_node=%s",
-                    flow.id, getattr(flow_session, "id", None), _node_get(node, "id"), option_value, next_node_id,
+                    "[CHOICE LIST RESPONSE DETAIL] flow_id=%s session_id=%s node_id=%s selected_row_id=%s selected_title=%s incoming_text=%s",
+                    flow.id, getattr(flow_session, "id", None), _node_get(node, "id"), selected_handle, selected_title, incoming_text,
                 )
                 if flow_session:
                     flow_session.context = {
@@ -2224,8 +2280,17 @@ def run_until_wait_node(
                     event_type="LIST_SELECTED", metadata={"option_id": selected_handle, "label": selected_title, "source": "choice"}, dedupe_bucket_seconds=1,
                 )
                 node = _get_node(db=db, node_id=next_node_id, tenant_id=session.tenant_id, runtime_graph=runtime_graph) if selected_edge else None
+                _log_choice_runtime_marker(
+                    "[CHOICE FLOW CONTINUE]",
+                    session_id=getattr(flow_session, "id", None),
+                    current_node_id=current_node_uuid,
+                    choice_node_id=current_node_uuid,
+                    selected_row_id=selected_handle,
+                    target_node_id=next_node_id,
+                    correlation_id=correlation_id,
+                )
                 logger.info(
-                    "[CHOICE FLOW CONTINUE] flow_id=%s session_id=%s source_handle=%s target_node=%s next_node_type=%s",
+                    "[CHOICE FLOW CONTINUE DETAIL] flow_id=%s session_id=%s source_handle=%s target_node=%s next_node_type=%s",
                     flow.id, getattr(flow_session, "id", None), selected_handle, next_node_id, _node_type_slug(node) if node else None,
                 )
                 normalized_input = ""
@@ -3093,6 +3158,32 @@ def process_flow_engine(
                 )
                 if selected_option:
                     saved_current_node_id = choice_node_id
+                    selected_edge = _find_edge_for_handle(choice_edges, str(selected_option.get("handleId") or selected_option.get("id") or selected_row_id))
+                    selected_target_node_id = _edge_target(selected_edge) if selected_edge else None
+                    if isinstance(runtime_session.context, dict):
+                        runtime_session.context = {
+                            **runtime_session.context,
+                            "selected_choice_target_node_id": str(selected_target_node_id) if selected_target_node_id else None,
+                        }
+                        db.add(runtime_session)
+                    _log_choice_runtime_marker(
+                        "[CHOICE LIST RESPONSE]",
+                        session_id=getattr(runtime_session, "id", None),
+                        current_node_id=getattr(runtime_session, "current_node_id", None),
+                        choice_node_id=choice_node_id,
+                        selected_row_id=selected_row_id,
+                        target_node_id=selected_target_node_id,
+                        correlation_id=_runtime_correlation_id(session_context),
+                    )
+                    _log_choice_runtime_marker(
+                        "[CHOICE OPTION RESOLVED]",
+                        session_id=getattr(runtime_session, "id", None),
+                        current_node_id=choice_node_id,
+                        choice_node_id=choice_node_id,
+                        selected_row_id=selected_row_id,
+                        target_node_id=selected_target_node_id,
+                        correlation_id=_runtime_correlation_id(session_context),
+                    )
                     logger.info(
                         "[FLOW CONTINUE USING_CHOICE_REPLY] session_id=%s choice_node_id=%s selected_row_id=%s selected_title=%s",
                         getattr(runtime_session, "id", None),
@@ -3120,7 +3211,29 @@ def process_flow_engine(
         current_node_type = _node_type_slug(current_graph_node)
         logger.info("[FLOW SESSION NODE FOUND] node_type=%s raw_node_type=%s", current_node_type, current_node_raw_type)
 
+    session_context_for_routing = runtime_session.context if runtime_session and isinstance(getattr(runtime_session, "context", None), dict) else {}
+    is_pending_choice_reply = bool(
+        session_context_for_routing.get("waiting_choice") is True
+        and (session_context_for_routing.get("selected_row_id") or session_context_for_routing.get("last_interactive_list_reply_id"))
+    )
     start_trigger_match = bool(start_trigger)
+    if is_pending_choice_reply and start_trigger_match:
+        _log_choice_runtime_marker(
+            "[FLOW RESTART DETECTED]",
+            session_id=getattr(runtime_session, "id", None),
+            current_node_id=saved_current_node_id,
+            choice_node_id=session_context_for_routing.get("choice_node_id") or saved_current_node_id,
+            selected_row_id=session_context_for_routing.get("selected_row_id") or session_context_for_routing.get("last_interactive_list_reply_id"),
+            target_node_id=session_context_for_routing.get("selected_choice_target_node_id"),
+            correlation_id=_runtime_correlation_id(session_context_for_routing),
+        )
+        logger.warning(
+            "[FLOW RESTART DETECTED DETAIL] reason=choice_reply_matched_start_trigger trigger=%s session_id=%s current_node_id=%s",
+            normalized_text,
+            getattr(runtime_session, "id", None),
+            saved_current_node_id,
+        )
+        start_trigger_match = False
     saved_current_node_present = saved_current_node_id is not None
     session_running_with_current_node = bool(
         runtime_session
@@ -3200,6 +3313,15 @@ def process_flow_engine(
 
     logger.info("[FLOW START PATH]")
     if runtime_session is not None:
+        _log_choice_runtime_marker(
+            "[FLOW RESTART DETECTED]",
+            session_id=getattr(runtime_session, "id", None),
+            current_node_id=saved_current_node_id,
+            choice_node_id=session_context_for_routing.get("choice_node_id") or saved_current_node_id,
+            selected_row_id=session_context_for_routing.get("selected_row_id") or session_context_for_routing.get("last_interactive_list_reply_id"),
+            target_node_id=session_context_for_routing.get("selected_choice_target_node_id"),
+            correlation_id=_runtime_correlation_id(session_context_for_routing),
+        )
         abandon_reason = "start_path_existing_runtime_session"
         runtime_current_node_id = getattr(runtime_session, "current_node_id", None)
         runtime_variables = getattr(runtime_session, "variables", None)
