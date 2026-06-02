@@ -2841,6 +2841,7 @@ def process_flow_engine(
 
     current_graph_node = None
     current_node_type = ""
+    current_node_raw_type = None
     if saved_current_node_id is not None:
         current_graph_node = _get_node(db=db, node_id=saved_current_node_id, tenant_id=conversation.tenant_id, runtime_graph=runtime_graph)
         if not current_graph_node:
@@ -2853,18 +2854,22 @@ def process_flow_engine(
                 runtime_graph.get("flow_version_id"),
             )
             return None
+        current_node_raw_type = _node_get(current_graph_node, "type")
         current_node_type = _node_type_slug(current_graph_node)
-        logger.info("[FLOW SESSION NODE FOUND] node_type=%s", current_node_type)
+        logger.info("[FLOW SESSION NODE FOUND] node_type=%s raw_node_type=%s", current_node_type, current_node_raw_type)
 
+    start_trigger_match = bool(start_trigger)
+    saved_current_node_present = saved_current_node_id is not None
     session_running_with_current_node = bool(
         runtime_session
         and session_status in {"running", "active"}
-        and saved_current_node_id is not None
+        and saved_current_node_present
     )
-    condition_wait_state = session_running_with_current_node and current_node_type == "condition"
+    current_node_is_condition = current_node_type == "condition"
+    condition_wait_state = session_running_with_current_node and current_node_is_condition
     effective_session_finalized = session_finalized and not session_running_with_current_node
 
-    explicit_start_trigger = start_trigger
+    explicit_start_trigger = start_trigger_match
     if effective_session_finalized and not explicit_start_trigger:
         logger.info(
             "[ENGINE FINALIZED HARD BLOCK] session_id=%s status=%s incoming_text=%s",
@@ -2880,16 +2885,18 @@ def process_flow_engine(
             getattr(runtime_session, "id", None),
         )
 
-    should_continue = (session_active and saved_current_node_id is not None and not start_trigger) or condition_wait_state
-    should_restart = effective_session_finalized and start_trigger
+    active_continue_term = session_active and saved_current_node_present and not start_trigger_match
+    should_continue = active_continue_term or condition_wait_state
+    should_restart = effective_session_finalized and start_trigger_match
+    start_path_selected = not should_continue
 
-    if condition_wait_state and (not session_active or start_trigger):
+    if condition_wait_state and (not session_active or start_trigger_match):
         logger.info(
             "[FLOW CONDITION CONTINUE PRESERVED] session_id=%s current_node_id=%s session_active=%s start_trigger=%s",
             getattr(runtime_session, "id", None),
             saved_current_node_id,
             session_active,
-            start_trigger,
+            start_trigger_match,
         )
     if should_continue:
         logger.info(
@@ -2900,7 +2907,7 @@ def process_flow_engine(
     elif should_restart:
         logger.info("[FLOW RESTART PATH] trigger=%s", normalized_text)
 
-    path = "CONTINUE" if should_continue else "START"
+    path = "START" if start_path_selected else "CONTINUE"
 
     published_version_id = _parse_uuid(getattr(flow, "published_version_id", None))
     if path == "CONTINUE":
@@ -2932,14 +2939,37 @@ def process_flow_engine(
     logger.info("[FLOW START PATH]")
     if runtime_session is not None:
         abandon_reason = "start_path_existing_runtime_session"
+        runtime_current_node_id = getattr(runtime_session, "current_node_id", None)
+        runtime_variables = getattr(runtime_session, "variables", None)
+        runtime_variable_current_node_id = (
+            runtime_variables.get("current_node_id")
+            if isinstance(runtime_variables, dict)
+            else None
+        )
+        runtime_status = ((getattr(runtime_session, "status", "") or "").strip().lower())
         abandon_condition = (
+            f"start_path_selected={start_path_selected} "
+            f"start_path_expression=not_should_continue "
             f"should_continue={should_continue} "
+            f"should_continue_expression=(active_continue_term or condition_wait_state) "
+            f"active_continue_term={active_continue_term} "
+            f"active_continue_expression=(session_active and saved_current_node_present and not_start_trigger_match) "
+            f"condition_wait_state={condition_wait_state} "
+            f"condition_wait_expression=(session_running_with_current_node and current_node_is_condition) "
             f"session_active={session_active} "
+            f"saved_current_node_present={saved_current_node_present} "
+            f"start_trigger_match={start_trigger_match} "
+            f"not_start_trigger_match={not start_trigger_match} "
+            f"session_running_with_current_node={session_running_with_current_node} "
+            f"current_node_is_condition={current_node_is_condition} "
             f"session_finalized={session_finalized} "
             f"effective_session_finalized={effective_session_finalized} "
-            f"start_trigger={start_trigger} "
+            f"runtime_session_status={runtime_status or None} "
+            f"runtime_session_current_node_id={runtime_current_node_id} "
+            f"runtime_variable_current_node_id={runtime_variable_current_node_id} "
             f"saved_current_node_id={saved_current_node_id} "
-            f"current_node_type={current_node_type or None}"
+            f"current_node_type={current_node_type or None} "
+            f"current_node_raw_type={current_node_raw_type}"
         )
         logger.warning(
             "[ABANDON DECISION] session_id=%s current_node_id=%s flow_id=%s message_text=%s reason=%s condition=%s code_path=%s",
@@ -2949,6 +2979,41 @@ def process_flow_engine(
             user_message_text,
             abandon_reason,
             abandon_condition,
+            "process_flow_engine:START:end_existing_runtime_session",
+        )
+        logger.warning(
+            "[ABANDON GUARD TRACE] session_id=%s flow_id=%s requested_status=%s "
+            "start_path_selected=%s start_path_expression=%s should_continue=%s should_continue_expression=%s "
+            "active_continue_term=%s active_continue_expression=%s condition_wait_state=%s condition_wait_expression=%s "
+            "session_active=%s saved_current_node_present=%s start_trigger_match=%s not_start_trigger_match=%s "
+            "session_running_with_current_node=%s current_node_is_condition=%s session_finalized=%s effective_session_finalized=%s "
+            "runtime_session.status=%s runtime_session.current_node_id=%s runtime_session.variables.current_node_id=%s "
+            "saved_current_node_id=%s current_node.type=%s current_node.raw_type=%s code_path=%s",
+            getattr(runtime_session, "id", None),
+            getattr(flow, "id", None),
+            "abandoned",
+            start_path_selected,
+            "not should_continue",
+            should_continue,
+            "(session_active and saved_current_node_present and not start_trigger_match) or condition_wait_state",
+            active_continue_term,
+            "session_active and saved_current_node_present and not start_trigger_match",
+            condition_wait_state,
+            "session_running_with_current_node and current_node_is_condition",
+            session_active,
+            saved_current_node_present,
+            start_trigger_match,
+            not start_trigger_match,
+            session_running_with_current_node,
+            current_node_is_condition,
+            session_finalized,
+            effective_session_finalized,
+            runtime_status or None,
+            runtime_current_node_id,
+            runtime_variable_current_node_id,
+            saved_current_node_id,
+            current_node_type or None,
+            current_node_raw_type,
             "process_flow_engine:START:end_existing_runtime_session",
         )
         session_service.end_session(runtime_session, status="abandoned")
