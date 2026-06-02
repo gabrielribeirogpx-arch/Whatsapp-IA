@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import re
 from datetime import datetime
@@ -195,6 +196,16 @@ def send_buttons_message_via_meta(*, token: str, phone_number_id: str, to: str, 
             "action": {"buttons": safe_buttons},
         },
     }
+    logger.info(
+        "[META INTERACTIVE PAYLOAD] flow_id=%s session_id=%s node_id=%s node_type=%s message_type=%s options_count=%s payload_json=%s",
+        context.get("flow_id"),
+        context.get("session_id"),
+        context.get("node_id"),
+        context.get("node_type"),
+        payload.get("type"),
+        len(safe_buttons),
+        json.dumps(payload, default=str, ensure_ascii=False, sort_keys=True),
+    )
     return asyncio.run(MetaCloudClient(token).post(f"/{phone_number_id}/messages", payload=payload, context=context))
 
 

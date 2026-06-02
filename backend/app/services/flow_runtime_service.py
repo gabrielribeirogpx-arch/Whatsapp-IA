@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import re
 import unicodedata
@@ -64,6 +65,24 @@ def _list_sections(data: dict[str, Any]) -> list[dict[str, Any]]:
         return [{"title": "Opções", "rows": rows}]
     return []
 
+
+
+def _safe_payload_json(payload: Any) -> str:
+    return json.dumps(payload, default=str, ensure_ascii=False, sort_keys=True)
+
+
+def _choice_options(data: dict[str, Any]) -> list[dict[str, Any]]:
+    raw_buttons = data.get("buttons") if isinstance(data.get("buttons"), list) else []
+    options = []
+    for index, button in enumerate(raw_buttons):
+        if not isinstance(button, dict):
+            continue
+        label = str(button.get("label") or button.get("title") or "").strip()
+        if not label:
+            continue
+        handle = str(button.get("handleId") or button.get("id") or _option_handle(label, f"choice_{index + 1}"))
+        options.append({"id": handle, "label": label, "handleId": handle})
+    return options
 
 def _extract_delay_seconds(node: dict[str, Any] | None) -> int:
     data = node.get("data") if isinstance(node, dict) and isinstance(node.get("data"), dict) else {}
@@ -476,6 +495,48 @@ class FlowRuntimeService:
                 status = "waiting_input"
                 next_id = node_id
             elif node_type == "choice":
+                options = _choice_options(data)
+                payload = {"text": data.get("text") or data.get("message") or data.get("content") or "", "options": options}
+                logger.info(
+                    "[CHOICE NODE EXECUTE] flow_id=%s session_id=%s node_id=%s node_type=%s message_type=%s options_count=%s payload_json=%s",
+                    flow_id,
+                    getattr(session, "id", None),
+                    node_id,
+                    node_type,
+                    "none",
+                    len(options),
+                    _safe_payload_json({"node_data": data}),
+                )
+                logger.info(
+                    "[CHOICE OPTIONS] flow_id=%s session_id=%s node_id=%s node_type=%s message_type=%s options_count=%s payload_json=%s",
+                    flow_id,
+                    getattr(session, "id", None),
+                    node_id,
+                    node_type,
+                    "none",
+                    len(options),
+                    _safe_payload_json(options),
+                )
+                logger.info(
+                    "[CHOICE PAYLOAD GENERATED] flow_id=%s session_id=%s node_id=%s node_type=%s message_type=%s options_count=%s payload_json=%s",
+                    flow_id,
+                    getattr(session, "id", None),
+                    node_id,
+                    node_type,
+                    "none",
+                    len(options),
+                    _safe_payload_json(payload),
+                )
+                logger.info(
+                    "[CHOICE INTERACTIVE LIST] flow_id=%s session_id=%s node_id=%s node_type=%s message_type=%s options_count=%s payload_json=%s",
+                    flow_id,
+                    getattr(session, "id", None),
+                    node_id,
+                    node_type,
+                    "none",
+                    len(options),
+                    _safe_payload_json({"supported_by_execute_with_session": False}),
+                )
                 status = "waiting_choice"
                 next_id = node_id
             else:

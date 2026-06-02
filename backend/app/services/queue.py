@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 import os
 import subprocess
@@ -167,6 +168,7 @@ def enqueue_send_message(message_data: dict[str, Any]) -> str | None:
         "node_id",
         "sequence_number",
         "message_id",
+        "node_type",
     )
     payload = {
         "tenant_id": str(tenant_id),
@@ -180,6 +182,18 @@ def enqueue_send_message(message_data: dict[str, Any]) -> str | None:
         value = message_data.get(key)
         if value is not None:
             payload[key] = str(value)
+
+    message_type = "interactive" if isinstance(payload.get("buttons"), list) and payload.get("buttons") else "text"
+    logger.info(
+        "[SEND WORKER MESSAGE TYPE] flow_id=%s session_id=%s node_id=%s node_type=%s message_type=%s options_count=%s payload_json=%s",
+        payload.get("flow_id"),
+        payload.get("session_id"),
+        payload.get("node_id"),
+        payload.get("node_type"),
+        message_type,
+        len(payload.get("buttons") or []) if isinstance(payload.get("buttons"), list) else 0,
+        json.dumps(payload, default=str, ensure_ascii=False, sort_keys=True),
+    )
 
     logger.info(
         "[FLOW QUEUE ENQUEUE] job_id=%s flow_id=%s session_id=%s node_id=%s sequence_number=%s message_text=%s api_commit=%s",

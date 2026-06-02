@@ -1675,17 +1675,55 @@ def _advance_to_edge_target(
     return next_node
 
 
+def _safe_payload_json(payload: Any) -> str:
+    return json.dumps(payload, default=str, ensure_ascii=False, sort_keys=True)
+
+
+def _choice_options_from_node(node_data: dict[str, Any], edges: list[FlowEdge | VersionedFlowEdge]) -> list[dict[str, Any]]:
+    raw_buttons = node_data.get("buttons") if isinstance(node_data.get("buttons"), list) else []
+    options: list[dict[str, Any]] = []
+    for index, button in enumerate(raw_buttons):
+        if not isinstance(button, dict):
+            continue
+        label = str(button.get("label") or button.get("title") or "").strip()
+        if not label:
+            continue
+        handle = str(button.get("handleId") or button.get("id") or _normalize_text(label).replace(" ", "_") or f"choice_{index + 1}")
+        options.append({"id": handle, "label": label, "handleId": handle})
+    if options:
+        return options
+    for index, edge in enumerate(edges):
+        label = str(getattr(edge, "condition", None) or _node_get(edge, "condition") or "").strip()
+        if not label:
+            continue
+        handle = _edge_source_handle(edge) or _normalize_text(label).replace(" ", "_") or f"choice_{index + 1}"
+        options.append({"id": handle, "label": label, "handleId": handle})
+    return options
+
+
+def _choice_interactive_list_payload(body_text: str, options: list[dict[str, Any]]) -> dict[str, Any]:
+    rows = [
+        {"id": str(option.get("id") or option.get("handleId") or f"choice_{index + 1}"), "title": str(option.get("label") or "")[:24]}
+        for index, option in enumerate(options)
+        if str(option.get("label") or "").strip()
+    ]
+    return {
+        "type": "interactive",
+        "interactive": {
+            "type": "list",
+            "body": {"text": body_text},
+            "action": {"button": "Ver opções", "sections": [{"title": "Opções", "rows": rows}]},
+        },
+    }
+
+
 def _render_choice_prompt(node_data: dict[str, Any], edges: list[FlowEdge | VersionedFlowEdge]) -> str:
     base = (node_data.get("content") or "Escolha uma opcao:").strip()
-    raw_buttons = node_data.get("buttons") if isinstance(node_data.get("buttons"), list) else []
-    button_labels = [str(button.get("label")).strip() for button in raw_buttons if isinstance(button, dict) and button.get("label")]
+    options = _choice_options_from_node(node_data, edges)
+    button_labels = [str(option.get("label") or "").strip() for option in options if str(option.get("label") or "").strip()]
 
     if button_labels:
         return f"{base}\n\n" + "\n".join(f"- {label}" for label in button_labels)
-
-    conditions = [edge.condition.strip() for edge in edges if edge.condition and edge.condition.strip()]
-    if conditions:
-        return f"{base}\n\n" + "\n".join(f"- {label}" for label in conditions)
 
     return base
 
@@ -1722,6 +1760,7 @@ def _send_flow_whatsapp_message(tenant: Tenant, phone: str, text: str, **flow_co
             "flow_version_id": str(flow_context.get("flow_version_id")) if flow_context.get("flow_version_id") else None,
             "session_id": str(flow_context.get("session_id")) if flow_context.get("session_id") else None,
             "node_id": str(flow_context.get("node_id")) if flow_context.get("node_id") else None,
+            "node_type": str(flow_context.get("node_type")) if flow_context.get("node_type") else None,
             "sequence_number": flow_context.get("sequence_number") or _next_flow_sequence(tenant.id, phone),
         })
         job_id = enqueue_send_message(payload)
@@ -1786,7 +1825,18 @@ def _send_flow_interactive_buttons(tenant: Tenant, phone: str, text: str, button
     """Enfileira envio de botoes; worker aplica fallback para texto simples se falhar."""
     print(f"[FLOW BUTTON SEND] Tentando enviar botoes: {[b.get('label') for b in buttons]}")
     try:
-        job_id = enqueue_send_message({"tenant_id": tenant.id, "phone": phone, "text": text, "buttons": buttons, "flow_id": str(flow_context.get("flow_id")) if flow_context.get("flow_id") else None, "flow_version_id": str(flow_context.get("flow_version_id")) if flow_context.get("flow_version_id") else None, "session_id": str(flow_context.get("session_id")) if flow_context.get("session_id") else None, "node_id": str(flow_context.get("node_id")) if flow_context.get("node_id") else None, "sequence_number": flow_context.get("sequence_number") or _next_flow_sequence(tenant.id, phone)})
+        payload = {"tenant_id": tenant.id, "phone": phone, "text": text, "buttons": buttons, "flow_id": str(flow_context.get("flow_id")) if flow_context.get("flow_id") else None, "flow_version_id": str(flow_context.get("flow_version_id")) if flow_context.get("flow_version_id") else None, "session_id": str(flow_context.get("session_id")) if flow_context.get("session_id") else None, "node_id": str(flow_context.get("node_id")) if flow_context.get("node_id") else None, "node_type": str(flow_context.get("node_type") or "buttons"), "sequence_number": flow_context.get("sequence_number") or _next_flow_sequence(tenant.id, phone)}
+        logger.info(
+            "[CHOICE PAYLOAD GENERATED] flow_id=%s session_id=%s node_id=%s node_type=%s message_type=%s options_count=%s payload_json=%s",
+            payload.get("flow_id"),
+            payload.get("session_id"),
+            payload.get("node_id"),
+            payload.get("node_type"),
+            "interactive",
+            len(buttons or []),
+            _safe_payload_json(payload),
+        )
+        job_id = enqueue_send_message(payload)
         print(f"[FLOW BUTTON SEND RESULT] job_id={job_id}")
     except Exception as error:
         print(f"[FLOW BUTTON ERROR] {error} — usando fallback texto em fila")
@@ -2049,6 +2099,51 @@ def run_until_wait_node(
             node_type,
         )
 
+        if node_type == "choice":
+            choice_options = _choice_options_from_node(node_data, edges)
+            choice_text = _render_choice_prompt(node_data, edges)
+            choice_list_payload = _choice_interactive_list_payload(choice_text, choice_options)
+            logger.info(
+                "[CHOICE NODE EXECUTE] flow_id=%s session_id=%s node_id=%s node_type=%s message_type=%s options_count=%s payload_json=%s",
+                flow.id,
+                getattr(flow_session, "id", None),
+                _node_get(node, "id"),
+                node_type,
+                "none",
+                len(choice_options),
+                _safe_payload_json({"node_data": node_data}),
+            )
+            logger.info(
+                "[CHOICE OPTIONS] flow_id=%s session_id=%s node_id=%s node_type=%s message_type=%s options_count=%s payload_json=%s",
+                flow.id,
+                getattr(flow_session, "id", None),
+                _node_get(node, "id"),
+                node_type,
+                "none",
+                len(choice_options),
+                _safe_payload_json(choice_options),
+            )
+            logger.info(
+                "[CHOICE PAYLOAD GENERATED] flow_id=%s session_id=%s node_id=%s node_type=%s message_type=%s options_count=%s payload_json=%s",
+                flow.id,
+                getattr(flow_session, "id", None),
+                _node_get(node, "id"),
+                node_type,
+                "text_prompt_only",
+                len(choice_options),
+                _safe_payload_json({"text": choice_text}),
+            )
+            logger.info(
+                "[CHOICE INTERACTIVE LIST] flow_id=%s session_id=%s node_id=%s node_type=%s message_type=%s options_count=%s payload_json=%s",
+                flow.id,
+                getattr(flow_session, "id", None),
+                _node_get(node, "id"),
+                node_type,
+                "interactive",
+                len(choice_options),
+                _safe_payload_json(choice_list_payload),
+            )
+
         if node_type in {"buttons", "buttons_node"}:
             raw_buttons = node_data.get("buttons") if isinstance(node_data.get("buttons"), list) else []
             buttons = [button for button in raw_buttons[:3] if isinstance(button, dict) and str(button.get("label") or button.get("title") or "").strip()]
@@ -2085,7 +2180,7 @@ def run_until_wait_node(
             phone = getattr(session, "phone_number", None) or getattr(session, "user_identifier", None)
             body_text = str(node_data.get("body_text") or node_data.get("content") or "").strip()
             if tenant and phone and body_text and buttons:
-                _send_flow_interactive_buttons(tenant=tenant, phone=phone, text=body_text, buttons=buttons, flow_id=flow.id, flow_version_id=getattr(flow_session, "flow_version_id", None), session_id=session.id, node_id=current_node_uuid)
+                _send_flow_interactive_buttons(tenant=tenant, phone=phone, text=body_text, buttons=buttons, flow_id=flow.id, flow_version_id=getattr(flow_session, "flow_version_id", None), session_id=session.id, node_id=current_node_uuid, node_type=node_type)
             _log_session_node_transition(
                 "BEFORE",
                 flow_session=flow_session,
@@ -2340,6 +2435,7 @@ def run_until_wait_node(
                             flow_version_id=getattr(flow_session, "flow_version_id", None),
                             session_id=getattr(flow_session, "id", None),
                             node_id=current_node_uuid,
+                            node_type=node_type,
                         )
                         logger.info("[MANYCHAT MESSAGE SENT] node_id=%s", _node_get(node, "id"))
             next_edge = _pick_default_edge(edges)
