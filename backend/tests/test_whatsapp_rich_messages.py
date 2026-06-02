@@ -97,3 +97,99 @@ def test_whatsapp_cloud_payloads_for_image_document_buttons_and_list(monkeypatch
     assert sent[1]["json"]["document"]["filename"] == "file.pdf"
     assert sent[2]["json"]["interactive"]["type"] == "button"
     assert sent[3]["json"]["interactive"]["type"] == "list"
+
+
+def test_choice_node_generates_interactive_list_and_follows_selected_edge():
+    graph = {
+        "nodes": [
+            {"id": "start", "type": "message", "data": {"content": "Olá"}},
+            {"id": "choice", "type": "choice", "data": {"content": "Escolha uma área", "buttons": [{"label": "Vendas", "handleId": "vendas"}, {"label": "Suporte", "handleId": "suporte"}]}},
+            {"id": "sales", "type": "message", "data": {"content": "Time comercial"}},
+            {"id": "support", "type": "message", "data": {"content": "Time de suporte"}},
+        ],
+        "edges": [
+            {"source": "start", "target": "choice", "sourceHandle": "default"},
+            {"source": "choice", "target": "sales", "sourceHandle": "vendas"},
+            {"source": "choice", "target": "support", "sourceHandle": "suporte"},
+        ],
+    }
+
+    first = asyncio.run(execute_node_chain_until_reply(graph, "start", "", context={"channel": "simulator"}))
+
+    assert first["events"][0] == {"type": "send_message", "text": "Olá"}
+    assert first["events"][1]["type"] == "send_list"
+    assert first["events"][1]["interactive_type"] == "list"
+    assert first["events"][1]["options"] == [
+        {"id": "vendas", "label": "Vendas", "handleId": "vendas"},
+        {"id": "suporte", "label": "Suporte", "handleId": "suporte"},
+    ]
+    assert first["events"][1]["sections"] == [{"title": "Opções", "rows": [{"id": "vendas", "title": "Vendas"}, {"id": "suporte", "title": "Suporte"}]}]
+    assert first["next_node_id"] == "choice"
+
+    selected = asyncio.run(execute_node_chain_until_reply(graph, "choice", "suporte", context={"channel": "simulator"}))
+
+    assert selected["events"][0] == {"type": "analytics", "event_type": "LIST_SELECTED", "node_id": "choice", "option_id": "suporte"}
+    assert selected["events"][1] == {"type": "send_message", "text": "Time de suporte"}
+
+
+def test_queue_transports_choice_interactive_list(monkeypatch):
+    from app.services import queue as queue_service
+
+    enqueued = []
+
+    class Queue:
+        def enqueue(self, func, **kwargs):
+            enqueued.append({"func": func, **kwargs})
+            return type("Job", (), {"id": "job-choice-list"})()
+
+    monkeypatch.setattr(queue_service, "get_queue", lambda _name: Queue())
+    monkeypatch.setattr(queue_service, "_runtime_commit", lambda: "test")
+
+    job_id = queue_service.enqueue_send_message({
+        "tenant_id": "tenant-1",
+        "phone": "5511999990000",
+        "text": "Escolha uma área",
+        "interactive_type": "list",
+        "sections": [{"title": "Opções", "rows": [{"id": "vendas", "title": "Vendas"}]}],
+        "options": [{"id": "vendas", "label": "Vendas", "handleId": "vendas"}],
+        "flow_id": "flow-1",
+        "session_id": "session-1",
+        "node_id": "choice-1",
+        "node_type": "choice",
+    })
+
+    payload = enqueued[0]["message_data"]
+    assert job_id == "job-choice-list"
+    assert payload["interactive_type"] == "list"
+    assert payload["sections"][0]["rows"][0]["id"] == "vendas"
+    assert payload["options"][0]["handleId"] == "vendas"
+
+
+def test_meta_message_service_sends_interactive_list(monkeypatch):
+    from app.services import whatsapp_message_service
+
+    posted = []
+
+    class Client:
+        def __init__(self, token):
+            self.token = token
+
+        async def post(self, endpoint, payload, context):
+            posted.append({"endpoint": endpoint, "payload": payload, "context": context, "token": self.token})
+            return {"messages": [{"id": "wamid.list"}]}
+
+    monkeypatch.setattr(whatsapp_message_service, "MetaCloudClient", Client)
+
+    response = whatsapp_message_service.send_interactive_list_via_meta(
+        token="token",
+        phone_number_id="123",
+        to="+55 11 99999-0000",
+        body_text="Escolha",
+        sections=[{"title": "Opções", "rows": [{"id": "suporte", "title": "Suporte"}]}],
+        context={"flow_id": "flow-1", "node_id": "choice-1"},
+    )
+
+    assert response["messages"][0]["id"] == "wamid.list"
+    assert posted[0]["payload"]["type"] == "interactive"
+    assert posted[0]["payload"]["interactive"]["type"] == "list"
+    assert posted[0]["payload"]["interactive"]["action"]["sections"][0]["rows"][0]["id"] == "suporte"

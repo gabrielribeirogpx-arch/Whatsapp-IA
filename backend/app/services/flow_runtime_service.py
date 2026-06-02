@@ -157,7 +157,7 @@ async def execute_node_chain_until_reply(
             next_id = find_next(str(cursor), ["default", "", "output"])
             next_node = node_map.get(str(next_id)) if next_id else None
             next_type = _node_type(next_node)
-            if next_type in {"delay", "action", "message"}:
+            if next_type in {"delay", "action", "message", "choice", "buttons_node", "list_node"}:
                 logger.info("[MESSAGE HAS AUTO_CONTINUE] node_id=%s", cursor)
                 logger.info("[AUTO_CONTINUE TO] next_node_id=%s next_type=%s", next_id, next_type)
                 cursor = next_id
@@ -227,6 +227,34 @@ async def execute_node_chain_until_reply(
                 continue
             if body_text and sections:
                 events.append({"type": "send_list", "body_text": body_text, "sections": sections})
+            response_node_id = str(cursor)
+            return _result(pending=False, events=events, response_node_id=response_node_id, next_node_id=str(cursor))
+
+        if ntype == "choice":
+            choice_options = _choice_options(data)
+            matched_option = None
+            for option in choice_options:
+                label = str(option.get("label") or "").strip()
+                handle = str(option.get("handleId") or option.get("id") or "").strip()
+                if normalized_input and (_normalize_text(label) == normalized_input or _normalize_text(handle) == normalized_input):
+                    matched_option = option
+                    break
+            body_text = str(data.get("body_text") or data.get("content") or "Escolha uma opção:").strip()
+            rows = [{"id": str(option.get("id") or option.get("handleId") or f"choice_{index + 1}"), "title": str(option.get("label") or "")[:24]} for index, option in enumerate(choice_options) if str(option.get("label") or "").strip()]
+            sections = [{"title": "Opções", "rows": rows}] if rows else []
+            logger.info("[CHOICE LIST GENERATED] node_id=%s options_count=%s payload_json=%s", cursor, len(choice_options), _safe_payload_json({"body_text": body_text, "sections": sections, "options": choice_options}))
+            if normalized_input and matched_option:
+                matched_handle = str(matched_option.get("handleId") or matched_option.get("id") or "")
+                logger.info("[CHOICE LIST RESPONSE] node_id=%s option_id=%s label=%s", cursor, matched_handle, matched_option.get("label"))
+                events.append({"type": "analytics", "event_type": "LIST_SELECTED", "node_id": str(cursor), "option_id": matched_handle})
+                next_choice_node = find_next(str(cursor), [matched_handle])
+                logger.info("[CHOICE OPTION RESOLVED] node_id=%s option_id=%s next_node_id=%s", cursor, matched_handle, next_choice_node)
+                logger.info("[CHOICE FLOW CONTINUE] node_id=%s next_node_id=%s", cursor, next_choice_node)
+                cursor = next_choice_node
+                continue
+            if body_text and sections:
+                events.append({"type": "send_list", "body_text": body_text, "sections": sections, "interactive_type": "list", "options": choice_options})
+                logger.info("[CHOICE LIST ENQUEUED] node_id=%s options_count=%s", cursor, len(choice_options))
             response_node_id = str(cursor)
             return _result(pending=False, events=events, response_node_id=response_node_id, next_node_id=str(cursor))
 

@@ -124,6 +124,9 @@ def _on_send_failure(job, connection, type_, value, traceback) -> None:  # noqa:
     phone = str(message_data.get("phone") or "")
     text = str(message_data.get("text") or "")
     buttons = message_data.get("buttons")
+    sections = message_data.get("sections") if isinstance(message_data.get("sections"), list) else None
+    options = message_data.get("options") if isinstance(message_data.get("options"), list) else None
+    interactive_type = str(message_data.get("interactive_type") or ("button" if isinstance(buttons, list) and buttons else "")).strip().lower() or None
     error = f"{type_.__name__}: {value}" if type_ else str(value)
 
     _record_failed_message(
@@ -150,6 +153,9 @@ def enqueue_send_message(message_data: dict[str, Any]) -> str | None:
     correlation_id = str(message_data.get("correlation_id") or message_data.get("message_id") or "n/a")
     content = str(message_data.get("text") or "").strip()
     buttons = message_data.get("buttons")
+    sections = message_data.get("sections") if isinstance(message_data.get("sections"), list) else None
+    options = message_data.get("options") if isinstance(message_data.get("options"), list) else None
+    interactive_type = str(message_data.get("interactive_type") or ("button" if isinstance(buttons, list) and buttons else "")).strip().lower() or None
 
     if not content:
         logger.warning("event=queue_send_skip correlation_id=%s tenant_id=%s phone=%s job_id=%s stage=send_enqueue reason=empty_text", correlation_id, tenant_id, phone or "n/a", "n/a")
@@ -175,6 +181,9 @@ def enqueue_send_message(message_data: dict[str, Any]) -> str | None:
         "phone": phone,
         "text": content,
         "buttons": buttons if isinstance(buttons, list) else None,
+        "sections": sections,
+        "options": options,
+        "interactive_type": interactive_type,
         "correlation_id": correlation_id,
         "conversation_id": str(message_data.get("conversation_id") or "") or None,
     }
@@ -183,7 +192,7 @@ def enqueue_send_message(message_data: dict[str, Any]) -> str | None:
         if value is not None:
             payload[key] = str(value)
 
-    message_type = "interactive" if isinstance(payload.get("buttons"), list) and payload.get("buttons") else "text"
+    message_type = "interactive" if payload.get("interactive_type") or (isinstance(payload.get("buttons"), list) and payload.get("buttons")) else "text"
     logger.info(
         "[SEND WORKER MESSAGE TYPE] flow_id=%s session_id=%s node_id=%s node_type=%s message_type=%s options_count=%s payload_json=%s",
         payload.get("flow_id"),
@@ -191,7 +200,7 @@ def enqueue_send_message(message_data: dict[str, Any]) -> str | None:
         payload.get("node_id"),
         payload.get("node_type"),
         message_type,
-        len(payload.get("buttons") or []) if isinstance(payload.get("buttons"), list) else 0,
+        len(payload.get("options") or payload.get("buttons") or []) if isinstance(payload.get("options") or payload.get("buttons"), list) else 0,
         json.dumps(payload, default=str, ensure_ascii=False, sort_keys=True),
     )
 
@@ -233,6 +242,6 @@ def enqueue_send_message(message_data: dict[str, Any]) -> str | None:
         tenant_id,
         phone,
         job.id,
-        bool(payload["buttons"]),
+        bool(payload.get("buttons") or payload.get("sections")),
     )
     return str(job.id)
