@@ -53,21 +53,28 @@ def _log_choice_runtime_marker(
     session_id: Any = None,
     current_node_id: Any = None,
     choice_node_id: Any = None,
+    node_id: Any = None,
     selected_row_id: Any = None,
+    selected_title: Any = None,
     target_node_id: Any = None,
     worker_id: str | None = None,
     correlation_id: str | None = None,
+    reason: str | None = None,
 ) -> None:
+    resolved_node_id = node_id or choice_node_id or current_node_id
     logger.info(
-        "%s session_id=%s current_node_id=%s choice_node_id=%s selected_row_id=%s target_node_id=%s worker_id=%s correlation_id=%s",
+        "%s session_id=%s node_id=%s current_node_id=%s choice_node_id=%s selected_row_id=%s selected_title=%s target_node_id=%s worker_id=%s correlation_id=%s reason=%s",
         marker,
         session_id,
+        resolved_node_id,
         current_node_id,
         choice_node_id,
         selected_row_id,
+        selected_title,
         target_node_id,
         worker_id or _runtime_worker_id(),
         correlation_id or "n/a",
+        reason or "n/a",
     )
 
 
@@ -3138,6 +3145,9 @@ def process_flow_engine(
     if saved_current_node_id is None and isinstance(getattr(runtime_session, "variables", None), dict):
         saved_current_node_id = _parse_uuid(runtime_session.variables.get("current_node_id"))
 
+    session_flow_version_id = _parse_uuid(getattr(runtime_session, "flow_version_id", None)) if runtime_session else None
+    runtime_graph = _get_current_flow_runtime(db=db, flow=flow, tenant_id=conversation.tenant_id, flow_version_id=session_flow_version_id)
+
     forced_node_id = _parse_uuid(force_node) if force_node else None
     if forced_node_id is not None:
         forced_graph_node = _get_node(db=db, node_id=forced_node_id, tenant_id=conversation.tenant_id, runtime_graph=runtime_graph)
@@ -3178,8 +3188,6 @@ def process_flow_engine(
         session_status or None,
     )
 
-    session_flow_version_id = _parse_uuid(getattr(runtime_session, "flow_version_id", None)) if runtime_session else None
-    runtime_graph = _get_current_flow_runtime(db=db, flow=flow, tenant_id=conversation.tenant_id, flow_version_id=session_flow_version_id)
     runtime_node_ids = [
         str(node.get("id"))
         for node in (runtime_graph.get("nodes") if isinstance(runtime_graph, dict) else [])
@@ -3187,15 +3195,96 @@ def process_flow_engine(
     ]
     logger.info("[RUNTIME GRAPH NODE IDS] flow_id=%s node_ids=%s", flow.id, runtime_node_ids)
 
-    if runtime_session and isinstance(getattr(runtime_session, "context", None), dict):
-        session_context = runtime_session.context or {}
-        selected_row_id = str(session_context.get("selected_row_id") or session_context.get("last_interactive_list_reply_id") or user_message_text or "").strip()
-        selected_title = str(session_context.get("selected_title") or session_context.get("last_interactive_list_reply_title") or "").strip()
-        choice_node_id = _parse_uuid(session_context.get("choice_node_id"))
-        if choice_node_id and selected_row_id and session_context.get("waiting_choice") is True:
+    session_context = runtime_session.context if runtime_session and isinstance(getattr(runtime_session, "context", None), dict) else {}
+    selected_row_id = str(session_context.get("selected_row_id") or session_context.get("last_interactive_list_reply_id") or user_message_text or "").strip()
+    selected_title = str(session_context.get("selected_title") or session_context.get("last_interactive_list_reply_title") or "").strip()
+    choice_node_id = _parse_uuid(session_context.get("choice_node_id"))
+    waiting_choice = session_context.get("waiting_choice") is True
+    if runtime_session and (waiting_choice or selected_row_id or selected_title):
+        _log_choice_runtime_marker(
+            "[CHOICE RESUME START]",
+            session_id=getattr(runtime_session, "id", None),
+            current_node_id=getattr(runtime_session, "current_node_id", None),
+            choice_node_id=choice_node_id or getattr(runtime_session, "current_node_id", None),
+            selected_row_id=selected_row_id,
+            selected_title=selected_title,
+            correlation_id=_runtime_correlation_id(session_context),
+            reason=f"waiting_choice={waiting_choice} choice_node_id_present={bool(choice_node_id)} selected_row_id_present={bool(selected_row_id)}",
+        )
+    if not runtime_session and (selected_row_id or selected_title):
+        _log_choice_runtime_marker(
+            "[CHOICE RESUME SKIPPED]",
+            selected_row_id=selected_row_id,
+            selected_title=selected_title,
+            reason="no_runtime_session",
+        )
+        _log_choice_runtime_marker("[CHOICE RESUME REASON]", selected_row_id=selected_row_id, selected_title=selected_title, reason="runtime_session_missing_before_choice_resolution")
+    elif runtime_session:
+        if not waiting_choice and (selected_row_id or selected_title):
+            _log_choice_runtime_marker(
+                "[CHOICE RESUME SKIPPED]",
+                session_id=getattr(runtime_session, "id", None),
+                current_node_id=getattr(runtime_session, "current_node_id", None),
+                choice_node_id=choice_node_id or getattr(runtime_session, "current_node_id", None),
+                selected_row_id=selected_row_id,
+                selected_title=selected_title,
+                correlation_id=_runtime_correlation_id(session_context),
+                reason="session_context_waiting_choice_not_true",
+            )
+            _log_choice_runtime_marker(
+                "[CHOICE RESUME REASON]",
+                session_id=getattr(runtime_session, "id", None),
+                current_node_id=getattr(runtime_session, "current_node_id", None),
+                choice_node_id=choice_node_id or getattr(runtime_session, "current_node_id", None),
+                selected_row_id=selected_row_id,
+                selected_title=selected_title,
+                correlation_id=_runtime_correlation_id(session_context),
+                reason=f"waiting_choice={session_context.get('waiting_choice')} context_keys={sorted(session_context.keys())}",
+            )
+        elif not choice_node_id and waiting_choice:
+            _log_choice_runtime_marker(
+                "[CHOICE RESUME SKIPPED]",
+                session_id=getattr(runtime_session, "id", None),
+                current_node_id=getattr(runtime_session, "current_node_id", None),
+                selected_row_id=selected_row_id,
+                selected_title=selected_title,
+                correlation_id=_runtime_correlation_id(session_context),
+                reason="missing_choice_node_id",
+            )
+            _log_choice_runtime_marker(
+                "[CHOICE RESUME REASON]",
+                session_id=getattr(runtime_session, "id", None),
+                current_node_id=getattr(runtime_session, "current_node_id", None),
+                selected_row_id=selected_row_id,
+                selected_title=selected_title,
+                correlation_id=_runtime_correlation_id(session_context),
+                reason=f"context_keys={sorted(session_context.keys())}",
+            )
+        elif choice_node_id and selected_row_id and waiting_choice:
             choice_node = _get_node(db=db, node_id=choice_node_id, tenant_id=conversation.tenant_id, runtime_graph=runtime_graph)
             choice_node_type = _node_type_slug(choice_node) if choice_node else ""
-            if choice_node_type == "choice":
+            if choice_node_type != "choice":
+                _log_choice_runtime_marker(
+                    "[CHOICE RESUME SKIPPED]",
+                    session_id=getattr(runtime_session, "id", None),
+                    current_node_id=getattr(runtime_session, "current_node_id", None),
+                    choice_node_id=choice_node_id,
+                    selected_row_id=selected_row_id,
+                    selected_title=selected_title,
+                    correlation_id=_runtime_correlation_id(session_context),
+                    reason=f"choice_node_type={choice_node_type or 'missing'}",
+                )
+                _log_choice_runtime_marker(
+                    "[CHOICE RESUME REASON]",
+                    session_id=getattr(runtime_session, "id", None),
+                    current_node_id=getattr(runtime_session, "current_node_id", None),
+                    choice_node_id=choice_node_id,
+                    selected_row_id=selected_row_id,
+                    selected_title=selected_title,
+                    correlation_id=_runtime_correlation_id(session_context),
+                    reason="stored_choice_node_not_choice_or_not_found",
+                )
+            else:
                 choice_edges = _get_edges(db=db, flow_id=flow.id, source=choice_node_id, runtime_graph=runtime_graph)
                 choice_options = _choice_options_from_node(_extract_node_data(choice_node), choice_edges)
                 selected_option = _resolve_choice_option(selected_row_id, choice_options) or (
@@ -3217,6 +3306,7 @@ def process_flow_engine(
                         current_node_id=getattr(runtime_session, "current_node_id", None),
                         choice_node_id=choice_node_id,
                         selected_row_id=selected_row_id,
+                        selected_title=selected_title,
                         target_node_id=selected_target_node_id,
                         correlation_id=_runtime_correlation_id(session_context),
                     )
@@ -3226,6 +3316,7 @@ def process_flow_engine(
                         current_node_id=choice_node_id,
                         choice_node_id=choice_node_id,
                         selected_row_id=selected_row_id,
+                        selected_title=selected_title,
                         target_node_id=selected_target_node_id,
                         correlation_id=_runtime_correlation_id(session_context),
                     )
@@ -3235,6 +3326,27 @@ def process_flow_engine(
                         choice_node_id,
                         selected_row_id,
                         selected_title,
+                    )
+                else:
+                    _log_choice_runtime_marker(
+                        "[CHOICE RESUME SKIPPED]",
+                        session_id=getattr(runtime_session, "id", None),
+                        current_node_id=getattr(runtime_session, "current_node_id", None),
+                        choice_node_id=choice_node_id,
+                        selected_row_id=selected_row_id,
+                        selected_title=selected_title,
+                        correlation_id=_runtime_correlation_id(session_context),
+                        reason="selected_option_not_resolved",
+                    )
+                    _log_choice_runtime_marker(
+                        "[CHOICE RESUME REASON]",
+                        session_id=getattr(runtime_session, "id", None),
+                        current_node_id=getattr(runtime_session, "current_node_id", None),
+                        choice_node_id=choice_node_id,
+                        selected_row_id=selected_row_id,
+                        selected_title=selected_title,
+                        correlation_id=_runtime_correlation_id(session_context),
+                        reason=f"options_count={len(choice_options)} option_ids={[str(option.get('id') or option.get('handleId') or '') for option in choice_options]}",
                     )
 
     current_graph_node = None

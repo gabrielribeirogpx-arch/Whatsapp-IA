@@ -54,14 +54,50 @@ def _worker_id() -> str:
     return str(os.getenv("WORKER_ID") or os.getenv("HOSTNAME") or os.getpid())
 
 
+
+
+def _choice_log_context(session: FlowSession | None, selected_row_id: str = "", selected_title: str = "") -> dict[str, object]:
+    context = session.context if session and isinstance(getattr(session, "context", None), dict) else {}
+    return {
+        "session_id": getattr(session, "id", None),
+        "node_id": getattr(session, "current_node_id", None) or context.get("choice_node_id"),
+        "selected_row_id": selected_row_id or context.get("selected_row_id") or context.get("last_interactive_list_reply_id"),
+        "selected_title": selected_title or context.get("selected_title") or context.get("last_interactive_list_reply_title"),
+    }
+
+
+def _log_choice_message_marker(marker: str, session: FlowSession | None, *, selected_row_id: str = "", selected_title: str = "", correlation_id: str = "n/a", reason: str = "n/a") -> None:
+    data = _choice_log_context(session, selected_row_id, selected_title)
+    logger.info(
+        "%s session_id=%s node_id=%s selected_row_id=%s selected_title=%s worker_id=%s correlation_id=%s reason=%s source=webhook",
+        marker,
+        data.get("session_id"),
+        data.get("node_id"),
+        data.get("selected_row_id"),
+        data.get("selected_title"),
+        _worker_id(),
+        correlation_id,
+        reason,
+    )
+
 def _persist_interactive_reply_context(db: Session, session: FlowSession | None, incoming: dict, *, correlation_id: str = "n/a") -> None:
-    if not session:
-        return
     interactive_type = str(incoming.get("interactive_type") or "").strip()
     selected_row_id = str(incoming.get("selected_row_id") or incoming.get("interactive_reply_id") or "").strip()
     selected_title = str(incoming.get("selected_title") or incoming.get("interactive_reply_title") or "").strip()
-    if interactive_type != "list_reply" or not selected_row_id:
+    if not session:
+        _log_choice_message_marker("[CHOICE RESUME SKIPPED]", session, selected_row_id=selected_row_id, selected_title=selected_title, correlation_id=correlation_id, reason="no_active_session")
+        _log_choice_message_marker("[CHOICE RESUME REASON]", session, selected_row_id=selected_row_id, selected_title=selected_title, correlation_id=correlation_id, reason=f"interactive_type={interactive_type} selected_row_id_present={bool(selected_row_id)}")
         return
+    if interactive_type != "list_reply" or not selected_row_id:
+        _log_choice_message_marker("[CHOICE RESUME SKIPPED]", session, selected_row_id=selected_row_id, selected_title=selected_title, correlation_id=correlation_id, reason=f"not_list_reply_or_missing_selected_row_id interactive_type={interactive_type}")
+        _log_choice_message_marker("[CHOICE RESUME REASON]", session, selected_row_id=selected_row_id, selected_title=selected_title, correlation_id=correlation_id, reason=f"selected_row_id_present={bool(selected_row_id)}")
+        return
+    _log_choice_message_marker("[CHOICE MESSAGE RECEIVED]", session, selected_row_id=selected_row_id, selected_title=selected_title, correlation_id=correlation_id, reason="persist_interactive_reply_context")
+    if isinstance(getattr(session, "context", None), dict) and session.context.get("waiting_choice") is True:
+        _log_choice_message_marker("[CHOICE WAITING SESSION FOUND]", session, selected_row_id=selected_row_id, selected_title=selected_title, correlation_id=correlation_id, reason="waiting_choice_true")
+    else:
+        _log_choice_message_marker("[CHOICE RESUME SKIPPED]", session, selected_row_id=selected_row_id, selected_title=selected_title, correlation_id=correlation_id, reason="active_session_not_waiting_choice")
+        _log_choice_message_marker("[CHOICE RESUME REASON]", session, selected_row_id=selected_row_id, selected_title=selected_title, correlation_id=correlation_id, reason=f"waiting_choice={((session.context or {}).get('waiting_choice') if isinstance(getattr(session, 'context', None), dict) else None)}")
     session.context = {
         **(session.context or {}),
         "last_interactive_type": interactive_type,
@@ -447,11 +483,18 @@ async def _process_meta_webhook(request: Request, db: Session) -> dict[str, str]
                 .order_by(FlowSession.updated_at.desc(), FlowSession.created_at.desc())
                 .first()
             )
+            selected_row_id = str(incoming.get("selected_row_id") or incoming.get("interactive_reply_id") or "").strip()
+            selected_title = str(incoming.get("selected_title") or incoming.get("interactive_reply_title") or "").strip()
+            incoming_correlation_id = str(incoming.get("message_id") or incoming.get("correlation_id") or "n/a")
+            if incoming_type == "interactive" and str(incoming.get("interactive_type") or "").strip() == "list_reply":
+                _log_choice_message_marker("[CHOICE MESSAGE RECEIVED]", active_session, selected_row_id=selected_row_id, selected_title=selected_title, correlation_id=incoming_correlation_id, reason="webhook_before_context_persist")
             if (
                 active_session
                 and (active_session.status or "").lower() not in FINAL_SESSION_STATUSES
             ):
-                _persist_interactive_reply_context(db, active_session, incoming, correlation_id=str(incoming.get("message_id") or incoming.get("correlation_id") or "n/a"))
+                if isinstance(getattr(active_session, "context", None), dict) and active_session.context.get("waiting_choice") is True:
+                    _log_choice_message_marker("[CHOICE WAITING SESSION FOUND]", active_session, selected_row_id=selected_row_id, selected_title=selected_title, correlation_id=incoming_correlation_id, reason="active_session_before_context_persist")
+                _persist_interactive_reply_context(db, active_session, incoming, correlation_id=incoming_correlation_id)
                 emit_message_received_event(
                     db=db,
                     tenant_id=conversation.tenant_id,
