@@ -209,6 +209,54 @@ def send_buttons_message_via_meta(*, token: str, phone_number_id: str, to: str, 
     return asyncio.run(MetaCloudClient(token).post(f"/{phone_number_id}/messages", payload=payload, context=context))
 
 
+
+def send_interactive_list_via_meta(*, token: str, phone_number_id: str, to: str, body_text: str, sections: list[dict[str, Any]], context: dict[str, Any], button_text: str = "Ver opções") -> dict[str, Any]:
+    safe_sections: list[dict[str, Any]] = []
+    for section_index, section in enumerate(sections or []):
+        if not isinstance(section, dict):
+            continue
+        rows: list[dict[str, Any]] = []
+        raw_rows = section.get("rows") if isinstance(section.get("rows"), list) else []
+        for row_index, row in enumerate(raw_rows):
+            if not isinstance(row, dict):
+                continue
+            title = str(row.get("title") or row.get("label") or "").strip()[:24]
+            if not title:
+                continue
+            rows.append({
+                "id": str(row.get("id") or row.get("handleId") or f"row_{section_index + 1}_{row_index + 1}"),
+                "title": title,
+                **({"description": str(row.get("description") or "")[:72]} if str(row.get("description") or "").strip() else {}),
+            })
+        if rows:
+            safe_sections.append({"title": str(section.get("title") or f"Seção {section_index + 1}")[:24], "rows": rows})
+
+    if not safe_sections:
+        return send_text_message_via_meta(token=token, phone_number_id=phone_number_id, to=to, text=body_text, context=context)
+
+    payload = {
+        "messaging_product": "whatsapp",
+        "to": re.sub(r"\D", "", to or ""),
+        "type": "interactive",
+        "interactive": {
+            "type": "list",
+            "body": {"text": body_text},
+            "action": {"button": (button_text or "Ver opções")[:20], "sections": safe_sections},
+        },
+    }
+    logger.info(
+        "[META INTERACTIVE PAYLOAD] flow_id=%s session_id=%s node_id=%s node_type=%s message_type=%s interactive_type=%s options_count=%s payload_json=%s",
+        context.get("flow_id"),
+        context.get("session_id"),
+        context.get("node_id"),
+        context.get("node_type"),
+        payload.get("type"),
+        "list",
+        sum(len(section.get("rows") or []) for section in safe_sections),
+        json.dumps(payload, default=str, ensure_ascii=False, sort_keys=True),
+    )
+    return asyncio.run(MetaCloudClient(token).post(f"/{phone_number_id}/messages", payload=payload, context=context))
+
 def extract_template_variables(body_text: str) -> list[str]:
     return sorted({m.group(1) for m in VAR_PATTERN.finditer(body_text or "")}, key=lambda x: int(x))
 

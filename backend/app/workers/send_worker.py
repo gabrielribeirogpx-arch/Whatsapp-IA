@@ -24,6 +24,7 @@ from app.services.whatsapp_message_service import (
     mark_provider_auth_error,
     resolve_active_meta_provider_credentials,
     send_buttons_message_via_meta,
+    send_interactive_list_via_meta,
     send_text_message_via_meta,
 )
 from app.services.whatsapp_credentials_service import WhatsAppCredentialsNotConfiguredError, get_tenant_whatsapp_credentials
@@ -424,6 +425,9 @@ def send_whatsapp_message(*, message_data: dict[str, Any]) -> None:
     phone = str(message_data.get("phone") or "")
     text = str(message_data.get("text") or "").strip()
     buttons = message_data.get("buttons")
+    interactive_type = str(message_data.get("interactive_type") or ("button" if isinstance(buttons, list) and buttons else "")).strip().lower()
+    sections = message_data.get("sections") if isinstance(message_data.get("sections"), list) else []
+    options = message_data.get("options") if isinstance(message_data.get("options"), list) else []
     correlation_id = str(message_data.get("correlation_id") or message_data.get("message_id") or "n/a")
     current_job = get_current_job()
     job_id = str(message_data.get("job_id") or getattr(current_job, "id", None) or "n/a")
@@ -437,7 +441,7 @@ def send_whatsapp_message(*, message_data: dict[str, Any]) -> None:
     conversation_id = str(message_data.get("conversation_id") or "") or None
     is_flow_message = bool(flow_id or flow_version_id or session_id or node_id or sequence_number_raw is not None)
     payload_provider_id = str(message_data.get("provider_id") or "unresolved")
-    message_type = "interactive" if isinstance(buttons, list) and buttons else "text"
+    message_type = "interactive" if interactive_type or (isinstance(buttons, list) and buttons) else "text"
     logger.info(
         "[SEND WORKER MESSAGE TYPE] flow_id=%s session_id=%s node_id=%s node_type=%s message_type=%s options_count=%s payload_json=%s",
         flow_id,
@@ -445,7 +449,7 @@ def send_whatsapp_message(*, message_data: dict[str, Any]) -> None:
         node_id,
         node_type,
         message_type,
-        len(buttons or []) if isinstance(buttons, list) else 0,
+        len(options or buttons or []) if isinstance(options or buttons, list) else 0,
         json.dumps(message_data, default=str, ensure_ascii=False, sort_keys=True),
     )
 
@@ -675,7 +679,28 @@ def send_whatsapp_message(*, message_data: dict[str, Any]) -> None:
 
         meta_response: dict[str, Any] | None = None
         try:
-            if buttons:
+            if interactive_type == "list":
+                logger.info(
+                    "[META INTERACTIVE PAYLOAD] flow_id=%s session_id=%s node_id=%s node_type=%s message_type=%s interactive_type=%s options_count=%s payload_json=%s",
+                    flow_id,
+                    session_id,
+                    node_id,
+                    node_type,
+                    "interactive",
+                    "list",
+                    len(options or []),
+                    json.dumps({"body_text": text, "sections": sections, "options": options, "interactive": {"type": "list"}}, default=str, ensure_ascii=False, sort_keys=True),
+                )
+                meta_response = send_interactive_list_via_meta(
+                    to=phone,
+                    body_text=text,
+                    sections=sections,
+                    token=resolved_token,
+                    phone_number_id=resolved_phone_number_id,
+                    context=context,
+                )
+                logger.info("[CHOICE LIST SENT] flow_id=%s session_id=%s node_id=%s options_count=%s", flow_id, session_id, node_id, len(options or []))
+            elif buttons:
                 logger.info(
                     "[META INTERACTIVE PAYLOAD] flow_id=%s session_id=%s node_id=%s node_type=%s message_type=%s options_count=%s payload_json=%s",
                     flow_id,
