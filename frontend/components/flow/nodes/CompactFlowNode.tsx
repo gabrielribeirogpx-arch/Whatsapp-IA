@@ -8,6 +8,7 @@ type SourceHandle = {
   id?: string;
   label?: string;
   color?: string;
+  optionValue?: string;
 };
 
 type CompactFlowNodeProps = {
@@ -26,6 +27,7 @@ type CompactFlowNodeProps = {
   isStart?: boolean;
   hasValidationError?: boolean;
   onToggleStart?: (nodeId: string) => void;
+  isConnectable?: boolean;
 };
 
 function CompactFlowNode({
@@ -44,13 +46,14 @@ function CompactFlowNode({
   isStart,
   hasValidationError,
   onToggleStart,
+  isConnectable = true,
 }: CompactFlowNodeProps) {
   const handles = useMemo(() => (sourceHandles?.length ? sourceHandles : [{ id: undefined, color: accent }]), [accent, sourceHandles]);
   const handleStep = handles.length > 1 ? 24 : 0;
   const firstHandleTop = handles.length > 1 ? 68 - ((handles.length - 1) * handleStep) / 2 : 55;
 
   useEffect(() => {
-    console.debug('[NODE RERENDER]', { node_id: id, title, selected, handle_count: handles.length });
+    console.debug('[NODE RERENDER]', { node_id: id, title, selected, handle_count: handles.length, isConnectable });
   });
 
   return (
@@ -63,7 +66,7 @@ function CompactFlowNode({
       } as CSSProperties}
     >
       <div className="flow-node-header-bar" style={{ background: accent }} />
-      <Handle type="target" position={Position.Left} />
+      <Handle type="target" position={Position.Left} isConnectable={isConnectable} />
 
       <div className="flow-node-compact-header">
         <span className="flow-node-emoji" aria-hidden="true">{emoji}</span>
@@ -104,16 +107,20 @@ function CompactFlowNode({
           type="source"
           position={Position.Right}
           title={handle.label}
+          className="flow-node-source-handle nodrag nopan"
+          isConnectable={isConnectable}
+          data-option-value={handle.optionValue}
           style={{
             top: firstHandleTop + index * handleStep,
-            right: -6,
-            width: 10,
-            height: 10,
+            right: -8,
+            width: 14,
+            height: 14,
             background: '#fff',
             border: `2px solid ${handle.color || accent}`,
             borderRadius: '50%',
             cursor: 'crosshair',
-            zIndex: 10,
+            pointerEvents: isConnectable ? 'auto' : 'none',
+            zIndex: 30,
           }}
         />
       ))}
