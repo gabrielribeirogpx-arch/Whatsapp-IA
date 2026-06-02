@@ -20,6 +20,7 @@ from sqlalchemy.orm import load_only
 from app.database import get_db
 from app.core.redis_client import get_redis_client
 from app.models import Conversation, Flow, FlowEdge, FlowEvent, FlowExecution, FlowNode, FlowSession, FlowStep, FlowVersion, Tenant, TenantUser
+from app.models.flow_session import set_current_node_id
 from app.services.flow_analytics_service import PERIODS, get_flow_analytics, get_flow_list_metrics, resolve_analytics_period
 from app.services.audit_service import write_audit_log
 from app.routers.account import get_current_user
@@ -2858,7 +2859,7 @@ async def simulate_tenant_flow(
                     reply = "Aguardando o tempo configurado para continuar o fluxo."
                     messages = [reply]
 
-                sim_session.current_node_id = next_node_id
+                set_current_node_id(sim_session, next_node_id, "flow_simulator_next_node")
                 sim_session.status = "running" if next_node_id else "finished"
                 logger.info("[SIMULATOR NEXT NODE SAVED] %s", next_node_id)
 

@@ -5,7 +5,7 @@ import uuid
 from sqlalchemy.orm import Session
 
 from app.models import Conversation
-from app.models.flow_session import FlowSession
+from app.models.flow_session import FlowSession, set_current_node_id
 from app.services.flow_engine_service import process_flow_engine
 
 logger = logging.getLogger(__name__)
@@ -82,9 +82,28 @@ def resume_after_delay(db: Session, tenant_id: uuid.UUID, phone: str, delay_node
         )
         return
 
+    if session and next_node_id:
+        old_node_id = getattr(session, "current_node_id", None)
+        set_current_node_id(session, next_node_id, "delay_worker_resume_to_next_node")
+        session.context = {
+            **(session.context or {}),
+            "waiting_delay": False,
+            "resumed_from_delay_node_id": str(delay_node_id) if delay_node_id else None,
+            "flow_current_node_id": str(next_node_id),
+        }
+        db.add(session)
+        logger.info(
+            "[DELAY RESUME CURRENT_NODE ADVANCE] session_id=%s old_node_id=%s new_node_id=%s delay_node_id=%s flow_id=%s",
+            getattr(session, "id", None),
+            old_node_id,
+            next_node_id,
+            delay_node_id,
+            flow_id,
+        )
+
     conversation = db.query(Conversation).filter(Conversation.tenant_id == tenant_id, Conversation.phone_number == phone).first()
     if conversation and isinstance(conversation.context, dict):
         conversation.context["flow_current_node_id"] = str(next_node_id) if next_node_id else None
         db.add(conversation)
-        db.commit()
+    db.commit()
     process_flow_engine(db=db, tenant_id=tenant_id, phone=phone, message_text="", force_node=(uuid.UUID(str(next_node_id)) if next_node_id else None))

@@ -2611,12 +2611,25 @@ def run_until_wait_node(
                     )
                     logger.info("[DELAY SCHEDULED] delay_node_id=%s seconds=%s next_node_id=%s", _node_get(node, "id"), delay_seconds, next_target)
                     if flow_session:
+                        delay_current_node_id = _parse_uuid(_node_get(node, "id"))
+                        logger.info(
+                            "[DELAY CURRENT NODE PRESERVED] session_id=%s delay_node_id=%s scheduled_next_node_id=%s reason=waiting_delay",
+                            getattr(flow_session, "id", None),
+                            delay_current_node_id,
+                            next_target,
+                        )
                         flow_session.current_node_id = session_service.safe_update_current_node(
                             session=flow_session,
-                            next_node_id=str(next_target),
-                            reason="delay_next_target",
+                            next_node_id=delay_current_node_id,
+                            reason="waiting_delay",
                             graph_context={"executed_node_id": str(_node_get(node, "id"))},
                         )
+                        flow_session.context = {
+                            **(flow_session.context or {}),
+                            "waiting_delay": True,
+                            "delay_node_id": str(delay_current_node_id) if delay_current_node_id else None,
+                            "pending_delay_next_node_id": str(next_target) if next_target else None,
+                        }
                         db.add(flow_session)
                     db.commit()
                     return None
@@ -3125,6 +3138,25 @@ def process_flow_engine(
     if saved_current_node_id is None and isinstance(getattr(runtime_session, "variables", None), dict):
         saved_current_node_id = _parse_uuid(runtime_session.variables.get("current_node_id"))
 
+    forced_node_id = _parse_uuid(force_node) if force_node else None
+    if forced_node_id is not None:
+        forced_graph_node = _get_node(db=db, node_id=forced_node_id, tenant_id=conversation.tenant_id, runtime_graph=runtime_graph)
+        saved_current_node_id = forced_node_id
+        if runtime_session and forced_graph_node is not None:
+            runtime_session.current_node_id = session_service.safe_update_current_node(
+                session=runtime_session,
+                next_node_id=forced_node_id,
+                reason="process_flow_engine_force_node",
+                graph_context={"executed_node_id": str(forced_node_id)},
+            )
+            db.add(runtime_session)
+        logger.info(
+            "[FLOW CONTINUE USING_FORCE_NODE] force_node=%s node_found=%s node_type=%s",
+            forced_node_id,
+            forced_graph_node is not None,
+            _node_type_slug(forced_graph_node) if forced_graph_node else None,
+        )
+
     requested_session_node_id = _parse_uuid(session_node_id) if session_node_id else None
     if requested_session_node_id is not None:
         saved_current_node_id = requested_session_node_id
@@ -3273,7 +3305,7 @@ def process_flow_engine(
             getattr(runtime_session, "id", None),
         )
 
-    active_continue_term = session_active and saved_current_node_present and not start_trigger_match
+    active_continue_term = (session_active or forced_node_id is not None) and saved_current_node_present and not start_trigger_match
     should_continue = active_continue_term or condition_wait_state
     should_restart = effective_session_finalized and start_trigger_match
     start_path_selected = not should_continue

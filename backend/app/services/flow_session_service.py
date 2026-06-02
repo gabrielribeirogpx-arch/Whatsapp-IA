@@ -5,7 +5,7 @@ import traceback
 from typing import Any
 
 from app.models.flow import Flow
-from app.models.flow_session import FlowSession
+from app.models.flow_session import FlowSession, set_current_node_write_reason
 
 SESSION_TTL_MINUTES = 30
 FINAL_SESSION_STATUSES = {"finished", "expired", "cancelled"}
@@ -511,6 +511,7 @@ class FlowSessionService:
             status=current_status,
             reason=f"safe_update_current_node:{reason_slug}",
         )
+        set_current_node_write_reason(session, reason_slug)
         return safe_next_node_id
 
     def end_session(

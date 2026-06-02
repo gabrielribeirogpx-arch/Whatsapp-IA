@@ -10,7 +10,7 @@ from sqlalchemy import select
 
 from app.db.session import SessionLocal
 from app.models import Message
-from app.models.flow_session import FINAL_SESSION_STATUSES, FlowSession
+from app.models.flow_session import FINAL_SESSION_STATUSES, FlowSession, set_current_node_write_reason
 from app.services.contact_sync_service import ensure_conversation_contact_link, upsert_contact_for_phone
 from app.services.contact_event_service import register_contact_event
 from app.services.conversation_service import get_or_create_conversation
@@ -36,6 +36,7 @@ def _persist_interactive_reply_context(db, session: FlowSession | None, parsed: 
     selected_title = str(parsed.get("selected_title") or parsed.get("interactive_reply_title") or "").strip()
     if interactive_type != "list_reply" or not selected_row_id:
         return
+    set_current_node_write_reason(session, "process_incoming_message_persist_interactive_reply_context_context_only")
     session.context = {
         **(session.context or {}),
         "last_interactive_type": interactive_type,

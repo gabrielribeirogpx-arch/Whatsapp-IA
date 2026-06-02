@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.models.flow_session import set_current_node_id
+
 
 def _log_session_node(phase: str, session: Any, executed_node_id: Any = None, next_node_id: Any = None, reason: str = "") -> None:
     context = getattr(session, "context", None)
@@ -87,7 +89,7 @@ class FlowEngine:
         while current_node and steps < 20:
             current_node_id = str(current_node.get("id") or "")
             _log_session_node("BEFORE", session, executed_node_id=current_node_id, next_node_id=current_node_id, reason="run_flow_execute_node")
-            session.current_node_id = current_node_id
+            set_current_node_id(session, current_node_id, "legacy_flow_engine_current_node")
             _log_session_node("AFTER", session, executed_node_id=current_node_id, next_node_id=current_node_id, reason="run_flow_execute_node")
             messages.extend(self.process_node(current_node, session))
 
@@ -98,14 +100,14 @@ class FlowEngine:
             if next_node is None:
                 finished = True
                 _log_session_node("BEFORE", session, executed_node_id=current_node_id, next_node_id=None, reason="run_flow_no_next_node")
-                session.current_node_id = None
+                set_current_node_id(session, None, "legacy_flow_engine_clear_current_node")
                 _log_session_node("AFTER", session, executed_node_id=current_node_id, next_node_id=None, reason="run_flow_no_next_node")
                 break
 
             current_node = next_node
             next_node_id = str(current_node.get("id") or "")
             _log_session_node("BEFORE", session, executed_node_id=current_node_id, next_node_id=next_node_id, reason="run_flow_advance")
-            session.current_node_id = next_node_id
+            set_current_node_id(session, next_node_id, "legacy_flow_engine_next_node")
             _log_session_node("AFTER", session, executed_node_id=current_node_id, next_node_id=next_node_id, reason="run_flow_advance")
             steps += 1
 
@@ -222,7 +224,7 @@ def run_flow_from_message(user_id: str, text: str):
 
             print("[FORCE START]:", start_node["id"])
             _log_session_node("BEFORE", session, executed_node_id=start_node["id"], next_node_id=start_node["id"], reason="force_start")
-            session.current_node_id = start_node["id"]
+            set_current_node_id(session, start_node["id"], "legacy_flow_engine_start_node")
             _log_session_node("AFTER", session, executed_node_id=start_node["id"], next_node_id=start_node["id"], reason="force_start")
             db.add(session)
             db.commit()
@@ -253,7 +255,7 @@ def run_flow_from_message(user_id: str, text: str):
                 if isinstance(edge, dict) and str(edge.get("source") or "") == current_node:
                     target_node_id = str(edge.get("target") or "") or None
                     _log_session_node("BEFORE", session, executed_node_id=current_node, next_node_id=target_node_id, reason="waiting_input_advance")
-                    session.current_node_id = target_node_id
+                    set_current_node_id(session, target_node_id, "legacy_flow_engine_choice_target")
                     _log_session_node("AFTER", session, executed_node_id=current_node, next_node_id=target_node_id, reason="waiting_input_advance")
                     break
 
