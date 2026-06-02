@@ -180,16 +180,20 @@ function WhatsAppBusinessConsole() {
 
   useEffect(() => { (async () => { const data = await getSystemSettings(); setForm({ ...INITIAL_FORM, ...data }); await refresh(); })(); }, []);
 
-  const stats = useMemo(() => ({
-    activeProviders: providers.filter(p => p.is_active).length,
-    approvedTemplates: templates.filter(t => t.status === 'approved').length,
-    pendingTemplates: templates.filter(t => t.status === 'pending' || t.status === 'submitted').length,
-    status: providers.some(p => p.status === 'connected') ? 'Operacional' : 'Sem conexão',
-    lastSyncAt: providers
-      .map(p => p?.metadata_json?.last_sync_at || p.last_connection_check_at || p.updated_at)
-      .filter(Boolean)
-      .sort((a, b) => new Date(b as string).getTime() - new Date(a as string).getTime())[0] ?? null
-  }), [providers, templates]);
+  const stats = useMemo(() => {
+    const connectedProviders = providers.filter(p => p.is_active || p.status === 'connected' || p.status === 'active');
+
+    return {
+      activeProviders: connectedProviders.length,
+      approvedTemplates: templates.filter(t => t.status === 'approved').length,
+      pendingTemplates: templates.filter(t => t.status === 'pending' || t.status === 'submitted').length,
+      status: connectedProviders.length > 0 ? 'Operacional' : 'Sem conexão',
+      lastSyncAt: providers
+        .map(p => p?.metadata_json?.last_sync_at || p.last_connection_check_at || p.updated_at)
+        .filter(Boolean)
+        .sort((a, b) => new Date(b as string).getTime() - new Date(a as string).getTime())[0] ?? null
+    };
+  }, [providers, templates]);
 
   const validateTemplate = () => { if (!/^[a-z0-9_]+$/.test(templateForm.name)) return 'Nome do template deve ter lowercase e underscores.'; const mapped = friendlyToMeta(templateForm.friendly_body_text || templateForm.body_text || ''); if (mapped.errors.length) return `${mapped.errors[0]}\nUse uma variável da lista ou remova o marcador.`; return validateMetaVariables(mapped.bodyText); };
   const parseFriendlyError = (error: unknown, fallback: string) => {

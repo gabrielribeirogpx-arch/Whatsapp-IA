@@ -25,7 +25,7 @@ def get_providers(
     db: Session = Depends(get_db),
     tenant: Tenant = Depends(get_current_tenant),
 ):
-    print("[WHATSAPP PROVIDERS LIST]", f"tenant_id={tenant.id}")
+    print("[WHATSAPP PROVIDERS LIST QUERY]", f"tenant_id={tenant.id}")
     return whatsapp_provider_service.list_providers(db, tenant.id)
 
 
