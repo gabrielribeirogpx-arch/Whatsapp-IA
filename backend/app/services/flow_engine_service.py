@@ -2239,7 +2239,26 @@ def run_until_wait_node(
             choice_options = _choice_options_from_node(node_data, edges)
             choice_body_text = _choice_body_text(node_data)
             choice_sections = _choice_sections(choice_options)
+            choice_context = flow_session.context if flow_session and isinstance(flow_session.context, dict) else {}
+            input_selected_row_id = str(choice_context.get("selected_row_id") or choice_context.get("last_interactive_list_reply_id") or "").strip()
+            input_selected_title = str(choice_context.get("selected_title") or choice_context.get("last_interactive_list_reply_title") or "").strip()
+            input_waiting_choice = choice_context.get("waiting_choice")
+            input_choice_node_id = choice_context.get("choice_node_id")
+            logger.info(
+                "[CHOICE INPUT] incoming_text=%s selected_row_id=%s selected_title=%s waiting_choice=%s choice_node_id=%s",
+                incoming_text,
+                input_selected_row_id,
+                input_selected_title,
+                input_waiting_choice,
+                input_choice_node_id,
+            )
             selected_option = _resolve_choice_option(incoming_text or "", choice_options)
+            logger.info(
+                "[CHOICE RESOLVE RESULT] selected_option=%s selected_handle=%s selected_label=%s",
+                _payload_summary(selected_option),
+                selected_option.get("handleId") or selected_option.get("id") if selected_option else None,
+                selected_option.get("label") if selected_option else None,
+            )
             logger.info(
                 "[CHOICE LIST GENERATED] flow_id=%s session_id=%s node_id=%s node_type=%s message_type=%s interactive_type=%s options_count=%s payload_summary=%s",
                 flow.id,
@@ -2255,8 +2274,19 @@ def run_until_wait_node(
                 selected_handle = str(selected_option.get("handleId") or selected_option.get("id") or "")
                 selected_title = str(selected_option.get("label") or "")
                 option_value = selected_handle
+                available_edges = [
+                    {"source_handle": _edge_source_handle(edge), "target_node": _edge_target(edge)}
+                    for edge in edges
+                ]
+                logger.info(
+                    "[CHOICE EDGE LOOKUP] source_handle=%s available_edges=%s",
+                    selected_handle,
+                    _payload_summary(available_edges),
+                )
                 selected_edge = _find_edge_for_handle(edges, selected_handle)
                 next_node_id = _edge_target(selected_edge) if selected_edge else None
+                if selected_edge:
+                    logger.info("[CHOICE EDGE FOUND] target_node=%s", next_node_id)
                 flow_context = flow_session.context if flow_session and isinstance(flow_session.context, dict) else {}
                 correlation_id = _runtime_correlation_id(flow_context)
                 _log_choice_runtime_marker(
