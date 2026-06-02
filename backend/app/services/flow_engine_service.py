@@ -35,6 +35,7 @@ _FLOW_RUNTIME_CACHE: dict[str, dict[str, Any]] = {}
 _FLOW_RUNTIME_EVENT_GUARD: set[str] = set()
 STRONG_YES_MATCHES = {"sim", "s", "claro", "quero", "com certeza", "yes"}
 STRONG_NO_MATCHES = {"nao", "n", "negativo", "no"}
+RUNTIME_SESSION_FINAL_STATUSES = {"completed", "finalized", "expired", "finished"}
 
 
 def _raise_runtime_publish_violation(action: str) -> None:
@@ -2900,7 +2901,9 @@ def process_flow_engine(
         conversation.mode = "flow"
         conversation.current_flow = flow.id
         if runtime_session is not None:
-            runtime_session.status = "running"
+            runtime_status = str(getattr(runtime_session, "status", "") or "").strip().lower()
+            if runtime_status not in RUNTIME_SESSION_FINAL_STATUSES and getattr(runtime_session, "current_node_id", None) is not None:
+                runtime_session.status = "running"
             db.add(runtime_session)
         db.add(conversation)
         db.commit()
