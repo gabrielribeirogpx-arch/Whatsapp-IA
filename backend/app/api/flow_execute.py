@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from app.core.tenant import get_current_tenant_id
 from app.database import get_db
 from app.models.flow import Flow
-from app.models.flow_session import FlowSession
+from app.models.flow_session import FlowSession, set_current_node_id
 from app.services.flow_engine import FlowEngine
 from app.services.flow_engine_service import get_flow_for_builder
 
@@ -82,7 +82,7 @@ def execute_flow(payload: FlowExecutePayload, db: Session = Depends(get_db)) -> 
         edges = flow_data.get("edges", []) if isinstance(flow_data.get("edges"), list) else []
         for edge in edges:
             if isinstance(edge, dict) and str(edge.get("source") or "") == current_node:
-                session.current_node_id = str(edge.get("target") or "") or None
+                set_current_node_id(session, str(edge.get("target") or "") or None, "api_flow_execute_edge_target")
                 break
 
     engine = FlowEngine()
