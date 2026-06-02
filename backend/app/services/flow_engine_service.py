@@ -2830,22 +2830,6 @@ def process_flow_engine(
         session_status or None,
     )
 
-    explicit_start_trigger = start_trigger
-    if session_finalized and not explicit_start_trigger:
-        logger.info(
-            "[ENGINE FINALIZED HARD BLOCK] session_id=%s status=%s incoming_text=%s",
-            getattr(runtime_session, "id", None),
-            session_status,
-            user_message_text,
-        )
-        return None
-    if session_finalized and explicit_start_trigger:
-        logger.info(
-            "[FLOW EXPLICIT RESTART] trigger=%s old_session_id=%s",
-            normalized_text,
-            getattr(runtime_session, "id", None),
-        )
-
     session_flow_version_id = _parse_uuid(getattr(runtime_session, "flow_version_id", None)) if runtime_session else None
     runtime_graph = _get_current_flow_runtime(db=db, flow=flow, tenant_id=conversation.tenant_id, flow_version_id=session_flow_version_id)
     runtime_node_ids = [
@@ -2855,9 +2839,58 @@ def process_flow_engine(
     ]
     logger.info("[RUNTIME GRAPH NODE IDS] flow_id=%s node_ids=%s", flow.id, runtime_node_ids)
 
-    should_continue = session_active and saved_current_node_id is not None and not start_trigger
-    should_restart = session_finalized and start_trigger
+    current_graph_node = None
+    current_node_type = ""
+    if saved_current_node_id is not None:
+        current_graph_node = _get_node(db=db, node_id=saved_current_node_id, tenant_id=conversation.tenant_id, runtime_graph=runtime_graph)
+        if not current_graph_node:
+            logger.error(
+                "[FLOW SESSION_NODE_NOT_FOUND_IN_GRAPH] session_node_id=%s graph_node_ids=%s runtime_graph_source=%s session_flow_version_id=%s published_version_id=%s",
+                saved_current_node_id,
+                runtime_node_ids,
+                runtime_graph.get("source"),
+                getattr(runtime_session, "flow_version_id", None),
+                runtime_graph.get("flow_version_id"),
+            )
+            return None
+        current_node_type = _node_type_slug(current_graph_node)
+        logger.info("[FLOW SESSION NODE FOUND] node_type=%s", current_node_type)
 
+    session_running_with_current_node = bool(
+        runtime_session
+        and session_status in {"running", "active"}
+        and saved_current_node_id is not None
+    )
+    condition_wait_state = session_running_with_current_node and current_node_type == "condition"
+    effective_session_finalized = session_finalized and not session_running_with_current_node
+
+    explicit_start_trigger = start_trigger
+    if effective_session_finalized and not explicit_start_trigger:
+        logger.info(
+            "[ENGINE FINALIZED HARD BLOCK] session_id=%s status=%s incoming_text=%s",
+            getattr(runtime_session, "id", None),
+            session_status,
+            user_message_text,
+        )
+        return None
+    if effective_session_finalized and explicit_start_trigger:
+        logger.info(
+            "[FLOW EXPLICIT RESTART] trigger=%s old_session_id=%s",
+            normalized_text,
+            getattr(runtime_session, "id", None),
+        )
+
+    should_continue = (session_active and saved_current_node_id is not None and not start_trigger) or condition_wait_state
+    should_restart = effective_session_finalized and start_trigger
+
+    if condition_wait_state and (not session_active or start_trigger):
+        logger.info(
+            "[FLOW CONDITION CONTINUE PRESERVED] session_id=%s current_node_id=%s session_active=%s start_trigger=%s",
+            getattr(runtime_session, "id", None),
+            saved_current_node_id,
+            session_active,
+            start_trigger,
+        )
     if should_continue:
         logger.info(
             "[FLOW ACTIVE CONTINUE] session_id=%s current_node_id=%s",
@@ -2872,19 +2905,6 @@ def process_flow_engine(
     published_version_id = _parse_uuid(getattr(flow, "published_version_id", None))
     if path == "CONTINUE":
         logger.info("[FLOW CONTINUE PATH]")
-        if saved_current_node_id is not None:
-            current_graph_node = _get_node(db=db, node_id=saved_current_node_id, tenant_id=conversation.tenant_id, runtime_graph=runtime_graph)
-            if not current_graph_node:
-                logger.error(
-                    "[FLOW SESSION_NODE_NOT_FOUND_IN_GRAPH] session_node_id=%s graph_node_ids=%s runtime_graph_source=%s session_flow_version_id=%s published_version_id=%s",
-                    saved_current_node_id,
-                    runtime_node_ids,
-                    runtime_graph.get("source"),
-                    getattr(runtime_session, "flow_version_id", None),
-                    runtime_graph.get("flow_version_id"),
-                )
-                return None
-            logger.info("[FLOW SESSION NODE FOUND] node_type=%s", _node_type_slug(current_graph_node))
         if runtime_session and published_version_id and _parse_uuid(getattr(runtime_session, "flow_version_id", None)) != published_version_id:
             runtime_session.flow_version_id = published_version_id
             db.add(runtime_session)
@@ -2911,6 +2931,26 @@ def process_flow_engine(
 
     logger.info("[FLOW START PATH]")
     if runtime_session is not None:
+        abandon_reason = "start_path_existing_runtime_session"
+        abandon_condition = (
+            f"should_continue={should_continue} "
+            f"session_active={session_active} "
+            f"session_finalized={session_finalized} "
+            f"effective_session_finalized={effective_session_finalized} "
+            f"start_trigger={start_trigger} "
+            f"saved_current_node_id={saved_current_node_id} "
+            f"current_node_type={current_node_type or None}"
+        )
+        logger.warning(
+            "[ABANDON DECISION] session_id=%s current_node_id=%s flow_id=%s message_text=%s reason=%s condition=%s code_path=%s",
+            getattr(runtime_session, "id", None),
+            saved_current_node_id,
+            getattr(flow, "id", None),
+            user_message_text,
+            abandon_reason,
+            abandon_condition,
+            "process_flow_engine:START:end_existing_runtime_session",
+        )
         session_service.end_session(runtime_session, status="abandoned")
 
     start_node = _get_start_node(
