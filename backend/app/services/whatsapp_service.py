@@ -5,6 +5,7 @@ from typing import Any
 import requests
 
 from app.services.whatsapp_credentials_service import get_tenant_whatsapp_credentials
+from app.services.message_origin_trace import log_message_origin_trace
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +26,10 @@ def send_message(token: str, phone_number_id: str, to: str, message: str) -> dic
         raise WhatsAppConfigError("Telefone de destino inválido")
 
     url = f"https://graph.facebook.com/v19.0/{phone_number_id}/messages"
+    log_message_origin_trace(
+        executor="whatsapp_service.send_message",
+        message=message,
+    )
     payload = {
         "messaging_product": "whatsapp",
         "to": normalized_phone,
@@ -97,6 +102,11 @@ def send_whatsapp_interactive_buttons(
     if not normalized_phone:
         raise WhatsAppConfigError("phone inválido para envio")
 
+    log_message_origin_trace(
+        executor="whatsapp_service.send_whatsapp_interactive_buttons",
+        message=body_text,
+        node_type="interactive_buttons",
+    )
     # Limita a 3 botões (limite da Meta) e title a 20 chars
     safe_buttons = [
         {
@@ -161,6 +171,18 @@ def _post_cloud_message(*, phone: str, token: str, phone_number_id: str, payload
     if not normalized_phone:
         raise WhatsAppConfigError("Telefone de destino inválido")
 
+    message_preview = ""
+    if payload.get("type") == "image":
+        message_preview = (payload.get("image") or {}).get("caption") or (payload.get("image") or {}).get("link") or ""
+    elif payload.get("type") == "document":
+        message_preview = (payload.get("document") or {}).get("caption") or (payload.get("document") or {}).get("filename") or (payload.get("document") or {}).get("link") or ""
+    elif payload.get("type") == "interactive":
+        message_preview = ((payload.get("interactive") or {}).get("body") or {}).get("text") or ""
+    log_message_origin_trace(
+        executor="whatsapp_service._post_cloud_message",
+        node_type=payload.get("type"),
+        message=message_preview,
+    )
     url = f"https://graph.facebook.com/v19.0/{phone_number_id}/messages"
     payload = {**payload, "messaging_product": "whatsapp", "to": normalized_phone}
     try:

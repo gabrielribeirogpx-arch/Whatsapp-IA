@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.services.flow_engine_service import get_flow_for_builder
 from app.services.flow_session_service import FlowSessionService
+from app.services.message_origin_trace import log_message_origin_trace
 
 
 logger = logging.getLogger(__name__)
@@ -32,6 +33,14 @@ def _stack_trace() -> str:
 
 
 def _log_new_engine_node_send_trace(*, executor: str, text: Any, context: dict[str, Any], node_id: Any, node_type: str, message_type: str) -> None:
+    log_message_origin_trace(
+        executor=executor,
+        flow_id=context.get("flow_id"),
+        node_id=node_id,
+        node_type=node_type,
+        message=text,
+        context=context,
+    )
     logger.warning(
         "[FLOW NODE SEND TRACE] engine=%s executor=%s source=%s flow_id=%s flow_version_id=%s session_id=%s node_id=%s node_type=%s message_type=%s text=%s stack=%s",
         "new",

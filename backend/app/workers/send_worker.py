@@ -20,6 +20,7 @@ from app.models import Tenant
 from app.models.conversation import Conversation
 from app.models.message import Message
 from app.services.idempotency_service import register_processed_message
+from app.services.message_origin_trace import log_message_origin_trace
 from app.services.whatsapp_message_service import (
     mark_provider_auth_error,
     resolve_active_meta_provider_credentials,
@@ -453,6 +454,14 @@ def send_whatsapp_message(*, message_data: dict[str, Any]) -> None:
     is_flow_message = bool(flow_id or flow_version_id or session_id or node_id or sequence_number_raw is not None)
     payload_provider_id = str(message_data.get("provider_id") or "unresolved")
     message_type = "interactive" if interactive_type or (isinstance(buttons, list) and buttons) else "text"
+    log_message_origin_trace(
+        executor=flow_executor or flow_send_source or "send_worker.send_whatsapp_message",
+        flow_id=flow_id,
+        node_id=node_id,
+        node_type=node_type,
+        message=text,
+        context=message_data,
+    )
     logger.info(
         "[SEND WORKER MESSAGE TYPE] flow_id=%s session_id=%s node_id=%s node_type=%s engine=%s executor=%s source=%s message_type=%s options_count=%s payload_json=%s",
         flow_id,
@@ -659,6 +668,8 @@ def send_whatsapp_message(*, message_data: dict[str, Any]) -> None:
             "node_id": node_id,
             "node_type": node_type,
             "sequence_number": sequence_number,
+            "flow_executor": flow_executor,
+            "flow_send_source": flow_send_source,
         }
         if is_flow_message:
             logger.info(
@@ -705,6 +716,14 @@ def send_whatsapp_message(*, message_data: dict[str, Any]) -> None:
             text,
         )
 
+        log_message_origin_trace(
+            executor=flow_executor or flow_send_source or "send_worker.before_meta",
+            flow_id=flow_id,
+            node_id=node_id,
+            node_type=node_type,
+            message=text,
+            context=context,
+        )
         meta_response: dict[str, Any] | None = None
         try:
             if interactive_type == "list":

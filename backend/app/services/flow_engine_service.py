@@ -27,6 +27,7 @@ from app.services.flow_session_service import FlowSessionService
 from app.core.redis_client import get_redis_client
 from app.services.delay_queue_service import DELAY_ZSET_KEY
 from app.services.whatsapp_service import send_whatsapp_document_cloud, send_whatsapp_image_cloud, send_whatsapp_list_cloud
+from app.services.message_origin_trace import log_message_origin_trace
 
 DEFAULT_FLOW_NAME = "default_visual"
 MAX_AUTO_STEPS = 10
@@ -1886,6 +1887,23 @@ def _flow_send_trace(
     message_type: str = "text",
     source: str | None = None,
 ) -> None:
+    log_message_origin_trace(
+        executor=executor,
+        flow_id=flow_id,
+        node_id=node_id,
+        node_type=node_type,
+        message=text,
+        context={
+            "flow_executor": executor,
+            "flow_send_source": source or executor,
+            "flow_id": flow_id,
+            "node_id": node_id,
+            "node_type": node_type,
+            "flow_version_id": flow_version_id,
+            "session_id": session_id,
+            "message_type": message_type,
+        },
+    )
     logger.warning(
         "[FLOW NODE SEND TRACE] engine=%s executor=%s source=%s flow_id=%s flow_version_id=%s session_id=%s node_id=%s node_type=%s message_type=%s text=%s stack=%s",
         engine,
