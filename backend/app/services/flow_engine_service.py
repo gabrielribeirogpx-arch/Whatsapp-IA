@@ -1840,6 +1840,40 @@ def _next_flow_sequence(tenant_id: uuid.UUID, phone: str) -> int | None:
         return None
 
 
+
+
+def _current_stack_trace() -> str:
+    return "".join(traceback.format_stack())
+
+
+def _flow_send_trace(
+    *,
+    engine: str,
+    executor: str,
+    text: Any,
+    flow_id: Any = None,
+    flow_version_id: Any = None,
+    session_id: Any = None,
+    node_id: Any = None,
+    node_type: Any = None,
+    message_type: str = "text",
+    source: str | None = None,
+) -> None:
+    logger.warning(
+        "[FLOW NODE SEND TRACE] engine=%s executor=%s source=%s flow_id=%s flow_version_id=%s session_id=%s node_id=%s node_type=%s message_type=%s text=%s stack=%s",
+        engine,
+        executor,
+        source or executor,
+        flow_id,
+        flow_version_id,
+        session_id,
+        node_id,
+        node_type,
+        message_type,
+        _text_preview(text, limit=240),
+        _current_stack_trace(),
+    )
+
 def _send_flow_whatsapp_message(tenant: Tenant, phone: str, text: str, **flow_context: Any) -> str | None:
     content = (text or "").strip()
     if not content:
@@ -1853,6 +1887,18 @@ def _send_flow_whatsapp_message(tenant: Tenant, phone: str, text: str, **flow_co
 
     print(f"[FLOW SEND] Enviando: {content}")
     logger.info("[FLOW SEND] Enfileirando mensagem: %s", content)
+    _flow_send_trace(
+        engine=str(flow_context.get("flow_engine") or "legacy"),
+        executor=str(flow_context.get("flow_executor") or "_send_flow_whatsapp_message"),
+        source=str(flow_context.get("flow_send_source") or "_send_flow_whatsapp_message"),
+        text=content,
+        flow_id=flow_context.get("flow_id"),
+        flow_version_id=flow_context.get("flow_version_id"),
+        session_id=flow_context.get("session_id"),
+        node_id=flow_context.get("node_id"),
+        node_type=flow_context.get("node_type"),
+        message_type="text",
+    )
     try:
         payload: dict[str, Any] = {"tenant_id": tenant.id, "phone": phone, "text": content}
         payload.update({
@@ -1862,6 +1908,9 @@ def _send_flow_whatsapp_message(tenant: Tenant, phone: str, text: str, **flow_co
             "node_id": str(flow_context.get("node_id")) if flow_context.get("node_id") else None,
             "node_type": str(flow_context.get("node_type")) if flow_context.get("node_type") else None,
             "sequence_number": flow_context.get("sequence_number") or _next_flow_sequence(tenant.id, phone),
+            "flow_engine": str(flow_context.get("flow_engine") or "legacy"),
+            "flow_executor": str(flow_context.get("flow_executor") or "_send_flow_whatsapp_message"),
+            "flow_send_source": str(flow_context.get("flow_send_source") or "_send_flow_whatsapp_message"),
         })
         job_id = enqueue_send_message(payload)
         print(f"[FLOW SEND RESULT] job_id={job_id}")
@@ -1885,6 +1934,9 @@ def enqueue_flow_send_with_tracking(
     channel: str = "whatsapp",
     buttons: list[dict[str, Any]] | None = None,
     template_or_node_text: str | None = None,
+    flow_engine: str = "new",
+    flow_executor: str = "enqueue_flow_send_with_tracking",
+    flow_send_source: str = "enqueue_flow_send_with_tracking",
 ) -> str | None:
     content = (text or "").strip()
     if not content or not phone:
@@ -1895,7 +1947,19 @@ def enqueue_flow_send_with_tracking(
     hash_source = (template_or_node_text or content).strip()
     text_hash = hashlib.sha256(hash_source.encode("utf-8")).hexdigest()[:16] if hash_source else None
 
-    payload: dict[str, Any] = {"tenant_id": tenant_id, "phone": phone, "text": content, "flow_id": str(flow_id) if flow_id else None, "flow_version_id": str(flow_version_id) if flow_version_id else None, "session_id": str(conversation_id) if conversation_id else None, "node_id": str(node_id) if node_id else None, "sequence_number": _next_flow_sequence(tenant_id, phone)}
+    _flow_send_trace(
+        engine=flow_engine,
+        executor=flow_executor,
+        source=flow_send_source,
+        text=content,
+        flow_id=flow_id,
+        flow_version_id=flow_version_id,
+        session_id=conversation_id,
+        node_id=node_id,
+        node_type="buttons" if has_buttons else "message",
+        message_type=message_kind,
+    )
+    payload: dict[str, Any] = {"tenant_id": tenant_id, "phone": phone, "text": content, "flow_id": str(flow_id) if flow_id else None, "flow_version_id": str(flow_version_id) if flow_version_id else None, "session_id": str(conversation_id) if conversation_id else None, "node_id": str(node_id) if node_id else None, "sequence_number": _next_flow_sequence(tenant_id, phone), "flow_engine": flow_engine, "flow_executor": flow_executor, "flow_send_source": flow_send_source}
     if has_buttons:
         payload["buttons"] = buttons
 
@@ -1924,8 +1988,20 @@ def enqueue_flow_send_with_tracking(
 def _send_flow_interactive_buttons(tenant: Tenant, phone: str, text: str, buttons: list[dict], **flow_context: Any) -> None:
     """Enfileira envio de botoes; worker aplica fallback para texto simples se falhar."""
     print(f"[FLOW BUTTON SEND] Tentando enviar botoes: {[b.get('label') for b in buttons]}")
+    _flow_send_trace(
+        engine=str(flow_context.get("flow_engine") or "legacy"),
+        executor=str(flow_context.get("flow_executor") or "_send_flow_interactive_buttons"),
+        source=str(flow_context.get("flow_send_source") or "_send_flow_interactive_buttons"),
+        text=text,
+        flow_id=flow_context.get("flow_id"),
+        flow_version_id=flow_context.get("flow_version_id"),
+        session_id=flow_context.get("session_id"),
+        node_id=flow_context.get("node_id"),
+        node_type=flow_context.get("node_type") or "buttons",
+        message_type="interactive_buttons",
+    )
     try:
-        payload = {"tenant_id": tenant.id, "phone": phone, "text": text, "buttons": buttons, "flow_id": str(flow_context.get("flow_id")) if flow_context.get("flow_id") else None, "flow_version_id": str(flow_context.get("flow_version_id")) if flow_context.get("flow_version_id") else None, "session_id": str(flow_context.get("session_id")) if flow_context.get("session_id") else None, "node_id": str(flow_context.get("node_id")) if flow_context.get("node_id") else None, "node_type": str(flow_context.get("node_type") or "buttons"), "sequence_number": flow_context.get("sequence_number") or _next_flow_sequence(tenant.id, phone)}
+        payload = {"tenant_id": tenant.id, "phone": phone, "text": text, "buttons": buttons, "flow_id": str(flow_context.get("flow_id")) if flow_context.get("flow_id") else None, "flow_version_id": str(flow_context.get("flow_version_id")) if flow_context.get("flow_version_id") else None, "session_id": str(flow_context.get("session_id")) if flow_context.get("session_id") else None, "node_id": str(flow_context.get("node_id")) if flow_context.get("node_id") else None, "node_type": str(flow_context.get("node_type") or "buttons"), "sequence_number": flow_context.get("sequence_number") or _next_flow_sequence(tenant.id, phone), "flow_engine": str(flow_context.get("flow_engine") or "legacy"), "flow_executor": str(flow_context.get("flow_executor") or "_send_flow_interactive_buttons"), "flow_send_source": str(flow_context.get("flow_send_source") or "_send_flow_interactive_buttons")}
         logger.info(
             "[CHOICE PAYLOAD GENERATED] flow_id=%s session_id=%s node_id=%s node_type=%s message_type=%s options_count=%s payload_json=%s",
             payload.get("flow_id"),
@@ -1940,11 +2016,23 @@ def _send_flow_interactive_buttons(tenant: Tenant, phone: str, text: str, button
         print(f"[FLOW BUTTON SEND RESULT] job_id={job_id}")
     except Exception as error:
         print(f"[FLOW BUTTON ERROR] {error} — usando fallback texto em fila")
-        _send_flow_whatsapp_message(tenant=tenant, phone=phone, text=text)
+        _send_flow_whatsapp_message(tenant=tenant, phone=phone, text=text, **flow_context)
 
 
 
 def _send_flow_interactive_list(tenant: Tenant, phone: str, text: str, sections: list[dict], options: list[dict], **flow_context: Any) -> str | None:
+    _flow_send_trace(
+        engine=str(flow_context.get("flow_engine") or "legacy"),
+        executor=str(flow_context.get("flow_executor") or "_send_flow_interactive_list"),
+        source=str(flow_context.get("flow_send_source") or "_send_flow_interactive_list"),
+        text=text,
+        flow_id=flow_context.get("flow_id"),
+        flow_version_id=flow_context.get("flow_version_id"),
+        session_id=flow_context.get("session_id"),
+        node_id=flow_context.get("node_id"),
+        node_type=flow_context.get("node_type") or "choice",
+        message_type="interactive_list",
+    )
     try:
         payload = {
             "tenant_id": tenant.id,
@@ -1959,6 +2047,9 @@ def _send_flow_interactive_list(tenant: Tenant, phone: str, text: str, sections:
             "node_id": str(flow_context.get("node_id")) if flow_context.get("node_id") else None,
             "node_type": str(flow_context.get("node_type") or "choice"),
             "sequence_number": flow_context.get("sequence_number") or _next_flow_sequence(tenant.id, phone),
+            "flow_engine": str(flow_context.get("flow_engine") or "legacy"),
+            "flow_executor": str(flow_context.get("flow_executor") or "_send_flow_interactive_list"),
+            "flow_send_source": str(flow_context.get("flow_send_source") or "_send_flow_interactive_list"),
         }
         logger.info(
             "[CHOICE LIST ENQUEUED] flow_id=%s session_id=%s node_id=%s node_type=%s message_type=%s interactive_type=%s options_count=%s payload_summary=%s",
@@ -2381,6 +2472,9 @@ def run_until_wait_node(
                     session_id=getattr(flow_session, "id", None) or session.id,
                     node_id=current_node_uuid,
                     node_type=node_type,
+                    flow_engine="legacy",
+                    flow_executor="run_until_wait_node",
+                    flow_send_source="run_until_wait_node:choice",
                 )
             _log_session_node_transition(
                 "BEFORE",
@@ -2727,6 +2821,9 @@ def run_until_wait_node(
                             session_id=getattr(flow_session, "id", None),
                             node_id=current_node_uuid,
                             node_type=node_type,
+                            flow_engine="legacy",
+                            flow_executor="run_until_wait_node",
+                            flow_send_source="run_until_wait_node:message",
                         )
                         logger.info("[MANYCHAT MESSAGE SENT] node_id=%s", _node_get(node, "id"))
             next_edge = _pick_default_edge(edges)
@@ -3133,7 +3230,19 @@ def _send_start_message_on_session_restart(
 
     if node_type == "message":
         text = _resolve_node_text(node_data)
-        job_id = _send_flow_whatsapp_message(tenant=tenant, phone=conversation.phone_number, text=text)
+        job_id = _send_flow_whatsapp_message(
+            tenant=tenant,
+            phone=conversation.phone_number,
+            text=text,
+            flow_id=flow.id,
+            flow_version_id=getattr(runtime_session, "flow_version_id", None),
+            session_id=getattr(runtime_session, "id", None),
+            node_id=start_node_id,
+            node_type=node_type,
+            flow_engine="legacy",
+            flow_executor="_send_start_message_on_session_restart",
+            flow_send_source="_send_start_message_on_session_restart:start_message",
+        )
         if not job_id:
             logger.error("[FLOW START MESSAGE NOT SENT] node_id=%s", start_node_id)
             runtime_session = session_service.save_runtime_session(

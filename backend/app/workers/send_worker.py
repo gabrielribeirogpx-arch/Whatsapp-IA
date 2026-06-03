@@ -445,17 +445,23 @@ def send_whatsapp_message(*, message_data: dict[str, Any]) -> None:
     session_id = message_data.get("session_id")
     node_id = message_data.get("node_id")
     node_type = message_data.get("node_type")
+    flow_engine = message_data.get("flow_engine")
+    flow_executor = message_data.get("flow_executor")
+    flow_send_source = message_data.get("flow_send_source")
     flow_session_id = message_data.get("session_id")
     conversation_id = str(message_data.get("conversation_id") or "") or None
     is_flow_message = bool(flow_id or flow_version_id or session_id or node_id or sequence_number_raw is not None)
     payload_provider_id = str(message_data.get("provider_id") or "unresolved")
     message_type = "interactive" if interactive_type or (isinstance(buttons, list) and buttons) else "text"
     logger.info(
-        "[SEND WORKER MESSAGE TYPE] flow_id=%s session_id=%s node_id=%s node_type=%s message_type=%s options_count=%s payload_json=%s",
+        "[SEND WORKER MESSAGE TYPE] flow_id=%s session_id=%s node_id=%s node_type=%s engine=%s executor=%s source=%s message_type=%s options_count=%s payload_json=%s",
         flow_id,
         session_id,
         node_id,
         node_type,
+        flow_engine,
+        flow_executor,
+        flow_send_source,
         message_type,
         len(options or buttons or []) if isinstance(options or buttons, list) else 0,
         json.dumps(message_data, default=str, ensure_ascii=False, sort_keys=True),
@@ -486,11 +492,14 @@ def send_whatsapp_message(*, message_data: dict[str, Any]) -> None:
         text,
     )
     logger.info(
-        "[FLOW QUEUE DEQUEUE] job_id=%s flow_id=%s session_id=%s node_id=%s sequence_number=%s message_text=%s worker_commit=%s worker_file=%s queue_name=%s",
+        "[FLOW QUEUE DEQUEUE] job_id=%s flow_id=%s session_id=%s node_id=%s engine=%s executor=%s source=%s sequence_number=%s message_text=%s worker_commit=%s worker_file=%s queue_name=%s",
         job_id,
         flow_id,
         session_id,
         node_id,
+        flow_engine or "unknown",
+        flow_executor or "unknown",
+        flow_send_source or "unknown",
         sequence_number_raw,
         text,
         commit,

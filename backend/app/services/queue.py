@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import subprocess
+import traceback
 import uuid
 from typing import Any
 
@@ -184,6 +185,9 @@ def enqueue_send_message(message_data: dict[str, Any]) -> str | None:
         "sequence_number",
         "message_id",
         "node_type",
+        "flow_engine",
+        "flow_executor",
+        "flow_send_source",
     )
     payload = {
         "tenant_id": str(tenant_id),
@@ -202,6 +206,21 @@ def enqueue_send_message(message_data: dict[str, Any]) -> str | None:
             payload[key] = str(value)
 
     message_type = "interactive" if payload.get("interactive_type") or (isinstance(payload.get("buttons"), list) and payload.get("buttons")) else "text"
+    if payload.get("flow_id") or payload.get("node_id") or payload.get("flow_engine"):
+        logger.warning(
+            "[FLOW SEND ENQUEUE TRACE] engine=%s executor=%s source=%s flow_id=%s flow_version_id=%s session_id=%s node_id=%s node_type=%s message_type=%s text=%s stack=%s",
+            payload.get("flow_engine") or "unknown",
+            payload.get("flow_executor") or "unknown",
+            payload.get("flow_send_source") or "enqueue_send_message",
+            payload.get("flow_id"),
+            payload.get("flow_version_id"),
+            payload.get("session_id"),
+            payload.get("node_id"),
+            payload.get("node_type"),
+            message_type,
+            content,
+            "".join(traceback.format_stack()),
+        )
     logger.info(
         "[SEND WORKER MESSAGE TYPE] flow_id=%s session_id=%s node_id=%s node_type=%s message_type=%s options_count=%s payload_json=%s",
         payload.get("flow_id"),
