@@ -446,6 +446,9 @@ type FlowBuilderClientProps = {
 
 type FlowSaveStatus = 'idle' | 'saving' | 'success' | 'error';
 
+type PublishedSnapshot = { version_id?: string | null; version?: number | null; nodes?: unknown[]; edges?: unknown[]; nodes_count?: number; edges_count?: number; graph_hash?: string | null };
+type RuntimeInspector = { flow_version_id?: string | null; session_id?: string | null; status?: string | null; current_node_id?: string | null; previous_node_id?: string | null; next_node_id?: string | null };
+
 const UNSAVED_CHANGES_MESSAGE = 'Você possui alterações não salvas. Deseja sair mesmo assim?';
 const AUTOSAVE_DELAY_MS = 5000;
 
@@ -453,7 +456,6 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
   const router = useRouter();
   const searchParams = useSearchParams();
   const flowIdFromUrl = searchParams.get('flow_id') || searchParams.get('flowId') || _initialFlowId || '';
-  const showDebugFlowActionsFlag = process.env.NEXT_PUBLIC_SHOW_DEBUG_FLOW_ACTIONS === 'true';
   const [flows, setFlows] = useState<Array<{ id: string; name?: string | null; created_at?: string | null; is_active?: boolean; status?: string | null; is_published?: boolean | null }>>([]);
   const normalizedFlows = useMemo(
     () =>
@@ -507,7 +509,9 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
   const [highlightedNodeId, setHighlightedNodeId] = useState<string | null>(null);
   const [operationError, setOperationError] = useState<string | null>(null);
   const [toastMessage, setToastMessage] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
-  const [isForceRepublishing, setIsForceRepublishing] = useState(false);
+  const [publishedSnapshot, setPublishedSnapshot] = useState<PublishedSnapshot | null>(null);
+  const [runtimeInspector, setRuntimeInspector] = useState<RuntimeInspector | null>(null);
+  const [isSnapshotPanelOpen, setIsSnapshotPanelOpen] = useState(false);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const flowDirty = hasUnsavedChanges;
   const setFlowDirty = setHasUnsavedChanges;
@@ -547,20 +551,6 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
     selectedNodeIdRef.current = selectedNodeId;
   }, [selectedNodeId]);
 
-  const canSeeDebugFlowActions = useMemo(() => {
-    if (showDebugFlowActionsFlag) return true;
-    if (typeof window === 'undefined') return false;
-
-    try {
-      const tenantRaw = window.localStorage.getItem('tenant');
-      const parsed = tenantRaw ? JSON.parse(tenantRaw) as Record<string, unknown> : {};
-      const role = String(parsed?.role || parsed?.user_role || parsed?.profile || '').toLowerCase();
-      const isAdminLike = role.includes('admin') || role.includes('dev');
-      return isAdminLike;
-    } catch {
-      return false;
-    }
-  }, [showDebugFlowActionsFlag]);
   const getFlowBadge = useCallback((flow: { is_active?: boolean }) => (
     flow.is_active
       ? { label: 'Ativo', style: { background: '#DCFCE7', color: '#166534' } }
@@ -1685,23 +1675,29 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
     }
   }, [selectedFlowId]);
 
-  const handleForceRepublish = useCallback(async () => {
-    if (!selectedFlowId || isForceRepublishing) return;
-
-    setIsForceRepublishing(true);
+  const loadRuntimeObservability = useCallback(async () => {
+    if (!selectedFlowId) return;
     try {
-      const response = await apiFetch(`/api/flows/${selectedFlowId}/force-republish-current`, { method: 'POST' });
-      await parseApiResponse(response);
-      console.log('[FORCE REPUBLISH]', { flowId: selectedFlowId, status: 200 });
-      toast.success('Flow republicado com sucesso');
-      await loadFlow(selectedFlowId);
-      console.log('[PUBLISHED VERSION UPDATED]', { flowId: selectedFlowId });
-    } catch (error) {
-      console.error('[FORCE REPUBLISH] erro ao republicar flow', error);
-    } finally {
-      setIsForceRepublishing(false);
+      const [snapshotResponse, inspectorResponse] = await Promise.all([
+        apiFetch(`/api/flows/${selectedFlowId}/published-snapshot`),
+        apiFetch(`/api/flows/${selectedFlowId}/runtime-inspector`),
+      ]);
+      if (snapshotResponse.ok) setPublishedSnapshot(await parseApiResponse(snapshotResponse));
+      if (inspectorResponse.ok) setRuntimeInspector(await parseApiResponse(inspectorResponse));
+    } catch {
+      setPublishedSnapshot(null);
+      setRuntimeInspector(null);
     }
-  }, [isForceRepublishing, loadFlow, selectedFlowId, toast]);
+  }, [selectedFlowId]);
+
+  useEffect(() => {
+    void loadRuntimeObservability();
+    if (!selectedFlowId) return undefined;
+    const intervalId = window.setInterval(() => {
+      void loadRuntimeObservability();
+    }, 5000);
+    return () => window.clearInterval(intervalId);
+  }, [loadRuntimeObservability, selectedFlowId]);
 
   const handleActivateFlow = useCallback(async () => {
     if (!selectedFlowId) return;
@@ -1746,12 +1742,13 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
       setActiveFlowId(selectedFlowId);
       setFlows((prev) => prev.map((flow) => ({ ...flow, is_active: flow.id === selectedFlowId })));
       await loadFlow(selectedFlowId);
+      await loadRuntimeObservability();
     } catch (error) {
       console.error('[PUBLISH ERROR]', { flowId: selectedFlowId, error });
       const message = error instanceof Error && error.message ? error.message : 'Não foi possível publicar o fluxo.';
       toast.error(`Falha ao publicar: ${message}`);
     }
-  }, [flowDirty, getCurrentSerializedFlow, handleSaveFlow, loadFlow, rfInstance, selectedFlowId, toast, validationErrors.length]);
+  }, [flowDirty, getCurrentSerializedFlow, handleSaveFlow, loadFlow, loadRuntimeObservability, rfInstance, selectedFlowId, toast, validationErrors.length]);
 
   const handleDeactivateFlow = useCallback(async () => {
     const response = await apiFetch('/api/flows/deactivate', {
@@ -2122,6 +2119,17 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
                   <History size={14} />
                   Histórico
                 </button>
+                <button
+                  type="button"
+                  className="flow-top-btn flow-top-btn-neutral"
+                  onClick={() => {
+                    setIsSnapshotPanelOpen((open) => !open);
+                    void loadRuntimeObservability();
+                  }}
+                  disabled={!selectedFlowId}
+                >
+                  Snapshot
+                </button>
                 {!isSimulatorOpen && (
                   <button
                     type="button"
@@ -2157,23 +2165,25 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
                   Ativar
                 </button>
               </div>
-              {canSeeDebugFlowActions && (
-                <div className="flow-toolbar-group flow-toolbar-group-debug">
-                  <button
-                    type="button"
-                    className="flow-top-btn flow-top-btn-neutral"
-                    onClick={() => {
-                      void handleForceRepublish();
-                    }}
-                    disabled={!selectedFlowId || isForceRepublishing}
-                  >
-                    {isForceRepublishing ? 'Republicando...' : 'Force Republish'}
-                  </button>
-                </div>
-              )}
             </div>
           </div>
         </div>
+        {isSnapshotPanelOpen && (
+          <div style={{ margin: '8px 0', padding: 12, border: '1px solid #dbeafe', borderRadius: 10, background: '#eff6ff', maxWidth: 760, fontSize: 12 }}>
+            <strong>Snapshot publicado</strong>
+            <div>Versão publicada atual: {publishedSnapshot?.version_id || '—'}</div>
+            <div>Nodes publicados: {publishedSnapshot?.nodes_count ?? publishedSnapshot?.nodes?.length ?? 0}</div>
+            <div>Edges publicadas: {publishedSnapshot?.edges_count ?? publishedSnapshot?.edges?.length ?? 0}</div>
+            <div>Hash: {publishedSnapshot?.graph_hash || '—'}</div>
+            <strong style={{ display: 'block', marginTop: 8 }}>Runtime Inspector</strong>
+            <div>Flow Version ID: {runtimeInspector?.flow_version_id || '—'}</div>
+            <div>Current Node: {runtimeInspector?.current_node_id || '—'}</div>
+            <div>Previous Node: {runtimeInspector?.previous_node_id || '—'}</div>
+            <div>Next Node: {runtimeInspector?.next_node_id || '—'}</div>
+            <div>Session ID: {runtimeInspector?.session_id || '—'}</div>
+            <div>Status: {runtimeInspector?.status || '—'}</div>
+          </div>
+        )}
         {validationErrors.length > 0 && (
           <div style={{ margin: '8px 0', padding: 10, border: '1px solid #fecaca', borderRadius: 8, background: '#fff1f2', maxWidth: 420 }}>
             <strong style={{ fontSize: 12 }}>Problemas do fluxo</strong>
