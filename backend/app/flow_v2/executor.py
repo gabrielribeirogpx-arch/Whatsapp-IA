@@ -4,6 +4,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
+from app.flow_v2.actions import RuntimeAction, SendMessageAction
 from app.flow_v2.contracts import FlowV2EventType, FlowV2SessionStatus, RuntimeInput, RuntimeOutput
 from app.flow_v2.event_store import FlowV2EventStore
 from app.flow_v2.node_executors import NodeExecutorRegistry
@@ -60,19 +61,20 @@ class FlowV2Executor:
             input_message_id=runtime_input.input_message_id,
         )
 
-        effects = self._execute_current_node(db, snapshot=snapshot, session=session, runtime_input=runtime_input)
+        actions = self._execute_current_node(db, snapshot=snapshot, session=session, runtime_input=runtime_input)
         db.flush()
         return RuntimeOutput(
             session_id=session.id,
             status=FlowV2SessionStatus(session.status),
             current_node_id=session.current_node_id,
-            effects=tuple(effects),
+            effects=tuple(self._legacy_effect(action) for action in actions if self._legacy_effect(action) is not None),
+            actions=tuple(actions),
             emitted_event_count=session.last_event_index - emitted_before,
         )
 
     def _execute_current_node(
         self, db: Session, *, snapshot: FlowV2Snapshot, session: Any, runtime_input: RuntimeInput
-    ) -> list[dict[str, Any]]:
+    ) -> list[RuntimeAction]:
         if not session.current_node_id:
             raise FlowV2ExecutionError("Session has no current node")
         node = snapshot.node_by_id.get(session.current_node_id)
@@ -126,11 +128,11 @@ class FlowV2Executor:
         if result.status == "scheduled":
             self.event_store.append(db, session=session, event_type=FlowV2EventType.SESSION_WAITING, node_id=result.next_node_id)
             self.session_manager.move_to(db, session=session, node_id=result.next_node_id, status=FlowV2SessionStatus.WAITING)
-            return list(result.effects)
+            return list(result.actions)
         if result.status == "wait":
             self.event_store.append(db, session=session, event_type=FlowV2EventType.SESSION_WAITING, node_id=node_id)
             self.session_manager.move_to(db, session=session, node_id=node_id, status=FlowV2SessionStatus.WAITING)
-            return list(result.effects)
+            return list(result.actions)
 
         self.event_store.append(
             db,
@@ -141,7 +143,13 @@ class FlowV2Executor:
         )
         self.event_store.append(db, session=session, event_type=FlowV2EventType.SESSION_WAITING, node_id=result.next_node_id)
         self.session_manager.move_to(db, session=session, node_id=result.next_node_id, status=FlowV2SessionStatus.WAITING)
-        return list(result.effects)
+        return list(result.actions)
+
+    @staticmethod
+    def _legacy_effect(action: RuntimeAction) -> dict[str, Any] | None:
+        if isinstance(action, SendMessageAction):
+            return {"type": "send_message", "text": action.text}
+        return None
 
     @staticmethod
     def _node_data(node: dict[str, Any]) -> dict[str, Any]:
