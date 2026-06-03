@@ -73,3 +73,18 @@ class FlowV2Event(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow, index=True)
 
     session: Mapped[FlowV2Session] = relationship("FlowV2Session", back_populates="events")
+
+
+class FlowV2ScheduledJob(Base):
+    """Scheduled resume point for Runtime V2 delay nodes."""
+
+    __tablename__ = "flow_v2_scheduled_jobs"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False, index=True)
+    session_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("flow_v2_sessions.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    resume_node_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    run_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow, index=True)

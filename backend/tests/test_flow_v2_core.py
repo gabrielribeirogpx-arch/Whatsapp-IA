@@ -2,12 +2,21 @@ from __future__ import annotations
 
 import uuid
 
+import pytest
+
 from app.flow_v2.contracts import FlowV2EventType, FlowV2SessionStatus, RuntimeInput
 from app.flow_v2.executor import FlowV2Executor
 from app.flow_v2.snapshot import FlowV2Snapshot, canonical_hash
+from app.flow_v2.transition_resolver import FlowV2TransitionError
 
 
 class _FakeDB:
+    def __init__(self):
+        self.added = []
+
+    def add(self, item):
+        self.added.append(item)
+
     def flush(self):
         pass
 
@@ -69,6 +78,51 @@ class _FakeSessionManager:
         session.status = str(status)
 
 
+def _snapshot(raw_snapshot, tenant_id=None, flow_version_id=None):
+    tenant_id = tenant_id or uuid.uuid4()
+    flow_version_id = flow_version_id or uuid.uuid4()
+    return FlowV2Snapshot(
+        flow_version_id=flow_version_id,
+        tenant_id=tenant_id,
+        hash=canonical_hash(raw_snapshot),
+        nodes=tuple(raw_snapshot["nodes"]),
+        edges=tuple(raw_snapshot["edges"]),
+        start_node_id=raw_snapshot["start_node_id"],
+    )
+
+
+def _executor(raw_snapshot):
+    snapshot = _snapshot(raw_snapshot)
+    event_store = _FakeEventStore()
+    session = _FakeSession(snapshot.tenant_id, snapshot.flow_version_id)
+    return (
+        FlowV2Executor(
+            snapshot_repository=_FakeSnapshotRepository(snapshot),
+            event_store=event_store,
+            session_manager=_FakeSessionManager(session, event_store),
+        ),
+        snapshot,
+        event_store,
+        session,
+        _FakeDB(),
+    )
+
+
+def _input(snapshot, metadata=None):
+    return RuntimeInput(
+        tenant_id=snapshot.tenant_id,
+        flow_version_id=snapshot.flow_version_id,
+        external_user_id="whatsapp:+5511999999999",
+        message_text="oi",
+        input_message_id="wamid.1",
+        metadata=metadata or {},
+    )
+
+
+def _event_types(event_store):
+    return [event["event_type"] for event in event_store.events]
+
+
 def test_canonical_hash_ignores_embedded_hash_key() -> None:
     snapshot = {"schema_version": 1, "start_node_id": "start", "nodes": [], "edges": []}
     with_hash = {**snapshot, "hash": "client-side-copy"}
@@ -76,51 +130,140 @@ def test_canonical_hash_ignores_embedded_hash_key() -> None:
     assert canonical_hash(snapshot) == canonical_hash({k: v for k, v in with_hash.items() if k != "hash"})
 
 
-def test_executor_uses_only_explicit_flow_version_snapshot_and_event_sourcing() -> None:
-    tenant_id = uuid.uuid4()
-    flow_version_id = uuid.uuid4()
+def test_message_to_message_navigates_to_next_node_and_emits_events() -> None:
     raw_snapshot = {
         "schema_version": 1,
         "start_node_id": "start",
-        "nodes": [{"id": "start", "type": "message", "data": {"text": "Olá"}}],
-        "edges": [],
+        "nodes": [
+            {"id": "start", "type": "message", "content": "Olá mundo"},
+            {"id": "next", "type": "message", "content": "Próxima"},
+        ],
+        "edges": [{"id": "e1", "source": "start", "target": "next"}],
     }
-    snapshot = FlowV2Snapshot(
-        flow_version_id=flow_version_id,
-        tenant_id=tenant_id,
-        hash=canonical_hash(raw_snapshot),
-        nodes=tuple(raw_snapshot["nodes"]),
-        edges=tuple(raw_snapshot["edges"]),
-        start_node_id="start",
-    )
-    event_store = _FakeEventStore()
-    session = _FakeSession(tenant_id, flow_version_id)
-    snapshot_repo = _FakeSnapshotRepository(snapshot)
-    executor = FlowV2Executor(
-        snapshot_repository=snapshot_repo,
-        event_store=event_store,
-        session_manager=_FakeSessionManager(session, event_store),
-    )
+    executor, snapshot, event_store, session, db = _executor(raw_snapshot)
 
-    output = executor.handle_input(
-        _FakeDB(),
-        RuntimeInput(
-            tenant_id=tenant_id,
-            flow_version_id=flow_version_id,
-            external_user_id="whatsapp:+5511999999999",
-            message_text="oi",
-            input_message_id="wamid.1",
-        ),
-    )
+    output = executor.handle_input(db, _input(snapshot))
 
-    assert snapshot_repo.loaded_with == {"tenant_id": tenant_id, "flow_version_id": flow_version_id}
-    assert output.status == FlowV2SessionStatus.COMPLETED
-    assert output.effects == ({"type": "send_message", "text": "Olá"},)
-    assert [event["event_type"] for event in event_store.events] == [
+    assert output.status == FlowV2SessionStatus.WAITING
+    assert output.current_node_id == "next"
+    assert output.effects == ({"type": "send_message", "text": "Olá mundo"},)
+    assert _event_types(event_store) == [
         "session.started",
         "input.received",
-        "node.entered",
-        "output.emitted",
-        "node.completed",
-        "session.completed",
+        "NODE_ENTERED",
+        "MESSAGE_SENT",
+        "NODE_EXECUTED",
+        "NODE_COMPLETED",
+        "TRANSITION_SELECTED",
+        "session.waiting",
     ]
+    assert event_store.events[3]["payload"] == {"node_id": "start", "message": "Olá mundo"}
+
+
+@pytest.mark.parametrize(("row_id", "expected"), [("op_a", "a"), ("op_b", "b")])
+def test_choice_navigates_by_option_id_only(row_id, expected) -> None:
+    raw_snapshot = {
+        "schema_version": 1,
+        "start_node_id": "start",
+        "nodes": [
+            {
+                "id": "start",
+                "type": "choice",
+                "options": [{"id": "op_a", "label": "Opção A"}, {"id": "op_b", "label": "Opção B"}],
+            },
+            {"id": "a", "type": "message", "content": "A"},
+            {"id": "b", "type": "message", "content": "B"},
+        ],
+        "edges": [
+            {"id": "e1", "source": "start", "sourceHandle": "op_a", "target": "a"},
+            {"id": "e2", "source": "start", "sourceHandle": "op_b", "target": "b"},
+        ],
+    }
+    executor, snapshot, event_store, session, db = _executor(raw_snapshot)
+
+    output = executor.handle_input(db, _input(snapshot, {"row_id": row_id}))
+
+    assert output.current_node_id == expected
+    assert "CHOICE_SHOWN" in _event_types(event_store)
+    assert "CHOICE_SELECTED" in _event_types(event_store)
+    assert event_store.events[4]["payload"] == {"node_id": "start", "row_id": row_id}
+
+
+def test_delay_scheduling_creates_scheduled_job_and_does_not_execute_next_node() -> None:
+    raw_snapshot = {
+        "schema_version": 1,
+        "start_node_id": "start",
+        "nodes": [{"id": "start", "type": "delay", "seconds": 3600}, {"id": "next", "type": "message", "content": "Depois"}],
+        "edges": [{"id": "e1", "source": "start", "target": "next"}],
+    }
+    executor, snapshot, event_store, session, db = _executor(raw_snapshot)
+
+    output = executor.handle_input(db, _input(snapshot))
+
+    assert output.effects == ()
+    assert output.status == FlowV2SessionStatus.WAITING
+    assert output.current_node_id == "next"
+    scheduled_jobs = [item for item in db.added if item.__class__.__name__ == "FlowV2ScheduledJob"]
+    assert len(scheduled_jobs) == 1
+    assert scheduled_jobs[0].session_id == session.id
+    assert scheduled_jobs[0].resume_node_id == "next"
+    assert "DELAY_SCHEDULED" in _event_types(event_store)
+
+
+@pytest.mark.parametrize(("tag", "expected"), [("vip", "vip_node"), ("regular", "normal_node")])
+def test_condition_evaluates_simple_equality(tag, expected) -> None:
+    raw_snapshot = {
+        "schema_version": 1,
+        "start_node_id": "start",
+        "nodes": [
+            {"id": "start", "type": "condition", "conditions": [{"field": "contact.tag", "operator": "==", "value": "vip"}]},
+            {"id": "vip_node", "type": "message", "content": "VIP"},
+            {"id": "normal_node", "type": "message", "content": "Normal"},
+        ],
+        "edges": [
+            {"id": "e1", "source": "start", "sourceHandle": "true", "target": "vip_node"},
+            {"id": "e2", "source": "start", "sourceHandle": "false", "target": "normal_node"},
+        ],
+    }
+    executor, snapshot, event_store, session, db = _executor(raw_snapshot)
+
+    output = executor.handle_input(db, _input(snapshot, {"contact": {"tag": tag}}))
+
+    assert output.current_node_id == expected
+    condition_event = next(event for event in event_store.events if event["event_type"] == "CONDITION_EVALUATED")
+    assert condition_event["payload"]["result"] is (tag == "vip")
+
+
+def test_ambiguous_transition_emits_event_and_aborts_execution() -> None:
+    raw_snapshot = {
+        "schema_version": 1,
+        "start_node_id": "start",
+        "nodes": [{"id": "start", "type": "message", "content": "Olá"}, {"id": "a", "type": "message"}, {"id": "b", "type": "message"}],
+        "edges": [
+            {"id": "e1", "source": "start", "target": "a"},
+            {"id": "e2", "source": "start", "target": "b"},
+        ],
+    }
+    executor, snapshot, event_store, session, db = _executor(raw_snapshot)
+
+    with pytest.raises(FlowV2TransitionError):
+        executor.handle_input(db, _input(snapshot))
+
+    assert "TRANSITION_AMBIGUOUS" in _event_types(event_store)
+    assert session.status == FlowV2SessionStatus.FAILED
+
+
+def test_missing_transition_emits_event_and_aborts_execution() -> None:
+    raw_snapshot = {
+        "schema_version": 1,
+        "start_node_id": "start",
+        "nodes": [{"id": "start", "type": "message", "content": "Olá"}],
+        "edges": [],
+    }
+    executor, snapshot, event_store, session, db = _executor(raw_snapshot)
+
+    with pytest.raises(FlowV2TransitionError):
+        executor.handle_input(db, _input(snapshot))
+
+    assert "TRANSITION_NOT_FOUND" in _event_types(event_store)
+    assert session.status == FlowV2SessionStatus.FAILED

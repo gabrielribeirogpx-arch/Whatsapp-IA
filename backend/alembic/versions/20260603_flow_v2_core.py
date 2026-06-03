@@ -121,6 +121,33 @@ def upgrade() -> None:
         if not _has_index(inspector, "flow_v2_events", index_name):
             op.create_index(index_name, "flow_v2_events", columns, unique=False)
 
+    inspector = inspect(bind)
+    if not _has_table(inspector, "flow_v2_scheduled_jobs"):
+        op.create_table(
+            "flow_v2_scheduled_jobs",
+            sa.Column("id", postgresql.UUID(as_uuid=True), nullable=False),
+            sa.Column("tenant_id", postgresql.UUID(as_uuid=True), nullable=False),
+            sa.Column("session_id", postgresql.UUID(as_uuid=True), nullable=False),
+            sa.Column("resume_node_id", sa.String(length=128), nullable=False),
+            sa.Column("run_at", sa.DateTime(), nullable=False),
+            sa.Column("created_at", sa.DateTime(), nullable=False),
+            sa.ForeignKeyConstraint(["session_id"], ["flow_v2_sessions.id"], ondelete="CASCADE"),
+            sa.ForeignKeyConstraint(["tenant_id"], ["tenants.id"]),
+            sa.PrimaryKeyConstraint("id"),
+        )
+
+    inspector = inspect(bind)
+    scheduled_job_indexes = {
+        "ix_flow_v2_scheduled_jobs_tenant_id": ["tenant_id"],
+        "ix_flow_v2_scheduled_jobs_session_id": ["session_id"],
+        "ix_flow_v2_scheduled_jobs_resume_node_id": ["resume_node_id"],
+        "ix_flow_v2_scheduled_jobs_run_at": ["run_at"],
+        "ix_flow_v2_scheduled_jobs_created_at": ["created_at"],
+    }
+    for index_name, columns in scheduled_job_indexes.items():
+        if not _has_index(inspector, "flow_v2_scheduled_jobs", index_name):
+            op.create_index(index_name, "flow_v2_scheduled_jobs", columns, unique=False)
+
     op.execute(
         text(
             """
@@ -160,6 +187,9 @@ def downgrade() -> None:
     op.execute("DROP TRIGGER IF EXISTS trg_prevent_flow_v2_snapshot_mutation ON flow_versions")
     op.execute("DROP FUNCTION IF EXISTS prevent_flow_v2_snapshot_mutation()")
 
+    if _has_table(inspector, "flow_v2_scheduled_jobs"):
+        op.drop_table("flow_v2_scheduled_jobs")
+    inspector = inspect(bind)
     if _has_table(inspector, "flow_v2_events"):
         op.drop_table("flow_v2_events")
     inspector = inspect(bind)
