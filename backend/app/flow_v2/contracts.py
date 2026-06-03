@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
+
+from app.flow_v2.actions import RuntimeAction
 from uuid import UUID
 
 
@@ -19,6 +21,7 @@ class FlowV2EventType(StrEnum):
     CHOICE_SHOWN = "CHOICE_SHOWN"
     CHOICE_SELECTED = "CHOICE_SELECTED"
     DELAY_SCHEDULED = "DELAY_SCHEDULED"
+    DELAY_RESUMED = "DELAY_RESUMED"
     CONDITION_EVALUATED = "CONDITION_EVALUATED"
     OUTPUT_EMITTED = "output.emitted"
     SESSION_WAITING = "session.waiting"
@@ -51,4 +54,5 @@ class RuntimeOutput:
     status: FlowV2SessionStatus
     current_node_id: str | None
     effects: tuple[dict[str, Any], ...] = ()
+    actions: tuple[RuntimeAction, ...] = ()
     emitted_event_count: int = 0

@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any, Protocol
 
+from app.flow_v2.actions import RuntimeAction, ScheduleDelayAction, SendMessageAction, WaitChoiceAction
 from app.flow_v2.contracts import FlowV2EventType, RuntimeInput
 from app.flow_v2.models import FlowV2ScheduledJob
 from app.flow_v2.snapshot import FlowV2Snapshot
@@ -13,9 +14,13 @@ from app.flow_v2.transition_resolver import TransitionResolver
 
 @dataclass(frozen=True)
 class NodeExecutionResult:
-    effects: tuple[dict[str, Any], ...] = ()
+    actions: tuple[RuntimeAction, ...] = ()
     next_node_id: str | None = None
     status: str = "continue"
+
+    @property
+    def effects(self) -> tuple[dict[str, Any], ...]:
+        return tuple(action.as_effect() for action in self.actions)
 
 
 class NodeExecutor(Protocol):
@@ -53,7 +58,16 @@ class MessageNodeExecutor(BaseNodeExecutor):
         payload = {"node_id": node_id, "message": message}
         self.event_store.append(db, session=session, event_type=FlowV2EventType.MESSAGE_SENT, node_id=node_id, payload=payload)
         next_node_id = self._default_next(db, snapshot=snapshot, session=session, node_id=node_id)
-        return NodeExecutionResult(effects=({"type": "send_message", "text": message},), next_node_id=next_node_id)
+        action = SendMessageAction(
+            tenant_id=session.tenant_id,
+            session_id=session.id,
+            external_user_id=runtime_input.external_user_id,
+            conversation_id=runtime_input.conversation_id,
+            contact_id=runtime_input.contact_id,
+            text=message,
+            metadata={"node_id": node_id},
+        )
+        return NodeExecutionResult(actions=(action,), next_node_id=next_node_id)
 
 
 class ChoiceNodeExecutor(BaseNodeExecutor):
@@ -71,7 +85,16 @@ class ChoiceNodeExecutor(BaseNodeExecutor):
         )
         row_id = runtime_input.metadata.get("row_id") or runtime_input.metadata.get("sourceHandle")
         if row_id is None:
-            return NodeExecutionResult(status="wait")
+            action = WaitChoiceAction(
+                tenant_id=session.tenant_id,
+                session_id=session.id,
+                external_user_id=runtime_input.external_user_id,
+                conversation_id=runtime_input.conversation_id,
+                contact_id=runtime_input.contact_id,
+                node_id=node_id,
+                option_ids=tuple(option_ids),
+            )
+            return NodeExecutionResult(actions=(action,), status="wait")
         row_id = str(row_id)
         if row_id not in option_ids:
             self.event_store.append(
@@ -117,7 +140,18 @@ class DelayNodeExecutor(BaseNodeExecutor):
             node_id=node_id,
             payload={"node_id": node_id, "seconds": seconds, "resume_node_id": next_node_id, "run_at": job.run_at.isoformat()},
         )
-        return NodeExecutionResult(status="scheduled", next_node_id=next_node_id)
+        action = ScheduleDelayAction(
+            tenant_id=session.tenant_id,
+            session_id=session.id,
+            external_user_id=runtime_input.external_user_id,
+            conversation_id=runtime_input.conversation_id,
+            contact_id=runtime_input.contact_id,
+            job_id=job.id,
+            resume_node_id=next_node_id,
+            run_at=job.run_at,
+            seconds=seconds,
+        )
+        return NodeExecutionResult(actions=(action,), status="scheduled", next_node_id=next_node_id)
 
 
 class ConditionNodeExecutor(BaseNodeExecutor):
