@@ -6,7 +6,7 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.flow_v2.contracts import FlowV2EventType
+from app.flow_v2.contracts import FLOW_V2_EVENT_VERSION, FlowV2EventType
 from app.flow_v2.models import FlowV2Event, FlowV2Session
 
 
@@ -26,6 +26,7 @@ class FlowV2EventStore:
         payload: dict[str, Any] | None = None,
         node_id: str | None = None,
         input_message_id: str | None = None,
+        event_version: int = FLOW_V2_EVENT_VERSION,
     ) -> FlowV2Event:
         next_index = session.last_event_index + 1
         event = FlowV2Event(
@@ -34,6 +35,7 @@ class FlowV2EventStore:
             flow_version_id=session.flow_version_id,
             event_index=next_index,
             event_type=str(event_type),
+            event_version=event_version,
             node_id=node_id,
             input_message_id=input_message_id,
             payload=payload or {},

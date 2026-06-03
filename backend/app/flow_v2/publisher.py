@@ -77,6 +77,7 @@ def _snapshot_payload(
     canonical_graph = canonicalize_graph(nodes, edges)
     return {
         "schema_version": V2_SNAPSHOT_SCHEMA_VERSION,
+        "snapshot_schema_version": V2_SNAPSHOT_SCHEMA_VERSION,
         "version": "flow_v2_snapshot_v1",
         "start_node_id": start_node_id,
         "nodes": canonical_graph["nodes"],

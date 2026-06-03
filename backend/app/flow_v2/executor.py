@@ -7,7 +7,9 @@ from sqlalchemy.orm import Session
 from app.flow_v2.actions import RuntimeAction, SendMessageAction
 from app.flow_v2.contracts import FlowV2EventType, FlowV2SessionStatus, RuntimeInput, RuntimeOutput
 from app.flow_v2.event_store import FlowV2EventStore
+from app.flow_v2.idempotency import FlowV2IdempotencyStore, resolve_event_kind, resolve_idempotency_key
 from app.flow_v2.node_executors import NodeExecutorRegistry
+from app.flow_v2.session_lock import FlowV2SessionLock
 from app.flow_v2.session_manager import FlowV2SessionManager
 from app.flow_v2.snapshot import FlowV2Snapshot, FlowV2SnapshotRepository
 from app.flow_v2.transition_resolver import FlowV2TransitionError, TransitionResolver
@@ -33,6 +35,8 @@ class FlowV2Executor:
         session_manager: FlowV2SessionManager | None = None,
         transition_resolver: TransitionResolver | None = None,
         node_registry: NodeExecutorRegistry | None = None,
+        idempotency_store: FlowV2IdempotencyStore | None = None,
+        session_lock: FlowV2SessionLock | None = None,
     ) -> None:
         self.snapshot_repository = snapshot_repository or FlowV2SnapshotRepository()
         self.event_store = event_store or FlowV2EventStore()
@@ -42,6 +46,8 @@ class FlowV2Executor:
             event_store=self.event_store,
             transition_resolver=self.transition_resolver,
         )
+        self.idempotency_store = idempotency_store or FlowV2IdempotencyStore()
+        self.session_lock = session_lock or FlowV2SessionLock()
 
     def handle_input(self, db: Session, runtime_input: RuntimeInput) -> RuntimeOutput:
         snapshot = self.snapshot_repository.load(
@@ -50,27 +56,53 @@ class FlowV2Executor:
             flow_version_id=runtime_input.flow_version_id,
         )
         session = self.session_manager.get_or_create(db, runtime_input=runtime_input, snapshot=snapshot)
-        emitted_before = session.last_event_index
-
-        self.event_store.append(
+        idempotency_metadata = {
+            **runtime_input.metadata,
+            "event_id": runtime_input.event_id or runtime_input.metadata.get("event_id"),
+            "message_id": runtime_input.message_id or runtime_input.metadata.get("message_id"),
+            "webhook_id": runtime_input.webhook_id or runtime_input.metadata.get("webhook_id"),
+        }
+        event_kind = resolve_event_kind(metadata=idempotency_metadata)
+        idempotency_key = resolve_idempotency_key(input_message_id=runtime_input.input_message_id, metadata=idempotency_metadata)
+        decision = self.idempotency_store.reserve_once(
             db,
-            session=session,
-            event_type=FlowV2EventType.INPUT_RECEIVED,
-            payload={"text": runtime_input.message_text, "metadata": runtime_input.metadata},
-            node_id=session.current_node_id,
-            input_message_id=runtime_input.input_message_id,
-        )
-
-        actions = self._execute_current_node(db, snapshot=snapshot, session=session, runtime_input=runtime_input)
-        db.flush()
-        return RuntimeOutput(
+            tenant_id=runtime_input.tenant_id,
+            event_kind=event_kind,
+            key=idempotency_key,
             session_id=session.id,
-            status=FlowV2SessionStatus(session.status),
-            current_node_id=session.current_node_id,
-            effects=tuple(self._legacy_effect(action) for action in actions if self._legacy_effect(action) is not None),
-            actions=tuple(actions),
-            emitted_event_count=session.last_event_index - emitted_before,
+            metadata=idempotency_metadata,
         )
+        if decision.is_duplicate:
+            return RuntimeOutput(
+                session_id=session.id,
+                status=FlowV2SessionStatus(session.status),
+                current_node_id=session.current_node_id,
+                emitted_event_count=0,
+            )
+
+        with self.session_lock.acquire(db, tenant_id=runtime_input.tenant_id, session_id=session.id):
+            emitted_before = session.last_event_index
+
+            self.event_store.append(
+                db,
+                session=session,
+                event_type=FlowV2EventType.INPUT_RECEIVED,
+                payload={"text": runtime_input.message_text, "metadata": runtime_input.metadata},
+                node_id=session.current_node_id,
+                input_message_id=runtime_input.input_message_id or idempotency_key,
+            )
+
+            actions = self._execute_current_node(db, snapshot=snapshot, session=session, runtime_input=runtime_input)
+            self.idempotency_store.mark_session(db, decision=decision, session_id=session.id)
+            db.flush()
+            return RuntimeOutput(
+                session_id=session.id,
+                status=FlowV2SessionStatus(session.status),
+                current_node_id=session.current_node_id,
+                effects=tuple(self._legacy_effect(action) for action in actions if self._legacy_effect(action) is not None),
+                actions=tuple(actions),
+                emitted_event_count=session.last_event_index - emitted_before,
+            )
 
     def _execute_current_node(
         self, db: Session, *, snapshot: FlowV2Snapshot, session: Any, runtime_input: RuntimeInput

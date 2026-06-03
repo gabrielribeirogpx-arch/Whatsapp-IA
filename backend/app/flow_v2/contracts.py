@@ -3,9 +3,11 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
+from uuid import UUID
 
 from app.flow_v2.actions import RuntimeAction
-from uuid import UUID
+
+FLOW_V2_EVENT_VERSION = 1
 
 
 class FlowV2EventType(StrEnum):
@@ -45,6 +47,10 @@ class RuntimeInput:
     contact_id: UUID | None = None
     conversation_id: UUID | None = None
     input_message_id: str | None = None
+    event_id: str | None = None
+    message_id: str | None = None
+    webhook_id: str | None = None
+    event_version: int = FLOW_V2_EVENT_VERSION
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
