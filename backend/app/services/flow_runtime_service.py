@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import re
+import traceback
 import unicodedata
 from typing import Any
 
@@ -24,6 +25,27 @@ def _summarize_reply(value: Any) -> str:
     masked = re.sub(r"\+?\d[\d\s().-]{7,}\d", "[phone]", masked)
     masked = re.sub(r"\s+", " ", masked).strip()
     return masked[:120] + ("..." if len(masked) > 120 else "")
+
+
+def _stack_trace() -> str:
+    return "".join(traceback.format_stack())
+
+
+def _log_new_engine_node_send_trace(*, executor: str, text: Any, context: dict[str, Any], node_id: Any, node_type: str, message_type: str) -> None:
+    logger.warning(
+        "[FLOW NODE SEND TRACE] engine=%s executor=%s source=%s flow_id=%s flow_version_id=%s session_id=%s node_id=%s node_type=%s message_type=%s text=%s stack=%s",
+        "new",
+        executor,
+        "flow_runtime_service",
+        context.get("flow_id"),
+        context.get("flow_version_id"),
+        context.get("session_id"),
+        node_id,
+        node_type,
+        message_type,
+        _summarize_reply(text),
+        _stack_trace(),
+    )
 
 
 def _normalize_text(value: Any) -> str:
@@ -160,7 +182,15 @@ async def execute_node_chain_until_reply(
             logger.info("[MESSAGE SENT] node_id=%s", cursor)
             logger.info("[CORE REPLY BUILT] node_id=%s reply_summary=%s", cursor, _summarize_reply(reply))
             if reply:
-                events.append({"type": "send_message", "text": reply})
+                _log_new_engine_node_send_trace(
+                    executor="execute_node_chain_until_reply",
+                    text=reply,
+                    context=context,
+                    node_id=cursor,
+                    node_type=ntype,
+                    message_type="text",
+                )
+                events.append({"type": "send_message", "text": reply, "flow_engine": "new", "flow_executor": "execute_node_chain_until_reply", "node_id": str(cursor), "node_type": ntype})
                 logger.info("[FLOW EVENTS BUILT] node_id=%s events=%s", cursor, events)
             response_node_id = str(cursor)
             next_id = find_next(str(cursor), ["default", "", "output"])
@@ -304,7 +334,15 @@ async def execute_node_chain_until_reply(
                 cursor = next_choice_node
                 continue
             if body_text and sections:
-                events.append({"type": "send_list", "body_text": body_text, "sections": sections, "interactive_type": "list", "options": choice_options})
+                _log_new_engine_node_send_trace(
+                    executor="execute_node_chain_until_reply",
+                    text=body_text,
+                    context=context,
+                    node_id=cursor,
+                    node_type=ntype,
+                    message_type="interactive_list",
+                )
+                events.append({"type": "send_list", "body_text": body_text, "sections": sections, "interactive_type": "list", "options": choice_options, "flow_engine": "new", "flow_executor": "execute_node_chain_until_reply", "node_id": str(cursor), "node_type": ntype})
                 logger.info(
                     "[CHOICE LIST ENQUEUED] session_id=%s node_id=%s flow_id=%s interactive_type=%s options_count=%s payload_summary=%s",
                     diagnostic_session_id,

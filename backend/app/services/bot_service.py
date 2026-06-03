@@ -325,7 +325,14 @@ def handle_visual_flow_priority(db: Session, message: Message, conversation, ses
         try:
             print(f"[MODE CHECK] current mode={conversation.mode}")
             if tenant:
-                enqueue_send_message({"tenant_id": tenant.id, "phone": conversation.phone_number, "text": visual_flow_response})
+                enqueue_send_message({
+                    "tenant_id": tenant.id,
+                    "phone": conversation.phone_number,
+                    "text": visual_flow_response,
+                    "flow_engine": "legacy",
+                    "flow_executor": "handle_visual_flow_priority",
+                    "flow_send_source": "bot_service:visual_flow_response_bridge",
+                })
             else:
                 print("[BOT] Tenant não encontrado, envio WhatsApp ignorado")
         except Exception:
@@ -471,7 +478,14 @@ def handle_bot(db: Session, message: Message, conversation) -> dict[str, str | b
     try:
         print(f"[MODE CHECK] current mode={conversation.mode}")
         if tenant:
-            enqueue_send_message({"tenant_id": tenant.id, "phone": conversation.phone_number, "text": selected_response})
+            enqueue_send_message({
+                "tenant_id": tenant.id,
+                "phone": conversation.phone_number,
+                "text": selected_response,
+                "flow_engine": "none",
+                "flow_executor": "handle_bot",
+                "flow_send_source": f"bot_service:{matched_rule}",
+            })
         else:
             print("[BOT] Tenant não encontrado, envio WhatsApp ignorado")
     except Exception:

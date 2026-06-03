@@ -174,7 +174,11 @@ async def _process_runtime_events(
                     "interactive_type": "list",
                     "sections": event.get("sections") if isinstance(event.get("sections"), list) else [],
                     "options": event.get("options") if isinstance(event.get("options"), list) else [],
-                    "node_type": "choice",
+                    "node_type": str(event.get("node_type") or "choice"),
+                    "node_id": str(event.get("node_id") or "") or None,
+                    "flow_engine": str(event.get("flow_engine") or "new"),
+                    "flow_executor": str(event.get("flow_executor") or "execute_node_chain_until_reply"),
+                    "flow_send_source": "webhook:_process_runtime_events:send_list",
                 })
                 continue
 
@@ -183,7 +187,7 @@ async def _process_runtime_events(
             node_id = None
             if execution is not None:
                 flow_version_id = execution.flow_version_id
-                node_id = execution.current_node_id
+                node_id = event.get("node_id") or execution.current_node_id
                 flow_version = db.get(FlowVersion, execution.flow_version_id)
                 flow_id = flow_version.flow_id if flow_version else None
             conversation = (
@@ -207,8 +211,11 @@ async def _process_runtime_events(
                     "flow_version_id": str(flow_version_id) if flow_version_id else None,
                     "session_id": str(conversation.id) if conversation else None,
                     "node_id": str(node_id) if node_id else None,
-                    "node_type": "choice",
+                    "node_type": str(event.get("node_type") or "choice"),
                     "conversation_id": str(conversation.id) if conversation else None,
+                    "flow_engine": str(event.get("flow_engine") or "new"),
+                    "flow_executor": str(event.get("flow_executor") or "execute_node_chain_until_reply"),
+                    "flow_send_source": "webhook:_process_runtime_events:send_list",
                 }
                 job_id = enqueue_send_message(payload)
                 logger.info(
@@ -235,6 +242,9 @@ async def _process_runtime_events(
                 channel="whatsapp",
                 buttons=event.get("buttons") if isinstance(event.get("buttons", []), list) else None,
                 template_or_node_text=str(event.get("template_name") or event.get("node_label") or ""),
+                flow_engine=str(event.get("flow_engine") or "new"),
+                flow_executor=str(event.get("flow_executor") or "execute_node_chain_until_reply"),
+                flow_send_source="webhook:_process_runtime_events:send_message",
             )
 
     return False
