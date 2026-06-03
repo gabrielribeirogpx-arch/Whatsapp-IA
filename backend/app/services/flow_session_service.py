@@ -205,6 +205,7 @@ class FlowSessionService:
                 FlowSession.tenant_id == tenant_id,
                 FlowSession.user_identifier == user_identifier,
                 FlowSession.flow_id == flow.id,
+                FlowSession.flow_version_id == flow.published_version_id,
             )
             .order_by(FlowSession.updated_at.desc(), FlowSession.created_at.desc())
             .first()

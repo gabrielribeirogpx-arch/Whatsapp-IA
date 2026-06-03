@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from fastapi import HTTPException
-from sqlalchemy import desc, func, select
+from sqlalchemy import desc, func, select, update
 from sqlalchemy.orm import Session
 
 from app.models import Conversation, Flow, FlowEdge, FlowNode, FlowVersion, Tenant
@@ -118,6 +118,48 @@ def _compute_graph_checksum(nodes: list[dict[str, Any]] | None, edges: list[dict
     payload = {"nodes": nodes if isinstance(nodes, list) else [], "edges": edges if isinstance(edges, list) else []}
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def flow_version_nodes_edges(flow_version: FlowVersion | None) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    if flow_version is None:
+        return [], []
+    nodes = flow_version.nodes_json if isinstance(getattr(flow_version, "nodes_json", None), list) else flow_version.nodes
+    edges = flow_version.edges_json if isinstance(getattr(flow_version, "edges_json", None), list) else flow_version.edges
+    return (nodes if isinstance(nodes, list) else []), (edges if isinstance(edges, list) else [])
+
+
+def graph_hash(nodes: list[dict[str, Any]] | None, edges: list[dict[str, Any]] | None) -> str:
+    return _compute_graph_checksum(nodes, edges)
+
+
+def apply_flow_version_snapshot_metadata(flow_version: FlowVersion, nodes: list[dict[str, Any]], edges: list[dict[str, Any]]) -> None:
+    nodes_payload = nodes if isinstance(nodes, list) else []
+    edges_payload = edges if isinstance(edges, list) else []
+    computed = graph_hash(nodes_payload, edges_payload)
+    flow_version.nodes_json = nodes_payload
+    flow_version.edges_json = edges_payload
+    flow_version.nodes = nodes_payload
+    flow_version.edges = edges_payload
+    flow_version.snapshot = {"nodes": nodes_payload, "edges": edges_payload}
+    flow_version.nodes_count = len(nodes_payload)
+    flow_version.edges_count = len(edges_payload)
+    flow_version.graph_hash = computed
+    flow_version.graph_checksum = computed
+
+
+def validate_flow_version_integrity(flow_version: FlowVersion) -> tuple[bool, str | None]:
+    nodes, edges = flow_version_nodes_edges(flow_version)
+    expected_nodes = getattr(flow_version, "nodes_count", None)
+    expected_edges = getattr(flow_version, "edges_count", None)
+    expected_hash = getattr(flow_version, "graph_hash", None) or getattr(flow_version, "graph_checksum", None)
+    computed_hash = graph_hash(nodes, edges)
+    if expected_nodes is not None and int(expected_nodes or 0) != len(nodes):
+        return False, "FLOW_VERSION_NODES_COUNT_MISMATCH"
+    if expected_edges is not None and int(expected_edges or 0) != len(edges):
+        return False, "FLOW_VERSION_EDGES_COUNT_MISMATCH"
+    if expected_hash and str(expected_hash) != computed_hash:
+        return False, "FLOW_VERSION_GRAPH_HASH_MISMATCH"
+    return True, None
 
 
 def _runtime_cache_key(tenant_id: uuid.UUID, flow_id: uuid.UUID, version_id: uuid.UUID | None, checksum: str) -> str:
@@ -401,10 +443,8 @@ def _get_latest_valid_flow_version(db: Session, flow_id: uuid.UUID) -> FlowVersi
         .order_by(FlowVersion.version.desc(), FlowVersion.created_at.desc())
     ).scalars().all()
     for version in versions:
-        valid, _ = validate_flow_legacy(
-            version.nodes if isinstance(version.nodes, list) else [],
-            version.edges if isinstance(version.edges, list) else [],
-        )
+        nodes, edges = flow_version_nodes_edges(version)
+        valid, _ = validate_flow_legacy(nodes, edges)
         if valid:
             return version
     return None
@@ -425,10 +465,8 @@ def _get_valid_flow_version_by_id(db: Session, flow: Flow, version_id: uuid.UUID
     ).scalars().first()
     if not selected:
         return None
-    valid, _ = validate_flow_structure(
-        nodes=selected.nodes if isinstance(selected.nodes, list) else [],
-        edges=selected.edges if isinstance(selected.edges, list) else [],
-    )
+    nodes, edges = flow_version_nodes_edges(selected)
+    valid, _ = validate_flow_structure(nodes=nodes, edges=edges)
     return selected if valid else None
 
 
@@ -627,7 +665,8 @@ def _republish_from_current_nodes(db: Session, flow: Flow) -> FlowVersion | None
     last_version = db.query(func.max(FlowVersion.version)).filter(FlowVersion.flow_id == flow.id).scalar()
     next_version = (last_version or 0) + 1
     db.query(FlowVersion).filter(FlowVersion.flow_id == flow.id).update({FlowVersion.is_active: False, FlowVersion.is_published: False}, synchronize_session=False)
-    v = FlowVersion(flow_id=flow.id, tenant_id=flow.tenant_id, version=next_version, nodes=nodes, edges=edges, snapshot={"nodes": nodes, "edges": edges}, is_active=True, is_published=True)
+    v = FlowVersion(flow_id=flow.id, tenant_id=flow.tenant_id, version=next_version, is_active=True, is_published=True)
+    apply_flow_version_snapshot_metadata(v, nodes, edges)
     db.add(v)
     db.flush()
     flow.current_version_id = v.id
@@ -647,8 +686,12 @@ def load_published_runtime_graph(
         raise HTTPException(status_code=409, detail=f"Flow {flow.id} sem published_version_id. Publique uma versão antes de executar.")
 
     selected_version = _get_flow_version_by_id(db=db, flow=flow, version_id=selected_version_id)
-    nodes = selected_version.nodes if selected_version and isinstance(selected_version.nodes, list) else []
-    edges = selected_version.edges if selected_version and isinstance(selected_version.edges, list) else []
+    if not selected_version:
+        raise HTTPException(status_code=409, detail=f"Published version {selected_version_id} não encontrada para flow {flow.id}.")
+    integrity_ok, integrity_error = validate_flow_version_integrity(selected_version)
+    if not integrity_ok:
+        raise HTTPException(status_code=409, detail=f"Published version inválida: {integrity_error}")
+    nodes, edges = flow_version_nodes_edges(selected_version)
     logger.info(
         "[RUNTIME GRAPH LOAD] flow_id=%s tenant_id=%s requested_flow_version_id=%s selected_flow_version_id=%s "
         "flow.published_version_id=%s flow.current_version_id=%s nodes_count=%s edges_count=%s checksum=%s",
@@ -713,6 +756,9 @@ def load_published_runtime_graph(
         "version_id": str(selected_version_id),
         "nodes": nodes,
         "edges": edges if isinstance(edges, list) else [],
+        "nodes_count": len(nodes),
+        "edges_count": len(edges if isinstance(edges, list) else []),
+        "graph_hash": graph_checksum,
         "graph_checksum": graph_checksum,
         "cache_key": cache_key,
     }
@@ -725,8 +771,7 @@ def resolve_runtime_flow_graph(db: Session, tenant_id: uuid.UUID, flow_id: str) 
 
 
 def _load_flow_version_runtime(flow: Flow, tenant_id: uuid.UUID, flow_version: FlowVersion) -> dict[str, Any]:
-    raw_nodes = flow_version.nodes if isinstance(flow_version.nodes, list) else []
-    raw_edges = flow_version.edges if isinstance(flow_version.edges, list) else []
+    raw_nodes, raw_edges = flow_version_nodes_edges(flow_version)
     nodes: list[VersionedFlowNode] = []
     legacy_id_map: dict[str, uuid.UUID] = {}
 
@@ -823,9 +868,8 @@ def _get_current_flow_runtime(db: Session, flow: Flow, tenant_id: uuid.UUID, flo
     runtime_version = FlowVersion(
         flow_id=flow.id,
         version=flow.version or 1,
-        nodes=resolved["nodes"],
-        edges=resolved["edges"],
     )
+    apply_flow_version_snapshot_metadata(runtime_version, resolved["nodes"], resolved["edges"])
     if resolved.get("version_id"):
         parsed_version_id = _parse_uuid(resolved["version_id"])
         if parsed_version_id:
@@ -1141,11 +1185,7 @@ def _get_start_node(
     if runtime_graph:
         nodes = runtime_graph.get("nodes", [])
     else:
-        nodes = db.execute(
-            select(FlowNode)
-            .where(FlowNode.flow_id == flow_id, FlowNode.tenant_id == tenant_id)
-            .order_by(FlowNode.created_at.asc(), FlowNode.id.asc())
-        ).scalars().all()
+        raise RuntimeError("Runtime graph is required; flow_nodes is editor-only")
 
     check_payload = [
         {
@@ -1179,11 +1219,7 @@ def _initialize_flow_start_node(
     if runtime_graph:
         nodes = runtime_graph.get("nodes", [])
     else:
-        nodes = db.execute(
-            select(FlowNode)
-            .where(FlowNode.flow_id == flow_id, FlowNode.tenant_id == conversation.tenant_id)
-            .order_by(FlowNode.created_at.asc(), FlowNode.id.asc())
-        ).scalars().all()
+        raise RuntimeError("Runtime graph is required; flow_nodes is editor-only")
 
     node_payload = [
         {
@@ -1289,9 +1325,7 @@ def _get_node(
     if runtime_graph:
         node_map = runtime_graph.get("node_map") if isinstance(runtime_graph.get("node_map"), dict) else {}
         return node_map.get(str(node_id))
-    return db.execute(
-        select(FlowNode).where(FlowNode.id == node_id, FlowNode.tenant_id == tenant_id)
-    ).scalars().first()
+    raise RuntimeError("Runtime graph is required; flow_nodes is editor-only")
 
 
 def resolve_current_node(
@@ -1337,14 +1371,7 @@ def _get_edges(
         source_text = str(source_uuid or source or "")
         all_edges = runtime_graph.get("edges") if isinstance(runtime_graph.get("edges"), list) else []
         return [edge for edge in all_edges if str(_edge_source(edge)) == source_text]
-    source_uuid = _parse_uuid(source)
-    if source_uuid is None:
-        return []
-    return db.execute(
-        select(FlowEdge)
-        .where(FlowEdge.flow_id == flow_id, FlowEdge.source == source_uuid)
-        .order_by(FlowEdge.id.asc())
-    ).scalars().all()
+    raise RuntimeError("Runtime graph is required; flow_edges is editor-only")
 
 
 def _edge_source(edge: Any) -> Any:
@@ -3997,26 +4024,22 @@ def seed_default_visual_flow(db: Session, flow: Flow, tenant_id: uuid.UUID) -> N
 
 def get_flow_graph(db: Session, tenant_id: uuid.UUID, flow_id: str) -> dict[str, Any]:
     flow = resolve_flow(db=db, tenant_id=tenant_id, flow_id=flow_id)
-
-    runtime_graph = resolve_runtime_flow_graph(db=db, tenant_id=tenant_id, flow_id=str(flow.id))
-    runtime_nodes = runtime_graph.get("nodes") if isinstance(runtime_graph, dict) else []
-    runtime_edges = runtime_graph.get("edges") if isinstance(runtime_graph, dict) else []
-    if isinstance(runtime_nodes, list) and runtime_nodes:
-        return {
-            "flow_id": str(flow.id),
-            "version_id": runtime_graph.get("version_id"),
-            "source": "flow_versions",
-            "nodes": runtime_nodes,
-            "edges": runtime_edges if isinstance(runtime_edges, list) else [],
-        }
+    selected_version = flow.current_version
+    if not selected_version and flow.current_version_id:
+        selected_version = db.execute(
+            select(FlowVersion).where(FlowVersion.id == flow.current_version_id, FlowVersion.flow_id == flow.id)
+        ).scalars().first()
+    nodes, edges = flow_version_nodes_edges(selected_version)
+    if not nodes:
+        nodes = flow.nodes_json if isinstance(flow.nodes_json, list) else flow.nodes if isinstance(flow.nodes, list) else []
+        edges = flow.edges_json if isinstance(flow.edges_json, list) else flow.edges if isinstance(flow.edges, list) else []
     return {
         "flow_id": str(flow.id),
-        "version_id": runtime_graph.get("version_id"),
-        "source": runtime_graph.get("source") or "empty",
-        "nodes": runtime_nodes if isinstance(runtime_nodes, list) else [],
-        "edges": runtime_edges if isinstance(runtime_edges, list) else [],
+        "version_id": str(selected_version.id) if selected_version else None,
+        "source": "builder_version" if selected_version else "builder_draft",
+        "nodes": nodes if isinstance(nodes, list) else [],
+        "edges": edges if isinstance(edges, list) else [],
     }
-
 
 def save_flow_graph(db: Session, tenant_id: uuid.UUID, flow_id: str, nodes: list[dict[str, Any]], edges: list[dict[str, Any]]) -> dict[str, str]:
     flow = resolve_flow(db=db, tenant_id=tenant_id, flow_id=flow_id)
@@ -4090,11 +4113,11 @@ def save_flow_graph(db: Session, tenant_id: uuid.UUID, flow_id: str, nodes: list
 
     flow_version = FlowVersion(
         flow_id=flow.id,
+        tenant_id=tenant_id,
         version=next_version,
-        nodes=normalized_nodes,
-        edges=normalized_edges,
         is_active=True,
     )
+    apply_flow_version_snapshot_metadata(flow_version, normalized_nodes, normalized_edges)
     db.add(flow_version)
     db.flush()
     flow.current_version_id = flow_version.id

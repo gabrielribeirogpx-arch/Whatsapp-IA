@@ -28,6 +28,7 @@ from app.services.flow_engine_service import (
     get_flow_for_builder,
     get_flow_graph,
     invalidate_flow_runtime_cache,
+    apply_flow_version_snapshot_metadata,
     resolve_runtime_flow_graph,
     resolve_flow,
     save_flow_graph,
@@ -256,7 +257,9 @@ def _validate_publish_graph_or_raise(nodes: list[dict[str, Any]], edges: list[di
         raise ValueError(f"Graph não serializável: {exc}") from exc
 
 def _publish_fresh_snapshot(db: Session, flow: Flow, *, reason: str) -> FlowVersion | None:
-    nodes, edges = _builder_graph_from_flow(flow)
+    with db.begin_nested():
+        db.execute(select(Flow.id).where(Flow.id == flow.id).with_for_update())
+        nodes, edges = _builder_graph_from_records(db, flow)
     if not nodes:
         logger.warning("[FLOW PUBLISH] flow_id=%s reason=%s sem nodes no builder", flow.id, reason)
         return None
@@ -285,37 +288,6 @@ def _publish_fresh_snapshot(db: Session, flow: Flow, *, reason: str) -> FlowVers
         candidate_nodes=nodes,
         candidate_edges=edges,
     )
-    if latest_published and latest_published.graph_checksum == checksum:
-        db.query(FlowVersion).filter(FlowVersion.flow_id == flow.id, FlowVersion.tenant_id == flow.tenant_id).update(
-            {FlowVersion.is_active: False, FlowVersion.is_published: False},
-            synchronize_session=False,
-        )
-        latest_published.nodes = nodes
-        latest_published.edges = edges
-        latest_published.snapshot = {"nodes": nodes, "edges": edges}
-        latest_published.graph_checksum = checksum
-        latest_published.start_node_id = start_node_id
-        latest_published.start_text_preview = start_text_preview
-        latest_published.created_from_source = "builder_graph"
-        latest_published.is_active = True
-        latest_published.is_published = True
-        flow.current_version_id = latest_published.id
-        flow.published_version_id = latest_published.id
-        flow.version = latest_published.version
-        _persist_builder_graph(flow, nodes, edges)
-        db.add(latest_published)
-        db.add(flow)
-        db.flush()
-        _log_publish_graph_snapshot(label="PUBLISH GRAPH", flow=flow, nodes=nodes, edges=edges, version=latest_published)
-        _log_flow_publish_result(flow=flow, version=latest_published, nodes=nodes, edges=edges, reason=reason)
-        logger.info(
-            "[PUBLISH GRAPH REUSED] flow_id=%s version_id=%s checksum=%s reason=same_checksum_marked_published",
-            flow.id,
-            latest_published.id,
-            checksum,
-        )
-        return latest_published
-
     db.query(FlowVersion).filter(FlowVersion.flow_id == flow.id, FlowVersion.tenant_id == flow.tenant_id).update({FlowVersion.is_active: False, FlowVersion.is_published: False}, synchronize_session=False)
     last_version = db.execute(select(FlowVersion.version).where(FlowVersion.flow_id == flow.id).order_by(FlowVersion.version.desc()).limit(1)).scalar()
     next_version_number = (last_version or 0) + 1
@@ -323,22 +295,23 @@ def _publish_fresh_snapshot(db: Session, flow: Flow, *, reason: str) -> FlowVers
         flow_id=flow.id,
         tenant_id=flow.tenant_id,
         version=next_version_number,
-        nodes=nodes,
-        edges=edges,
-        snapshot={"nodes": nodes, "edges": edges},
-        graph_checksum=checksum,
         start_node_id=start_node_id,
         start_text_preview=start_text_preview,
         created_from_source="builder_graph",
         is_active=True,
         is_published=True,
     )
+    apply_flow_version_snapshot_metadata(fresh_version, nodes, edges)
     db.add(fresh_version)
     db.flush()
     flow.current_version_id = fresh_version.id
     flow.published_version_id = fresh_version.id
     flow.version = fresh_version.version
     _persist_builder_graph(flow, nodes, edges)
+    db.query(FlowSession).filter(FlowSession.flow_id == flow.id).update(
+        {FlowSession.status: "completed", FlowSession.current_node_id: None},
+        synchronize_session=False,
+    )
     db.add(flow)
     db.flush()
     _log_publish_graph_snapshot(label="PUBLISH GRAPH", flow=flow, nodes=nodes, edges=edges, version=fresh_version)
@@ -469,6 +442,48 @@ def _persist_builder_graph(flow: Flow, nodes: list[dict[str, Any]], edges: list[
     flow.nodes = nodes
     flow.edges = edges
 
+def _builder_graph_from_records(db: Session, flow: Flow) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    node_rows = db.execute(
+        select(FlowNode)
+        .where(FlowNode.flow_id == flow.id, FlowNode.tenant_id == flow.tenant_id)
+        .order_by(FlowNode.created_at.asc(), FlowNode.id.asc())
+    ).scalars().all()
+    node_ids = {str(node.id) for node in node_rows}
+    nodes = [
+        {
+            "id": str(node.id),
+            "type": node.type,
+            "position": {"x": node.position_x or 0, "y": node.position_y or 0},
+            "data": dict(node.metadata_json or {}, **({"content": node.content} if node.content else {})),
+        }
+        for node in node_rows
+    ]
+    edge_rows = db.execute(
+        select(FlowEdge)
+        .where(FlowEdge.flow_id == flow.id)
+        .order_by(FlowEdge.id.asc())
+    ).scalars().all()
+    edges = []
+    for edge in edge_rows:
+        source = str(edge.source)
+        target = str(edge.target)
+        if source not in node_ids or target not in node_ids:
+            continue
+        condition = edge.condition
+        edges.append({
+            "id": str(edge.id),
+            "source": source,
+            "target": target,
+            "sourceHandle": condition or "default",
+            "targetHandle": "default",
+            "type": "default",
+            "label": condition,
+            "data": {"condition": condition, "sourceHandle": condition or "default"},
+        })
+    if nodes:
+        return nodes, edges
+    return _builder_graph_from_flow(flow)
+
 def _builder_graph_from_flow(flow: Flow) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     nodes = flow.nodes_json if isinstance(flow.nodes_json, list) else flow.nodes if isinstance(flow.nodes, list) else []
     edges = flow.edges_json if isinstance(flow.edges_json, list) else flow.edges if isinstance(flow.edges, list) else []
@@ -567,6 +582,9 @@ class CanonicalFlowVersionResponse(BaseModel):
     nodes: list[dict[str, Any]] = Field(default_factory=list)
     edges: list[dict[str, Any]] = Field(default_factory=list)
     version: int | None = None
+    nodes_count: int = 0
+    edges_count: int = 0
+    graph_hash: str | None = None
 
 
 class FlowVersionResponse(CanonicalFlowVersionResponse):
@@ -591,7 +609,7 @@ def tenant_flow_audit(
     for flow in flows:
         versions = db.execute(
             select(FlowVersion)
-            .where(FlowVersion.flow_id == flow.id, FlowVersion.tenant_id == tenant_uuid)
+            .where(FlowVersion.flow_id == flow.id, FlowVersion.tenant_id == tenant.id)
             .order_by(FlowVersion.version.asc(), FlowVersion.created_at.asc())
         ).scalars().all()
         version_payload: list[dict[str, Any]] = []
@@ -964,7 +982,7 @@ def _flow_version_payload(db: Session, **values: Any) -> dict[str, Any]:
 
 def _flow_version_select(db: Session):
     columns = _flow_versions_columns(db)
-    attrs = [getattr(FlowVersion, name) for name in ("id", "flow_id", "version", "nodes", "edges", "is_active", "created_at", "tenant_id", "snapshot") if name in columns]
+    attrs = [getattr(FlowVersion, name) for name in ("id", "flow_id", "version", "nodes", "edges", "nodes_json", "edges_json", "nodes_count", "edges_count", "graph_hash", "graph_checksum", "is_active", "created_at", "tenant_id", "snapshot") if name in columns]
     statement = select(FlowVersion)
     if attrs:
         statement = statement.options(load_only(*attrs))
@@ -1282,12 +1300,10 @@ async def update_flow_route(
                 flow_id=flow.id,
                 tenant_id=tenant.id,
                 version=next_version,
-                snapshot={"nodes": nodes, "edges": edges},
-                nodes=nodes,
-                edges=edges,
                 is_active=False,
                 is_published=False,
             ))
+            apply_flow_version_snapshot_metadata(new_version, nodes, edges)
 
             db.add(new_version)
             db.flush()
@@ -1464,6 +1480,9 @@ def _serialize_flow_version_response(
         "nodes": normalized_nodes,
         "edges": normalized_edges,
         "version": version_value,
+        "nodes_count": len(normalized_nodes),
+        "edges_count": len(normalized_edges),
+        "graph_hash": _graph_checksum(normalized_nodes, normalized_edges),
     }
     return {
         **canonical,
@@ -1482,6 +1501,9 @@ def _serialize_flow_version(flow_version: FlowVersion, current_version_id: uuid.
         "created_at": flow_version.created_at.isoformat() if flow_version.created_at else None,
         "is_active": flow_version.is_active,
         "is_current": bool(current_version_id and flow_version.id == current_version_id),
+        "nodes_count": getattr(flow_version, "nodes_count", 0) or 0,
+        "edges_count": getattr(flow_version, "edges_count", 0) or 0,
+        "graph_hash": getattr(flow_version, "graph_hash", None) or getattr(flow_version, "graph_checksum", None),
     }
 
 
@@ -2205,103 +2227,6 @@ def debug_tenant_flow_versions(
     }
 
 
-@crud_router.post("/{flow_id}/force-republish-current")
-def force_republish_current_tenant_flow(
-    flow_id: str,
-    x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
-    db: Session = Depends(get_db),
-):
-    tenant_uuid = _resolve_tenant_header(x_tenant_id)
-    flow = _get_flow_by_identifier(db=db, flow_id=flow_id, tenant_id=tenant_uuid)
-    if not flow:
-        raise HTTPException(status_code=404, detail="Flow not found")
-
-    nodes, edges = _builder_graph_from_flow(flow)
-    if not nodes:
-        raise HTTPException(status_code=400, detail="Builder graph vazio: sem nodes para republicar")
-
-    validate_flow_payload_or_400(nodes, edges)
-    logger.info(
-        "[PUBLISH EDGES SNAPSHOT] flow_id=%s reason=force_republish_current edges_count=%s edges_raw_preview=%s",
-        flow.id,
-        len(edges),
-        edges[:5],
-    )
-    last_version = db.execute(
-        select(FlowVersion.version).where(FlowVersion.flow_id == flow.id, FlowVersion.tenant_id == tenant_uuid).order_by(FlowVersion.version.desc()).limit(1)
-    ).scalar()
-    next_version_number = (last_version or 0) + 1
-
-    db.query(FlowVersion).filter(FlowVersion.flow_id == flow.id, FlowVersion.tenant_id == tenant_uuid).update(
-        {FlowVersion.is_active: False, FlowVersion.is_published: False},
-        synchronize_session=False,
-    )
-    new_version = FlowVersion(
-        flow_id=flow.id,
-        tenant_id=tenant_uuid,
-        version=next_version_number,
-        nodes=nodes,
-        edges=edges,
-        snapshot={"nodes": nodes, "edges": edges},
-        is_active=True,
-        is_published=True,
-    )
-    db.add(new_version)
-    db.flush()
-    flow.current_version_id = new_version.id
-    flow.published_version_id = new_version.id
-    flow.version = new_version.version
-    flow.status = "published"
-    _log_flow_publish_result(flow=flow, version=new_version, nodes=nodes, edges=edges, reason="force_republish_current")
-    db.add(flow)
-    invalidate_flow_runtime_cache(flow.id)
-    db.commit()
-    db.refresh(flow)
-
-    start_node_id, start_text_preview = _extract_start_node_metadata(nodes)
-    runtime_validation = validate_flow_definition({"nodes": nodes, "edges": edges}, mode="published")
-    validation_errors = runtime_validation.get("errors") if isinstance(runtime_validation, dict) else []
-    if not isinstance(validation_errors, list):
-        validation_errors = [validation_errors]
-
-    checksum = _graph_checksum(nodes, edges)
-    response_payload = {
-        "flow_id": str(flow.id),
-        "version_id": str(new_version.id),
-        "version": new_version.version,
-        "nodes_count": len(nodes),
-        "edges_count": len(edges),
-        "start_node_id": start_node_id,
-        "start_text_preview": start_text_preview,
-        "validation_errors": validation_errors,
-        "graph_checksum": checksum,
-    }
-    logger.info(
-        "[FORCE REPUBLISH RESULT] flow_id=%s version_id=%s nodes=%s edges=%s start_node_id=%s validation_errors=%s",
-        flow.id,
-        new_version.id,
-        len(nodes),
-        len(edges),
-        start_node_id,
-        len(validation_errors),
-    )
-    if validation_errors:
-        raise HTTPException(status_code=422, detail=response_payload)
-
-    # confirmação pós-commit de que o runtime resolve sem 409
-    invalidate_flow_runtime_cache(flow.id)
-    try:
-        resolve_runtime_flow_graph(db=db, tenant_id=tenant_uuid, flow_id=str(flow.id))
-    except HTTPException as exc:
-        if exc.status_code == 409:
-            raise HTTPException(status_code=422, detail=exc.detail) from exc
-        raise
-    return {
-        **response_payload,
-        "new_version_id": str(new_version.id),
-    }
-
-
 @crud_router.post("/{flow_id}/admin-hard-reset-runtime")
 def admin_hard_reset_runtime(
     flow_id: str,
@@ -2355,12 +2280,10 @@ def admin_hard_reset_runtime(
         flow_id=flow.id,
         tenant_id=tenant_uuid,
         version=next_version_number,
-        nodes=nodes,
-        edges=edges,
-        snapshot={"nodes": nodes, "edges": edges},
         is_active=True,
         is_published=True,
     )
+    apply_flow_version_snapshot_metadata(new_version, nodes, edges)
     db.add(new_version)
     db.flush()
     flow.current_version_id = new_version.id
@@ -2565,7 +2488,7 @@ def list_flow_versions_by_id(
 
     versions = db.execute(
         _flow_version_select(db)
-        .where(FlowVersion.flow_id == flow.id, FlowVersion.tenant_id == tenant_uuid)
+        .where(FlowVersion.flow_id == flow.id, FlowVersion.tenant_id == tenant.id)
         .order_by(FlowVersion.created_at.desc(), FlowVersion.version.desc())
     ).scalars().all()
     return [_serialize_flow_version(item, flow.current_version_id) for item in versions]
@@ -2584,16 +2507,16 @@ def restore_flow_version_by_id(
         raise HTTPException(status_code=404, detail="Flow not found")
 
     flow_version = db.execute(
-        _flow_version_select(db).where(FlowVersion.id == version_id, FlowVersion.flow_id == flow.id, FlowVersion.tenant_id == tenant_uuid)
+        _flow_version_select(db).where(FlowVersion.id == version_id, FlowVersion.flow_id == flow.id, FlowVersion.tenant_id == tenant.id)
     ).scalars().first()
     if not flow_version:
         raise HTTPException(status_code=404, detail="Flow version not found")
 
-    db.query(FlowVersion).filter(FlowVersion.flow_id == flow.id, FlowVersion.tenant_id == tenant_uuid).update(
+    db.query(FlowVersion).filter(FlowVersion.flow_id == flow.id, FlowVersion.tenant_id == tenant.id).update(
         {FlowVersion.is_active: False},
         synchronize_session=False,
     )
-    db.query(FlowVersion).filter(FlowVersion.id == flow_version.id, FlowVersion.tenant_id == tenant_uuid).update(
+    db.query(FlowVersion).filter(FlowVersion.id == flow_version.id, FlowVersion.tenant_id == tenant.id).update(
         {FlowVersion.is_active: True},
         synchronize_session=False,
     )
@@ -2605,6 +2528,76 @@ def restore_flow_version_by_id(
     db.refresh(flow)
     return _serialize_flow(flow)
 
+
+@crud_router.get("/{flow_id}/published-snapshot")
+def get_published_snapshot(
+    flow_id: str,
+    x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
+    db: Session = Depends(get_db),
+):
+    tenant_uuid = _resolve_tenant_header(x_tenant_id)
+    flow = _get_flow_by_identifier(db=db, flow_id=flow_id, tenant_id=tenant_uuid)
+    if not flow:
+        raise HTTPException(status_code=404, detail="Flow not found")
+    version = None
+    if flow.published_version_id:
+        version = db.execute(
+            select(FlowVersion).where(FlowVersion.id == flow.published_version_id, FlowVersion.flow_id == flow.id)
+        ).scalars().first()
+    if not version:
+        return {"flow_id": str(flow.id), "version_id": None, "nodes": [], "edges": [], "nodes_count": 0, "edges_count": 0, "graph_hash": None}
+    nodes = version.nodes_json if isinstance(getattr(version, "nodes_json", None), list) else version.nodes if isinstance(version.nodes, list) else []
+    edges = version.edges_json if isinstance(getattr(version, "edges_json", None), list) else version.edges if isinstance(version.edges, list) else []
+    return {
+        "flow_id": str(flow.id),
+        "version_id": str(version.id),
+        "version": version.version,
+        "nodes": nodes,
+        "edges": edges,
+        "nodes_count": getattr(version, "nodes_count", None) or len(nodes),
+        "edges_count": getattr(version, "edges_count", None) or len(edges),
+        "graph_hash": getattr(version, "graph_hash", None) or getattr(version, "graph_checksum", None) or _graph_checksum(nodes, edges),
+    }
+
+
+@crud_router.get("/{flow_id}/runtime-inspector")
+def get_runtime_inspector(
+    flow_id: str,
+    x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
+    db: Session = Depends(get_db),
+):
+    tenant_uuid = _resolve_tenant_header(x_tenant_id)
+    flow = _get_flow_by_identifier(db=db, flow_id=flow_id, tenant_id=tenant_uuid)
+    if not flow:
+        raise HTTPException(status_code=404, detail="Flow not found")
+    session = db.execute(
+        select(FlowSession)
+        .where(FlowSession.flow_id == flow.id, FlowSession.tenant_id == tenant_uuid)
+        .order_by(FlowSession.updated_at.desc(), FlowSession.created_at.desc())
+        .limit(1)
+    ).scalars().first()
+    version = None
+    if session and session.flow_version_id:
+        version = db.execute(select(FlowVersion).where(FlowVersion.id == session.flow_version_id)).scalars().first()
+    nodes = version.nodes_json if version and isinstance(getattr(version, "nodes_json", None), list) else version.nodes if version and isinstance(version.nodes, list) else []
+    edges = version.edges_json if version and isinstance(getattr(version, "edges_json", None), list) else version.edges if version and isinstance(version.edges, list) else []
+    current_node_id = str(session.current_node_id) if session and session.current_node_id else None
+    previous_node_id = None
+    next_node_id = None
+    if current_node_id:
+        incoming = next((edge for edge in edges if isinstance(edge, dict) and str(edge.get("target")) == current_node_id), None)
+        outgoing = next((edge for edge in edges if isinstance(edge, dict) and str(edge.get("source")) == current_node_id), None)
+        previous_node_id = str(incoming.get("source")) if incoming else None
+        next_node_id = str(outgoing.get("target")) if outgoing else None
+    return {
+        "flow_id": str(flow.id),
+        "flow_version_id": str(session.flow_version_id) if session and session.flow_version_id else None,
+        "session_id": str(session.id) if session else None,
+        "status": session.status if session else None,
+        "current_node_id": current_node_id,
+        "previous_node_id": previous_node_id,
+        "next_node_id": next_node_id,
+    }
 
 @crud_router.post("/{flow_id}/publish", response_model=FlowVersionResponse)
 def publish_tenant_flow_version(

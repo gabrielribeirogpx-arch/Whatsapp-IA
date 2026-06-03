@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unicodedata
+import uuid
 import logging
 import re
 from datetime import datetime
@@ -9,8 +10,8 @@ from typing import Any
 from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
-from app.models import Conversation, Flow, FlowStep, FlowVersion, Message
-from app.services.flow_engine_service import get_flow_graph, save_flow_graph
+from app.models import Conversation, Flow, FlowEdge, FlowNode, FlowStep, FlowVersion, Message
+from app.services.flow_engine_service import apply_flow_version_snapshot_metadata, get_flow_graph, save_flow_graph
 from app.services.cache_service import invalidate_tenant_and_flow_cache
 
 DEFAULT_FLOW_NAME = "default_visual"
@@ -102,12 +103,10 @@ class FlowService:
                 flow_id=flow.id,
                 tenant_id=tenant_id,
                 version=next_version,
-                snapshot={"nodes": nodes, "edges": edges},
-                nodes=nodes,
-                edges=edges,
                 is_active=False,
                 is_published=False,
             )
+            apply_flow_version_snapshot_metadata(version, nodes, edges)
             self.db.add(version)
             self.db.flush()
             flow.current_version_id = version.id
@@ -117,6 +116,7 @@ class FlowService:
             flow.edges_json = edges
             flow.nodes = nodes
             flow.edges = edges
+            self._rebuild_builder_tables(flow=flow, tenant_id=tenant_id, nodes=nodes, edges=edges)
             self.db.add(flow)
             self.db.flush()
             logger.info(
@@ -127,6 +127,60 @@ class FlowService:
                 None,
             )
             return version
+
+    def _rebuild_builder_tables(self, *, flow: Flow, tenant_id, nodes: list[dict[str, Any]], edges: list[dict[str, Any]]) -> None:
+        self.db.query(FlowEdge).filter(FlowEdge.flow_id == flow.id).delete(synchronize_session=False)
+        self.db.query(FlowNode).filter(FlowNode.flow_id == flow.id, FlowNode.tenant_id == tenant_id).delete(synchronize_session=False)
+        self.db.flush()
+
+        node_uuid_map: dict[str, Any] = {}
+        for item in nodes if isinstance(nodes, list) else []:
+            if not isinstance(item, dict):
+                continue
+            raw_id = str(item.get("id") or "").strip()
+            try:
+                node_id = uuid.UUID(raw_id)
+            except (TypeError, ValueError):
+                node_id = uuid.uuid4()
+                item["id"] = str(node_id)
+            data = item.get("data") if isinstance(item.get("data"), dict) else {}
+            position = item.get("position") if isinstance(item.get("position"), dict) else {}
+            metadata = data.get("metadata") if isinstance(data.get("metadata"), dict) else {}
+            metadata = dict(metadata)
+            for key in ("text", "label", "buttons", "condition", "action", "isStart", "content"):
+                if key in data:
+                    metadata[key] = data[key]
+            node = FlowNode(
+                id=node_id,
+                flow_id=flow.id,
+                tenant_id=tenant_id,
+                type=str(item.get("type") or "default"),
+                content=(data.get("content") or data.get("text")) if isinstance(data, dict) else None,
+                metadata_json=metadata,
+                is_terminal=bool(data.get("is_terminal") or data.get("isTerminal") or data.get("endFlow") or data.get("isEnd")),
+                position_x=int(position.get("x", 0) or 0),
+                position_y=int(position.get("y", 0) or 0),
+            )
+            self.db.add(node)
+            node_uuid_map[raw_id or str(node_id)] = node_id
+
+        self.db.flush()
+        for item in edges if isinstance(edges, list) else []:
+            if not isinstance(item, dict):
+                continue
+            source_id = node_uuid_map.get(str(item.get("source") or "").strip())
+            target_id = node_uuid_map.get(str(item.get("target") or "").strip())
+            if not source_id or not target_id:
+                continue
+            data = item.get("data") if isinstance(item.get("data"), dict) else {}
+            condition = data.get("condition") or data.get("sourceHandle") or item.get("label") or item.get("sourceHandle")
+            try:
+                edge_id = uuid.UUID(str(item.get("id"))) if item.get("id") else uuid.uuid4()
+            except (TypeError, ValueError):
+                edge_id = uuid.uuid4()
+            self.db.add(FlowEdge(id=edge_id, flow_id=flow.id, source=source_id, target=target_id, condition=str(condition) if condition else None))
+
+        self.db.flush()
 
     def publish_version(self, flow: Flow, flow_version: FlowVersion) -> None:
         self.db.query(FlowVersion).filter(FlowVersion.flow_id == flow.id).update({FlowVersion.is_published: False}, synchronize_session=False)
