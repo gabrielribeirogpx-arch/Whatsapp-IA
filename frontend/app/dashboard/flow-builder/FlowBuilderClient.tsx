@@ -12,7 +12,7 @@ import ReactFlow, {
   useEdgesState,
   useNodesState,
 } from 'reactflow';
-import type { Connection, Edge, Node, ReactFlowInstance } from 'reactflow';
+import type { Connection, Edge, EdgeChange, Node, NodeChange, ReactFlowInstance } from 'reactflow';
 import 'reactflow/dist/style.css';
 import { Clock, FileText, GitBranch, History, Image as ImageIcon, ListChecks, MessageSquare, MousePointerClick, RotateCcw, Zap } from 'lucide-react';
 
@@ -165,9 +165,10 @@ const serializeFlowGraph = (nodes: Node[], edges: Edge[]) => {
     };
   });
 
+  const nodeIds = new Set(nodes.map((node) => node.id));
   const nodeTypeById = new Map(nodes.map((node) => [node.id, node.type]));
   const cleanEdges: FlowEdgePayload[] = edges
-    .filter((edge) => edge.source && edge.target)
+    .filter((edge) => edge.source && edge.target && nodeIds.has(edge.source) && nodeIds.has(edge.target))
     .map((edge) => {
       const sourceNodeType = nodeTypeById.get(edge.source);
       const normalizedSourceHandle =
@@ -675,6 +676,32 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
       setFlowSaveStatus('idle');
     }
   }, [edges, isFlowHydrated, nodes, selectedFlowId, setFlowDirty]);
+
+  const handleNodesChange = useCallback((changes: NodeChange[]) => {
+    const removedNodeIds = changes.filter((change) => change.type === 'remove').map((change) => change.id);
+    if (removedNodeIds.length > 0) {
+      console.info('[FLOW NODE REMOVE]', {
+        flow_id: selectedFlowId,
+        removed_node_ids: removedNodeIds,
+        state_nodes_before: nodesRef.current.map((node) => node.id),
+      });
+      markFlowDirty('node_removed', { removed_node_ids: removedNodeIds });
+    }
+    onNodesChange(changes);
+  }, [markFlowDirty, onNodesChange, selectedFlowId]);
+
+  const handleEdgesChange = useCallback((changes: EdgeChange[]) => {
+    const removedEdgeIds = changes.filter((change) => change.type === 'remove').map((change) => change.id);
+    if (removedEdgeIds.length > 0) {
+      console.info('[FLOW EDGE REMOVE]', {
+        flow_id: selectedFlowId,
+        removed_edge_ids: removedEdgeIds,
+        state_edges_before: edgesRef.current.map((edge) => edge.id),
+      });
+      markFlowDirty('edge_removed', { removed_edge_ids: removedEdgeIds });
+    }
+    onEdgesChange(changes);
+  }, [markFlowDirty, onEdgesChange, selectedFlowId]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -1563,6 +1590,12 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
     clearSaveStatusTimer();
 
     console.info(isAutosave ? '[AUTOSAVE START]' : '[FLOW SAVE START]', { flow_id: selectedFlowId, endpoint, method: 'PUT' });
+    console.info('[FLOW SAVE REQUEST]', {
+      flow_id: selectedFlowId,
+      nodes_count: safeFlow.nodes.length,
+      edges_count: safeFlow.edges.length,
+      node_ids: safeFlow.nodes.map((node) => node.id),
+    });
     console.info('[FLOW SAVE PAYLOAD]', {
       flow_id: selectedFlowId,
       endpoint,
@@ -1695,7 +1728,9 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
         }
       }
 
+      const publishSnapshot = getCurrentSerializedFlow();
       console.log('[PUBLISH REQUEST]', { flowId: selectedFlowId });
+      console.info('[FLOW PUBLISH NODE IDS]', { flow_id: selectedFlowId, node_ids: publishSnapshot.nodes.map((node) => node.id) });
       const response = await apiFetch(`/api/flows/${selectedFlowId}/publish`, { method: 'POST', body: JSON.stringify({}) });
       if (!response.ok) {
         const body = await response.text();
@@ -2229,8 +2264,8 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
           onInit={setRfInstance}
           nodes={safeNodes}
           edges={decoratedEdges}
-          onNodesChange={onNodesChange}
-          onEdgesChange={onEdgesChange}
+          onNodesChange={handleNodesChange}
+          onEdgesChange={handleEdgesChange}
           onConnect={onConnect}
           onConnectStart={onConnectStart}
           onConnectEnd={onConnectEnd}
@@ -2242,7 +2277,14 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
             setContextMenu({ x: e.clientX - mainRect.left, y: e.clientY - mainRect.top });
           }}
           onNodesDelete={(deleted) => {
-            setNodes((nds) => nds.filter((node) => !deleted.find((item) => item.id === node.id)));
+            const deletedIds = new Set(deleted.map((item) => item.id));
+            console.info('[FLOW NODE DELETE COMMIT]', {
+              flow_id: selectedFlowId,
+              deleted_node_ids: Array.from(deletedIds),
+            });
+            setNodes((nds) => nds.filter((node) => !deletedIds.has(node.id)));
+            setEdges((eds) => eds.filter((edge) => !deletedIds.has(edge.source) && !deletedIds.has(edge.target)));
+            markFlowDirty('node_delete_commit', { deleted_node_ids: Array.from(deletedIds) });
           }}
           nodeTypes={nodeTypes}
           nodesDraggable={true}

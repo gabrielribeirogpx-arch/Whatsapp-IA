@@ -29,6 +29,7 @@ from app.services.flow_engine_service import (
     get_flow_graph,
     invalidate_flow_runtime_cache,
     resolve_runtime_flow_graph,
+    resolve_flow,
     save_flow_graph,
     validate_flow as validate_flow_definition,
     validate_flow_graph,
@@ -59,6 +60,53 @@ def _graph_checksum(nodes: list[dict[str, Any]], edges: list[dict[str, Any]]) ->
 
 def _graph_node_ids(nodes: list[dict[str, Any]] | None) -> list[str]:
     return [str(node.get("id")) for node in (nodes or []) if isinstance(node, dict) and node.get("id") is not None]
+
+
+def _log_flow_save_request(*, flow_id: str | uuid.UUID | None, tenant_id: str | uuid.UUID | None, nodes: list[Any], edges: list[Any]) -> None:
+    logger.info(
+        "[FLOW SAVE REQUEST] flow_id=%s tenant_id=%s nodes_count=%s edges_count=%s node_ids=%s",
+        flow_id,
+        tenant_id,
+        len(nodes if isinstance(nodes, list) else []),
+        len(edges if isinstance(edges, list) else []),
+        [str(node.get("id")) for node in nodes if isinstance(node, dict) and node.get("id") is not None] if isinstance(nodes, list) else [],
+    )
+
+
+def _log_flow_save_result(*, flow: Flow, version: FlowVersion | None = None) -> None:
+    nodes_json = flow.nodes_json if isinstance(flow.nodes_json, list) else []
+    edges_json = flow.edges_json if isinstance(flow.edges_json, list) else []
+    version_nodes = version.nodes if version and isinstance(version.nodes, list) else []
+    version_edges = version.edges if version and isinstance(version.edges, list) else []
+    logger.info(
+        "[FLOW SAVE RESULT] flow_id=%s current_version_id=%s version_id=%s nodes_json_count=%s edges_json_count=%s version_nodes_count=%s version_edges_count=%s node_ids=%s",
+        flow.id,
+        flow.current_version_id,
+        getattr(version, "id", None),
+        len(nodes_json),
+        len(edges_json),
+        len(version_nodes),
+        len(version_edges),
+        _graph_node_ids(nodes_json),
+    )
+
+
+def _log_flow_publish_result(*, flow: Flow, version: FlowVersion, nodes: list[dict[str, Any]], edges: list[dict[str, Any]], reason: str) -> None:
+    logger.info(
+        "[FLOW PUBLISH] flow_id=%s tenant_id=%s reason=%s version_id=%s nodes_count=%s edges_count=%s",
+        flow.id,
+        flow.tenant_id,
+        reason,
+        version.id,
+        len(nodes),
+        len(edges),
+    )
+    logger.info(
+        "[FLOW PUBLISH NODE IDS] flow_id=%s version_id=%s node_ids=%s",
+        flow.id,
+        version.id,
+        _graph_node_ids(nodes),
+    )
 
 
 def _graph_edge_pairs(edges: list[dict[str, Any]] | None) -> list[dict[str, str | None]]:
@@ -259,6 +307,7 @@ def _publish_fresh_snapshot(db: Session, flow: Flow, *, reason: str) -> FlowVers
         db.add(flow)
         db.flush()
         _log_publish_graph_snapshot(label="PUBLISH GRAPH", flow=flow, nodes=nodes, edges=edges, version=latest_published)
+        _log_flow_publish_result(flow=flow, version=latest_published, nodes=nodes, edges=edges, reason=reason)
         logger.info(
             "[PUBLISH GRAPH REUSED] flow_id=%s version_id=%s checksum=%s reason=same_checksum_marked_published",
             flow.id,
@@ -293,6 +342,7 @@ def _publish_fresh_snapshot(db: Session, flow: Flow, *, reason: str) -> FlowVers
     db.add(flow)
     db.flush()
     _log_publish_graph_snapshot(label="PUBLISH GRAPH", flow=flow, nodes=nodes, edges=edges, version=fresh_version)
+    _log_flow_publish_result(flow=flow, version=fresh_version, nodes=nodes, edges=edges, reason=reason)
     logger.info("[PUBLISH GRAPH SOURCE] flow_id=%s nodes_count=%s edges_count=%s checksum=%s start_text_preview=%s", flow.id, len(nodes), len(edges), checksum, start_text_preview)
     return fresh_version
 
@@ -1191,6 +1241,8 @@ async def update_flow_route(
         raw_nodes = payload_data.get("nodes")
         raw_edges = payload_data.get("edges")
         should_update_graph = isinstance(raw_nodes, list) and isinstance(raw_edges, list)
+        if should_update_graph:
+            _log_flow_save_request(flow_id=flow.id, tenant_id=tenant.id, nodes=raw_nodes, edges=raw_edges)
 
         if should_update_graph:
             nodes = []
@@ -1242,6 +1294,7 @@ async def update_flow_route(
             flow.current_version_id = new_version.id
             flow.version = new_version.version
             _persist_builder_graph(flow, nodes, edges)
+            _log_flow_save_result(flow=flow, version=new_version)
             invalidate_flow_runtime_cache(flow.id)
         else:
             validation = None
@@ -1519,6 +1572,7 @@ def save_tenant_flow(
 
     normalized_nodes = payload.nodes or []
     normalized_edges = payload.edges or []
+    _log_flow_save_request(flow_id=flow_id or "default", tenant_id=tenant.id, nodes=normalized_nodes, edges=normalized_edges)
     logger.info("[FLOW SAVE] nodes: %s", len(normalized_nodes))
     validate_flow_payload_or_400(normalized_nodes, normalized_edges)
 
@@ -1538,6 +1592,8 @@ def save_tenant_flow(
     db.commit()
 
     graph = get_flow_graph(db=db, tenant_id=tenant.id, flow_id=flow_id or "default")
+    saved_flow = resolve_flow(db=db, tenant_id=tenant.id, flow_id=flow_id or "default")
+    _log_flow_save_result(flow=saved_flow, version=saved_flow.current_version)
     return _normalize_flow_response(graph)
 
 
@@ -1740,6 +1796,7 @@ async def update_tenant_flow(
         payload_data = payload if isinstance(payload, dict) else {}
         if not isinstance(payload_data.get("nodes"), list) or not isinstance(payload_data.get("edges"), list):
             raise HTTPException(status_code=400, detail="Payload inválido")
+        _log_flow_save_request(flow_id=flow_id, tenant_id=tenant_uuid, nodes=payload_data.get("nodes") or [], edges=payload_data.get("edges") or [])
         logger.info("[FLOW SAVE] tenant_id=%s nodes_count=%s edges_count=%s", str(tenant_uuid), len(payload_data.get("nodes") or []), len(payload_data.get("edges") or []))
         payload_model = FlowUpdate(**payload_data)
         logger.info("FLOW RECEBIDO: %s", payload_model.model_dump())
@@ -1803,6 +1860,7 @@ async def update_tenant_flow(
 
         flow_service = FlowService(db)
         nova = flow_service.create_version(flow=flow, tenant_id=tenant_uuid, nodes=nodes_json, edges=edges_json)
+        _log_flow_save_result(flow=flow, version=nova)
 
         db.query(FlowVersion).filter(
             FlowVersion.flow_id == flow.id,
@@ -2194,6 +2252,7 @@ def force_republish_current_tenant_flow(
     flow.published_version_id = new_version.id
     flow.version = new_version.version
     flow.status = "published"
+    _log_flow_publish_result(flow=flow, version=new_version, nodes=nodes, edges=edges, reason="force_republish_current")
     db.add(flow)
     invalidate_flow_runtime_cache(flow.id)
     db.commit()
