@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, UniqueConstraint, text
+from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -67,6 +67,7 @@ class FlowV2Event(Base):
     )
     event_index: Mapped[int] = mapped_column(Integer, nullable=False)
     event_type: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    event_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
     node_id: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
     input_message_id: Mapped[str | None] = mapped_column(String(180), nullable=True, index=True)
     payload: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict, server_default="{}")
@@ -87,4 +88,43 @@ class FlowV2ScheduledJob(Base):
     )
     resume_node_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
     run_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow, index=True)
+
+
+class FlowV2IdempotencyKey(Base):
+    """Processed Runtime V2 ingress keys for production idempotency."""
+
+    __tablename__ = "flow_v2_idempotency_keys"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "event_kind", "idempotency_key", name="uq_flow_v2_idempotency_key"),
+        Index("ix_flow_v2_idempotency_tenant_kind", "tenant_id", "event_kind"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False, index=True)
+    event_kind: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    idempotency_key: Mapped[str] = mapped_column(String(180), nullable=False, index=True)
+    session_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("flow_v2_sessions.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    payload: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict, server_default="{}")
+    processed_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow, index=True)
+
+
+class FlowV2DeadLetter(Base):
+    """Dead letter queue for failed Runtime V2 events."""
+
+    __tablename__ = "flow_v2_dead_letters"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False, index=True)
+    session_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("flow_v2_sessions.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    flow_version_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("flow_versions.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    event: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict, server_default="{}")
+    error: Mapped[str] = mapped_column(Text, nullable=False)
+    stacktrace: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow, index=True)

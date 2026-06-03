@@ -49,7 +49,7 @@ class FlowV2PublishService:
                 graph_hash=published.v2_snapshot_hash,
                 graph_checksum=published.v2_snapshot_hash,
                 v2_snapshot_hash=published.v2_snapshot_hash,
-                v2_snapshot_schema_version=published.snapshot["schema_version"],
+                v2_snapshot_schema_version=published.snapshot["snapshot_schema_version"],
                 start_node_id=published.snapshot["start_node_id"],
                 created_from_source="flow_v2_publish_service",
                 is_active=True,

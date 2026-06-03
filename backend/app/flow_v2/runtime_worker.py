@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from app.flow_v2.actions import RuntimeAction, action_from_effect
 from app.flow_v2.channel_adapter import ChannelAdapter
 from app.flow_v2.contracts import RuntimeInput, RuntimeOutput
+from app.flow_v2.dead_letter import FlowV2DeadLetterQueue
 from app.flow_v2.executor import FlowV2Executor
 
 
@@ -21,6 +22,9 @@ class FlowV2InputEvent:
     contact_id: UUID | None = None
     conversation_id: UUID | None = None
     input_message_id: str | None = None
+    event_id: str | None = None
+    message_id: str | None = None
+    webhook_id: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def to_runtime_input(self) -> RuntimeInput:
@@ -32,6 +36,9 @@ class FlowV2InputEvent:
             contact_id=self.contact_id,
             conversation_id=self.conversation_id,
             input_message_id=self.input_message_id,
+            event_id=self.event_id,
+            message_id=self.message_id,
+            webhook_id=self.webhook_id,
             metadata=dict(self.metadata),
         )
 
@@ -51,13 +58,35 @@ class FlowV2RuntimeWorker:
     to the configured channel adapter.
     """
 
-    def __init__(self, *, executor: FlowV2Executor | None = None, channel_adapter: ChannelAdapter | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        executor: FlowV2Executor | None = None,
+        channel_adapter: ChannelAdapter | None = None,
+        dead_letter_queue: FlowV2DeadLetterQueue | None = None,
+    ) -> None:
         self.executor = executor or FlowV2Executor()
         self.channel_adapter = channel_adapter
+        self.dead_letter_queue = dead_letter_queue or FlowV2DeadLetterQueue()
 
     def process(self, db: Session, input_event: FlowV2InputEvent | RuntimeInput) -> FlowV2WorkerResult:
         runtime_input = input_event if isinstance(input_event, RuntimeInput) else input_event.to_runtime_input()
-        runtime_output = self.executor.handle_input(db, runtime_input)
+        try:
+            runtime_output = self.executor.handle_input(db, runtime_input)
+        except Exception as exc:
+            self.dead_letter_queue.record(
+                db,
+                tenant_id=runtime_input.tenant_id,
+                session_id=None,
+                flow_version_id=runtime_input.flow_version_id,
+                event={
+                    "external_user_id": runtime_input.external_user_id,
+                    "input_message_id": runtime_input.input_message_id,
+                    "metadata": runtime_input.metadata,
+                },
+                error=exc,
+            )
+            raise
         actions = runtime_output.actions or tuple(
             action
             for effect in runtime_output.effects

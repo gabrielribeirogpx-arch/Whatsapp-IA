@@ -33,6 +33,8 @@ from app.api.flow_runtime import router as flow_runtime_router
 from app.api.whatsapp_webhook import router as whatsapp_webhook_router
 from app.api.flow_execute import router as flow_execute_router
 from app.api.whatsapp import router as whatsapp_router
+from app.api.runtime_health import router as runtime_health_router
+from app.api.runtime_metrics import router as runtime_metrics_router
 
 
 # ✅ MIGRATIONS
@@ -231,6 +233,8 @@ app.include_router(flow_runtime_router, prefix="/api")
 app.include_router(flow_execute_router, prefix="/api")
 app.include_router(whatsapp_webhook_router, prefix="/api")
 app.include_router(whatsapp_router, prefix="/api")
+app.include_router(runtime_health_router, prefix="/api")
+app.include_router(runtime_metrics_router, prefix="/api")
 
 
 # ✅ HEALTH

@@ -223,3 +223,20 @@ O hash canônico é calculado sobre o objeto acima, com JSON ordenado por chave.
 - Conversão automática completa dos drafts V1.
 - Integração de webhook produtivo.
 - Nós avançados com condições, delay, IA, mídia ou ações externas.
+
+## Sprint 6: Production Hardening Flow
+
+```mermaid
+flowchart TD
+    A[Webhook / Choice / Delay Event] --> B[Resolve event_version + idempotency key]
+    B --> C{Already processed?}
+    C -- yes --> D[Return current RuntimeOutput without side effects]
+    C -- no --> E[Acquire session lock]
+    E --> F[Append versioned event]
+    F --> G[Execute current node]
+    G --> H[Dispatch runtime actions via adapter]
+    G -- error --> I[Store flow_v2_dead_letters]
+    H --> J[Aggregate sessions and events into metrics]
+```
+
+Sprint 6 keeps V1, Builder, and real WhatsApp delivery outside the Runtime V2 production-hardening path.

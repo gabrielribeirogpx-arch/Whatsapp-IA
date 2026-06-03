@@ -24,6 +24,7 @@ class FlowV2Snapshot:
     nodes: tuple[dict[str, Any], ...]
     edges: tuple[dict[str, Any], ...]
     start_node_id: str
+    snapshot_schema_version: int = 1
 
     @property
     def node_by_id(self) -> dict[str, dict[str, Any]]:
@@ -65,6 +66,7 @@ class FlowV2SnapshotRepository:
         if not isinstance(nodes, list) or not isinstance(edges, list):
             raise FlowV2SnapshotError("Runtime V2 snapshot must contain nodes and edges arrays")
 
+        snapshot = migrate_snapshot(snapshot)
         start_node_id = snapshot.get("start_node_id")
         if not start_node_id:
             raise FlowV2SnapshotError("Runtime V2 snapshot must declare start_node_id")
@@ -76,4 +78,19 @@ class FlowV2SnapshotRepository:
             nodes=tuple(dict(node) for node in nodes),
             edges=tuple(dict(edge) for edge in edges),
             start_node_id=str(start_node_id),
+            snapshot_schema_version=int(snapshot.get("snapshot_schema_version") or snapshot.get("schema_version") or 1),
         )
+
+
+def migrate_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
+    """Return a runtime snapshot in the current schema.
+
+    Sprint 6 keeps migrations intentionally small: legacy V2 snapshots with only
+    schema_version are read as snapshot_schema_version=1. Future migrations can
+    branch on this function without mutating the immutable database row.
+    """
+
+    schema_version = int(snapshot.get("snapshot_schema_version") or snapshot.get("schema_version") or 1)
+    if schema_version == 1:
+        return {**snapshot, "snapshot_schema_version": 1}
+    raise FlowV2SnapshotError(f"Unsupported Runtime V2 snapshot_schema_version={schema_version}")
