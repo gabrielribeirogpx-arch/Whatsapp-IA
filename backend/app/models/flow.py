@@ -124,6 +124,8 @@ class FlowVersion(Base):
     edges_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     graph_hash: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     graph_checksum: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    v2_snapshot_hash: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    v2_snapshot_schema_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
     start_node_id: Mapped[str | None] = mapped_column(String, nullable=True)
     start_text_preview: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_from_source: Mapped[str | None] = mapped_column(String(64), nullable=True)
