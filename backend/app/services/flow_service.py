@@ -103,7 +103,7 @@ class FlowService:
                 flow_id=flow.id,
                 tenant_id=tenant_id,
                 version=next_version,
-                is_active=False,
+                is_active=True,
                 is_published=False,
             )
             apply_flow_version_snapshot_metadata(version, nodes, edges)

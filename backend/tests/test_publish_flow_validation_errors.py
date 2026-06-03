@@ -181,6 +181,7 @@ def test_publish_fresh_snapshot_republishes_latest_matching_checksum(monkeypatch
             return None
 
     monkeypatch.setattr(flows, 'validate_flow_payload_or_400', lambda _nodes, _edges: None)
+    monkeypatch.setattr(flows, '_builder_graph_from_records', lambda _db, _flow: (nodes, edges))
     published = flows._publish_fresh_snapshot(db=DB(), flow=flow, reason='publish')
 
     assert published is latest_version
