@@ -2259,6 +2259,7 @@ def run_until_wait_node(
     flow_session, _ = session_service.get_runtime_session(session.tenant_id, session.phone_number, flow)
     node = _get_node(db=db, node_id=start_node_id, tenant_id=session.tenant_id, runtime_graph=runtime_graph) if start_node_id else None
     normalized_input = _normalize_text(incoming_text or "")
+    choice_target_trace: dict[str, Any] | None = None
     if node:
         node_data = _extract_node_data(node)
         is_start_node = bool(node_data.get("isStart"))
@@ -2442,6 +2443,30 @@ def run_until_wait_node(
                     event_type="LIST_SELECTED", metadata={"option_id": selected_handle, "label": selected_title, "source": "choice"}, dedupe_bucket_seconds=1,
                 )
                 node = _get_node(db=db, node_id=next_node_id, tenant_id=session.tenant_id, runtime_graph=runtime_graph) if selected_edge else None
+                target_node_data = _extract_node_data(node) if node else {}
+                target_node_type = _node_type_slug(node) if node else None
+                target_node_content = _resolve_node_text(target_node_data) if node else None
+                logger.info(
+                    "[CHOICE TARGET EXECUTION START] flow_id=%s session_id=%s target_node_id=%s target_node_type=%s target_node_content=%s",
+                    flow.id,
+                    getattr(flow_session, "id", None),
+                    next_node_id,
+                    target_node_type,
+                    target_node_content,
+                )
+                logger.info(
+                    "[CHOICE TARGET NODE LOADED] flow_id=%s session_id=%s target_node_id=%s target_node_type=%s target_node_content=%s",
+                    flow.id,
+                    getattr(flow_session, "id", None),
+                    next_node_id,
+                    target_node_type,
+                    target_node_content,
+                )
+                choice_target_trace = {
+                    "target_node_id": str(next_node_id) if next_node_id else None,
+                    "target_node_type": target_node_type,
+                    "target_node_content": target_node_content,
+                }
                 _log_choice_runtime_marker(
                     "[CHOICE FLOW CONTINUE]",
                     session_id=getattr(flow_session, "id", None),
@@ -2826,6 +2851,15 @@ def run_until_wait_node(
                             flow_send_source="run_until_wait_node:message",
                         )
                         logger.info("[MANYCHAT MESSAGE SENT] node_id=%s", _node_get(node, "id"))
+                        if choice_target_trace and choice_target_trace.get("target_node_id") == str(current_node_uuid):
+                            logger.info(
+                                "[CHOICE TARGET MESSAGE SENT] flow_id=%s session_id=%s target_node_id=%s target_node_type=%s target_node_content=%s",
+                                flow.id,
+                                getattr(flow_session, "id", None),
+                                current_node_uuid,
+                                node_type,
+                                text,
+                            )
             next_edge = _pick_default_edge(edges)
             next_target = _edge_target(next_edge) if next_edge else None
             message_node_id = _node_get(node, "id")
@@ -2890,6 +2924,15 @@ def run_until_wait_node(
                     flow.id, getattr(flow_session, "id", None), _node_get(node, "id"), None, node_type,
                 )
                 _finalize_runtime_flow_session(db=db, conversation=session, flow_session=flow_session, end_node_id=_node_get(node, "id"))
+                if choice_target_trace and choice_target_trace.get("target_node_id") == str(current_node_uuid):
+                    logger.info(
+                        "[CHOICE TARGET EXECUTION FINISHED] flow_id=%s session_id=%s target_node_id=%s target_node_type=%s target_node_content=%s",
+                        flow.id,
+                        getattr(flow_session, "id", None),
+                        current_node_uuid,
+                        node_type,
+                        choice_target_trace.get("target_node_content"),
+                    )
                 return None
             next_node_type = _node_type_slug(next_node) if next_node else None
             logger.info(
@@ -2930,6 +2973,16 @@ def run_until_wait_node(
                 _node_type_slug(node) if node else None,
                 "run_until_wait_node:message_default_edge",
             )
+            if choice_target_trace and choice_target_trace.get("target_node_id") == str(current_node_uuid):
+                logger.info(
+                    "[CHOICE TARGET EXECUTION FINISHED] flow_id=%s session_id=%s target_node_id=%s target_node_type=%s target_node_content=%s",
+                    flow.id,
+                    getattr(flow_session, "id", None),
+                    current_node_uuid,
+                    node_type,
+                    choice_target_trace.get("target_node_content"),
+                )
+                choice_target_trace = None
             if node and next_node_type == "condition":
                 condition_node_id = _node_get(node, "id")
                 target_node_id = _parse_uuid(condition_node_id)
