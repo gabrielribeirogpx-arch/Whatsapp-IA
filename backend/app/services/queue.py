@@ -19,6 +19,7 @@ except ImportError:
 from app.db.session import SessionLocal
 from app.models import FailedMessage, Tenant
 from app.services.cache_service import check_rate_limit
+from app.services.message_origin_trace import log_message_origin_trace
 
 logger = logging.getLogger(__name__)
 
@@ -206,6 +207,14 @@ def enqueue_send_message(message_data: dict[str, Any]) -> str | None:
             payload[key] = str(value)
 
     message_type = "interactive" if payload.get("interactive_type") or (isinstance(payload.get("buttons"), list) and payload.get("buttons")) else "text"
+    log_message_origin_trace(
+        executor=payload.get("flow_executor") or payload.get("flow_send_source") or "enqueue_send_message",
+        flow_id=payload.get("flow_id"),
+        node_id=payload.get("node_id"),
+        node_type=payload.get("node_type"),
+        message=content,
+        context=payload,
+    )
     if payload.get("flow_id") or payload.get("node_id") or payload.get("flow_engine"):
         logger.warning(
             "[FLOW SEND ENQUEUE TRACE] engine=%s executor=%s source=%s flow_id=%s flow_version_id=%s session_id=%s node_id=%s node_type=%s message_type=%s text=%s stack=%s",

@@ -14,6 +14,7 @@ from app.integrations.meta.meta_cloud_client import MetaApiError, MetaCloudClien
 from app.models.tenant_whatsapp_provider import TenantWhatsAppProvider
 from app.models.whatsapp_message_template import WhatsAppMessageTemplate
 from app.utils.encryption import decrypt_secret
+from app.services.message_origin_trace import log_message_origin_trace
 
 logger = logging.getLogger(__name__)
 VAR_PATTERN = re.compile(r"\{\{\s*(\d+)\s*\}\}")
@@ -162,6 +163,14 @@ def mark_provider_auth_error(db: Session, *, provider_id: str, error_message: st
 
 
 def send_text_message_via_meta(*, token: str, phone_number_id: str, to: str, text: str, context: dict[str, Any]) -> dict[str, Any]:
+    log_message_origin_trace(
+        executor=context.get("flow_executor") or context.get("flow_send_source") or "send_text_message_via_meta",
+        flow_id=context.get("flow_id"),
+        node_id=context.get("node_id"),
+        node_type=context.get("node_type"),
+        message=text,
+        context=context,
+    )
     payload = {
         "messaging_product": "whatsapp",
         "to": re.sub(r"\D", "", to or ""),
@@ -172,6 +181,14 @@ def send_text_message_via_meta(*, token: str, phone_number_id: str, to: str, tex
 
 
 def send_buttons_message_via_meta(*, token: str, phone_number_id: str, to: str, body_text: str, buttons: list[dict[str, Any]], context: dict[str, Any]) -> dict[str, Any]:
+    log_message_origin_trace(
+        executor=context.get("flow_executor") or context.get("flow_send_source") or "send_buttons_message_via_meta",
+        flow_id=context.get("flow_id"),
+        node_id=context.get("node_id"),
+        node_type=context.get("node_type"),
+        message=body_text,
+        context=context,
+    )
     safe_buttons = [
         {
             "type": "reply",
@@ -211,6 +228,14 @@ def send_buttons_message_via_meta(*, token: str, phone_number_id: str, to: str, 
 
 
 def send_interactive_list_via_meta(*, token: str, phone_number_id: str, to: str, body_text: str, sections: list[dict[str, Any]], context: dict[str, Any], button_text: str = "Ver opções") -> dict[str, Any]:
+    log_message_origin_trace(
+        executor=context.get("flow_executor") or context.get("flow_send_source") or "send_interactive_list_via_meta",
+        flow_id=context.get("flow_id"),
+        node_id=context.get("node_id"),
+        node_type=context.get("node_type"),
+        message=body_text,
+        context=context,
+    )
     safe_sections: list[dict[str, Any]] = []
     for section_index, section in enumerate(sections or []):
         if not isinstance(section, dict):
@@ -291,7 +316,15 @@ def send_template_message(db: Session, *, tenant_id: str, provider_id: str, temp
         "type": "template",
         "template": {"name": template.name, "language": {"code": language_code or template.language or "pt_BR"}, "components": components},
     }
-    context = {"tenant_id": tenant_id, "provider_id": provider_id, "template_id": template_id, "token_length": len(token or "")}
+    context = {"tenant_id": tenant_id, "provider_id": provider_id, "template_id": template_id, "token_length": len(token or ""), "executor": "send_template_message"}
+    log_message_origin_trace(
+        executor="send_template_message",
+        flow_id=None,
+        node_id=template_id,
+        node_type="whatsapp_template",
+        message=template.body_text,
+        context=context,
+    )
     client = MetaCloudClient(token)
 
     for attempt in range(1, 4):
