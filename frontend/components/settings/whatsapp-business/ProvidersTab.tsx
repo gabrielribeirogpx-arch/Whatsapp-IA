@@ -11,7 +11,7 @@ export default function ProvidersTab(props: any) {
 
   const statusBadges = useMemo(() => {
     if (!editingProvider) return [];
-    return [editingProvider.status, editingProvider.is_active ? 'active' : 'inactive'];
+    return [editingProvider.connection_status || editingProvider.status || 'disconnected', editingProvider.is_active ? 'active' : 'inactive'];
   }, [editingProvider]);
 
   const openEditor = (provider: any) => {
@@ -47,7 +47,7 @@ export default function ProvidersTab(props: any) {
       <form onSubmit={submitEdit} className='w-full max-w-2xl space-y-4 rounded-3xl border border-slate-200 bg-white p-6 shadow-2xl'>
         <div>
           <h3 className='text-xl font-semibold text-slate-900'>Editar conexão WhatsApp</h3>
-          <p className='text-sm text-slate-600'>Atualize credenciais sem interromper o runtime</p>
+          <p className='text-sm text-slate-600'>{(editingProvider.connection_status || editingProvider.status) === 'token_expired' ? 'Cole um novo token para restaurar a conexão sem remover o provider.' : 'Atualize credenciais sem interromper o runtime'}</p>
           <div className='mt-2 flex gap-2'>{statusBadges.map((badge: string) => <span key={badge} className='rounded-full border border-slate-200 bg-slate-50 px-2 py-1 text-xs font-medium text-slate-700'>{badge}</span>)}</div>
         </div>
         <div className='grid gap-3 sm:grid-cols-2'>
@@ -61,7 +61,7 @@ export default function ProvidersTab(props: any) {
         {error && <div className='rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700'>{error}</div>}
         <div className='flex justify-end gap-2'>
           <button type='button' onClick={() => setEditingProvider(null)} className='secondary-button border border-slate-300 bg-white'>Cancelar</button>
-          <button disabled={props.loading} className='primary-button'>{props.loading ? 'Salvando...' : 'Salvar'}</button>
+          <button disabled={props.loading} className='primary-button'>{props.loading ? 'Salvando...' : ((editingProvider.connection_status || editingProvider.status) === 'token_expired' ? 'Atualizar Token' : 'Salvar')}</button>
         </div>
       </form>
     </div>}

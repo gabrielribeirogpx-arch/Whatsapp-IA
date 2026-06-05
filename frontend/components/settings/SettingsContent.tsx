@@ -181,7 +181,7 @@ function WhatsAppBusinessConsole() {
   useEffect(() => { (async () => { const data = await getSystemSettings(); setForm({ ...INITIAL_FORM, ...data }); await refresh(); })(); }, []);
 
   const stats = useMemo(() => {
-    const connectedProviders = providers.filter(p => p.is_active || p.status === 'connected' || p.status === 'active');
+    const connectedProviders = providers.filter(p => p.is_active || p.connection_status === 'connected' || p.status === 'connected' || p.status === 'active');
 
     return {
       activeProviders: connectedProviders.length,
@@ -189,7 +189,7 @@ function WhatsAppBusinessConsole() {
       pendingTemplates: templates.filter(t => t.status === 'pending' || t.status === 'submitted').length,
       status: connectedProviders.length > 0 ? 'Operacional' : 'Sem conexão',
       lastSyncAt: providers
-        .map(p => p?.metadata_json?.last_sync_at || p.last_connection_check_at || p.updated_at)
+        .map(p => p.last_validation_at || p?.metadata_json?.last_sync_at || p.last_connection_check_at || p.updated_at)
         .filter(Boolean)
         .sort((a, b) => new Date(b as string).getTime() - new Date(a as string).getTime())[0] ?? null
     };

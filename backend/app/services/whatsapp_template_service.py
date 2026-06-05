@@ -12,6 +12,7 @@ from app.integrations.meta.meta_cloud_client import MetaApiError, MetaCloudClien
 from app.models.tenant_whatsapp_provider import TenantWhatsAppProvider
 from app.models.whatsapp_message_template import WhatsAppMessageTemplate
 from app.utils.encryption import decrypt_secret
+from app.services.whatsapp_provider_service import record_provider_meta_error
 
 logger = logging.getLogger(__name__)
 
@@ -119,7 +120,7 @@ def submit_template_placeholder(db: Session, tenant_id: UUID, template_id: UUID)
             f"json={str(response_body)[:1500]} text={response_text[:1500]} headers={str(response_headers)[:1000]}"
         )
         template.metadata_json = {**(template.metadata_json or {}), "last_error": str(exc)}
-        db.commit()
+        record_provider_meta_error(db, provider, exc, endpoint="template_submit")
         if status_code in {401, 403}:
             raise TemplateSubmitError("Token Meta inválido ou expirado.", 422, meta_error=meta_message, meta_code=meta_code) from exc
         if status_code == 404:
@@ -137,7 +138,8 @@ def sync_templates_placeholder(db: Session, tenant_id: UUID):
             continue
         try:
             resp = asyncio.run(_list_meta_templates(provider, token, str(tenant_id)))
-        except MetaApiError:
+        except MetaApiError as exc:
+            record_provider_meta_error(db, provider, exc, endpoint="template_sync")
             continue
         remote = {item.get("name"): item for item in resp.get("data", [])}
         now = datetime.utcnow()

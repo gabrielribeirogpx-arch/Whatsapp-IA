@@ -20,6 +20,16 @@ from app.utils.encryption import decrypt_secret, encrypt_secret
 
 logger = logging.getLogger(__name__)
 
+SUPPORTED_CONNECTION_STATUSES = {
+    "connected",
+    "token_expired",
+    "invalid_token",
+    "invalid_phone_number",
+    "meta_error",
+    "disconnected",
+}
+
+
 PROVIDER_REQUIRED_FIELDS = {
     "meta_cloud": [
         "waba_id",
@@ -100,6 +110,9 @@ def _provider_conflict_log_row(provider: TenantWhatsAppProvider | None) -> dict 
         "business_id": provider.business_id,
         "is_active": provider.is_active,
         "status": provider.status,
+        "connection_status": getattr(provider, "connection_status", provider.status),
+        "last_validation_at": provider.last_validation_at.isoformat() if getattr(provider, "last_validation_at", None) else None,
+        "last_validation_error": getattr(provider, "last_validation_error", None),
         "deleted_at": deleted_at.isoformat() if deleted_at else None,
     }
 
@@ -113,6 +126,7 @@ def _provider_list_log_row(provider: TenantWhatsAppProvider) -> dict:
         "display_name": provider.display_name,
         "is_active": provider.is_active,
         "status": provider.status,
+        "connection_status": getattr(provider, "connection_status", provider.status),
         "phone_number_id": provider.phone_number_id,
         "waba_id": provider.waba_id,
         "business_id": provider.business_id,
@@ -243,6 +257,7 @@ def _assert_phone_number_id_available(
         "business_id": conflict.business_id,
         "is_active": conflict.is_active,
         "status": conflict.status,
+        "connection_status": getattr(conflict, "connection_status", conflict.status),
         "created_at": conflict.created_at.isoformat() if conflict.created_at else None,
         "updated_at": conflict.updated_at.isoformat() if conflict.updated_at else None,
         "deleted_at": deleted_at.isoformat() if deleted_at else None,
@@ -305,6 +320,76 @@ def _assert_phone_number_id_available(
         blocking_provider=blocking_provider,
     )
 
+
+
+def _classify_meta_error(exc: MetaApiError, *, endpoint: str | None = None) -> str:
+    message = str(exc).lower()
+    payload = getattr(exc, "payload", {}) or {}
+    raw = ""
+    if isinstance(payload, dict):
+        raw = str(payload.get("raw") or payload.get("error") or "").lower()
+    combined = f"{message} {raw} {endpoint or ''}"
+    if exc.status_code == 401:
+        return "token_expired"
+    if "phone_number_id" in combined or "phone number" in combined:
+        return "invalid_phone_number"
+    return "meta_error"
+
+
+def _set_provider_connection_status(
+    provider: TenantWhatsAppProvider,
+    status: str,
+    *,
+    error_message: str | None = None,
+    checked_at: datetime | None = None,
+) -> None:
+    normalized = status if status in SUPPORTED_CONNECTION_STATUSES else "meta_error"
+    now = checked_at or datetime.utcnow()
+    provider.connection_status = normalized
+    provider.status = normalized
+    provider.last_validation_at = now
+    provider.last_connection_check_at = now
+    provider.last_validation_error = error_message
+    if error_message:
+        provider.metadata_json = {**(provider.metadata_json or {}), "last_error": error_message}
+    elif provider.metadata_json:
+        metadata = dict(provider.metadata_json or {})
+        metadata.pop("last_error", None)
+        provider.metadata_json = metadata
+
+
+def record_provider_meta_error(
+    db: Session,
+    provider: TenantWhatsAppProvider,
+    exc: MetaApiError,
+    *,
+    endpoint: str | None = None,
+) -> str:
+    status = _classify_meta_error(exc, endpoint=endpoint)
+    _set_provider_connection_status(provider, status, error_message=str(exc))
+    provider.updated_at = datetime.utcnow()
+    db.add(provider)
+    db.commit()
+    return status
+
+
+def record_provider_meta_error_by_id(
+    db: Session,
+    *,
+    provider_id: UUID | str | None,
+    exc: MetaApiError,
+    endpoint: str | None = None,
+) -> str | None:
+    if not provider_id:
+        return None
+    provider = (
+        db.execute(select(TenantWhatsAppProvider).where(TenantWhatsAppProvider.id == provider_id))
+        .scalars()
+        .first()
+    )
+    if not provider:
+        return None
+    return record_provider_meta_error(db, provider, exc, endpoint=endpoint)
 
 def _log_provider_save(*, provider: TenantWhatsAppProvider, action: str) -> None:
     logger.info(
@@ -419,7 +504,7 @@ def update_provider(db: Session, tenant_id: UUID, provider_id: UUID, payload):
         and provider.is_active
         and provider.provider_type == "meta_cloud"
     ):
-        provider.status = "active"
+        _set_provider_connection_status(provider, "disconnected", error_message=None)
     provider.updated_at = datetime.utcnow()
     db.commit()
     db.refresh(provider)
@@ -448,7 +533,7 @@ def set_active_provider(db: Session, tenant_id: UUID, provider_id: UUID):
         .values(is_active=False)
     )
     provider.is_active = True
-    provider.status = "active"
+    _set_provider_connection_status(provider, "connected", error_message=None)
     provider.updated_at = datetime.utcnow()
     db.commit()
     db.refresh(provider)
@@ -520,9 +605,10 @@ def test_worker_active_provider_connection(db: Session, tenant_id: UUID):
     try:
         checks = asyncio.run(_run_checks())
     except MetaApiError as exc:
+        status = record_provider_meta_error_by_id(db, provider_id=provider_id, exc=exc, endpoint="worker_diagnostic") or ("token_expired" if exc.status_code == 401 else "meta_error")
         return {
             "ok": False,
-            "status": "invalid_token" if exc.status_code == 401 else "meta_error",
+            "status": status,
             "provider_id": provider_id,
             "phone_number_id": phone_number_id,
             "token_exists": bool(token),
@@ -628,6 +714,8 @@ def runtime_send_diagnostics(db: Session, tenant_id: UUID) -> dict:
         meta_response = asyncio.run(_run_checks())
         token_valid = True
     except MetaApiError as exc:
+        if provider_id:
+            record_provider_meta_error_by_id(db, provider_id=provider_id, exc=exc, endpoint="runtime_send_diagnostic")
         meta_response = {
             "error": str(exc),
             "status_code": exc.status_code,
@@ -657,28 +745,31 @@ def test_provider_connection(db: Session, tenant_id: UUID, provider_id: UUID):
     provider = _get_provider(db, tenant_id, provider_id)
     required = PROVIDER_REQUIRED_FIELDS.get(provider.provider_type, ["phone_number_id"])
     missing = [field for field in required if not getattr(provider, field)]
-    provider.last_connection_check_at = datetime.utcnow()
     if missing:
-        provider.status = "invalid_config"
+        connection_status = (
+            "invalid_phone_number"
+            if "phone_number_id" in missing
+            else "invalid_token"
+            if any(field in missing for field in ("access_token_encrypted", "api_key_encrypted"))
+            else "disconnected"
+        )
         message = f"Campos obrigatórios ausentes: {', '.join(missing)}"
+        _set_provider_connection_status(provider, connection_status, error_message=message)
         db.commit()
-        return {"ok": False, "status": provider.status, "message": message}
+        return {"ok": False, "status": provider.connection_status, "message": message}
 
     if not os.getenv("WHATSAPP_SECRET_ENCRYPTION_KEY", "").strip():
-        provider.status = "invalid_config"
+        message = "WHATSAPP_SECRET_ENCRYPTION_KEY não configurada."
+        _set_provider_connection_status(provider, "invalid_token", error_message=message)
         db.commit()
-        return {
-            "ok": False,
-            "status": provider.status,
-            "message": "WHATSAPP_SECRET_ENCRYPTION_KEY não configurada.",
-        }
+        return {"ok": False, "status": provider.connection_status, "message": message}
 
     if provider.provider_type != "meta_cloud":
-        provider.status = "connected"
+        _set_provider_connection_status(provider, "connected", error_message=None)
         db.commit()
         return {
             "ok": True,
-            "status": provider.status,
+            "status": provider.connection_status,
             "message": "Conexão validada para provider não-Meta.",
         }
 
@@ -692,37 +783,27 @@ def test_provider_connection(db: Session, tenant_id: UUID, provider_id: UUID):
         len(token or ""),
     )
     if not token:
-        provider.status = "invalid_config"
+        message = "Token inválido ou ausente."
+        _set_provider_connection_status(provider, "invalid_token", error_message=message)
         db.commit()
-        return {
-            "ok": False,
-            "status": provider.status,
-            "message": "Token inválido ou ausente.",
-        }
+        return {"ok": False, "status": provider.connection_status, "message": message}
 
     try:
         metadata = asyncio.run(
             _sync_meta_provider_metadata(provider, token, str(tenant_id))
         )
         provider.metadata_json = {**(provider.metadata_json or {}), **metadata}
-        provider.status = "connected"
-        provider.last_connection_check_at = datetime.utcnow()
+        _set_provider_connection_status(provider, "connected", error_message=None)
         db.commit()
         return {
             "ok": True,
-            "status": provider.status,
+            "status": provider.connection_status,
             "message": "Conexão Meta validada com sucesso.",
             "metadata": metadata,
         }
     except MetaApiError as exc:
-        provider.status = "invalid_config"
-        provider.metadata_json = {
-            **(provider.metadata_json or {}),
-            "last_error": str(exc),
-        }
-        db.commit()
-        return {"ok": False, "status": provider.status, "message": str(exc)}
-
+        connection_status = record_provider_meta_error(db, provider, exc, endpoint="metadata_validation")
+        return {"ok": False, "status": connection_status, "message": str(exc)}
 
 def _normalize_secret_fields(data: dict):
     mapped = dict(data)

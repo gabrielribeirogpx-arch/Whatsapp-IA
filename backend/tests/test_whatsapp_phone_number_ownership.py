@@ -298,3 +298,112 @@ def test_provider_list_logs_query_result_and_returns_active_provider(caplog):
     assert f"provider_ids=['{provider.id}']" in caplog.text
     assert "provider_type" in caplog.text
     assert "deleted_at" in caplog.text
+
+
+def test_provider_list_returns_persisted_provider_without_meta_lookup(monkeypatch):
+    db = _FakeDB()
+    tenant = _tenant(db, name="Owner", slug="owner")
+    provider = create_provider(
+        db,
+        tenant.id,
+        _Payload(
+            provider_type="meta_cloud",
+            phone_number_id="876969468828520",
+            display_name="Meta Cloud",
+            is_active=True,
+            status="connected",
+            connection_status="token_expired",
+            last_validation_error="Token da Meta expirado.",
+        ),
+    )
+
+    def _fail_meta_lookup(*_args, **_kwargs):
+        raise AssertionError("GET /api/whatsapp/providers não deve consultar Meta Cloud API")
+
+    monkeypatch.setattr(
+        "app.services.whatsapp_provider_service.MetaCloudClient",
+        _fail_meta_lookup,
+    )
+
+    providers = list_providers(db, tenant.id)
+
+    assert [item.id for item in providers] == [provider.id]
+    assert providers[0].connection_status == "token_expired"
+    assert providers[0].last_validation_error == "Token da Meta expirado."
+
+
+def test_meta_401_validation_marks_token_expired_without_deleting_provider(monkeypatch):
+    from app.integrations.meta.meta_cloud_client import MetaApiError
+    from app.services import whatsapp_provider_service
+
+    db = _FakeDB()
+    tenant = _tenant(db, name="Owner", slug="owner")
+    provider = TenantWhatsAppProvider(
+        id=uuid.uuid4(),
+        tenant_id=tenant.id,
+        provider_type="meta_cloud",
+        display_name="Meta Cloud",
+        waba_id="waba-1",
+        business_id="business-1",
+        phone_number_id="phone-1",
+        access_token_encrypted="encrypted-token",
+        is_active=True,
+        status="connected",
+        connection_status="connected",
+        metadata_json={},
+    )
+    db.add(provider)
+
+    async def _expired(*_args, **_kwargs):
+        raise MetaApiError("Token da Meta expirado.", status_code=401)
+
+    monkeypatch.setenv("WHATSAPP_SECRET_ENCRYPTION_KEY", "test-key")
+    monkeypatch.setattr(whatsapp_provider_service, "decrypt_secret", lambda _value: "plain-token")
+    monkeypatch.setattr(whatsapp_provider_service, "_sync_meta_provider_metadata", _expired)
+
+    result = whatsapp_provider_service.test_provider_connection(db, tenant.id, provider.id)
+
+    assert result["ok"] is False
+    assert result["status"] == "token_expired"
+    assert provider in db.providers
+    assert provider.connection_status == "token_expired"
+    assert provider.status == "token_expired"
+    assert provider.last_validation_at is not None
+    assert provider.last_validation_error == "Token da Meta expirado."
+    assert list_providers(db, tenant.id)[0].id == provider.id
+
+
+def test_meta_phone_validation_error_marks_invalid_phone_without_hiding_provider(monkeypatch):
+    from app.integrations.meta.meta_cloud_client import MetaApiError
+    from app.services import whatsapp_provider_service
+
+    db = _FakeDB()
+    tenant = _tenant(db, name="Owner", slug="owner")
+    provider = TenantWhatsAppProvider(
+        id=uuid.uuid4(),
+        tenant_id=tenant.id,
+        provider_type="meta_cloud",
+        display_name="Meta Cloud",
+        waba_id="waba-1",
+        business_id="business-1",
+        phone_number_id="bad-phone",
+        access_token_encrypted="encrypted-token",
+        is_active=True,
+        status="connected",
+        connection_status="connected",
+        metadata_json={},
+    )
+    db.add(provider)
+
+    async def _bad_phone(*_args, **_kwargs):
+        raise MetaApiError("phone_number_id inválido na configuração.", status_code=400)
+
+    monkeypatch.setenv("WHATSAPP_SECRET_ENCRYPTION_KEY", "test-key")
+    monkeypatch.setattr(whatsapp_provider_service, "decrypt_secret", lambda _value: "plain-token")
+    monkeypatch.setattr(whatsapp_provider_service, "_sync_meta_provider_metadata", _bad_phone)
+
+    result = whatsapp_provider_service.test_provider_connection(db, tenant.id, provider.id)
+
+    assert result["status"] == "invalid_phone_number"
+    assert provider.connection_status == "invalid_phone_number"
+    assert list_providers(db, tenant.id)[0].id == provider.id
