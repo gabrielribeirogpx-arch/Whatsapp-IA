@@ -7,6 +7,7 @@ from app.services.bot_service import handle_bot, handle_visual_flow_priority
 from app.services.conversation_log_service import log_conversation_event
 from app.services.flow_engine_service import get_active_visual_flow, is_flow_trigger
 from app.services.flow_session_service import FlowSessionService
+from app.services.flow_runtime_selector import FlowRuntimeSelector, bind_conversation_to_flow, resolve_flow_runtime
 
 
 
@@ -162,6 +163,20 @@ def handle_incoming_message(db: Session, message: Message, conversation: Convers
             print("[FLOW MODE] sem node ativo, mantendo flow e tentando retomar")
 
         print("[FLOW MODE] usuário em fluxo")
+        if active_flow and resolve_flow_runtime(active_flow) == "v2":
+            bind_conversation_to_flow(db, conversation=conversation, flow=active_flow)
+            FlowRuntimeSelector().dispatch(
+                db=db,
+                flow=active_flow,
+                tenant_id=conversation.tenant_id,
+                phone=conversation.phone_number,
+                message_text=message.text or "",
+                conversation=conversation,
+                contact_id=getattr(conversation, "contact_id", None),
+                input_message_id=str(getattr(message, "id", "") or ""),
+                metadata={"source": "message_router", "mode": "flow"},
+            )
+            return True
         result = handle_visual_flow_priority(db=db, message=message, conversation=conversation, session_node_id=session_node_id)
         if not result or not result.get("response"):
             print("[LEGACY FALLBACK HARD BLOCKED]")
@@ -191,6 +206,23 @@ def handle_incoming_message(db: Session, message: Message, conversation: Convers
             if _check_finalized_flow_block(active_flow):
                 return None
             print("[FLOW MODE] iniciando fluxo")
+            if resolve_flow_runtime(active_flow) == "v2":
+                bind_conversation_to_flow(db, conversation=conversation, flow=active_flow)
+                db.commit()
+                db.refresh(conversation)
+                print("[MODE SET] flow")
+                FlowRuntimeSelector().dispatch(
+                    db=db,
+                    flow=active_flow,
+                    tenant_id=conversation.tenant_id,
+                    phone=conversation.phone_number,
+                    message_text=message.text or "",
+                    conversation=conversation,
+                    contact_id=getattr(conversation, "contact_id", None),
+                    input_message_id=str(getattr(message, "id", "") or ""),
+                    metadata={"source": "message_router", "mode": "bot"},
+                )
+                return True
             conversation.mode = "flow"
             db.commit()
             db.refresh(conversation)

@@ -26,6 +26,7 @@ class Flow(TenantMixin, Base):
     priority: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
     status: Mapped[str] = mapped_column(String, nullable=False, default="draft", server_default="draft", index=True)
+    runtime: Mapped[str] = mapped_column(String(16), nullable=False, default="v2", server_default="v2", index=True)
     current_version_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("flow_versions.id", ondelete="SET NULL"),

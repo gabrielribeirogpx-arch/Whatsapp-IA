@@ -16,7 +16,9 @@ depends_on = None
 def upgrade() -> None:
     # flow_versions already stores the canonical graph in nodes/edges/snapshot.
     # No extra JSON/count/hash columns are required for compatibility.
+    pass
 
 
 def downgrade() -> None:
     # No-op: upgrade does not add flow_versions compatibility columns.
+    pass
