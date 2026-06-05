@@ -380,7 +380,7 @@ export type SystemSettingsPayload = {
   workspace_profile: WorkspaceProfile;
 };
 
-export type WhatsAppProvider = { id:string; provider_type:string; display_name?:string|null; waba_id?:string|null; phone_number_id?:string|null; business_id?:string|null; is_active:boolean; status:string; metadata_json?: Record<string, any>; last_connection_check_at?: string | null; updated_at?: string; access_token_masked?:string|null };
+export type WhatsAppProvider = { id:string; provider_type:string; display_name?:string|null; waba_id?:string|null; phone_number_id?:string|null; business_id?:string|null; is_active:boolean; status:string; connection_status:'connected'|'token_expired'|'invalid_token'|'invalid_phone_number'|'meta_error'|'disconnected'|string; last_validation_at?: string | null; last_validation_error?: string | null; metadata_json?: Record<string, any>; last_connection_check_at?: string | null; updated_at?: string; access_token_masked?:string|null };
 export type WhatsAppTemplate = { id:string; name:string; status:string; language:string; category?:string|null; provider_id?: string | null; body_text:string; body_raw_meta?: string; body_preview?: string | null; rejection_reason?: string | null; variables_json?: Array<{ position:number; key:string; label:string; example:string }> | null };
 
 export type WhatsAppCampaign = {

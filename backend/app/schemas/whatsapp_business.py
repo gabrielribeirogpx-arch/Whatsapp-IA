@@ -25,6 +25,17 @@ class TenantWhatsAppProviderCreate(BaseModel):
 class TenantWhatsAppProviderUpdate(TenantWhatsAppProviderCreate):
     provider_type: ProviderTypeEnum | None = None
     status: str | None = None
+    connection_status: str | None = None
+
+
+ConnectionStatus = Literal[
+    "connected",
+    "token_expired",
+    "invalid_token",
+    "invalid_phone_number",
+    "meta_error",
+    "disconnected",
+]
 
 
 class TenantWhatsAppProviderOut(BaseModel):
@@ -40,7 +51,10 @@ class TenantWhatsAppProviderOut(BaseModel):
     webhook_verify_token: str | None = None
     webhook_url: str | None = None
     is_active: bool
-    status: Literal["disconnected", "connected", "active", "invalid_config"]
+    status: str
+    connection_status: ConnectionStatus = "disconnected"
+    last_validation_at: datetime | None = None
+    last_validation_error: str | None = None
     metadata_json: dict = Field(default_factory=dict)
     last_connection_check_at: datetime | None = None
     created_at: datetime

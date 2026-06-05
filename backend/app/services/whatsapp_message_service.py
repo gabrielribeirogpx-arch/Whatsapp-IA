@@ -26,6 +26,7 @@ def _provider_resolution_row(provider: TenantWhatsAppProvider) -> dict[str, Any]
         "tenant_id": str(provider.tenant_id),
         "is_active": provider.is_active,
         "status": provider.status,
+        "connection_status": getattr(provider, "connection_status", provider.status),
         "updated_at": provider.updated_at.isoformat() if provider.updated_at else None,
     }
 
@@ -146,7 +147,8 @@ def resolve_active_meta_provider_credentials(db: Session, *, tenant_id: str, con
         "phone_number_id": str(provider.phone_number_id),
         "waba_id": str(provider.waba_id or ""),
         "business_id": str(provider.business_id or ""),
-        "status": str(provider.status),
+        "status": str(getattr(provider, "connection_status", provider.status)),
+        "connection_status": str(getattr(provider, "connection_status", provider.status)),
         "is_active": str(provider.is_active),
         "updated_at": provider.updated_at.isoformat() if provider.updated_at else "",
     }
@@ -156,7 +158,12 @@ def mark_provider_auth_error(db: Session, *, provider_id: str, error_message: st
     provider = db.execute(select(TenantWhatsAppProvider).where(TenantWhatsAppProvider.id == provider_id)).scalars().first()
     if not provider:
         return
+    now = datetime.utcnow()
     provider.status = "token_expired"
+    provider.connection_status = "token_expired"
+    provider.last_validation_at = now
+    provider.last_connection_check_at = now
+    provider.last_validation_error = error_message
     provider.metadata_json = {**(provider.metadata_json or {}), "last_error": error_message}
     db.add(provider)
     db.commit()
