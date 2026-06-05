@@ -1,15 +1,29 @@
 from __future__ import annotations
 
+import inspect
+import logging
 from typing import Any, Protocol, runtime_checkable
 
 from app.flow_v2.actions import RuntimeAction, SendMessageAction
+
+logger = logging.getLogger(__name__)
 
 
 @runtime_checkable
 class ChannelAdapter(Protocol):
     """Outbound delivery interface for Runtime V2 actions."""
 
-    def send_text(self, *, recipient_id: str, text: str, metadata: dict[str, Any] | None = None) -> dict[str, Any]: ...
+    def send_text(
+        self,
+        *,
+        recipient_id: str,
+        text: str,
+        tenant_id: Any | None = None,
+        session_id: Any | None = None,
+        conversation_id: Any | None = None,
+        contact_id: Any | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]: ...
 
     def send_image(self, *, recipient_id: str, image_url: str, caption: str | None = None,
                    metadata: dict[str, Any] | None = None) -> dict[str, Any]: ...
@@ -37,13 +51,66 @@ class WhatsAppAdapter:
         self.client = client
         self.sent_actions: list[RuntimeAction] = []
 
-    def send_text(self, *, recipient_id: str, text: str, metadata: dict[str, Any] | None = None) -> dict[str, Any]:
-        metadata = metadata or {}
+    @staticmethod
+    def _invoke_text_client(client: Any, kwargs: dict[str, Any]) -> dict[str, Any]:
+        try:
+            signature = inspect.signature(client)
+        except (TypeError, ValueError):
+            return client(**kwargs)
+
+        if any(parameter.kind == inspect.Parameter.VAR_KEYWORD for parameter in signature.parameters.values()):
+            return client(**kwargs)
+
+        accepted_kwargs = {key: value for key, value in kwargs.items() if key in signature.parameters}
+        return client(**accepted_kwargs)
+
+    def send_text(
+        self,
+        *,
+        recipient_id: str,
+        text: str,
+        tenant_id: Any | None = None,
+        session_id: Any | None = None,
+        conversation_id: Any | None = None,
+        contact_id: Any | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        metadata = dict(metadata or {})
+        logger.info(
+            "[V2 CHANNEL ADAPTER] tenant_id=%s provider_id=%s session_id=%s conversation_id=%s contact_id=%s recipient_id=%s metadata_keys=%s",
+            tenant_id,
+            metadata.get("provider_id"),
+            session_id,
+            conversation_id,
+            contact_id,
+            recipient_id,
+            sorted(metadata.keys()),
+        )
         if self.client is None:
-            return {"status": "mocked", "channel": "whatsapp", "type": "text", "recipient_id": recipient_id, "text": text}
+            return {
+                "status": "mocked",
+                "channel": "whatsapp",
+                "type": "text",
+                "recipient_id": recipient_id,
+                "text": text,
+                "tenant_id": str(tenant_id) if tenant_id is not None else None,
+                "session_id": str(session_id) if session_id is not None else None,
+                "conversation_id": str(conversation_id) if conversation_id is not None else None,
+                "contact_id": str(contact_id) if contact_id is not None else None,
+                "metadata": metadata,
+            }
+        kwargs = {
+            "recipient_id": recipient_id,
+            "text": text,
+            "tenant_id": tenant_id,
+            "session_id": session_id,
+            "conversation_id": conversation_id,
+            "contact_id": contact_id,
+            "metadata": metadata,
+        }
         if callable(self.client):
-            return self.client(recipient_id=recipient_id, text=text, metadata=metadata)
-        return self.client.send_text(recipient_id=recipient_id, text=text, metadata=metadata)
+            return self._invoke_text_client(self.client, kwargs)
+        return self._invoke_text_client(self.client.send_text, kwargs)
 
     def send_image(self, *, recipient_id: str, image_url: str, caption: str | None = None,
                    metadata: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -64,5 +131,23 @@ class WhatsAppAdapter:
     def dispatch(self, action: RuntimeAction) -> dict[str, Any]:
         self.sent_actions.append(action)
         if isinstance(action, SendMessageAction):
-            return self.send_text(recipient_id=action.external_user_id, text=action.text, metadata=action.metadata)
+            logger.info(
+                "[V2 CHANNEL ADAPTER] dispatch action_type=%s tenant_id=%s provider_id=%s session_id=%s conversation_id=%s contact_id=%s metadata_keys=%s",
+                action.action_type,
+                action.tenant_id,
+                action.metadata.get("provider_id"),
+                action.session_id,
+                action.conversation_id,
+                action.contact_id,
+                sorted(action.metadata.keys()),
+            )
+            return self.send_text(
+                recipient_id=action.external_user_id,
+                text=action.text,
+                tenant_id=action.tenant_id,
+                session_id=action.session_id,
+                conversation_id=action.conversation_id,
+                contact_id=action.contact_id,
+                metadata=action.metadata,
+            )
         return {"status": "mocked", "channel": "whatsapp", "type": action.action_type, "recipient_id": action.external_user_id}

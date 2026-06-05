@@ -69,6 +69,7 @@ class MessageNodeExecutor(BaseNodeExecutor):
         payload = {"node_id": node_id, "message": message}
         self.event_store.append(db, session=session, event_type=FlowV2EventType.MESSAGE_SENT, node_id=node_id, payload=payload)
         next_node_id = self._default_next(db, snapshot=snapshot, session=session, node_id=node_id)
+        action_metadata = {**runtime_input.metadata, "node_id": node_id}
         action = SendMessageAction(
             tenant_id=session.tenant_id,
             session_id=session.id,
@@ -76,7 +77,17 @@ class MessageNodeExecutor(BaseNodeExecutor):
             conversation_id=runtime_input.conversation_id,
             contact_id=runtime_input.contact_id,
             text=message,
-            metadata={"node_id": node_id},
+            metadata=action_metadata,
+        )
+        logger.info(
+            "[V2 SEND ACTION] tenant_id=%s provider_id=%s session_id=%s conversation_id=%s contact_id=%s node_id=%s metadata_keys=%s",
+            action.tenant_id,
+            action.metadata.get("provider_id"),
+            action.session_id,
+            action.conversation_id,
+            action.contact_id,
+            node_id,
+            sorted(action.metadata.keys()),
         )
         return NodeExecutionResult(actions=(action,), next_node_id=next_node_id)
 

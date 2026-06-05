@@ -101,12 +101,15 @@ def _executor(raw_snapshot):
     return executor, snapshot, event_store, session, _FakeDB()
 
 
-def _input(snapshot):
+def _input(snapshot, metadata=None, conversation_id=None, contact_id=None):
     return RuntimeInput(
         tenant_id=snapshot.tenant_id,
         flow_version_id=snapshot.flow_version_id,
         external_user_id="whatsapp:+5511999999999",
         message_text="oi",
+        conversation_id=conversation_id,
+        contact_id=contact_id,
+        metadata=metadata or {},
     )
 
 
@@ -144,6 +147,80 @@ def test_whatsapp_adapter_receives_action_from_runtime_worker() -> None:
     assert result.deliveries[0]["status"] == "mocked"
     assert result.deliveries[0]["text"] == "Olá"
 
+
+
+def test_message_action_preserves_runtime_metadata_and_never_empty_tenant_id() -> None:
+    provider_id = str(uuid.uuid4())
+    executor, snapshot, _, _, db = _executor(
+        {
+            "schema_version": 1,
+            "start_node_id": "start",
+            "nodes": [{"id": "start", "type": "message", "content": "Olá"}, {"id": "end", "type": "message"}],
+            "edges": [{"id": "e1", "source": "start", "target": "end"}],
+        }
+    )
+
+    output = executor.handle_input(
+        db,
+        _input(
+            snapshot,
+            metadata={
+                "tenant_id": str(snapshot.tenant_id),
+                "provider_id": provider_id,
+                "flow_id": "flow-1",
+                "source": "message_worker",
+            },
+        ),
+    )
+
+    action = output.actions[0]
+    assert isinstance(action, SendMessageAction)
+    assert str(action.tenant_id) == str(snapshot.tenant_id)
+    assert action.metadata["tenant_id"] == str(snapshot.tenant_id)
+    assert action.metadata["provider_id"] == provider_id
+    assert action.metadata["flow_id"] == "flow-1"
+    assert action.metadata["source"] == "message_worker"
+    assert action.metadata["node_id"] == "start"
+    assert action.metadata["tenant_id"] != ""
+
+
+def test_whatsapp_adapter_propagates_structured_ids_to_client() -> None:
+    provider_id = str(uuid.uuid4())
+    conversation_id = uuid.uuid4()
+    contact_id = uuid.uuid4()
+    executor, snapshot, _, session, db = _executor(
+        {
+            "schema_version": 1,
+            "start_node_id": "start",
+            "nodes": [{"id": "start", "type": "message", "content": "Olá"}, {"id": "end", "type": "message"}],
+            "edges": [{"id": "e1", "source": "start", "target": "end"}],
+        }
+    )
+    calls = []
+
+    def client(**kwargs):
+        calls.append(kwargs)
+        return {"status": "queued", **kwargs}
+
+    adapter = WhatsAppAdapter(client=client)
+
+    FlowV2RuntimeWorker(executor=executor, channel_adapter=adapter).process(
+        db,
+        _input(
+            snapshot,
+            conversation_id=conversation_id,
+            contact_id=contact_id,
+            metadata={"tenant_id": str(snapshot.tenant_id), "provider_id": provider_id},
+        ),
+    )
+
+    assert calls[0]["tenant_id"] == snapshot.tenant_id
+    assert calls[0]["session_id"] == session.id
+    assert calls[0]["conversation_id"] == conversation_id
+    assert calls[0]["contact_id"] == contact_id
+    assert calls[0]["metadata"]["tenant_id"] == str(snapshot.tenant_id)
+    assert calls[0]["metadata"]["provider_id"] == provider_id
+    assert calls[0]["metadata"]["tenant_id"] != ""
 
 def test_delay_worker_resumes_due_job_and_emits_delay_resumed() -> None:
     tenant_id = uuid.uuid4()

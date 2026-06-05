@@ -8,6 +8,7 @@ os.environ.setdefault("DATABASE_URL", "sqlite+pysqlite:///:memory:")
 
 from app.flow_v2.contracts import FlowV2SessionStatus, RuntimeOutput
 from app.flow_v2.runtime_worker import FlowV2WorkerResult
+from app.services import flow_runtime_selector
 from app.services.flow_runtime_selector import FlowRuntimeSelector, resolve_flow_runtime
 
 
@@ -69,6 +70,38 @@ def test_v2_runtime_dispatches_to_flow_v2_worker() -> None:
     assert input_event.input_message_id == "wamid-1"
     assert input_event.metadata["flow_runtime_selector"] == "flow.runtime"
 
+
+
+def test_enqueue_whatsapp_text_prefers_structured_tenant_id(monkeypatch) -> None:
+    tenant_id = uuid.uuid4()
+    session_id = uuid.uuid4()
+    conversation_id = uuid.uuid4()
+    contact_id = uuid.uuid4()
+    provider_id = str(uuid.uuid4())
+    enqueued = []
+
+    monkeypatch.setattr(flow_runtime_selector, "enqueue_send_message", lambda payload: enqueued.append(payload) or "job-1")
+
+    result = flow_runtime_selector._enqueue_whatsapp_text(
+        recipient_id="5511999999999",
+        text="Olá! Como posso te ajudar?",
+        tenant_id=tenant_id,
+        session_id=session_id,
+        conversation_id=conversation_id,
+        contact_id=contact_id,
+        metadata={"provider_id": provider_id, "node_id": "start"},
+    )
+
+    payload = enqueued[0]
+    assert result["tenant_id"] == str(tenant_id)
+    assert payload["tenant_id"] == str(tenant_id)
+    assert payload["tenant_id"] != ""
+    assert payload["provider_id"] == provider_id
+    assert payload["session_id"] == str(session_id)
+    assert payload["conversation_id"] == str(conversation_id)
+    assert payload["contact_id"] == str(contact_id)
+    assert payload["node_id"] == "start"
+    assert payload["metadata"] == {"provider_id": provider_id, "node_id": "start"}
 
 def test_v1_runtime_does_not_call_flow_v2_worker() -> None:
     worker = _FakeWorker()

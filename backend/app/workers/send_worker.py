@@ -454,6 +454,18 @@ def send_whatsapp_message(*, message_data: dict[str, Any]) -> None:
     is_flow_message = bool(flow_id or flow_version_id or session_id or node_id or sequence_number_raw is not None)
     payload_provider_id = str(message_data.get("provider_id") or "unresolved")
     message_type = "interactive" if interactive_type or (isinstance(buttons, list) and buttons) else "text"
+    logger.info(
+        "[V2 SEND WORKER] tenant_id=%s provider_id=%s session_id=%s conversation_id=%s contact_id=%s flow_id=%s phone=%s metadata_keys=%s payload_json=%s",
+        tenant_id or "",
+        payload_provider_id,
+        session_id,
+        conversation_id,
+        message_data.get("contact_id"),
+        flow_id,
+        phone,
+        sorted(message_data.get("metadata", {}).keys()) if isinstance(message_data.get("metadata"), dict) else [],
+        json.dumps(message_data, default=str, ensure_ascii=False, sort_keys=True),
+    )
     log_message_origin_trace(
         executor=flow_executor or flow_send_source or "send_worker.send_whatsapp_message",
         flow_id=flow_id,

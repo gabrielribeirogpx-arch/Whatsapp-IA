@@ -189,9 +189,12 @@ def enqueue_send_message(message_data: dict[str, Any]) -> str | None:
         "flow_engine",
         "flow_executor",
         "flow_send_source",
+        "provider_id",
+        "contact_id",
     )
+    metadata = message_data.get("metadata") if isinstance(message_data.get("metadata"), dict) else None
     payload = {
-        "tenant_id": str(tenant_id),
+        "tenant_id": str(tenant_id or ""),
         "phone": phone,
         "text": content,
         "buttons": buttons if isinstance(buttons, list) else None,
@@ -200,11 +203,24 @@ def enqueue_send_message(message_data: dict[str, Any]) -> str | None:
         "interactive_type": interactive_type,
         "correlation_id": correlation_id,
         "conversation_id": str(message_data.get("conversation_id") or "") or None,
+        "metadata": metadata,
     }
     for key in passthrough_keys:
         value = message_data.get(key)
         if value is not None:
             payload[key] = str(value)
+
+    logger.info(
+        "[V2 ENQUEUE] normalized tenant_id=%s provider_id=%s session_id=%s conversation_id=%s contact_id=%s flow_id=%s phone=%s metadata_keys=%s",
+        payload.get("tenant_id") or "",
+        payload.get("provider_id"),
+        payload.get("session_id"),
+        payload.get("conversation_id"),
+        payload.get("contact_id"),
+        payload.get("flow_id"),
+        phone,
+        sorted(metadata.keys()) if metadata else [],
+    )
 
     message_type = "interactive" if payload.get("interactive_type") or (isinstance(payload.get("buttons"), list) and payload.get("buttons")) else "text"
     log_message_origin_trace(

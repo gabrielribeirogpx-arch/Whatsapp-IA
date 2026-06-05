@@ -73,15 +73,55 @@ def bind_conversation_to_flow(db: Session, *, conversation: Conversation, flow: 
         db.flush()
 
 
-def _enqueue_whatsapp_text(*, recipient_id: str, text: str, metadata: dict[str, Any] | None = None) -> dict[str, Any]:
+def _compact_string(value: Any) -> str | None:
+    text = str(value or "").strip()
+    return text or None
+
+
+def _enqueue_whatsapp_text(
+    *,
+    recipient_id: str,
+    text: str,
+    tenant_id: Any | None = None,
+    session_id: Any | None = None,
+    conversation_id: Any | None = None,
+    contact_id: Any | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    metadata = dict(metadata or {})
+    resolved_tenant_id = _compact_string(tenant_id) or _compact_string(metadata.get("tenant_id"))
+    resolved_session_id = _compact_string(session_id) or _compact_string(metadata.get("session_id"))
+    resolved_conversation_id = _compact_string(conversation_id) or _compact_string(metadata.get("conversation_id"))
+    resolved_contact_id = _compact_string(contact_id) or _compact_string(metadata.get("contact_id"))
     payload = {
-        "tenant_id": str((metadata or {}).get("tenant_id") or ""),
+        "tenant_id": resolved_tenant_id or "",
+        "provider_id": _compact_string(metadata.get("provider_id")),
         "phone": recipient_id,
         "text": text,
+        "conversation_id": resolved_conversation_id,
+        "contact_id": resolved_contact_id,
+        "session_id": resolved_session_id,
+        "flow_id": _compact_string(metadata.get("flow_id")),
+        "flow_version_id": _compact_string(metadata.get("flow_version_id")),
+        "node_id": _compact_string(metadata.get("node_id")),
+        "node_type": _compact_string(metadata.get("node_type")),
+        "correlation_id": _compact_string(metadata.get("correlation_id") or metadata.get("message_id") or metadata.get("webhook_id")),
+        "metadata": metadata,
         "flow_send_source": "flow_runtime_selector:v2",
     }
+    logger.info(
+        "[V2 ENQUEUE] tenant_id=%s provider_id=%s session_id=%s conversation_id=%s contact_id=%s node_id=%s phone=%s metadata_keys=%s",
+        payload.get("tenant_id") or "",
+        payload.get("provider_id"),
+        payload.get("session_id"),
+        payload.get("conversation_id"),
+        payload.get("contact_id"),
+        payload.get("node_id"),
+        recipient_id,
+        sorted(metadata.keys()),
+    )
     enqueue_send_message(payload)
-    return {"status": "queued", "channel": "whatsapp", "type": "text", "recipient_id": recipient_id}
+    return {"status": "queued", "channel": "whatsapp", "type": "text", "recipient_id": recipient_id, "tenant_id": payload.get("tenant_id")}
 
 
 class FlowRuntimeSelector:
@@ -115,6 +155,9 @@ class FlowRuntimeSelector:
         runtime_metadata = dict(metadata or {})
         runtime_metadata.setdefault("tenant_id", str(tenant_id))
         runtime_metadata.setdefault("flow_id", str(flow.id))
+        runtime_metadata.setdefault("flow_version_id", str(flow.published_version_id))
+        runtime_metadata.setdefault("conversation_id", str(conversation.id) if conversation else None)
+        runtime_metadata.setdefault("contact_id", str(contact_id) if contact_id else None)
         runtime_metadata.setdefault("flow_runtime_selector", FLOW_RUNTIME_SELECTOR)
         worker = self.runtime_worker or FlowV2RuntimeWorker(
             channel_adapter=WhatsAppAdapter(client=_enqueue_whatsapp_text),

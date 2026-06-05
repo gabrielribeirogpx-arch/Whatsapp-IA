@@ -156,10 +156,20 @@ def test_queue_transports_choice_interactive_list(monkeypatch):
         "session_id": "session-1",
         "node_id": "choice-1",
         "node_type": "choice",
+        "provider_id": "provider-1",
+        "contact_id": "contact-1",
+        "conversation_id": "conversation-1",
+        "metadata": {"tenant_id": "tenant-1", "provider_id": "provider-1"},
     })
 
     payload = enqueued[0]["message_data"]
     assert job_id == "job-choice-list"
+    assert payload["tenant_id"] == "tenant-1"
+    assert payload["tenant_id"] != ""
+    assert payload["provider_id"] == "provider-1"
+    assert payload["contact_id"] == "contact-1"
+    assert payload["conversation_id"] == "conversation-1"
+    assert payload["metadata"] == {"tenant_id": "tenant-1", "provider_id": "provider-1"}
     assert payload["interactive_type"] == "list"
     assert payload["sections"][0]["rows"][0]["id"] == "vendas"
     assert payload["options"][0]["handleId"] == "vendas"
