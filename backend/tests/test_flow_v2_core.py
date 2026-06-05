@@ -333,6 +333,47 @@ def test_message_to_condition_to_message_executes_until_terminal_message() -> No
     assert [event["payload"]["target_node_id"] for event in event_store.events if event["event_type"] == "TRANSITION_SELECTED"] == ["check", "final"]
 
 
+def test_start_message_waits_before_executing_next_condition() -> None:
+    raw_snapshot = {
+        "schema_version": 1,
+        "start_node_id": "start",
+        "nodes": [
+            {"id": "start", "type": "message", "content": "Olá! Como posso te ajudar?", "data": {"isStart": True}},
+            {"id": "check", "type": "condition", "conditions": [{"field": "contact.tag", "operator": "==", "value": "vip"}]},
+            {"id": "answer_a", "type": "message", "content": "Resposta A"},
+            {"id": "answer_b", "type": "message", "content": "Resposta B"},
+        ],
+        "edges": [
+            {"id": "e1", "source": "start", "target": "check"},
+            {"id": "e2", "source": "check", "sourceHandle": "true", "target": "answer_a"},
+            {"id": "e3", "source": "check", "sourceHandle": "false", "target": "answer_b"},
+        ],
+    }
+    executor, snapshot, event_store, session, db = _executor(raw_snapshot)
+
+    first = executor.handle_input(db, _input(snapshot, {"contact": {"tag": "vip"}}))
+
+    assert first.status == FlowV2SessionStatus.WAITING
+    assert first.current_node_id == "check"
+    assert first.effects == ({"type": "send_message", "text": "Olá! Como posso te ajudar?"},)
+    assert [event["node_id"] for event in event_store.events if event["event_type"] == "NODE_ENTERED"] == ["start"]
+    assert "CONDITION_EVALUATED" not in _event_types(event_store)
+    waiting_event = event_store.events[-1]
+    assert waiting_event["event_type"] == "session.waiting"
+    assert waiting_event["node_id"] == "check"
+
+    second = executor.handle_input(db, _input(snapshot, {"contact": {"tag": "vip"}, "message_id": "wamid.2"}))
+
+    assert second.status == FlowV2SessionStatus.COMPLETED
+    assert second.current_node_id is None
+    assert second.effects == ({"type": "send_message", "text": "Resposta A"},)
+    assert [event["node_id"] for event in event_store.events if event["event_type"] == "NODE_ENTERED"] == [
+        "start",
+        "check",
+        "answer_a",
+    ]
+
+
 def test_loop_protection_fails_after_max_steps() -> None:
     raw_snapshot = {
         "schema_version": 1,

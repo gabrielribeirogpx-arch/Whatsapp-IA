@@ -100,10 +100,11 @@ class MessageNodeExecutor(BaseNodeExecutor):
                 sorted(action.metadata.keys()),
             )
             actions = (action,)
+        should_wait_after_start = bool(node.get("isStart") or data.get("isStart")) and next_node_id is not None
         return NodeExecutionResult(
             actions=actions,
             next_node_id=next_node_id,
-            status="complete" if next_node_id is None else "continue",
+            status="wait" if should_wait_after_start else ("complete" if next_node_id is None else "continue"),
         )
 
 
