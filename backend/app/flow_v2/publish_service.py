@@ -42,8 +42,6 @@ class FlowV2PublishService:
                 snapshot=published.snapshot,
                 nodes=published.snapshot["nodes"],
                 edges=published.snapshot["edges"],
-                nodes_json=published.snapshot["nodes"],
-                edges_json=published.snapshot["edges"],
                 nodes_count=len(published.snapshot["nodes"]),
                 edges_count=len(published.snapshot["edges"]),
                 graph_hash=published.v2_snapshot_hash,

@@ -982,7 +982,7 @@ def _flow_version_payload(db: Session, **values: Any) -> dict[str, Any]:
 
 def _flow_version_select(db: Session):
     columns = _flow_versions_columns(db)
-    attrs = [getattr(FlowVersion, name) for name in ("id", "flow_id", "version", "nodes", "edges", "nodes_json", "edges_json", "nodes_count", "edges_count", "graph_hash", "graph_checksum", "is_active", "created_at", "tenant_id", "snapshot") if name in columns]
+    attrs = [getattr(FlowVersion, name) for name in ("id", "flow_id", "version", "nodes", "edges", "graph_checksum", "is_active", "created_at", "tenant_id", "snapshot") if name in columns]
     statement = select(FlowVersion)
     if attrs:
         statement = statement.options(load_only(*attrs))

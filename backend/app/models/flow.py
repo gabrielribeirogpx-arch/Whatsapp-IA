@@ -118,11 +118,53 @@ class FlowVersion(Base):
     snapshot: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     nodes: Mapped[list[dict] | None] = mapped_column(JSONB, nullable=True)
     edges: Mapped[list[dict] | None] = mapped_column(JSONB, nullable=True)
-    nodes_json: Mapped[list[dict] | None] = mapped_column(JSONB, nullable=True)
-    edges_json: Mapped[list[dict] | None] = mapped_column(JSONB, nullable=True)
-    nodes_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
-    edges_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
-    graph_hash: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+
+    @property
+    def nodes_json(self) -> list[dict] | None:
+        return self.nodes
+
+    @nodes_json.setter
+    def nodes_json(self, value: list[dict] | None) -> None:
+        self.nodes = value
+
+    @property
+    def edges_json(self) -> list[dict] | None:
+        return self.edges
+
+    @edges_json.setter
+    def edges_json(self, value: list[dict] | None) -> None:
+        self.edges = value
+
+    @property
+    def nodes_count(self) -> int:
+        value = getattr(self, "_nodes_count", None)
+        if value is not None:
+            return int(value or 0)
+        return len(self.nodes) if isinstance(self.nodes, list) else 0
+
+    @nodes_count.setter
+    def nodes_count(self, value: int | None) -> None:
+        self._nodes_count = int(value or 0)
+
+    @property
+    def edges_count(self) -> int:
+        value = getattr(self, "_edges_count", None)
+        if value is not None:
+            return int(value or 0)
+        return len(self.edges) if isinstance(self.edges, list) else 0
+
+    @edges_count.setter
+    def edges_count(self, value: int | None) -> None:
+        self._edges_count = int(value or 0)
+
+    @property
+    def graph_hash(self) -> str | None:
+        return self.graph_checksum
+
+    @graph_hash.setter
+    def graph_hash(self, value: str | None) -> None:
+        self.graph_checksum = value
+
     graph_checksum: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     v2_snapshot_hash: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     v2_snapshot_schema_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
