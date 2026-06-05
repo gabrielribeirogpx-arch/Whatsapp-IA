@@ -53,16 +53,29 @@ def resolve_runtime_flow_for_conversation(
 
     current_flow_id = getattr(conversation, "current_flow_id", None) or getattr(conversation, "current_flow", None)
     if current_flow_id:
-        return db.execute(
+        current_flow = db.execute(
             select(Flow).where(
                 Flow.id == current_flow_id,
                 Flow.tenant_id == tenant_id,
+                Flow.is_active.is_(True),
                 Flow.is_deleted.is_(False),
                 Flow.deleted_at.is_(None),
             )
         ).scalars().first()
+        if current_flow is not None:
+            return current_flow
 
-    return None
+    return db.execute(
+        select(Flow)
+        .where(
+            Flow.tenant_id == tenant_id,
+            Flow.is_active.is_(True),
+            Flow.is_deleted.is_(False),
+            Flow.deleted_at.is_(None),
+            Flow.published_version_id.is_not(None),
+        )
+        .order_by(Flow.priority.desc(), Flow.created_at.asc(), Flow.id.asc())
+    ).scalars().first()
 
 
 def bind_conversation_to_flow(db: Session, *, conversation: Conversation, flow: Flow) -> None:
@@ -159,6 +172,16 @@ class FlowRuntimeSelector:
         runtime_metadata.setdefault("conversation_id", str(conversation.id) if conversation else None)
         runtime_metadata.setdefault("contact_id", str(contact_id) if contact_id else None)
         runtime_metadata.setdefault("flow_runtime_selector", FLOW_RUNTIME_SELECTOR)
+        selection_reason = runtime_metadata.get("selected_flow_reason") or (
+            "conversation_current_flow_id" if conversation and getattr(conversation, "current_flow_id", None) == flow.id else "provided_flow"
+        )
+        logger.info(
+            "[V2 FLOW SELECTED]\ntenant_id=%s\nflow_id=%s\nflow_version_id=%s\nreason=%s",
+            tenant_id,
+            flow.id,
+            flow.published_version_id,
+            selection_reason,
+        )
         worker = self.runtime_worker or FlowV2RuntimeWorker(
             channel_adapter=WhatsAppAdapter(client=_enqueue_whatsapp_text),
         )

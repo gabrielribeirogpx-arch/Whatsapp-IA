@@ -24,7 +24,7 @@ from app.services.message_service import normalize_meta_message
 from app.services.realtime_service import sse_broker
 from app.services.flow_service import resolve_flow_for_message
 from app.services.flow_runtime_selector import FlowRuntimeSelector, bind_conversation_to_flow, resolve_flow_runtime
-from app.services.flow_engine_service import get_flow_graph, enqueue_flow_send_with_tracking, emit_message_received_event
+from app.services.flow_engine_service import get_active_visual_flow, get_flow_graph, enqueue_flow_send_with_tracking, emit_message_received_event
 from app.services.flow_engine import get_node_by_id
 from app.services.flow_session_service import FlowSessionService
 from app.services.flow_runtime_service import execute_node_chain_until_reply
@@ -472,12 +472,14 @@ async def _process_meta_webhook(request: Request, db: Session) -> dict[str, str]
                 conversation.current_flow_id is None or conversation.current_node_id is None
             )
             selected_flow = None
+            selected_flow_reason = None
             if conversation.current_flow_id:
                 selected_flow = (
                     db.execute(
                         select(Flow).where(
                             Flow.id == conversation.current_flow_id,
                             Flow.tenant_id == conversation.tenant_id,
+                            Flow.is_active.is_(True),
                             Flow.is_deleted.is_(False),
                             Flow.deleted_at.is_(None),
                         )
@@ -485,7 +487,29 @@ async def _process_meta_webhook(request: Request, db: Session) -> dict[str, str]
                     .scalars()
                     .first()
                 )
-            if should_resolve_flow:
+                if selected_flow:
+                    selected_flow_reason = "conversation_current_active_flow"
+                else:
+                    logger.warning(
+                        "[V2 STALE CONVERSATION FLOW] tenant_id=%s conversation_id=%s stale_flow_id=%s reason=current_flow_not_active",
+                        conversation.tenant_id,
+                        conversation.id,
+                        conversation.current_flow_id,
+                    )
+            active_builder_flow = get_active_visual_flow(db=db, tenant_id=conversation.tenant_id)
+            if active_builder_flow and (selected_flow is None or selected_flow.id != active_builder_flow.id):
+                logger.warning(
+                    "[V2 FLOW ACTIVE MISMATCH] tenant_id=%s conversation_id=%s conversation_flow_id=%s active_flow_id=%s active_flow_version_id=%s reason=builder_active_overrides_stale_conversation_flow",
+                    conversation.tenant_id,
+                    conversation.id,
+                    getattr(selected_flow, "id", None) or conversation.current_flow_id,
+                    active_builder_flow.id,
+                    active_builder_flow.published_version_id,
+                )
+                selected_flow = active_builder_flow
+                selected_flow_reason = "builder_active_overrides_stale_conversation_flow"
+                bind_conversation_to_flow(db, conversation=conversation, flow=active_builder_flow)
+            if should_resolve_flow and selected_flow is None:
                 resolved_flow = resolve_flow_for_message(
                     db=db,
                     tenant_id=conversation.tenant_id,
@@ -494,6 +518,7 @@ async def _process_meta_webhook(request: Request, db: Session) -> dict[str, str]
                 )
                 if resolved_flow:
                     selected_flow = resolved_flow
+                    selected_flow_reason = "message_trigger_resolved_flow"
                     bind_conversation_to_flow(db, conversation=conversation, flow=resolved_flow)
                 else:
                     logger.info("[FALLBACK ROUTING] tenant=%s conversation=%s", conversation.tenant_id, conversation.id)
@@ -514,6 +539,7 @@ async def _process_meta_webhook(request: Request, db: Session) -> dict[str, str]
                         "phone_number_id": phone_number_id,
                         "interactive_type": incoming.get("interactive_type"),
                         "selected_row_id": incoming.get("selected_row_id") or incoming.get("interactive_reply_id"),
+                        "selected_flow_reason": selected_flow_reason or "webhook_selected_flow",
                     },
                 )
                 logger.info(

@@ -146,6 +146,11 @@ class WhatsAppAdapter:
         metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         metadata = dict(metadata or {})
+        logger.info(
+            "[V2 CHOICE DELIVERY]\ninteractive_type=%s\nbutton_count=%s",
+            "button",
+            len(buttons or []),
+        )
         payload = {
             "tenant_id": str(tenant_id or metadata.get("tenant_id") or ""),
             "provider_id": metadata.get("provider_id"),
