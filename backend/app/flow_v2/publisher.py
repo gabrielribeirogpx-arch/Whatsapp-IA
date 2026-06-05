@@ -42,10 +42,76 @@ def canonicalize_graph(
 
 
 def v2_snapshot_hash(nodes: list[dict[str, Any]], edges: list[dict[str, Any]]) -> str:
+    nodes_payload = _runtime_v2_nodes_payload(copy.deepcopy(nodes))
     snapshot = _snapshot_payload(
-        nodes=nodes, edges=edges, start_node_id=_derive_start_node_id(nodes)
+        nodes=nodes_payload,
+        edges=edges,
+        start_node_id=_derive_start_node_id(nodes_payload),
     )
     return canonical_hash(snapshot)
+
+
+def _runtime_v2_nodes_payload(nodes: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Return nodes in the immutable Runtime V2 publication contract.
+
+    The Flow Builder stores choice rows as ``data.buttons`` so it can keep its
+    existing UI model.  Runtime V2 consumes ``options``.  During publication we
+    keep the original builder fields for backward compatibility and add
+    ``data.options`` when a choice node only has builder buttons.
+    """
+
+    return [_runtime_v2_node_payload(node) for node in nodes]
+
+
+def _runtime_v2_node_payload(node: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(node, dict):
+        return node
+    node_type = str(
+        node.get("type") or _node_data(node).get("type") or "message"
+    ).lower()
+    if node_type != "choice":
+        return node
+
+    data = _node_data(node)
+    if _has_non_empty_options(node.get("options")) or _has_non_empty_options(
+        data.get("options")
+    ):
+        return node
+
+    options = _choice_options_from_buttons(data.get("buttons"))
+    if not options:
+        return node
+
+    next_node = dict(node)
+    next_data = dict(data)
+    next_data["options"] = options
+    next_node["data"] = next_data
+    return next_node
+
+
+def _node_data(node: dict[str, Any]) -> dict[str, Any]:
+    data = node.get("data")
+    return data if isinstance(data, dict) else {}
+
+
+def _has_non_empty_options(value: Any) -> bool:
+    return isinstance(value, list) and bool(value)
+
+
+def _choice_options_from_buttons(buttons: Any) -> list[dict[str, str]]:
+    if not isinstance(buttons, list):
+        return []
+
+    options: list[dict[str, str]] = []
+    for button in buttons:
+        if not isinstance(button, dict):
+            continue
+        handle_id = str(button.get("handleId") or button.get("handle_id") or "").strip()
+        label = str(button.get("label") or "").strip()
+        if not handle_id or not label:
+            continue
+        options.append({"id": handle_id, "label": label})
+    return options
 
 
 class FlowV2Publisher:
@@ -57,7 +123,9 @@ class FlowV2Publisher:
     def publish(
         self, *, nodes: list[dict[str, Any]] | None, edges: list[dict[str, Any]] | None
     ) -> FlowV2PublishResult:
-        nodes_payload = copy.deepcopy(nodes if isinstance(nodes, list) else [])
+        nodes_payload = _runtime_v2_nodes_payload(
+            copy.deepcopy(nodes if isinstance(nodes, list) else [])
+        )
         edges_payload = copy.deepcopy(edges if isinstance(edges, list) else [])
         validation = self.validator.validate(nodes=nodes_payload, edges=edges_payload)
         if not validation.is_valid:
@@ -86,7 +154,11 @@ def _snapshot_payload(
         len(canonical_graph["edges"]),
         len(transitions),
     )
-    logger.info("[V2 TRANSITIONS] publishing transitions=%s edges=%s", transitions, canonical_graph["edges"])
+    logger.info(
+        "[V2 TRANSITIONS] publishing transitions=%s edges=%s",
+        transitions,
+        canonical_graph["edges"],
+    )
     return {
         "schema_version": V2_SNAPSHOT_SCHEMA_VERSION,
         "snapshot_schema_version": V2_SNAPSHOT_SCHEMA_VERSION,
