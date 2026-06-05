@@ -253,6 +253,12 @@ class ChoiceNodeExecutor(BaseNodeExecutor):
                 "node_id": node_id,
                 "node_type": "choice",
             }
+            logger.info(
+                "[V2 CHOICE EXECUTED]\nnode_id=%s\noptions=%s\nbuttons=%s",
+                node_id,
+                json.dumps(_choice_options_payload(options), default=str, ensure_ascii=False, sort_keys=True),
+                json.dumps(buttons, default=str, ensure_ascii=False, sort_keys=True),
+            )
             action = SendChoiceButtonsAction(
                 tenant_id=session.tenant_id,
                 session_id=session.id,

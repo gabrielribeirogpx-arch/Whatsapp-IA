@@ -789,6 +789,11 @@ def send_whatsapp_message(*, message_data: dict[str, Any]) -> None:
                 )
             elif buttons:
                 logger.info(
+                    "[V2 CHOICE DELIVERY]\ninteractive_type=%s\nbutton_count=%s",
+                    interactive_type or "button",
+                    len(buttons or []) if isinstance(buttons, list) else 0,
+                )
+                logger.info(
                     "[META INTERACTIVE PAYLOAD] flow_id=%s session_id=%s node_id=%s node_type=%s message_type=%s options_count=%s payload_json=%s",
                     flow_id,
                     session_id,
