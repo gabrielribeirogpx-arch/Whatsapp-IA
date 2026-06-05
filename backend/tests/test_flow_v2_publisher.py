@@ -203,3 +203,99 @@ def test_publisher_raises_with_validation_errors() -> None:
         )
 
     assert "FLOW_V2_ORPHAN_NODE:orphan" in exc.value.errors
+
+
+def _choice_button_nodes() -> list[dict]:
+    return [
+        {"id": "start", "type": "message", "data": {"content": "Olá"}},
+        {
+            "id": "choice",
+            "type": "choice",
+            "data": {
+                "content": "Escolha",
+                "buttons": [
+                    {
+                        "id": "choice-1",
+                        "label": "Quero planos",
+                        "handleId": "quero_planos",
+                        "next": "",
+                    },
+                    {
+                        "id": "choice-2",
+                        "label": "Falar com humano",
+                        "handleId": "falar_com_humano",
+                        "next": "",
+                    },
+                ],
+            },
+        },
+        {"id": "end", "type": "message", "data": {"content": "Fim"}},
+    ]
+
+
+def _choice_edges() -> list[dict]:
+    return [
+        {"id": "e1", "source": "start", "target": "choice"},
+        {
+            "id": "e2",
+            "source": "choice",
+            "sourceHandle": "quero_planos",
+            "target": "end",
+        },
+        {
+            "id": "e3",
+            "source": "choice",
+            "sourceHandle": "falar_com_humano",
+            "target": "end",
+        },
+    ]
+
+
+def _snapshot_node(snapshot: dict, node_id: str) -> dict:
+    return next(node for node in snapshot["nodes"] if node["id"] == node_id)
+
+
+def test_publisher_converts_legacy_builder_choice_buttons_to_runtime_options() -> None:
+    nodes = _choice_button_nodes()
+
+    result = FlowV2Publisher().publish(nodes=nodes, edges=_choice_edges())
+
+    choice = _snapshot_node(result.snapshot, "choice")
+    assert choice["data"]["options"] == [
+        {"id": "quero_planos", "label": "Quero planos"},
+        {"id": "falar_com_humano", "label": "Falar com humano"},
+    ]
+    assert choice["data"]["buttons"] == nodes[1]["data"]["buttons"]
+    assert "options" not in nodes[1]["data"]
+
+
+def test_publisher_keeps_choice_options_for_new_runtime_contract_flows() -> None:
+    nodes = _choice_button_nodes()
+    nodes[1] = {
+        "id": "choice",
+        "type": "choice",
+        "data": {
+            "content": "Escolha",
+            "options": [
+                {"id": "quero_planos", "label": "Quero planos"},
+                {"id": "falar_com_humano", "label": "Falar com humano"},
+            ],
+        },
+    }
+
+    result = FlowV2Publisher().publish(nodes=nodes, edges=_choice_edges())
+
+    choice = _snapshot_node(result.snapshot, "choice")
+    assert choice["data"]["options"] == nodes[1]["data"]["options"]
+    assert "buttons" not in choice["data"]
+
+
+def test_publisher_does_not_override_existing_choice_options_with_buttons() -> None:
+    nodes = _choice_button_nodes()
+    nodes[1]["data"]["options"] = [{"id": "existing", "label": "Existente"}]
+
+    result = FlowV2Publisher().publish(nodes=nodes, edges=_choice_edges())
+
+    choice = _snapshot_node(result.snapshot, "choice")
+    assert choice["data"]["options"] == [{"id": "existing", "label": "Existente"}]
+    assert choice["data"]["buttons"] == nodes[1]["data"]["buttons"]
