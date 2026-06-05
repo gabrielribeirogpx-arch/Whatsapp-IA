@@ -196,17 +196,15 @@ def send_buttons_message_via_meta(*, token: str, phone_number_id: str, to: str, 
         message=body_text,
         context=context,
     )
-    safe_buttons = [
-        {
-            "type": "reply",
-            "reply": {
-                "id": str(btn.get("label") or "").strip().lower(),
-                "title": str(btn.get("label") or "")[:20],
-            },
-        }
-        for btn in buttons[:3]
-        if isinstance(btn, dict) and str(btn.get("label") or "").strip()
-    ]
+    safe_buttons: list[dict[str, Any]] = []
+    for index, btn in enumerate(buttons[:3]):
+        if not isinstance(btn, dict):
+            continue
+        button_id = str(btn.get("id") or btn.get("handleId") or btn.get("handle_id") or btn.get("label") or f"button_{index + 1}").strip()
+        title = str(btn.get("title") or btn.get("label") or "").strip()
+        if not button_id or not title:
+            continue
+        safe_buttons.append({"type": "reply", "reply": {"id": button_id[:256], "title": title[:20]}})
     if not safe_buttons:
         return send_text_message_via_meta(token=token, phone_number_id=phone_number_id, to=to, text=body_text, context=context)
 

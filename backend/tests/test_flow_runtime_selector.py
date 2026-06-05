@@ -118,3 +118,57 @@ def test_v1_runtime_does_not_call_flow_v2_worker() -> None:
     assert result.runtime == "v1"
     assert result.should_run_v1 is True
     assert worker.calls == []
+
+
+def test_whatsapp_adapter_enqueues_choice_buttons_without_runtime_selector(monkeypatch) -> None:
+    from app.flow_v2.actions import SendChoiceButtonsAction
+    from app.flow_v2.channel_adapter import WhatsAppAdapter
+    from app.services import queue as queue_service
+
+    tenant_id = uuid.uuid4()
+    session_id = uuid.uuid4()
+    conversation_id = uuid.uuid4()
+    contact_id = uuid.uuid4()
+    enqueued = []
+
+    monkeypatch.setattr(queue_service, "enqueue_send_message", lambda payload: enqueued.append(payload) or "job-choice")
+
+    action = SendChoiceButtonsAction(
+        tenant_id=tenant_id,
+        session_id=session_id,
+        external_user_id="5511999999999",
+        conversation_id=conversation_id,
+        contact_id=contact_id,
+        text="Escolha",
+        node_id="choice",
+        options=({"id": "quero_planos", "label": "Quero planos"},),
+        buttons=({"id": "quero_planos", "title": "Quero planos"},),
+        metadata={
+            "tenant_id": str(tenant_id),
+            "flow_id": "flow-1",
+            "flow_version_id": "version-1",
+            "provider_id": "provider-1",
+            "node_id": "choice",
+            "node_type": "choice",
+        },
+    )
+
+    delivery = WhatsAppAdapter(client=object()).dispatch(action)
+
+    payload = enqueued[0]
+    assert delivery == {
+        "status": "queued",
+        "channel": "whatsapp",
+        "type": "buttons",
+        "recipient_id": "5511999999999",
+        "job_id": "job-choice",
+        "tenant_id": str(tenant_id),
+    }
+    assert payload["tenant_id"] == str(tenant_id)
+    assert payload["phone"] == "5511999999999"
+    assert payload["text"] == "Escolha"
+    assert payload["interactive_type"] == "button"
+    assert payload["node_id"] == "choice"
+    assert payload["node_type"] == "choice"
+    assert payload["buttons"] == [{"id": "quero_planos", "title": "Quero planos"}]
+    assert payload["options"] == [{"id": "quero_planos", "label": "Quero planos"}]

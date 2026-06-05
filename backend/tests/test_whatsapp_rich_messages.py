@@ -49,7 +49,8 @@ def test_rich_message_runtime_serialization_and_execution():
     second = asyncio.run(execute_node_chain_until_reply(graph, "buttons", "Vendas", context={"channel": "simulator"}))
 
     assert second["events"][0]["event_type"] == "BUTTON_CLICKED"
-    assert second["events"][1] == {"type": "send_message", "text": "Time comercial"}
+    assert second["events"][1]["type"] == "send_message"
+    assert second["events"][1]["text"] == "Time comercial"
 
 
 def test_list_selection_runtime_and_analytics_event_type():
@@ -116,7 +117,8 @@ def test_choice_node_generates_interactive_list_and_follows_selected_edge():
 
     first = asyncio.run(execute_node_chain_until_reply(graph, "start", "", context={"channel": "simulator"}))
 
-    assert first["events"][0] == {"type": "send_message", "text": "Olá"}
+    assert first["events"][0]["type"] == "send_message"
+    assert first["events"][0]["text"] == "Olá"
     assert first["events"][1]["type"] == "send_list"
     assert first["events"][1]["interactive_type"] == "list"
     assert first["events"][1]["options"] == [
@@ -129,7 +131,8 @@ def test_choice_node_generates_interactive_list_and_follows_selected_edge():
     selected = asyncio.run(execute_node_chain_until_reply(graph, "choice", "suporte", context={"channel": "simulator"}))
 
     assert selected["events"][0] == {"type": "analytics", "event_type": "LIST_SELECTED", "node_id": "choice", "option_id": "suporte"}
-    assert selected["events"][1] == {"type": "send_message", "text": "Time de suporte"}
+    assert selected["events"][1]["type"] == "send_message"
+    assert selected["events"][1]["text"] == "Time de suporte"
 
 
 def test_queue_transports_choice_interactive_list(monkeypatch):
@@ -203,3 +206,35 @@ def test_meta_message_service_sends_interactive_list(monkeypatch):
     assert posted[0]["payload"]["type"] == "interactive"
     assert posted[0]["payload"]["interactive"]["type"] == "list"
     assert posted[0]["payload"]["interactive"]["action"]["sections"][0]["rows"][0]["id"] == "suporte"
+
+
+def test_meta_message_service_uses_choice_button_ids_and_titles(monkeypatch):
+    from app.services import whatsapp_message_service
+
+    posted = []
+
+    class Client:
+        def __init__(self, token):
+            self.token = token
+
+        async def post(self, endpoint, payload, context):
+            posted.append({"endpoint": endpoint, "payload": payload, "context": context, "token": self.token})
+            return {"messages": [{"id": "wamid.buttons"}]}
+
+    monkeypatch.setattr(whatsapp_message_service, "MetaCloudClient", Client)
+
+    response = whatsapp_message_service.send_buttons_message_via_meta(
+        token="token",
+        phone_number_id="123",
+        to="+55 11 99999-0000",
+        body_text="Escolha",
+        buttons=[{"id": "quero_planos", "title": "Quero planos"}],
+        context={"flow_id": "flow-1", "node_id": "choice-1", "node_type": "choice"},
+    )
+
+    assert response["messages"][0]["id"] == "wamid.buttons"
+    assert posted[0]["payload"]["type"] == "interactive"
+    assert posted[0]["payload"]["interactive"]["type"] == "button"
+    assert posted[0]["payload"]["interactive"]["action"]["buttons"] == [
+        {"type": "reply", "reply": {"id": "quero_planos", "title": "Quero planos"}}
+    ]
