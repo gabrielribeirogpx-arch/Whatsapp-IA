@@ -19,6 +19,12 @@ from app.services.conversation_service import get_or_create_conversation
 from app.services.idempotency_service import register_processed_message
 from app.services.lead_auto_service import ensure_whatsapp_lead_for_inbound
 from app.services.message_router import handle_incoming_message
+from app.services.flow_runtime_selector import (
+    FlowRuntimeSelector,
+    bind_conversation_to_flow,
+    resolve_flow_runtime,
+    resolve_runtime_flow_for_conversation,
+)
 from app.services.message_service import normalize_meta_message
 from app.core.redis_client import get_redis_client
 from app.services.tenant_service import resolve_tenant_by_phone_number_id
@@ -432,37 +438,71 @@ def process_incoming_message(payload: dict[str, Any]) -> None:
         )
 
         if persisted_message and persisted_conversation:
-            active_session = None
-            if hasattr(db, "query"):
-                active_session = (
-                    db.query(FlowSession)
-                    .filter(
-                        FlowSession.tenant_id == tenant.id,
-                        FlowSession.conversation_id == str(persisted_conversation.id),
-                    )
-                    .order_by(FlowSession.updated_at.desc(), FlowSession.created_at.desc())
-                    .first()
+            selected_flow = resolve_runtime_flow_for_conversation(
+                db=db,
+                tenant_id=tenant.id,
+                conversation=persisted_conversation,
+                message_text=text,
+            )
+            if selected_flow and resolve_flow_runtime(selected_flow) == "v2":
+                bind_conversation_to_flow(db, conversation=persisted_conversation, flow=selected_flow)
+                FlowRuntimeSelector().dispatch(
+                    db=db,
+                    flow=selected_flow,
+                    tenant_id=tenant.id,
+                    phone=contact.phone if contact else phone,
+                    message_text=text,
+                    conversation=persisted_conversation,
+                    contact_id=contact.id if contact else None,
+                    input_message_id=correlation_id,
+                    metadata={
+                        "source": "message_worker",
+                        "job_id": payload.get("job_id"),
+                        "message_type": parsed.get("type") or "text",
+                        "phone_number_id": phone_number_id,
+                        "interactive_type": parsed.get("interactive_type"),
+                        "selected_row_id": parsed.get("selected_row_id") or parsed.get("interactive_reply_id"),
+                    },
                 )
-            selected_row_id = str(parsed.get("selected_row_id") or parsed.get("interactive_reply_id") or "").strip()
-            selected_title = str(parsed.get("selected_title") or parsed.get("interactive_reply_title") or "").strip()
-            if str(parsed.get("interactive_type") or "").strip() == "list_reply":
-                _log_choice_message_marker("[CHOICE MESSAGE RECEIVED]", active_session, selected_row_id=selected_row_id, selected_title=selected_title, correlation_id=correlation_id, reason="persist_interactive_reply_context")
-            if active_session and (active_session.status or "").lower() not in FINAL_SESSION_STATUSES:
-                if isinstance(getattr(active_session, "context", None), dict) and active_session.context.get("waiting_choice") is True:
-                    _log_choice_message_marker("[CHOICE WAITING SESSION FOUND]", active_session, selected_row_id=selected_row_id, selected_title=selected_title, correlation_id=correlation_id, reason="persist_interactive_reply_context")
-                _persist_interactive_reply_context(db, active_session, parsed, correlation_id=correlation_id)
-            elif str(parsed.get("interactive_type") or "").strip() == "list_reply":
-                _log_choice_message_marker("[CHOICE RESUME SKIPPED]", active_session, selected_row_id=selected_row_id, selected_title=selected_title, reason="no_active_non_final_session")
-                _log_choice_message_marker("[CHOICE RESUME REASON]", active_session, selected_row_id=selected_row_id, selected_title=selected_title, reason=f"active_session={bool(active_session)} status={getattr(active_session, 'status', None)}")
-            try:
-                handle_incoming_message(db=db, message=persisted_message, conversation=persisted_conversation)
-            except Exception:
-                logger.warning(
-                    "event=incoming_worker_tracking_warning correlation_id=%s tenant_id=%s stage=incoming_worker_flow reason=tracking_failed",
-                    correlation_id,
+                logger.info(
+                    "[FLOW RUNTIME SELECTOR] skipped_v1=true runtime=v2 tenant_id=%s flow_id=%s conversation_id=%s correlation_id=%s",
                     tenant.id,
-                    exc_info=True,
+                    selected_flow.id,
+                    persisted_conversation.id,
+                    correlation_id,
                 )
+            else:
+                active_session = None
+                if hasattr(db, "query"):
+                    active_session = (
+                        db.query(FlowSession)
+                        .filter(
+                            FlowSession.tenant_id == tenant.id,
+                            FlowSession.conversation_id == str(persisted_conversation.id),
+                        )
+                        .order_by(FlowSession.updated_at.desc(), FlowSession.created_at.desc())
+                        .first()
+                    )
+                selected_row_id = str(parsed.get("selected_row_id") or parsed.get("interactive_reply_id") or "").strip()
+                selected_title = str(parsed.get("selected_title") or parsed.get("interactive_reply_title") or "").strip()
+                if str(parsed.get("interactive_type") or "").strip() == "list_reply":
+                    _log_choice_message_marker("[CHOICE MESSAGE RECEIVED]", active_session, selected_row_id=selected_row_id, selected_title=selected_title, correlation_id=correlation_id, reason="persist_interactive_reply_context")
+                if active_session and (active_session.status or "").lower() not in FINAL_SESSION_STATUSES:
+                    if isinstance(getattr(active_session, "context", None), dict) and active_session.context.get("waiting_choice") is True:
+                        _log_choice_message_marker("[CHOICE WAITING SESSION FOUND]", active_session, selected_row_id=selected_row_id, selected_title=selected_title, correlation_id=correlation_id, reason="persist_interactive_reply_context")
+                    _persist_interactive_reply_context(db, active_session, parsed, correlation_id=correlation_id)
+                elif str(parsed.get("interactive_type") or "").strip() == "list_reply":
+                    _log_choice_message_marker("[CHOICE RESUME SKIPPED]", active_session, selected_row_id=selected_row_id, selected_title=selected_title, reason="no_active_non_final_session")
+                    _log_choice_message_marker("[CHOICE RESUME REASON]", active_session, selected_row_id=selected_row_id, selected_title=selected_title, reason=f"active_session={bool(active_session)} status={getattr(active_session, 'status', None)}")
+                try:
+                    handle_incoming_message(db=db, message=persisted_message, conversation=persisted_conversation)
+                except Exception:
+                    logger.warning(
+                        "event=incoming_worker_tracking_warning correlation_id=%s tenant_id=%s stage=incoming_worker_flow reason=tracking_failed",
+                        correlation_id,
+                        tenant.id,
+                        exc_info=True,
+                    )
         logger.info("event=incoming_worker_flow_executed correlation_id=%s", correlation_id)
 
         db.commit()

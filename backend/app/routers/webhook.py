@@ -23,6 +23,7 @@ from app.services.tenant_query import enforce_tenant_filter, require_tenant_id
 from app.services.message_service import normalize_meta_message
 from app.services.realtime_service import sse_broker
 from app.services.flow_service import resolve_flow_for_message
+from app.services.flow_runtime_selector import FlowRuntimeSelector, bind_conversation_to_flow, resolve_flow_runtime
 from app.services.flow_engine_service import get_flow_graph, enqueue_flow_send_with_tracking, emit_message_received_event
 from app.services.flow_engine import get_node_by_id
 from app.services.flow_session_service import FlowSessionService
@@ -470,6 +471,20 @@ async def _process_meta_webhook(request: Request, db: Session) -> dict[str, str]
             should_resolve_flow = conversation.mode != "flow" and (
                 conversation.current_flow_id is None or conversation.current_node_id is None
             )
+            selected_flow = None
+            if conversation.current_flow_id:
+                selected_flow = (
+                    db.execute(
+                        select(Flow).where(
+                            Flow.id == conversation.current_flow_id,
+                            Flow.tenant_id == conversation.tenant_id,
+                            Flow.is_deleted.is_(False),
+                            Flow.deleted_at.is_(None),
+                        )
+                    )
+                    .scalars()
+                    .first()
+                )
             if should_resolve_flow:
                 resolved_flow = resolve_flow_for_message(
                     db=db,
@@ -478,11 +493,36 @@ async def _process_meta_webhook(request: Request, db: Session) -> dict[str, str]
                     conversation=conversation,
                 )
                 if resolved_flow:
-                    conversation.current_flow_id = resolved_flow.id
-                    conversation.mode = "flow"
-                    db.add(conversation)
+                    selected_flow = resolved_flow
+                    bind_conversation_to_flow(db, conversation=conversation, flow=resolved_flow)
                 else:
                     logger.info("[FALLBACK ROUTING] tenant=%s conversation=%s", conversation.tenant_id, conversation.id)
+
+            if selected_flow and resolve_flow_runtime(selected_flow) == "v2":
+                FlowRuntimeSelector().dispatch(
+                    db=db,
+                    flow=selected_flow,
+                    tenant_id=conversation.tenant_id,
+                    phone=normalized_phone,
+                    message_text=incoming_message,
+                    conversation=conversation,
+                    contact_id=contact.id if contact else None,
+                    input_message_id=message_id,
+                    metadata={
+                        "source": "webhook",
+                        "message_type": incoming_type,
+                        "phone_number_id": phone_number_id,
+                        "interactive_type": incoming.get("interactive_type"),
+                        "selected_row_id": incoming.get("selected_row_id") or incoming.get("interactive_reply_id"),
+                    },
+                )
+                logger.info(
+                    "[FLOW RUNTIME SELECTOR] skipped_v1=true runtime=v2 tenant_id=%s flow_id=%s conversation_id=%s",
+                    conversation.tenant_id,
+                    selected_flow.id,
+                    conversation.id,
+                )
+                continue
 
             active_session = (
                 db.query(FlowSession)
