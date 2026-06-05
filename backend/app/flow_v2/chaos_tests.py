@@ -38,7 +38,7 @@ class FlowV2ChaosTestSuite:
         return ChaosTestReport(status="PASSED" if all(scenario.passed for scenario in scenarios) else "FAILED", scenarios=scenarios)
 
     def worker_crash(self) -> ChaosScenarioResult:
-        payload = _message_payload()
+        payload = _delay_payload()
         executor, snapshot, event_store, session, db = _executor(payload)
         try:
             executor.handle_input(db, _runtime_input(snapshot, metadata={"message_id": "crash-msg"}))
@@ -49,7 +49,7 @@ class FlowV2ChaosTestSuite:
             recovered_session.status = session.status
             recovered_session.last_event_index = session.last_event_index
             recovered_executor.handle_input(recovered_db, _runtime_input(snapshot, metadata={"message_id": "after-crash"}))
-            passed = checkpoint[0] == "middle" and recovered_session.last_event_index > checkpoint[2]
+            passed = checkpoint[0] == "done" and recovered_session.current_node_id is None and recovered_session.last_event_index > checkpoint[2]
             return ChaosScenarioResult("worker_crash", passed, f"checkpoint={checkpoint}, recovered_index={recovered_session.last_event_index}")
         except Exception as exc:  # noqa: BLE001
             return ChaosScenarioResult("worker_crash", False, str(exc))
