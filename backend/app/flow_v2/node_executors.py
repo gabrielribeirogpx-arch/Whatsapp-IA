@@ -6,7 +6,12 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any, Protocol
 
-from app.flow_v2.actions import RuntimeAction, ScheduleDelayAction, SendMessageAction, WaitChoiceAction
+from app.flow_v2.actions import (
+    RuntimeAction,
+    ScheduleDelayAction,
+    SendMessageAction,
+    WaitChoiceAction,
+)
 from app.flow_v2.contracts import FlowV2EventType, RuntimeInput
 from app.flow_v2.models import FlowV2ScheduledJob
 from app.flow_v2.snapshot import FlowV2Snapshot, build_transitions_from_edges
@@ -48,7 +53,9 @@ class BaseNodeExecutor:
         data = node.get("data")
         return data if isinstance(data, dict) else {}
 
-    def _default_next(self, db, *, snapshot: FlowV2Snapshot, session: Any, node_id: str) -> str:
+    def _default_next(
+        self, db, *, snapshot: FlowV2Snapshot, session: Any, node_id: str
+    ) -> str:
         logger.info(
             "[V2 NODE EXECUTION] resolving_default_next node_id=%s start_node_id=%s transitions_count=%s edges_count=%s",
             node_id,
@@ -56,29 +63,63 @@ class BaseNodeExecutor:
             len(snapshot.transitions),
             len(snapshot.edges),
         )
-        return self.transition_resolver.resolve(db, snapshot=snapshot, session=session, source_node_id=node_id).target_node_id
+        return self.transition_resolver.resolve(
+            db, snapshot=snapshot, session=session, source_node_id=node_id
+        ).target_node_id
 
-    def _default_next_or_terminal(self, db, *, snapshot: FlowV2Snapshot, session: Any, node_id: str) -> str | None:
-        transitions = list(snapshot.transitions) if snapshot.transitions else build_transitions_from_edges(snapshot.edges)
-        outgoing = [transition for transition in transitions if str(transition.get("source_node_id")) == node_id]
+    def _default_next_or_terminal(
+        self, db, *, snapshot: FlowV2Snapshot, session: Any, node_id: str
+    ) -> str | None:
+        transitions = (
+            list(snapshot.transitions)
+            if snapshot.transitions
+            else build_transitions_from_edges(snapshot.edges)
+        )
+        outgoing = [
+            transition
+            for transition in transitions
+            if str(transition.get("source_node_id")) == node_id
+        ]
         if not outgoing:
             logger.info("[V2 NODE EXECUTION] terminal_node node_id=%s", node_id)
             return None
-        return self._default_next(db, snapshot=snapshot, session=session, node_id=node_id)
+        return self._default_next(
+            db, snapshot=snapshot, session=session, node_id=node_id
+        )
 
 
 class MessageNodeExecutor(BaseNodeExecutor):
-    def execute(self, db, *, snapshot, session, node, runtime_input) -> NodeExecutionResult:
+    def execute(
+        self, db, *, snapshot, session, node, runtime_input
+    ) -> NodeExecutionResult:
         node_id = str(node["id"])
         data = self._node_data(node)
-        message = node.get("content") or node.get("text") or data.get("content") or data.get("text") or data.get("message")
+        message = (
+            node.get("content")
+            or node.get("text")
+            or data.get("content")
+            or data.get("text")
+            or data.get("message")
+        )
         message = "" if message is None else str(message)
-        logger.info("[V2 NODE EXECUTION] message node_id=%s message_preview=%s", node_id, message[:120])
-        next_node_id = self._default_next_or_terminal(db, snapshot=snapshot, session=session, node_id=node_id)
+        logger.info(
+            "[V2 NODE EXECUTION] message node_id=%s message_preview=%s",
+            node_id,
+            message[:120],
+        )
+        next_node_id = self._default_next_or_terminal(
+            db, snapshot=snapshot, session=session, node_id=node_id
+        )
         actions: tuple[RuntimeAction, ...] = ()
         if message:
             payload = {"node_id": node_id, "message": message}
-            self.event_store.append(db, session=session, event_type=FlowV2EventType.MESSAGE_SENT, node_id=node_id, payload=payload)
+            self.event_store.append(
+                db,
+                session=session,
+                event_type=FlowV2EventType.MESSAGE_SENT,
+                node_id=node_id,
+                payload=payload,
+            )
             action_metadata = {**runtime_input.metadata, "node_id": node_id}
             action = SendMessageAction(
                 tenant_id=session.tenant_id,
@@ -100,25 +141,39 @@ class MessageNodeExecutor(BaseNodeExecutor):
                 sorted(action.metadata.keys()),
             )
             actions = (action,)
-        should_wait_after_start = bool(node.get("isStart") or data.get("isStart")) and next_node_id is not None
+        should_wait_after_start = (
+            bool(node.get("isStart") or data.get("isStart"))
+            and next_node_id is not None
+        )
         return NodeExecutionResult(
             actions=actions,
             next_node_id=next_node_id,
-            status="wait" if should_wait_after_start else ("complete" if next_node_id is None else "continue"),
+            status=(
+                "wait"
+                if should_wait_after_start
+                else ("complete" if next_node_id is None else "continue")
+            ),
         )
 
 
 class ChoiceNodeExecutor(BaseNodeExecutor):
-    def execute(self, db, *, snapshot, session, node, runtime_input) -> NodeExecutionResult:
+    def execute(
+        self, db, *, snapshot, session, node, runtime_input
+    ) -> NodeExecutionResult:
         node_id = str(node["id"])
         data = self._node_data(node)
         options = node.get("options") or data.get("options") or []
-        option_ids = [str(option["id"]) for option in options if isinstance(option, dict) and option.get("id") is not None]
+        option_ids = [
+            str(option["id"])
+            for option in options
+            if isinstance(option, dict) and option.get("id") is not None
+        ]
         logger.info(
             "[V2 NODE EXECUTION] choice node_id=%s option_ids=%s row_id=%s",
             node_id,
             option_ids,
-            runtime_input.metadata.get("row_id") or runtime_input.metadata.get("sourceHandle"),
+            runtime_input.metadata.get("row_id")
+            or runtime_input.metadata.get("sourceHandle"),
         )
         self.event_store.append(
             db,
@@ -127,7 +182,9 @@ class ChoiceNodeExecutor(BaseNodeExecutor):
             node_id=node_id,
             payload={"node_id": node_id, "option_ids": option_ids},
         )
-        row_id = runtime_input.metadata.get("row_id") or runtime_input.metadata.get("sourceHandle")
+        row_id = runtime_input.metadata.get("row_id") or runtime_input.metadata.get(
+            "sourceHandle"
+        )
         if row_id is None:
             action = WaitChoiceAction(
                 tenant_id=session.tenant_id,
@@ -157,18 +214,30 @@ class ChoiceNodeExecutor(BaseNodeExecutor):
             payload={"node_id": node_id, "row_id": row_id},
         )
         next_node_id = self.transition_resolver.resolve(
-            db, snapshot=snapshot, session=session, source_node_id=node_id, source_handle=row_id
+            db,
+            snapshot=snapshot,
+            session=session,
+            source_node_id=node_id,
+            source_handle=row_id,
         ).target_node_id
         return NodeExecutionResult(next_node_id=next_node_id)
 
 
 class DelayNodeExecutor(BaseNodeExecutor):
-    def execute(self, db, *, snapshot, session, node, runtime_input) -> NodeExecutionResult:
+    def execute(
+        self, db, *, snapshot, session, node, runtime_input
+    ) -> NodeExecutionResult:
         node_id = str(node["id"])
         data = self._node_data(node)
-        seconds = int(node.get("seconds") if node.get("seconds") is not None else data.get("seconds", 0))
+        seconds = int(
+            node.get("seconds")
+            if node.get("seconds") is not None
+            else data.get("seconds", 0)
+        )
         logger.info("[V2 NODE EXECUTION] delay node_id=%s seconds=%s", node_id, seconds)
-        next_node_id = self._default_next(db, snapshot=snapshot, session=session, node_id=node_id)
+        next_node_id = self._default_next(
+            db, snapshot=snapshot, session=session, node_id=node_id
+        )
         job = FlowV2ScheduledJob(
             id=uuid.uuid4(),
             tenant_id=session.tenant_id,
@@ -183,7 +252,12 @@ class DelayNodeExecutor(BaseNodeExecutor):
             session=session,
             event_type=FlowV2EventType.DELAY_SCHEDULED,
             node_id=node_id,
-            payload={"node_id": node_id, "seconds": seconds, "resume_node_id": next_node_id, "run_at": job.run_at.isoformat()},
+            payload={
+                "node_id": node_id,
+                "seconds": seconds,
+                "resume_node_id": next_node_id,
+                "run_at": job.run_at.isoformat(),
+            },
         )
         action = ScheduleDelayAction(
             tenant_id=session.tenant_id,
@@ -196,27 +270,78 @@ class DelayNodeExecutor(BaseNodeExecutor):
             run_at=job.run_at,
             seconds=seconds,
         )
-        return NodeExecutionResult(actions=(action,), status="scheduled", next_node_id=next_node_id)
+        return NodeExecutionResult(
+            actions=(action,), status="scheduled", next_node_id=next_node_id
+        )
 
 
 class ConditionNodeExecutor(BaseNodeExecutor):
-    def execute(self, db, *, snapshot, session, node, runtime_input) -> NodeExecutionResult:
+    def execute(
+        self, db, *, snapshot, session, node, runtime_input
+    ) -> NodeExecutionResult:
         node_id = str(node["id"])
         data = self._node_data(node)
         conditions = node.get("conditions") or data.get("conditions") or []
-        result = all(self._evaluate(condition, runtime_input.metadata) for condition in conditions)
+        keywords = self._keywords_from_builder_data(data)
+        match_type = (
+            str(data.get("matchType") or data.get("match_type") or "equals")
+            .strip()
+            .lower()
+        )
+        message = (
+            ""
+            if runtime_input.message_text is None
+            else str(runtime_input.message_text)
+        )
+
+        logger.info("[V2 CONDITION SNAPSHOT NODE] node_id=%s node=%s", node_id, node)
+        logger.info("[V2 CONDITION NODE DATA] node_id=%s data=%s", node_id, data)
+
+        if keywords:
+            result = self._evaluate_builder_keywords(
+                message=message, keywords=keywords, match_type=match_type
+            )
+        else:
+            result = bool(conditions) and all(
+                self._evaluate(condition, runtime_input.metadata)
+                for condition in conditions
+            )
+
         handle = "true" if result else "false"
-        logger.info("[V2 NODE EXECUTION] condition node_id=%s result=%s source_handle=%s", node_id, result, handle)
+        resolution = self.transition_resolver.resolve(
+            db,
+            snapshot=snapshot,
+            session=session,
+            source_node_id=node_id,
+            source_handle=handle,
+        )
+        next_node_id = resolution.target_node_id
+        logger.info(
+            "[V2 CONDITION] node_id=%s message=%s keywords=%s match_type=%s result=%s source_handle=%s target_node_id=%s",
+            node_id,
+            message,
+            keywords,
+            match_type,
+            result,
+            handle,
+            next_node_id,
+        )
         self.event_store.append(
             db,
             session=session,
             event_type=FlowV2EventType.CONDITION_EVALUATED,
             node_id=node_id,
-            payload={"node_id": node_id, "result": result, "source_handle": handle},
+            payload={
+                "node_id": node_id,
+                "conditions": conditions,
+                "message": message,
+                "keywords": keywords,
+                "match_type": match_type,
+                "result": result,
+                "source_handle": handle,
+                "target_node_id": next_node_id,
+            },
         )
-        next_node_id = self.transition_resolver.resolve(
-            db, snapshot=snapshot, session=session, source_node_id=node_id, source_handle=handle
-        ).target_node_id
         return NodeExecutionResult(next_node_id=next_node_id)
 
     @classmethod
@@ -224,11 +349,54 @@ class ConditionNodeExecutor(BaseNodeExecutor):
         if not isinstance(condition, dict):
             return False
         left = condition.get("left") or condition.get("field") or condition.get("path")
-        expected = condition.get("right") if "right" in condition else condition.get("value")
+        expected = (
+            condition.get("right") if "right" in condition else condition.get("value")
+        )
         operator = condition.get("operator") or condition.get("op") or "=="
         if operator not in {"==", "eq", "equals"} or not left:
             return False
         return cls._get_path(metadata, str(left)) == expected
+
+    @classmethod
+    def _evaluate_builder_keywords(
+        cls, *, message: str, keywords: list[str], match_type: str
+    ) -> bool:
+        normalized_message = cls._normalize_text(message)
+        normalized_keywords = [
+            cls._normalize_text(keyword)
+            for keyword in keywords
+            if cls._normalize_text(keyword)
+        ]
+        if not normalized_keywords:
+            return False
+        if match_type == "contains":
+            return any(keyword in normalized_message for keyword in normalized_keywords)
+        return any(normalized_message == keyword for keyword in normalized_keywords)
+
+    @staticmethod
+    def _keywords_from_builder_data(data: dict[str, Any]) -> list[str]:
+        for key in ("keywords", "positive", "condition"):
+            raw_value = data.get(key)
+            keywords = ConditionNodeExecutor._coerce_keywords(raw_value)
+            if keywords:
+                return keywords
+        return []
+
+    @staticmethod
+    def _coerce_keywords(raw_value: Any) -> list[str]:
+        if isinstance(raw_value, list):
+            return [str(item).strip() for item in raw_value if str(item).strip()]
+        if isinstance(raw_value, str):
+            return [
+                part.strip()
+                for part in raw_value.replace("\n", ",").split(",")
+                if part.strip()
+            ]
+        return []
+
+    @staticmethod
+    def _normalize_text(value: str) -> str:
+        return value.strip().casefold()
 
     @staticmethod
     def _get_path(values: dict[str, Any], path: str) -> Any:
@@ -243,14 +411,24 @@ class ConditionNodeExecutor(BaseNodeExecutor):
 class NodeExecutorRegistry:
     def __init__(self, *, event_store, transition_resolver: TransitionResolver) -> None:
         self._executors: dict[str, NodeExecutor] = {
-            "message": MessageNodeExecutor(event_store=event_store, transition_resolver=transition_resolver),
-            "choice": ChoiceNodeExecutor(event_store=event_store, transition_resolver=transition_resolver),
-            "delay": DelayNodeExecutor(event_store=event_store, transition_resolver=transition_resolver),
-            "condition": ConditionNodeExecutor(event_store=event_store, transition_resolver=transition_resolver),
+            "message": MessageNodeExecutor(
+                event_store=event_store, transition_resolver=transition_resolver
+            ),
+            "choice": ChoiceNodeExecutor(
+                event_store=event_store, transition_resolver=transition_resolver
+            ),
+            "delay": DelayNodeExecutor(
+                event_store=event_store, transition_resolver=transition_resolver
+            ),
+            "condition": ConditionNodeExecutor(
+                event_store=event_store, transition_resolver=transition_resolver
+            ),
         }
 
     def get(self, node_type: str) -> NodeExecutor:
         try:
             return self._executors[node_type]
         except KeyError as exc:
-            raise RuntimeError(f"Unsupported Runtime V2 node type: {node_type}") from exc
+            raise RuntimeError(
+                f"Unsupported Runtime V2 node type: {node_type}"
+            ) from exc
