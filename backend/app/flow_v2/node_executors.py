@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 import uuid
 from dataclasses import dataclass
@@ -9,8 +10,8 @@ from typing import Any, Protocol
 from app.flow_v2.actions import (
     RuntimeAction,
     ScheduleDelayAction,
+    SendChoiceButtonsAction,
     SendMessageAction,
-    WaitChoiceAction,
 )
 from app.flow_v2.contracts import FlowV2EventType, RuntimeInput
 from app.flow_v2.models import FlowV2ScheduledJob
@@ -156,6 +157,49 @@ class MessageNodeExecutor(BaseNodeExecutor):
         )
 
 
+def _choice_prompt(node: dict[str, Any], data: dict[str, Any]) -> str:
+    prompt = (
+        node.get("content")
+        or node.get("text")
+        or data.get("content")
+        or data.get("text")
+        or data.get("message")
+        or data.get("body_text")
+        or data.get("title")
+    )
+    return str(prompt or "Escolha uma opção")
+
+
+def _choice_buttons_from_options(options: Any) -> tuple[dict[str, Any], ...]:
+    if not isinstance(options, list):
+        return ()
+
+    buttons: list[dict[str, Any]] = []
+    for option in options[:3]:
+        if not isinstance(option, dict):
+            continue
+        option_id = str(option.get("id") or option.get("handleId") or option.get("handle_id") or "").strip()
+        title = str(option.get("label") or option.get("title") or "").strip()
+        if not option_id or not title:
+            continue
+        buttons.append({"id": option_id, "title": title[:20]})
+    return tuple(buttons)
+
+
+def _choice_options_payload(options: Any) -> tuple[dict[str, Any], ...]:
+    if not isinstance(options, list):
+        return ()
+    payload: list[dict[str, Any]] = []
+    for option in options:
+        if not isinstance(option, dict):
+            continue
+        option_id = str(option.get("id") or "").strip()
+        label = str(option.get("label") or "").strip()
+        if option_id and label:
+            payload.append({"id": option_id, "label": label})
+    return tuple(payload)
+
+
 class ChoiceNodeExecutor(BaseNodeExecutor):
     def execute(
         self, db, *, snapshot, session, node, runtime_input
@@ -168,6 +212,23 @@ class ChoiceNodeExecutor(BaseNodeExecutor):
             for option in options
             if isinstance(option, dict) and option.get("id") is not None
         ]
+        choice_log_payload = {
+            "node_id": node_id,
+            "session_id": str(session.id),
+            "options_count": len(options) if isinstance(options, list) else 0,
+            "options": options if isinstance(options, list) else [],
+            "provider_id": runtime_input.metadata.get("provider_id"),
+            "tenant_id": str(session.tenant_id),
+            "message_type": "wait_choice",
+            "payload": {
+                "row_id": runtime_input.metadata.get("row_id")
+                or runtime_input.metadata.get("sourceHandle"),
+                "current_node_id": getattr(session, "current_node_id", None),
+                "session_status": getattr(session, "status", None),
+            },
+        }
+        logger.info("[V2 CHOICE NODE] %s", json.dumps(choice_log_payload, default=str, ensure_ascii=False, sort_keys=True))
+        logger.info("[V2 CHOICE OPTIONS] %s", json.dumps(choice_log_payload, default=str, ensure_ascii=False, sort_keys=True))
         logger.info(
             "[V2 NODE EXECUTION] choice node_id=%s option_ids=%s row_id=%s",
             node_id,
@@ -186,16 +247,43 @@ class ChoiceNodeExecutor(BaseNodeExecutor):
             "sourceHandle"
         )
         if row_id is None:
-            action = WaitChoiceAction(
+            buttons = _choice_buttons_from_options(options)
+            action_metadata = {
+                **runtime_input.metadata,
+                "node_id": node_id,
+                "node_type": "choice",
+            }
+            action = SendChoiceButtonsAction(
                 tenant_id=session.tenant_id,
                 session_id=session.id,
                 external_user_id=runtime_input.external_user_id,
                 conversation_id=runtime_input.conversation_id,
                 contact_id=runtime_input.contact_id,
+                text=_choice_prompt(node, data),
                 node_id=node_id,
-                option_ids=tuple(option_ids),
+                options=_choice_options_payload(options),
+                buttons=buttons,
+                metadata=action_metadata,
             )
-            return NodeExecutionResult(actions=(action,), status="wait")
+            result = NodeExecutionResult(actions=(action,), status="wait")
+            logger.info(
+                "[V2 CHOICE ACTION] %s",
+                json.dumps(
+                    {
+                        **choice_log_payload,
+                        "message_type": "interactive",
+                        "payload": {
+                            "status": result.status,
+                            "next_node_id": result.next_node_id,
+                            "actions": [runtime_action.as_effect() for runtime_action in result.actions],
+                        },
+                    },
+                    default=str,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                ),
+            )
+            return result
         row_id = str(row_id)
         if row_id not in option_ids:
             self.event_store.append(
@@ -220,7 +308,24 @@ class ChoiceNodeExecutor(BaseNodeExecutor):
             source_node_id=node_id,
             source_handle=row_id,
         ).target_node_id
-        return NodeExecutionResult(next_node_id=next_node_id)
+        result = NodeExecutionResult(next_node_id=next_node_id)
+        logger.info(
+            "[V2 CHOICE ACTION] %s",
+            json.dumps(
+                {
+                    **choice_log_payload,
+                    "payload": {
+                        "status": result.status,
+                        "next_node_id": result.next_node_id,
+                        "actions": [runtime_action.as_effect() for runtime_action in result.actions],
+                    },
+                },
+                default=str,
+                ensure_ascii=False,
+                sort_keys=True,
+            ),
+        )
+        return result
 
 
 class DelayNodeExecutor(BaseNodeExecutor):

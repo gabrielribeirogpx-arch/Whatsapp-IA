@@ -487,6 +487,25 @@ def send_whatsapp_message(*, message_data: dict[str, Any]) -> None:
         len(options or buttons or []) if isinstance(options or buttons, list) else 0,
         json.dumps(message_data, default=str, ensure_ascii=False, sort_keys=True),
     )
+    if node_type == "choice":
+        logger.info(
+            "[V2 CHOICE SEND WORKER] %s",
+            json.dumps(
+                {
+                    "node_id": node_id,
+                    "session_id": session_id,
+                    "options_count": len(options or buttons or []) if isinstance(options or buttons, list) else 0,
+                    "options": options or buttons or [],
+                    "provider_id": payload_provider_id,
+                    "tenant_id": tenant_id,
+                    "message_type": message_type,
+                    "payload": message_data,
+                },
+                default=str,
+                ensure_ascii=False,
+                sort_keys=True,
+            ),
+        )
     if interactive_type == "list":
         logger.info(
             "[CHOICE LIST RECEIVED BY WORKER] session_id=%s node_id=%s flow_id=%s interactive_type=%s job_id=%s options_count=%s payload_summary=%s",

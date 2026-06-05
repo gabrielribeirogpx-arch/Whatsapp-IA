@@ -4,6 +4,7 @@ import uuid
 
 import pytest
 
+from app.flow_v2.actions import SendChoiceButtonsAction
 from app.flow_v2.contracts import FlowV2EventType, FlowV2SessionStatus, RuntimeInput
 from app.flow_v2.executor import FlowV2Executor
 from app.flow_v2.snapshot import FlowV2Snapshot, canonical_hash
@@ -119,6 +120,17 @@ def _input(snapshot, metadata=None):
     )
 
 
+
+def _input_with_id(snapshot, input_message_id, metadata=None):
+    return RuntimeInput(
+        tenant_id=snapshot.tenant_id,
+        flow_version_id=snapshot.flow_version_id,
+        external_user_id="whatsapp:+5511999999999",
+        message_text="oi",
+        input_message_id=input_message_id,
+        metadata=metadata or {},
+    )
+
 def _event_types(event_store):
     return [event["event_type"] for event in event_store.events]
 
@@ -217,6 +229,104 @@ def test_choice_navigates_by_option_id_only(row_id, expected) -> None:
     assert event_store.events[4]["payload"] == {"node_id": "start", "row_id": row_id}
     assert any(event["payload"] == {"node_id": expected, "message": expected.upper()} for event in event_store.events)
 
+
+
+def test_message_initial_then_choice_emits_real_interactive_buttons_action() -> None:
+    raw_snapshot = {
+        "schema_version": 1,
+        "start_node_id": "start",
+        "nodes": [
+            {"id": "start", "type": "message", "data": {"isStart": True, "text": "Olá"}},
+            {
+                "id": "choice",
+                "type": "choice",
+                "data": {
+                    "content": "Escolha",
+                    "options": [
+                        {"id": "quero_planos", "label": "Quero planos"},
+                        {"id": "humano", "label": "Humano"},
+                    ],
+                },
+            },
+            {"id": "end", "type": "message", "data": {"text": "Fim"}},
+        ],
+        "edges": [
+            {"id": "e1", "source": "start", "target": "choice"},
+            {"id": "e2", "source": "choice", "sourceHandle": "quero_planos", "target": "end"},
+            {"id": "e3", "source": "choice", "sourceHandle": "humano", "target": "end"},
+        ],
+    }
+    executor, snapshot, event_store, session, db = _executor(raw_snapshot)
+
+    initial = executor.handle_input(db, _input_with_id(snapshot, "wamid.initial", {"provider_id": "provider-1"}))
+    choice = executor.handle_input(db, _input_with_id(snapshot, "wamid.choice", {"provider_id": "provider-1"}))
+
+    assert initial.status == FlowV2SessionStatus.WAITING
+    assert initial.current_node_id == "choice"
+    assert choice.status == FlowV2SessionStatus.WAITING
+    assert choice.current_node_id == "choice"
+    assert session.status == FlowV2SessionStatus.WAITING
+    assert session.current_node_id == "choice"
+    assert len(choice.actions) == 1
+    action = choice.actions[0]
+    assert isinstance(action, SendChoiceButtonsAction)
+    assert action.text == "Escolha"
+    assert action.node_id == "choice"
+    assert list(action.buttons) == [
+        {"id": "quero_planos", "title": "Quero planos"},
+        {"id": "humano", "title": "Humano"},
+    ]
+    assert action.as_effect()["interactive"] == {
+        "type": "button",
+        "body": {"text": "Escolha"},
+        "action": {
+            "buttons": [
+                {"id": "quero_planos", "title": "Quero planos"},
+                {"id": "humano", "title": "Humano"},
+            ]
+        },
+    }
+    assert "CHOICE_SHOWN" in _event_types(event_store)
+
+
+def test_waiting_choice_with_row_id_transitions_to_target_node() -> None:
+    raw_snapshot = {
+        "schema_version": 1,
+        "start_node_id": "start",
+        "nodes": [
+            {"id": "start", "type": "message", "data": {"isStart": True, "text": "Olá"}},
+            {
+                "id": "choice",
+                "type": "choice",
+                "data": {
+                    "content": "Escolha",
+                    "options": [
+                        {"id": "quero_planos", "label": "Quero planos"},
+                        {"id": "humano", "label": "Humano"},
+                    ],
+                },
+            },
+            {"id": "plans", "type": "message", "data": {"text": "Planos"}},
+            {"id": "human", "type": "message", "data": {"text": "Humano"}},
+        ],
+        "edges": [
+            {"id": "e1", "source": "start", "target": "choice"},
+            {"id": "e2", "source": "choice", "sourceHandle": "quero_planos", "target": "plans"},
+            {"id": "e3", "source": "choice", "sourceHandle": "humano", "target": "human"},
+        ],
+    }
+    executor, snapshot, event_store, session, db = _executor(raw_snapshot)
+
+    executor.handle_input(db, _input_with_id(snapshot, "wamid.initial"))
+    selected = executor.handle_input(db, _input_with_id(snapshot, "wamid.reply", {"row_id": "quero_planos"}))
+
+    assert selected.status == FlowV2SessionStatus.COMPLETED
+    assert selected.current_node_id is None
+    assert selected.effects == ({"type": "send_message", "text": "Planos"},)
+    assert session.status == FlowV2SessionStatus.COMPLETED
+    assert session.current_node_id is None
+    assert "CHOICE_SELECTED" in _event_types(event_store)
+    assert any(event["payload"] == {"node_id": "choice", "row_id": "quero_planos"} for event in event_store.events)
 
 def test_delay_scheduling_creates_scheduled_job_and_does_not_execute_next_node() -> None:
     raw_snapshot = {

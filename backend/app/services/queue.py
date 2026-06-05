@@ -256,6 +256,25 @@ def enqueue_send_message(message_data: dict[str, Any]) -> str | None:
         len(payload.get("options") or payload.get("buttons") or []) if isinstance(payload.get("options") or payload.get("buttons"), list) else 0,
         json.dumps(payload, default=str, ensure_ascii=False, sort_keys=True),
     )
+    if payload.get("node_type") == "choice":
+        logger.info(
+            "[V2 CHOICE ENQUEUE] %s",
+            json.dumps(
+                {
+                    "node_id": payload.get("node_id"),
+                    "session_id": payload.get("session_id"),
+                    "options_count": len(payload.get("options") or payload.get("buttons") or []) if isinstance(payload.get("options") or payload.get("buttons"), list) else 0,
+                    "options": payload.get("options") or payload.get("buttons") or [],
+                    "provider_id": payload.get("provider_id"),
+                    "tenant_id": payload.get("tenant_id"),
+                    "message_type": message_type,
+                    "payload": payload,
+                },
+                default=str,
+                ensure_ascii=False,
+                sort_keys=True,
+            ),
+        )
 
     logger.info(
         "[FLOW QUEUE ENQUEUE] job_id=%s flow_id=%s session_id=%s node_id=%s sequence_number=%s message_text=%s api_commit=%s",

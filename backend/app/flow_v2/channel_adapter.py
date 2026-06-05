@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import inspect
+import json
 import logging
 from typing import Any, Protocol, runtime_checkable
 
-from app.flow_v2.actions import RuntimeAction, SendMessageAction
+from app.flow_v2.actions import RuntimeAction, SendChoiceButtonsAction, SendMessageAction
 
 logger = logging.getLogger(__name__)
 
@@ -31,8 +32,19 @@ class ChannelAdapter(Protocol):
     def send_document(self, *, recipient_id: str, document_url: str, filename: str | None = None,
                       metadata: dict[str, Any] | None = None) -> dict[str, Any]: ...
 
-    def send_buttons(self, *, recipient_id: str, text: str, buttons: list[dict[str, Any]],
-                     metadata: dict[str, Any] | None = None) -> dict[str, Any]: ...
+    def send_buttons(
+        self,
+        *,
+        recipient_id: str,
+        text: str,
+        buttons: list[dict[str, Any]],
+        tenant_id: Any | None = None,
+        session_id: Any | None = None,
+        conversation_id: Any | None = None,
+        contact_id: Any | None = None,
+        options: list[dict[str, Any]] | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]: ...
 
     def send_list(self, *, recipient_id: str, text: str, sections: list[dict[str, Any]],
                   metadata: dict[str, Any] | None = None) -> dict[str, Any]: ...
@@ -120,9 +132,98 @@ class WhatsAppAdapter:
                       metadata: dict[str, Any] | None = None) -> dict[str, Any]:
         return {"status": "mocked", "channel": "whatsapp", "type": "document", "recipient_id": recipient_id, "document_url": document_url}
 
-    def send_buttons(self, *, recipient_id: str, text: str, buttons: list[dict[str, Any]],
-                     metadata: dict[str, Any] | None = None) -> dict[str, Any]:
-        return {"status": "mocked", "channel": "whatsapp", "type": "buttons", "recipient_id": recipient_id, "buttons": buttons}
+    def send_buttons(
+        self,
+        *,
+        recipient_id: str,
+        text: str,
+        buttons: list[dict[str, Any]],
+        tenant_id: Any | None = None,
+        session_id: Any | None = None,
+        conversation_id: Any | None = None,
+        contact_id: Any | None = None,
+        options: list[dict[str, Any]] | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        metadata = dict(metadata or {})
+        payload = {
+            "tenant_id": str(tenant_id or metadata.get("tenant_id") or ""),
+            "provider_id": metadata.get("provider_id"),
+            "phone": recipient_id,
+            "text": text,
+            "buttons": buttons,
+            "options": options or [],
+            "interactive_type": "button",
+            "conversation_id": str(conversation_id or metadata.get("conversation_id") or "") or None,
+            "contact_id": str(contact_id or metadata.get("contact_id") or "") or None,
+            "session_id": str(session_id or metadata.get("session_id") or "") or None,
+            "flow_id": metadata.get("flow_id"),
+            "flow_version_id": metadata.get("flow_version_id"),
+            "node_id": metadata.get("node_id"),
+            "node_type": metadata.get("node_type") or "choice",
+            "correlation_id": metadata.get("correlation_id") or metadata.get("message_id") or metadata.get("webhook_id"),
+            "metadata": metadata,
+            "flow_send_source": "flow_v2:choice",
+        }
+        logger.info(
+            "[V2 CHOICE ENQUEUE] tenant_id=%s provider_id=%s session_id=%s node_id=%s message_type=%s options_count=%s payload_json=%s",
+            payload.get("tenant_id"),
+            payload.get("provider_id"),
+            payload.get("session_id"),
+            payload.get("node_id"),
+            "interactive",
+            len(options or buttons or []),
+            json.dumps(payload, default=str, ensure_ascii=False, sort_keys=True),
+        )
+        if self.client is not None:
+            kwargs = {
+                "recipient_id": recipient_id,
+                "text": text,
+                "tenant_id": tenant_id,
+                "session_id": session_id,
+                "conversation_id": conversation_id,
+                "contact_id": contact_id,
+                "buttons": buttons,
+                "options": options or [],
+                "interactive_type": "button",
+                "metadata": metadata,
+            }
+            try:
+                signature = inspect.signature(self.client if callable(self.client) else self.client.send_text)
+                accepts_kwargs = any(parameter.kind == inspect.Parameter.VAR_KEYWORD for parameter in signature.parameters.values())
+                if accepts_kwargs or "buttons" in signature.parameters:
+                    target = self.client if callable(self.client) else self.client.send_text
+                    return self._invoke_text_client(target, kwargs)
+            except (AttributeError, TypeError, ValueError):
+                pass
+
+        if self.client is None:
+            return {
+                "status": "mocked",
+                "channel": "whatsapp",
+                "type": "buttons",
+                "recipient_id": recipient_id,
+                "text": text,
+                "buttons": buttons,
+                "options": options or [],
+                "tenant_id": str(tenant_id) if tenant_id is not None else None,
+                "session_id": str(session_id) if session_id is not None else None,
+                "conversation_id": str(conversation_id) if conversation_id is not None else None,
+                "contact_id": str(contact_id) if contact_id is not None else None,
+                "metadata": metadata,
+            }
+
+        from app.services.queue import enqueue_send_message
+
+        job_id = enqueue_send_message(payload)
+        return {
+            "status": "queued" if job_id else "skipped",
+            "channel": "whatsapp",
+            "type": "buttons",
+            "recipient_id": recipient_id,
+            "job_id": job_id,
+            "tenant_id": payload.get("tenant_id"),
+        }
 
     def send_list(self, *, recipient_id: str, text: str, sections: list[dict[str, Any]],
                   metadata: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -148,6 +249,29 @@ class WhatsAppAdapter:
                 session_id=action.session_id,
                 conversation_id=action.conversation_id,
                 contact_id=action.contact_id,
+                metadata=action.metadata,
+            )
+        if isinstance(action, SendChoiceButtonsAction):
+            logger.info(
+                "[V2 CHANNEL ADAPTER] dispatch action_type=%s tenant_id=%s provider_id=%s session_id=%s conversation_id=%s contact_id=%s node_id=%s buttons_count=%s",
+                action.action_type,
+                action.tenant_id,
+                action.metadata.get("provider_id"),
+                action.session_id,
+                action.conversation_id,
+                action.contact_id,
+                action.node_id,
+                len(action.buttons),
+            )
+            return self.send_buttons(
+                recipient_id=action.external_user_id,
+                text=action.text,
+                buttons=[dict(button) for button in action.buttons],
+                tenant_id=action.tenant_id,
+                session_id=action.session_id,
+                conversation_id=action.conversation_id,
+                contact_id=action.contact_id,
+                options=[dict(option) for option in action.options],
                 metadata=action.metadata,
             )
         return {"status": "mocked", "channel": "whatsapp", "type": action.action_type, "recipient_id": action.external_user_id}

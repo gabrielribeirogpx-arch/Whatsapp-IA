@@ -56,6 +56,36 @@ class SendMessageAction(RuntimeAction):
 
 
 @dataclass(frozen=True)
+class SendChoiceButtonsAction(RuntimeAction):
+    text: str = ""
+    node_id: str = ""
+    options: tuple[dict[str, Any], ...] = ()
+    buttons: tuple[dict[str, Any], ...] = ()
+
+    @property
+    def action_type(self) -> Literal["send_choice_buttons"]:
+        return "send_choice_buttons"
+
+    def as_effect(self) -> dict[str, Any]:
+        payload = super().as_effect()
+        buttons = [dict(button) for button in self.buttons]
+        payload.update(
+            {
+                "text": self.text,
+                "node_id": self.node_id,
+                "options": [dict(option) for option in self.options],
+                "buttons": buttons,
+                "interactive": {
+                    "type": "button",
+                    "body": {"text": self.text},
+                    "action": {"buttons": buttons},
+                },
+            }
+        )
+        return payload
+
+
+@dataclass(frozen=True)
 class WaitChoiceAction(RuntimeAction):
     node_id: str = ""
     option_ids: tuple[str, ...] = ()
