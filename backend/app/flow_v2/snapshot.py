@@ -57,6 +57,16 @@ class FlowV2SnapshotRepository:
         expected_hash = getattr(version, "v2_snapshot_hash", None)
         if not expected_hash:
             raise FlowV2SnapshotError("Runtime V2 requires an immutable snapshot hash")
+
+        snapshot = migrate_snapshot(snapshot)
+        stored_schema_version = getattr(version, "v2_snapshot_schema_version", None)
+        snapshot_schema_version = int(snapshot.get("snapshot_schema_version") or snapshot.get("schema_version") or 1)
+        if stored_schema_version is not None and int(stored_schema_version) != snapshot_schema_version:
+            raise FlowV2SnapshotError("Flow version snapshot schema version mismatch")
+
+        embedded_hash = snapshot.get("hash")
+        if embedded_hash and embedded_hash != expected_hash:
+            raise FlowV2SnapshotError("Flow version embedded snapshot hash mismatch")
         actual_hash = canonical_hash({k: v for k, v in snapshot.items() if k != "hash"})
         if expected_hash != actual_hash:
             raise FlowV2SnapshotError("Flow version snapshot hash mismatch")
@@ -66,7 +76,6 @@ class FlowV2SnapshotRepository:
         if not isinstance(nodes, list) or not isinstance(edges, list):
             raise FlowV2SnapshotError("Runtime V2 snapshot must contain nodes and edges arrays")
 
-        snapshot = migrate_snapshot(snapshot)
         start_node_id = snapshot.get("start_node_id")
         if not start_node_id:
             raise FlowV2SnapshotError("Runtime V2 snapshot must declare start_node_id")
@@ -78,7 +87,7 @@ class FlowV2SnapshotRepository:
             nodes=tuple(dict(node) for node in nodes),
             edges=tuple(dict(edge) for edge in edges),
             start_node_id=str(start_node_id),
-            snapshot_schema_version=int(snapshot.get("snapshot_schema_version") or snapshot.get("schema_version") or 1),
+            snapshot_schema_version=snapshot_schema_version,
         )
 
 

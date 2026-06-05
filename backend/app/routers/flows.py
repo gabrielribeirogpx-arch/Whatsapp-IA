@@ -6,6 +6,7 @@ import traceback
 import asyncio
 import hashlib
 import json
+from contextlib import nullcontext
 from datetime import datetime
 from typing import Any
 
@@ -39,6 +40,7 @@ from app.services.flow_runtime_service import execute_node_chain_until_reply
 from app.services.flow_session_service import FlowSessionService
 from app.services.flow_service import FlowService, create_flow, delete_flow, duplicate_flow, get_flow, get_flows, update_flow
 from app.services.delay_queue_service import clear_delays_for_runtime_reset
+from app.flow_v2.publisher import FlowV2PublishError, FlowV2Publisher
 
 router = APIRouter()
 crud_router = APIRouter(tags=["flows-crud"])
@@ -256,10 +258,39 @@ def _validate_publish_graph_or_raise(nodes: list[dict[str, Any]], edges: list[di
     except (TypeError, ValueError) as exc:
         raise ValueError(f"Graph não serializável: {exc}") from exc
 
+def _is_flow_runtime_v2(flow: Flow) -> bool:
+    return str(getattr(flow, "runtime", "") or "").strip().lower() == "v2"
+
+
+def _apply_flow_v2_snapshot_metadata(flow_version: FlowVersion, nodes: list[dict[str, Any]], edges: list[dict[str, Any]]) -> None:
+    try:
+        published = FlowV2Publisher().publish(nodes=nodes, edges=edges)
+    except FlowV2PublishError as exc:
+        raise ValueError("; ".join(exc.errors)) from exc
+
+    snapshot = published.snapshot
+    flow_version.nodes_json = snapshot["nodes"]
+    flow_version.edges_json = snapshot["edges"]
+    flow_version.nodes = snapshot["nodes"]
+    flow_version.edges = snapshot["edges"]
+    flow_version.snapshot = snapshot
+    flow_version.nodes_count = len(snapshot["nodes"])
+    flow_version.edges_count = len(snapshot["edges"])
+    flow_version.graph_hash = published.v2_snapshot_hash
+    flow_version.graph_checksum = published.v2_snapshot_hash
+    flow_version.v2_snapshot_hash = published.v2_snapshot_hash
+    flow_version.v2_snapshot_schema_version = int(snapshot["snapshot_schema_version"])
+    flow_version.start_node_id = str(snapshot["start_node_id"])
+
+
 def _publish_fresh_snapshot(db: Session, flow: Flow, *, reason: str) -> FlowVersion | None:
-    with db.begin_nested():
+    transaction = db.begin_nested() if hasattr(db, "begin_nested") else nullcontext()
+    with transaction:
         db.execute(select(Flow.id).where(Flow.id == flow.id).with_for_update())
-        nodes, edges = _builder_graph_from_records(db, flow)
+        try:
+            nodes, edges = _builder_graph_from_records(db, flow)
+        except AttributeError:
+            nodes, edges = _builder_graph_from_flow(flow)
     if not nodes:
         logger.warning("[FLOW PUBLISH] flow_id=%s reason=%s sem nodes no builder", flow.id, reason)
         return None
@@ -273,6 +304,7 @@ def _publish_fresh_snapshot(db: Session, flow: Flow, *, reason: str) -> FlowVers
         len(edges),
         edges[:5],
     )
+    is_runtime_v2 = _is_flow_runtime_v2(flow)
     checksum = _graph_checksum(nodes, edges)
     start_node_id, start_text_preview = _extract_start_node_metadata(nodes)
 
@@ -288,6 +320,23 @@ def _publish_fresh_snapshot(db: Session, flow: Flow, *, reason: str) -> FlowVers
         candidate_nodes=nodes,
         candidate_edges=edges,
     )
+    if latest_published is not None and not is_runtime_v2 and getattr(latest_published, "graph_checksum", None) == checksum:
+        db.query(FlowVersion).filter(FlowVersion.flow_id == flow.id, FlowVersion.tenant_id == flow.tenant_id).update({FlowVersion.is_active: False, FlowVersion.is_published: False}, synchronize_session=False)
+        latest_published.is_active = True
+        latest_published.is_published = True
+        latest_published.start_node_id = start_node_id
+        latest_published.start_text_preview = start_text_preview
+        latest_published.created_from_source = latest_published.created_from_source or "builder_graph"
+        flow.current_version_id = latest_published.id
+        flow.published_version_id = latest_published.id
+        flow.version = latest_published.version
+        _persist_builder_graph(flow, nodes, edges)
+        db.add(flow)
+        db.flush()
+        _log_publish_graph_snapshot(label="PUBLISH GRAPH", flow=flow, nodes=nodes, edges=edges, version=latest_published)
+        _log_flow_publish_result(flow=flow, version=latest_published, nodes=nodes, edges=edges, reason=reason)
+        logger.info("[PUBLISH GRAPH SOURCE] flow_id=%s reused_version_id=%s nodes_count=%s edges_count=%s checksum=%s", flow.id, latest_published.id, len(nodes), len(edges), checksum)
+        return latest_published
     db.query(FlowVersion).filter(FlowVersion.flow_id == flow.id, FlowVersion.tenant_id == flow.tenant_id).update({FlowVersion.is_active: False, FlowVersion.is_published: False}, synchronize_session=False)
     last_version = db.execute(select(FlowVersion.version).where(FlowVersion.flow_id == flow.id).order_by(FlowVersion.version.desc()).limit(1)).scalar()
     next_version_number = (last_version or 0) + 1
@@ -297,11 +346,15 @@ def _publish_fresh_snapshot(db: Session, flow: Flow, *, reason: str) -> FlowVers
         version=next_version_number,
         start_node_id=start_node_id,
         start_text_preview=start_text_preview,
-        created_from_source="builder_graph",
+        created_from_source="flow_v2_publish" if is_runtime_v2 else "builder_graph",
         is_active=True,
         is_published=True,
     )
-    apply_flow_version_snapshot_metadata(fresh_version, nodes, edges)
+    if is_runtime_v2:
+        _apply_flow_v2_snapshot_metadata(fresh_version, nodes, edges)
+        checksum = fresh_version.v2_snapshot_hash or checksum
+    else:
+        apply_flow_version_snapshot_metadata(fresh_version, nodes, edges)
     db.add(fresh_version)
     db.flush()
     flow.current_version_id = fresh_version.id
@@ -316,7 +369,7 @@ def _publish_fresh_snapshot(db: Session, flow: Flow, *, reason: str) -> FlowVers
     db.flush()
     _log_publish_graph_snapshot(label="PUBLISH GRAPH", flow=flow, nodes=nodes, edges=edges, version=fresh_version)
     _log_flow_publish_result(flow=flow, version=fresh_version, nodes=nodes, edges=edges, reason=reason)
-    logger.info("[PUBLISH GRAPH SOURCE] flow_id=%s nodes_count=%s edges_count=%s checksum=%s start_text_preview=%s", flow.id, len(nodes), len(edges), checksum, start_text_preview)
+    logger.info("[PUBLISH GRAPH SOURCE] flow_id=%s nodes_count=%s edges_count=%s checksum=%s start_text_preview=%s runtime=%s snapshot_hash=%s", flow.id, len(nodes), len(edges), checksum, start_text_preview, getattr(flow, "runtime", None), getattr(fresh_version, "v2_snapshot_hash", None))
     return fresh_version
 
 
@@ -585,6 +638,7 @@ class CanonicalFlowVersionResponse(BaseModel):
     nodes_count: int = 0
     edges_count: int = 0
     graph_hash: str | None = None
+    snapshot_hash: str | None = None
 
 
 class FlowVersionResponse(CanonicalFlowVersionResponse):
@@ -1469,6 +1523,7 @@ def _serialize_flow_version_response(
     edges: list[dict[str, Any]] | None,
     version_id: uuid.UUID | str | None,
     version: int | None = None,
+    snapshot_hash: str | None = None,
 ) -> dict[str, Any]:
     normalized_nodes = nodes if isinstance(nodes, list) else []
     normalized_edges = edges if isinstance(edges, list) else []
@@ -1482,7 +1537,8 @@ def _serialize_flow_version_response(
         "version": version_value,
         "nodes_count": len(normalized_nodes),
         "edges_count": len(normalized_edges),
-        "graph_hash": _graph_checksum(normalized_nodes, normalized_edges),
+        "graph_hash": snapshot_hash or _graph_checksum(normalized_nodes, normalized_edges),
+        "snapshot_hash": snapshot_hash,
     }
     return {
         **canonical,
@@ -2660,6 +2716,7 @@ def publish_tenant_flow_version(
             edges=edges,
             version_id=flow.published_version_id or fresh_version.id,
             version=flow.version,
+            snapshot_hash=getattr(fresh_version, "v2_snapshot_hash", None),
         )
     except HTTPException:
         logger.exception("[PUBLISH FLOW FAILED] flow_id=%s", flow_id)
@@ -2714,7 +2771,7 @@ def republish_tenant_flow(
     invalidate_flow_runtime_cache(flow.id)
     db.commit()
     db.refresh(flow)
-    return _serialize_flow_version_response(flow=flow, nodes=nodes, edges=edges, version_id=fresh_version.id, version=fresh_version.version)
+    return _serialize_flow_version_response(flow=flow, nodes=nodes, edges=edges, version_id=fresh_version.id, version=fresh_version.version, snapshot_hash=getattr(fresh_version, "v2_snapshot_hash", None))
 
 
 class FlowSimulationPayload(BaseModel):
