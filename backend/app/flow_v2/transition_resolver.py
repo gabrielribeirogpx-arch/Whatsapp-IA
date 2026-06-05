@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import Any
 
 from app.flow_v2.contracts import FlowV2EventType
 from app.flow_v2.event_store import FlowV2EventStore
-from app.flow_v2.snapshot import FlowV2Snapshot
+from app.flow_v2.snapshot import FlowV2Snapshot, build_transitions_from_edges, is_default_source_handle, normalize_source_handle
+
+logger = logging.getLogger(__name__)
 
 
 class FlowV2TransitionError(RuntimeError):
@@ -19,7 +22,7 @@ class TransitionResolution:
 
 
 class TransitionResolver:
-    """Resolves explicit Runtime V2 edges without V1 fallback heuristics."""
+    """Resolves explicit Runtime V2 transitions without V1 fallback heuristics."""
 
     def __init__(self, event_store: FlowV2EventStore | None = None) -> None:
         self.event_store = event_store or FlowV2EventStore()
@@ -33,53 +36,97 @@ class TransitionResolver:
         source_node_id: str,
         source_handle: str | None = None,
     ) -> TransitionResolution:
-        matches = self._matches(snapshot=snapshot, source_node_id=source_node_id, source_handle=source_handle)
+        transitions = self._snapshot_transitions(snapshot)
+        matches = self._matches(transitions=transitions, source_node_id=source_node_id, source_handle=source_handle)
+        logger.info(
+            "[V2 TRANSITION RESOLVER] source_node_id=%s source_handle=%s transitions_count=%s matches_count=%s transitions=%s",
+            source_node_id,
+            source_handle,
+            len(transitions),
+            len(matches),
+            transitions,
+        )
         if not matches:
+            outgoing = [transition for transition in transitions if str(transition.get("source_node_id")) == source_node_id]
+            payload = {
+                "source_handle": source_handle,
+                "source_node_id": source_node_id,
+                "start_node_id": snapshot.start_node_id,
+                "nodes_count": len(snapshot.nodes),
+                "edges_count": len(snapshot.edges),
+                "transitions_count": len(transitions),
+                "outgoing_transitions": outgoing,
+                "available_source_nodes": sorted({str(transition.get("source_node_id")) for transition in transitions}),
+            }
             self.event_store.append(
                 db,
                 session=session,
                 event_type=FlowV2EventType.TRANSITION_NOT_FOUND,
                 node_id=source_node_id,
-                payload={"source_handle": source_handle},
+                payload=payload,
             )
-            raise FlowV2TransitionError("Runtime V2 transition not found")
+            logger.error("[V2 TRANSITION RESOLVER] transition_not_found payload=%s", payload)
+            raise FlowV2TransitionError(
+                "Runtime V2 transition not found: "
+                f"source_node_id={source_node_id} source_handle={source_handle} "
+                f"transitions_count={len(transitions)} outgoing_count={len(outgoing)}"
+            )
         if len(matches) > 1:
+            payload = {"source_handle": source_handle, "match_count": len(matches), "matches": matches}
             self.event_store.append(
                 db,
                 session=session,
                 event_type=FlowV2EventType.TRANSITION_AMBIGUOUS,
                 node_id=source_node_id,
-                payload={"source_handle": source_handle, "match_count": len(matches)},
+                payload=payload,
             )
-            raise FlowV2TransitionError("Runtime V2 transition is ambiguous")
+            logger.error("[V2 TRANSITION RESOLVER] transition_ambiguous payload=%s", payload)
+            raise FlowV2TransitionError(
+                "Runtime V2 transition is ambiguous: "
+                f"source_node_id={source_node_id} source_handle={source_handle} match_count={len(matches)}"
+            )
 
-        edge = matches[0]
-        target = edge.get("target") or edge.get("to") or edge.get("target_node_id")
+        transition = matches[0]
+        target = transition.get("target_node_id") or transition.get("target") or transition.get("to")
         if not target or str(target) not in snapshot.node_by_id:
+            payload = {"source_handle": source_handle, "target_node_id": str(target) if target else None, "transition": transition}
             self.event_store.append(
                 db,
                 session=session,
                 event_type=FlowV2EventType.TRANSITION_NOT_FOUND,
                 node_id=source_node_id,
-                payload={"source_handle": source_handle, "target_node_id": str(target) if target else None},
+                payload=payload,
             )
-            raise FlowV2TransitionError("Runtime V2 transition target is invalid")
-        return TransitionResolution(target_node_id=str(target), edge=dict(edge))
+            logger.error("[V2 TRANSITION RESOLVER] invalid_target payload=%s", payload)
+            raise FlowV2TransitionError(
+                "Runtime V2 transition target is invalid: "
+                f"source_node_id={source_node_id} source_handle={source_handle} target_node_id={target}"
+            )
+        logger.info(
+            "[V2 TRANSITION RESOLVER] selected source_node_id=%s source_handle=%s target_node_id=%s transition=%s",
+            source_node_id,
+            source_handle,
+            target,
+            transition,
+        )
+        return TransitionResolution(target_node_id=str(target), edge=dict(transition))
+
+    @staticmethod
+    def _snapshot_transitions(snapshot: FlowV2Snapshot) -> list[dict[str, Any]]:
+        if snapshot.transitions:
+            return [dict(transition) for transition in snapshot.transitions]
+        return build_transitions_from_edges(snapshot.edges)
 
     @staticmethod
     def _matches(
-        *, snapshot: FlowV2Snapshot, source_node_id: str, source_handle: str | None = None
+        *, transitions: list[dict[str, Any]], source_node_id: str, source_handle: str | None = None
     ) -> list[dict[str, Any]]:
-        outgoing = [
-            edge
-            for edge in snapshot.edges
-            if str(edge.get("source") or edge.get("from") or edge.get("source_node_id")) == source_node_id
-        ]
-        if source_handle is None:
-            return [edge for edge in outgoing if edge.get("sourceHandle") in (None, "") and edge.get("source_handle") in (None, "")]
+        outgoing = [transition for transition in transitions if str(transition.get("source_node_id")) == source_node_id]
+        requested_handle = normalize_source_handle(source_handle)
+        if requested_handle is None:
+            return [transition for transition in outgoing if is_default_source_handle(transition.get("source_handle"))]
         return [
-            edge
-            for edge in outgoing
-            if str(edge.get("sourceHandle") if edge.get("sourceHandle") is not None else edge.get("source_handle"))
-            == source_handle
+            transition
+            for transition in outgoing
+            if normalize_source_handle(transition.get("source_handle")) == requested_handle
         ]

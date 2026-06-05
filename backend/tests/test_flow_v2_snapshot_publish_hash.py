@@ -91,6 +91,9 @@ def test_publish_fresh_snapshot_generates_v2_snapshot_hash(monkeypatch):
     assert version.v2_snapshot_hash
     assert version.graph_checksum == version.v2_snapshot_hash
     assert version.snapshot["hash"] == version.v2_snapshot_hash
+    assert version.snapshot["transitions"] == [
+        {"id": "e1", "source_node_id": "n1", "target_node_id": "n2", "edge_id": "e1"}
+    ]
     assert version.v2_snapshot_schema_version == version.snapshot["snapshot_schema_version"] == 1
     assert version.start_node_id == "n1"
     assert flow.published_version_id == version.id

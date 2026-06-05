@@ -2601,18 +2601,25 @@ def get_published_snapshot(
             select(FlowVersion).where(FlowVersion.id == flow.published_version_id, FlowVersion.flow_id == flow.id)
         ).scalars().first()
     if not version:
-        return {"flow_id": str(flow.id), "version_id": None, "nodes": [], "edges": [], "nodes_count": 0, "edges_count": 0, "graph_hash": None}
+        return {"flow_id": str(flow.id), "version_id": None, "nodes": [], "edges": [], "transitions": [], "snapshot": None, "nodes_count": 0, "edges_count": 0, "transitions_count": 0, "graph_hash": None}
     nodes = version.nodes_json if isinstance(getattr(version, "nodes_json", None), list) else version.nodes if isinstance(version.nodes, list) else []
     edges = version.edges_json if isinstance(getattr(version, "edges_json", None), list) else version.edges if isinstance(version.edges, list) else []
+    snapshot = version.snapshot if isinstance(getattr(version, "snapshot", None), dict) else {}
+    transitions = snapshot.get("transitions") if isinstance(snapshot.get("transitions"), list) else []
     return {
         "flow_id": str(flow.id),
         "version_id": str(version.id),
         "version": version.version,
         "nodes": nodes,
         "edges": edges,
+        "transitions": transitions,
+        "snapshot": snapshot or None,
+        "start_node_id": snapshot.get("start_node_id") or getattr(version, "start_node_id", None),
         "nodes_count": getattr(version, "nodes_count", None) or len(nodes),
         "edges_count": getattr(version, "edges_count", None) or len(edges),
+        "transitions_count": len(transitions),
         "graph_hash": getattr(version, "graph_hash", None) or getattr(version, "graph_checksum", None) or _graph_checksum(nodes, edges),
+        "snapshot_hash": getattr(version, "v2_snapshot_hash", None) or snapshot.get("hash"),
     }
 
 

@@ -160,6 +160,24 @@ def test_message_to_message_navigates_to_next_node_and_emits_events() -> None:
     assert event_store.events[3]["payload"] == {"node_id": "start", "message": "Olá mundo"}
 
 
+def test_default_source_handle_edge_navigates_linear_node() -> None:
+    raw_snapshot = {
+        "schema_version": 1,
+        "start_node_id": "start",
+        "nodes": [
+            {"id": "start", "type": "message", "content": "Olá mundo"},
+            {"id": "next", "type": "message", "content": "Próxima"},
+        ],
+        "edges": [{"id": "e1", "source": "start", "sourceHandle": "default", "target": "next"}],
+    }
+    executor, snapshot, _event_store, _session, db = _executor(raw_snapshot)
+
+    output = executor.handle_input(db, _input(snapshot))
+
+    assert output.status == FlowV2SessionStatus.WAITING
+    assert output.current_node_id == "next"
+
+
 @pytest.mark.parametrize(("row_id", "expected"), [("op_a", "a"), ("op_b", "b")])
 def test_choice_navigates_by_option_id_only(row_id, expected) -> None:
     raw_snapshot = {

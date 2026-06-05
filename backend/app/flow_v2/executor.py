@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -13,6 +14,8 @@ from app.flow_v2.session_lock import FlowV2SessionLock
 from app.flow_v2.session_manager import FlowV2SessionManager
 from app.flow_v2.snapshot import FlowV2Snapshot, FlowV2SnapshotRepository
 from app.flow_v2.transition_resolver import FlowV2TransitionError, TransitionResolver
+
+logger = logging.getLogger(__name__)
 
 
 class FlowV2ExecutionError(RuntimeError):
@@ -54,6 +57,16 @@ class FlowV2Executor:
             db,
             tenant_id=runtime_input.tenant_id,
             flow_version_id=runtime_input.flow_version_id,
+        )
+        logger.info(
+            "[V2 SNAPSHOT] executor_loaded flow_version_id=%s tenant_id=%s start_node_id=%s nodes_count=%s edges_count=%s transitions_count=%s hash=%s",
+            runtime_input.flow_version_id,
+            runtime_input.tenant_id,
+            snapshot.start_node_id,
+            len(snapshot.nodes),
+            len(snapshot.edges),
+            len(snapshot.transitions),
+            snapshot.hash,
         )
         session = self.session_manager.get_or_create(db, runtime_input=runtime_input, snapshot=snapshot)
         idempotency_metadata = {
@@ -117,6 +130,13 @@ class FlowV2Executor:
         self.event_store.append(db, session=session, event_type=FlowV2EventType.NODE_ENTERED, node_id=node_id)
         try:
             node_type = str(node.get("type") or self._node_data(node).get("type") or "message")
+            logger.info(
+                "[V2 NODE EXECUTION] enter node_id=%s node_type=%s current_node_id=%s transitions_count=%s",
+                node_id,
+                node_type,
+                session.current_node_id,
+                len(snapshot.transitions),
+            )
             result = self.node_registry.get(node_type).execute(
                 db,
                 snapshot=snapshot,
@@ -132,7 +152,8 @@ class FlowV2Executor:
                 payload={"node_type": node_type, "status": result.status},
             )
             self.event_store.append(db, session=session, event_type=FlowV2EventType.NODE_COMPLETED, node_id=node_id)
-        except FlowV2TransitionError:
+        except FlowV2TransitionError as exc:
+            logger.exception("[V2 NODE EXECUTION] transition_failed node_id=%s error=%s", node_id, exc)
             self.event_store.append(
                 db,
                 session=session,
