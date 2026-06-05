@@ -6,6 +6,7 @@ import traceback
 import asyncio
 import hashlib
 import json
+from contextlib import nullcontext
 from datetime import datetime
 from typing import Any
 
@@ -256,8 +257,53 @@ def _validate_publish_graph_or_raise(nodes: list[dict[str, Any]], edges: list[di
     except (TypeError, ValueError) as exc:
         raise ValueError(f"Graph não serializável: {exc}") from exc
 
+def _flow_version_checksum(version: FlowVersion | None) -> str | None:
+    if not version:
+        return None
+    stored_checksum = getattr(version, "graph_checksum", None) or getattr(version, "graph_hash", None)
+    if stored_checksum:
+        return str(stored_checksum)
+    version_nodes = getattr(version, "nodes", None) if isinstance(getattr(version, "nodes", None), list) else []
+    version_edges = getattr(version, "edges", None) if isinstance(getattr(version, "edges", None), list) else []
+    return _graph_checksum(version_nodes, version_edges) if version_nodes or version_edges else None
+
+
+def _get_flow_version_by_id_for_publish(db: Session, flow: Flow, version_id: uuid.UUID | str | None) -> FlowVersion | None:
+    if not version_id:
+        return None
+    return (
+        db.query(FlowVersion)
+        .filter(FlowVersion.id == version_id, FlowVersion.flow_id == flow.id, FlowVersion.tenant_id == flow.tenant_id)
+        .first()
+    )
+
+
+def _select_existing_version_for_publish(db: Session, flow: Flow, checksum: str) -> FlowVersion | None:
+    candidates: list[FlowVersion | None] = [getattr(flow, "current_version", None)]
+    candidates.append(_get_flow_version_by_id_for_publish(db, flow, getattr(flow, "current_version_id", None)))
+    candidates.append(
+        db.query(FlowVersion)
+        .filter(FlowVersion.flow_id == flow.id, FlowVersion.tenant_id == flow.tenant_id)
+        .order_by(FlowVersion.version.desc())
+        .first()
+    )
+
+    seen: set[str] = set()
+    for candidate in candidates:
+        if not candidate:
+            continue
+        candidate_id = str(getattr(candidate, "id", ""))
+        if candidate_id in seen:
+            continue
+        seen.add(candidate_id)
+        if _flow_version_checksum(candidate) == checksum:
+            return candidate
+    return None
+
+
 def _publish_fresh_snapshot(db: Session, flow: Flow, *, reason: str) -> FlowVersion | None:
-    with db.begin_nested():
+    nested = db.begin_nested() if hasattr(db, "begin_nested") else nullcontext()
+    with nested:
         db.execute(select(Flow.id).where(Flow.id == flow.id).with_for_update())
         nodes, edges = _builder_graph_from_records(db, flow)
     if not nodes:
@@ -276,37 +322,50 @@ def _publish_fresh_snapshot(db: Session, flow: Flow, *, reason: str) -> FlowVers
     checksum = _graph_checksum(nodes, edges)
     start_node_id, start_text_preview = _extract_start_node_metadata(nodes)
 
-    latest_published = (
-        db.query(FlowVersion)
-        .filter(FlowVersion.flow_id == flow.id, FlowVersion.tenant_id == flow.tenant_id)
-        .order_by(FlowVersion.version.desc())
-        .first()
-    )
     _log_publish_source_divergence(
         flow=flow,
         published_version=getattr(flow, "published_version", None),
         candidate_nodes=nodes,
         candidate_edges=edges,
     )
-    db.query(FlowVersion).filter(FlowVersion.flow_id == flow.id, FlowVersion.tenant_id == flow.tenant_id).update({FlowVersion.is_active: False, FlowVersion.is_published: False}, synchronize_session=False)
-    last_version = db.execute(select(FlowVersion.version).where(FlowVersion.flow_id == flow.id).order_by(FlowVersion.version.desc()).limit(1)).scalar()
-    next_version_number = (last_version or 0) + 1
-    fresh_version = FlowVersion(
-        flow_id=flow.id,
-        tenant_id=flow.tenant_id,
-        version=next_version_number,
-        start_node_id=start_node_id,
-        start_text_preview=start_text_preview,
-        created_from_source="builder_graph",
-        is_active=True,
-        is_published=True,
+
+    publish_version = _select_existing_version_for_publish(db=db, flow=flow, checksum=checksum)
+    db.query(FlowVersion).filter(FlowVersion.flow_id == flow.id, FlowVersion.tenant_id == flow.tenant_id).update(
+        {FlowVersion.is_active: False, FlowVersion.is_published: False},
+        synchronize_session=False,
     )
-    apply_flow_version_snapshot_metadata(fresh_version, nodes, edges)
-    db.add(fresh_version)
-    db.flush()
-    flow.current_version_id = fresh_version.id
-    flow.published_version_id = fresh_version.id
-    flow.version = fresh_version.version
+
+    if publish_version:
+        apply_flow_version_snapshot_metadata(publish_version, nodes, edges)
+        publish_version.start_node_id = start_node_id
+        publish_version.start_text_preview = start_text_preview
+        publish_version.created_from_source = publish_version.created_from_source or "builder_current_version"
+        publish_version.is_active = True
+        publish_version.is_published = True
+        db.query(FlowVersion).filter(FlowVersion.id == publish_version.id, FlowVersion.flow_id == flow.id).update(
+            {FlowVersion.is_active: True, FlowVersion.is_published: True},
+            synchronize_session=False,
+        )
+    else:
+        last_version = db.execute(select(FlowVersion.version).where(FlowVersion.flow_id == flow.id).order_by(FlowVersion.version.desc()).limit(1)).scalar()
+        next_version_number = (last_version or 0) + 1
+        publish_version = FlowVersion(
+            flow_id=flow.id,
+            tenant_id=flow.tenant_id,
+            version=next_version_number,
+            start_node_id=start_node_id,
+            start_text_preview=start_text_preview,
+            created_from_source="builder_graph",
+            is_active=True,
+            is_published=True,
+        )
+        apply_flow_version_snapshot_metadata(publish_version, nodes, edges)
+        db.add(publish_version)
+        db.flush()
+
+    flow.current_version_id = publish_version.id
+    flow.published_version_id = publish_version.id
+    flow.version = publish_version.version
     _persist_builder_graph(flow, nodes, edges)
     db.query(FlowSession).filter(FlowSession.flow_id == flow.id).update(
         {FlowSession.status: "completed", FlowSession.current_node_id: None},
@@ -314,10 +373,10 @@ def _publish_fresh_snapshot(db: Session, flow: Flow, *, reason: str) -> FlowVers
     )
     db.add(flow)
     db.flush()
-    _log_publish_graph_snapshot(label="PUBLISH GRAPH", flow=flow, nodes=nodes, edges=edges, version=fresh_version)
-    _log_flow_publish_result(flow=flow, version=fresh_version, nodes=nodes, edges=edges, reason=reason)
+    _log_publish_graph_snapshot(label="PUBLISH GRAPH", flow=flow, nodes=nodes, edges=edges, version=publish_version)
+    _log_flow_publish_result(flow=flow, version=publish_version, nodes=nodes, edges=edges, reason=reason)
     logger.info("[PUBLISH GRAPH SOURCE] flow_id=%s nodes_count=%s edges_count=%s checksum=%s start_text_preview=%s", flow.id, len(nodes), len(edges), checksum, start_text_preview)
-    return fresh_version
+    return publish_version
 
 
 def _ensure_published_snapshot_on_activate(db: Session, flow: Flow) -> None:
@@ -1889,7 +1948,7 @@ async def update_tenant_flow(
             FlowVersion.tenant_id == tenant_uuid,
             FlowVersion.id != nova.id,
         ).update(
-            {"is_active": False, "is_published": False},
+            {"is_active": False},
             synchronize_session=False,
         )
 
