@@ -128,6 +128,14 @@ def test_valid_publication_builds_immutable_snapshot_and_viewer() -> None:
     assert result.snapshot["start_node_id"] == "start"
     assert len(result.snapshot["nodes"]) == 5
     assert len(result.snapshot["edges"]) == 6
+    assert result.snapshot["transitions"] == [
+        {"id": "e1", "source_node_id": "start", "target_node_id": "choice", "edge_id": "e1"},
+        {"id": "e2", "source_node_id": "choice", "target_node_id": "delay", "source_handle": "yes", "edge_id": "e2"},
+        {"id": "e3", "source_node_id": "choice", "target_node_id": "end", "source_handle": "no", "edge_id": "e3"},
+        {"id": "e4", "source_node_id": "delay", "target_node_id": "condition", "edge_id": "e4"},
+        {"id": "e5", "source_node_id": "condition", "target_node_id": "end", "source_handle": "true", "edge_id": "e5"},
+        {"id": "e6", "source_node_id": "condition", "target_node_id": "end", "source_handle": "false", "edge_id": "e6"},
+    ]
 
     view = FlowV2SnapshotViewer().view(result.snapshot).as_dict()
     assert view["version"] == "flow_v2_snapshot_v1"

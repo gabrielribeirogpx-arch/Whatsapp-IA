@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from typing import Any
 from uuid import UUID
@@ -11,6 +12,8 @@ from app.flow_v2.channel_adapter import ChannelAdapter
 from app.flow_v2.contracts import RuntimeInput, RuntimeOutput
 from app.flow_v2.dead_letter import FlowV2DeadLetterQueue
 from app.flow_v2.executor import FlowV2Executor
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -71,9 +74,23 @@ class FlowV2RuntimeWorker:
 
     def process(self, db: Session, input_event: FlowV2InputEvent | RuntimeInput) -> FlowV2WorkerResult:
         runtime_input = input_event if isinstance(input_event, RuntimeInput) else input_event.to_runtime_input()
+        logger.info(
+            "[V2 SNAPSHOT] worker_process tenant_id=%s flow_version_id=%s external_user_id=%s metadata_keys=%s",
+            runtime_input.tenant_id,
+            runtime_input.flow_version_id,
+            runtime_input.external_user_id,
+            sorted(runtime_input.metadata.keys()),
+        )
         try:
             runtime_output = self.executor.handle_input(db, runtime_input)
         except Exception as exc:
+            logger.exception(
+                "[V2 SNAPSHOT] worker_failed tenant_id=%s flow_version_id=%s error_type=%s error=%s",
+                runtime_input.tenant_id,
+                runtime_input.flow_version_id,
+                type(exc).__name__,
+                exc,
+            )
             self.dead_letter_queue.record(
                 db,
                 tenant_id=runtime_input.tenant_id,
@@ -103,4 +120,12 @@ class FlowV2RuntimeWorker:
         deliveries: list[dict[str, Any]] = []
         if self.channel_adapter is not None:
             deliveries = [self.channel_adapter.dispatch(action) for action in actions]
+        logger.info(
+            "[V2 NODE EXECUTION] worker_done session_id=%s status=%s current_node_id=%s actions_count=%s deliveries_count=%s",
+            runtime_output.session_id,
+            runtime_output.status,
+            runtime_output.current_node_id,
+            len(actions),
+            len(deliveries),
+        )
         return FlowV2WorkerResult(runtime_output=runtime_output, actions=tuple(actions), deliveries=tuple(deliveries))

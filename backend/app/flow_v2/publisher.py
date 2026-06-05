@@ -2,13 +2,16 @@ from __future__ import annotations
 
 import copy
 import json
+import logging
 from dataclasses import dataclass
 from typing import Any
 
 from app.flow_v2.graph_validator import FlowV2GraphValidator, GraphValidationResult
-from app.flow_v2.snapshot import canonical_hash
+from app.flow_v2.snapshot import build_transitions_from_edges, canonical_hash
 
 V2_SNAPSHOT_SCHEMA_VERSION = 1
+
+logger = logging.getLogger(__name__)
 
 
 class FlowV2PublishError(RuntimeError):
@@ -75,6 +78,15 @@ def _snapshot_payload(
     *, nodes: list[dict[str, Any]], edges: list[dict[str, Any]], start_node_id: str
 ) -> dict[str, Any]:
     canonical_graph = canonicalize_graph(nodes, edges)
+    transitions = build_transitions_from_edges(canonical_graph["edges"])
+    logger.info(
+        "[V2 SNAPSHOT] publishing start_node_id=%s nodes_count=%s edges_count=%s transitions_count=%s",
+        start_node_id,
+        len(canonical_graph["nodes"]),
+        len(canonical_graph["edges"]),
+        len(transitions),
+    )
+    logger.info("[V2 TRANSITIONS] publishing transitions=%s edges=%s", transitions, canonical_graph["edges"])
     return {
         "schema_version": V2_SNAPSHOT_SCHEMA_VERSION,
         "snapshot_schema_version": V2_SNAPSHOT_SCHEMA_VERSION,
@@ -82,6 +94,7 @@ def _snapshot_payload(
         "start_node_id": start_node_id,
         "nodes": canonical_graph["nodes"],
         "edges": canonical_graph["edges"],
+        "transitions": transitions,
     }
 
 

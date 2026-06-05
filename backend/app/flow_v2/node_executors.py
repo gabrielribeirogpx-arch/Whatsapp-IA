@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -10,6 +11,8 @@ from app.flow_v2.contracts import FlowV2EventType, RuntimeInput
 from app.flow_v2.models import FlowV2ScheduledJob
 from app.flow_v2.snapshot import FlowV2Snapshot
 from app.flow_v2.transition_resolver import TransitionResolver
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -46,6 +49,13 @@ class BaseNodeExecutor:
         return data if isinstance(data, dict) else {}
 
     def _default_next(self, db, *, snapshot: FlowV2Snapshot, session: Any, node_id: str) -> str:
+        logger.info(
+            "[V2 NODE EXECUTION] resolving_default_next node_id=%s start_node_id=%s transitions_count=%s edges_count=%s",
+            node_id,
+            snapshot.start_node_id,
+            len(snapshot.transitions),
+            len(snapshot.edges),
+        )
         return self.transition_resolver.resolve(db, snapshot=snapshot, session=session, source_node_id=node_id).target_node_id
 
 
@@ -55,6 +65,7 @@ class MessageNodeExecutor(BaseNodeExecutor):
         data = self._node_data(node)
         message = node.get("content") or node.get("text") or data.get("content") or data.get("text") or data.get("message")
         message = "" if message is None else str(message)
+        logger.info("[V2 NODE EXECUTION] message node_id=%s message_preview=%s", node_id, message[:120])
         payload = {"node_id": node_id, "message": message}
         self.event_store.append(db, session=session, event_type=FlowV2EventType.MESSAGE_SENT, node_id=node_id, payload=payload)
         next_node_id = self._default_next(db, snapshot=snapshot, session=session, node_id=node_id)
@@ -76,6 +87,12 @@ class ChoiceNodeExecutor(BaseNodeExecutor):
         data = self._node_data(node)
         options = node.get("options") or data.get("options") or []
         option_ids = [str(option["id"]) for option in options if isinstance(option, dict) and option.get("id") is not None]
+        logger.info(
+            "[V2 NODE EXECUTION] choice node_id=%s option_ids=%s row_id=%s",
+            node_id,
+            option_ids,
+            runtime_input.metadata.get("row_id") or runtime_input.metadata.get("sourceHandle"),
+        )
         self.event_store.append(
             db,
             session=session,
@@ -123,6 +140,7 @@ class DelayNodeExecutor(BaseNodeExecutor):
         node_id = str(node["id"])
         data = self._node_data(node)
         seconds = int(node.get("seconds") if node.get("seconds") is not None else data.get("seconds", 0))
+        logger.info("[V2 NODE EXECUTION] delay node_id=%s seconds=%s", node_id, seconds)
         next_node_id = self._default_next(db, snapshot=snapshot, session=session, node_id=node_id)
         job = FlowV2ScheduledJob(
             id=uuid.uuid4(),
@@ -161,6 +179,7 @@ class ConditionNodeExecutor(BaseNodeExecutor):
         conditions = node.get("conditions") or data.get("conditions") or []
         result = all(self._evaluate(condition, runtime_input.metadata) for condition in conditions)
         handle = "true" if result else "false"
+        logger.info("[V2 NODE EXECUTION] condition node_id=%s result=%s source_handle=%s", node_id, result, handle)
         self.event_store.append(
             db,
             session=session,
