@@ -94,6 +94,19 @@ def test_delay_seconds_must_be_positive(seconds) -> None:
     assert "FLOW_V2_DELAY_SECONDS_MUST_BE_POSITIVE:delay" in result.errors
 
 
+def test_flow_builder_condition_keywords_match_type_is_valid() -> None:
+    nodes = _valid_nodes()
+    nodes[3] = {
+        "id": "condition",
+        "type": "condition",
+        "data": {"keywords": ["suporte"], "matchType": "contains"},
+    }
+
+    result = FlowV2GraphValidator().validate(nodes=nodes, edges=_valid_edges())
+
+    assert result.status == GraphValidationStatus.VALID
+
+
 def test_invalid_condition_config_is_invalid() -> None:
     nodes = _valid_nodes()
     nodes[3] = {
@@ -129,12 +142,46 @@ def test_valid_publication_builds_immutable_snapshot_and_viewer() -> None:
     assert len(result.snapshot["nodes"]) == 5
     assert len(result.snapshot["edges"]) == 6
     assert result.snapshot["transitions"] == [
-        {"id": "e1", "source_node_id": "start", "target_node_id": "choice", "edge_id": "e1"},
-        {"id": "e2", "source_node_id": "choice", "target_node_id": "delay", "source_handle": "yes", "edge_id": "e2"},
-        {"id": "e3", "source_node_id": "choice", "target_node_id": "end", "source_handle": "no", "edge_id": "e3"},
-        {"id": "e4", "source_node_id": "delay", "target_node_id": "condition", "edge_id": "e4"},
-        {"id": "e5", "source_node_id": "condition", "target_node_id": "end", "source_handle": "true", "edge_id": "e5"},
-        {"id": "e6", "source_node_id": "condition", "target_node_id": "end", "source_handle": "false", "edge_id": "e6"},
+        {
+            "id": "e1",
+            "source_node_id": "start",
+            "target_node_id": "choice",
+            "edge_id": "e1",
+        },
+        {
+            "id": "e2",
+            "source_node_id": "choice",
+            "target_node_id": "delay",
+            "source_handle": "yes",
+            "edge_id": "e2",
+        },
+        {
+            "id": "e3",
+            "source_node_id": "choice",
+            "target_node_id": "end",
+            "source_handle": "no",
+            "edge_id": "e3",
+        },
+        {
+            "id": "e4",
+            "source_node_id": "delay",
+            "target_node_id": "condition",
+            "edge_id": "e4",
+        },
+        {
+            "id": "e5",
+            "source_node_id": "condition",
+            "target_node_id": "end",
+            "source_handle": "true",
+            "edge_id": "e5",
+        },
+        {
+            "id": "e6",
+            "source_node_id": "condition",
+            "target_node_id": "end",
+            "source_handle": "false",
+            "edge_id": "e6",
+        },
     ]
 
     view = FlowV2SnapshotViewer().view(result.snapshot).as_dict()

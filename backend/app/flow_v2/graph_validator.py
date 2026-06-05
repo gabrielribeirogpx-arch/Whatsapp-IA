@@ -24,6 +24,7 @@ class FlowV2GraphValidator:
     """Validates Flow Publisher V2 graphs before immutable snapshot creation."""
 
     SUPPORTED_CONDITION_OPERATORS = {"==", "eq", "equals"}
+    SUPPORTED_BUILDER_MATCH_TYPES = {"contains", "equals", "eq", "=="}
 
     def validate(
         self, *, nodes: list[dict[str, Any]] | None, edges: list[dict[str, Any]] | None
@@ -186,12 +187,43 @@ class FlowV2GraphValidator:
                 errors.append(f"FLOW_V2_DELAY_SECONDS_MUST_BE_POSITIVE:{node_id}")
         elif node_type == "condition":
             conditions = node.get("conditions") or data.get("conditions")
+            if self._has_valid_builder_condition(data):
+                return
             if not isinstance(conditions, list) or not conditions:
                 errors.append(f"FLOW_V2_CONDITION_CONFIG_INVALID:{node_id}")
                 return
             for index, condition in enumerate(conditions):
                 if not self._is_valid_condition(condition):
                     errors.append(f"FLOW_V2_CONDITION_CONFIG_INVALID:{node_id}:{index}")
+
+    def _has_valid_builder_condition(self, data: dict[str, Any]) -> bool:
+        keywords = self._builder_keywords(data)
+        match_type = (
+            str(data.get("matchType") or data.get("match_type") or "equals")
+            .strip()
+            .lower()
+        )
+        return bool(keywords) and match_type in self.SUPPORTED_BUILDER_MATCH_TYPES
+
+    @staticmethod
+    def _builder_keywords(data: dict[str, Any]) -> list[str]:
+        for key in ("keywords", "positive", "condition"):
+            raw_value = data.get(key)
+            if isinstance(raw_value, list):
+                keywords = [
+                    str(item).strip() for item in raw_value if str(item).strip()
+                ]
+            elif isinstance(raw_value, str):
+                keywords = [
+                    part.strip()
+                    for part in raw_value.replace("\n", ",").split(",")
+                    if part.strip()
+                ]
+            else:
+                keywords = []
+            if keywords:
+                return keywords
+        return []
 
     def _is_valid_condition(self, condition: Any) -> bool:
         if not isinstance(condition, dict):

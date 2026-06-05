@@ -1,12 +1,18 @@
 from __future__ import annotations
 
+import logging
 import uuid
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
 from app.flow_v2.actions import ScheduleDelayAction, SendMessageAction
 from app.flow_v2.channel_adapter import WhatsAppAdapter
-from app.flow_v2.contracts import FlowV2EventType, FlowV2SessionStatus, RuntimeInput, RuntimeOutput
+from app.flow_v2.contracts import (
+    FlowV2EventType,
+    FlowV2SessionStatus,
+    RuntimeInput,
+    RuntimeOutput,
+)
 from app.flow_v2.delay_worker import FlowV2DelayWorker
 from app.flow_v2.event_store import FlowV2EventStore
 from app.flow_v2.executor import FlowV2Executor
@@ -56,9 +62,24 @@ class _FakeEventStore:
     def __init__(self):
         self.events = []
 
-    def append(self, db, *, session, event_type, payload=None, node_id=None, input_message_id=None):
+    def append(
+        self,
+        db,
+        *,
+        session,
+        event_type,
+        payload=None,
+        node_id=None,
+        input_message_id=None,
+    ):
         session.last_event_index += 1
-        self.events.append({"event_type": str(event_type), "payload": payload or {}, "node_id": node_id})
+        self.events.append(
+            {
+                "event_type": str(event_type),
+                "payload": payload or {},
+                "node_id": node_id,
+            }
+        )
 
 
 class _FakeSessionManager:
@@ -68,7 +89,9 @@ class _FakeSessionManager:
 
     def get_or_create(self, db, *, runtime_input, snapshot):
         if self.session.last_event_index == 0:
-            self.event_store.append(db, session=self.session, event_type=FlowV2EventType.SESSION_STARTED)
+            self.event_store.append(
+                db, session=self.session, event_type=FlowV2EventType.SESSION_STARTED
+            )
         return self.session
 
     def move_to(self, db, *, session, node_id, status):
@@ -92,7 +115,11 @@ def _snapshot(raw_snapshot, tenant_id=None, flow_version_id=None):
 def _executor(raw_snapshot):
     snapshot = _snapshot(raw_snapshot)
     event_store = _FakeEventStore()
-    session = _FakeSession(snapshot.tenant_id, snapshot.flow_version_id)
+    session = _FakeSession(
+        snapshot.tenant_id,
+        snapshot.flow_version_id,
+        current_node_id=snapshot.start_node_id,
+    )
     executor = FlowV2Executor(
         snapshot_repository=_FakeSnapshotRepository(snapshot),
         event_store=event_store,
@@ -101,15 +128,147 @@ def _executor(raw_snapshot):
     return executor, snapshot, event_store, session, _FakeDB()
 
 
-def _input(snapshot, metadata=None, conversation_id=None, contact_id=None):
+def _input(
+    snapshot, metadata=None, conversation_id=None, contact_id=None, message_text="oi"
+):
     return RuntimeInput(
         tenant_id=snapshot.tenant_id,
         flow_version_id=snapshot.flow_version_id,
         external_user_id="whatsapp:+5511999999999",
-        message_text="oi",
+        message_text=message_text,
         conversation_id=conversation_id,
         contact_id=contact_id,
         metadata=metadata or {},
+    )
+
+
+def test_condition_builder_keywords_contains_routes_positive_and_logs_payload(
+    caplog,
+) -> None:
+    condition_node = {
+        "id": "condition",
+        "type": "condition",
+        "data": {
+            "keywords": ["suporte"],
+            "matchType": "contains",
+        },
+    }
+    executor, snapshot, event_store, _, db = _executor(
+        {
+            "schema_version": 1,
+            "start_node_id": "condition",
+            "nodes": [
+                condition_node,
+                {"id": "positive", "type": "message", "content": "Ramo positivo"},
+                {"id": "negative", "type": "message", "content": "Ramo negativo"},
+            ],
+            "edges": [
+                {
+                    "id": "e-true",
+                    "source": "condition",
+                    "sourceHandle": "true",
+                    "target": "positive",
+                },
+                {
+                    "id": "e-false",
+                    "source": "condition",
+                    "sourceHandle": "false",
+                    "target": "negative",
+                },
+            ],
+        }
+    )
+
+    with caplog.at_level(logging.INFO, logger="app.flow_v2.node_executors"):
+        output = executor.handle_input(db, _input(snapshot, message_text="suporte"))
+
+    condition_event = next(
+        event
+        for event in event_store.events
+        if event["event_type"] == str(FlowV2EventType.CONDITION_EVALUATED)
+    )
+    assert condition_event["payload"] == {
+        "node_id": "condition",
+        "conditions": [],
+        "message": "suporte",
+        "keywords": ["suporte"],
+        "match_type": "contains",
+        "result": True,
+        "source_handle": "true",
+        "target_node_id": "positive",
+    }
+    assert output.effects == ({"type": "send_message", "text": "Ramo positivo"},)
+    assert (
+        "[V2 CONDITION SNAPSHOT NODE] node_id=condition node={'id': 'condition', 'type': 'condition', 'data': {'keywords': ['suporte'], 'matchType': 'contains'}}"
+        in caplog.text
+    )
+    assert (
+        "[V2 CONDITION] node_id=condition message=suporte keywords=['suporte'] match_type=contains result=True source_handle=true target_node_id=positive"
+        in caplog.text
+    )
+
+
+def test_condition_builder_keywords_contains_routes_negative_for_klm(caplog) -> None:
+    condition_node = {
+        "id": "condition",
+        "type": "condition",
+        "data": {
+            "keywords": ["suporte"],
+            "matchType": "contains",
+        },
+    }
+    executor, snapshot, event_store, _, db = _executor(
+        {
+            "schema_version": 1,
+            "start_node_id": "condition",
+            "nodes": [
+                condition_node,
+                {"id": "positive", "type": "message", "content": "Ramo positivo"},
+                {"id": "negative", "type": "message", "content": "Ramo negativo"},
+            ],
+            "edges": [
+                {
+                    "id": "e-true",
+                    "source": "condition",
+                    "sourceHandle": "true",
+                    "target": "positive",
+                },
+                {
+                    "id": "e-false",
+                    "source": "condition",
+                    "sourceHandle": "false",
+                    "target": "negative",
+                },
+            ],
+        }
+    )
+
+    with caplog.at_level(logging.INFO, logger="app.flow_v2.node_executors"):
+        output = executor.handle_input(db, _input(snapshot, message_text="klm"))
+
+    condition_event = next(
+        event
+        for event in event_store.events
+        if event["event_type"] == str(FlowV2EventType.CONDITION_EVALUATED)
+    )
+    assert condition_event["payload"] == {
+        "node_id": "condition",
+        "conditions": [],
+        "message": "klm",
+        "keywords": ["suporte"],
+        "match_type": "contains",
+        "result": False,
+        "source_handle": "false",
+        "target_node_id": "negative",
+    }
+    assert output.effects == ({"type": "send_message", "text": "Ramo negativo"},)
+    assert (
+        "[V2 CONDITION SNAPSHOT NODE] node_id=condition node={'id': 'condition', 'type': 'condition', 'data': {'keywords': ['suporte'], 'matchType': 'contains'}}"
+        in caplog.text
+    )
+    assert (
+        "[V2 CONDITION] node_id=condition message=klm keywords=['suporte'] match_type=contains result=False source_handle=false target_node_id=negative"
+        in caplog.text
     )
 
 
@@ -118,7 +277,10 @@ def test_runtime_generates_send_message_action() -> None:
         {
             "schema_version": 1,
             "start_node_id": "start",
-            "nodes": [{"id": "start", "type": "message", "content": "Olá"}, {"id": "end", "type": "message"}],
+            "nodes": [
+                {"id": "start", "type": "message", "content": "Olá"},
+                {"id": "end", "type": "message"},
+            ],
             "edges": [{"id": "e1", "source": "start", "target": "end"}],
         }
     )
@@ -135,18 +297,22 @@ def test_whatsapp_adapter_receives_action_from_runtime_worker() -> None:
         {
             "schema_version": 1,
             "start_node_id": "start",
-            "nodes": [{"id": "start", "type": "message", "content": "Olá"}, {"id": "end", "type": "message"}],
+            "nodes": [
+                {"id": "start", "type": "message", "content": "Olá"},
+                {"id": "end", "type": "message"},
+            ],
             "edges": [{"id": "e1", "source": "start", "target": "end"}],
         }
     )
     adapter = WhatsAppAdapter()
 
-    result = FlowV2RuntimeWorker(executor=executor, channel_adapter=adapter).process(db, _input(snapshot))
+    result = FlowV2RuntimeWorker(executor=executor, channel_adapter=adapter).process(
+        db, _input(snapshot)
+    )
 
     assert adapter.sent_actions == list(result.actions)
     assert result.deliveries[0]["status"] == "mocked"
     assert result.deliveries[0]["text"] == "Olá"
-
 
 
 def test_message_action_preserves_runtime_metadata_and_never_empty_tenant_id() -> None:
@@ -155,7 +321,10 @@ def test_message_action_preserves_runtime_metadata_and_never_empty_tenant_id() -
         {
             "schema_version": 1,
             "start_node_id": "start",
-            "nodes": [{"id": "start", "type": "message", "content": "Olá"}, {"id": "end", "type": "message"}],
+            "nodes": [
+                {"id": "start", "type": "message", "content": "Olá"},
+                {"id": "end", "type": "message"},
+            ],
             "edges": [{"id": "e1", "source": "start", "target": "end"}],
         }
     )
@@ -192,7 +361,10 @@ def test_whatsapp_adapter_propagates_structured_ids_to_client() -> None:
         {
             "schema_version": 1,
             "start_node_id": "start",
-            "nodes": [{"id": "start", "type": "message", "content": "Olá"}, {"id": "end", "type": "message"}],
+            "nodes": [
+                {"id": "start", "type": "message", "content": "Olá"},
+                {"id": "end", "type": "message"},
+            ],
             "edges": [{"id": "e1", "source": "start", "target": "end"}],
         }
     )
@@ -222,11 +394,18 @@ def test_whatsapp_adapter_propagates_structured_ids_to_client() -> None:
     assert calls[0]["metadata"]["provider_id"] == provider_id
     assert calls[0]["metadata"]["tenant_id"] != ""
 
+
 def test_delay_worker_resumes_due_job_and_emits_delay_resumed() -> None:
     tenant_id = uuid.uuid4()
     flow_version_id = uuid.uuid4()
     session = _FakeSession(tenant_id, flow_version_id, current_node_id="after_delay")
-    job = SimpleNamespace(id=uuid.uuid4(), tenant_id=tenant_id, session_id=session.id, resume_node_id="after_delay", run_at=datetime.now(UTC).replace(tzinfo=None) - timedelta(seconds=1))
+    job = SimpleNamespace(
+        id=uuid.uuid4(),
+        tenant_id=tenant_id,
+        session_id=session.id,
+        resume_node_id="after_delay",
+        run_at=datetime.now(UTC).replace(tzinfo=None) - timedelta(seconds=1),
+    )
 
     class _Result:
         def __init__(self, value):
@@ -265,11 +444,21 @@ def test_delay_worker_resumes_due_job_and_emits_delay_resumed() -> None:
 
         def process(self, db, runtime_input):
             self.inputs.append(runtime_input)
-            return SimpleNamespace(runtime_output=RuntimeOutput(session_id=session.id, status=FlowV2SessionStatus.WAITING, current_node_id="done"), actions=(), deliveries=())
+            return SimpleNamespace(
+                runtime_output=RuntimeOutput(
+                    session_id=session.id,
+                    status=FlowV2SessionStatus.WAITING,
+                    current_node_id="done",
+                ),
+                actions=(),
+                deliveries=(),
+            )
 
     event_store = _FakeEventStore()
     runtime_worker = _RuntimeWorker()
-    result = FlowV2DelayWorker(runtime_worker=runtime_worker, event_store=event_store).run_due(_DelayDB(), now=datetime.now(UTC).replace(tzinfo=None))
+    result = FlowV2DelayWorker(
+        runtime_worker=runtime_worker, event_store=event_store
+    ).run_due(_DelayDB(), now=datetime.now(UTC).replace(tzinfo=None))
 
     assert result.processed == 1
     assert result.resumed_session_ids == (session.id,)
@@ -282,7 +471,10 @@ def test_publish_service_creates_new_version_and_updates_active_version_id() -> 
     flow = SimpleNamespace(
         id=uuid.uuid4(),
         tenant_id=tenant_id,
-        nodes_json=[{"id": "start", "type": "message", "content": "Olá"}, {"id": "end", "type": "message"}],
+        nodes_json=[
+            {"id": "start", "type": "message", "content": "Olá"},
+            {"id": "end", "type": "message"},
+        ],
         edges_json=[{"id": "e1", "source": "start", "target": "end"}],
         nodes=None,
         edges=None,
@@ -318,7 +510,9 @@ def test_publish_service_creates_new_version_and_updates_active_version_id() -> 
 
     db = _PublishDB()
 
-    result = FlowV2PublishService().publish_draft(db, tenant_id=tenant_id, flow_id=flow.id)
+    result = FlowV2PublishService().publish_draft(
+        db, tenant_id=tenant_id, flow_id=flow.id
+    )
 
     assert result.version.version == 3
     assert result.version.is_published is True
@@ -332,11 +526,17 @@ def test_runtime_executes_published_version_id() -> None:
         {
             "schema_version": 1,
             "start_node_id": "start",
-            "nodes": [{"id": "start", "type": "message", "content": "Publicado"}, {"id": "end", "type": "message"}],
+            "nodes": [
+                {"id": "start", "type": "message", "content": "Publicado"},
+                {"id": "end", "type": "message"},
+            ],
             "edges": [{"id": "e1", "source": "start", "target": "end"}],
         }
     )
 
     FlowV2RuntimeWorker(executor=executor).process(db, _input(snapshot))
 
-    assert executor.snapshot_repository.loaded_with == {"tenant_id": snapshot.tenant_id, "flow_version_id": snapshot.flow_version_id}
+    assert executor.snapshot_repository.loaded_with == {
+        "tenant_id": snapshot.tenant_id,
+        "flow_version_id": snapshot.flow_version_id,
+    }
