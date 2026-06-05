@@ -11,7 +11,7 @@ from typing import Any
 from sqlalchemy import select
 
 from app.db.session import SessionLocal
-from app.models import Message
+from app.models import Message, TenantWhatsAppProvider
 from app.models.flow_session import FINAL_SESSION_STATUSES, FlowSession, set_current_node_write_reason
 from app.services.contact_sync_service import ensure_conversation_contact_link, upsert_contact_for_phone
 from app.services.contact_event_service import register_contact_event
@@ -319,10 +319,32 @@ def process_incoming_message(payload: dict[str, Any]) -> None:
             logger.info("[FLOW LOCKED SKIP] tenant_id=%s phone=%s", tenant.id, parsed.get("phone") or "n/a")
             return
 
+        provider = None
+        provider_id = None
+        if phone_number_id:
+            provider = (
+                db.execute(
+                    select(TenantWhatsAppProvider)
+                    .where(
+                        TenantWhatsAppProvider.tenant_id == tenant.id,
+                        TenantWhatsAppProvider.phone_number_id == phone_number_id,
+                    )
+                    .order_by(
+                        TenantWhatsAppProvider.is_active.desc(),
+                        TenantWhatsAppProvider.updated_at.desc(),
+                        TenantWhatsAppProvider.created_at.desc(),
+                    )
+                )
+                .scalars()
+                .first()
+            )
+            provider_id = str(provider.id) if provider else None
+
         logger.info(
-            "event=incoming_worker_tenant_resolved correlation_id=%s tenant_id=%s phone=%s job_id=%s stage=incoming_worker_tenant",
+            "event=incoming_worker_tenant_resolved correlation_id=%s tenant_id=%s provider_id=%s phone=%s job_id=%s stage=incoming_worker_tenant",
             correlation_id,
             tenant.id,
+            provider_id or "n/a",
             parsed.get("phone") or "n/a",
             payload.get("job_id") or "n/a",
         )
@@ -460,6 +482,7 @@ def process_incoming_message(payload: dict[str, Any]) -> None:
                         "job_id": payload.get("job_id"),
                         "message_type": parsed.get("type") or "text",
                         "phone_number_id": phone_number_id,
+                        "provider_id": provider_id,
                         "interactive_type": parsed.get("interactive_type"),
                         "selected_row_id": parsed.get("selected_row_id") or parsed.get("interactive_reply_id"),
                     },
