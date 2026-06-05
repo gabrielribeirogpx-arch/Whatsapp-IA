@@ -144,9 +144,12 @@ def test_message_to_message_navigates_to_next_node_and_emits_events() -> None:
 
     output = executor.handle_input(db, _input(snapshot))
 
-    assert output.status == FlowV2SessionStatus.WAITING
-    assert output.current_node_id == "next"
-    assert output.effects == ({"type": "send_message", "text": "Olá mundo"},)
+    assert output.status == FlowV2SessionStatus.COMPLETED
+    assert output.current_node_id is None
+    assert output.effects == (
+        {"type": "send_message", "text": "Olá mundo"},
+        {"type": "send_message", "text": "Próxima"},
+    )
     assert _event_types(event_store) == [
         "session.started",
         "input.received",
@@ -155,9 +158,14 @@ def test_message_to_message_navigates_to_next_node_and_emits_events() -> None:
         "NODE_EXECUTED",
         "NODE_COMPLETED",
         "TRANSITION_SELECTED",
-        "session.waiting",
+        "NODE_ENTERED",
+        "MESSAGE_SENT",
+        "NODE_EXECUTED",
+        "NODE_COMPLETED",
+        "session.completed",
     ]
     assert event_store.events[3]["payload"] == {"node_id": "start", "message": "Olá mundo"}
+    assert event_store.events[8]["payload"] == {"node_id": "next", "message": "Próxima"}
 
 
 def test_default_source_handle_edge_navigates_linear_node() -> None:
@@ -174,8 +182,8 @@ def test_default_source_handle_edge_navigates_linear_node() -> None:
 
     output = executor.handle_input(db, _input(snapshot))
 
-    assert output.status == FlowV2SessionStatus.WAITING
-    assert output.current_node_id == "next"
+    assert output.status == FlowV2SessionStatus.COMPLETED
+    assert output.current_node_id is None
 
 
 @pytest.mark.parametrize(("row_id", "expected"), [("op_a", "a"), ("op_b", "b")])
@@ -201,10 +209,13 @@ def test_choice_navigates_by_option_id_only(row_id, expected) -> None:
 
     output = executor.handle_input(db, _input(snapshot, {"row_id": row_id}))
 
-    assert output.current_node_id == expected
+    assert output.status == FlowV2SessionStatus.COMPLETED
+    assert output.current_node_id is None
     assert "CHOICE_SHOWN" in _event_types(event_store)
     assert "CHOICE_SELECTED" in _event_types(event_store)
+    assert "MESSAGE_SENT" in _event_types(event_store)
     assert event_store.events[4]["payload"] == {"node_id": "start", "row_id": row_id}
+    assert any(event["payload"] == {"node_id": expected, "message": expected.upper()} for event in event_store.events)
 
 
 def test_delay_scheduling_creates_scheduled_job_and_does_not_execute_next_node() -> None:
@@ -247,9 +258,11 @@ def test_condition_evaluates_simple_equality(tag, expected) -> None:
 
     output = executor.handle_input(db, _input(snapshot, {"contact": {"tag": tag}}))
 
-    assert output.current_node_id == expected
+    assert output.status == FlowV2SessionStatus.COMPLETED
+    assert output.current_node_id is None
     condition_event = next(event for event in event_store.events if event["event_type"] == "CONDITION_EVALUATED")
     assert condition_event["payload"]["result"] is (tag == "vip")
+    assert any(event["node_id"] == expected and event["event_type"] == "MESSAGE_SENT" for event in event_store.events)
 
 
 def test_ambiguous_transition_emits_event_and_aborts_execution() -> None:
@@ -271,7 +284,7 @@ def test_ambiguous_transition_emits_event_and_aborts_execution() -> None:
     assert session.status == FlowV2SessionStatus.FAILED
 
 
-def test_missing_transition_emits_event_and_aborts_execution() -> None:
+def test_message_final_without_outgoing_edge_completes() -> None:
     raw_snapshot = {
         "schema_version": 1,
         "start_node_id": "start",
@@ -280,8 +293,65 @@ def test_missing_transition_emits_event_and_aborts_execution() -> None:
     }
     executor, snapshot, event_store, session, db = _executor(raw_snapshot)
 
-    with pytest.raises(FlowV2TransitionError):
-        executor.handle_input(db, _input(snapshot))
+    output = executor.handle_input(db, _input(snapshot))
 
-    assert "TRANSITION_NOT_FOUND" in _event_types(event_store)
+    assert output.status == FlowV2SessionStatus.COMPLETED
+    assert output.current_node_id is None
+    assert output.effects == ({"type": "send_message", "text": "Olá"},)
+    assert "TRANSITION_NOT_FOUND" not in _event_types(event_store)
+    assert _event_types(event_store)[-1] == "session.completed"
+    assert session.status == FlowV2SessionStatus.COMPLETED
+
+
+def test_message_to_condition_to_message_executes_until_terminal_message() -> None:
+    raw_snapshot = {
+        "schema_version": 1,
+        "start_node_id": "start",
+        "nodes": [
+            {"id": "start", "type": "message", "content": "Início"},
+            {"id": "check", "type": "condition", "conditions": [{"field": "contact.tag", "operator": "==", "value": "vip"}]},
+            {"id": "final", "type": "message", "content": "Final VIP"},
+            {"id": "fallback", "type": "message", "content": "Final normal"},
+        ],
+        "edges": [
+            {"id": "e1", "source": "start", "target": "check"},
+            {"id": "e2", "source": "check", "sourceHandle": "true", "target": "final"},
+            {"id": "e3", "source": "check", "sourceHandle": "false", "target": "fallback"},
+        ],
+    }
+    executor, snapshot, event_store, session, db = _executor(raw_snapshot)
+
+    output = executor.handle_input(db, _input(snapshot, {"contact": {"tag": "vip"}}))
+
+    assert output.status == FlowV2SessionStatus.COMPLETED
+    assert output.current_node_id is None
+    assert output.effects == (
+        {"type": "send_message", "text": "Início"},
+        {"type": "send_message", "text": "Final VIP"},
+    )
+    assert [event["node_id"] for event in event_store.events if event["event_type"] == "NODE_ENTERED"] == ["start", "check", "final"]
+    assert [event["payload"]["target_node_id"] for event in event_store.events if event["event_type"] == "TRANSITION_SELECTED"] == ["check", "final"]
+
+
+def test_loop_protection_fails_after_max_steps() -> None:
+    raw_snapshot = {
+        "schema_version": 1,
+        "start_node_id": "start",
+        "nodes": [
+            {"id": "start", "type": "condition", "conditions": [{"field": "loop", "operator": "==", "value": True}]},
+            {"id": "again", "type": "condition", "conditions": [{"field": "loop", "operator": "==", "value": True}]},
+        ],
+        "edges": [
+            {"id": "e1", "source": "start", "sourceHandle": "true", "target": "again"},
+            {"id": "e2", "source": "again", "sourceHandle": "true", "target": "start"},
+        ],
+    }
+    executor, snapshot, event_store, session, db = _executor(raw_snapshot)
+
+    with pytest.raises(RuntimeError, match="max_steps=50"):
+        executor.handle_input(db, _input(snapshot, {"loop": True}))
+
+    assert [event["event_type"] for event in event_store.events].count("NODE_ENTERED") == 50
+    assert event_store.events[-1]["event_type"] == "session.failed"
+    assert event_store.events[-1]["payload"] == {"reason": "max_steps_exceeded", "max_steps": 50}
     assert session.status == FlowV2SessionStatus.FAILED

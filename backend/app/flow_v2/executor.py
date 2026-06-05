@@ -22,6 +22,9 @@ class FlowV2ExecutionError(RuntimeError):
     pass
 
 
+MAX_RUNTIME_STEPS = 50
+
+
 class FlowV2Executor:
     """The single Runtime V2 executor.
 
@@ -120,83 +123,104 @@ class FlowV2Executor:
     def _execute_current_node(
         self, db: Session, *, snapshot: FlowV2Snapshot, session: Any, runtime_input: RuntimeInput
     ) -> list[RuntimeAction]:
-        if not session.current_node_id:
-            raise FlowV2ExecutionError("Session has no current node")
-        node = snapshot.node_by_id.get(session.current_node_id)
-        if node is None:
-            raise FlowV2ExecutionError("Current node is absent from immutable snapshot")
+        actions: list[RuntimeAction] = []
 
-        node_id = str(node["id"])
-        self.event_store.append(db, session=session, event_type=FlowV2EventType.NODE_ENTERED, node_id=node_id)
-        try:
-            node_type = str(node.get("type") or self._node_data(node).get("type") or "message")
-            logger.info(
-                "[V2 NODE EXECUTION] enter node_id=%s node_type=%s current_node_id=%s transitions_count=%s",
-                node_id,
-                node_type,
-                session.current_node_id,
-                len(snapshot.transitions),
-            )
-            result = self.node_registry.get(node_type).execute(
-                db,
-                snapshot=snapshot,
-                session=session,
-                node=node,
-                runtime_input=runtime_input,
-            )
+        for step in range(MAX_RUNTIME_STEPS):
+            if not session.current_node_id:
+                raise FlowV2ExecutionError("Session has no current node")
+            node = snapshot.node_by_id.get(session.current_node_id)
+            if node is None:
+                raise FlowV2ExecutionError("Current node is absent from immutable snapshot")
+
+            node_id = str(node["id"])
+            self.event_store.append(db, session=session, event_type=FlowV2EventType.NODE_ENTERED, node_id=node_id)
+            try:
+                node_type = str(node.get("type") or self._node_data(node).get("type") or "message")
+                logger.info(
+                    "[V2 NODE EXECUTION] enter node_id=%s node_type=%s current_node_id=%s transitions_count=%s step=%s",
+                    node_id,
+                    node_type,
+                    session.current_node_id,
+                    len(snapshot.transitions),
+                    step + 1,
+                )
+                result = self.node_registry.get(node_type).execute(
+                    db,
+                    snapshot=snapshot,
+                    session=session,
+                    node=node,
+                    runtime_input=runtime_input,
+                )
+                self.event_store.append(
+                    db,
+                    session=session,
+                    event_type=FlowV2EventType.NODE_EXECUTED,
+                    node_id=node_id,
+                    payload={"node_type": node_type, "status": result.status},
+                )
+                self.event_store.append(db, session=session, event_type=FlowV2EventType.NODE_COMPLETED, node_id=node_id)
+            except FlowV2TransitionError as exc:
+                logger.exception("[V2 NODE EXECUTION] transition_failed node_id=%s error=%s", node_id, exc)
+                self.event_store.append(
+                    db,
+                    session=session,
+                    event_type=FlowV2EventType.NODE_EXECUTED,
+                    node_id=node_id,
+                    payload={"status": "transition_failed"},
+                )
+                self.event_store.append(db, session=session, event_type=FlowV2EventType.NODE_COMPLETED, node_id=node_id)
+                self.event_store.append(db, session=session, event_type=FlowV2EventType.SESSION_FAILED, node_id=node_id)
+                self.session_manager.move_to(db, session=session, node_id=node_id, status=FlowV2SessionStatus.FAILED)
+                raise
+            except RuntimeError:
+                self.event_store.append(
+                    db,
+                    session=session,
+                    event_type=FlowV2EventType.NODE_EXECUTED,
+                    node_id=node_id,
+                    payload={"status": "failed"},
+                )
+                self.event_store.append(db, session=session, event_type=FlowV2EventType.NODE_COMPLETED, node_id=node_id)
+                self.event_store.append(db, session=session, event_type=FlowV2EventType.SESSION_FAILED, node_id=node_id)
+                self.session_manager.move_to(db, session=session, node_id=node_id, status=FlowV2SessionStatus.FAILED)
+                raise
+
+            actions.extend(result.actions)
+
+            if result.status == "scheduled":
+                self.event_store.append(db, session=session, event_type=FlowV2EventType.SESSION_WAITING, node_id=result.next_node_id)
+                self.session_manager.move_to(db, session=session, node_id=result.next_node_id, status=FlowV2SessionStatus.WAITING)
+                return actions
+            if result.status == "wait":
+                self.event_store.append(db, session=session, event_type=FlowV2EventType.SESSION_WAITING, node_id=node_id)
+                self.session_manager.move_to(db, session=session, node_id=node_id, status=FlowV2SessionStatus.WAITING)
+                return actions
+            if result.status == "complete":
+                self.event_store.append(db, session=session, event_type=FlowV2EventType.SESSION_COMPLETED, node_id=node_id)
+                self.session_manager.move_to(db, session=session, node_id=None, status=FlowV2SessionStatus.COMPLETED)
+                return actions
+
+            if not result.next_node_id:
+                raise FlowV2ExecutionError(f"Node {node_id} continued without next_node_id")
             self.event_store.append(
                 db,
                 session=session,
-                event_type=FlowV2EventType.NODE_EXECUTED,
+                event_type=FlowV2EventType.TRANSITION_SELECTED,
                 node_id=node_id,
-                payload={"node_type": node_type, "status": result.status},
+                payload={"target_node_id": result.next_node_id},
             )
-            self.event_store.append(db, session=session, event_type=FlowV2EventType.NODE_COMPLETED, node_id=node_id)
-        except FlowV2TransitionError as exc:
-            logger.exception("[V2 NODE EXECUTION] transition_failed node_id=%s error=%s", node_id, exc)
-            self.event_store.append(
-                db,
-                session=session,
-                event_type=FlowV2EventType.NODE_EXECUTED,
-                node_id=node_id,
-                payload={"status": "transition_failed"},
-            )
-            self.event_store.append(db, session=session, event_type=FlowV2EventType.NODE_COMPLETED, node_id=node_id)
-            self.event_store.append(db, session=session, event_type=FlowV2EventType.SESSION_FAILED, node_id=node_id)
-            self.session_manager.move_to(db, session=session, node_id=node_id, status=FlowV2SessionStatus.FAILED)
-            raise
-        except RuntimeError:
-            self.event_store.append(
-                db,
-                session=session,
-                event_type=FlowV2EventType.NODE_EXECUTED,
-                node_id=node_id,
-                payload={"status": "failed"},
-            )
-            self.event_store.append(db, session=session, event_type=FlowV2EventType.NODE_COMPLETED, node_id=node_id)
-            self.event_store.append(db, session=session, event_type=FlowV2EventType.SESSION_FAILED, node_id=node_id)
-            self.session_manager.move_to(db, session=session, node_id=node_id, status=FlowV2SessionStatus.FAILED)
-            raise
+            self.session_manager.move_to(db, session=session, node_id=result.next_node_id, status=FlowV2SessionStatus.RUNNING)
 
-        if result.status == "scheduled":
-            self.event_store.append(db, session=session, event_type=FlowV2EventType.SESSION_WAITING, node_id=result.next_node_id)
-            self.session_manager.move_to(db, session=session, node_id=result.next_node_id, status=FlowV2SessionStatus.WAITING)
-            return list(result.actions)
-        if result.status == "wait":
-            self.event_store.append(db, session=session, event_type=FlowV2EventType.SESSION_WAITING, node_id=node_id)
-            self.session_manager.move_to(db, session=session, node_id=node_id, status=FlowV2SessionStatus.WAITING)
-            return list(result.actions)
-
+        current_node_id = session.current_node_id
         self.event_store.append(
             db,
             session=session,
-            event_type=FlowV2EventType.TRANSITION_SELECTED,
-            node_id=node_id,
-            payload={"target_node_id": result.next_node_id},
+            event_type=FlowV2EventType.SESSION_FAILED,
+            node_id=current_node_id,
+            payload={"reason": "max_steps_exceeded", "max_steps": MAX_RUNTIME_STEPS},
         )
-        self.event_store.append(db, session=session, event_type=FlowV2EventType.SESSION_WAITING, node_id=result.next_node_id)
-        self.session_manager.move_to(db, session=session, node_id=result.next_node_id, status=FlowV2SessionStatus.WAITING)
-        return list(result.actions)
+        self.session_manager.move_to(db, session=session, node_id=current_node_id, status=FlowV2SessionStatus.FAILED)
+        raise FlowV2ExecutionError(f"Runtime V2 exceeded max_steps={MAX_RUNTIME_STEPS}")
 
     @staticmethod
     def _legacy_effect(action: RuntimeAction) -> dict[str, Any] | None:

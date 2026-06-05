@@ -9,7 +9,7 @@ from typing import Any, Protocol
 from app.flow_v2.actions import RuntimeAction, ScheduleDelayAction, SendMessageAction, WaitChoiceAction
 from app.flow_v2.contracts import FlowV2EventType, RuntimeInput
 from app.flow_v2.models import FlowV2ScheduledJob
-from app.flow_v2.snapshot import FlowV2Snapshot
+from app.flow_v2.snapshot import FlowV2Snapshot, build_transitions_from_edges
 from app.flow_v2.transition_resolver import TransitionResolver
 
 logger = logging.getLogger(__name__)
@@ -58,6 +58,14 @@ class BaseNodeExecutor:
         )
         return self.transition_resolver.resolve(db, snapshot=snapshot, session=session, source_node_id=node_id).target_node_id
 
+    def _default_next_or_terminal(self, db, *, snapshot: FlowV2Snapshot, session: Any, node_id: str) -> str | None:
+        transitions = list(snapshot.transitions) if snapshot.transitions else build_transitions_from_edges(snapshot.edges)
+        outgoing = [transition for transition in transitions if str(transition.get("source_node_id")) == node_id]
+        if not outgoing:
+            logger.info("[V2 NODE EXECUTION] terminal_node node_id=%s", node_id)
+            return None
+        return self._default_next(db, snapshot=snapshot, session=session, node_id=node_id)
+
 
 class MessageNodeExecutor(BaseNodeExecutor):
     def execute(self, db, *, snapshot, session, node, runtime_input) -> NodeExecutionResult:
@@ -66,30 +74,37 @@ class MessageNodeExecutor(BaseNodeExecutor):
         message = node.get("content") or node.get("text") or data.get("content") or data.get("text") or data.get("message")
         message = "" if message is None else str(message)
         logger.info("[V2 NODE EXECUTION] message node_id=%s message_preview=%s", node_id, message[:120])
-        payload = {"node_id": node_id, "message": message}
-        self.event_store.append(db, session=session, event_type=FlowV2EventType.MESSAGE_SENT, node_id=node_id, payload=payload)
-        next_node_id = self._default_next(db, snapshot=snapshot, session=session, node_id=node_id)
-        action_metadata = {**runtime_input.metadata, "node_id": node_id}
-        action = SendMessageAction(
-            tenant_id=session.tenant_id,
-            session_id=session.id,
-            external_user_id=runtime_input.external_user_id,
-            conversation_id=runtime_input.conversation_id,
-            contact_id=runtime_input.contact_id,
-            text=message,
-            metadata=action_metadata,
+        next_node_id = self._default_next_or_terminal(db, snapshot=snapshot, session=session, node_id=node_id)
+        actions: tuple[RuntimeAction, ...] = ()
+        if message:
+            payload = {"node_id": node_id, "message": message}
+            self.event_store.append(db, session=session, event_type=FlowV2EventType.MESSAGE_SENT, node_id=node_id, payload=payload)
+            action_metadata = {**runtime_input.metadata, "node_id": node_id}
+            action = SendMessageAction(
+                tenant_id=session.tenant_id,
+                session_id=session.id,
+                external_user_id=runtime_input.external_user_id,
+                conversation_id=runtime_input.conversation_id,
+                contact_id=runtime_input.contact_id,
+                text=message,
+                metadata=action_metadata,
+            )
+            logger.info(
+                "[V2 SEND ACTION] tenant_id=%s provider_id=%s session_id=%s conversation_id=%s contact_id=%s node_id=%s metadata_keys=%s",
+                action.tenant_id,
+                action.metadata.get("provider_id"),
+                action.session_id,
+                action.conversation_id,
+                action.contact_id,
+                node_id,
+                sorted(action.metadata.keys()),
+            )
+            actions = (action,)
+        return NodeExecutionResult(
+            actions=actions,
+            next_node_id=next_node_id,
+            status="complete" if next_node_id is None else "continue",
         )
-        logger.info(
-            "[V2 SEND ACTION] tenant_id=%s provider_id=%s session_id=%s conversation_id=%s contact_id=%s node_id=%s metadata_keys=%s",
-            action.tenant_id,
-            action.metadata.get("provider_id"),
-            action.session_id,
-            action.conversation_id,
-            action.contact_id,
-            node_id,
-            sorted(action.metadata.keys()),
-        )
-        return NodeExecutionResult(actions=(action,), next_node_id=next_node_id)
 
 
 class ChoiceNodeExecutor(BaseNodeExecutor):
