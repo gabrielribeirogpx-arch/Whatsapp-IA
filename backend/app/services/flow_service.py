@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from app.models import Conversation, Flow, FlowEdge, FlowNode, FlowStep, FlowVersion, Message
 from app.services.flow_engine_service import apply_flow_version_snapshot_metadata, get_flow_graph, save_flow_graph
 from app.services.cache_service import invalidate_tenant_and_flow_cache
+from app.services.flow_activation_service import activate_flow_exclusively, acquire_tenant_flow_activation_lock
 
 DEFAULT_FLOW_NAME = "default_visual"
 DEFAULT_START_STEP = "inicio"
@@ -416,6 +417,7 @@ def create_flow(db: Session, tenant_id, data: dict[str, Any]) -> Flow:
     should_activate = bool(requested_active) if requested_active is not None else False
 
     if should_activate:
+        acquire_tenant_flow_activation_lock(db=db, tenant_id=tenant_id)
         db.execute(
             update(Flow)
             .where(Flow.tenant_id == tenant_id)
@@ -442,7 +444,7 @@ def create_flow(db: Session, tenant_id, data: dict[str, Any]) -> Flow:
     )
     db.add(flow)
     db.flush()
-    logger.info("[FLOW CREATED DRAFT] flow_id=%s is_active=false", flow.id)
+    logger.info("[FLOW CREATED DRAFT] flow_id=%s is_active=%s", flow.id, flow.is_active)
     logger.info(
         "[FLOW CREATE] tenant_id=%s flow_id=%s version_id=%s request_id=%s",
         tenant_id,
@@ -477,7 +479,10 @@ def update_flow(db: Session, flow_id, tenant_id, data: dict[str, Any]) -> Flow |
     if "description" in data:
         flow.description = data["description"]
     if "is_active" in data:
-        flow.is_active = data["is_active"]
+        if data["is_active"]:
+            flow = activate_flow_exclusively(db=db, tenant_id=tenant_id, flow=flow)
+        else:
+            flow.is_active = False
     if "trigger_type" in data or "trigger_value" in data:
         trigger_type, trigger_value = normalize_flow_trigger(data.get("trigger_type", flow.trigger_type), data.get("trigger_value", flow.trigger_value))
         flow.trigger_type = trigger_type

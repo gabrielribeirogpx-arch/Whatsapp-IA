@@ -276,7 +276,8 @@ export default function DashboardPage() {
   }, [conversations]);
 
   const viewModel = useMemo<DashboardViewModel>(() => {
-    const flowFallback = flows.length ? flows.slice(0, 5).map((flow) => ({ name: flow.name, value: 0 })) : FALLBACK_VIEW_MODEL.topFlows;
+    const activeFlows = flows.filter((flow) => flow.is_active);
+    const flowFallback = activeFlows.length ? activeFlows.slice(0, 5).map((flow) => ({ name: flow.name, value: 0 })) : FALLBACK_VIEW_MODEL.topFlows;
     const msgsToday = uniqueConversations.filter((c) => {
       const d = new Date(c.updated_at);
       const now = new Date();
@@ -538,8 +539,8 @@ export default function DashboardPage() {
           flows.length ? (
             <div className="space-y-3">
               {flows.map((flow) => {
-                const isPublished = flow.status?.toLowerCase() === 'published';
-                return <div key={flow.id} className="rounded-2xl border border-emerald-100 bg-white/90 p-4 shadow-sm"><div className="flex items-start justify-between gap-3"><div><p className="m-0 text-sm font-semibold text-slate-900">{flow.name}</p><p className="mt-1 text-xs text-slate-500">Status: {isPublished ? 'Publicado' : 'Rascunho'}</p></div><span className={`rounded-full px-2 py-1 text-[11px] font-semibold ${isPublished ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>{isPublished ? 'Publicado' : 'Rascunho'}</span></div><div className="mt-3 flex gap-2"><button className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-700">Editar</button><button className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-medium text-emerald-700">Abrir analytics</button></div></div>;
+                const isPublished = flow.is_active;
+                return <div key={flow.id} className="rounded-2xl border border-emerald-100 bg-white/90 p-4 shadow-sm"><div className="flex items-start justify-between gap-3"><div><p className="m-0 text-sm font-semibold text-slate-900">{flow.name}</p><p className="mt-1 text-xs text-slate-500">Status: {isPublished ? 'Ativo' : 'Inativo'}</p></div><span className={`rounded-full px-2 py-1 text-[11px] font-semibold ${isPublished ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>{isPublished ? 'Ativo' : 'Inativo'}</span></div><div className="mt-3 flex gap-2"><button className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-700">Editar</button><button className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-medium text-emerald-700">Abrir analytics</button></div></div>;
               })}
             </div>
           ) : <div className="grid min-h-[260px] place-items-center rounded-2xl border border-dashed border-emerald-200 bg-white/70 p-6 text-center"><p className="text-sm font-medium text-slate-600">Sem fluxos por enquanto. Crie um novo fluxo para visualizar detalhes aqui.</p></div>

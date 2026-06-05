@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint, text
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -13,6 +13,15 @@ from app.models.mixins import TenantMixin
 
 class Flow(TenantMixin, Base):
     __tablename__ = "flows"
+    __table_args__ = (
+        Index(
+            "uq_flows_single_active_per_tenant",
+            "tenant_id",
+            unique=True,
+            postgresql_where=text("is_active IS TRUE AND is_deleted IS FALSE AND deleted_at IS NULL"),
+            sqlite_where=text("is_active IS 1 AND is_deleted IS 0 AND deleted_at IS NULL"),
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     name: Mapped[str] = mapped_column(String, nullable=False)

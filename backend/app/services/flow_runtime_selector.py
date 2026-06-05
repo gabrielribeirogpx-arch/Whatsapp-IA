@@ -13,6 +13,7 @@ from app.flow_v2.runtime_worker import FlowV2InputEvent, FlowV2RuntimeWorker, Fl
 from app.models import Conversation
 from app.models.flow import Flow
 from app.services.queue import enqueue_send_message
+from app.services.flow_activation_service import MULTIPLE_ACTIVE_FLOWS_LOG
 
 logger = logging.getLogger(__name__)
 
@@ -65,7 +66,7 @@ def resolve_runtime_flow_for_conversation(
         if current_flow is not None:
             return current_flow
 
-    return db.execute(
+    active_flows = db.execute(
         select(Flow)
         .where(
             Flow.tenant_id == tenant_id,
@@ -75,7 +76,17 @@ def resolve_runtime_flow_for_conversation(
             Flow.published_version_id.is_not(None),
         )
         .order_by(Flow.priority.desc(), Flow.created_at.asc(), Flow.id.asc())
-    ).scalars().first()
+    ).scalars().all()
+    if len(active_flows) > 1:
+        logger.error(
+            "%s tenant_id=%s active_count=%s flow_ids=%s source=runtime_selector",
+            MULTIPLE_ACTIVE_FLOWS_LOG,
+            tenant_id,
+            len(active_flows),
+            [str(flow.id) for flow in active_flows],
+        )
+        raise RuntimeError("Multiple active flows found for tenant")
+    return active_flows[0] if active_flows else None
 
 
 def bind_conversation_to_flow(db: Session, *, conversation: Conversation, flow: Flow) -> None:
