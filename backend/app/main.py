@@ -72,6 +72,12 @@ def ensure_conversations_columns():
         "ALTER TABLE flow_versions ADD COLUMN IF NOT EXISTS nodes JSONB;",
         "ALTER TABLE flow_versions ADD COLUMN IF NOT EXISTS edges JSONB;",
         "ALTER TABLE flow_versions ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT false;",
+        "ALTER TABLE flow_versions ADD COLUMN IF NOT EXISTS graph_checksum VARCHAR(64);",
+        "ALTER TABLE flow_versions ADD COLUMN IF NOT EXISTS v2_snapshot_hash VARCHAR(64);",
+        "ALTER TABLE flow_versions ADD COLUMN IF NOT EXISTS v2_snapshot_schema_version INTEGER;",
+        "ALTER TABLE flow_versions ADD COLUMN IF NOT EXISTS start_node_id VARCHAR;",
+        "ALTER TABLE flow_versions ADD COLUMN IF NOT EXISTS start_text_preview VARCHAR(255);",
+        "ALTER TABLE flow_versions ADD COLUMN IF NOT EXISTS created_from_source VARCHAR(64);",
     ]
     try:
         with engine.begin() as connection:
