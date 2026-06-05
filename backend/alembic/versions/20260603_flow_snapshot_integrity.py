@@ -1,14 +1,14 @@
 """flow snapshot integrity metadata
 
 Revision ID: 20260603_flow_integrity
-Revises: 20260601_release_hidden_phone
+Revises: 20260603_flow_v2_sprint6
 Create Date: 2026-06-03
 """
 
 from __future__ import annotations
 
 revision = "20260603_flow_integrity"
-down_revision = "20260601_release_hidden_phone"
+down_revision = "20260603_flow_v2_sprint6"
 branch_labels = None
 depends_on = None
 
