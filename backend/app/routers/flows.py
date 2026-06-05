@@ -39,6 +39,7 @@ from app.services.flow_engine_service import (
 from app.services.flow_runtime_service import execute_node_chain_until_reply
 from app.services.flow_session_service import FlowSessionService
 from app.services.flow_service import FlowService, create_flow, delete_flow, duplicate_flow, get_flow, get_flows, update_flow
+from app.services.flow_activation_service import activate_flow_exclusively, deactivate_tenant_flows_exclusively
 from app.services.delay_queue_service import clear_delays_for_runtime_reset
 from app.flow_v2.publisher import FlowV2PublishError, FlowV2Publisher
 
@@ -375,6 +376,10 @@ def _publish_fresh_snapshot(db: Session, flow: Flow, *, reason: str) -> FlowVers
 
 def _ensure_published_snapshot_on_activate(db: Session, flow: Flow) -> None:
     _publish_fresh_snapshot(db=db, flow=flow, reason="activate")
+
+
+def _ensure_published_snapshot_callback(db: Session, flow: Flow) -> None:
+    _ensure_published_snapshot_on_activate(db=db, flow=flow)
 
 class FlowBuilderPayload(BaseModel):
     nodes: list[dict[str, Any]] = Field(default_factory=list)
@@ -2064,16 +2069,12 @@ def activate_tenant_flow(
     if not flow:
         raise HTTPException(status_code=404, detail="Flow não encontrado")
 
-    db.query(Flow).filter(
-        Flow.tenant_id == tenant_uuid,
-    ).update(
-        {Flow.is_active: False},
-        synchronize_session=False,
+    flow = activate_flow_exclusively(
+        db=db,
+        tenant_id=tenant_uuid,
+        flow=flow,
+        ensure_published=_ensure_published_snapshot_callback,
     )
-    db.refresh(flow)
-    _ensure_published_snapshot_on_activate(db=db, flow=flow)
-    flow.is_active = True
-    db.add(flow)
     invalidate_flow_runtime_cache(flow.id)
     _write_flow_audit_log(
         db,
@@ -2098,17 +2099,7 @@ def deactivate_tenant_flows(
     current_user: TenantUser = Depends(get_current_user),
 ):
     tenant_uuid = _resolve_tenant_header(x_tenant_id)
-    active_flows = db.query(Flow).filter(
-        Flow.tenant_id == tenant_uuid,
-        Flow.is_active.is_(True),
-    ).all()
-
-    db.query(Flow).filter(
-        Flow.tenant_id == tenant_uuid,
-    ).update(
-        {Flow.is_active: False},
-        synchronize_session=False,
-    )
+    active_flows = deactivate_tenant_flows_exclusively(db=db, tenant_id=tenant_uuid)
     for flow in active_flows:
         flow.is_active = False
         _write_flow_audit_log(
@@ -2138,10 +2129,17 @@ def update_tenant_flow_status(
     if not flow:
         raise HTTPException(status_code=404, detail="Flow não encontrado")
 
-    flow.is_active = payload.is_active
-    db.add(flow)
     if payload.is_active:
-        _ensure_published_snapshot_on_activate(db=db, flow=flow)
+        flow = activate_flow_exclusively(
+            db=db,
+            tenant_id=tenant_uuid,
+            flow=flow,
+            ensure_published=_ensure_published_snapshot_callback,
+        )
+        invalidate_flow_runtime_cache(flow.id)
+    else:
+        flow.is_active = False
+        db.add(flow)
     _write_flow_audit_log(
         db,
         action="FLOW_PUBLISHED" if payload.is_active else "FLOW_UNPUBLISHED",

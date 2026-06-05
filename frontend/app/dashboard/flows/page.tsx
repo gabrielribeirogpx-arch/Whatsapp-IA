@@ -159,7 +159,10 @@ export default function FlowsPage() {
 
   const updateLocalState = (flowId: string, newStatus: 'active' | 'inactive') => {
     const isActive = newStatus === 'active';
-    setFlows((prev) => prev.map((flow) => (flow.id === flowId ? { ...flow, is_active: isActive, status: newStatus } : flow)));
+    setFlows((prev) => prev.map((flow) => {
+      if (flow.id === flowId) return { ...flow, is_active: isActive, status: newStatus };
+      return isActive ? { ...flow, is_active: false, status: flow.status === 'active' ? 'inactive' : flow.status } : flow;
+    }));
   };
 
   const toggleFlowStatus = async (flowId: string) => {
@@ -177,7 +180,7 @@ export default function FlowsPage() {
     }
   };
 
-  const published = flows.filter((f) => f.published).length;
+  const activeCount = flows.filter((f) => f.is_active).length;
   const drafts = flows.filter((f) => f.draft).length;
   const filteredFlows = useMemo(() => {
     const normalizedSearch = searchTerm.trim().toLowerCase();
@@ -260,9 +263,9 @@ export default function FlowsPage() {
                 <img src="/icons/publicados.svg" alt="Publicados" className="h-5 w-5 opacity-80" />
               </div>
               <div>
-                <span className="text-xs uppercase tracking-wide text-gray-500">PUBLICADOS</span>
-                <span className="mt-1 block text-2xl font-semibold text-gray-900">{published}</span>
-                <span className="mt-1 block text-sm text-gray-400">Fluxos ativos em produção</span>
+                <span className="text-xs uppercase tracking-wide text-gray-500">ATIVOS</span>
+                <span className="mt-1 block text-2xl font-semibold text-gray-900">{activeCount}</span>
+                <span className="mt-1 block text-sm text-gray-400">Fluxo ativo em produção</span>
               </div>
             </div>
             <svg className="self-start opacity-80" width="120" height="44" viewBox="0 0 120 44" fill="none" aria-hidden="true">
