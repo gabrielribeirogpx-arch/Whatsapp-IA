@@ -192,8 +192,9 @@ class FlowV2Executor:
                 self.session_manager.move_to(db, session=session, node_id=result.next_node_id, status=FlowV2SessionStatus.WAITING)
                 return actions
             if result.status == "wait":
-                self.event_store.append(db, session=session, event_type=FlowV2EventType.SESSION_WAITING, node_id=node_id)
-                self.session_manager.move_to(db, session=session, node_id=node_id, status=FlowV2SessionStatus.WAITING)
+                waiting_node_id = result.next_node_id or node_id
+                self.event_store.append(db, session=session, event_type=FlowV2EventType.SESSION_WAITING, node_id=waiting_node_id)
+                self.session_manager.move_to(db, session=session, node_id=waiting_node_id, status=FlowV2SessionStatus.WAITING)
                 return actions
             if result.status == "complete":
                 self.event_store.append(db, session=session, event_type=FlowV2EventType.SESSION_COMPLETED, node_id=node_id)
