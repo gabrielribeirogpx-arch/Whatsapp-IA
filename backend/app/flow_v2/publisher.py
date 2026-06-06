@@ -6,6 +6,7 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
+from app.flow_v2.delay_contract import normalize_delay_nodes
 from app.flow_v2.graph_validator import FlowV2GraphValidator, GraphValidationResult
 from app.flow_v2.snapshot import build_transitions_from_edges, canonical_hash
 
@@ -72,7 +73,7 @@ def _runtime_v2_node_payload(node: dict[str, Any]) -> dict[str, Any]:
     if node_type in {"buttons", "buttons_node", "list", "list_node"}:
         return _legacy_interactive_node_to_choice(node, node_type)
     if node_type != "choice":
-        return node
+        return normalize_delay_nodes([node])[0]
 
     data = _node_data(node)
     if _has_non_empty_options(node.get("options")) or _has_non_empty_options(

@@ -16,6 +16,7 @@ from fastapi import HTTPException
 from sqlalchemy import desc, func, select, update
 from sqlalchemy.orm import Session
 
+from app.flow_v2.delay_contract import normalize_delay_nodes
 from app.models import Conversation, Flow, FlowEdge, FlowNode, FlowVersion, Tenant
 from app.models.flow_session import FlowSession
 from app.services.delay_queue_service import enqueue_delay
@@ -134,7 +135,7 @@ def graph_hash(nodes: list[dict[str, Any]] | None, edges: list[dict[str, Any]] |
 
 
 def apply_flow_version_snapshot_metadata(flow_version: FlowVersion, nodes: list[dict[str, Any]], edges: list[dict[str, Any]]) -> None:
-    nodes_payload = nodes if isinstance(nodes, list) else []
+    nodes_payload = normalize_delay_nodes(nodes if isinstance(nodes, list) else [])
     edges_payload = edges if isinstance(edges, list) else []
     computed = graph_hash(nodes_payload, edges_payload)
     flow_version.nodes_json = nodes_payload

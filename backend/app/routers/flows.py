@@ -41,6 +41,7 @@ from app.services.flow_session_service import FlowSessionService
 from app.services.flow_service import FlowService, create_flow, delete_flow, duplicate_flow, get_flow, get_flows, update_flow
 from app.services.flow_activation_service import activate_flow_exclusively, deactivate_tenant_flows_exclusively
 from app.services.delay_queue_service import clear_delays_for_runtime_reset
+from app.flow_v2.delay_contract import normalize_delay_nodes
 from app.flow_v2.publisher import FlowV2PublishError, FlowV2Publisher
 
 router = APIRouter()
@@ -1381,7 +1382,7 @@ async def update_flow_route(
                         "data": normalized_node.get("data") or {},
                     }
                 )
-            nodes = _ensure_start_node(nodes)
+            nodes = normalize_delay_nodes(_ensure_start_node(nodes))
             edges = _normalize_flow_edges(raw_edges)
             logger.info(
                 "[FLOW UPDATE GRAPH PAYLOAD] flow_id=%s nodes_count=%s edges_count=%s edge_pairs=%s edges_raw=%s",
@@ -1701,7 +1702,7 @@ def save_tenant_flow(
     if not tenant:
         return dict(_EMPTY_FLOW)
 
-    normalized_nodes = payload.nodes or []
+    normalized_nodes = normalize_delay_nodes(payload.nodes or [])
     normalized_edges = payload.edges or []
     _log_flow_save_request(flow_id=flow_id or "default", tenant_id=tenant.id, nodes=normalized_nodes, edges=normalized_edges)
     logger.info("[FLOW SAVE] nodes: %s", len(normalized_nodes))

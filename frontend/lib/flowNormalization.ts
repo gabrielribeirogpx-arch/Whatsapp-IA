@@ -34,6 +34,32 @@ const rowsToButtons = (nodeId: string, sections: unknown): Array<{ id: string; l
   });
 };
 
+const parseDelaySeconds = (value: unknown): number | undefined => {
+  if (value === null || value === undefined || value === '') return undefined;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
+};
+
+const normalizeDelayNode = (node: FlowNodePayload): FlowNodePayload => {
+  if (node.type !== 'delay') return node;
+  const data = (node.data || {}) as Record<string, unknown>;
+  const seconds = parseDelaySeconds(
+    (node as FlowNodePayload & { seconds?: unknown }).seconds ??
+    data.seconds ??
+    data.content ??
+    data.delay ??
+    data.wait_seconds ??
+    data.duration,
+  );
+  const { content, delay, wait_seconds, duration, seconds: _dataSeconds, ...cleanData } = data;
+  return {
+    ...node,
+    type: 'delay',
+    ...(seconds !== undefined ? { seconds } : {}),
+    data: cleanData as FlowNodePayload['data'],
+  };
+};
+
 const normalizeNode = (node: unknown): FlowNodePayload => {
   const safeNode = (node && typeof node === 'object' ? node : {}) as Record<string, unknown>;
   const nodeData = (safeNode.data && typeof safeNode.data === 'object' ? safeNode.data : {}) as FlowNodePayload['data'] & Record<string, unknown>;
@@ -47,7 +73,7 @@ const normalizeNode = (node: unknown): FlowNodePayload => {
     ? { ...nodeData, display_mode: 'list' as const, content: String(nodeData.content ?? nodeData.body_text ?? ''), buttons: nodeData.buttons ?? rowsToButtons(nodeId, nodeData.sections) }
     : nodeData;
 
-  return {
+  return normalizeDelayNode({
     id: nodeId,
     type: isLegacyButtons || isLegacyList ? 'choice' : String(safeNode.type ?? 'message'),
     data,
@@ -55,7 +81,7 @@ const normalizeNode = (node: unknown): FlowNodePayload => {
       safeNode.position && typeof safeNode.position === 'object'
         ? (safeNode.position as { x: number; y: number })
         : { x: 0, y: 0 },
-  };
+  });
 };
 
 export function normalizeFlow(flow: FlowLike): NormalizedFlowGraph {
