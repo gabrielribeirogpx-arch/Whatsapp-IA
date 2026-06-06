@@ -395,11 +395,18 @@ def validate_flow_graph(nodes: list[dict[str, Any]] | None, edges: list[dict[str
             if not isinstance(text, str) or not text.strip():
                 add_issue(errors, "MESSAGE_TEXT_REQUIRED", node_id, "Message precisa ter texto.")
         elif node_type == "delay":
-            raw_delay = data.get("delay") or data.get("seconds") or data.get("content")
+            raw_delay = node.get("seconds")
+            if raw_delay in (None, ""):
+                raw_delay = data.get("delay")
+            if raw_delay in (None, ""):
+                raw_delay = data.get("seconds")
+            if raw_delay in (None, ""):
+                raw_delay = data.get("content")
             try:
                 delay = float(str(raw_delay).strip())
             except Exception:
                 delay = 0
+            logger.info("[DELAY VALIDATION] node_id=%s seconds=%s data=%s", node_id, raw_delay, data)
             if delay <= 0:
                 add_issue(errors, "DELAY_INVALID", node_id, "Delay precisa ter tempo válido > 0.")
         elif node_type == "action":
