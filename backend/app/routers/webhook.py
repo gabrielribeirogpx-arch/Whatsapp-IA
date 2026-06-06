@@ -524,6 +524,19 @@ async def _process_meta_webhook(request: Request, db: Session) -> dict[str, str]
                     logger.info("[FALLBACK ROUTING] tenant=%s conversation=%s", conversation.tenant_id, conversation.id)
 
             if selected_flow and resolve_flow_runtime(selected_flow) == "v2":
+                if incoming_type == "interactive":
+                    logger.info(
+                        "[CHOICE WEBHOOK RECEIVED] source=webhook_router flow_id=%s conversation_id=%s message_id=%s interactive_type=%s interactive_reply_id=%s interactive_reply_title=%s selected_row_id=%s selected_title=%s text=%s",
+                        selected_flow.id,
+                        conversation.id,
+                        message_id,
+                        incoming.get("interactive_type"),
+                        incoming.get("interactive_reply_id"),
+                        incoming.get("interactive_reply_title"),
+                        incoming.get("selected_row_id"),
+                        incoming.get("selected_title"),
+                        incoming_message,
+                    )
                 FlowRuntimeSelector().dispatch(
                     db=db,
                     flow=selected_flow,
@@ -538,7 +551,10 @@ async def _process_meta_webhook(request: Request, db: Session) -> dict[str, str]
                         "message_type": incoming_type,
                         "phone_number_id": phone_number_id,
                         "interactive_type": incoming.get("interactive_type"),
+                        "interactive_reply_id": incoming.get("interactive_reply_id"),
+                        "interactive_reply_title": incoming.get("interactive_reply_title"),
                         "selected_row_id": incoming.get("selected_row_id") or incoming.get("interactive_reply_id"),
+                        "selected_title": incoming.get("selected_title") or incoming.get("interactive_reply_title"),
                         "selected_flow_reason": selected_flow_reason or "webhook_selected_flow",
                     },
                 )

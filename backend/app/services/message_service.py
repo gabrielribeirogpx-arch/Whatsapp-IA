@@ -17,24 +17,36 @@ def _json_log_payload(payload: Any) -> str:
 
 def _interactive_debug_fields(message: dict[str, Any]) -> dict[str, str]:
     interactive = message.get("interactive") if isinstance(message.get("interactive"), dict) else {}
+    button_reply = interactive.get("button_reply") if isinstance(interactive.get("button_reply"), dict) else {}
     list_reply = interactive.get("list_reply") if isinstance(interactive.get("list_reply"), dict) else {}
+    interactive_type = sanitize_text(str(interactive.get("type") or ""))
+    button_reply_id = sanitize_text(str(button_reply.get("id") or ""))
+    button_reply_title = sanitize_text(str(button_reply.get("title") or ""))
+    list_reply_id = sanitize_text(str(list_reply.get("id") or ""))
+    list_reply_title = sanitize_text(str(list_reply.get("title") or ""))
     return {
         "message_type": sanitize_text(str(message.get("type") or "")),
-        "interactive_type": sanitize_text(str(interactive.get("type") or "")),
-        "interactive_list_reply_id": sanitize_text(str(list_reply.get("id") or "")),
-        "interactive_list_reply_title": sanitize_text(str(list_reply.get("title") or "")),
+        "interactive_type": interactive_type,
+        "interactive_button_reply_id": button_reply_id,
+        "interactive_button_reply_title": button_reply_title,
+        "interactive_list_reply_id": list_reply_id,
+        "interactive_list_reply_title": list_reply_title,
+        "selected_row_id": list_reply_id if interactive_type == "list_reply" else "",
     }
 
 
 def _log_meta_message_marker(marker: str, *, message: dict[str, Any], payload: Any | None = None) -> None:
     fields = _interactive_debug_fields(message)
     logger.info(
-        "%s message.type=%s interactive.type=%s interactive.list_reply.id=%s interactive.list_reply.title=%s payload=%s",
+        "%s message.type=%s interactive.type=%s interactive.button_reply.id=%s interactive.button_reply.title=%s interactive.list_reply.id=%s interactive.list_reply.title=%s selected_row_id=%s payload=%s",
         marker,
         fields["message_type"] or "n/a",
         fields["interactive_type"] or "n/a",
+        fields["interactive_button_reply_id"] or "n/a",
+        fields["interactive_button_reply_title"] or "n/a",
         fields["interactive_list_reply_id"] or "n/a",
         fields["interactive_list_reply_title"] or "n/a",
+        fields["selected_row_id"] or "n/a",
         _json_log_payload(message if payload is None else payload),
     )
 
@@ -111,6 +123,8 @@ def normalize_meta_message(payload: dict[str, Any]) -> list[dict[str, str | None
                 interactive_reply_id = ""
                 interactive_reply_title = ""
                 _log_meta_message_marker("[MESSAGE TYPE DETECTED]", message=message)
+                if message_type == "interactive":
+                    _log_meta_message_marker("[CHOICE WEBHOOK RECEIVED]", message=message)
                 if message_type == "text":
                     text = sanitize_text(str(message.get("text", {}).get("body", "")))
                 elif message_type == "interactive":
@@ -147,6 +161,8 @@ def normalize_meta_message(payload: dict[str, Any]) -> list[dict[str, str | None
                     "selected_row_id": interactive_reply_id if interactive_type == "list_reply" else None,
                     "selected_title": interactive_reply_title if interactive_type == "list_reply" else None,
                 }
+                if message_type == "interactive":
+                    _log_meta_message_marker("[CHOICE PARSED]", message=message, payload=normalized_message)
                 _log_meta_message_marker("[MESSAGE NORMALIZED]", message=message, payload=normalized_message)
                 normalized.append(normalized_message)
 

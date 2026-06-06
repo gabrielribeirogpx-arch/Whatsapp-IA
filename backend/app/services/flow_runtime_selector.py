@@ -193,6 +193,16 @@ class FlowRuntimeSelector:
             flow.published_version_id,
             selection_reason,
         )
+        logger.info(
+            "[CHOICE PARSED] source=FlowRuntimeSelector message_text=%s interactive_type=%s interactive_reply_id=%s selected_row_id=%s selected_title=%s row_id=%s sourceHandle=%s expected_runtime_choice_key=row_id_or_sourceHandle",
+            message_text,
+            runtime_metadata.get("interactive_type"),
+            runtime_metadata.get("interactive_reply_id"),
+            runtime_metadata.get("selected_row_id"),
+            runtime_metadata.get("selected_title"),
+            runtime_metadata.get("row_id"),
+            runtime_metadata.get("sourceHandle"),
+        )
         worker = self.runtime_worker or FlowV2RuntimeWorker(
             channel_adapter=WhatsAppAdapter(client=_enqueue_whatsapp_text),
         )
