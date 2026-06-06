@@ -259,16 +259,14 @@ def test_message_initial_then_choice_emits_real_interactive_buttons_action() -> 
     executor, snapshot, event_store, session, db = _executor(raw_snapshot)
 
     initial = executor.handle_input(db, _input_with_id(snapshot, "wamid.initial", {"provider_id": "provider-1"}))
-    choice = executor.handle_input(db, _input_with_id(snapshot, "wamid.choice", {"provider_id": "provider-1"}))
 
     assert initial.status == FlowV2SessionStatus.WAITING
     assert initial.current_node_id == "choice"
-    assert choice.status == FlowV2SessionStatus.WAITING
-    assert choice.current_node_id == "choice"
     assert session.status == FlowV2SessionStatus.WAITING
     assert session.current_node_id == "choice"
-    assert len(choice.actions) == 1
-    action = choice.actions[0]
+    assert len(initial.actions) == 2
+    assert initial.effects == ({"type": "send_message", "text": "Olá"},)
+    action = initial.actions[1]
     assert isinstance(action, SendChoiceButtonsAction)
     assert action.text == "Escolha"
     assert action.node_id == "choice"
@@ -317,7 +315,11 @@ def test_waiting_choice_with_row_id_transitions_to_target_node() -> None:
     }
     executor, snapshot, event_store, session, db = _executor(raw_snapshot)
 
-    executor.handle_input(db, _input_with_id(snapshot, "wamid.initial"))
+    initial = executor.handle_input(db, _input_with_id(snapshot, "wamid.initial"))
+    assert initial.status == FlowV2SessionStatus.WAITING
+    assert initial.current_node_id == "choice"
+    assert len(initial.actions) == 2
+
     selected = executor.handle_input(db, _input_with_id(snapshot, "wamid.reply", {"row_id": "quero_planos"}))
 
     assert selected.status == FlowV2SessionStatus.COMPLETED
