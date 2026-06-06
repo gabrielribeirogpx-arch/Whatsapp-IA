@@ -299,3 +299,23 @@ def test_publisher_does_not_override_existing_choice_options_with_buttons() -> N
     choice = _snapshot_node(result.snapshot, "choice")
     assert choice["data"]["options"] == [{"id": "existing", "label": "Existente"}]
     assert choice["data"]["buttons"] == nodes[1]["data"]["buttons"]
+
+
+def test_publication_fails_when_node_type_is_missing() -> None:
+    nodes = [
+        {"id": "start", "content": "Olá", "data": {"isStart": True}},
+        {"id": "end", "type": "message", "content": "Fim"},
+    ]
+
+    with pytest.raises(RuntimeError, match="FLOW_V2_NODE_MISSING_TYPE:start"):
+        FlowV2Publisher().publish(nodes=nodes, edges=[{"id": "e1", "source": "start", "target": "end"}])
+
+
+def test_publication_fails_when_node_type_is_unknown() -> None:
+    nodes = [
+        {"id": "start", "type": "message", "content": "Olá", "data": {"isStart": True}},
+        {"id": "mystery", "type": "unknown", "content": "?"},
+    ]
+
+    with pytest.raises(RuntimeError, match="FLOW_V2_UNKNOWN_NODE_TYPE:mystery:unknown"):
+        FlowV2Publisher().publish(nodes=nodes, edges=[{"id": "e1", "source": "start", "target": "mystery"}])

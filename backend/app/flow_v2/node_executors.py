@@ -121,7 +121,7 @@ class MessageNodeExecutor(BaseNodeExecutor):
                 node_id=node_id,
                 payload=payload,
             )
-            action_metadata = {**runtime_input.metadata, "node_id": node_id}
+            action_metadata = {**runtime_input.metadata, "node_id": node_id, "node_type": "message"}
             action = SendMessageAction(
                 tenant_id=session.tenant_id,
                 session_id=session.id,
@@ -142,9 +142,16 @@ class MessageNodeExecutor(BaseNodeExecutor):
                 sorted(action.metadata.keys()),
             )
             actions = (action,)
+        next_node = snapshot.node_by_id.get(next_node_id) if next_node_id else None
+        next_node_type = (
+            str(next_node.get("type") or "").strip().lower()
+            if isinstance(next_node, dict)
+            else ""
+        )
         should_wait_after_start = (
             bool(node.get("isStart") or data.get("isStart"))
             and next_node_id is not None
+            and next_node_type != "choice"
         )
         return NodeExecutionResult(
             actions=actions,
@@ -535,6 +542,10 @@ class NodeExecutorRegistry:
                 event_store=event_store, transition_resolver=transition_resolver
             ),
         }
+
+    @property
+    def supported_node_types(self) -> frozenset[str]:
+        return frozenset(self._executors)
 
     def get(self, node_type: str) -> NodeExecutor:
         try:

@@ -41,7 +41,7 @@ from app.services.flow_session_service import FlowSessionService
 from app.services.flow_service import FlowService, create_flow, delete_flow, duplicate_flow, get_flow, get_flows, update_flow
 from app.services.flow_activation_service import activate_flow_exclusively, deactivate_tenant_flows_exclusively
 from app.services.delay_queue_service import clear_delays_for_runtime_reset
-from app.flow_v2.publisher import FlowV2PublishError, FlowV2Publisher
+from app.flow_v2.publisher import FlowV2PublishError, FlowV2Publisher, FlowV2SnapshotIntegrityError
 
 router = APIRouter()
 crud_router = APIRouter(tags=["flows-crud"])
@@ -263,11 +263,27 @@ def _is_flow_runtime_v2(flow: Flow) -> bool:
     return str(getattr(flow, "runtime", "") or "").strip().lower() == "v2"
 
 
+def _assert_flow_v2_snapshot_persisted_unchanged(db: Session, flow_version: FlowVersion, generated_snapshot: dict[str, Any]) -> None:
+    db.flush()
+    if not hasattr(db, "expire"):
+        return
+    if getattr(flow_version, "id", None) is None:
+        raise FlowV2SnapshotIntegrityError("FLOW_V2_SNAPSHOT_COMPARE_MISSING_VERSION_ID")
+    db.expire(flow_version, ["snapshot"])
+    saved_snapshot = db.execute(
+        select(FlowVersion.snapshot).where(FlowVersion.id == flow_version.id)
+    ).scalar_one_or_none()
+    if saved_snapshot != generated_snapshot:
+        raise FlowV2SnapshotIntegrityError(
+            f"FLOW_V2_SNAPSHOT_DIVERGENCE:{flow_version.id}"
+        )
+
+
 def _apply_flow_v2_snapshot_metadata(flow_version: FlowVersion, nodes: list[dict[str, Any]], edges: list[dict[str, Any]]) -> None:
     try:
         published = FlowV2Publisher().publish(nodes=nodes, edges=edges)
     except FlowV2PublishError as exc:
-        raise ValueError("; ".join(exc.errors)) from exc
+        raise FlowV2SnapshotIntegrityError("; ".join(exc.errors)) from exc
 
     snapshot = published.snapshot
     flow_version.nodes_json = snapshot["nodes"]
@@ -406,6 +422,8 @@ def _publish_fresh_snapshot(db: Session, flow: Flow, *, reason: str) -> FlowVers
         apply_flow_version_snapshot_metadata(fresh_version, nodes, edges)
     db.add(fresh_version)
     db.flush()
+    if is_runtime_v2:
+        _assert_flow_v2_snapshot_persisted_unchanged(db, fresh_version, fresh_version.snapshot)
     flow.current_version_id = fresh_version.id
     flow.published_version_id = fresh_version.id
     flow.version = fresh_version.version

@@ -10,6 +10,7 @@ from app.flow_v2.graph_validator import FlowV2GraphValidator, GraphValidationRes
 from app.flow_v2.snapshot import build_transitions_from_edges, canonical_hash
 
 V2_SNAPSHOT_SCHEMA_VERSION = 1
+FLOW_V2_ALLOWED_NODE_TYPES = frozenset({"message", "choice", "condition", "delay", "webhook", "transfer"})
 
 logger = logging.getLogger(__name__)
 
@@ -18,6 +19,10 @@ class FlowV2PublishError(RuntimeError):
     def __init__(self, errors: tuple[str, ...]) -> None:
         self.errors = errors
         super().__init__("Flow V2 graph is invalid: " + "; ".join(errors))
+
+
+class FlowV2SnapshotIntegrityError(RuntimeError):
+    """Publication-time hard stop for invalid immutable Runtime V2 snapshots."""
 
 
 @dataclass(frozen=True)
@@ -66,9 +71,7 @@ def _runtime_v2_nodes_payload(nodes: list[dict[str, Any]]) -> list[dict[str, Any
 def _runtime_v2_node_payload(node: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(node, dict):
         return node
-    node_type = str(
-        node.get("type") or _node_data(node).get("type") or "message"
-    ).lower()
+    node_type = _strict_node_type(node)
     if node_type != "choice":
         return node
 
@@ -87,6 +90,38 @@ def _runtime_v2_node_payload(node: dict[str, Any]) -> dict[str, Any]:
     next_data["options"] = options
     next_node["data"] = next_data
     return next_node
+
+
+def _strict_node_type(node: dict[str, Any]) -> str:
+    raw_type = node.get("type")
+    node_id = str(node.get("id") or "").strip()
+    if raw_type is None or str(raw_type).strip() == "":
+        raise FlowV2SnapshotIntegrityError(f"FLOW_V2_NODE_MISSING_TYPE:{node_id or '<missing-id>'}")
+    node_type = str(raw_type).strip().lower()
+    if node_type not in FLOW_V2_ALLOWED_NODE_TYPES:
+        raise FlowV2SnapshotIntegrityError(f"FLOW_V2_UNKNOWN_NODE_TYPE:{node_id}:{node_type}")
+    return node_type
+
+
+def _validate_snapshot_nodes_or_raise(nodes: list[dict[str, Any]]) -> None:
+    if not isinstance(nodes, list):
+        raise FlowV2SnapshotIntegrityError("FLOW_V2_SNAPSHOT_NODES_MUST_BE_LIST")
+    for index, node in enumerate(nodes):
+        if not isinstance(node, dict):
+            raise FlowV2SnapshotIntegrityError(f"FLOW_V2_NODE_{index}_INVALID")
+        node_id = str(node.get("id") or "").strip()
+        if not node_id:
+            raise FlowV2SnapshotIntegrityError(f"FLOW_V2_NODE_{index}_MISSING_ID")
+        _strict_node_type(node)
+
+
+def _log_snapshot_nodes(nodes: list[dict[str, Any]]) -> None:
+    for node in nodes:
+        logger.info(
+            "[V2 SNAPSHOT NODES] node_id=%s node_type=%s",
+            node.get("id"),
+            _strict_node_type(node),
+        )
 
 
 def _node_data(node: dict[str, Any]) -> dict[str, Any]:
@@ -127,6 +162,7 @@ class FlowV2Publisher:
             copy.deepcopy(nodes if isinstance(nodes, list) else [])
         )
         edges_payload = copy.deepcopy(edges if isinstance(edges, list) else [])
+        _validate_snapshot_nodes_or_raise(nodes_payload)
         validation = self.validator.validate(nodes=nodes_payload, edges=edges_payload)
         if not validation.is_valid:
             raise FlowV2PublishError(validation.errors)
@@ -135,6 +171,8 @@ class FlowV2Publisher:
         snapshot = _snapshot_payload(
             nodes=nodes_payload, edges=edges_payload, start_node_id=start_node_id
         )
+        _validate_snapshot_nodes_or_raise(snapshot["nodes"])
+        _log_snapshot_nodes(snapshot["nodes"])
         snapshot_hash = canonical_hash(snapshot)
         snapshot = {**snapshot, "hash": snapshot_hash}
         return FlowV2PublishResult(

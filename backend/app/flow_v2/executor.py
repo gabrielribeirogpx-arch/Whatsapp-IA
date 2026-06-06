@@ -135,7 +135,7 @@ class FlowV2Executor:
             node_id = str(node["id"])
             self.event_store.append(db, session=session, event_type=FlowV2EventType.NODE_ENTERED, node_id=node_id)
             try:
-                node_type = str(node.get("type") or self._node_data(node).get("type") or "message")
+                node_type = self._runtime_node_type(node, snapshot=snapshot)
                 logger.info(
                     "[V2 NODE EXECUTION] enter node_id=%s node_type=%s current_node_id=%s transitions_count=%s step=%s",
                     node_id,
@@ -223,13 +223,23 @@ class FlowV2Executor:
         self.session_manager.move_to(db, session=session, node_id=current_node_id, status=FlowV2SessionStatus.FAILED)
         raise FlowV2ExecutionError(f"Runtime V2 exceeded max_steps={MAX_RUNTIME_STEPS}")
 
+    def _runtime_node_type(self, node: dict[str, Any], *, snapshot: FlowV2Snapshot) -> str:
+        node_id = str(node.get("id") or "")
+        raw_type = node.get("type")
+        if raw_type is None or str(raw_type).strip() == "":
+            raise RuntimeError(
+                f"Unknown node type. node_id={node_id} snapshot_version={snapshot.flow_version_id}"
+            )
+        node_type = str(raw_type).strip().lower()
+        if node_type not in self.node_registry.supported_node_types:
+            raise RuntimeError(
+                f"Unknown node type. node_id={node_id} snapshot_version={snapshot.flow_version_id}"
+            )
+        return node_type
+
     @staticmethod
     def _legacy_effect(action: RuntimeAction) -> dict[str, Any] | None:
         if isinstance(action, SendMessageAction):
             return {"type": "send_message", "text": action.text}
         return None
 
-    @staticmethod
-    def _node_data(node: dict[str, Any]) -> dict[str, Any]:
-        data = node.get("data")
-        return data if isinstance(data, dict) else {}

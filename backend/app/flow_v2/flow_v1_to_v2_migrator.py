@@ -163,8 +163,11 @@ def _first_list(*values: Any) -> list[Any]:
 
 
 def _node_type(node: dict[str, Any]) -> str:
-    data = node.get("data") if isinstance(node.get("data"), dict) else {}
-    return str(node.get("type") or data.get("type") or "message").lower()
+    raw_type = node.get("type")
+    if raw_type is None or str(raw_type).strip() == "":
+        node_id = str(node.get("id") or "<missing-id>")
+        raise RuntimeError(f"FLOW_V2_NODE_MISSING_TYPE:{node_id}")
+    return str(raw_type).strip().lower()
 
 
 def _message_content(node: dict[str, Any]) -> Any:

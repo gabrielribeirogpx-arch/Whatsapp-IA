@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import logging
 import uuid
+
+import pytest
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
-from app.flow_v2.actions import ScheduleDelayAction, SendMessageAction
+from app.flow_v2.actions import ScheduleDelayAction, SendChoiceButtonsAction, SendMessageAction
 from app.flow_v2.channel_adapter import WhatsAppAdapter
 from app.flow_v2.contracts import (
     FlowV2EventType,
@@ -503,8 +505,12 @@ def test_publish_service_creates_new_version_and_updates_active_version_id() -> 
             return True
 
         def execute(self, statement):
-            if "UPDATE flow_versions" in str(statement):
+            statement_text = str(statement)
+            if "UPDATE flow_versions" in statement_text:
                 return _Scalar(None)
+            if "flow_versions.snapshot" in statement_text:
+                version = next((item for item in self.added if isinstance(item, FlowVersion)), None)
+                return _Scalar(version.snapshot if version is not None else None)
             self.calls += 1
             return _Scalar(flow if self.calls == 1 else 2)
 
@@ -540,3 +546,87 @@ def test_runtime_executes_published_version_id() -> None:
         "tenant_id": snapshot.tenant_id,
         "flow_version_id": snapshot.flow_version_id,
     }
+
+
+def test_message_choice_publication_and_runtime_emit_choice_buttons_to_adapter() -> None:
+    tenant_id = uuid.uuid4()
+    flow_version_id = uuid.uuid4()
+    published = FlowV2PublishService().publisher.publish(
+        nodes=[
+            {"id": "start", "type": "message", "content": "Olá! Como posso te ajudar?", "data": {"isStart": True}},
+            {
+                "id": "choice",
+                "type": "choice",
+                "content": "Escolha uma opção",
+                "options": [{"id": "a", "label": "Opção A"}],
+            },
+            {"id": "message_a", "type": "message", "content": "Mensagem A"},
+        ],
+        edges=[
+            {"id": "e-start-choice", "source": "start", "target": "choice"},
+            {"id": "e-choice-a", "source": "choice", "sourceHandle": "a", "target": "message_a"},
+        ],
+    )
+    snapshot = _snapshot(published.snapshot, tenant_id=tenant_id, flow_version_id=flow_version_id)
+    event_store = _FakeEventStore()
+    session = _FakeSession(tenant_id, flow_version_id, current_node_id=snapshot.start_node_id)
+    executor = FlowV2Executor(
+        snapshot_repository=_FakeSnapshotRepository(snapshot),
+        event_store=event_store,
+        session_manager=_FakeSessionManager(session, event_store),
+    )
+    adapter = WhatsAppAdapter()
+
+    result = FlowV2RuntimeWorker(executor=executor, channel_adapter=adapter).process(
+        _FakeDB(),
+        _input(
+            snapshot,
+            metadata={
+                "tenant_id": str(tenant_id),
+                "flow_id": "flow-1",
+                "flow_version_id": str(flow_version_id),
+                "provider_id": "provider-1",
+            },
+        ),
+    )
+
+    executed_events = [event for event in event_store.events if event["event_type"] == str(FlowV2EventType.NODE_EXECUTED)]
+    assert executed_events[0]["payload"]["node_type"] == "message"
+    assert executed_events[1]["payload"]["node_type"] == "choice"
+    assert isinstance(result.actions[0], SendMessageAction)
+    assert result.actions[0].metadata["node_type"] == "message"
+    assert isinstance(result.actions[1], SendChoiceButtonsAction)
+    assert result.actions[1].metadata["node_type"] == "choice"
+    assert adapter.sent_actions == list(result.actions)
+    assert result.deliveries[1]["type"] == "buttons"
+    assert result.deliveries[1]["buttons"] == [{"id": "a", "title": "Opção A"}]
+    assert result.deliveries[1]["meta_payload"]["interactive_type"] == "button"
+    assert result.deliveries[1]["meta_payload"]["node_type"] == "choice"
+
+
+def test_runtime_raises_instead_of_falling_back_for_missing_node_type() -> None:
+    flow_version_id = uuid.uuid4()
+    executor, _, _, _, db = _executor(
+        {
+            "schema_version": 1,
+            "start_node_id": "start",
+            "nodes": [{"id": "start", "content": "Sem tipo"}],
+            "edges": [],
+        }
+    )
+    snapshot = _snapshot(
+        {
+            "schema_version": 1,
+            "start_node_id": "start",
+            "nodes": [{"id": "start", "content": "Sem tipo"}],
+            "edges": [],
+        },
+        flow_version_id=flow_version_id,
+    )
+    executor.snapshot_repository.snapshot = snapshot
+
+    with pytest.raises(
+        RuntimeError,
+        match=f"Unknown node type. node_id=start snapshot_version={flow_version_id}",
+    ):
+        executor.handle_input(db, _input(snapshot))
