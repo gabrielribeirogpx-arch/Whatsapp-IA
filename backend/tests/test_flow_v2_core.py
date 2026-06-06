@@ -503,7 +503,77 @@ def test_message_to_condition_to_message_executes_until_terminal_message() -> No
     assert [event["payload"]["target_node_id"] for event in event_store.events if event["event_type"] == "TRANSITION_SELECTED"] == ["check", "final"]
 
 
-def test_start_message_waits_before_executing_next_condition() -> None:
+def test_start_message_to_message_chain_continues_automatically() -> None:
+    raw_snapshot = {
+        "schema_version": 1,
+        "start_node_id": "start",
+        "nodes": [
+            {"id": "start", "type": "message", "content": "Início", "data": {"isStart": True}},
+            {"id": "middle", "type": "message", "content": "Meio"},
+            {"id": "end", "type": "message", "content": "Fim"},
+        ],
+        "edges": [
+            {"id": "e1", "source": "start", "target": "middle"},
+            {"id": "e2", "source": "middle", "target": "end"},
+        ],
+    }
+    executor, snapshot, event_store, session, db = _executor(raw_snapshot)
+
+    output = executor.handle_input(db, _input(snapshot))
+
+    assert output.status == FlowV2SessionStatus.COMPLETED
+    assert output.current_node_id is None
+    assert session.status == FlowV2SessionStatus.COMPLETED
+    assert output.effects == (
+        {"type": "send_message", "text": "Início"},
+        {"type": "send_message", "text": "Meio"},
+        {"type": "send_message", "text": "Fim"},
+    )
+    assert [event["node_id"] for event in event_store.events if event["event_type"] == "NODE_ENTERED"] == ["start", "middle", "end"]
+    assert "session.waiting" not in _event_types(event_store)
+
+
+def test_start_message_to_delay_schedules_without_waiting_before_delay_and_resumes_next_message() -> None:
+    raw_snapshot = {
+        "schema_version": 1,
+        "start_node_id": "start",
+        "nodes": [
+            {"id": "start", "type": "message", "content": "Início", "data": {"isStart": True}},
+            {"id": "delay", "type": "delay", "seconds": 5},
+            {"id": "after_delay", "type": "message", "content": "Depois"},
+        ],
+        "edges": [
+            {"id": "e1", "source": "start", "target": "delay"},
+            {"id": "e2", "source": "delay", "target": "after_delay"},
+        ],
+    }
+    executor, snapshot, event_store, session, db = _executor(raw_snapshot)
+
+    initial = executor.handle_input(db, _input_with_id(snapshot, "wamid.delay.initial"))
+
+    assert initial.status == FlowV2SessionStatus.WAITING
+    assert initial.current_node_id == "after_delay"
+    assert session.status == FlowV2SessionStatus.WAITING
+    assert initial.effects == ({"type": "send_message", "text": "Início"},)
+    assert [event["node_id"] for event in event_store.events if event["event_type"] == "NODE_ENTERED"] == ["start", "delay"]
+    assert "DELAY_SCHEDULED" in _event_types(event_store)
+    scheduled_jobs = [item for item in db.added if item.__class__.__name__ == "FlowV2ScheduledJob"]
+    assert len(scheduled_jobs) == 1
+    assert scheduled_jobs[0].resume_node_id == "after_delay"
+    assert initial.actions[-1].as_effect()["type"] == "schedule_delay"
+    assert initial.actions[-1].as_effect()["seconds"] == 5
+
+    resumed = executor.handle_input(db, _input_with_id(snapshot, "wamid.delay.resume"))
+
+    assert resumed.status == FlowV2SessionStatus.COMPLETED
+    assert resumed.current_node_id is None
+    assert session.status == FlowV2SessionStatus.COMPLETED
+    assert resumed.effects == ({"type": "send_message", "text": "Depois"},)
+    assert [event["node_id"] for event in event_store.events if event["event_type"] == "NODE_ENTERED"] == ["start", "delay", "after_delay"]
+
+
+@pytest.mark.parametrize(("tag", "expected_node_id", "expected_text"), [("vip", "answer_a", "Resposta A"), ("regular", "answer_b", "Resposta B")])
+def test_start_message_to_condition_branch_executes_automatically(tag, expected_node_id, expected_text) -> None:
     raw_snapshot = {
         "schema_version": 1,
         "start_node_id": "start",
@@ -521,28 +591,48 @@ def test_start_message_waits_before_executing_next_condition() -> None:
     }
     executor, snapshot, event_store, session, db = _executor(raw_snapshot)
 
-    first = executor.handle_input(db, _input(snapshot, {"contact": {"tag": "vip"}}))
+    output = executor.handle_input(db, _input(snapshot, {"contact": {"tag": tag}}))
 
-    assert first.status == FlowV2SessionStatus.WAITING
-    assert first.current_node_id == "check"
-    assert first.effects == ({"type": "send_message", "text": "Olá! Como posso te ajudar?"},)
-    assert [event["node_id"] for event in event_store.events if event["event_type"] == "NODE_ENTERED"] == ["start"]
-    assert "CONDITION_EVALUATED" not in _event_types(event_store)
-    waiting_event = event_store.events[-1]
-    assert waiting_event["event_type"] == "session.waiting"
-    assert waiting_event["node_id"] == "check"
+    assert output.status == FlowV2SessionStatus.COMPLETED
+    assert output.current_node_id is None
+    assert session.status == FlowV2SessionStatus.COMPLETED
+    assert output.effects == (
+        {"type": "send_message", "text": "Olá! Como posso te ajudar?"},
+        {"type": "send_message", "text": expected_text},
+    )
+    assert [event["node_id"] for event in event_store.events if event["event_type"] == "NODE_ENTERED"] == ["start", "check", expected_node_id]
+    condition_event = next(event for event in event_store.events if event["event_type"] == "CONDITION_EVALUATED")
+    assert condition_event["payload"]["result"] is (tag == "vip")
+    assert "session.waiting" not in _event_types(event_store)
 
-    second = executor.handle_input(db, _input(snapshot, {"contact": {"tag": "vip"}, "message_id": "wamid.2"}))
 
-    assert second.status == FlowV2SessionStatus.COMPLETED
-    assert second.current_node_id is None
-    assert second.effects == ({"type": "send_message", "text": "Resposta A"},)
-    assert [event["node_id"] for event in event_store.events if event["event_type"] == "NODE_ENTERED"] == [
-        "start",
-        "check",
-        "answer_a",
-    ]
+def test_start_message_to_action_to_message_executes_automatically() -> None:
+    raw_snapshot = {
+        "schema_version": 1,
+        "start_node_id": "start",
+        "nodes": [
+            {"id": "start", "type": "message", "content": "Início", "data": {"isStart": True}},
+            {"id": "action", "type": "action"},
+            {"id": "end", "type": "message", "content": "Depois da ação"},
+        ],
+        "edges": [
+            {"id": "e1", "source": "start", "target": "action"},
+            {"id": "e2", "source": "action", "target": "end"},
+        ],
+    }
+    executor, snapshot, event_store, session, db = _executor(raw_snapshot)
 
+    output = executor.handle_input(db, _input(snapshot))
+
+    assert output.status == FlowV2SessionStatus.COMPLETED
+    assert output.current_node_id is None
+    assert session.status == FlowV2SessionStatus.COMPLETED
+    assert output.effects == (
+        {"type": "send_message", "text": "Início"},
+        {"type": "send_message", "text": "Depois da ação"},
+    )
+    assert [event["node_id"] for event in event_store.events if event["event_type"] == "NODE_ENTERED"] == ["start", "action", "end"]
+    assert "session.waiting" not in _event_types(event_store)
 
 def test_loop_protection_fails_after_max_steps() -> None:
     raw_snapshot = {

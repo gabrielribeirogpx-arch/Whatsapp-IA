@@ -158,14 +158,19 @@ class MessageNodeExecutor(BaseNodeExecutor):
             )
             actions = (action,)
         legacy_wait_after_start_condition = is_start and next_node_id is not None
-        wait_after_start_condition = legacy_wait_after_start_condition and next_node_type != "choice"
+        interactive_next_node_types = {"choice", "buttons", "buttons_node", "list", "list_node"}
+        next_node_is_interactive = next_node_type in interactive_next_node_types
+        # A start message must not block before the next node runs. Interactive
+        # nodes (choice/buttons/list) enter WAITING from their own executor after
+        # emitting the prompt, while automatic nodes continue in this loop.
+        wait_after_start_condition = False
         status = (
             "complete"
             if next_node_id is None
             else ("wait" if wait_after_start_condition else "continue")
         )
         logger.info(
-            "[MESSAGE AUTO CONTINUE] node_id=%s next_node_id=%s next_node_type=%s status=%s auto_continue=%s legacy_wait_after_start_condition=%s wait_after_start_condition=%s blocking_condition=%s",
+            "[MESSAGE AUTO CONTINUE] node_id=%s next_node_id=%s next_node_type=%s status=%s auto_continue=%s legacy_wait_after_start_condition=%s wait_after_start_condition=%s next_node_is_interactive=%s blocking_condition=%s",
             node_id,
             next_node_id,
             next_node_type,
@@ -173,7 +178,8 @@ class MessageNodeExecutor(BaseNodeExecutor):
             status == "continue",
             legacy_wait_after_start_condition,
             wait_after_start_condition,
-            "isStart && next_node_id && next_node_type != choice" if wait_after_start_condition else "none",
+            next_node_is_interactive,
+            "none",
         )
         return NodeExecutionResult(
             actions=actions,
