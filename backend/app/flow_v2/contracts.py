@@ -53,6 +53,16 @@ class RuntimeInput:
     event_version: int = FLOW_V2_EVENT_VERSION
     metadata: dict[str, Any] = field(default_factory=dict)
 
+    def __post_init__(self) -> None:
+        metadata = dict(self.metadata or {})
+        choice_id = metadata.get("selected_row_id") or metadata.get("interactive_reply_id")
+        if choice_id:
+            if not metadata.get("row_id"):
+                metadata["row_id"] = choice_id
+            if not metadata.get("sourceHandle"):
+                metadata["sourceHandle"] = choice_id
+        object.__setattr__(self, "metadata", metadata)
+
 
 @dataclass(frozen=True)
 class RuntimeOutput:

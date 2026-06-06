@@ -330,6 +330,64 @@ def test_waiting_choice_with_row_id_transitions_to_target_node() -> None:
     assert "CHOICE_SELECTED" in _event_types(event_store)
     assert any(event["payload"] == {"node_id": "choice", "row_id": "quero_planos"} for event in event_store.events)
 
+
+def test_waiting_choice_with_button_reply_id_maps_row_id_and_transitions_to_target_node() -> None:
+    raw_snapshot = {
+        "schema_version": 1,
+        "start_node_id": "start",
+        "nodes": [
+            {"id": "start", "type": "message", "data": {"isStart": True, "text": "Olá"}},
+            {
+                "id": "choice",
+                "type": "choice",
+                "data": {
+                    "content": "Escolha",
+                    "options": [
+                        {"id": "quero_planos", "label": "Quero planos"},
+                        {"id": "falar_com_humano", "label": "Falar com humano"},
+                    ],
+                },
+            },
+            {"id": "plans", "type": "message", "data": {"text": "Planos"}},
+            {"id": "human", "type": "message", "data": {"text": "Humano"}},
+        ],
+        "edges": [
+            {"id": "e1", "source": "start", "target": "choice"},
+            {"id": "e2", "source": "choice", "sourceHandle": "quero_planos", "target": "plans"},
+            {"id": "e3", "source": "choice", "sourceHandle": "falar_com_humano", "target": "human"},
+        ],
+    }
+    executor, snapshot, event_store, session, db = _executor(raw_snapshot)
+
+    initial = executor.handle_input(db, _input_with_id(snapshot, "wamid.initial"))
+    assert initial.status == FlowV2SessionStatus.WAITING
+    assert initial.current_node_id == "choice"
+
+    selected = executor.handle_input(
+        db,
+        _input_with_id(
+            snapshot,
+            "wamid.button_reply",
+            {"interactive_type": "button_reply", "interactive_reply_id": "quero_planos"},
+        ),
+    )
+
+    input_received = next(
+        event
+        for event in event_store.events
+        if event["event_type"] == "input.received" and event["input_message_id"] == "wamid.button_reply"
+    )
+    assert input_received["payload"]["metadata"]["row_id"] == "quero_planos"
+    assert input_received["payload"]["metadata"]["sourceHandle"] == "quero_planos"
+    assert selected.status == FlowV2SessionStatus.COMPLETED
+    assert selected.current_node_id is None
+    assert selected.effects == ({"type": "send_message", "text": "Planos"},)
+    assert session.status == FlowV2SessionStatus.COMPLETED
+    assert session.current_node_id is None
+    assert len(selected.actions) == 1
+    assert not any(isinstance(action, SendChoiceButtonsAction) for action in selected.actions)
+    assert any(event["payload"] == {"node_id": "choice", "row_id": "quero_planos"} for event in event_store.events)
+
 def test_delay_scheduling_creates_scheduled_job_and_does_not_execute_next_node() -> None:
     raw_snapshot = {
         "schema_version": 1,
