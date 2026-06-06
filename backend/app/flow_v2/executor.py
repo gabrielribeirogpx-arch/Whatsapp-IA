@@ -196,6 +196,13 @@ class FlowV2Executor:
                 )
                 self.event_store.append(db, session=session, event_type=FlowV2EventType.SESSION_WAITING, node_id=result.next_node_id)
                 self.session_manager.move_to(db, session=session, node_id=result.next_node_id, status=FlowV2SessionStatus.WAITING)
+                logger.info(
+                    "[SESSION STATUS] node_id=%s node_type=%s current_node_id=%s session_status=%s reason=scheduled",
+                    node_id,
+                    node_type,
+                    session.current_node_id,
+                    session.status,
+                )
                 return actions
             if result.status == "wait":
                 waiting_node_id = result.next_node_id or node_id
@@ -208,6 +215,13 @@ class FlowV2Executor:
                 )
                 self.event_store.append(db, session=session, event_type=FlowV2EventType.SESSION_WAITING, node_id=waiting_node_id)
                 self.session_manager.move_to(db, session=session, node_id=waiting_node_id, status=FlowV2SessionStatus.WAITING)
+                logger.info(
+                    "[SESSION STATUS] node_id=%s node_type=%s current_node_id=%s session_status=%s reason=executor_result_wait",
+                    node_id,
+                    node_type,
+                    session.current_node_id,
+                    session.status,
+                )
                 return actions
             if result.status == "complete":
                 self.event_store.append(db, session=session, event_type=FlowV2EventType.SESSION_COMPLETED, node_id=node_id)
