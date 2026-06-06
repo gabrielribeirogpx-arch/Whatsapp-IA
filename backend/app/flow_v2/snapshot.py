@@ -98,6 +98,84 @@ def _runtime_source_handle(source_handle: Any) -> str | None:
     return normalize_source_handle(source_handle)
 
 
+def build_snapshot_transition_audit(
+    snapshot: FlowV2Snapshot,
+    *,
+    source_node_id: str | None = None,
+    source_handle: Any | None = None,
+) -> dict[str, Any]:
+    """Build a production-safe audit report for Runtime V2 routing failures."""
+
+    transitions = (
+        [dict(transition) for transition in snapshot.transitions]
+        if snapshot.transitions
+        else build_transitions_from_edges(snapshot.edges)
+    )
+    edge_transition_keys = {
+        (
+            str(edge.get("source") or edge.get("from") or edge.get("source_node_id")),
+            str(edge.get("target") or edge.get("to") or edge.get("target_node_id")),
+            normalize_source_handle(_edge_source_handle(edge)),
+        )
+        for edge in snapshot.edges
+        if isinstance(edge, dict)
+        and (edge.get("source") or edge.get("from") or edge.get("source_node_id")) not in (None, "")
+        and (edge.get("target") or edge.get("to") or edge.get("target_node_id")) not in (None, "")
+    }
+    transition_keys = {
+        (
+            str(transition.get("source_node_id") or transition.get("source") or transition.get("from")),
+            str(transition.get("target_node_id") or transition.get("target") or transition.get("to")),
+            normalize_source_handle(transition.get("source_handle")),
+        )
+        for transition in transitions
+        if isinstance(transition, dict)
+    }
+    missing_transition_keys = edge_transition_keys - transition_keys
+    missing_from_transitions = [
+        {"source_node_id": source, "target_node_id": target, "source_handle": handle}
+        for source, target, handle in sorted(
+            missing_transition_keys,
+            key=lambda item: (item[0] or "", item[1] or "", item[2] or ""),
+        )
+    ]
+    requested_handle = normalize_source_handle(source_handle)
+    outgoing = [
+        transition
+        for transition in transitions
+        if str(transition.get("source_node_id")) == str(source_node_id)
+    ] if source_node_id is not None else []
+    matching = [
+        transition
+        for transition in outgoing
+        if (
+            is_default_source_handle(transition.get("source_handle"))
+            if requested_handle is None
+            else normalize_source_handle(transition.get("source_handle")) == requested_handle
+        )
+    ]
+    return {
+        "flow_version_id": str(snapshot.flow_version_id),
+        "tenant_id": str(snapshot.tenant_id),
+        "snapshot_hash": snapshot.hash,
+        "start_node_id": snapshot.start_node_id,
+        "nodes_count": len(snapshot.nodes),
+        "edges_count": len(snapshot.edges),
+        "transitions_count": len(transitions),
+        "nodes": [dict(node) for node in snapshot.nodes],
+        "edges": [dict(edge) for edge in snapshot.edges],
+        "transitions_found": transitions,
+        "transitions_missing": missing_from_transitions,
+        "requested_transition": {
+            "source_node_id": str(source_node_id) if source_node_id is not None else None,
+            "source_handle": requested_handle,
+            "outgoing_transitions": outgoing,
+            "matching_transitions": matching,
+            "missing": source_node_id is not None and not matching,
+        },
+    }
+
+
 class FlowV2SnapshotRepository:
     """Loads immutable runtime snapshots exclusively from flow_versions."""
 
@@ -165,7 +243,7 @@ class FlowV2SnapshotRepository:
             edges,
         )
 
-        return FlowV2Snapshot(
+        loaded_snapshot = FlowV2Snapshot(
             flow_version_id=version.id,
             tenant_id=tenant_id,
             hash=expected_hash,
@@ -175,6 +253,13 @@ class FlowV2SnapshotRepository:
             start_node_id=str(start_node_id),
             snapshot_schema_version=snapshot_schema_version,
         )
+        logger.info(
+            "[V2 SNAPSHOT] audit_report flow_version_id=%s report=%s",
+            version.id,
+            build_snapshot_transition_audit(loaded_snapshot),
+        )
+        return loaded_snapshot
+
 
 
 def migrate_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:

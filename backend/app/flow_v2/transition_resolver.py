@@ -6,7 +6,7 @@ from typing import Any
 
 from app.flow_v2.contracts import FlowV2EventType
 from app.flow_v2.event_store import FlowV2EventStore
-from app.flow_v2.snapshot import FlowV2Snapshot, build_transitions_from_edges, is_default_source_handle, normalize_source_handle
+from app.flow_v2.snapshot import FlowV2Snapshot, build_snapshot_transition_audit, build_transitions_from_edges, is_default_source_handle, normalize_source_handle
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +48,11 @@ class TransitionResolver:
         )
         if not matches:
             outgoing = [transition for transition in transitions if str(transition.get("source_node_id")) == source_node_id]
+            audit_report = build_snapshot_transition_audit(
+                snapshot,
+                source_node_id=source_node_id,
+                source_handle=source_handle,
+            )
             payload = {
                 "source_handle": source_handle,
                 "source_node_id": source_node_id,
@@ -57,6 +62,7 @@ class TransitionResolver:
                 "transitions_count": len(transitions),
                 "outgoing_transitions": outgoing,
                 "available_source_nodes": sorted({str(transition.get("source_node_id")) for transition in transitions}),
+                "audit_report": audit_report,
             }
             self.event_store.append(
                 db,
@@ -66,6 +72,7 @@ class TransitionResolver:
                 payload=payload,
             )
             logger.error("[V2 TRANSITION RESOLVER] transition_not_found payload=%s", payload)
+            logger.error("[V2 TRANSITIONS] missing_transition_report=%s", audit_report)
             raise FlowV2TransitionError(
                 "Runtime V2 transition not found: "
                 f"source_node_id={source_node_id} source_handle={source_handle} "

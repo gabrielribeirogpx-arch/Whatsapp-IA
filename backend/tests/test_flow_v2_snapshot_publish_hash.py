@@ -229,3 +229,48 @@ def test_publish_fresh_snapshot_converts_builder_choice_buttons_for_runtime_v2(
     ]
     assert choice["data"]["buttons"] == nodes[1]["data"]["buttons"]
     assert "options" not in nodes[1]["data"]
+
+
+def test_publish_graph_selection_prefers_react_flow_json_edges_when_records_are_partial():
+    record_nodes = [
+        {"id": "start", "type": "message", "data": {"isStart": True, "text": "Olá"}},
+        {"id": "delay", "type": "delay", "data": {"seconds": 5}},
+    ]
+    flow_nodes = [dict(node) for node in record_nodes]
+    flow_edges = [{"id": "e1", "source": "start", "target": "delay"}]
+
+    nodes, edges, source = flows._select_publish_builder_graph(
+        flow_nodes=flow_nodes,
+        flow_edges=flow_edges,
+        record_nodes=record_nodes,
+        record_edges=[],
+    )
+
+    assert source == "flow_json"
+    assert nodes == flow_nodes
+    assert edges == flow_edges
+
+
+def test_snapshot_audit_report_identifies_requested_missing_transition():
+    from app.flow_v2.snapshot import FlowV2Snapshot, build_snapshot_transition_audit
+
+    tenant_id = uuid.uuid4()
+    flow_version_id = uuid.uuid4()
+    snapshot = FlowV2Snapshot(
+        flow_version_id=flow_version_id,
+        tenant_id=tenant_id,
+        hash="hash",
+        nodes=tuple(NODES),
+        edges=tuple(EDGES),
+        transitions=(),
+        start_node_id="n1",
+    )
+
+    report = build_snapshot_transition_audit(snapshot, source_node_id="missing")
+
+    assert report["start_node_id"] == "n1"
+    assert report["transitions_found"] == [
+        {"id": "e1", "source_node_id": "n1", "target_node_id": "n2", "edge_id": "e1"}
+    ]
+    assert report["requested_transition"]["missing"] is True
+    assert report["requested_transition"]["outgoing_transitions"] == []

@@ -284,14 +284,62 @@ def _apply_flow_v2_snapshot_metadata(flow_version: FlowVersion, nodes: list[dict
     flow_version.start_node_id = str(snapshot["start_node_id"])
 
 
+
+def _select_publish_builder_graph(
+    *,
+    flow_nodes: list[dict[str, Any]],
+    flow_edges: list[dict[str, Any]],
+    record_nodes: list[dict[str, Any]],
+    record_edges: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], str]:
+    """Choose the graph source to publish without dropping React Flow edges.
+
+    The React Flow builder persists its canonical graph on the Flow JSON fields.
+    Some deployments also materialize FlowNode rows before FlowEdge rows; using
+    those partial records first can publish a V2 snapshot with nodes but no
+    transitions.  Prefer a complete Flow JSON graph whenever it contains edges.
+    """
+
+    safe_flow_nodes = flow_nodes if isinstance(flow_nodes, list) else []
+    safe_flow_edges = flow_edges if isinstance(flow_edges, list) else []
+    safe_record_nodes = record_nodes if isinstance(record_nodes, list) else []
+    safe_record_edges = record_edges if isinstance(record_edges, list) else []
+
+    if safe_flow_nodes and safe_flow_edges:
+        return safe_flow_nodes, safe_flow_edges, "flow_json"
+    if safe_record_nodes:
+        return safe_record_nodes, safe_record_edges, "records"
+    return safe_flow_nodes, safe_flow_edges, "flow_json_empty_edges"
+
 def _publish_fresh_snapshot(db: Session, flow: Flow, *, reason: str) -> FlowVersion | None:
     transaction = db.begin_nested() if hasattr(db, "begin_nested") else nullcontext()
     with transaction:
         db.execute(select(Flow.id).where(Flow.id == flow.id).with_for_update())
+        flow_nodes, flow_edges = _builder_graph_from_flow(flow)
         try:
-            nodes, edges = _builder_graph_from_records(db, flow)
+            record_nodes, record_edges = _builder_graph_from_records(db, flow)
         except AttributeError:
-            nodes, edges = _builder_graph_from_flow(flow)
+            record_nodes, record_edges = [], []
+        nodes, edges, graph_source = _select_publish_builder_graph(
+            flow_nodes=flow_nodes,
+            flow_edges=flow_edges,
+            record_nodes=record_nodes,
+            record_edges=record_edges,
+        )
+        logger.info(
+            "[V2 SNAPSHOT] publish_graph_source flow_id=%s reason=%s source=%s "
+            "flow_nodes_count=%s flow_edges_count=%s record_nodes_count=%s record_edges_count=%s "
+            "selected_nodes_count=%s selected_edges_count=%s",
+            flow.id,
+            reason,
+            graph_source,
+            len(flow_nodes),
+            len(flow_edges),
+            len(record_nodes),
+            len(record_edges),
+            len(nodes),
+            len(edges),
+        )
     if not nodes:
         logger.warning("[FLOW PUBLISH] flow_id=%s reason=%s sem nodes no builder", flow.id, reason)
         return None

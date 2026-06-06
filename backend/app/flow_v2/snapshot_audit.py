@@ -7,7 +7,7 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.flow_v2.snapshot import canonical_hash
+from app.flow_v2.snapshot import build_transitions_from_edges, canonical_hash
 from app.models.flow import FlowVersion
 
 
@@ -70,6 +70,34 @@ class FlowV2SnapshotAuditor:
         if not isinstance(edges, list):
             issues.append(SnapshotAuditIssue(version_id, "EDGES_INVALID", "Snapshot edges must be a list"))
             edges = []
+
+        transitions = snapshot.get("transitions")
+        if not isinstance(transitions, list):
+            issues.append(SnapshotAuditIssue(version_id, "TRANSITIONS_INVALID", "Snapshot transitions must be a list"))
+            transitions = []
+        expected_transitions = build_transitions_from_edges(edges)
+        expected_transition_keys = {
+            (transition.get("source_node_id"), transition.get("target_node_id"), transition.get("source_handle"))
+            for transition in expected_transitions
+        }
+        transition_keys = {
+            (transition.get("source_node_id"), transition.get("target_node_id"), transition.get("source_handle"))
+            for transition in transitions
+            if isinstance(transition, dict)
+        }
+        missing_transition_keys = expected_transition_keys - transition_keys
+        if missing_transition_keys:
+            sorted_missing = sorted(
+                missing_transition_keys,
+                key=lambda item: (item[0] or "", item[1] or "", item[2] or ""),
+            )
+            issues.append(
+                SnapshotAuditIssue(
+                    version_id,
+                    "TRANSITIONS_MISSING",
+                    f"Snapshot transitions missing routes: {sorted_missing}",
+                )
+            )
 
         expected_nodes = _optional_int(getattr(version, "nodes_count", None))
         if expected_nodes is not None and expected_nodes != len(nodes):
