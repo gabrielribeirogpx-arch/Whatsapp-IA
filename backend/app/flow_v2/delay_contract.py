@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import copy
+import logging
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 DELAY_LEGACY_DATA_FIELDS = ("content", "delay", "wait_seconds", "duration")
 DELAY_LEGACY_NODE_FIELDS = ("delay_seconds", "wait_seconds", "duration", "value", "delay")
@@ -28,6 +31,13 @@ def normalize_delay_node(node: dict[str, Any]) -> dict[str, Any]:
     seconds = _coerce_seconds(_first_present(normalized, normalized_data))
     if seconds is not None:
         normalized["seconds"] = seconds
+
+    logger.info(
+        "[DELAY NORMALIZED] node_id=%s seconds=%s data=%s",
+        normalized.get("id"),
+        normalized.get("seconds"),
+        normalized_data,
+    )
 
     for key in DELAY_LEGACY_NODE_FIELDS:
         normalized.pop(key, None)

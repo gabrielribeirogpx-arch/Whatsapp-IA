@@ -67,6 +67,19 @@ def _graph_node_ids(nodes: list[dict[str, Any]] | None) -> list[str]:
     return [str(node.get("id")) for node in (nodes or []) if isinstance(node, dict) and node.get("id") is not None]
 
 
+def _builder_node_for_save(node: dict[str, Any]) -> dict[str, Any]:
+    normalized_node = node if isinstance(node, dict) else {}
+    next_node = {
+        "id": str(normalized_node.get("id")),
+        "type": normalized_node.get("type") or "default",
+        "position": normalized_node.get("position") or {"x": 0, "y": 0},
+        "data": normalized_node.get("data") or {},
+    }
+    if str(next_node.get("type") or "").lower() == "delay" and "seconds" in normalized_node:
+        next_node["seconds"] = normalized_node.get("seconds")
+    return next_node
+
+
 def _log_flow_save_request(*, flow_id: str | uuid.UUID | None, tenant_id: str | uuid.UUID | None, nodes: list[Any], edges: list[Any]) -> None:
     logger.info(
         "[FLOW SAVE REQUEST] flow_id=%s tenant_id=%s nodes_count=%s edges_count=%s node_ids=%s",
@@ -1373,16 +1386,24 @@ async def update_flow_route(
         if should_update_graph:
             nodes = []
             for node in raw_nodes:
-                normalized_node = node if isinstance(node, dict) else {}
-                nodes.append(
-                    {
-                        "id": str(normalized_node.get("id")),
-                        "type": normalized_node.get("type") or "default",
-                        "position": normalized_node.get("position") or {"x": 0, "y": 0},
-                        "data": normalized_node.get("data") or {},
-                    }
-                )
+                next_node = _builder_node_for_save(node if isinstance(node, dict) else {})
+                if str(next_node.get("type") or "").lower() == "delay":
+                    logger.info(
+                        "[DELAY SAVE] node_id=%s seconds=%s data=%s",
+                        next_node.get("id"),
+                        next_node.get("seconds"),
+                        next_node.get("data"),
+                    )
+                nodes.append(next_node)
             nodes = normalize_delay_nodes(_ensure_start_node(nodes))
+            for node in nodes:
+                if isinstance(node, dict) and str(node.get("type") or "").lower() == "delay":
+                    logger.info(
+                        "[DELAY NORMALIZED] node_id=%s seconds=%s data=%s",
+                        node.get("id"),
+                        node.get("seconds"),
+                        node.get("data"),
+                    )
             edges = _normalize_flow_edges(raw_edges)
             logger.info(
                 "[FLOW UPDATE GRAPH PAYLOAD] flow_id=%s nodes_count=%s edges_count=%s edge_pairs=%s edges_raw=%s",
