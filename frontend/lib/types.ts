@@ -272,7 +272,11 @@ export type FlowNodePayload = {
   data: {
     label?: string;
     content?: string;
+    body_text?: string;
+    display_mode?: 'buttons' | 'list';
+    displayMode?: 'buttons' | 'list';
     buttons?: FlowChoiceButton[];
+    sections?: unknown[];
     condition?: string;
     action?: string;
     isStart?: boolean;

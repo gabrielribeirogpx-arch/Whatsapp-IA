@@ -61,6 +61,8 @@ class SendChoiceButtonsAction(RuntimeAction):
     node_id: str = ""
     options: tuple[dict[str, Any], ...] = ()
     buttons: tuple[dict[str, Any], ...] = ()
+    sections: tuple[dict[str, Any], ...] = ()
+    display_mode: Literal["buttons", "list"] = "buttons"
 
     @property
     def action_type(self) -> Literal["send_choice_buttons"]:
@@ -69,17 +71,29 @@ class SendChoiceButtonsAction(RuntimeAction):
     def as_effect(self) -> dict[str, Any]:
         payload = super().as_effect()
         buttons = [dict(button) for button in self.buttons]
+        sections = [dict(section) for section in self.sections]
+        interactive = (
+            {
+                "type": "list",
+                "body": {"text": self.text},
+                "action": {"button": "Ver opções", "sections": sections},
+            }
+            if self.display_mode == "list"
+            else {
+                "type": "button",
+                "body": {"text": self.text},
+                "action": {"buttons": buttons},
+            }
+        )
         payload.update(
             {
                 "text": self.text,
                 "node_id": self.node_id,
                 "options": [dict(option) for option in self.options],
                 "buttons": buttons,
-                "interactive": {
-                    "type": "button",
-                    "body": {"text": self.text},
-                    "action": {"buttons": buttons},
-                },
+                "sections": sections,
+                "display_mode": self.display_mode,
+                "interactive": interactive,
             }
         )
         return payload

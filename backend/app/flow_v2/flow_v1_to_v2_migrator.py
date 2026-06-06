@@ -6,7 +6,7 @@ from typing import Any, Iterable
 from app.flow_v2.publisher import FlowV2Publisher
 
 
-SUPPORTED_V2_NODE_TYPES: frozenset[str] = frozenset({"message", "choice", "delay", "condition"})
+SUPPORTED_V2_NODE_TYPES: frozenset[str] = frozenset({"message", "choice", "delay", "condition", "action"})
 
 
 @dataclass(frozen=True)
@@ -80,7 +80,13 @@ class FlowV1ToV2Migrator:
         node_type = _node_type(payload)
         normalized = dict(payload)
         normalized["id"] = node_id
-        if node_type not in SUPPORTED_V2_NODE_TYPES:
+        if node_type in {"buttons", "buttons_node", "list", "list_node"}:
+            normalized["type"] = "choice"
+            data = normalized.get("data") if isinstance(normalized.get("data"), dict) else {}
+            display_mode = "list" if node_type in {"list", "list_node"} else "buttons"
+            normalized["data"] = {**data, "display_mode": display_mode}
+            warnings.append(f"FLOW_V1_NODE_TYPE_MAPPED_TO_CHOICE:{node_id}:{node_type}:{display_mode}")
+        elif node_type not in SUPPORTED_V2_NODE_TYPES:
             normalized["type"] = "message"
             data = normalized.get("data") if isinstance(normalized.get("data"), dict) else {}
             normalized["data"] = {**data, "v1_original_type": node_type}

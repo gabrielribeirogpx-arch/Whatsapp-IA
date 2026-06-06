@@ -211,6 +211,32 @@ def _choice_buttons_from_options(options: Any) -> tuple[dict[str, Any], ...]:
     return tuple(buttons)
 
 
+def _choice_sections_from_options(options: Any) -> tuple[dict[str, Any], ...]:
+    if not isinstance(options, list):
+        return ()
+
+    rows: list[dict[str, Any]] = []
+    for index, option in enumerate(options):
+        if not isinstance(option, dict):
+            continue
+        row_id = str(option.get("id") or option.get("handleId") or option.get("handle_id") or f"option_{index + 1}").strip()
+        title = str(option.get("label") or option.get("title") or f"Opção {index + 1}").strip()
+        description = str(option.get("description") or "").strip()
+        if not row_id or not title:
+            continue
+        row: dict[str, Any] = {"id": row_id, "title": title[:24]}
+        if description:
+            row["description"] = description[:72]
+        rows.append(row)
+    return ({"title": "Opções", "rows": rows},) if rows else ()
+
+
+def _choice_display_mode(node: dict[str, Any], data: dict[str, Any]) -> str:
+    raw = node.get("display_mode") or data.get("display_mode") or data.get("displayMode") or "buttons"
+    mode = str(raw).strip().lower()
+    return "list" if mode == "list" else "buttons"
+
+
 def _choice_options_payload(options: Any) -> tuple[dict[str, Any], ...]:
     if not isinstance(options, list):
         return ()
@@ -232,6 +258,7 @@ class ChoiceNodeExecutor(BaseNodeExecutor):
         node_id = str(node["id"])
         data = self._node_data(node)
         options = node.get("options") or data.get("options") or []
+        display_mode = _choice_display_mode(node, data)
         option_ids = [
             str(option["id"])
             for option in options
@@ -284,16 +311,20 @@ class ChoiceNodeExecutor(BaseNodeExecutor):
         )
         if row_id is None:
             buttons = _choice_buttons_from_options(options)
+            sections = _choice_sections_from_options(options)
             action_metadata = {
                 **runtime_input.metadata,
                 "node_id": node_id,
                 "node_type": "choice",
+                "display_mode": display_mode,
+                "interactive_type": "list" if display_mode == "list" else "button",
             }
             logger.info(
-                "[V2 CHOICE EXECUTED]\nnode_id=%s\noptions=%s\nbuttons=%s",
+                "[V2 CHOICE EXECUTED]\nnode_id=%s\ndisplay_mode=%s\noptions=%s\nbuttons=%s",
                 node_id,
+                display_mode,
                 json.dumps(_choice_options_payload(options), default=str, ensure_ascii=False, sort_keys=True),
-                json.dumps(buttons, default=str, ensure_ascii=False, sort_keys=True),
+                json.dumps(buttons if display_mode == "buttons" else sections, default=str, ensure_ascii=False, sort_keys=True),
             )
             action = SendChoiceButtonsAction(
                 tenant_id=session.tenant_id,
@@ -305,6 +336,8 @@ class ChoiceNodeExecutor(BaseNodeExecutor):
                 node_id=node_id,
                 options=_choice_options_payload(options),
                 buttons=buttons,
+                sections=sections,
+                display_mode=display_mode,
                 metadata=action_metadata,
             )
             result = NodeExecutionResult(actions=(action,), status="wait")
@@ -605,6 +638,20 @@ class ConditionNodeExecutor(BaseNodeExecutor):
         return current
 
 
+class ActionNodeExecutor(BaseNodeExecutor):
+    def execute(
+        self, db, *, snapshot, session, node, runtime_input
+    ) -> NodeExecutionResult:
+        node_id = str(node["id"])
+        next_node_id = self._default_next_or_terminal(
+            db, snapshot=snapshot, session=session, node_id=node_id
+        )
+        return NodeExecutionResult(
+            next_node_id=next_node_id,
+            status="complete" if next_node_id is None else "continue",
+        )
+
+
 class NodeExecutorRegistry:
     def __init__(self, *, event_store, transition_resolver: TransitionResolver) -> None:
         self._executors: dict[str, NodeExecutor] = {
@@ -618,6 +665,9 @@ class NodeExecutorRegistry:
                 event_store=event_store, transition_resolver=transition_resolver
             ),
             "condition": ConditionNodeExecutor(
+                event_store=event_store, transition_resolver=transition_resolver
+            ),
+            "action": ActionNodeExecutor(
                 event_store=event_store, transition_resolver=transition_resolver
             ),
         }

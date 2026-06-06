@@ -46,8 +46,19 @@ class ChannelAdapter(Protocol):
         metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]: ...
 
-    def send_list(self, *, recipient_id: str, text: str, sections: list[dict[str, Any]],
-                  metadata: dict[str, Any] | None = None) -> dict[str, Any]: ...
+    def send_list(
+        self,
+        *,
+        recipient_id: str,
+        text: str,
+        sections: list[dict[str, Any]],
+        tenant_id: Any | None = None,
+        session_id: Any | None = None,
+        conversation_id: Any | None = None,
+        contact_id: Any | None = None,
+        options: list[dict[str, Any]] | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]: ...
 
     def dispatch(self, action: RuntimeAction) -> dict[str, Any]: ...
 
@@ -230,9 +241,66 @@ class WhatsAppAdapter:
             "tenant_id": payload.get("tenant_id"),
         }
 
-    def send_list(self, *, recipient_id: str, text: str, sections: list[dict[str, Any]],
-                  metadata: dict[str, Any] | None = None) -> dict[str, Any]:
-        return {"status": "mocked", "channel": "whatsapp", "type": "list", "recipient_id": recipient_id, "sections": sections}
+    def send_list(
+        self,
+        *,
+        recipient_id: str,
+        text: str,
+        sections: list[dict[str, Any]],
+        tenant_id: Any | None = None,
+        session_id: Any | None = None,
+        conversation_id: Any | None = None,
+        contact_id: Any | None = None,
+        options: list[dict[str, Any]] | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        metadata = dict(metadata or {})
+        payload = {
+            "tenant_id": str(tenant_id or metadata.get("tenant_id") or ""),
+            "provider_id": metadata.get("provider_id"),
+            "phone": recipient_id,
+            "text": text,
+            "sections": sections,
+            "options": options or [],
+            "interactive_type": "list",
+            "conversation_id": str(conversation_id or metadata.get("conversation_id") or "") or None,
+            "contact_id": str(contact_id or metadata.get("contact_id") or "") or None,
+            "session_id": str(session_id or metadata.get("session_id") or "") or None,
+            "flow_id": metadata.get("flow_id"),
+            "flow_version_id": metadata.get("flow_version_id"),
+            "node_id": metadata.get("node_id"),
+            "node_type": metadata.get("node_type") or "choice",
+            "correlation_id": metadata.get("correlation_id") or metadata.get("message_id") or metadata.get("webhook_id"),
+            "metadata": metadata,
+            "flow_send_source": "flow_v2:choice",
+        }
+        if self.client is None:
+            return {
+                "status": "mocked",
+                "channel": "whatsapp",
+                "type": "list",
+                "recipient_id": recipient_id,
+                "text": text,
+                "sections": sections,
+                "options": options or [],
+                "tenant_id": str(tenant_id) if tenant_id is not None else None,
+                "session_id": str(session_id) if session_id is not None else None,
+                "conversation_id": str(conversation_id) if conversation_id is not None else None,
+                "contact_id": str(contact_id) if contact_id is not None else None,
+                "metadata": metadata,
+            }
+
+        from app.services.queue import enqueue_send_message
+
+        job_id = enqueue_send_message(payload)
+        return {
+            "status": "queued" if job_id else "skipped",
+            "channel": "whatsapp",
+            "type": "list",
+            "recipient_id": recipient_id,
+            "job_id": job_id,
+            "tenant_id": payload.get("tenant_id"),
+        }
 
     def dispatch(self, action: RuntimeAction) -> dict[str, Any]:
         self.sent_actions.append(action)
@@ -268,6 +336,18 @@ class WhatsAppAdapter:
                 action.node_id,
                 len(action.buttons),
             )
+            if action.display_mode == "list":
+                return self.send_list(
+                    recipient_id=action.external_user_id,
+                    text=action.text,
+                    sections=[dict(section) for section in action.sections],
+                    tenant_id=action.tenant_id,
+                    session_id=action.session_id,
+                    conversation_id=action.conversation_id,
+                    contact_id=action.contact_id,
+                    options=[dict(option) for option in action.options],
+                    metadata=action.metadata,
+                )
             return self.send_buttons(
                 recipient_id=action.external_user_id,
                 text=action.text,

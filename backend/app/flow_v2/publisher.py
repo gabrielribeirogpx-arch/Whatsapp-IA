@@ -69,6 +69,8 @@ def _runtime_v2_node_payload(node: dict[str, Any]) -> dict[str, Any]:
     node_type = str(
         node.get("type") or _node_data(node).get("type") or "message"
     ).lower()
+    if node_type in {"buttons", "buttons_node", "list", "list_node"}:
+        return _legacy_interactive_node_to_choice(node, node_type)
     if node_type != "choice":
         return node
 
@@ -89,6 +91,25 @@ def _runtime_v2_node_payload(node: dict[str, Any]) -> dict[str, Any]:
     return next_node
 
 
+def _legacy_interactive_node_to_choice(node: dict[str, Any], node_type: str) -> dict[str, Any]:
+    data = _node_data(node)
+    display_mode = "list" if node_type in {"list", "list_node"} else "buttons"
+    next_node = dict(node)
+    next_node["type"] = "choice"
+    next_data = dict(data)
+    next_data["display_mode"] = display_mode
+    if display_mode == "buttons":
+        options = _choice_options_from_buttons(next_data.get("buttons") or node.get("buttons"))
+    else:
+        options = _choice_options_from_sections(next_data.get("sections") or node.get("sections"))
+    if options and not (_has_non_empty_options(node.get("options")) or _has_non_empty_options(next_data.get("options"))):
+        next_data["options"] = options
+    if "content" not in next_data and next_data.get("body_text"):
+        next_data["content"] = next_data.get("body_text")
+    next_node["data"] = next_data
+    return next_node
+
+
 def _node_data(node: dict[str, Any]) -> dict[str, Any]:
     data = node.get("data")
     return data if isinstance(data, dict) else {}
@@ -96,6 +117,30 @@ def _node_data(node: dict[str, Any]) -> dict[str, Any]:
 
 def _has_non_empty_options(value: Any) -> bool:
     return isinstance(value, list) and bool(value)
+
+
+def _choice_options_from_sections(sections: Any) -> list[dict[str, str]]:
+    if not isinstance(sections, list):
+        return []
+
+    options: list[dict[str, str]] = []
+    for section in sections:
+        if not isinstance(section, dict):
+            continue
+        rows = section.get("rows") if isinstance(section.get("rows"), list) else []
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            handle_id = str(row.get("handleId") or row.get("handle_id") or row.get("id") or "").strip()
+            label = str(row.get("label") or row.get("title") or "").strip()
+            if not handle_id or not label:
+                continue
+            option: dict[str, str] = {"id": handle_id, "label": label}
+            description = str(row.get("description") or "").strip()
+            if description:
+                option["description"] = description
+            options.append(option)
+    return options
 
 
 def _choice_options_from_buttons(buttons: Any) -> list[dict[str, str]]:

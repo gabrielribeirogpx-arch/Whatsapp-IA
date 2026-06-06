@@ -18,14 +18,39 @@ export type NormalizedFlowGraph = {
   edges: FlowEdgePayload[];
 };
 
+const rowsToButtons = (nodeId: string, sections: unknown): Array<{ id: string; label: string; handleId: string }> => {
+  if (!Array.isArray(sections)) return [];
+
+  return sections.flatMap((section, sectionIndex) => {
+    if (!section || typeof section !== 'object') return [];
+    const rows = Array.isArray((section as { rows?: unknown }).rows) ? ((section as { rows: unknown[] }).rows) : [];
+    return rows.flatMap((row, rowIndex) => {
+      if (!row || typeof row !== 'object') return [];
+      const safeRow = row as Record<string, unknown>;
+      const label = String(safeRow.label ?? safeRow.title ?? `Opção ${rowIndex + 1}`);
+      const handleId = String(safeRow.handleId ?? safeRow.handle_id ?? safeRow.id ?? `option_${sectionIndex + 1}_${rowIndex + 1}`);
+      return [{ id: String(safeRow.id ?? `${nodeId}-row-${sectionIndex + 1}-${rowIndex + 1}`), label, handleId }];
+    });
+  });
+};
+
 const normalizeNode = (node: unknown): FlowNodePayload => {
   const safeNode = (node && typeof node === 'object' ? node : {}) as Record<string, unknown>;
-  const nodeData = (safeNode.data && typeof safeNode.data === 'object' ? safeNode.data : {}) as FlowNodePayload['data'];
+  const nodeData = (safeNode.data && typeof safeNode.data === 'object' ? safeNode.data : {}) as FlowNodePayload['data'] & Record<string, unknown>;
+  const nodeId = String(safeNode.id ?? '');
+  const rawType = String(safeNode.type ?? 'message').toLowerCase();
+  const isLegacyButtons = rawType === 'buttons' || rawType === 'buttons_node';
+  const isLegacyList = rawType === 'list' || rawType === 'list_node';
+  const data = isLegacyButtons
+    ? { ...nodeData, display_mode: 'buttons' as const, content: String(nodeData.content ?? nodeData.body_text ?? '') }
+    : isLegacyList
+    ? { ...nodeData, display_mode: 'list' as const, content: String(nodeData.content ?? nodeData.body_text ?? ''), buttons: nodeData.buttons ?? rowsToButtons(nodeId, nodeData.sections) }
+    : nodeData;
 
   return {
-    id: String(safeNode.id ?? ''),
-    type: String(safeNode.type ?? 'message'),
-    data: nodeData,
+    id: nodeId,
+    type: isLegacyButtons || isLegacyList ? 'choice' : String(safeNode.type ?? 'message'),
+    data,
     position:
       safeNode.position && typeof safeNode.position === 'object'
         ? (safeNode.position as { x: number; y: number })
