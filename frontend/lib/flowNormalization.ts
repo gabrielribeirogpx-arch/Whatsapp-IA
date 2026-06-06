@@ -40,23 +40,40 @@ const parseDelaySeconds = (value: unknown): number | undefined => {
   return Number.isFinite(parsed) ? parsed : undefined;
 };
 
+type DelayNodeInput = FlowNodePayload & {
+  delay_seconds?: unknown;
+  wait_seconds?: unknown;
+  duration?: unknown;
+  value?: unknown;
+  delay?: unknown;
+};
+
 const normalizeDelayNode = (node: FlowNodePayload): FlowNodePayload => {
   if (node.type !== 'delay') return node;
   const data = (node.data || {}) as Record<string, unknown>;
+  const delayNode = node as DelayNodeInput;
   const seconds = parseDelaySeconds(
-    (node as FlowNodePayload & { seconds?: unknown }).seconds ??
+    delayNode.seconds ??
     data.seconds ??
     data.content ??
     data.delay ??
     data.wait_seconds ??
-    data.duration,
+    data.duration ??
+    delayNode.delay_seconds ??
+    delayNode.wait_seconds ??
+    delayNode.duration ??
+    delayNode.value ??
+    delayNode.delay,
   );
   const { content, delay, wait_seconds, duration, seconds: _dataSeconds, ...cleanData } = data;
   return {
     ...node,
     type: 'delay',
     ...(seconds !== undefined ? { seconds } : {}),
-    data: cleanData as FlowNodePayload['data'],
+    data: {
+      ...(cleanData as FlowNodePayload['data']),
+      ...(seconds !== undefined ? { seconds } : {}),
+    },
   };
 };
 
@@ -73,9 +90,20 @@ const normalizeNode = (node: unknown): FlowNodePayload => {
     ? { ...nodeData, display_mode: 'list' as const, content: String(nodeData.content ?? nodeData.body_text ?? ''), buttons: nodeData.buttons ?? rowsToButtons(nodeId, nodeData.sections) }
     : nodeData;
 
+  const normalizedType = isLegacyButtons || isLegacyList ? 'choice' : String(safeNode.type ?? 'message');
+  const topLevelDelaySeconds = parseDelaySeconds(
+    safeNode.seconds ??
+    safeNode.delay_seconds ??
+    safeNode.wait_seconds ??
+    safeNode.duration ??
+    safeNode.value ??
+    safeNode.delay,
+  );
+
   return normalizeDelayNode({
     id: nodeId,
-    type: isLegacyButtons || isLegacyList ? 'choice' : String(safeNode.type ?? 'message'),
+    type: normalizedType,
+    ...(normalizedType === 'delay' && topLevelDelaySeconds !== undefined ? { seconds: topLevelDelaySeconds } : {}),
     data,
     position:
       safeNode.position && typeof safeNode.position === 'object'
