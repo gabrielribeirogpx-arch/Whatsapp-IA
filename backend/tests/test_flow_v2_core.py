@@ -566,3 +566,61 @@ def test_loop_protection_fails_after_max_steps() -> None:
     assert event_store.events[-1]["event_type"] == "session.failed"
     assert event_store.events[-1]["payload"] == {"reason": "max_steps_exceeded", "max_steps": 50}
     assert session.status == FlowV2SessionStatus.FAILED
+
+@pytest.mark.parametrize(
+    ("display_mode", "expected_interactive_type", "reply_metadata"),
+    [
+        ("buttons", "button", {"interactive_reply_id": "next", "interactive_type": "button_reply"}),
+        ("list", "list", {"interactive_reply_id": "next", "interactive_type": "list_reply"}),
+    ],
+)
+def test_message_choice_display_mode_sends_clicks_transitions_and_completes(display_mode, expected_interactive_type, reply_metadata) -> None:
+    raw_snapshot = {
+        "schema_version": 1,
+        "start_node_id": "start",
+        "nodes": [
+            {"id": "start", "type": "message", "data": {"isStart": True, "text": "Olá"}},
+            {
+                "id": "choice",
+                "type": "choice",
+                "data": {
+                    "content": "Escolha",
+                    "display_mode": display_mode,
+                    "options": [{"id": "next", "label": "Continuar"}],
+                },
+            },
+            {"id": "end", "type": "message", "data": {"text": "Fim"}},
+        ],
+        "edges": [
+            {"id": "e1", "source": "start", "target": "choice"},
+            {"id": "e2", "source": "choice", "sourceHandle": "next", "target": "end"},
+        ],
+    }
+    executor, snapshot, event_store, session, db = _executor(raw_snapshot)
+
+    initial = executor.handle_input(db, _input_with_id(snapshot, f"wamid.{display_mode}.initial"))
+
+    assert initial.status == FlowV2SessionStatus.WAITING
+    assert initial.current_node_id == "choice"
+    assert len(initial.actions) == 2
+    action = initial.actions[1]
+    assert isinstance(action, SendChoiceButtonsAction)
+    assert action.display_mode == display_mode
+    assert action.metadata["interactive_type"] == expected_interactive_type
+    assert action.as_effect()["interactive"]["type"] == expected_interactive_type
+    if display_mode == "buttons":
+        assert action.as_effect()["interactive"]["action"]["buttons"] == [{"id": "next", "title": "Continuar"}]
+    else:
+        assert action.as_effect()["interactive"]["action"]["sections"] == [
+            {"title": "Opções", "rows": [{"id": "next", "title": "Continuar"}]}
+        ]
+
+    selected = executor.handle_input(db, _input_with_id(snapshot, f"wamid.{display_mode}.reply", reply_metadata))
+
+    assert selected.status == FlowV2SessionStatus.COMPLETED
+    assert selected.current_node_id is None
+    assert selected.effects == ({"type": "send_message", "text": "Fim"},)
+    assert session.status == FlowV2SessionStatus.COMPLETED
+    assert session.current_node_id is None
+    assert any(event["payload"] == {"node_id": "choice", "row_id": "next"} for event in event_store.events)
+    assert not any(isinstance(action, SendChoiceButtonsAction) for action in selected.actions)

@@ -299,3 +299,57 @@ def test_publisher_does_not_override_existing_choice_options_with_buttons() -> N
     choice = _snapshot_node(result.snapshot, "choice")
     assert choice["data"]["options"] == [{"id": "existing", "label": "Existente"}]
     assert choice["data"]["buttons"] == nodes[1]["data"]["buttons"]
+
+
+def test_publisher_migrates_legacy_buttons_node_to_choice_display_mode_buttons() -> None:
+    nodes = [
+        {"id": "start", "type": "message", "data": {"isStart": True, "content": "Olá"}},
+        {
+            "id": "legacy-buttons",
+            "type": "buttons",
+            "data": {
+                "body_text": "Escolha",
+                "buttons": [{"id": "btn-1", "label": "Vendas", "handleId": "vendas"}],
+            },
+        },
+        {"id": "end", "type": "message", "data": {"content": "Fim"}},
+    ]
+    edges = [
+        {"id": "e1", "source": "start", "target": "legacy-buttons"},
+        {"id": "e2", "source": "legacy-buttons", "sourceHandle": "vendas", "target": "end"},
+    ]
+
+    result = FlowV2Publisher().publish(nodes=nodes, edges=edges)
+
+    choice = _snapshot_node(result.snapshot, "legacy-buttons")
+    assert choice["type"] == "choice"
+    assert choice["data"]["display_mode"] == "buttons"
+    assert choice["data"]["options"] == [{"id": "vendas", "label": "Vendas"}]
+    assert choice["data"]["buttons"] == nodes[1]["data"]["buttons"]
+
+
+def test_publisher_migrates_legacy_list_node_to_choice_display_mode_list() -> None:
+    nodes = [
+        {"id": "start", "type": "message", "data": {"isStart": True, "content": "Olá"}},
+        {
+            "id": "legacy-list",
+            "type": "list",
+            "data": {
+                "body_text": "Escolha",
+                "sections": [{"title": "Áreas", "rows": [{"id": "row-1", "title": "Suporte", "handleId": "suporte"}]}],
+            },
+        },
+        {"id": "end", "type": "message", "data": {"content": "Fim"}},
+    ]
+    edges = [
+        {"id": "e1", "source": "start", "target": "legacy-list"},
+        {"id": "e2", "source": "legacy-list", "sourceHandle": "suporte", "target": "end"},
+    ]
+
+    result = FlowV2Publisher().publish(nodes=nodes, edges=edges)
+
+    choice = _snapshot_node(result.snapshot, "legacy-list")
+    assert choice["type"] == "choice"
+    assert choice["data"]["display_mode"] == "list"
+    assert choice["data"]["options"] == [{"id": "suporte", "label": "Suporte"}]
+    assert choice["data"]["sections"] == nodes[1]["data"]["sections"]

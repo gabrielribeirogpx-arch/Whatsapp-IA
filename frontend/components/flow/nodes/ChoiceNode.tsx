@@ -9,6 +9,8 @@ type ChoiceNodeData = {
   label?: string;
   content?: string;
   buttons?: ChoiceButton[];
+  display_mode?: 'buttons' | 'list';
+  displayMode?: 'buttons' | 'list';
   running?: boolean;
   isStart?: boolean;
   onToggleStart?: (nodeId: string) => void;
@@ -19,6 +21,7 @@ const toHandleId = (value: string, fallback: string) => value.toLowerCase().trim
 
 export default function ChoiceNode({ id, data, selected, isConnectable }: NodeProps) {
   const nodeData = (data || {}) as ChoiceNodeData;
+  const displayMode = nodeData.display_mode || nodeData.displayMode || 'buttons';
   const buttons = (nodeData.buttons || []).map((button, index) => {
     const optionValue = button.value || button.label || button.id || `option_${index + 1}`;
     const label = button.label || button.value || `Opção ${index + 1}`;
@@ -45,11 +48,11 @@ export default function ChoiceNode({ id, data, selected, isConnectable }: NodePr
       running={nodeData.running}
       title="Escolha"
       emoji="🧭"
-      badge="LOGIC"
+      badge={displayMode === 'list' ? 'LISTA' : 'BOTÕES'}
       badgeTone={{ background: '#fff7ed', color: '#c2410c' }}
       accent="linear-gradient(90deg, #f97316, #fb923c)"
-      summary={truncateText(nodeData.content, 50, 'Roteamento interno')}
-      meta="Lógica interna do fluxo"
+      summary={truncateText(nodeData.content, 50, 'Escolha uma opção')}
+      meta={displayMode === 'list' ? 'Lista WhatsApp' : 'Botões WhatsApp'}
       chips={buttons.map((button) => button.label || '')}
       isStart={nodeData.isStart}
       hasValidationError={nodeData.hasValidationError}

@@ -23,6 +23,7 @@ class GraphValidationResult:
 class FlowV2GraphValidator:
     """Validates Flow Publisher V2 graphs before immutable snapshot creation."""
 
+    SUPPORTED_NODE_TYPES = {"message", "choice", "condition", "delay", "action", "start"}
     SUPPORTED_CONDITION_OPERATORS = {"==", "eq", "equals"}
     SUPPORTED_BUILDER_MATCH_TYPES = {"contains", "equals", "eq", "=="}
 
@@ -68,6 +69,9 @@ class FlowV2GraphValidator:
             if node_id_str in node_ids:
                 errors.append(f"FLOW_V2_DUPLICATE_NODE_ID:{node_id_str}")
             node_ids.add(node_id_str)
+            node_type = self._node_type(node)
+            if node_type not in self.SUPPORTED_NODE_TYPES:
+                errors.append(f"FLOW_V2_NODE_TYPE_UNSUPPORTED:{node_id_str}:{node_type}")
             self._validate_node_config(node_id_str, node, errors)
         return node_ids
 
@@ -165,6 +169,9 @@ class FlowV2GraphValidator:
         node_type = self._node_type(node)
         data = self._node_data(node)
         if node_type == "choice":
+            display_mode = str(node.get("display_mode") or data.get("display_mode") or data.get("displayMode") or "buttons").strip().lower()
+            if display_mode not in {"buttons", "list"}:
+                errors.append(f"FLOW_V2_CHOICE_DISPLAY_MODE_INVALID:{node_id}")
             options = node.get("options") or data.get("options") or []
             if not isinstance(options, list) or not options:
                 errors.append(f"FLOW_V2_CHOICE_OPTIONS_INVALID:{node_id}")
