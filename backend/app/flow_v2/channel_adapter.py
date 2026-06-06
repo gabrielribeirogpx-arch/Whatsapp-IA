@@ -216,6 +216,7 @@ class WhatsAppAdapter:
                 "conversation_id": str(conversation_id) if conversation_id is not None else None,
                 "contact_id": str(contact_id) if contact_id is not None else None,
                 "metadata": metadata,
+                "meta_payload": payload,
             }
 
         from app.services.queue import enqueue_send_message

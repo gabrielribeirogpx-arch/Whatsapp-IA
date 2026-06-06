@@ -25,6 +25,7 @@ class FlowV2GraphValidator:
 
     SUPPORTED_CONDITION_OPERATORS = {"==", "eq", "equals"}
     SUPPORTED_BUILDER_MATCH_TYPES = {"contains", "equals", "eq", "=="}
+    SUPPORTED_NODE_TYPES = {"message", "choice", "condition", "delay", "webhook", "transfer"}
 
     def validate(
         self, *, nodes: list[dict[str, Any]] | None, edges: list[dict[str, Any]] | None
@@ -164,6 +165,12 @@ class FlowV2GraphValidator:
     ) -> None:
         node_type = self._node_type(node)
         data = self._node_data(node)
+        if node_type == "":
+            errors.append(f"FLOW_V2_NODE_MISSING_TYPE:{node_id}")
+            return
+        if node_type not in self.SUPPORTED_NODE_TYPES:
+            errors.append(f"FLOW_V2_UNKNOWN_NODE_TYPE:{node_id}:{node_type}")
+            return
         if node_type == "choice":
             options = node.get("options") or data.get("options") or []
             if not isinstance(options, list) or not options:
@@ -263,8 +270,10 @@ class FlowV2GraphValidator:
 
     @staticmethod
     def _node_type(node: dict[str, Any]) -> str:
-        data = FlowV2GraphValidator._node_data(node)
-        return str(node.get("type") or data.get("type") or "message").lower()
+        raw_type = node.get("type")
+        if raw_type is None or str(raw_type).strip() == "":
+            return ""
+        return str(raw_type).strip().lower()
 
     @staticmethod
     def _node_data(node: dict[str, Any]) -> dict[str, Any]:

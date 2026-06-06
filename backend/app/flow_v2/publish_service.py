@@ -8,7 +8,7 @@ from uuid import UUID
 from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
-from app.flow_v2.publisher import FlowV2Publisher
+from app.flow_v2.publisher import FlowV2Publisher, FlowV2SnapshotIntegrityError
 from app.models.flow import Flow, FlowVersion
 
 
@@ -55,6 +55,7 @@ class FlowV2PublishService:
             )
             db.add(version)
             db.flush()
+            self._assert_snapshot_persisted_unchanged(db, version=version, generated_snapshot=published.snapshot)
             flow.current_version_id = version.id
             flow.published_version_id = version.id
             if hasattr(flow, "active_version_id"):
@@ -63,6 +64,20 @@ class FlowV2PublishService:
             db.add(flow)
             db.flush()
             return FlowV2PublishServiceResult(flow=flow, version=version, snapshot=published.snapshot, active_version_id=version.id)
+
+    @staticmethod
+    def _assert_snapshot_persisted_unchanged(db: Session, *, version: FlowVersion, generated_snapshot: dict[str, Any]) -> None:
+        db.flush()
+        if not hasattr(db, "expire"):
+            return
+        if getattr(version, "id", None) is None:
+            raise FlowV2SnapshotIntegrityError("FLOW_V2_SNAPSHOT_COMPARE_MISSING_VERSION_ID")
+        db.expire(version, ["snapshot"])
+        saved_snapshot = db.execute(
+            select(FlowVersion.snapshot).where(FlowVersion.id == version.id)
+        ).scalar_one_or_none()
+        if saved_snapshot != generated_snapshot:
+            raise FlowV2SnapshotIntegrityError(f"FLOW_V2_SNAPSHOT_DIVERGENCE:{version.id}")
 
     @staticmethod
     def _draft_nodes(flow: Flow) -> list[dict[str, Any]]:
