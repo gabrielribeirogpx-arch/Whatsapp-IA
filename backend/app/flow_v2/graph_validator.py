@@ -182,11 +182,7 @@ class FlowV2GraphValidator:
                         f"FLOW_V2_CHOICE_OPTION_ID_REQUIRED:{node_id}:{index}"
                     )
         elif node_type == "delay":
-            seconds = (
-                node.get("seconds")
-                if node.get("seconds") is not None
-                else data.get("seconds")
-            )
+            seconds = node.get("seconds")
             try:
                 if float(seconds) <= 0:
                     errors.append(f"FLOW_V2_DELAY_SECONDS_MUST_BE_POSITIVE:{node_id}")

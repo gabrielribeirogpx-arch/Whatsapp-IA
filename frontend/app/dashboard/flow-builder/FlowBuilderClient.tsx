@@ -69,7 +69,7 @@ const NODE_PRESETS: Record<FlowNodeKind, { label: string; type: string; data: Re
     },
   },
   condition: { label: 'Condição', type: 'condition', data: { condition: '' } },
-  delay: { label: 'Delay', type: 'delay', data: { content: '3' } },
+  delay: { label: 'Delay', type: 'delay', data: { seconds: 3 } },
   action: { label: 'Ação', type: 'action', data: { action: '' } },
 };
 
@@ -126,13 +126,46 @@ const buildFlowEdge = (edge: any): Edge => {
   };
 };
 
+const parseDelaySeconds = (value: unknown): number | undefined => {
+  if (value === null || value === undefined || value === '') return undefined;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return undefined;
+  return Number.isInteger(parsed) ? parsed : parsed;
+};
+
+const normalizeDelayNodePayload = (node: FlowNodePayload): FlowNodePayload => {
+  if (node.type !== 'delay') return node;
+  const data = (node.data || {}) as Record<string, unknown>;
+  const seconds = parseDelaySeconds(
+    (node as FlowNodePayload & { seconds?: unknown }).seconds ??
+    data.seconds ??
+    data.content ??
+    data.delay ??
+    data.wait_seconds ??
+    data.duration,
+  );
+  const { content, delay, wait_seconds, duration, seconds: _dataSeconds, ...cleanData } = data;
+  const nextNode = {
+    ...node,
+    type: 'delay',
+    ...(seconds !== undefined ? { seconds } : {}),
+    data: {
+      ...cleanData,
+      ...(cleanData.isStart ? { isStart: true } : {}),
+    },
+  };
+  if (Object.keys(nextNode.data).length === 0) {
+    delete (nextNode as FlowNodePayload & { data?: FlowNodePayload['data'] }).data;
+  }
+  return nextNode;
+};
 
 const serializeFlowGraph = (nodes: Node[], edges: Edge[]) => {
   const payloadNodes: FlowNodePayload[] = nodes.map((node) => {
     const nodeData = node.data || {};
     const { onChange, onToggleStart, running, hasValidationError, ...cleanData } = nodeData as Record<string, unknown>;
 
-    return {
+    return normalizeDelayNodePayload({
       id: node.id,
       type: node.type || 'message',
       position: node.position || { x: 0, y: 0 },
@@ -140,7 +173,7 @@ const serializeFlowGraph = (nodes: Node[], edges: Edge[]) => {
         ...cleanData,
         isStart: !!cleanData.isStart,
       },
-    };
+    });
   });
 
   const nodeIds = new Set(nodes.map((node) => node.id));
@@ -309,7 +342,7 @@ function FlowNodeEditorPanel({
         {kind === 'delay' && (
           <label className="flow-editor-field">
             Tempo em segundos
-            <input type="number" min="0" value={toText(draft.content || draft.delay || draft.seconds)} onChange={(event) => onDraftChange({ content: event.target.value })} />
+            <input type="number" min="1" value={toText(draft.seconds)} onChange={(event) => onDraftChange({ seconds: parseDelaySeconds(event.target.value) ?? 0 })} />
           </label>
         )}
 
@@ -881,6 +914,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
         position: node.position || randomPosition(),
         data: {
           ...node.data,
+          ...(node.type === 'delay' && node.seconds !== undefined ? { seconds: node.seconds } : {}),
           isStart: node.data?.isStart ?? false,
           buttons: node.type === 'choice' ? normalizeChoiceButtons(node.id, node.data?.buttons) : node.data?.buttons,
           label: node.data?.label || node.data?.content || `Node ${node.id}`,

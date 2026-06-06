@@ -83,6 +83,17 @@ def test_choice_without_option_id_or_source_handle_is_invalid() -> None:
     assert "FLOW_V2_CHOICE_SOURCE_HANDLE_REQUIRED:choice:1" in result.errors
 
 
+def test_legacy_delay_content_is_promoted_to_seconds_before_validation() -> None:
+    nodes = _valid_nodes()
+    nodes[2] = {"id": "delay", "type": "delay", "data": {"content": "5"}}
+
+    result = FlowV2Publisher().publish(nodes=nodes, edges=_valid_edges())
+
+    delay_node = next(node for node in result.snapshot["nodes"] if node["id"] == "delay")
+    assert delay_node["seconds"] == 5
+    assert "content" not in delay_node.get("data", {})
+
+
 @pytest.mark.parametrize("seconds", [0, -1, None, "abc"])
 def test_delay_seconds_must_be_positive(seconds) -> None:
     nodes = _valid_nodes()

@@ -10,6 +10,7 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.flow_v2.delay_contract import normalize_delay_nodes
 from app.models.flow import FlowVersion
 
 logger = logging.getLogger(__name__)
@@ -272,9 +273,10 @@ def migrate_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
 
     schema_version = int(snapshot.get("snapshot_schema_version") or snapshot.get("schema_version") or 1)
     if schema_version == 1:
+        nodes = normalize_delay_nodes(snapshot.get("nodes") if isinstance(snapshot.get("nodes"), list) else [])
         edges = snapshot.get("edges") if isinstance(snapshot.get("edges"), list) else []
         transitions = snapshot.get("transitions")
         if not isinstance(transitions, list):
             transitions = build_transitions_from_edges(edges)
-        return {**snapshot, "snapshot_schema_version": 1, "transitions": transitions}
+        return {**snapshot, "snapshot_schema_version": 1, "nodes": nodes, "transitions": transitions}
     raise FlowV2SnapshotError(f"Unsupported Runtime V2 snapshot_schema_version={schema_version}")

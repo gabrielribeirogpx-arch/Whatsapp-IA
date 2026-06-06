@@ -17,6 +17,7 @@ from app.flow_v2.delay_worker import FlowV2DelayWorker
 from app.flow_v2.event_store import FlowV2EventStore
 from app.flow_v2.executor import FlowV2Executor
 from app.flow_v2.publish_service import FlowV2PublishService
+from app.flow_v2.publisher import FlowV2Publisher
 from app.flow_v2.runtime_worker import FlowV2RuntimeWorker
 from app.flow_v2.snapshot import FlowV2Snapshot, canonical_hash
 from app.models.flow import FlowVersion
@@ -393,6 +394,91 @@ def test_whatsapp_adapter_propagates_structured_ids_to_client() -> None:
     assert calls[0]["metadata"]["tenant_id"] == str(snapshot.tenant_id)
     assert calls[0]["metadata"]["provider_id"] == provider_id
     assert calls[0]["metadata"]["tenant_id"] != ""
+
+
+
+def test_message_delay_message_publish_waits_worker_resumes_and_sends_next_message() -> None:
+    nodes = [
+        {"id": "start", "type": "message", "content": "Olá"},
+        {"id": "delay", "type": "delay", "seconds": 5},
+        {"id": "after_delay", "type": "message", "content": "Depois"},
+    ]
+    edges = [
+        {"id": "e1", "source": "start", "target": "delay"},
+        {"id": "e2", "source": "delay", "target": "after_delay"},
+    ]
+
+    published = FlowV2Publisher().publish(nodes=nodes, edges=edges)
+    assert published.validation.is_valid
+    executor, snapshot, event_store, session, db = _executor(published.snapshot)
+
+    initial = executor.handle_input(db, _input(snapshot))
+
+    assert initial.status == FlowV2SessionStatus.WAITING
+    assert initial.current_node_id == "after_delay"
+    assert initial.effects == ({"type": "send_message", "text": "Olá"},)
+    scheduled_jobs = [item for item in db.added if item.__class__.__name__ == "FlowV2ScheduledJob"]
+    assert len(scheduled_jobs) == 1
+    assert scheduled_jobs[0].resume_node_id == "after_delay"
+
+    class _Result:
+        def __init__(self, value):
+            self.value = value
+
+        def scalars(self):
+            return self
+
+        def __iter__(self):
+            return iter(self.value)
+
+        def scalar_one_or_none(self):
+            return self.value
+
+    class _DelayDB(_FakeDB):
+        def __init__(self, job):
+            super().__init__()
+            self.job = job
+            self.calls = 0
+            self.deleted = 0
+
+        def execute(self, statement):
+            if "DELETE FROM flow_v2_scheduled_jobs" in str(statement):
+                self.deleted += 1
+                return _Result(None)
+            self.calls += 1
+            if self.calls == 1:
+                return _Result([self.job])
+            return _Result(session)
+
+    class _RuntimeWorker:
+        def __init__(self):
+            self.outputs = []
+
+        def process(self, db, runtime_input):
+            output = executor.handle_input(db, runtime_input)
+            self.outputs.append(output)
+            return SimpleNamespace(runtime_output=output, actions=output.actions, deliveries=())
+
+    class _IdempotencyStore:
+        def reserve_once(self, db, **kwargs):
+            return SimpleNamespace(is_duplicate=False)
+
+        def mark_session(self, db, *, decision, session_id):
+            pass
+
+    executor.idempotency_store = _IdempotencyStore()
+    runtime_worker = _RuntimeWorker()
+    result = FlowV2DelayWorker(
+        runtime_worker=runtime_worker,
+        event_store=event_store,
+        idempotency_store=_IdempotencyStore(),
+    ).run_due(_DelayDB(scheduled_jobs[0]), now=scheduled_jobs[0].run_at + timedelta(seconds=1))
+
+    assert result.processed == 1
+    assert runtime_worker.outputs[0].status == FlowV2SessionStatus.COMPLETED
+    assert runtime_worker.outputs[0].effects == ({"type": "send_message", "text": "Depois"},)
+    assert session.status == str(FlowV2SessionStatus.COMPLETED)
+    assert session.current_node_id is None
 
 
 def test_delay_worker_resumes_due_job_and_emits_delay_resumed() -> None:

@@ -269,9 +269,14 @@ export type FlowNodePayload = {
   id: string;
   type: string;
   position: { x: number; y: number };
+  seconds?: number;
   data: {
     label?: string;
     content?: string;
+    seconds?: number;
+    delay?: string | number;
+    wait_seconds?: string | number;
+    duration?: string | number;
     body_text?: string;
     display_mode?: 'buttons' | 'list';
     displayMode?: 'buttons' | 'list';

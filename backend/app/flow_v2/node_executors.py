@@ -458,12 +458,7 @@ class DelayNodeExecutor(BaseNodeExecutor):
         self, db, *, snapshot, session, node, runtime_input
     ) -> NodeExecutionResult:
         node_id = str(node["id"])
-        data = self._node_data(node)
-        seconds = int(
-            node.get("seconds")
-            if node.get("seconds") is not None
-            else data.get("seconds", 0)
-        )
+        seconds = int(node.get("seconds", 0))
         logger.info("[V2 NODE EXECUTION] delay node_id=%s seconds=%s", node_id, seconds)
         next_node_id = self._default_next(
             db, snapshot=snapshot, session=session, node_id=node_id
