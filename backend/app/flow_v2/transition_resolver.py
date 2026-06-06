@@ -48,6 +48,13 @@ class TransitionResolver:
         )
         if not matches:
             outgoing = [transition for transition in transitions if str(transition.get("source_node_id")) == source_node_id]
+            logger.error(
+                "[CHOICE TRANSITION NOT FOUND] source_node_id=%s source_handle=%s transitions_count=%s outgoing_count=%s reason=no_matching_transition",
+                source_node_id,
+                source_handle,
+                len(transitions),
+                len(outgoing),
+            )
             audit_report = build_snapshot_transition_audit(
                 snapshot,
                 source_node_id=source_node_id,
@@ -96,6 +103,12 @@ class TransitionResolver:
         transition = matches[0]
         target = transition.get("target_node_id") or transition.get("target") or transition.get("to")
         if not target or str(target) not in snapshot.node_by_id:
+            logger.error(
+                "[CHOICE TRANSITION NOT FOUND] source_node_id=%s source_handle=%s target_node_id=%s reason=invalid_target",
+                source_node_id,
+                source_handle,
+                target,
+            )
             payload = {"source_handle": source_handle, "target_node_id": str(target) if target else None, "transition": transition}
             self.event_store.append(
                 db,
@@ -109,6 +122,13 @@ class TransitionResolver:
                 "Runtime V2 transition target is invalid: "
                 f"source_node_id={source_node_id} source_handle={source_handle} target_node_id={target}"
             )
+        logger.info(
+            "[CHOICE TRANSITION FOUND] source_node_id=%s source_handle=%s target_node_id=%s transition=%s",
+            source_node_id,
+            source_handle,
+            target,
+            transition,
+        )
         logger.info(
             "[V2 TRANSITION RESOLVER] selected source_node_id=%s source_handle=%s target_node_id=%s transition=%s",
             source_node_id,

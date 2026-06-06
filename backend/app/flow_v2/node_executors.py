@@ -271,6 +271,17 @@ class ChoiceNodeExecutor(BaseNodeExecutor):
         row_id = runtime_input.metadata.get("row_id") or runtime_input.metadata.get(
             "sourceHandle"
         )
+        logger.info(
+            "[CHOICE PARSED] source=RuntimeV2ChoiceResolver node_id=%s session_id=%s message_text=%s row_id=%s sourceHandle=%s selected_row_id=%s interactive_reply_id=%s expected_runtime_choice_key=row_id_or_sourceHandle option_ids=%s",
+            node_id,
+            session.id,
+            runtime_input.message_text,
+            runtime_input.metadata.get("row_id"),
+            runtime_input.metadata.get("sourceHandle"),
+            runtime_input.metadata.get("selected_row_id"),
+            runtime_input.metadata.get("interactive_reply_id"),
+            option_ids,
+        )
         if row_id is None:
             buttons = _choice_buttons_from_options(options)
             action_metadata = {
@@ -297,6 +308,24 @@ class ChoiceNodeExecutor(BaseNodeExecutor):
                 metadata=action_metadata,
             )
             result = NodeExecutionResult(actions=(action,), status="wait")
+            logger.error(
+                "[CHOICE OPTION NOT FOUND] node_id=%s session_id=%s reason=missing_runtime_choice_key row_id=%s sourceHandle=%s selected_row_id=%s interactive_reply_id=%s message_text=%s expected_runtime_choice_key=row_id_or_sourceHandle",
+                node_id,
+                session.id,
+                runtime_input.metadata.get("row_id"),
+                runtime_input.metadata.get("sourceHandle"),
+                runtime_input.metadata.get("selected_row_id"),
+                runtime_input.metadata.get("interactive_reply_id"),
+                runtime_input.message_text,
+            )
+            logger.info(
+                "[CHOICE EXECUTION COMPLETE] node_id=%s session_id=%s status=%s next_node_id=%s actions_count=%s reason=waiting_for_choice_selection",
+                node_id,
+                session.id,
+                result.status,
+                result.next_node_id,
+                len(result.actions),
+            )
             logger.info(
                 "[V2 CHOICE ACTION] %s",
                 json.dumps(
@@ -317,6 +346,15 @@ class ChoiceNodeExecutor(BaseNodeExecutor):
             return result
         row_id = str(row_id)
         if row_id not in option_ids:
+            logger.error(
+                "[CHOICE OPTION NOT FOUND] node_id=%s session_id=%s received_row_id=%s allowed_option_ids=%s selected_row_id=%s interactive_reply_id=%s reason=row_id_not_in_option_ids",
+                node_id,
+                session.id,
+                row_id,
+                option_ids,
+                runtime_input.metadata.get("selected_row_id"),
+                runtime_input.metadata.get("interactive_reply_id"),
+            )
             self.event_store.append(
                 db,
                 session=session,
@@ -325,6 +363,13 @@ class ChoiceNodeExecutor(BaseNodeExecutor):
                 payload={"source_handle": row_id, "allowed_option_ids": option_ids},
             )
             raise RuntimeError("Runtime V2 choice option not found")
+        logger.info(
+            "[CHOICE OPTION MATCHED] node_id=%s session_id=%s received_row_id=%s allowed_option_ids=%s",
+            node_id,
+            session.id,
+            row_id,
+            option_ids,
+        )
         self.event_store.append(
             db,
             session=session,
@@ -339,7 +384,23 @@ class ChoiceNodeExecutor(BaseNodeExecutor):
             source_node_id=node_id,
             source_handle=row_id,
         ).target_node_id
+        logger.info(
+            "[CHOICE NEXT NODE] node_id=%s session_id=%s source_handle=%s next_node_id=%s next_node_exists=%s",
+            node_id,
+            session.id,
+            row_id,
+            next_node_id,
+            next_node_id in snapshot.node_by_id,
+        )
         result = NodeExecutionResult(next_node_id=next_node_id)
+        logger.info(
+            "[CHOICE EXECUTION COMPLETE] node_id=%s session_id=%s status=%s next_node_id=%s actions_count=%s",
+            node_id,
+            session.id,
+            result.status,
+            result.next_node_id,
+            len(result.actions),
+        )
         logger.info(
             "[V2 CHOICE ACTION] %s",
             json.dumps(
