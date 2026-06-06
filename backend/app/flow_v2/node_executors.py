@@ -103,13 +103,28 @@ class MessageNodeExecutor(BaseNodeExecutor):
             or data.get("message")
         )
         message = "" if message is None else str(message)
+        is_start = bool(node.get("isStart") or data.get("isStart"))
         logger.info(
-            "[V2 NODE EXECUTION] message node_id=%s message_preview=%s",
+            "[MESSAGE EXECUTED] node_id=%s is_start=%s message_preview=%s",
             node_id,
+            is_start,
             message[:120],
         )
         next_node_id = self._default_next_or_terminal(
             db, snapshot=snapshot, session=session, node_id=node_id
+        )
+        next_node = snapshot.node_by_id.get(next_node_id) if next_node_id else None
+        next_node_data = self._node_data(next_node) if isinstance(next_node, dict) else {}
+        next_node_type = (
+            str(next_node.get("type") or next_node_data.get("type") or "message")
+            if isinstance(next_node, dict)
+            else None
+        )
+        logger.info(
+            "[MESSAGE NEXT NODE] node_id=%s next_node_id=%s next_node_type=%s",
+            node_id,
+            next_node_id,
+            next_node_type,
         )
         actions: tuple[RuntimeAction, ...] = ()
         if message:
@@ -142,18 +157,28 @@ class MessageNodeExecutor(BaseNodeExecutor):
                 sorted(action.metadata.keys()),
             )
             actions = (action,)
-        should_wait_after_start = (
-            bool(node.get("isStart") or data.get("isStart"))
-            and next_node_id is not None
+        legacy_wait_after_start_condition = is_start and next_node_id is not None
+        wait_after_start_condition = legacy_wait_after_start_condition and next_node_type != "choice"
+        status = (
+            "complete"
+            if next_node_id is None
+            else ("wait" if wait_after_start_condition else "continue")
+        )
+        logger.info(
+            "[MESSAGE AUTO CONTINUE] node_id=%s next_node_id=%s next_node_type=%s status=%s auto_continue=%s legacy_wait_after_start_condition=%s wait_after_start_condition=%s blocking_condition=%s",
+            node_id,
+            next_node_id,
+            next_node_type,
+            status,
+            status == "continue",
+            legacy_wait_after_start_condition,
+            wait_after_start_condition,
+            "isStart && next_node_id && next_node_type != choice" if wait_after_start_condition else "none",
         )
         return NodeExecutionResult(
             actions=actions,
             next_node_id=next_node_id,
-            status=(
-                "wait"
-                if should_wait_after_start
-                else ("complete" if next_node_id is None else "continue")
-            ),
+            status=status,
         )
 
 
