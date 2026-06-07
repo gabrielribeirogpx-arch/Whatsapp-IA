@@ -1,6 +1,6 @@
 'use client';
 
-import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 
 import ChatWindow from './ChatWindow';
@@ -40,6 +40,44 @@ export default function ChatShell() {
   const [modeError, setModeError] = useState('');
   const [querySelectionMissing, setQuerySelectionMissing] = useState(false);
   const [crmOpen, setCrmOpen] = useState(false);
+  const [handoffToast, setHandoffToast] = useState('');
+  const previousModesRef = useRef<Map<string, string>>(new Map());
+  const hasLoadedConversationsRef = useRef(false);
+
+
+  const playHumanHandoffSound = useCallback(() => {
+    // TODO: Reativar notificação sonora quando houver um asset de áudio existente/aprovado no projeto.
+  }, []);
+
+  const applyConversations = useCallback(
+    (items: Conversation[], options: { notifyHandoff?: boolean } = {}) => {
+      const notifyHandoff = options.notifyHandoff ?? true;
+      const previousModes = previousModesRef.current;
+
+      if (notifyHandoff && hasLoadedConversationsRef.current) {
+        const handoffConversation = items.find((conversation) => {
+          const conversationId = String(conversation.id);
+          const previousMode = previousModes.get(conversationId);
+          const currentMode = String(conversation.mode || '').toLowerCase();
+
+          return Boolean(previousMode && previousMode !== 'human' && currentMode === 'human');
+        });
+
+        if (handoffConversation) {
+          const displayName = handoffConversation.name || handoffConversation.phone || 'Conversa';
+          setHandoffToast(`Cliente solicitou atendimento humano: ${displayName}`);
+          playHumanHandoffSound();
+        }
+      }
+
+      previousModesRef.current = new Map(
+        items.map((conversation) => [String(conversation.id), String(conversation.mode || '').toLowerCase()])
+      );
+      hasLoadedConversationsRef.current = true;
+      setConversations(items);
+    },
+    [playHumanHandoffSound]
+  );
 
 
   useEffect(() => {
@@ -78,7 +116,9 @@ export default function ChatShell() {
           score: conversation.score,
           lastMessage: conversation.last_message,
           lastMessageAt: conversation.updated_at,
-          status: conversation.mode
+          status: conversation.mode,
+          assignedUserId: conversation.assigned_user_id ?? null,
+          awaitingHumanAssignment: String(conversation.mode || '').toLowerCase() === 'human' && !conversation.assigned_user_id
         };
       }),
     [conversations]
@@ -110,6 +150,14 @@ export default function ChatShell() {
         return normalizedStatus !== 'human' && normalizedStatus !== 'bot' && normalizedStatus !== 'ai';
       }).length,
     [orderedContacts]
+  );
+
+  const humanRequestsCount = useMemo(
+    () =>
+      conversations.filter(
+        (conversation) => String(conversation.mode || '').toLowerCase() === 'human' && !conversation.assigned_user_id
+      ).length,
+    [conversations]
   );
 
   const selectedContact = useMemo(
@@ -147,6 +195,14 @@ export default function ChatShell() {
   }, [modeNotice, modeError]);
 
   useEffect(() => {
+    if (!handoffToast) return;
+
+    const timeoutId = window.setTimeout(() => setHandoffToast(''), 5000);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [handoffToast]);
+
+  useEffect(() => {
     if (!selectedContactId) return;
 
     fetchMessages(selectedContactId).catch(() => undefined);
@@ -178,7 +234,7 @@ export default function ChatShell() {
       }
 
       fetchMessages(selectedContactId).catch(() => undefined);
-      getConversations().then(setConversations).catch(() => undefined);
+      getConversations().then((items) => applyConversations(items)).catch(() => undefined);
     };
 
     eventSource.onerror = () => {
@@ -188,7 +244,7 @@ export default function ChatShell() {
     return () => {
       eventSource.close();
     };
-  }, [selectedContactId, selectedConversation, fetchMessages]);
+  }, [selectedContactId, selectedConversation, fetchMessages, applyConversations]);
 
 
   useEffect(() => {
@@ -198,7 +254,7 @@ export default function ChatShell() {
         const targetPhone = searchParams.get('phone');
         const normalizedTargetPhone = targetPhone ? targetPhone.replace(/\D/g, '') : '';
 
-        setConversations(items);
+        applyConversations(items, { notifyHandoff: false });
 
         const matchedConversation = items.find((conversation) => {
           const byContactId = targetContactId
@@ -225,7 +281,7 @@ export default function ChatShell() {
         setSelectedContactId((current) => current || (items[0] ? String(items[0].contact_id ?? items[0].id) : ''));
       })
       .catch(() => setConversations([]));
-  }, [searchParams]);
+  }, [searchParams, applyConversations]);
 
 
   function onSelectContact(contactId: string) {
@@ -270,11 +326,10 @@ export default function ChatShell() {
       await updateConversationMode(conversationId, newMode);
 
       setMode(newMode);
-      setConversations((current) =>
-        current.map((conversation) =>
-          conversation.id === selectedConversation.id ? { ...conversation, mode: newMode } : conversation
-        )
+      const updatedConversations = conversations.map((conversation) =>
+        conversation.id === selectedConversation.id ? { ...conversation, mode: newMode } : conversation
       );
+      applyConversations(updatedConversations, { notifyHandoff: false });
       setModeNotice('Modo atualizado.');
     } catch (err) {
       console.error('Erro ao atualizar modo:', err);
@@ -294,6 +349,7 @@ export default function ChatShell() {
         sidebarOpen={sidebarOpen}
         onToggleSidebar={() => setSidebarOpen((value) => !value)}
         unansweredCount={unansweredCount}
+        humanRequestsCount={humanRequestsCount}
       />
       <ChatWindow
         contact={selectedContact}
@@ -309,6 +365,7 @@ export default function ChatShell() {
         emptyStateMessage={querySelectionMissing ? 'Conversa ainda não encontrada para este contato.' : undefined}
         onModeChange={handleChangeMode}
       />
+      {handoffToast ? <div className="wa-handoff-toast" role="status">{handoffToast}</div> : null}
       <CRMContactSidebar contact={selectedContact} open={crmOpen} onClose={() => setCrmOpen(false)} />
     </div>
   );

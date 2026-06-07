@@ -3849,3 +3849,49 @@ input {
     box-shadow: -18px 0 40px rgba(15, 23, 42, 0.18);
   }
 }
+
+.wa-contact-badge.handoff,
+.wa-chat-handoff-badge {
+  background: #fee2e2;
+  color: #991b1b;
+  border: 1px solid #fecaca;
+}
+
+.wa-chat-handoff-badge {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  margin-top: 0.45rem;
+  border-radius: 999px;
+  padding: 0.22rem 0.6rem;
+  font-size: 0.74rem;
+  font-weight: 700;
+}
+
+.wa-handoff-toast {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  z-index: 50;
+  max-width: min(360px, calc(100vw - 48px));
+  border-radius: 16px;
+  border: 1px solid #fecaca;
+  background: #fff;
+  color: #991b1b;
+  box-shadow: 0 24px 60px rgba(127, 29, 29, 0.18);
+  padding: 14px 16px;
+  font-size: 0.92rem;
+  font-weight: 700;
+  animation: waHandoffToastIn 0.22s ease-out;
+}
+
+@keyframes waHandoffToastIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
