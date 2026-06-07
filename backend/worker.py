@@ -7,11 +7,13 @@ import os
 import signal
 import uuid
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from time import time
 
 from redis.asyncio import Redis
 
 from app.db.session import SessionLocal
+from app.flow_v2.delay_worker import FlowV2DelayWorker
 from app.services.delay_queue_service import DELAY_ZSET_KEY
 from app.services.flow_engine_service import process_flow_engine
 
@@ -39,15 +41,27 @@ class DelayJob:
 
 
 class DelayWorker:
-    def __init__(self, redis_url: str, poll_interval_seconds: float = 1.0) -> None:
+    def __init__(
+        self,
+        redis_url: str,
+        poll_interval_seconds: float = 1.0,
+        *,
+        flow_v2_delay_worker: FlowV2DelayWorker | None = None,
+    ) -> None:
         self.redis_url = redis_url
         self.poll_interval_seconds = poll_interval_seconds
         self.redis: Redis = Redis.from_url(redis_url, decode_responses=True)
+        self.flow_v2_delay_worker = flow_v2_delay_worker or FlowV2DelayWorker()
         self._stop_event = asyncio.Event()
 
     async def start(self) -> None:
         self._register_signal_handlers()
-        logger.info("Delay worker iniciado. redis=%s zset=%s", self.redis_url, DELAY_ZSET_KEY)
+        logger.info(
+            "Delay worker iniciado. redis=%s zset=%s v2_table=%s",
+            self.redis_url,
+            DELAY_ZSET_KEY,
+            "flow_v2_scheduled_jobs",
+        )
 
         try:
             while not self._stop_event.is_set():
@@ -72,6 +86,13 @@ class DelayWorker:
                 logger.warning("Signal handler não suportado para %s neste ambiente", sig)
 
     async def _process_due_jobs_once(self) -> None:
+        try:
+            processed_v2 = await asyncio.to_thread(self._process_flow_v2_due_jobs_once)
+            if processed_v2:
+                logger.info("Runtime V2 delay jobs processados count=%s backend=flow_v2_scheduled_jobs", processed_v2)
+        except Exception:
+            logger.exception("Falha ao processar delays Runtime V2 em flow_v2_scheduled_jobs")
+
         now = int(time())
         raw_jobs = await self.redis.zrangebyscore(DELAY_ZSET_KEY, min=0, max=now)
         if not raw_jobs:
@@ -104,6 +125,19 @@ class DelayWorker:
                     job.next_node_id,
                 )
                 await self.redis.zadd(DELAY_ZSET_KEY, {raw_job: now + 1})
+
+    def _process_flow_v2_due_jobs_once(self) -> int:
+        with SessionLocal() as db:
+            try:
+                result = self.flow_v2_delay_worker.run_due(
+                    db,
+                    now=datetime.now(UTC).replace(tzinfo=None),
+                )
+                db.commit()
+                return result.processed
+            except Exception:
+                db.rollback()
+                raise
 
     @staticmethod
     def _run_flow_engine_job(job: DelayJob) -> None:

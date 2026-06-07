@@ -464,10 +464,27 @@ class DelayNodeExecutor(BaseNodeExecutor):
         self, db, *, snapshot, session, node, runtime_input
     ) -> NodeExecutionResult:
         node_id = str(node["id"])
-        seconds = int(node.get("seconds", 0))
-        logger.info("[V2 NODE EXECUTION] delay node_id=%s seconds=%s", node_id, seconds)
+        data = self._node_data(node)
+        raw_seconds = node.get("seconds", data.get("seconds", 0))
+        seconds = int(raw_seconds or 0)
+        logger.info(
+            "[DELAY EXECUTE INPUT] session_id=%s node_id=%s current_node_id=%s raw_seconds=%s seconds=%s node=%s",
+            session.id,
+            node_id,
+            session.current_node_id,
+            raw_seconds,
+            seconds,
+            node,
+        )
         next_node_id = self._default_next(
             db, snapshot=snapshot, session=session, node_id=node_id
+        )
+        logger.info(
+            "[DELAY EXECUTE NEXT] session_id=%s node_id=%s seconds=%s next_node_id=%s",
+            session.id,
+            node_id,
+            seconds,
+            next_node_id,
         )
         job = FlowV2ScheduledJob(
             id=uuid.uuid4(),
@@ -478,6 +495,13 @@ class DelayNodeExecutor(BaseNodeExecutor):
         )
         if hasattr(db, "add"):
             db.add(job)
+        logger.info(
+            "[DELAY JOB CREATED] session_id=%s job_id=%s resume_node_id=%s run_at=%s backend=flow_v2_scheduled_jobs",
+            session.id,
+            job.id,
+            job.resume_node_id,
+            job.run_at,
+        )
         self.event_store.append(
             db,
             session=session,
@@ -501,9 +525,18 @@ class DelayNodeExecutor(BaseNodeExecutor):
             run_at=job.run_at,
             seconds=seconds,
         )
-        return NodeExecutionResult(
+        result = NodeExecutionResult(
             actions=(action,), status="scheduled", next_node_id=next_node_id
         )
+        logger.info(
+            "[DELAY EXECUTE RETURN] session_id=%s node_id=%s status=%s next_node_id=%s actions_count=%s",
+            session.id,
+            node_id,
+            result.status,
+            result.next_node_id,
+            len(result.actions),
+        )
+        return result
 
 
 class ConditionNodeExecutor(BaseNodeExecutor):
