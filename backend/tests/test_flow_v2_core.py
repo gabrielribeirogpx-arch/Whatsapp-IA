@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import uuid
 from contextlib import contextmanager
+from types import SimpleNamespace
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -19,6 +20,12 @@ class _FakeDB:
         self.added = []
         self.session = None
         self.deleted = []
+        self.conversation = None
+
+    def get(self, model, item_id):
+        if self.conversation is not None and item_id == getattr(self.conversation, "id", None):
+            return self.conversation
+        return None
 
     def add(self, item):
         self.added.append(item)
@@ -857,3 +864,76 @@ def test_message_to_action_to_message_continues_runtime_v2(action_type) -> None:
         and event["payload"] == {"node_type": "action", "status": "continue"}
         for event in event_store.events
     )
+
+
+def test_transfer_human_marks_conversation_and_blocks_next_runtime_execution() -> None:
+    raw_snapshot = {
+        "schema_version": 1,
+        "start_node_id": "start",
+        "nodes": [
+            {"id": "start", "type": "message", "content": "Mensagem"},
+            {
+                "id": "action",
+                "type": "action",
+                "data": {
+                    "action_type": "transfer_human",
+                    "params": {"reason": "solicitou humano"},
+                },
+            },
+            {"id": "end", "type": "message", "content": "Humano acionado"},
+        ],
+        "edges": [
+            {"id": "e1", "source": "start", "target": "action"},
+            {"id": "e2", "source": "action", "target": "end"},
+        ],
+    }
+    executor, snapshot, event_store, session, db = _executor(raw_snapshot)
+    conversation = SimpleNamespace(
+        id=uuid.uuid4(),
+        tenant_id=snapshot.tenant_id,
+        phone_number="+5511999999999",
+        mode="flow",
+        context={},
+    )
+    db.conversation = conversation
+
+    first = executor.handle_input(db, RuntimeInput(
+        tenant_id=snapshot.tenant_id,
+        flow_version_id=snapshot.flow_version_id,
+        external_user_id="whatsapp:+5511999999999",
+        message_text="oi",
+        conversation_id=conversation.id,
+        input_message_id="wamid.transfer.first",
+        metadata={},
+    ))
+
+    assert first.status == FlowV2SessionStatus.COMPLETED
+    assert first.effects == (
+        {"type": "send_message", "text": "Mensagem"},
+        {"type": "send_message", "text": "Humano acionado"},
+    )
+    assert conversation.mode == "human"
+    assert conversation.context["transfer_reason"] == "solicitou humano"
+    assert any(
+        event["event_type"] == "NODE_EXECUTED"
+        and event["node_id"] == "action"
+        and event["payload"] == {"node_type": "action", "status": "continue"}
+        for event in event_store.events
+    )
+
+    emitted_after_first = len(event_store.events)
+    second = executor.handle_input(db, RuntimeInput(
+        tenant_id=snapshot.tenant_id,
+        flow_version_id=snapshot.flow_version_id,
+        external_user_id="whatsapp:+5511999999999",
+        message_text="oi de novo",
+        conversation_id=conversation.id,
+        input_message_id="wamid.transfer.second",
+        metadata={},
+    ))
+
+    assert second.status == FlowV2SessionStatus.COMPLETED
+    assert second.actions == ()
+    assert second.effects == ()
+    assert second.emitted_event_count == 0
+    assert len(event_store.events) == emitted_after_first

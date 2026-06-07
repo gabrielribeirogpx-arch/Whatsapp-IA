@@ -7,7 +7,12 @@ from app.services.bot_service import handle_bot, handle_visual_flow_priority
 from app.services.conversation_log_service import log_conversation_event
 from app.services.flow_engine_service import get_active_visual_flow, is_flow_trigger
 from app.services.flow_session_service import FlowSessionService
-from app.services.flow_runtime_selector import FlowRuntimeSelector, bind_conversation_to_flow, resolve_flow_runtime
+from app.services.flow_runtime_selector import (
+    FlowRuntimeSelector,
+    bind_conversation_to_flow,
+    is_conversation_human,
+    resolve_flow_runtime,
+)
 
 
 
@@ -49,6 +54,17 @@ def handle_incoming_message(db: Session, message: Message, conversation: Convers
 
     print(f"[MODE] {mode}")
     print(f"[FLOW] node={conversation.current_node_id}")
+
+    if is_conversation_human(conversation):
+        print("[HUMAN MODE] automação desabilitada; runtime não executado")
+        log_conversation_event(
+            db,
+            {
+                **base_log_data,
+                "flow_step": conversation.conversation_state,
+            },
+        )
+        return None
 
     session_service = FlowSessionService(db)
     active_flow_for_state = get_active_visual_flow(db=db, tenant_id=conversation.tenant_id)

@@ -28,10 +28,11 @@ class FlowRuntimeDispatchResult:
     runtime: str
     processed_by_v2: bool = False
     worker_result: FlowV2WorkerResult | None = None
+    automation_skipped: bool = False
 
     @property
     def should_run_v1(self) -> bool:
-        return self.runtime == FLOW_RUNTIME_V1 and not self.processed_by_v2
+        return self.runtime == FLOW_RUNTIME_V1 and not self.processed_by_v2 and not self.automation_skipped
 
 
 def resolve_flow_runtime(flow: Flow | None) -> str:
@@ -43,6 +44,12 @@ def resolve_flow_runtime(flow: Flow | None) -> str:
     return FLOW_RUNTIME_V1
 
 
+def is_conversation_human(conversation: Conversation | None) -> bool:
+    """Return True when automation must stay disabled for human service."""
+
+    return str(getattr(conversation, "mode", "") or "").strip().lower() == "human"
+
+
 def resolve_runtime_flow_for_conversation(
     *,
     db: Session,
@@ -51,6 +58,14 @@ def resolve_runtime_flow_for_conversation(
     message_text: str,
 ) -> Flow | None:
     """Find the flow whose runtime should handle this inbound WhatsApp message."""
+
+    if is_conversation_human(conversation):
+        logger.info(
+            "[FLOW RUNTIME SKIPPED] reason=human_mode tenant_id=%s conversation_id=%s",
+            tenant_id,
+            getattr(conversation, "id", None),
+        )
+        return None
 
     current_flow_id = getattr(conversation, "current_flow_id", None) or getattr(conversation, "current_flow", None)
     if current_flow_id:
@@ -168,6 +183,14 @@ class FlowRuntimeSelector:
         metadata: dict[str, Any] | None = None,
     ) -> FlowRuntimeDispatchResult:
         runtime = resolve_flow_runtime(flow)
+        if is_conversation_human(conversation):
+            logger.info(
+                "[FLOW RUNTIME SKIPPED] reason=human_mode tenant_id=%s flow_id=%s conversation_id=%s",
+                tenant_id,
+                getattr(flow, "id", None),
+                getattr(conversation, "id", None),
+            )
+            return FlowRuntimeDispatchResult(runtime=runtime, processed_by_v2=False, automation_skipped=True)
         if runtime == FLOW_RUNTIME_V1:
             return FlowRuntimeDispatchResult(runtime=FLOW_RUNTIME_V1)
 
