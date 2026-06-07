@@ -1,5 +1,5 @@
 import { FormEvent, KeyboardEvent, useEffect, useMemo, useRef, useState } from 'react';
-import { Paperclip, Mic, SendHorizontal, Smile, X } from 'lucide-react';
+import { MoreVertical, Paperclip, Mic, RotateCcw, SendHorizontal, Smile, X } from 'lucide-react';
 import { ChatMessage, Contact, ConversationMode } from '../lib/types';
 import { IconMenu } from './icons';
 import Avatar from './Avatar';
@@ -20,6 +20,8 @@ type ChatWindowProps = {
   modeError?: string;
   emptyStateMessage?: string;
   onModeChange: (mode: ConversationMode) => void;
+  onResetConversation?: () => Promise<void> | void;
+  resetInProgress?: boolean;
 };
 
 type ComposerAttachment = { id: string; file: File; previewUrl?: string };
@@ -45,7 +47,7 @@ const formatSize = (bytes: number) => {
 };
 
 export default function ChatWindow(props: ChatWindowProps) {
-  const { contact, messages, inputValue, onInputChange, onSend, onToggleSidebar, mode, modeUpdating = false, modeNotice, modeError, emptyStateMessage, onModeChange } = props;
+  const { contact, messages, inputValue, onInputChange, onSend, onToggleSidebar, mode, modeUpdating = false, modeNotice, modeError, emptyStateMessage, onModeChange, onResetConversation, resetInProgress = false } = props;
   const messagesRef = useRef<HTMLElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const composerFormRef = useRef<HTMLFormElement | null>(null);
@@ -54,6 +56,8 @@ export default function ChatWindow(props: ChatWindowProps) {
   const [showEmoji, setShowEmoji] = useState(false);
   const [attachments, setAttachments] = useState<ComposerAttachment[]>([]);
   const [dragActive, setDragActive] = useState(false);
+  const [actionsOpen, setActionsOpen] = useState(false);
+  const [confirmResetOpen, setConfirmResetOpen] = useState(false);
 
   useEffect(() => {
     if (!messagesRef.current) return;
@@ -78,6 +82,13 @@ export default function ChatWindow(props: ChatWindowProps) {
     document.addEventListener('mousedown', onDocumentClick);
     return () => document.removeEventListener('mousedown', onDocumentClick);
   }, []);
+
+  useEffect(() => {
+    if (!contact) {
+      setActionsOpen(false);
+      setConfirmResetOpen(false);
+    }
+  }, [contact]);
 
   useEffect(() => () => attachments.forEach((a) => a.previewUrl && URL.revokeObjectURL(a.previewUrl)), [attachments]);
 
@@ -142,7 +153,35 @@ export default function ChatWindow(props: ChatWindowProps) {
               </div>
             </div>
             <div className="wa-chat-actions">
-              <ConversationModeSelector mode={mode} loading={modeUpdating} disabled={!contact} onChange={onModeChange} />
+              <div className="wa-chat-actions-row">
+                <ConversationModeSelector mode={mode} loading={modeUpdating} disabled={!contact} onChange={onModeChange} />
+                <div className="wa-conversation-menu-wrap">
+                  <button
+                    type="button"
+                    className="wa-conversation-menu-trigger"
+                    onClick={() => setActionsOpen((current) => !current)}
+                    aria-label="Abrir menu da conversa"
+                    aria-expanded={actionsOpen}
+                  >
+                    <MoreVertical size={18} />
+                  </button>
+                  {actionsOpen ? (
+                    <div className="wa-conversation-menu" role="menu">
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={() => {
+                          setActionsOpen(false);
+                          setConfirmResetOpen(true);
+                        }}
+                      >
+                        <RotateCcw size={14} />
+                        🔄 Resetar Conversa
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
+              </div>
               {modeUpdating ? <p className="wa-mode-feedback">Atualizando modo...</p> : null}
               {!modeUpdating && modeNotice ? <p className="wa-mode-feedback success">{modeNotice}</p> : null}
               {!modeUpdating && modeError ? <p className="wa-mode-feedback error">{modeError}</p> : null}
@@ -155,6 +194,32 @@ export default function ChatWindow(props: ChatWindowProps) {
           </div>
         )}
       </header>
+
+      {confirmResetOpen ? (
+        <div className="wa-reset-modal-backdrop" role="presentation">
+          <div className="wa-reset-modal" role="dialog" aria-modal="true" aria-labelledby="wa-reset-title">
+            <h2 id="wa-reset-title">Resetar conversa de teste</h2>
+            <p>Esta ação apagará mensagens, sessões de fluxo e estado da conversa deste contato.</p>
+            <p>Deseja continuar?</p>
+            <div className="wa-reset-modal-actions">
+              <button type="button" className="wa-reset-cancel" onClick={() => setConfirmResetOpen(false)} disabled={resetInProgress}>
+                Cancelar
+              </button>
+              <button
+                type="button"
+                className="wa-reset-confirm"
+                disabled={resetInProgress}
+                onClick={async () => {
+                  await onResetConversation?.();
+                  setConfirmResetOpen(false);
+                }}
+              >
+                {resetInProgress ? 'Resetando...' : 'Resetar'}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
       <main
         className="wa-messages-panel"
         ref={messagesRef}

@@ -6,7 +6,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import ChatWindow from './ChatWindow';
 import Sidebar from './Sidebar';
 import CRMContactSidebar from './inbox/CRMContactSidebar';
-import { getConversations, getMessagesByConversation, sendMessage, updateConversationMode } from '../lib/api';
+import { getConversations, getMessagesByConversation, resetConversation, sendMessage, updateConversationMode } from '../lib/api';
 import { ChatMessage, Contact, Conversation, ConversationMode, Message } from '../lib/types';
 
 type ConversationAssignmentSnapshot = {
@@ -50,6 +50,9 @@ export default function ChatShell() {
   const [querySelectionMissing, setQuerySelectionMissing] = useState(false);
   const [crmOpen, setCrmOpen] = useState(false);
   const [handoffToast, setHandoffToast] = useState('');
+  const [resetToast, setResetToast] = useState('');
+  const [resetError, setResetError] = useState('');
+  const [resettingConversation, setResettingConversation] = useState(false);
   const previousAssignmentRef = useRef<Map<string, ConversationAssignmentSnapshot>>(new Map());
   const hasLoadedConversationsRef = useRef(false);
 
@@ -237,6 +240,17 @@ export default function ChatShell() {
   }, [handoffToast]);
 
   useEffect(() => {
+    if (!resetToast && !resetError) return;
+
+    const timeoutId = window.setTimeout(() => {
+      setResetToast('');
+      setResetError('');
+    }, 4000);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [resetToast, resetError]);
+
+  useEffect(() => {
     if (!selectedContactId) return;
 
     fetchMessages(selectedContactId).catch(() => undefined);
@@ -346,6 +360,29 @@ export default function ChatShell() {
     }
   }
 
+
+  async function handleResetConversation() {
+    if (!selectedConversation || resettingConversation) return;
+
+    setResetToast('');
+    setResetError('');
+    setResettingConversation(true);
+
+    try {
+      await resetConversation(String(selectedConversation.id));
+      const refreshedConversations = await getConversations();
+      applyConversations(refreshedConversations, { notifyHandoff: false });
+      setMessages([]);
+      setSelectedContactId(refreshedConversations[0] ? String(refreshedConversations[0].contact_id ?? refreshedConversations[0].id) : '');
+      setResetToast('Conversa resetada com sucesso.');
+    } catch (err) {
+      console.error('Erro ao resetar conversa:', err);
+      setResetError('Não foi possível resetar a conversa.');
+    } finally {
+      setResettingConversation(false);
+    }
+  }
+
   async function handleChangeMode(newMode: ConversationMode) {
     if (!selectedConversation || modeUpdating || newMode === mode) return;
 
@@ -397,9 +434,13 @@ export default function ChatShell() {
         modeNotice={modeNotice}
         modeError={modeError}
         emptyStateMessage={querySelectionMissing ? 'Conversa ainda não encontrada para este contato.' : undefined}
+        resetInProgress={resettingConversation}
+        onResetConversation={selectedConversation ? handleResetConversation : undefined}
         onModeChange={handleChangeMode}
       />
       {handoffToast ? <div className="wa-handoff-toast" role="status">{handoffToast}</div> : null}
+      {resetToast ? <div className="wa-reset-toast success" role="status">{resetToast}</div> : null}
+      {resetError ? <div className="wa-reset-toast error" role="alert">{resetError}</div> : null}
       <CRMContactSidebar contact={selectedContact} open={crmOpen} onClose={() => setCrmOpen(false)} />
     </div>
   );
