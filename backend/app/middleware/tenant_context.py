@@ -25,6 +25,7 @@ PUBLIC_PATHS = (
 
 GLOBAL_READONLY_PATHS = (
     "/api/admin/multi-tenant-investigation",
+    "/api/debug/runtime-flow",
 )
 
 

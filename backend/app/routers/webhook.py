@@ -380,6 +380,11 @@ async def _process_meta_webhook(request: Request, db: Session) -> dict[str, str]
             tenant_id = tenant.id
             incoming["tenant_id"] = str(tenant_id)
             logger.info("[TENANT RESOLVED] tenant_id=%s slug=%s phone_number_id=%s", tenant.id, tenant.slug, phone_number_id)
+            logger.info(
+                "[WEBHOOK TENANT RESOLVED]\ntenant_id=%s\nphone_number_id=%s",
+                tenant.id,
+                phone_number_id,
+            )
             message_id = (incoming.get("message_id") or "").strip()
             was_inserted = register_processed_message(db=db, tenant_id=tenant_id, message_id=message_id)
             if not was_inserted:
@@ -523,6 +528,14 @@ async def _process_meta_webhook(request: Request, db: Session) -> dict[str, str]
                 else:
                     logger.info("[FALLBACK ROUTING] tenant=%s conversation=%s", conversation.tenant_id, conversation.id)
 
+            if selected_flow:
+                selected_runtime = resolve_flow_runtime(selected_flow)
+                logger.info(
+                    "[FLOW SELECTED]\nflow_id=%s\nruntime=%s\npublished_version_id=%s",
+                    selected_flow.id,
+                    selected_runtime,
+                    selected_flow.published_version_id,
+                )
             if selected_flow and resolve_flow_runtime(selected_flow) == "v2":
                 if incoming_type == "interactive":
                     logger.info(
