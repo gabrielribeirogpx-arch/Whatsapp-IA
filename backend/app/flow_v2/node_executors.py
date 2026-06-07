@@ -110,6 +110,15 @@ class MessageNodeExecutor(BaseNodeExecutor):
             is_start,
             message[:120],
         )
+        logger.info(
+            "[MESSAGE NODE EXECUTION] node_id=%s is_start=%s message_present=%s message_preview=%s event_type=%s target_final_node=%s",
+            node_id,
+            is_start,
+            bool(message),
+            message[:120],
+            runtime_input.metadata.get("event_type"),
+            node_id == "bccab03d-830a-4dc1-9e67-bcadf5666eee",
+        )
         next_node_id = self._default_next_or_terminal(
             db, snapshot=snapshot, session=session, node_id=node_id
         )
@@ -155,6 +164,18 @@ class MessageNodeExecutor(BaseNodeExecutor):
                 action.contact_id,
                 node_id,
                 sorted(action.metadata.keys()),
+            )
+            logger.info(
+                "[SEND ACTION CREATED] tenant_id=%s provider_id=%s session_id=%s conversation_id=%s contact_id=%s node_id=%s text_preview=%s metadata_keys=%s event_type=%s",
+                action.tenant_id,
+                action.metadata.get("provider_id"),
+                action.session_id,
+                action.conversation_id,
+                action.contact_id,
+                node_id,
+                action.text[:120],
+                sorted(action.metadata.keys()),
+                runtime_input.metadata.get("event_type"),
             )
             actions = (action,)
         legacy_wait_after_start_condition = is_start and next_node_id is not None

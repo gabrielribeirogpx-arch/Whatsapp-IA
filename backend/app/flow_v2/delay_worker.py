@@ -65,6 +65,14 @@ class FlowV2DelayWorker:
             )
             session.current_node_id = job.resume_node_id
             session.status = str(FlowV2SessionStatus.RUNNING)
+            logger.info(
+                "[DELAY_RESUMED] after_move_to session_id=%s current_node_id=%s session_status=%s resume_node_id=%s job_id=%s",
+                session.id,
+                session.current_node_id,
+                session.status,
+                job.resume_node_id,
+                job.id,
+            )
             self.event_store.append(
                 db,
                 session=session,

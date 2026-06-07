@@ -117,6 +117,17 @@ class FlowV2RuntimeWorker:
             ))
             is not None
         )
+        if runtime_input.metadata.get("event_type") == "DELAY_RESUMED":
+            logger.info(
+                "[DELAY_RESUMED] worker_after_process session_id=%s status=%s current_node_id=%s runtime_output_actions_count=%s worker_actions_count=%s runtime_output_actions_empty=%s worker_actions_empty=%s",
+                runtime_output.session_id,
+                runtime_output.status,
+                runtime_output.current_node_id,
+                len(runtime_output.actions),
+                len(actions),
+                len(runtime_output.actions) == 0,
+                len(actions) == 0,
+            )
         deliveries: list[dict[str, Any]] = []
         if self.channel_adapter is not None:
             deliveries = [self.channel_adapter.dispatch(action) for action in actions]
