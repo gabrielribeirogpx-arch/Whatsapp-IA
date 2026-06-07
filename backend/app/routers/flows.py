@@ -40,6 +40,7 @@ from app.services.flow_runtime_service import execute_node_chain_until_reply
 from app.services.flow_session_service import FlowSessionService
 from app.services.flow_service import FlowService, create_flow, delete_flow, duplicate_flow, get_flow, get_flows, update_flow
 from app.services.flow_activation_service import activate_flow_exclusively, deactivate_tenant_flows_exclusively
+from app.services.runtime_flow_diagnostics import assert_flow_matches_whatsapp_tenant
 from app.services.delay_queue_service import clear_delays_for_runtime_reset
 from app.flow_v2.delay_contract import normalize_delay_nodes
 from app.flow_v2.publisher import FlowV2PublishError, FlowV2Publisher
@@ -1363,9 +1364,15 @@ async def update_flow_route(
         logger.info("[FLOW UPDATE REQUEST] flow_id=%s trigger_type=%s trigger_value=%s", flow_id, payload_data.get("trigger_type"), payload_data.get("trigger_value"))
 
         tenant = _resolve_request_tenant(db=db, tenant_id_header=x_tenant_id)
+        logger.info("[BUILDER TENANT]\ntenant_id=%s", tenant.id)
         flow = _get_flow_by_identifier(db=db, flow_id=flow_id, tenant_id=tenant.id)
         if not flow:
             raise HTTPException(status_code=404, detail="Flow não encontrado")
+        if payload_data.get("is_active") is True:
+            try:
+                assert_flow_matches_whatsapp_tenant(db=db, flow=flow)
+            except ValueError as exc:
+                raise HTTPException(status_code=409, detail=str(exc)) from exc
 
         for key in {"name", "description", "is_active", "trigger_type", "trigger_value", "keywords", "stop_words", "priority", "version", "status"}:
             if key in payload_data:
@@ -1459,6 +1466,12 @@ async def update_flow_route(
         logger.info("[FLOW STORED GRAPH JSON] flow_id=%s flow.nodes_json=%s flow.edges_json=%s", str(flow.id), getattr(flow, "nodes_json", None), getattr(flow, "edges_json", None))
         db.refresh(flow)
         logger.info("[FLOW UPDATE SAVED] flow_id=%s trigger_type=%s trigger_value=%s", str(flow.id), flow.trigger_type, flow.trigger_value)
+        if flow.is_active:
+            logger.info(
+                "[FLOW ACTIVATED]\nflow_id=%s\npublished_version_id=%s",
+                flow.id,
+                flow.published_version_id,
+            )
 
         response = _serialize_flow(flow)
         if validation is not None:
@@ -2135,9 +2148,14 @@ def activate_tenant_flow(
     current_user: TenantUser = Depends(get_current_user),
 ):
     tenant_uuid = _resolve_tenant_header(x_tenant_id)
+    logger.info("[BUILDER TENANT]\ntenant_id=%s", tenant_uuid)
     flow = _get_flow_by_identifier(db=db, flow_id=flow_id, tenant_id=tenant_uuid)
     if not flow:
         raise HTTPException(status_code=404, detail="Flow não encontrado")
+    try:
+        assert_flow_matches_whatsapp_tenant(db=db, flow=flow)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     flow = activate_flow_exclusively(
         db=db,
@@ -2157,7 +2175,11 @@ def activate_tenant_flow(
     )
     db.commit()
     db.refresh(flow)
-    logger.info("[FLOW ACTIVATED] flow_id=%s", flow.id)
+    logger.info(
+        "[FLOW ACTIVATED]\nflow_id=%s\npublished_version_id=%s",
+        flow.id,
+        flow.published_version_id,
+    )
     return _serialize_flow(flow)
 
 
@@ -2195,11 +2217,16 @@ def update_tenant_flow_status(
     current_user: TenantUser = Depends(get_current_user),
 ):
     tenant_uuid = _resolve_tenant_header(x_tenant_id)
+    logger.info("[BUILDER TENANT]\ntenant_id=%s", tenant_uuid)
     flow = _get_flow_by_identifier(db=db, flow_id=flow_id, tenant_id=tenant_uuid)
     if not flow:
         raise HTTPException(status_code=404, detail="Flow não encontrado")
 
     if payload.is_active:
+        try:
+            assert_flow_matches_whatsapp_tenant(db=db, flow=flow)
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
         flow = activate_flow_exclusively(
             db=db,
             tenant_id=tenant_uuid,
@@ -2221,6 +2248,12 @@ def update_tenant_flow_status(
     )
     db.commit()
     db.refresh(flow)
+    if payload.is_active:
+        logger.info(
+            "[FLOW ACTIVATED]\nflow_id=%s\npublished_version_id=%s",
+            flow.id,
+            flow.published_version_id,
+        )
     return _serialize_flow(flow)
 
 

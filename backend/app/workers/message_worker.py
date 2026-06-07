@@ -348,6 +348,11 @@ def process_incoming_message(payload: dict[str, Any]) -> None:
             parsed.get("phone") or "n/a",
             payload.get("job_id") or "n/a",
         )
+        logger.info(
+            "[WEBHOOK TENANT RESOLVED]\ntenant_id=%s\nphone_number_id=%s",
+            tenant.id,
+            phone_number_id,
+        )
 
         is_new = register_processed_message(db=db, tenant_id=tenant.id, message_id=correlation_id)
         if not is_new:
@@ -466,6 +471,14 @@ def process_incoming_message(payload: dict[str, Any]) -> None:
                 conversation=persisted_conversation,
                 message_text=text,
             )
+            if selected_flow:
+                selected_runtime = resolve_flow_runtime(selected_flow)
+                logger.info(
+                    "[FLOW SELECTED]\nflow_id=%s\nruntime=%s\npublished_version_id=%s",
+                    selected_flow.id,
+                    selected_runtime,
+                    selected_flow.published_version_id,
+                )
             if selected_flow and resolve_flow_runtime(selected_flow) == "v2":
                 bind_conversation_to_flow(db, conversation=persisted_conversation, flow=selected_flow)
                 FlowRuntimeSelector().dispatch(
