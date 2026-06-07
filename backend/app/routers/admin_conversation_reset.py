@@ -27,14 +27,21 @@ def reset_conversation(
     db: Session = Depends(get_db),
 ):
     if (current_user.role or "").lower() not in ADMIN_ROLES:
-        raise HTTPException(status_code=403, detail="Apenas administradores podem resetar conversas de teste")
-
-    conversation = db.execute(
-        select(Conversation).where(
-            Conversation.id == conversation_id,
-            Conversation.tenant_id == tenant.id,
+        raise HTTPException(
+            status_code=403,
+            detail="Apenas administradores podem resetar conversas de teste",
         )
-    ).scalars().first()
+
+    conversation = (
+        db.execute(
+            select(Conversation).where(
+                Conversation.id == conversation_id,
+                Conversation.tenant_id == tenant.id,
+            )
+        )
+        .scalars()
+        .first()
+    )
     if not conversation:
         raise HTTPException(status_code=404, detail="Conversa não encontrada")
 
@@ -54,6 +61,11 @@ def reset_conversation(
             "deleted_flow_events": result.deleted_flow_events,
             "deleted_flow_sessions": result.deleted_flow_sessions,
             "deleted_messages": result.deleted_messages,
+            "deleted_conversation_logs": result.deleted_conversation_logs,
+            "deleted_flow_events_v1": result.deleted_flow_events_v1,
+            "deleted_flow_execution_events": result.deleted_flow_execution_events,
+            "deleted_flow_executions": result.deleted_flow_executions,
+            "detached_leads": result.detached_leads,
             "deleted_conversations": result.deleted_conversations,
         },
         request=request,
@@ -71,6 +83,11 @@ def reset_conversation(
             "flow_events": result.deleted_flow_events,
             "flow_sessions": result.deleted_flow_sessions,
             "messages": result.deleted_messages,
+            "conversation_logs": result.deleted_conversation_logs,
+            "flow_events_v1": result.deleted_flow_events_v1,
+            "flow_execution_events": result.deleted_flow_execution_events,
+            "flow_executions": result.deleted_flow_executions,
+            "detached_leads": result.detached_leads,
             "conversations": result.deleted_conversations,
         },
     }
