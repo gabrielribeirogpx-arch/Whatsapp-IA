@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { apiFetch, parseApiResponse } from '../lib/api';
 
 type AnalyticsTimeseries = {
@@ -86,33 +86,35 @@ export function useDashboardAnalytics(period: DashboardPeriod = '7d') {
   const [error, setError] = useState<string | null>(null);
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
 
-  useEffect(() => {
-    void (async () => {
-      setIsLoading(true);
-      try {
-        const res = await apiFetch(`${process.env.NEXT_PUBLIC_API_URL}/api/dashboard/analytics?period=${period}`);
-        const payload = await parseApiResponse<AnalyticsResponse>(res);
+  const refetch = useCallback(async () => {
+    setIsLoading(true);
+    try {
+      const res = await apiFetch(`${process.env.NEXT_PUBLIC_API_URL}/api/dashboard/analytics?period=${period}`);
+      const payload = await parseApiResponse<AnalyticsResponse>(res);
 
-        if (!payload) {
-          setData(null);
-          setError(null);
-          return;
-        }
-
-        setData(payload);
-        const summaryRes = await apiFetch(`${process.env.NEXT_PUBLIC_API_URL}/api/dashboard/summary?period=${period}`);
-        const summaryPayload = await parseApiResponse<DashboardSummary>(summaryRes);
-        setSummary(summaryPayload ?? null);
-        setError(null);
-      } catch {
+      if (!payload) {
         setData(null);
-        setSummary(null);
-        setError('Não foi possível carregar os indicadores do dashboard agora.');
-      } finally {
-        setIsLoading(false);
+        setError(null);
+        return;
       }
-    })();
+
+      setData(payload);
+      const summaryRes = await apiFetch(`${process.env.NEXT_PUBLIC_API_URL}/api/dashboard/summary?period=${period}`);
+      const summaryPayload = await parseApiResponse<DashboardSummary>(summaryRes);
+      setSummary(summaryPayload ?? null);
+      setError(null);
+    } catch {
+      setData(null);
+      setSummary(null);
+      setError('Não foi possível carregar os indicadores do dashboard agora.');
+    } finally {
+      setIsLoading(false);
+    }
   }, [period]);
+
+  useEffect(() => {
+    void refetch();
+  }, [refetch]);
 
   const normalized = useMemo(() => {
     const rawSeries = data?.timeseries;
@@ -185,5 +187,5 @@ export function useDashboardAnalytics(period: DashboardPeriod = '7d') {
     return { kpis: calculated, timeseries: padded };
   }, [data]);
 
-  return { data, summary, ...normalized, isLoading, error };
+  return { data, summary, ...normalized, isLoading, error, refetch };
 }

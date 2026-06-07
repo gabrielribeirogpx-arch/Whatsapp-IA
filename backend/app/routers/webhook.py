@@ -21,7 +21,7 @@ from app.services.message_router import handle_incoming_message
 from app.services.idempotency_service import register_processed_message
 from app.services.tenant_query import enforce_tenant_filter, require_tenant_id
 from app.services.message_service import normalize_meta_message
-from app.services.realtime_service import sse_broker
+from app.services.realtime_service import publish_dashboard_event, sse_broker
 from app.services.flow_service import resolve_flow_for_message
 from app.services.flow_runtime_selector import FlowRuntimeSelector, bind_conversation_to_flow, resolve_flow_runtime
 from app.services.flow_engine_service import get_active_visual_flow, get_flow_graph, enqueue_flow_send_with_tracking, emit_message_received_event
@@ -437,7 +437,7 @@ async def _process_meta_webhook(request: Request, db: Session) -> dict[str, str]
                     contact_name,
                 )
             ensure_conversation_contact_link(conversation, contact)
-            ensure_whatsapp_lead_for_inbound(
+            lead_result = ensure_whatsapp_lead_for_inbound(
                 db=db,
                 tenant_id=tenant_id,
                 phone=normalized_phone,
@@ -472,6 +472,46 @@ async def _process_meta_webhook(request: Request, db: Session) -> dict[str, str]
             }
             await sse_broker.publish(f"{tenant.id}:{normalized_phone}", message_payload)
             await sse_broker.publish(f"{tenant.id}:{conversation.id}", message_payload)
+
+            display_name = (contact_name or conversation.name or normalized_phone or "Contato").strip()
+            if lead_result and lead_result.created:
+                await publish_dashboard_event(
+                    tenant_id=tenant.id,
+                    payload={
+                        "event": "dashboard_activity",
+                        "refresh": ["analytics", "activity", "conversations"],
+                        "activity": {
+                            "id": str(lead_result.lead.id),
+                            "type": "LEAD_CREATED",
+                            "title": f"Novo lead criado: {display_name}",
+                            "description": normalized_phone,
+                            "entity_type": "lead",
+                            "entity_id": str(lead_result.lead.id),
+                            "contact_name": contact_name or conversation.name,
+                            "phone": normalized_phone,
+                            "created_at": datetime.utcnow().isoformat(),
+                        },
+                    },
+                )
+            else:
+                await publish_dashboard_event(
+                    tenant_id=tenant.id,
+                    payload={
+                        "event": "dashboard_activity",
+                        "refresh": ["analytics", "conversations"],
+                        "activity": {
+                            "id": str(inbound_message.id),
+                            "type": "MESSAGE_RECEIVED",
+                            "title": display_name,
+                            "description": incoming_message,
+                            "entity_type": "conversation",
+                            "entity_id": str(conversation.id),
+                            "contact_name": contact_name or conversation.name,
+                            "phone": normalized_phone,
+                            "created_at": inbound_message.created_at.isoformat(),
+                        },
+                    },
+                )
 
             should_resolve_flow = conversation.mode != "flow" and (
                 conversation.current_flow_id is None or conversation.current_node_id is None

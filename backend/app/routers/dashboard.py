@@ -1,7 +1,9 @@
 from datetime import datetime, timedelta
 
+import asyncio
 import logging
 from fastapi import APIRouter, Depends, Query
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session
@@ -9,6 +11,7 @@ from sqlalchemy.orm import Session
 from app.db.session import get_db
 from app.models import AuditLog, Contact, Conversation, Flow, FlowEvent, FlowSession, Lead, Message, PipelineStage, Product, Tenant
 from app.models.lead import LeadStatus
+from app.services.realtime_service import sse_broker
 from app.services.tenant_service import get_current_tenant
 
 router = APIRouter(tags=["dashboard"])
@@ -100,7 +103,37 @@ class DashboardActivityOut(BaseModel):
     description: str | None = None
     entity_type: str | None = None
     entity_id: str | None = None
+    contact_name: str | None = None
+    phone: str | None = None
     created_at: datetime
+
+
+def _activity_from_audit_log(row: AuditLog) -> DashboardActivityOut:
+    metadata = row.metadata_json or {}
+    phone = str(metadata.get("phone") or "").strip() or None
+    contact_name = str(metadata.get("contact_name") or metadata.get("name") or "").strip() or None
+    display_name = contact_name or phone
+    titles = {
+        "LEAD_CREATED": "Novo lead criado",
+        "LEAD_MOVED": "Lead movido de etapa",
+        "LEAD_CONVERTED": "Lead concluído",
+        "LEAD_DELETED": "Lead removido",
+        "CONVERSATION_STARTED": "Nova conversa iniciada",
+    }
+    title = str(metadata.get("event") or titles.get(row.action, row.action))
+    if display_name and row.action in {"LEAD_CREATED", "CONVERSATION_STARTED"}:
+        title = f"{title}: {display_name}"
+    return DashboardActivityOut(
+        id=str(row.id),
+        type=row.action,
+        title=title,
+        description=str(metadata.get("phone") or metadata.get("to_stage") or "") or None,
+        entity_type=row.entity_type,
+        entity_id=row.entity_id,
+        contact_name=contact_name,
+        phone=phone,
+        created_at=row.created_at,
+    )
 
 
 class DashboardSummaryOut(BaseModel):
@@ -367,26 +400,29 @@ def get_dashboard_activity(
         .scalars()
         .all()
     )
-    titles = {
-        "LEAD_CREATED": "Novo lead criado",
-        "LEAD_MOVED": "Lead movido de etapa",
-        "LEAD_CONVERTED": "Lead concluído",
-        "LEAD_DELETED": "Lead removido",
-        "CONVERSATION_STARTED": "Nova conversa iniciada",
-    }
     print("[LIVE ACTIVITY]", f"tenant_id={tenant.id}", f"count={len(rows)}")
-    return [
-        DashboardActivityOut(
-            id=str(row.id),
-            type=row.action,
-            title=str((row.metadata_json or {}).get("event") or titles.get(row.action, row.action)),
-            description=str((row.metadata_json or {}).get("phone") or (row.metadata_json or {}).get("to_stage") or "") or None,
-            entity_type=row.entity_type,
-            entity_id=row.entity_id,
-            created_at=row.created_at,
-        )
-        for row in rows
-    ]
+    return [_activity_from_audit_log(row) for row in rows]
+
+
+@router.get("/dashboard/stream")
+async def stream_dashboard_events(
+    tenant: Tenant = Depends(get_current_tenant),
+):
+    channel = f"dashboard:{tenant.id}"
+    queue = await sse_broker.subscribe(channel)
+
+    async def event_generator():
+        try:
+            while True:
+                try:
+                    data = await asyncio.wait_for(queue.get(), timeout=20)
+                    yield data
+                except asyncio.TimeoutError:
+                    yield ": ping\n\n"
+        finally:
+            sse_broker.unsubscribe(channel, queue)
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 
 @router.get("/dashboard/summary", response_model=DashboardSummaryOut)
