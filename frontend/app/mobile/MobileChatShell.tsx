@@ -26,14 +26,14 @@ import { usePushNotifications } from '@/hooks/mobile/usePushNotifications';
 import { useServiceWorker } from '@/hooks/mobile/useServiceWorker';
 import { usePWAInstall }     from '@/hooks/mobile/usePWAInstall';
 
-import MobileConvoList      from './MobileConvoList';
-import MobileChatView       from './MobileChatView';
-import MobileNotifView      from './MobileNotifView';
-import MobileProfileView    from './MobileProfileView';
-import BottomNav            from './BottomNav';
-import PushBanner           from './PushBanner';
-import PushPermissionSheet  from './PushPermissionSheet';
-import InstallPrompt        from './InstallPrompt';
+import MobileConvoList      from './views/MobileConvoList';
+import MobileChatView       from './views/MobileChatView';
+import MobileNotifView      from './views/MobileNotifView';
+import MobileProfileView    from './views/MobileProfileView';
+import BottomNav            from './components/BottomNav';
+import PushBanner           from './components/PushBanner';
+import PushPermissionSheet  from './components/PushPermissionSheet';
+import InstallPrompt        from './components/InstallPrompt';
 
 export type MobileView = 'inbox' | 'chat' | 'notifs' | 'profile';
 
