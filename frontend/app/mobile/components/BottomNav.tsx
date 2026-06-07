@@ -6,7 +6,7 @@
  */
 
 import { MessageSquare, Bell, User } from 'lucide-react';
-import type { MobileView } from './MobileChatShell';
+import type { MobileView } from '../MobileChatShell';
 
 interface BottomNavProps {
   current: MobileView;
