@@ -471,7 +471,6 @@ def test_message_delay_message_publish_waits_worker_resumes_and_sends_next_messa
     result = FlowV2DelayWorker(
         runtime_worker=runtime_worker,
         event_store=event_store,
-        idempotency_store=_IdempotencyStore(),
     ).run_due(_DelayDB(scheduled_jobs[0]), now=scheduled_jobs[0].run_at + timedelta(seconds=1))
 
     assert result.processed == 1
