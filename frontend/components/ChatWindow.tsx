@@ -96,6 +96,12 @@ export default function ChatWindow(props: ChatWindowProps) {
   }, [messages]);
 
   const statusText = getWhatsappWindowStatus(contact?.lastMessageAt);
+  const assignedUserName = contact?.assignedUserName?.trim() || 'Atendente';
+  const handoffStatus = contact?.awaitingHumanAssignment
+    ? { label: '🔴 Aguardando Atendente', className: 'handoff' }
+    : contact?.inHumanCare
+      ? { label: `🟢 Em atendimento por ${assignedUserName}`, className: 'assigned' }
+      : null;
 
   const handleFiles = (fileList: FileList | null) => {
     if (!fileList?.length) return;
@@ -130,8 +136,8 @@ export default function ChatWindow(props: ChatWindowProps) {
                   <span className="wa-status-dot" aria-hidden="true" />
                   {statusText}
                 </p>
-                {contact.awaitingHumanAssignment ? (
-                  <div className="wa-chat-handoff-badge">🔴 Aguardando Atendente</div>
+                {handoffStatus ? (
+                  <div className={`wa-chat-handoff-badge ${handoffStatus.className}`}>{handoffStatus.label}</div>
                 ) : null}
               </div>
             </div>

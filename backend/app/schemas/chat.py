@@ -15,6 +15,7 @@ class ConversationOut(BaseModel):
     score: int = 0
     mode: str
     assigned_user_id: uuid.UUID | None = None
+    assigned_user_name: str | None = None
     last_message: str
     updated_at: datetime
 

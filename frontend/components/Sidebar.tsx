@@ -72,11 +72,11 @@ export default function Sidebar({
     return diffInDays === 1 ? 'há 1 dia' : `há ${diffInDays} dias`;
   }
 
-  function getBadge(status?: string) {
+  function getBadge(status?: string, hasHumanAssignee = false) {
     const normalizedStatus = status?.toLowerCase();
 
     if (normalizedStatus === 'human') {
-      return { label: '👤 Humano', className: 'human' };
+      return hasHumanAssignee ? null : { label: '👤 Humano', className: 'human' };
     }
 
     if (normalizedStatus === 'bot' || normalizedStatus === 'ai') {
@@ -152,7 +152,9 @@ export default function Sidebar({
         {filteredContacts.map((contact) => {
           const isActive = contact.id === selectedContactId;
           const displayName = contact.name || formatPhone(contact.phone);
-          const badge = getBadge(contact.status);
+          const assignedUserName = contact.assignedUserName?.trim() || 'Atendente';
+          const inHumanCare = Boolean(contact.inHumanCare);
+          const badge = getBadge(contact.status, inHumanCare);
           const awaitingHuman = Boolean(contact.awaitingHumanAssignment);
           const relativeTime = formatRelativeTime(contact.lastMessageAt);
           const temp = (contact.score ?? 0) >= 80 ? 'hot' : (contact.score ?? 0) >= 40 ? 'warm' : 'cold';
@@ -182,7 +184,8 @@ export default function Sidebar({
                   <div className="wa-contact-meta">
                     <div className={`wa-contact-temp ${temp}`}>{temp === 'hot' ? 'Quente' : temp === 'warm' ? 'Morno' : 'Frio'}</div>
                     {awaitingHuman ? <div className="wa-contact-badge handoff">🔴 Aguardando Atendente</div> : null}
-                    <div className={`wa-contact-badge ${badge.className}`}>{badge.label}</div>
+                    {inHumanCare ? <div className="wa-contact-badge assigned">🟢 Em atendimento por {assignedUserName}</div> : null}
+                    {badge ? <div className={`wa-contact-badge ${badge.className}`}>{badge.label}</div> : null}
                     {contact.stage ? <div className="wa-contact-tag">{contact.stage}</div> : null}
                     {unread ? <div className="wa-contact-unread">{unread}</div> : null}
                   </div>

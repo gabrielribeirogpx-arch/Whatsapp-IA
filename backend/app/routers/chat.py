@@ -10,7 +10,7 @@ from sqlalchemy import desc, select, func
 from sqlalchemy.orm import Session, load_only, selectinload
 
 from app.database import get_db
-from app.models import Contact, ContactEvent, Conversation, ConversationLog, Message, Tenant
+from app.models import Contact, ContactEvent, Conversation, ConversationLog, Message, Tenant, TenantUser
 from app.schemas.chat import (
     ContactOut,
     ConversationOut,
@@ -128,6 +128,25 @@ def list_conversations(
             .all()
         )
 
+        assigned_user_ids = {
+            assigned_user_id
+            for conversation in items
+            if (assigned_user_id := getattr(conversation, "assigned_user_id", None))
+        }
+        assigned_users_by_id = (
+            {
+                user.id: user.full_name
+                for user in db.execute(
+                    select(TenantUser.id, TenantUser.full_name).where(
+                        TenantUser.tenant_id == tenant.id,
+                        TenantUser.id.in_(assigned_user_ids),
+                    )
+                ).all()
+            }
+            if assigned_user_ids
+            else {}
+        )
+
         response: list[ConversationOut] = []
         seen_phones: set[str] = set()
         for conversation in items or []:
@@ -167,7 +186,10 @@ def list_conversations(
                     stage=stage or "novo",
                     score=int(score or 0),
                     mode=conversation.mode or "bot",
-                    assigned_user_id=conversation.assigned_user_id,
+                    assigned_user_id=getattr(conversation, "assigned_user_id", None),
+                    assigned_user_name=assigned_users_by_id.get(
+                        getattr(conversation, "assigned_user_id", None)
+                    ),
                     last_message=last_message or "",
                     updated_at=conversation.updated_at or datetime.utcnow(),
                 )

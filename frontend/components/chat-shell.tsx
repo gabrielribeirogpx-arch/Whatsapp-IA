@@ -9,6 +9,15 @@ import CRMContactSidebar from './inbox/CRMContactSidebar';
 import { getConversations, getMessagesByConversation, sendMessage, updateConversationMode } from '../lib/api';
 import { ChatMessage, Contact, Conversation, ConversationMode, Message } from '../lib/types';
 
+type ConversationAssignmentSnapshot = {
+  mode: string;
+  assignedUserId: string | null;
+};
+
+function getAssignedUserName(conversation: Conversation) {
+  return conversation.assigned_user_name?.trim() || 'Atendente';
+}
+
 function toChatMessage(message: Message): ChatMessage {
   const parsedDate = new Date(message.created_at);
   const time = Number.isNaN(parsedDate.getTime())
@@ -41,7 +50,7 @@ export default function ChatShell() {
   const [querySelectionMissing, setQuerySelectionMissing] = useState(false);
   const [crmOpen, setCrmOpen] = useState(false);
   const [handoffToast, setHandoffToast] = useState('');
-  const previousModesRef = useRef<Map<string, string>>(new Map());
+  const previousAssignmentRef = useRef<Map<string, ConversationAssignmentSnapshot>>(new Map());
   const hasLoadedConversationsRef = useRef(false);
 
 
@@ -52,26 +61,49 @@ export default function ChatShell() {
   const applyConversations = useCallback(
     (items: Conversation[], options: { notifyHandoff?: boolean } = {}) => {
       const notifyHandoff = options.notifyHandoff ?? true;
-      const previousModes = previousModesRef.current;
+      const previousAssignments = previousAssignmentRef.current;
 
       if (notifyHandoff && hasLoadedConversationsRef.current) {
-        const handoffConversation = items.find((conversation) => {
-          const conversationId = String(conversation.id);
-          const previousMode = previousModes.get(conversationId);
+        const assignedConversation = items.find((conversation) => {
+          const previous = previousAssignments.get(String(conversation.id));
           const currentMode = String(conversation.mode || '').toLowerCase();
+          const currentAssignedUserId = conversation.assigned_user_id ? String(conversation.assigned_user_id) : null;
 
-          return Boolean(previousMode && previousMode !== 'human' && currentMode === 'human');
+          return Boolean(
+            previous &&
+              previous.mode === 'human' &&
+              !previous.assignedUserId &&
+              currentMode === 'human' &&
+              currentAssignedUserId
+          );
         });
 
-        if (handoffConversation) {
-          const displayName = handoffConversation.name || handoffConversation.phone || 'Conversa';
-          setHandoffToast(`Cliente solicitou atendimento humano: ${displayName}`);
-          playHumanHandoffSound();
+        if (assignedConversation) {
+          setHandoffToast(`${getAssignedUserName(assignedConversation)} assumiu o atendimento`);
+        } else {
+          const handoffConversation = items.find((conversation) => {
+            const previous = previousAssignments.get(String(conversation.id));
+            const currentMode = String(conversation.mode || '').toLowerCase();
+
+            return Boolean(previous && previous.mode !== 'human' && currentMode === 'human');
+          });
+
+          if (handoffConversation) {
+            const displayName = handoffConversation.name || handoffConversation.phone || 'Conversa';
+            setHandoffToast(`Cliente solicitou atendimento humano: ${displayName}`);
+            playHumanHandoffSound();
+          }
         }
       }
 
-      previousModesRef.current = new Map(
-        items.map((conversation) => [String(conversation.id), String(conversation.mode || '').toLowerCase()])
+      previousAssignmentRef.current = new Map(
+        items.map((conversation) => [
+          String(conversation.id),
+          {
+            mode: String(conversation.mode || '').toLowerCase(),
+            assignedUserId: conversation.assigned_user_id ? String(conversation.assigned_user_id) : null
+          }
+        ])
       );
       hasLoadedConversationsRef.current = true;
       setConversations(items);
@@ -118,7 +150,9 @@ export default function ChatShell() {
           lastMessageAt: conversation.updated_at,
           status: conversation.mode,
           assignedUserId: conversation.assigned_user_id ?? null,
-          awaitingHumanAssignment: String(conversation.mode || '').toLowerCase() === 'human' && !conversation.assigned_user_id
+          assignedUserName: conversation.assigned_user_name ?? null,
+          awaitingHumanAssignment: String(conversation.mode || '').toLowerCase() === 'human' && !conversation.assigned_user_id,
+          inHumanCare: String(conversation.mode || '').toLowerCase() === 'human' && Boolean(conversation.assigned_user_id)
         };
       }),
     [conversations]
