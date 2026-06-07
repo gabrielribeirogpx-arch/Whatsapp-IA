@@ -9,7 +9,11 @@ os.environ.setdefault("DATABASE_URL", "sqlite+pysqlite:///:memory:")
 from app.flow_v2.contracts import FlowV2SessionStatus, RuntimeOutput
 from app.flow_v2.runtime_worker import FlowV2WorkerResult
 from app.services import flow_runtime_selector
-from app.services.flow_runtime_selector import FlowRuntimeSelector, resolve_flow_runtime
+from app.services.flow_runtime_selector import (
+    FlowRuntimeSelector,
+    resolve_flow_runtime,
+    resolve_runtime_flow_for_conversation,
+)
 
 
 class _FakeWorker:
@@ -172,3 +176,32 @@ def test_whatsapp_adapter_enqueues_choice_buttons_without_runtime_selector(monke
     assert payload["node_type"] == "choice"
     assert payload["buttons"] == [{"id": "quero_planos", "title": "Quero planos"}]
     assert payload["options"] == [{"id": "quero_planos", "label": "Quero planos"}]
+
+
+def test_human_conversation_does_not_dispatch_v2_runtime() -> None:
+    tenant_id = uuid.uuid4()
+    worker = _FakeWorker()
+    flow = SimpleNamespace(id=uuid.uuid4(), runtime="v2", published_version_id=uuid.uuid4())
+    conversation = SimpleNamespace(id=uuid.uuid4(), mode="human")
+
+    resolved_flow = resolve_runtime_flow_for_conversation(
+        db=object(),
+        tenant_id=tenant_id,
+        conversation=conversation,
+        message_text="oi",
+    )
+    result = FlowRuntimeSelector(runtime_worker=worker).dispatch(
+        db=object(),
+        flow=flow,
+        tenant_id=tenant_id,
+        phone="5511999999999",
+        message_text="oi",
+        conversation=conversation,
+    )
+
+    assert resolved_flow is None
+    assert result.runtime == "v2"
+    assert result.processed_by_v2 is False
+    assert result.automation_skipped is True
+    assert result.should_run_v1 is False
+    assert worker.calls == []

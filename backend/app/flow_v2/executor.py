@@ -1,9 +1,13 @@
 from __future__ import annotations
 
 import logging
+import uuid
 from typing import Any
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
+
+from app.models import Conversation
 
 from app.flow_v2.actions import RuntimeAction, SendMessageAction
 from app.flow_v2.contracts import FlowV2EventType, FlowV2SessionStatus, RuntimeInput, RuntimeOutput
@@ -56,6 +60,20 @@ class FlowV2Executor:
         self.session_lock = session_lock or FlowV2SessionLock()
 
     def handle_input(self, db: Session, runtime_input: RuntimeInput) -> RuntimeOutput:
+        if self._conversation_is_human(db, runtime_input=runtime_input):
+            logger.info(
+                "[V2 RUNTIME SKIPPED] reason=human_mode tenant_id=%s conversation_id=%s external_user_id=%s",
+                runtime_input.tenant_id,
+                runtime_input.conversation_id,
+                runtime_input.external_user_id,
+            )
+            return RuntimeOutput(
+                session_id=uuid.uuid4(),
+                status=FlowV2SessionStatus.COMPLETED,
+                current_node_id=None,
+                emitted_event_count=0,
+            )
+
         snapshot = self.snapshot_repository.load(
             db,
             tenant_id=runtime_input.tenant_id,
@@ -140,6 +158,24 @@ class FlowV2Executor:
                     output.emitted_event_count,
                 )
             return output
+
+    @staticmethod
+    def _conversation_is_human(db: Session, *, runtime_input: RuntimeInput) -> bool:
+        conversation = None
+        if runtime_input.conversation_id and hasattr(db, "get"):
+            conversation = db.get(Conversation, runtime_input.conversation_id)
+        if conversation is None and hasattr(db, "execute"):
+            external_user_id = str(runtime_input.external_user_id or "")
+            phone = external_user_id.split(":", 1)[1] if ":" in external_user_id else external_user_id
+            if phone:
+                result = db.execute(
+                    select(Conversation).where(
+                        Conversation.tenant_id == runtime_input.tenant_id,
+                        Conversation.phone_number == phone,
+                    )
+                ).scalars()
+                conversation = result.first() if hasattr(result, "first") else None
+        return str(getattr(conversation, "mode", "") or "").strip().lower() == "human"
 
     def _execute_current_node(
         self, db: Session, *, snapshot: FlowV2Snapshot, session: Any, runtime_input: RuntimeInput
