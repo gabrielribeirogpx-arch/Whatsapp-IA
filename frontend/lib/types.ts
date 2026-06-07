@@ -9,6 +9,7 @@ export type Conversation = {
   score?: number;
   mode: 'human' | 'bot' | 'ai' | string;
   assigned_user_id?: string | null;
+  assigned_user_name?: string | null;
   last_message: string;
   updated_at: string;
 };
@@ -118,7 +119,9 @@ export type Contact = {
   lastMessage: string;
   status?: string;
   assignedUserId?: string | null;
+  assignedUserName?: string | null;
   awaitingHumanAssignment?: boolean;
+  inHumanCare?: boolean;
 };
 
 export type ChatMessage = {
