@@ -4193,6 +4193,18 @@ def save_flow_graph(db: Session, tenant_id: uuid.UUID, flow_id: str, nodes: list
                 metadata["condition"] = data.get("condition")
             if data.get("action") is not None:
                 metadata["action"] = data.get("action")
+            if data.get("action_type") is not None:
+                metadata["action_type"] = data.get("action_type")
+            if isinstance(data.get("params"), dict):
+                metadata["params"] = data.get("params")
+            if data.get("tag") is not None:
+                metadata["tag"] = data.get("tag")
+            if data.get("message") is not None:
+                metadata["message"] = data.get("message")
+            if data.get("reason") is not None:
+                metadata["reason"] = data.get("reason")
+            if data.get("lead_name") is not None:
+                metadata["lead_name"] = data.get("lead_name")
             if data.get("isStart") is not None:
                 metadata["isStart"] = bool(data.get("isStart"))
 

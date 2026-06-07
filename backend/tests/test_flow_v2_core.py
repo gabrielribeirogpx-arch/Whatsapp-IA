@@ -810,3 +810,50 @@ def test_message_choice_display_mode_sends_clicks_transitions_and_completes(disp
     assert session.current_node_id is None
     assert any(event["payload"] == {"node_id": "choice", "row_id": "next"} for event in event_store.events)
     assert not any(isinstance(action, SendChoiceButtonsAction) for action in selected.actions)
+
+
+@pytest.mark.parametrize("action_type", ["create_lead", "add_tag", "notify_team", "transfer_human"])
+def test_message_to_action_to_message_continues_runtime_v2(action_type) -> None:
+    raw_snapshot = {
+        "schema_version": 1,
+        "start_node_id": "start",
+        "nodes": [
+            {"id": "start", "type": "message", "content": "Antes"},
+            {
+                "id": "action",
+                "type": "action",
+                "data": {
+                    "action_type": action_type,
+                    "params": {
+                        "tag": "vip",
+                        "message": "Atender lead",
+                        "reason": "solicitou humano",
+                        "lead_name": "Lead Teste",
+                    },
+                },
+            },
+            {"id": "end", "type": "message", "content": "Depois"},
+        ],
+        "edges": [
+            {"id": "e1", "source": "start", "target": "action"},
+            {"id": "e2", "source": "action", "target": "end"},
+        ],
+    }
+    executor, snapshot, event_store, session, db = _executor(raw_snapshot)
+
+    output = executor.handle_input(db, _input(snapshot))
+
+    assert output.status == FlowV2SessionStatus.COMPLETED
+    assert output.current_node_id is None
+    assert output.effects == (
+        {"type": "send_message", "text": "Antes"},
+        {"type": "send_message", "text": "Depois"},
+    )
+    assert session.status == FlowV2SessionStatus.COMPLETED
+    assert session.current_node_id is None
+    assert any(
+        event["event_type"] == "NODE_EXECUTED"
+        and event["node_id"] == "action"
+        and event["payload"] == {"node_type": "action", "status": "continue"}
+        for event in event_store.events
+    )
