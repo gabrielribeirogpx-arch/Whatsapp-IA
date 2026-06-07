@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any, Protocol
 
+from sqlalchemy import select
+
 from app.flow_v2.actions import (
     RuntimeAction,
     ScheduleDelayAction,
@@ -15,6 +17,9 @@ from app.flow_v2.actions import (
 )
 from app.flow_v2.contracts import FlowV2EventType, RuntimeInput
 from app.flow_v2.models import FlowV2ScheduledJob
+from app.models.contact import Contact
+from app.models.conversation import Conversation
+from app.services.lead_service import get_or_create_lead
 from app.flow_v2.snapshot import FlowV2Snapshot, build_transitions_from_edges
 from app.flow_v2.transition_resolver import TransitionResolver
 
@@ -694,17 +699,175 @@ class ConditionNodeExecutor(BaseNodeExecutor):
 
 
 class ActionNodeExecutor(BaseNodeExecutor):
+    SUPPORTED_ACTION_TYPES = {
+        "create_lead",
+        "add_tag",
+        "notify_team",
+        "transfer_human",
+    }
+
     def execute(
         self, db, *, snapshot, session, node, runtime_input
     ) -> NodeExecutionResult:
         node_id = str(node["id"])
+        data = self._node_data(node)
+        action_type = self._action_type(node, data)
+        params = self._action_params(node, data)
+
+        if action_type not in self.SUPPORTED_ACTION_TYPES:
+            logger.warning(
+                "[ACTION NODE SKIPPED] node_id=%s action_type=%s reason=unsupported",
+                node_id,
+                action_type or "missing",
+            )
+        else:
+            self._execute_action(
+                db,
+                session=session,
+                node_id=node_id,
+                action_type=action_type,
+                params=params,
+                runtime_input=runtime_input,
+            )
+
         next_node_id = self._default_next_or_terminal(
             db, snapshot=snapshot, session=session, node_id=node_id
         )
-        return NodeExecutionResult(
-            next_node_id=next_node_id,
-            status="complete" if next_node_id is None else "continue",
+        return NodeExecutionResult(next_node_id=next_node_id, status="continue")
+
+    @staticmethod
+    def _action_type(node: dict[str, Any], data: dict[str, Any]) -> str:
+        return str(
+            node.get("action_type")
+            or data.get("action_type")
+            or data.get("actionType")
+            or data.get("action")
+            or ""
+        ).strip().lower()
+
+    @staticmethod
+    def _action_params(node: dict[str, Any], data: dict[str, Any]) -> dict[str, Any]:
+        raw_params = data.get("params") or data.get("parameters") or node.get("params") or node.get("parameters")
+        params = dict(raw_params) if isinstance(raw_params, dict) else {}
+        for key in ("tag", "message", "reason", "lead_name"):
+            if key in data and key not in params:
+                params[key] = data[key]
+        return params
+
+    def _execute_action(
+        self,
+        db,
+        *,
+        session: Any,
+        node_id: str,
+        action_type: str,
+        params: dict[str, Any],
+        runtime_input: RuntimeInput,
+    ) -> None:
+        try:
+            if action_type == "create_lead":
+                self._create_lead(db, session=session, runtime_input=runtime_input, params=params)
+            elif action_type == "add_tag":
+                self._add_tag(db, runtime_input=runtime_input, params=params)
+            elif action_type == "notify_team":
+                self._notify_team(session=session, node_id=node_id, runtime_input=runtime_input, params=params)
+            elif action_type == "transfer_human":
+                self._transfer_human(db, runtime_input=runtime_input, params=params)
+        except Exception:
+            logger.exception(
+                "[ACTION NODE FAILED] node_id=%s action_type=%s",
+                node_id,
+                action_type,
+            )
+            return
+
+        logger.info(
+            "[ACTION NODE EXECUTED] node_id=%s action_type=%s params_keys=%s",
+            node_id,
+            action_type,
+            sorted(params.keys()),
         )
+
+    @staticmethod
+    def _create_lead(db, *, session: Any, runtime_input: RuntimeInput, params: dict[str, Any]) -> None:
+        phone = ActionNodeExecutor._phone_from_runtime_input(runtime_input)
+        if not phone:
+            return
+        name = str(params.get("lead_name") or runtime_input.metadata.get("contact_name") or "").strip() or None
+        get_or_create_lead(
+            db,
+            tenant_id=session.tenant_id,
+            phone=phone,
+            name=name,
+            last_message=runtime_input.message_text,
+        )
+
+    @staticmethod
+    def _add_tag(db, *, runtime_input: RuntimeInput, params: dict[str, Any]) -> None:
+        tag = str(params.get("tag") or params.get("label") or "").strip()
+        if not tag:
+            return
+        contact = ActionNodeExecutor._resolve_contact(db, runtime_input=runtime_input)
+        if contact is None:
+            return
+        tags = list(getattr(contact, "tags_json", None) or [])
+        if tag not in tags:
+            tags.append(tag)
+            contact.tags_json = tags
+
+    @staticmethod
+    def _notify_team(*, session: Any, node_id: str, runtime_input: RuntimeInput, params: dict[str, Any]) -> None:
+        # MVP: record an operational notification intent in logs without stopping the flow.
+        logger.info(
+            "[ACTION NOTIFY TEAM] tenant_id=%s session_id=%s node_id=%s conversation_id=%s contact_id=%s message=%s",
+            session.tenant_id,
+            session.id,
+            node_id,
+            runtime_input.conversation_id,
+            runtime_input.contact_id,
+            str(params.get("message") or "Novo atendimento requer atenção")[:200],
+        )
+
+    @staticmethod
+    def _transfer_human(db, *, runtime_input: RuntimeInput, params: dict[str, Any]) -> None:
+        conversation = ActionNodeExecutor._resolve_conversation(db, runtime_input=runtime_input)
+        if conversation is None:
+            return
+        conversation.mode = "human"
+        context = dict(getattr(conversation, "context", None) or {})
+        context["transfer_reason"] = str(params.get("reason") or "flow_action")
+        conversation.context = context
+
+    @staticmethod
+    def _resolve_contact(db, *, runtime_input: RuntimeInput):
+        if runtime_input.contact_id and hasattr(db, "get"):
+            contact = db.get(Contact, runtime_input.contact_id)
+            if contact is not None:
+                return contact
+        phone = ActionNodeExecutor._phone_from_runtime_input(runtime_input)
+        if not phone or not hasattr(db, "execute"):
+            return None
+        return db.execute(
+            select(Contact).where(Contact.tenant_id == runtime_input.tenant_id, Contact.phone == phone)
+        ).scalars().first()
+
+    @staticmethod
+    def _resolve_conversation(db, *, runtime_input: RuntimeInput):
+        if runtime_input.conversation_id and hasattr(db, "get"):
+            conversation = db.get(Conversation, runtime_input.conversation_id)
+            if conversation is not None:
+                return conversation
+        phone = ActionNodeExecutor._phone_from_runtime_input(runtime_input)
+        if not phone or not hasattr(db, "execute"):
+            return None
+        return db.execute(
+            select(Conversation).where(Conversation.tenant_id == runtime_input.tenant_id, Conversation.phone_number == phone)
+        ).scalars().first()
+
+    @staticmethod
+    def _phone_from_runtime_input(runtime_input: RuntimeInput) -> str:
+        external_user_id = str(runtime_input.external_user_id or "")
+        return external_user_id.split(":", 1)[1] if ":" in external_user_id else external_user_id
 
 
 class NodeExecutorRegistry:

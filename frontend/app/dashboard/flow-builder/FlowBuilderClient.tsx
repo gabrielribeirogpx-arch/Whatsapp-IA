@@ -54,6 +54,18 @@ type ChoiceConnectDebug = {
   completed?: boolean;
 };
 
+
+const ACTION_TYPE_OPTIONS = [
+  { value: 'create_lead', label: 'Criar Lead' },
+  { value: 'add_tag', label: 'Adicionar Tag' },
+  { value: 'notify_team', label: 'Notificar Equipe' },
+  { value: 'transfer_human', label: 'Transferir para Humano' },
+] as const;
+
+type ActionType = (typeof ACTION_TYPE_OPTIONS)[number]['value'];
+
+const isActionType = (value: string): value is ActionType => ACTION_TYPE_OPTIONS.some((option) => option.value === value);
+
 const NODE_PRESETS: Record<FlowNodeKind, { label: string; type: string; data: Record<string, unknown> }> = {
   message: { label: 'Mensagem', type: 'message', data: { content: '' } },
   choice: {
@@ -70,7 +82,7 @@ const NODE_PRESETS: Record<FlowNodeKind, { label: string; type: string; data: Re
   },
   condition: { label: 'Condição', type: 'condition', data: { condition: '' } },
   delay: { label: 'Delay', type: 'delay', data: { seconds: 3 } },
-  action: { label: 'Ação', type: 'action', data: { action: '' } },
+  action: { label: 'Ação', type: 'action', data: { action_type: 'create_lead', action: 'create_lead', params: {} } },
 };
 
 const initialNodes: Node[] = [];
@@ -346,12 +358,55 @@ function FlowNodeEditorPanel({
           </label>
         )}
 
-        {kind === 'action' && (
-          <label className="flow-editor-field">
-            Nome da ação
-            <input value={toText(draft.action)} onChange={(event) => onDraftChange({ action: event.target.value })} placeholder="Ex.: notificar equipe" />
-          </label>
-        )}
+        {kind === 'action' && (() => {
+          const selectedActionType = isActionType(toText(draft.action_type || draft.action)) ? (toText(draft.action_type || draft.action) as ActionType) : 'create_lead';
+          const params = draft.params && typeof draft.params === 'object' ? (draft.params as Record<string, unknown>) : {};
+          const updateActionParam = (key: string, value: string) => onDraftChange({ params: { ...params, [key]: value }, [key]: value });
+
+          return (
+            <>
+              <label className="flow-editor-field">
+                Tipo de Ação
+                <select
+                  value={selectedActionType}
+                  onChange={(event) => onDraftChange({ action_type: event.target.value, action: event.target.value, params: {} })}
+                >
+                  {ACTION_TYPE_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                  ))}
+                </select>
+              </label>
+
+              {selectedActionType === 'create_lead' && (
+                <label className="flow-editor-field">
+                  Nome do lead (opcional)
+                  <input value={toText(params.lead_name || draft.lead_name)} onChange={(event) => updateActionParam('lead_name', event.target.value)} placeholder="Usar nome do contato se vazio" />
+                </label>
+              )}
+
+              {selectedActionType === 'add_tag' && (
+                <label className="flow-editor-field">
+                  Tag
+                  <input value={toText(params.tag || draft.tag)} onChange={(event) => updateActionParam('tag', event.target.value)} placeholder="Ex.: vip" />
+                </label>
+              )}
+
+              {selectedActionType === 'notify_team' && (
+                <label className="flow-editor-field">
+                  Mensagem para equipe
+                  <textarea value={toText(params.message || draft.message)} onChange={(event) => updateActionParam('message', event.target.value)} placeholder="Ex.: Lead pediu atendimento" />
+                </label>
+              )}
+
+              {selectedActionType === 'transfer_human' && (
+                <label className="flow-editor-field">
+                  Motivo da transferência
+                  <input value={toText(params.reason || draft.reason)} onChange={(event) => updateActionParam('reason', event.target.value)} placeholder="Ex.: solicitou humano" />
+                </label>
+              )}
+            </>
+          );
+        })()}
 
         <label className="flow-editor-checkbox">
           <input type="checkbox" checked={!!draft.is_terminal} onChange={(event) => onDraftChange({ is_terminal: event.target.checked })} />
