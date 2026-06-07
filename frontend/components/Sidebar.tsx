@@ -9,6 +9,7 @@ type SidebarProps = {
   sidebarOpen: boolean;
   onToggleSidebar: () => void;
   unansweredCount: number;
+  humanRequestsCount: number;
 };
 
 export default function Sidebar({
@@ -17,7 +18,8 @@ export default function Sidebar({
   onSelectContact,
   sidebarOpen,
   onToggleSidebar,
-  unansweredCount: _unansweredCount
+  unansweredCount: _unansweredCount,
+  humanRequestsCount
 }: SidebarProps) {
   const [searchTerm, setSearchTerm] = useState('');
   const [activeFilter, setActiveFilter] = useState<'all' | 'pending' | 'human' | 'ai'>('all');
@@ -25,7 +27,7 @@ export default function Sidebar({
   const filterChips = [
     { id: 'all', label: 'Todas' },
     { id: 'pending', label: 'Não respondidas' },
-    { id: 'human', label: 'Humanos' },
+    { id: 'human', label: `Humanos (${humanRequestsCount})` },
     { id: 'ai', label: 'IA' }
   ] as const;
 
@@ -151,6 +153,7 @@ export default function Sidebar({
           const isActive = contact.id === selectedContactId;
           const displayName = contact.name || formatPhone(contact.phone);
           const badge = getBadge(contact.status);
+          const awaitingHuman = Boolean(contact.awaitingHumanAssignment);
           const relativeTime = formatRelativeTime(contact.lastMessageAt);
           const temp = (contact.score ?? 0) >= 80 ? 'hot' : (contact.score ?? 0) >= 40 ? 'warm' : 'cold';
           const unread = contact.status !== 'human' ? 1 : 0;
@@ -178,6 +181,7 @@ export default function Sidebar({
                   <p className="wa-contact-preview">{contact.lastMessage || 'Sem mensagens ainda.'}</p>
                   <div className="wa-contact-meta">
                     <div className={`wa-contact-temp ${temp}`}>{temp === 'hot' ? 'Quente' : temp === 'warm' ? 'Morno' : 'Frio'}</div>
+                    {awaitingHuman ? <div className="wa-contact-badge handoff">🔴 Aguardando Atendente</div> : null}
                     <div className={`wa-contact-badge ${badge.className}`}>{badge.label}</div>
                     {contact.stage ? <div className="wa-contact-tag">{contact.stage}</div> : null}
                     {unread ? <div className="wa-contact-unread">{unread}</div> : null}

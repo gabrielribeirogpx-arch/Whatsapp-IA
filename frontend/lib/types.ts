@@ -8,6 +8,7 @@ export type Conversation = {
   stage?: string;
   score?: number;
   mode: 'human' | 'bot' | 'ai' | string;
+  assigned_user_id?: string | null;
   last_message: string;
   updated_at: string;
 };
@@ -116,6 +117,8 @@ export type Contact = {
   lastMessageAt?: string | null;
   lastMessage: string;
   status?: string;
+  assignedUserId?: string | null;
+  awaitingHumanAssignment?: boolean;
 };
 
 export type ChatMessage = {

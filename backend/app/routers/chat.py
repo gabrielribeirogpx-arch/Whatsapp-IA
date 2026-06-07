@@ -117,6 +117,7 @@ def list_conversations(
                         Conversation.name,
                         Conversation.avatar_url,
                         Conversation.mode,
+                        Conversation.assigned_user_id,
                         Conversation.updated_at,
                     )
                 )
@@ -166,6 +167,7 @@ def list_conversations(
                     stage=stage or "novo",
                     score=int(score or 0),
                     mode=conversation.mode or "bot",
+                    assigned_user_id=conversation.assigned_user_id,
                     last_message=last_message or "",
                     updated_at=conversation.updated_at or datetime.utcnow(),
                 )
