@@ -159,6 +159,7 @@ class FlowV2DelayWorker:
                 metadata={
                     "delay_job_id": job_id,
                     "event_type": str(FlowV2EventType.DELAY_RESUMED),
+                    "_flow_v2_session_id": str(session.id),
                 },
             )
             results.append(self.runtime_worker.process(db, runtime_input))

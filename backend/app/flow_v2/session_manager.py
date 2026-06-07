@@ -4,7 +4,7 @@ from datetime import datetime
 import logging
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from app.flow_v2.contracts import FlowV2EventType, FlowV2SessionStatus, RuntimeInput
@@ -28,6 +28,21 @@ class FlowV2SessionManager:
         runtime_input: RuntimeInput,
         snapshot: FlowV2Snapshot,
     ) -> FlowV2Session:
+        raw_session_id = runtime_input.metadata.get("_flow_v2_session_id")
+        session_id = UUID(str(raw_session_id)) if raw_session_id else None
+        if session_id:
+            session = db.execute(
+                select(FlowV2Session).where(
+                    FlowV2Session.id == session_id,
+                    FlowV2Session.tenant_id == runtime_input.tenant_id,
+                    FlowV2Session.flow_version_id == runtime_input.flow_version_id,
+                    FlowV2Session.external_user_id == runtime_input.external_user_id,
+                )
+            ).scalar_one_or_none()
+            if session is not None:
+                return session
+
+        self._lock_active_session_identity(db, runtime_input=runtime_input)
         session = db.execute(
             select(FlowV2Session)
             .where(
@@ -70,6 +85,22 @@ class FlowV2SessionManager:
             payload={"snapshot_hash": snapshot.hash, "start_node_id": snapshot.start_node_id},
         )
         return session
+
+    def _lock_active_session_identity(self, db: Session, *, runtime_input: RuntimeInput) -> None:
+        lock_key = ":".join(
+            (
+                str(runtime_input.tenant_id),
+                str(runtime_input.flow_version_id),
+                runtime_input.external_user_id,
+            )
+        )
+        try:
+            db.execute(
+                text("SELECT pg_advisory_xact_lock(hashtext(:lock_key))"),
+                {"lock_key": lock_key},
+            )
+        except Exception:
+            return
 
     def move_to(self, db: Session, *, session: FlowV2Session, node_id: str | None, status: FlowV2SessionStatus) -> None:
         session.current_node_id = node_id
