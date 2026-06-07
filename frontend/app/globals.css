@@ -3903,3 +3903,153 @@ input {
     transform: translateY(0);
   }
 }
+
+.wa-chat-actions-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.wa-conversation-menu-wrap {
+  position: relative;
+}
+
+.wa-conversation-menu-trigger {
+  width: 36px;
+  height: 36px;
+  border: 1px solid #e5e7eb;
+  border-radius: 999px;
+  background: #fff;
+  color: #475569;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.wa-conversation-menu-trigger:hover {
+  background: #f8fafc;
+  color: #0f172a;
+}
+
+.wa-conversation-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 35;
+  min-width: 210px;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 20px 45px rgba(15, 23, 42, 0.14);
+  padding: 0.35rem;
+}
+
+.wa-conversation-menu button {
+  width: 100%;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  padding: 0.65rem 0.7rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: #334155;
+  font-size: 0.86rem;
+  font-weight: 700;
+  cursor: pointer;
+  text-align: left;
+}
+
+.wa-conversation-menu button:hover {
+  background: #fef2f2;
+  color: #b91c1c;
+}
+
+.wa-reset-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  background: rgba(15, 23, 42, 0.48);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+}
+
+.wa-reset-modal {
+  width: min(440px, 100%);
+  border-radius: 22px;
+  background: #fff;
+  box-shadow: 0 28px 80px rgba(15, 23, 42, 0.3);
+  padding: 1.4rem;
+}
+
+.wa-reset-modal h2 {
+  margin: 0 0 0.75rem;
+  color: #0f172a;
+  font-size: 1.15rem;
+}
+
+.wa-reset-modal p {
+  margin: 0.4rem 0;
+  color: #475569;
+  font-size: 0.94rem;
+  line-height: 1.5;
+}
+
+.wa-reset-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.7rem;
+  margin-top: 1.25rem;
+}
+
+.wa-reset-modal-actions button {
+  border: 0;
+  border-radius: 999px;
+  padding: 0.7rem 1.05rem;
+  font-size: 0.9rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.wa-reset-modal-actions button:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+.wa-reset-cancel {
+  background: #f1f5f9;
+  color: #334155;
+}
+
+.wa-reset-confirm {
+  background: #dc2626;
+  color: #fff;
+}
+
+.wa-reset-toast {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  z-index: 55;
+  max-width: min(360px, calc(100vw - 48px));
+  border-radius: 16px;
+  background: #fff;
+  box-shadow: 0 24px 60px rgba(15, 23, 42, 0.16);
+  padding: 14px 16px;
+  font-size: 0.92rem;
+  font-weight: 800;
+  animation: waHandoffToastIn 0.22s ease-out;
+}
+
+.wa-reset-toast.success {
+  border: 1px solid #bbf7d0;
+  color: #166534;
+}
+
+.wa-reset-toast.error {
+  border: 1px solid #fecaca;
+  color: #991b1b;
+}

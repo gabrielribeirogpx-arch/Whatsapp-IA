@@ -217,6 +217,15 @@ export async function tenantLogin(email: string, password: string, turnstileToke
   return parseApiResponse<TenantSession>(res);
 }
 
+
+export async function resetConversation(conversationId: string): Promise<{ ok: boolean }> {
+  const res = await apiFetch(`/api/admin/reset-conversation/${conversationId}`, {
+    method: 'POST'
+  });
+
+  return parseApiResponse<{ ok: boolean }>(res);
+}
+
 export async function getConversations(): Promise<Conversation[]> {
   const res = await apiFetch('/api/conversations');
   return parseApiResponse<Conversation[]>(res);
