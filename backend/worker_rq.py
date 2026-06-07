@@ -3,7 +3,8 @@ import subprocess
 
 import redis
 from rq import Connection, Queue, Worker
-from sqlalchemy import create_engine
+
+from app.db.session import dispose_engine_connections_after_fork
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 REDIS_URL = os.getenv("REDIS_URL")
@@ -14,8 +15,7 @@ if not DATABASE_URL:
 if not REDIS_URL:
     raise Exception("REDIS_URL não configurado")
 
-print("[WORKER] Connecting DB...")
-engine = create_engine(DATABASE_URL)
+print("[WORKER] DB engine configured with pooled connection health checks")
 
 print("[WORKER] Connecting Redis...")
 conn = redis.from_url(REDIS_URL)
@@ -72,6 +72,7 @@ class LoggingWorker(Worker):
 
 if __name__ == "__main__":
     print(f"[RQ WORKER] started commit_sha={runtime_commit_sha()} queues={','.join(listen)}")
+    dispose_engine_connections_after_fork()
     with Connection(conn):
         worker = LoggingWorker(list(map(Queue, listen)))
         worker.work()

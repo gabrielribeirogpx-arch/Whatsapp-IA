@@ -12,7 +12,7 @@ from time import time
 
 from redis.asyncio import Redis
 
-from app.db.session import SessionLocal
+from app.db.session import SessionLocal, dispose_engine_connections_after_fork
 from app.flow_v2.delay_worker import FlowV2DelayWorker
 from app.services.delay_queue_service import DELAY_ZSET_KEY
 from app.services.flow_engine_service import process_flow_engine
@@ -53,6 +53,14 @@ class DelayWorker:
         self.redis: Redis = Redis.from_url(redis_url, decode_responses=True)
         self.flow_v2_delay_worker = flow_v2_delay_worker or FlowV2DelayWorker()
         self._stop_event = asyncio.Event()
+
+    @staticmethod
+    def reset_db_connections() -> None:
+        # Railway/Switchback can close idle Postgres sockets, and worker
+        # processes may inherit pools across forks. Start each delay-worker
+        # process with an empty pool so the first poll of
+        # flow_v2_scheduled_jobs opens a fresh connection.
+        dispose_engine_connections_after_fork()
 
     async def start(self) -> None:
         self._register_signal_handlers()
@@ -153,6 +161,7 @@ class DelayWorker:
 
 async def main() -> None:
     redis_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+    DelayWorker.reset_db_connections()
     worker = DelayWorker(redis_url=redis_url, poll_interval_seconds=1.0)
     await worker.start()
 

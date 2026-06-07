@@ -73,3 +73,36 @@ def test_delay_worker_polls_flow_v2_scheduled_jobs_before_legacy_redis(monkeypat
     assert flow_v2_delay_worker.calls[0]["db"] is session_local.db
     assert session_local.db.committed is True
     assert session_local.db.rolled_back is False
+
+
+def test_delay_worker_reset_db_connections_disposes_inherited_pool(monkeypatch) -> None:
+    calls = []
+    monkeypatch.setattr(delay_worker_module, "dispose_engine_connections_after_fork", lambda: calls.append("disposed"))
+
+    delay_worker_module.DelayWorker.reset_db_connections()
+
+    assert calls == ["disposed"]
+
+
+def test_sqlalchemy_engine_uses_pre_ping_and_recycle(monkeypatch) -> None:
+    from app.core import database
+
+    calls = []
+    sentinel = object()
+
+    def fake_create_engine(database_url, **kwargs):
+        calls.append({"database_url": database_url, "kwargs": kwargs})
+        return sentinel
+
+    monkeypatch.setenv("DB_POOL_RECYCLE_SECONDS", "123")
+    monkeypatch.setattr(database, "create_engine", fake_create_engine)
+
+    engine = database.create_sqlalchemy_engine("postgresql://example/db")
+
+    assert engine is sentinel
+    assert calls == [
+        {
+            "database_url": "postgresql://example/db",
+            "kwargs": {"pool_pre_ping": True, "pool_recycle": 123},
+        }
+    ]
