@@ -140,6 +140,33 @@ def test_publish_fresh_snapshot_keeps_v1_without_v2_hash(monkeypatch):
     assert version.snapshot == {"nodes": NODES, "edges": EDGES}
 
 
+def test_snapshot_repository_loads_immutable_unpublished_replaced_version():
+    tenant_id = uuid.uuid4()
+    flow_version_id = uuid.uuid4()
+    published = FlowV2Publisher().publish(nodes=NODES, edges=EDGES)
+    version = SimpleNamespace(
+        id=flow_version_id,
+        tenant_id=tenant_id,
+        is_published=False,
+        snapshot=published.snapshot,
+        v2_snapshot_hash=published.v2_snapshot_hash,
+        v2_snapshot_schema_version=published.snapshot["snapshot_schema_version"],
+    )
+
+    class _DB:
+        def execute(self, *_args, **_kwargs):
+            return _Scalar(version)
+
+    snapshot = FlowV2SnapshotRepository().load(
+        _DB(), tenant_id=tenant_id, flow_version_id=flow_version_id
+    )
+
+    assert snapshot.flow_version_id == flow_version_id
+    assert snapshot.tenant_id == tenant_id
+    assert snapshot.hash == published.v2_snapshot_hash
+    assert snapshot.start_node_id == "n1"
+
+
 def test_snapshot_repository_rejects_schema_version_mismatch():
     tenant_id = uuid.uuid4()
     flow_version_id = uuid.uuid4()

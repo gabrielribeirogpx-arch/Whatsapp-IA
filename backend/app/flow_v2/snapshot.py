@@ -185,11 +185,10 @@ class FlowV2SnapshotRepository:
             select(FlowVersion).where(
                 FlowVersion.id == flow_version_id,
                 FlowVersion.tenant_id == tenant_id,
-                FlowVersion.is_published.is_(True),
             )
         ).scalar_one_or_none()
         if version is None:
-            raise FlowV2SnapshotError("Published flow version not found for Runtime V2")
+            raise FlowV2SnapshotError("Flow version not found for Runtime V2")
 
         stored_snapshot = version.snapshot
         if not isinstance(stored_snapshot, dict):
