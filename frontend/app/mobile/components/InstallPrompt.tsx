@@ -1,0 +1,114 @@
+'use client';
+
+/**
+ * /frontend/components/mobile/InstallPrompt.tsx
+ * Banner de instalação do PWA — aparece quando beforeinstallprompt dispara.
+ */
+
+import { Download, X } from 'lucide-react';
+import { useState } from 'react';
+
+interface InstallPromptProps {
+  onInstall: () => Promise<boolean>;
+}
+
+export default function InstallPrompt({ onInstall }: InstallPromptProps) {
+  const [dismissed, setDismissed] = useState(false);
+  const [loading, setLoading] = useState(false);
+
+  if (dismissed) return null;
+
+  async function handleInstall() {
+    setLoading(true);
+    const accepted = await onInstall();
+    if (!accepted) setLoading(false);
+    // se aceito, o componente vai desmontar porque isInstallable vira false no shell
+  }
+
+  return (
+    <div
+      style={{
+        position: 'fixed',
+        bottom: '80px', // acima do BottomNav
+        left: '12px',
+        right: '12px',
+        background: '#1a1a2e',
+        border: '1px solid rgba(124,110,245,0.3)',
+        borderRadius: '14px',
+        padding: '12px 14px',
+        display: 'flex',
+        gap: '10px',
+        alignItems: 'center',
+        zIndex: 90,
+        animation: 'slideUp 0.3s ease',
+      }}
+    >
+      <style>{`
+        @keyframes slideUp {
+          from { transform: translateY(20px); opacity: 0; }
+          to   { transform: translateY(0);    opacity: 1; }
+        }
+      `}</style>
+
+      <span
+        style={{
+          width: '36px',
+          height: '36px',
+          borderRadius: '10px',
+          background: 'rgba(124,110,245,0.15)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          flexShrink: 0,
+          color: '#7c6ef5',
+        }}
+      >
+        <Download size={18} />
+      </span>
+
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <p style={{ margin: 0, fontSize: '13px', fontWeight: 600, color: '#e8e8f0' }}>
+          Instalar Wazza Inbox
+        </p>
+        <p style={{ margin: '1px 0 0', fontSize: '11px', color: 'rgba(255,255,255,0.4)' }}>
+          Adicionar à tela inicial
+        </p>
+      </div>
+
+      <button
+        onClick={handleInstall}
+        disabled={loading}
+        style={{
+          background: '#7c6ef5',
+          border: 'none',
+          borderRadius: '8px',
+          padding: '6px 12px',
+          fontSize: '12px',
+          fontWeight: 600,
+          color: '#fff',
+          cursor: loading ? 'default' : 'pointer',
+          opacity: loading ? 0.7 : 1,
+          flexShrink: 0,
+          WebkitTapHighlightColor: 'transparent',
+        }}
+      >
+        {loading ? '…' : 'Instalar'}
+      </button>
+
+      <button
+        onClick={() => setDismissed(true)}
+        style={{
+          background: 'transparent',
+          border: 'none',
+          cursor: 'pointer',
+          color: 'rgba(255,255,255,0.3)',
+          padding: '4px',
+          flexShrink: 0,
+          WebkitTapHighlightColor: 'transparent',
+        }}
+      >
+        <X size={15} />
+      </button>
+    </div>
+  );
+}
