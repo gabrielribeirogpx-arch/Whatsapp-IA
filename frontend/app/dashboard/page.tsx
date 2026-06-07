@@ -221,7 +221,7 @@ export default function DashboardPage() {
   const [flows, setFlows] = useState<FlowItem[]>([]);
   const [activities, setActivities] = useState<DashboardActivity[]>([]);
   const router = useRouter();
-  const { data, summary, kpis, timeseries, isLoading, error: dashboardError } = useDashboardAnalytics(period);
+  const { data, summary, kpis, timeseries, isLoading, error: dashboardError, refetch: refetchDashboardAnalytics } = useDashboardAnalytics(period);
   const [conversationsError, setConversationsError] = useState<string | null>(null);
   const [flowsError, setFlowsError] = useState<string | null>(null);
   const [activitiesError, setActivitiesError] = useState<string | null>(null);
@@ -229,6 +229,7 @@ export default function DashboardPage() {
   const [mounted, setMounted] = useState(false);
   const [showWelcomeToast, setShowWelcomeToast] = useState(false);
   const [activePanel, setActivePanel] = useState<DetailPanelKey>(null);
+  const [isActivityLive, setIsActivityLive] = useState(false);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -250,6 +251,61 @@ export default function DashboardPage() {
       try { const payload = await getDashboardActivity(); setActivities(Array.isArray(payload) ? payload : []); setActivitiesError(null);} catch { setActivities([]); setActivitiesError('Nenhuma atividade recente ainda.'); }
     })();
   }, []);
+
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const tenantId = localStorage.getItem('tenant_id');
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL;
+    if (!tenantId || !apiUrl) return;
+
+    const baseUrl = apiUrl.endsWith('/') ? apiUrl.slice(0, -1) : apiUrl;
+    const eventSource = new EventSource(`${baseUrl}/api/dashboard/stream?tenant_id=${encodeURIComponent(tenantId)}`);
+
+    eventSource.onopen = () => setIsActivityLive(true);
+    eventSource.onmessage = (event) => {
+      let payload: {
+        event?: string;
+        refresh?: string[];
+        activity?: DashboardActivity;
+      } | null = null;
+
+      try {
+        payload = JSON.parse(event.data);
+      } catch {
+        payload = null;
+      }
+
+      if (payload?.activity) {
+        setActivities((current) => {
+          const next = [payload.activity as DashboardActivity, ...current.filter((item) => item.id !== payload?.activity?.id)];
+          return next.slice(0, 20);
+        });
+        setActivitiesError(null);
+      }
+
+      const refreshTargets = payload?.refresh ?? [];
+      if (refreshTargets.includes('analytics')) {
+        void refetchDashboardAnalytics();
+      }
+      if (refreshTargets.includes('activity')) {
+        getDashboardActivity().then((items) => setActivities(Array.isArray(items) ? items : [])).catch(() => undefined);
+      }
+      if (refreshTargets.includes('conversations')) {
+        getConversations().then((items) => setConversations(Array.isArray(items) ? items : [])).catch(() => undefined);
+      }
+    };
+
+    eventSource.onerror = () => {
+      setIsActivityLive(false);
+    };
+
+    return () => {
+      eventSource.close();
+      setIsActivityLive(false);
+    };
+  }, [refetchDashboardAnalytics]);
 
   useEffect(() => {
     setGreeting(getGreeting());
@@ -479,11 +535,14 @@ export default function DashboardPage() {
         <div className="min-h-[390px] rounded-2xl border border-slate-100 bg-white p-5 shadow-[0_12px_30px_rgba(15,23,42,0.04)]">
           <div className="flex items-center justify-between">
             <h3 className="m-0 text-sm font-semibold text-slate-900">Atividade ao vivo</h3>
-            <span className="text-xs text-slate-500 flex items-center gap-2"><span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />Atualizando agora</span>
+            <span className="text-xs text-slate-500 flex items-center gap-2"><span className={`h-1.5 w-1.5 rounded-full ${isActivityLive ? 'bg-emerald-500' : 'bg-amber-400'}`} />{isActivityLive ? 'Ao vivo' : 'Reconectando'}</span>
           </div>
           {(activitiesError || liveItems.length === 0) ? <div className="mt-4 h-[290px] grid place-items-center rounded-xl border border-dashed border-emerald-200 bg-emerald-50/40 text-center"><div><p className="m-0 font-semibold text-slate-700">Nenhuma atividade recente ainda.</p><p className="m-0 mt-1 text-sm text-slate-500">Eventos reais do CRM aparecerão aqui em tempo real.</p></div></div> : <div className="mt-4 divide-y divide-slate-100">{(liveItems || []).map((item, idx) => {
-            const initials = getInitials(item.title);
-            return <div key={item.id || idx} className="flex items-start gap-3 py-3"><div className="h-9 w-9 rounded-full bg-emerald-50 text-emerald-700 text-xs font-semibold flex items-center justify-center shrink-0">{initials}</div><div className="min-w-0 flex-1"><p className="m-0 text-sm font-semibold text-slate-800 leading-tight">{item.title}</p><p className="m-0 text-xs text-slate-500 mt-0.5">{item.description || item.type}</p></div><div className="flex shrink-0 items-center gap-2"><span className="text-xs text-slate-400">{formatRelativeTime(item.created_at)}</span><span className="h-2 w-2 rounded-full bg-emerald-500" /></div></div>;
+            const displayName = item.contact_name?.trim() || item.phone?.trim() || item.title;
+            const detail = item.title && item.title !== displayName ? item.title : item.description || item.type;
+            const detailSuffix = item.description && item.description !== detail ? ` · ${item.description}` : '';
+            const initials = getInitials(displayName);
+            return <div key={item.id || idx} className="flex items-start gap-3 py-3"><div className="h-9 w-9 rounded-full bg-emerald-50 text-emerald-700 text-xs font-semibold flex items-center justify-center shrink-0">{initials}</div><div className="min-w-0 flex-1"><p className="m-0 text-sm font-semibold text-slate-800 leading-tight">{displayName}</p><p className="m-0 text-xs text-slate-500 mt-0.5">{detail}{detailSuffix}</p></div><div className="flex shrink-0 items-center gap-2"><span className="text-xs text-slate-400">{formatRelativeTime(item.created_at)}</span><span className="h-2 w-2 rounded-full bg-emerald-500" /></div></div>;
           })}</div>}
           <div className="mt-4 border-t border-slate-100 pt-4 text-center">
             <button type="button" onClick={() => setActivePanel('conversations')} className="text-sm font-medium text-emerald-600 hover:text-emerald-700">

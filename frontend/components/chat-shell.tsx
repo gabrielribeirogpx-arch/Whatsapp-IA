@@ -250,6 +250,42 @@ export default function ChatShell() {
     return () => window.clearTimeout(timeoutId);
   }, [resetToast, resetError]);
 
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const tenantId = localStorage.getItem('tenant_id');
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL;
+    if (!tenantId || !apiUrl) return;
+
+    const baseUrl = apiUrl.endsWith('/') ? apiUrl.slice(0, -1) : apiUrl;
+    const eventSource = new EventSource(`${baseUrl}/api/dashboard/stream?tenant_id=${encodeURIComponent(tenantId)}`);
+
+    eventSource.onmessage = (event) => {
+      let payload: { refresh?: string[] } | null = null;
+
+      try {
+        payload = JSON.parse(event.data);
+      } catch {
+        payload = null;
+      }
+
+      if (!payload?.refresh?.includes('conversations')) return;
+
+      getConversations()
+        .then((items) => applyConversations(items))
+        .catch(() => undefined);
+    };
+
+    eventSource.onerror = () => {
+      // EventSource reconecta automaticamente; manter aberto preserva o realtime do Inbox.
+    };
+
+    return () => {
+      eventSource.close();
+    };
+  }, [applyConversations]);
+
   useEffect(() => {
     if (!selectedContactId) return;
 

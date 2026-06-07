@@ -29,7 +29,7 @@ from app.services.conversation_service import get_or_create_conversation
 from app.services.lead_service import get_or_create_lead
 from app.services.message_service import sanitize_text
 from app.utils.phone import normalize_phone
-from app.services.realtime_service import sse_broker
+from app.services.realtime_service import publish_dashboard_event, sse_broker
 from app.services.tenant_service import (
     TenantLimitError,
     assert_tenant_can_send,
@@ -493,6 +493,25 @@ async def send_message(
     message_payload = {"event": "message", "message": MessageOut.model_validate(message).model_dump(mode="json")}
     await sse_broker.publish(f"{tenant.id}:{phone}", message_payload)
     await sse_broker.publish(f"{tenant.id}:{conversation.id}", message_payload)
+    display_name = (conversation.name or phone or "Contato").strip()
+    await publish_dashboard_event(
+        tenant_id=tenant.id,
+        payload={
+            "event": "dashboard_activity",
+            "refresh": ["analytics", "conversations"],
+            "activity": {
+                "id": str(message.id),
+                "type": "MESSAGE_SENT",
+                "title": display_name,
+                "description": message_text,
+                "entity_type": "conversation",
+                "entity_id": str(conversation.id),
+                "contact_name": conversation.name,
+                "phone": phone,
+                "created_at": message.created_at.isoformat(),
+            },
+        },
+    )
     return message
 
 
@@ -524,7 +543,7 @@ def take_over(
 
 
 @router.patch("/conversations/{conversation_id}/mode")
-def update_conversation_mode(
+async def update_conversation_mode(
     conversation_id: UUID,
     mode: str,
     tenant: Tenant = Depends(get_current_tenant),
@@ -554,6 +573,24 @@ def update_conversation_mode(
         handle_bot_activation(db=db, conversation=conversation)
 
     db.commit()
+    await publish_dashboard_event(
+        tenant_id=tenant.id,
+        payload={
+            "event": "conversation_updated",
+            "refresh": ["analytics", "conversations"],
+            "activity": {
+                "id": str(conversation.id),
+                "type": "HUMAN_REQUEST" if mode == "human" else "CONVERSATION_MODE_UPDATED",
+                "title": (conversation.name or conversation.phone_number or "Conversa"),
+                "description": "Solicitação humana" if mode == "human" else f"Modo atualizado para {mode}",
+                "entity_type": "conversation",
+                "entity_id": str(conversation.id),
+                "contact_name": conversation.name,
+                "phone": conversation.phone_number,
+                "created_at": datetime.utcnow().isoformat(),
+            },
+        },
+    )
 
     return {"status": "updated", "mode": mode}
 

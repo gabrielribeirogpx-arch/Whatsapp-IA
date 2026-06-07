@@ -225,6 +225,7 @@ def ensure_whatsapp_lead_for_inbound(
         metadata={
             "source": WHATSAPP_SOURCE,
             "phone": normalized_phone,
+            "contact_name": name or getattr(contact, "name", None),
             "contact_id": str(contact.id) if contact else None,
             "conversation_id": str(conversation.id) if conversation else None,
             "pipeline_stage_id": str(pipeline_stage.id) if pipeline_stage else None,
@@ -242,7 +243,7 @@ def ensure_whatsapp_lead_for_inbound(
             user_id=lead.owner_id,
             entity_type="conversation",
             entity_id=conversation.id,
-            metadata={"phone": normalized_phone, "lead_id": str(lead.id), "event": "Nova conversa iniciada"},
+            metadata={"phone": normalized_phone, "contact_name": name or getattr(contact, "name", None), "lead_id": str(lead.id), "event": "Nova conversa iniciada"},
         )
     logger.info(
         "event=lead_auto_created tenant_id=%s lead_id=%s contact_id=%s conversation_id=%s source=%s",

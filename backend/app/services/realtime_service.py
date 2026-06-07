@@ -27,6 +27,11 @@ class SSEBroker:
 sse_broker = SSEBroker()
 
 
+async def publish_dashboard_event(*, tenant_id, payload: dict) -> None:
+    """Publish tenant-wide dashboard/inbox realtime events through the shared SSE broker."""
+    await sse_broker.publish(f"dashboard:{tenant_id}", payload)
+
+
 def publish_contact_event(*, tenant_id, contact_id, event) -> None:
     """Best-effort publish of CRM timeline events to SSE subscribers."""
     payload = {

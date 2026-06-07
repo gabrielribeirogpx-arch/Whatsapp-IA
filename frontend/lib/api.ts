@@ -366,6 +366,8 @@ export type DashboardActivity = {
   title: string;
   description?: string | null;
   entity_type?: string | null;
+  contact_name?: string | null;
+  phone?: string | null;
   entity_id?: string | null;
   created_at: string;
 };
