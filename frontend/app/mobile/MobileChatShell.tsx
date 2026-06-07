@@ -37,7 +37,55 @@ import InstallPrompt        from './components/InstallPrompt';
 
 export type MobileView = 'inbox' | 'chat' | 'notifs' | 'profile';
 
+const MOBILE_INBOX_CACHE_KEY = 'wazza-mobile-inbox-cache-v1';
+
 // ─── Helpers ──────────────────────────────────────────────────
+
+function readCachedConversations(): Conversation[] {
+  if (typeof window === 'undefined') return [];
+
+  try {
+    const raw = window.localStorage.getItem(MOBILE_INBOX_CACHE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as { conversations?: Conversation[] };
+    return Array.isArray(parsed.conversations) ? parsed.conversations : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeCachedConversations(conversations: Conversation[]) {
+  if (typeof window === 'undefined') return;
+
+  try {
+    window.localStorage.setItem(MOBILE_INBOX_CACHE_KEY, JSON.stringify({
+      cachedAt: new Date().toISOString(),
+      conversations,
+    }));
+  } catch {
+    // Cache offline é best-effort para não bloquear o Inbox.
+  }
+}
+
+function updateAppBadge(count: number) {
+  if (typeof navigator === 'undefined') return;
+  const nav = navigator as Navigator & {
+    setAppBadge?: (contents?: number) => Promise<void>;
+    clearAppBadge?: () => Promise<void>;
+  };
+
+  if (count > 0 && nav.setAppBadge) {
+    nav.setAppBadge(count).catch(() => undefined);
+  } else if (count === 0 && nav.clearAppBadge) {
+    nav.clearAppBadge().catch(() => undefined);
+  }
+}
+
+function vibrate(pattern: VibratePattern) {
+  if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
+    navigator.vibrate(pattern);
+  }
+}
 
 function toChatMessage(msg: Message): ChatMessage {
   const d = new Date(msg.created_at);
@@ -177,8 +225,13 @@ export default function MobileChatShell() {
     try {
       const data = await getConversations();
       setConversations(data);
+      writeCachedConversations(data);
     } catch (e) {
       console.error('[MobileChatShell] fetchConversations:', e);
+      const cached = readCachedConversations();
+      if (cached.length > 0) {
+        setConversations(cached);
+      }
     } finally {
       setLoading(false);
     }
@@ -198,6 +251,11 @@ export default function MobileChatShell() {
     }
   }, []);
 
+  const showBanner = useCallback((title: string, text: string) => {
+    setPushBanner({ title, text });
+    setTimeout(() => setPushBanner(null), 4000);
+  }, []);
+
   // ── SSE handler ──────────────────────────────────────────────
   useSSE(useCallback((type: string, data: unknown) => {
     const d = data as Record<string, unknown>;
@@ -215,6 +273,7 @@ export default function MobileChatShell() {
 
     if (type === 'new_message') {
       const msg = d as { conversation_id: unknown; message: Message };
+      vibrate([80, 40, 80]);
       // Atualiza last_message na lista
       setConversations(prev =>
         prev.map(c =>
@@ -231,6 +290,7 @@ export default function MobileChatShell() {
 
     if (type === 'handoff_requested') {
       const h = d as { conversation_id: unknown; contact_name?: string };
+      vibrate([120, 60, 120]);
       showBanner(
         'Solicitação de atendimento',
         `${h.contact_name || 'Cliente'} quer falar com um humano`
@@ -252,14 +312,17 @@ export default function MobileChatShell() {
         )
       );
     }
-  }, [selectedConvoId]));
+  }, [selectedConvoId, showBanner]));
+
+  useEffect(() => {
+    writeCachedConversations(conversations);
+  }, [conversations]);
+
+  useEffect(() => {
+    updateAppBadge(pendingCount);
+  }, [pendingCount]);
 
   // ── Handlers ─────────────────────────────────────────────────
-  const showBanner = useCallback((title: string, text: string) => {
-    setPushBanner({ title, text });
-    setTimeout(() => setPushBanner(null), 4000);
-  }, []);
-
   const openChat = useCallback((convoId: string) => {
     const convo = conversations.find(c => c.id === convoId);
     if (!convo) return;
@@ -269,6 +332,20 @@ export default function MobileChatShell() {
     fetchMessages(convo);
     setView('chat');
   }, [conversations, fetchMessages]);
+
+  useEffect(() => {
+    if (loading || conversations.length === 0 || typeof window === 'undefined') return;
+
+    const params = new URLSearchParams(window.location.search);
+    const conversationId = params.get('conversation_id');
+    if (!conversationId) return;
+
+    openChat(conversationId);
+    params.delete('conversation_id');
+    const nextSearch = params.toString();
+    const nextUrl = `${window.location.pathname}${nextSearch ? `?${nextSearch}` : ''}`;
+    window.history.replaceState(null, '', nextUrl);
+  }, [conversations, loading, openChat]);
 
   const handleSend = useCallback(async (e?: FormEvent) => {
     e?.preventDefault();
