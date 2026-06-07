@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import uuid
+from contextlib import contextmanager
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
 from app.flow_v2.actions import SendChoiceButtonsAction
 from app.flow_v2.contracts import FlowV2EventType, FlowV2SessionStatus, RuntimeInput
+from app.flow_v2.delay_worker import FlowV2DelayWorker
 from app.flow_v2.executor import FlowV2Executor
 from app.flow_v2.snapshot import FlowV2Snapshot, canonical_hash
 from app.flow_v2.transition_resolver import FlowV2TransitionError
@@ -14,12 +17,49 @@ from app.flow_v2.transition_resolver import FlowV2TransitionError
 class _FakeDB:
     def __init__(self):
         self.added = []
+        self.session = None
+        self.deleted = []
 
     def add(self, item):
         self.added.append(item)
 
+    def execute(self, statement, params=None):
+        statement_text = str(statement)
+        if "pg_try_advisory_xact_lock" in statement_text:
+            return _FakeResult(scalar_value=True)
+        if "DELETE FROM flow_v2_scheduled_jobs" in statement_text:
+            self.deleted.append(statement)
+            return _FakeResult()
+        if "flow_v2_scheduled_jobs" in statement_text:
+            jobs = [item for item in self.added if item.__class__.__name__ == "FlowV2ScheduledJob"]
+            return _FakeResult(values=jobs)
+        if "flow_v2_sessions" in statement_text:
+            return _FakeResult(scalar_one_value=self.session)
+        if "flow_v2_idempotency_keys" in statement_text:
+            return _FakeResult(scalar_one_value=None)
+        return _FakeResult()
+
     def flush(self):
         pass
+
+
+class _FakeResult:
+    def __init__(self, values=None, scalar_one_value=None, scalar_value=None):
+        self.values = values or []
+        self.scalar_one_value = scalar_one_value
+        self.scalar_value = scalar_value
+
+    def scalars(self):
+        return self
+
+    def __iter__(self):
+        return iter(self.values)
+
+    def scalar_one_or_none(self):
+        return self.scalar_one_value
+
+    def scalar(self):
+        return self.scalar_value
 
 
 class _FakeSession:
@@ -28,6 +68,9 @@ class _FakeSession:
         self.tenant_id = tenant_id
         self.flow_version_id = flow_version_id
         self.current_node_id = "start"
+        self.external_user_id = "whatsapp:+5511999999999"
+        self.contact_id = None
+        self.conversation_id = None
         self.status = FlowV2SessionStatus.RUNNING
         self.last_event_index = 0
 
@@ -57,6 +100,12 @@ class _FakeEventStore:
                 "input_message_id": input_message_id,
             }
         )
+
+
+class _FakeSessionLock:
+    @contextmanager
+    def acquire(self, db, *, tenant_id, session_id):
+        yield
 
 
 class _FakeSessionManager:
@@ -96,16 +145,19 @@ def _executor(raw_snapshot):
     snapshot = _snapshot(raw_snapshot)
     event_store = _FakeEventStore()
     session = _FakeSession(snapshot.tenant_id, snapshot.flow_version_id)
+    db = _FakeDB()
+    db.session = session
     return (
         FlowV2Executor(
             snapshot_repository=_FakeSnapshotRepository(snapshot),
             event_store=event_store,
             session_manager=_FakeSessionManager(session, event_store),
+            session_lock=_FakeSessionLock(),
         ),
         snapshot,
         event_store,
         session,
-        _FakeDB(),
+        db,
     )
 
 
@@ -570,6 +622,50 @@ def test_start_message_to_delay_schedules_without_waiting_before_delay_and_resum
     assert session.status == FlowV2SessionStatus.COMPLETED
     assert resumed.effects == ({"type": "send_message", "text": "Depois"},)
     assert [event["node_id"] for event in event_store.events if event["event_type"] == "NODE_ENTERED"] == ["start", "delay", "after_delay"]
+
+
+def test_delay_worker_resume_dispatches_message_delay_message_default_pipeline() -> None:
+    raw_snapshot = {
+        "schema_version": 1,
+        "start_node_id": "start",
+        "nodes": [
+            {"id": "start", "type": "message", "content": "Olá! Como posso te ajudar?", "data": {"isStart": True}},
+            {"id": "delay", "type": "delay", "seconds": 5},
+            {"id": "bccab03d-830a-4dc1-9e67-bcadf5666eee", "type": "message", "content": "Certo, vou encaminhar para esses planos."},
+        ],
+        "edges": [
+            {"id": "e1", "source": "start", "target": "delay"},
+            {"id": "e2", "source": "delay", "target": "bccab03d-830a-4dc1-9e67-bcadf5666eee"},
+        ],
+    }
+    executor, snapshot, event_store, session, db = _executor(raw_snapshot)
+    initial = executor.handle_input(db, _input_with_id(snapshot, "wamid.delay.initial"))
+    scheduled_job = next(item for item in db.added if item.__class__.__name__ == "FlowV2ScheduledJob")
+    scheduled_job.run_at = datetime.now(UTC).replace(tzinfo=None) - timedelta(seconds=1)
+
+    delay_worker = FlowV2DelayWorker(event_store=event_store)
+    delay_worker.runtime_worker.executor = executor
+    assert delay_worker.runtime_worker.channel_adapter is not None
+    sent_payloads = []
+    delay_worker.runtime_worker.channel_adapter.client = lambda **kwargs: sent_payloads.append(kwargs) or {"status": "queued"}
+
+    result = delay_worker.run_due(db, now=datetime.now(UTC).replace(tzinfo=None))
+
+    assert initial.effects == ({"type": "send_message", "text": "Olá! Como posso te ajudar?"},)
+    assert result.processed == 1
+    assert result.worker_results[0].runtime_output.status == FlowV2SessionStatus.COMPLETED
+    assert result.worker_results[0].runtime_output.current_node_id is None
+    assert result.worker_results[0].runtime_output.effects == ({"type": "send_message", "text": "Certo, vou encaminhar para esses planos."},)
+    assert [action.text for action in result.worker_results[0].runtime_output.actions if hasattr(action, "text")] == ["Certo, vou encaminhar para esses planos."]
+    assert [action.text for action in result.worker_results[0].actions if hasattr(action, "text")] == ["Certo, vou encaminhar para esses planos."]
+    assert result.worker_results[0].deliveries == ({"status": "queued"},)
+    assert sent_payloads[0]["text"] == "Certo, vou encaminhar para esses planos."
+    assert sent_payloads[0]["recipient_id"] == "whatsapp:+5511999999999"
+    assert [event["node_id"] for event in event_store.events if event["event_type"] == "NODE_ENTERED"] == [
+        "start",
+        "delay",
+        "bccab03d-830a-4dc1-9e67-bcadf5666eee",
+    ]
 
 
 @pytest.mark.parametrize(("tag", "expected_node_id", "expected_text"), [("vip", "answer_a", "Resposta A"), ("regular", "answer_b", "Resposta B")])
