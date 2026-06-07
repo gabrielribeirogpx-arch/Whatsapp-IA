@@ -108,10 +108,19 @@ class FlowV2Executor:
                 input_message_id=runtime_input.input_message_id or idempotency_key,
             )
 
+            if self._is_delay_resumed(runtime_input):
+                logger.info(
+                    "[DELAY_RESUMED] executor_before_execute session_id=%s current_node_id=%s session_status=%s delay_job_id=%s",
+                    session.id,
+                    session.current_node_id,
+                    session.status,
+                    runtime_input.metadata.get("delay_job_id"),
+                )
+
             actions = self._execute_current_node(db, snapshot=snapshot, session=session, runtime_input=runtime_input)
             self.idempotency_store.mark_session(db, decision=decision, session_id=session.id)
             db.flush()
-            return RuntimeOutput(
+            output = RuntimeOutput(
                 session_id=session.id,
                 status=FlowV2SessionStatus(session.status),
                 current_node_id=session.current_node_id,
@@ -119,6 +128,18 @@ class FlowV2Executor:
                 actions=tuple(actions),
                 emitted_event_count=session.last_event_index - emitted_before,
             )
+            if self._is_delay_resumed(runtime_input):
+                logger.info(
+                    "[DELAY_RESUMED] runtime_output session_id=%s status=%s current_node_id=%s runtime_output_actions_count=%s actions_empty=%s effects_count=%s emitted_event_count=%s",
+                    output.session_id,
+                    output.status,
+                    output.current_node_id,
+                    len(output.actions),
+                    len(output.actions) == 0,
+                    len(output.effects),
+                    output.emitted_event_count,
+                )
+            return output
 
     def _execute_current_node(
         self, db: Session, *, snapshot: FlowV2Snapshot, session: Any, runtime_input: RuntimeInput
@@ -143,6 +164,18 @@ class FlowV2Executor:
                     session.current_node_id,
                     len(snapshot.transitions),
                     step + 1,
+                )
+                logger.info(
+                    "[EXECUTOR ENTER NODE] node_id=%s node_type=%s current_node_id=%s transitions_count=%s step=%s event_type=%s delay_resumed=%s reentered_delay_after_resume=%s target_final_node=%s",
+                    node_id,
+                    node_type,
+                    session.current_node_id,
+                    len(snapshot.transitions),
+                    step + 1,
+                    runtime_input.metadata.get("event_type"),
+                    self._is_delay_resumed(runtime_input),
+                    self._is_delay_resumed(runtime_input) and node_type == "delay",
+                    node_id == "bccab03d-830a-4dc1-9e67-bcadf5666eee",
                 )
                 result = self.node_registry.get(node_type).execute(
                     db,
@@ -203,6 +236,14 @@ class FlowV2Executor:
                     session.current_node_id,
                     session.status,
                 )
+                logger.info(
+                    "[EXECUTOR STOP] node_id=%s node_type=%s current_node_id=%s session_status=%s reason=scheduled actions_count=%s",
+                    node_id,
+                    node_type,
+                    session.current_node_id,
+                    session.status,
+                    len(actions),
+                )
                 return actions
             if result.status == "wait":
                 waiting_node_id = result.next_node_id or node_id
@@ -222,10 +263,26 @@ class FlowV2Executor:
                     session.current_node_id,
                     session.status,
                 )
+                logger.info(
+                    "[EXECUTOR STOP] node_id=%s node_type=%s current_node_id=%s session_status=%s reason=executor_result_wait actions_count=%s",
+                    node_id,
+                    node_type,
+                    session.current_node_id,
+                    session.status,
+                    len(actions),
+                )
                 return actions
             if result.status == "complete":
                 self.event_store.append(db, session=session, event_type=FlowV2EventType.SESSION_COMPLETED, node_id=node_id)
                 self.session_manager.move_to(db, session=session, node_id=None, status=FlowV2SessionStatus.COMPLETED)
+                logger.info(
+                    "[EXECUTOR STOP] node_id=%s node_type=%s current_node_id=%s session_status=%s reason=complete actions_count=%s",
+                    node_id,
+                    node_type,
+                    session.current_node_id,
+                    session.status,
+                    len(actions),
+                )
                 return actions
 
             if not result.next_node_id:
@@ -249,6 +306,10 @@ class FlowV2Executor:
         )
         self.session_manager.move_to(db, session=session, node_id=current_node_id, status=FlowV2SessionStatus.FAILED)
         raise FlowV2ExecutionError(f"Runtime V2 exceeded max_steps={MAX_RUNTIME_STEPS}")
+
+    @staticmethod
+    def _is_delay_resumed(runtime_input: RuntimeInput) -> bool:
+        return runtime_input.metadata.get("event_type") == str(FlowV2EventType.DELAY_RESUMED)
 
     @staticmethod
     def _legacy_effect(action: RuntimeAction) -> dict[str, Any] | None:
