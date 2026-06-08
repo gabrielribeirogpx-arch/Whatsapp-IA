@@ -7,7 +7,7 @@
 
 import {
   ArrowLeft, Bot, User, Clock, Send, Paperclip,
-  MoreVertical, UserCheck, RefreshCw, CheckCheck, Check,
+  MoreVertical, UserCheck, RefreshCw, CheckCheck, Check, LogOut,
 } from 'lucide-react';
 import { useRef, useEffect, useState, FormEvent } from 'react';
 import type { ChatMessage, Contact, ConversationMode } from '@/lib/types';
@@ -26,6 +26,7 @@ interface MobileChatViewProps {
   currentUserId?: string;
   isAdmin?: boolean;
   onAssume?: () => void;
+  onRelease?: () => void;
   onReset?: () => void;
 }
 
@@ -48,12 +49,14 @@ export default function MobileChatView({
   assignedUserName,
   isAdmin = false,
   onAssume,
+  onRelease,
   onReset,
 }: MobileChatViewProps) {
   const listRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [confirmReset, setConfirmReset] = useState(false);
+  const [confirmRelease, setConfirmRelease] = useState(false);
 
   useEffect(() => {
     if (listRef.current) {
@@ -78,6 +81,10 @@ export default function MobileChatView({
   const isHuman = mode === 'human';
   const hasAssigned = !!assignedUserName;
 
+  // Determines which handoff banner variant to show
+  // 1. human + no-assigned → awaiting attendant (orange)
+  // 2. human + assigned     → in-care (green) with Liberar button
+  // (mode === 'bot' shows no banner)
   let handoffBg = '';
   let handoffText = '';
   if (isHuman && !hasAssigned) {
@@ -171,6 +178,13 @@ export default function MobileChatView({
                       onClick={() => { setMenuOpen(false); onAssume(); }}
                     />
                   )}
+                  {isHuman && hasAssigned && onRelease && (
+                    <MenuOption
+                      icon={<LogOut size={15} />}
+                      label="Liberar para o bot"
+                      onClick={() => { setMenuOpen(false); setConfirmRelease(true); }}
+                    />
+                  )}
                   {isAdmin && onReset && (
                     <MenuOption
                       icon={<RefreshCw size={15} />}
@@ -206,6 +220,32 @@ export default function MobileChatView({
                 Assumir
               </button>
             )}
+            {isHuman && hasAssigned && onRelease && (
+              <button onClick={() => setConfirmRelease(true)} style={{
+                background: 'transparent', border: '1px solid #59C414', borderRadius: '6px',
+                padding: '3px 10px', fontSize: '11px', fontWeight: 600,
+                color: '#59C414', cursor: 'pointer',
+                display: 'flex', alignItems: 'center', gap: '4px',
+                WebkitTapHighlightColor: 'transparent',
+              }}>
+                <LogOut size={11} />
+                Liberar
+              </button>
+            )}
+          </div>
+        )}
+
+        {/* Bot-reactivated banner (mode switched back to bot) */}
+        {!isHuman && (
+          <div style={{
+            background: 'rgba(55,138,221,0.07)',
+            padding: '6px 16px', fontSize: '12px',
+            color: '#378ADD', fontWeight: 500,
+            display: 'flex', alignItems: 'center', gap: '6px',
+            borderTop: '1px solid #E5E7EB',
+          }}>
+            <Bot size={13} />
+            ⚙️ Automação reativada
           </div>
         )}
       </div>
@@ -299,6 +339,17 @@ export default function MobileChatView({
           confirmLabel="Resetar"
           onConfirm={() => { setConfirmReset(false); onReset?.(); }}
           onCancel={() => setConfirmReset(false)}
+        />
+      )}
+
+      {/* ── Confirm Release Dialog ── */}
+      {confirmRelease && (
+        <ConfirmSheet
+          message="Liberar conversa? O bot voltará a responder automaticamente."
+          confirmLabel="Liberar"
+          confirmColor="#378ADD"
+          onConfirm={() => { setConfirmRelease(false); onRelease?.(); }}
+          onCancel={() => setConfirmRelease(false)}
         />
       )}
     </div>
@@ -404,8 +455,8 @@ function MenuOption({ icon, label, onClick, danger = false }: {
 
 // ── Confirm Sheet ───────────────────────────────────────────────
 
-function ConfirmSheet({ message, confirmLabel, onConfirm, onCancel }: {
-  message: string; confirmLabel: string; onConfirm: () => void; onCancel: () => void;
+function ConfirmSheet({ message, confirmLabel, confirmColor = '#e24b4a', onConfirm, onCancel }: {
+  message: string; confirmLabel: string; confirmColor?: string; onConfirm: () => void; onCancel: () => void;
 }) {
   return (
     <>
@@ -424,7 +475,7 @@ function ConfirmSheet({ message, confirmLabel, onConfirm, onCancel }: {
           {message}
         </p>
         <button onClick={onConfirm} style={{
-          width: '100%', padding: '13px', background: '#e24b4a',
+          width: '100%', padding: '13px', background: confirmColor,
           border: 'none', borderRadius: '12px',
           fontSize: '15px', fontWeight: 600, color: '#fff',
           cursor: 'pointer', marginBottom: '8px',

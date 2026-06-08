@@ -370,6 +370,28 @@ export default function MobileChatShell() {
     } catch (e) { console.error('[MobileChatShell] handleAssume:', e); }
   }, [selectedConvo]);
 
+  const handleRelease = useCallback(async () => {
+    if (!selectedConvo) return;
+    try {
+      // 1. Clear assignment on the backend
+      await fetch(`/api/conversations/${selectedConvo.id}/assign`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id: null }), credentials: 'include',
+      });
+      // 2. Switch mode back to bot so flows resume
+      await updateConversationMode(String(selectedConvo.id), 'bot');
+      // 3. Update local state: clear assignment + set mode to bot
+      setConversations(prev =>
+        prev.map(c =>
+          c.id === selectedConvo.id
+            ? { ...c, mode: 'bot', assigned_user_id: null, assigned_user_name: null } as any
+            : c
+        )
+      );
+      setMode('bot');
+    } catch (e) { console.error('[MobileChatShell] handleRelease:', e); }
+  }, [selectedConvo]);
+
   const handleReset = useCallback(async () => {
     if (!selectedConvo) return;
     try {
@@ -460,6 +482,7 @@ export default function MobileChatShell() {
           assignedUserName={assignedUserName}
           isAdmin={isAdmin}
           onAssume={handleAssume}
+          onRelease={handleRelease}
           onReset={handleReset}
         />
       )}
