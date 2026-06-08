@@ -3,9 +3,9 @@ export default function Head() {
     <>
       <meta name="apple-mobile-web-app-capable" content="yes" />
       <meta name="apple-mobile-web-app-title" content="Wazza Inbox" />
-      <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+      <meta name="apple-mobile-web-app-status-bar-style" content="default" />
       <meta name="mobile-web-app-capable" content="yes" />
-      <meta name="theme-color" content="#0a0a0f" />
+      <meta name="theme-color" content="#59C414" />
       <link rel="apple-touch-icon" href="/Logo.svg" />
       <link rel="apple-touch-startup-image" href="/Logo.svg" media="(device-width: 414px) and (device-height: 896px) and (-webkit-device-pixel-ratio: 2)" />
       <link rel="apple-touch-startup-image" href="/Logo.svg" media="(device-width: 390px) and (device-height: 844px) and (-webkit-device-pixel-ratio: 3)" />
