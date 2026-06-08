@@ -1,8 +1,8 @@
 'use client';
 
 /**
- * /frontend/components/mobile/BottomNav.tsx
- * Bottom navigation bar — Inbox · Notificações · Perfil
+ * BottomNav.tsx — Wazza Inbox Mobile
+ * Light Mode · Identidade Verde #59C414
  */
 
 import { MessageSquare, Bell, User } from 'lucide-react';
@@ -22,34 +22,20 @@ export default function BottomNav({ current, onChange, pendingCount = 0 }: Botto
       icon: <MessageSquare size={22} />,
       badge: pendingCount > 0 ? pendingCount : undefined,
     },
-    {
-      id: 'notifs',
-      label: 'Alertas',
-      icon: <Bell size={22} />,
-    },
-    {
-      id: 'profile',
-      label: 'Perfil',
-      icon: <User size={22} />,
-    },
+    { id: 'notifs',  label: 'Alertas', icon: <Bell size={22} /> },
+    { id: 'profile', label: 'Perfil',  icon: <User size={22} /> },
   ];
 
   return (
-    <nav
-      style={{
-        position: 'fixed',
-        bottom: 0,
-        left: 0,
-        right: 0,
-        height: '64px',
-        background: '#0d0d14',
-        borderTop: '1px solid rgba(255,255,255,0.07)',
-        display: 'flex',
-        alignItems: 'stretch',
-        zIndex: 100,
-        paddingBottom: 'env(safe-area-inset-bottom)',
-      }}
-    >
+    <nav style={{
+      position: 'fixed', bottom: 0, left: 0, right: 0,
+      height: '64px',
+      background: '#FFFFFF',
+      borderTop: '1px solid #E5E7EB',
+      display: 'flex', alignItems: 'stretch',
+      zIndex: 100,
+      paddingBottom: 'env(safe-area-inset-bottom)',
+    }}>
       {tabs.map((tab) => {
         const active = current === tab.id;
         return (
@@ -58,65 +44,47 @@ export default function BottomNav({ current, onChange, pendingCount = 0 }: Botto
             onClick={() => onChange(tab.id)}
             style={{
               flex: 1,
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              justifyContent: 'center',
+              display: 'flex', flexDirection: 'column',
+              alignItems: 'center', justifyContent: 'center',
               gap: '3px',
-              background: 'transparent',
-              border: 'none',
+              background: 'transparent', border: 'none',
               cursor: 'pointer',
-              color: active ? '#7c6ef5' : 'rgba(255,255,255,0.35)',
+              color: active ? '#59C414' : '#9CA3AF',
               transition: 'color 0.15s',
               position: 'relative',
               WebkitTapHighlightColor: 'transparent',
             }}
           >
-            {/* Active indicator */}
+            {/* Active indicator top */}
             {active && (
-              <span
-                style={{
-                  position: 'absolute',
-                  top: 0,
-                  left: '50%',
-                  transform: 'translateX(-50%)',
-                  width: '32px',
-                  height: '2px',
-                  background: '#7c6ef5',
-                  borderRadius: '0 0 2px 2px',
-                }}
-              />
+              <span style={{
+                position: 'absolute', top: 0, left: '50%',
+                transform: 'translateX(-50%)',
+                width: '32px', height: '2px',
+                background: '#59C414',
+                borderRadius: '0 0 2px 2px',
+              }} />
             )}
 
             {/* Icon with badge */}
             <span style={{ position: 'relative' }}>
               {tab.icon}
               {tab.badge !== undefined && (
-                <span
-                  style={{
-                    position: 'absolute',
-                    top: '-4px',
-                    right: '-6px',
-                    minWidth: '16px',
-                    height: '16px',
-                    padding: '0 4px',
-                    background: '#e24b4a',
-                    borderRadius: '8px',
-                    fontSize: '10px',
-                    fontWeight: 600,
-                    color: '#fff',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    lineHeight: 1,
-                  }}
-                >
+                <span style={{
+                  position: 'absolute', top: '-4px', right: '-6px',
+                  minWidth: '16px', height: '16px',
+                  padding: '0 4px',
+                  background: '#e24b4a', borderRadius: '8px',
+                  fontSize: '10px', fontWeight: 600, color: '#fff',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  lineHeight: 1,
+                }}>
                   {tab.badge > 99 ? '99+' : tab.badge}
                 </span>
               )}
             </span>
 
-            <span style={{ fontSize: '10px', fontWeight: active ? 500 : 400 }}>{tab.label}</span>
+            <span style={{ fontSize: '10px', fontWeight: active ? 600 : 400 }}>{tab.label}</span>
           </button>
         );
       })}

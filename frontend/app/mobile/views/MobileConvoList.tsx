@@ -1,11 +1,8 @@
 'use client';
 
 /**
- * /frontend/components/mobile/MobileConvoList.tsx
- *
- * Lista de conversas do inbox mobile.
- * Filtros: all | human | bot | pending
- * Busca por nome/telefone.
+ * MobileConvoList.tsx — Wazza Inbox Mobile
+ * Light Mode · Identidade Verde #59C414
  */
 
 import { Search, Bell, BellOff, Bot, User, Clock, X } from 'lucide-react';
@@ -25,15 +22,15 @@ interface MobileConvoListProps {
 }
 
 const FILTERS: { id: 'all' | 'human' | 'bot' | 'pending'; label: string }[] = [
-  { id: 'all',     label: 'Todos'     },
-  { id: 'human',   label: 'Humano'    },
-  { id: 'bot',     label: 'Bot'       },
-  { id: 'pending', label: 'Pendente'  },
+  { id: 'all',     label: 'Todos'    },
+  { id: 'human',   label: 'Humano'   },
+  { id: 'bot',     label: 'Bot'      },
+  { id: 'pending', label: 'Pendente' },
 ];
 
 function modeIcon(mode?: string) {
   const m = (mode || '').toLowerCase();
-  if (m === 'human')            return <User size={12} />;
+  if (m === 'human')             return <User size={12} />;
   if (m === 'bot' || m === 'ai') return <Bot size={12} />;
   return <Clock size={12} />;
 }
@@ -47,12 +44,7 @@ function modeColor(mode?: string): string {
 
 function initials(name?: string): string {
   if (!name) return '?';
-  return name
-    .split(' ')
-    .slice(0, 2)
-    .map((w) => w[0])
-    .join('')
-    .toUpperCase();
+  return name.split(' ').slice(0, 2).map((w) => w[0]).join('').toUpperCase();
 }
 
 function timeLabel(iso?: string): string {
@@ -79,50 +71,55 @@ export default function MobileConvoList({
   pushGranted,
   pendingCount,
 }: MobileConvoListProps) {
-  // Filter + search
   const filtered = conversations.filter((c) => {
     const m = (c.mode || '').toLowerCase();
-
-    if (filter === 'human'   && m !== 'human')             return false;
-    if (filter === 'bot'     && m !== 'bot' && m !== 'ai') return false;
+    if (filter === 'human'   && m !== 'human')              return false;
+    if (filter === 'bot'     && m !== 'bot' && m !== 'ai')  return false;
     if (filter === 'pending' && ['human', 'bot', 'ai'].includes(m)) return false;
-
     if (search) {
       const q = search.toLowerCase();
       return (
-        (c.name   || '').toLowerCase().includes(q) ||
-        (c.phone  || '').toLowerCase().includes(q)
+        (c.name  || '').toLowerCase().includes(q) ||
+        (c.phone || '').toLowerCase().includes(q)
       );
     }
     return true;
   });
 
   return (
-    <div
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        height: '100dvh',
-        background: '#0a0a0f',
-        fontFamily: "'DM Sans', sans-serif",
-      }}
-    >
+    <div style={{
+      display: 'flex',
+      flexDirection: 'column',
+      height: '100dvh',
+      background: '#FFFFFF',
+      fontFamily: "'DM Sans', sans-serif",
+    }}>
       {/* ── Header ── */}
-      <div
-        style={{
-          paddingTop: 'calc(env(safe-area-inset-top, 0px) + 12px)',
-          padding: 'calc(env(safe-area-inset-top,0px) + 12px) 16px 0',
-          background: '#0a0a0f',
-          flexShrink: 0,
-        }}
-      >
+      <div style={{
+        padding: 'calc(env(safe-area-inset-top,0px) + 12px) 16px 0',
+        background: '#FFFFFF',
+        borderBottom: '1px solid #E5E7EB',
+        flexShrink: 0,
+      }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
           <div>
-            <h1 style={{ margin: 0, fontSize: '22px', fontWeight: 700, color: '#e8e8f0', letterSpacing: '-0.3px' }}>
-              Inbox
-            </h1>
+            {/* Logo Wazza */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '2px' }}>
+              <div style={{
+                width: '28px', height: '28px', borderRadius: '8px',
+                background: '#59C414',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+              }}>
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                  <path d="M8 1C4.13 1 1 4.13 1 8c0 1.23.33 2.38.9 3.38L1 15l3.72-.88C5.67 14.68 6.8 15 8 15c3.87 0 7-3.13 7-7s-3.13-7-7-7z" fill="white"/>
+                </svg>
+              </div>
+              <h1 style={{ margin: 0, fontSize: '20px', fontWeight: 700, color: '#111827', letterSpacing: '-0.3px' }}>
+                Wazza Inbox
+              </h1>
+            </div>
             {pendingCount > 0 && (
-              <p style={{ margin: 0, fontSize: '12px', color: '#EF9F27' }}>
+              <p style={{ margin: 0, fontSize: '12px', color: '#EF9F27', fontWeight: 500 }}>
                 {pendingCount} aguardando atendimento
               </p>
             )}
@@ -131,16 +128,13 @@ export default function MobileConvoList({
           <button
             onClick={onPushRequest}
             style={{
-              background: pushGranted ? 'rgba(29,158,117,0.12)' : 'rgba(255,255,255,0.06)',
-              border: `1px solid ${pushGranted ? 'rgba(29,158,117,0.3)' : 'rgba(255,255,255,0.1)'}`,
+              background: pushGranted ? 'rgba(89,196,20,0.10)' : '#F9FAFB',
+              border: `1px solid ${pushGranted ? 'rgba(89,196,20,0.4)' : '#E5E7EB'}`,
               borderRadius: '10px',
-              width: '36px',
-              height: '36px',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
+              width: '36px', height: '36px',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
               cursor: 'pointer',
-              color: pushGranted ? '#1D9E75' : 'rgba(255,255,255,0.4)',
+              color: pushGranted ? '#59C414' : '#9CA3AF',
               WebkitTapHighlightColor: 'transparent',
             }}
           >
@@ -149,104 +143,68 @@ export default function MobileConvoList({
         </div>
 
         {/* Search */}
-        <div
-          style={{
-            position: 'relative',
-            marginBottom: '10px',
-          }}
-        >
-          <Search
-            size={15}
-            style={{
-              position: 'absolute',
-              left: '10px',
-              top: '50%',
-              transform: 'translateY(-50%)',
-              color: 'rgba(255,255,255,0.3)',
-              pointerEvents: 'none',
-            }}
-          />
+        <div style={{ position: 'relative', marginBottom: '10px' }}>
+          <Search size={15} style={{
+            position: 'absolute', left: '10px', top: '50%',
+            transform: 'translateY(-50%)', color: '#9CA3AF', pointerEvents: 'none',
+          }} />
           <input
             type="search"
             value={search}
             onChange={(e) => onSearchChange(e.target.value)}
             placeholder="Buscar conversa…"
             style={{
-              width: '100%',
-              height: '38px',
-              background: 'rgba(255,255,255,0.05)',
-              border: '1px solid rgba(255,255,255,0.08)',
+              width: '100%', height: '38px',
+              background: '#F9FAFB',
+              border: '1px solid #E5E7EB',
               borderRadius: '10px',
               paddingLeft: '32px',
               paddingRight: search ? '32px' : '12px',
-              fontSize: '14px',
-              color: '#e8e8f0',
-              outline: 'none',
-              boxSizing: 'border-box',
+              fontSize: '14px', color: '#111827',
+              outline: 'none', boxSizing: 'border-box',
             }}
           />
           {search && (
-            <button
-              onClick={() => onSearchChange('')}
-              style={{
-                position: 'absolute',
-                right: '8px',
-                top: '50%',
-                transform: 'translateY(-50%)',
-                background: 'transparent',
-                border: 'none',
-                cursor: 'pointer',
-                color: 'rgba(255,255,255,0.3)',
-                padding: '2px',
-                WebkitTapHighlightColor: 'transparent',
-              }}
-            >
+            <button onClick={() => onSearchChange('')} style={{
+              position: 'absolute', right: '8px', top: '50%',
+              transform: 'translateY(-50%)',
+              background: 'transparent', border: 'none',
+              cursor: 'pointer', color: '#9CA3AF',
+              padding: '2px', WebkitTapHighlightColor: 'transparent',
+            }}>
               <X size={14} />
             </button>
           )}
         </div>
 
         {/* Filters */}
-        <div
-          style={{
-            display: 'flex',
-            gap: '6px',
-            overflowX: 'auto',
-            paddingBottom: '10px',
-            scrollbarWidth: 'none',
-          }}
-        >
+        <div style={{
+          display: 'flex', gap: '6px', overflowX: 'auto',
+          paddingBottom: '10px', scrollbarWidth: 'none',
+        }}>
           {FILTERS.map((f) => (
             <button
               key={f.id}
               onClick={() => onFilterChange(f.id)}
               style={{
-                flexShrink: 0,
-                padding: '5px 12px',
-                borderRadius: '20px',
-                fontSize: '12px',
-                fontWeight: filter === f.id ? 600 : 400,
-                background: filter === f.id ? '#7c6ef5' : 'rgba(255,255,255,0.06)',
-                border: filter === f.id ? 'none' : '1px solid rgba(255,255,255,0.08)',
-                color: filter === f.id ? '#fff' : 'rgba(255,255,255,0.45)',
-                cursor: 'pointer',
-                WebkitTapHighlightColor: 'transparent',
+                flexShrink: 0, padding: '5px 12px', borderRadius: '20px',
+                fontSize: '12px', fontWeight: filter === f.id ? 600 : 400,
+                background: filter === f.id ? '#59C414' : '#F9FAFB',
+                border: filter === f.id ? 'none' : '1px solid #E5E7EB',
+                color: filter === f.id ? '#fff' : '#6B7280',
+                cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
                 transition: 'all 0.15s',
               }}
             >
               {f.label}
               {f.id === 'pending' && pendingCount > 0 && (
-                <span
-                  style={{
-                    marginLeft: '5px',
-                    background: 'rgba(239,159,39,0.3)',
-                    color: '#EF9F27',
-                    borderRadius: '10px',
-                    padding: '0 5px',
-                    fontSize: '10px',
-                    fontWeight: 700,
-                  }}
-                >
+                <span style={{
+                  marginLeft: '5px',
+                  background: 'rgba(239,159,39,0.15)',
+                  color: '#EF9F27',
+                  borderRadius: '10px', padding: '0 5px',
+                  fontSize: '10px', fontWeight: 700,
+                }}>
                   {pendingCount}
                 </span>
               )}
@@ -256,23 +214,21 @@ export default function MobileConvoList({
       </div>
 
       {/* ── List ── */}
-      <div
-        style={{
-          flex: 1,
-          overflowY: 'auto',
-          paddingBottom: 'calc(env(safe-area-inset-bottom,0px) + 72px)',
-          WebkitOverflowScrolling: 'touch',
-        }}
-      >
+      <div style={{
+        flex: 1, overflowY: 'auto',
+        paddingBottom: 'calc(env(safe-area-inset-bottom,0px) + 72px)',
+        WebkitOverflowScrolling: 'touch',
+        background: '#FFFFFF',
+      }}>
         {loading && (
-          <div style={{ padding: '40px 0', textAlign: 'center', color: 'rgba(255,255,255,0.2)', fontSize: '13px' }}>
+          <div style={{ padding: '40px 0', textAlign: 'center', color: '#9CA3AF', fontSize: '13px' }}>
             Carregando conversas…
           </div>
         )}
 
         {!loading && filtered.length === 0 && (
           <div style={{ padding: '48px 20px', textAlign: 'center' }}>
-            <p style={{ margin: 0, fontSize: '15px', color: 'rgba(255,255,255,0.25)' }}>
+            <p style={{ margin: 0, fontSize: '15px', color: '#9CA3AF' }}>
               {search ? 'Nenhuma conversa encontrada.' : 'Nenhuma conversa nesta categoria.'}
             </p>
           </div>
@@ -302,63 +258,40 @@ function ConvoRow({ convo, onClick }: ConvoRowProps) {
       onClick={onClick}
       style={{
         width: '100%',
-        display: 'flex',
-        alignItems: 'center',
-        gap: '12px',
+        display: 'flex', alignItems: 'center', gap: '12px',
         padding: '12px 16px',
-        background: 'transparent',
-        border: 'none',
-        borderBottom: '1px solid rgba(255,255,255,0.04)',
-        cursor: 'pointer',
-        textAlign: 'left',
-        WebkitTapHighlightColor: 'rgba(124,110,245,0.08)',
+        background: 'transparent', border: 'none',
+        borderBottom: '1px solid #F3F4F6',
+        cursor: 'pointer', textAlign: 'left',
+        WebkitTapHighlightColor: 'rgba(89,196,20,0.06)',
         transition: 'background 0.1s',
       }}
     >
       {/* Avatar */}
       <div style={{ position: 'relative', flexShrink: 0 }}>
         {convo.avatar_url ? (
-          <img
-            src={convo.avatar_url}
-            alt=""
-            style={{ width: '44px', height: '44px', borderRadius: '50%', objectFit: 'cover' }}
-          />
+          <img src={convo.avatar_url} alt="" style={{
+            width: '46px', height: '46px', borderRadius: '50%', objectFit: 'cover',
+          }} />
         ) : (
-          <div
-            style={{
-              width: '44px',
-              height: '44px',
-              borderRadius: '50%',
-              background: 'rgba(124,110,245,0.15)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontSize: '14px',
-              fontWeight: 600,
-              color: '#7c6ef5',
-              border: isPending ? '2px solid #EF9F27' : 'none',
-            }}
-          >
+          <div style={{
+            width: '46px', height: '46px', borderRadius: '50%',
+            background: 'rgba(89,196,20,0.10)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontSize: '15px', fontWeight: 600, color: '#59C414',
+            border: isPending ? '2px solid #EF9F27' : '2px solid transparent',
+          }}>
             {initials(convo.name)}
           </div>
         )}
         {/* Mode dot */}
-        <span
-          style={{
-            position: 'absolute',
-            bottom: '1px',
-            right: '1px',
-            width: '16px',
-            height: '16px',
-            borderRadius: '50%',
-            background: color,
-            border: '2px solid #0a0a0f',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            color: '#fff',
-          }}
-        >
+        <span style={{
+          position: 'absolute', bottom: '1px', right: '1px',
+          width: '16px', height: '16px', borderRadius: '50%',
+          background: color, border: '2px solid #FFFFFF',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          color: '#fff',
+        }}>
           {modeIcon(convo.mode)}
         </span>
       </div>
@@ -366,35 +299,22 @@ function ConvoRow({ convo, onClick }: ConvoRowProps) {
       {/* Content */}
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '2px' }}>
-          <span
-            style={{
-              fontSize: '14px',
-              fontWeight: 600,
-              color: '#e8e8f0',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap',
-              maxWidth: '180px',
-            }}
-          >
+          <span style={{
+            fontSize: '14px', fontWeight: 600, color: '#111827',
+            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '180px',
+          }}>
             {convo.name || convo.phone || '—'}
           </span>
-          <span style={{ fontSize: '11px', color: 'rgba(255,255,255,0.3)', flexShrink: 0, marginLeft: '8px' }}>
+          <span style={{ fontSize: '11px', color: '#9CA3AF', flexShrink: 0, marginLeft: '8px' }}>
             {timeLabel(convo.updated_at)}
           </span>
         </div>
-
-        <p
-          style={{
-            margin: 0,
-            fontSize: '12px',
-            color: isPending ? '#EF9F27' : 'rgba(255,255,255,0.4)',
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            whiteSpace: 'nowrap',
-            fontWeight: isPending ? 500 : 400,
-          }}
-        >
+        <p style={{
+          margin: 0, fontSize: '12px',
+          color: isPending ? '#EF9F27' : '#6B7280',
+          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+          fontWeight: isPending ? 500 : 400,
+        }}>
           {isPending ? '⚡ Aguardando atendente' : (convo.last_message || 'Sem mensagens')}
         </p>
       </div>
