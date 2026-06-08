@@ -10,6 +10,7 @@ from sqlalchemy import desc, select, func
 from sqlalchemy.orm import Session, load_only, selectinload
 
 from app.database import get_db
+from app.routers.account import get_current_user
 from app.models import Contact, ContactEvent, Conversation, ConversationLog, Message, Tenant, TenantUser
 from app.schemas.chat import (
     ContactOut,
@@ -524,6 +525,7 @@ async def send_message_legacy(payload: SendMessageRequest, tenant: Tenant = Depe
 def take_over(
     phone: str,
     tenant: Tenant = Depends(get_current_tenant),
+    current_user: TenantUser = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     sanitized_phone = normalize_phone(phone)
@@ -536,10 +538,19 @@ def take_over(
     if not conversation:
         raise HTTPException(status_code=404, detail="Conversa não encontrada")
 
-    conversation.updated_at = datetime.utcnow()
-    db.commit()
+    conversation.assigned_user_id = current_user.id
 
-    return ToggleAssignmentResponse(phone=sanitized_phone, status="human")
+    conversation.mode = "human"
+
+    conversation.updated_at = datetime.utcnow()
+
+    db.commit()
+    db.refresh(conversation)
+
+    return ToggleAssignmentResponse(
+        phone=sanitized_phone,
+        status="human"
+    )
 
 
 @router.patch("/conversations/{conversation_id}/mode")
