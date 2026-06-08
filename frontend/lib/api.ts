@@ -259,6 +259,32 @@ export async function updateConversationMode(conversationId: string, mode: Conve
   return parseApiResponse(res);
 }
 
+export type ConversationAssignmentResponse = {
+  phone: string;
+  status: string;
+  conversation_id?: string | null;
+  mode?: string | null;
+  assigned_user_id?: string | null;
+  assigned_user_name?: string | null;
+  conversation?: Conversation | null;
+};
+
+export async function assignConversationToSelf(conversationId: string): Promise<ConversationAssignmentResponse> {
+  const res = await apiFetch(`/api/conversations/${conversationId}/assign`, {
+    method: 'PATCH',
+    body: JSON.stringify({ self: true })
+  });
+  return parseApiResponse<ConversationAssignmentResponse>(res);
+}
+
+export async function releaseConversationAssignment(conversationId: string): Promise<ConversationAssignmentResponse> {
+  const res = await apiFetch(`/api/conversations/${conversationId}/assign`, {
+    method: 'PATCH',
+    body: JSON.stringify({ user_id: null })
+  });
+  return parseApiResponse<ConversationAssignmentResponse>(res);
+}
+
 export async function sendMessage(phone: string, message: string, contact_id?: string) {
   const res = await apiFetch('/api/send-message', {
     method: 'POST',

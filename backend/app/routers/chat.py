@@ -14,6 +14,7 @@ from app.routers.account import get_current_user
 from app.models import Contact, ContactEvent, Conversation, ConversationLog, Message, Tenant, TenantUser
 from app.schemas.chat import (
     ContactOut,
+    ConversationAssignmentRequest,
     ConversationOut,
     ConversationLogOut,
     MessageOut,
@@ -86,6 +87,63 @@ def _usage_response(tenant: Tenant) -> TenantUsageOut:
     )
 
 
+def _conversation_assigned_user_name(conversation: Conversation, assigned_users_by_id: dict | None = None) -> str | None:
+    assigned_user_id = getattr(conversation, "assigned_user_id", None)
+    stored_name = (getattr(conversation, "assigned_user_name", None) or "").strip()
+    if stored_name:
+        return stored_name
+    if assigned_user_id and assigned_users_by_id:
+        return assigned_users_by_id.get(assigned_user_id)
+    return None
+
+
+def _conversation_out(
+    conversation: Conversation,
+    *,
+    last_message: str = "",
+    assigned_users_by_id: dict | None = None,
+) -> ConversationOut:
+    phone = str(getattr(conversation, "phone", None) or conversation.phone_number or "").strip() or "desconhecido"
+    contact = getattr(conversation, "contact", None)
+    contact_name = getattr(contact, "name", None) if contact else None
+    display_name = (getattr(conversation, "name", None) or contact_name or phone).strip() or phone
+    stage = getattr(contact, "stage", None) if contact else None
+    score = getattr(contact, "score", None) if contact else None
+
+    return ConversationOut(
+        id=conversation.id,
+        tenant_id=conversation.tenant_id,
+        contact_id=conversation.contact_id,
+        phone=phone,
+        name=display_name,
+        avatar_url=conversation.avatar_url,
+        stage=stage or "novo",
+        score=int(score or 0),
+        mode=conversation.mode or "bot",
+        assigned_user_id=getattr(conversation, "assigned_user_id", None),
+        assigned_user_name=_conversation_assigned_user_name(conversation, assigned_users_by_id),
+        last_message=last_message or "",
+        updated_at=conversation.updated_at or datetime.utcnow(),
+    )
+
+
+async def _publish_assignment_event(tenant_id, conversation: Conversation) -> None:
+    conversation_payload = _conversation_out(conversation).model_dump(mode="json")
+    payload = {
+        "event": "conversation_assigned",
+        "refresh": ["conversations"],
+        "conversation_id": str(conversation.id),
+        "phone": conversation.phone_number,
+        "mode": conversation.mode,
+        "assigned_user_id": str(conversation.assigned_user_id) if conversation.assigned_user_id else None,
+        "assigned_user_name": conversation.assigned_user_name,
+        "conversation": conversation_payload,
+    }
+    await publish_dashboard_event(tenant_id=tenant_id, payload=payload)
+    await sse_broker.publish(f"{tenant_id}:{conversation.id}", payload)
+    await sse_broker.publish(f"{tenant_id}:{conversation.phone_number}", payload)
+
+
 @router.post("/auth/login", response_model=TenantLoginResponse)
 def tenant_login(payload: TenantLoginRequest, db: Session = Depends(get_db)):
     tenant = login_tenant(db, payload.slug.strip())
@@ -119,6 +177,7 @@ def list_conversations(
                         Conversation.avatar_url,
                         Conversation.mode,
                         Conversation.assigned_user_id,
+                        Conversation.assigned_user_name,
                         Conversation.updated_at,
                     )
                 )
@@ -169,30 +228,13 @@ def list_conversations(
                 .first()
             )
 
-            contact = getattr(conversation, "contact", None)
-            contact_name = getattr(contact, "name", None) if contact else None
-            display_name = (getattr(conversation, "name", None) or contact_name or phone).strip() or phone
-            stage = getattr(contact, "stage", None) if contact else None
-            score = getattr(contact, "score", None) if contact else None
             last_message = getattr(last_message_item, "text", "") if last_message_item else ""
 
             response.append(
-                ConversationOut(
-                    id=conversation.id,
-                    tenant_id=conversation.tenant_id,
-                    contact_id=conversation.contact_id,
-                    phone=phone,
-                    name=display_name,
-                    avatar_url=conversation.avatar_url,
-                    stage=stage or "novo",
-                    score=int(score or 0),
-                    mode=conversation.mode or "bot",
-                    assigned_user_id=getattr(conversation, "assigned_user_id", None),
-                    assigned_user_name=assigned_users_by_id.get(
-                        getattr(conversation, "assigned_user_id", None)
-                    ),
-                    last_message=last_message or "",
-                    updated_at=conversation.updated_at or datetime.utcnow(),
+                _conversation_out(
+                    conversation,
+                    last_message=last_message,
+                    assigned_users_by_id=assigned_users_by_id,
                 )
             )
 
@@ -522,7 +564,7 @@ async def send_message_legacy(payload: SendMessageRequest, tenant: Tenant = Depe
 
 
 @router.post("/take-over/{phone}", response_model=ToggleAssignmentResponse)
-def take_over(
+async def take_over(
     phone: str,
     tenant: Tenant = Depends(get_current_tenant),
     current_user: TenantUser = Depends(get_current_user),
@@ -532,24 +574,102 @@ def take_over(
     print("PHONE_NORMALIZED:", sanitized_phone)
     conversation = db.execute(
         select(Conversation)
-        .options(load_only(Conversation.id, Conversation.tenant_id, Conversation.phone_number))
+        .options(
+            load_only(
+                Conversation.id,
+                Conversation.tenant_id,
+                Conversation.contact_id,
+                Conversation.phone_number,
+                Conversation.name,
+                Conversation.avatar_url,
+                Conversation.mode,
+                Conversation.assigned_user_id,
+                Conversation.assigned_user_name,
+                Conversation.updated_at,
+            )
+        )
         .where(Conversation.tenant_id == tenant.id, Conversation.phone_number == sanitized_phone)
     ).scalars().first()
     if not conversation:
         raise HTTPException(status_code=404, detail="Conversa não encontrada")
 
     conversation.assigned_user_id = current_user.id
-
+    conversation.assigned_user_name = current_user.full_name
     conversation.mode = "human"
-
     conversation.updated_at = datetime.utcnow()
 
     db.commit()
     db.refresh(conversation)
+    await _publish_assignment_event(tenant.id, conversation)
 
+    conversation_out = _conversation_out(conversation)
     return ToggleAssignmentResponse(
         phone=sanitized_phone,
-        status="human"
+        status="human",
+        conversation_id=conversation.id,
+        mode=conversation.mode,
+        assigned_user_id=conversation.assigned_user_id,
+        assigned_user_name=conversation.assigned_user_name,
+        conversation=conversation_out,
+    )
+
+
+@router.patch("/conversations/{conversation_id}/assign", response_model=ToggleAssignmentResponse)
+async def assign_conversation(
+    conversation_id: UUID,
+    payload: ConversationAssignmentRequest,
+    tenant: Tenant = Depends(get_current_tenant),
+    current_user: TenantUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    conversation = (
+        db.execute(
+            select(Conversation).where(
+                Conversation.id == conversation_id,
+                Conversation.tenant_id == tenant.id,
+            )
+        )
+        .scalars()
+        .first()
+    )
+    if not conversation:
+        raise HTTPException(status_code=404, detail="Conversa nÃ£o encontrada")
+
+    if payload.user_id is None and payload.self is not True:
+        conversation.assigned_user_id = None
+        conversation.assigned_user_name = None
+        conversation.mode = "bot"
+    else:
+        if payload.user_id is not None and payload.user_id != current_user.id:
+            target_user = db.execute(
+                select(TenantUser).where(
+                    TenantUser.tenant_id == tenant.id,
+                    TenantUser.id == payload.user_id,
+                )
+            ).scalars().first()
+            if not target_user:
+                raise HTTPException(status_code=404, detail="Atendente nÃ£o encontrado")
+        else:
+            target_user = current_user
+
+        conversation.assigned_user_id = target_user.id
+        conversation.assigned_user_name = target_user.full_name
+        conversation.mode = "human"
+
+    conversation.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(conversation)
+    await _publish_assignment_event(tenant.id, conversation)
+
+    conversation_out = _conversation_out(conversation)
+    return ToggleAssignmentResponse(
+        phone=conversation.phone_number,
+        status=conversation.mode,
+        conversation_id=conversation.id,
+        mode=conversation.mode,
+        assigned_user_id=conversation.assigned_user_id,
+        assigned_user_name=conversation.assigned_user_name,
+        conversation=conversation_out,
     )
 
 
@@ -582,9 +702,11 @@ async def update_conversation_mode(
 
     if mode == "bot":
         conversation.assigned_user_id = None
+        conversation.assigned_user_name = None
         handle_bot_activation(db=db, conversation=conversation)
 
-    db.commit() 
+    db.commit()
+    db.refresh(conversation)
     await publish_dashboard_event(
         tenant_id=tenant.id,
         payload={
@@ -603,8 +725,14 @@ async def update_conversation_mode(
             },
         },
     )
+    await _publish_assignment_event(tenant.id, conversation)
 
-    return {"status": "updated", "mode": mode}
+    return {
+        "status": "updated",
+        "mode": mode,
+        "assigned_user_id": conversation.assigned_user_id,
+        "assigned_user_name": conversation.assigned_user_name,
+    }
 
 
 @router.get("/stream/messages/{phone}")

@@ -15,8 +15,11 @@ import {
 } from 'react';
 
 import {
+  assignConversationToSelf,
+  getAccountMe,
   getConversations,
   getMessagesByConversation,
+  releaseConversationAssignment,
   sendMessage,
   updateConversationMode,
 } from '@/lib/api';
@@ -111,15 +114,28 @@ function useSSE(onEvent: (type: string, data: unknown) => void) {
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    const SSE_URL = process.env.NEXT_PUBLIC_SSE_URL || '/api/sse';
+    const tenantId = localStorage.getItem('tenant_id');
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL;
+    if (!tenantId || !apiUrl) return;
+    const baseUrl = apiUrl.endsWith('/') ? apiUrl.slice(0, -1) : apiUrl;
+    const SSE_URL = `${baseUrl}/api/dashboard/stream?tenant_id=${encodeURIComponent(tenantId)}`;
     let es: EventSource;
     let retryTimer: ReturnType<typeof setTimeout>;
 
     function connect() {
       es = new EventSource(SSE_URL, { withCredentials: true });
 
+      es.onmessage = (e) => {
+        try {
+          const payload = JSON.parse(e.data);
+          cbRef.current(payload.event || 'message', payload);
+        } catch { /* noop */ }
+      };
       es.addEventListener('conversation_updated', (e) => {
         try { cbRef.current('conversation_updated', JSON.parse(e.data)); } catch { /* noop */ }
+      });
+      es.addEventListener('conversation_assigned', (e) => {
+        try { cbRef.current('conversation_assigned', JSON.parse(e.data)); } catch { /* noop */ }
       });
       es.addEventListener('new_message', (e) => {
         try { cbRef.current('new_message', JSON.parse(e.data)); } catch { /* noop */ }
@@ -167,6 +183,7 @@ export default function MobileChatShell() {
   const [loading, setLoading]                 = useState(true);
   const [pushBanner, setPushBanner]           = useState<{ title: string; text: string } | null>(null);
   const [showPermSheet, setShowPermSheet]     = useState(false);
+  const [currentUserId, setCurrentUserId]      = useState<string | null>(null);
 
   // ── Hooks ────────────────────────────────────────────────────
   const { granted: pushGranted, requestPermission, subscribe } = usePushNotifications();
@@ -197,7 +214,11 @@ export default function MobileChatShell() {
     [contacts]
   );
 
-  const assignedUserName = useMemo(() => (selectedConvo as any)?.assigned_user_name || null, [selectedConvo]);
+  const assignedUserName = useMemo(() => {
+    if (!selectedConvo?.assigned_user_id) return null;
+    if (currentUserId && String(selectedConvo.assigned_user_id) === currentUserId) return 'Você';
+    return selectedConvo.assigned_user_name || 'Atendente';
+  }, [currentUserId, selectedConvo]);
 
   const isAdmin = useMemo(() => {
     if (typeof window === 'undefined') return false;
@@ -223,6 +244,13 @@ export default function MobileChatShell() {
     if (authed) fetchConversations();
   }, [authed, fetchConversations]);
 
+  useEffect(() => {
+    if (!authed) return;
+    getAccountMe()
+      .then((account) => setCurrentUserId(String(account.profile.id)))
+      .catch(() => setCurrentUserId(null));
+  }, [authed]);
+
   const fetchMessages = useCallback(async (convo: Conversation) => {
     try {
       const data = await getMessagesByConversation(String(convo.id));
@@ -241,12 +269,16 @@ export default function MobileChatShell() {
   useSSE(useCallback((type: string, data: unknown) => {
     const d = data as Record<string, unknown>;
 
-    if (type === 'conversation_updated') {
-      const updated = d as Partial<Conversation> & { id: unknown };
+    if (type === 'conversation_updated' || type === 'conversation_assigned') {
+      const updated = ((d.conversation as Partial<Conversation> | undefined) || d) as Partial<Conversation> & {
+        id?: unknown;
+        conversation_id?: unknown;
+      };
+      const updatedId = updated.id ?? updated.conversation_id ?? d.conversation_id;
       setConversations(prev =>
-        prev.map(c => String(c.id) === String(updated.id) ? { ...c, ...updated } : c)
+        prev.map(c => String(c.id) === String(updatedId) ? { ...c, ...updated } : c)
       );
-      if (selectedConvoId && String(updated.id) === selectedConvoId && updated.mode) {
+      if (selectedConvoId && String(updatedId) === selectedConvoId && updated.mode) {
         setMode((updated.mode as string).toLowerCase() as ConversationMode);
       }
     }
@@ -360,31 +392,34 @@ export default function MobileChatShell() {
   const handleAssume = useCallback(async () => {
     if (!selectedConvo) return;
     try {
-      await fetch(`/api/conversations/${selectedConvo.id}/assign`, {
-        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ self: true }), credentials: 'include',
-      });
+      const response = await assignConversationToSelf(String(selectedConvo.id));
+      const updatedConversation = response.conversation || {
+        ...selectedConvo,
+        mode: response.mode || 'human',
+        assigned_user_id: response.assigned_user_id || selectedConvo.assigned_user_id,
+        assigned_user_name: response.assigned_user_name || selectedConvo.assigned_user_name,
+      };
       setConversations(prev =>
-        prev.map(c => c.id === selectedConvo.id ? { ...c, assigned_user_name: 'Você' } as any : c)
+        prev.map(c => c.id === selectedConvo.id ? { ...c, ...updatedConversation } as any : c)
       );
+      setMode('human');
     } catch (e) { console.error('[MobileChatShell] handleAssume:', e); }
   }, [selectedConvo]);
 
   const handleRelease = useCallback(async () => {
     if (!selectedConvo) return;
     try {
-      // 1. Clear assignment on the backend
-      await fetch(`/api/conversations/${selectedConvo.id}/assign`, {
-        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_id: null }), credentials: 'include',
-      });
-      // 2. Switch mode back to bot so flows resume
-      await updateConversationMode(String(selectedConvo.id), 'bot');
-      // 3. Update local state: clear assignment + set mode to bot
+      const response = await releaseConversationAssignment(String(selectedConvo.id));
+      const updatedConversation = response.conversation || {
+        ...selectedConvo,
+        mode: 'bot',
+        assigned_user_id: null,
+        assigned_user_name: null,
+      };
       setConversations(prev =>
         prev.map(c =>
           c.id === selectedConvo.id
-            ? { ...c, mode: 'bot', assigned_user_id: null, assigned_user_name: null } as any
+            ? { ...c, ...updatedConversation } as any
             : c
         )
       );

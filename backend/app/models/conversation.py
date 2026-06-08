@@ -22,6 +22,7 @@ class Conversation(TenantMixin, Base):
     avatar_url: Mapped[str | None] = mapped_column(String, nullable=True)
     mode: Mapped[str] = mapped_column(String(10), nullable=False, default="bot", server_default="bot")
     assigned_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    assigned_user_name: Mapped[str | None] = mapped_column(String(150), nullable=True)
     conversation_state: Mapped[str | None] = mapped_column(String, nullable=True)
     current_flow: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("flows.id"), nullable=True)
     current_step: Mapped[str | None] = mapped_column(String, nullable=True)

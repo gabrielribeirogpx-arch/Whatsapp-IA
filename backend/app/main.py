@@ -61,6 +61,7 @@ def ensure_conversations_columns():
         "ALTER TABLE conversations ADD COLUMN IF NOT EXISTS last_intent_at TIMESTAMP;",
         "ALTER TABLE conversations ADD COLUMN IF NOT EXISTS lead_score INTEGER DEFAULT 0;",
         "ALTER TABLE conversations ADD COLUMN IF NOT EXISTS assigned_user_id UUID;",
+        "ALTER TABLE conversations ADD COLUMN IF NOT EXISTS assigned_user_name VARCHAR(150);",
         "ALTER TABLE conversations ADD COLUMN IF NOT EXISTS current_step TEXT;",
         "ALTER TABLE conversations ADD COLUMN IF NOT EXISTS current_flow UUID;",
         "ALTER TABLE conversations ADD COLUMN IF NOT EXISTS current_node_id UUID;",

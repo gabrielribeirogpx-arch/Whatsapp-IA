@@ -68,6 +68,16 @@ class ContactOut(BaseModel):
 class ToggleAssignmentResponse(BaseModel):
     phone: str
     status: str
+    conversation_id: uuid.UUID | None = None
+    mode: str | None = None
+    assigned_user_id: uuid.UUID | None = None
+    assigned_user_name: str | None = None
+    conversation: ConversationOut | None = None
+
+
+class ConversationAssignmentRequest(BaseModel):
+    self: bool | None = None
+    user_id: uuid.UUID | None = None
 
 
 class TenantLoginRequest(BaseModel):
