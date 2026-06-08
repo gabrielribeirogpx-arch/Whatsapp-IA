@@ -2,16 +2,17 @@ from datetime import datetime, timedelta
 
 import asyncio
 import logging
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session
 
-from app.db.session import get_db
+from app.db.session import SessionLocal, get_db
 from app.models import AuditLog, Contact, Conversation, Flow, FlowEvent, FlowSession, Lead, Message, PipelineStage, Product, Tenant
 from app.models.lead import LeadStatus
 from app.services.realtime_service import sse_broker
+from app.services.websocket_auth import authenticate_ws_user
 from app.services.tenant_service import get_current_tenant
 
 router = APIRouter(tags=["dashboard"])
@@ -423,6 +424,35 @@ async def stream_dashboard_events(
             sse_broker.unsubscribe(channel, queue)
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+
+@router.websocket("/dashboard/ws")
+async def ws_dashboard_events(websocket: WebSocket):
+    tenant_id_raw = str(websocket.query_params.get("tenant_id") or "").strip()
+    token = str(websocket.query_params.get("token") or "").strip()
+    try:
+        from uuid import UUID
+
+        tenant_id = UUID(tenant_id_raw)
+    except ValueError:
+        await websocket.close(code=1008)
+        return
+
+    db = SessionLocal()
+    try:
+        authenticate_ws_user(db, tenant_id, token)
+        channel = f"dashboard:{tenant_id}"
+        await websocket.accept()
+        await sse_broker.subscribe_websocket(channel, websocket)
+        try:
+            while True:
+                await websocket.receive_text()
+        except WebSocketDisconnect:
+            pass
+        finally:
+            sse_broker.unsubscribe_websocket(channel, websocket)
+    finally:
+        db.close()
 
 
 @router.get("/dashboard/summary", response_model=DashboardSummaryOut)

@@ -4,12 +4,13 @@ from datetime import datetime
 from typing import List
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse
 from sqlalchemy import desc, select, func
 from sqlalchemy.orm import Session, load_only, selectinload
 
 from app.database import get_db
+from app.db.session import SessionLocal
 from app.routers.account import get_current_user
 from app.models import Contact, ContactEvent, Conversation, ConversationLog, Message, Tenant, TenantUser
 from app.schemas.chat import (
@@ -30,6 +31,7 @@ from app.services.bot_service import handle_bot_activation
 from app.services.conversation_service import get_or_create_conversation
 from app.services.lead_service import get_or_create_lead
 from app.services.message_service import sanitize_text
+from app.services.websocket_auth import authenticate_ws_user
 from app.utils.phone import normalize_phone
 from app.services.realtime_service import publish_dashboard_event, sse_broker
 from app.services.tenant_service import (
@@ -754,6 +756,50 @@ async def stream_messages(phone: str, tenant: Tenant = Depends(get_current_tenan
             sse_broker.unsubscribe(channel, queue)
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+
+@router.websocket("/ws/messages/{conversation_id}")
+async def ws_messages(
+    websocket: WebSocket,
+    conversation_id: UUID,
+):
+    tenant_id_raw = str(websocket.query_params.get("tenant_id") or "").strip()
+    token = str(websocket.query_params.get("token") or "").strip()
+    try:
+        tenant_id = UUID(tenant_id_raw)
+    except ValueError:
+        await websocket.close(code=1008)
+        return
+
+    db = SessionLocal()
+    try:
+        authenticate_ws_user(db, tenant_id, token)
+        conversation = (
+            db.execute(
+                select(Conversation).where(
+                    Conversation.id == conversation_id,
+                    Conversation.tenant_id == tenant_id,
+                )
+            )
+            .scalars()
+            .first()
+        )
+        if not conversation:
+            await websocket.close(code=1008)
+            return
+
+        channel = f"{tenant_id}:{conversation.id}"
+        await websocket.accept()
+        await sse_broker.subscribe_websocket(channel, websocket)
+        try:
+            while True:
+                await websocket.receive_text()
+        except WebSocketDisconnect:
+            pass
+        finally:
+            sse_broker.unsubscribe_websocket(channel, websocket)
+    finally:
+        db.close()
 
 
 @router.get("/sse/messages/{conversation_id}")

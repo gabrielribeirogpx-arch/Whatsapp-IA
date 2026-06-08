@@ -27,6 +27,7 @@ import { ChatMessage, Contact, Conversation, ConversationMode, Message } from '@
 import { usePushNotifications } from '@/hooks/mobile/usePushNotifications';
 import { useServiceWorker }    from '@/hooks/mobile/useServiceWorker';
 import { usePWAInstall }       from '@/hooks/mobile/usePWAInstall';
+import { useRealtime }         from '@/hooks/useRealtime';
 
 import MobileConvoList     from './views/MobileConvoList';
 import MobileChatView      from './views/MobileChatView';
@@ -106,56 +107,6 @@ function toChatMessage(msg: Message): ChatMessage {
   };
 }
 
-// ─── SSE Hook (inline — não altera Runtime V2) ────────────────
-
-function useSSE(onEvent: (type: string, data: unknown) => void) {
-  const cbRef = useRef(onEvent);
-  cbRef.current = onEvent;
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    const tenantId = localStorage.getItem('tenant_id');
-    const apiUrl = process.env.NEXT_PUBLIC_API_URL;
-    if (!tenantId || !apiUrl) return;
-    const baseUrl = apiUrl.endsWith('/') ? apiUrl.slice(0, -1) : apiUrl;
-    const SSE_URL = `${baseUrl}/api/dashboard/stream?tenant_id=${encodeURIComponent(tenantId)}`;
-    let es: EventSource;
-    let retryTimer: ReturnType<typeof setTimeout>;
-
-    function connect() {
-      es = new EventSource(SSE_URL, { withCredentials: true });
-
-      es.onmessage = (e) => {
-        try {
-          const payload = JSON.parse(e.data);
-          cbRef.current(payload.event || 'message', payload);
-        } catch { /* noop */ }
-      };
-      es.addEventListener('conversation_updated', (e) => {
-        try { cbRef.current('conversation_updated', JSON.parse(e.data)); } catch { /* noop */ }
-      });
-      es.addEventListener('conversation_assigned', (e) => {
-        try { cbRef.current('conversation_assigned', JSON.parse(e.data)); } catch { /* noop */ }
-      });
-      es.addEventListener('new_message', (e) => {
-        try { cbRef.current('new_message', JSON.parse(e.data)); } catch { /* noop */ }
-      });
-      es.addEventListener('handoff_requested', (e) => {
-        try { cbRef.current('handoff_requested', JSON.parse(e.data)); } catch { /* noop */ }
-      });
-      es.addEventListener('message_assigned', (e) => {
-        try { cbRef.current('message_assigned', JSON.parse(e.data)); } catch { /* noop */ }
-      });
-      es.onerror = () => {
-        es.close();
-        retryTimer = setTimeout(connect, 5000);
-      };
-    }
-
-    connect();
-    return () => { clearTimeout(retryTimer); es?.close(); };
-  }, []);
-}
 
 // ─── Main Component ───────────────────────────────────────────
 
@@ -265,61 +216,67 @@ export default function MobileChatShell() {
     setTimeout(() => setPushBanner(null), 4000);
   }, []);
 
-  // ── SSE ──────────────────────────────────────────────────────
-  useSSE(useCallback((type: string, data: unknown) => {
-    const d = data as Record<string, unknown>;
+  // ── WebSocket/SSE Hook ──────────────────────────────────────
+  useRealtime({
+    wsUrl: `${process.env.NEXT_PUBLIC_API_URL?.replace('http', 'ws')}/api/dashboard/stream`,
+    sseUrl: `${process.env.NEXT_PUBLIC_API_URL}/api/dashboard/stream`,
+    tenantId: typeof window !== 'undefined' ? localStorage.getItem('tenant_id') || '' : '',
+    onMessage: (data: unknown) => {
+        const d = data as Record<string, unknown>;
+        const type = d.event || 'message';
 
-    if (type === 'conversation_updated' || type === 'conversation_assigned') {
-      const updated = ((d.conversation as Partial<Conversation> | undefined) || d) as Partial<Conversation> & {
-        id?: unknown;
-        conversation_id?: unknown;
-      };
-      const updatedId = updated.id ?? updated.conversation_id ?? d.conversation_id;
-      setConversations(prev =>
-        prev.map(c => String(c.id) === String(updatedId) ? { ...c, ...updated } : c)
-      );
-      if (selectedConvoId && String(updatedId) === selectedConvoId && updated.mode) {
-        setMode((updated.mode as string).toLowerCase() as ConversationMode);
-      }
+        if (type === 'conversation_updated' || type === 'conversation_assigned') {
+            const updated = ((d.conversation as Partial<Conversation> | undefined) || d) as Partial<Conversation> & {
+                id?: unknown;
+                conversation_id?: unknown;
+            };
+            const updatedId = updated.id ?? updated.conversation_id ?? d.conversation_id;
+            setConversations(prev =>
+                prev.map(c => String(c.id) === String(updatedId) ? { ...c, ...updated } : c)
+            );
+            if (selectedConvoId && String(updatedId) === selectedConvoId && updated.mode) {
+                setMode((updated.mode as string).toLowerCase() as ConversationMode);
+            }
+        }
+        
+        if (type === 'new_message' || type === 'message') {
+            const msg = d as { conversation_id: unknown; message: Message };
+            vibrate([80, 40, 80]);
+            setConversations(prev =>
+                prev.map(c =>
+                    String(c.id) === String(msg.conversation_id)
+                        ? { ...c, last_message: msg.message?.content, updated_at: msg.message?.created_at }
+                        : c
+                )
+            );
+            if (selectedConvoId && String(msg.conversation_id) === selectedConvoId) {
+                setMessages(prev => [...prev, toChatMessage(msg.message)]);
+            }
+        }
+        
+        if (type === 'handoff_requested') {
+            const h = d as { conversation_id: unknown; contact_name?: string };
+            vibrate([120, 60, 120]);
+            showBanner('Solicitação de atendimento', `${h.contact_name || 'Cliente'} quer falar com um humano`);
+            setConversations(prev =>
+              prev.map(c =>
+                String(c.id) === String(h.conversation_id) ? { ...c, mode: 'human' } : c
+              )
+            );
+        }
+        
+        if (type === 'message_assigned') {
+            const a = d as { conversation_id: unknown; user_name: string; user_id: string };
+            setConversations(prev =>
+              prev.map(c =>
+                String(c.id) === String(a.conversation_id)
+                  ? { ...c, assigned_user_id: a.user_id, assigned_user_name: a.user_name } as any
+                  : c
+              )
+            );
+        }
     }
-
-    if (type === 'new_message') {
-      const msg = d as { conversation_id: unknown; message: Message };
-      vibrate([80, 40, 80]);
-      setConversations(prev =>
-        prev.map(c =>
-          String(c.id) === String(msg.conversation_id)
-            ? { ...c, last_message: msg.message?.content, updated_at: msg.message?.created_at }
-            : c
-        )
-      );
-      if (selectedConvoId && String(msg.conversation_id) === selectedConvoId) {
-        setMessages(prev => [...prev, toChatMessage(msg.message)]);
-      }
-    }
-
-    if (type === 'handoff_requested') {
-      const h = d as { conversation_id: unknown; contact_name?: string };
-      vibrate([120, 60, 120]);
-      showBanner('Solicitação de atendimento', `${h.contact_name || 'Cliente'} quer falar com um humano`);
-      setConversations(prev =>
-        prev.map(c =>
-          String(c.id) === String(h.conversation_id) ? { ...c, mode: 'human' } : c
-        )
-      );
-    }
-
-    if (type === 'message_assigned') {
-      const a = d as { conversation_id: unknown; user_name: string; user_id: string };
-      setConversations(prev =>
-        prev.map(c =>
-          String(c.id) === String(a.conversation_id)
-            ? { ...c, assigned_user_id: a.user_id, assigned_user_name: a.user_name } as any
-            : c
-        )
-      );
-    }
-  }, [selectedConvoId, showBanner]));
+  });
 
   useEffect(() => { writeCachedConversations(conversations); }, [conversations]);
   useEffect(() => { updateAppBadge(pendingCount); }, [pendingCount]);

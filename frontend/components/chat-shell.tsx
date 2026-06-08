@@ -8,6 +8,7 @@ import Sidebar from './Sidebar';
 import CRMContactSidebar from './inbox/CRMContactSidebar';
 import { getConversations, getMessagesByConversation, resetConversation, sendMessage, updateConversationMode } from '../lib/api';
 import { ChatMessage, Contact, Conversation, ConversationMode, Message } from '../lib/types';
+import { useRealtime } from '../hooks/useRealtime';
 
 type ConversationAssignmentSnapshot = {
   mode: string;
@@ -251,84 +252,31 @@ export default function ChatShell() {
   }, [resetToast, resetError]);
 
 
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
+  // A lógica de tempo real está centralizada nos hooks useRealtime abaixo
 
-    const tenantId = localStorage.getItem('tenant_id');
-    const apiUrl = process.env.NEXT_PUBLIC_API_URL;
-    if (!tenantId || !apiUrl) return;
-
-    const baseUrl = apiUrl.endsWith('/') ? apiUrl.slice(0, -1) : apiUrl;
-    const eventSource = new EventSource(`${baseUrl}/api/dashboard/stream?tenant_id=${encodeURIComponent(tenantId)}`);
-
-    eventSource.onmessage = (event) => {
-      let payload: { refresh?: string[] } | null = null;
-
-      try {
-        payload = JSON.parse(event.data);
-      } catch {
-        payload = null;
-      }
-
+  useRealtime({
+    wsUrl: `${process.env.NEXT_PUBLIC_API_URL?.replace('http', 'ws')}/api/dashboard/stream`,
+    sseUrl: `${process.env.NEXT_PUBLIC_API_URL}/api/dashboard/stream`,
+    tenantId: typeof window !== 'undefined' ? localStorage.getItem('tenant_id') || '' : '',
+    onMessage: (payload: { refresh?: string[] }) => {
       if (!payload?.refresh?.includes('conversations')) return;
-
       getConversations()
         .then((items) => applyConversations(items))
         .catch(() => undefined);
-    };
-
-    eventSource.onerror = () => {
-      // EventSource reconecta automaticamente; manter aberto preserva o realtime do Inbox.
-    };
-
-    return () => {
-      eventSource.close();
-    };
-  }, [applyConversations]);
-
-  useEffect(() => {
-    if (!selectedContactId) return;
-
-    fetchMessages(selectedContactId).catch(() => undefined);
-    if (typeof window !== 'undefined' && window.innerWidth > 1200) {
-      setCrmOpen(true);
     }
-  }, [selectedContactId, fetchMessages]);
+  });
 
-  useEffect(() => {
-    if (!selectedContactId) return;
-    if (typeof window === 'undefined') return;
-
-    const tenantId = localStorage.getItem('tenant_id');
-    const apiUrl = process.env.NEXT_PUBLIC_API_URL;
-    if (!selectedConversation || !tenantId || !apiUrl) return;
-
-    const baseUrl = apiUrl.endsWith('/') ? apiUrl.slice(0, -1) : apiUrl;
-    const eventSource = new EventSource(
-      `${baseUrl}/api/sse/messages/${selectedConversation.id}?tenant_id=${encodeURIComponent(tenantId)}`
-    );
-
-    eventSource.onmessage = (event) => {
-      let payload: { type?: string; conversation_id?: string; source?: string } | null = null;
-
-      try {
-        payload = JSON.parse(event.data);
-      } catch {
-        payload = null;
-      }
-
+  useRealtime({
+    wsUrl: selectedConversation ? `${process.env.NEXT_PUBLIC_API_URL?.replace('http', 'ws')}/ws/messages/${selectedConversation.id}` : '',
+    sseUrl: selectedConversation ? `${process.env.NEXT_PUBLIC_API_URL}/api/sse/messages/${selectedConversation.id}` : '',
+    tenantId: typeof window !== 'undefined' ? localStorage.getItem('tenant_id') || '' : '',
+    onMessage: () => {
+      if (!selectedContactId) return;
       fetchMessages(selectedContactId).catch(() => undefined);
       getConversations().then((items) => applyConversations(items)).catch(() => undefined);
-    };
+    }
+  });
 
-    eventSource.onerror = () => {
-      eventSource.close();
-    };
-
-    return () => {
-      eventSource.close();
-    };
-  }, [selectedContactId, selectedConversation, fetchMessages, applyConversations]);
 
 
   useEffect(() => {
