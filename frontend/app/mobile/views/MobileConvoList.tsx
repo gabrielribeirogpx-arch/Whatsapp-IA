@@ -105,16 +105,24 @@ export default function MobileConvoList({
           <div>
             {/* Logo Wazza */}
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '2px' }}>
-              <div style={{
-                width: '28px', height: '28px', borderRadius: '8px',
-                background: '#59C414',
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-              }}>
-                <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-                  <path d="M8 1C4.13 1 1 4.13 1 8c0 1.23.33 2.38.9 3.38L1 15l3.72-.88C5.67 14.68 6.8 15 8 15c3.87 0 7-3.13 7-7s-3.13-7-7-7z" fill="white"/>
-                </svg>
-              </div>
-              <h1 style={{ margin: 0, fontSize: '20px', fontWeight: 700, color: '#111827', letterSpacing: '-0.3px' }}>
+              <img
+                src="/Logo.svg"
+                alt="Wazza"
+                style={{
+                  height: '24px',
+                  width: 'auto',
+                  objectFit: 'contain',
+                }}
+              />
+              <h1
+                style={{
+                  margin: 0,
+                  fontSize: '20px',
+                  fontWeight: 700,
+                  color: '#111827',
+                  letterSpacing: '-0.3px'
+                 }}
+              >
                 Wazza Inbox
               </h1>
             </div>

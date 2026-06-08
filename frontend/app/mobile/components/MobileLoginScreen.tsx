@@ -69,10 +69,10 @@ export default function MobileLoginScreen({ onSuccess }: MobileLoginScreenProps)
         }}
       >
       <img
-        src="/Logo.svg"
+        src="/Logo3.svg"
         alt="Wazza"
         style={{
-          width: '180px',
+          width: '120px',
           height: 'auto',
           objectFit: 'contain',
         }}
