@@ -61,29 +61,23 @@ export default function MobileLoginScreen({ onSuccess }: MobileLoginScreenProps)
       fontFamily: "'DM Sans', sans-serif",
     }}>
       {/* Logo */}
-      <div style={{
-        display: 'flex', flexDirection: 'column', alignItems: 'center',
-        marginBottom: '40px', gap: '12px',
-      }}>
-        <div style={{
-          width: '64px', height: '64px', borderRadius: '18px',
-          background: '#59C414',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          boxShadow: '0 8px 24px rgba(89,196,20,0.35)',
-        }}>
-          <svg width="36" height="36" viewBox="0 0 36 36" fill="none">
-            <path d="M18 2C9.16 2 2 9.16 2 18c0 2.77.74 5.36 2.04 7.61L2 34l8.59-1.98A15.9 15.9 0 0018 34c8.84 0 16-7.16 16-16S26.84 2 18 2z" fill="white"/>
-          </svg>
-        </div>
-        <div style={{ textAlign: 'center' }}>
-          <h1 style={{ margin: 0, fontSize: '26px', fontWeight: 700, color: '#111827', letterSpacing: '-0.5px' }}>
-            Wazza Inbox
-          </h1>
-          <p style={{ margin: '4px 0 0', fontSize: '14px', color: '#6B7280' }}>
-            Atendimento inteligente no WhatsApp
-          </p>
-        </div>
-      </div>
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'center',
+          marginBottom: '40px',
+        }}
+      >
+      <img
+        src="/Logo.svg"
+        alt="Wazza"
+        style={{
+          width: '180px',
+          height: 'auto',
+          objectFit: 'contain',
+        }}
+     />
+  </div>
 
       {/* Card */}
       <div style={{
