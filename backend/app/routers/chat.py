@@ -581,9 +581,10 @@ async def update_conversation_mode(
     conversation.updated_at = datetime.utcnow()
 
     if mode == "bot":
+        conversation.assigned_user_id = None
         handle_bot_activation(db=db, conversation=conversation)
 
-    db.commit()
+    db.commit() 
     await publish_dashboard_event(
         tenant_id=tenant.id,
         payload={
