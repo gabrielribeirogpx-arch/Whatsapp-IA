@@ -20,11 +20,14 @@ export function useRealtime({
         ws.current?.close();
         es.current?.close();
 
-        if (!wsUrl) return;
+        if (!wsUrl) {
+            console.log("[WS CREATE] wsUrl vazio, abortando conexão");
+            return;
+        }
 
         console.log("[WS URL]", wsUrl);
         const token = typeof window !== 'undefined' ? localStorage.getItem('token') : '';
-        
+
         // Se não houver token, usar SSE diretamente (fallback)
         if (!token) {
             console.log("[WS FALLBACK] Sem token, usando SSE");
@@ -33,17 +36,18 @@ export function useRealtime({
         }
 
         // WS com token real
+        console.log("[WS CREATE]");
         const socket = new WebSocket(`${wsUrl}?tenant_id=${encodeURIComponent(tenantId)}&token=${encodeURIComponent(token || '')}`);
-        
-        socket.onopen = () => {
+
+        socket.onopen = (event) => {
             console.log("[WS OPEN]", socket.url);
         };
-        
+
         socket.onmessage = (event) => {
             console.log("[WS MESSAGE RECEIVED]", event.data);
             onMessage(JSON.parse(event.data));
         };
-        
+
         socket.onerror = (e) => {
             console.log("[WS ERROR]", e);
             // Fallback para SSE se o WS falhar
@@ -53,8 +57,10 @@ export function useRealtime({
         socket.onclose = (e) => {
             console.log("[WS CLOSE]", e.code, e.reason);
         };
-        
+
         ws.current = socket;
+    };
+
     };
 
     const connectSSE = () => {

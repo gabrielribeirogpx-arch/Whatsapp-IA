@@ -254,6 +254,10 @@ export default function ChatShell() {
 
   // A lógica de tempo real está centralizada nos hooks useRealtime abaixo
 
+  useEffect(() => {
+    console.log("[FRONTEND SELECTED CONVERSATION]", selectedConversation?.id);
+  }, [selectedConversation]);
+
   useRealtime({
     wsUrl: `${process.env.NEXT_PUBLIC_API_URL?.replace('http', 'ws')}/api/dashboard/ws`,
     sseUrl: `${process.env.NEXT_PUBLIC_API_URL}/api/dashboard/stream`,
@@ -267,20 +271,23 @@ export default function ChatShell() {
     }
   });
 
+  const messageWsUrl = selectedConversation ? `${process.env.NEXT_PUBLIC_API_URL?.replace('http', 'ws')}/api/ws/messages/${selectedConversation.id}` : '';
+  const messageSseUrl = selectedConversation ? `${process.env.NEXT_PUBLIC_API_URL}/api/sse/messages/${selectedConversation.id}` : '';
+  
+  console.log("[BEFORE MESSAGE HOOK]", selectedConversation?.id);
+  console.log("[MESSAGE WS URL]", messageWsUrl);
+
   useRealtime({
-    wsUrl: selectedConversation ? `${process.env.NEXT_PUBLIC_API_URL?.replace('http', 'ws')}/api/ws/messages/${selectedConversation.id}` : '',
-    sseUrl: selectedConversation ? `${process.env.NEXT_PUBLIC_API_URL}/api/sse/messages/${selectedConversation.id}` : '',
+    wsUrl: messageWsUrl,
+    sseUrl: messageSseUrl,
     tenantId: typeof window !== 'undefined' ? localStorage.getItem('tenant_id') || '' : '',
     onMessage: (payload: { message?: { conversation_id: string } }) => {
       console.log("[WS MESSAGE RECEIVED CONVERSATION]", payload?.message?.conversation_id);
+      if (!selectedContactId) return;
       fetchMessages(selectedContactId).catch(() => undefined);
       getConversations().then((items) => applyConversations(items)).catch(() => undefined);
     }
   });
-
-  useEffect(() => {
-    console.log("[FRONTEND SELECTED CONVERSATION]", selectedConversation?.id);
-  }, [selectedConversation]);
 
 
 

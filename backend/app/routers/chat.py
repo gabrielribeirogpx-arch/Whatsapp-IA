@@ -455,110 +455,128 @@ async def send_message(
     tenant: Tenant = Depends(get_current_tenant),
     db: Session = Depends(get_db),
 ):
-    phone = normalize_phone(payload.phone)
-    print("PHONE_NORMALIZED:", phone)
-    message_text = sanitize_text(payload.message)
-    if not phone or not message_text:
-        raise HTTPException(status_code=400, detail="Dados inválidos")
-
     try:
-        assert_tenant_can_send(tenant)
-    except TenantLimitError as exc:
-        raise HTTPException(status_code=403, detail=str(exc)) from exc
+        print("[SEND_MESSAGE STEP 1]")
+        phone = normalize_phone(payload.phone)
+        print("PHONE_NORMALIZED:", phone)
+        message_text = sanitize_text(payload.message)
+        if not phone or not message_text:
+            raise HTTPException(status_code=400, detail="Dados inválidos")
 
-    tenant_id = tenant.id
-    print("TENANT ID:", tenant_id, type(tenant_id))
+        print("[SEND_MESSAGE STEP 2]")
+        try:
+            assert_tenant_can_send(tenant)
+        except TenantLimitError as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
+        print("[SEND_MESSAGE STEP 3]")
 
-    contact = None
-    if payload.contact_id:
-        contact = db.execute(
-            select(Contact).where(Contact.tenant_id == tenant_id, Contact.id == payload.contact_id)
-        ).scalars().first()
-        if contact:
-            phone = normalize_phone(contact.phone)
-            print("PHONE_NORMALIZED:", phone)
+        tenant_id = tenant.id
+        print("TENANT ID:", tenant_id, type(tenant_id))
 
-    if not contact:
-        contact = upsert_contact_for_phone(
-            db,
+        contact = None
+        if payload.contact_id:
+            contact = db.execute(
+                select(Contact).where(Contact.tenant_id == tenant_id, Contact.id == payload.contact_id)
+            ).scalars().first()
+            if contact:
+                phone = normalize_phone(contact.phone)
+                print("PHONE_NORMALIZED:", phone)
+        print("[SEND_MESSAGE STEP 4]")
+
+        if not contact:
+            contact = upsert_contact_for_phone(
+                db,
+                tenant_id=tenant_id,
+                phone=phone,
+                name=payload.name,
+            )
+        print("[SEND_MESSAGE STEP 5]")
+
+        conversation, _ = get_or_create_conversation(
+            db=db,
             tenant_id=tenant_id,
             phone=phone,
-            name=payload.name,
+            contact_id=contact.id if contact else None,
         )
+        ensure_conversation_contact_link(conversation, contact)
+        print("[SEND_MESSAGE STEP 6]")
 
-    conversation, _ = get_or_create_conversation(
-        db=db,
-        tenant_id=tenant_id,
-        phone=phone,
-        contact_id=contact.id if contact else None,
-    )
-    ensure_conversation_contact_link(conversation, contact)
+        if contact and payload.name and payload.name.strip() and payload.name.strip() != contact.name:
+            contact.name = payload.name.strip()
+        if conversation.name is None and _looks_like_name(message_text):
+            conversation.name = message_text.strip()
+            if contact and (not contact.name or contact.name == "Cliente"):
+                contact.name = conversation.name
+        print("NOME CLIENTE:", conversation.name)
+        print("[SEND_MESSAGE STEP 7]")
 
-    if contact and payload.name and payload.name.strip() and payload.name.strip() != contact.name:
-        contact.name = payload.name.strip()
-    if conversation.name is None and _looks_like_name(message_text):
-        conversation.name = message_text.strip()
-        if contact and (not contact.name or contact.name == "Cliente"):
-            contact.name = conversation.name
-    print("NOME CLIENTE:", conversation.name)
+        print(f"[MODE CHECK] current mode={conversation.mode}")
+        try:
+            enqueue_send_message({"tenant_id": tenant.id, "phone": phone, "text": message_text})
+        except Exception:
+            pass
+        print("[SEND_MESSAGE STEP 8]")
 
-    print(f"[MODE CHECK] current mode={conversation.mode}")
-    try:
-        enqueue_send_message({"tenant_id": tenant.id, "phone": phone, "text": message_text})
-    except Exception:
-        pass
+        print("SALVANDO_MSG:", phone, message_text)
+        message = Message(
+            tenant_id=conversation.tenant_id,
+            conversation_id=conversation.id,
+            text=message_text,
+            created_at=datetime.utcnow(),
+            from_me=True,
+        )
+        print("[SEND_MESSAGE STEP 9]")
+        db.add(message)
+        print("CONVERSA_ID:", conversation.id)
+        print("MSG_SALVA:", message.text)
+        print("LEAD_SYNC:", phone, tenant.id)
+        get_or_create_lead(
+            db=db,
+            tenant_id=tenant.id,
+            phone=conversation.phone_number or phone,
+            name=conversation.name,
+            last_message=message_text,
+        )
+        consume_usage(tenant, 1)
+        if contact:
+            contact.last_message_at = datetime.utcnow()
+            register_contact_event(db, tenant_id=tenant.id, contact_id=contact.id, event_type="message_sent", title="Mensagem enviada", description=message_text, contact=contact)
+        conversation.updated_at = datetime.utcnow()
+        print("[SEND_MESSAGE STEP 10]")
+        db.commit()
+        print("[SEND_MESSAGE STEP 11]")
+        db.refresh(message)
+        print("[SEND_MESSAGE STEP 12]")
 
-    print("SALVANDO_MSG:", phone, message_text)
-    message = Message(
-        tenant_id=conversation.tenant_id,
-        conversation_id=conversation.id,
-        text=message_text,
-        created_at=datetime.utcnow(),
-        from_me=True,
-    )
-    db.add(message)
-    print("CONVERSA_ID:", conversation.id)
-    print("MSG_SALVA:", message.text)
-    print("LEAD_SYNC:", phone, tenant.id)
-    get_or_create_lead(
-        db=db,
-        tenant_id=tenant.id,
-        phone=conversation.phone_number or phone,
-        name=conversation.name,
-        last_message=message_text,
-    )
-    consume_usage(tenant, 1)
-    if contact:
-        contact.last_message_at = datetime.utcnow()
-        register_contact_event(db, tenant_id=tenant.id, contact_id=contact.id, event_type="message_sent", title="Mensagem enviada", description=message_text, contact=contact)
-    conversation.updated_at = datetime.utcnow()
-    db.commit()
-    db.refresh(message)
-
-    message_payload = {"event": "message", "message": MessageOut.model_validate(message).model_dump(mode="json")}
-    print("[WS BROADCAST] message", conversation.id)
-    await sse_broker.publish(f"{tenant.id}:{phone}", message_payload)
-    await sse_broker.publish(f"{tenant.id}:{conversation.id}", message_payload)
-    display_name = (conversation.name or phone or "Contato").strip()
-    await publish_dashboard_event(
-        tenant_id=tenant.id,
-        payload={
-            "event": "dashboard_activity",
-            "refresh": ["analytics", "conversations"],
-            "activity": {
-                "id": str(message.id),
-                "type": "MESSAGE_SENT",
-                "title": display_name,
-                "description": message_text,
-                "entity_type": "conversation",
-                "entity_id": str(conversation.id),
-                "contact_name": conversation.name,
-                "phone": phone,
-                "created_at": message.created_at.isoformat(),
+        message_payload = {"event": "message", "message": MessageOut.model_validate(message).model_dump(mode="json")}
+        print("[WS BROADCAST] message", conversation.id)
+        await sse_broker.publish(f"{tenant.id}:{phone}", message_payload)
+        await sse_broker.publish(f"{tenant.id}:{conversation.id}", message_payload)
+        display_name = (conversation.name or phone or "Contato").strip()
+        print("[SEND_MESSAGE STEP 13]")
+        await publish_dashboard_event(
+            tenant_id=tenant.id,
+            payload={
+                "event": "dashboard_activity",
+                "refresh": ["analytics", "conversations"],
+                "activity": {
+                    "id": str(message.id),
+                    "type": "MESSAGE_SENT",
+                    "title": display_name,
+                    "description": message_text,
+                    "entity_type": "conversation",
+                    "entity_id": str(conversation.id),
+                    "contact_name": conversation.name,
+                    "phone": phone,
+                    "created_at": message.created_at.isoformat(),
+                },
             },
-        },
-    )
-    return message
+        )
+        print("[SEND_MESSAGE STEP 14]")
+        return message
+    except Exception:
+        logger.exception("[SEND_MESSAGE ERROR]")
+        raise
 
 
 @router.post("/send", response_model=MessageOut)
