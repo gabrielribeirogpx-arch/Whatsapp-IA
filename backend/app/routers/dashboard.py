@@ -428,32 +428,37 @@ async def stream_dashboard_events(
 
 @router.websocket("/dashboard/ws")
 async def ws_dashboard_events(websocket: WebSocket):
-    tenant_id_raw = str(websocket.query_params.get("tenant_id") or "").strip()
-    token = str(websocket.query_params.get("token") or "").strip()
+    print("[WS HANDSHAKE START]")
     try:
-        from uuid import UUID
-
-        tenant_id = UUID(tenant_id_raw)
-    except ValueError:
-        await websocket.close(code=1008)
-        return
-
-    db = SessionLocal()
-    try:
-        authenticate_ws_user(db, tenant_id, token)
-        print("[WS CONNECTED DASHBOARD]", tenant_id)
-        channel = f"dashboard:{tenant_id}"
-        await websocket.accept()
-        await sse_broker.subscribe_websocket(channel, websocket)
+        tenant_id_raw = str(websocket.query_params.get("tenant_id") or "").strip()
+        token = str(websocket.query_params.get("token") or "").strip()
         try:
-            while True:
-                await websocket.receive_text()
-        except WebSocketDisconnect:
-            pass
+            from uuid import UUID
+
+            tenant_id = UUID(tenant_id_raw)
+        except ValueError:
+            await websocket.close(code=1008)
+            return
+
+        db = SessionLocal()
+        try:
+            authenticate_ws_user(db, tenant_id, token)
+            print("[WS CONNECTED DASHBOARD]", tenant_id)
+            channel = f"dashboard:{tenant_id}"
+            await websocket.accept()
+            await sse_broker.subscribe_websocket(channel, websocket)
+            try:
+                while True:
+                    await websocket.receive_text()
+            except WebSocketDisconnect:
+                pass
+            finally:
+                sse_broker.unsubscribe_websocket(channel, websocket)
         finally:
-            sse_broker.unsubscribe_websocket(channel, websocket)
-    finally:
-        db.close()
+            db.close()
+    except Exception as e:
+        print("[WS ERROR]", repr(e))
+        raise
 
 
 @router.get("/dashboard/summary", response_model=DashboardSummaryOut)
