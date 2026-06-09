@@ -218,7 +218,7 @@ export default function MobileChatShell() {
 
   // ── WebSocket/SSE Hook ──────────────────────────────────────
   useRealtime({
-    wsUrl: `${process.env.NEXT_PUBLIC_API_URL?.replace('http', 'ws')}/dashboard/ws`,
+    wsUrl: `${process.env.NEXT_PUBLIC_API_URL?.replace('http', 'ws')}/api/dashboard/ws`,
     sseUrl: `${process.env.NEXT_PUBLIC_API_URL}/api/dashboard/stream`,
     tenantId: typeof window !== 'undefined' ? localStorage.getItem('tenant_id') || '' : '',
     onMessage: (data: unknown) => {

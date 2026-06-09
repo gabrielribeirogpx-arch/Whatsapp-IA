@@ -255,7 +255,7 @@ export default function ChatShell() {
   // A lógica de tempo real está centralizada nos hooks useRealtime abaixo
 
   useRealtime({
-    wsUrl: `${process.env.NEXT_PUBLIC_API_URL?.replace('http', 'ws')}/dashboard/ws`,
+    wsUrl: `${process.env.NEXT_PUBLIC_API_URL?.replace('http', 'ws')}/api/dashboard/ws`,
     sseUrl: `${process.env.NEXT_PUBLIC_API_URL}/api/dashboard/stream`,
     tenantId: typeof window !== 'undefined' ? localStorage.getItem('tenant_id') || '' : '',
     onMessage: (payload: { refresh?: string[] }) => {
@@ -268,7 +268,7 @@ export default function ChatShell() {
   });
 
   useRealtime({
-    wsUrl: selectedConversation ? `${process.env.NEXT_PUBLIC_API_URL?.replace('http', 'ws')}/ws/messages/${selectedConversation.id}` : '',
+    wsUrl: selectedConversation ? `${process.env.NEXT_PUBLIC_API_URL?.replace('http', 'ws')}/api/ws/messages/${selectedConversation.id}` : '',
     sseUrl: selectedConversation ? `${process.env.NEXT_PUBLIC_API_URL}/api/sse/messages/${selectedConversation.id}` : '',
     tenantId: typeof window !== 'undefined' ? localStorage.getItem('tenant_id') || '' : '',
     onMessage: () => {
