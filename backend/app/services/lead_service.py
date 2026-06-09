@@ -17,6 +17,7 @@ def get_or_create_lead(
     name: str | None = None,
     last_message: str | None = None,
 ) -> Lead:
+    print(f"[LEAD SERVICE FILE] {__file__}")
     phone = normalize_phone(phone)
     
     # AUDITORIA PROFUNDA

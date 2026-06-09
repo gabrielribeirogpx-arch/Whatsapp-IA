@@ -530,6 +530,7 @@ async def send_message(
         print("CONVERSA_ID:", conversation.id)
         print("MSG_SALVA:", message.text)
         print("LEAD_SYNC:", phone, tenant.id)
+        print("[CALLING GET_OR_CREATE_LEAD]")
         get_or_create_lead(
             db=db,
             tenant_id=tenant.id,
@@ -537,6 +538,7 @@ async def send_message(
             name=conversation.name,
             last_message=message_text,
         )
+        print("[AFTER GET_OR_CREATE_LEAD]")
         consume_usage(tenant, 1)
         if contact:
             contact.last_message_at = datetime.utcnow()
