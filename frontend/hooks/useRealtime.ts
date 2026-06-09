@@ -61,8 +61,6 @@ export function useRealtime({
         ws.current = socket;
     };
 
-    };
-
     const connectSSE = () => {
         if (ws.current) ws.current.close();
         const source = new EventSource(`${sseUrl}?tenant_id=${encodeURIComponent(tenantId)}`);
