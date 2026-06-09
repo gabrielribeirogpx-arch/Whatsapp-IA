@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -28,6 +29,8 @@ from app.services.flow_runtime_selector import (
 from app.services.message_service import normalize_meta_message
 from app.core.redis_client import get_redis_client
 from app.services.tenant_service import resolve_tenant_by_phone_number_id
+from app.services.realtime_service import sse_broker
+from app.schemas.chat import MessageOut
 
 logger = logging.getLogger(__name__)
 
@@ -542,6 +545,51 @@ def process_incoming_message(payload: dict[str, Any]) -> None:
         logger.info("event=incoming_worker_flow_executed correlation_id=%s", correlation_id)
 
         db.commit()
+
+        try:
+            message_payload = {
+                "event": "message",
+                "message": MessageOut.model_validate(
+                    persisted_message
+                ).model_dump(mode="json"),
+            }
+            ws_channel = (
+                f"{tenant.id}:{persisted_conversation.id}"
+            )
+
+            sse_channel = (
+                f"{tenant.id}:{persisted_conversation.phone_number}"
+            )
+
+            logger.warning(
+                "[REDIS PUBLISH] ws=%s sse=%s",
+                ws_channel,
+                sse_channel
+            )
+
+            asyncio.run(
+                sse_broker.publish(
+                    ws_channel,
+                    message_payload
+                )
+            )
+
+            asyncio.run(
+                sse_broker.publish(
+                    sse_channel,
+                    message_payload
+                )
+            )
+
+            logger.warning(
+                "[REDIS PUBLISH SUCCESS]"
+            )
+
+        except Exception:
+            logger.exception(
+                "[WS BROADCAST ERROR]"
+            )
+
     except Exception:
         if db.in_transaction():
             db.rollback()
