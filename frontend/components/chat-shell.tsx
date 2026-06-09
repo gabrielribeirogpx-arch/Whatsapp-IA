@@ -65,6 +65,7 @@ export default function ChatShell() {
 
   const applyConversations = useCallback(
     (items: Conversation[], options: { notifyHandoff?: boolean } = {}) => {
+      console.log("[APPLY CONVERSATIONS]", items.length);
       const notifyHandoff = options.notifyHandoff ?? true;
       const previousAssignments = previousAssignmentRef.current;
 
@@ -111,6 +112,7 @@ export default function ChatShell() {
         ])
       );
       hasLoadedConversationsRef.current = true;
+      console.log("[SET CONVERSATIONS]", items.length);
       setConversations(items);
     },
     [playHumanHandoffSound]
@@ -142,8 +144,9 @@ export default function ChatShell() {
 
 
   const contacts = useMemo<Contact[]>(
-    () =>
-      conversations.map((conversation) => {
+    () => {
+      console.log("[CONTACTS MEMO]", conversations.length);
+      return conversations.map((conversation) => {
         return {
           id: String(conversation.contact_id ?? conversation.id),
           name: conversation.name,
@@ -159,7 +162,8 @@ export default function ChatShell() {
           awaitingHumanAssignment: String(conversation.mode || '').toLowerCase() === 'human' && !conversation.assigned_user_id,
           inHumanCare: String(conversation.mode || '').toLowerCase() === 'human' && Boolean(conversation.assigned_user_id)
         };
-      }),
+      });
+    },
     [conversations]
   );
 
@@ -267,7 +271,10 @@ export default function ChatShell() {
       console.log("[WS MESSAGE]", payload);
       if (!payload?.refresh?.includes('conversations')) return;
       getConversations()
-        .then((items) => applyConversations(items))
+        .then((items) => {
+          console.log("[API RESULT]", items);
+          applyConversations(items);
+        })
         .catch(() => undefined);
     }
   });

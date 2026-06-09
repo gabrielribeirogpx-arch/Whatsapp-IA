@@ -21,6 +21,8 @@ export default function Sidebar({
   unansweredCount: _unansweredCount,
   humanRequestsCount
 }: SidebarProps) {
+  console.log("[SIDEBAR RECEIVED]", contacts.length);
+  console.log("[SIDEBAR FIRST ITEM]", contacts[0]?.id);
   const [searchTerm, setSearchTerm] = useState('');
   const [activeFilter, setActiveFilter] = useState<'all' | 'pending' | 'human' | 'ai'>('all');
 
