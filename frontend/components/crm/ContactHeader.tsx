@@ -1,6 +1,7 @@
 'use client';
 
 import { memo, useMemo } from 'react';
+import { derivePresenceState, getPresenceLabel } from '@/lib/presence';
 
 type Props = { profile: any };
 
@@ -21,7 +22,8 @@ function stableColor(seed: string) {
 function ContactHeader({ profile }: Props) {
   const fullName = profile?.name || 'Contato';
   const color = useMemo(() => stableColor(String(profile?.id || fullName)), [profile?.id, fullName]);
-  const online = useMemo(() => Number(String(profile?.id || 1).slice(-1)) % 2 === 0, [profile?.id]);
+  const presenceState = useMemo(() => derivePresenceState(profile?.last_interaction_at), [profile?.last_interaction_at]);
+  const isOnline = presenceState === 'online' || presenceState === 'recently_active';
 
   return <div className='rounded-2xl border border-slate-200 bg-white/90 p-5 shadow-sm'>
     <div className='flex items-center gap-4'>
@@ -29,7 +31,7 @@ function ContactHeader({ profile }: Props) {
       <div>
         <h1 className='text-2xl font-semibold text-slate-900'>{fullName}</h1>
         <p className='text-sm text-slate-500'>{profile?.phone || '-'}</p>
-        <p className='text-xs mt-1'><span className={`inline-block h-2 w-2 rounded-full ${online ? 'bg-emerald-500' : 'bg-slate-400'}`}/> {online ? 'online' : 'offline'}</p>
+        <p className='text-xs mt-1'><span className={`inline-block h-2 w-2 rounded-full ${isOnline ? 'bg-emerald-500' : 'bg-slate-400'}`}/> {getPresenceLabel(presenceState)}</p>
       </div>
     </div>
     <div className='mt-4 flex flex-wrap gap-2'>

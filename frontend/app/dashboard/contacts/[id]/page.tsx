@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useResilientSSE } from '@/lib/useResilientSSE';
 import { apiFetch } from '@/lib/api';
 import ContactHeader from '@/components/crm/ContactHeader';
 import ContactMetrics from '@/components/crm/ContactMetrics';
@@ -32,61 +33,40 @@ export default function ContactProfilePage({ params }: { params: { id: string } 
 
   useEffect(() => { void load(); }, [load]);
 
-  useEffect(() => {
-    if (!profile?.id || typeof window === 'undefined') return;
-    const tenantId = localStorage.getItem('tenant_id');
-    const apiUrl = process.env.NEXT_PUBLIC_API_URL;
-    if (!tenantId || !apiUrl) return;
+  const tenantId = typeof window !== 'undefined' ? localStorage.getItem('tenant_id') : null;
+  const apiUrl = process.env.NEXT_PUBLIC_API_URL;
+  const baseUrl = apiUrl ? (apiUrl.endsWith('/') ? apiUrl.slice(0, -1) : apiUrl) : null;
+  const streamUrl = profile?.id && tenantId && baseUrl
+    ? `${baseUrl}/api/crm/contacts/${profile.id}/events/stream?tenant_id=${encodeURIComponent(tenantId)}`
+    : null;
 
-    const baseUrl = apiUrl.endsWith('/') ? apiUrl.slice(0, -1) : apiUrl;
-    let closed = false;
-    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-    let eventSource: EventSource | null = null;
+  useResilientSSE<any>({
+    url: streamUrl,
+    channel: `crm-contact-events:${profile?.id ?? 'none'}`,
+    enabled: Boolean(profile?.id && tenantId),
+    onEvent: (incoming) => {
+      if (!incoming?.id) return;
+      console.info('[PRESENCE UPDATE]', { contactId: profile?.id, tenantId, eventType: incoming.type });
 
-    const connect = () => {
-      if (closed) return;
-      eventSource = new EventSource(`${baseUrl}/api/crm/contacts/${profile.id}/events/stream?tenant_id=${encodeURIComponent(tenantId)}`);
-      eventSource.onmessage = (msg) => {
-        try {
-          const incoming = JSON.parse(msg.data || '{}');
-          if (!incoming?.id) return;
+      setEvents((prev) => {
+        if (prev.some((item) => item.id === incoming.id)) return prev;
+        return [incoming, ...prev];
+      });
 
-          setEvents((prev) => {
-            if (prev.some((item) => item.id === incoming.id)) return prev;
-            return [incoming, ...prev];
-          });
+      setProfile((prev: any) => prev ? {
+        ...prev,
+        last_interaction_at: incoming.created_at || prev.last_interaction_at,
+        score: (Number(prev.score || 0) + (incoming.type === 'message_received' ? 6 : incoming.type === 'flow_completed' ? 15 : incoming.type === 'message_sent' ? 3 : 2)),
+        messages_count: Number(prev.messages_count || 0) + ((incoming.type === 'message_received' || incoming.type === 'message_sent') ? 1 : 0),
+        campaigns_received: Number(prev.campaigns_received || 0) + (incoming.type === 'campaign_sent' ? 1 : 0),
+        flows_executed: Number(prev.flows_executed || 0) + ((incoming.type === 'flow_started' || incoming.type === 'flow_completed') ? 1 : 0),
+      } : prev);
 
-          setProfile((prev: any) => prev ? {
-            ...prev,
-            last_interaction_at: incoming.created_at || prev.last_interaction_at,
-            score: (Number(prev.score || 0) + (incoming.type === 'message_received' ? 6 : incoming.type === 'flow_completed' ? 15 : incoming.type === 'message_sent' ? 3 : 2)),
-            messages_count: Number(prev.messages_count || 0) + ((incoming.type === 'message_received' || incoming.type === 'message_sent') ? 1 : 0),
-            campaigns_received: Number(prev.campaigns_received || 0) + (incoming.type === 'campaign_sent' ? 1 : 0),
-            flows_executed: Number(prev.flows_executed || 0) + ((incoming.type === 'flow_started' || incoming.type === 'flow_completed') ? 1 : 0),
-          } : prev);
-
-          setHighlightedId(incoming.id);
-          setTimeout(() => setHighlightedId((current) => (current === incoming.id ? null : current)), 1800);
-          timelineContainerRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
-        } catch {
-          // ignore malformed payloads
-        }
-      };
-
-      eventSource.onerror = () => {
-        eventSource?.close();
-        if (!closed) reconnectTimer = setTimeout(connect, 2000);
-      };
-    };
-
-    connect();
-
-    return () => {
-      closed = true;
-      eventSource?.close();
-      if (reconnectTimer) clearTimeout(reconnectTimer);
-    };
-  }, [profile?.id]);
+      setHighlightedId(incoming.id);
+      setTimeout(() => setHighlightedId((current) => (current === incoming.id ? null : current)), 1800);
+      timelineContainerRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  });
 
   const scoreView = useMemo(() => {
     const score = Number(profile?.score || 0);
