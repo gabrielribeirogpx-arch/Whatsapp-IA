@@ -20,38 +20,43 @@ def get_or_create_lead(
     print(f"[LEAD SERVICE FILE] {__file__}")
     phone = normalize_phone(phone)
     
-    # AUDITORIA PROFUNDA
-    all_leads = db.execute(
+    # 1. Busca abrangente (ignora status para evitar colisão)
+    lead = db.execute(
         select(Lead).where(
             Lead.tenant_id == tenant_id,
             Lead.phone == phone
         )
-    ).scalars().all()
-    
-    print("[LEAD AUDIT]", [{"id": str(l.id), "status": l.status, "phone": l.phone} for l in all_leads])
-
-    print(f"[LEAD LOOKUP] tenant_id={tenant_id} phone={phone} status_filter={LeadStatus.ACTIVE.value}")
-    lead = db.execute(
-        select(Lead).where(Lead.tenant_id == tenant_id, Lead.phone == phone, Lead.status == LeadStatus.ACTIVE.value)
     ).scalars().first()
     
+    # 2. Configuração de Pipeline
+    first_stage = get_first_pipeline_stage(db, tenant_id)
+    first_stage_id = first_stage.id if first_stage else None
+
+    # 3. Lógica de Reativação ou Atualização
     if lead:
-        print(f"[LEAD FOUND] lead_id={lead.id} status={lead.status}")
+        old_status = lead.status
+        if old_status != LeadStatus.ACTIVE.value:
+            print(f"[LEAD REACTIVATED] lead_id={lead.id} old_status={old_status}")
+            lead.status = LeadStatus.ACTIVE.value
+            lead.stage_id = first_stage_id
+            lead.entered_stage_at = datetime.utcnow()
+        
         lead.last_contact_at = datetime.utcnow()
         lead.last_interaction = datetime.utcnow()
         lead.last_message = last_message
+        if name and name.strip():
+            lead.name = name.strip()
+        
         return lead
-
-    print("[LEAD CREATE] Tentando inserir novo lead")
-    first_stage = get_first_pipeline_stage(db, tenant_id)
-    default_stage_id = first_stage.id if first_stage else None
-
+    
+    # 4. Criação de novo lead
+    print("[LEAD CREATE] Criando novo lead")
     lead = Lead(
         tenant_id=tenant_id,
         phone=phone,
         name=(name.strip() if name and name.strip() else None),
         stage=LeadStage.LEAD.value,
-        stage_id=default_stage_id,
+        stage_id=first_stage_id,
         temperature=LeadTemperature.COLD.value,
         score=0,
         last_message=last_message,
@@ -68,10 +73,6 @@ def get_or_create_lead(
             db.flush()
     except IntegrityError:
         print("[LEAD INTEGRITY ERROR] Ocorreu colisão na constraint tenant/phone")
-        lead = db.execute(
-            select(Lead).where(Lead.tenant_id == tenant_id, Lead.phone == phone, Lead.status == LeadStatus.ACTIVE.value)
-        ).scalars().first()
-        if not lead:
-            raise
+        raise
 
     return lead
