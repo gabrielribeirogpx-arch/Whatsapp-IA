@@ -218,12 +218,13 @@ export default function MobileChatShell() {
 
   // ── WebSocket/SSE Hook ──────────────────────────────────────
   useRealtime({
-    wsUrl: `${process.env.NEXT_PUBLIC_API_URL?.replace('http', 'ws')}/api/dashboard/stream`,
+    wsUrl: `${process.env.NEXT_PUBLIC_API_URL?.replace('http', 'ws')}/dashboard/ws`,
     sseUrl: `${process.env.NEXT_PUBLIC_API_URL}/api/dashboard/stream`,
     tenantId: typeof window !== 'undefined' ? localStorage.getItem('tenant_id') || '' : '',
     onMessage: (data: unknown) => {
+        console.log("[WS MESSAGE]", data);
         const d = data as Record<string, unknown>;
-        const type = d.event || 'message';
+        const type = (d.event || 'message') as string;
 
         if (type === 'conversation_updated' || type === 'conversation_assigned') {
             const updated = ((d.conversation as Partial<Conversation> | undefined) || d) as Partial<Conversation> & {

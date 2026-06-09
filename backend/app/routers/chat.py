@@ -536,6 +536,7 @@ async def send_message(
     db.refresh(message)
 
     message_payload = {"event": "message", "message": MessageOut.model_validate(message).model_dump(mode="json")}
+    print("[WS BROADCAST] message", conversation.id)
     await sse_broker.publish(f"{tenant.id}:{phone}", message_payload)
     await sse_broker.publish(f"{tenant.id}:{conversation.id}", message_payload)
     display_name = (conversation.name or phone or "Contato").strip()
@@ -774,6 +775,7 @@ async def ws_messages(
     db = SessionLocal()
     try:
         authenticate_ws_user(db, tenant_id, token)
+        print("[WS CONNECTED MESSAGE]", conversation_id)
         conversation = (
             db.execute(
                 select(Conversation).where(

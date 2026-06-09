@@ -255,10 +255,11 @@ export default function ChatShell() {
   // A lógica de tempo real está centralizada nos hooks useRealtime abaixo
 
   useRealtime({
-    wsUrl: `${process.env.NEXT_PUBLIC_API_URL?.replace('http', 'ws')}/api/dashboard/stream`,
+    wsUrl: `${process.env.NEXT_PUBLIC_API_URL?.replace('http', 'ws')}/dashboard/ws`,
     sseUrl: `${process.env.NEXT_PUBLIC_API_URL}/api/dashboard/stream`,
     tenantId: typeof window !== 'undefined' ? localStorage.getItem('tenant_id') || '' : '',
     onMessage: (payload: { refresh?: string[] }) => {
+      console.log("[WS MESSAGE]", payload);
       if (!payload?.refresh?.includes('conversations')) return;
       getConversations()
         .then((items) => applyConversations(items))

@@ -441,6 +441,7 @@ async def ws_dashboard_events(websocket: WebSocket):
     db = SessionLocal()
     try:
         authenticate_ws_user(db, tenant_id, token)
+        print("[WS CONNECTED DASHBOARD]", tenant_id)
         channel = f"dashboard:{tenant_id}"
         await websocket.accept()
         await sse_broker.subscribe_websocket(channel, websocket)

@@ -470,6 +470,7 @@ async def _process_meta_webhook(request: Request, db: Session) -> dict[str, str]
                 "event": "message",
                 "message": MessageOut.model_validate(inbound_message).model_dump(mode="json"),
             }
+            print("[WS BROADCAST] message", conversation.id)
             await sse_broker.publish(f"{tenant.id}:{normalized_phone}", message_payload)
             await sse_broker.publish(f"{tenant.id}:{conversation.id}", message_payload)
 
