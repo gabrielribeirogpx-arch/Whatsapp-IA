@@ -571,8 +571,17 @@ def process_incoming_message(payload: dict[str, Any]) -> None:
             sync_publish(ws_channel, message_payload)
             sync_publish(sse_channel, message_payload)
 
+            dashboard_channel = f"dashboard:{tenant.id}"
+            dashboard_payload = {
+                "refresh": ["conversations"],
+            }
+            sync_publish(dashboard_channel, dashboard_payload)
+
             logger.warning(
-                "[REDIS PUBLISH SUCCESS]"
+                "[REDIS PUBLISH SUCCESS] ws=%s sse=%s dashboard=%s",
+                ws_channel,
+                sse_channel,
+                dashboard_channel,
             )
 
         except Exception:

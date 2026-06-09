@@ -260,7 +260,7 @@ export default function ChatShell() {
   }, [selectedConversation]);
 
   useRealtime({
-    wsUrl: `${process.env.NEXT_PUBLIC_API_URL?.replace('http', 'ws')}/api/dashboard/ws`,
+    wsUrl: `${process.env.NEXT_PUBLIC_API_URL?.replace(/^https/, 'wss').replace(/^http/, 'ws')}/api/dashboard/ws`,
     sseUrl: `${process.env.NEXT_PUBLIC_API_URL}/api/dashboard/stream`,
     tenantId: typeof window !== 'undefined' ? localStorage.getItem('tenant_id') || '' : '',
     onMessage: (payload: { refresh?: string[] }) => {
@@ -272,7 +272,7 @@ export default function ChatShell() {
     }
   });
 
-  const messageWsUrl = selectedConversation ? `${process.env.NEXT_PUBLIC_API_URL?.replace('http', 'ws')}/api/ws/messages/${selectedConversation.id}` : '';
+  const messageWsUrl = selectedConversation ? `${process.env.NEXT_PUBLIC_API_URL?.replace(/^https/, 'wss').replace(/^http/, 'ws')}/api/ws/messages/${selectedConversation.id}` : '';
   const messageSseUrl = selectedConversation ? `${process.env.NEXT_PUBLIC_API_URL}/api/sse/messages/${selectedConversation.id}` : '';
   
   console.log("[BEFORE MESSAGE HOOK]", selectedConversation?.id);
