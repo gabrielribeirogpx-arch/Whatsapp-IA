@@ -111,6 +111,7 @@ function toChatMessage(msg: Message): ChatMessage {
 // ─── Main Component ───────────────────────────────────────────
 
 export default function MobileChatShell() {
+  console.log("[COMPONENT RENDER] MobileChatShell");
   // ── Auth state ───────────────────────────────────────────────
   const [authChecked, setAuthChecked] = useState(false);
   const [authed, setAuthed]           = useState(false);
@@ -217,6 +218,7 @@ export default function MobileChatShell() {
   }, []);
 
   // ── WebSocket/SSE Hook ──────────────────────────────────────
+  console.log("[BEFORE DASHBOARD HOOK MOBILE]");
   useRealtime({
     wsUrl: `${process.env.NEXT_PUBLIC_API_URL?.replace('http', 'ws')}/api/dashboard/ws`,
     sseUrl: `${process.env.NEXT_PUBLIC_API_URL}/api/dashboard/stream`,

@@ -37,6 +37,7 @@ function toChatMessage(message: Message): ChatMessage {
 }
 
 export default function ChatShell() {
+  console.log("[COMPONENT RENDER] ChatShell");
   const router = useRouter();
   const searchParams = useSearchParams();
   const [conversations, setConversations] = useState<Conversation[]>([]);
