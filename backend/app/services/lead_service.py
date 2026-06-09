@@ -18,25 +18,32 @@ def get_or_create_lead(
     last_message: str | None = None,
 ) -> Lead:
     phone = normalize_phone(phone)
-    print("PHONE:", phone)
+    
+    # AUDITORIA PROFUNDA
+    all_leads = db.execute(
+        select(Lead).where(
+            Lead.tenant_id == tenant_id,
+            Lead.phone == phone
+        )
+    ).scalars().all()
+    
+    print("[LEAD AUDIT]", [{"id": str(l.id), "status": l.status, "phone": l.phone} for l in all_leads])
 
-    first_stage = get_first_pipeline_stage(db, tenant_id)
-    default_stage_id = first_stage.id if first_stage else None
-
+    print(f"[LEAD LOOKUP] tenant_id={tenant_id} phone={phone} status_filter={LeadStatus.ACTIVE.value}")
     lead = db.execute(
         select(Lead).where(Lead.tenant_id == tenant_id, Lead.phone == phone, Lead.status == LeadStatus.ACTIVE.value)
     ).scalars().first()
-
+    
     if lead:
+        print(f"[LEAD FOUND] lead_id={lead.id} status={lead.status}")
         lead.last_contact_at = datetime.utcnow()
         lead.last_interaction = datetime.utcnow()
         lead.last_message = last_message
-        if not lead.stage_id and default_stage_id:
-            lead.stage_id = default_stage_id
-            lead.entered_stage_at = datetime.utcnow()
-        if name and name.strip():
-            lead.name = name.strip()
         return lead
+
+    print("[LEAD CREATE] Tentando inserir novo lead")
+    first_stage = get_first_pipeline_stage(db, tenant_id)
+    default_stage_id = first_stage.id if first_stage else None
 
     lead = Lead(
         tenant_id=tenant_id,
@@ -54,11 +61,12 @@ def get_or_create_lead(
         entered_stage_at=datetime.utcnow(),
     )
     db.add(lead)
-
+    
     try:
         with db.begin_nested():
             db.flush()
     except IntegrityError:
+        print("[LEAD INTEGRITY ERROR] Ocorreu colisão na constraint tenant/phone")
         lead = db.execute(
             select(Lead).where(Lead.tenant_id == tenant_id, Lead.phone == phone, Lead.status == LeadStatus.ACTIVE.value)
         ).scalars().first()
