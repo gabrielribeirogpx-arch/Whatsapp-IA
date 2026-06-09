@@ -22,6 +22,7 @@ class SSEBroker:
                 del self._queues[phone]
 
     async def subscribe_websocket(self, channel: str, websocket: WebSocket) -> None:
+        print("[BROKER SUBSCRIBE]", channel)
         self._websockets[channel].add(websocket)
 
     def unsubscribe_websocket(self, channel: str, websocket: WebSocket) -> None:
@@ -30,20 +31,22 @@ class SSEBroker:
             if not self._websockets[channel]:
                 del self._websockets[channel]
 
-    async def publish(self, phone: str, payload: dict) -> None:
+    async def publish(self, channel: str, payload: dict) -> None:
+        print("[BROKER PUBLISH]", channel, payload)
         data = f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
-        for queue in list(self._queues.get(phone, set())):
+        for queue in list(self._queues.get(channel, set())):
             await queue.put(data)
 
         dead_websockets: list[WebSocket] = []
-        for websocket in list(self._websockets.get(phone, set())):
+        for websocket in list(self._websockets.get(channel, set())):
             try:
+                print("[WS SEND]", channel, payload)
                 await websocket.send_json(payload)
             except Exception:
                 dead_websockets.append(websocket)
 
         for websocket in dead_websockets:
-            self.unsubscribe_websocket(phone, websocket)
+            self.unsubscribe_websocket(channel, websocket)
 
 
 sse_broker = SSEBroker()

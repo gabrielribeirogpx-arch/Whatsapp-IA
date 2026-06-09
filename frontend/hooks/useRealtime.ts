@@ -40,6 +40,7 @@ export function useRealtime({
         };
         
         socket.onmessage = (event) => {
+            console.log("[WS MESSAGE RECEIVED]", event.data);
             onMessage(JSON.parse(event.data));
         };
         
