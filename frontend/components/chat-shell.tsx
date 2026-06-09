@@ -271,12 +271,16 @@ export default function ChatShell() {
     wsUrl: selectedConversation ? `${process.env.NEXT_PUBLIC_API_URL?.replace('http', 'ws')}/api/ws/messages/${selectedConversation.id}` : '',
     sseUrl: selectedConversation ? `${process.env.NEXT_PUBLIC_API_URL}/api/sse/messages/${selectedConversation.id}` : '',
     tenantId: typeof window !== 'undefined' ? localStorage.getItem('tenant_id') || '' : '',
-    onMessage: () => {
-      if (!selectedContactId) return;
+    onMessage: (payload: { message?: { conversation_id: string } }) => {
+      console.log("[WS MESSAGE RECEIVED CONVERSATION]", payload?.message?.conversation_id);
       fetchMessages(selectedContactId).catch(() => undefined);
       getConversations().then((items) => applyConversations(items)).catch(() => undefined);
     }
   });
+
+  useEffect(() => {
+    console.log("[FRONTEND SELECTED CONVERSATION]", selectedConversation?.id);
+  }, [selectedConversation]);
 
 
 
