@@ -764,18 +764,19 @@ async def ws_messages(
     websocket: WebSocket,
     conversation_id: UUID,
 ):
+    print("[WS HANDSHAKE START MESSAGES]", conversation_id)
     tenant_id_raw = str(websocket.query_params.get("tenant_id") or "").strip()
     token = str(websocket.query_params.get("token") or "").strip()
     try:
         tenant_id = UUID(tenant_id_raw)
     except ValueError:
+        print("[WS ERROR] Invalid tenant_id")
         await websocket.close(code=1008)
         return
 
     db = SessionLocal()
     try:
         authenticate_ws_user(db, tenant_id, token)
-        print("[WS CONNECTED MESSAGE]", conversation_id)
         conversation = (
             db.execute(
                 select(Conversation).where(
@@ -787,9 +788,11 @@ async def ws_messages(
             .first()
         )
         if not conversation:
+            print("[WS ERROR] Conversation not found")
             await websocket.close(code=1008)
             return
 
+        print("[WS CONNECTED MESSAGE]", conversation_id)
         channel = f"{tenant_id}:{conversation.id}"
         await websocket.accept()
         await sse_broker.subscribe_websocket(channel, websocket)
@@ -797,9 +800,13 @@ async def ws_messages(
             while True:
                 await websocket.receive_text()
         except WebSocketDisconnect:
+            print("[WS DISCONNECT MESSAGE]", conversation_id)
             pass
         finally:
             sse_broker.unsubscribe_websocket(channel, websocket)
+    except Exception as e:
+        print("[WS ERROR]", repr(e))
+        raise
     finally:
         db.close()
 
