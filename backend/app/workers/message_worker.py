@@ -567,19 +567,9 @@ def process_incoming_message(payload: dict[str, Any]) -> None:
                 sse_channel
             )
 
-            asyncio.run(
-                sse_broker.publish(
-                    ws_channel,
-                    message_payload
-                )
-            )
-
-            asyncio.run(
-                sse_broker.publish(
-                    sse_channel,
-                    message_payload
-                )
-            )
+            from app.services.realtime_service import sync_publish
+            sync_publish(ws_channel, message_payload)
+            sync_publish(sse_channel, message_payload)
 
             logger.warning(
                 "[REDIS PUBLISH SUCCESS]"

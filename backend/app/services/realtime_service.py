@@ -25,3 +25,7 @@ def publish_contact_event(*, tenant_id, contact_id, event) -> None:
         asyncio.set_event_loop(loop)
         
     loop.create_task(sse_broker.publish(channel, payload))
+
+def sync_publish(channel: str, payload: dict) -> None:
+    """Interface síncrona para workers."""
+    sse_broker.sync_publish(channel, payload)

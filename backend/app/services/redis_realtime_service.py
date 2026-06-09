@@ -4,14 +4,22 @@ import logging
 import os
 import redis.asyncio as redis
 from fastapi import WebSocket, WebSocketDisconnect
+from app.core.redis_client import get_redis_client
 
 logger = logging.getLogger(__name__)
 
 class RedisRealtimeBroker:
     def __init__(self) -> None:
         self.redis_url = os.getenv("REDIS_URL", "redis://localhost:6379")
-        # Client assíncrono persistente
+        # Client assíncrono para WebSockets/FastAPI
         self.client = redis.from_url(self.redis_url, decode_responses=True)
+        # Client síncrono para Workers
+        self.sync_client = get_redis_client()
+
+    def sync_publish(self, channel: str, payload: dict) -> None:
+        """Publique síncronamente a partir de workers."""
+        print("[REDIS SYNC PUBLISH]", channel)
+        self.sync_client.publish(channel, json.dumps(payload))
 
     async def publish(self, channel: str, payload: dict) -> None:
         print("[REDIS PUBLISH]", channel)
