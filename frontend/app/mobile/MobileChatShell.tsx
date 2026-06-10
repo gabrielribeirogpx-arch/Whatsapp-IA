@@ -189,6 +189,7 @@ export default function MobileChatShell() {
       });
       console.log('[SET CONVERSATIONS]', data.length);
       setConversations(data);
+      console.log("[STATE UPDATED]", data.length);
       writeCachedConversations(data);
     } catch (e) {
       console.error('[MobileChatShell] fetchConversations:', e);
@@ -231,13 +232,15 @@ export default function MobileChatShell() {
     sseUrl: `${process.env.NEXT_PUBLIC_API_URL}/api/dashboard/stream`,
     tenantId: typeof window !== 'undefined' ? localStorage.getItem('tenant_id') || '' : '',
     onMessage: (data: unknown) => {
+        console.log("[ONMESSAGE START]", data);
         console.log("[WS MESSAGE]", data);
         const d = data as Record<string, unknown>;
         const type = (d.event || 'message') as string;
         const refreshTargets = Array.isArray(d.refresh) ? d.refresh : [];
 
         if (refreshTargets.includes('conversations')) {
-            void fetchConversations();
+            console.log("[REFRESH CONVERSATIONS RECEIVED]");
+            void fetchConversations().then(() => console.log("[FETCH FINISHED]"));
             return;
         }
 

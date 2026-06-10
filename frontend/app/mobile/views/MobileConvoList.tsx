@@ -71,6 +71,7 @@ export default function MobileConvoList({
   pushGranted,
   pendingCount,
 }: MobileConvoListProps) {
+  console.log("[LIST RENDER]", conversations.length);
   console.log('[MOBILE LIST RECEIVED]', conversations.length);
 
   const filtered = conversations.filter((c) => {
