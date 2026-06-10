@@ -143,8 +143,9 @@ export default function MobileChatShell() {
   useServiceWorker('/sw.js');
 
   // ── Derived ─────────────────────────────────────────────────
-  const contacts = useMemo<Contact[]>(() =>
-    conversations.map(c => ({
+  const contacts = useMemo<Contact[]>(() => {
+    console.log('[CONTACTS RECALCULATED]', conversations.length);
+    return conversations.map(c => ({
       id:            String(c.contact_id ?? c.id),
       name:          c.name,
       phone:         c.phone,
@@ -154,9 +155,8 @@ export default function MobileChatShell() {
       lastMessage:   c.last_message,
       lastMessageAt: c.updated_at,
       status:        c.mode,
-    })),
-    [conversations]
-  );
+    }));
+  }, [conversations]);
 
   const selectedConvo   = useMemo(() => conversations.find(c => c.id === selectedConvoId), [conversations, selectedConvoId]);
   const selectedContact = useMemo(() => contacts.find(c => c.id === String(selectedConvo?.contact_id ?? selectedConvo?.id)), [contacts, selectedConvo]);
@@ -181,6 +181,13 @@ export default function MobileChatShell() {
   const fetchConversations = useCallback(async () => {
     try {
       const data = await getConversations();
+      console.log('[AFTER API]', data.length);
+      console.log('[FIRST CONVERSATION]', {
+        id: data[0]?.id,
+        last_message: data[0]?.last_message,
+        updated_at: data[0]?.updated_at,
+      });
+      console.log('[SET CONVERSATIONS]', data.length);
       setConversations(data);
       writeCachedConversations(data);
     } catch (e) {
