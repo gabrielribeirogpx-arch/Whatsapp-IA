@@ -25,21 +25,51 @@ class RedisRealtimeBroker:
         print("[REDIS PUBLISH]", channel)
         await self.client.publish(channel, json.dumps(payload))
 
+    def unsubscribe_websocket(self, channel: str, websocket: WebSocket) -> None:
+        """Compatibility no-op.
+
+        WebSocket PubSub cleanup is owned by subscribe_websocket(), which creates
+        and closes the Redis pubsub object in its own finally block.
+        """
+        print("[REDIS UNSUBSCRIBE WS NOOP]", channel)
+
     async def subscribe_websocket(self, channel: str, websocket: WebSocket) -> None:
         print("[REDIS SUBSCRIBE WS]", channel)
         pubsub = self.client.pubsub()
         await pubsub.subscribe(channel)
-        
-        try:
+
+        async def forward_redis_messages() -> None:
             # Uso idiomático do PubSub escutando eventos
             async for message in pubsub.listen():
                 if message['type'] == 'message':
                     payload = json.loads(message['data'])
                     print("[WS SEND]", channel)
                     await websocket.send_json(payload)
+
+        async def wait_for_websocket_disconnect() -> None:
+            while True:
+                await websocket.receive_text()
+
+        tasks = {
+            asyncio.create_task(forward_redis_messages()),
+            asyncio.create_task(wait_for_websocket_disconnect()),
+        }
+
+        try:
+            done, _pending = await asyncio.wait(
+                tasks,
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            for task in done:
+                exc = task.exception()
+                if exc and not isinstance(exc, WebSocketDisconnect):
+                    raise exc
         except WebSocketDisconnect:
             print("[WS DISCONNECT]", channel)
         finally:
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
             await pubsub.unsubscribe(channel)
             await pubsub.close()
             
