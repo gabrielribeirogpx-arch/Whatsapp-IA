@@ -23,6 +23,7 @@ import {
   sendMessage,
   updateConversationMode,
 } from '@/lib/api';
+import { formatTimeBR } from '@/lib/date';
 import { ChatMessage, Contact, Conversation, ConversationMode, Message } from '@/lib/types';
 import { usePushNotifications } from '@/hooks/mobile/usePushNotifications';
 import { useServiceWorker }    from '@/hooks/mobile/useServiceWorker';
@@ -93,14 +94,18 @@ function vibrate(pattern: VibratePattern) {
 }
 
 function toChatMessage(msg: Message): ChatMessage {
-  const d = new Date(msg.created_at);
+  const d = new Date(
+    /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:.\d+)?$/.test(msg.created_at)
+      ? `${msg.created_at}Z`
+      : msg.created_at
+  );
   return {
     id: String(msg.id),
     text: msg.content,
     fromMe: msg.role === 'assistant',
     time: isNaN(d.getTime())
       ? '--:--'
-      : d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+      : formatTimeBR(msg.created_at),
     createdAt: msg.created_at,
     status: msg.role === 'assistant' ? 'read' : 'delivered',
     isNew: Date.now() - d.getTime() < 5000,
