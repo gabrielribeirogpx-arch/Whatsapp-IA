@@ -370,15 +370,15 @@ function MessageBubble({ msg, prevFromMe }: { msg: ChatMessage; prevFromMe?: boo
     }}>
       <div style={{
         maxWidth: '78%',
-        background: isMine ? '#59C414' : '#FFFFFF',
+        background: isMine ? '#E7FFDB' : '#FFFFFF',
         borderRadius: isMine ? '18px 18px 4px 18px' : '18px 18px 18px 4px',
         padding: '8px 12px',
-        boxShadow: isMine ? 'none' : '0 1px 2px rgba(0,0,0,0.06)',
+        boxShadow: isMine ? '0 2px 8px rgba(11,20,26,0.08)' : '0 1px 2px rgba(0,0,0,0.06)',
         border: isMine ? 'none' : '1px solid #E5E7EB',
       }}>
         <p style={{
           margin: 0, fontSize: '14px',
-          color: isMine ? '#fff' : '#111827',
+          color: isMine ? '#0B141A' : '#111827',
           lineHeight: 1.45, wordBreak: 'break-word',
         }}>
           {msg.text}
