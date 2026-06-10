@@ -225,6 +225,26 @@ export default function MobileChatShell() {
     setTimeout(() => setPushBanner(null), 4000);
   }, []);
 
+  const appendRealtimeMessage = useCallback((message: Message) => {
+    const incoming = toChatMessage(message);
+
+    setMessages(prev => {
+      if (prev.some(existing => existing.id === incoming.id)) return prev;
+
+      const optimisticIndex = prev.findIndex(existing =>
+        existing.id.startsWith('opt-') &&
+        existing.fromMe === incoming.fromMe &&
+        existing.text === incoming.text
+      );
+
+      if (optimisticIndex >= 0) {
+        return prev.map((existing, index) => index === optimisticIndex ? incoming : existing);
+      }
+
+      return [...prev, incoming];
+    });
+  }, []);
+
   // ── WebSocket/SSE Hook ──────────────────────────────────────
   console.log("[BEFORE DASHBOARD HOOK MOBILE]");
   useRealtime({
@@ -269,7 +289,7 @@ export default function MobileChatShell() {
                 )
             );
             if (selectedConvoId && String(msg.conversation_id) === selectedConvoId) {
-                setMessages(prev => [...prev, toChatMessage(msg.message)]);
+                appendRealtimeMessage(msg.message);
             }
         }
         
@@ -297,6 +317,80 @@ export default function MobileChatShell() {
     }
   });
 
+  useEffect(() => {
+    if (!selectedConvoId || view !== 'chat' || typeof window === 'undefined') return;
+
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL;
+    const tenantId = localStorage.getItem('tenant_id') || '';
+    const token = localStorage.getItem('token') || '';
+
+    if (!apiUrl || !tenantId || !token) {
+      console.warn('[MOBILE MESSAGE WS] missing config/auth, skipping connection', {
+        hasApiUrl: !!apiUrl,
+        hasTenantId: !!tenantId,
+        hasToken: !!token,
+      });
+      return;
+    }
+
+    const wsBaseUrl = apiUrl
+      .replace(/^https/, 'wss')
+      .replace(/^http/, 'ws')
+      .replace(/\/$/, '');
+
+    const params = new URLSearchParams({
+      tenant_id: tenantId,
+      token,
+    });
+
+    const socket = new WebSocket(
+      `${wsBaseUrl}/api/ws/messages/${encodeURIComponent(selectedConvoId)}?${params.toString()}`
+    );
+
+    socket.onopen = () => {
+      console.log('[MOBILE MESSAGE WS OPEN]', selectedConvoId);
+    };
+
+    socket.onmessage = (event) => {
+      try {
+        const payload = JSON.parse(event.data) as {
+          event?: string;
+          message?: Message;
+          conversation_id?: unknown;
+        };
+
+        const type = payload.event || 'message';
+        const payloadConversationId = payload.conversation_id
+          ? String(payload.conversation_id)
+          : selectedConvoId;
+
+        if (
+          (type === 'message' || type === 'new_message') &&
+          payload.message &&
+          payloadConversationId === selectedConvoId
+        ) {
+          vibrate([80, 40, 80]);
+          appendRealtimeMessage(payload.message);
+        }
+      } catch (error) {
+        console.error('[MOBILE MESSAGE WS PARSE ERROR]', error);
+      }
+    };
+
+    socket.onerror = (error) => {
+      console.error('[MOBILE MESSAGE WS ERROR]', error);
+    };
+
+    socket.onclose = (event) => {
+      console.log('[MOBILE MESSAGE WS CLOSE]', selectedConvoId, event.code, event.reason);
+    };
+
+    return () => {
+      console.log('[MOBILE MESSAGE WS CLEANUP]', selectedConvoId);
+      socket.close();
+    };
+  }, [appendRealtimeMessage, selectedConvoId, view]);
+
   useEffect(() => { writeCachedConversations(conversations); }, [conversations]);
   useEffect(() => { updateAppBadge(pendingCount); }, [pendingCount]);
 
@@ -310,6 +404,12 @@ export default function MobileChatShell() {
     fetchMessages(convo);
     setView('chat');
   }, [conversations, fetchMessages]);
+
+  const closeChat = useCallback(() => {
+    setView('inbox');
+    setSelectedConvoId(null);
+    setMessages([]);
+  }, []);
 
   useEffect(() => {
     if (loading || conversations.length === 0 || typeof window === 'undefined') return;
@@ -412,10 +512,10 @@ export default function MobileChatShell() {
       await fetch(`/api/admin/reset-conversation/${selectedConvo.id}`, {
         method: 'POST', credentials: 'include',
       });
-      setView('inbox');
+      closeChat();
       fetchConversations();
     } catch (e) { console.error('[MobileChatShell] handleReset:', e); }
-  }, [selectedConvo, fetchConversations]);
+  }, [selectedConvo, fetchConversations, closeChat]);
 
   const handlePushAllow = useCallback(async () => {
     setShowPermSheet(false);
@@ -489,7 +589,7 @@ export default function MobileChatShell() {
           inputValue={inputValue}
           onInputChange={setInputValue}
           onSend={handleSend}
-          onBack={() => setView('inbox')}
+          onBack={closeChat}
           mode={mode}
           modeUpdating={modeUpdating}
           onModeChange={handleModeChange}
