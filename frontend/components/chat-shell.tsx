@@ -9,6 +9,7 @@ import CRMContactSidebar from './inbox/CRMContactSidebar';
 import { getConversations, getMessagesByConversation, resetConversation, sendMessage, updateConversationMode } from '../lib/api';
 import { ChatMessage, Contact, Conversation, ConversationMode, Message } from '../lib/types';
 import { useRealtime } from '../hooks/useRealtime';
+import { formatTimeBR } from '../lib/date';
 
 type ConversationAssignmentSnapshot = {
   mode: string;
@@ -20,10 +21,14 @@ function getAssignedUserName(conversation: Conversation) {
 }
 
 function toChatMessage(message: Message): ChatMessage {
-  const parsedDate = new Date(message.created_at);
+  const parsedDate = new Date(
+    /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?$/.test(message.created_at)
+      ? `${message.created_at}Z`
+      : message.created_at
+  );
   const time = Number.isNaN(parsedDate.getTime())
     ? '--:--'
-    : parsedDate.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+    : formatTimeBR(message.created_at);
 
   return {
     id: String(message.id),
