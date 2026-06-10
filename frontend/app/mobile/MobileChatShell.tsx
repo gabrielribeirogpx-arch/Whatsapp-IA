@@ -127,6 +127,7 @@ export default function MobileChatShell() {
   const [conversations, setConversations]     = useState<Conversation[]>([]);
   const [messages, setMessages]               = useState<ChatMessage[]>([]);
   const [selectedConvoId, setSelectedConvoId] = useState<string | null>(null);
+  const selectedConvoIdRef                    = useRef<string | null>(null);
   const [inputValue, setInputValue]           = useState('');
   const [filter, setFilter]                   = useState<'all'|'human'|'bot'|'pending'>('all');
   const [search, setSearch]                   = useState('');
@@ -213,8 +214,21 @@ export default function MobileChatShell() {
 
   const fetchMessages = useCallback(async (convo: Conversation) => {
     try {
-      const data = await getMessagesByConversation(String(convo.id));
-      setMessages(data.map(toChatMessage));
+      const conversationId = String(convo.id);
+      const data = await getMessagesByConversation(conversationId);
+
+      if (selectedConvoIdRef.current !== conversationId) {
+        return;
+      }
+
+      const fetchedMessages = data.map(toChatMessage);
+
+      setMessages(prev => {
+        const fetchedIds = new Set(fetchedMessages.map(message => message.id));
+        const realtimeMessages = prev.filter(message => !fetchedIds.has(message.id));
+
+        return [...fetchedMessages, ...realtimeMessages];
+      });
     } catch (e) {
       console.error('[MobileChatShell] fetchMessages:', e);
     }
@@ -398,6 +412,7 @@ export default function MobileChatShell() {
   const openChat = useCallback((convoId: string) => {
     const convo = conversations.find(c => c.id === convoId);
     if (!convo) return;
+    selectedConvoIdRef.current = convoId;
     setSelectedConvoId(convoId);
     setMode((convo.mode?.toLowerCase() as ConversationMode) || 'human');
     setMessages([]);
@@ -407,6 +422,7 @@ export default function MobileChatShell() {
 
   const closeChat = useCallback(() => {
     setView('inbox');
+    selectedConvoIdRef.current = null;
     setSelectedConvoId(null);
     setMessages([]);
   }, []);
