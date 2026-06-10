@@ -108,7 +108,7 @@ def _conversation_out(
     phone = str(getattr(conversation, "phone", None) or conversation.phone_number or "").strip() or "desconhecido"
     contact = getattr(conversation, "contact", None)
     contact_name = getattr(contact, "name", None) if contact else None
-    display_name = (getattr(conversation, "name", None) or contact_name or phone).strip() or phone
+    display_name = (contact_name or getattr(conversation, "name", None) or phone).strip() or phone
     stage = getattr(contact, "stage", None) if contact else None
     score = getattr(contact, "score", None) if contact else None
 
