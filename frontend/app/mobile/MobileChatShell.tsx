@@ -227,6 +227,12 @@ export default function MobileChatShell() {
         console.log("[WS MESSAGE]", data);
         const d = data as Record<string, unknown>;
         const type = (d.event || 'message') as string;
+        const refreshTargets = Array.isArray(d.refresh) ? d.refresh : [];
+
+        if (refreshTargets.includes('conversations')) {
+            void fetchConversations();
+            return;
+        }
 
         if (type === 'conversation_updated' || type === 'conversation_assigned') {
             const updated = ((d.conversation as Partial<Conversation> | undefined) || d) as Partial<Conversation> & {
