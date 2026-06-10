@@ -71,6 +71,8 @@ export default function MobileConvoList({
   pushGranted,
   pendingCount,
 }: MobileConvoListProps) {
+  console.log('[MOBILE LIST RECEIVED]', conversations.length);
+
   const filtered = conversations.filter((c) => {
     const m = (c.mode || '').toLowerCase();
     if (filter === 'human'   && m !== 'human')              return false;
