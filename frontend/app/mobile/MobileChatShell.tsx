@@ -358,6 +358,9 @@ export default function MobileChatShell() {
   const handleAssume = useCallback(async () => {
     if (!selectedConvo) return;
     try {
+      console.log("[ASSUME SELECTED_CONVO_ID]", selectedConvoId);
+      console.log("[ASSUME SELECTED_CONVO]", selectedConvo);
+      console.log("[ASSUME CONVERSATIONS]", conversations);
       const response = await assignConversationToSelf(String(selectedConvo.id));
       const updatedConversation = response.conversation || {
         ...selectedConvo,
@@ -370,7 +373,7 @@ export default function MobileChatShell() {
       );
       setMode('human');
     } catch (e) { console.error('[MobileChatShell] handleAssume:', e); }
-  }, [selectedConvo]);
+  }, [conversations, selectedConvo, selectedConvoId]);
 
   const handleRelease = useCallback(async () => {
     if (!selectedConvo) return;
