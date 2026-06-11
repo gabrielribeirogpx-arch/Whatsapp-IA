@@ -20,6 +20,26 @@ function getAssignedUserName(conversation: Conversation) {
   return conversation.assigned_user_name?.trim() || 'Atendente';
 }
 
+function getConversationModeErrorMessage(error: unknown) {
+  const fallback = 'Não foi possível atualizar o modo.';
+  if (!(error instanceof Error)) return fallback;
+
+  const match = error.message.match(/^HTTP\s+\d+:\s*([\s\S]*)$/);
+  const rawBody = match?.[1]?.trim();
+  if (!rawBody) return fallback;
+
+  try {
+    const parsed = JSON.parse(rawBody) as { detail?: unknown };
+    if (typeof parsed.detail === 'string' && parsed.detail.trim()) {
+      return parsed.detail.trim();
+    }
+  } catch {
+    return rawBody;
+  }
+
+  return fallback;
+}
+
 function toChatMessage(message: Message): ChatMessage {
   const parsedDate = new Date(
     /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?$/.test(message.created_at)
@@ -414,7 +434,7 @@ export default function ChatShell() {
     } catch (err) {
       console.error('Erro ao atualizar modo:', err);
       setMode(previousMode);
-      setModeError('Não foi possível atualizar o modo.');
+      setModeError(getConversationModeErrorMessage(err));
     } finally {
       setModeUpdating(false);
     }

@@ -17,6 +17,10 @@ from sqlalchemy import desc, func, select, update
 from sqlalchemy.orm import Session
 
 from app.flow_v2.delay_contract import normalize_delay_nodes
+from app.flow_v2.snapshot import (
+    canonical_hash as v2_canonical_hash,
+    migrate_snapshot as migrate_v2_snapshot,
+)
 from app.models import Conversation, Flow, FlowEdge, FlowNode, FlowVersion, Tenant
 from app.models.flow_session import FlowSession
 from app.services.delay_queue_service import enqueue_delay
@@ -149,6 +153,88 @@ def apply_flow_version_snapshot_metadata(flow_version: FlowVersion, nodes: list[
     flow_version.graph_checksum = computed
 
 
+def _version_uses_valid_v2_snapshot_hash(
+    flow_version: FlowVersion,
+    *,
+    nodes: list[dict[str, Any]],
+    edges: list[dict[str, Any]],
+    expected_hash: str,
+) -> bool:
+    """Accept Runtime V2 published versions whose stored checksum is the V2 snapshot hash.
+
+    Runtime V2 publications intentionally persist ``graph_checksum``/``graph_hash``
+    with the immutable canonical snapshot hash.  That hash is calculated from the
+    full Runtime V2 snapshot contract, not only the legacy ``{"nodes", "edges"}``
+    payload used by Runtime V1.  Treat that as valid only when the immutable
+    snapshot verifies and matches the nodes/edges that will be loaded.
+    """
+
+    v2_hash = getattr(flow_version, "v2_snapshot_hash", None)
+    if not v2_hash or str(v2_hash) != str(expected_hash):
+        return False
+
+    stored_snapshot = getattr(flow_version, "snapshot", None)
+    if not isinstance(stored_snapshot, dict):
+        logger.warning(
+            "[FLOW VERSION INTEGRITY] V2 hash present but snapshot missing flow_version_id=%s",
+            getattr(flow_version, "id", None),
+        )
+        return False
+
+    try:
+        snapshot = migrate_v2_snapshot(stored_snapshot)
+    except Exception as exc:  # pragma: no cover - defensive guard mirrors Runtime V2 loader
+        logger.warning(
+            "[FLOW VERSION INTEGRITY] V2 snapshot migration failed flow_version_id=%s error=%s",
+            getattr(flow_version, "id", None),
+            exc,
+        )
+        return False
+
+    embedded_hash = stored_snapshot.get("hash")
+    if embedded_hash and str(embedded_hash) != str(v2_hash):
+        logger.warning(
+            "[FLOW VERSION INTEGRITY] V2 embedded hash mismatch flow_version_id=%s embedded_hash=%s v2_snapshot_hash=%s",
+            getattr(flow_version, "id", None),
+            embedded_hash,
+            v2_hash,
+        )
+        return False
+
+    hash_candidates = {
+        v2_canonical_hash({k: v for k, v in stored_snapshot.items() if k != "hash"}),
+        v2_canonical_hash({k: v for k, v in snapshot.items() if k != "hash"}),
+    }
+    if str(v2_hash) not in hash_candidates:
+        logger.warning(
+            "[FLOW VERSION INTEGRITY] V2 canonical hash mismatch flow_version_id=%s v2_snapshot_hash=%s candidates=%s",
+            getattr(flow_version, "id", None),
+            v2_hash,
+            sorted(hash_candidates),
+        )
+        return False
+
+    snapshot_nodes = snapshot.get("nodes") if isinstance(snapshot.get("nodes"), list) else []
+    snapshot_edges = snapshot.get("edges") if isinstance(snapshot.get("edges"), list) else []
+    if snapshot_nodes != nodes or snapshot_edges != edges:
+        logger.warning(
+            "[FLOW VERSION INTEGRITY] V2 snapshot differs from runtime columns flow_version_id=%s snapshot_nodes=%s runtime_nodes=%s snapshot_edges=%s runtime_edges=%s",
+            getattr(flow_version, "id", None),
+            len(snapshot_nodes),
+            len(nodes),
+            len(snapshot_edges),
+            len(edges),
+        )
+        return False
+
+    logger.info(
+        "[FLOW VERSION INTEGRITY] accepted Runtime V2 snapshot hash flow_version_id=%s checksum=%s",
+        getattr(flow_version, "id", None),
+        v2_hash,
+    )
+    return True
+
+
 def validate_flow_version_integrity(flow_version: FlowVersion) -> tuple[bool, str | None]:
     nodes, edges = flow_version_nodes_edges(flow_version)
     expected_nodes = getattr(flow_version, "nodes_count", None)
@@ -160,6 +246,20 @@ def validate_flow_version_integrity(flow_version: FlowVersion) -> tuple[bool, st
     if expected_edges is not None and int(expected_edges or 0) != len(edges):
         return False, "FLOW_VERSION_EDGES_COUNT_MISMATCH"
     if expected_hash and str(expected_hash) != computed_hash:
+        if _version_uses_valid_v2_snapshot_hash(
+            flow_version,
+            nodes=nodes,
+            edges=edges,
+            expected_hash=str(expected_hash),
+        ):
+            return True, None
+        logger.warning(
+            "[FLOW VERSION INTEGRITY] graph hash mismatch flow_version_id=%s expected=%s computed=%s v2_snapshot_hash=%s",
+            getattr(flow_version, "id", None),
+            expected_hash,
+            computed_hash,
+            getattr(flow_version, "v2_snapshot_hash", None),
+        )
         return False, "FLOW_VERSION_GRAPH_HASH_MISMATCH"
     return True, None
 
