@@ -4058,3 +4058,553 @@ input {
   border: 1px solid #fecaca;
   color: #991b1b;
 }
+
+/* Inbox desktop visual refresh — WhatsApp Web inspired, visual-only overrides. */
+@media (min-width: 901px) {
+  .wa-layout {
+    grid-template-columns: minmax(320px, 390px) minmax(540px, 1fr) minmax(320px, 380px);
+    gap: 0;
+    padding: 0;
+    background: #f0f2f5;
+  }
+
+  .wa-sidebar,
+  .wa-chat-window,
+  .wa-crm-sidebar {
+    border-radius: 0;
+    box-shadow: none;
+  }
+}
+
+.wa-layout {
+  --wa-green: #25d366;
+  --wa-green-dark: #128c7e;
+  --wa-green-soft: #d9fdd3;
+  --wa-text: #111b21;
+  --wa-muted: #667781;
+  --wa-line: #e9edef;
+  color: var(--wa-text);
+}
+
+.wa-sidebar {
+  border-color: var(--wa-line);
+  background: #ffffff;
+}
+
+.wa-contact-list {
+  padding: 14px 12px 18px;
+  gap: 6px;
+}
+
+.wa-sidebar-search-wrapper {
+  margin: 0 0 10px;
+}
+
+.wa-sidebar-search-icon {
+  left: 14px;
+  color: #8696a0;
+  font-size: 0.86rem;
+}
+
+.wa-sidebar-search-input {
+  height: 44px;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  background: #f0f2f5;
+  padding: 0 14px 0 40px;
+  color: var(--wa-text);
+  font-size: 0.9rem;
+}
+
+.wa-sidebar-search-input:focus {
+  border-color: rgba(37, 211, 102, 0.42);
+  background: #fff;
+  box-shadow: 0 0 0 3px rgba(37, 211, 102, 0.12);
+}
+
+.wa-sidebar-search-input::placeholder {
+  color: #8696a0;
+}
+
+.wa-filter-chips {
+  gap: 7px;
+  padding: 0 2px 8px;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+}
+
+.wa-filter-chip {
+  border-color: #e6ebef;
+  background: #fff;
+  color: #54656f;
+  padding: 0.36rem 0.72rem;
+  font-size: 0.76rem;
+  font-weight: 700;
+  white-space: nowrap;
+  box-shadow: 0 1px 1px rgba(17, 27, 33, 0.02);
+}
+
+.wa-filter-chip:hover {
+  border-color: rgba(37, 211, 102, 0.4);
+  background: #f6fffa;
+  color: #0b6b4f;
+}
+
+.wa-filter-chip.active {
+  border-color: rgba(37, 211, 102, 0.28);
+  background: #e7fce3;
+  color: #0b7a43;
+}
+
+.wa-contact-item {
+  border-left: 0;
+  border-radius: 14px;
+  padding: 11px 10px;
+  background: transparent;
+  box-shadow: none;
+}
+
+.wa-contact-item:hover {
+  transform: none;
+  background: #f5f7f8;
+  box-shadow: none;
+}
+
+.wa-contact-item.active {
+  border-left-color: transparent;
+  background: linear-gradient(90deg, #e9fbef 0%, #f3fff6 100%);
+  box-shadow: inset 0 0 0 1px rgba(37, 211, 102, 0.16);
+}
+
+.wa-contact-main {
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.wa-contact-main .wa-avatar-fallback,
+.wa-contact-main .wa-avatar-image,
+.wa-chat-contact .wa-avatar-fallback,
+.wa-chat-contact .wa-avatar-image {
+  width: 46px;
+  height: 46px;
+}
+
+.wa-contact-row strong {
+  color: var(--wa-text);
+  font-size: 0.94rem;
+  font-weight: 750;
+  line-height: 1.25;
+}
+
+.wa-contact-time {
+  color: #8696a0;
+  font-size: 0.7rem;
+  line-height: 1.25;
+}
+
+.wa-contact-preview {
+  margin-top: 0.28rem;
+  color: var(--wa-muted);
+  font-size: 0.82rem;
+  line-height: 1.35;
+}
+
+.wa-contact-meta {
+  gap: 5px;
+  margin-top: 0.48rem;
+}
+
+.wa-contact-badge,
+.wa-contact-temp,
+.wa-contact-tag,
+.wa-contact-unread {
+  border-radius: 999px;
+  padding: 0.16rem 0.48rem;
+  font-size: 0.65rem;
+  font-weight: 750;
+  line-height: 1.3;
+}
+
+.wa-contact-badge {
+  margin-top: 0;
+}
+
+.wa-contact-badge.ai,
+.wa-contact-badge.human,
+.wa-contact-temp.hot {
+  background: #e7fce3;
+  color: #0b7a43;
+}
+
+.wa-contact-badge.bot,
+.wa-contact-temp.warm {
+  background: #fff4cc;
+  color: #8a5a00;
+}
+
+.wa-contact-badge.pending,
+.wa-contact-temp.cold,
+.wa-contact-tag {
+  background: #eef2f5;
+  color: #54656f;
+}
+
+.wa-contact-unread {
+  min-width: 18px;
+  padding-inline: 0.38rem;
+  background: var(--wa-green);
+  color: #fff;
+}
+
+.wa-chat-window {
+  border-color: var(--wa-line);
+  background: #efeae2;
+}
+
+.wa-chat-header {
+  min-height: 72px;
+  padding: 14px 22px;
+  border-bottom-color: var(--wa-line);
+  background: rgba(255, 255, 255, 0.96);
+  gap: 14px;
+}
+
+.wa-chat-contact {
+  min-width: 0;
+  gap: 13px;
+}
+
+.wa-chat-header h1 {
+  color: var(--wa-text);
+  font-size: 1rem;
+  font-weight: 760;
+  line-height: 1.25;
+}
+
+.wa-chat-header p,
+.wa-contact-status {
+  color: var(--wa-muted);
+  font-size: 0.8rem;
+}
+
+.wa-contact-status.away {
+  color: #667781;
+}
+
+.wa-status-dot {
+  width: 7px;
+  height: 7px;
+  color: #f4c430;
+}
+
+.wa-chat-actions {
+  gap: 0.32rem;
+}
+
+.wa-chat-actions-row {
+  gap: 0.45rem;
+}
+
+.wa-mode-selector {
+  border-color: #e7ebee;
+  background: #f0f2f5;
+  border-radius: 999px;
+  padding: 3px;
+  gap: 2px;
+}
+
+.wa-mode-button {
+  min-height: 32px;
+  padding: 0.36rem 0.72rem;
+  color: #54656f;
+  font-size: 0.78rem;
+  transition: background 0.18s ease, color 0.18s ease, box-shadow 0.18s ease;
+}
+
+.wa-mode-button:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.82);
+  color: var(--wa-text);
+}
+
+.wa-mode-button.human.active,
+.wa-mode-button.bot.active,
+.wa-mode-button.ai.active {
+  background: #fff;
+  box-shadow: 0 1px 4px rgba(17, 27, 33, 0.12);
+}
+
+.wa-mode-button.human.active { color: #0b7a43; }
+.wa-mode-button.bot.active { color: #8a5a00; }
+.wa-mode-button.ai.active { color: #5b21b6; }
+
+.wa-conversation-menu-trigger {
+  width: 34px;
+  height: 34px;
+  border-color: transparent;
+  background: transparent;
+  color: #54656f;
+}
+
+.wa-conversation-menu-trigger:hover {
+  background: #f0f2f5;
+}
+
+.wa-chat-handoff-badge {
+  margin-top: 0.32rem;
+  padding: 0.18rem 0.52rem;
+  font-size: 0.68rem;
+}
+
+.wa-messages-panel {
+  gap: 10px;
+  padding: 28px clamp(22px, 5vw, 64px);
+  background-color: #efeae2;
+  background-image:
+    radial-gradient(circle at 18px 18px, rgba(17, 27, 33, 0.025) 1.5px, transparent 2px),
+    radial-gradient(circle at 58px 42px, rgba(17, 27, 33, 0.018) 1.5px, transparent 2px),
+    linear-gradient(180deg, rgba(239, 234, 226, 0.94), rgba(239, 234, 226, 0.94));
+  background-size: 82px 82px, 96px 96px, 100% 100%;
+}
+
+.wa-date-divider span {
+  border: 1px solid rgba(17, 27, 33, 0.05);
+  background: rgba(255, 255, 255, 0.82);
+  color: #667781;
+  box-shadow: 0 1px 2px rgba(17, 27, 33, 0.06);
+}
+
+.wa-message-bubble {
+  max-width: min(70%, 620px);
+  border-radius: 13px;
+  padding: 8px 10px 6px;
+  color: var(--wa-text);
+  font-size: 0.92rem;
+  line-height: 1.45;
+}
+
+.wa-message-bubble p {
+  white-space: pre-wrap;
+}
+
+.wa-message-bubble time {
+  margin-top: 0.16rem;
+  color: #667781;
+  font-size: 0.66rem;
+  line-height: 1;
+}
+
+.wa-message-bubble.mine {
+  border-top-right-radius: 5px;
+  background: var(--wa-green-soft);
+  box-shadow: 0 1px 2px rgba(17, 27, 33, 0.08);
+}
+
+.wa-message-bubble.theirs {
+  border-top-left-radius: 5px;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(17, 27, 33, 0.09);
+}
+
+.wa-message-bubble.is-new {
+  box-shadow: 0 0 0 2px rgba(37, 211, 102, 0.18), 0 1px 2px rgba(17, 27, 33, 0.08);
+}
+
+.wa-message-status {
+  margin-left: 5px;
+  color: #8696a0;
+}
+
+.wa-message-status.read {
+  color: #53bdeb;
+}
+
+.wa-message-composer.premium {
+  padding: 12px 22px 14px;
+  border-top: 0;
+  background: #f0f2f5;
+  box-shadow: none;
+}
+
+.wa-composer-input-wrap {
+  border-color: #fff;
+  border-radius: 18px;
+  background: #fff;
+  padding: 7px 8px;
+  box-shadow: 0 1px 3px rgba(17, 27, 33, 0.08);
+}
+
+.wa-composer-input-wrap:focus-within {
+  border-color: rgba(37, 211, 102, 0.4);
+  box-shadow: 0 0 0 3px rgba(37, 211, 102, 0.12);
+}
+
+.wa-composer-tools {
+  gap: 2px;
+}
+
+.wa-composer-icon-btn {
+  width: 36px;
+  height: 36px;
+  color: #667781;
+}
+
+.wa-composer-icon-btn:hover:not(:disabled) {
+  background: #f0f2f5;
+  color: #111b21;
+}
+
+.wa-message-composer textarea {
+  min-height: 36px;
+  padding: 8px 4px;
+  color: var(--wa-text);
+  font-size: 0.92rem;
+  line-height: 1.35;
+}
+
+.wa-send-btn-modern {
+  width: 38px;
+  height: 38px;
+  border-radius: 999px;
+  background: #00a884;
+  box-shadow: none;
+}
+
+.wa-send-btn-modern:hover:not(:disabled) {
+  box-shadow: 0 8px 18px rgba(0, 168, 132, 0.24);
+}
+
+.wa-crm-sidebar {
+  border-color: var(--wa-line);
+  background: #f7f8fa;
+  backdrop-filter: none;
+  box-shadow: none;
+}
+
+.wa-crm-content {
+  padding: 18px 16px 22px;
+  gap: 12px;
+}
+
+.wa-crm-card {
+  border-color: rgba(17, 27, 33, 0.06);
+  border-radius: 18px;
+  padding: 16px;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(17, 27, 33, 0.05);
+}
+
+.wa-crm-card:hover {
+  transform: none;
+  box-shadow: 0 6px 18px rgba(17, 27, 33, 0.07);
+}
+
+.wa-crm-contact-head {
+  align-items: flex-start;
+  gap: 13px;
+}
+
+.wa-crm-contact-head .wa-avatar-fallback,
+.wa-crm-contact-head .wa-avatar-image {
+  width: 48px;
+  height: 48px;
+}
+
+.wa-crm-contact-head h3,
+.wa-crm-card h4 {
+  color: var(--wa-text);
+  font-weight: 780;
+}
+
+.wa-crm-phone,
+.wa-crm-online,
+.wa-crm-muted {
+  color: var(--wa-muted);
+}
+
+.wa-crm-badges,
+.wa-crm-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.wa-crm-badges span,
+.wa-crm-tags span {
+  border-color: #e6ebef;
+  background: #f0f2f5;
+  color: #54656f;
+  padding: 0.2rem 0.58rem;
+  font-size: 0.68rem;
+  font-weight: 750;
+}
+
+.temp-badge.temp-cold { background: #e8f1ff; color: #1d4ed8; }
+.temp-badge.temp-warm { background: #fff4cc; color: #8a5a00; }
+.temp-badge.temp-hot { background: #e7fce3; color: #0b7a43; }
+
+.wa-crm-inline .premium-input {
+  min-height: 42px;
+  border-radius: 12px;
+  background: #fff;
+}
+
+.wa-crm-inline .secondary-button {
+  min-width: 42px;
+  border-radius: 12px;
+}
+
+.wa-crm-timeline {
+  gap: 9px;
+  max-height: 300px;
+  padding: 2px 4px 2px 0;
+}
+
+.wa-crm-timeline::before {
+  display: none;
+}
+
+.wa-crm-event {
+  grid-template-columns: 12px 1fr;
+  gap: 9px;
+  border-color: #e9edef;
+  border-radius: 14px;
+  padding: 11px 12px;
+  background: #fff;
+}
+
+.wa-crm-event:hover {
+  transform: none;
+  box-shadow: 0 5px 14px rgba(17, 27, 33, 0.06);
+}
+
+.wa-crm-event-dot {
+  width: 8px;
+  height: 8px;
+  margin-top: 5px;
+}
+
+.wa-crm-event strong {
+  color: var(--wa-text);
+  font-size: 0.82rem;
+}
+
+.wa-crm-event p,
+.wa-crm-event time {
+  color: var(--wa-muted);
+  font-size: 0.74rem;
+}
+
+.wa-crm-metrics div {
+  border-color: #e9edef;
+  background: #fff;
+}
+
+@media (max-width: 900px) {
+  .wa-contact-main .wa-avatar-fallback,
+  .wa-contact-main .wa-avatar-image,
+  .wa-chat-contact .wa-avatar-fallback,
+  .wa-chat-contact .wa-avatar-image {
+    width: 42px;
+    height: 42px;
+  }
+}
