@@ -81,7 +81,11 @@ export default function Sidebar({
       return hasHumanAssignee ? null : { label: '👤 Humano', className: 'human' };
     }
 
-    if (normalizedStatus === 'bot' || normalizedStatus === 'ai') {
+    if (normalizedStatus === 'bot') {
+      return { label: '⚙️ Bot', className: 'bot' };
+    }
+
+    if (normalizedStatus === 'ai') {
       return { label: '🤖 IA', className: 'ai' };
     }
 
