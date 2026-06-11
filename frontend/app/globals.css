@@ -822,6 +822,11 @@ input {
   color: #166534;
 }
 
+.wa-contact-badge.bot {
+  background: #fef3c7;
+  color: #92400e;
+}
+
 .wa-contact-badge.human {
   background: #dcfce7;
   color: #166534;

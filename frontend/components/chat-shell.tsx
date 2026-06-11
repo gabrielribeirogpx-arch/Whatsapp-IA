@@ -16,6 +16,31 @@ type ConversationAssignmentSnapshot = {
   assignedUserId: string | null;
 };
 
+type ConversationModeOverride = {
+  mode: ConversationMode;
+  updatedAt: number;
+};
+
+type ConversationModeUpdateResponse = {
+  mode?: unknown;
+  conversation?: {
+    mode?: unknown;
+  } | null;
+};
+
+const RECENT_MODE_OVERRIDE_TTL_MS = 30_000;
+
+function normalizeConversationMode(value: unknown): ConversationMode | null {
+  if (typeof value !== 'string') return null;
+
+  const normalizedMode = value.toLowerCase();
+  if (normalizedMode === 'human' || normalizedMode === 'bot' || normalizedMode === 'ai') {
+    return normalizedMode;
+  }
+
+  return null;
+}
+
 function getAssignedUserName(conversation: Conversation) {
   return conversation.assigned_user_name?.trim() || 'Atendente';
 }
@@ -81,6 +106,7 @@ export default function ChatShell() {
   const [resetError, setResetError] = useState('');
   const [resettingConversation, setResettingConversation] = useState(false);
   const previousAssignmentRef = useRef<Map<string, ConversationAssignmentSnapshot>>(new Map());
+  const recentModeOverridesRef = useRef<Map<string, ConversationModeOverride>>(new Map());
   const hasLoadedConversationsRef = useRef(false);
 
 
@@ -93,9 +119,24 @@ export default function ChatShell() {
       console.log("[APPLY CONVERSATIONS]", items.length);
       const notifyHandoff = options.notifyHandoff ?? true;
       const previousAssignments = previousAssignmentRef.current;
+      const recentModeOverrides = recentModeOverridesRef.current;
+      const now = Date.now();
+      const normalizedItems = items.map((conversation) => {
+        const conversationId = String(conversation.id);
+        const override = recentModeOverrides.get(conversationId);
+
+        if (!override) return conversation;
+
+        if (now - override.updatedAt > RECENT_MODE_OVERRIDE_TTL_MS) {
+          recentModeOverrides.delete(conversationId);
+          return conversation;
+        }
+
+        return { ...conversation, mode: override.mode };
+      });
 
       if (notifyHandoff && hasLoadedConversationsRef.current) {
-        const assignedConversation = items.find((conversation) => {
+        const assignedConversation = normalizedItems.find((conversation) => {
           const previous = previousAssignments.get(String(conversation.id));
           const currentMode = String(conversation.mode || '').toLowerCase();
           const currentAssignedUserId = conversation.assigned_user_id ? String(conversation.assigned_user_id) : null;
@@ -112,7 +153,7 @@ export default function ChatShell() {
         if (assignedConversation) {
           setHandoffToast(`${getAssignedUserName(assignedConversation)} assumiu o atendimento`);
         } else {
-          const handoffConversation = items.find((conversation) => {
+          const handoffConversation = normalizedItems.find((conversation) => {
             const previous = previousAssignments.get(String(conversation.id));
             const currentMode = String(conversation.mode || '').toLowerCase();
 
@@ -128,7 +169,7 @@ export default function ChatShell() {
       }
 
       previousAssignmentRef.current = new Map(
-        items.map((conversation) => [
+        normalizedItems.map((conversation) => [
           String(conversation.id),
           {
             mode: String(conversation.mode || '').toLowerCase(),
@@ -138,7 +179,7 @@ export default function ChatShell() {
       );
       hasLoadedConversationsRef.current = true;
       console.log("[SET CONVERSATIONS]", items.length);
-      setConversations(items);
+      setConversations(normalizedItems);
     },
     [playHumanHandoffSound]
   );
@@ -423,11 +464,13 @@ export default function ChatShell() {
     setModeUpdating(true);
 
     try {
-      await updateConversationMode(conversationId, newMode);
+      const response = (await updateConversationMode(conversationId, newMode)) as ConversationModeUpdateResponse | null | undefined;
+      const updatedMode = normalizeConversationMode(response?.conversation?.mode) ?? normalizeConversationMode(response?.mode) ?? newMode;
 
-      setMode(newMode);
+      recentModeOverridesRef.current.set(conversationId, { mode: updatedMode, updatedAt: Date.now() });
+      setMode(updatedMode);
       const updatedConversations = conversations.map((conversation) =>
-        conversation.id === selectedConversation.id ? { ...conversation, mode: newMode } : conversation
+        String(conversation.id) === conversationId ? { ...conversation, mode: updatedMode } : conversation
       );
       applyConversations(updatedConversations, { notifyHandoff: false });
       setModeNotice('Modo atualizado.');
