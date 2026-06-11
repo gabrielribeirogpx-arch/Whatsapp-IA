@@ -131,6 +131,8 @@ class MessageNodeExecutor(BaseNodeExecutor):
         next_node_data = self._node_data(next_node) if isinstance(next_node, dict) else {}
         next_node_type = (
             str(next_node.get("type") or next_node_data.get("type") or "message")
+            .strip()
+            .lower()
             if isinstance(next_node, dict)
             else None
         )
@@ -186,10 +188,10 @@ class MessageNodeExecutor(BaseNodeExecutor):
         legacy_wait_after_start_condition = is_start and next_node_id is not None
         interactive_next_node_types = {"choice", "buttons", "buttons_node", "list", "list_node"}
         next_node_is_interactive = next_node_type in interactive_next_node_types
-        # A start message must not block before the next node runs. Interactive
-        # nodes (choice/buttons/list) enter WAITING from their own executor after
-        # emitting the prompt, while automatic nodes continue in this loop.
-        wait_after_start_condition = False
+        # A message immediately followed by a condition is a conversational
+        # boundary: the condition must evaluate the next inbound user message,
+        # not the message that triggered the current runtime call.
+        wait_after_start_condition = next_node_type == "condition"
         status = (
             "complete"
             if next_node_id is None
