@@ -27,7 +27,7 @@ from app.schemas.chat import (
 )
 from app.services.contact_sync_service import ensure_conversation_contact_link, upsert_contact_for_phone
 from app.services.contact_event_service import register_contact_event
-from app.services.bot_service import handle_bot_activation
+from app.services.flow_engine_service import get_active_visual_flow
 from app.services.conversation_service import get_or_create_conversation
 from app.services.lead_service import get_or_create_lead
 from app.services.message_service import sanitize_text
@@ -718,13 +718,39 @@ async def update_conversation_mode(
     if mode not in {"human", "bot", "ai", "flow"}:
         raise HTTPException(status_code=400, detail="Invalid mode")
 
-    conversation.mode = mode
-    conversation.updated_at = datetime.utcnow()
+    logger.info(
+        "[CONVERSATION MODE UPDATE] requested tenant_id=%s conversation_id=%s from_mode=%s to_mode=%s",
+        tenant.id,
+        conversation.id,
+        conversation.mode,
+        mode,
+    )
 
     if mode == "bot":
         conversation.assigned_user_id = None
         conversation.assigned_user_name = None
-        handle_bot_activation(db=db, conversation=conversation)
+        try:
+            active_flow = get_active_visual_flow(db=db, tenant_id=tenant.id)
+            logger.info(
+                "[CONVERSATION MODE UPDATE] bot preflight completed tenant_id=%s conversation_id=%s active_flow_id=%s",
+                tenant.id,
+                conversation.id,
+                getattr(active_flow, "id", None),
+            )
+        except HTTPException as exc:
+            logger.warning(
+                "[CONVERSATION MODE UPDATE] bot preflight failed tenant_id=%s conversation_id=%s detail=%s",
+                tenant.id,
+                conversation.id,
+                exc.detail,
+            )
+            raise HTTPException(
+                status_code=exc.status_code,
+                detail="Nenhum fluxo publicado válido encontrado para este atendimento.",
+            ) from exc
+
+    conversation.mode = mode
+    conversation.updated_at = datetime.utcnow()
 
     db.commit()
     db.refresh(conversation)

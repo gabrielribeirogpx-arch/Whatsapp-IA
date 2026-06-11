@@ -66,6 +66,24 @@ def test_runtime_aborts_when_snapshot_hash_is_invalid() -> None:
     assert reason == "FLOW_VERSION_GRAPH_HASH_MISMATCH"
 
 
+def test_runtime_v2_snapshot_hash_is_valid_integrity_hash() -> None:
+    from app.flow_v2.publisher import FlowV2Publisher
+
+    nodes, edges = _published_graph("Runtime V2")
+    published = FlowV2Publisher().publish(nodes=nodes, edges=edges)
+    version = FlowVersion(flow_id=uuid4(), tenant_id=uuid4(), version=1)
+    version.nodes_json = published.snapshot["nodes"]
+    version.edges_json = published.snapshot["edges"]
+    version.snapshot = published.snapshot
+    version.nodes_count = len(published.snapshot["nodes"])
+    version.edges_count = len(published.snapshot["edges"])
+    version.graph_hash = published.v2_snapshot_hash
+    version.v2_snapshot_hash = published.v2_snapshot_hash
+    version.v2_snapshot_schema_version = published.snapshot["snapshot_schema_version"]
+
+    assert validate_flow_version_integrity(version) == (True, None)
+
+
 def test_choice_edges_must_point_to_existing_nodes() -> None:
     choice_id = str(uuid4())
     target_a = str(uuid4())
