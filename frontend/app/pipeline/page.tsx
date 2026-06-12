@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import {
   CircleDollarSign,
@@ -22,6 +22,7 @@ import {
 
 import { getPipeline, listWorkspaceUsers, moveLeadToStage } from '../../lib/api';
 import { PipelineLead, PipelineStage, WorkspaceUser } from '../../lib/types';
+import { canMoveLeadToStage } from './dropGuards';
 
 const CHANNELS = ['Todos', 'WhatsApp', 'Instagram', 'Web'] as const;
 const ALL_OWNERS_FILTER = 'Todos';
@@ -127,6 +128,7 @@ export default function PipelinePage() {
   const [searchTerm, setSearchTerm] = useState('');
   const [channelFilter, setChannelFilter] = useState<Channel>('Todos');
   const [ownerFilter, setOwnerFilter] = useState<Owner>(ALL_OWNERS_FILTER);
+  const pendingMoveLeadIds = useRef<Set<string>>(new Set());
 
   const syncPipeline = async () => {
     const data = await getPipeline();
@@ -221,25 +223,28 @@ export default function PipelinePage() {
   const visibleLeads = filteredStages.reduce((total, stage) => total + stage.leads.length, 0);
 
   const handleDrop = async (stage: PipelineBoardStage) => {
-    if (!draggingLead) return;
-    if (draggingLead.stage_id === stage.id) {
+    const leadToMove = draggingLead;
+    const targetStageId = stage.id;
+
+    if (!canMoveLeadToStage(leadToMove, targetStageId, pendingMoveLeadIds.current)) {
       setDraggingLead(null);
       return;
     }
 
-    const leadToMove = draggingLead;
+    pendingMoveLeadIds.current.add(leadToMove.id);
     const previousStages = stages;
     setError('');
-    setStages((currentStages) => moveLeadBetweenStages(currentStages, leadToMove, stage.id));
+    setDraggingLead(null);
+    setStages((currentStages) => moveLeadBetweenStages(currentStages, leadToMove, targetStageId));
 
     try {
-      await moveLeadToStage(leadToMove.id, stage.id);
+      await moveLeadToStage(leadToMove.id, targetStageId);
     } catch (moveErr) {
       console.error('[PIPELINE MOVE ERROR]', moveErr);
 
       try {
         const refreshedStages = await syncPipeline();
-        if (pipelineContainsLeadInStage(refreshedStages, leadToMove.id, stage.id)) return;
+        if (pipelineContainsLeadInStage(refreshedStages, leadToMove.id, targetStageId)) return;
       } catch (refreshErr) {
         console.error('[PIPELINE MOVE CONFIRMATION ERROR]', refreshErr);
       }
@@ -249,7 +254,7 @@ export default function PipelinePage() {
       setError(`Falha real ao mover o contato: ${message}`);
       return;
     } finally {
-      setDraggingLead(null);
+      pendingMoveLeadIds.current.delete(leadToMove.id);
     }
 
     try {
@@ -360,7 +365,11 @@ export default function PipelinePage() {
               key={stage.id}
               className={`pipeline-column ${draggingLead ? 'is-drop-ready' : ''}`}
               onDragOver={(event) => event.preventDefault()}
-              onDrop={() => handleDrop(stage)}
+              onDrop={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                void handleDrop(stage);
+              }}
             >
               <header className="pipeline-column-header">
                 <div>

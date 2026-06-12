@@ -154,6 +154,61 @@ def test_move_lead_refuses_stage_from_another_tenant() -> None:
     assert lead.stage_id == original_stage_id
     assert db.commits == 0
 
+def test_move_lead_same_stage_is_idempotent_without_duplicate_audit() -> None:
+    tenant = _tenant()
+    stage_id = uuid.uuid4()
+    target_stage = _stage(tenant_id=tenant.id, stage_id=stage_id)
+    lead = _lead(tenant_id=tenant.id, stage_id=stage_id)
+    db = _FakeDb(lead, target_stage)
+
+    response = leads_router.move_lead(
+        lead.id,
+        LeadMoveRequest(stage_id=target_stage.id),
+        tenant=tenant,
+        db=db,
+    )
+
+    assert response is lead
+    assert lead.stage_id == stage_id
+    assert db.commits == 0
+    assert db.refreshed == []
+    assert db.added == []
+
+
+def test_move_endpoint_empty_payload_returns_clear_422_without_500() -> None:
+    tenant = _tenant()
+    client = TestClient(_build_move_app(_FakeDb(), tenant))
+
+    response = client.patch(f"/api/leads/{uuid.uuid4()}/move", json={})
+
+    assert response.status_code == 422
+    assert response.json()["detail"][0]["loc"][-1] == "stage_id"
+
+
+def test_move_endpoint_null_stage_id_returns_clear_422_without_500() -> None:
+    tenant = _tenant()
+    client = TestClient(_build_move_app(_FakeDb(), tenant))
+
+    response = client.patch(f"/api/leads/{uuid.uuid4()}/move", json={"stage_id": None})
+
+    assert response.status_code == 422
+    assert response.json()["detail"][0]["loc"][-1] == "stage_id"
+
+
+def test_move_endpoint_validation_error_contains_cors_headers() -> None:
+    tenant = _tenant()
+    origin = "https://frontend-whatsapp-ia-production.up.railway.app"
+    client = TestClient(_build_move_app(_FakeDb(), tenant))
+
+    response = client.patch(
+        f"/api/leads/{uuid.uuid4()}/move",
+        json={},
+        headers={"Origin": origin},
+    )
+
+    assert response.status_code == 422
+    assert response.headers.get("access-control-allow-origin") == origin
+
 
 def _build_move_app(db: _FakeDb | None = None, tenant=None) -> FastAPI:
     app = FastAPI()
