@@ -15,6 +15,8 @@ type ChatWindowProps = {
   onSend: (event: FormEvent<HTMLFormElement>) => void;
   onToggleSidebar: () => void;
   mode: ConversationMode;
+  presenceStatus?: string;
+  typingText?: string;
   modeUpdating?: boolean;
   modeNotice?: string;
   modeError?: string;
@@ -47,7 +49,7 @@ const formatSize = (bytes: number) => {
 };
 
 export default function ChatWindow(props: ChatWindowProps) {
-  const { contact, messages, inputValue, onInputChange, onSend, onToggleSidebar, mode, modeUpdating = false, modeNotice, modeError, emptyStateMessage, onModeChange, onResetConversation, resetInProgress = false } = props;
+  const { contact, messages, inputValue, onInputChange, onSend, onToggleSidebar, mode, presenceStatus, typingText, modeUpdating = false, modeNotice, modeError, emptyStateMessage, onModeChange, onResetConversation, resetInProgress = false } = props;
   const messagesRef = useRef<HTMLElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const composerFormRef = useRef<HTMLFormElement | null>(null);
@@ -106,7 +108,7 @@ export default function ChatWindow(props: ChatWindowProps) {
     return out;
   }, [messages]);
 
-  const statusText = getWhatsappWindowStatus(contact?.lastMessageAt);
+  const statusText = presenceStatus || getWhatsappWindowStatus(contact?.lastMessageAt);
   const assignedUserName = contact?.assignedUserName?.trim() || 'Atendente';
   const handoffStatus = contact?.awaitingHumanAssignment
     ? { label: '🔴 Aguardando Atendente', className: 'handoff' }
@@ -145,7 +147,7 @@ export default function ChatWindow(props: ChatWindowProps) {
                 <h1>{contact.name || contact.phone}</h1>
                 <p className="wa-contact-status away">
                   <span className="wa-status-dot" aria-hidden="true" />
-                  {statusText}
+                  {typingText || statusText}
                 </p>
                 {handoffStatus ? (
                   <div className={`wa-chat-handoff-badge ${handoffStatus.className}`}>{handoffStatus.label}</div>
@@ -253,6 +255,7 @@ export default function ChatWindow(props: ChatWindowProps) {
           </div>
         ) : null}
       </main>
+      {typingText ? <div className="wa-typing-indicator" role="status">{typingText}</div> : null}
       <form ref={composerFormRef} className="wa-message-composer premium" onSubmit={onSend}>
         <div className="wa-composer-input-wrap">
           <div className="wa-composer-tools">

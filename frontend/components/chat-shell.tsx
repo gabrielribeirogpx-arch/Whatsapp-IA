@@ -27,8 +27,36 @@ type ConversationModeUpdateResponse = {
     mode?: unknown;
   } | null;
 };
+type PresenceSnapshot = {
+  status: 'online' | 'offline';
+  lastSeen?: string | null;
+  participantName?: string | null;
+};
+
+type TypingSnapshot = {
+  participantName?: string | null;
+  participantType?: string | null;
+  expiresAt: number;
+};
+
+type RealtimeEvent = {
+  type?: string;
+  refresh?: string[];
+  tenant_id?: string;
+  conversation_id?: string;
+  participant_id?: string;
+  participant_type?: string;
+  participant_name?: string | null;
+  status?: string;
+  last_seen?: string | null;
+  is_typing?: boolean;
+  message?: { conversation_id: string };
+};
 
 const RECENT_MODE_OVERRIDE_TTL_MS = 30_000;
+const TYPING_STOP_DELAY_MS = 2000;
+const TYPING_START_THROTTLE_MS = 3000;
+
 
 function normalizeConversationMode(value: unknown): ConversationMode | null {
   if (typeof value !== 'string') return null;
@@ -63,6 +91,28 @@ function getConversationModeErrorMessage(error: unknown) {
   }
 
   return fallback;
+}
+
+function formatPresenceStatus(snapshot?: PresenceSnapshot) {
+  if (!snapshot) return 'Ativo recentemente';
+  if (snapshot.status === 'online') return 'Online';
+
+  if (snapshot.lastSeen) {
+    const date = new Date(snapshot.lastSeen);
+    if (!Number.isNaN(date.getTime())) {
+      return `Visto por último às ${date.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`;
+    }
+  }
+
+  return 'Ativo recentemente';
+}
+
+function formatTypingText(snapshot?: TypingSnapshot) {
+  if (!snapshot || snapshot.expiresAt <= Date.now()) return '';
+
+  if (snapshot.participantType === 'contact') return 'Cliente está digitando...';
+  const name = snapshot.participantName?.trim() || 'Atendente';
+  return `${name} está digitando...`;
 }
 
 function toChatMessage(message: Message): ChatMessage {
@@ -105,9 +155,13 @@ export default function ChatShell() {
   const [resetToast, setResetToast] = useState('');
   const [resetError, setResetError] = useState('');
   const [resettingConversation, setResettingConversation] = useState(false);
+  const [presenceByConversation, setPresenceByConversation] = useState<Record<string, PresenceSnapshot>>({});
+  const [typingByConversation, setTypingByConversation] = useState<Record<string, TypingSnapshot>>({});
   const previousAssignmentRef = useRef<Map<string, ConversationAssignmentSnapshot>>(new Map());
   const recentModeOverridesRef = useRef<Map<string, ConversationModeOverride>>(new Map());
   const hasLoadedConversationsRef = useRef(false);
+  const typingStopTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastTypingStartRef = useRef(0);
 
 
   const playHumanHandoffSound = useCallback(() => {
@@ -333,8 +387,19 @@ export default function ChatShell() {
     wsUrl: `${process.env.NEXT_PUBLIC_API_URL?.replace(/^https/, 'wss').replace(/^http/, 'ws')}/api/dashboard/ws`,
     sseUrl: `${process.env.NEXT_PUBLIC_API_URL}/api/dashboard/stream`,
     tenantId: typeof window !== 'undefined' ? localStorage.getItem('tenant_id') || '' : '',
-    onMessage: (payload: { refresh?: string[] }) => {
+    onMessage: (payload: RealtimeEvent) => {
       console.log("[WS MESSAGE]", payload);
+      if (payload?.type === 'presence_updated' && payload.conversation_id && (payload.status === 'online' || payload.status === 'offline')) {
+        setPresenceByConversation((current) => ({
+          ...current,
+          [String(payload.conversation_id)]: {
+            status: payload.status as 'online' | 'offline',
+            lastSeen: payload.last_seen ?? null,
+            participantName: payload.participant_name ?? null,
+          },
+        }));
+        return;
+      }
       if (!payload?.refresh?.includes('conversations')) return;
       getConversations()
         .then((items) => {
@@ -351,18 +416,115 @@ export default function ChatShell() {
   console.log("[BEFORE MESSAGE HOOK]", selectedConversation?.id);
   console.log("[MESSAGE WS URL]", messageWsUrl);
 
-  useRealtime({
+  const { connected: messageRealtimeConnected, sendJson: sendMessageRealtimeJson } = useRealtime({
     wsUrl: messageWsUrl,
     sseUrl: messageSseUrl,
     tenantId: typeof window !== 'undefined' ? localStorage.getItem('tenant_id') || '' : '',
-    onMessage: (payload: { message?: { conversation_id: string } }) => {
-      console.log("[WS MESSAGE RECEIVED CONVERSATION]", payload?.message?.conversation_id);
+    onMessage: (payload: RealtimeEvent) => {
+      console.log("[WS MESSAGE RECEIVED CONVERSATION]", payload?.message?.conversation_id || payload?.conversation_id || payload?.type);
+      if (payload?.type === 'presence_updated' && payload.conversation_id && (payload.status === 'online' || payload.status === 'offline')) {
+        setPresenceByConversation((current) => ({
+          ...current,
+          [String(payload.conversation_id)]: {
+            status: payload.status as 'online' | 'offline',
+            lastSeen: payload.last_seen ?? null,
+            participantName: payload.participant_name ?? null,
+          },
+        }));
+        return;
+      }
+
+      if (payload?.type === 'typing' && payload.conversation_id) {
+        const conversationId = String(payload.conversation_id);
+        setTypingByConversation((current) => {
+          const next = { ...current };
+          if (payload.is_typing) {
+            next[conversationId] = {
+              participantName: payload.participant_name ?? null,
+              participantType: payload.participant_type ?? null,
+              expiresAt: Date.now() + 5500,
+            };
+          } else {
+            delete next[conversationId];
+          }
+          return next;
+        });
+        return;
+      }
+
       if (!selectedContactId) return;
       fetchMessages(selectedContactId).catch(() => undefined);
       getConversations().then((items) => applyConversations(items)).catch(() => undefined);
     }
   });
 
+
+  useEffect(() => {
+    if (!selectedConversation || !messageRealtimeConnected) return;
+
+    sendMessageRealtimeJson({ type: 'presence_heartbeat' });
+    const intervalId = window.setInterval(() => {
+      sendMessageRealtimeJson({ type: 'presence_heartbeat' });
+    }, 20_000);
+
+    return () => window.clearInterval(intervalId);
+  }, [messageRealtimeConnected, selectedConversation, sendMessageRealtimeJson]);
+
+  useEffect(() => {
+    const intervalId = window.setInterval(() => {
+      const now = Date.now();
+      setTypingByConversation((current) => {
+        let changed = false;
+        const next = { ...current };
+        Object.entries(next).forEach(([conversationId, snapshot]) => {
+          if (snapshot.expiresAt <= now) {
+            delete next[conversationId];
+            changed = true;
+          }
+        });
+        return changed ? next : current;
+      });
+    }, 1000);
+
+    return () => window.clearInterval(intervalId);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (typingStopTimeoutRef.current) clearTimeout(typingStopTimeoutRef.current);
+      sendMessageRealtimeJson({ type: 'typing_stop' });
+    };
+  }, [selectedConversation?.id, sendMessageRealtimeJson]);
+
+  const emitTypingActivity = useCallback((value: string) => {
+    if (!selectedConversation) return;
+
+    if (!value.trim()) {
+      if (typingStopTimeoutRef.current) clearTimeout(typingStopTimeoutRef.current);
+      typingStopTimeoutRef.current = null;
+      lastTypingStartRef.current = 0;
+      sendMessageRealtimeJson({ type: 'typing_stop' });
+      return;
+    }
+
+    const now = Date.now();
+    if (now - lastTypingStartRef.current > TYPING_START_THROTTLE_MS) {
+      sendMessageRealtimeJson({ type: 'typing_start' });
+      lastTypingStartRef.current = now;
+    }
+
+    if (typingStopTimeoutRef.current) clearTimeout(typingStopTimeoutRef.current);
+    typingStopTimeoutRef.current = setTimeout(() => {
+      sendMessageRealtimeJson({ type: 'typing_stop' });
+      lastTypingStartRef.current = 0;
+      typingStopTimeoutRef.current = null;
+    }, TYPING_STOP_DELAY_MS);
+  }, [selectedConversation, sendMessageRealtimeJson]);
+
+  const handleInputChange = useCallback((value: string) => {
+    setInputValue(value);
+    emitTypingActivity(value);
+  }, [emitTypingActivity]);
 
 
   useEffect(() => {
@@ -422,6 +584,10 @@ export default function ChatShell() {
 
     setMessages((current) => [...current, newMessage]);
     setInputValue('');
+    if (typingStopTimeoutRef.current) clearTimeout(typingStopTimeoutRef.current);
+    typingStopTimeoutRef.current = null;
+    lastTypingStartRef.current = 0;
+    sendMessageRealtimeJson({ type: 'typing_stop' });
 
     try {
       await sendMessage(selectedContact.phone, text, selectedContact.id);
@@ -498,10 +664,12 @@ export default function ChatShell() {
         contact={selectedContact}
         messages={messages}
         inputValue={inputValue}
-        onInputChange={setInputValue}
+        onInputChange={handleInputChange}
         onSend={onSend}
         onToggleSidebar={() => setSidebarOpen((value) => !value)}
         mode={mode}
+        presenceStatus={formatPresenceStatus(selectedConversation ? presenceByConversation[String(selectedConversation.id)] : undefined)}
+        typingText={formatTypingText(selectedConversation ? typingByConversation[String(selectedConversation.id)] : undefined)}
         modeUpdating={modeUpdating}
         modeNotice={modeNotice}
         modeError={modeError}

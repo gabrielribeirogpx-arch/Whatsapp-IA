@@ -32,6 +32,7 @@ from app.services.conversation_service import get_or_create_conversation
 from app.services.lead_service import get_or_create_lead
 from app.services.message_service import sanitize_text
 from app.services.websocket_auth import authenticate_ws_user
+from app.services.presence_service import PresenceService
 from app.utils.phone import normalize_phone
 from app.services.realtime_service import publish_dashboard_event, sse_broker
 from app.services.tenant_service import (
@@ -820,7 +821,7 @@ async def ws_messages(
 
     db = SessionLocal()
     try:
-        authenticate_ws_user(db, tenant_id, token)
+        user = authenticate_ws_user(db, tenant_id, token)
         conversation = (
             db.execute(
                 select(Conversation).where(
@@ -836,17 +837,67 @@ async def ws_messages(
             await websocket.close(code=1008)
             return
 
+        participant_id = str(user.id)
+        participant_name = user.full_name
+        presence = PresenceService()
+
+        async def handle_client_message(payload: dict, connection_id: str) -> None:
+            event_type = str(payload.get("type") or "").strip()
+            if event_type in {"heartbeat", "presence_heartbeat"}:
+                presence.heartbeat(
+                    tenant_id=tenant_id,
+                    conversation_id=conversation.id,
+                    participant_id=participant_id,
+                )
+                return
+
+            if event_type == "typing_start":
+                typing_payload = presence.typing_start(
+                    tenant_id=tenant_id,
+                    conversation_id=conversation.id,
+                    participant_id=participant_id,
+                    participant_type="agent",
+                    participant_name=participant_name,
+                )
+                typing_payload["sender_connection_id"] = connection_id
+                await presence.publish_typing_update(typing_payload)
+                return
+
+            if event_type == "typing_stop":
+                typing_payload = presence.typing_stop(
+                    tenant_id=tenant_id,
+                    conversation_id=conversation.id,
+                    participant_id=participant_id,
+                    participant_type="agent",
+                    participant_name=participant_name,
+                )
+                typing_payload["sender_connection_id"] = connection_id
+                await presence.publish_typing_update(typing_payload)
+
         print("[WS CONNECTED MESSAGE]", conversation_id)
         channel = f"{tenant_id}:{conversation.id}"
         await websocket.accept()
-        await sse_broker.subscribe_websocket(channel, websocket)
+        online_payload = presence.mark_online(
+            tenant_id=tenant_id,
+            conversation_id=conversation.id,
+            participant_id=participant_id,
+            participant_type="agent",
+            participant_name=participant_name,
+        )
+        await presence.publish_presence_update(online_payload)
         try:
-            while True:
-                await websocket.receive_text()
-        except WebSocketDisconnect:
-            print("[WS DISCONNECT MESSAGE]", conversation_id)
-            pass
+            await sse_broker.subscribe_websocket(channel, websocket, on_client_message=handle_client_message)
         finally:
+            print("[WS DISCONNECT MESSAGE]", conversation_id)
+            offline_payload = presence.mark_offline(
+                tenant_id=tenant_id,
+                conversation_id=conversation.id,
+                participant_id=participant_id,
+                participant_type="agent",
+                participant_name=participant_name,
+            )
+            if offline_payload.get("status") == "offline":
+                await presence.publish_presence_update(offline_payload)
             sse_broker.unsubscribe_websocket(channel, websocket)
     except Exception as e:
         print("[WS ERROR]", repr(e))
