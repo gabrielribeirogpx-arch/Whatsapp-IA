@@ -1,4 +1,4 @@
-import {
+import type {
   CRMContact,
   Conversation,
   KnowledgeCrawlPayload,
@@ -178,16 +178,17 @@ export async function apiFetch(path: string, init: RequestInit = {}): Promise<Re
 }
 
 export async function parseApiResponse<T>(res: Response): Promise<T> {
+  const body = await res.text();
+
   if (!res.ok) {
-    const body = await res.text();
     throw new Error(`HTTP ${res.status}: ${body}`);
   }
 
-  if (res.status === 204) {
+  if (res.status === 204 || res.status === 205 || body.trim().length === 0) {
     return undefined as T;
   }
 
-  return res.json();
+  return JSON.parse(body) as T;
 }
 
 export async function registerTenant(payload: Record<string, string>, turnstileToken: string): Promise<TenantSession> {
