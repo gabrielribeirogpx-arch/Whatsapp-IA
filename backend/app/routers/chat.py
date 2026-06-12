@@ -27,6 +27,7 @@ from app.schemas.chat import (
 )
 from app.services.contact_sync_service import ensure_conversation_contact_link, upsert_contact_for_phone
 from app.services.contact_event_service import register_contact_event
+from app.services.contact_tag_service import add_tag_to_contact
 from app.services.flow_engine_service import get_active_visual_flow
 from app.services.conversation_service import get_or_create_conversation
 from app.services.lead_service import get_or_create_lead
@@ -1173,10 +1174,19 @@ def add_contact_tag(contact_id: UUID, payload: dict, tenant: Tenant = Depends(ge
     tag = str(payload.get("tag") or "").strip()
     if not tag:
         raise HTTPException(status_code=400, detail="Tag obrigatória")
-    tags = list(contact.tags_json or [])
-    if tag not in tags:
-        tags.append(tag)
-    contact.tags_json = tags
-    register_contact_event(db, tenant_id=tenant.id, contact_id=contact.id, event_type="tag_added", title="Tag adicionada", description=tag, contact=contact)
+    conversation = db.execute(
+        select(Conversation)
+        .where(Conversation.tenant_id == tenant.id, Conversation.contact_id == contact.id)
+        .order_by(desc(Conversation.updated_at))
+    ).scalars().first()
+    result = add_tag_to_contact(
+        db,
+        tenant_id=tenant.id,
+        contact=contact,
+        tag=tag,
+        description=tag,
+        metadata={"source": "manual", "tag": tag},
+        conversation=conversation,
+    )
     db.commit()
-    return {"ok": True, "tags_json": tags}
+    return {"ok": True, "tags_json": result.tags_json if result else list(contact.tags_json or [])}

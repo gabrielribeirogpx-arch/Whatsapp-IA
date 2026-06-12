@@ -22,8 +22,11 @@ class _FakeDB:
         self.session = None
         self.deleted = []
         self.conversation = None
+        self.contact = None
 
     def get(self, model, item_id):
+        if self.contact is not None and item_id == getattr(self.contact, "id", None):
+            return self.contact
         if self.conversation is not None and item_id == getattr(self.conversation, "id", None):
             return self.conversation
         return None
@@ -68,6 +71,9 @@ class _FakeResult:
 
     def scalar(self):
         return self.scalar_value
+
+    def first(self):
+        return self.values[0] if self.values else None
 
 
 class _FakeSession:
@@ -1210,3 +1216,144 @@ def test_delay_auto_mode_calculation_error_falls_back_to_configured_delay(monkey
     delay_event = next(event for event in event_store.events if event["event_type"] == "DELAY_SCHEDULED")
     assert output.actions[0].seconds == 6
     assert delay_event["payload"]["seconds"] == 6
+
+
+def _input_for_contact(snapshot, *, contact_id, conversation_id=None, tenant_id=None):
+    return RuntimeInput(
+        tenant_id=tenant_id or snapshot.tenant_id,
+        flow_version_id=snapshot.flow_version_id,
+        external_user_id="whatsapp:+5511999999999",
+        message_text="oi",
+        contact_id=contact_id,
+        conversation_id=conversation_id,
+        input_message_id=f"wamid.{uuid.uuid4()}",
+    )
+
+
+def test_terminal_action_returns_complete_without_next_node() -> None:
+    raw_snapshot = {
+        "schema_version": 1,
+        "start_node_id": "start",
+        "nodes": [
+            {"id": "start", "type": "message", "content": "Antes"},
+            {"id": "action", "type": "action", "data": {"action_type": "notify_team", "params": {"message": "Fim"}}},
+        ],
+        "edges": [{"id": "e1", "source": "start", "target": "action"}],
+    }
+    executor, snapshot, event_store, session, db = _executor(raw_snapshot)
+
+    output = executor.handle_input(db, _input(snapshot))
+
+    assert output.status == FlowV2SessionStatus.COMPLETED
+    assert output.current_node_id is None
+    assert session.status == FlowV2SessionStatus.COMPLETED
+    assert session.current_node_id is None
+    assert any(
+        event["event_type"] == "NODE_EXECUTED"
+        and event["node_id"] == "action"
+        and event["payload"] == {"node_type": "action", "status": "complete"}
+        for event in event_store.events
+    )
+
+
+def test_add_tag_action_adds_tag_and_runtime_continues_to_next_node(monkeypatch) -> None:
+    from app.services import contact_tag_service
+
+    published = []
+    monkeypatch.setattr(contact_tag_service, "sync_publish", lambda channel, payload: published.append((channel, payload)))
+    raw_snapshot = {
+        "schema_version": 1,
+        "start_node_id": "action",
+        "nodes": [
+            {"id": "action", "type": "action", "data": {"action_type": "add_tag", "params": {"tag": "financeiro"}}},
+            {"id": "end", "type": "message", "content": "Tag aplicada com sucesso"},
+        ],
+        "edges": [{"id": "e1", "source": "action", "target": "end"}],
+    }
+    executor, snapshot, _event_store, _session, db = _executor(raw_snapshot)
+    contact = SimpleNamespace(
+        id=uuid.uuid4(),
+        tenant_id=snapshot.tenant_id,
+        phone="+5511999999999",
+        name="Cliente",
+        avatar_url=None,
+        tags_json=[],
+        score=0,
+        lifecycle_stage=None,
+        last_interaction_at=None,
+        updated_at=None,
+    )
+    conversation = SimpleNamespace(
+        id=uuid.uuid4(),
+        tenant_id=snapshot.tenant_id,
+        contact_id=contact.id,
+        phone_number=contact.phone,
+    )
+    db.contact = contact
+    db.conversation = conversation
+
+    output = executor.handle_input(db, _input_for_contact(snapshot, contact_id=contact.id, conversation_id=conversation.id))
+
+    assert output.status == FlowV2SessionStatus.COMPLETED
+    assert output.effects == ({"type": "send_message", "text": "Tag aplicada com sucesso"},)
+    assert contact.tags_json == ["financeiro"]
+    assert contact.updated_at is not None
+    assert any(getattr(event, "type", None) == "tag_added" for event in db.added)
+    assert any(channel == f"dashboard:{snapshot.tenant_id}" for channel, _payload in published)
+    assert any(channel == f"{snapshot.tenant_id}:{conversation.id}" for channel, _payload in published)
+
+
+def test_add_tag_action_does_not_duplicate_existing_tag(monkeypatch) -> None:
+    from app.services import contact_tag_service
+
+    published = []
+    monkeypatch.setattr(contact_tag_service, "sync_publish", lambda channel, payload: published.append((channel, payload)))
+    raw_snapshot = {
+        "schema_version": 1,
+        "start_node_id": "action",
+        "nodes": [{"id": "action", "type": "action", "data": {"action_type": "add_tag", "params": {"tag": "financeiro"}}}],
+        "edges": [],
+    }
+    executor, snapshot, _event_store, _session, db = _executor(raw_snapshot)
+    contact = SimpleNamespace(
+        id=uuid.uuid4(),
+        tenant_id=snapshot.tenant_id,
+        phone="+5511999999999",
+        tags_json=["financeiro"],
+        last_interaction_at=None,
+        updated_at=None,
+    )
+    db.contact = contact
+
+    output = executor.handle_input(db, _input_for_contact(snapshot, contact_id=contact.id))
+
+    assert output.status == FlowV2SessionStatus.COMPLETED
+    assert contact.tags_json == ["financeiro"]
+    assert not any(getattr(event, "type", None) == "tag_added" for event in db.added)
+    assert published == []
+
+
+def test_add_tag_action_respects_tenant_isolation() -> None:
+    raw_snapshot = {
+        "schema_version": 1,
+        "start_node_id": "action",
+        "nodes": [{"id": "action", "type": "action", "data": {"action_type": "add_tag", "params": {"tag": "financeiro"}}}],
+        "edges": [],
+    }
+    executor, snapshot, _event_store, _session, db = _executor(raw_snapshot)
+    other_tenant_id = uuid.uuid4()
+    contact = SimpleNamespace(
+        id=uuid.uuid4(),
+        tenant_id=other_tenant_id,
+        phone="+5511999999999",
+        tags_json=[],
+        last_interaction_at=None,
+        updated_at=None,
+    )
+    db.contact = contact
+
+    output = executor.handle_input(db, _input_for_contact(snapshot, contact_id=contact.id))
+
+    assert output.status == FlowV2SessionStatus.COMPLETED
+    assert contact.tags_json == []
+    assert db.added == []
