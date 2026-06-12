@@ -20,6 +20,7 @@ from app.schemas.lead import (
     PipelineStageOut,
 )
 from app.services.audit_service import write_audit_log
+from app.services.lead_service import soft_delete_lead_by_id
 from app.services.pipeline_service import ensure_pipeline_stages, reorder_pipeline_stages
 from app.services.tenant_service import get_current_tenant
 
@@ -335,23 +336,10 @@ def delete_lead(
     tenant: Tenant = Depends(get_current_tenant),
     db: Session = Depends(get_db),
 ):
-    lead = db.execute(
-        select(Lead).where(Lead.id == lead_id, Lead.tenant_id == tenant.id)
-    ).scalars().first()
-    if not lead:
+    result = soft_delete_lead_by_id(db, tenant_id=tenant.id, lead_id=lead_id)
+    if not result:
         raise HTTPException(status_code=404, detail="Lead não encontrado")
 
-    lead.status = LeadStatus.DELETED.value
-    lead.updated_at = datetime.utcnow()
-    write_audit_log(
-        db,
-        action="LEAD_DELETED",
-        tenant_id=tenant.id,
-        user_id=lead.owner_id,
-        entity_type="lead",
-        entity_id=lead.id,
-        metadata={"phone": lead.phone, "event": "Lead removido"},
-    )
     db.commit()
     return {"deleted": True}
 
