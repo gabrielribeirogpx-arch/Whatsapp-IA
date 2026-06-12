@@ -439,9 +439,14 @@ export async function reorderPipelineStages(stageIds: string[]): Promise<Pipelin
 }
 
 export async function moveLeadToStage(leadId: string, stageId: string) {
+  const normalizedStageId = stageId?.trim();
+  if (!normalizedStageId) {
+    throw new Error('Etapa de destino ausente para mover lead.');
+  }
+
   const res = await apiFetch(`/api/leads/${leadId}/move`, {
     method: 'PATCH',
-    body: JSON.stringify({ stage_id: stageId })
+    body: JSON.stringify({ stage_id: normalizedStageId })
   });
 
   return parseApiResponse(res);

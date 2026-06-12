@@ -2,7 +2,7 @@ import logging
 import uuid
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import desc, func, select
 from sqlalchemy.exc import IntegrityError
@@ -286,48 +286,106 @@ def delete_pipeline_stage(
 def move_lead(
     lead_id: uuid.UUID,
     payload: LeadMoveRequest,
+    request: Request = None,
     tenant: Tenant = Depends(get_current_tenant),
     db: Session = Depends(get_db),
 ):
-    lead = db.execute(
-        select(Lead).where(Lead.id == lead_id, Lead.tenant_id == tenant.id)
-    ).scalars().first()
-    if not lead:
-        raise HTTPException(status_code=404, detail="Lead não encontrado")
-
-    target_stage = db.execute(
-        select(PipelineStage).where(PipelineStage.id == payload.stage_id, PipelineStage.tenant_id == tenant.id)
-    ).scalars().first()
-    if not target_stage:
-        raise HTTPException(status_code=404, detail="Stage não encontrado")
-
-    previous_stage_id = lead.stage_id
-    lead.stage_id = target_stage.id
-    lead.entered_stage_at = datetime.utcnow()
-    lead.updated_at = datetime.utcnow()
-    action = "LEAD_CONVERTED" if target_stage.is_final_stage else "LEAD_MOVED"
-    if target_stage.is_final_stage:
-        lead.status = LeadStatus.CONVERTED.value
-    else:
-        lead.status = LeadStatus.ACTIVE.value
-    write_audit_log(
-        db,
-        action=action,
-        tenant_id=tenant.id,
-        user_id=lead.owner_id,
-        entity_type="lead",
-        entity_id=lead.id,
-        metadata={
-            "from_stage_id": str(previous_stage_id) if previous_stage_id else None,
-            "to_stage_id": str(target_stage.id),
-            "to_stage": target_stage.name,
-            "event": "Lead concluído" if target_stage.is_final_stage else "Lead movido de etapa",
-        },
+    origin = request.headers.get("origin") if request else None
+    method = request.method if request else "DIRECT"
+    logger.info(
+        "[PIPELINE MOVE REQUEST] method=%s lead_id=%s stage_id=%s origin=%s tenant_id=%s",
+        method,
+        lead_id,
+        payload.stage_id,
+        origin,
+        tenant.id,
     )
 
-    db.commit()
-    db.refresh(lead)
-    return lead
+    try:
+        lead = db.execute(
+            select(Lead).where(Lead.id == lead_id, Lead.tenant_id == tenant.id)
+        ).scalars().first()
+        if not lead:
+            logger.warning(
+                "[PIPELINE MOVE RESPONSE] method=%s lead_id=%s stage_id=%s origin=%s status=404 reason=lead_not_found",
+                method,
+                lead_id,
+                payload.stage_id,
+                origin,
+            )
+            raise HTTPException(status_code=404, detail="Lead não encontrado")
+
+        target_stage = db.execute(
+            select(PipelineStage).where(PipelineStage.id == payload.stage_id, PipelineStage.tenant_id == tenant.id)
+        ).scalars().first()
+        if not target_stage:
+            logger.warning(
+                "[PIPELINE MOVE RESPONSE] method=%s lead_id=%s stage_id=%s origin=%s status=404 reason=stage_not_found",
+                method,
+                lead_id,
+                payload.stage_id,
+                origin,
+            )
+            raise HTTPException(status_code=404, detail="Stage não encontrado")
+
+        previous_stage_id = lead.stage_id
+        if previous_stage_id == target_stage.id:
+            logger.info(
+                "[PIPELINE MOVE RESPONSE] method=%s lead_id=%s stage_id=%s origin=%s status=200 result=noop",
+                method,
+                lead_id,
+                payload.stage_id,
+                origin,
+            )
+            return lead
+
+        lead.stage_id = target_stage.id
+        lead.entered_stage_at = datetime.utcnow()
+        lead.updated_at = datetime.utcnow()
+        action = "LEAD_CONVERTED" if target_stage.is_final_stage else "LEAD_MOVED"
+        if target_stage.is_final_stage:
+            lead.status = LeadStatus.CONVERTED.value
+        else:
+            lead.status = LeadStatus.ACTIVE.value
+        write_audit_log(
+            db,
+            action=action,
+            tenant_id=tenant.id,
+            user_id=lead.owner_id,
+            entity_type="lead",
+            entity_id=lead.id,
+            metadata={
+                "from_stage_id": str(previous_stage_id) if previous_stage_id else None,
+                "to_stage_id": str(target_stage.id),
+                "to_stage": target_stage.name,
+                "event": "Lead concluído" if target_stage.is_final_stage else "Lead movido de etapa",
+            },
+        )
+
+        db.commit()
+        db.refresh(lead)
+        logger.info(
+            "[PIPELINE MOVE RESPONSE] method=%s lead_id=%s stage_id=%s origin=%s status=200 result=moved",
+            method,
+            lead_id,
+            payload.stage_id,
+            origin,
+        )
+        return lead
+    except HTTPException:
+        raise
+    except Exception:
+        rollback = getattr(db, "rollback", None)
+        if callable(rollback):
+            rollback()
+        logger.exception(
+            "[PIPELINE MOVE RESPONSE] method=%s lead_id=%s stage_id=%s origin=%s status=500 result=exception",
+            method,
+            lead_id,
+            payload.stage_id,
+            origin,
+        )
+        raise
 
 
 @router.delete("/leads/{lead_id}")
