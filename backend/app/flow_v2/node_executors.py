@@ -20,8 +20,8 @@ from app.flow_v2.contracts import FlowV2EventType, RuntimeInput
 from app.flow_v2.models import FlowV2ScheduledJob
 from app.models.contact import Contact
 from app.models.conversation import Conversation
-from app.services.lead_service import get_or_create_lead
 from app.services.contact_tag_service import add_tag_to_contact
+from app.services.lead_auto_service import create_or_update_lead_from_flow_action
 from app.flow_v2.snapshot import FlowV2Snapshot, build_transitions_from_edges
 from app.flow_v2.transition_resolver import TransitionResolver
 
@@ -931,13 +931,16 @@ class ActionNodeExecutor(BaseNodeExecutor):
         phone = ActionNodeExecutor._phone_from_runtime_input(runtime_input)
         if not phone:
             return
-        name = str(params.get("lead_name") or runtime_input.metadata.get("contact_name") or "").strip() or None
-        get_or_create_lead(
+        name = str(params.get("lead_name") or "").strip() or None
+        create_or_update_lead_from_flow_action(
             db,
             tenant_id=session.tenant_id,
             phone=phone,
-            name=name,
+            contact_id=runtime_input.contact_id,
+            conversation_id=runtime_input.conversation_id,
+            lead_name=name,
             last_message=runtime_input.message_text,
+            metadata=runtime_input.metadata,
         )
 
     @staticmethod

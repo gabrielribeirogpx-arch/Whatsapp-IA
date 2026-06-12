@@ -1357,3 +1357,85 @@ def test_add_tag_action_respects_tenant_isolation() -> None:
     assert output.status == FlowV2SessionStatus.COMPLETED
     assert contact.tags_json == []
     assert db.added == []
+
+
+def test_create_lead_action_passes_runtime_context_and_continues(monkeypatch) -> None:
+    raw_snapshot = {
+        "schema_version": 1,
+        "start_node_id": "action",
+        "nodes": [
+            {
+                "id": "action",
+                "type": "action",
+                "data": {"action_type": "create_lead", "params": {"lead_name": "Gabriel Teste"}},
+            },
+            {"id": "end", "type": "message", "content": "Lead criado com sucesso"},
+        ],
+        "edges": [{"id": "e1", "source": "action", "target": "end"}],
+    }
+    executor, snapshot, _event_store, session, db = _executor(raw_snapshot)
+    contact_id = uuid.uuid4()
+    conversation_id = uuid.uuid4()
+    calls = []
+
+    def fake_create_or_update(db_arg, **kwargs):
+        calls.append({"db": db_arg, **kwargs})
+
+    monkeypatch.setattr("app.flow_v2.node_executors.create_or_update_lead_from_flow_action", fake_create_or_update)
+
+    output = executor.handle_input(
+        db,
+        RuntimeInput(
+            tenant_id=snapshot.tenant_id,
+            flow_version_id=snapshot.flow_version_id,
+            external_user_id="whatsapp:+5511999999999",
+            message_text="oi",
+            contact_id=contact_id,
+            conversation_id=conversation_id,
+            input_message_id="wamid.create-lead.context",
+            metadata={"contact_name": "Nome Metadata"},
+        ),
+    )
+
+    assert output.status == FlowV2SessionStatus.COMPLETED
+    assert output.effects == ({"type": "send_message", "text": "Lead criado com sucesso"},)
+    assert calls == [
+        {
+            "db": db,
+            "tenant_id": session.tenant_id,
+            "phone": "+5511999999999",
+            "contact_id": contact_id,
+            "conversation_id": conversation_id,
+            "lead_name": "Gabriel Teste",
+            "last_message": "oi",
+            "metadata": {"contact_name": "Nome Metadata"},
+        }
+    ]
+
+
+def test_create_lead_terminal_action_completes_when_service_fails(monkeypatch) -> None:
+    raw_snapshot = {
+        "schema_version": 1,
+        "start_node_id": "action",
+        "nodes": [
+            {
+                "id": "action",
+                "type": "action",
+                "data": {"action_type": "create_lead", "params": {"lead_name": "Lead"}},
+            },
+        ],
+        "edges": [],
+    }
+    executor, snapshot, _event_store, session, db = _executor(raw_snapshot)
+
+    def raise_controlled_error(*_args, **_kwargs):
+        raise RuntimeError("crm temporarily unavailable")
+
+    monkeypatch.setattr("app.flow_v2.node_executors.create_or_update_lead_from_flow_action", raise_controlled_error)
+
+    output = executor.handle_input(db, _input_with_id(snapshot, "wamid.create-lead.terminal"))
+
+    assert output.status == FlowV2SessionStatus.COMPLETED
+    assert output.effects == ()
+    assert session.status == FlowV2SessionStatus.COMPLETED
+    assert session.current_node_id is None
