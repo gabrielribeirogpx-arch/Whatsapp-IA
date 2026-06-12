@@ -4257,11 +4257,13 @@ input {
 }
 
 .wa-chat-window {
+  min-height: 0;
   border-color: var(--wa-line);
   background: #efeae2;
 }
 
 .wa-chat-header {
+  flex: 0 0 auto;
   min-height: 72px;
   padding: 14px 22px;
   border-bottom-color: var(--wa-line);
@@ -4356,6 +4358,12 @@ input {
 }
 
 .wa-messages-panel {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  overflow-y: auto;
   gap: 10px;
   padding: 28px clamp(22px, 5vw, 64px);
   background-color: #efeae2;
@@ -4374,6 +4382,11 @@ input {
 }
 
 .wa-message-bubble {
+  position: relative;
+  display: block;
+  flex: 0 0 auto;
+  visibility: visible;
+  opacity: 1;
   max-width: min(70%, 620px);
   border-radius: 13px;
   padding: 8px 10px 6px;
@@ -4394,12 +4407,14 @@ input {
 }
 
 .wa-message-bubble.mine {
+  align-self: flex-end;
   border-top-right-radius: 5px;
   background: var(--wa-green-soft);
   box-shadow: 0 1px 2px rgba(17, 27, 33, 0.08);
 }
 
 .wa-message-bubble.theirs {
+  align-self: flex-start;
   border-top-left-radius: 5px;
   background: #fff;
   box-shadow: 0 1px 2px rgba(17, 27, 33, 0.09);
@@ -4419,6 +4434,7 @@ input {
 }
 
 .wa-message-composer.premium {
+  flex: 0 0 auto;
   padding: 12px 22px 14px;
   border-top: 0;
   background: #f0f2f5;
