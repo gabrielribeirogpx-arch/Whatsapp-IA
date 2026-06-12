@@ -125,6 +125,7 @@ def verify_contacts_columns() -> None:
 REQUIRED_CORS_ORIGINS = (
     "https://frontend-whatsapp-ia-production.up.railway.app",
     "https://whatsapp-ia-nine.vercel.app",
+    "https://whatsapp-ia-production-4699.up.railway.app",
 )
 
 DEFAULT_CORS_ORIGINS = (

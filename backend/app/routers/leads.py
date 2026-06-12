@@ -282,7 +282,7 @@ def delete_pipeline_stage(
     return {"deleted": True}
 
 
-@router.post("/leads/{lead_id}/move", response_model=LeadOut)
+@router.api_route("/leads/{lead_id}/move", methods=["PATCH", "POST"], response_model=LeadOut)
 def move_lead(
     lead_id: uuid.UUID,
     payload: LeadMoveRequest,

@@ -439,7 +439,7 @@ export async function reorderPipelineStages(stageIds: string[]): Promise<Pipelin
 
 export async function moveLeadToStage(leadId: string, stageId: string) {
   const res = await apiFetch(`/api/leads/${leadId}/move`, {
-    method: 'POST',
+    method: 'PATCH',
     body: JSON.stringify({ stage_id: stageId })
   });
 
