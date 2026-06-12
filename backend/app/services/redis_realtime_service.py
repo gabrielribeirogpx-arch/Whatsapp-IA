@@ -2,6 +2,8 @@ import asyncio
 import json
 import logging
 import os
+from typing import Awaitable, Callable
+from uuid import uuid4
 import redis.asyncio as redis
 from fastapi import WebSocket, WebSocketDisconnect
 from app.core.redis_client import get_redis_client
@@ -33,8 +35,15 @@ class RedisRealtimeBroker:
         """
         print("[REDIS UNSUBSCRIBE WS NOOP]", channel)
 
-    async def subscribe_websocket(self, channel: str, websocket: WebSocket) -> None:
+    async def subscribe_websocket(
+        self,
+        channel: str,
+        websocket: WebSocket,
+        *,
+        on_client_message: Callable[[dict, str], Awaitable[None]] | None = None,
+    ) -> None:
         print("[REDIS SUBSCRIBE WS]", channel)
+        connection_id = uuid4().hex
         pubsub = self.client.pubsub()
         await pubsub.subscribe(channel)
 
@@ -43,12 +52,22 @@ class RedisRealtimeBroker:
             async for message in pubsub.listen():
                 if message['type'] == 'message':
                     payload = json.loads(message['data'])
+                    if payload.get("sender_connection_id") == connection_id:
+                        continue
                     print("[WS SEND]", channel)
                     await websocket.send_json(payload)
 
         async def wait_for_websocket_disconnect() -> None:
             while True:
-                await websocket.receive_text()
+                raw_message = await websocket.receive_text()
+                if on_client_message is None:
+                    continue
+                try:
+                    payload = json.loads(raw_message)
+                except json.JSONDecodeError:
+                    logger.warning("[WS INVALID JSON] channel=%s", channel)
+                    continue
+                await on_client_message(payload, connection_id)
 
         tasks = {
             asyncio.create_task(forward_redis_messages()),
