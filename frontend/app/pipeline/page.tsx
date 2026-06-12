@@ -98,6 +98,24 @@ function getInitials(name?: string | null) {
   return parts.map((part) => part[0]).join('').toUpperCase();
 }
 
+function moveLeadBetweenStages(stages: PipelineStage[], lead: PipelineLead, targetStageId: string): PipelineStage[] {
+  const movedLead = { ...lead, stage_id: targetStageId };
+
+  return stages.map((stage) => {
+    const leadsWithoutMovedLead = stage.leads.filter((item) => item.id !== lead.id);
+
+    if (stage.id !== targetStageId) {
+      return { ...stage, leads: leadsWithoutMovedLead };
+    }
+
+    return { ...stage, leads: [movedLead, ...leadsWithoutMovedLead] };
+  });
+}
+
+function pipelineContainsLeadInStage(stages: PipelineStage[], leadId: string, stageId: string) {
+  return stages.some((stage) => stage.id === stageId && stage.leads.some((lead) => lead.id === leadId));
+}
+
 export default function PipelinePage() {
   const [stages, setStages] = useState<PipelineStage[]>([]);
   const [draggingLead, setDraggingLead] = useState<PipelineLead | null>(null);
@@ -110,11 +128,16 @@ export default function PipelinePage() {
   const [channelFilter, setChannelFilter] = useState<Channel>('Todos');
   const [ownerFilter, setOwnerFilter] = useState<Owner>(ALL_OWNERS_FILTER);
 
+  const syncPipeline = async () => {
+    const data = await getPipeline();
+    setStages(data);
+    return data;
+  };
+
   const fetchPipeline = async () => {
     try {
       setError('');
-      const data = await getPipeline();
-      setStages(data);
+      await syncPipeline();
     } catch {
       setError('Falha real ao sincronizar o pipeline. Tente novamente em alguns instantes.');
     } finally {
@@ -199,16 +222,41 @@ export default function PipelinePage() {
 
   const handleDrop = async (stage: PipelineBoardStage) => {
     if (!draggingLead) return;
+    if (draggingLead.stage_id === stage.id) {
+      setDraggingLead(null);
+      return;
+    }
+
+    const leadToMove = draggingLead;
+    const previousStages = stages;
+    setError('');
+    setStages((currentStages) => moveLeadBetweenStages(currentStages, leadToMove, stage.id));
 
     try {
-      await moveLeadToStage(draggingLead.id, stage.id);
-      await fetchPipeline();
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Erro desconhecido';
-      console.error('[PIPELINE MOVE ERROR]', err);
+      await moveLeadToStage(leadToMove.id, stage.id);
+    } catch (moveErr) {
+      console.error('[PIPELINE MOVE ERROR]', moveErr);
+
+      try {
+        const refreshedStages = await syncPipeline();
+        if (pipelineContainsLeadInStage(refreshedStages, leadToMove.id, stage.id)) return;
+      } catch (refreshErr) {
+        console.error('[PIPELINE MOVE CONFIRMATION ERROR]', refreshErr);
+      }
+
+      const message = moveErr instanceof Error ? moveErr.message : 'Erro desconhecido';
+      setStages(previousStages);
       setError(`Falha real ao mover o contato: ${message}`);
+      return;
     } finally {
       setDraggingLead(null);
+    }
+
+    try {
+      await syncPipeline();
+    } catch (refreshErr) {
+      console.error('[PIPELINE REFRESH AFTER MOVE ERROR]', refreshErr);
+      setError('Contato movido com sucesso, mas não foi possível sincronizar o pipeline agora. A atualização visual foi mantida.');
     }
   };
 
