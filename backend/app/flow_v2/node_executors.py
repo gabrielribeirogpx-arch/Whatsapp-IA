@@ -487,7 +487,62 @@ class ChoiceNodeExecutor(BaseNodeExecutor):
         return result
 
 
+def _coerce_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "y", "sim", "on"}
+    return False
+
+
+def _runtime_input_message_id(runtime_input: RuntimeInput) -> str | None:
+    metadata = runtime_input.metadata or {}
+    for value in (
+        runtime_input.message_id,
+        runtime_input.input_message_id,
+        metadata.get("message_id"),
+        metadata.get("wamid"),
+        metadata.get("whatsapp_message_id"),
+        metadata.get("incoming_message_id"),
+        metadata.get("input_message_id"),
+    ):
+        if value:
+            return str(value)
+    return None
+
+
 class DelayNodeExecutor(BaseNodeExecutor):
+    @staticmethod
+    def _send_typing_indicator(db, *, session: Any, node_id: str, runtime_input: RuntimeInput) -> None:
+        try:
+            from app.services.whatsapp_message_service import send_whatsapp_typing_indicator_safe
+
+            metadata = dict(runtime_input.metadata or {})
+            send_whatsapp_typing_indicator_safe(
+                db,
+                tenant_id=session.tenant_id,
+                conversation_id=runtime_input.conversation_id,
+                recipient_id=runtime_input.external_user_id,
+                message_id=_runtime_input_message_id(runtime_input),
+                context={
+                    **metadata,
+                    "flow_version_id": str(session.flow_version_id),
+                    "session_id": str(session.id),
+                    "node_id": node_id,
+                    "node_type": "delay",
+                    "flow_executor": "flow_v2:delay",
+                },
+            )
+        except Exception:
+            logger.warning(
+                "[DELAY TYPING FAILED] session_id=%s node_id=%s reason=unexpected_exception",
+                session.id,
+                node_id,
+                exc_info=True,
+            )
+
     def execute(
         self, db, *, snapshot, session, node, runtime_input
     ) -> NodeExecutionResult:
@@ -504,16 +559,20 @@ class DelayNodeExecutor(BaseNodeExecutor):
             seconds,
             node,
         )
+        show_typing = _coerce_bool(data.get("show_typing", node.get("show_typing", False)))
         next_node_id = self._default_next(
             db, snapshot=snapshot, session=session, node_id=node_id
         )
         logger.info(
-            "[DELAY EXECUTE NEXT] session_id=%s node_id=%s seconds=%s next_node_id=%s",
+            "[DELAY EXECUTE NEXT] session_id=%s node_id=%s seconds=%s show_typing=%s next_node_id=%s",
             session.id,
             node_id,
             seconds,
+            show_typing,
             next_node_id,
         )
+        if show_typing:
+            self._send_typing_indicator(db, session=session, node_id=node_id, runtime_input=runtime_input)
         job = FlowV2ScheduledJob(
             id=uuid.uuid4(),
             tenant_id=session.tenant_id,

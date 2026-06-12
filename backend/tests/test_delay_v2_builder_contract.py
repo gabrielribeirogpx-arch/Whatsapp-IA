@@ -98,3 +98,32 @@ def test_message_delay_message_publishes_with_runtime_v2_delay_seconds() -> None
     assert published.validation.is_valid
     assert delay_node["seconds"] == 5
     assert "seconds" not in delay_node.get("data", {})
+
+def test_delay_show_typing_survives_save_normalize_and_publish() -> None:
+    frontend_node = {
+        "id": "delay",
+        "type": "delay",
+        "position": {"x": 100, "y": 100},
+        "seconds": 5,
+        "data": {"show_typing": True},
+    }
+
+    rebuilt_node = flows._builder_node_for_save(frontend_node)
+    normalized_node = normalize_delay_nodes([rebuilt_node])[0]
+    published = FlowV2Publisher().publish(
+        nodes=[
+            {"id": "start", "type": "message", "content": "Olá"},
+            normalized_node,
+            {"id": "after_delay", "type": "message", "content": "Depois"},
+        ],
+        edges=[
+            {"id": "e1", "source": "start", "target": "delay"},
+            {"id": "e2", "source": "delay", "target": "after_delay"},
+        ],
+    )
+
+    delay_node = next(node for node in published.snapshot["nodes"] if node["id"] == "delay")
+    assert rebuilt_node["data"]["show_typing"] is True
+    assert normalized_node["data"]["show_typing"] is True
+    assert published.validation.is_valid
+    assert delay_node["data"]["show_typing"] is True

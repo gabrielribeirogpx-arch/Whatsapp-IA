@@ -81,7 +81,7 @@ const NODE_PRESETS: Record<FlowNodeKind, { label: string; type: string; data: Re
     },
   },
   condition: { label: 'Condição', type: 'condition', data: { condition: '' } },
-  delay: { label: 'Delay', type: 'delay', data: { seconds: 3 } },
+  delay: { label: 'Delay', type: 'delay', data: { seconds: 3, show_typing: false } },
   action: { label: 'Ação', type: 'action', data: { action_type: 'create_lead', action: 'create_lead', params: {} } },
 };
 
@@ -352,10 +352,21 @@ function FlowNodeEditorPanel({
         )}
 
         {kind === 'delay' && (
-          <label className="flow-editor-field">
-            Tempo em segundos
-            <input type="number" min="1" value={toText(draft.seconds)} onChange={(event) => onDraftChange({ seconds: parseDelaySeconds(event.target.value) ?? 0 })} />
-          </label>
+          <>
+            <label className="flow-editor-field">
+              Tempo em segundos
+              <input type="number" min="1" value={toText(draft.seconds)} onChange={(event) => onDraftChange({ seconds: parseDelaySeconds(event.target.value) ?? 0 })} />
+            </label>
+            <label className="flow-editor-radio">
+              <input
+                type="checkbox"
+                checked={draft.show_typing === true}
+                onChange={(event) => onDraftChange({ show_typing: event.target.checked })}
+              />
+              Mostrar digitando no WhatsApp
+            </label>
+            <small className="flow-editor-help-text">Exibe o indicador de digitação para o cliente durante a espera.</small>
+          </>
         )}
 
         {kind === 'action' && (() => {
