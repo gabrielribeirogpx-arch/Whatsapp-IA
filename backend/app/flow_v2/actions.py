@@ -122,7 +122,7 @@ class ScheduleDelayAction(RuntimeAction):
     job_id: UUID | None = None
     resume_node_id: str = ""
     run_at: datetime | None = None
-    seconds: int = 0
+    seconds: int | float = 0
 
     @property
     def action_type(self) -> Literal["schedule_delay"]:

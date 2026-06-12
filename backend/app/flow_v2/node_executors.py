@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -94,20 +95,32 @@ class BaseNodeExecutor:
         )
 
 
+def extract_message_text_from_node(node: dict[str, Any] | None) -> str:
+    if not isinstance(node, dict):
+        return ""
+    data = BaseNodeExecutor._node_data(node)
+    message = (
+        node.get("content")
+        or node.get("text")
+        or data.get("content")
+        or data.get("text")
+        or data.get("message")
+    )
+    return "" if message is None else str(message)
+
+
+def calculate_typing_delay_seconds(text: str) -> float:
+    normalized_text = re.sub(r"\s+", " ", str(text or "").strip())
+    return min(max(len(normalized_text) / 18, 1.2), 5.0)
+
+
 class MessageNodeExecutor(BaseNodeExecutor):
     def execute(
         self, db, *, snapshot, session, node, runtime_input
     ) -> NodeExecutionResult:
         node_id = str(node["id"])
         data = self._node_data(node)
-        message = (
-            node.get("content")
-            or node.get("text")
-            or data.get("content")
-            or data.get("text")
-            or data.get("message")
-        )
-        message = "" if message is None else str(message)
+        message = extract_message_text_from_node(node)
         is_start = bool(node.get("isStart") or data.get("isStart"))
         logger.info(
             "[MESSAGE EXECUTED] node_id=%s is_start=%s message_preview=%s",
@@ -515,6 +528,50 @@ def _runtime_input_message_id(runtime_input: RuntimeInput) -> str | None:
 
 class DelayNodeExecutor(BaseNodeExecutor):
     @staticmethod
+    def _node_type(node: dict[str, Any] | None) -> str | None:
+        if not isinstance(node, dict):
+            return None
+        data = BaseNodeExecutor._node_data(node)
+        return str(node.get("type") or data.get("type") or "message").strip().lower()
+
+    @classmethod
+    def _resolve_effective_seconds(
+        cls,
+        *,
+        snapshot: FlowV2Snapshot,
+        next_node_id: str | None,
+        fallback_seconds: int | float,
+        show_typing: bool,
+        typing_duration_mode: str,
+        session: Any,
+        node_id: str,
+    ) -> int | float:
+        if not show_typing or typing_duration_mode != "auto":
+            return fallback_seconds
+        try:
+            next_node = snapshot.node_by_id.get(next_node_id) if next_node_id else None
+            next_node_type = cls._node_type(next_node)
+            if next_node_type != "message":
+                logger.info(
+                    "[DELAY AUTO TYPING FALLBACK] session_id=%s node_id=%s next_node_id=%s next_node_type=%s reason=non_message",
+                    session.id,
+                    node_id,
+                    next_node_id,
+                    next_node_type,
+                )
+                return fallback_seconds
+            return calculate_typing_delay_seconds(extract_message_text_from_node(next_node))
+        except Exception:
+            logger.warning(
+                "[DELAY AUTO TYPING FALLBACK] session_id=%s node_id=%s next_node_id=%s reason=calculation_failed",
+                session.id,
+                node_id,
+                next_node_id,
+                exc_info=True,
+            )
+            return fallback_seconds
+
+    @staticmethod
     def _send_typing_indicator(db, *, session: Any, node_id: str, runtime_input: RuntimeInput) -> None:
         try:
             from app.services.whatsapp_message_service import send_whatsapp_typing_indicator_safe
@@ -560,15 +617,30 @@ class DelayNodeExecutor(BaseNodeExecutor):
             node,
         )
         show_typing = _coerce_bool(data.get("show_typing", node.get("show_typing", False)))
+        raw_typing_duration_mode = data.get("typing_duration_mode", node.get("typing_duration_mode", "delay"))
+        typing_duration_mode = str(raw_typing_duration_mode or "delay").strip().lower()
+        if typing_duration_mode not in {"delay", "auto"}:
+            typing_duration_mode = "delay"
         next_node_id = self._default_next(
             db, snapshot=snapshot, session=session, node_id=node_id
         )
+        effective_seconds = self._resolve_effective_seconds(
+            snapshot=snapshot,
+            next_node_id=next_node_id,
+            fallback_seconds=seconds,
+            show_typing=show_typing,
+            typing_duration_mode=typing_duration_mode,
+            session=session,
+            node_id=node_id,
+        )
         logger.info(
-            "[DELAY EXECUTE NEXT] session_id=%s node_id=%s seconds=%s show_typing=%s next_node_id=%s",
+            "[DELAY EXECUTE NEXT] session_id=%s node_id=%s seconds=%s effective_seconds=%s show_typing=%s typing_duration_mode=%s next_node_id=%s",
             session.id,
             node_id,
             seconds,
+            effective_seconds,
             show_typing,
+            typing_duration_mode,
             next_node_id,
         )
         if show_typing:
@@ -578,7 +650,7 @@ class DelayNodeExecutor(BaseNodeExecutor):
             tenant_id=session.tenant_id,
             session_id=session.id,
             resume_node_id=next_node_id,
-            run_at=datetime.now(UTC).replace(tzinfo=None) + timedelta(seconds=seconds),
+            run_at=datetime.now(UTC).replace(tzinfo=None) + timedelta(seconds=effective_seconds),
         )
         if hasattr(db, "add"):
             db.add(job)
@@ -596,7 +668,9 @@ class DelayNodeExecutor(BaseNodeExecutor):
             node_id=node_id,
             payload={
                 "node_id": node_id,
-                "seconds": seconds,
+                "seconds": effective_seconds,
+                "configured_seconds": seconds,
+                "typing_duration_mode": typing_duration_mode,
                 "resume_node_id": next_node_id,
                 "run_at": job.run_at.isoformat(),
             },
@@ -610,7 +684,7 @@ class DelayNodeExecutor(BaseNodeExecutor):
             job_id=job.id,
             resume_node_id=next_node_id,
             run_at=job.run_at,
-            seconds=seconds,
+            seconds=effective_seconds,
         )
         result = NodeExecutionResult(
             actions=(action,), status="scheduled", next_node_id=next_node_id
