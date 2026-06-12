@@ -9,6 +9,7 @@ import pytest
 
 from app.flow_v2.actions import SendChoiceButtonsAction
 from app.flow_v2.node_executors import calculate_typing_delay_seconds
+from app.services.conversation_mode_service import set_conversation_mode
 from app.flow_v2.contracts import FlowV2EventType, FlowV2SessionStatus, RuntimeInput
 from app.flow_v2.delay_worker import FlowV2DelayWorker
 from app.flow_v2.executor import FlowV2Executor
@@ -999,6 +1000,131 @@ def test_transfer_human_marks_conversation_and_blocks_next_runtime_execution() -
     assert second.effects == ()
     assert second.emitted_event_count == 0
     assert len(event_store.events) == emitted_after_first
+
+
+@pytest.mark.parametrize("mode", ["human", "bot", "ai"])
+def test_set_conversation_mode_action_updates_mode_and_continues_runtime_v2(mode) -> None:
+    raw_snapshot = {
+        "schema_version": 1,
+        "start_node_id": "start",
+        "nodes": [
+            {"id": "start", "type": "message", "content": "Antes"},
+            {"id": "action", "type": "action", "data": {"action_type": "set_conversation_mode", "mode": mode}},
+            {"id": "end", "type": "message", "content": "Depois"},
+        ],
+        "edges": [
+            {"id": "e1", "source": "start", "target": "action"},
+            {"id": "e2", "source": "action", "target": "end"},
+        ],
+    }
+    executor, snapshot, _, _, db = _executor(raw_snapshot)
+    conversation = SimpleNamespace(
+        id=uuid.uuid4(), tenant_id=snapshot.tenant_id, contact_id=None, phone_number="+5511999999999",
+        name="Cliente", avatar_url=None, assigned_user_id=uuid.uuid4(), assigned_user_name="Agente",
+        mode="flow", context={}, updated_at=None,
+    )
+    db.conversation = conversation
+
+    output = executor.handle_input(db, RuntimeInput(
+        tenant_id=snapshot.tenant_id,
+        flow_version_id=snapshot.flow_version_id,
+        external_user_id="whatsapp:+5511999999999",
+        message_text="oi",
+        conversation_id=conversation.id,
+        input_message_id=f"wamid.mode.{mode}",
+        metadata={},
+    ))
+
+    assert output.status == FlowV2SessionStatus.COMPLETED
+    assert output.effects == ({"type": "send_message", "text": "Antes"}, {"type": "send_message", "text": "Depois"})
+    assert conversation.mode == mode
+    if mode == "bot":
+        assert conversation.assigned_user_id is None
+        assert conversation.assigned_user_name is None
+    assert any(item.__class__.__name__ == "AuditLog" for item in db.added)
+
+
+def test_set_conversation_mode_terminal_action_completes_runtime_v2() -> None:
+    raw_snapshot = {
+        "schema_version": 1,
+        "start_node_id": "action",
+        "nodes": [{"id": "action", "type": "action", "data": {"action_type": "set_conversation_mode", "mode": "bot"}}],
+        "edges": [],
+    }
+    executor, snapshot, _, session, db = _executor(raw_snapshot)
+    conversation = SimpleNamespace(
+        id=uuid.uuid4(), tenant_id=snapshot.tenant_id, contact_id=None, phone_number="+5511999999999",
+        name="Cliente", avatar_url=None, assigned_user_id=None, assigned_user_name=None, mode="flow", context={}, updated_at=None,
+    )
+    db.conversation = conversation
+
+    output = executor.handle_input(db, RuntimeInput(
+        tenant_id=snapshot.tenant_id,
+        flow_version_id=snapshot.flow_version_id,
+        external_user_id="whatsapp:+5511999999999",
+        message_text="oi",
+        conversation_id=conversation.id,
+        input_message_id="wamid.mode.terminal",
+        metadata={},
+    ))
+
+    assert output.status == FlowV2SessionStatus.COMPLETED
+    assert output.effects == ()
+    assert session.status == FlowV2SessionStatus.COMPLETED
+    assert conversation.mode == "bot"
+
+
+def test_set_conversation_mode_realtime_and_audit_are_dispatched(monkeypatch) -> None:
+    db = _FakeDB()
+    tenant_id = uuid.uuid4()
+    conversation = SimpleNamespace(
+        id=uuid.uuid4(), tenant_id=tenant_id, contact_id=None, phone_number="+5511999999999",
+        name="Cliente", avatar_url=None, assigned_user_id=None, assigned_user_name=None, mode="ai", updated_at=None,
+    )
+    published = []
+    monkeypatch.setattr("app.services.conversation_mode_service.sync_publish", lambda channel, payload: published.append((channel, payload)))
+
+    set_conversation_mode(db, tenant_id=tenant_id, conversation=conversation, mode="human", flow_execution_id="flow-exec-1")
+
+    assert conversation.mode == "human"
+    assert any(item.__class__.__name__ == "AuditLog" and item.action == "CONVERSATION_MODE_CHANGED" for item in db.added)
+    assert any(channel == f"dashboard:{tenant_id}" and payload["event"] == "conversation_updated" for channel, payload in published)
+    assert any(channel == f"{tenant_id}:{conversation.id}" for channel, _ in published)
+
+
+def test_set_conversation_mode_enforces_tenant_isolation() -> None:
+    db = _FakeDB()
+    conversation = SimpleNamespace(id=uuid.uuid4(), tenant_id=uuid.uuid4(), phone_number="+5511999999999", mode="bot")
+
+    with pytest.raises(ValueError, match="tenant"):
+        set_conversation_mode(db, tenant_id=uuid.uuid4(), conversation=conversation, mode="human")
+
+
+def test_set_conversation_mode_invalid_mode_fails_controlled_runtime_v2() -> None:
+    raw_snapshot = {
+        "schema_version": 1,
+        "start_node_id": "action",
+        "nodes": [{"id": "action", "type": "action", "data": {"action_type": "set_conversation_mode", "mode": "invalid"}}],
+        "edges": [],
+    }
+    executor, snapshot, _, session, db = _executor(raw_snapshot)
+    db.conversation = SimpleNamespace(
+        id=uuid.uuid4(), tenant_id=snapshot.tenant_id, contact_id=None, phone_number="+5511999999999",
+        name="Cliente", avatar_url=None, assigned_user_id=None, assigned_user_name=None, mode="flow", context={}, updated_at=None,
+    )
+
+    with pytest.raises(RuntimeError, match="Invalid conversation mode"):
+        executor.handle_input(db, RuntimeInput(
+            tenant_id=snapshot.tenant_id,
+            flow_version_id=snapshot.flow_version_id,
+            external_user_id="whatsapp:+5511999999999",
+            message_text="oi",
+            conversation_id=db.conversation.id,
+            input_message_id="wamid.mode.invalid",
+            metadata={},
+        ))
+    assert session.status == FlowV2SessionStatus.FAILED
+
 
 def test_delay_with_show_typing_sends_indicator_and_schedules_job(monkeypatch) -> None:
     calls = []

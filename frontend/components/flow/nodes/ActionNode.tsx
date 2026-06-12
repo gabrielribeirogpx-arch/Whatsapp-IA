@@ -8,12 +8,21 @@ const ACTION_TYPE_LABELS: Record<string, string> = {
   add_tag: 'Adicionar Tag',
   notify_team: 'Notificar Equipe',
   transfer_human: 'Transferir para Humano',
+  set_conversation_mode: 'Alterar modo da conversa',
+};
+
+const CONVERSATION_MODE_LABELS: Record<string, string> = {
+  human: 'Humano',
+  bot: 'Bot',
+  ai: 'IA',
 };
 
 type ActionNodeData = {
   label?: string;
   action?: string;
   action_type?: string;
+  mode?: string;
+  params?: Record<string, unknown>;
   running?: boolean;
   isStart?: boolean;
   onToggleStart?: (nodeId: string) => void;
@@ -23,7 +32,11 @@ type ActionNodeData = {
 export default function ActionNode({ id, data, selected }: NodeProps) {
   const nodeData = (data || {}) as ActionNodeData;
   const actionType = nodeData.action_type || nodeData.action || '';
-  const actionLabel = ACTION_TYPE_LABELS[actionType] || nodeData.label;
+  const mode = String(nodeData.mode || nodeData.params?.mode || '').toLowerCase();
+  const modeLabel = CONVERSATION_MODE_LABELS[mode];
+  const actionLabel = actionType === 'set_conversation_mode' && modeLabel
+    ? `Alterar modo → ${modeLabel}`
+    : ACTION_TYPE_LABELS[actionType] || nodeData.label;
 
   return (
     <CompactFlowNode

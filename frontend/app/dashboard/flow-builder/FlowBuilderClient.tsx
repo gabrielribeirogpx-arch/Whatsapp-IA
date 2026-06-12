@@ -60,9 +60,19 @@ const ACTION_TYPE_OPTIONS = [
   { value: 'add_tag', label: 'Adicionar Tag' },
   { value: 'notify_team', label: 'Notificar Equipe' },
   { value: 'transfer_human', label: 'Transferir para Humano' },
+  { value: 'set_conversation_mode', label: 'Alterar modo da conversa' },
 ] as const;
 
 type ActionType = (typeof ACTION_TYPE_OPTIONS)[number]['value'];
+
+const CONVERSATION_MODE_OPTIONS = [
+  { value: 'human', label: 'Humano' },
+  { value: 'bot', label: 'Bot' },
+  { value: 'ai', label: 'IA' },
+] as const;
+
+type ConversationMode = (typeof CONVERSATION_MODE_OPTIONS)[number]['value'];
+const isConversationMode = (value: string): value is ConversationMode => CONVERSATION_MODE_OPTIONS.some((option) => option.value === value);
 
 const isActionType = (value: string): value is ActionType => ACTION_TYPE_OPTIONS.some((option) => option.value === value);
 
@@ -392,7 +402,15 @@ function FlowNodeEditorPanel({
                 Tipo de Ação
                 <select
                   value={selectedActionType}
-                  onChange={(event) => onDraftChange({ action_type: event.target.value, action: event.target.value, params: {} })}
+                  onChange={(event) => {
+                    const nextActionType = event.target.value;
+                    onDraftChange({
+                      action_type: nextActionType,
+                      action: nextActionType,
+                      params: {},
+                      ...(nextActionType === 'set_conversation_mode' ? { mode: 'human' } : { mode: undefined }),
+                    });
+                  }}
                 >
                   {ACTION_TYPE_OPTIONS.map((option) => (
                     <option key={option.value} value={option.value}>{option.label}</option>
@@ -425,6 +443,20 @@ function FlowNodeEditorPanel({
                 <label className="flow-editor-field">
                   Motivo da transferência
                   <input value={toText(params.reason || draft.reason)} onChange={(event) => updateActionParam('reason', event.target.value)} placeholder="Ex.: solicitou humano" />
+                </label>
+              )}
+
+              {selectedActionType === 'set_conversation_mode' && (
+                <label className="flow-editor-field">
+                  Modo
+                  <select
+                    value={isConversationMode(toText(draft.mode || params.mode)) ? toText(draft.mode || params.mode) : 'human'}
+                    onChange={(event) => onDraftChange({ mode: event.target.value, params: { ...params, mode: event.target.value } })}
+                  >
+                    {CONVERSATION_MODE_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>{option.label}</option>
+                    ))}
+                  </select>
                 </label>
               )}
             </>
