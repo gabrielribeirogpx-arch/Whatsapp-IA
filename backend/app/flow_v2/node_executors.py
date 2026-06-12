@@ -21,6 +21,7 @@ from app.flow_v2.models import FlowV2ScheduledJob
 from app.models.contact import Contact
 from app.models.conversation import Conversation
 from app.services.lead_service import get_or_create_lead
+from app.services.contact_tag_service import add_tag_to_contact
 from app.flow_v2.snapshot import FlowV2Snapshot, build_transitions_from_edges
 from app.flow_v2.transition_resolver import TransitionResolver
 
@@ -868,6 +869,8 @@ class ActionNodeExecutor(BaseNodeExecutor):
         next_node_id = self._default_next_or_terminal(
             db, snapshot=snapshot, session=session, node_id=node_id
         )
+        if next_node_id is None:
+            return NodeExecutionResult(status="complete")
         return NodeExecutionResult(next_node_id=next_node_id, status="continue")
 
     @staticmethod
@@ -903,7 +906,7 @@ class ActionNodeExecutor(BaseNodeExecutor):
             if action_type == "create_lead":
                 self._create_lead(db, session=session, runtime_input=runtime_input, params=params)
             elif action_type == "add_tag":
-                self._add_tag(db, runtime_input=runtime_input, params=params)
+                self._add_tag(db, session=session, runtime_input=runtime_input, params=params)
             elif action_type == "notify_team":
                 self._notify_team(session=session, node_id=node_id, runtime_input=runtime_input, params=params)
             elif action_type == "transfer_human":
@@ -938,17 +941,23 @@ class ActionNodeExecutor(BaseNodeExecutor):
         )
 
     @staticmethod
-    def _add_tag(db, *, runtime_input: RuntimeInput, params: dict[str, Any]) -> None:
+    def _add_tag(db, *, session: Any, runtime_input: RuntimeInput, params: dict[str, Any]) -> None:
         tag = str(params.get("tag") or params.get("label") or "").strip()
         if not tag:
             return
         contact = ActionNodeExecutor._resolve_contact(db, runtime_input=runtime_input)
         if contact is None:
             return
-        tags = list(getattr(contact, "tags_json", None) or [])
-        if tag not in tags:
-            tags.append(tag)
-            contact.tags_json = tags
+        conversation = ActionNodeExecutor._resolve_conversation(db, runtime_input=runtime_input)
+        add_tag_to_contact(
+            db,
+            tenant_id=session.tenant_id,
+            contact=contact,
+            tag=tag,
+            description=f"Tag '{tag}' adicionada automaticamente pelo Flow Builder.",
+            metadata={"source": "flow_builder", "tag": tag},
+            conversation=conversation,
+        )
 
     @staticmethod
     def _notify_team(*, session: Any, node_id: str, runtime_input: RuntimeInput, params: dict[str, Any]) -> None:
@@ -977,7 +986,7 @@ class ActionNodeExecutor(BaseNodeExecutor):
     def _resolve_contact(db, *, runtime_input: RuntimeInput):
         if runtime_input.contact_id and hasattr(db, "get"):
             contact = db.get(Contact, runtime_input.contact_id)
-            if contact is not None:
+            if contact is not None and str(getattr(contact, "tenant_id", "")) == str(runtime_input.tenant_id):
                 return contact
         phone = ActionNodeExecutor._phone_from_runtime_input(runtime_input)
         if not phone or not hasattr(db, "execute"):
@@ -990,7 +999,7 @@ class ActionNodeExecutor(BaseNodeExecutor):
     def _resolve_conversation(db, *, runtime_input: RuntimeInput):
         if runtime_input.conversation_id and hasattr(db, "get"):
             conversation = db.get(Conversation, runtime_input.conversation_id)
-            if conversation is not None:
+            if conversation is not None and str(getattr(conversation, "tenant_id", "")) == str(runtime_input.tenant_id):
                 return conversation
         phone = ActionNodeExecutor._phone_from_runtime_input(runtime_input)
         if not phone or not hasattr(db, "execute"):
