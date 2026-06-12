@@ -9,6 +9,7 @@ type DelayNodeData = {
   delay?: string | number;
   seconds?: string | number;
   show_typing?: boolean;
+  typing_duration_mode?: 'delay' | 'auto';
   running?: boolean;
   isStart?: boolean;
   onToggleStart?: (nodeId: string) => void;
@@ -31,6 +32,7 @@ export default function DelayNode({ id, data, selected }: NodeProps) {
       accent="linear-gradient(90deg, #0891b2, #06b6d4)"
       summary={`Aguardar ${value}s`}
       meta={nodeData.show_typing ? 'Pausa + digitando no WhatsApp' : 'Pausa no fluxo'}
+      chips={nodeData.show_typing && nodeData.typing_duration_mode === 'auto' ? ['Digitando automático'] : []}
       isStart={nodeData.isStart}
       hasValidationError={nodeData.hasValidationError}
       onToggleStart={nodeData.onToggleStart}

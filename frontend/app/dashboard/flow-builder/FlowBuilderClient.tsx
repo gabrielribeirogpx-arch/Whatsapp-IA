@@ -365,6 +365,18 @@ function FlowNodeEditorPanel({
               />
               Mostrar digitando no WhatsApp
             </label>
+            {draft.show_typing === true && (
+              <label className="flow-editor-field">
+                Tempo do digitando
+                <select
+                  value={toText(draft.typing_duration_mode || 'delay')}
+                  onChange={(event) => onDraftChange({ typing_duration_mode: event.target.value })}
+                >
+                  <option value="delay">Usar duração do Delay</option>
+                  <option value="auto">Automático pela próxima mensagem</option>
+                </select>
+              </label>
+            )}
             <small className="flow-editor-help-text">Exibe o indicador de digitação para o cliente durante a espera.</small>
           </>
         )}

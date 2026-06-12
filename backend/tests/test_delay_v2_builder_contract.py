@@ -105,7 +105,7 @@ def test_delay_show_typing_survives_save_normalize_and_publish() -> None:
         "type": "delay",
         "position": {"x": 100, "y": 100},
         "seconds": 5,
-        "data": {"show_typing": True},
+        "data": {"show_typing": True, "typing_duration_mode": "auto"},
     }
 
     rebuilt_node = flows._builder_node_for_save(frontend_node)
@@ -124,6 +124,9 @@ def test_delay_show_typing_survives_save_normalize_and_publish() -> None:
 
     delay_node = next(node for node in published.snapshot["nodes"] if node["id"] == "delay")
     assert rebuilt_node["data"]["show_typing"] is True
+    assert rebuilt_node["data"]["typing_duration_mode"] == "auto"
     assert normalized_node["data"]["show_typing"] is True
+    assert normalized_node["data"]["typing_duration_mode"] == "auto"
     assert published.validation.is_valid
     assert delay_node["data"]["show_typing"] is True
+    assert delay_node["data"]["typing_duration_mode"] == "auto"

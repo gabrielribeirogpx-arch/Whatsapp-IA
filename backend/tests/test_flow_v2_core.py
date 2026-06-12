@@ -8,6 +8,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from app.flow_v2.actions import SendChoiceButtonsAction
+from app.flow_v2.node_executors import calculate_typing_delay_seconds
 from app.flow_v2.contracts import FlowV2EventType, FlowV2SessionStatus, RuntimeInput
 from app.flow_v2.delay_worker import FlowV2DelayWorker
 from app.flow_v2.executor import FlowV2Executor
@@ -204,6 +205,18 @@ def _input_with_text(snapshot, input_message_id, message_text, metadata=None):
 
 def _event_types(event_store):
     return [event["event_type"] for event in event_store.events]
+
+
+def test_calculate_typing_delay_seconds_short_text_returns_minimum() -> None:
+    assert calculate_typing_delay_seconds("oi") == 1.2
+
+
+def test_calculate_typing_delay_seconds_medium_text_is_proportional() -> None:
+    assert calculate_typing_delay_seconds("x" * 36) == 2.0
+
+
+def test_calculate_typing_delay_seconds_long_text_returns_maximum() -> None:
+    assert calculate_typing_delay_seconds("x" * 180) == 5.0
 
 
 def test_canonical_hash_ignores_embedded_hash_key() -> None:
@@ -1074,3 +1087,126 @@ def test_delay_show_typing_false_does_not_send_indicator(monkeypatch) -> None:
     scheduled_jobs = [item for item in db.added if item.__class__.__name__ == "FlowV2ScheduledJob"]
     assert output.status == FlowV2SessionStatus.WAITING
     assert len(scheduled_jobs) == 1
+
+
+def test_delay_show_typing_missing_mode_keeps_configured_delay(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "app.services.whatsapp_message_service.send_whatsapp_typing_indicator_safe",
+        lambda db, **kwargs: {"status": "sent"},
+    )
+    raw_snapshot = {
+        "schema_version": 1,
+        "start_node_id": "start",
+        "nodes": [
+            {"id": "start", "type": "delay", "seconds": 3, "data": {"show_typing": True}},
+            {"id": "next", "type": "message", "content": "x" * 90},
+        ],
+        "edges": [{"id": "e1", "source": "start", "target": "next"}],
+    }
+    executor, snapshot, event_store, _, db = _executor(raw_snapshot)
+
+    output = executor.handle_input(db, _input(snapshot))
+
+    delay_event = next(event for event in event_store.events if event["event_type"] == "DELAY_SCHEDULED")
+    assert output.actions[0].seconds == 3
+    assert delay_event["payload"]["seconds"] == 3
+    assert delay_event["payload"]["typing_duration_mode"] == "delay"
+
+
+def test_delay_show_typing_delay_mode_keeps_configured_delay(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "app.services.whatsapp_message_service.send_whatsapp_typing_indicator_safe",
+        lambda db, **kwargs: {"status": "sent"},
+    )
+    raw_snapshot = {
+        "schema_version": 1,
+        "start_node_id": "start",
+        "nodes": [
+            {"id": "start", "type": "delay", "seconds": 4, "data": {"show_typing": True, "typing_duration_mode": "delay"}},
+            {"id": "next", "type": "message", "content": "x" * 90},
+        ],
+        "edges": [{"id": "e1", "source": "start", "target": "next"}],
+    }
+    executor, snapshot, event_store, _, db = _executor(raw_snapshot)
+
+    output = executor.handle_input(db, _input(snapshot))
+
+    delay_event = next(event for event in event_store.events if event["event_type"] == "DELAY_SCHEDULED")
+    assert output.actions[0].seconds == 4
+    assert delay_event["payload"]["seconds"] == 4
+
+
+def test_delay_show_typing_auto_mode_uses_next_message_length(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "app.services.whatsapp_message_service.send_whatsapp_typing_indicator_safe",
+        lambda db, **kwargs: {"status": "sent"},
+    )
+    raw_snapshot = {
+        "schema_version": 1,
+        "start_node_id": "start",
+        "nodes": [
+            {"id": "start", "type": "delay", "seconds": 10, "data": {"show_typing": True, "typing_duration_mode": "auto"}},
+            {"id": "next", "type": "message", "data": {"text": "x" * 36}},
+        ],
+        "edges": [{"id": "e1", "source": "start", "target": "next"}],
+    }
+    executor, snapshot, event_store, _, db = _executor(raw_snapshot)
+
+    output = executor.handle_input(db, _input(snapshot))
+
+    delay_event = next(event for event in event_store.events if event["event_type"] == "DELAY_SCHEDULED")
+    assert output.actions[0].seconds == 2.0
+    assert delay_event["payload"]["seconds"] == 2.0
+    assert delay_event["payload"]["configured_seconds"] == 10
+    assert delay_event["payload"]["typing_duration_mode"] == "auto"
+
+
+def test_delay_auto_mode_next_non_message_falls_back_to_configured_delay(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "app.services.whatsapp_message_service.send_whatsapp_typing_indicator_safe",
+        lambda db, **kwargs: {"status": "sent"},
+    )
+    raw_snapshot = {
+        "schema_version": 1,
+        "start_node_id": "start",
+        "nodes": [
+            {"id": "start", "type": "delay", "seconds": 7, "data": {"show_typing": True, "typing_duration_mode": "auto"}},
+            {"id": "next", "type": "condition", "data": {"condition": "sim"}},
+        ],
+        "edges": [{"id": "e1", "source": "start", "target": "next"}],
+    }
+    executor, snapshot, event_store, _, db = _executor(raw_snapshot)
+
+    output = executor.handle_input(db, _input(snapshot))
+
+    delay_event = next(event for event in event_store.events if event["event_type"] == "DELAY_SCHEDULED")
+    assert output.actions[0].seconds == 7
+    assert delay_event["payload"]["seconds"] == 7
+
+
+def test_delay_auto_mode_calculation_error_falls_back_to_configured_delay(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "app.services.whatsapp_message_service.send_whatsapp_typing_indicator_safe",
+        lambda db, **kwargs: {"status": "sent"},
+    )
+
+    def fail_calculation(text: str) -> float:
+        raise RuntimeError("bad template")
+
+    monkeypatch.setattr("app.flow_v2.node_executors.calculate_typing_delay_seconds", fail_calculation)
+    raw_snapshot = {
+        "schema_version": 1,
+        "start_node_id": "start",
+        "nodes": [
+            {"id": "start", "type": "delay", "seconds": 6, "data": {"show_typing": True, "typing_duration_mode": "auto"}},
+            {"id": "next", "type": "message", "content": "Depois"},
+        ],
+        "edges": [{"id": "e1", "source": "start", "target": "next"}],
+    }
+    executor, snapshot, event_store, _, db = _executor(raw_snapshot)
+
+    output = executor.handle_input(db, _input(snapshot))
+
+    delay_event = next(event for event in event_store.events if event["event_type"] == "DELAY_SCHEDULED")
+    assert output.actions[0].seconds == 6
+    assert delay_event["payload"]["seconds"] == 6

@@ -284,6 +284,7 @@ export type FlowNodePayload = {
     wait_seconds?: string | number;
     duration?: string | number;
     show_typing?: boolean;
+    typing_duration_mode?: 'delay' | 'auto';
     body_text?: string;
     display_mode?: 'buttons' | 'list';
     displayMode?: 'buttons' | 'list';
