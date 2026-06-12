@@ -203,8 +203,10 @@ export default function PipelinePage() {
     try {
       await moveLeadToStage(draggingLead.id, stage.id);
       await fetchPipeline();
-    } catch {
-      setError('Falha real ao mover o contato. Tente novamente.');
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Erro desconhecido';
+      console.error('[PIPELINE MOVE ERROR]', err);
+      setError(`Falha real ao mover o contato: ${message}`);
     } finally {
       setDraggingLead(null);
     }

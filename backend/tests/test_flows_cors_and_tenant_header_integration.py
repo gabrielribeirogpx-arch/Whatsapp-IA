@@ -79,6 +79,7 @@ def test_required_cors_origins_are_kept_when_env_overrides_defaults(monkeypatch)
         "https://custom.example.com",
         "https://frontend-whatsapp-ia-production.up.railway.app",
         "https://whatsapp-ia-nine.vercel.app",
+        "https://whatsapp-ia-production-4699.up.railway.app",
     ]
 
 
