@@ -2,7 +2,7 @@ import logging
 import uuid
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, Field
 from sqlalchemy import desc, func, select
 from sqlalchemy.exc import IntegrityError
@@ -282,7 +282,12 @@ def delete_pipeline_stage(
     return {"deleted": True}
 
 
-@router.api_route("/leads/{lead_id}/move", methods=["PATCH", "POST"], response_model=LeadOut)
+@router.api_route(
+    "/leads/{lead_id}/move",
+    methods=["PATCH", "POST"],
+    response_model=LeadOut,
+    responses={204: {"description": "Lead moved without response body"}},
+)
 def move_lead(
     lead_id: uuid.UUID,
     payload: LeadMoveRequest,
@@ -331,13 +336,13 @@ def move_lead(
         previous_stage_id = lead.stage_id
         if previous_stage_id == target_stage.id:
             logger.info(
-                "[PIPELINE MOVE RESPONSE] method=%s lead_id=%s stage_id=%s origin=%s status=200 result=noop",
+                "[PIPELINE MOVE RESPONSE] method=%s lead_id=%s stage_id=%s origin=%s status=204 result=noop",
                 method,
                 lead_id,
                 payload.stage_id,
                 origin,
             )
-            return lead
+            return Response(status_code=status.HTTP_204_NO_CONTENT)
 
         lead.stage_id = target_stage.id
         lead.entered_stage_at = datetime.utcnow()
@@ -365,13 +370,13 @@ def move_lead(
         db.commit()
         db.refresh(lead)
         logger.info(
-            "[PIPELINE MOVE RESPONSE] method=%s lead_id=%s stage_id=%s origin=%s status=200 result=moved",
+            "[PIPELINE MOVE RESPONSE] method=%s lead_id=%s stage_id=%s origin=%s status=204 result=moved",
             method,
             lead_id,
             payload.stage_id,
             origin,
         )
-        return lead
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
     except HTTPException:
         raise
     except Exception:

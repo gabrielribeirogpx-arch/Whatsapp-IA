@@ -129,6 +129,7 @@ export default function PipelinePage() {
   const [channelFilter, setChannelFilter] = useState<Channel>('Todos');
   const [ownerFilter, setOwnerFilter] = useState<Owner>(ALL_OWNERS_FILTER);
   const pendingMoveLeadIds = useRef<Set<string>>(new Set());
+  const activeDragRef = useRef<{ lead: PipelineLead; dropHandled: boolean } | null>(null);
 
   const syncPipeline = async () => {
     const data = await getPipeline();
@@ -223,7 +224,13 @@ export default function PipelinePage() {
   const visibleLeads = filteredStages.reduce((total, stage) => total + stage.leads.length, 0);
 
   const handleDrop = async (stage: PipelineBoardStage) => {
-    const leadToMove = draggingLead;
+    const dragSession = activeDragRef.current;
+    if (!dragSession || dragSession.dropHandled) {
+      setDraggingLead(null);
+      return;
+    }
+
+    const leadToMove = dragSession.lead;
     const targetStageId = stage.id;
 
     if (!canMoveLeadToStage(leadToMove, targetStageId, pendingMoveLeadIds.current)) {
@@ -231,6 +238,7 @@ export default function PipelinePage() {
       return;
     }
 
+    dragSession.dropHandled = true;
     pendingMoveLeadIds.current.add(leadToMove.id);
     const previousStages = stages;
     setError('');
@@ -389,8 +397,14 @@ export default function PipelinePage() {
                       key={lead.id}
                       className="pipeline-lead-card"
                       draggable
-                      onDragStart={() => setDraggingLead(lead)}
-                      onDragEnd={() => setDraggingLead(null)}
+                      onDragStart={() => {
+                        activeDragRef.current = { lead, dropHandled: false };
+                        setDraggingLead(lead);
+                      }}
+                      onDragEnd={() => {
+                        activeDragRef.current = null;
+                        setDraggingLead(null);
+                      }}
                       style={{ '--stack-offset': `${Math.min(index, 4) * 5}px` } as CSSProperties}
                     >
                       <div className="pipeline-lead-topline">

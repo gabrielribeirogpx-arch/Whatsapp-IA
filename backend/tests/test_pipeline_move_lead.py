@@ -113,7 +113,8 @@ def test_move_lead_to_valid_stage_persists_stage_and_audit_log() -> None:
         db=db,
     )
 
-    assert response is lead
+    assert response.status_code == 204
+    assert response.body == b""
     assert lead.stage_id == target_stage.id
     assert lead.status == LeadStatus.ACTIVE.value
     assert lead.updated_at is not None
@@ -168,7 +169,8 @@ def test_move_lead_same_stage_is_idempotent_without_duplicate_audit() -> None:
         db=db,
     )
 
-    assert response is lead
+    assert response.status_code == 204
+    assert response.body == b""
     assert lead.stage_id == stage_id
     assert db.commits == 0
     assert db.refreshed == []
@@ -240,10 +242,24 @@ def test_patch_move_endpoint_is_registered_with_api_prefix_and_matches_payload_s
 
     response = client.patch(f"/api/leads/{lead.id}/move", json={"stage_id": str(target_stage.id)})
 
-    assert response.status_code == 200
-    body = response.json()
-    assert body["id"] == str(lead.id)
-    assert body["stage_id"] == str(target_stage.id)
+    assert response.status_code == 204
+    assert response.content == b""
+    assert lead.stage_id == target_stage.id
+
+
+def test_patch_move_endpoint_does_not_serialize_lead_after_commit() -> None:
+    tenant = _tenant()
+    target_stage = _stage(tenant_id=tenant.id)
+    lead = _lead(tenant_id=tenant.id, stage_id=uuid.uuid4())
+    lead.last_contact_at = None
+    db = _FakeDb(lead, target_stage)
+    client = TestClient(_build_move_app(db, tenant))
+
+    response = client.patch(f"/api/leads/{lead.id}/move", json={"stage_id": str(target_stage.id)})
+
+    assert response.status_code == 204
+    assert response.content == b""
+    assert db.commits == 1
 
 
 def test_move_endpoint_invalid_payload_returns_clear_422_without_500() -> None:
