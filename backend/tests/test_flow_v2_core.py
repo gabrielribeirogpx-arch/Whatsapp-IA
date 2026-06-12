@@ -980,3 +980,97 @@ def test_transfer_human_marks_conversation_and_blocks_next_runtime_execution() -
     assert second.effects == ()
     assert second.emitted_event_count == 0
     assert len(event_store.events) == emitted_after_first
+
+def test_delay_with_show_typing_sends_indicator_and_schedules_job(monkeypatch) -> None:
+    calls = []
+
+    def fake_typing(db, **kwargs):
+        calls.append(kwargs)
+        return {"status": "sent"}
+
+    monkeypatch.setattr(
+        "app.services.whatsapp_message_service.send_whatsapp_typing_indicator_safe",
+        fake_typing,
+    )
+    raw_snapshot = {
+        "schema_version": 1,
+        "start_node_id": "start",
+        "nodes": [
+            {"id": "start", "type": "delay", "seconds": 3, "data": {"show_typing": True}},
+            {"id": "next", "type": "message", "content": "Depois"},
+        ],
+        "edges": [{"id": "e1", "source": "start", "target": "next"}],
+    }
+    executor, snapshot, _, session, db = _executor(raw_snapshot)
+    runtime_input = RuntimeInput(
+        tenant_id=snapshot.tenant_id,
+        flow_version_id=snapshot.flow_version_id,
+        external_user_id="whatsapp:+5511999999999",
+        message_id="wamid.example",
+        metadata={"provider_id": "provider-1"},
+    )
+
+    output = executor.handle_input(db, runtime_input)
+
+    scheduled_jobs = [item for item in db.added if item.__class__.__name__ == "FlowV2ScheduledJob"]
+    assert output.status == FlowV2SessionStatus.WAITING
+    assert len(scheduled_jobs) == 1
+    assert scheduled_jobs[0].resume_node_id == "next"
+    assert len(calls) == 1
+    assert calls[0]["tenant_id"] == session.tenant_id
+    assert calls[0]["message_id"] == "wamid.example"
+    assert calls[0]["recipient_id"] == "whatsapp:+5511999999999"
+    assert calls[0]["context"]["node_id"] == "start"
+
+
+def test_delay_typing_failure_still_returns_scheduled(monkeypatch) -> None:
+    def fake_typing(db, **kwargs):
+        raise RuntimeError("meta down")
+
+    monkeypatch.setattr(
+        "app.services.whatsapp_message_service.send_whatsapp_typing_indicator_safe",
+        fake_typing,
+    )
+    raw_snapshot = {
+        "schema_version": 1,
+        "start_node_id": "start",
+        "nodes": [
+            {"id": "start", "type": "delay", "seconds": 3, "data": {"show_typing": True}},
+            {"id": "next", "type": "message", "content": "Depois"},
+        ],
+        "edges": [{"id": "e1", "source": "start", "target": "next"}],
+    }
+    executor, snapshot, _, session, db = _executor(raw_snapshot)
+    output = executor.handle_input(db, _input(snapshot, {"message_id": "wamid.example"}))
+
+    scheduled_jobs = [item for item in db.added if item.__class__.__name__ == "FlowV2ScheduledJob"]
+    assert output.status == FlowV2SessionStatus.WAITING
+    assert session.status == FlowV2SessionStatus.WAITING
+    assert len(scheduled_jobs) == 1
+    assert scheduled_jobs[0].resume_node_id == "next"
+
+
+def test_delay_show_typing_false_does_not_send_indicator(monkeypatch) -> None:
+    def fake_typing(db, **kwargs):
+        raise AssertionError("typing indicator should not be sent")
+
+    monkeypatch.setattr(
+        "app.services.whatsapp_message_service.send_whatsapp_typing_indicator_safe",
+        fake_typing,
+    )
+    raw_snapshot = {
+        "schema_version": 1,
+        "start_node_id": "start",
+        "nodes": [
+            {"id": "start", "type": "delay", "seconds": 3, "data": {"show_typing": False}},
+            {"id": "next", "type": "message", "content": "Depois"},
+        ],
+        "edges": [{"id": "e1", "source": "start", "target": "next"}],
+    }
+    executor, snapshot, _, _, db = _executor(raw_snapshot)
+
+    output = executor.handle_input(db, _input(snapshot))
+
+    scheduled_jobs = [item for item in db.added if item.__class__.__name__ == "FlowV2ScheduledJob"]
+    assert output.status == FlowV2SessionStatus.WAITING
+    assert len(scheduled_jobs) == 1

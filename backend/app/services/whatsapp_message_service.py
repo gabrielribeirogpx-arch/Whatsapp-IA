@@ -287,6 +287,99 @@ def send_interactive_list_via_meta(*, token: str, phone_number_id: str, to: str,
     )
     return asyncio.run(MetaCloudClient(token).post(f"/{phone_number_id}/messages", payload=payload, context=context))
 
+
+def send_typing_indicator_via_meta(*, token: str, phone_number_id: str, message_id: str, context: dict[str, Any]) -> dict[str, Any]:
+    payload = {
+        "messaging_product": "whatsapp",
+        "status": "read",
+        "message_id": str(message_id or "").strip(),
+        "typing_indicator": {"type": "text"},
+    }
+    return asyncio.run(MetaCloudClient(token).post(f"/{phone_number_id}/messages", payload=payload, context=context))
+
+
+def send_whatsapp_typing_indicator_safe(
+    db: Session,
+    *,
+    tenant_id: Any,
+    conversation_id: Any | None = None,
+    recipient_id: str | None = None,
+    message_id: str | None = None,
+    context: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Best-effort WhatsApp typing indicator for an inbound message.
+
+    WhatsApp requires the inbound wamid/message id because the typing indicator is
+    sent as a read receipt for the message being answered. Any missing data or
+    Meta failure is logged and converted into a skipped/failed result so flow
+    execution can continue normally.
+    """
+
+    safe_context = dict(context or {})
+    safe_context.setdefault("tenant_id", str(tenant_id or ""))
+    if conversation_id:
+        safe_context.setdefault("conversation_id", str(conversation_id))
+    if recipient_id:
+        safe_context.setdefault("recipient_id", recipient_id)
+
+    inbound_message_id = str(message_id or "").strip()
+    if not inbound_message_id:
+        logger.warning(
+            "[WHATSAPP TYPING SKIPPED] tenant_id=%s conversation_id=%s recipient_id=%s reason=missing_message_id",
+            tenant_id,
+            conversation_id or "n/a",
+            recipient_id or "n/a",
+        )
+        return {"status": "skipped", "reason": "missing_message_id"}
+
+    try:
+        credentials = resolve_active_meta_provider_credentials(
+            db, tenant_id=str(tenant_id), conversation_id=str(conversation_id) if conversation_id else None
+        )
+        if not credentials:
+            logger.warning(
+                "[WHATSAPP TYPING SKIPPED] tenant_id=%s conversation_id=%s recipient_id=%s reason=missing_provider_credentials",
+                tenant_id,
+                conversation_id or "n/a",
+                recipient_id or "n/a",
+            )
+            return {"status": "skipped", "reason": "missing_provider_credentials"}
+
+        safe_context.update(
+            {
+                "provider_id": credentials.get("provider_id"),
+                "phone_number_id": credentials.get("phone_number_id"),
+                "token_length": credentials.get("token_length"),
+                "flow_send_source": safe_context.get("flow_send_source") or "flow_v2:delay_typing",
+            }
+        )
+        response = send_typing_indicator_via_meta(
+            token=credentials["token"],
+            phone_number_id=credentials["phone_number_id"],
+            message_id=inbound_message_id,
+            context=safe_context,
+        )
+        logger.info(
+            "[WHATSAPP TYPING SENT] tenant_id=%s provider_id=%s conversation_id=%s recipient_id=%s message_id=%s",
+            tenant_id,
+            credentials.get("provider_id"),
+            conversation_id or "n/a",
+            recipient_id or "n/a",
+            inbound_message_id,
+        )
+        return {"status": "sent", "raw": response}
+    except Exception as exc:
+        logger.warning(
+            "[WHATSAPP TYPING FAILED] tenant_id=%s conversation_id=%s recipient_id=%s message_id=%s error=%s",
+            tenant_id,
+            conversation_id or "n/a",
+            recipient_id or "n/a",
+            inbound_message_id,
+            str(exc),
+            exc_info=True,
+        )
+        return {"status": "failed", "reason": str(exc)}
+
 def extract_template_variables(body_text: str) -> list[str]:
     return sorted({m.group(1) for m in VAR_PATTERN.finditer(body_text or "")}, key=lambda x: int(x))
 
