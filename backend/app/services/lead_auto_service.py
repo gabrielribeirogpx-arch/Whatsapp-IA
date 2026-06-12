@@ -13,12 +13,15 @@ from app.models import Contact, Conversation, Lead, PipelineStage, TenantUser
 from app.models.lead import LeadSource, LeadStage, LeadStatus
 from app.services.audit_service import write_audit_log
 from app.services.pipeline_service import get_first_pipeline_stage
+from app.services.realtime_service import sync_publish
 from app.utils.phone import normalize_phone
 
 logger = logging.getLogger(__name__)
 
 WHATSAPP_SOURCE = LeadSource.WHATSAPP.value
 LEAD_CREATED_ACTION = "LEAD_CREATED"
+FLOW_LEAD_CREATED_ACTION = "FLOW_LEAD_CREATED"
+FLOW_LEAD_UPDATED_ACTION = "FLOW_LEAD_UPDATED"
 
 
 @dataclass(frozen=True)
@@ -80,6 +83,125 @@ def _lookup_lead_by_contact(db: Session, *, tenant_id: UUID, contact: Contact | 
             Lead.contact_id == contact.id,
         )
     ).scalars().first()
+
+
+def _lookup_contact_by_id(db: Session, *, tenant_id: UUID, contact_id) -> Contact | None:
+    if not contact_id:
+        return None
+    return db.execute(
+        select(Contact).where(
+            Contact.tenant_id == tenant_id,
+            Contact.id == contact_id,
+        )
+    ).scalars().first()
+
+
+def _lookup_contact_by_phone(db: Session, *, tenant_id: UUID, normalized_phone: str) -> Contact | None:
+    return db.execute(
+        select(Contact).where(
+            Contact.tenant_id == tenant_id,
+            Contact.phone == normalized_phone,
+        )
+    ).scalars().first()
+
+
+def _lookup_conversation_by_id(db: Session, *, tenant_id: UUID, conversation_id) -> Conversation | None:
+    if not conversation_id:
+        return None
+    return db.execute(
+        select(Conversation).where(
+            Conversation.tenant_id == tenant_id,
+            Conversation.id == conversation_id,
+        )
+    ).scalars().first()
+
+
+def _lookup_conversation_by_phone(db: Session, *, tenant_id: UUID, normalized_phone: str) -> Conversation | None:
+    return db.execute(
+        select(Conversation).where(
+            Conversation.tenant_id == tenant_id,
+            Conversation.phone_number == normalized_phone,
+        )
+    ).scalars().first()
+
+
+def _metadata_contact_name(metadata: dict | None) -> str | None:
+    if not isinstance(metadata, dict):
+        return None
+    for key in ("contact_name", "name"):
+        value = str(metadata.get(key) or "").strip()
+        if value:
+            return value
+    contact_metadata = metadata.get("contact")
+    if isinstance(contact_metadata, dict):
+        value = str(contact_metadata.get("name") or "").strip()
+        if value:
+            return value
+    return None
+
+
+def _publish_flow_lead_realtime(
+    *,
+    tenant_id: UUID,
+    lead: Lead,
+    created: bool,
+    contact: Contact | None,
+    conversation: Conversation | None,
+) -> None:
+    payload = {
+        "event": "lead_created" if created else "lead_updated",
+        "type": "LEAD_CREATED" if created else "LEAD_UPDATED",
+        "refresh": [
+            "analytics",
+            "activity",
+            "conversations",
+            "contacts",
+            "leads",
+            "pipeline",
+            "contact_details",
+        ],
+        "lead_id": str(getattr(lead, "id", "")),
+        "contact_id": str(getattr(contact, "id", "") or getattr(lead, "contact_id", "") or "")
+        or None,
+        "conversation_id": str(
+            getattr(conversation, "id", "") or getattr(lead, "conversation_id", "") or ""
+        )
+        or None,
+        "phone": getattr(lead, "phone", None),
+        "lead": {
+            "id": str(getattr(lead, "id", "")),
+            "tenant_id": str(getattr(lead, "tenant_id", "")),
+            "phone": getattr(lead, "phone", None),
+            "name": getattr(lead, "name", None),
+            "contact_id": str(getattr(lead, "contact_id", ""))
+            if getattr(lead, "contact_id", None)
+            else None,
+            "conversation_id": str(getattr(lead, "conversation_id", ""))
+            if getattr(lead, "conversation_id", None)
+            else None,
+            "stage_id": str(getattr(lead, "stage_id", "")) if getattr(lead, "stage_id", None) else None,
+            "status": getattr(lead, "status", None),
+            "source": getattr(lead, "source", None),
+            "last_message": getattr(lead, "last_message", None),
+            "last_interaction": getattr(lead, "last_interaction", None).isoformat()
+            if getattr(lead, "last_interaction", None)
+            else None,
+            "last_contact_at": getattr(lead, "last_contact_at", None).isoformat()
+            if getattr(lead, "last_contact_at", None)
+            else None,
+            "updated_at": getattr(lead, "updated_at", None).isoformat()
+            if getattr(lead, "updated_at", None)
+            else None,
+        },
+    }
+    sync_publish(f"dashboard:{tenant_id}", payload)
+    if conversation is not None:
+        conversation_id = getattr(conversation, "id", None)
+        if conversation_id:
+            sync_publish(f"{tenant_id}:{conversation_id}", payload)
+        phone_number = getattr(conversation, "phone_number", None) or getattr(lead, "phone", None)
+        if phone_number:
+            sync_publish(f"{tenant_id}:{phone_number}", payload)
 
 
 def _apply_inbound_lead_updates(
@@ -254,3 +376,103 @@ def ensure_whatsapp_lead_for_inbound(
         WHATSAPP_SOURCE,
     )
     return AutoLeadResult(lead=lead, created=True, pipeline_stage=pipeline_stage)
+
+
+def create_or_update_lead_from_flow_action(
+    db: Session,
+    *,
+    tenant_id: UUID,
+    phone: str,
+    contact_id=None,
+    conversation_id=None,
+    lead_name: str | None = None,
+    last_message: str | None = None,
+    metadata: dict | None = None,
+) -> AutoLeadResult | None:
+    """Create/update a WhatsApp CRM lead from the Runtime V2 Create Lead action.
+
+    This Flow Builder adapter reuses the official inbound lead path so tenant
+    isolation, pipeline defaults, duplicate recovery and base CRM fields stay
+    consistent with WhatsApp inbound processing.
+    """
+    normalized_phone = normalize_phone(phone)
+    if not normalized_phone:
+        logger.warning("[FLOW CREATE LEAD SKIPPED] tenant_id=%s reason=missing_phone", tenant_id)
+        return None
+
+    contact = _lookup_contact_by_id(db, tenant_id=tenant_id, contact_id=contact_id)
+    if contact is None:
+        contact = _lookup_contact_by_phone(db, tenant_id=tenant_id, normalized_phone=normalized_phone)
+
+    conversation = _lookup_conversation_by_id(db, tenant_id=tenant_id, conversation_id=conversation_id)
+    if conversation is None:
+        conversation = _lookup_conversation_by_phone(db, tenant_id=tenant_id, normalized_phone=normalized_phone)
+
+    resolved_name = (
+        str(lead_name or "").strip()
+        or _metadata_contact_name(metadata)
+        or str(getattr(contact, "name", None) or "").strip()
+        or None
+    )
+    result = ensure_whatsapp_lead_for_inbound(
+        db,
+        tenant_id=tenant_id,
+        phone=normalized_phone,
+        contact=contact,
+        conversation=conversation,
+        name=resolved_name,
+        message_text=last_message,
+    )
+    if result is None:
+        return None
+
+    if lead_name and str(lead_name).strip():
+        result.lead.name = str(lead_name).strip()
+    if contact is not None:
+        result.lead.contact_id = getattr(contact, "id", None)
+    if conversation is not None:
+        result.lead.conversation_id = getattr(conversation, "id", None)
+    result.lead.status = LeadStatus.ACTIVE.value
+
+    action = FLOW_LEAD_CREATED_ACTION if result.created else FLOW_LEAD_UPDATED_ACTION
+    event = (
+        "Lead criado automaticamente pelo Flow Builder."
+        if result.created
+        else "Lead atualizado automaticamente pelo Flow Builder."
+    )
+    write_audit_log(
+        db,
+        action=action,
+        tenant_id=tenant_id,
+        user_id=getattr(result.lead, "owner_id", None),
+        entity_type="lead",
+        entity_id=getattr(result.lead, "id", None),
+        metadata={
+            "source": "flow_builder",
+            "phone": normalized_phone,
+            "contact_name": resolved_name,
+            "contact_id": str(getattr(contact, "id", "")) if contact else None,
+            "conversation_id": str(getattr(conversation, "id", "")) if conversation else None,
+            "lead_id": str(getattr(result.lead, "id", "")),
+            "created": result.created,
+            "automatic": True,
+            "event": event,
+        },
+    )
+
+    try:
+        _publish_flow_lead_realtime(
+            tenant_id=tenant_id,
+            lead=result.lead,
+            created=result.created,
+            contact=contact,
+            conversation=conversation,
+        )
+    except Exception:
+        logger.exception(
+            "[FLOW CREATE LEAD REALTIME FAILED] tenant_id=%s lead_id=%s",
+            tenant_id,
+            getattr(result.lead, "id", None),
+        )
+
+    return result

@@ -198,3 +198,144 @@ def test_ensure_whatsapp_lead_for_inbound_logs_new_conversation_activity(monkeyp
     assert result.lead.email == "c@example.com"
     assert [row["action"] for row in db.audit_rows] == ["LEAD_CREATED", "CONVERSATION_STARTED"]
     assert db.audit_rows[1]["metadata"]["event"] == "Nova conversa iniciada"
+
+
+def test_create_or_update_lead_from_flow_action_creates_linked_lead_with_audit_and_realtime(monkeypatch):
+    db = _FakeDB()
+    stage = SimpleNamespace(id="stage-novo", name="Novo")
+    contact = SimpleNamespace(
+        id="contact-1",
+        tenant_id="tenant-1",
+        phone="5511999990001",
+        name="Contato Fallback",
+        email="c@example.com",
+    )
+    conversation = SimpleNamespace(id="conversation-1", tenant_id="tenant-1", phone_number="5511999990001")
+    published = []
+
+    def fake_execute(statement):
+        text = str(statement)
+        if "FROM contacts" in text:
+            return _FakeExecuteResult(contact)
+        if "FROM conversations" in text:
+            return _FakeExecuteResult(conversation)
+        return _FakeDB.execute(db, statement)
+
+    db.execute = fake_execute
+    monkeypatch.setattr(lead_auto_service, "get_first_pipeline_stage", lambda _db, _tenant_id: stage)
+    monkeypatch.setattr(lead_auto_service, "write_audit_log", lambda db, **kwargs: db.audit_rows.append(kwargs))
+    monkeypatch.setattr(lead_auto_service, "sync_publish", lambda channel, payload: published.append((channel, payload)))
+
+    result = lead_auto_service.create_or_update_lead_from_flow_action(
+        db,
+        tenant_id="tenant-1",
+        phone="+55 (11) 99999-0001",
+        contact_id="contact-1",
+        conversation_id="conversation-1",
+        lead_name="Lead Param",
+        last_message="Mensagem do runtime",
+        metadata={"contact_name": "Metadata Nome"},
+    )
+
+    assert result is not None
+    assert result.created is True
+    assert result.lead.phone == "5511999990001"
+    assert result.lead.name == "Lead Param"
+    assert result.lead.contact_id == "contact-1"
+    assert result.lead.conversation_id == "conversation-1"
+    assert result.lead.last_message == "Mensagem do runtime"
+    assert [row["action"] for row in db.audit_rows] == ["LEAD_CREATED", "FLOW_LEAD_CREATED"]
+    assert db.audit_rows[-1]["metadata"]["event"] == "Lead criado automaticamente pelo Flow Builder."
+    assert published[0][0] == "dashboard:tenant-1"
+    assert published[0][1]["event"] == "lead_created"
+
+
+def test_create_or_update_lead_from_flow_action_updates_existing_without_duplicate_and_metadata_name(monkeypatch):
+    existing = Lead(tenant_id="tenant-1", phone="5511999990001", name="5511999990001", score=0)
+    db = _FakeDB(existing_lead=existing)
+    contact = SimpleNamespace(
+        id="contact-1", tenant_id="tenant-1", phone="5511999990001", name="Contato Fallback"
+    )
+    conversation = SimpleNamespace(id="conversation-1", tenant_id="tenant-1", phone_number="5511999990001")
+    published = []
+
+    def fake_execute(statement):
+        text = str(statement)
+        if "FROM contacts" in text:
+            return _FakeExecuteResult(contact)
+        if "FROM conversations" in text:
+            return _FakeExecuteResult(conversation)
+        return _FakeDB.execute(db, statement)
+
+    db.execute = fake_execute
+    monkeypatch.setattr(
+        lead_auto_service,
+        "get_first_pipeline_stage",
+        lambda _db, _tenant_id: SimpleNamespace(id="stage-novo", name="Novo"),
+    )
+    monkeypatch.setattr(lead_auto_service, "write_audit_log", lambda db, **kwargs: db.audit_rows.append(kwargs))
+    monkeypatch.setattr(lead_auto_service, "sync_publish", lambda channel, payload: published.append((channel, payload)))
+
+    result = lead_auto_service.create_or_update_lead_from_flow_action(
+        db,
+        tenant_id="tenant-1",
+        phone="5511999990001",
+        contact_id="contact-1",
+        conversation_id="conversation-1",
+        last_message="Nova mensagem",
+        metadata={"contact_name": "Nome Metadata"},
+    )
+
+    assert result is not None
+    assert result.created is False
+    assert result.lead is existing
+    assert db.added == []
+    assert existing.name == "Nome Metadata"
+    assert existing.contact_id == "contact-1"
+    assert existing.conversation_id == "conversation-1"
+    assert existing.last_message == "Nova mensagem"
+    assert [row["action"] for row in db.audit_rows] == ["FLOW_LEAD_UPDATED"]
+    assert db.audit_rows[0]["metadata"]["event"] == "Lead atualizado automaticamente pelo Flow Builder."
+    assert published[0][1]["event"] == "lead_updated"
+
+
+def test_create_or_update_lead_from_flow_action_uses_contact_name_fallback(monkeypatch):
+    db = _FakeDB()
+    contact = SimpleNamespace(
+        id="contact-1", tenant_id="tenant-1", phone="5511999990001", name="Nome Contato", email=None
+    )
+
+    def fake_execute(statement):
+        text = str(statement)
+        if "FROM contacts" in text:
+            return _FakeExecuteResult(contact)
+        if "FROM conversations" in text:
+            return _FakeExecuteResult(None)
+        return _FakeDB.execute(db, statement)
+
+    db.execute = fake_execute
+    monkeypatch.setattr(lead_auto_service, "get_first_pipeline_stage", lambda _db, _tenant_id: None)
+    monkeypatch.setattr(lead_auto_service, "write_audit_log", lambda db, **kwargs: db.audit_rows.append(kwargs))
+    monkeypatch.setattr(lead_auto_service, "sync_publish", lambda channel, payload: None)
+
+    result = lead_auto_service.create_or_update_lead_from_flow_action(
+        db,
+        tenant_id="tenant-1",
+        phone="5511999990001",
+        contact_id="contact-1",
+    )
+
+    assert result is not None
+    assert result.lead.name == "Nome Contato"
+
+
+def test_create_or_update_lead_from_flow_action_skips_missing_phone(monkeypatch):
+    db = _FakeDB()
+    monkeypatch.setattr(lead_auto_service, "write_audit_log", lambda db, **kwargs: db.audit_rows.append(kwargs))
+    monkeypatch.setattr(lead_auto_service, "sync_publish", lambda channel, payload: None)
+
+    result = lead_auto_service.create_or_update_lead_from_flow_action(db, tenant_id="tenant-1", phone="")
+
+    assert result is None
+    assert db.added == []
+    assert db.audit_rows == []
