@@ -292,7 +292,8 @@ export type FlowNodePayload = {
     sections?: unknown[];
     condition?: string;
     action?: string;
-    action_type?: 'create_lead' | 'add_tag' | 'notify_team' | 'transfer_human';
+    action_type?: 'create_lead' | 'add_tag' | 'notify_team' | 'transfer_human' | 'set_conversation_mode';
+    mode?: 'human' | 'bot' | 'ai';
     params?: Record<string, unknown>;
     tag?: string;
     message?: string;

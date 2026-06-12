@@ -28,6 +28,7 @@ from app.schemas.chat import (
 from app.services.contact_sync_service import ensure_conversation_contact_link, upsert_contact_for_phone
 from app.services.contact_event_service import register_contact_event
 from app.services.contact_tag_service import add_tag_to_contact
+from app.services.conversation_mode_service import ConversationModeError, set_conversation_mode
 from app.services.flow_engine_service import get_active_visual_flow
 from app.services.conversation_service import get_or_create_conversation
 from app.services.lead_service import get_or_create_lead
@@ -751,11 +752,20 @@ async def update_conversation_mode(
                 detail="Nenhum fluxo publicado válido encontrado para este atendimento.",
             ) from exc
 
-    conversation.mode = mode
-    conversation.updated_at = datetime.utcnow()
+    try:
+        set_conversation_mode(
+            db,
+            tenant_id=tenant.id,
+            conversation=conversation,
+            mode=mode,
+            source="inbox",
+            allow_flow=True,
+            commit=True,
+            publish_realtime=False,
+        )
+    except ConversationModeError as exc:
+        raise HTTPException(status_code=400, detail="Invalid mode") from exc
 
-    db.commit()
-    db.refresh(conversation)
     await publish_dashboard_event(
         tenant_id=tenant.id,
         payload={

@@ -21,6 +21,7 @@ from app.flow_v2.models import FlowV2ScheduledJob
 from app.models.contact import Contact
 from app.models.conversation import Conversation
 from app.services.contact_tag_service import add_tag_to_contact
+from app.services.conversation_mode_service import ConversationModeError, set_conversation_mode
 from app.flow_v2.snapshot import FlowV2Snapshot, build_transitions_from_edges
 from app.flow_v2.transition_resolver import TransitionResolver
 
@@ -839,6 +840,7 @@ class ActionNodeExecutor(BaseNodeExecutor):
         "add_tag",
         "notify_team",
         "transfer_human",
+        "set_conversation_mode",
     }
 
     def execute(
@@ -886,7 +888,7 @@ class ActionNodeExecutor(BaseNodeExecutor):
     def _action_params(node: dict[str, Any], data: dict[str, Any]) -> dict[str, Any]:
         raw_params = data.get("params") or data.get("parameters") or node.get("params") or node.get("parameters")
         params = dict(raw_params) if isinstance(raw_params, dict) else {}
-        for key in ("tag", "message", "reason", "lead_name"):
+        for key in ("tag", "message", "reason", "lead_name", "mode"):
             if key in data and key not in params:
                 params[key] = data[key]
         return params
@@ -909,7 +911,17 @@ class ActionNodeExecutor(BaseNodeExecutor):
             elif action_type == "notify_team":
                 self._notify_team(session=session, node_id=node_id, runtime_input=runtime_input, params=params)
             elif action_type == "transfer_human":
-                self._transfer_human(db, runtime_input=runtime_input, params=params)
+                self._transfer_human(db, session=session, runtime_input=runtime_input, params=params)
+            elif action_type == "set_conversation_mode":
+                self._set_conversation_mode(db, session=session, runtime_input=runtime_input, params=params)
+        except ConversationModeError as exc:
+            logger.warning(
+                "[ACTION NODE FAILED CONTROLLED] node_id=%s action_type=%s error=%s",
+                node_id,
+                action_type,
+                exc,
+            )
+            raise RuntimeError(str(exc)) from exc
         except Exception:
             logger.exception(
                 "[ACTION NODE FAILED] node_id=%s action_type=%s",
@@ -977,14 +989,44 @@ class ActionNodeExecutor(BaseNodeExecutor):
         )
 
     @staticmethod
-    def _transfer_human(db, *, runtime_input: RuntimeInput, params: dict[str, Any]) -> None:
+    def _transfer_human(db, *, session: Any, runtime_input: RuntimeInput, params: dict[str, Any]) -> None:
+        params = {**params, "mode": "human"}
+        ActionNodeExecutor._set_conversation_mode(
+            db,
+            session=session,
+            runtime_input=runtime_input,
+            params=params,
+            compatibility_action="transfer_human",
+        )
+
+    @staticmethod
+    def _set_conversation_mode(
+        db,
+        *,
+        session: Any,
+        runtime_input: RuntimeInput,
+        params: dict[str, Any],
+        compatibility_action: str | None = None,
+    ) -> None:
         conversation = ActionNodeExecutor._resolve_conversation(db, runtime_input=runtime_input)
         if conversation is None:
             return
-        conversation.mode = "human"
+        mode = str(params.get("mode") or "").strip().lower()
         context = dict(getattr(conversation, "context", None) or {})
-        context["transfer_reason"] = str(params.get("reason") or "flow_action")
-        conversation.context = context
+        if compatibility_action == "transfer_human":
+            context["transfer_reason"] = str(params.get("reason") or "flow_action")
+            conversation.context = context
+        set_conversation_mode(
+            db,
+            tenant_id=session.tenant_id,
+            conversation=conversation,
+            mode=mode,
+            flow_execution_id=getattr(session, "id", None),
+            source=compatibility_action or "flow_v2_action",
+            reason=str(params.get("reason") or compatibility_action or "flow_action"),
+            commit=hasattr(db, "commit"),
+            publish_realtime=hasattr(db, "commit"),
+        )
 
     @staticmethod
     def _resolve_contact(db, *, runtime_input: RuntimeInput):
