@@ -9,8 +9,11 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.models import Contact, Conversation, Lead, PipelineStage, TenantUser
-from app.models.lead import LeadSource, LeadStage, LeadStatus
+from app.models.contact import Contact
+from app.models.conversation import Conversation
+from app.models.lead import Lead, LeadSource, LeadStage, LeadStatus
+from app.models.pipeline_stage import PipelineStage
+from app.models.user import TenantUser
 from app.services.audit_service import write_audit_log
 from app.services.pipeline_service import get_first_pipeline_stage
 from app.services.realtime_service import sync_publish

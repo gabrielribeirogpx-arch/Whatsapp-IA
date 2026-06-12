@@ -8,7 +8,8 @@ from uuid import UUID
 from fastapi import Request
 from sqlalchemy.orm import Session
 
-from app.models import AuditLog, TenantUser
+from app.models.audit_log import AuditLog
+from app.models.user import TenantUser
 from app.security.turnstile import get_client_ip
 
 

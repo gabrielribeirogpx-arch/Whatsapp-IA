@@ -1,7 +1,7 @@
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import PipelineStage
+from app.models.pipeline_stage import PipelineStage
 
 WORKSPACE_PROFILE_PRIVATE_SALES = "private_sales"
 WORKSPACE_PROFILE_GOVERNMENT = "government"
