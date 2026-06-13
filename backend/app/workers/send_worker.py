@@ -61,6 +61,24 @@ def _media_url_headers(media_url: str) -> tuple[str, int, int]:
         return 0, "", 0
 
 
+VIDEO_META_MAX_BYTES = int(os.getenv("FLOW_MEDIA_VIDEO_META_MAX_BYTES", str(16 * 1024 * 1024)))
+
+
+def _validate_video_media_preflight(*, media_url: str, status_code: int, content_type: str, content_length: int) -> None:
+    if status_code not in {200, 206}:
+        logger.error("[MEDIA SEND PREFLIGHT BLOCKED] media_type=video reason=public_url_unreachable media_url=%s status_code=%s", media_url, status_code)
+        raise RuntimeError("URL pública do vídeo não está acessível para envio à Meta.")
+    if content_type not in {"video/mp4", "video/3gpp"}:
+        logger.error("[MEDIA SEND PREFLIGHT BLOCKED] media_type=video reason=invalid_content_type media_url=%s content_type=%s", media_url, content_type)
+        raise RuntimeError("Este vídeo não é compatível com WhatsApp. Use MP4 H.264 com áudio AAC.")
+    if content_length <= 0:
+        logger.error("[MEDIA SEND PREFLIGHT BLOCKED] media_type=video reason=invalid_content_length media_url=%s content_length=%s", media_url, content_length)
+        raise RuntimeError("Content-Length do vídeo inválido para envio à Meta.")
+    if content_length > VIDEO_META_MAX_BYTES:
+        logger.error("[MEDIA SEND PREFLIGHT BLOCKED] media_type=video reason=size_limit media_url=%s content_length=%s limit=%s", media_url, content_length, VIDEO_META_MAX_BYTES)
+        raise RuntimeError(f"Vídeo excede o limite de {VIDEO_META_MAX_BYTES} bytes.")
+
+
 SEND_LOCK_TTL_SECONDS = int(os.getenv("SEND_LOCK_TTL_SECONDS", "120"))
 SEND_LOCK_WAIT_TIMEOUT_SECONDS = float(os.getenv("SEND_LOCK_WAIT_TIMEOUT_SECONDS", "45"))
 SEND_LOCK_RETRY_INTERVAL_SECONDS = float(os.getenv("SEND_LOCK_RETRY_INTERVAL_SECONDS", "0.25"))
@@ -508,6 +526,13 @@ def send_whatsapp_message(*, message_data: dict[str, Any]) -> None:
             media_content_type,
             media_content_length,
         )
+        if media_type == "video":
+            _validate_video_media_preflight(
+                media_url=media_url,
+                status_code=media_status_code,
+                content_type=media_content_type,
+                content_length=media_content_length,
+            )
     logger.info(
         "[V2 SEND WORKER] tenant_id=%s provider_id=%s session_id=%s conversation_id=%s contact_id=%s flow_id=%s phone=%s metadata_keys=%s payload_json=%s",
         tenant_id or "",
