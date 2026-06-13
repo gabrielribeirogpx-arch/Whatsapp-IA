@@ -20,8 +20,11 @@ from app.flow_v2.contracts import FlowV2EventType, RuntimeInput
 from app.flow_v2.models import FlowV2ScheduledJob
 from app.models.contact import Contact
 from app.models.conversation import Conversation
+from app.models.conversation_log import ConversationLog
 from app.services.contact_tag_service import add_tag_to_contact
 from app.services.conversation_mode_service import ConversationModeError, set_conversation_mode
+from app.services.audit_service import write_audit_log
+from app.services.realtime_service import sync_publish
 from app.flow_v2.snapshot import FlowV2Snapshot, build_transitions_from_edges
 from app.flow_v2.transition_resolver import TransitionResolver
 
@@ -888,7 +891,16 @@ class ActionNodeExecutor(BaseNodeExecutor):
     def _action_params(node: dict[str, Any], data: dict[str, Any]) -> dict[str, Any]:
         raw_params = data.get("params") or data.get("parameters") or node.get("params") or node.get("parameters")
         params = dict(raw_params) if isinstance(raw_params, dict) else {}
-        for key in ("tag", "message", "reason", "lead_name", "mode"):
+        for key in (
+            "tag",
+            "message",
+            "reason",
+            "lead_name",
+            "mode",
+            "notification_title",
+            "notification_message",
+            "notification_priority",
+        ):
             if key in data and key not in params:
                 params[key] = data[key]
         return params
@@ -909,7 +921,7 @@ class ActionNodeExecutor(BaseNodeExecutor):
             elif action_type == "add_tag":
                 self._add_tag(db, session=session, runtime_input=runtime_input, params=params)
             elif action_type == "notify_team":
-                self._notify_team(session=session, node_id=node_id, runtime_input=runtime_input, params=params)
+                self._notify_team(db, session=session, node_id=node_id, runtime_input=runtime_input, params=params)
             elif action_type == "transfer_human":
                 self._transfer_human(db, session=session, runtime_input=runtime_input, params=params)
             elif action_type == "set_conversation_mode":
@@ -976,17 +988,107 @@ class ActionNodeExecutor(BaseNodeExecutor):
         )
 
     @staticmethod
-    def _notify_team(*, session: Any, node_id: str, runtime_input: RuntimeInput, params: dict[str, Any]) -> None:
-        # MVP: record an operational notification intent in logs without stopping the flow.
+    def _notify_team(db, *, session: Any, node_id: str, runtime_input: RuntimeInput, params: dict[str, Any]) -> None:
+        conversation = ActionNodeExecutor._resolve_conversation(db, runtime_input=runtime_input)
+        if conversation is None:
+            logger.info(
+                "[ACTION NOTIFY TEAM SKIPPED] tenant_id=%s session_id=%s node_id=%s conversation_id=%s reason=conversation_not_found_or_tenant_mismatch",
+                session.tenant_id,
+                session.id,
+                node_id,
+                runtime_input.conversation_id,
+            )
+            return
+
+        title = str(params.get("notification_title") or params.get("title") or "").strip()
+        message = str(
+            params.get("notification_message")
+            or params.get("message")
+            or "Novo atendimento requer atenção"
+        ).strip()
+        priority = ActionNodeExecutor._notification_priority(params.get("notification_priority") or params.get("priority"))
+        display_text = " — ".join(part for part in (title, message) if part) or "Equipe notificada"
+        metadata = {
+            "tenant_id": str(session.tenant_id),
+            "conversation_id": str(conversation.id),
+            "title": title or None,
+            "message": message,
+            "priority": priority,
+            "flow_execution_id": str(getattr(session, "id", "") or "") or None,
+            "node_id": node_id,
+        }
+
+        write_audit_log(
+            db,
+            action="TEAM_NOTIFICATION_CREATED",
+            tenant_id=session.tenant_id,
+            entity_type="conversation",
+            entity_id=conversation.id,
+            metadata=metadata,
+        )
+
+        activity = ConversationLog(
+            tenant_id=session.tenant_id,
+            conversation_id=conversation.id,
+            message=display_text,
+            mode="human",
+            intent="team_notification",
+            flow_step=node_id,
+            used_fallback=False,
+            response="Equipe notificada",
+            created_at=datetime.utcnow(),
+        )
+        if hasattr(db, "add"):
+            db.add(activity)
+
+        conversation.updated_at = datetime.utcnow()
+        if hasattr(db, "add"):
+            db.add(conversation)
+
+        payload = {
+            "event": "team_notification",
+            "type": "team_notification",
+            "refresh": ["activity", "conversations", "conversation"],
+            "tenant_id": str(session.tenant_id),
+            "conversation_id": str(conversation.id),
+            "phone": getattr(conversation, "phone_number", None),
+            "title": title,
+            "message": message,
+            "priority": priority,
+            "activity": {
+                "id": str(getattr(activity, "id", "") or uuid.uuid4()),
+                "type": "TEAM_NOTIFICATION_CREATED",
+                "title": title or "Equipe notificada",
+                "description": message,
+                "entity_type": "conversation",
+                "entity_id": str(conversation.id),
+                "contact_name": getattr(conversation, "name", None),
+                "phone": getattr(conversation, "phone_number", None),
+                "created_at": activity.created_at.isoformat(),
+            },
+        }
+        sync_publish(f"dashboard:{session.tenant_id}", payload)
+        sync_publish(f"{session.tenant_id}:{conversation.id}", payload)
+        phone_number = getattr(conversation, "phone_number", None)
+        if phone_number:
+            sync_publish(f"{session.tenant_id}:{phone_number}", payload)
+
         logger.info(
-            "[ACTION NOTIFY TEAM] tenant_id=%s session_id=%s node_id=%s conversation_id=%s contact_id=%s message=%s",
+            "[ACTION NOTIFY TEAM] tenant_id=%s session_id=%s node_id=%s conversation_id=%s priority=%s title=%s message=%s",
             session.tenant_id,
             session.id,
             node_id,
-            runtime_input.conversation_id,
-            runtime_input.contact_id,
-            str(params.get("message") or "Novo atendimento requer atenção")[:200],
+            conversation.id,
+            priority,
+            title,
+            message[:200],
         )
+
+    @staticmethod
+    def _notification_priority(value: Any) -> str:
+        normalized = str(value or "normal").strip().lower()
+        aliases = {"low": "low", "baixa": "low", "normal": "normal", "high": "high", "alta": "high"}
+        return aliases.get(normalized, "normal")
 
     @staticmethod
     def _transfer_human(db, *, session: Any, runtime_input: RuntimeInput, params: dict[str, Any]) -> None:

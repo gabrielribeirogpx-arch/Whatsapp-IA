@@ -1565,3 +1565,92 @@ def test_create_lead_terminal_action_completes_when_service_fails(monkeypatch) -
     assert output.effects == ()
     assert session.status == FlowV2SessionStatus.COMPLETED
     assert session.current_node_id is None
+
+
+def _notify_team_snapshot(*, params=None, with_next=False):
+    nodes = [{"id": "action", "type": "action", "data": {"action_type": "notify_team", **({"params": params} if params is not None else {})}}]
+    edges = []
+    if with_next:
+        nodes.append({"id": "end", "type": "message", "content": "Operador avisado"})
+        edges.append({"id": "e1", "source": "action", "target": "end"})
+    return {"schema_version": 1, "start_node_id": "action", "nodes": nodes, "edges": edges}
+
+
+def _attach_notify_conversation(db, snapshot, *, tenant_id=None):
+    conversation = SimpleNamespace(
+        id=uuid.uuid4(),
+        tenant_id=tenant_id or snapshot.tenant_id,
+        contact_id=uuid.uuid4(),
+        phone_number="+5511999999999",
+        name="Cliente Teste",
+        updated_at=None,
+    )
+    db.conversation = conversation
+    return conversation
+
+
+def test_notify_team_creates_activity_audit_realtime_and_defaults_priority(monkeypatch) -> None:
+    from app.flow_v2 import node_executors
+
+    published = []
+    monkeypatch.setattr(node_executors, "sync_publish", lambda channel, payload: published.append((channel, payload)))
+    executor, snapshot, _event_store, session, db = _executor(
+        _notify_team_snapshot(params={"notification_title": "Financeiro", "notification_message": "Cliente aguardando pagamento."})
+    )
+    conversation = _attach_notify_conversation(db, snapshot)
+
+    output = executor.handle_input(db, _input_for_contact(snapshot, contact_id=conversation.contact_id, conversation_id=conversation.id))
+
+    assert output.status == FlowV2SessionStatus.COMPLETED
+    audit = next(item for item in db.added if item.__class__.__name__ == "AuditLog")
+    assert audit.action == "TEAM_NOTIFICATION_CREATED"
+    assert audit.tenant_id == snapshot.tenant_id
+    assert audit.entity_id == str(conversation.id)
+    assert audit.metadata_json["title"] == "Financeiro"
+    assert audit.metadata_json["message"] == "Cliente aguardando pagamento."
+    assert audit.metadata_json["priority"] == "normal"
+    assert audit.metadata_json["flow_execution_id"] == str(session.id)
+    activity = next(item for item in db.added if item.__class__.__name__ == "ConversationLog")
+    assert activity.tenant_id == snapshot.tenant_id
+    assert activity.conversation_id == conversation.id
+    assert activity.intent == "team_notification"
+    assert activity.response == "Equipe notificada"
+    assert "Financeiro" in activity.message
+    assert any(channel == f"dashboard:{snapshot.tenant_id}" and payload["event"] == "team_notification" for channel, payload in published)
+    assert any(channel == f"{snapshot.tenant_id}:{conversation.id}" for channel, _payload in published)
+    assert any(payload["priority"] == "normal" for _channel, payload in published)
+
+
+def test_notify_team_high_priority_and_runtime_continues_to_message(monkeypatch) -> None:
+    from app.flow_v2 import node_executors
+
+    published = []
+    monkeypatch.setattr(node_executors, "sync_publish", lambda channel, payload: published.append((channel, payload)))
+    executor, snapshot, _event_store, _session, db = _executor(
+        _notify_team_snapshot(
+            params={"notification_title": "Financeiro", "notification_message": "Cliente aguardando pagamento.", "notification_priority": "high"},
+            with_next=True,
+        )
+    )
+    conversation = _attach_notify_conversation(db, snapshot)
+
+    output = executor.handle_input(db, _input_for_contact(snapshot, contact_id=conversation.contact_id, conversation_id=conversation.id))
+
+    assert output.status == FlowV2SessionStatus.COMPLETED
+    assert output.effects == ({"type": "send_message", "text": "Operador avisado"},)
+    assert any(payload["priority"] == "high" for _channel, payload in published)
+
+
+def test_notify_team_respects_tenant_isolation(monkeypatch) -> None:
+    from app.flow_v2 import node_executors
+
+    published = []
+    monkeypatch.setattr(node_executors, "sync_publish", lambda channel, payload: published.append((channel, payload)))
+    executor, snapshot, _event_store, _session, db = _executor(_notify_team_snapshot(params={"notification_message": "Avisar"}))
+    conversation = _attach_notify_conversation(db, snapshot, tenant_id=uuid.uuid4())
+
+    output = executor.handle_input(db, _input_for_contact(snapshot, contact_id=conversation.contact_id, conversation_id=conversation.id))
+
+    assert output.status == FlowV2SessionStatus.COMPLETED
+    assert not any(item.__class__.__name__ in {"AuditLog", "ConversationLog"} for item in db.added)
+    assert published == []
