@@ -201,6 +201,7 @@ def send_media_message_via_meta(*, token: str, phone_number_id: str, to: str, me
     if normalized_type == "document" and filename:
         media_payload["filename"] = filename
     payload = {"messaging_product": "whatsapp", "to": re.sub(r"\D", "", to or ""), "type": normalized_type, normalized_type: media_payload}
+    logger.info("[META MEDIA REQUEST] flow_id=%s session_id=%s node_id=%s node_type=%s media_type=%s media_url=%s content_type=%s content_length=%s", context.get("flow_id"), context.get("session_id"), context.get("node_id"), context.get("node_type"), normalized_type, link, context.get("media_content_type"), context.get("media_content_length"))
     logger.info("[META MEDIA PAYLOAD] flow_id=%s session_id=%s node_id=%s node_type=%s media_type=%s payload_json=%s", context.get("flow_id"), context.get("session_id"), context.get("node_id"), context.get("node_type"), normalized_type, json.dumps(payload, default=str, ensure_ascii=False, sort_keys=True))
     return asyncio.run(MetaCloudClient(token).post(f"/{phone_number_id}/messages", payload=payload, context=context))
 

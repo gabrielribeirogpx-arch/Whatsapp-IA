@@ -19,6 +19,33 @@ def _json_log_payload(payload: object) -> str:
         return str(payload)
 
 
+def _log_media_delivery_statuses(payload: dict) -> None:
+    try:
+        entry = (payload.get("entry") or [None])[0] or {}
+        change = (entry.get("changes") or [None])[0] or {}
+        value = change.get("value") or {}
+        statuses = value.get("statuses") or []
+        for status_payload in statuses:
+            status = str(status_payload.get("status") or "").lower()
+            if status not in {"failed", "sent", "delivered"}:
+                continue
+            conversation = status_payload.get("conversation") or {}
+            pricing = status_payload.get("pricing") or {}
+            errors = status_payload.get("errors") or []
+            logger.info(
+                "[MEDIA WEBHOOK STATUS] message_id=%s status=%s recipient_id=%s conversation_id=%s pricing_category=%s errors=%s raw_status=%s",
+                status_payload.get("id"),
+                status,
+                status_payload.get("recipient_id"),
+                conversation.get("id"),
+                pricing.get("category"),
+                _json_log_payload(errors),
+                _json_log_payload(status_payload),
+            )
+    except Exception:
+        logger.exception("event=media_webhook_status_log_error")
+
+
 def _recalculate_campaign_metrics(db, campaign: WhatsAppCampaign) -> None:
     rows = db.execute(select(WhatsAppCampaignRecipient).where(WhatsAppCampaignRecipient.campaign_id == campaign.id)).scalars().all()
     campaign.total_recipients = len(rows)
@@ -98,6 +125,7 @@ async def enqueue_webhook_payload(request: Request) -> tuple[bool, str | None]:
     except Exception:
         logger.exception("event=webhook_correlation_parse_error correlation_id=%s stage=webhook_parse", correlation_id)
 
+    _log_media_delivery_statuses(payload)
     _update_campaign_status_from_meta(payload)
 
     try:
