@@ -191,7 +191,7 @@ class FlowV2GraphValidator:
         elif node_type == "media":
             media_type = str(node.get("media_type") or data.get("media_type") or "").strip().lower()
             media_url = str(node.get("media_url") or data.get("media_url") or data.get("url") or "").strip()
-            if media_type not in {"image", "document"}:
+            if media_type not in {"image", "document", "audio", "video"}:
                 errors.append(f"FLOW_V2_MEDIA_TYPE_INVALID:{node_id}")
             if not media_url or not media_url.startswith("https://"):
                 errors.append(f"FLOW_V2_MEDIA_URL_INVALID:{node_id}")

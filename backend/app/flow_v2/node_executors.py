@@ -237,7 +237,7 @@ class MessageNodeExecutor(BaseNodeExecutor):
 
 
 class MediaNodeExecutor(BaseNodeExecutor):
-    SUPPORTED_MEDIA_TYPES = {"image", "document"}
+    SUPPORTED_MEDIA_TYPES = {"image", "document", "audio", "video"}
 
     def execute(self, db, *, snapshot, session, node, runtime_input) -> NodeExecutionResult:
         node_id = str(node["id"])
@@ -245,6 +245,8 @@ class MediaNodeExecutor(BaseNodeExecutor):
         media_type = str(node.get("media_type") or data.get("media_type") or "").strip().lower()
         media_url = str(node.get("media_url") or data.get("media_url") or data.get("url") or "").strip()
         caption = str(node.get("caption") or data.get("caption") or "").strip() or None
+        if media_type == "audio":
+            caption = None
         filename = str(node.get("filename") or data.get("filename") or "").strip() or None
         if media_type not in self.SUPPORTED_MEDIA_TYPES:
             logger.error("[MEDIA NODE INVALID] node_id=%s reason=invalid_media_type media_type=%s", node_id, media_type or "missing")

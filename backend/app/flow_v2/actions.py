@@ -57,7 +57,7 @@ class SendMessageAction(RuntimeAction):
 
 @dataclass(frozen=True)
 class SendMediaAction(RuntimeAction):
-    media_type: Literal["image", "document"] = "image"
+    media_type: Literal["image", "document", "audio", "video"] = "image"
     media_url: str = ""
     caption: str | None = None
     filename: str | None = None
@@ -204,7 +204,7 @@ def action_from_effect(
         )
     if effect_type == "send_media":
         media_type = str(effect.get("media_type") or "").strip().lower()
-        if media_type not in {"image", "document"}:
+        if media_type not in {"image", "document", "audio", "video"}:
             return None
         return SendMediaAction(
             tenant_id=tenant_id,

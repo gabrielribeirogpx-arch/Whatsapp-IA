@@ -352,7 +352,15 @@ class WhatsAppAdapter:
             logger.info("[V2 CHANNEL ADAPTER] dispatch action_type=%s tenant_id=%s provider_id=%s session_id=%s conversation_id=%s contact_id=%s media_type=%s", action.action_type, action.tenant_id, action.metadata.get("provider_id"), action.session_id, action.conversation_id, action.contact_id, action.media_type)
             if action.media_type == "document":
                 return self.send_document(recipient_id=action.external_user_id, document_url=action.media_url, caption=action.caption, filename=action.filename, tenant_id=action.tenant_id, session_id=action.session_id, conversation_id=action.conversation_id, contact_id=action.contact_id, metadata=action.metadata)
-            return self.send_image(recipient_id=action.external_user_id, image_url=action.media_url, caption=action.caption, tenant_id=action.tenant_id, session_id=action.session_id, conversation_id=action.conversation_id, contact_id=action.contact_id, metadata=action.metadata)
+            if action.media_type == "image":
+                return self.send_image(recipient_id=action.external_user_id, image_url=action.media_url, caption=action.caption, tenant_id=action.tenant_id, session_id=action.session_id, conversation_id=action.conversation_id, contact_id=action.contact_id, metadata=action.metadata)
+            metadata = dict(action.metadata or {})
+            if self.client is None:
+                return {"status": "mocked", "channel": "whatsapp", "type": action.media_type, "recipient_id": action.external_user_id, "media_url": action.media_url, "caption": None if action.media_type == "audio" else action.caption, "metadata": metadata}
+            from app.services.queue import enqueue_send_message
+            payload = self._media_queue_payload(recipient_id=action.external_user_id, media_type=action.media_type, media_url=action.media_url, caption=None if action.media_type == "audio" else action.caption, filename=None, tenant_id=action.tenant_id, session_id=action.session_id, conversation_id=action.conversation_id, contact_id=action.contact_id, metadata=metadata)
+            job_id = enqueue_send_message(payload)
+            return {"status": "queued" if job_id else "skipped", "channel": "whatsapp", "type": action.media_type, "recipient_id": action.external_user_id, "job_id": job_id, "tenant_id": payload.get("tenant_id")}
         if isinstance(action, SendChoiceButtonsAction):
             logger.info(
                 "[V2 CHANNEL ADAPTER] dispatch action_type=%s tenant_id=%s provider_id=%s session_id=%s conversation_id=%s contact_id=%s node_id=%s buttons_count=%s",

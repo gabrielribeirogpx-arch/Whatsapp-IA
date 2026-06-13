@@ -30,7 +30,13 @@ export default function MessageBubble({ message }: MessageBubbleProps) {
 
   return (
     <article className={`wa-message-bubble ${message.fromMe ? 'mine' : 'theirs'} ${message.isNew ? 'is-new' : ''}`}>
-      <p>{isMedia ? '📎 ' : null}{renderMessageText(message.text || (message.mediaUrl ? `Mídia enviada: ${message.mediaUrl}` : 'Mídia enviada'))}</p>
+      {message.mediaType === 'audio' && message.mediaUrl ? (
+        <audio controls src={message.mediaUrl} style={{ width: '100%' }}>Áudio: {message.mediaUrl}</audio>
+      ) : null}
+      {message.mediaType === 'video' && message.mediaUrl ? (
+        <video controls src={message.mediaUrl} style={{ width: '100%', borderRadius: 8 }}>Vídeo: {message.mediaUrl}</video>
+      ) : null}
+      <p>{isMedia ? '📎 ' : null}{renderMessageText(message.text || message.caption || (message.mediaUrl ? `Mídia enviada: ${message.mediaUrl}` : 'Mídia enviada'))}</p>
       <time>
         {message.time}
         {message.fromMe ? (

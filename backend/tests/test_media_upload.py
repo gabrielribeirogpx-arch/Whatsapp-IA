@@ -138,3 +138,33 @@ def test_media_upload_pdf_is_publicly_served_with_pdf_headers(tmp_path, monkeypa
     assert get_response.headers["content-type"].startswith("application/pdf")
     assert get_response.content == pdf_bytes
     assert get_response.content.startswith(b"%PDF")
+
+
+def test_media_upload_accepts_valid_mp3(tmp_path, monkeypatch):
+    client = _client(tmp_path, monkeypatch)
+
+    response = client.post(
+        "/api/media/upload",
+        headers=_headers(),
+        files={"file": ("audio.mp3", b"ID3\x03\x00", "audio/mpeg")},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["url"].endswith(".mp3")
+    assert body["mime_type"] == "audio/mpeg"
+
+
+def test_media_upload_accepts_valid_mp4(tmp_path, monkeypatch):
+    client = _client(tmp_path, monkeypatch)
+
+    response = client.post(
+        "/api/media/upload",
+        headers=_headers(),
+        files={"file": ("video.mp4", b"\x00\x00\x00\x18ftypmp42", "video/mp4")},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["url"].endswith(".mp4")
+    assert body["mime_type"] == "video/mp4"
