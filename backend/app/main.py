@@ -20,6 +20,7 @@ from app.routers import products
 from app.routers import knowledge
 from app.routers import leads
 from app.routers import dashboard
+from app.routers import tasks
 from app.routers import settings
 from app.routers import account
 from app.routers import bot_rules
@@ -82,6 +83,8 @@ def ensure_conversations_columns():
         "ALTER TABLE flow_versions ADD COLUMN IF NOT EXISTS start_node_id VARCHAR;",
         "ALTER TABLE flow_versions ADD COLUMN IF NOT EXISTS start_text_preview VARCHAR(255);",
         "ALTER TABLE flow_versions ADD COLUMN IF NOT EXISTS created_from_source VARCHAR(64);",
+        "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS completed_at TIMESTAMP;",
+        "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS completed_by UUID;",
     ]
     try:
         with engine.begin() as connection:
@@ -221,6 +224,7 @@ app.include_router(products.router, prefix="/api")
 app.include_router(knowledge.router, prefix="/api")
 app.include_router(leads.router, prefix="/api")
 app.include_router(dashboard.router, prefix="/api")
+app.include_router(tasks.router, prefix="/api")
 app.include_router(settings.router, prefix="/api")
 app.include_router(account.router, prefix="/api")
 app.include_router(bot_rules.router)
