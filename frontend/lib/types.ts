@@ -306,7 +306,7 @@ export type FlowNodePayload = {
     notification_title?: string;
     notification_message?: string;
     notification_priority?: 'low' | 'normal' | 'high';
-    media_type?: 'image' | 'document';
+    media_type?: 'image' | 'document' | 'audio' | 'video';
     media_url?: string;
     caption?: string;
     filename?: string;

@@ -447,6 +447,8 @@ def send_whatsapp_message(*, message_data: dict[str, Any]) -> None:
     media_type = str(message_data.get("media_type") or "").strip().lower()
     media_url = str(message_data.get("media_url") or "").strip()
     media_caption = str(message_data.get("caption") or "").strip() or None
+    if media_type == "audio":
+        media_caption = None
     media_filename = str(message_data.get("filename") or "").strip() or None
     buttons = message_data.get("buttons")
     interactive_type = str(message_data.get("interactive_type") or ("button" if isinstance(buttons, list) and buttons else "")).strip().lower()

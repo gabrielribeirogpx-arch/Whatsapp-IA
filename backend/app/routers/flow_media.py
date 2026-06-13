@@ -17,20 +17,44 @@ media_router = APIRouter(prefix="/api/media", tags=["media"])
 public_router = APIRouter(tags=["flow-media-public"])
 
 UPLOAD_ROOT = Path(os.getenv("FLOW_MEDIA_UPLOAD_DIR", "uploads/flow-media"))
-ALLOWED_CONTENT_TYPES = {"image/jpeg", "image/png", "image/webp", "application/pdf"}
+ALLOWED_CONTENT_TYPES = {
+    "image/jpeg", "image/png", "image/webp", "application/pdf",
+    "audio/mpeg", "audio/mp3", "audio/ogg", "audio/webm", "audio/wav", "audio/aac", "audio/mp4",
+    "video/mp4", "video/3gpp", "video/quicktime",
+}
 SAFE_SUFFIX_BY_CONTENT_TYPE = {
     "image/jpeg": ".jpg",
     "image/png": ".png",
     "image/webp": ".webp",
     "application/pdf": ".pdf",
+    "audio/mpeg": ".mp3",
+    "audio/mp3": ".mp3",
+    "audio/ogg": ".ogg",
+    "audio/webm": ".webm",
+    "audio/wav": ".wav",
+    "audio/aac": ".aac",
+    "audio/mp4": ".m4a",
+    "video/mp4": ".mp4",
+    "video/3gpp": ".3gp",
+    "video/quicktime": ".mov",
 }
-ALLOWED_SUFFIXES = {".jpg", ".jpeg", ".png", ".webp", ".pdf"}
+ALLOWED_SUFFIXES = {".jpg", ".jpeg", ".png", ".webp", ".pdf", ".mp3", ".ogg", ".opus", ".wav", ".aac", ".m4a", ".mp4", ".3gp", ".mov", ".webm"}
 CONTENT_TYPE_BY_SUFFIX = {
     ".jpg": "image/jpeg",
     ".jpeg": "image/jpeg",
     ".png": "image/png",
     ".webp": "image/webp",
     ".pdf": "application/pdf",
+    ".mp3": "audio/mpeg",
+    ".ogg": "audio/ogg",
+    ".opus": "audio/ogg",
+    ".wav": "audio/wav",
+    ".aac": "audio/aac",
+    ".m4a": "audio/mp4",
+    ".mp4": "video/mp4",
+    ".3gp": "video/3gpp",
+    ".mov": "video/quicktime",
+    ".webm": "audio/webm",
 }
 DANGEROUS_SUFFIXES = {
     ".ade", ".adp", ".apk", ".app", ".appx", ".bat", ".cmd", ".com", ".cpl",
@@ -40,6 +64,7 @@ DANGEROUS_SUFFIXES = {
     ".wsf", ".wsh",
 }
 DEFAULT_MAX_UPLOAD_BYTES = 10 * 1024 * 1024
+MEDIA_MAX_UPLOAD_BYTES = {"audio": 16 * 1024 * 1024, "video": 16 * 1024 * 1024}
 
 
 def _max_upload_bytes() -> int:
@@ -66,7 +91,20 @@ def _safe_suffix(filename: str, content_type: str) -> str:
     if suffix == ".jpeg" and content_type == "image/jpeg":
         return suffix
     expected = SAFE_SUFFIX_BY_CONTENT_TYPE[content_type]
-    if suffix and suffix != expected:
+    compatible_suffixes = {expected}
+    if content_type == "image/jpeg":
+        compatible_suffixes.add(".jpeg")
+    if content_type == "audio/mpeg":
+        compatible_suffixes.add(".mp3")
+    if content_type == "audio/mp3":
+        compatible_suffixes.add(".mp3")
+    if content_type == "audio/ogg":
+        compatible_suffixes.update({".ogg", ".opus"})
+    if content_type == "audio/mp4":
+        compatible_suffixes.update({".m4a", ".mp4"})
+    if content_type == "video/mp4":
+        compatible_suffixes.add(".mp4")
+    if suffix and suffix not in compatible_suffixes:
         raise HTTPException(status_code=400, detail="Extensão não corresponde ao tipo do arquivo.")
     return suffix or expected
 
@@ -129,10 +167,11 @@ async def _upload_media(request: Request, file: UploadFile = File(...)) -> JSONR
 
     content_type = str(file.content_type or "").lower()
     if content_type not in ALLOWED_CONTENT_TYPES:
-        raise HTTPException(status_code=415, detail="Tipo de arquivo não suportado. Use JPEG, PNG, WebP ou PDF.")
+        raise HTTPException(status_code=415, detail="Tipo de arquivo não suportado. Use JPEG, PNG, WebP, PDF, áudio ou vídeo compatível.")
 
     suffix = _safe_suffix(file.filename or "", content_type)
-    max_upload_bytes = _max_upload_bytes()
+    media_family = content_type.split("/", 1)[0]
+    max_upload_bytes = MEDIA_MAX_UPLOAD_BYTES.get(media_family, _max_upload_bytes())
     data = await file.read(max_upload_bytes + 1)
     if len(data) > max_upload_bytes:
         raise HTTPException(status_code=413, detail=f"Arquivo maior que {max_upload_bytes} bytes.")

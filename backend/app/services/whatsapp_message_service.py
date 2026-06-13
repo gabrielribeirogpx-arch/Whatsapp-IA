@@ -189,14 +189,14 @@ def send_text_message_via_meta(*, token: str, phone_number_id: str, to: str, tex
 
 def send_media_message_via_meta(*, token: str, phone_number_id: str, to: str, media_type: str, media_url: str, context: dict[str, Any], caption: str | None = None, filename: str | None = None) -> dict[str, Any]:
     normalized_type = str(media_type or "").strip().lower()
-    if normalized_type not in {"image", "document"}:
-        raise ValueError("media_type must be image or document")
+    if normalized_type not in {"image", "document", "audio", "video"}:
+        raise ValueError("media_type must be image, document, audio or video")
     link = str(media_url or "").strip()
     if not link.startswith("https://"):
         raise ValueError("media_url must start with https://")
     log_message_origin_trace(executor=context.get("flow_executor") or context.get("flow_send_source") or "send_media_message_via_meta", flow_id=context.get("flow_id"), node_id=context.get("node_id"), node_type=context.get("node_type"), message=caption or "📎 Mídia enviada", context=context)
     media_payload: dict[str, Any] = {"link": link}
-    if caption:
+    if caption and normalized_type != "audio":
         media_payload["caption"] = caption
     if normalized_type == "document" and filename:
         media_payload["filename"] = filename

@@ -300,7 +300,7 @@ function FlowNodeEditorPanel({
   draft: Record<string, unknown>;
   onDraftChange: (patch: Record<string, unknown>) => void;
   onClose: () => void;
-  onUpload: (file: File | null, mediaType: 'image' | 'document') => void;
+  onUpload: (file: File | null, mediaType: 'image' | 'document' | 'audio' | 'video') => void;
   isUploading: boolean;
   uploadError: string | null;
 }) {
@@ -409,7 +409,8 @@ function FlowNodeEditorPanel({
         )}
 
         {kind === 'media' && (() => {
-          const mediaType = toText(draft.media_type || 'image') === 'document' ? 'document' : 'image';
+          const rawMediaType = toText(draft.media_type || 'image');
+          const mediaType = (['image', 'document', 'audio', 'video'].includes(rawMediaType) ? rawMediaType : 'image') as 'image' | 'document' | 'audio' | 'video';
           const mediaUrl = toText(draft.media_url);
           const urlInvalid = mediaUrl.trim().length > 0 && !mediaUrl.trim().startsWith('https://');
           const sourceMode = toText(draft.media_source || (mediaUrl ? 'external' : 'upload')) === 'external' ? 'external' : 'upload';
@@ -421,10 +422,12 @@ function FlowNodeEditorPanel({
                 Tipo de mídia
                 <select
                   value={mediaType}
-                  onChange={(event) => onDraftChange({ media_type: event.target.value, ...(event.target.value === 'image' ? { filename: '' } : {}) })}
+                  onChange={(event) => onDraftChange({ media_type: event.target.value, ...(event.target.value !== 'document' ? { filename: '' } : {}), ...(event.target.value === 'audio' ? { caption: '' } : {}) })}
                 >
                   <option value="image">Imagem</option>
                   <option value="document">Documento/PDF</option>
+                  <option value="audio">Áudio</option>
+                  <option value="video">Vídeo</option>
                 </select>
               </label>
               <fieldset className="flow-editor-field">
@@ -443,7 +446,7 @@ function FlowNodeEditorPanel({
                   Arquivo
                   <input
                     type="file"
-                    accept={mediaType === 'document' ? 'application/pdf' : 'image/jpeg,image/png,image/webp'}
+                    accept={mediaType === 'document' ? 'application/pdf' : mediaType === 'audio' ? '.mp3,.ogg,.opus,.wav,.aac,.m4a,audio/mpeg,audio/mp3,audio/ogg,audio/webm,audio/wav,audio/aac,audio/mp4' : mediaType === 'video' ? '.mp4,.3gp,.mov,video/mp4,video/3gpp,video/quicktime' : 'image/jpeg,image/png,image/webp'}
                     disabled={isUploading}
                     onChange={(event) => onUpload(event.target.files?.[0] || null, mediaType)}
                   />
@@ -456,7 +459,7 @@ function FlowNodeEditorPanel({
                   <input
                     value={mediaUrl}
                     onChange={(event) => onDraftChange({ media_url: event.target.value })}
-                    placeholder={mediaType === 'document' ? 'https://exemplo.com/contrato.pdf' : 'https://exemplo.com/imagem.jpg'}
+                    placeholder={mediaType === 'document' ? 'https://exemplo.com/contrato.pdf' : mediaType === 'audio' ? 'https://exemplo.com/audio.mp3' : mediaType === 'video' ? 'https://exemplo.com/video.mp4' : 'https://exemplo.com/imagem.jpg'}
                   />
                   {!mediaUrl.trim() ? <small className="flow-editor-error">URL obrigatória para enviar a mídia.</small> : null}
                   {urlInvalid ? <small className="flow-editor-error">A URL deve começar com https://</small> : null}
@@ -468,14 +471,22 @@ function FlowNodeEditorPanel({
               {mediaUrl && mediaType === 'document' ? (
                 <div className="flow-editor-info-card"><strong>📄 PDF</strong><span>{toText(draft.filename) || 'Documento enviado'}</span></div>
               ) : null}
-              <label className="flow-editor-field">
-                Legenda/caption (opcional)
-                <textarea
-                  value={toText(draft.caption)}
-                  onChange={(event) => onDraftChange({ caption: event.target.value })}
-                  placeholder={mediaType === 'document' ? 'Segue o PDF' : 'Veja a imagem'}
-                />
-              </label>
+              {mediaUrl && mediaType === 'audio' ? (
+                <div className="flow-editor-info-card"><audio controls src={mediaUrl} style={{ width: '100%' }}>Seu navegador não suporta áudio.</audio></div>
+              ) : null}
+              {mediaUrl && mediaType === 'video' ? (
+                <div className="flow-editor-info-card"><video controls src={mediaUrl} style={{ width: '100%', borderRadius: 12 }}>Seu navegador não suporta vídeo.</video></div>
+              ) : null}
+              {mediaType !== 'audio' && (
+                <label className="flow-editor-field">
+                  Legenda/caption (opcional)
+                  <textarea
+                    value={toText(draft.caption)}
+                    onChange={(event) => onDraftChange({ caption: event.target.value })}
+                    placeholder={mediaType === 'document' ? 'Segue o PDF' : mediaType === 'video' ? 'Veja o vídeo' : 'Veja a imagem'}
+                  />
+                </label>
+              )}
               {mediaType === 'document' && (
                 <label className="flow-editor-field">
                   Nome do arquivo (opcional)
@@ -1148,7 +1159,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
     }
   }, [openNodeEditor]);
 
-  const uploadEditorMedia = useCallback(async (file: File | null, mediaType: 'image' | 'document') => {
+  const uploadEditorMedia = useCallback(async (file: File | null, mediaType: 'image' | 'document' | 'audio' | 'video') => {
     if (!file) return;
     setMediaUploadError(null);
     setIsMediaUploading(true);
@@ -1161,11 +1172,12 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
       if (!uploadedUrl.startsWith('https://')) {
         throw new Error(INVALID_UPLOAD_PUBLIC_URL_MESSAGE);
       }
-      const resolvedMediaType = result.mime_type === 'application/pdf' ? 'document' : mediaType;
+      const resolvedMediaType = result.mime_type === 'application/pdf' ? 'document' : result.mime_type?.startsWith('audio/') ? 'audio' : result.mime_type?.startsWith('video/') ? 'video' : mediaType;
       const patch = {
         media_type: resolvedMediaType,
         media_url: uploadedUrl,
-        filename: result.filename || nodeEditorDraft.filename,
+        filename: resolvedMediaType === 'document' ? (result.filename || nodeEditorDraft.filename) : '',
+        caption: resolvedMediaType === 'audio' ? '' : nodeEditorDraft.caption,
       };
       setNodeEditorDraft((prev) => ({
         ...prev,

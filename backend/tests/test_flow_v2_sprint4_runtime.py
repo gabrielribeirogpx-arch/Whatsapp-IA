@@ -669,3 +669,23 @@ def test_whatsapp_adapter_dispatches_media_actions_to_mock_delivery() -> None:
     assert delivery["status"] == "mocked"
     assert delivery["type"] == "image"
     assert delivery["image_url"] == "https://cdn.example.com/foto.jpg"
+
+
+def test_media_audio_node_generates_action_without_caption() -> None:
+    executor, snapshot, _, _, db = _executor({"schema_version": 1, "start_node_id": "media", "nodes": [{"id": "media", "type": "media", "data": {"isStart": True, "media_type": "audio", "media_url": "https://cdn.example.com/audio.mp3", "caption": "Ignorar"}}], "edges": []})
+    output = executor.handle_input(db, _input(snapshot))
+    assert output.status == FlowV2SessionStatus.COMPLETED
+    effect = output.actions[0].as_effect()
+    assert effect["media_type"] == "audio"
+    assert effect["media_url"] == "https://cdn.example.com/audio.mp3"
+    assert "caption" not in effect
+
+
+def test_media_video_node_generates_action_with_optional_caption() -> None:
+    executor, snapshot, _, _, db = _executor({"schema_version": 1, "start_node_id": "media", "nodes": [{"id": "media", "type": "media", "data": {"isStart": True, "media_type": "video", "media_url": "https://cdn.example.com/video.mp4", "caption": "Veja"}}], "edges": []})
+    output = executor.handle_input(db, _input(snapshot))
+    assert output.status == FlowV2SessionStatus.COMPLETED
+    effect = output.actions[0].as_effect()
+    assert effect["media_type"] == "video"
+    assert effect["media_url"] == "https://cdn.example.com/video.mp4"
+    assert effect["caption"] == "Veja"

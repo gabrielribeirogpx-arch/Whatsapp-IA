@@ -238,3 +238,72 @@ def test_meta_message_service_uses_choice_button_ids_and_titles(monkeypatch):
     assert posted[0]["payload"]["interactive"]["action"]["buttons"] == [
         {"type": "reply", "reply": {"id": "quero_planos", "title": "Quero planos"}}
     ]
+
+
+def test_meta_message_service_sends_audio_without_caption(monkeypatch):
+    from app.services import whatsapp_message_service
+
+    posted = []
+
+    class Client:
+        def __init__(self, token):
+            self.token = token
+
+        async def post(self, endpoint, payload, context):
+            posted.append({"endpoint": endpoint, "payload": payload, "context": context, "token": self.token})
+            return {"messages": [{"id": "wamid.audio"}]}
+
+    monkeypatch.setattr(whatsapp_message_service, "MetaCloudClient", Client)
+
+    response = whatsapp_message_service.send_media_message_via_meta(
+        token="token",
+        phone_number_id="123",
+        to="+55 11 99999-0000",
+        media_type="audio",
+        media_url="https://cdn.ex/audio.mp3",
+        caption="não enviar",
+        context={"flow_id": "flow-1", "node_id": "media-1"},
+    )
+
+    assert response["messages"][0]["id"] == "wamid.audio"
+    assert posted[0]["payload"] == {
+        "messaging_product": "whatsapp",
+        "to": "5511999990000",
+        "type": "audio",
+        "audio": {"link": "https://cdn.ex/audio.mp3"},
+    }
+
+
+def test_meta_message_service_sends_video_with_caption(monkeypatch):
+    from app.services import whatsapp_message_service
+
+    posted = []
+
+    class Client:
+        def __init__(self, token):
+            self.token = token
+
+        async def post(self, endpoint, payload, context):
+            posted.append({"endpoint": endpoint, "payload": payload, "context": context, "token": self.token})
+            return {"messages": [{"id": "wamid.video"}]}
+
+    monkeypatch.setattr(whatsapp_message_service, "MetaCloudClient", Client)
+
+    response = whatsapp_message_service.send_media_message_via_meta(
+        token="token",
+        phone_number_id="123",
+        to="5511999990000",
+        media_type="video",
+        media_url="https://cdn.ex/video.mp4",
+        caption="Veja o vídeo",
+        filename="ignorado.mp4",
+        context={"flow_id": "flow-1", "node_id": "media-1"},
+    )
+
+    assert response["messages"][0]["id"] == "wamid.video"
+    assert posted[0]["payload"] == {
+        "messaging_product": "whatsapp",
+        "to": "5511999990000",
+        "type": "video",
+        "video": {"link": "https://cdn.ex/video.mp4", "caption": "Veja o vídeo"},
+    }
