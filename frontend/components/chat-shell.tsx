@@ -1,15 +1,34 @@
-'use client';
+"use client";
 
-import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import {
+  FormEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 
-import ChatWindow from './ChatWindow';
-import Sidebar from './Sidebar';
-import CRMContactSidebar from './inbox/CRMContactSidebar';
-import { getConversations, getMessagesByConversation, resetConversation, sendMessage, updateConversationMode } from '../lib/api';
-import { ChatMessage, Contact, Conversation, ConversationMode, Message } from '../lib/types';
-import { useRealtime } from '../hooks/useRealtime';
-import { formatTimeBR } from '../lib/date';
+import ChatWindow from "./ChatWindow";
+import Sidebar from "./Sidebar";
+import CRMContactSidebar from "./inbox/CRMContactSidebar";
+import {
+  getConversations,
+  getMessagesByConversation,
+  resetConversation,
+  sendMessage,
+  updateConversationMode,
+} from "../lib/api";
+import {
+  ChatMessage,
+  Contact,
+  Conversation,
+  ConversationMode,
+  Message,
+} from "../lib/types";
+import { useRealtime } from "../hooks/useRealtime";
+import { formatTimeBR } from "../lib/date";
 
 type ConversationAssignmentSnapshot = {
   mode: string;
@@ -28,7 +47,7 @@ type ConversationModeUpdateResponse = {
   } | null;
 };
 type PresenceSnapshot = {
-  status: 'online' | 'offline';
+  status: "online" | "offline";
   lastSeen?: string | null;
   participantName?: string | null;
 };
@@ -50,22 +69,84 @@ type RealtimeEvent = {
   status?: string;
   last_seen?: string | null;
   is_typing?: boolean;
-  message?: { conversation_id: string };
+  message?: { conversation_id: string } | string | null;
   event?: string;
+  action?: string;
+  event_id?: string;
+  id?: string;
   title?: string;
   priority?: string;
+  activity?: {
+    id?: string;
+    type?: string;
+    title?: string;
+    description?: string;
+    created_at?: string;
+    entity_id?: string;
+  };
 };
 
 const RECENT_MODE_OVERRIDE_TTL_MS = 30_000;
 const TYPING_STOP_DELAY_MS = 2000;
 const TYPING_START_THROTTLE_MS = 3000;
+const TEAM_NOTIFICATION_TOAST_MS = 7000;
+const TEAM_NOTIFICATION_DEDUPE_WINDOW_MS = 3000;
 
+type TeamNotificationDetails = {
+  id: string;
+  conversationId: string;
+  title: string;
+  message: string;
+  priority: string;
+};
+
+function normalizeRealtimeType(payload: RealtimeEvent) {
+  return String(
+    payload.event || payload.type || payload.action || "",
+  ).toLowerCase();
+}
+
+function normalizePriorityLabel(priority: string) {
+  const normalized = priority.toLowerCase();
+  if (normalized === "high" || normalized === "alta") return "Alta";
+  if (normalized === "low" || normalized === "baixa") return "Baixa";
+  return "Normal";
+}
+
+function getTeamNotificationDetails(
+  payload: RealtimeEvent,
+): TeamNotificationDetails {
+  const rawMessage = typeof payload.message === "string" ? payload.message : "";
+  const title =
+    String(
+      payload.title || payload.activity?.title || "Equipe notificada",
+    ).trim() || "Equipe notificada";
+  const message = String(
+    rawMessage || payload.activity?.description || "",
+  ).trim();
+  const priority = String(payload.priority || "normal").toLowerCase();
+  const conversationId = String(
+    payload.conversation_id || payload.activity?.entity_id || "",
+  );
+  const id = String(
+    payload.event_id ||
+      payload.activity?.id ||
+      payload.id ||
+      [conversationId, title, message, priority].join("|"),
+  );
+
+  return { id, conversationId, title, message, priority };
+}
 
 function normalizeConversationMode(value: unknown): ConversationMode | null {
-  if (typeof value !== 'string') return null;
+  if (typeof value !== "string") return null;
 
   const normalizedMode = value.toLowerCase();
-  if (normalizedMode === 'human' || normalizedMode === 'bot' || normalizedMode === 'ai') {
+  if (
+    normalizedMode === "human" ||
+    normalizedMode === "bot" ||
+    normalizedMode === "ai"
+  ) {
     return normalizedMode;
   }
 
@@ -73,11 +154,11 @@ function normalizeConversationMode(value: unknown): ConversationMode | null {
 }
 
 function getAssignedUserName(conversation: Conversation) {
-  return conversation.assigned_user_name?.trim() || 'Atendente';
+  return conversation.assigned_user_name?.trim() || "Atendente";
 }
 
 function getConversationModeErrorMessage(error: unknown) {
-  const fallback = 'Não foi possível atualizar o modo.';
+  const fallback = "Não foi possível atualizar o modo.";
   if (!(error instanceof Error)) return fallback;
 
   const match = error.message.match(/^HTTP\s+\d+:\s*([\s\S]*)$/);
@@ -86,7 +167,7 @@ function getConversationModeErrorMessage(error: unknown) {
 
   try {
     const parsed = JSON.parse(rawBody) as { detail?: unknown };
-    if (typeof parsed.detail === 'string' && parsed.detail.trim()) {
+    if (typeof parsed.detail === "string" && parsed.detail.trim()) {
       return parsed.detail.trim();
     }
   } catch {
@@ -97,24 +178,25 @@ function getConversationModeErrorMessage(error: unknown) {
 }
 
 function formatPresenceStatus(snapshot?: PresenceSnapshot) {
-  if (!snapshot) return 'Ativo recentemente';
-  if (snapshot.status === 'online') return 'Online';
+  if (!snapshot) return "Ativo recentemente";
+  if (snapshot.status === "online") return "Online";
 
   if (snapshot.lastSeen) {
     const date = new Date(snapshot.lastSeen);
     if (!Number.isNaN(date.getTime())) {
-      return `Visto por último às ${date.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`;
+      return `Visto por último às ${date.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}`;
     }
   }
 
-  return 'Ativo recentemente';
+  return "Ativo recentemente";
 }
 
 function formatTypingText(snapshot?: TypingSnapshot) {
-  if (!snapshot || snapshot.expiresAt <= Date.now()) return '';
+  if (!snapshot || snapshot.expiresAt <= Date.now()) return "";
 
-  if (snapshot.participantType === 'contact') return 'Cliente está digitando...';
-  const name = snapshot.participantName?.trim() || 'Atendente';
+  if (snapshot.participantType === "contact")
+    return "Cliente está digitando...";
+  const name = snapshot.participantName?.trim() || "Atendente";
   return `${name} está digitando...`;
 }
 
@@ -122,20 +204,20 @@ function toChatMessage(message: Message): ChatMessage {
   const parsedDate = new Date(
     /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?$/.test(message.created_at)
       ? `${message.created_at}Z`
-      : message.created_at
+      : message.created_at,
   );
   const time = Number.isNaN(parsedDate.getTime())
-    ? '--:--'
+    ? "--:--"
     : formatTimeBR(message.created_at);
 
   return {
     id: String(message.id),
     text: message.content,
-    fromMe: message.role === 'assistant',
+    fromMe: message.role === "assistant",
     time,
     createdAt: message.created_at,
-    status: message.role === 'assistant' ? 'read' : 'delivered',
-    isNew: Date.now() - parsedDate.getTime() < 8000
+    status: message.role === "assistant" ? "read" : "delivered",
+    isNew: Date.now() - parsedDate.getTime() < 8000,
   };
 }
 
@@ -144,29 +226,41 @@ export default function ChatShell() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [conversations, setConversations] = useState<Conversation[]>([]);
-  const [selectedContactId, setSelectedContactId] = useState('');
+  const [selectedContactId, setSelectedContactId] = useState("");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [inputValue, setInputValue] = useState('');
+  const [inputValue, setInputValue] = useState("");
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [mode, setMode] = useState<ConversationMode>('human');
+  const [mode, setMode] = useState<ConversationMode>("human");
   const [modeUpdating, setModeUpdating] = useState(false);
-  const [modeNotice, setModeNotice] = useState('');
-  const [modeError, setModeError] = useState('');
+  const [modeNotice, setModeNotice] = useState("");
+  const [modeError, setModeError] = useState("");
   const [querySelectionMissing, setQuerySelectionMissing] = useState(false);
   const [crmOpen, setCrmOpen] = useState(false);
-  const [handoffToast, setHandoffToast] = useState('');
-  const [resetToast, setResetToast] = useState('');
-  const [teamNotificationToast, setTeamNotificationToast] = useState('');
-  const [resetError, setResetError] = useState('');
+  const [handoffToast, setHandoffToast] = useState("");
+  const [resetToast, setResetToast] = useState("");
+  const [teamNotificationToast, setTeamNotificationToast] =
+    useState<TeamNotificationDetails | null>(null);
+  const [resetError, setResetError] = useState("");
   const [resettingConversation, setResettingConversation] = useState(false);
-  const [presenceByConversation, setPresenceByConversation] = useState<Record<string, PresenceSnapshot>>({});
-  const [typingByConversation, setTypingByConversation] = useState<Record<string, TypingSnapshot>>({});
-  const previousAssignmentRef = useRef<Map<string, ConversationAssignmentSnapshot>>(new Map());
-  const recentModeOverridesRef = useRef<Map<string, ConversationModeOverride>>(new Map());
+  const [presenceByConversation, setPresenceByConversation] = useState<
+    Record<string, PresenceSnapshot>
+  >({});
+  const [typingByConversation, setTypingByConversation] = useState<
+    Record<string, TypingSnapshot>
+  >({});
+  const previousAssignmentRef = useRef<
+    Map<string, ConversationAssignmentSnapshot>
+  >(new Map());
+  const recentModeOverridesRef = useRef<Map<string, ConversationModeOverride>>(
+    new Map(),
+  );
   const hasLoadedConversationsRef = useRef(false);
-  const typingStopTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const typingStopTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
   const lastTypingStartRef = useRef(0);
-
+  const teamNotificationDedupeRef = useRef<Map<string, number>>(new Map());
+  const [crmRefreshKey, setCrmRefreshKey] = useState(0);
 
   const playHumanHandoffSound = useCallback(() => {
     // TODO: Reativar notificação sonora quando houver um asset de áudio existente/aprovado no projeto.
@@ -196,31 +290,42 @@ export default function ChatShell() {
       if (notifyHandoff && hasLoadedConversationsRef.current) {
         const assignedConversation = normalizedItems.find((conversation) => {
           const previous = previousAssignments.get(String(conversation.id));
-          const currentMode = String(conversation.mode || '').toLowerCase();
-          const currentAssignedUserId = conversation.assigned_user_id ? String(conversation.assigned_user_id) : null;
+          const currentMode = String(conversation.mode || "").toLowerCase();
+          const currentAssignedUserId = conversation.assigned_user_id
+            ? String(conversation.assigned_user_id)
+            : null;
 
           return Boolean(
             previous &&
-              previous.mode === 'human' &&
-              !previous.assignedUserId &&
-              currentMode === 'human' &&
-              currentAssignedUserId
+            previous.mode === "human" &&
+            !previous.assignedUserId &&
+            currentMode === "human" &&
+            currentAssignedUserId,
           );
         });
 
         if (assignedConversation) {
-          setHandoffToast(`${getAssignedUserName(assignedConversation)} assumiu o atendimento`);
+          setHandoffToast(
+            `${getAssignedUserName(assignedConversation)} assumiu o atendimento`,
+          );
         } else {
           const handoffConversation = normalizedItems.find((conversation) => {
             const previous = previousAssignments.get(String(conversation.id));
-            const currentMode = String(conversation.mode || '').toLowerCase();
+            const currentMode = String(conversation.mode || "").toLowerCase();
 
-            return Boolean(previous && previous.mode !== 'human' && currentMode === 'human');
+            return Boolean(
+              previous && previous.mode !== "human" && currentMode === "human",
+            );
           });
 
           if (handoffConversation) {
-            const displayName = handoffConversation.name || handoffConversation.phone || 'Conversa';
-            setHandoffToast(`Cliente solicitou atendimento humano: ${displayName}`);
+            const displayName =
+              handoffConversation.name ||
+              handoffConversation.phone ||
+              "Conversa";
+            setHandoffToast(
+              `Cliente solicitou atendimento humano: ${displayName}`,
+            );
             playHumanHandoffSound();
           }
         }
@@ -230,73 +335,77 @@ export default function ChatShell() {
         normalizedItems.map((conversation) => [
           String(conversation.id),
           {
-            mode: String(conversation.mode || '').toLowerCase(),
-            assignedUserId: conversation.assigned_user_id ? String(conversation.assigned_user_id) : null
-          }
-        ])
+            mode: String(conversation.mode || "").toLowerCase(),
+            assignedUserId: conversation.assigned_user_id
+              ? String(conversation.assigned_user_id)
+              : null,
+          },
+        ]),
       );
       hasLoadedConversationsRef.current = true;
       console.log("[SET CONVERSATIONS]", items.length);
       setConversations(normalizedItems);
     },
-    [playHumanHandoffSound]
+    [playHumanHandoffSound],
   );
 
-
   useEffect(() => {
-    const token = localStorage.getItem('token');
+    const token = localStorage.getItem("token");
     if (!token) {
-      router.replace('/login');
+      router.replace("/login");
     }
   }, [router]);
 
-
   const fetchMessages = useCallback(
     async (conversationId: string) => {
-      const conversation = conversations.find((item) => String(item.contact_id ?? item.id) === conversationId);
+      const conversation = conversations.find(
+        (item) => String(item.contact_id ?? item.id) === conversationId,
+      );
 
       if (!conversation) {
         setMessages([]);
         return;
       }
 
-      const realMessages: Message[] = await getMessagesByConversation(String(conversation.id));
+      const realMessages: Message[] = await getMessagesByConversation(
+        String(conversation.id),
+      );
       setMessages(realMessages.map(toChatMessage));
     },
-    [conversations]
+    [conversations],
   );
 
-
-  const contacts = useMemo<Contact[]>(
-    () => {
-      console.log("[CONTACTS MEMO]", conversations.length);
-      return conversations.map((conversation) => {
-        return {
-          id: String(conversation.contact_id ?? conversation.id),
-          name: conversation.name,
-          phone: conversation.phone,
-          avatarUrl: conversation.avatar_url,
-          stage: conversation.stage,
-          score: conversation.score,
-          lastMessage: conversation.last_message,
-          lastMessageAt: conversation.updated_at,
-          status: conversation.mode,
-          assignedUserId: conversation.assigned_user_id ?? null,
-          assignedUserName: conversation.assigned_user_name ?? null,
-          awaitingHumanAssignment: String(conversation.mode || '').toLowerCase() === 'human' && !conversation.assigned_user_id,
-          inHumanCare: String(conversation.mode || '').toLowerCase() === 'human' && Boolean(conversation.assigned_user_id)
-        };
-      });
-    },
-    [conversations]
-  );
+  const contacts = useMemo<Contact[]>(() => {
+    console.log("[CONTACTS MEMO]", conversations.length);
+    return conversations.map((conversation) => {
+      return {
+        id: String(conversation.contact_id ?? conversation.id),
+        name: conversation.name,
+        phone: conversation.phone,
+        avatarUrl: conversation.avatar_url,
+        stage: conversation.stage,
+        score: conversation.score,
+        lastMessage: conversation.last_message,
+        lastMessageAt: conversation.updated_at,
+        status: conversation.mode,
+        assignedUserId: conversation.assigned_user_id ?? null,
+        assignedUserName: conversation.assigned_user_name ?? null,
+        awaitingHumanAssignment:
+          String(conversation.mode || "").toLowerCase() === "human" &&
+          !conversation.assigned_user_id,
+        inHumanCare:
+          String(conversation.mode || "").toLowerCase() === "human" &&
+          Boolean(conversation.assigned_user_id),
+      };
+    });
+  }, [conversations]);
 
   const orderedContacts = useMemo(() => {
     const getPriority = (status?: string) => {
       const normalizedStatus = status?.toLowerCase();
 
-      if (normalizedStatus === 'human') return 2;
-      if (normalizedStatus === 'bot' || normalizedStatus === 'ai') return 1;
+      if (normalizedStatus === "human") return 2;
+      if (normalizedStatus === "bot" || normalizedStatus === "ai") return 1;
       return 0;
     };
 
@@ -314,26 +423,35 @@ export default function ChatShell() {
     () =>
       orderedContacts.filter((contact) => {
         const normalizedStatus = contact.status?.toLowerCase();
-        return normalizedStatus !== 'human' && normalizedStatus !== 'bot' && normalizedStatus !== 'ai';
+        return (
+          normalizedStatus !== "human" &&
+          normalizedStatus !== "bot" &&
+          normalizedStatus !== "ai"
+        );
       }).length,
-    [orderedContacts]
+    [orderedContacts],
   );
 
   const humanRequestsCount = useMemo(
     () =>
       conversations.filter(
-        (conversation) => String(conversation.mode || '').toLowerCase() === 'human' && !conversation.assigned_user_id
+        (conversation) =>
+          String(conversation.mode || "").toLowerCase() === "human" &&
+          !conversation.assigned_user_id,
       ).length,
-    [conversations]
+    [conversations],
   );
 
   const selectedContact = useMemo(
     () => contacts.find((contact) => contact.id === selectedContactId),
-    [contacts, selectedContactId]
+    [contacts, selectedContactId],
   );
   const selectedConversation = useMemo(
-    () => conversations.find((item) => String(item.contact_id ?? item.id) === selectedContactId),
-    [conversations, selectedContactId]
+    () =>
+      conversations.find(
+        (item) => String(item.contact_id ?? item.id) === selectedContactId,
+      ),
+    [conversations, selectedContactId],
   );
 
   useEffect(() => {
@@ -342,20 +460,22 @@ export default function ChatShell() {
     }
 
     const currentMode = selectedConversation.mode?.toLowerCase();
-    if (currentMode === 'bot' || currentMode === 'ai' || currentMode === 'human') {
+    if (
+      currentMode === "bot" ||
+      currentMode === "ai" ||
+      currentMode === "human"
+    ) {
       setMode(currentMode);
       return;
     }
   }, [selectedConversation]);
 
-
-
   useEffect(() => {
     if (!modeNotice && !modeError) return;
 
     const timeoutId = window.setTimeout(() => {
-      setModeNotice('');
-      setModeError('');
+      setModeNotice("");
+      setModeError("");
     }, 2200);
 
     return () => window.clearTimeout(timeoutId);
@@ -364,7 +484,7 @@ export default function ChatShell() {
   useEffect(() => {
     if (!handoffToast) return;
 
-    const timeoutId = window.setTimeout(() => setHandoffToast(''), 5000);
+    const timeoutId = window.setTimeout(() => setHandoffToast(""), 5000);
 
     return () => window.clearTimeout(timeoutId);
   }, [handoffToast]);
@@ -372,7 +492,10 @@ export default function ChatShell() {
   useEffect(() => {
     if (!teamNotificationToast) return;
 
-    const timeoutId = window.setTimeout(() => setTeamNotificationToast(''), 5000);
+    const timeoutId = window.setTimeout(
+      () => setTeamNotificationToast(null),
+      TEAM_NOTIFICATION_TOAST_MS,
+    );
 
     return () => window.clearTimeout(timeoutId);
   }, [teamNotificationToast]);
@@ -381,13 +504,54 @@ export default function ChatShell() {
     if (!resetToast && !resetError) return;
 
     const timeoutId = window.setTimeout(() => {
-      setResetToast('');
-      setResetError('');
+      setResetToast("");
+      setResetError("");
     }, 4000);
 
     return () => window.clearTimeout(timeoutId);
   }, [resetToast, resetError]);
 
+  const showTeamNotification = useCallback(
+    (payload: RealtimeEvent) => {
+      if (
+        normalizeRealtimeType(payload) !== "team_notification" &&
+        payload.action !== "TEAM_NOTIFICATION_CREATED"
+      )
+        return false;
+
+      console.log("[TEAM_NOTIFICATION EVENT]", payload);
+      const details = getTeamNotificationDetails(payload);
+      const dedupeKey = payload.event_id || details.id;
+      const now = Date.now();
+      const lastSeen = teamNotificationDedupeRef.current.get(dedupeKey);
+      if (lastSeen && now - lastSeen < TEAM_NOTIFICATION_DEDUPE_WINDOW_MS) {
+        return true;
+      }
+
+      teamNotificationDedupeRef.current.set(dedupeKey, now);
+      teamNotificationDedupeRef.current.forEach((timestamp, key) => {
+        if (now - timestamp > TEAM_NOTIFICATION_DEDUPE_WINDOW_MS) {
+          teamNotificationDedupeRef.current.delete(key);
+        }
+      });
+
+      setTeamNotificationToast(details);
+      setCrmRefreshKey((current) => current + 1);
+
+      if (
+        details.conversationId &&
+        selectedConversation &&
+        details.conversationId === String(selectedConversation.id)
+      ) {
+        fetchMessages(
+          String(selectedConversation.contact_id ?? selectedConversation.id),
+        ).catch(() => undefined);
+      }
+
+      return true;
+    },
+    [fetchMessages, selectedConversation],
+  );
 
   // A lógica de tempo real está centralizada nos hooks useRealtime abaixo
 
@@ -396,58 +560,76 @@ export default function ChatShell() {
   }, [selectedConversation]);
 
   useRealtime({
-    wsUrl: `${process.env.NEXT_PUBLIC_API_URL?.replace(/^https/, 'wss').replace(/^http/, 'ws')}/api/dashboard/ws`,
+    wsUrl: `${process.env.NEXT_PUBLIC_API_URL?.replace(/^https/, "wss").replace(/^http/, "ws")}/api/dashboard/ws`,
     sseUrl: `${process.env.NEXT_PUBLIC_API_URL}/api/dashboard/stream`,
-    tenantId: typeof window !== 'undefined' ? localStorage.getItem('tenant_id') || '' : '',
+    tenantId:
+      typeof window !== "undefined"
+        ? localStorage.getItem("tenant_id") || ""
+        : "",
     onMessage: (payload: RealtimeEvent) => {
       console.log("[WS MESSAGE]", payload);
-      if (payload?.type === 'presence_updated' && payload.conversation_id && (payload.status === 'online' || payload.status === 'offline')) {
+      if (
+        payload?.type === "presence_updated" &&
+        payload.conversation_id &&
+        (payload.status === "online" || payload.status === "offline")
+      ) {
         setPresenceByConversation((current) => ({
           ...current,
           [String(payload.conversation_id)]: {
-            status: payload.status as 'online' | 'offline',
+            status: payload.status as "online" | "offline",
             lastSeen: payload.last_seen ?? null,
             participantName: payload.participant_name ?? null,
           },
         }));
         return;
       }
-      if (payload?.event === 'team_notification' || payload?.type === 'team_notification') {
-        const title = String(payload.title || 'Equipe notificada').trim();
-        const message = String((payload as { message?: unknown }).message || '').trim();
-        const priority = String(payload.priority || 'normal').toLowerCase();
-        setTeamNotificationToast(`🔔 ${title}${message ? ` — ${message}` : ''}${priority === 'high' ? ' (Prioridade alta)' : ''}`);
-        if (selectedConversation && String(payload.conversation_id) === String(selectedConversation.id)) {
-          fetchMessages(String(selectedConversation.contact_id ?? selectedConversation.id)).catch(() => undefined);
-        }
-      }
-      if (!payload?.refresh?.includes('conversations')) return;
+      showTeamNotification(payload);
+      if (!payload?.refresh?.includes("conversations")) return;
       getConversations()
         .then((items) => {
           console.log("[API RESULT]", items);
           applyConversations(items);
         })
         .catch(() => undefined);
-    }
+    },
   });
 
-  const messageWsUrl = selectedConversation ? `${process.env.NEXT_PUBLIC_API_URL?.replace(/^https/, 'wss').replace(/^http/, 'ws')}/api/ws/messages/${selectedConversation.id}` : '';
-  const messageSseUrl = selectedConversation ? `${process.env.NEXT_PUBLIC_API_URL}/api/sse/messages/${selectedConversation.id}` : '';
-  
+  const messageWsUrl = selectedConversation
+    ? `${process.env.NEXT_PUBLIC_API_URL?.replace(/^https/, "wss").replace(/^http/, "ws")}/api/ws/messages/${selectedConversation.id}`
+    : "";
+  const messageSseUrl = selectedConversation
+    ? `${process.env.NEXT_PUBLIC_API_URL}/api/sse/messages/${selectedConversation.id}`
+    : "";
+
   console.log("[BEFORE MESSAGE HOOK]", selectedConversation?.id);
   console.log("[MESSAGE WS URL]", messageWsUrl);
 
-  const { connected: messageRealtimeConnected, sendJson: sendMessageRealtimeJson } = useRealtime({
+  const {
+    connected: messageRealtimeConnected,
+    sendJson: sendMessageRealtimeJson,
+  } = useRealtime({
     wsUrl: messageWsUrl,
     sseUrl: messageSseUrl,
-    tenantId: typeof window !== 'undefined' ? localStorage.getItem('tenant_id') || '' : '',
+    tenantId:
+      typeof window !== "undefined"
+        ? localStorage.getItem("tenant_id") || ""
+        : "",
     onMessage: (payload: RealtimeEvent) => {
-      console.log("[WS MESSAGE RECEIVED CONVERSATION]", payload?.message?.conversation_id || payload?.conversation_id || payload?.type);
-      if (payload?.type === 'presence_updated' && payload.conversation_id && (payload.status === 'online' || payload.status === 'offline')) {
+      console.log(
+        "[WS MESSAGE RECEIVED CONVERSATION]",
+        typeof payload?.message === "object"
+          ? payload?.message?.conversation_id
+          : payload?.conversation_id || payload?.type,
+      );
+      if (
+        payload?.type === "presence_updated" &&
+        payload.conversation_id &&
+        (payload.status === "online" || payload.status === "offline")
+      ) {
         setPresenceByConversation((current) => ({
           ...current,
           [String(payload.conversation_id)]: {
-            status: payload.status as 'online' | 'offline',
+            status: payload.status as "online" | "offline",
             lastSeen: payload.last_seen ?? null,
             participantName: payload.participant_name ?? null,
           },
@@ -455,7 +637,7 @@ export default function ChatShell() {
         return;
       }
 
-      if (payload?.type === 'typing' && payload.conversation_id) {
+      if (payload?.type === "typing" && payload.conversation_id) {
         const conversationId = String(payload.conversation_id);
         setTypingByConversation((current) => {
           const next = { ...current };
@@ -473,25 +655,21 @@ export default function ChatShell() {
         return;
       }
 
-      if (payload?.event === 'team_notification' || payload?.type === 'team_notification') {
-        const title = String(payload.title || 'Equipe notificada').trim();
-        const message = String((payload as { message?: unknown }).message || '').trim();
-        const priority = String(payload.priority || 'normal').toLowerCase();
-        setTeamNotificationToast(`🔔 ${title}${message ? ` — ${message}` : ''}${priority === 'high' ? ' (Prioridade alta)' : ''}`);
-      }
+      showTeamNotification(payload);
       if (!selectedContactId) return;
       fetchMessages(selectedContactId).catch(() => undefined);
-      getConversations().then((items) => applyConversations(items)).catch(() => undefined);
-    }
+      getConversations()
+        .then((items) => applyConversations(items))
+        .catch(() => undefined);
+    },
   });
-
 
   useEffect(() => {
     if (!selectedConversation || !messageRealtimeConnected) return;
 
-    sendMessageRealtimeJson({ type: 'presence_heartbeat' });
+    sendMessageRealtimeJson({ type: "presence_heartbeat" });
     const intervalId = window.setInterval(() => {
-      sendMessageRealtimeJson({ type: 'presence_heartbeat' });
+      sendMessageRealtimeJson({ type: "presence_heartbeat" });
     }, 20_000);
 
     return () => window.clearInterval(intervalId);
@@ -518,58 +696,69 @@ export default function ChatShell() {
 
   useEffect(() => {
     return () => {
-      if (typingStopTimeoutRef.current) clearTimeout(typingStopTimeoutRef.current);
-      sendMessageRealtimeJson({ type: 'typing_stop' });
+      if (typingStopTimeoutRef.current)
+        clearTimeout(typingStopTimeoutRef.current);
+      sendMessageRealtimeJson({ type: "typing_stop" });
     };
   }, [selectedConversation?.id, sendMessageRealtimeJson]);
 
-  const emitTypingActivity = useCallback((value: string) => {
-    if (!selectedConversation) return;
+  const emitTypingActivity = useCallback(
+    (value: string) => {
+      if (!selectedConversation) return;
 
-    if (!value.trim()) {
-      if (typingStopTimeoutRef.current) clearTimeout(typingStopTimeoutRef.current);
-      typingStopTimeoutRef.current = null;
-      lastTypingStartRef.current = 0;
-      sendMessageRealtimeJson({ type: 'typing_stop' });
-      return;
-    }
+      if (!value.trim()) {
+        if (typingStopTimeoutRef.current)
+          clearTimeout(typingStopTimeoutRef.current);
+        typingStopTimeoutRef.current = null;
+        lastTypingStartRef.current = 0;
+        sendMessageRealtimeJson({ type: "typing_stop" });
+        return;
+      }
 
-    const now = Date.now();
-    if (now - lastTypingStartRef.current > TYPING_START_THROTTLE_MS) {
-      sendMessageRealtimeJson({ type: 'typing_start' });
-      lastTypingStartRef.current = now;
-    }
+      const now = Date.now();
+      if (now - lastTypingStartRef.current > TYPING_START_THROTTLE_MS) {
+        sendMessageRealtimeJson({ type: "typing_start" });
+        lastTypingStartRef.current = now;
+      }
 
-    if (typingStopTimeoutRef.current) clearTimeout(typingStopTimeoutRef.current);
-    typingStopTimeoutRef.current = setTimeout(() => {
-      sendMessageRealtimeJson({ type: 'typing_stop' });
-      lastTypingStartRef.current = 0;
-      typingStopTimeoutRef.current = null;
-    }, TYPING_STOP_DELAY_MS);
-  }, [selectedConversation, sendMessageRealtimeJson]);
+      if (typingStopTimeoutRef.current)
+        clearTimeout(typingStopTimeoutRef.current);
+      typingStopTimeoutRef.current = setTimeout(() => {
+        sendMessageRealtimeJson({ type: "typing_stop" });
+        lastTypingStartRef.current = 0;
+        typingStopTimeoutRef.current = null;
+      }, TYPING_STOP_DELAY_MS);
+    },
+    [selectedConversation, sendMessageRealtimeJson],
+  );
 
-  const handleInputChange = useCallback((value: string) => {
-    setInputValue(value);
-    emitTypingActivity(value);
-  }, [emitTypingActivity]);
-
+  const handleInputChange = useCallback(
+    (value: string) => {
+      setInputValue(value);
+      emitTypingActivity(value);
+    },
+    [emitTypingActivity],
+  );
 
   useEffect(() => {
     getConversations()
       .then((items) => {
-        const targetContactId = searchParams.get('contact_id');
-        const targetPhone = searchParams.get('phone');
-        const normalizedTargetPhone = targetPhone ? targetPhone.replace(/\D/g, '') : '';
+        const targetContactId = searchParams.get("contact_id");
+        const targetPhone = searchParams.get("phone");
+        const normalizedTargetPhone = targetPhone
+          ? targetPhone.replace(/\D/g, "")
+          : "";
 
         applyConversations(items, { notifyHandoff: false });
 
         const matchedConversation = items.find((conversation) => {
           const byContactId = targetContactId
-            ? String(conversation.contact_id ?? conversation.id) === targetContactId
+            ? String(conversation.contact_id ?? conversation.id) ===
+              targetContactId
             : false;
 
           const byPhone = normalizedTargetPhone
-            ? conversation.phone.replace(/\D/g, '') === normalizedTargetPhone
+            ? conversation.phone.replace(/\D/g, "") === normalizedTargetPhone
             : false;
 
           return byContactId || byPhone;
@@ -577,7 +766,9 @@ export default function ChatShell() {
 
         if (matchedConversation) {
           setQuerySelectionMissing(false);
-          setSelectedContactId(String(matchedConversation.contact_id ?? matchedConversation.id));
+          setSelectedContactId(
+            String(matchedConversation.contact_id ?? matchedConversation.id),
+          );
           return;
         }
 
@@ -585,11 +776,14 @@ export default function ChatShell() {
           setQuerySelectionMissing(true);
         }
 
-        setSelectedContactId((current) => current || (items[0] ? String(items[0].contact_id ?? items[0].id) : ''));
+        setSelectedContactId(
+          (current) =>
+            current ||
+            (items[0] ? String(items[0].contact_id ?? items[0].id) : ""),
+        );
       })
       .catch(() => setConversations([]));
   }, [searchParams, applyConversations]);
-
 
   function onSelectContact(contactId: string) {
     setSelectedContactId(contactId);
@@ -606,29 +800,32 @@ export default function ChatShell() {
       id: `${now.getTime()}`,
       text,
       fromMe: true,
-      time: now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+      time: now.toLocaleTimeString("pt-BR", {
+        hour: "2-digit",
+        minute: "2-digit",
+      }),
     };
 
     setMessages((current) => [...current, newMessage]);
-    setInputValue('');
-    if (typingStopTimeoutRef.current) clearTimeout(typingStopTimeoutRef.current);
+    setInputValue("");
+    if (typingStopTimeoutRef.current)
+      clearTimeout(typingStopTimeoutRef.current);
     typingStopTimeoutRef.current = null;
     lastTypingStartRef.current = 0;
-    sendMessageRealtimeJson({ type: 'typing_stop' });
+    sendMessageRealtimeJson({ type: "typing_stop" });
 
     try {
       await sendMessage(selectedContact.phone, text, selectedContact.id);
     } catch (error) {
-      console.error('Falha ao enviar para backend:', error);
+      console.error("Falha ao enviar para backend:", error);
     }
   }
-
 
   async function handleResetConversation() {
     if (!selectedConversation || resettingConversation) return;
 
-    setResetToast('');
-    setResetError('');
+    setResetToast("");
+    setResetError("");
     setResettingConversation(true);
 
     try {
@@ -636,11 +833,18 @@ export default function ChatShell() {
       const refreshedConversations = await getConversations();
       applyConversations(refreshedConversations, { notifyHandoff: false });
       setMessages([]);
-      setSelectedContactId(refreshedConversations[0] ? String(refreshedConversations[0].contact_id ?? refreshedConversations[0].id) : '');
-      setResetToast('Conversa resetada com sucesso.');
+      setSelectedContactId(
+        refreshedConversations[0]
+          ? String(
+              refreshedConversations[0].contact_id ??
+                refreshedConversations[0].id,
+            )
+          : "",
+      );
+      setResetToast("Conversa resetada com sucesso.");
     } catch (err) {
-      console.error('Erro ao resetar conversa:', err);
-      setResetError('Não foi possível resetar a conversa.');
+      console.error("Erro ao resetar conversa:", err);
+      setResetError("Não foi possível resetar a conversa.");
     } finally {
       setResettingConversation(false);
     }
@@ -652,23 +856,34 @@ export default function ChatShell() {
     const conversationId = String(selectedConversation.id);
     const previousMode = mode;
 
-    setModeError('');
-    setModeNotice('');
+    setModeError("");
+    setModeNotice("");
     setModeUpdating(true);
 
     try {
-      const response = (await updateConversationMode(conversationId, newMode)) as ConversationModeUpdateResponse | null | undefined;
-      const updatedMode = normalizeConversationMode(response?.conversation?.mode) ?? normalizeConversationMode(response?.mode) ?? newMode;
+      const response = (await updateConversationMode(
+        conversationId,
+        newMode,
+      )) as ConversationModeUpdateResponse | null | undefined;
+      const updatedMode =
+        normalizeConversationMode(response?.conversation?.mode) ??
+        normalizeConversationMode(response?.mode) ??
+        newMode;
 
-      recentModeOverridesRef.current.set(conversationId, { mode: updatedMode, updatedAt: Date.now() });
+      recentModeOverridesRef.current.set(conversationId, {
+        mode: updatedMode,
+        updatedAt: Date.now(),
+      });
       setMode(updatedMode);
       const updatedConversations = conversations.map((conversation) =>
-        String(conversation.id) === conversationId ? { ...conversation, mode: updatedMode } : conversation
+        String(conversation.id) === conversationId
+          ? { ...conversation, mode: updatedMode }
+          : conversation,
       );
       applyConversations(updatedConversations, { notifyHandoff: false });
-      setModeNotice('Modo atualizado.');
+      setModeNotice("Modo atualizado.");
     } catch (err) {
-      console.error('Erro ao atualizar modo:', err);
+      console.error("Erro ao atualizar modo:", err);
       setMode(previousMode);
       setModeError(getConversationModeErrorMessage(err));
     } finally {
@@ -695,21 +910,75 @@ export default function ChatShell() {
         onSend={onSend}
         onToggleSidebar={() => setSidebarOpen((value) => !value)}
         mode={mode}
-        presenceStatus={formatPresenceStatus(selectedConversation ? presenceByConversation[String(selectedConversation.id)] : undefined)}
-        typingText={formatTypingText(selectedConversation ? typingByConversation[String(selectedConversation.id)] : undefined)}
+        presenceStatus={formatPresenceStatus(
+          selectedConversation
+            ? presenceByConversation[String(selectedConversation.id)]
+            : undefined,
+        )}
+        typingText={formatTypingText(
+          selectedConversation
+            ? typingByConversation[String(selectedConversation.id)]
+            : undefined,
+        )}
         modeUpdating={modeUpdating}
         modeNotice={modeNotice}
         modeError={modeError}
-        emptyStateMessage={querySelectionMissing ? 'Conversa ainda não encontrada para este contato.' : undefined}
+        emptyStateMessage={
+          querySelectionMissing
+            ? "Conversa ainda não encontrada para este contato."
+            : undefined
+        }
         resetInProgress={resettingConversation}
-        onResetConversation={selectedConversation ? handleResetConversation : undefined}
+        onResetConversation={
+          selectedConversation ? handleResetConversation : undefined
+        }
         onModeChange={handleChangeMode}
       />
-      {handoffToast ? <div className="wa-handoff-toast" role="status">{handoffToast}</div> : null}
-      {teamNotificationToast ? <div className="wa-handoff-toast" role="status">{teamNotificationToast}</div> : null}
-      {resetToast ? <div className="wa-reset-toast success" role="status">{resetToast}</div> : null}
-      {resetError ? <div className="wa-reset-toast error" role="alert">{resetError}</div> : null}
-      <CRMContactSidebar contact={selectedContact} open={crmOpen} onClose={() => setCrmOpen(false)} />
+      {handoffToast ? (
+        <div className="wa-handoff-toast" role="status">
+          {handoffToast}
+        </div>
+      ) : null}
+      {teamNotificationToast ? (
+        <div
+          className={`wa-team-notification-toast priority-${teamNotificationToast.priority}`}
+          role="status"
+        >
+          <div className="wa-team-notification-icon" aria-hidden="true">
+            🔔
+          </div>
+          <div>
+            <strong>Equipe notificada</strong>
+            <p className="wa-team-notification-title">
+              {teamNotificationToast.title}
+            </p>
+            {teamNotificationToast.message ? (
+              <p>{teamNotificationToast.message}</p>
+            ) : null}
+            <span>
+              Prioridade:{" "}
+              {normalizePriorityLabel(teamNotificationToast.priority)}
+            </span>
+          </div>
+        </div>
+      ) : null}
+      {resetToast ? (
+        <div className="wa-reset-toast success" role="status">
+          {resetToast}
+        </div>
+      ) : null}
+      {resetError ? (
+        <div className="wa-reset-toast error" role="alert">
+          {resetError}
+        </div>
+      ) : null}
+      <CRMContactSidebar
+        contact={selectedContact}
+        conversationId={selectedConversation?.id}
+        refreshKey={crmRefreshKey}
+        open={crmOpen}
+        onClose={() => setCrmOpen(false)}
+      />
     </div>
   );
 }

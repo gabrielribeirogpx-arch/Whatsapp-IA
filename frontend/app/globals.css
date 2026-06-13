@@ -4634,3 +4634,118 @@ input {
     height: 42px;
   }
 }
+
+.wa-team-notification-toast {
+  position: fixed;
+  top: 24px;
+  right: 24px;
+  z-index: 80;
+  display: grid;
+  grid-template-columns: 44px 1fr;
+  gap: 12px;
+  width: min(420px, calc(100vw - 48px));
+  border-radius: 20px;
+  border: 1px solid #bfdbfe;
+  background: linear-gradient(135deg, #eff6ff 0%, #ffffff 58%, #f8fafc 100%);
+  color: #0f172a;
+  box-shadow: 0 24px 70px rgba(37, 99, 235, 0.24), 0 8px 24px rgba(15, 23, 42, 0.12);
+  padding: 16px;
+  font-size: 0.9rem;
+  animation: waTeamNotificationIn 0.24s ease-out;
+}
+
+.wa-team-notification-toast.priority-high,
+.wa-team-notification-toast.priority-alta {
+  border-color: #fecaca;
+  background: linear-gradient(135deg, #fef2f2 0%, #ffffff 58%, #fff7ed 100%);
+  box-shadow: 0 24px 70px rgba(220, 38, 38, 0.24), 0 8px 24px rgba(15, 23, 42, 0.12);
+}
+
+.wa-team-notification-icon {
+  display: grid;
+  height: 44px;
+  width: 44px;
+  place-items: center;
+  border-radius: 15px;
+  background: #2563eb;
+  color: #fff;
+  font-size: 1.25rem;
+  box-shadow: 0 12px 24px rgba(37, 99, 235, 0.24);
+}
+
+.wa-team-notification-toast.priority-high .wa-team-notification-icon,
+.wa-team-notification-toast.priority-alta .wa-team-notification-icon {
+  background: #dc2626;
+  box-shadow: 0 12px 24px rgba(220, 38, 38, 0.24);
+}
+
+.wa-team-notification-toast strong {
+  display: block;
+  font-size: 0.82rem;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #1d4ed8;
+}
+
+.wa-team-notification-toast.priority-high strong,
+.wa-team-notification-toast.priority-alta strong {
+  color: #b91c1c;
+}
+
+.wa-team-notification-title {
+  margin: 4px 0 0;
+  font-size: 1rem;
+  font-weight: 900;
+  color: #0f172a;
+}
+
+.wa-team-notification-toast p:not(.wa-team-notification-title) {
+  margin: 4px 0 0;
+  color: #334155;
+  line-height: 1.35;
+}
+
+.wa-team-notification-toast span {
+  display: inline-flex;
+  width: fit-content;
+  margin-top: 8px;
+  border-radius: 999px;
+  background: rgba(37, 99, 235, 0.1);
+  padding: 4px 9px;
+  font-size: 0.72rem;
+  font-weight: 900;
+  color: #1d4ed8;
+}
+
+.wa-team-notification-toast.priority-high span,
+.wa-team-notification-toast.priority-alta span {
+  background: rgba(220, 38, 38, 0.1);
+  color: #b91c1c;
+}
+
+.wa-crm-event.tone-notification {
+  border-color: #bfdbfe;
+  background: #eff6ff;
+}
+
+.wa-crm-event.tone-notification .wa-crm-event-dot {
+  background: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.18);
+}
+
+@keyframes waTeamNotificationIn {
+  from {
+    opacity: 0;
+    transform: translateY(-12px) scale(0.98);
+  }
+}
+
+@media (max-width: 900px) {
+  .wa-team-notification-toast {
+    top: calc(env(safe-area-inset-top, 0px) + 12px);
+    right: 12px;
+    left: 12px;
+    width: auto;
+  }
+}
