@@ -54,11 +54,11 @@ import PushPermissionSheet from "./components/PushPermissionSheet";
 import InstallPrompt from "./components/InstallPrompt";
 import MobileLoginScreen from "./components/MobileLoginScreen";
 import {
-  formatTaskHistoryDescription,
   getTaskNotificationDetails,
   isTaskCreatedPayload,
   normalizeTaskPriorityLabel,
 } from "@/lib/taskRealtime";
+import { ConversationFilterId, isUnansweredStatus } from "@/lib/conversationFilters";
 
 export type MobileView = "inbox" | "chat" | "notifs" | "profile";
 
@@ -74,6 +74,15 @@ type MobileRealtimePayload = Record<string, unknown> & {
   title?: string;
   message?: string;
   priority?: string;
+  task?: {
+    id?: string;
+    title?: string;
+    description?: string | null;
+    priority?: string;
+    assigned_to?: string | null;
+    due_at?: string | null;
+    due_minutes?: number | string | null;
+  };
   activity?: {
     id?: string;
     title?: string;
@@ -208,9 +217,7 @@ export default function MobileChatShell() {
   const [selectedConvoId, setSelectedConvoId] = useState<string | null>(null);
   const selectedConvoIdRef = useRef<string | null>(null);
   const [inputValue, setInputValue] = useState("");
-  const [filter, setFilter] = useState<"all" | "human" | "bot" | "pending">(
-    "all",
-  );
+  const [filter, setFilter] = useState<ConversationFilterId>("all");
   const [search, setSearch] = useState("");
   const [mode, setMode] = useState<ConversationMode>("human");
   const [modeUpdating, setModeUpdating] = useState(false);
@@ -264,9 +271,7 @@ export default function MobileChatShell() {
 
   const pendingCount = useMemo(
     () =>
-      contacts.filter(
-        (c) => !["human", "bot", "ai"].includes((c.status || "").toLowerCase()),
-      ).length,
+      contacts.filter((c) => isUnansweredStatus(c.status)).length,
     [contacts],
   );
 
@@ -405,14 +410,23 @@ export default function MobileChatShell() {
       });
 
       const priorityLabel = normalizeTaskPriorityLabel(details.priority);
+      const taskBody = [
+        details.title,
+        details.assignee ? `Responsável: ${details.assignee}` : null,
+        `Prazo: ${details.dueLabel}`,
+      ]
+        .filter(Boolean)
+        .join(" · ");
+
       vibrate([45]);
       showBanner(
         "📝 Nova tarefa criada",
-        formatTaskHistoryDescription(details),
+        `${details.title} · Prioridade: ${priorityLabel} · Prazo: ${details.dueLabel}`,
       );
       addLocalNotif({
+        id: `task-created-${details.id}`,
         title: `📝 Tarefa criada · ${priorityLabel}`,
-        body: formatTaskHistoryDescription(details),
+        body: taskBody,
         type: "task_created",
         conversationId: details.conversationId || undefined,
       });
@@ -467,6 +481,7 @@ export default function MobileChatShell() {
           .join(" · "),
       );
       addLocalNotif({
+        id: `team-notification-${details.id}`,
         title: `🔔 Equipe notificada · ${priorityLabel}`,
         body: [details.title, details.message].filter(Boolean).join(" — "),
         type: "team_notification",

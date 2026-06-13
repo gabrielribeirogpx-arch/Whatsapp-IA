@@ -7,13 +7,14 @@
 
 import { Search, Bell, BellOff, Bot, User, Clock, X } from 'lucide-react';
 import type { Conversation } from '@/lib/types';
+import { CONVERSATION_FILTERS, ConversationFilterId, matchesConversationFilter } from '@/lib/conversationFilters';
 
 interface MobileConvoListProps {
   conversations: Conversation[];
   loading: boolean;
-  filter: 'all' | 'human' | 'bot' | 'pending';
+  filter: ConversationFilterId;
   search: string;
-  onFilterChange: (f: 'all' | 'human' | 'bot' | 'pending') => void;
+  onFilterChange: (f: ConversationFilterId) => void;
   onSearchChange: (s: string) => void;
   onSelectConvo: (id: string) => void;
   onPushRequest: () => void;
@@ -21,24 +22,21 @@ interface MobileConvoListProps {
   pendingCount: number;
 }
 
-const FILTERS: { id: 'all' | 'human' | 'bot' | 'pending'; label: string }[] = [
-  { id: 'all',     label: 'Todos'    },
-  { id: 'human',   label: 'Humano'   },
-  { id: 'bot',     label: 'Bot'      },
-  { id: 'pending', label: 'Pendente' },
-];
+const FILTERS = CONVERSATION_FILTERS;
 
 function modeIcon(mode?: string) {
   const m = (mode || '').toLowerCase();
   if (m === 'human')             return <User size={12} />;
-  if (m === 'bot' || m === 'ai') return <Bot size={12} />;
+  if (m === 'bot') return <Bot size={12} />;
+  if (m === 'ai') return <Bot size={12} />;
   return <Clock size={12} />;
 }
 
 function modeColor(mode?: string): string {
   const m = (mode || '').toLowerCase();
   if (m === 'human')             return '#1D9E75';
-  if (m === 'bot' || m === 'ai') return '#378ADD';
+  if (m === 'bot') return '#378ADD';
+  if (m === 'ai') return '#7C3AED';
   return '#EF9F27';
 }
 
@@ -75,17 +73,18 @@ export default function MobileConvoList({
   console.log('[MOBILE LIST RECEIVED]', conversations.length);
 
   const filtered = conversations.filter((c) => {
-    const m = (c.mode || '').toLowerCase();
-    if (filter === 'human'   && m !== 'human')              return false;
-    if (filter === 'bot'     && m !== 'bot' && m !== 'ai')  return false;
-    if (filter === 'pending' && ['human', 'bot', 'ai'].includes(m)) return false;
+    if (!matchesConversationFilter(c, filter)) return false;
+
     if (search) {
       const q = search.toLowerCase();
       return (
         (c.name  || '').toLowerCase().includes(q) ||
-        (c.phone || '').toLowerCase().includes(q)
+        (c.phone || '').toLowerCase().includes(q) ||
+        (c.last_message || '').toLowerCase().includes(q) ||
+        (c.stage || '').toLowerCase().includes(q)
       );
     }
+
     return true;
   });
 
@@ -208,7 +207,7 @@ export default function MobileConvoList({
               }}
             >
               {f.label}
-              {f.id === 'pending' && pendingCount > 0 && (
+              {f.id === 'unanswered' && pendingCount > 0 && (
                 <span style={{
                   marginLeft: '5px',
                   background: 'rgba(239,159,39,0.15)',

@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import Avatar from './Avatar';
 import { Contact } from '../lib/types';
+import { CONVERSATION_FILTERS, ConversationFilterId, matchesConversationFilter } from '../lib/conversationFilters';
 
 type SidebarProps = {
   contacts: Contact[];
@@ -18,20 +19,15 @@ export default function Sidebar({
   onSelectContact,
   sidebarOpen,
   onToggleSidebar,
-  unansweredCount: _unansweredCount,
+  unansweredCount,
   humanRequestsCount
 }: SidebarProps) {
   console.log("[SIDEBAR RECEIVED]", contacts.length);
   console.log("[SIDEBAR FIRST ITEM]", contacts[0]?.id);
   const [searchTerm, setSearchTerm] = useState('');
-  const [activeFilter, setActiveFilter] = useState<'all' | 'pending' | 'human' | 'ai'>('all');
+  const [activeFilter, setActiveFilter] = useState<ConversationFilterId>('all');
 
-  const filterChips = [
-    { id: 'all', label: 'Todas' },
-    { id: 'pending', label: 'Não respondidas' },
-    { id: 'human', label: `Humanos (${humanRequestsCount})` },
-    { id: 'ai', label: 'IA' }
-  ] as const;
+  const filterChips = CONVERSATION_FILTERS;
 
   function formatPhone(phone: string) {
     const digits = phone.replace(/\D/g, '');
@@ -96,17 +92,7 @@ export default function Sidebar({
     const normalizedSearchTerm = searchTerm.trim().toLowerCase();
 
     return contacts.filter((contact) => {
-      const normalizedStatus = (contact.status || '').toLowerCase();
-      const matchesFilter =
-        activeFilter === 'all'
-          ? true
-          : activeFilter === 'pending'
-            ? normalizedStatus === 'pending'
-            : activeFilter === 'human'
-              ? normalizedStatus === 'human'
-              : normalizedStatus === 'ai' || normalizedStatus === 'bot';
-
-      if (!matchesFilter) return false;
+      if (!matchesConversationFilter(contact, activeFilter)) return false;
 
       if (!normalizedSearchTerm) return true;
 
@@ -145,7 +131,7 @@ export default function Sidebar({
                 className={`wa-filter-chip ${isActive ? 'active' : ''}`}
                 onClick={() => setActiveFilter(chip.id)}
               >
-                {chip.label}
+                {chip.label}{chip.id === 'unanswered' && unansweredCount > 0 ? ` (${unansweredCount})` : ''}{chip.id === 'awaiting' && humanRequestsCount > 0 ? ` (${humanRequestsCount})` : ''}
               </button>
             );
           })}
