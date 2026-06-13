@@ -5,7 +5,13 @@
  * Light Mode · Identidade Verde #59C414
  */
 
-import { Bell, Trash2, MessageSquare, UserCheck, ClipboardList } from "lucide-react";
+import {
+  Bell,
+  ClipboardList,
+  MessageSquare,
+  Trash2,
+  UserCheck,
+} from "lucide-react";
 import { useEffect, useState } from "react";
 
 interface LocalNotif {
@@ -22,7 +28,9 @@ export function getLocalNotifCount() {
   return _notifs.length;
 }
 
-export function addLocalNotif(n: Omit<LocalNotif, "id" | "receivedAt"> & { id?: string }) {
+export function addLocalNotif(
+  n: Omit<LocalNotif, "id" | "receivedAt"> & { id?: string },
+) {
   const id = n.id || `notif-${Date.now()}`;
   if (_notifs.some((notif) => notif.id === id)) return;
 
@@ -37,6 +45,10 @@ export function addLocalNotif(n: Omit<LocalNotif, "id" | "receivedAt"> & { id?: 
       }),
     );
   }
+}
+
+function getNotificationBodyLines(n: LocalNotif): string[] {
+  return n.body.split("\n").filter(Boolean);
 }
 
 function timeLabel(iso: string): string {
@@ -81,7 +93,6 @@ export default function MobileNotifView() {
         fontFamily: "'DM Sans', sans-serif",
       }}
     >
-      {/* Header */}
       <div
         style={{
           padding: "calc(env(safe-area-inset-top,0px) + 14px) 16px 14px",
@@ -127,7 +138,6 @@ export default function MobileNotifView() {
         )}
       </div>
 
-      {/* List */}
       <div
         style={{
           flex: 1,
@@ -156,98 +166,126 @@ export default function MobileNotifView() {
           </div>
         )}
 
-        {notifs.map((n) => (
-          <div
-            key={n.id}
-            style={{
-              display: "flex",
-              gap: "12px",
-              padding: "12px 16px",
-              background: "#FFFFFF",
-              borderBottom: "1px solid #F3F4F6",
-            }}
-          >
-            <span
+        {notifs.map((n) => {
+          const bodyLines = getNotificationBodyLines(n);
+          const isTaskCreated = n.type === "task_created";
+          const iconColor =
+            n.type === "handoff"
+              ? "#EF9F27"
+              : n.type === "team_notification"
+                ? "#2563EB"
+                : isTaskCreated
+                  ? "#059669"
+                  : "#59C414";
+          const iconBg =
+            n.type === "handoff"
+              ? "rgba(239,159,39,0.10)"
+              : n.type === "team_notification"
+                ? "rgba(37,99,235,0.10)"
+                : isTaskCreated
+                  ? "rgba(16,185,129,0.10)"
+                  : "rgba(89,196,20,0.10)";
+
+          return (
+            <div
+              key={n.id}
               style={{
-                width: "36px",
-                height: "36px",
-                borderRadius: "10px",
-                background:
-                  n.type === "handoff"
-                    ? "rgba(239,159,39,0.10)"
-                    : n.type === "team_notification"
-                      ? "rgba(37,99,235,0.10)"
-                      : n.type === "task_created"
-                        ? "rgba(16,185,129,0.10)"
-                        : "rgba(89,196,20,0.10)",
                 display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                flexShrink: 0,
-                color:
-                  n.type === "handoff"
-                    ? "#EF9F27"
-                    : n.type === "team_notification"
-                      ? "#2563EB"
-                      : n.type === "task_created"
-                        ? "#059669"
-                        : "#59C414",
+                gap: "12px",
+                padding: "12px 16px",
+                background: "#FFFFFF",
+                borderBottom: "1px solid #F3F4F6",
               }}
             >
-              {n.type === "handoff" ? (
-                <UserCheck size={17} />
-              ) : n.type === "team_notification" ? (
-                <Bell size={17} />
-              ) : n.type === "task_created" ? (
-                <ClipboardList size={17} />
-              ) : (
-                <MessageSquare size={17} />
-              )}
-            </span>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div
+              <span
                 style={{
+                  width: "36px",
+                  height: "36px",
+                  borderRadius: "10px",
+                  background: iconBg,
                   display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "baseline",
-                  marginBottom: "2px",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  flexShrink: 0,
+                  color: iconColor,
                 }}
               >
-                <span
+                {n.type === "handoff" ? (
+                  <UserCheck size={17} />
+                ) : n.type === "team_notification" ? (
+                  <Bell size={17} />
+                ) : isTaskCreated ? (
+                  <ClipboardList size={17} />
+                ) : (
+                  <MessageSquare size={17} />
+                )}
+              </span>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div
                   style={{
-                    fontSize: "13px",
-                    fontWeight: 600,
-                    color: "#111827",
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "baseline",
+                    marginBottom: "2px",
                   }}
                 >
-                  {n.title}
-                </span>
-                <span
-                  style={{
-                    fontSize: "11px",
-                    color: "#9CA3AF",
-                    marginLeft: "8px",
-                    flexShrink: 0,
-                  }}
-                >
-                  {timeLabel(n.receivedAt)}
-                </span>
+                  <span
+                    style={{
+                      fontSize: "13px",
+                      fontWeight: 600,
+                      color: "#111827",
+                    }}
+                  >
+                    {n.title}
+                  </span>
+                  <span
+                    style={{
+                      fontSize: "11px",
+                      color: "#9CA3AF",
+                      marginLeft: "8px",
+                      flexShrink: 0,
+                    }}
+                  >
+                    {timeLabel(n.receivedAt)}
+                  </span>
+                </div>
+                {isTaskCreated ? (
+                  <div>
+                    {bodyLines.map((line, index) => (
+                      <p
+                        key={`${n.id}-line-${index}`}
+                        style={{
+                          margin: index === 0 ? 0 : "2px 0 0",
+                          fontSize: index === 0 ? "12px" : "11px",
+                          fontWeight: index === 0 ? 600 : 500,
+                          color: index === 0 ? "#374151" : "#6B7280",
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        {line}
+                      </p>
+                    ))}
+                  </div>
+                ) : (
+                  <p
+                    style={{
+                      margin: 0,
+                      fontSize: "12px",
+                      color: "#6B7280",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {n.body}
+                  </p>
+                )}
               </div>
-              <p
-                style={{
-                  margin: 0,
-                  fontSize: "12px",
-                  color: "#6B7280",
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
-                  whiteSpace: "nowrap",
-                }}
-              >
-                {n.body}
-              </p>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );

@@ -6,6 +6,10 @@ import { apiFetch } from "@/lib/api";
 import { formatDateTimeBR } from "@/lib/date";
 import { Contact } from "@/lib/types";
 import { getWhatsappWindowStatus } from "@/lib/contactStatus";
+import {
+  buildTaskNotificationText,
+  formatTaskPriorityLabel,
+} from "@/lib/taskRealtime";
 
 type Props = {
   contact?: Contact;
@@ -42,7 +46,12 @@ const getEventTone = (type: string) => {
     t.includes("equipe notificada")
   )
     return "notification";
-  if (t.includes("task_created") || t.includes("task created") || t.includes("tarefa")) return "flow";
+  if (
+    t.includes("task_created") ||
+    t.includes("task created") ||
+    t.includes("tarefa")
+  )
+    return "flow";
   if (t.includes("message") || t.includes("mensag")) return "message";
   if (t.includes("flow") || t.includes("autom")) return "flow";
   if (t.includes("campaign") || t.includes("campanha")) return "campaign";
@@ -59,6 +68,18 @@ function formatPriority(value: unknown) {
   if (priority === "high" || priority === "alta") return "alta";
   if (priority === "low" || priority === "baixa") return "baixa";
   return "normal";
+}
+
+function metadataString(event: ActivityEvent, key: string) {
+  const value = getMetadataValue(event, key);
+  return typeof value === "string" || typeof value === "number"
+    ? String(value).trim()
+    : "";
+}
+
+function matchTaskLogValue(raw: string, label: string) {
+  const match = raw.match(new RegExp(`${label}:\\s*([^·\\n]+)`, "i"));
+  return match?.[1]?.trim() || "";
 }
 
 function getMetadataValue(event: ActivityEvent, key: string) {
@@ -95,29 +116,43 @@ function renderActivityEvent(event: ActivityEvent) {
     };
   }
 
-
   if (
     identity.includes("task_created") ||
     identity.includes("task created")
   ) {
     const raw = String(event.message || event.description || "").trim();
-    const titleMatch = raw.match(/Título:\s*([^·]+)/i);
-    const priorityMatch = raw.match(/Prioridade:\s*([^·]+)/i);
-    const assigneeMatch = raw.match(/Responsável:\s*([^·]+)/i);
-    const dueMatch = raw.match(/Prazo:\s*([^·]+)/i);
-    const title = titleMatch?.[1]?.trim() || event.title || "Tarefa";
-    const priority = priorityMatch?.[1]?.trim() || "normal";
-    const assignee = assigneeMatch?.[1]?.trim() || "-";
-    const due = dueMatch?.[1]?.trim() || "-";
+    const title =
+      metadataString(event, "task_title") ||
+      metadataString(event, "title") ||
+      matchTaskLogValue(raw, "Título") ||
+      event.title ||
+      "Tarefa";
+    const priority =
+      metadataString(event, "priority") ||
+      metadataString(event, "task_priority") ||
+      matchTaskLogValue(raw, "Prioridade") ||
+      "normal";
+    const assignee =
+      metadataString(event, "task_assignee") ||
+      metadataString(event, "assigned_to") ||
+      matchTaskLogValue(raw, "Responsável") ||
+      "-";
+    const due =
+      metadataString(event, "due_at") ||
+      metadataString(event, "task_due") ||
+      metadataString(event, "due_label") ||
+      matchTaskLogValue(raw, "Prazo") ||
+      "Sem prazo";
+    const taskText = buildTaskNotificationText({
+      title,
+      priority,
+      assignee: assignee === "-" ? "" : assignee,
+      dueLabel: due,
+    });
 
     return {
-      title: "📝 Tarefa criada",
-      description: [
-        title,
-        `Prioridade: ${priority}`,
-        `Responsável: ${assignee}`,
-        `Prazo: ${due}`,
-      ].join(" · "),
+      title: `📝 Tarefa criada · ${formatTaskPriorityLabel(priority)}`,
+      description: taskText.historyDescription,
     };
   }
 

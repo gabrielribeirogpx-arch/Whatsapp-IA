@@ -30,7 +30,6 @@ import {
 import { useRealtime } from "../hooks/useRealtime";
 import { formatTimeBR } from "../lib/date";
 import {
-  formatTaskHistoryDescription,
   getTaskNotificationDetails,
   isTaskCreatedPayload,
 } from "../lib/taskRealtime";
@@ -610,7 +609,7 @@ export default function ChatShell() {
 
       console.log("[TASK_CREATED EVENT]", payload);
       const details = getTaskNotificationDetails(payload);
-      const dedupeKey = payload.event_id || details.id;
+      const dedupeKey = details.id;
       const now = Date.now();
       const lastSeen = taskCreatedDedupeRef.current.get(dedupeKey);
       if (lastSeen && now - lastSeen < TEAM_NOTIFICATION_DEDUPE_WINDOW_MS) {
@@ -1116,19 +1115,40 @@ export default function ChatShell() {
         </div>
       ) : null}
       {taskCreatedToast ? (
-        <div className="wa-team-notification-toast" role="status">
-          <div className="wa-team-notification-icon" aria-hidden="true">
+        <div
+          className={`wa-task-created-toast priority-${taskCreatedToast.priority}`}
+          role="status"
+        >
+          <div className="wa-task-created-icon" aria-hidden="true">
             📝
           </div>
           <div>
-            <strong>📝 Nova tarefa criada</strong>
-            <p className="wa-team-notification-title">
+            <strong>NOVA TAREFA</strong>
+            <p className="wa-task-created-title">
               {taskCreatedToast.title}
             </p>
-            {taskCreatedToast.description ? <p>{taskCreatedToast.description}</p> : null}
-            <span>
-              {formatTaskHistoryDescription(taskCreatedToast)}
-            </span>
+            <dl className="wa-task-created-meta">
+              <div>
+                <dt>Responsável</dt>
+                <dd>{taskCreatedToast.assignee || "-"}</dd>
+              </div>
+              <div>
+                <dt>Prioridade</dt>
+                <dd>{taskCreatedToast.priorityLabel}</dd>
+              </div>
+              <div>
+                <dt>Prazo</dt>
+                <dd>{taskCreatedToast.dueLabel}</dd>
+              </div>
+            </dl>
+            <button
+              className="wa-task-created-action"
+              type="button"
+              aria-label="Abrir tarefa criada (em breve)"
+              disabled
+            >
+              Abrir tarefa em breve
+            </button>
           </div>
         </div>
       ) : null}

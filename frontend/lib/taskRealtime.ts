@@ -9,6 +9,10 @@ export type TaskRealtimePayload = Record<string, unknown> & {
   title?: string;
   message?: unknown;
   priority?: string;
+  task_title?: string;
+  task_assignee?: string;
+  task_due_minutes?: number | string | null;
+  due_at?: string | null;
   task?: {
     id?: string;
     title?: string;
@@ -32,8 +36,22 @@ export type TaskNotificationDetails = {
   title: string;
   description: string;
   priority: string;
+  priorityLabel: string;
   assignee: string;
   dueLabel: string;
+};
+
+export type TaskNotificationText = {
+  heading: string;
+  alertTitle: string;
+  titleLine: string;
+  assigneeLine: string;
+  priorityLine: string;
+  dueLine: string;
+  bannerText: string;
+  historyDescription: string;
+  toastLines: string[];
+  alertLines: string[];
 };
 
 export function normalizeRealtimeType(payload: {
@@ -78,23 +96,20 @@ export function isTaskCreatedPayload(payload: TaskRealtimePayload) {
   );
 }
 
-export function normalizeTaskPriorityLabel(priority: string) {
+export function formatTaskPriorityLabel(priority: string) {
   const normalized = priority.toLowerCase();
   if (normalized === "high" || normalized === "alta") return "Alta";
   if (normalized === "low" || normalized === "baixa") return "Baixa";
   return "Normal";
 }
 
+export const normalizeTaskPriorityLabel = formatTaskPriorityLabel;
+
 export function formatTaskDueLabel(payload: TaskRealtimePayload) {
   const normalizedPayload = unwrapTaskCreatedPayload(payload);
-  const rawMinutes = normalizedPayload.task?.due_minutes;
-  const minutes =
-    typeof rawMinutes === "number" ? rawMinutes : Number(rawMinutes);
-  if (Number.isFinite(minutes) && minutes > 0) {
-    return `${Math.round(minutes)} min`;
-  }
-  if (normalizedPayload.task?.due_at) {
-    const due = new Date(normalizedPayload.task.due_at);
+  const rawDueAt = normalizedPayload.task?.due_at || normalizedPayload.due_at;
+  if (rawDueAt) {
+    const due = new Date(rawDueAt);
     if (!Number.isNaN(due.getTime())) {
       return due.toLocaleString("pt-BR", {
         day: "2-digit",
@@ -103,6 +118,14 @@ export function formatTaskDueLabel(payload: TaskRealtimePayload) {
         minute: "2-digit",
       });
     }
+  }
+
+  const rawMinutes =
+    normalizedPayload.task?.due_minutes || normalizedPayload.task_due_minutes;
+  const minutes =
+    typeof rawMinutes === "number" ? rawMinutes : Number(rawMinutes);
+  if (Number.isFinite(minutes) && minutes > 0) {
+    return `${Math.round(minutes)} min`;
   }
   return "Sem prazo";
 }
@@ -114,6 +137,7 @@ export function getTaskNotificationDetails(
   const title =
     String(
       normalizedPayload.task?.title ||
+        normalizedPayload.task_title ||
         normalizedPayload.title ||
         normalizedPayload.activity?.title ||
         "Nova tarefa",
@@ -131,7 +155,9 @@ export function getTaskNotificationDetails(
   const priority = String(
     normalizedPayload.task?.priority || normalizedPayload.priority || "normal",
   ).toLowerCase();
-  const assignee = String(normalizedPayload.task?.assigned_to || "").trim();
+  const assignee = String(
+    normalizedPayload.task?.assigned_to || normalizedPayload.task_assignee || "",
+  ).trim();
   const conversationId = String(
     normalizedPayload.conversation_id ||
       normalizedPayload.activity?.entity_id ||
@@ -145,14 +171,46 @@ export function getTaskNotificationDetails(
       [conversationId, title, priority, assignee, dueLabel].join("|"),
   );
 
+  const priorityLabel = formatTaskPriorityLabel(priority);
+
   return {
     id,
     conversationId,
     title,
     description,
     priority,
+    priorityLabel,
     assignee,
     dueLabel,
+  };
+}
+
+export function buildTaskNotificationText(
+  details: Pick<
+    TaskNotificationDetails,
+    "title" | "priority" | "assignee" | "dueLabel"
+  >,
+): TaskNotificationText {
+  const priorityLabel = formatTaskPriorityLabel(details.priority);
+  const assignee = details.assignee || "-";
+  const titleLine = details.title || "Nova tarefa";
+  const assigneeLine = `Responsável: ${assignee}`;
+  const priorityLine = `Prioridade: ${priorityLabel}`;
+  const dueLine = `Prazo: ${details.dueLabel || "Sem prazo"}`;
+
+  return {
+    heading: "📝 Nova tarefa criada",
+    alertTitle: `Tarefa criada · ${priorityLabel}`,
+    titleLine,
+    assigneeLine,
+    priorityLine,
+    dueLine,
+    bannerText: [titleLine, assigneeLine, dueLine].join("\n"),
+    historyDescription: [titleLine, priorityLine, assigneeLine, dueLine].join(
+      " · ",
+    ),
+    toastLines: [titleLine, assigneeLine, priorityLine, dueLine],
+    alertLines: [titleLine, `${assigneeLine} · ${dueLine}`],
   };
 }
 
@@ -162,12 +220,5 @@ export function formatTaskHistoryDescription(
     "title" | "priority" | "assignee" | "dueLabel"
   >,
 ) {
-  return [
-    details.title,
-    `Prioridade: ${normalizeTaskPriorityLabel(details.priority)}`,
-    details.assignee ? `Responsável: ${details.assignee}` : "Responsável: -",
-    `Prazo: ${details.dueLabel}`,
-  ]
-    .filter(Boolean)
-    .join(" · ");
+  return buildTaskNotificationText(details).historyDescription;
 }
