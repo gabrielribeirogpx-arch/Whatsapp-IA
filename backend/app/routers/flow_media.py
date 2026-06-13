@@ -181,36 +181,44 @@ def _validate_video_headers_once(
     return usable_response is not None, content_type, content_length, head_status, get_status, exception
 
 
-def _validate_video_headers(*, public_url: str, suffix: str, local_size: int) -> tuple[str, int]:
+def _validate_internal_video_file(*, suffix: str, content_type: str, local_size: int) -> None:
     if suffix not in {".mp4", ".3gp"}:
+        raise HTTPException(status_code=400, detail=VIDEO_INCOMPATIBLE_DETAIL)
+    if content_type not in {"video/mp4", "video/3gpp"}:
+        raise HTTPException(status_code=415, detail=VIDEO_INCOMPATIBLE_DETAIL)
+    expected_type = "video/mp4" if suffix == ".mp4" else "video/3gpp"
+    if content_type != expected_type:
         raise HTTPException(status_code=400, detail=VIDEO_INCOMPATIBLE_DETAIL)
     if local_size <= 0:
         raise HTTPException(status_code=400, detail="Arquivo de vídeo vazio.")
     if local_size > VIDEO_META_MAX_BYTES:
-        raise HTTPException(status_code=413, detail=f"Vídeo maior que o limite da Meta ({VIDEO_META_MAX_BYTES} bytes).")
+        raise HTTPException(status_code=413, detail=f"Vídeo excede o limite de {VIDEO_META_MAX_BYTES} bytes.")
 
+
+def _diagnose_video_public_url(*, public_url: str, suffix: str, local_size: int) -> tuple[str, int]:
     deadline = time.monotonic() + max(0, VIDEO_PREFLIGHT_RETRY_SECONDS)
     last_result: tuple[bool, str, int, int | None, int | None, BaseException | None] | None = None
     while True:
         last_result = _validate_video_headers_once(public_url=public_url, local_size=local_size)
-        is_reachable, content_type, content_length, head_status, get_status, exception = last_result
+        is_reachable, content_type, content_length, _head_status, _get_status, _exception = last_result
         if is_reachable:
-            break
+            expected_type = "video/mp4" if suffix == ".mp4" else "video/3gpp"
+            if content_type != expected_type or content_length <= 0 or content_length > VIDEO_META_MAX_BYTES:
+                logger.warning(
+                    "[VIDEO PREFLIGHT] public URL preflight returned unexpected headers, upload accepted because local file validation passed public_url=%s content_type=%s content_length=%s expected_type=%s",
+                    public_url,
+                    content_type,
+                    content_length,
+                    expected_type,
+                )
+            return content_type or expected_type, content_length or local_size
         if time.monotonic() >= deadline:
-            if exception is not None:
-                raise HTTPException(status_code=400, detail="Não foi possível validar a URL pública do vídeo.") from exception
-            raise HTTPException(status_code=400, detail="URL pública do vídeo não retornou HTTP 200.")
+            logger.warning(
+                "[VIDEO PREFLIGHT] public URL preflight failed, upload accepted because local file validation passed public_url=%s",
+                public_url,
+            )
+            return ("video/mp4" if suffix == ".mp4" else "video/3gpp"), local_size
         time.sleep(max(0.1, VIDEO_PREFLIGHT_RETRY_INTERVAL_SECONDS))
-
-    _, content_type, content_length, _head_status, _get_status, _exception = last_result
-    expected_type = "video/mp4" if suffix == ".mp4" else "video/3gpp"
-    if content_type != expected_type:
-        raise HTTPException(status_code=400, detail=VIDEO_INCOMPATIBLE_DETAIL)
-    if content_length <= 0:
-        raise HTTPException(status_code=400, detail="Content-Length do vídeo inválido.")
-    if content_length > VIDEO_META_MAX_BYTES:
-        raise HTTPException(status_code=413, detail=f"Vídeo maior que o limite da Meta ({VIDEO_META_MAX_BYTES} bytes).")
-    return content_type, content_length
 
 
 def _validate_video_with_ffprobe(path: Path) -> None:
@@ -371,8 +379,9 @@ async def _upload_media(request: Request, file: UploadFile = File(...)) -> JSONR
     public_url = _public_url(request, public_filename)
     if media_family == "video":
         try:
+            _validate_internal_video_file(suffix=suffix, content_type=content_type, local_size=len(data))
             _validate_video_with_ffprobe(path)
-            preflight_content_type, preflight_content_length = _validate_video_headers(public_url=public_url, suffix=suffix, local_size=len(data))
+            preflight_content_type, preflight_content_length = _diagnose_video_public_url(public_url=public_url, suffix=suffix, local_size=len(data))
         except HTTPException:
             path.unlink(missing_ok=True)
             raise
