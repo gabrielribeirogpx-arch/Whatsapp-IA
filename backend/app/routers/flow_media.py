@@ -5,6 +5,8 @@ import logging
 import os
 import re
 import subprocess
+import time
+import traceback
 import uuid
 from collections.abc import Mapping
 from pathlib import Path
@@ -72,6 +74,9 @@ DEFAULT_MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 MEDIA_MAX_UPLOAD_BYTES = {"audio": 16 * 1024 * 1024, "video": 16 * 1024 * 1024}
 VIDEO_META_MAX_BYTES = int(os.getenv("FLOW_MEDIA_VIDEO_META_MAX_BYTES", str(16 * 1024 * 1024)))
 VIDEO_INCOMPATIBLE_DETAIL = "Este vídeo não é compatível com WhatsApp. Use MP4 H.264 com áudio AAC."
+VIDEO_PREFLIGHT_RETRY_SECONDS = float(os.getenv("FLOW_MEDIA_VIDEO_PREFLIGHT_RETRY_SECONDS", "5"))
+VIDEO_PREFLIGHT_RETRY_INTERVAL_SECONDS = float(os.getenv("FLOW_MEDIA_VIDEO_PREFLIGHT_RETRY_INTERVAL_SECONDS", "0.5"))
+VIDEO_PREFLIGHT_TIMEOUT_SECONDS = float(os.getenv("FLOW_MEDIA_VIDEO_PREFLIGHT_TIMEOUT_SECONDS", "8"))
 
 
 def _max_upload_bytes() -> int:
@@ -92,6 +97,90 @@ def _header_int(headers: Mapping[str, str], name: str) -> int:
         return 0
 
 
+def _video_preflight_exception_text(exc: BaseException | None) -> str:
+    if exc is None:
+        return ""
+    return "".join(traceback.format_exception(type(exc), exc, exc.__traceback__)).strip().replace("\n", " | ")
+
+
+def _log_video_preflight(
+    *,
+    public_url: str,
+    head_status: int | None,
+    get_status: int | None,
+    content_type: str,
+    content_length: int,
+    exception: BaseException | None,
+) -> None:
+    exception_text = _video_preflight_exception_text(exception)
+    logger.info(
+        "[VIDEO PREFLIGHT]\npublic_url=%s\nhead_status=%s\nget_status=%s\ncontent_type=%s\ncontent_length=%s\nexception=%s",
+        public_url,
+        head_status if head_status is not None else "",
+        get_status if get_status is not None else "",
+        content_type,
+        content_length if content_length > 0 else "",
+        exception_text,
+    )
+    if exception is not None:
+        logger.warning(
+            "[VIDEO PREFLIGHT EXCEPTION] public_url=%s",
+            public_url,
+            exc_info=(type(exception), exception, exception.__traceback__),
+        )
+
+
+def _successful_video_preflight_status(status_code: int | None) -> bool:
+    return status_code in {200, 206}
+
+
+def _validate_video_headers_once(
+    *, public_url: str, local_size: int
+) -> tuple[bool, str, int, int | None, int | None, BaseException | None]:
+    head_status: int | None = None
+    get_status: int | None = None
+    content_type = ""
+    content_length = 0
+    exception: BaseException | None = None
+    usable_response: requests.Response | None = None
+
+    try:
+        head_response = requests.head(public_url, allow_redirects=True, timeout=VIDEO_PREFLIGHT_TIMEOUT_SECONDS)
+        head_status = head_response.status_code
+        if _successful_video_preflight_status(head_status):
+            usable_response = head_response
+    except requests.RequestException as exc:
+        exception = exc
+
+    try:
+        get_response = requests.get(
+            public_url,
+            headers={"Range": "bytes=0-0"},
+            stream=True,
+            allow_redirects=True,
+            timeout=VIDEO_PREFLIGHT_TIMEOUT_SECONDS,
+        )
+        get_status = get_response.status_code
+        if _successful_video_preflight_status(get_status):
+            usable_response = get_response
+    except requests.RequestException as exc:
+        exception = exc
+
+    if usable_response is not None:
+        content_type = str(usable_response.headers.get("content-type") or "").split(";", 1)[0].strip().lower()
+        content_length = _header_int(usable_response.headers, "content-length") or local_size
+
+    _log_video_preflight(
+        public_url=public_url,
+        head_status=head_status,
+        get_status=get_status,
+        content_type=content_type,
+        content_length=content_length,
+        exception=exception,
+    )
+    return usable_response is not None, content_type, content_length, head_status, get_status, exception
+
+
 def _validate_video_headers(*, public_url: str, suffix: str, local_size: int) -> tuple[str, int]:
     if suffix not in {".mp4", ".3gp"}:
         raise HTTPException(status_code=400, detail=VIDEO_INCOMPATIBLE_DETAIL)
@@ -100,27 +189,20 @@ def _validate_video_headers(*, public_url: str, suffix: str, local_size: int) ->
     if local_size > VIDEO_META_MAX_BYTES:
         raise HTTPException(status_code=413, detail=f"Vídeo maior que o limite da Meta ({VIDEO_META_MAX_BYTES} bytes).")
 
-    try:
-        response = requests.head(public_url, allow_redirects=True, timeout=8)
-        if response.status_code == 405:
-            response = requests.get(public_url, headers={"Range": "bytes=0-0"}, stream=True, allow_redirects=True, timeout=8)
-        status_code = response.status_code
-        content_type = str(response.headers.get("content-type") or "").split(";", 1)[0].strip().lower()
-        content_length = _header_int(response.headers, "content-length") or local_size
-        logger.info(
-            "[MEDIA VIDEO PREFLIGHT] media_url=%s status_code=%s content_type=%s content_length=%s local_size=%s",
-            public_url,
-            status_code,
-            content_type,
-            content_length,
-            local_size,
-        )
-    except requests.RequestException as exc:
-        logger.warning("[MEDIA VIDEO PREFLIGHT FAILED] media_url=%s error=%s", public_url, exc)
-        raise HTTPException(status_code=400, detail="Não foi possível validar a URL pública do vídeo.") from exc
+    deadline = time.monotonic() + max(0, VIDEO_PREFLIGHT_RETRY_SECONDS)
+    last_result: tuple[bool, str, int, int | None, int | None, BaseException | None] | None = None
+    while True:
+        last_result = _validate_video_headers_once(public_url=public_url, local_size=local_size)
+        is_reachable, content_type, content_length, head_status, get_status, exception = last_result
+        if is_reachable:
+            break
+        if time.monotonic() >= deadline:
+            if exception is not None:
+                raise HTTPException(status_code=400, detail="Não foi possível validar a URL pública do vídeo.") from exception
+            raise HTTPException(status_code=400, detail="URL pública do vídeo não retornou HTTP 200.")
+        time.sleep(max(0.1, VIDEO_PREFLIGHT_RETRY_INTERVAL_SECONDS))
 
-    if status_code != 200:
-        raise HTTPException(status_code=400, detail="URL pública do vídeo não retornou HTTP 200.")
+    _, content_type, content_length, _head_status, _get_status, _exception = last_result
     expected_type = "video/mp4" if suffix == ".mp4" else "video/3gpp"
     if content_type != expected_type:
         raise HTTPException(status_code=400, detail=VIDEO_INCOMPATIBLE_DETAIL)
