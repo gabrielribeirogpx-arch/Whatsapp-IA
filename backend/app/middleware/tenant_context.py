@@ -20,6 +20,7 @@ PUBLIC_PATHS = (
     "/api/reset-password",
     "/webhook",
     "/api/webhook",
+    "/uploads",
 )
 
 

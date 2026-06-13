@@ -166,6 +166,7 @@ ALLOWED_ORIGIN_REGEX = _parse_allowed_origin_regex()
 
 app = FastAPI()
 
+app.include_router(flow_media.public_router)
 app.mount("/uploads", StaticFiles(directory=os.getenv("FLOW_MEDIA_STATIC_DIR", "uploads"), check_dir=False), name="uploads")
 
 app.add_middleware(TenantContextMiddleware)
