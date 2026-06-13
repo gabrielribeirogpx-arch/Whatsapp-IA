@@ -29,6 +29,11 @@ import {
 } from "../lib/types";
 import { useRealtime } from "../hooks/useRealtime";
 import { formatTimeBR } from "../lib/date";
+import {
+  formatTaskHistoryDescription,
+  getTaskNotificationDetails,
+  isTaskCreatedPayload,
+} from "../lib/taskRealtime";
 
 type ConversationAssignmentSnapshot = {
   mode: string;
@@ -90,6 +95,7 @@ const RECENT_MODE_OVERRIDE_TTL_MS = 30_000;
 const TYPING_STOP_DELAY_MS = 2000;
 const TYPING_START_THROTTLE_MS = 3000;
 const TEAM_NOTIFICATION_TOAST_MS = 7000;
+const TASK_CREATED_TOAST_MS = 7000;
 const TEAM_NOTIFICATION_DEDUPE_WINDOW_MS = 3000;
 
 type TeamNotificationDetails = {
@@ -99,6 +105,8 @@ type TeamNotificationDetails = {
   message: string;
   priority: string;
 };
+
+type TaskCreatedToast = ReturnType<typeof getTaskNotificationDetails>;
 
 function normalizeRealtimeType(payload: RealtimeEvent) {
   return String(
@@ -240,6 +248,8 @@ export default function ChatShell() {
   const [resetToast, setResetToast] = useState("");
   const [teamNotificationToast, setTeamNotificationToast] =
     useState<TeamNotificationDetails | null>(null);
+  const [taskCreatedToast, setTaskCreatedToast] =
+    useState<TaskCreatedToast | null>(null);
   const [resetError, setResetError] = useState("");
   const [resettingConversation, setResettingConversation] = useState(false);
   const [presenceByConversation, setPresenceByConversation] = useState<
@@ -260,6 +270,7 @@ export default function ChatShell() {
   );
   const lastTypingStartRef = useRef(0);
   const teamNotificationDedupeRef = useRef<Map<string, number>>(new Map());
+  const taskCreatedDedupeRef = useRef<Map<string, number>>(new Map());
   const [crmRefreshKey, setCrmRefreshKey] = useState(0);
 
   const playHumanHandoffSound = useCallback(() => {
@@ -501,6 +512,17 @@ export default function ChatShell() {
   }, [teamNotificationToast]);
 
   useEffect(() => {
+    if (!taskCreatedToast) return;
+
+    const timeoutId = window.setTimeout(
+      () => setTaskCreatedToast(null),
+      TASK_CREATED_TOAST_MS,
+    );
+
+    return () => window.clearTimeout(timeoutId);
+  }, [taskCreatedToast]);
+
+  useEffect(() => {
     if (!resetToast && !resetError) return;
 
     const timeoutId = window.setTimeout(() => {
@@ -510,6 +532,44 @@ export default function ChatShell() {
 
     return () => window.clearTimeout(timeoutId);
   }, [resetToast, resetError]);
+
+  const showTaskCreatedNotification = useCallback(
+    (payload: RealtimeEvent) => {
+      if (!isTaskCreatedPayload(payload)) return false;
+
+      console.log("[TASK_CREATED EVENT]", payload);
+      const details = getTaskNotificationDetails(payload);
+      const dedupeKey = payload.event_id || details.id;
+      const now = Date.now();
+      const lastSeen = taskCreatedDedupeRef.current.get(dedupeKey);
+      if (lastSeen && now - lastSeen < TEAM_NOTIFICATION_DEDUPE_WINDOW_MS) {
+        return true;
+      }
+
+      taskCreatedDedupeRef.current.set(dedupeKey, now);
+      taskCreatedDedupeRef.current.forEach((timestamp, key) => {
+        if (now - timestamp > TEAM_NOTIFICATION_DEDUPE_WINDOW_MS) {
+          taskCreatedDedupeRef.current.delete(key);
+        }
+      });
+
+      setTaskCreatedToast(details);
+      setCrmRefreshKey((current) => current + 1);
+
+      if (
+        details.conversationId &&
+        selectedConversation &&
+        details.conversationId === String(selectedConversation.id)
+      ) {
+        fetchMessages(
+          String(selectedConversation.contact_id ?? selectedConversation.id),
+        ).catch(() => undefined);
+      }
+
+      return true;
+    },
+    [fetchMessages, selectedConversation],
+  );
 
   const showTeamNotification = useCallback(
     (payload: RealtimeEvent) => {
@@ -583,6 +643,7 @@ export default function ChatShell() {
         }));
         return;
       }
+      showTaskCreatedNotification(payload);
       showTeamNotification(payload);
       if (!payload?.refresh?.includes("conversations")) return;
       getConversations()
@@ -655,6 +716,7 @@ export default function ChatShell() {
         return;
       }
 
+      showTaskCreatedNotification(payload);
       showTeamNotification(payload);
       if (!selectedContactId) return;
       fetchMessages(selectedContactId).catch(() => undefined);
@@ -958,6 +1020,23 @@ export default function ChatShell() {
             <span>
               Prioridade:{" "}
               {normalizePriorityLabel(teamNotificationToast.priority)}
+            </span>
+          </div>
+        </div>
+      ) : null}
+      {taskCreatedToast ? (
+        <div className="wa-team-notification-toast" role="status">
+          <div className="wa-team-notification-icon" aria-hidden="true">
+            📝
+          </div>
+          <div>
+            <strong>📝 Nova tarefa criada</strong>
+            <p className="wa-team-notification-title">
+              {taskCreatedToast.title}
+            </p>
+            {taskCreatedToast.description ? <p>{taskCreatedToast.description}</p> : null}
+            <span>
+              {formatTaskHistoryDescription(taskCreatedToast)}
             </span>
           </div>
         </div>

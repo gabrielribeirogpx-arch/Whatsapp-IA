@@ -24,6 +24,7 @@ class _FakeDB:
         self.deleted = []
         self.conversation = None
         self.contact = None
+        self.lead = None
 
     def get(self, model, item_id):
         if self.contact is not None and item_id == getattr(self.contact, "id", None):
@@ -49,6 +50,8 @@ class _FakeDB:
             return _FakeResult(scalar_one_value=self.session)
         if "flow_v2_idempotency_keys" in statement_text:
             return _FakeResult(scalar_one_value=None)
+        if "leads" in statement_text:
+            return _FakeResult(values=[self.lead] if self.lead is not None else [])
         return _FakeResult()
 
     def flush(self):
@@ -882,7 +885,7 @@ def test_message_choice_display_mode_sends_clicks_transitions_and_completes(disp
     assert not any(isinstance(action, SendChoiceButtonsAction) for action in selected.actions)
 
 
-@pytest.mark.parametrize("action_type", ["create_lead", "add_tag", "notify_team", "transfer_human"])
+@pytest.mark.parametrize("action_type", ["create_lead", "add_tag", "notify_team", "transfer_human", "create_task"])
 def test_message_to_action_to_message_continues_runtime_v2(action_type) -> None:
     raw_snapshot = {
         "schema_version": 1,
@@ -1654,3 +1657,112 @@ def test_notify_team_respects_tenant_isolation(monkeypatch) -> None:
     assert output.status == FlowV2SessionStatus.COMPLETED
     assert not any(item.__class__.__name__ in {"AuditLog", "ConversationLog"} for item in db.added)
     assert published == []
+
+
+
+def _create_task_snapshot(*, params=None, with_next=False):
+    nodes = [{"id": "action", "type": "action", "data": {"action_type": "create_task", **({"params": params} if params is not None else {})}}]
+    edges = []
+    if with_next:
+        nodes.append({"id": "end", "type": "message", "content": "Tarefa criada com sucesso"})
+        edges.append({"id": "e1", "source": "action", "target": "end"})
+    return {"schema_version": 1, "start_node_id": "action", "nodes": nodes, "edges": edges}
+
+
+def _attach_task_conversation(db, snapshot, *, tenant_id=None):
+    contact_id = uuid.uuid4()
+    conversation = SimpleNamespace(
+        id=uuid.uuid4(),
+        tenant_id=tenant_id or snapshot.tenant_id,
+        contact_id=contact_id,
+        phone_number="+5511999999999",
+        name="Cliente Tarefa",
+        updated_at=None,
+    )
+    db.conversation = conversation
+    return conversation
+
+
+def test_create_task_creates_task_audit_log_realtime_and_continues(monkeypatch) -> None:
+    from app.flow_v2 import node_executors
+
+    published = []
+    monkeypatch.setattr(node_executors, "sync_publish", lambda channel, payload: published.append((channel, payload)))
+    executor, snapshot, _event_store, session, db = _executor(
+        _create_task_snapshot(
+            params={
+                "task_title": "Ligar para cliente",
+                "task_description": "Confirmar pagamento",
+                "task_priority": "high",
+                "task_assignee": "Maria",
+                "task_due_minutes": "30",
+            },
+            with_next=True,
+        )
+    )
+    conversation = _attach_task_conversation(db, snapshot)
+    lead = SimpleNamespace(id=uuid.uuid4(), tenant_id=snapshot.tenant_id, contact_id=conversation.contact_id, conversation_id=conversation.id, phone="+5511999999999")
+    db.lead = lead
+
+    output = executor.handle_input(db, _input_for_contact(snapshot, contact_id=conversation.contact_id, conversation_id=conversation.id))
+
+    assert output.status == FlowV2SessionStatus.COMPLETED
+    assert output.effects == ({"type": "send_message", "text": "Tarefa criada com sucesso"},)
+    task = next(item for item in db.added if item.__class__.__name__ == "Task")
+    assert task.tenant_id == snapshot.tenant_id
+    assert task.conversation_id == conversation.id
+    assert task.contact_id == conversation.contact_id
+    assert task.lead_id == lead.id
+    assert task.title == "Ligar para cliente"
+    assert task.description == "Confirmar pagamento"
+    assert task.priority == "high"
+    assert task.status == "open"
+    assert task.assigned_to == "Maria"
+    assert task.due_at is not None
+    assert 29 <= (task.due_at - task.created_at).total_seconds() / 60 <= 31
+    audit = next(item for item in db.added if item.__class__.__name__ == "AuditLog")
+    assert audit.action == "TASK_CREATED"
+    assert audit.tenant_id == snapshot.tenant_id
+    assert audit.entity_id == str(task.id)
+    assert audit.metadata_json["priority"] == "high"
+    assert audit.metadata_json["due_minutes"] == 30
+    activity = next(item for item in db.added if item.__class__.__name__ == "ConversationLog")
+    assert activity.tenant_id == snapshot.tenant_id
+    assert activity.conversation_id == conversation.id
+    assert activity.intent == "task_created"
+    assert activity.response == "Tarefa criada"
+    assert "Ligar para cliente" in activity.message
+    assert any(channel == f"dashboard:{snapshot.tenant_id}" and payload["event"] == "task_created" for channel, payload in published)
+    assert any(channel == f"{snapshot.tenant_id}:{conversation.id}" for channel, _payload in published)
+    assert any(payload["task"]["title"] == "Ligar para cliente" for _channel, payload in published)
+
+
+def test_create_task_respects_tenant_isolation(monkeypatch) -> None:
+    from app.flow_v2 import node_executors
+
+    published = []
+    monkeypatch.setattr(node_executors, "sync_publish", lambda channel, payload: published.append((channel, payload)))
+    executor, snapshot, _event_store, _session, db = _executor(_create_task_snapshot(params={"task_title": "Isolada"}))
+    conversation = _attach_task_conversation(db, snapshot, tenant_id=uuid.uuid4())
+
+    output = executor.handle_input(db, _input_for_contact(snapshot, contact_id=conversation.contact_id, conversation_id=conversation.id))
+
+    assert output.status == FlowV2SessionStatus.COMPLETED
+    assert not any(item.__class__.__name__ in {"Task", "AuditLog", "ConversationLog"} for item in db.added)
+    assert published == []
+
+
+def test_create_task_defaults_priority_and_due_minutes(monkeypatch) -> None:
+    from app.flow_v2 import node_executors
+
+    monkeypatch.setattr(node_executors, "sync_publish", lambda _channel, _payload: None)
+    executor, snapshot, _event_store, _session, db = _executor(_create_task_snapshot(params={"task_title": "Retornar contato"}))
+    conversation = _attach_task_conversation(db, snapshot)
+
+    output = executor.handle_input(db, _input_for_contact(snapshot, contact_id=conversation.contact_id, conversation_id=conversation.id))
+
+    assert output.status == FlowV2SessionStatus.COMPLETED
+    task = next(item for item in db.added if item.__class__.__name__ == "Task")
+    assert task.priority == "normal"
+    assert task.due_at is not None
+    assert 59 <= (task.due_at - task.created_at).total_seconds() / 60 <= 61

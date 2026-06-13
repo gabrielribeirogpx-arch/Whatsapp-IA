@@ -42,6 +42,7 @@ const getEventTone = (type: string) => {
     t.includes("equipe notificada")
   )
     return "notification";
+  if (t.includes("task_created") || t.includes("task created") || t.includes("tarefa")) return "flow";
   if (t.includes("message") || t.includes("mensag")) return "message";
   if (t.includes("flow") || t.includes("autom")) return "flow";
   if (t.includes("campaign") || t.includes("campanha")) return "campaign";
@@ -91,6 +92,32 @@ function renderActivityEvent(event: ActivityEvent) {
       ]
         .filter(Boolean)
         .join(" · "),
+    };
+  }
+
+
+  if (
+    identity.includes("task_created") ||
+    identity.includes("task created")
+  ) {
+    const raw = String(event.message || event.description || "").trim();
+    const titleMatch = raw.match(/Título:\s*([^·]+)/i);
+    const priorityMatch = raw.match(/Prioridade:\s*([^·]+)/i);
+    const assigneeMatch = raw.match(/Responsável:\s*([^·]+)/i);
+    const dueMatch = raw.match(/Prazo:\s*([^·]+)/i);
+    const title = titleMatch?.[1]?.trim() || event.title || "Tarefa";
+    const priority = priorityMatch?.[1]?.trim() || "normal";
+    const assignee = assigneeMatch?.[1]?.trim() || "-";
+    const due = dueMatch?.[1]?.trim() || "-";
+
+    return {
+      title: "📝 Tarefa criada",
+      description: [
+        title,
+        `Prioridade: ${priority}`,
+        `Responsável: ${assignee}`,
+        `Prazo: ${due}`,
+      ].join(" · "),
     };
   }
 

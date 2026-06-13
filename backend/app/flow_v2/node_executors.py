@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any, Protocol
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 
 from app.flow_v2.actions import (
     RuntimeAction,
@@ -21,6 +21,8 @@ from app.flow_v2.models import FlowV2ScheduledJob
 from app.models.contact import Contact
 from app.models.conversation import Conversation
 from app.models.conversation_log import ConversationLog
+from app.models.lead import Lead
+from app.models.task import Task
 from app.services.contact_tag_service import add_tag_to_contact
 from app.services.conversation_mode_service import ConversationModeError, set_conversation_mode
 from app.services.audit_service import write_audit_log
@@ -844,6 +846,7 @@ class ActionNodeExecutor(BaseNodeExecutor):
         "notify_team",
         "transfer_human",
         "set_conversation_mode",
+        "create_task",
     }
 
     def execute(
@@ -900,6 +903,11 @@ class ActionNodeExecutor(BaseNodeExecutor):
             "notification_title",
             "notification_message",
             "notification_priority",
+            "task_title",
+            "task_description",
+            "task_priority",
+            "task_assignee",
+            "task_due_minutes",
         ):
             if key in data and key not in params:
                 params[key] = data[key]
@@ -926,6 +934,8 @@ class ActionNodeExecutor(BaseNodeExecutor):
                 self._transfer_human(db, session=session, runtime_input=runtime_input, params=params)
             elif action_type == "set_conversation_mode":
                 self._set_conversation_mode(db, session=session, runtime_input=runtime_input, params=params)
+            elif action_type == "create_task":
+                self._create_task(db, session=session, node_id=node_id, runtime_input=runtime_input, params=params)
         except ConversationModeError as exc:
             logger.warning(
                 "[ACTION NODE FAILED CONTROLLED] node_id=%s action_type=%s error=%s",
@@ -1083,6 +1093,186 @@ class ActionNodeExecutor(BaseNodeExecutor):
             title,
             message[:200],
         )
+
+
+    @staticmethod
+    def _create_task(db, *, session: Any, node_id: str, runtime_input: RuntimeInput, params: dict[str, Any]) -> None:
+        conversation = ActionNodeExecutor._resolve_conversation(db, runtime_input=runtime_input)
+        if conversation is None:
+            logger.info(
+                "[ACTION CREATE TASK SKIPPED] tenant_id=%s session_id=%s node_id=%s conversation_id=%s reason=conversation_not_found_or_tenant_mismatch",
+                session.tenant_id,
+                session.id,
+                node_id,
+                runtime_input.conversation_id,
+            )
+            return
+
+        now = datetime.utcnow()
+        title = str(params.get("task_title") or params.get("title") or "Nova tarefa").strip() or "Nova tarefa"
+        description = str(params.get("task_description") or params.get("description") or "").strip() or None
+        priority = ActionNodeExecutor._task_priority(params.get("task_priority") or params.get("priority"))
+        assigned_to = str(params.get("task_assignee") or params.get("assigned_to") or "").strip() or None
+        due_minutes = ActionNodeExecutor._task_due_minutes(params.get("task_due_minutes") or params.get("due_minutes"))
+        due_at = now + timedelta(minutes=due_minutes) if due_minutes > 0 else None
+        contact_id = runtime_input.contact_id or getattr(conversation, "contact_id", None)
+        lead = ActionNodeExecutor._resolve_lead(db, runtime_input=runtime_input, contact_id=contact_id, conversation_id=conversation.id)
+
+        task = Task(
+            id=uuid.uuid4(),
+            tenant_id=session.tenant_id,
+            conversation_id=conversation.id,
+            contact_id=contact_id,
+            lead_id=getattr(lead, "id", None),
+            title=title,
+            description=description,
+            priority=priority,
+            status="open",
+            assigned_to=assigned_to,
+            due_at=due_at,
+            created_at=now,
+            updated_at=now,
+        )
+        if hasattr(db, "add"):
+            db.add(task)
+            if hasattr(db, "flush"):
+                db.flush()
+
+        metadata = {
+            "tenant_id": str(session.tenant_id),
+            "task_id": str(task.id),
+            "conversation_id": str(conversation.id),
+            "contact_id": str(contact_id) if contact_id else None,
+            "lead_id": str(task.lead_id) if task.lead_id else None,
+            "title": title,
+            "description": description,
+            "priority": priority,
+            "status": "open",
+            "assigned_to": assigned_to,
+            "due_at": due_at.isoformat() if due_at else None,
+            "due_minutes": due_minutes,
+            "flow_execution_id": str(getattr(session, "id", "") or "") or None,
+            "node_id": node_id,
+        }
+        write_audit_log(
+            db,
+            action="TASK_CREATED",
+            tenant_id=session.tenant_id,
+            entity_type="task",
+            entity_id=task.id,
+            metadata=metadata,
+        )
+
+        due_label = f"{due_minutes} min" if due_minutes > 0 else "sem prazo"
+        log_message = " · ".join(
+            part
+            for part in (
+                f"Título: {title}",
+                f"Prioridade: {priority}",
+                f"Responsável: {assigned_to}" if assigned_to else "Responsável: -",
+                f"Prazo: {due_label}",
+            )
+            if part
+        )
+        activity = ConversationLog(
+            tenant_id=session.tenant_id,
+            conversation_id=conversation.id,
+            message=log_message,
+            mode="human",
+            intent="task_created",
+            flow_step=node_id,
+            used_fallback=False,
+            response="Tarefa criada",
+            created_at=now,
+        )
+        if hasattr(db, "add"):
+            db.add(activity)
+
+        conversation.updated_at = now
+        if hasattr(db, "add"):
+            db.add(conversation)
+
+        payload = {
+            "event": "task_created",
+            "type": "task_created",
+            "action": "TASK_CREATED",
+            "refresh": ["activity", "conversations", "conversation", "tasks"],
+            "tenant_id": str(session.tenant_id),
+            "conversation_id": str(conversation.id),
+            "contact_id": str(contact_id) if contact_id else None,
+            "lead_id": str(task.lead_id) if task.lead_id else None,
+            "phone": getattr(conversation, "phone_number", None),
+            "task": {
+                "id": str(task.id),
+                "title": title,
+                "description": description,
+                "priority": priority,
+                "status": "open",
+                "assigned_to": assigned_to,
+                "due_at": due_at.isoformat() if due_at else None,
+                "due_minutes": due_minutes,
+            },
+            "activity": {
+                "id": str(getattr(activity, "id", "") or uuid.uuid4()),
+                "type": "TASK_CREATED",
+                "title": "📝 Tarefa criada",
+                "description": log_message,
+                "entity_type": "task",
+                "entity_id": str(task.id),
+                "contact_name": getattr(conversation, "name", None),
+                "phone": getattr(conversation, "phone_number", None),
+                "created_at": activity.created_at.isoformat(),
+            },
+        }
+        sync_publish(f"dashboard:{session.tenant_id}", payload)
+        sync_publish(f"{session.tenant_id}:{conversation.id}", payload)
+        phone_number = getattr(conversation, "phone_number", None)
+        if phone_number:
+            sync_publish(f"{session.tenant_id}:{phone_number}", payload)
+
+        logger.info(
+            "[ACTION CREATE TASK] tenant_id=%s session_id=%s node_id=%s conversation_id=%s task_id=%s priority=%s due_minutes=%s",
+            session.tenant_id,
+            session.id,
+            node_id,
+            conversation.id,
+            task.id,
+            priority,
+            due_minutes,
+        )
+
+    @staticmethod
+    def _task_priority(value: Any) -> str:
+        normalized = str(value or "normal").strip().lower()
+        aliases = {"low": "low", "baixa": "low", "normal": "normal", "high": "high", "alta": "high"}
+        return aliases.get(normalized, "normal")
+
+    @staticmethod
+    def _task_due_minutes(value: Any) -> int:
+        if value in (None, ""):
+            return 60
+        try:
+            parsed = int(float(str(value).strip()))
+        except (TypeError, ValueError):
+            return 60
+        return max(parsed, 0)
+
+    @staticmethod
+    def _resolve_lead(db, *, runtime_input: RuntimeInput, contact_id: Any = None, conversation_id: Any = None):
+        if not hasattr(db, "execute"):
+            return None
+        filters = [Lead.tenant_id == runtime_input.tenant_id]
+        identifiers = []
+        if contact_id:
+            identifiers.append(Lead.contact_id == contact_id)
+        if conversation_id:
+            identifiers.append(Lead.conversation_id == conversation_id)
+        phone = ActionNodeExecutor._phone_from_runtime_input(runtime_input)
+        if phone:
+            identifiers.append(Lead.phone == phone)
+        if not identifiers:
+            return None
+        return db.execute(select(Lead).where(*filters, or_(*identifiers))).scalars().first()
 
     @staticmethod
     def _notification_priority(value: Any) -> str:

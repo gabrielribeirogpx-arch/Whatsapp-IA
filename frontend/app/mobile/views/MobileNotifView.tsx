@@ -12,7 +12,7 @@ interface LocalNotif {
   id: string;
   title: string;
   body: string;
-  type: "message" | "handoff" | "team_notification" | "generic";
+  type: "message" | "handoff" | "team_notification" | "task_created" | "generic";
   receivedAt: string;
   conversationId?: string;
 }
@@ -174,7 +174,9 @@ export default function MobileNotifView() {
                     ? "rgba(239,159,39,0.10)"
                     : n.type === "team_notification"
                       ? "rgba(37,99,235,0.10)"
-                      : "rgba(89,196,20,0.10)",
+                      : n.type === "task_created"
+                        ? "rgba(16,185,129,0.10)"
+                        : "rgba(89,196,20,0.10)",
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
@@ -184,12 +186,16 @@ export default function MobileNotifView() {
                     ? "#EF9F27"
                     : n.type === "team_notification"
                       ? "#2563EB"
-                      : "#59C414",
+                      : n.type === "task_created"
+                        ? "#059669"
+                        : "#59C414",
               }}
             >
               {n.type === "handoff" ? (
                 <UserCheck size={17} />
               ) : n.type === "team_notification" ? (
+                <Bell size={17} />
+              ) : n.type === "task_created" ? (
                 <Bell size={17} />
               ) : (
                 <MessageSquare size={17} />
