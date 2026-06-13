@@ -2,6 +2,8 @@ export type TaskRealtimePayload = Record<string, unknown> & {
   event?: string;
   type?: string;
   action?: string;
+  data?: TaskRealtimePayload;
+  payload?: TaskRealtimePayload;
   event_id?: string;
   conversation_id?: string;
   title?: string;
@@ -34,12 +36,46 @@ export type TaskNotificationDetails = {
   dueLabel: string;
 };
 
-export function normalizeRealtimeType(payload: { event?: unknown; type?: unknown; action?: unknown }) {
-  return String(payload.event || payload.type || payload.action || "").toLowerCase();
+export function normalizeRealtimeType(payload: {
+  event?: unknown;
+  type?: unknown;
+  action?: unknown;
+}) {
+  return String(
+    payload.event || payload.type || payload.action || "",
+  ).toLowerCase();
+}
+
+export function unwrapTaskCreatedPayload(
+  payload: TaskRealtimePayload,
+): TaskRealtimePayload {
+  const nestedPayloads = [payload.data, payload.payload].filter(
+    (item): item is TaskRealtimePayload =>
+      Boolean(item && typeof item === "object"),
+  );
+  const nestedTaskCreated = nestedPayloads.find(
+    (item) =>
+      normalizeRealtimeType(item) === "task_created" ||
+      item.action === "TASK_CREATED",
+  );
+
+  if (nestedTaskCreated) return nestedTaskCreated;
+  if (
+    normalizeRealtimeType(payload) === "task_created" ||
+    payload.action === "TASK_CREATED"
+  ) {
+    return payload;
+  }
+
+  return payload;
 }
 
 export function isTaskCreatedPayload(payload: TaskRealtimePayload) {
-  return normalizeRealtimeType(payload) === "task_created" || payload.action === "TASK_CREATED";
+  const candidate = unwrapTaskCreatedPayload(payload);
+  return (
+    normalizeRealtimeType(candidate) === "task_created" ||
+    candidate.action === "TASK_CREATED"
+  );
 }
 
 export function normalizeTaskPriorityLabel(priority: string) {
@@ -50,37 +86,82 @@ export function normalizeTaskPriorityLabel(priority: string) {
 }
 
 export function formatTaskDueLabel(payload: TaskRealtimePayload) {
-  const rawMinutes = payload.task?.due_minutes;
-  const minutes = typeof rawMinutes === "number" ? rawMinutes : Number(rawMinutes);
-  if (Number.isFinite(minutes) && minutes > 0) return `${Math.round(minutes)} min`;
-  if (payload.task?.due_at) {
-    const due = new Date(payload.task.due_at);
+  const normalizedPayload = unwrapTaskCreatedPayload(payload);
+  const rawMinutes = normalizedPayload.task?.due_minutes;
+  const minutes =
+    typeof rawMinutes === "number" ? rawMinutes : Number(rawMinutes);
+  if (Number.isFinite(minutes) && minutes > 0) {
+    return `${Math.round(minutes)} min`;
+  }
+  if (normalizedPayload.task?.due_at) {
+    const due = new Date(normalizedPayload.task.due_at);
     if (!Number.isNaN(due.getTime())) {
-      return due.toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+      return due.toLocaleString("pt-BR", {
+        day: "2-digit",
+        month: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+      });
     }
   }
   return "Sem prazo";
 }
 
-export function getTaskNotificationDetails(payload: TaskRealtimePayload): TaskNotificationDetails {
-  const title = String(payload.task?.title || payload.title || payload.activity?.title || "Nova tarefa").trim() || "Nova tarefa";
-  const rawMessage = typeof payload.message === "string" ? payload.message : "";
-  const description = String(payload.task?.description || rawMessage || payload.activity?.description || "").trim();
-  const priority = String(payload.task?.priority || payload.priority || "normal").toLowerCase();
-  const assignee = String(payload.task?.assigned_to || "").trim();
-  const conversationId = String(payload.conversation_id || payload.activity?.entity_id || "");
-  const dueLabel = formatTaskDueLabel(payload);
+export function getTaskNotificationDetails(
+  payload: TaskRealtimePayload,
+): TaskNotificationDetails {
+  const normalizedPayload = unwrapTaskCreatedPayload(payload);
+  const title =
+    String(
+      normalizedPayload.task?.title ||
+        normalizedPayload.title ||
+        normalizedPayload.activity?.title ||
+        "Nova tarefa",
+    ).trim() || "Nova tarefa";
+  const rawMessage =
+    typeof normalizedPayload.message === "string"
+      ? normalizedPayload.message
+      : "";
+  const description = String(
+    normalizedPayload.task?.description ||
+      rawMessage ||
+      normalizedPayload.activity?.description ||
+      "",
+  ).trim();
+  const priority = String(
+    normalizedPayload.task?.priority || normalizedPayload.priority || "normal",
+  ).toLowerCase();
+  const assignee = String(normalizedPayload.task?.assigned_to || "").trim();
+  const conversationId = String(
+    normalizedPayload.conversation_id ||
+      normalizedPayload.activity?.entity_id ||
+      "",
+  );
+  const dueLabel = formatTaskDueLabel(normalizedPayload);
   const id = String(
-    payload.event_id ||
-      payload.task?.id ||
-      payload.activity?.id ||
+    normalizedPayload.event_id ||
+      normalizedPayload.task?.id ||
+      normalizedPayload.activity?.id ||
       [conversationId, title, priority, assignee, dueLabel].join("|"),
   );
 
-  return { id, conversationId, title, description, priority, assignee, dueLabel };
+  return {
+    id,
+    conversationId,
+    title,
+    description,
+    priority,
+    assignee,
+    dueLabel,
+  };
 }
 
-export function formatTaskHistoryDescription(details: Pick<TaskNotificationDetails, "title" | "priority" | "assignee" | "dueLabel">) {
+export function formatTaskHistoryDescription(
+  details: Pick<
+    TaskNotificationDetails,
+    "title" | "priority" | "assignee" | "dueLabel"
+  >,
+) {
   return [
     details.title,
     `Prioridade: ${normalizeTaskPriorityLabel(details.priority)}`,

@@ -412,6 +412,7 @@ export default function MobileChatShell() {
       const priorityLabel = normalizeTaskPriorityLabel(details.priority);
       const taskBody = [
         details.title,
+        `Prioridade: ${priorityLabel}`,
         details.assignee ? `Responsável: ${details.assignee}` : null,
         `Prazo: ${details.dueLabel}`,
       ]
@@ -419,31 +420,18 @@ export default function MobileChatShell() {
         .join(" · ");
 
       vibrate([45]);
-      showBanner(
-        "📝 Nova tarefa criada",
-        `${details.title} · Prioridade: ${priorityLabel} · Prazo: ${details.dueLabel}`,
-      );
+      showBanner("📝 Nova tarefa criada", taskBody);
       addLocalNotif({
         id: `task-created-${details.id}`,
-        title: `📝 Tarefa criada · ${priorityLabel}`,
+        title: "📝 Nova tarefa criada",
         body: taskBody,
         type: "task_created",
         conversationId: details.conversationId || undefined,
       });
 
-      if (
-        details.conversationId &&
-        selectedConvoIdRef.current === details.conversationId
-      ) {
-        const current = conversations.find(
-          (c) => String(c.id) === details.conversationId,
-        );
-        if (current) void fetchMessages(current);
-      }
-
       return true;
     },
-    [conversations, fetchMessages, showBanner],
+    [showBanner],
   );
 
   const showTeamNotification = useCallback(
@@ -488,19 +476,9 @@ export default function MobileChatShell() {
         conversationId: details.conversationId || undefined,
       });
 
-      if (
-        details.conversationId &&
-        selectedConvoIdRef.current === details.conversationId
-      ) {
-        const current = conversations.find(
-          (c) => String(c.id) === details.conversationId,
-        );
-        if (current) void fetchMessages(current);
-      }
-
       return true;
     },
-    [conversations, fetchMessages, showBanner],
+    [showBanner],
   );
 
   // ── WebSocket/SSE Hook ──────────────────────────────────────
