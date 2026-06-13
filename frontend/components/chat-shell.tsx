@@ -51,6 +51,9 @@ type RealtimeEvent = {
   last_seen?: string | null;
   is_typing?: boolean;
   message?: { conversation_id: string };
+  event?: string;
+  title?: string;
+  priority?: string;
 };
 
 const RECENT_MODE_OVERRIDE_TTL_MS = 30_000;
@@ -153,6 +156,7 @@ export default function ChatShell() {
   const [crmOpen, setCrmOpen] = useState(false);
   const [handoffToast, setHandoffToast] = useState('');
   const [resetToast, setResetToast] = useState('');
+  const [teamNotificationToast, setTeamNotificationToast] = useState('');
   const [resetError, setResetError] = useState('');
   const [resettingConversation, setResettingConversation] = useState(false);
   const [presenceByConversation, setPresenceByConversation] = useState<Record<string, PresenceSnapshot>>({});
@@ -366,6 +370,14 @@ export default function ChatShell() {
   }, [handoffToast]);
 
   useEffect(() => {
+    if (!teamNotificationToast) return;
+
+    const timeoutId = window.setTimeout(() => setTeamNotificationToast(''), 5000);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [teamNotificationToast]);
+
+  useEffect(() => {
     if (!resetToast && !resetError) return;
 
     const timeoutId = window.setTimeout(() => {
@@ -399,6 +411,15 @@ export default function ChatShell() {
           },
         }));
         return;
+      }
+      if (payload?.event === 'team_notification' || payload?.type === 'team_notification') {
+        const title = String(payload.title || 'Equipe notificada').trim();
+        const message = String((payload as { message?: unknown }).message || '').trim();
+        const priority = String(payload.priority || 'normal').toLowerCase();
+        setTeamNotificationToast(`🔔 ${title}${message ? ` — ${message}` : ''}${priority === 'high' ? ' (Prioridade alta)' : ''}`);
+        if (selectedConversation && String(payload.conversation_id) === String(selectedConversation.id)) {
+          fetchMessages(String(selectedConversation.contact_id ?? selectedConversation.id)).catch(() => undefined);
+        }
       }
       if (!payload?.refresh?.includes('conversations')) return;
       getConversations()
@@ -452,6 +473,12 @@ export default function ChatShell() {
         return;
       }
 
+      if (payload?.event === 'team_notification' || payload?.type === 'team_notification') {
+        const title = String(payload.title || 'Equipe notificada').trim();
+        const message = String((payload as { message?: unknown }).message || '').trim();
+        const priority = String(payload.priority || 'normal').toLowerCase();
+        setTeamNotificationToast(`🔔 ${title}${message ? ` — ${message}` : ''}${priority === 'high' ? ' (Prioridade alta)' : ''}`);
+      }
       if (!selectedContactId) return;
       fetchMessages(selectedContactId).catch(() => undefined);
       getConversations().then((items) => applyConversations(items)).catch(() => undefined);
@@ -679,6 +706,7 @@ export default function ChatShell() {
         onModeChange={handleChangeMode}
       />
       {handoffToast ? <div className="wa-handoff-toast" role="status">{handoffToast}</div> : null}
+      {teamNotificationToast ? <div className="wa-handoff-toast" role="status">{teamNotificationToast}</div> : null}
       {resetToast ? <div className="wa-reset-toast success" role="status">{resetToast}</div> : null}
       {resetError ? <div className="wa-reset-toast error" role="alert">{resetError}</div> : null}
       <CRMContactSidebar contact={selectedContact} open={crmOpen} onClose={() => setCrmOpen(false)} />

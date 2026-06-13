@@ -55,6 +55,15 @@ type ChoiceConnectDebug = {
 };
 
 
+const NOTIFICATION_PRIORITY_OPTIONS = [
+  { value: 'low', label: 'Baixa' },
+  { value: 'normal', label: 'Normal' },
+  { value: 'high', label: 'Alta' },
+] as const;
+
+type NotificationPriority = (typeof NOTIFICATION_PRIORITY_OPTIONS)[number]['value'];
+const isNotificationPriority = (value: string): value is NotificationPriority => NOTIFICATION_PRIORITY_OPTIONS.some((option) => option.value === value);
+
 const ACTION_TYPE_OPTIONS = [
   { value: 'create_lead', label: 'Criar Lead' },
   { value: 'add_tag', label: 'Adicionar Tag' },
@@ -409,6 +418,7 @@ function FlowNodeEditorPanel({
                       action: nextActionType,
                       params: {},
                       ...(nextActionType === 'set_conversation_mode' ? { mode: 'human' } : { mode: undefined }),
+                      ...(nextActionType === 'notify_team' ? { notification_priority: 'normal', params: { notification_priority: 'normal' } } : {}),
                     });
                   }}
                 >
@@ -433,10 +443,35 @@ function FlowNodeEditorPanel({
               )}
 
               {selectedActionType === 'notify_team' && (
-                <label className="flow-editor-field">
-                  Mensagem para equipe
-                  <textarea value={toText(params.message || draft.message)} onChange={(event) => updateActionParam('message', event.target.value)} placeholder="Ex.: Lead pediu atendimento" />
-                </label>
+                <>
+                  <label className="flow-editor-field">
+                    Título (opcional)
+                    <input
+                      value={toText(params.notification_title || draft.notification_title)}
+                      onChange={(event) => updateActionParam('notification_title', event.target.value)}
+                      placeholder="Ex.: Financeiro"
+                    />
+                  </label>
+                  <label className="flow-editor-field">
+                    Mensagem (opcional)
+                    <textarea
+                      value={toText(params.notification_message || draft.notification_message)}
+                      onChange={(event) => updateActionParam('notification_message', event.target.value)}
+                      placeholder="Ex.: Cliente aguardando pagamento."
+                    />
+                  </label>
+                  <label className="flow-editor-field">
+                    Prioridade
+                    <select
+                      value={isNotificationPriority(toText(params.notification_priority || draft.notification_priority)) ? toText(params.notification_priority || draft.notification_priority) : 'normal'}
+                      onChange={(event) => updateActionParam('notification_priority', event.target.value)}
+                    >
+                      {NOTIFICATION_PRIORITY_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>{option.label}</option>
+                      ))}
+                    </select>
+                  </label>
+                </>
               )}
 
               {selectedActionType === 'transfer_human' && (

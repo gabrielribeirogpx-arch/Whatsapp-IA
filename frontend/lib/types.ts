@@ -299,6 +299,9 @@ export type FlowNodePayload = {
     message?: string;
     reason?: string;
     lead_name?: string;
+    notification_title?: string;
+    notification_message?: string;
+    notification_priority?: 'low' | 'normal' | 'high';
     isStart?: boolean;
     metadata?: Record<string, unknown>;
     onChange?: (nodeId: string, patch: Record<string, unknown>) => void;

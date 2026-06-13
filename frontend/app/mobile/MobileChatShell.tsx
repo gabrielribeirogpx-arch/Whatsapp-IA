@@ -277,6 +277,18 @@ export default function MobileChatShell() {
         const type = (d.event || 'message') as string;
         const refreshTargets = Array.isArray(d.refresh) ? d.refresh : [];
 
+        if (type === 'team_notification') {
+            const title = String(d.title || 'Equipe notificada').trim();
+            const message = String(d.message || '').trim();
+            const priority = String(d.priority || 'normal').toLowerCase();
+            vibrate(priority === 'high' ? [120, 60, 120] : [80]);
+            showBanner(`🔔 ${title}`, `${message}${priority === 'high' ? ' Prioridade alta.' : ''}`.trim());
+            if (selectedConvoIdRef.current && String(d.conversation_id) === selectedConvoIdRef.current) {
+                const current = conversations.find(c => String(c.id) === selectedConvoIdRef.current);
+                if (current) void fetchMessages(current);
+            }
+        }
+
         if (refreshTargets.includes('conversations')) {
             console.log("[REFRESH CONVERSATIONS RECEIVED]");
             void fetchConversations().then(() => console.log("[FETCH FINISHED]"));
