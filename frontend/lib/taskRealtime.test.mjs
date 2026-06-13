@@ -11,7 +11,9 @@ const context = { exports: {}, module: { exports: {} } };
 context.exports = context.module.exports;
 vm.runInNewContext(compiled, context, { filename: "taskRealtime.ts" });
 const {
+  buildTaskNotificationText,
   formatTaskHistoryDescription,
+  formatTaskPriorityLabel,
   getTaskNotificationDetails,
   isTaskCreatedPayload,
   normalizeTaskPriorityLabel,
@@ -40,9 +42,23 @@ assert.equal(details.priority, "high");
 assert.equal(details.assignee, "Maria");
 assert.equal(details.dueLabel, "30 min");
 assert.equal(normalizeTaskPriorityLabel(details.priority), "Alta");
+assert.equal(formatTaskPriorityLabel(details.priority), "Alta");
 assert.equal(
   formatTaskHistoryDescription(details),
   "Ligar para cliente · Prioridade: Alta · Responsável: Maria · Prazo: 30 min",
+);
+assert.equal(
+  JSON.stringify(buildTaskNotificationText(details).toastLines),
+  JSON.stringify([
+    "Ligar para cliente",
+    "Responsável: Maria",
+    "Prioridade: Alta",
+    "Prazo: 30 min",
+  ]),
+);
+assert.equal(
+  buildTaskNotificationText(details).alertTitle,
+  "Tarefa criada · Alta",
 );
 
 const mobileAlertPayload = { action: "TASK_CREATED", task: { title: "Sem prioridade" } };
@@ -66,3 +82,20 @@ assert.equal(wrappedDetails.id, "evt-2");
 assert.equal(wrappedDetails.conversationId, "conv-2");
 assert.equal(wrappedDetails.title, "Enviar contrato");
 assert.notEqual(wrappedDetails.dueLabel, "Sem prazo");
+
+const flatPayload = {
+  type: "task_created",
+  task_title: "Enviar boleto",
+  task_assignee: "João",
+  task_due_minutes: "45",
+  priority: "low",
+};
+const flatDetails = getTaskNotificationDetails(flatPayload);
+assert.equal(flatDetails.title, "Enviar boleto");
+assert.equal(flatDetails.assignee, "João");
+assert.equal(flatDetails.dueLabel, "45 min");
+assert.equal(flatDetails.priorityLabel, "Baixa");
+assert.equal(
+  buildTaskNotificationText(flatDetails).bannerText,
+  "Enviar boleto\nResponsável: João\nPrazo: 45 min",
+);

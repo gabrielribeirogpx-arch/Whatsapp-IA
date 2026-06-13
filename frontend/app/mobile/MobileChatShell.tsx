@@ -54,9 +54,9 @@ import PushPermissionSheet from "./components/PushPermissionSheet";
 import InstallPrompt from "./components/InstallPrompt";
 import MobileLoginScreen from "./components/MobileLoginScreen";
 import {
+  buildTaskNotificationText,
   getTaskNotificationDetails,
   isTaskCreatedPayload,
-  normalizeTaskPriorityLabel,
 } from "@/lib/taskRealtime";
 import { ConversationFilterId, isUnansweredStatus } from "@/lib/conversationFilters";
 
@@ -225,12 +225,16 @@ export default function MobileChatShell() {
   const [pushBanner, setPushBanner] = useState<{
     title: string;
     text: string;
+    variant?: "message" | "team_notification" | "task_created";
   } | null>(null);
   const [showPermSheet, setShowPermSheet] = useState(false);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [notifCount, setNotifCount] = useState(0);
   const teamNotificationDedupeRef = useRef<Map<string, number>>(new Map());
   const taskCreatedDedupeRef = useRef<Map<string, number>>(new Map());
+  const pushBannerTimeoutRef = useRef<number | null>(
+    null,
+  );
 
   // ── Hooks ────────────────────────────────────────────────────
   const {
@@ -318,6 +322,14 @@ export default function MobileChatShell() {
   }, [authed, fetchConversations]);
 
   useEffect(() => {
+    return () => {
+      if (pushBannerTimeoutRef.current) {
+        window.clearTimeout(pushBannerTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
     setNotifCount(getLocalNotifCount());
     const handler = (event: Event) => {
       const detail = (event as CustomEvent<{ count?: number }>).detail;
@@ -363,10 +375,26 @@ export default function MobileChatShell() {
     }
   }, []);
 
-  const showBanner = useCallback((title: string, text: string) => {
-    setPushBanner({ title, text });
-    setTimeout(() => setPushBanner(null), 4000);
-  }, []);
+  const showBanner = useCallback(
+    (
+      title: string,
+      text: string,
+      options: {
+        durationMs?: number;
+        variant?: "message" | "team_notification" | "task_created";
+      } = {},
+    ) => {
+      if (pushBannerTimeoutRef.current) {
+        window.clearTimeout(pushBannerTimeoutRef.current);
+      }
+      setPushBanner({ title, text, variant: options.variant });
+      pushBannerTimeoutRef.current = window.setTimeout(() => {
+        setPushBanner(null);
+        pushBannerTimeoutRef.current = null;
+      }, options.durationMs ?? 6000);
+    },
+    [],
+  );
 
   const appendRealtimeMessage = useCallback((message: Message) => {
     const incoming = toChatMessage(message);
@@ -409,22 +437,17 @@ export default function MobileChatShell() {
         }
       });
 
-      const priorityLabel = normalizeTaskPriorityLabel(details.priority);
-      const taskBody = [
-        details.title,
-        `Prioridade: ${priorityLabel}`,
-        details.assignee ? `Responsável: ${details.assignee}` : null,
-        `Prazo: ${details.dueLabel}`,
-      ]
-        .filter(Boolean)
-        .join(" · ");
+      const taskText = buildTaskNotificationText(details);
 
-      vibrate([45]);
-      showBanner("📝 Nova tarefa criada", taskBody);
+      vibrate([35]);
+      showBanner(taskText.heading, taskText.bannerText, {
+        durationMs: 6500,
+        variant: "task_created",
+      });
       addLocalNotif({
         id: `task-created-${details.id}`,
-        title: "📝 Nova tarefa criada",
-        body: taskBody,
+        title: taskText.alertTitle,
+        body: taskText.alertLines.join("\n"),
         type: "task_created",
         conversationId: details.conversationId || undefined,
       });
@@ -467,6 +490,7 @@ export default function MobileChatShell() {
         [details.title, details.message, `Prioridade: ${priorityLabel}`]
           .filter(Boolean)
           .join(" · "),
+        { variant: "team_notification" },
       );
       addLocalNotif({
         id: `team-notification-${details.id}`,
@@ -979,6 +1003,7 @@ export default function MobileChatShell() {
         <PushBanner
           title={pushBanner.title}
           text={pushBanner.text}
+          variant={pushBanner.variant}
           onDismiss={() => setPushBanner(null)}
         />
       )}
