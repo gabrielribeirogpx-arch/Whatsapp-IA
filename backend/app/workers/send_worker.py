@@ -10,6 +10,8 @@ import uuid
 from functools import lru_cache
 from typing import Any
 
+import requests
+
 from rq import get_current_job
 
 from app.db.session import SessionLocal
@@ -41,6 +43,22 @@ def _payload_summary(payload: Any, limit: int = 1200) -> str:
     except Exception:
         encoded = str(payload)
     return encoded[:limit] + ("..." if len(encoded) > limit else "")
+
+
+def _media_url_headers(media_url: str) -> tuple[str, int, int]:
+    try:
+        response = requests.head(media_url, allow_redirects=True, timeout=8)
+        if response.status_code == 405:
+            response = requests.get(media_url, headers={"Range": "bytes=0-0"}, stream=True, allow_redirects=True, timeout=8)
+        content_type = str(response.headers.get("content-type") or "").split(";", 1)[0].strip().lower()
+        try:
+            content_length = int(str(response.headers.get("content-length") or "0").strip())
+        except ValueError:
+            content_length = 0
+        return response.status_code, content_type, content_length
+    except requests.RequestException as exc:
+        logger.warning("[MEDIA URL HEADERS FAILED] media_url=%s error=%s", media_url, exc)
+        return 0, "", 0
 
 
 SEND_LOCK_TTL_SECONDS = int(os.getenv("SEND_LOCK_TTL_SECONDS", "120"))
@@ -472,6 +490,24 @@ def send_whatsapp_message(*, message_data: dict[str, Any]) -> None:
     payload_provider_id = str(message_data.get("provider_id") or "unresolved")
     is_media_message = message_type_hint == "media" or bool(media_type or media_url)
     message_type = "media" if is_media_message else ("interactive" if interactive_type or (isinstance(buttons, list) and buttons) else "text")
+    media_status_code, media_content_type, media_content_length = (0, "", 0)
+    if is_media_message:
+        media_status_code, media_content_type, media_content_length = _media_url_headers(media_url) if media_url else (0, "", 0)
+        logger.info(
+            "[MEDIA SEND PREFLIGHT] tenant_id=%s provider_id=%s phone=%s job_id=%s flow_id=%s session_id=%s node_id=%s media_type=%s media_url=%s status_code=%s content_type=%s content_length=%s",
+            tenant_id,
+            payload_provider_id,
+            phone,
+            job_id,
+            flow_id,
+            session_id,
+            node_id,
+            media_type,
+            media_url,
+            media_status_code,
+            media_content_type,
+            media_content_length,
+        )
     logger.info(
         "[V2 SEND WORKER] tenant_id=%s provider_id=%s session_id=%s conversation_id=%s contact_id=%s flow_id=%s phone=%s metadata_keys=%s payload_json=%s",
         tenant_id or "",
@@ -776,7 +812,7 @@ def send_whatsapp_message(*, message_data: dict[str, Any]) -> None:
         meta_response: dict[str, Any] | None = None
         try:
             if is_media_message:
-                meta_response = send_media_message_via_meta(to=phone, media_type=media_type, media_url=media_url, caption=media_caption, filename=media_filename, token=resolved_token, phone_number_id=resolved_phone_number_id, context={**context, "message_type": "media", "media_type": media_type, "media_url": media_url})
+                meta_response = send_media_message_via_meta(to=phone, media_type=media_type, media_url=media_url, caption=media_caption, filename=media_filename, token=resolved_token, phone_number_id=resolved_phone_number_id, context={**context, "message_type": "media", "media_type": media_type, "media_url": media_url, "media_content_type": media_content_type, "media_content_length": media_content_length, "media_status_code": media_status_code})
             elif interactive_type == "list":
                 logger.info(
                     "[META INTERACTIVE PAYLOAD] flow_id=%s session_id=%s node_id=%s node_type=%s message_type=%s interactive_type=%s options_count=%s payload_json=%s",
@@ -845,6 +881,20 @@ def send_whatsapp_message(*, message_data: dict[str, Any]) -> None:
                 resolved_phone_number_id,
                 meta_response,
             )
+            if is_media_message and isinstance(meta_response, dict) and str(meta_response.get("status") or "").lower() == "failed":
+                logger.error(
+                    "[MEDIA SEND META FAILED RESPONSE] tenant_id=%s provider_id=%s phone=%s job_id=%s flow_id=%s session_id=%s node_id=%s media_type=%s media_url=%s meta_response_json=%s",
+                    tenant_id,
+                    provider_id,
+                    phone,
+                    job_id,
+                    flow_id,
+                    session_id,
+                    node_id,
+                    media_type,
+                    media_url,
+                    json.dumps(meta_response, default=str, ensure_ascii=False, sort_keys=True),
+                )
         except MetaApiError as exc:
             if is_media_message:
                 logger.error(
@@ -859,7 +909,7 @@ def send_whatsapp_message(*, message_data: dict[str, Any]) -> None:
                     media_type,
                     media_url,
                     exc.status_code,
-                    _payload_summary(exc.payload),
+                    json.dumps(exc.payload, default=str, ensure_ascii=False, sort_keys=True),
                 )
             if interactive_type == "list":
                 logger.error(

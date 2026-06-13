@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+import json
 import logging
 import os
 import re
+import subprocess
 import uuid
+from collections.abc import Mapping
 from pathlib import Path
 from urllib.parse import urlparse
+
+import requests
 
 from fastapi import APIRouter, File, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
@@ -65,6 +70,8 @@ DANGEROUS_SUFFIXES = {
 }
 DEFAULT_MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 MEDIA_MAX_UPLOAD_BYTES = {"audio": 16 * 1024 * 1024, "video": 16 * 1024 * 1024}
+VIDEO_META_MAX_BYTES = int(os.getenv("FLOW_MEDIA_VIDEO_META_MAX_BYTES", str(16 * 1024 * 1024)))
+VIDEO_INCOMPATIBLE_DETAIL = "Este vídeo não é compatível com WhatsApp. Use MP4 H.264 com áudio AAC."
 
 
 def _max_upload_bytes() -> int:
@@ -76,6 +83,100 @@ def _max_upload_bytes() -> int:
     except ValueError:
         return DEFAULT_MAX_UPLOAD_BYTES
 
+
+
+def _header_int(headers: Mapping[str, str], name: str) -> int:
+    try:
+        return int(str(headers.get(name) or "0").split(";", 1)[0].strip())
+    except (TypeError, ValueError):
+        return 0
+
+
+def _validate_video_headers(*, public_url: str, suffix: str, local_size: int) -> tuple[str, int]:
+    if suffix not in {".mp4", ".3gp"}:
+        raise HTTPException(status_code=400, detail=VIDEO_INCOMPATIBLE_DETAIL)
+    if local_size <= 0:
+        raise HTTPException(status_code=400, detail="Arquivo de vídeo vazio.")
+    if local_size > VIDEO_META_MAX_BYTES:
+        raise HTTPException(status_code=413, detail=f"Vídeo maior que o limite da Meta ({VIDEO_META_MAX_BYTES} bytes).")
+
+    try:
+        response = requests.head(public_url, allow_redirects=True, timeout=8)
+        if response.status_code == 405:
+            response = requests.get(public_url, headers={"Range": "bytes=0-0"}, stream=True, allow_redirects=True, timeout=8)
+        status_code = response.status_code
+        content_type = str(response.headers.get("content-type") or "").split(";", 1)[0].strip().lower()
+        content_length = _header_int(response.headers, "content-length") or local_size
+        logger.info(
+            "[MEDIA VIDEO PREFLIGHT] media_url=%s status_code=%s content_type=%s content_length=%s local_size=%s",
+            public_url,
+            status_code,
+            content_type,
+            content_length,
+            local_size,
+        )
+    except requests.RequestException as exc:
+        logger.warning("[MEDIA VIDEO PREFLIGHT FAILED] media_url=%s error=%s", public_url, exc)
+        raise HTTPException(status_code=400, detail="Não foi possível validar a URL pública do vídeo.") from exc
+
+    if status_code != 200:
+        raise HTTPException(status_code=400, detail="URL pública do vídeo não retornou HTTP 200.")
+    expected_type = "video/mp4" if suffix == ".mp4" else "video/3gpp"
+    if content_type != expected_type:
+        raise HTTPException(status_code=400, detail=VIDEO_INCOMPATIBLE_DETAIL)
+    if content_length <= 0:
+        raise HTTPException(status_code=400, detail="Content-Length do vídeo inválido.")
+    if content_length > VIDEO_META_MAX_BYTES:
+        raise HTTPException(status_code=413, detail=f"Vídeo maior que o limite da Meta ({VIDEO_META_MAX_BYTES} bytes).")
+    return content_type, content_length
+
+
+def _validate_video_with_ffprobe(path: Path) -> None:
+    ffprobe_bin = os.getenv("FFPROBE_BIN", "ffprobe")
+    try:
+        result = subprocess.run(
+            [
+                ffprobe_bin,
+                "-v",
+                "error",
+                "-print_format",
+                "json",
+                "-show_format",
+                "-show_streams",
+                str(path),
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+    except FileNotFoundError:
+        logger.info("[MEDIA VIDEO FFPROBE SKIPPED] reason=ffprobe_not_found path=%s", path)
+        return
+    except subprocess.SubprocessError as exc:
+        logger.warning("[MEDIA VIDEO FFPROBE FAILED] path=%s error=%s", path, exc)
+        raise HTTPException(status_code=400, detail=VIDEO_INCOMPATIBLE_DETAIL) from exc
+
+    if result.returncode != 0:
+        logger.warning("[MEDIA VIDEO FFPROBE INVALID] path=%s stderr=%s", path, result.stderr)
+        raise HTTPException(status_code=400, detail=VIDEO_INCOMPATIBLE_DETAIL)
+    try:
+        metadata = json.loads(result.stdout or "{}")
+    except json.JSONDecodeError as exc:
+        logger.warning("[MEDIA VIDEO FFPROBE JSON ERROR] path=%s error=%s", path, exc)
+        raise HTTPException(status_code=400, detail=VIDEO_INCOMPATIBLE_DETAIL) from exc
+
+    streams = metadata.get("streams") or []
+    video_streams = [s for s in streams if s.get("codec_type") == "video"]
+    audio_streams = [s for s in streams if s.get("codec_type") == "audio"]
+    video_codec = str((video_streams[0] or {}).get("codec_name") or "").lower() if video_streams else ""
+    audio_codec = str((audio_streams[0] or {}).get("codec_name") or "").lower() if audio_streams else ""
+    format_name = str((metadata.get("format") or {}).get("format_name") or "").lower()
+    logger.info("[MEDIA VIDEO FFPROBE] path=%s format=%s video_codec=%s audio_codec=%s", path, format_name, video_codec, audio_codec or "none")
+    if "mp4" not in format_name and path.suffix.lower() == ".mp4":
+        raise HTTPException(status_code=400, detail=VIDEO_INCOMPATIBLE_DETAIL)
+    if video_codec != "h264" or (audio_streams and audio_codec != "aac"):
+        raise HTTPException(status_code=400, detail=VIDEO_INCOMPATIBLE_DETAIL)
 
 def _original_suffixes(filename: str) -> list[str]:
     return [suffix.lower() for suffix in Path(filename or "").suffixes]
@@ -104,6 +205,8 @@ def _safe_suffix(filename: str, content_type: str) -> str:
         compatible_suffixes.update({".m4a", ".mp4"})
     if content_type == "video/mp4":
         compatible_suffixes.add(".mp4")
+    if content_type == "video/3gpp":
+        compatible_suffixes.add(".3gp")
     if suffix and suffix not in compatible_suffixes:
         raise HTTPException(status_code=400, detail="Extensão não corresponde ao tipo do arquivo.")
     return suffix or expected
@@ -184,7 +287,16 @@ async def _upload_media(request: Request, file: UploadFile = File(...)) -> JSONR
 
     public_filename = f"{request.state.tenant_id}/{stored_filename}"
     public_url = _public_url(request, public_filename)
-    logger.info("[MEDIA UPLOAD] public_url=%s", public_url)
+    if media_family == "video":
+        try:
+            _validate_video_with_ffprobe(path)
+            preflight_content_type, preflight_content_length = _validate_video_headers(public_url=public_url, suffix=suffix, local_size=len(data))
+        except HTTPException:
+            path.unlink(missing_ok=True)
+            raise
+    else:
+        preflight_content_type, preflight_content_length = content_type, len(data)
+    logger.info("[MEDIA UPLOAD] media_type=%s public_url=%s content_type=%s content_length=%s", media_family, public_url, preflight_content_type, preflight_content_length)
     return JSONResponse({
         "url": public_url,
         "filename": file.filename or stored_filename,
