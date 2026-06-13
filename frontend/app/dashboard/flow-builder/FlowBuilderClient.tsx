@@ -30,6 +30,8 @@ import { normalizeFlow } from '@/lib/flowNormalization';
 import { FlowEdgePayload, FlowNodePayload, FlowVersionItem } from '@/lib/types';
 
 const FETCH_TIMEOUT_MS = 8000;
+const INVALID_UPLOAD_PUBLIC_URL_MESSAGE = 'Upload concluído, mas a URL pública gerada é inválida.';
+
 
 const nodeTypes = {
   message: MessageNode,
@@ -1155,10 +1157,14 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
       formData.append('file', file);
       const response = await apiFetch('/api/media/upload', { method: 'POST', body: formData });
       const result = await parseApiResponse<{ url: string; filename?: string; mime_type?: string; size?: number }>(response);
+      const uploadedUrl = String(result.url || '').trim();
+      if (!uploadedUrl.startsWith('https://')) {
+        throw new Error(INVALID_UPLOAD_PUBLIC_URL_MESSAGE);
+      }
       const resolvedMediaType = result.mime_type === 'application/pdf' ? 'document' : mediaType;
       const patch = {
         media_type: resolvedMediaType,
-        media_url: result.url,
+        media_url: uploadedUrl,
         filename: result.filename || nodeEditorDraft.filename,
       };
       setNodeEditorDraft((prev) => ({
@@ -1169,7 +1175,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
       if (nodeId) {
         console.info('[NODE CHANGED]', { node_id: nodeId, patch_keys: Object.keys(patch), media_type: mediaType });
         updateNodeData(nodeId, patch);
-        markFlowDirty('media_uploaded', { node_id: nodeId, media_type: mediaType, url: result.url });
+        markFlowDirty('media_uploaded', { node_id: nodeId, media_type: mediaType, url: uploadedUrl });
       }
     } catch (error) {
       setMediaUploadError(error instanceof Error ? error.message : 'Não foi possível enviar o arquivo. Verifique o tipo, tamanho e tente novamente.');
@@ -1918,6 +1924,17 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
 
     const currentNodes = rfInstance?.getNodes?.() || [];
     const currentEdges = rfInstance?.getEdges?.() || [];
+    const invalidMediaNode = currentNodes.find((node) => {
+      const data = node.data as Record<string, unknown> | undefined;
+      if (node.type !== 'media' && data?.type !== 'media') return false;
+      return !String(data?.media_url || '').trim().startsWith('https://');
+    });
+    if (invalidMediaNode) {
+      setValidationErrors([{ code: 'FLOW_V2_MEDIA_URL_INVALID', node_id: invalidMediaNode.id, message: 'Node Mídia exige uma URL pública começando com https:// para publicar.' }]);
+      setHighlightedNodeId(invalidMediaNode.id);
+      toast.error('Node Mídia exige uma URL pública começando com https:// para publicar.');
+      return;
+    }
     if (flowContainsTemporaryIds(currentNodes, currentEdges)) {
       toast.error('Flow contém IDs temporários inválidos.');
       return;

@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import logging
 import os
 import uuid
 from pathlib import Path
+from urllib.parse import urlparse
 
 from fastapi import APIRouter, File, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/flow-media", tags=["flow-media"])
 media_router = APIRouter(prefix="/api/media", tags=["media"])
@@ -58,8 +62,30 @@ def _safe_suffix(filename: str, content_type: str) -> str:
     return suffix or expected
 
 
+def _configured_public_base_url() -> str | None:
+    for env_name in ("PUBLIC_BACKEND_URL", "API_PUBLIC_URL", "BACKEND_PUBLIC_URL"):
+        value = str(os.getenv(env_name) or "").strip().rstrip("/")
+        if value:
+            return value
+    return None
+
+
+def _request_public_base_url(request: Request) -> str:
+    base_url = str(request.base_url).rstrip("/")
+    parsed = urlparse(base_url)
+    forwarded_proto = str(request.headers.get("x-forwarded-proto") or "").split(",")[0].strip().lower()
+    host = str(request.headers.get("x-forwarded-host") or request.headers.get("host") or parsed.netloc).split(",")[0].strip()
+    scheme = forwarded_proto or parsed.scheme or "https"
+    if host.endswith(".up.railway.app") or os.getenv("RAILWAY_ENVIRONMENT") or os.getenv("RAILWAY_PUBLIC_DOMAIN"):
+        scheme = "https"
+    return f"{scheme}://{host}".rstrip("/")
+
+
 def _public_url(request: Request, filename: str) -> str:
-    public_base = os.getenv("PUBLIC_BACKEND_URL", str(request.base_url).rstrip("/"))
+    public_base = _configured_public_base_url() or _request_public_base_url(request)
+    parsed = urlparse(public_base)
+    if parsed.netloc.endswith(".up.railway.app") and parsed.scheme != "https":
+        public_base = f"https://{parsed.netloc}{parsed.path}".rstrip("/")
     return f"{public_base}/uploads/flow-media/{filename}"
 
 
@@ -84,8 +110,10 @@ async def _upload_media(request: Request, file: UploadFile = File(...)) -> JSONR
     path.write_bytes(data)
 
     public_filename = f"{request.state.tenant_id}/{stored_filename}"
+    public_url = _public_url(request, public_filename)
+    logger.info("[MEDIA UPLOAD] public_url=%s", public_url)
     return JSONResponse({
-        "url": _public_url(request, public_filename),
+        "url": public_url,
         "filename": file.filename or stored_filename,
         "mime_type": content_type,
         "size": len(data),
