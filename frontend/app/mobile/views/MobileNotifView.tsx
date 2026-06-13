@@ -5,7 +5,7 @@
  * Light Mode · Identidade Verde #59C414
  */
 
-import { Bell, Trash2, MessageSquare, UserCheck } from "lucide-react";
+import { Bell, Trash2, MessageSquare, UserCheck, ClipboardList } from "lucide-react";
 import { useEffect, useState } from "react";
 
 interface LocalNotif {
@@ -22,9 +22,12 @@ export function getLocalNotifCount() {
   return _notifs.length;
 }
 
-export function addLocalNotif(n: Omit<LocalNotif, "id" | "receivedAt">) {
+export function addLocalNotif(n: Omit<LocalNotif, "id" | "receivedAt"> & { id?: string }) {
+  const id = n.id || `notif-${Date.now()}`;
+  if (_notifs.some((notif) => notif.id === id)) return;
+
   _notifs = [
-    { ...n, id: `notif-${Date.now()}`, receivedAt: new Date().toISOString() },
+    { ...n, id, receivedAt: new Date().toISOString() },
     ..._notifs.slice(0, 49),
   ];
   if (typeof window !== "undefined") {
@@ -196,7 +199,7 @@ export default function MobileNotifView() {
               ) : n.type === "team_notification" ? (
                 <Bell size={17} />
               ) : n.type === "task_created" ? (
-                <Bell size={17} />
+                <ClipboardList size={17} />
               ) : (
                 <MessageSquare size={17} />
               )}
