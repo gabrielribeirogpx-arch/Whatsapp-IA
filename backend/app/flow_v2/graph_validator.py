@@ -23,7 +23,7 @@ class GraphValidationResult:
 class FlowV2GraphValidator:
     """Validates Flow Publisher V2 graphs before immutable snapshot creation."""
 
-    SUPPORTED_NODE_TYPES = {"message", "choice", "condition", "delay", "action", "start"}
+    SUPPORTED_NODE_TYPES = {"message", "choice", "condition", "delay", "action", "media", "start"}
     SUPPORTED_CONDITION_OPERATORS = {"==", "eq", "equals"}
     SUPPORTED_BUILDER_MATCH_TYPES = {"contains", "equals", "eq", "=="}
 
@@ -188,6 +188,13 @@ class FlowV2GraphValidator:
                     errors.append(f"FLOW_V2_DELAY_SECONDS_MUST_BE_POSITIVE:{node_id}")
             except (TypeError, ValueError):
                 errors.append(f"FLOW_V2_DELAY_SECONDS_MUST_BE_POSITIVE:{node_id}")
+        elif node_type == "media":
+            media_type = str(node.get("media_type") or data.get("media_type") or "").strip().lower()
+            media_url = str(node.get("media_url") or data.get("media_url") or data.get("url") or "").strip()
+            if media_type not in {"image", "document"}:
+                errors.append(f"FLOW_V2_MEDIA_TYPE_INVALID:{node_id}")
+            if not media_url or not media_url.startswith("https://"):
+                errors.append(f"FLOW_V2_MEDIA_URL_INVALID:{node_id}")
         elif node_type == "condition":
             conditions = node.get("conditions") or data.get("conditions")
             if self._has_valid_builder_condition(data):

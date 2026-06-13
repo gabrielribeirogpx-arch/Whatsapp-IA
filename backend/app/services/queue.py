@@ -163,14 +163,20 @@ def enqueue_send_message(message_data: dict[str, Any]) -> str | None:
     phone = str(message_data.get("phone") or "")
     correlation_id = str(message_data.get("correlation_id") or message_data.get("message_id") or "n/a")
     content = str(message_data.get("text") or "").strip()
+    message_type_hint = str(message_data.get("message_type") or "").strip().lower()
+    media_type = str(message_data.get("media_type") or "").strip().lower()
+    media_url = str(message_data.get("media_url") or "").strip()
     buttons = message_data.get("buttons")
     sections = message_data.get("sections") if isinstance(message_data.get("sections"), list) else None
     options = message_data.get("options") if isinstance(message_data.get("options"), list) else None
     interactive_type = str(message_data.get("interactive_type") or ("button" if isinstance(buttons, list) and buttons else "")).strip().lower() or None
 
-    if not content:
+    is_media_message = message_type_hint == "media" or bool(media_type or media_url)
+    if not content and not is_media_message:
         logger.warning("event=queue_send_skip correlation_id=%s tenant_id=%s phone=%s job_id=%s stage=send_enqueue reason=empty_text", correlation_id, tenant_id, phone or "n/a", "n/a")
         return None
+    if is_media_message and not content:
+        content = str(message_data.get("caption") or "📎 Mídia enviada").strip() or "📎 Mídia enviada"
 
     if not phone:
         logger.warning("event=queue_send_skip correlation_id=%s tenant_id=%s phone=%s job_id=%s stage=send_enqueue reason=missing_phone", correlation_id, tenant_id, "n/a", "n/a")
@@ -191,6 +197,11 @@ def enqueue_send_message(message_data: dict[str, Any]) -> str | None:
         "flow_send_source",
         "provider_id",
         "contact_id",
+        "message_type",
+        "media_type",
+        "media_url",
+        "caption",
+        "filename",
     )
     metadata = message_data.get("metadata") if isinstance(message_data.get("metadata"), dict) else None
     payload = {
@@ -204,6 +215,11 @@ def enqueue_send_message(message_data: dict[str, Any]) -> str | None:
         "correlation_id": correlation_id,
         "conversation_id": str(message_data.get("conversation_id") or "") or None,
         "metadata": metadata,
+        "message_type": "media" if is_media_message else None,
+        "media_type": media_type or None,
+        "media_url": media_url or None,
+        "caption": str(message_data.get("caption") or "") or None,
+        "filename": str(message_data.get("filename") or "") or None,
     }
     for key in passthrough_keys:
         value = message_data.get(key)
@@ -222,7 +238,7 @@ def enqueue_send_message(message_data: dict[str, Any]) -> str | None:
         sorted(metadata.keys()) if metadata else [],
     )
 
-    message_type = "interactive" if payload.get("interactive_type") or (isinstance(payload.get("buttons"), list) and payload.get("buttons")) else "text"
+    message_type = "media" if payload.get("message_type") == "media" else ("interactive" if payload.get("interactive_type") or (isinstance(payload.get("buttons"), list) and payload.get("buttons")) else "text")
     log_message_origin_trace(
         executor=payload.get("flow_executor") or payload.get("flow_send_source") or "enqueue_send_message",
         flow_id=payload.get("flow_id"),

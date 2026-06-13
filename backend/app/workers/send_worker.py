@@ -26,6 +26,7 @@ from app.services.whatsapp_message_service import (
     resolve_active_meta_provider_credentials,
     send_buttons_message_via_meta,
     send_interactive_list_via_meta,
+    send_media_message_via_meta,
     send_text_message_via_meta,
 )
 from app.services.whatsapp_credentials_service import WhatsAppCredentialsNotConfiguredError, get_tenant_whatsapp_credentials
@@ -114,6 +115,15 @@ def _record_outbound_message(*, db, tenant_id: uuid.UUID, phone: str, text: str,
     conversation.updated_at = outbound.created_at
     db.add(outbound)
     db.commit()
+    try:
+        from app.schemas.chat import MessageOut
+        from app.services.realtime_service import sync_publish
+        message_payload = {"event": "message", "message": MessageOut.model_validate(outbound).model_dump(mode="json")}
+        sync_publish(f"{tenant_id}:{conversation.id}", message_payload)
+        sync_publish(f"{tenant_id}:{conversation.phone_number}", message_payload)
+        sync_publish(f"dashboard:{tenant_id}", {"refresh": ["conversations"]})
+    except Exception:
+        logger.warning("[OUTBOUND REALTIME PUBLISH FAILED] tenant_id=%s conversation_id=%s", tenant_id, conversation.id, exc_info=True)
     logger.info(
         "[OUTBOUND MESSAGE RECORDED] tenant_id=%s conversation_id=%s flow_id=%s node_id=%s status=sent direction=outbound flow_version_id=%s flow_session_id=%s",
         tenant_id,
@@ -433,6 +443,11 @@ def send_whatsapp_message(*, message_data: dict[str, Any]) -> None:
     tenant_id = str(message_data.get("tenant_id") or "")
     phone = str(message_data.get("phone") or "")
     text = str(message_data.get("text") or "").strip()
+    message_type_hint = str(message_data.get("message_type") or "").strip().lower()
+    media_type = str(message_data.get("media_type") or "").strip().lower()
+    media_url = str(message_data.get("media_url") or "").strip()
+    media_caption = str(message_data.get("caption") or "").strip() or None
+    media_filename = str(message_data.get("filename") or "").strip() or None
     buttons = message_data.get("buttons")
     interactive_type = str(message_data.get("interactive_type") or ("button" if isinstance(buttons, list) and buttons else "")).strip().lower()
     sections = message_data.get("sections") if isinstance(message_data.get("sections"), list) else []
@@ -453,7 +468,8 @@ def send_whatsapp_message(*, message_data: dict[str, Any]) -> None:
     conversation_id = str(message_data.get("conversation_id") or "") or None
     is_flow_message = bool(flow_id or flow_version_id or session_id or node_id or sequence_number_raw is not None)
     payload_provider_id = str(message_data.get("provider_id") or "unresolved")
-    message_type = "interactive" if interactive_type or (isinstance(buttons, list) and buttons) else "text"
+    is_media_message = message_type_hint == "media" or bool(media_type or media_url)
+    message_type = "media" if is_media_message else ("interactive" if interactive_type or (isinstance(buttons, list) and buttons) else "text")
     logger.info(
         "[V2 SEND WORKER] tenant_id=%s provider_id=%s session_id=%s conversation_id=%s contact_id=%s flow_id=%s phone=%s metadata_keys=%s payload_json=%s",
         tenant_id or "",
@@ -757,7 +773,9 @@ def send_whatsapp_message(*, message_data: dict[str, Any]) -> None:
         )
         meta_response: dict[str, Any] | None = None
         try:
-            if interactive_type == "list":
+            if is_media_message:
+                meta_response = send_media_message_via_meta(to=phone, media_type=media_type, media_url=media_url, caption=media_caption, filename=media_filename, token=resolved_token, phone_number_id=resolved_phone_number_id, context={**context, "message_type": "media", "media_type": media_type, "media_url": media_url})
+            elif interactive_type == "list":
                 logger.info(
                     "[META INTERACTIVE PAYLOAD] flow_id=%s session_id=%s node_id=%s node_type=%s message_type=%s interactive_type=%s options_count=%s payload_json=%s",
                     flow_id,
@@ -857,12 +875,17 @@ def send_whatsapp_message(*, message_data: dict[str, Any]) -> None:
             redis_client.set(last_sent_key, sequence_number)
 
         dedupe_message_id = str(message_data.get("message_id") or message_data.get("job_id") or getattr(current_job, "id", None) or correlation_id)
+        outbound_text = text
+        if is_media_message:
+            outbound_text = f"📎 Mídia enviada: {media_url}"
+            if media_caption:
+                outbound_text = f"{media_caption}\n{outbound_text}"
         with SessionLocal() as db:
             _record_outbound_message(
                 db=db,
                 tenant_id=tenant_uuid,
                 phone=phone,
-                text=text,
+                text=outbound_text,
                 message_id=f"outbound:{dedupe_message_id}",
                 flow_id=flow_id,
                 flow_version_id=flow_version_id,

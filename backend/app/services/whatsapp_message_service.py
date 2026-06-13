@@ -187,6 +187,24 @@ def send_text_message_via_meta(*, token: str, phone_number_id: str, to: str, tex
     return asyncio.run(MetaCloudClient(token).post(f"/{phone_number_id}/messages", payload=payload, context=context))
 
 
+def send_media_message_via_meta(*, token: str, phone_number_id: str, to: str, media_type: str, media_url: str, context: dict[str, Any], caption: str | None = None, filename: str | None = None) -> dict[str, Any]:
+    normalized_type = str(media_type or "").strip().lower()
+    if normalized_type not in {"image", "document"}:
+        raise ValueError("media_type must be image or document")
+    link = str(media_url or "").strip()
+    if not link.startswith("https://"):
+        raise ValueError("media_url must start with https://")
+    log_message_origin_trace(executor=context.get("flow_executor") or context.get("flow_send_source") or "send_media_message_via_meta", flow_id=context.get("flow_id"), node_id=context.get("node_id"), node_type=context.get("node_type"), message=caption or "📎 Mídia enviada", context=context)
+    media_payload: dict[str, Any] = {"link": link}
+    if caption:
+        media_payload["caption"] = caption
+    if normalized_type == "document" and filename:
+        media_payload["filename"] = filename
+    payload = {"messaging_product": "whatsapp", "to": re.sub(r"\D", "", to or ""), "type": normalized_type, normalized_type: media_payload}
+    logger.info("[META MEDIA PAYLOAD] flow_id=%s session_id=%s node_id=%s node_type=%s media_type=%s payload_json=%s", context.get("flow_id"), context.get("session_id"), context.get("node_id"), context.get("node_type"), normalized_type, json.dumps(payload, default=str, ensure_ascii=False, sort_keys=True))
+    return asyncio.run(MetaCloudClient(token).post(f"/{phone_number_id}/messages", payload=payload, context=context))
+
+
 def send_buttons_message_via_meta(*, token: str, phone_number_id: str, to: str, body_text: str, buttons: list[dict[str, Any]], context: dict[str, Any]) -> dict[str, Any]:
     log_message_origin_trace(
         executor=context.get("flow_executor") or context.get("flow_send_source") or "send_buttons_message_via_meta",

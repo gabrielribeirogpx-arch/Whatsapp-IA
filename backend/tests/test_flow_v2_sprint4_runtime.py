@@ -5,7 +5,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
-from app.flow_v2.actions import ScheduleDelayAction, SendMessageAction
+from app.flow_v2.actions import ScheduleDelayAction, SendMediaAction, SendMessageAction
 from app.flow_v2.channel_adapter import WhatsAppAdapter
 from app.flow_v2.contracts import (
     FlowV2EventType,
@@ -625,3 +625,47 @@ def test_runtime_executes_published_version_id() -> None:
         "tenant_id": snapshot.tenant_id,
         "flow_version_id": snapshot.flow_version_id,
     }
+
+
+def test_media_image_node_generates_action_and_continues_to_message() -> None:
+    executor, snapshot, event_store, session, db = _executor({"schema_version": 1, "start_node_id": "media", "nodes": [{"id": "media", "type": "media", "data": {"isStart": True, "media_type": "image", "media_url": "https://cdn.example.com/foto.jpg", "caption": "Veja a imagem"}}, {"id": "next", "type": "message", "content": "Depois da mídia"}], "edges": [{"id": "e1", "source": "media", "target": "next"}]})
+    output = executor.handle_input(db, _input(snapshot))
+    assert output.status == FlowV2SessionStatus.COMPLETED
+    assert len(output.actions) == 2
+    assert output.actions[0].action_type == "send_media"
+    assert output.actions[0].as_effect()["media_type"] == "image"
+    assert output.actions[0].as_effect()["media_url"] == "https://cdn.example.com/foto.jpg"
+    assert output.actions[1].action_type == "send_message"
+    assert session.current_node_id is None
+
+
+def test_media_document_node_generates_document_action() -> None:
+    executor, snapshot, _, _, db = _executor({"schema_version": 1, "start_node_id": "media", "nodes": [{"id": "media", "type": "media", "data": {"isStart": True, "media_type": "document", "media_url": "https://cdn.example.com/contrato.pdf", "caption": "Segue o PDF", "filename": "contrato.pdf"}}], "edges": []})
+    output = executor.handle_input(db, _input(snapshot))
+    assert output.status == FlowV2SessionStatus.COMPLETED
+    effect = output.actions[0].as_effect()
+    assert effect["media_type"] == "document"
+    assert effect["media_url"] == "https://cdn.example.com/contrato.pdf"
+    assert effect["caption"] == "Segue o PDF"
+    assert effect["filename"] == "contrato.pdf"
+
+
+def test_media_invalid_url_fails_session_without_dispatching_action() -> None:
+    executor, snapshot, _, session, db = _executor({"schema_version": 1, "start_node_id": "media", "nodes": [{"id": "media", "type": "media", "data": {"isStart": True, "media_type": "image", "media_url": "http://cdn.example.com/foto.jpg"}}], "edges": []})
+    try:
+        executor.handle_input(db, _input(snapshot))
+    except RuntimeError as exc:
+        assert "Invalid media_url" in str(exc)
+    else:
+        raise AssertionError("expected invalid media_url to raise RuntimeError")
+    assert session.status == str(FlowV2SessionStatus.FAILED)
+
+
+def test_whatsapp_adapter_dispatches_media_actions_to_mock_delivery() -> None:
+    tenant_id = uuid.uuid4()
+    session_id = uuid.uuid4()
+    action = SendMediaAction(tenant_id=tenant_id, session_id=session_id, external_user_id="whatsapp:+5511999999999", media_type="image", media_url="https://cdn.example.com/foto.jpg", caption="Veja")
+    delivery = WhatsAppAdapter().dispatch(action)
+    assert delivery["status"] == "mocked"
+    assert delivery["type"] == "image"
+    assert delivery["image_url"] == "https://cdn.example.com/foto.jpg"

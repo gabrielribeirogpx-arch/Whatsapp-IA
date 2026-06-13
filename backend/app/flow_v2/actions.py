@@ -56,6 +56,27 @@ class SendMessageAction(RuntimeAction):
 
 
 @dataclass(frozen=True)
+class SendMediaAction(RuntimeAction):
+    media_type: Literal["image", "document"] = "image"
+    media_url: str = ""
+    caption: str | None = None
+    filename: str | None = None
+
+    @property
+    def action_type(self) -> Literal["send_media"]:
+        return "send_media"
+
+    def as_effect(self) -> dict[str, Any]:
+        payload = super().as_effect()
+        payload.update({"media_type": self.media_type, "media_url": self.media_url})
+        if self.caption:
+            payload["caption"] = self.caption
+        if self.filename:
+            payload["filename"] = self.filename
+        return payload
+
+
+@dataclass(frozen=True)
 class SendChoiceButtonsAction(RuntimeAction):
     text: str = ""
     node_id: str = ""
@@ -180,5 +201,21 @@ def action_from_effect(
             contact_id=contact_id,
             text=str(effect.get("text") or ""),
             metadata={k: v for k, v in effect.items() if k not in {"type", "text"}},
+        )
+    if effect_type == "send_media":
+        media_type = str(effect.get("media_type") or "").strip().lower()
+        if media_type not in {"image", "document"}:
+            return None
+        return SendMediaAction(
+            tenant_id=tenant_id,
+            session_id=session_id,
+            external_user_id=external_user_id,
+            conversation_id=conversation_id,
+            contact_id=contact_id,
+            media_type=media_type,
+            media_url=str(effect.get("media_url") or ""),
+            caption=str(effect.get("caption") or "") or None,
+            filename=str(effect.get("filename") or "") or None,
+            metadata={k: v for k, v in effect.items() if k not in {"type", "media_type", "media_url", "caption", "filename"}},
         )
     return None
