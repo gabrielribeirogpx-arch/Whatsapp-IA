@@ -156,6 +156,7 @@ def test_media_upload_accepts_valid_mp3(tmp_path, monkeypatch):
 
 
 def test_media_upload_accepts_valid_mp4(tmp_path, monkeypatch):
+    monkeypatch.setattr(flow_media, "_validate_video_headers", lambda **kwargs: ("video/mp4", kwargs["local_size"]))
     client = _client(tmp_path, monkeypatch)
 
     response = client.post(
@@ -168,3 +169,56 @@ def test_media_upload_accepts_valid_mp4(tmp_path, monkeypatch):
     body = response.json()
     assert body["url"].endswith(".mp4")
     assert body["mime_type"] == "video/mp4"
+
+
+def test_video_preflight_accepts_get_when_head_fails(monkeypatch):
+    class Response:
+        def __init__(self, status_code, headers):
+            self.status_code = status_code
+            self.headers = headers
+
+    monkeypatch.setattr(flow_media.requests, "head", lambda *args, **kwargs: Response(404, {}))
+    monkeypatch.setattr(
+        flow_media.requests,
+        "get",
+        lambda *args, **kwargs: Response(206, {"content-type": "video/mp4", "content-length": "12"}),
+    )
+
+    content_type, content_length = flow_media._validate_video_headers(
+        public_url="https://api.example.com/uploads/flow-media/tenant/video.mp4",
+        suffix=".mp4",
+        local_size=12,
+    )
+
+    assert content_type == "video/mp4"
+    assert content_length == 12
+
+
+def test_video_preflight_retries_until_public_url_is_available(monkeypatch):
+    class Response:
+        def __init__(self, status_code, headers=None):
+            self.status_code = status_code
+            self.headers = headers or {}
+
+    attempts = {"count": 0}
+
+    def fake_head(*args, **kwargs):
+        attempts["count"] += 1
+        if attempts["count"] < 2:
+            return Response(404)
+        return Response(200, {"content-type": "video/mp4", "content-length": "12"})
+
+    monkeypatch.setattr(flow_media, "VIDEO_PREFLIGHT_RETRY_SECONDS", 1)
+    monkeypatch.setattr(flow_media, "VIDEO_PREFLIGHT_RETRY_INTERVAL_SECONDS", 0.1)
+    monkeypatch.setattr(flow_media.requests, "head", fake_head)
+    monkeypatch.setattr(flow_media.requests, "get", lambda *args, **kwargs: Response(404))
+
+    content_type, content_length = flow_media._validate_video_headers(
+        public_url="https://api.example.com/uploads/flow-media/tenant/video.mp4",
+        suffix=".mp4",
+        local_size=12,
+    )
+
+    assert attempts["count"] == 2
+    assert content_type == "video/mp4"
+    assert content_length == 12
