@@ -35,7 +35,9 @@ import type {
   AccountPreferences,
   AccountSecurity,
   AuditLog,
-  WorkspaceUser
+  WorkspaceUser,
+  TaskItem,
+  TaskUpdatePayload
 } from './types';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL;
@@ -795,4 +797,39 @@ export async function updateWorkspaceUser(userId: string, payload: { name?: stri
 export async function deactivateWorkspaceUser(userId: string): Promise<WorkspaceUser> {
   const res = await apiFetch(`/api/workspace/users/${userId}/deactivate`, { method: 'POST' });
   return parseApiResponse<WorkspaceUser>(res);
+}
+
+
+export type TaskFilters = {
+  status?: string;
+  priority?: string;
+  assigned_to?: string;
+  overdue?: boolean;
+  conversation_id?: string;
+  contact_id?: string;
+};
+
+function buildTaskQuery(filters: TaskFilters = {}) {
+  const params = new URLSearchParams();
+  Object.entries(filters).forEach(([key, value]) => {
+    if (value === undefined || value === null || value === '') return;
+    params.set(key, String(value));
+  });
+  const query = params.toString();
+  return query ? `?${query}` : '';
+}
+
+export async function listTasks(filters: TaskFilters = {}): Promise<TaskItem[]> {
+  const res = await apiFetch(`/api/tasks${buildTaskQuery(filters)}`);
+  return parseApiResponse<TaskItem[]>(res);
+}
+
+export async function updateTask(taskId: string, payload: TaskUpdatePayload): Promise<TaskItem> {
+  const res = await apiFetch(`/api/tasks/${taskId}`, { method: 'PATCH', body: JSON.stringify(payload) });
+  return parseApiResponse<TaskItem>(res);
+}
+
+export async function completeTask(taskId: string): Promise<TaskItem> {
+  const res = await apiFetch(`/api/tasks/${taskId}/complete`, { method: 'POST' });
+  return parseApiResponse<TaskItem>(res);
 }

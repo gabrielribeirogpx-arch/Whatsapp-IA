@@ -433,3 +433,27 @@ export type WhatsAppCampaignRecipient = {
   provider_message_id?: string | null;
   error_message?: string | null;
 };
+
+export type TaskItem = {
+  id: string;
+  tenant_id: string;
+  conversation_id?: string | null;
+  contact_id?: string | null;
+  lead_id?: string | null;
+  title: string;
+  description?: string | null;
+  priority: string;
+  status: string;
+  assigned_to?: string | null;
+  due_at?: string | null;
+  completed_at?: string | null;
+  completed_by?: string | null;
+  created_at: string;
+  updated_at: string;
+  contact_name?: string | null;
+  contact_phone?: string | null;
+  conversation_name?: string | null;
+  conversation_phone?: string | null;
+};
+
+export type TaskUpdatePayload = Partial<Pick<TaskItem, 'status' | 'assigned_to' | 'priority' | 'due_at' | 'title' | 'description'>>;

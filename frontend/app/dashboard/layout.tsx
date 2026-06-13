@@ -133,6 +133,11 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
             <span className="dash-nav-label">Pipeline</span>
           </Link>
 
+          <Link href="/tasks" className={`dash-nav-item ${pathname === '/tasks' ? 'active' : ''}`}>
+            <span aria-hidden="true" className="text-lg">📋</span>
+            <span className="dash-nav-label">Tarefas</span>
+          </Link>
+
 
           <Link href="/dashboard/campaigns" className={`dash-nav-item ${pathname === '/dashboard/campaigns' ? 'active' : ''}`}>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 11l18-5-5 18-2-7-7-2z"/></svg>
