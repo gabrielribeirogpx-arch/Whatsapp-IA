@@ -230,6 +230,7 @@ app.include_router(account.router, prefix="/api")
 app.include_router(bot_rules.router)
 app.include_router(flows.crud_router, prefix="/api/flows", tags=["flows"])
 app.include_router(flow_media.router)
+app.include_router(flow_media.media_router)
 app.include_router(flows.router, prefix="/api/admin", tags=["admin"])
 app.include_router(whatsapp_providers.router)
 app.include_router(

@@ -410,6 +410,7 @@ function FlowNodeEditorPanel({
           const mediaType = toText(draft.media_type || 'image') === 'document' ? 'document' : 'image';
           const mediaUrl = toText(draft.media_url);
           const urlInvalid = mediaUrl.trim().length > 0 && !mediaUrl.trim().startsWith('https://');
+          const sourceMode = toText(draft.media_source || (mediaUrl ? 'external' : 'upload')) === 'external' ? 'external' : 'upload';
 
           return (
             <>
@@ -424,16 +425,47 @@ function FlowNodeEditorPanel({
                   <option value="document">Documento/PDF</option>
                 </select>
               </label>
-              <label className="flow-editor-field">
-                URL do arquivo (HTTPS)
-                <input
-                  value={mediaUrl}
-                  onChange={(event) => onDraftChange({ media_url: event.target.value })}
-                  placeholder={mediaType === 'document' ? 'https://exemplo.com/contrato.pdf' : 'https://exemplo.com/imagem.jpg'}
-                />
-                {!mediaUrl.trim() ? <small className="flow-editor-error">URL obrigatória para enviar a mídia.</small> : null}
-                {urlInvalid ? <small className="flow-editor-error">A URL deve começar com https://</small> : null}
-              </label>
+              <fieldset className="flow-editor-field">
+                <legend>Origem do arquivo</legend>
+                <label className="flow-editor-radio">
+                  <input type="radio" name={`media-source-${node.id}`} checked={sourceMode === 'upload'} onChange={() => onDraftChange({ media_source: 'upload' })} />
+                  Upload de arquivo
+                </label>
+                <label className="flow-editor-radio">
+                  <input type="radio" name={`media-source-${node.id}`} checked={sourceMode === 'external'} onChange={() => onDraftChange({ media_source: 'external' })} />
+                  URL externa
+                </label>
+              </fieldset>
+              {sourceMode === 'upload' ? (
+                <label className="flow-editor-field">
+                  Arquivo
+                  <input
+                    type="file"
+                    accept={mediaType === 'document' ? 'application/pdf' : 'image/jpeg,image/png,image/webp'}
+                    disabled={isUploading}
+                    onChange={(event) => onUpload(event.target.files?.[0] || null, mediaType)}
+                  />
+                  {isUploading ? <small>Enviando arquivo...</small> : null}
+                  {uploadError ? <small className="flow-editor-error">{uploadError}</small> : null}
+                </label>
+              ) : (
+                <label className="flow-editor-field">
+                  URL do arquivo (HTTPS)
+                  <input
+                    value={mediaUrl}
+                    onChange={(event) => onDraftChange({ media_url: event.target.value })}
+                    placeholder={mediaType === 'document' ? 'https://exemplo.com/contrato.pdf' : 'https://exemplo.com/imagem.jpg'}
+                  />
+                  {!mediaUrl.trim() ? <small className="flow-editor-error">URL obrigatória para enviar a mídia.</small> : null}
+                  {urlInvalid ? <small className="flow-editor-error">A URL deve começar com https://</small> : null}
+                </label>
+              )}
+              {mediaUrl && mediaType === 'image' ? (
+                <div className="flow-editor-info-card"><img src={mediaUrl} alt="Preview da mídia" style={{ maxWidth: '100%', borderRadius: 12 }} /></div>
+              ) : null}
+              {mediaUrl && mediaType === 'document' ? (
+                <div className="flow-editor-info-card"><strong>📄 PDF</strong><span>{toText(draft.filename) || 'Documento enviado'}</span></div>
+              ) : null}
               <label className="flow-editor-field">
                 Legenda/caption (opcional)
                 <textarea
@@ -1121,11 +1153,14 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
     try {
       const formData = new FormData();
       formData.append('file', file);
-      const response = await apiFetch('/api/flow-media/upload', { method: 'POST', body: formData });
-      const result = await parseApiResponse<{ url: string; filename?: string }>(response);
-      const patch = mediaType === 'image'
-        ? { media_url: result.url }
-        : { document_url: result.url, filename: result.filename || nodeEditorDraft.filename };
+      const response = await apiFetch('/api/media/upload', { method: 'POST', body: formData });
+      const result = await parseApiResponse<{ url: string; filename?: string; mime_type?: string; size?: number }>(response);
+      const resolvedMediaType = result.mime_type === 'application/pdf' ? 'document' : mediaType;
+      const patch = {
+        media_type: resolvedMediaType,
+        media_url: result.url,
+        filename: result.filename || nodeEditorDraft.filename,
+      };
       setNodeEditorDraft((prev) => ({
         ...prev,
         ...patch,
@@ -1137,7 +1172,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
         markFlowDirty('media_uploaded', { node_id: nodeId, media_type: mediaType, url: result.url });
       }
     } catch (error) {
-      setMediaUploadError(error instanceof Error ? error.message : 'Falha ao enviar arquivo');
+      setMediaUploadError(error instanceof Error ? error.message : 'Não foi possível enviar o arquivo. Verifique o tipo, tamanho e tente novamente.');
     } finally {
       setIsMediaUploading(false);
     }

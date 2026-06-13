@@ -378,6 +378,16 @@ def test_media_node_publish_preserves_media_fields() -> None:
     assert media_node["data"]["filename"] == "contrato.pdf"
 
 
+def test_media_node_publish_preserves_uploaded_media_url_and_filename() -> None:
+    nodes = [{"id": "start", "type": "media", "data": {"isStart": True, "media_type": "image", "media_url": "https://api.example.com/uploads/flow-media/tenant/foto.webp", "caption": "Veja", "filename": "foto.webp", "media_source": "upload"}}]
+    result = FlowV2Publisher().publish(nodes=nodes, edges=[])
+    media_node = next(node for node in result.snapshot["nodes"] if node["id"] == "start")
+    assert media_node["data"]["media_type"] == "image"
+    assert media_node["data"]["media_url"] == "https://api.example.com/uploads/flow-media/tenant/foto.webp"
+    assert media_node["data"]["caption"] == "Veja"
+    assert media_node["data"]["filename"] == "foto.webp"
+
+
 def test_media_node_requires_https_url() -> None:
     nodes = [{"id": "start", "type": "media", "data": {"isStart": True, "media_type": "image", "media_url": "http://cdn.example.com/foto.jpg"}}]
     result = FlowV2GraphValidator().validate(nodes=nodes, edges=[])
