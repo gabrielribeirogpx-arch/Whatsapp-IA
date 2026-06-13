@@ -7,6 +7,7 @@ const ACTION_TYPE_LABELS: Record<string, string> = {
   create_lead: 'Criar Lead',
   add_tag: 'Adicionar Tag',
   notify_team: 'Notificar Equipe',
+  create_task: 'Criar tarefa',
   transfer_human: 'Transferir para Humano',
   set_conversation_mode: 'Alterar modo da conversa',
 };
@@ -33,6 +34,11 @@ type ActionNodeData = {
   notification_message?: string;
   notification_priority?: string;
   message?: string;
+  task_title?: string;
+  task_description?: string;
+  task_priority?: string;
+  task_assignee?: string;
+  task_due_minutes?: string | number;
   running?: boolean;
   isStart?: boolean;
   onToggleStart?: (nodeId: string) => void;
@@ -50,10 +56,16 @@ export default function ActionNode({ id, data, selected }: NodeProps) {
   ).trim();
   const notificationPriority = String(nodeData.notification_priority || nodeData.params?.notification_priority || 'normal').toLowerCase();
   const notificationPriorityLabel = NOTIFICATION_PRIORITY_LABELS[notificationPriority] || 'Normal';
+  const taskTitle = String(nodeData.task_title || nodeData.params?.task_title || '').trim();
+  const taskPriority = String(nodeData.task_priority || nodeData.params?.task_priority || 'normal').toLowerCase();
+  const taskPriorityLabel = NOTIFICATION_PRIORITY_LABELS[taskPriority] || 'Normal';
+  const taskAssignee = String(nodeData.task_assignee || nodeData.params?.task_assignee || '').trim();
+  const taskDueMinutes = String(nodeData.task_due_minutes || nodeData.params?.task_due_minutes || '').trim();
   const actionLabel = actionType === 'set_conversation_mode' && modeLabel
     ? `Alterar modo → ${modeLabel}`
     : ACTION_TYPE_LABELS[actionType] || nodeData.label;
   const notifySummary = [actionLabel, notificationTitle, notificationMessage].filter(Boolean).join(' • ');
+  const taskSummary = ['📝 Criar tarefa', taskTitle || 'Título não definido', `Prioridade: ${taskPriorityLabel}`, taskAssignee ? `Responsável: ${taskAssignee}` : 'Responsável: -', taskDueMinutes ? `Prazo: ${taskDueMinutes} min` : 'Prazo: 60 min'].join(' • ');
 
   return (
     <CompactFlowNode
@@ -65,8 +77,8 @@ export default function ActionNode({ id, data, selected }: NodeProps) {
       badge="LOGIC"
       badgeTone={{ background: '#f5f3ff', color: '#5b21b6' }}
       accent="linear-gradient(90deg, #7c3aed, #8b5cf6)"
-      summary={truncateText(actionType === 'notify_team' ? notifySummary : actionLabel, 80, 'Ação não configurada')}
-      meta={actionType === 'notify_team' ? `Prioridade: ${notificationPriorityLabel}` : 'Automação interna'}
+      summary={truncateText(actionType === 'notify_team' ? notifySummary : actionType === 'create_task' ? taskSummary : actionLabel, 100, 'Ação não configurada')}
+      meta={actionType === 'notify_team' ? `Prioridade: ${notificationPriorityLabel}` : actionType === 'create_task' ? `Prioridade: ${taskPriorityLabel}` : 'Automação interna'}
       isStart={nodeData.isStart}
       hasValidationError={nodeData.hasValidationError}
       onToggleStart={nodeData.onToggleStart}

@@ -53,6 +53,12 @@ import PushBanner from "./components/PushBanner";
 import PushPermissionSheet from "./components/PushPermissionSheet";
 import InstallPrompt from "./components/InstallPrompt";
 import MobileLoginScreen from "./components/MobileLoginScreen";
+import {
+  formatTaskHistoryDescription,
+  getTaskNotificationDetails,
+  isTaskCreatedPayload,
+  normalizeTaskPriorityLabel,
+} from "@/lib/taskRealtime";
 
 export type MobileView = "inbox" | "chat" | "notifs" | "profile";
 
@@ -217,6 +223,7 @@ export default function MobileChatShell() {
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [notifCount, setNotifCount] = useState(0);
   const teamNotificationDedupeRef = useRef<Map<string, number>>(new Map());
+  const taskCreatedDedupeRef = useRef<Map<string, number>>(new Map());
 
   // ── Hooks ────────────────────────────────────────────────────
   const {
@@ -379,6 +386,52 @@ export default function MobileChatShell() {
     });
   }, []);
 
+  const showTaskCreatedNotification = useCallback(
+    (payload: MobileRealtimePayload) => {
+      if (!isTaskCreatedPayload(payload)) return false;
+
+      console.log("[TASK_CREATED EVENT]", payload);
+      const details = getTaskNotificationDetails(payload);
+      const now = Date.now();
+      const lastSeen = taskCreatedDedupeRef.current.get(details.id);
+      if (lastSeen && now - lastSeen < TEAM_NOTIFICATION_DEDUPE_WINDOW_MS)
+        return true;
+
+      taskCreatedDedupeRef.current.set(details.id, now);
+      taskCreatedDedupeRef.current.forEach((timestamp, key) => {
+        if (now - timestamp > TEAM_NOTIFICATION_DEDUPE_WINDOW_MS) {
+          taskCreatedDedupeRef.current.delete(key);
+        }
+      });
+
+      const priorityLabel = normalizeTaskPriorityLabel(details.priority);
+      vibrate([45]);
+      showBanner(
+        "📝 Nova tarefa criada",
+        formatTaskHistoryDescription(details),
+      );
+      addLocalNotif({
+        title: `📝 Tarefa criada · ${priorityLabel}`,
+        body: formatTaskHistoryDescription(details),
+        type: "task_created",
+        conversationId: details.conversationId || undefined,
+      });
+
+      if (
+        details.conversationId &&
+        selectedConvoIdRef.current === details.conversationId
+      ) {
+        const current = conversations.find(
+          (c) => String(c.id) === details.conversationId,
+        );
+        if (current) void fetchMessages(current);
+      }
+
+      return true;
+    },
+    [conversations, fetchMessages, showBanner],
+  );
+
   const showTeamNotification = useCallback(
     (payload: MobileRealtimePayload) => {
       if (
@@ -451,6 +504,7 @@ export default function MobileChatShell() {
       const type = normalizeRealtimeType(d) || "message";
       const refreshTargets = Array.isArray(d.refresh) ? d.refresh : [];
 
+      showTaskCreatedNotification(d);
       showTeamNotification(d);
 
       if (refreshTargets.includes("conversations")) {

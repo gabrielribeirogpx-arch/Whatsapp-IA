@@ -68,6 +68,7 @@ const ACTION_TYPE_OPTIONS = [
   { value: 'create_lead', label: 'Criar Lead' },
   { value: 'add_tag', label: 'Adicionar Tag' },
   { value: 'notify_team', label: 'Notificar Equipe' },
+  { value: 'create_task', label: 'Criar tarefa' },
   { value: 'transfer_human', label: 'Transferir para Humano' },
   { value: 'set_conversation_mode', label: 'Alterar modo da conversa' },
 ] as const;
@@ -419,6 +420,7 @@ function FlowNodeEditorPanel({
                       params: {},
                       ...(nextActionType === 'set_conversation_mode' ? { mode: 'human' } : { mode: undefined }),
                       ...(nextActionType === 'notify_team' ? { notification_priority: 'normal', params: { notification_priority: 'normal' } } : {}),
+                      ...(nextActionType === 'create_task' ? { task_priority: 'normal', task_due_minutes: '60', params: { task_priority: 'normal', task_due_minutes: '60' } } : {}),
                     });
                   }}
                 >
@@ -470,6 +472,57 @@ function FlowNodeEditorPanel({
                         <option key={option.value} value={option.value}>{option.label}</option>
                       ))}
                     </select>
+                  </label>
+                </>
+              )}
+
+
+              {selectedActionType === 'create_task' && (
+                <>
+                  <label className="flow-editor-field">
+                    Título
+                    <input
+                      value={toText(params.task_title || draft.task_title)}
+                      onChange={(event) => updateActionParam('task_title', event.target.value)}
+                      placeholder="Ex.: Retornar contato"
+                    />
+                  </label>
+                  <label className="flow-editor-field">
+                    Descrição
+                    <textarea
+                      value={toText(params.task_description || draft.task_description)}
+                      onChange={(event) => updateActionParam('task_description', event.target.value)}
+                      placeholder="Detalhes para o responsável"
+                    />
+                  </label>
+                  <label className="flow-editor-field">
+                    Prioridade
+                    <select
+                      value={isNotificationPriority(toText(params.task_priority || draft.task_priority)) ? toText(params.task_priority || draft.task_priority) : 'normal'}
+                      onChange={(event) => updateActionParam('task_priority', event.target.value)}
+                    >
+                      {NOTIFICATION_PRIORITY_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>{option.label}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="flow-editor-field">
+                    Responsável
+                    <input
+                      value={toText(params.task_assignee || draft.task_assignee)}
+                      onChange={(event) => updateActionParam('task_assignee', event.target.value)}
+                      placeholder="Nome, equipe ou e-mail"
+                    />
+                  </label>
+                  <label className="flow-editor-field">
+                    Prazo em minutos
+                    <input
+                      type="number"
+                      min="0"
+                      value={toText(params.task_due_minutes || draft.task_due_minutes || '60')}
+                      onChange={(event) => updateActionParam('task_due_minutes', event.target.value)}
+                      placeholder="60"
+                    />
                   </label>
                 </>
               )}
