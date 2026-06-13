@@ -5,7 +5,7 @@ import json
 import logging
 from typing import Any, Protocol, runtime_checkable
 
-from app.flow_v2.actions import RuntimeAction, SendChoiceButtonsAction, SendMessageAction
+from app.flow_v2.actions import RuntimeAction, SendChoiceButtonsAction, SendMediaAction, SendMessageAction
 
 logger = logging.getLogger(__name__)
 
@@ -27,10 +27,14 @@ class ChannelAdapter(Protocol):
     ) -> dict[str, Any]: ...
 
     def send_image(self, *, recipient_id: str, image_url: str, caption: str | None = None,
+                   tenant_id: Any | None = None, session_id: Any | None = None,
+                   conversation_id: Any | None = None, contact_id: Any | None = None,
                    metadata: dict[str, Any] | None = None) -> dict[str, Any]: ...
 
     def send_document(self, *, recipient_id: str, document_url: str, filename: str | None = None,
-                      metadata: dict[str, Any] | None = None) -> dict[str, Any]: ...
+                      caption: str | None = None, tenant_id: Any | None = None,
+                      session_id: Any | None = None, conversation_id: Any | None = None,
+                      contact_id: Any | None = None, metadata: dict[str, Any] | None = None) -> dict[str, Any]: ...
 
     def send_buttons(
         self,
@@ -136,12 +140,32 @@ class WhatsAppAdapter:
         return self._invoke_text_client(self.client.send_text, kwargs)
 
     def send_image(self, *, recipient_id: str, image_url: str, caption: str | None = None,
+                   tenant_id: Any | None = None, session_id: Any | None = None,
+                   conversation_id: Any | None = None, contact_id: Any | None = None,
                    metadata: dict[str, Any] | None = None) -> dict[str, Any]:
-        return {"status": "mocked", "channel": "whatsapp", "type": "image", "recipient_id": recipient_id, "image_url": image_url}
+        metadata = dict(metadata or {})
+        if self.client is None:
+            return {"status": "mocked", "channel": "whatsapp", "type": "image", "recipient_id": recipient_id, "image_url": image_url, "caption": caption, "metadata": metadata}
+        from app.services.queue import enqueue_send_message
+        payload = self._media_queue_payload(recipient_id=recipient_id, media_type="image", media_url=image_url, caption=caption, filename=None, tenant_id=tenant_id, session_id=session_id, conversation_id=conversation_id, contact_id=contact_id, metadata=metadata)
+        job_id = enqueue_send_message(payload)
+        return {"status": "queued" if job_id else "skipped", "channel": "whatsapp", "type": "image", "recipient_id": recipient_id, "job_id": job_id, "tenant_id": payload.get("tenant_id")}
 
     def send_document(self, *, recipient_id: str, document_url: str, filename: str | None = None,
-                      metadata: dict[str, Any] | None = None) -> dict[str, Any]:
-        return {"status": "mocked", "channel": "whatsapp", "type": "document", "recipient_id": recipient_id, "document_url": document_url}
+                      caption: str | None = None, tenant_id: Any | None = None,
+                      session_id: Any | None = None, conversation_id: Any | None = None,
+                      contact_id: Any | None = None, metadata: dict[str, Any] | None = None) -> dict[str, Any]:
+        metadata = dict(metadata or {})
+        if self.client is None:
+            return {"status": "mocked", "channel": "whatsapp", "type": "document", "recipient_id": recipient_id, "document_url": document_url, "caption": caption, "filename": filename, "metadata": metadata}
+        from app.services.queue import enqueue_send_message
+        payload = self._media_queue_payload(recipient_id=recipient_id, media_type="document", media_url=document_url, caption=caption, filename=filename, tenant_id=tenant_id, session_id=session_id, conversation_id=conversation_id, contact_id=contact_id, metadata=metadata)
+        job_id = enqueue_send_message(payload)
+        return {"status": "queued" if job_id else "skipped", "channel": "whatsapp", "type": "document", "recipient_id": recipient_id, "job_id": job_id, "tenant_id": payload.get("tenant_id")}
+
+    @staticmethod
+    def _media_queue_payload(*, recipient_id: str, media_type: str, media_url: str, caption: str | None, filename: str | None, tenant_id: Any | None, session_id: Any | None, conversation_id: Any | None, contact_id: Any | None, metadata: dict[str, Any]) -> dict[str, Any]:
+        return {"tenant_id": str(tenant_id or metadata.get("tenant_id") or ""), "provider_id": metadata.get("provider_id"), "phone": recipient_id, "text": caption or "📎 Mídia enviada", "message_type": "media", "media_type": media_type, "media_url": media_url, "caption": caption, "filename": filename, "conversation_id": str(conversation_id or metadata.get("conversation_id") or "") or None, "contact_id": str(contact_id or metadata.get("contact_id") or "") or None, "session_id": str(session_id or metadata.get("session_id") or "") or None, "flow_id": metadata.get("flow_id"), "flow_version_id": metadata.get("flow_version_id"), "node_id": metadata.get("node_id"), "node_type": metadata.get("node_type") or "media", "correlation_id": metadata.get("correlation_id") or metadata.get("message_id") or metadata.get("webhook_id"), "metadata": metadata, "flow_send_source": "flow_v2:media"}
 
     def send_buttons(
         self,
@@ -324,6 +348,11 @@ class WhatsAppAdapter:
                 contact_id=action.contact_id,
                 metadata=action.metadata,
             )
+        if isinstance(action, SendMediaAction):
+            logger.info("[V2 CHANNEL ADAPTER] dispatch action_type=%s tenant_id=%s provider_id=%s session_id=%s conversation_id=%s contact_id=%s media_type=%s", action.action_type, action.tenant_id, action.metadata.get("provider_id"), action.session_id, action.conversation_id, action.contact_id, action.media_type)
+            if action.media_type == "document":
+                return self.send_document(recipient_id=action.external_user_id, document_url=action.media_url, caption=action.caption, filename=action.filename, tenant_id=action.tenant_id, session_id=action.session_id, conversation_id=action.conversation_id, contact_id=action.contact_id, metadata=action.metadata)
+            return self.send_image(recipient_id=action.external_user_id, image_url=action.media_url, caption=action.caption, tenant_id=action.tenant_id, session_id=action.session_id, conversation_id=action.conversation_id, contact_id=action.contact_id, metadata=action.metadata)
         if isinstance(action, SendChoiceButtonsAction):
             logger.info(
                 "[V2 CHANNEL ADAPTER] dispatch action_type=%s tenant_id=%s provider_id=%s session_id=%s conversation_id=%s contact_id=%s node_id=%s buttons_count=%s",

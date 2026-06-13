@@ -364,3 +364,22 @@ def test_publisher_migrates_legacy_list_node_to_choice_display_mode_list() -> No
     assert choice["data"]["display_mode"] == "list"
     assert choice["data"]["options"] == [{"id": "suporte", "label": "Suporte"}]
     assert choice["data"]["sections"] == nodes[1]["data"]["sections"]
+
+
+def test_media_node_publish_preserves_media_fields() -> None:
+    nodes = [{"id": "start", "type": "message", "data": {"isStart": True, "content": "Olá"}}, {"id": "media", "type": "media", "data": {"media_type": "document", "media_url": "https://cdn.example.com/contrato.pdf", "caption": "Segue o PDF", "filename": "contrato.pdf"}}]
+    edges = [{"id": "e1", "source": "start", "target": "media"}]
+    result = FlowV2Publisher().publish(nodes=nodes, edges=edges)
+    media_node = next(node for node in result.snapshot["nodes"] if node["id"] == "media")
+    assert media_node["type"] == "media"
+    assert media_node["data"]["media_type"] == "document"
+    assert media_node["data"]["media_url"] == "https://cdn.example.com/contrato.pdf"
+    assert media_node["data"]["caption"] == "Segue o PDF"
+    assert media_node["data"]["filename"] == "contrato.pdf"
+
+
+def test_media_node_requires_https_url() -> None:
+    nodes = [{"id": "start", "type": "media", "data": {"isStart": True, "media_type": "image", "media_url": "http://cdn.example.com/foto.jpg"}}]
+    result = FlowV2GraphValidator().validate(nodes=nodes, edges=[])
+    assert result.status == GraphValidationStatus.INVALID
+    assert "FLOW_V2_MEDIA_URL_INVALID:start" in result.errors

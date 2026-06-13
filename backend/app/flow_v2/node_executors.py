@@ -14,6 +14,7 @@ from app.flow_v2.actions import (
     RuntimeAction,
     ScheduleDelayAction,
     SendChoiceButtonsAction,
+    SendMediaAction,
     SendMessageAction,
 )
 from app.flow_v2.contracts import FlowV2EventType, RuntimeInput
@@ -233,6 +234,29 @@ class MessageNodeExecutor(BaseNodeExecutor):
             next_node_id=next_node_id,
             status=status,
         )
+
+
+class MediaNodeExecutor(BaseNodeExecutor):
+    SUPPORTED_MEDIA_TYPES = {"image", "document"}
+
+    def execute(self, db, *, snapshot, session, node, runtime_input) -> NodeExecutionResult:
+        node_id = str(node["id"])
+        data = self._node_data(node)
+        media_type = str(node.get("media_type") or data.get("media_type") or "").strip().lower()
+        media_url = str(node.get("media_url") or data.get("media_url") or data.get("url") or "").strip()
+        caption = str(node.get("caption") or data.get("caption") or "").strip() or None
+        filename = str(node.get("filename") or data.get("filename") or "").strip() or None
+        if media_type not in self.SUPPORTED_MEDIA_TYPES:
+            logger.error("[MEDIA NODE INVALID] node_id=%s reason=invalid_media_type media_type=%s", node_id, media_type or "missing")
+            raise RuntimeError(f"Invalid media_type for media node {node_id}")
+        if not media_url or not media_url.startswith("https://"):
+            logger.error("[MEDIA NODE INVALID] node_id=%s reason=invalid_media_url media_type=%s media_url_present=%s", node_id, media_type, bool(media_url))
+            raise RuntimeError(f"Invalid media_url for media node {node_id}")
+        next_node_id = self._default_next_or_terminal(db, snapshot=snapshot, session=session, node_id=node_id)
+        self.event_store.append(db, session=session, event_type=FlowV2EventType.MESSAGE_SENT, node_id=node_id, payload={"node_id": node_id, "media_type": media_type, "media_url": media_url, "caption": caption, "filename": filename})
+        action = SendMediaAction(tenant_id=session.tenant_id, session_id=session.id, external_user_id=runtime_input.external_user_id, conversation_id=runtime_input.conversation_id, contact_id=runtime_input.contact_id, media_type=media_type, media_url=media_url, caption=caption, filename=filename if media_type == "document" else None, metadata={**runtime_input.metadata, "node_id": node_id, "node_type": "media"})
+        logger.info("[MEDIA NODE EXECUTED] node_id=%s media_type=%s media_url=%s caption_present=%s filename=%s next_node_id=%s", node_id, media_type, media_url, bool(caption), filename, next_node_id)
+        return NodeExecutionResult(actions=(action,), next_node_id=next_node_id, status="complete" if next_node_id is None else "continue")
 
 
 def _choice_prompt(node: dict[str, Any], data: dict[str, Any]) -> str:
@@ -1368,6 +1392,9 @@ class NodeExecutorRegistry:
                 event_store=event_store, transition_resolver=transition_resolver
             ),
             "action": ActionNodeExecutor(
+                event_store=event_store, transition_resolver=transition_resolver
+            ),
+            "media": MediaNodeExecutor(
                 event_store=event_store, transition_resolver=transition_resolver
             ),
         }

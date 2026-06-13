@@ -131,6 +131,10 @@ export type ChatMessage = {
   time: string;
   createdAt?: string;
   status?: 'sent' | 'delivered' | 'read';
+  mediaType?: 'image' | 'document' | string;
+  mediaUrl?: string | null;
+  caption?: string | null;
+  filename?: string | null;
   isNew?: boolean;
 };
 
@@ -292,7 +296,7 @@ export type FlowNodePayload = {
     sections?: unknown[];
     condition?: string;
     action?: string;
-    action_type?: 'create_lead' | 'add_tag' | 'notify_team' | 'transfer_human' | 'set_conversation_mode';
+    action_type?: 'create_lead' | 'add_tag' | 'notify_team' | 'transfer_human' | 'set_conversation_mode' | 'create_task';
     mode?: 'human' | 'bot' | 'ai';
     params?: Record<string, unknown>;
     tag?: string;
@@ -302,6 +306,10 @@ export type FlowNodePayload = {
     notification_title?: string;
     notification_message?: string;
     notification_priority?: 'low' | 'normal' | 'high';
+    media_type?: 'image' | 'document';
+    media_url?: string;
+    caption?: string;
+    filename?: string;
     isStart?: boolean;
     metadata?: Record<string, unknown>;
     onChange?: (nodeId: string, patch: Record<string, unknown>) => void;

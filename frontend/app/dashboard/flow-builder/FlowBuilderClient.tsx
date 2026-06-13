@@ -14,13 +14,14 @@ import ReactFlow, {
 } from 'reactflow';
 import type { Connection, Edge, EdgeChange, Node, NodeChange, ReactFlowInstance } from 'reactflow';
 import 'reactflow/dist/style.css';
-import { Clock, GitBranch, History, ListChecks, MessageSquare, RotateCcw, Zap } from 'lucide-react';
+import { Clock, FileImage, GitBranch, History, ListChecks, MessageSquare, RotateCcw, Zap } from 'lucide-react';
 
 import ActionNode from '@/components/flow/nodes/ActionNode';
 import ChoiceNode from '@/components/flow/nodes/ChoiceNode';
 import ConditionNode from '@/components/flow/nodes/ConditionNode';
 import DelayNode from '@/components/flow/nodes/DelayNode';
 import MessageNode from '@/components/flow/nodes/MessageNode';
+import MediaNode from '@/components/flow/nodes/MediaNode';
 import CreateFlowModal from '@/components/flows/CreateFlowModal';
 import { apiFetch, getFlowGraph, getTenantSessionFromStorage, listFlowVersions, parseApiResponse, restoreFlowVersion } from '@/lib/api';
 import { getLayoutedElements } from '@/lib/autoLayout';
@@ -36,14 +37,16 @@ const nodeTypes = {
   condition: ConditionNode,
   delay: DelayNode,
   action: ActionNode,
+  media: MediaNode,
   messageNode: MessageNode,
   choiceNode: ChoiceNode,
   conditionNode: ConditionNode,
   delayNode: DelayNode,
   actionNode: ActionNode,
+  mediaNode: MediaNode,
 };
 
-type FlowNodeKind = 'message' | 'choice' | 'condition' | 'delay' | 'action';
+type FlowNodeKind = 'message' | 'choice' | 'condition' | 'delay' | 'action' | 'media';
 type FlowConnection = Connection & { sourceHandle?: string | null };
 type ChoiceConnectDebug = {
   nodeId: string;
@@ -103,6 +106,7 @@ const NODE_PRESETS: Record<FlowNodeKind, { label: string; type: string; data: Re
   condition: { label: 'Condição', type: 'condition', data: { condition: '' } },
   delay: { label: 'Delay', type: 'delay', data: { seconds: 3, show_typing: false } },
   action: { label: 'Ação', type: 'action', data: { action_type: 'create_lead', action: 'create_lead', params: {} } },
+  media: { label: 'Mídia', type: 'media', data: { media_type: 'image', media_url: '', caption: '', filename: '' } },
 };
 
 const initialNodes: Node[] = [];
@@ -276,6 +280,7 @@ const getBuilderNodeTitle = (node?: Node | null) => NODE_PRESETS[getBuilderNodeK
 const getMiniMapNodeColor = (type: string) => {
   const normalized = type.toLowerCase();
   if (normalized === 'message') return '#3b82f6';
+  if (normalized === 'media') return '#06b6d4';
   if (['choice', 'condition', 'delay', 'action'].includes(normalized)) return '#f97316';
   return '#94a3b8';
 };
@@ -400,6 +405,56 @@ function FlowNodeEditorPanel({
             <small className="flow-editor-help-text">Exibe o indicador de digitação para o cliente durante a espera.</small>
           </>
         )}
+
+        {kind === 'media' && (() => {
+          const mediaType = toText(draft.media_type || 'image') === 'document' ? 'document' : 'image';
+          const mediaUrl = toText(draft.media_url);
+          const urlInvalid = mediaUrl.trim().length > 0 && !mediaUrl.trim().startsWith('https://');
+
+          return (
+            <>
+              <div className="flow-editor-info-card"><strong>Tipo:</strong> Mídia WhatsApp <span>MEDIA</span></div>
+              <label className="flow-editor-field">
+                Tipo de mídia
+                <select
+                  value={mediaType}
+                  onChange={(event) => onDraftChange({ media_type: event.target.value, ...(event.target.value === 'image' ? { filename: '' } : {}) })}
+                >
+                  <option value="image">Imagem</option>
+                  <option value="document">Documento/PDF</option>
+                </select>
+              </label>
+              <label className="flow-editor-field">
+                URL do arquivo (HTTPS)
+                <input
+                  value={mediaUrl}
+                  onChange={(event) => onDraftChange({ media_url: event.target.value })}
+                  placeholder={mediaType === 'document' ? 'https://exemplo.com/contrato.pdf' : 'https://exemplo.com/imagem.jpg'}
+                />
+                {!mediaUrl.trim() ? <small className="flow-editor-error">URL obrigatória para enviar a mídia.</small> : null}
+                {urlInvalid ? <small className="flow-editor-error">A URL deve começar com https://</small> : null}
+              </label>
+              <label className="flow-editor-field">
+                Legenda/caption (opcional)
+                <textarea
+                  value={toText(draft.caption)}
+                  onChange={(event) => onDraftChange({ caption: event.target.value })}
+                  placeholder={mediaType === 'document' ? 'Segue o PDF' : 'Veja a imagem'}
+                />
+              </label>
+              {mediaType === 'document' && (
+                <label className="flow-editor-field">
+                  Nome do arquivo (opcional)
+                  <input
+                    value={toText(draft.filename)}
+                    onChange={(event) => onDraftChange({ filename: event.target.value })}
+                    placeholder="contrato.pdf"
+                  />
+                </label>
+              )}
+            </>
+          );
+        })()}
 
         {kind === 'action' && (() => {
           const selectedActionType = isActionType(toText(draft.action_type || draft.action)) ? (toText(draft.action_type || draft.action) as ActionType) : 'create_lead';
@@ -2033,6 +2088,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
         <span className="dash-nav-section">Comunicação</span>
         {([
           { kind: 'message' as FlowNodeKind, label: 'Mensagem', icon: MessageSquare },
+          { kind: 'media' as FlowNodeKind, label: 'Mídia', icon: FileImage },
         ]).map(({ kind, label, icon: Icon }) => (
           <button key={kind} type="button" className="dash-nav-item" onClick={() => addNode(kind)} title={label} style={{ border: 'none', background: 'none', cursor: 'pointer', width: '100%', textAlign: 'left' }}>
             <Icon size={18} strokeWidth={1.8} className="text-current" />
@@ -2323,6 +2379,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
             </div>
             {([
               { kind: 'message' as FlowNodeKind, label: 'Mensagem', icon: MessageSquare },
+              { kind: 'media' as FlowNodeKind, label: 'Mídia', icon: FileImage },
               { kind: 'choice' as FlowNodeKind, label: 'Escolha', icon: ListChecks },
               { kind: 'condition' as FlowNodeKind, label: 'Condição', icon: GitBranch },
               { kind: 'delay' as FlowNodeKind, label: 'Delay', icon: Clock },
