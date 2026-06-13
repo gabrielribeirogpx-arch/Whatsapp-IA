@@ -14,6 +14,7 @@ def _client(tmp_path, monkeypatch, max_bytes: int = 1024) -> TestClient:
     monkeypatch.setenv("MEDIA_UPLOAD_MAX_BYTES", str(max_bytes))
     app = FastAPI()
     app.add_middleware(TenantContextMiddleware)
+    app.include_router(flow_media.public_router)
     app.include_router(flow_media.media_router)
     return TestClient(app)
 
@@ -109,3 +110,31 @@ def test_media_upload_fallback_forces_https_on_railway_host(tmp_path, monkeypatc
     assert body["url"].startswith("https://whatsapp-ia-production-4699.up.railway.app/uploads/flow-media/")
     assert not body["url"].startswith("http://")
 
+
+def test_media_upload_pdf_is_publicly_served_with_pdf_headers(tmp_path, monkeypatch):
+    monkeypatch.setenv("PUBLIC_BACKEND_URL", "https://api.example.com")
+    client = _client(tmp_path, monkeypatch)
+    tenant_id = str(uuid.uuid4())
+    pdf_bytes = b"%PDF-1.4\n% test pdf bytes\n"
+
+    upload_response = client.post(
+        "/api/media/upload",
+        headers={"X-Tenant-ID": tenant_id},
+        files={"file": ("Edital.pdf", pdf_bytes, "application/pdf")},
+    )
+
+    assert upload_response.status_code == 200
+    public_path = upload_response.json()["url"].removeprefix("https://api.example.com")
+
+    head_response = client.head(public_path)
+    assert head_response.status_code == 200
+    assert head_response.headers["content-type"].startswith("application/pdf")
+    assert int(head_response.headers["content-length"]) > 0
+    assert 'filename="' in head_response.headers["content-disposition"]
+    assert "Edital.pdf" in head_response.headers["content-disposition"]
+
+    get_response = client.get(public_path)
+    assert get_response.status_code == 200
+    assert get_response.headers["content-type"].startswith("application/pdf")
+    assert get_response.content == pdf_bytes
+    assert get_response.content.startswith(b"%PDF")

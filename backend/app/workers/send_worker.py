@@ -844,6 +844,21 @@ def send_whatsapp_message(*, message_data: dict[str, Any]) -> None:
                 meta_response,
             )
         except MetaApiError as exc:
+            if is_media_message:
+                logger.error(
+                    "[MEDIA SEND META ERROR] tenant_id=%s provider_id=%s phone=%s job_id=%s flow_id=%s session_id=%s node_id=%s media_type=%s media_url=%s status_code=%s meta_payload=%s",
+                    tenant_id,
+                    provider_id,
+                    phone,
+                    job_id,
+                    flow_id,
+                    session_id,
+                    node_id,
+                    media_type,
+                    media_url,
+                    exc.status_code,
+                    _payload_summary(exc.payload),
+                )
             if interactive_type == "list":
                 logger.error(
                     "[CHOICE LIST SEND ERROR] session_id=%s node_id=%s flow_id=%s interactive_type=%s status_code=%s error=%s payload_summary=%s",
