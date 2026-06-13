@@ -74,7 +74,7 @@ type RealtimeEvent = {
   status?: string;
   last_seen?: string | null;
   is_typing?: boolean;
-  message?: { conversation_id: string } | string | null;
+  message?: (Partial<Message> & { conversation_id?: string; client_id?: string }) | string | null;
   event?: string;
   action?: string;
   event_id?: string;
@@ -229,6 +229,47 @@ function toChatMessage(message: Message): ChatMessage {
   };
 }
 
+function getMessageTime(message: ChatMessage) {
+  const parsed = message.createdAt
+    ? new Date(message.createdAt).getTime()
+    : Number(message.id);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function getMessageMergeKey(message: ChatMessage) {
+  if (message.id) return message.id;
+  return [
+    message.createdAt || "",
+    message.fromMe ? "out" : "in",
+    message.text,
+  ].join("|");
+}
+
+function mergeChatMessages(current: ChatMessage[], incoming: ChatMessage[]) {
+  if (incoming.length === 0) return current;
+
+  const byKey = new Map<string, ChatMessage>();
+  current.forEach((message) => byKey.set(getMessageMergeKey(message), message));
+
+  incoming.forEach((message) => {
+    const exactKey = getMessageMergeKey(message);
+    const optimisticKey = Array.from(byKey.entries()).find(
+      ([, existing]) =>
+        (existing.id.startsWith("opt-") ||
+          (!existing.createdAt && existing.fromMe)) &&
+        existing.fromMe === message.fromMe &&
+        existing.text === message.text,
+    )?.[0];
+
+    if (optimisticKey) byKey.delete(optimisticKey);
+    byKey.set(exactKey, { ...byKey.get(exactKey), ...message });
+  });
+
+  return Array.from(byKey.values()).sort(
+    (a, b) => getMessageTime(a) - getMessageTime(b),
+  );
+}
+
 export default function ChatShell() {
   console.log("[COMPONENT RENDER] ChatShell");
   const router = useRouter();
@@ -271,6 +312,8 @@ export default function ChatShell() {
   const lastTypingStartRef = useRef(0);
   const teamNotificationDedupeRef = useRef<Map<string, number>>(new Map());
   const taskCreatedDedupeRef = useRef<Map<string, number>>(new Map());
+  const selectedContactIdRef = useRef("");
+  const loadedMessagesContactIdRef = useRef("");
   const [crmRefreshKey, setCrmRefreshKey] = useState(0);
 
   const playHumanHandoffSound = useCallback(() => {
@@ -373,15 +416,17 @@ export default function ChatShell() {
         (item) => String(item.contact_id ?? item.id) === conversationId,
       );
 
-      if (!conversation) {
-        setMessages([]);
-        return;
-      }
+      if (!conversation) return;
 
+      const backendConversationId = String(conversation.id);
       const realMessages: Message[] = await getMessagesByConversation(
-        String(conversation.id),
+        backendConversationId,
       );
-      setMessages(realMessages.map(toChatMessage));
+
+      if (selectedContactIdRef.current !== conversationId) return;
+
+      const incomingMessages = realMessages.map(toChatMessage);
+      setMessages((current) => mergeChatMessages(current, incomingMessages));
     },
     [conversations],
   );
@@ -464,6 +509,32 @@ export default function ChatShell() {
       ),
     [conversations, selectedContactId],
   );
+
+  useEffect(() => {
+    selectedContactIdRef.current = selectedContactId;
+  }, [selectedContactId]);
+
+  useEffect(() => {
+    if (!selectedContactId) {
+      loadedMessagesContactIdRef.current = "";
+      setMessages([]);
+      return;
+    }
+
+    const hasConversation = conversations.some(
+      (item) => String(item.contact_id ?? item.id) === selectedContactId,
+    );
+    if (!hasConversation) return;
+
+    const isNewSelection =
+      loadedMessagesContactIdRef.current !== selectedContactId;
+    if (isNewSelection) {
+      loadedMessagesContactIdRef.current = selectedContactId;
+      setMessages([]);
+    }
+
+    fetchMessages(selectedContactId).catch(() => undefined);
+  }, [conversations, fetchMessages, selectedContactId]);
 
   useEffect(() => {
     if (!selectedConversation) {
@@ -718,6 +789,26 @@ export default function ChatShell() {
 
       showTaskCreatedNotification(payload);
       showTeamNotification(payload);
+
+      if (typeof payload.message === "object" && payload.message?.id) {
+        const messageConversationId = String(
+          payload.message.conversation_id || payload.conversation_id || "",
+        );
+        if (
+          selectedConversation &&
+          messageConversationId === String(selectedConversation.id) &&
+          payload.message.content &&
+          payload.message.role &&
+          payload.message.created_at
+        ) {
+          setMessages((current) =>
+            mergeChatMessages(current, [
+              toChatMessage(payload.message as Message),
+            ]),
+          );
+        }
+      }
+
       if (!selectedContactId) return;
       fetchMessages(selectedContactId).catch(() => undefined);
       getConversations()

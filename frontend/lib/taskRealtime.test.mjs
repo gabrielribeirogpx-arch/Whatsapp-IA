@@ -50,3 +50,19 @@ const mobileDetails = getTaskNotificationDetails(mobileAlertPayload);
 assert.equal(isTaskCreatedPayload(mobileAlertPayload), true);
 assert.equal(mobileDetails.priority, "normal");
 assert.equal(formatTaskHistoryDescription(mobileDetails).includes("Prioridade: Normal"), true);
+
+const wrappedPayload = {
+  event: "dashboard_event",
+  data: {
+    type: "TASK_CREATED",
+    conversation_id: "conv-2",
+    event_id: "evt-2",
+    task: { title: "Enviar contrato", due_at: "2026-06-13T15:30:00Z" },
+  },
+};
+const wrappedDetails = getTaskNotificationDetails(wrappedPayload);
+assert.equal(isTaskCreatedPayload(wrappedPayload), true);
+assert.equal(wrappedDetails.id, "evt-2");
+assert.equal(wrappedDetails.conversationId, "conv-2");
+assert.equal(wrappedDetails.title, "Enviar contrato");
+assert.notEqual(wrappedDetails.dueLabel, "Sem prazo");
