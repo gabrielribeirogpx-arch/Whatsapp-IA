@@ -90,6 +90,7 @@ Responsável por tarefas assíncronas e filas RQ.
 - Depende de Redis (`REDIS_URL`) quando filas estão habilitadas.
 - Deve usar a mesma versão Python efetiva do backend.
 - Deve receber as mesmas variáveis críticas de integração necessárias para processar tarefas com segurança.
+- Em investigações de mídia/filas, confirmar nos logs que o serviço worker ativo emitiu `[RQ WORKER] started commit_sha=...` com o mesmo commit selecionado para a API; commits divergentes indicam worker rodando build antigo.
 
 ### Frontend
 
@@ -182,6 +183,21 @@ Ações:
 2. Confirmar que o commit correto está selecionado.
 3. Confirmar que variáveis foram salvas no ambiente correto.
 4. Evitar mudanças simultâneas de runtime e dependências durante a investigação.
+
+### Divergência de commit entre API e workers
+
+Sintomas comuns:
+
+- A API registra `[FLOW QUEUE ENQUEUE]` ou `[MEDIA JOB ENQUEUED]`, mas o worker não registra `[SEND_WORKER ENTRY]` para o mesmo `job_id`.
+- O worker registra `[SEND_WORKER ENTRY]`, mas não contém logs esperados de mídia, como `[MEDIA SEND START]`, `[VIDEO SEND PREFLIGHT RESULT]`, `[META MEDIA REQUEST]` ou `[META MEDIA RESPONSE]`.
+- O commit exibido em `api_commit=...` no enqueue diverge do `commit_sha=...` emitido por `[RQ WORKER] started ...`.
+
+Ações:
+
+1. Confirmar o commit da API nos logs de enqueue (`api_commit=...`) e o commit do RQ Worker no startup (`[RQ WORKER] started commit_sha=...`).
+2. Se os commits divergirem, redeployar explicitamente todos os serviços Python que consomem o mesmo código: API, RQ Worker e Delay Worker.
+3. Após redeploy, confirmar que API, RQ Worker e Delay Worker apontam para o mesmo commit do Railway/GitHub.
+4. Não considerar o envio de mídia resolvido apenas pelo enqueue: para vídeo, validar uma rota completa com `[MEDIA SEND START]` seguido de `[META MEDIA RESPONSE]` ou `[META MEDIA EXCEPTION]`.
 
 ### Imports case-sensitive no Linux
 

@@ -495,6 +495,14 @@ def send_whatsapp_message(*, message_data: dict[str, Any]) -> None:
     correlation_id = str(message_data.get("correlation_id") or message_data.get("message_id") or "n/a")
     current_job = get_current_job()
     job_id = str(message_data.get("job_id") or getattr(current_job, "id", None) or "n/a")
+    logger.info(
+        "[SEND_WORKER ENTRY] job_id=%s message_type=%s media_type=%s worker_commit=%s queue_name=%s",
+        job_id,
+        message_type_hint or "n/a",
+        media_type or "n/a",
+        commit,
+        getattr(current_job, "origin", None),
+    )
     sequence_number_raw = message_data.get("sequence_number")
     flow_id = message_data.get("flow_id")
     flow_version_id = message_data.get("flow_version_id")
@@ -512,6 +520,15 @@ def send_whatsapp_message(*, message_data: dict[str, Any]) -> None:
     message_type = "media" if is_media_message else ("interactive" if interactive_type or (isinstance(buttons, list) and buttons) else "text")
     media_status_code, media_content_type, media_content_length = (0, "", 0)
     if is_media_message:
+        logger.info(
+            "[MEDIA SEND START] job_id=%s media_type=%s media_url=%s caption=%s phone=%s tenant_id=%s",
+            job_id,
+            media_type,
+            media_url,
+            media_caption,
+            phone,
+            tenant_id,
+        )
         media_status_code, media_content_type, media_content_length = _media_url_headers(media_url) if media_url else (0, "", 0)
         logger.info(
             "[MEDIA SEND PREFLIGHT] tenant_id=%s provider_id=%s phone=%s job_id=%s flow_id=%s session_id=%s node_id=%s media_type=%s media_url=%s status_code=%s content_type=%s content_length=%s",
@@ -850,7 +867,8 @@ def send_whatsapp_message(*, message_data: dict[str, Any]) -> None:
         try:
             if is_media_message:
                 logger.info(
-                    "[MEDIA SEND START] media_type=%s media_url=%s caption=%s phone=%s tenant_id=%s",
+                    "[MEDIA SEND META CALL] job_id=%s media_type=%s media_url=%s caption=%s phone=%s tenant_id=%s",
+                    job_id,
                     media_type,
                     media_url,
                     media_caption,

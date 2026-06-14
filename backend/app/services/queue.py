@@ -313,6 +313,7 @@ def enqueue_send_message(message_data: dict[str, Any]) -> str | None:
         on_failure=_on_send_failure,
     )
 
+    api_commit = _runtime_commit()
     logger.info(
         "[FLOW QUEUE ENQUEUE] job_id=%s flow_id=%s session_id=%s node_id=%s sequence_number=%s message_text=%s api_commit=%s",
         job.id,
@@ -321,8 +322,17 @@ def enqueue_send_message(message_data: dict[str, Any]) -> str | None:
         payload.get("node_id"),
         payload.get("sequence_number"),
         content,
-        _runtime_commit(),
+        api_commit,
     )
+    if payload.get("message_type") == "media":
+        logger.info(
+            "[MEDIA JOB ENQUEUED] job_id=%s queue=%s media_type=%s node_id=%s api_commit=%s",
+            job.id,
+            queue.name,
+            payload.get("media_type"),
+            payload.get("node_id"),
+            api_commit,
+        )
 
     if payload.get("interactive_type") == "list":
         logger.info(
