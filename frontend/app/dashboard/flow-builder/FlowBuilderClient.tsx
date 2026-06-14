@@ -297,7 +297,68 @@ const getMiniMapNodeColor = (type: string) => {
 };
 
 
-const FLOW_TEMPLATE_VARIABLES = ['{{contact.name}}', '{{contact.phone}}', '{{last_message}}', '{{lead.name}}', '{{today}}'];
+const FLOW_TEMPLATE_VARIABLES = ['{{contact.name}}', '{{contact.phone}}', '{{last_message}}', '{{lead.name}}', '{{today}}', '{{now}}'];
+
+
+const QUICK_VARIABLES = [
+  { icon: '👤', label: 'Nome', value: '{{contact.name}}' },
+  { icon: '📞', label: 'Telefone', value: '{{contact.phone}}' },
+  { icon: '💬', label: 'Última mensagem', value: '{{last_message}}' },
+  { icon: '🏷️', label: 'Lead', value: '{{lead.name}}' },
+  { icon: '📅', label: 'Hoje', value: '{{today}}' },
+  { icon: '⏰', label: 'Agora', value: '{{now}}' },
+] as const;
+
+type VariableInputElement = HTMLInputElement | HTMLTextAreaElement;
+
+function insertVariableAtCursor(
+  targetRef: React.RefObject<VariableInputElement>,
+  currentValue: string,
+  variable: string,
+  onChange: (nextValue: string) => void,
+) {
+  const target = targetRef.current;
+  const selectionStart = target?.selectionStart ?? currentValue.length;
+  const selectionEnd = target?.selectionEnd ?? selectionStart;
+  const nextValue = `${currentValue.slice(0, selectionStart)}${variable}${currentValue.slice(selectionEnd)}`;
+  const nextCursorPosition = selectionStart + variable.length;
+
+  onChange(nextValue);
+
+  requestAnimationFrame(() => {
+    target?.focus();
+    target?.setSelectionRange(nextCursorPosition, nextCursorPosition);
+  });
+}
+
+function VariableChips({
+  targetRef,
+  value,
+  onChange,
+}: {
+  targetRef: React.RefObject<VariableInputElement>;
+  value: string;
+  onChange: (nextValue: string) => void;
+}) {
+  return (
+    <div className="flow-variable-chips" aria-label="Variáveis rápidas">
+      <span>Variáveis rápidas</span>
+      <div className="flow-variable-chip-list">
+        {QUICK_VARIABLES.map((variable) => (
+          <button
+            key={variable.value}
+            type="button"
+            title={variable.value}
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={() => insertVariableAtCursor(targetRef, value, variable.value, onChange)}
+          >
+            {variable.icon} {variable.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 function FlowVariablesHelp() {
   return (
@@ -330,6 +391,20 @@ function FlowNodeEditorPanel({
   isUploading: boolean;
   uploadError: string | null;
 }) {
+  const messageContentRef = useRef<HTMLTextAreaElement>(null);
+  const ctaTextRef = useRef<HTMLTextAreaElement>(null);
+  const ctaButtonTextRef = useRef<HTMLInputElement>(null);
+  const ctaUrlRef = useRef<HTMLInputElement>(null);
+  const mediaUrlRef = useRef<HTMLInputElement>(null);
+  const mediaCaptionRef = useRef<HTMLTextAreaElement>(null);
+  const mediaFilenameRef = useRef<HTMLInputElement>(null);
+  const notificationTitleRef = useRef<HTMLInputElement>(null);
+  const notificationMessageRef = useRef<HTMLTextAreaElement>(null);
+  const taskTitleRef = useRef<HTMLInputElement>(null);
+  const taskDescriptionRef = useRef<HTMLTextAreaElement>(null);
+  const taskAssigneeRef = useRef<HTMLInputElement>(null);
+  const transferReasonRef = useRef<HTMLInputElement>(null);
+
   if (!node) return null;
   const kind = getBuilderNodeKind(node);
   const title = getBuilderNodeTitle(node);
@@ -362,7 +437,8 @@ function FlowNodeEditorPanel({
         {kind === 'message' && (
           <label className="flow-editor-field">
             Mensagem
-            <textarea value={toText(draft.content)} onChange={(event) => onDraftChange({ content: event.target.value })} placeholder="Digite a mensagem..." />
+            <textarea ref={messageContentRef} value={toText(draft.content)} onChange={(event) => onDraftChange({ content: event.target.value })} placeholder="Digite a mensagem..." />
+            <VariableChips targetRef={messageContentRef} value={toText(draft.content)} onChange={(next) => onDraftChange({ content: next })} />
           </label>
         )}
 
@@ -407,17 +483,20 @@ function FlowNodeEditorPanel({
               <div className="flow-editor-info-card"><strong>Tipo:</strong> Botão com link externo <span>CTA URL</span></div>
               <label className="flow-editor-field">
                 Texto da mensagem
-                <textarea value={toText(draft.content || draft.text || draft.message)} onChange={(event) => onDraftChange({ content: event.target.value, text: event.target.value, message: event.target.value })} placeholder="Sua fatura está disponível." required />
+                <textarea ref={ctaTextRef} value={toText(draft.content || draft.text || draft.message)} onChange={(event) => onDraftChange({ content: event.target.value, text: event.target.value, message: event.target.value })} placeholder="Sua fatura está disponível." required />
+                <VariableChips targetRef={ctaTextRef} value={toText(draft.content || draft.text || draft.message)} onChange={(next) => onDraftChange({ content: next, text: next, message: next })} />
               </label>
               <label className="flow-editor-field">
                 Texto do botão
-                <input value={buttonText} maxLength={20} onChange={(event) => onDraftChange({ button_text: event.target.value })} placeholder="Acessar Fatura" required />
+                <input ref={ctaButtonTextRef} value={buttonText} maxLength={20} onChange={(event) => onDraftChange({ button_text: event.target.value })} placeholder="Acessar Fatura" required />
+                <VariableChips targetRef={ctaButtonTextRef} value={buttonText} onChange={(next) => onDraftChange({ button_text: next })} />
                 <small>{buttonText.length}/20 caracteres</small>
                 {buttonInvalid ? <small className="flow-editor-error">O botão deve ter no máximo 20 caracteres.</small> : null}
               </label>
               <label className="flow-editor-field">
                 URL
-                <input value={url} onChange={(event) => onDraftChange({ url: event.target.value })} placeholder="https://exemplo.com/fatura" required />
+                <input ref={ctaUrlRef} value={url} onChange={(event) => onDraftChange({ url: event.target.value })} placeholder="https://exemplo.com/fatura" required />
+                <VariableChips targetRef={ctaUrlRef} value={url} onChange={(next) => onDraftChange({ url: next })} />
                 {urlInvalid ? <small className="flow-editor-error">A URL precisa começar com https:// ou conter variável</small> : null}
               </label>
             </>
@@ -511,10 +590,12 @@ function FlowNodeEditorPanel({
                 <label className="flow-editor-field">
                   URL do arquivo (HTTPS)
                   <input
+                    ref={mediaUrlRef}
                     value={mediaUrl}
                     onChange={(event) => onDraftChange({ media_url: event.target.value })}
                     placeholder={mediaType === 'document' ? 'https://exemplo.com/contrato.pdf' : mediaType === 'audio' ? 'https://exemplo.com/audio.mp3' : mediaType === 'video' ? 'https://exemplo.com/video.mp4' : 'https://exemplo.com/imagem.jpg'}
                   />
+                  <VariableChips targetRef={mediaUrlRef} value={mediaUrl} onChange={(next) => onDraftChange({ media_url: next })} />
                   {!mediaUrl.trim() ? <small className="flow-editor-error">URL obrigatória para enviar a mídia.</small> : null}
                   {urlInvalid ? <small className="flow-editor-error">A URL deve começar com https:// ou conter variável</small> : null}
                 </label>
@@ -535,20 +616,24 @@ function FlowNodeEditorPanel({
                 <label className="flow-editor-field">
                   Legenda/caption (opcional)
                   <textarea
+                    ref={mediaCaptionRef}
                     value={toText(draft.caption)}
                     onChange={(event) => onDraftChange({ caption: event.target.value })}
                     placeholder={mediaType === 'document' ? 'Segue o PDF' : mediaType === 'video' ? 'Veja o vídeo' : 'Veja a imagem'}
                   />
+                  <VariableChips targetRef={mediaCaptionRef} value={toText(draft.caption)} onChange={(next) => onDraftChange({ caption: next })} />
                 </label>
               )}
               {mediaType === 'document' && (
                 <label className="flow-editor-field">
                   Nome do arquivo (opcional)
                   <input
+                    ref={mediaFilenameRef}
                     value={toText(draft.filename)}
                     onChange={(event) => onDraftChange({ filename: event.target.value })}
                     placeholder="contrato.pdf"
                   />
+                  <VariableChips targetRef={mediaFilenameRef} value={toText(draft.filename)} onChange={(next) => onDraftChange({ filename: next })} />
                 </label>
               )}
             </>
@@ -603,18 +688,22 @@ function FlowNodeEditorPanel({
                   <label className="flow-editor-field">
                     Título (opcional)
                     <input
+                      ref={notificationTitleRef}
                       value={toText(params.notification_title || draft.notification_title)}
                       onChange={(event) => updateActionParam('notification_title', event.target.value)}
                       placeholder="Ex.: Financeiro"
                     />
+                    <VariableChips targetRef={notificationTitleRef} value={toText(params.notification_title || draft.notification_title)} onChange={(next) => updateActionParam('notification_title', next)} />
                   </label>
                   <label className="flow-editor-field">
                     Mensagem (opcional)
                     <textarea
+                      ref={notificationMessageRef}
                       value={toText(params.notification_message || draft.notification_message)}
                       onChange={(event) => updateActionParam('notification_message', event.target.value)}
                       placeholder="Ex.: Cliente aguardando pagamento."
                     />
+                    <VariableChips targetRef={notificationMessageRef} value={toText(params.notification_message || draft.notification_message)} onChange={(next) => updateActionParam('notification_message', next)} />
                   </label>
                   <label className="flow-editor-field">
                     Prioridade
@@ -636,18 +725,22 @@ function FlowNodeEditorPanel({
                   <label className="flow-editor-field">
                     Título
                     <input
+                      ref={taskTitleRef}
                       value={toText(params.task_title || draft.task_title)}
                       onChange={(event) => updateActionParam('task_title', event.target.value)}
                       placeholder="Ex.: Retornar contato"
                     />
+                    <VariableChips targetRef={taskTitleRef} value={toText(params.task_title || draft.task_title)} onChange={(next) => updateActionParam('task_title', next)} />
                   </label>
                   <label className="flow-editor-field">
                     Descrição
                     <textarea
+                      ref={taskDescriptionRef}
                       value={toText(params.task_description || draft.task_description)}
                       onChange={(event) => updateActionParam('task_description', event.target.value)}
                       placeholder="Detalhes para o responsável"
                     />
+                    <VariableChips targetRef={taskDescriptionRef} value={toText(params.task_description || draft.task_description)} onChange={(next) => updateActionParam('task_description', next)} />
                   </label>
                   <label className="flow-editor-field">
                     Prioridade
@@ -663,10 +756,12 @@ function FlowNodeEditorPanel({
                   <label className="flow-editor-field">
                     Responsável
                     <input
+                      ref={taskAssigneeRef}
                       value={toText(params.task_assignee || draft.task_assignee)}
                       onChange={(event) => updateActionParam('task_assignee', event.target.value)}
                       placeholder="Nome, equipe ou e-mail"
                     />
+                    <VariableChips targetRef={taskAssigneeRef} value={toText(params.task_assignee || draft.task_assignee)} onChange={(next) => updateActionParam('task_assignee', next)} />
                   </label>
                   <label className="flow-editor-field">
                     Prazo em minutos
@@ -684,7 +779,8 @@ function FlowNodeEditorPanel({
               {selectedActionType === 'transfer_human' && (
                 <label className="flow-editor-field">
                   Motivo da transferência
-                  <input value={toText(params.reason || draft.reason)} onChange={(event) => updateActionParam('reason', event.target.value)} placeholder="Ex.: solicitou humano" />
+                  <input ref={transferReasonRef} value={toText(params.reason || draft.reason)} onChange={(event) => updateActionParam('reason', event.target.value)} placeholder="Ex.: solicitou humano" />
+                  <VariableChips targetRef={transferReasonRef} value={toText(params.reason || draft.reason)} onChange={(next) => updateActionParam('reason', next)} />
                 </label>
               )}
 
