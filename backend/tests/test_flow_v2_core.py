@@ -1827,3 +1827,47 @@ def test_create_task_defaults_priority_and_due_minutes(monkeypatch) -> None:
     assert task.priority == "normal"
     assert task.due_at is not None
     assert 59 <= (task.due_at - task.created_at).total_seconds() / 60 <= 61
+
+
+def test_dynamic_template_renders_message_contact_name() -> None:
+    executor, snapshot, _event_store, session, db = _executor({"schema_version": 1, "start_node_id": "start", "nodes": [{"id": "start", "type": "message", "data": {"content": "Olá {{ contact.name }}"}}], "edges": []})
+    contact_id = uuid.uuid4()
+    session.contact_id = contact_id
+    db.contact = SimpleNamespace(id=contact_id, tenant_id=snapshot.tenant_id, name="Gabriel", phone="+5511999999999")
+
+    output = executor.handle_input(db, RuntimeInput(tenant_id=snapshot.tenant_id, flow_version_id=snapshot.flow_version_id, external_user_id="whatsapp:+5511999999999", contact_id=contact_id, message_text="oi"))
+
+    assert output.actions[0].as_effect()["text"] == "Olá Gabriel"
+
+
+def test_dynamic_template_renders_cta_url_and_unknown_as_empty() -> None:
+    executor, snapshot, _event_store, session, db = _executor({"schema_version": 1, "start_node_id": "start", "nodes": [{"id": "start", "type": "cta_url", "data": {"text": "Olá {{missing.value}}", "button_text": "Abrir", "url": "https://example.com/{{contact.phone}}"}}], "edges": []})
+    contact_id = uuid.uuid4()
+    session.contact_id = contact_id
+    db.contact = SimpleNamespace(id=contact_id, tenant_id=snapshot.tenant_id, name="Gabriel", phone="5511999999999")
+
+    output = executor.handle_input(db, RuntimeInput(tenant_id=snapshot.tenant_id, flow_version_id=snapshot.flow_version_id, external_user_id="whatsapp:+5511999999999", contact_id=contact_id, message_text="oi"))
+    effect = output.actions[0].as_effect()
+
+    assert effect["text"] == "Olá "
+    assert effect["url"] == "https://example.com/5511999999999"
+
+
+def test_dynamic_template_does_not_eval_code() -> None:
+    from app.flow_v2.template_renderer import FlowRenderContext, render_template
+
+    rendered = render_template("{{__import__.os}} {{ contact.name.__class__ }}", FlowRenderContext(tenant_id="t", contact={"name": "Gabriel"}))
+
+    assert rendered == " "
+
+
+def test_publish_accepts_templated_media_and_cta_urls() -> None:
+    published = FlowV2Publisher().publish(
+        nodes=[
+            {"id": "media", "type": "media", "data": {"isStart": True, "media_type": "image", "media_url": "{{contact.media_url}}", "caption": "Olá {{contact.name}}"}},
+            {"id": "cta", "type": "cta_url", "data": {"text": "Acesse", "button_text": "Abrir", "url": "{{contact.link}}"}},
+        ],
+        edges=[{"id": "e1", "source": "media", "target": "cta"}],
+    )
+
+    assert published.validation.is_valid
