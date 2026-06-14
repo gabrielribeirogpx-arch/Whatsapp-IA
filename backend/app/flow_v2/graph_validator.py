@@ -23,7 +23,7 @@ class GraphValidationResult:
 class FlowV2GraphValidator:
     """Validates Flow Publisher V2 graphs before immutable snapshot creation."""
 
-    SUPPORTED_NODE_TYPES = {"message", "choice", "condition", "delay", "action", "media", "start"}
+    SUPPORTED_NODE_TYPES = {"message", "choice", "condition", "delay", "action", "media", "cta_url", "start"}
     SUPPORTED_CONDITION_OPERATORS = {"==", "eq", "equals"}
     SUPPORTED_BUILDER_MATCH_TYPES = {"contains", "equals", "eq", "=="}
 
@@ -195,6 +195,18 @@ class FlowV2GraphValidator:
                 errors.append(f"FLOW_V2_MEDIA_TYPE_INVALID:{node_id}")
             if not media_url or not media_url.startswith("https://"):
                 errors.append(f"FLOW_V2_MEDIA_URL_INVALID:{node_id}")
+        elif node_type == "cta_url":
+            text = str(node.get("text") or node.get("content") or data.get("text") or data.get("content") or data.get("message") or "").strip()
+            button_text = str(node.get("button_text") or data.get("button_text") or data.get("buttonText") or data.get("button") or "").strip()
+            url = str(node.get("url") or data.get("url") or data.get("href") or "").strip()
+            if not text:
+                errors.append(f"FLOW_V2_CTA_URL_TEXT_REQUIRED:{node_id}")
+            if not button_text:
+                errors.append(f"FLOW_V2_CTA_URL_BUTTON_TEXT_REQUIRED:{node_id}")
+            elif len(button_text) > 20:
+                errors.append(f"FLOW_V2_CTA_URL_BUTTON_TEXT_TOO_LONG:{node_id}")
+            if not url.startswith("https://"):
+                errors.append(f"FLOW_V2_CTA_URL_HTTPS_REQUIRED:{node_id}")
         elif node_type == "condition":
             conditions = node.get("conditions") or data.get("conditions")
             if self._has_valid_builder_condition(data):

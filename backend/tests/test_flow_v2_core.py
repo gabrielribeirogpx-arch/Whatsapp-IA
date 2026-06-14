@@ -7,7 +7,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from app.flow_v2.actions import SendChoiceButtonsAction
+from app.flow_v2.actions import SendChoiceButtonsAction, SendCtaUrlAction
 from app.flow_v2.node_executors import calculate_typing_delay_seconds
 from app.services.conversation_mode_service import set_conversation_mode
 from app.flow_v2.contracts import FlowV2EventType, FlowV2SessionStatus, RuntimeInput
@@ -481,6 +481,67 @@ def test_waiting_choice_with_button_reply_id_maps_row_id_and_transitions_to_targ
     assert len(selected.actions) == 1
     assert not any(isinstance(action, SendChoiceButtonsAction) for action in selected.actions)
     assert any(event["payload"] == {"node_id": "choice", "row_id": "quero_planos"} for event in event_store.events)
+
+
+def test_terminal_cta_url_node_completes_and_emits_send_cta_url_action() -> None:
+    raw_snapshot = {
+        "schema_version": 1,
+        "start_node_id": "start",
+        "nodes": [
+            {
+                "id": "start",
+                "type": "cta_url",
+                "data": {
+                    "content": "Veja nossos planos",
+                    "button_text": "Abrir link",
+                    "url": "https://example.com/planos",
+                },
+            },
+        ],
+        "edges": [],
+    }
+    executor, snapshot, event_store, session, db = _executor(raw_snapshot)
+
+    output = executor.handle_input(db, _input_with_id(snapshot, "wamid.cta.terminal"))
+
+    assert output.status == FlowV2SessionStatus.COMPLETED
+    assert output.current_node_id is None
+    assert len(output.actions) == 1
+    action = output.actions[0]
+    assert isinstance(action, SendCtaUrlAction)
+    assert action.action_type == "send_cta_url"
+    assert action.metadata["node_type"] == "cta_url"
+    assert action.as_effect()["interactive_type"] == "cta_url"
+    assert "MESSAGE_SENT" in _event_types(event_store)
+
+
+def test_non_terminal_cta_url_node_continues_to_next_node() -> None:
+    raw_snapshot = {
+        "schema_version": 1,
+        "start_node_id": "start",
+        "nodes": [
+            {
+                "id": "start",
+                "type": "cta_url",
+                "text": "Veja nossos planos",
+                "button_text": "Abrir link",
+                "url": "https://example.com/planos",
+            },
+            {"id": "next", "type": "message", "content": "Depois do link"},
+        ],
+        "edges": [{"id": "e1", "source": "start", "target": "next"}],
+    }
+    executor, snapshot, event_store, session, db = _executor(raw_snapshot)
+
+    output = executor.handle_input(db, _input_with_id(snapshot, "wamid.cta.next"))
+
+    assert output.status == FlowV2SessionStatus.COMPLETED
+    assert output.current_node_id is None
+    assert len(output.actions) == 2
+    assert isinstance(output.actions[0], SendCtaUrlAction)
+    assert output.actions[1].as_effect()["type"] == "send_message"
+    assert output.actions[1].as_effect()["text"] == "Depois do link"
+    assert any(event["event_type"] == "TRANSITION_SELECTED" and event["payload"] == {"target_node_id": "next"} for event in event_store.events)
 
 def test_delay_scheduling_creates_scheduled_job_and_does_not_execute_next_node() -> None:
     raw_snapshot = {
