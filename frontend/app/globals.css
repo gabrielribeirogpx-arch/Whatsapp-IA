@@ -4887,3 +4887,38 @@ input {
     width: auto;
   }
 }
+
+.flow-variable-chips {
+  display: grid;
+  gap: 6px;
+}
+
+.flow-variable-chips > span {
+  color: #64748b;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.flow-variable-chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.flow-variable-chip-list button {
+  border: 1px solid #dbe2ea;
+  border-radius: 999px;
+  background: #fff;
+  color: #334155;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 800;
+  padding: 5px 8px;
+}
+
+.flow-variable-chip-list button:hover,
+.flow-variable-chip-list button:focus-visible {
+  border-color: #93c5fd;
+  background: #eff6ff;
+  color: #1d4ed8;
+}
