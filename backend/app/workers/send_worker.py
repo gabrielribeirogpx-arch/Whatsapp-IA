@@ -6,6 +6,7 @@ import logging
 import os
 import subprocess
 import time
+import traceback
 import uuid
 from functools import lru_cache
 from typing import Any
@@ -64,19 +65,20 @@ def _media_url_headers(media_url: str) -> tuple[str, int, int]:
 VIDEO_META_MAX_BYTES = int(os.getenv("FLOW_MEDIA_VIDEO_META_MAX_BYTES", str(16 * 1024 * 1024)))
 
 
-def _validate_video_media_preflight(*, media_url: str, status_code: int, content_type: str, content_length: int) -> None:
+def _validate_video_media_preflight(*, media_url: str, status_code: int, content_type: str, content_length: int) -> tuple[bool, str | None]:
     if status_code not in {200, 206}:
         logger.error("[MEDIA SEND PREFLIGHT BLOCKED] media_type=video reason=public_url_unreachable media_url=%s status_code=%s", media_url, status_code)
-        raise RuntimeError("URL pública do vídeo não está acessível para envio à Meta.")
+        return False, "public_url_unreachable"
     if content_type not in {"video/mp4", "video/3gpp"}:
         logger.error("[MEDIA SEND PREFLIGHT BLOCKED] media_type=video reason=invalid_content_type media_url=%s content_type=%s", media_url, content_type)
-        raise RuntimeError("Este vídeo não é compatível com WhatsApp. Use MP4 H.264 com áudio AAC.")
+        return False, "invalid_content_type"
     if content_length <= 0:
         logger.error("[MEDIA SEND PREFLIGHT BLOCKED] media_type=video reason=invalid_content_length media_url=%s content_length=%s", media_url, content_length)
-        raise RuntimeError("Content-Length do vídeo inválido para envio à Meta.")
+        return False, "invalid_content_length"
     if content_length > VIDEO_META_MAX_BYTES:
         logger.error("[MEDIA SEND PREFLIGHT BLOCKED] media_type=video reason=size_limit media_url=%s content_length=%s limit=%s", media_url, content_length, VIDEO_META_MAX_BYTES)
-        raise RuntimeError(f"Vídeo excede o limite de {VIDEO_META_MAX_BYTES} bytes.")
+        return False, "size_limit"
+    return True, None
 
 
 SEND_LOCK_TTL_SECONDS = int(os.getenv("SEND_LOCK_TTL_SECONDS", "120"))
@@ -527,12 +529,22 @@ def send_whatsapp_message(*, message_data: dict[str, Any]) -> None:
             media_content_length,
         )
         if media_type == "video":
-            _validate_video_media_preflight(
+            preflight_ok, preflight_error = _validate_video_media_preflight(
                 media_url=media_url,
                 status_code=media_status_code,
                 content_type=media_content_type,
                 content_length=media_content_length,
             )
+            logger.info(
+                "[VIDEO SEND PREFLIGHT RESULT] ok=%s status=%s content_type=%s content_length=%s error=%s",
+                preflight_ok,
+                media_status_code,
+                media_content_type,
+                media_content_length,
+                preflight_error,
+            )
+            if not preflight_ok:
+                raise RuntimeError(f"Video preflight blocked before Meta POST: {preflight_error}")
     logger.info(
         "[V2 SEND WORKER] tenant_id=%s provider_id=%s session_id=%s conversation_id=%s contact_id=%s flow_id=%s phone=%s metadata_keys=%s payload_json=%s",
         tenant_id or "",
@@ -837,6 +849,14 @@ def send_whatsapp_message(*, message_data: dict[str, Any]) -> None:
         meta_response: dict[str, Any] | None = None
         try:
             if is_media_message:
+                logger.info(
+                    "[MEDIA SEND START] media_type=%s media_url=%s caption=%s phone=%s tenant_id=%s",
+                    media_type,
+                    media_url,
+                    media_caption,
+                    phone,
+                    tenant_id,
+                )
                 meta_response = send_media_message_via_meta(to=phone, media_type=media_type, media_url=media_url, caption=media_caption, filename=media_filename, token=resolved_token, phone_number_id=resolved_phone_number_id, context={**context, "message_type": "media", "media_type": media_type, "media_url": media_url, "media_content_type": media_content_type, "media_content_length": media_content_length, "media_status_code": media_status_code})
             elif interactive_type == "list":
                 logger.info(
@@ -920,8 +940,10 @@ def send_whatsapp_message(*, message_data: dict[str, Any]) -> None:
                     media_url,
                     json.dumps(meta_response, default=str, ensure_ascii=False, sort_keys=True),
                 )
+                raise RuntimeError("Meta returned failed status for media send")
         except MetaApiError as exc:
             if is_media_message:
+                logger.error("[META MEDIA EXCEPTION] exception=%s traceback=%s", exc, traceback.format_exc())
                 logger.error(
                     "[MEDIA SEND META ERROR] tenant_id=%s provider_id=%s phone=%s job_id=%s flow_id=%s session_id=%s node_id=%s media_type=%s media_url=%s status_code=%s meta_payload=%s",
                     tenant_id,
@@ -952,6 +974,10 @@ def send_whatsapp_message(*, message_data: dict[str, Any]) -> None:
                 with SessionLocal() as db:
                     mark_provider_auth_error(db, provider_id=provider_id, error_message=str(exc))
             logger.error("[WORKER EXIT FAILURE] job_id=%s reason=meta_api_error status_code=%s error=%s", job_id, exc.status_code, exc)
+            raise
+        except Exception as exc:
+            if is_media_message:
+                logger.error("[META MEDIA EXCEPTION] exception=%s traceback=%s", exc, traceback.format_exc())
             raise
 
         logger.info(
