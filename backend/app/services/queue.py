@@ -202,6 +202,8 @@ def enqueue_send_message(message_data: dict[str, Any]) -> str | None:
         "media_url",
         "caption",
         "filename",
+        "button_text",
+        "url",
     )
     metadata = message_data.get("metadata") if isinstance(message_data.get("metadata"), dict) else None
     payload = {
@@ -215,7 +217,7 @@ def enqueue_send_message(message_data: dict[str, Any]) -> str | None:
         "correlation_id": correlation_id,
         "conversation_id": str(message_data.get("conversation_id") or "") or None,
         "metadata": metadata,
-        "message_type": "media" if is_media_message else None,
+        "message_type": "media" if is_media_message else ("interactive" if interactive_type else None),
         "media_type": media_type or None,
         "media_url": media_url or None,
         "caption": str(message_data.get("caption") or "") or None,
