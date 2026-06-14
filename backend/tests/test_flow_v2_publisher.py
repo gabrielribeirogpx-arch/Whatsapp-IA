@@ -393,3 +393,47 @@ def test_media_node_requires_https_url() -> None:
     result = FlowV2GraphValidator().validate(nodes=nodes, edges=[])
     assert result.status == GraphValidationStatus.INVALID
     assert "FLOW_V2_MEDIA_URL_INVALID:start" in result.errors
+
+
+def test_cta_url_node_publishes_without_unsupported_type_error() -> None:
+    result = FlowV2Publisher().publish(
+        nodes=[
+            {"id": "start", "type": "message", "content": "Olá"},
+            {
+                "id": "cta",
+                "type": "cta_url",
+                "data": {
+                    "content": "Veja nossos planos",
+                    "button_text": "Abrir link",
+                    "url": "https://example.com/planos",
+                },
+            },
+        ],
+        edges=[{"id": "e1", "source": "start", "target": "cta"}],
+    )
+
+    assert result.validation.status == GraphValidationStatus.VALID
+    assert not any("FLOW_V2_NODE_TYPE_UNSUPPORTED" in error for error in result.validation.errors)
+    cta_node = next(node for node in result.snapshot["nodes"] if node["id"] == "cta")
+    assert cta_node["type"] == "cta_url"
+
+
+def test_cta_url_without_https_fails_with_specific_error() -> None:
+    result = FlowV2GraphValidator().validate(
+        nodes=[
+            {"id": "start", "type": "message", "content": "Olá"},
+            {
+                "id": "cta",
+                "type": "cta_url",
+                "data": {
+                    "content": "Veja nossos planos",
+                    "button_text": "Abrir link",
+                    "url": "http://example.com/planos",
+                },
+            },
+        ],
+        edges=[{"id": "e1", "source": "start", "target": "cta"}],
+    )
+
+    assert result.status == GraphValidationStatus.INVALID
+    assert "FLOW_V2_CTA_URL_HTTPS_REQUIRED:cta" in result.errors

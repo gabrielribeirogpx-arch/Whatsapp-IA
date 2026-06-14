@@ -296,11 +296,16 @@ export type FlowNodePayload = {
     sections?: unknown[];
     condition?: string;
     action?: string;
-    action_type?: 'create_lead' | 'add_tag' | 'notify_team' | 'transfer_human' | 'set_conversation_mode' | 'create_task';
+    action_type?: 'create_lead' | 'add_tag' | 'notify_team' | 'transfer_human' | 'set_conversation_mode' | 'create_task' | 'send_cta_url';
     mode?: 'human' | 'bot' | 'ai';
     params?: Record<string, unknown>;
     tag?: string;
     message?: string;
+    text?: string;
+    button_text?: string;
+    buttonText?: string;
+    url?: string;
+    href?: string;
     reason?: string;
     lead_name?: string;
     notification_title?: string;
