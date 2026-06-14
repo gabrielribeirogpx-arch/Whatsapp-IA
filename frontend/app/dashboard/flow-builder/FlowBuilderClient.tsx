@@ -296,6 +296,23 @@ const getMiniMapNodeColor = (type: string) => {
   return '#94a3b8';
 };
 
+
+const FLOW_TEMPLATE_VARIABLES = ['{{contact.name}}', '{{contact.phone}}', '{{last_message}}', '{{lead.name}}', '{{today}}'];
+
+function FlowVariablesHelp() {
+  return (
+    <details className="flow-editor-info-card flow-editor-variables-help">
+      <summary>Variáveis</summary>
+      <div className="flow-editor-variable-list">
+        {FLOW_TEMPLATE_VARIABLES.map((variable) => (
+          <code key={variable}>{variable}</code>
+        ))}
+      </div>
+      <small>Variáveis serão preenchidas quando o fluxo rodar.</small>
+    </details>
+  );
+}
+
 function FlowNodeEditorPanel({
   node,
   draft,
@@ -341,6 +358,7 @@ function FlowNodeEditorPanel({
       </div>
 
       <div className="flow-node-editor-content">
+        {['message', 'choice', 'media', 'cta_url', 'condition', 'action'].includes(kind) ? <FlowVariablesHelp /> : null}
         {kind === 'message' && (
           <label className="flow-editor-field">
             Mensagem
@@ -382,7 +400,7 @@ function FlowNodeEditorPanel({
         {kind === 'cta_url' && (() => {
           const buttonText = toText(draft.button_text);
           const url = toText(draft.url);
-          const urlInvalid = url.trim().length > 0 && !url.trim().startsWith('https://');
+          const urlInvalid = url.trim().length > 0 && !url.trim().startsWith('https://') && !url.includes('{{');
           const buttonInvalid = buttonText.length > 20;
           return (
             <>
@@ -400,7 +418,7 @@ function FlowNodeEditorPanel({
               <label className="flow-editor-field">
                 URL
                 <input value={url} onChange={(event) => onDraftChange({ url: event.target.value })} placeholder="https://exemplo.com/fatura" required />
-                {urlInvalid ? <small className="flow-editor-error">A URL precisa começar com https://</small> : null}
+                {urlInvalid ? <small className="flow-editor-error">A URL precisa começar com https:// ou conter variável</small> : null}
               </label>
             </>
           );
@@ -448,7 +466,7 @@ function FlowNodeEditorPanel({
           const rawMediaType = toText(draft.media_type || 'image');
           const mediaType = (['image', 'document', 'audio', 'video'].includes(rawMediaType) ? rawMediaType : 'image') as 'image' | 'document' | 'audio' | 'video';
           const mediaUrl = toText(draft.media_url);
-          const urlInvalid = mediaUrl.trim().length > 0 && !mediaUrl.trim().startsWith('https://');
+          const urlInvalid = mediaUrl.trim().length > 0 && !mediaUrl.trim().startsWith('https://') && !mediaUrl.includes('{{');
           const sourceMode = toText(draft.media_source || (mediaUrl ? 'external' : 'upload')) === 'external' ? 'external' : 'upload';
 
           return (
@@ -498,7 +516,7 @@ function FlowNodeEditorPanel({
                     placeholder={mediaType === 'document' ? 'https://exemplo.com/contrato.pdf' : mediaType === 'audio' ? 'https://exemplo.com/audio.mp3' : mediaType === 'video' ? 'https://exemplo.com/video.mp4' : 'https://exemplo.com/imagem.jpg'}
                   />
                   {!mediaUrl.trim() ? <small className="flow-editor-error">URL obrigatória para enviar a mídia.</small> : null}
-                  {urlInvalid ? <small className="flow-editor-error">A URL deve começar com https://</small> : null}
+                  {urlInvalid ? <small className="flow-editor-error">A URL deve começar com https:// ou conter variável</small> : null}
                 </label>
               )}
               {mediaUrl && mediaType === 'image' ? (

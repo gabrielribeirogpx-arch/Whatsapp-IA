@@ -31,6 +31,7 @@ from app.services.audit_service import write_audit_log
 from app.services.realtime_service import sync_publish
 from app.flow_v2.snapshot import FlowV2Snapshot, build_transitions_from_edges
 from app.flow_v2.transition_resolver import TransitionResolver
+from app.flow_v2.template_renderer import FlowRenderContext, render_template
 
 logger = logging.getLogger(__name__)
 
@@ -67,6 +68,32 @@ class BaseNodeExecutor:
     def _node_data(node: dict[str, Any]) -> dict[str, Any]:
         data = node.get("data")
         return data if isinstance(data, dict) else {}
+
+
+    @staticmethod
+    def _render_context(db, *, snapshot: FlowV2Snapshot, session: Any, runtime_input: RuntimeInput) -> FlowRenderContext:
+        contact = ActionNodeExecutor._resolve_contact(db, runtime_input=runtime_input)
+        conversation = ActionNodeExecutor._resolve_conversation(db, runtime_input=runtime_input)
+        lead = ActionNodeExecutor._resolve_lead(
+            db,
+            runtime_input=runtime_input,
+            contact_id=runtime_input.contact_id or getattr(conversation, "contact_id", None),
+            conversation_id=runtime_input.conversation_id or getattr(conversation, "id", None),
+        )
+        return FlowRenderContext(
+            tenant_id=session.tenant_id,
+            external_user_id=runtime_input.external_user_id,
+            phone=ActionNodeExecutor._phone_from_runtime_input(runtime_input),
+            contact=contact,
+            conversation=conversation,
+            lead=lead,
+            last_message=runtime_input.message_text,
+            flow={"id": getattr(snapshot, "flow_id", None), "name": getattr(snapshot, "name", None)},
+            session=session,
+        )
+
+    def _render(self, value: Any, db, *, snapshot: FlowV2Snapshot, session: Any, runtime_input: RuntimeInput) -> Any:
+        return render_template(value, self._render_context(db, snapshot=snapshot, session=session, runtime_input=runtime_input))
 
     def _default_next(
         self, db, *, snapshot: FlowV2Snapshot, session: Any, node_id: str
@@ -128,7 +155,7 @@ class MessageNodeExecutor(BaseNodeExecutor):
     ) -> NodeExecutionResult:
         node_id = str(node["id"])
         data = self._node_data(node)
-        message = extract_message_text_from_node(node)
+        message = self._render(extract_message_text_from_node(node), db, snapshot=snapshot, session=session, runtime_input=runtime_input)
         is_start = bool(node.get("isStart") or data.get("isStart"))
         logger.info(
             "[MESSAGE EXECUTED] node_id=%s is_start=%s message_preview=%s",
@@ -244,11 +271,11 @@ class MediaNodeExecutor(BaseNodeExecutor):
         node_id = str(node["id"])
         data = self._node_data(node)
         media_type = str(node.get("media_type") or data.get("media_type") or "").strip().lower()
-        media_url = str(node.get("media_url") or data.get("media_url") or data.get("url") or "").strip()
-        caption = str(node.get("caption") or data.get("caption") or "").strip() or None
+        media_url = str(self._render(node.get("media_url") or data.get("media_url") or data.get("url") or "", db, snapshot=snapshot, session=session, runtime_input=runtime_input)).strip()
+        caption = str(self._render(node.get("caption") or data.get("caption") or "", db, snapshot=snapshot, session=session, runtime_input=runtime_input)).strip() or None
         if media_type == "audio":
             caption = None
-        filename = str(node.get("filename") or data.get("filename") or "").strip() or None
+        filename = str(self._render(node.get("filename") or data.get("filename") or "", db, snapshot=snapshot, session=session, runtime_input=runtime_input)).strip() or None
         if media_type not in self.SUPPORTED_MEDIA_TYPES:
             logger.error("[MEDIA NODE INVALID] node_id=%s reason=invalid_media_type media_type=%s", node_id, media_type or "missing")
             raise RuntimeError(f"Invalid media_type for media node {node_id}")
@@ -268,9 +295,9 @@ class CtaUrlNodeExecutor(BaseNodeExecutor):
     def execute(self, db, *, snapshot, session, node, runtime_input) -> NodeExecutionResult:
         node_id = str(node["id"])
         data = self._node_data(node)
-        text = str(node.get("text") or node.get("content") or data.get("text") or data.get("content") or data.get("message") or "").strip()
-        button_text = str(node.get("button_text") or data.get("button_text") or data.get("buttonText") or data.get("button") or "").strip()
-        url = str(node.get("url") or data.get("url") or data.get("href") or "").strip()
+        text = str(self._render(node.get("text") or node.get("content") or data.get("text") or data.get("content") or data.get("message") or "", db, snapshot=snapshot, session=session, runtime_input=runtime_input)).strip()
+        button_text = str(self._render(node.get("button_text") or data.get("button_text") or data.get("buttonText") or data.get("button") or "", db, snapshot=snapshot, session=session, runtime_input=runtime_input)).strip()
+        url = str(self._render(node.get("url") or data.get("url") or data.get("href") or "", db, snapshot=snapshot, session=session, runtime_input=runtime_input)).strip()
         if not text:
             raise RuntimeError(f"CTA URL node {node_id} requires text")
         if not button_text:
@@ -915,6 +942,7 @@ class ActionNodeExecutor(BaseNodeExecutor):
                 action_type or "missing",
             )
         else:
+            params = self._render_action_params(params, db, snapshot=snapshot, session=session, runtime_input=runtime_input, action_type=action_type)
             self._execute_action(
                 db,
                 session=session,
@@ -963,6 +991,29 @@ class ActionNodeExecutor(BaseNodeExecutor):
             if key in data and key not in params:
                 params[key] = data[key]
         return params
+
+    def _render_action_params(
+        self,
+        params: dict[str, Any],
+        db,
+        *,
+        snapshot: FlowV2Snapshot,
+        session: Any,
+        runtime_input: RuntimeInput,
+        action_type: str,
+    ) -> dict[str, Any]:
+        keys_by_action = {
+            "notify_team": {"notification_title", "notification_message", "title", "message"},
+            "create_task": {"task_title", "task_description", "task_assignee", "title", "description", "assigned_to"},
+            "transfer_human": {"reason"},
+        }
+        keys = keys_by_action.get(action_type, set())
+        if not keys:
+            return params
+        return {
+            key: self._render(value, db, snapshot=snapshot, session=session, runtime_input=runtime_input) if key in keys else value
+            for key, value in params.items()
+        }
 
     def _execute_action(
         self,

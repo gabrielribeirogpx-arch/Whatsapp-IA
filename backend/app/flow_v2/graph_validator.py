@@ -193,7 +193,7 @@ class FlowV2GraphValidator:
             media_url = str(node.get("media_url") or data.get("media_url") or data.get("url") or "").strip()
             if media_type not in {"image", "document", "audio", "video"}:
                 errors.append(f"FLOW_V2_MEDIA_TYPE_INVALID:{node_id}")
-            if not media_url or not media_url.startswith("https://"):
+            if not media_url or (not media_url.startswith("https://") and "{{" not in media_url):
                 errors.append(f"FLOW_V2_MEDIA_URL_INVALID:{node_id}")
         elif node_type == "cta_url":
             text = str(node.get("text") or node.get("content") or data.get("text") or data.get("content") or data.get("message") or "").strip()
@@ -205,7 +205,7 @@ class FlowV2GraphValidator:
                 errors.append(f"FLOW_V2_CTA_URL_BUTTON_TEXT_REQUIRED:{node_id}")
             elif len(button_text) > 20:
                 errors.append(f"FLOW_V2_CTA_URL_BUTTON_TEXT_TOO_LONG:{node_id}")
-            if not url.startswith("https://"):
+            if not url.startswith("https://") and "{{" not in url:
                 errors.append(f"FLOW_V2_CTA_URL_HTTPS_REQUIRED:{node_id}")
         elif node_type == "condition":
             conditions = node.get("conditions") or data.get("conditions")
