@@ -68,6 +68,13 @@ VIDEO_META_MAX_BYTES = int(os.getenv("FLOW_MEDIA_VIDEO_META_MAX_BYTES", str(16 *
 
 def _validate_video_media_preflight(*, media_url: str, status_code: int, content_type: str, content_length: int) -> tuple[bool, str | None]:
     if status_code not in {200, 206}:
+        if "/uploads/flow-media/" in media_url and status_code == 404:
+            logger.error(
+                'FLOW_MEDIA_FILE_MISSING Arquivo de mídia não encontrado no storage. Faça upload novamente ou configure storage persistente. media_type=video media_url=%s status_code=%s',
+                media_url,
+                status_code,
+            )
+            return False, "FLOW_MEDIA_FILE_MISSING"
         logger.error("[MEDIA SEND PREFLIGHT BLOCKED] media_type=video reason=public_url_unreachable media_url=%s status_code=%s", media_url, status_code)
         return False, "public_url_unreachable"
     if content_type not in {"video/mp4", "video/3gpp"}:

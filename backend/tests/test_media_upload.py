@@ -222,3 +222,52 @@ def test_video_preflight_retries_until_public_url_is_available(monkeypatch):
     assert attempts["count"] == 2
     assert content_type == "video/mp4"
     assert content_length == 12
+
+
+def test_upload_storage_status_logs_root_exists_and_writable(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(flow_media, "UPLOAD_ROOT", tmp_path / "flow-media")
+
+    status = flow_media.log_upload_storage_status()
+
+    captured = capsys.readouterr()
+    assert "[UPLOAD STORAGE]" in captured.out
+    assert status["root"] == str(tmp_path / "flow-media")
+    assert status["exists"] is True
+    assert status["writable"] is True
+
+
+def test_media_upload_fails_clearly_when_railway_storage_is_not_persistent(monkeypatch):
+    monkeypatch.setattr(flow_media, "UPLOAD_ROOT", flow_media.Path("uploads/flow-media"))
+    monkeypatch.setattr(flow_media, "_is_railway_environment", lambda: True)
+    app = FastAPI()
+    app.add_middleware(TenantContextMiddleware)
+    app.include_router(flow_media.media_router)
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/media/upload",
+        headers=_headers(),
+        files={"file": ("foto.png", b"\x89PNG\r\n\x1a\n", "image/png")},
+    )
+
+    assert response.status_code == 503
+    assert "Storage persistente" in response.json()["detail"]
+
+
+def test_media_upload_fails_clearly_when_railway_data_volume_is_missing(tmp_path, monkeypatch):
+    monkeypatch.setattr(flow_media, "UPLOAD_ROOT", flow_media.Path("/data/uploads/flow-media"))
+    monkeypatch.setattr(flow_media, "_is_railway_environment", lambda: True)
+    monkeypatch.setattr(flow_media.os.path, "ismount", lambda path: False)
+    app = FastAPI()
+    app.add_middleware(TenantContextMiddleware)
+    app.include_router(flow_media.media_router)
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/media/upload",
+        headers=_headers(),
+        files={"file": ("foto.png", b"\x89PNG\r\n\x1a\n", "image/png")},
+    )
+
+    assert response.status_code == 503
+    assert "Storage persistente" in response.json()["detail"]
