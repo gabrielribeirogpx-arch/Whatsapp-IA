@@ -14,11 +14,12 @@ import ReactFlow, {
 } from 'reactflow';
 import type { Connection, Edge, EdgeChange, Node, NodeChange, ReactFlowInstance } from 'reactflow';
 import 'reactflow/dist/style.css';
-import { Clock, FileImage, GitBranch, History, ListChecks, MessageSquare, RotateCcw, Zap } from 'lucide-react';
+import { Clock, ExternalLink, FileImage, GitBranch, History, ListChecks, MessageSquare, RotateCcw, Zap } from 'lucide-react';
 
 import ActionNode from '@/components/flow/nodes/ActionNode';
 import ChoiceNode from '@/components/flow/nodes/ChoiceNode';
 import ConditionNode from '@/components/flow/nodes/ConditionNode';
+import CtaUrlNode from '@/components/flow/nodes/CtaUrlNode';
 import DelayNode from '@/components/flow/nodes/DelayNode';
 import MessageNode from '@/components/flow/nodes/MessageNode';
 import MediaNode from '@/components/flow/nodes/MediaNode';
@@ -40,15 +41,18 @@ const nodeTypes = {
   delay: DelayNode,
   action: ActionNode,
   media: MediaNode,
+  cta_url: CtaUrlNode,
+  cta_link: CtaUrlNode,
   messageNode: MessageNode,
   choiceNode: ChoiceNode,
   conditionNode: ConditionNode,
   delayNode: DelayNode,
   actionNode: ActionNode,
   mediaNode: MediaNode,
+  ctaUrlNode: CtaUrlNode,
 };
 
-type FlowNodeKind = 'message' | 'choice' | 'condition' | 'delay' | 'action' | 'media';
+type FlowNodeKind = 'message' | 'choice' | 'condition' | 'delay' | 'action' | 'media' | 'cta_url';
 type FlowConnection = Connection & { sourceHandle?: string | null };
 type ChoiceConnectDebug = {
   nodeId: string;
@@ -109,6 +113,7 @@ const NODE_PRESETS: Record<FlowNodeKind, { label: string; type: string; data: Re
   delay: { label: 'Delay', type: 'delay', data: { seconds: 3, show_typing: false } },
   action: { label: 'Ação', type: 'action', data: { action_type: 'create_lead', action: 'create_lead', params: {} } },
   media: { label: 'Mídia', type: 'media', data: { media_type: 'image', media_url: '', caption: '', filename: '' } },
+  cta_url: { label: 'CTA / Link', type: 'cta_url', data: { content: '', text: '', button_text: '', url: '', is_terminal: false } },
 };
 
 const initialNodes: Node[] = [];
@@ -277,12 +282,16 @@ type FlowValidationIssue = { code: string; node_id?: string | null; message: str
 type EditorButton = { id?: string; label?: string; handleId?: string; next?: string };
 const toText = (value: unknown) => (typeof value === 'string' ? value : value == null ? '' : String(value));
 const fieldHandleId = (value: string, fallback: string) => value.toLowerCase().trim().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '') || fallback;
-const getBuilderNodeKind = (node?: Node | null) => String(node?.type || 'message').toLowerCase();
+const getBuilderNodeKind = (node?: Node | null) => {
+  const normalized = String(node?.type || 'message').toLowerCase();
+  return normalized === 'cta_link' ? 'cta_url' : normalized;
+};
 const getBuilderNodeTitle = (node?: Node | null) => NODE_PRESETS[getBuilderNodeKind(node) as FlowNodeKind]?.label || 'Node';
 const getMiniMapNodeColor = (type: string) => {
   const normalized = type.toLowerCase();
   if (normalized === 'message') return '#3b82f6';
   if (normalized === 'media') return '#06b6d4';
+  if (normalized === 'cta_url' || normalized === 'cta_link') return '#7c3aed';
   if (['choice', 'condition', 'delay', 'action'].includes(normalized)) return '#f97316';
   return '#94a3b8';
 };
@@ -369,6 +378,33 @@ function FlowNodeEditorPanel({
             </div>
           </>
         )}
+
+        {kind === 'cta_url' && (() => {
+          const buttonText = toText(draft.button_text);
+          const url = toText(draft.url);
+          const urlInvalid = url.trim().length > 0 && !url.trim().startsWith('https://');
+          const buttonInvalid = buttonText.length > 20;
+          return (
+            <>
+              <div className="flow-editor-info-card"><strong>Tipo:</strong> Botão com link externo <span>CTA URL</span></div>
+              <label className="flow-editor-field">
+                Texto da mensagem
+                <textarea value={toText(draft.content || draft.text || draft.message)} onChange={(event) => onDraftChange({ content: event.target.value, text: event.target.value, message: event.target.value })} placeholder="Sua fatura está disponível." required />
+              </label>
+              <label className="flow-editor-field">
+                Texto do botão
+                <input value={buttonText} maxLength={20} onChange={(event) => onDraftChange({ button_text: event.target.value })} placeholder="Acessar Fatura" required />
+                <small>{buttonText.length}/20 caracteres</small>
+                {buttonInvalid ? <small className="flow-editor-error">O botão deve ter no máximo 20 caracteres.</small> : null}
+              </label>
+              <label className="flow-editor-field">
+                URL
+                <input value={url} onChange={(event) => onDraftChange({ url: event.target.value })} placeholder="https://exemplo.com/fatura" required />
+                {urlInvalid ? <small className="flow-editor-error">A URL precisa começar com https://</small> : null}
+              </label>
+            </>
+          );
+        })()}
 
         {kind === 'condition' && (
           <label className="flow-editor-field">
@@ -1947,6 +1983,20 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
       toast.error('Node Mídia exige uma URL pública começando com https:// para publicar.');
       return;
     }
+    const invalidCtaNode = currentNodes.find((node) => {
+      const data = node.data as Record<string, unknown> | undefined;
+      if (node.type !== 'cta_url' && node.type !== 'cta_link' && data?.type !== 'cta_url') return false;
+      const text = String(data?.content || data?.text || data?.message || '').trim();
+      const buttonText = String(data?.button_text || '').trim();
+      const url = String(data?.url || '').trim();
+      return !text || !buttonText || buttonText.length > 20 || !url.startsWith('https://');
+    });
+    if (invalidCtaNode) {
+      setValidationErrors([{ code: 'FLOW_V2_CTA_URL_INVALID', node_id: invalidCtaNode.id, message: 'Node CTA / Link exige mensagem, botão de até 20 caracteres e URL começando com https://.' }]);
+      setHighlightedNodeId(invalidCtaNode.id);
+      toast.error('Node CTA / Link exige mensagem, botão de até 20 caracteres e URL https://.');
+      return;
+    }
     if (flowContainsTemporaryIds(currentNodes, currentEdges)) {
       toast.error('Flow contém IDs temporários inválidos.');
       return;
@@ -2153,6 +2203,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
         {([
           { kind: 'message' as FlowNodeKind, label: 'Mensagem', icon: MessageSquare },
           { kind: 'media' as FlowNodeKind, label: 'Mídia', icon: FileImage },
+          { kind: 'cta_url' as FlowNodeKind, label: 'CTA / Link', icon: ExternalLink },
         ]).map(({ kind, label, icon: Icon }) => (
           <button key={kind} type="button" className="dash-nav-item" onClick={() => addNode(kind)} title={label} style={{ border: 'none', background: 'none', cursor: 'pointer', width: '100%', textAlign: 'left' }}>
             <Icon size={18} strokeWidth={1.8} className="text-current" />
@@ -2444,6 +2495,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
             {([
               { kind: 'message' as FlowNodeKind, label: 'Mensagem', icon: MessageSquare },
               { kind: 'media' as FlowNodeKind, label: 'Mídia', icon: FileImage },
+              { kind: 'cta_url' as FlowNodeKind, label: 'CTA / Link', icon: ExternalLink },
               { kind: 'choice' as FlowNodeKind, label: 'Escolha', icon: ListChecks },
               { kind: 'condition' as FlowNodeKind, label: 'Condição', icon: GitBranch },
               { kind: 'delay' as FlowNodeKind, label: 'Delay', icon: Clock },

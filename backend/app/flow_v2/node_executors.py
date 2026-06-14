@@ -14,6 +14,7 @@ from app.flow_v2.actions import (
     RuntimeAction,
     ScheduleDelayAction,
     SendChoiceButtonsAction,
+    SendCtaUrlAction,
     SendMediaAction,
     SendMessageAction,
 )
@@ -258,6 +259,30 @@ class MediaNodeExecutor(BaseNodeExecutor):
         self.event_store.append(db, session=session, event_type=FlowV2EventType.MESSAGE_SENT, node_id=node_id, payload={"node_id": node_id, "media_type": media_type, "media_url": media_url, "caption": caption, "filename": filename})
         action = SendMediaAction(tenant_id=session.tenant_id, session_id=session.id, external_user_id=runtime_input.external_user_id, conversation_id=runtime_input.conversation_id, contact_id=runtime_input.contact_id, media_type=media_type, media_url=media_url, caption=caption, filename=filename if media_type == "document" else None, metadata={**runtime_input.metadata, "node_id": node_id, "node_type": "media"})
         logger.info("[MEDIA NODE EXECUTED] node_id=%s media_type=%s media_url=%s caption_present=%s filename=%s next_node_id=%s", node_id, media_type, media_url, bool(caption), filename, next_node_id)
+        return NodeExecutionResult(actions=(action,), next_node_id=next_node_id, status="complete" if next_node_id is None else "continue")
+
+
+class CtaUrlNodeExecutor(BaseNodeExecutor):
+    MAX_BUTTON_TEXT_LENGTH = 20
+
+    def execute(self, db, *, snapshot, session, node, runtime_input) -> NodeExecutionResult:
+        node_id = str(node["id"])
+        data = self._node_data(node)
+        text = str(node.get("text") or node.get("content") or data.get("text") or data.get("content") or data.get("message") or "").strip()
+        button_text = str(node.get("button_text") or data.get("button_text") or data.get("buttonText") or data.get("button") or "").strip()
+        url = str(node.get("url") or data.get("url") or data.get("href") or "").strip()
+        if not text:
+            raise RuntimeError(f"CTA URL node {node_id} requires text")
+        if not button_text:
+            raise RuntimeError(f"CTA URL node {node_id} requires button_text")
+        if len(button_text) > self.MAX_BUTTON_TEXT_LENGTH:
+            raise RuntimeError(f"CTA URL node {node_id} button_text exceeds WhatsApp limit")
+        if not url.startswith("https://"):
+            raise RuntimeError(f"CTA URL node {node_id} requires https url")
+        next_node_id = self._default_next_or_terminal(db, snapshot=snapshot, session=session, node_id=node_id)
+        self.event_store.append(db, session=session, event_type=FlowV2EventType.MESSAGE_SENT, node_id=node_id, payload={"node_id": node_id, "message_type": "interactive", "interactive_type": "cta_url", "text": text, "button_text": button_text, "url": url})
+        action = SendCtaUrlAction(tenant_id=session.tenant_id, session_id=session.id, external_user_id=runtime_input.external_user_id, conversation_id=runtime_input.conversation_id, contact_id=runtime_input.contact_id, text=text, button_text=button_text, url=url, metadata={**runtime_input.metadata, "node_id": node_id, "node_type": "cta_url"})
+        logger.info("[CTA URL NODE EXECUTED] node_id=%s button_text=%s url=%s next_node_id=%s", node_id, button_text, url, next_node_id)
         return NodeExecutionResult(actions=(action,), next_node_id=next_node_id, status="complete" if next_node_id is None else "continue")
 
 
@@ -1397,6 +1422,12 @@ class NodeExecutorRegistry:
                 event_store=event_store, transition_resolver=transition_resolver
             ),
             "media": MediaNodeExecutor(
+                event_store=event_store, transition_resolver=transition_resolver
+            ),
+            "cta_url": CtaUrlNodeExecutor(
+                event_store=event_store, transition_resolver=transition_resolver
+            ),
+            "cta_link": CtaUrlNodeExecutor(
                 event_store=event_store, transition_resolver=transition_resolver
             ),
         }

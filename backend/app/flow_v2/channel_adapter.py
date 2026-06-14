@@ -5,7 +5,7 @@ import json
 import logging
 from typing import Any, Protocol, runtime_checkable
 
-from app.flow_v2.actions import RuntimeAction, SendChoiceButtonsAction, SendMediaAction, SendMessageAction
+from app.flow_v2.actions import RuntimeAction, SendChoiceButtonsAction, SendCtaUrlAction, SendMediaAction, SendMessageAction
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +61,20 @@ class ChannelAdapter(Protocol):
         conversation_id: Any | None = None,
         contact_id: Any | None = None,
         options: list[dict[str, Any]] | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]: ...
+
+    def send_cta_url(
+        self,
+        *,
+        recipient_id: str,
+        text: str,
+        button_text: str,
+        url: str,
+        tenant_id: Any | None = None,
+        session_id: Any | None = None,
+        conversation_id: Any | None = None,
+        contact_id: Any | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]: ...
 
@@ -326,6 +340,46 @@ class WhatsAppAdapter:
             "tenant_id": payload.get("tenant_id"),
         }
 
+    def send_cta_url(
+        self,
+        *,
+        recipient_id: str,
+        text: str,
+        button_text: str,
+        url: str,
+        tenant_id: Any | None = None,
+        session_id: Any | None = None,
+        conversation_id: Any | None = None,
+        contact_id: Any | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        metadata = dict(metadata or {})
+        payload = {
+            "tenant_id": str(tenant_id or metadata.get("tenant_id") or ""),
+            "provider_id": metadata.get("provider_id"),
+            "phone": recipient_id,
+            "text": text,
+            "button_text": button_text,
+            "url": url,
+            "message_type": "interactive",
+            "interactive_type": "cta_url",
+            "conversation_id": str(conversation_id or metadata.get("conversation_id") or "") or None,
+            "contact_id": str(contact_id or metadata.get("contact_id") or "") or None,
+            "session_id": str(session_id or metadata.get("session_id") or "") or None,
+            "flow_id": metadata.get("flow_id"),
+            "flow_version_id": metadata.get("flow_version_id"),
+            "node_id": metadata.get("node_id"),
+            "node_type": metadata.get("node_type") or "cta_url",
+            "correlation_id": metadata.get("correlation_id") or metadata.get("message_id") or metadata.get("webhook_id"),
+            "metadata": metadata,
+            "flow_send_source": "flow_v2:cta_url",
+        }
+        if self.client is None:
+            return {"status": "mocked", "channel": "whatsapp", "type": "cta_url", "recipient_id": recipient_id, "text": text, "button_text": button_text, "url": url, "metadata": metadata}
+        from app.services.queue import enqueue_send_message
+        job_id = enqueue_send_message(payload)
+        return {"status": "queued" if job_id else "skipped", "channel": "whatsapp", "type": "cta_url", "recipient_id": recipient_id, "job_id": job_id, "tenant_id": payload.get("tenant_id")}
+
     def dispatch(self, action: RuntimeAction) -> dict[str, Any]:
         self.sent_actions.append(action)
         if isinstance(action, SendMessageAction):
@@ -361,6 +415,8 @@ class WhatsAppAdapter:
             payload = self._media_queue_payload(recipient_id=action.external_user_id, media_type=action.media_type, media_url=action.media_url, caption=None if action.media_type == "audio" else action.caption, filename=None, tenant_id=action.tenant_id, session_id=action.session_id, conversation_id=action.conversation_id, contact_id=action.contact_id, metadata=metadata)
             job_id = enqueue_send_message(payload)
             return {"status": "queued" if job_id else "skipped", "channel": "whatsapp", "type": action.media_type, "recipient_id": action.external_user_id, "job_id": job_id, "tenant_id": payload.get("tenant_id")}
+        if isinstance(action, SendCtaUrlAction):
+            return self.send_cta_url(recipient_id=action.external_user_id, text=action.text, button_text=action.button_text, url=action.url, tenant_id=action.tenant_id, session_id=action.session_id, conversation_id=action.conversation_id, contact_id=action.contact_id, metadata=action.metadata)
         if isinstance(action, SendChoiceButtonsAction):
             logger.info(
                 "[V2 CHANNEL ADAPTER] dispatch action_type=%s tenant_id=%s provider_id=%s session_id=%s conversation_id=%s contact_id=%s node_id=%s buttons_count=%s",

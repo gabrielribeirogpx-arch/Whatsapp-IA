@@ -77,6 +77,35 @@ class SendMediaAction(RuntimeAction):
 
 
 @dataclass(frozen=True)
+class SendCtaUrlAction(RuntimeAction):
+    text: str = ""
+    button_text: str = ""
+    url: str = ""
+
+    @property
+    def action_type(self) -> Literal["send_cta_url"]:
+        return "send_cta_url"
+
+    def as_effect(self) -> dict[str, Any]:
+        payload = super().as_effect()
+        payload.update({
+            "text": self.text,
+            "button_text": self.button_text,
+            "url": self.url,
+            "interactive_type": "cta_url",
+            "interactive": {
+                "type": "cta_url",
+                "body": {"text": self.text},
+                "action": {
+                    "name": "cta_url",
+                    "parameters": {"display_text": self.button_text, "url": self.url},
+                },
+            },
+        })
+        return payload
+
+
+@dataclass(frozen=True)
 class SendChoiceButtonsAction(RuntimeAction):
     text: str = ""
     node_id: str = ""

@@ -28,6 +28,7 @@ from app.services.whatsapp_message_service import (
     mark_provider_auth_error,
     resolve_active_meta_provider_credentials,
     send_buttons_message_via_meta,
+    send_cta_url_message_via_meta,
     send_interactive_list_via_meta,
     send_media_message_via_meta,
     send_text_message_via_meta,
@@ -489,6 +490,8 @@ def send_whatsapp_message(*, message_data: dict[str, Any]) -> None:
         media_caption = None
     media_filename = str(message_data.get("filename") or "").strip() or None
     buttons = message_data.get("buttons")
+    button_text = str(message_data.get("button_text") or "").strip()
+    cta_url = str(message_data.get("url") or "").strip()
     interactive_type = str(message_data.get("interactive_type") or ("button" if isinstance(buttons, list) and buttons else "")).strip().lower()
     sections = message_data.get("sections") if isinstance(message_data.get("sections"), list) else []
     options = message_data.get("options") if isinstance(message_data.get("options"), list) else []
@@ -876,6 +879,16 @@ def send_whatsapp_message(*, message_data: dict[str, Any]) -> None:
                     tenant_id,
                 )
                 meta_response = send_media_message_via_meta(to=phone, media_type=media_type, media_url=media_url, caption=media_caption, filename=media_filename, token=resolved_token, phone_number_id=resolved_phone_number_id, context={**context, "message_type": "media", "media_type": media_type, "media_url": media_url, "media_content_type": media_content_type, "media_content_length": media_content_length, "media_status_code": media_status_code})
+            elif interactive_type == "cta_url":
+                meta_response = send_cta_url_message_via_meta(
+                    to=phone,
+                    body_text=text,
+                    button_text=button_text,
+                    url=cta_url,
+                    token=resolved_token,
+                    phone_number_id=resolved_phone_number_id,
+                    context=context,
+                )
             elif interactive_type == "list":
                 logger.info(
                     "[META INTERACTIVE PAYLOAD] flow_id=%s session_id=%s node_id=%s node_type=%s message_type=%s interactive_type=%s options_count=%s payload_json=%s",
@@ -1012,6 +1025,8 @@ def send_whatsapp_message(*, message_data: dict[str, Any]) -> None:
 
         dedupe_message_id = str(message_data.get("message_id") or message_data.get("job_id") or getattr(current_job, "id", None) or correlation_id)
         outbound_text = text
+        if interactive_type == "cta_url":
+            outbound_text = f"{text}\n[{button_text} ↗]"
         if is_media_message:
             outbound_text = f"📎 Mídia enviada: {media_url}"
             if media_caption:

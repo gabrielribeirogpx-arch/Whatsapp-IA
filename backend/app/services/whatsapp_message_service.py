@@ -260,6 +260,32 @@ def send_buttons_message_via_meta(*, token: str, phone_number_id: str, to: str, 
 
 
 
+def send_cta_url_message_via_meta(*, token: str, phone_number_id: str, to: str, body_text: str, button_text: str, url: str, context: dict[str, Any]) -> dict[str, Any]:
+    display_text = str(button_text or "").strip()[:20]
+    cta_url = str(url or "").strip()
+    if not body_text.strip() or not display_text or not cta_url.startswith("https://"):
+        raise ValueError("CTA URL interactive messages require body_text, button_text and https:// url")
+    payload = {
+        "messaging_product": "whatsapp",
+        "to": re.sub(r"\D", "", to or ""),
+        "type": "interactive",
+        "interactive": {
+            "type": "cta_url",
+            "body": {"text": body_text},
+            "action": {
+                "name": "cta_url",
+                "parameters": {"display_text": display_text, "url": cta_url},
+            },
+        },
+    }
+    logger.info(
+        "[META INTERACTIVE PAYLOAD] flow_id=%s session_id=%s node_id=%s node_type=%s message_type=%s interactive_type=%s payload_json=%s",
+        context.get("flow_id"), context.get("session_id"), context.get("node_id"), context.get("node_type"), "interactive", "cta_url",
+        json.dumps(payload, default=str, ensure_ascii=False, sort_keys=True),
+    )
+    return asyncio.run(MetaCloudClient(token).post(f"/{phone_number_id}/messages", payload=payload, context=context))
+
+
 def send_interactive_list_via_meta(*, token: str, phone_number_id: str, to: str, body_text: str, sections: list[dict[str, Any]], context: dict[str, Any], button_text: str = "Ver opções") -> dict[str, Any]:
     log_message_origin_trace(
         executor=context.get("flow_executor") or context.get("flow_send_source") or "send_interactive_list_via_meta",
