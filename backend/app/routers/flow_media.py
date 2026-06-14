@@ -23,7 +23,22 @@ router = APIRouter(prefix="/api/flow-media", tags=["flow-media"])
 media_router = APIRouter(prefix="/api/media", tags=["media"])
 public_router = APIRouter(tags=["flow-media-public"])
 
-UPLOAD_ROOT = Path(os.getenv("FLOW_MEDIA_UPLOAD_DIR", "uploads/flow-media"))
+
+def _default_upload_root() -> Path:
+    configured = os.getenv("FLOW_MEDIA_UPLOAD_DIR")
+    if configured:
+        return Path(configured)
+    upload_root = os.getenv("UPLOAD_ROOT")
+    if upload_root:
+        return Path(upload_root) / "flow-media"
+    return Path("/data/uploads/flow-media")
+
+
+UPLOAD_ROOT = _default_upload_root()
+UPLOAD_STORAGE_RAILWAY_DETAIL = (
+    "Storage persistente de mídia não configurado. Configure um Railway Volume em /data "
+    "ou defina FLOW_MEDIA_UPLOAD_DIR/UPLOAD_ROOT para um caminho persistente compartilhado pela API e worker."
+)
 ALLOWED_CONTENT_TYPES = {
     "image/jpeg", "image/png", "image/webp", "application/pdf",
     "audio/mpeg", "audio/mp3", "audio/ogg", "audio/webm", "audio/wav", "audio/aac", "audio/mp4",
@@ -77,6 +92,47 @@ VIDEO_INCOMPATIBLE_DETAIL = "Este vídeo não é compatível com WhatsApp. Use M
 VIDEO_PREFLIGHT_RETRY_SECONDS = float(os.getenv("FLOW_MEDIA_VIDEO_PREFLIGHT_RETRY_SECONDS", "5"))
 VIDEO_PREFLIGHT_RETRY_INTERVAL_SECONDS = float(os.getenv("FLOW_MEDIA_VIDEO_PREFLIGHT_RETRY_INTERVAL_SECONDS", "0.5"))
 VIDEO_PREFLIGHT_TIMEOUT_SECONDS = float(os.getenv("FLOW_MEDIA_VIDEO_PREFLIGHT_TIMEOUT_SECONDS", "8"))
+
+
+def _is_railway_environment() -> bool:
+    return bool(os.getenv("RAILWAY_ENVIRONMENT") or os.getenv("RAILWAY_PUBLIC_DOMAIN") or os.getenv("RAILWAY_PROJECT_ID"))
+
+
+def _upload_storage_status() -> dict[str, object]:
+    root = UPLOAD_ROOT
+    exists = root.exists()
+    writable = False
+    data_mount_persistent = os.path.ismount("/data")
+    try:
+        root.mkdir(parents=True, exist_ok=True)
+        probe = root / ".write-test"
+        probe.write_text("ok")
+        probe.unlink(missing_ok=True)
+        exists = root.exists()
+        writable = True
+    except OSError:
+        exists = root.exists()
+        writable = False
+    return {"root": str(root), "exists": exists, "writable": writable, "data_mount_persistent": data_mount_persistent}
+
+
+def log_upload_storage_status() -> dict[str, object]:
+    status = _upload_storage_status()
+    logger.info("[UPLOAD STORAGE] root=%s exists=%s writable=%s", status["root"], status["exists"], status["writable"])
+    print(f'[UPLOAD STORAGE] root={status["root"]} exists={status["exists"]} writable={status["writable"]}', flush=True)
+    return status
+
+
+def _ensure_upload_storage_ready() -> None:
+    status = _upload_storage_status()
+    logger.info("[UPLOAD STORAGE] root=%s exists=%s writable=%s", status["root"], status["exists"], status["writable"])
+    root = Path(str(status["root"]))
+    if not status["writable"]:
+        raise HTTPException(status_code=503, detail=UPLOAD_STORAGE_RAILWAY_DETAIL)
+    if _is_railway_environment() and not root.is_absolute():
+        raise HTTPException(status_code=503, detail=UPLOAD_STORAGE_RAILWAY_DETAIL)
+    if _is_railway_environment() and str(root).startswith("/data/") and not status.get("data_mount_persistent"):
+        raise HTTPException(status_code=503, detail=UPLOAD_STORAGE_RAILWAY_DETAIL)
 
 
 def _max_upload_bytes() -> int:
@@ -195,7 +251,7 @@ def _validate_internal_video_file(*, suffix: str, content_type: str, local_size:
         raise HTTPException(status_code=413, detail=f"Vídeo excede o limite de {VIDEO_META_MAX_BYTES} bytes.")
 
 
-def _diagnose_video_public_url(*, public_url: str, suffix: str, local_size: int) -> tuple[str, int]:
+def _validate_video_headers(*, public_url: str, suffix: str, local_size: int) -> tuple[str, int]:
     deadline = time.monotonic() + max(0, VIDEO_PREFLIGHT_RETRY_SECONDS)
     last_result: tuple[bool, str, int, int | None, int | None, BaseException | None] | None = None
     while True:
@@ -355,6 +411,7 @@ async def get_public_flow_media(tenant_id: str, filename: str):
 
 
 async def _upload_media(request: Request, file: UploadFile = File(...)) -> JSONResponse:
+    _ensure_upload_storage_ready()
     if not getattr(request.state, "tenant_id", None):
         raise HTTPException(status_code=400, detail="X-Tenant-ID é obrigatório")
 
@@ -381,7 +438,7 @@ async def _upload_media(request: Request, file: UploadFile = File(...)) -> JSONR
         try:
             _validate_internal_video_file(suffix=suffix, content_type=content_type, local_size=len(data))
             _validate_video_with_ffprobe(path)
-            preflight_content_type, preflight_content_length = _diagnose_video_public_url(public_url=public_url, suffix=suffix, local_size=len(data))
+            preflight_content_type, preflight_content_length = _validate_video_headers(public_url=public_url, suffix=suffix, local_size=len(data))
         except HTTPException:
             path.unlink(missing_ok=True)
             raise

@@ -1861,6 +1861,18 @@ def test_dynamic_template_does_not_eval_code() -> None:
     assert rendered == " "
 
 
+def test_template_date_variables_use_pt_br_and_preserve_iso() -> None:
+    from datetime import UTC, datetime
+
+    from app.flow_v2.template_renderer import FlowRenderContext, render_template
+
+    context = FlowRenderContext(tenant_id="t", now=datetime(2026, 6, 14, 12, 34, 56, tzinfo=UTC))
+
+    rendered = render_template("{{today}}|{{now}}|{{today_iso}}|{{now_iso}}", context)
+
+    assert rendered == "14/06/2026|14/06/2026 09:34|2026-06-14|2026-06-14T12:34:56+00:00"
+
+
 def test_publish_accepts_templated_media_and_cta_urls() -> None:
     published = FlowV2Publisher().publish(
         nodes=[

@@ -167,7 +167,7 @@ ALLOWED_ORIGIN_REGEX = _parse_allowed_origin_regex()
 app = FastAPI()
 
 app.include_router(flow_media.public_router)
-app.mount("/uploads", StaticFiles(directory=os.getenv("FLOW_MEDIA_STATIC_DIR", "uploads"), check_dir=False), name="uploads")
+app.mount("/uploads", StaticFiles(directory=os.getenv("FLOW_MEDIA_STATIC_DIR", "/data/uploads"), check_dir=False), name="uploads")
 
 app.add_middleware(TenantContextMiddleware)
 
@@ -202,6 +202,7 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 @app.on_event("startup")
 def on_startup():
     print(f"[CORS] enabled origins={ALLOWED_ORIGINS} origin_regex={ALLOWED_ORIGIN_REGEX}")
+    flow_media.log_upload_storage_status()
     run_migrations()
     Base.metadata.create_all(bind=engine)
     ensure_conversations_columns()

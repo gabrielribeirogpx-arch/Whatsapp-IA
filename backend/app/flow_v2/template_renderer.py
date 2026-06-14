@@ -4,9 +4,12 @@ import logging
 import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from zoneinfo import ZoneInfo
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+DEFAULT_RENDER_TIMEZONE = ZoneInfo("America/Sao_Paulo")
 
 _PLACEHOLDER_RE = re.compile(r"{{\s*([a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)*)\s*}}")
 MAX_TEMPLATE_LENGTH = 20_000
@@ -28,7 +31,8 @@ class FlowRenderContext:
     session: Any | None = None
 
     def values(self) -> dict[str, Any]:
-        now = self.now or datetime.now(UTC)
+        now = self.now or datetime.now(DEFAULT_RENDER_TIMEZONE)
+        now_br = _localized_datetime(now)
         phone = self.phone or _phone_from_external_user_id(self.external_user_id)
         return {
             "tenant_id": self.tenant_id,
@@ -38,8 +42,10 @@ class FlowRenderContext:
             "conversation": _object_map(self.conversation, ("id", "mode", "status", "phone_number", "name")),
             "lead": _object_map(self.lead, ("id", "name", "phone", "stage", "status")),
             "last_message": self.last_message or "",
-            "now": now.isoformat(),
-            "today": self.today or now.date().isoformat(),
+            "now": now_br.strftime("%d/%m/%Y %H:%M"),
+            "today": self.today or now_br.strftime("%d/%m/%Y"),
+            "now_iso": now.isoformat(),
+            "today_iso": now_br.date().isoformat(),
             "flow": _object_map(self.flow, ("id", "name")),
             "session": _object_map(self.session, ("id",)),
         }
@@ -93,3 +99,9 @@ def _object_map(obj: Any, fields: tuple[str, ...]) -> dict[str, Any]:
 def _phone_from_external_user_id(external_user_id: str | None) -> str:
     raw = str(external_user_id or "")
     return raw.split(":", 1)[1] if ":" in raw else raw
+
+
+def _localized_datetime(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC).astimezone(DEFAULT_RENDER_TIMEZONE)
+    return value.astimezone(DEFAULT_RENDER_TIMEZONE)
