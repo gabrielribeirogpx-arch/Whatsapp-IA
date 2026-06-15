@@ -405,143 +405,145 @@ export default function Page({ params }: Props) {
           )}
 
           <div className="main-grid">
-            <div className="card card-soft">
+            <div className="card card-soft funnel-card">
               <h3 className="section-title">
                 <Funnel size={18} />
                 Funil do fluxo
               </h3>
-              {nodeFunnel.length === 0 ? (
-                <div className="funnel-empty">
-                  <svg
-                    viewBox="0 0 320 180"
-                    className="funnel-illustration"
-                    aria-hidden
-                  >
-                    <defs>
-                      <linearGradient
-                        id="funnelGradient"
-                        x1="0%"
-                        y1="0%"
-                        x2="100%"
-                        y2="100%"
-                      >
-                        <stop
-                          offset="0%"
-                          stopColor="#22c55e"
-                          stopOpacity="0.3"
-                        />
-                        <stop
-                          offset="100%"
-                          stopColor="#16a34a"
-                          stopOpacity="0.55"
-                        />
-                      </linearGradient>
-                    </defs>
-                    <ellipse
-                      cx="116"
-                      cy="38"
-                      rx="92"
-                      ry="12"
-                      fill="url(#funnelGradient)"
-                    />
-                    <path
-                      d="M24 38h184l-22 35H46z"
-                      fill="url(#funnelGradient)"
-                      opacity="0.9"
-                    />
-                    <ellipse
-                      cx="116"
-                      cy="73"
-                      rx="70"
-                      ry="10"
-                      fill="url(#funnelGradient)"
-                      opacity="0.8"
-                    />
-                    <path
-                      d="M46 73h140l-18 30H64z"
-                      fill="url(#funnelGradient)"
-                      opacity="0.75"
-                    />
-                    <ellipse
-                      cx="116"
-                      cy="103"
-                      rx="50"
-                      ry="8"
-                      fill="url(#funnelGradient)"
-                      opacity="0.7"
-                    />
-                    <path
-                      d="M64 103h104l-14 25H78z"
-                      fill="url(#funnelGradient)"
-                      opacity="0.6"
-                    />
-                    <ellipse
-                      cx="116"
-                      cy="128"
-                      rx="34"
-                      ry="6"
-                      fill="url(#funnelGradient)"
-                      opacity="0.58"
-                    />
-                  </svg>
-                  <div>
-                    <h4>Sem dados ainda</h4>
-                    <p className="secondary-text">
-                      O funil será exibido assim que houver movimentação de
-                      usuários neste fluxo.
-                    </p>
-                  </div>
-                </div>
-              ) : (
-                nodeFunnel.map((n, i) => {
-                  const dropoffRate = Number(n.dropoff_rate ?? 0);
-                  const color =
-                    dropoffRate > 40
-                      ? "#EF4444"
-                      : dropoffRate > 20
-                        ? "#EAB308"
-                        : "#22C55E";
-                  const nodeEntries = Number(n.entered ?? n.entries ?? 0);
-                  const firstNode = nodeFunnel[0] as
-                    | { entered?: number; entries?: number }
-                    | undefined;
-                  const pct =
-                    i === 0
-                      ? 100
-                      : Math.round(
-                          (nodeEntries /
-                            (Number(
-                              firstNode?.entered ?? firstNode?.entries ?? 1,
-                            ) || 1)) *
-                            100,
-                        );
-                  return (
-                    <div key={n.node_id} className="funnel-row">
-                      <div className="funnel-row-header">
-                        <span>
-                          {n.node_label} ({n.node_type})
-                        </span>
-                        <span>{pct}%</span>
-                      </div>
-                      <div className="progress-track">
-                        <div
-                          className="progress-fill"
-                          style={{ width: `${pct}%`, background: color }}
-                        />
-                      </div>
-                      <small className="secondary-text">
-                        Entradas {n.entered ?? n.entries ?? 0} • Concluídos{" "}
-                        {n.completed ?? 0} • Abandono {n.dropoff ?? 0} (
-                        {n.dropoff_rate ?? 0}%) • Conversões{" "}
-                        {n.conversions ?? 0}
-                        {n.avg_time_seconds != null
-                          ? ` • Tempo ${formatDuration(n.avg_time_seconds)}`
-                          : ""}
-                      </small>
+              <div className="funnel-content">
+                {nodeFunnel.length === 0 ? (
+                  <div className="funnel-empty">
+                    <svg
+                      viewBox="0 0 320 180"
+                      className="funnel-illustration"
+                      aria-hidden
+                    >
+                      <defs>
+                        <linearGradient
+                          id="funnelGradient"
+                          x1="0%"
+                          y1="0%"
+                          x2="100%"
+                          y2="100%"
+                        >
+                          <stop
+                            offset="0%"
+                            stopColor="#22c55e"
+                            stopOpacity="0.3"
+                          />
+                          <stop
+                            offset="100%"
+                            stopColor="#16a34a"
+                            stopOpacity="0.55"
+                          />
+                        </linearGradient>
+                      </defs>
+                      <ellipse
+                        cx="116"
+                        cy="38"
+                        rx="92"
+                        ry="12"
+                        fill="url(#funnelGradient)"
+                      />
+                      <path
+                        d="M24 38h184l-22 35H46z"
+                        fill="url(#funnelGradient)"
+                        opacity="0.9"
+                      />
+                      <ellipse
+                        cx="116"
+                        cy="73"
+                        rx="70"
+                        ry="10"
+                        fill="url(#funnelGradient)"
+                        opacity="0.8"
+                      />
+                      <path
+                        d="M46 73h140l-18 30H64z"
+                        fill="url(#funnelGradient)"
+                        opacity="0.75"
+                      />
+                      <ellipse
+                        cx="116"
+                        cy="103"
+                        rx="50"
+                        ry="8"
+                        fill="url(#funnelGradient)"
+                        opacity="0.7"
+                      />
+                      <path
+                        d="M64 103h104l-14 25H78z"
+                        fill="url(#funnelGradient)"
+                        opacity="0.6"
+                      />
+                      <ellipse
+                        cx="116"
+                        cy="128"
+                        rx="34"
+                        ry="6"
+                        fill="url(#funnelGradient)"
+                        opacity="0.58"
+                      />
+                    </svg>
+                    <div>
+                      <h4>Sem dados ainda</h4>
+                      <p className="secondary-text">
+                        O funil será exibido assim que houver movimentação de
+                        usuários neste fluxo.
+                      </p>
                     </div>
-                  );
-                })
-              )}
+                  </div>
+                ) : (
+                  nodeFunnel.map((n, i) => {
+                    const dropoffRate = Number(n.dropoff_rate ?? 0);
+                    const color =
+                      dropoffRate > 40
+                        ? "#EF4444"
+                        : dropoffRate > 20
+                          ? "#EAB308"
+                          : "#22C55E";
+                    const nodeEntries = Number(n.entered ?? n.entries ?? 0);
+                    const firstNode = nodeFunnel[0] as
+                      | { entered?: number; entries?: number }
+                      | undefined;
+                    const pct =
+                      i === 0
+                        ? 100
+                        : Math.round(
+                            (nodeEntries /
+                              (Number(
+                                firstNode?.entered ?? firstNode?.entries ?? 1,
+                              ) || 1)) *
+                              100,
+                          );
+                    return (
+                      <div key={n.node_id} className="funnel-row">
+                        <div className="funnel-row-header">
+                          <span>
+                            {n.node_label} ({n.node_type})
+                          </span>
+                          <span>{pct}%</span>
+                        </div>
+                        <div className="progress-track">
+                          <div
+                            className="progress-fill"
+                            style={{ width: `${pct}%`, background: color }}
+                          />
+                        </div>
+                        <small className="secondary-text">
+                          Entradas {n.entered ?? n.entries ?? 0} • Concluídos{" "}
+                          {n.completed ?? 0} • Abandono {n.dropoff ?? 0} (
+                          {n.dropoff_rate ?? 0}%) • Conversões{" "}
+                          {n.conversions ?? 0}
+                          {n.avg_time_seconds != null
+                            ? ` • Tempo ${formatDuration(n.avg_time_seconds)}`
+                            : ""}
+                        </small>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
             </div>
 
             <div className="side-stack">
@@ -1053,7 +1055,20 @@ export default function Page({ params }: Props) {
               display: grid;
               grid-template-columns: minmax(0, 2fr) minmax(320px, 1fr);
               gap: 16px;
-              align-items: start;
+              align-items: stretch;
+            }
+            .funnel-card {
+              height: 100%;
+              align-self: stretch;
+              display: flex;
+              flex-direction: column;
+              margin-bottom: 0;
+            }
+            .funnel-content {
+              flex: 1;
+              display: flex;
+              flex-direction: column;
+              justify-content: center;
             }
             .side-stack {
               display: grid;
