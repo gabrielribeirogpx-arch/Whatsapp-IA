@@ -661,7 +661,8 @@ export default function Page({ params }: Props) {
             .analytics-shell {
               width: 100%;
               max-width: none;
-              padding: 0 24px 32px;
+              box-sizing: border-box;
+              padding: 0 0 32px 24px;
             }
             .analytics-page {
               width: 100%;
