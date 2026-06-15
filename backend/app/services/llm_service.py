@@ -9,7 +9,7 @@ from openai import OpenAI
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import TenantAISetting
+from app.models.tenant_ai_setting import TenantAISetting
 from app.utils.encryption import decrypt_secret
 
 

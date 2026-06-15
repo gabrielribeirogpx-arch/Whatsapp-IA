@@ -8,7 +8,9 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import KnowledgeChunk, KnowledgeSource, Tenant
+from app.models.knowledge_chunk import KnowledgeChunk
+from app.models.knowledge_source import KnowledgeSource
+from app.models.tenant import Tenant
 from app.schemas.knowledge import KnowledgeSourceOut, KnowledgeUploadOut
 from app.services.rag_service import ingest_knowledge_source
 from app.services.tenant_service import get_current_tenant

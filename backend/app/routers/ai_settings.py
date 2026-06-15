@@ -3,7 +3,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import Tenant, TenantAISetting
+from app.models.tenant import Tenant
+from app.models.tenant_ai_setting import TenantAISetting
 from app.schemas.ai_settings import TenantAISettingsOut, TenantAISettingsTestOut, TenantAISettingsTestRequest, TenantAISettingsUpdate
 from app.services.llm_service import LLMConfigurationError, LLMGenerationError, test_provider_connection
 from app.services.tenant_service import get_current_tenant

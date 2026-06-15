@@ -12,7 +12,9 @@ from PyPDF2 import PdfReader
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
-from app.models import KnowledgeBase, KnowledgeChunk, KnowledgeSource
+from app.models.knowledge_base import KnowledgeBase
+from app.models.knowledge_chunk import KnowledgeChunk
+from app.models.knowledge_source import KnowledgeSource
 from app.services.embedding_service import cosine_similarity, generate_embedding
 from app.services.llm_service import generate_answer_for_tenant
 
