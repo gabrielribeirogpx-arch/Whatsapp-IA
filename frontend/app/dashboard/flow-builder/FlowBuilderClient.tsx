@@ -1252,9 +1252,9 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
     );
   }, [setNodes]);
 
-  const openNodeEditor = useCallback((node: Node, source: 'click' | 'selection' = 'click') => {
+  const openNodeEditor = useCallback((node: Node, source: 'doubleClick' = 'doubleClick') => {
     const canvasWidthBefore = flowCanvasRef.current?.getBoundingClientRect().width ?? 0;
-    console.info('[NODE CLICK]', { node_id: node.id, node_type: node.type, source });
+    console.info('[NODE DOUBLE CLICK]', { node_id: node.id, node_type: node.type, source });
     console.info('[FLOW CANVAS WIDTH BEFORE]', canvasWidthBefore);
 
     if (selectedNodeIdRef.current === node.id) {
@@ -1299,14 +1299,8 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
     }
   }, [markFlowDirty, updateNodeData]);
 
-  const handleReactFlowNodeClick = useCallback((_: unknown, node: Node) => {
-    openNodeEditor(node, 'click');
-  }, [openNodeEditor]);
-
-  const handleReactFlowSelectionChange = useCallback(({ nodes: selectedNodes }: { nodes: Node[] }) => {
-    if (selectedNodes.length === 1) {
-      openNodeEditor(selectedNodes[0], 'selection');
-    }
+  const handleReactFlowNodeDoubleClick = useCallback((_: unknown, node: Node) => {
+    openNodeEditor(node, 'doubleClick');
   }, [openNodeEditor]);
 
   const uploadEditorMedia = useCallback(async (file: File | null, mediaType: 'image' | 'document' | 'audio' | 'video') => {
@@ -2672,8 +2666,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
           onConnect={onConnect}
           onConnectStart={onConnectStart}
           onConnectEnd={onConnectEnd}
-          onNodeClick={handleReactFlowNodeClick}
-          onSelectionChange={handleReactFlowSelectionChange}
+          onNodeDoubleClick={handleReactFlowNodeDoubleClick}
           onContextMenu={(e) => {
             e.preventDefault();
             const mainRect = (e.currentTarget as HTMLElement).getBoundingClientRect();
