@@ -975,6 +975,26 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
     return window.confirm(UNSAVED_CHANGES_MESSAGE);
   }, [flowDirty]);
 
+  const flowStatusIndicator = useMemo(() => {
+    if (flowSaveStatus === 'saving') {
+      return {
+        label: 'Salvando...',
+        className: 'flow-save-indicator flow-save-indicator-saving',
+        title: 'Salvando alterações do fluxo.',
+      };
+    }
+
+    if (flowDirty) {
+      return {
+        label: 'Não salvo',
+        className: 'flow-save-indicator flow-save-indicator-dirty',
+        title: 'Existem alterações locais ainda não publicadas.\nClique em Ativar para publicar o fluxo.',
+      };
+    }
+
+    return null;
+  }, [flowDirty, flowSaveStatus]);
+
   const saveButtonLabel = useMemo(() => {
     if (flowSaveStatus === 'saving') return 'Salvando...';
     if (flowSaveStatus === 'success') return 'Salvo agora';
@@ -2406,11 +2426,6 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
           <Link href="/dashboard/flows">Fluxos</Link>
           <span aria-hidden="true">›</span>
           <span>{selectedFlow ? (selectedFlow.name || selectedFlow.id) : 'Selecione um fluxo'}</span>
-          {flowDirty && (
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, color: '#b45309', background: '#fffbeb', border: '1px solid #f59e0b', borderRadius: 999, padding: '3px 9px', fontSize: 12, fontWeight: 600 }}>
-              ● Alterações não salvas
-            </span>
-          )}
           <span aria-hidden="true">›</span>
           <strong>Builder</strong>
         </div>
@@ -2449,7 +2464,17 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
                       </span>
                       {selectedFlow && (() => {
                         const badge = getFlowBadge(selectedFlow);
-                        return <span className="flow-badge" style={badge.style}>{badge.label}</span>;
+                        return (
+                          <span className="flow-status-cluster">
+                            <span className="flow-badge" style={badge.style}>{badge.label}</span>
+                            {flowStatusIndicator && (
+                              <span className={flowStatusIndicator.className} title={flowStatusIndicator.title}>
+                                <span aria-hidden="true">•</span>
+                                <span>{flowStatusIndicator.label}</span>
+                              </span>
+                            )}
+                          </span>
+                        );
                       })()}
                     </div>
                   </button>

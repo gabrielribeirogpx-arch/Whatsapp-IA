@@ -1868,6 +1868,35 @@ input {
   max-width: min(28vw, 280px);
 }
 
+.flow-status-cluster {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 0 0 auto;
+}
+
+.flow-save-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 22px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+  opacity: 0.86;
+  transition: opacity 0.2s ease, color 0.2s ease;
+}
+
+.flow-save-indicator-dirty {
+  color: #d97706;
+}
+
+.flow-save-indicator-saving {
+  color: #64748b;
+}
+
 .flow-badge {
   padding: 2px 8px;
   border-radius: 999px;
