@@ -11,6 +11,15 @@ type FlowAnalyticsApi = {
   flow_id?: string;
   flow_name?: string;
   period?: string;
+  summary?: {
+    entries?: number;
+    conversions?: number;
+    conversion_rate?: number;
+    abandonments?: number;
+    abandonment_rate?: number;
+    avg_duration_seconds?: number;
+    messages_handled?: number;
+  };
   kpis?: {
     entries?: number;
     conversion_rate?: number;
@@ -69,14 +78,14 @@ export default function Page({ params }: Props) {
   }, [params.flowId]);
 
   const kpis = useMemo(() => [
-    ['Entradas', Number(data?.kpis?.entries ?? 0)],
-    ['Conversão', `${Number(data?.kpis?.conversion_rate ?? 0)}%`],
-    ['Abandono', `${Number(data?.kpis?.abandonment_rate ?? 0)}%`],
-    ['Tempo médio', formatDuration(data?.kpis?.avg_time_seconds)],
-    ['Mensagens tratadas', Number(data?.kpis?.handled_messages ?? 0)],
+    ['Entradas', Number(data?.summary?.entries ?? data?.kpis?.entries ?? 0)],
+    ['Conversão', `${Number(data?.summary?.conversion_rate ?? data?.kpis?.conversion_rate ?? 0)}%`],
+    ['Abandono', `${Number(data?.summary?.abandonment_rate ?? data?.kpis?.abandonment_rate ?? 0)}%`],
+    ['Tempo médio', formatDuration(data?.summary?.avg_duration_seconds ?? data?.kpis?.avg_time_seconds)],
+    ['Mensagens tratadas', Number(data?.summary?.messages_handled ?? data?.kpis?.handled_messages ?? 0)],
   ], [data]);
 
-  const noData = Number(data?.kpis?.entries ?? 0) === 0;
+  const noData = Number(data?.summary?.entries ?? data?.kpis?.entries ?? 0) === 0;
   const timeseries = (data?.timeseries ?? []).map((point) => ({
     date: point.date ?? '',
     entries: Number(point.entries ?? 0),

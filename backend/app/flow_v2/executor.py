@@ -7,7 +7,8 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import Conversation
+from app.models import Conversation, FlowVersion
+from app.services.flow_analytics_service import track_flow_event
 
 from app.flow_v2.actions import RuntimeAction, SendMessageAction
 from app.flow_v2.contracts import FlowV2EventType, FlowV2SessionStatus, RuntimeInput, RuntimeOutput
@@ -90,6 +91,9 @@ class FlowV2Executor:
             snapshot.hash,
         )
         session = self.session_manager.get_or_create(db, runtime_input=runtime_input, snapshot=snapshot)
+        flow_id = self._flow_id_for_version(db, tenant_id=runtime_input.tenant_id, flow_version_id=runtime_input.flow_version_id)
+        if getattr(session, "last_event_index", 0) == 0:
+            self._track_analytics(db, session=session, flow_id=flow_id, event_type="flow_started", metadata={"external_user_id": runtime_input.external_user_id})
         idempotency_metadata = {
             **runtime_input.metadata,
             "event_id": runtime_input.event_id or runtime_input.metadata.get("event_id"),
@@ -125,6 +129,7 @@ class FlowV2Executor:
                 node_id=session.current_node_id,
                 input_message_id=runtime_input.input_message_id or idempotency_key,
             )
+            self._track_analytics(db, session=session, flow_id=flow_id, event_type="message_received", node_id=session.current_node_id, event_key=runtime_input.message_text, metadata={"text": runtime_input.message_text})
 
             if self._is_delay_resumed(runtime_input):
                 logger.info(
@@ -191,6 +196,11 @@ class FlowV2Executor:
 
             node_id = str(node["id"])
             self.event_store.append(db, session=session, event_type=FlowV2EventType.NODE_ENTERED, node_id=node_id)
+            flow_id = self._flow_id_for_version(db, tenant_id=session.tenant_id, flow_version_id=session.flow_version_id)
+            node_type = str(node.get("type") or self._node_data(node).get("type") or "message")
+            self._track_analytics(db, session=session, flow_id=flow_id, event_type="node_entered", node_id=node_id, node_type=node_type, metadata={"node_label": self._node_data(node).get("label")})
+            if self._node_data(node).get("is_conversion") is True:
+                self._track_analytics(db, session=session, flow_id=flow_id, event_type="conversion_reached", node_id=node_id, node_type=node_type, event_key=str(self._node_data(node).get("conversion_label") or node_id), metadata={"conversion_label": self._node_data(node).get("conversion_label")})
             try:
                 node_type = str(node.get("type") or self._node_data(node).get("type") or "message")
                 logger.info(
@@ -228,6 +238,7 @@ class FlowV2Executor:
                     payload={"node_type": node_type, "status": result.status},
                 )
                 self.event_store.append(db, session=session, event_type=FlowV2EventType.NODE_COMPLETED, node_id=node_id)
+                self._track_analytics(db, session=session, flow_id=flow_id, event_type="node_completed", node_id=node_id, node_type=node_type)
             except FlowV2TransitionError as exc:
                 logger.exception("[V2 NODE EXECUTION] transition_failed node_id=%s error=%s", node_id, exc)
                 self.event_store.append(
@@ -255,6 +266,9 @@ class FlowV2Executor:
                 raise
 
             actions.extend(result.actions)
+            for action in result.actions:
+                if isinstance(action, SendMessageAction):
+                    self._track_analytics(db, session=session, flow_id=flow_id, event_type="message_sent", node_id=node_id, node_type=node_type, metadata={"text": action.text})
 
             if result.status == "scheduled":
                 logger.info(
@@ -310,6 +324,7 @@ class FlowV2Executor:
                 return actions
             if result.status == "complete":
                 self.event_store.append(db, session=session, event_type=FlowV2EventType.SESSION_COMPLETED, node_id=node_id)
+                self._track_analytics(db, session=session, flow_id=flow_id, event_type="flow_completed", node_id=node_id, node_type=node_type)
                 self.session_manager.move_to(db, session=session, node_id=None, status=FlowV2SessionStatus.COMPLETED)
                 logger.info(
                     "[EXECUTOR STOP] node_id=%s node_type=%s current_node_id=%s session_status=%s reason=complete actions_count=%s",
@@ -330,6 +345,7 @@ class FlowV2Executor:
                 node_id=node_id,
                 payload={"target_node_id": result.next_node_id},
             )
+            self._track_analytics(db, session=session, flow_id=flow_id, event_type="choice_selected", node_id=node_id, node_type=node_type, event_key=str(result.next_node_id), metadata={"target_node_id": result.next_node_id})
             self.session_manager.move_to(db, session=session, node_id=result.next_node_id, status=FlowV2SessionStatus.RUNNING)
 
         current_node_id = session.current_node_id
@@ -342,6 +358,38 @@ class FlowV2Executor:
         )
         self.session_manager.move_to(db, session=session, node_id=current_node_id, status=FlowV2SessionStatus.FAILED)
         raise FlowV2ExecutionError(f"Runtime V2 exceeded max_steps={MAX_RUNTIME_STEPS}")
+
+
+    @staticmethod
+    def _flow_id_for_version(db: Session, *, tenant_id: uuid.UUID, flow_version_id: uuid.UUID) -> uuid.UUID | None:
+        try:
+            row = db.query(FlowVersion.flow_id).filter(FlowVersion.id == flow_version_id, FlowVersion.tenant_id == tenant_id).first()
+            return row[0] if row else None
+        except Exception as exc:  # pragma: no cover
+            logger.warning("event=flow_analytics_resolve_flow_failed flow_version_id=%s tenant_id=%s error=%s", flow_version_id, tenant_id, exc)
+            return None
+
+    @staticmethod
+    def _track_analytics(db: Session, *, session: Any, flow_id: uuid.UUID | None, event_type: str, node_id: str | None = None, node_type: str | None = None, event_key: str | None = None, metadata: dict[str, Any] | None = None) -> None:
+        if not flow_id:
+            return
+        try:
+            track_flow_event(
+                db,
+                tenant_id=session.tenant_id,
+                flow_id=flow_id,
+                flow_version_id=session.flow_version_id,
+                session_id=session.id,
+                conversation_id=getattr(session, "conversation_id", None),
+                contact_id=getattr(session, "contact_id", None),
+                node_id=node_id,
+                node_type=node_type,
+                event_type=event_type,
+                event_key=event_key,
+                metadata=metadata or {},
+            )
+        except Exception as exc:  # pragma: no cover
+            logger.warning("event=flow_analytics_runtime_track_failed session_id=%s event_type=%s error=%s", getattr(session, "id", None), event_type, exc)
 
     @staticmethod
     def _is_delay_resumed(runtime_input: RuntimeInput) -> bool:

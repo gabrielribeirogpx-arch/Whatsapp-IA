@@ -622,7 +622,7 @@ export async function restoreFlowVersion(flowId: string, versionId: string): Pro
 }
 
 export async function getFlowAnalytics(flowId: string, period: string = "7d"): Promise<FlowAnalytics> {
-  const res = await apiFetch(`/api/flows/${flowId}/analytics?period=${encodeURIComponent(period)}`);
+  const res = await apiFetch(`/api/flows/${flowId}/analytics?range=${encodeURIComponent(period)}`);
   return parseApiResponse<FlowAnalytics>(res);
 }
 
