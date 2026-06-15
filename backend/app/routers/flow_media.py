@@ -440,11 +440,24 @@ async def _upload_media(request: Request, file: UploadFile = File(...)) -> JSONR
             _validate_video_with_ffprobe(path)
             preflight_content_type, preflight_content_length = _validate_video_headers(public_url=public_url, suffix=suffix, local_size=len(data))
         except HTTPException:
+            logger.warning("[MEDIA UPLOAD CLEANUP] reason=video_validation_failed local_path=%s public_url=%s", path, public_url)
             path.unlink(missing_ok=True)
             raise
     else:
         preflight_content_type, preflight_content_length = content_type, len(data)
     logger.info("[MEDIA UPLOAD] media_type=%s public_url=%s content_type=%s content_length=%s", media_family, public_url, preflight_content_type, preflight_content_length)
+    logger.info(
+        "[MEDIA UPLOAD DIAGNOSTIC] tenant_id=%s original_filename=%s stored_filename=%s media_type=%s public_url=%s local_path=%s exists=%s size=%s note=%s",
+        request.state.tenant_id,
+        file.filename,
+        stored_filename,
+        media_family,
+        public_url,
+        path,
+        os.path.exists(path),
+        os.path.getsize(path) if os.path.exists(path) else None,
+        "new upload generates a uuid-prefixed URL; compare this public_url with published snapshot media_url",
+    )
     return JSONResponse({
         "url": public_url,
         "filename": file.filename or stored_filename,

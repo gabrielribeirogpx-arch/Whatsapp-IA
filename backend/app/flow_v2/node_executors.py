@@ -285,7 +285,17 @@ class MediaNodeExecutor(BaseNodeExecutor):
         next_node_id = self._default_next_or_terminal(db, snapshot=snapshot, session=session, node_id=node_id)
         self.event_store.append(db, session=session, event_type=FlowV2EventType.MESSAGE_SENT, node_id=node_id, payload={"node_id": node_id, "media_type": media_type, "media_url": media_url, "caption": caption, "filename": filename})
         action = SendMediaAction(tenant_id=session.tenant_id, session_id=session.id, external_user_id=runtime_input.external_user_id, conversation_id=runtime_input.conversation_id, contact_id=runtime_input.contact_id, media_type=media_type, media_url=media_url, caption=caption, filename=filename if media_type == "document" else None, metadata={**runtime_input.metadata, "node_id": node_id, "node_type": "media"})
-        logger.info("[MEDIA NODE EXECUTED] node_id=%s media_type=%s media_url=%s caption_present=%s filename=%s next_node_id=%s", node_id, media_type, media_url, bool(caption), filename, next_node_id)
+        logger.info(
+            "[MEDIA NODE EXECUTED] flow_id=%s snapshot_id=%s node_id=%s media_type=%s media_url=%s caption_present=%s filename=%s next_node_id=%s",
+            getattr(session, "flow_id", None),
+            getattr(session, "flow_version_id", None),
+            node_id,
+            media_type,
+            media_url,
+            bool(caption),
+            filename,
+            next_node_id,
+        )
         return NodeExecutionResult(actions=(action,), next_node_id=next_node_id, status="complete" if next_node_id is None else "continue")
 
 
