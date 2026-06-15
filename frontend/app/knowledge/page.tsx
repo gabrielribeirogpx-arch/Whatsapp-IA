@@ -1,247 +1,109 @@
 'use client';
 
-import Link from 'next/link';
-import { DragEvent, FormEvent, useEffect, useState } from 'react';
+import { FormEvent, useEffect, useState } from 'react';
+import { apiFetch } from '@/lib/api';
 
-import { crawlKnowledgeSite, createKnowledge, deleteKnowledge, getKnowledge, uploadKnowledgePdf } from '../../lib/api';
-import { KnowledgeItem } from '../../lib/types';
+type KnowledgeSource = {
+  id: string;
+  name: string;
+  type: string;
+  status: 'pending' | 'processing' | 'ready' | 'failed' | string;
+  original_filename?: string | null;
+  size_bytes?: number | null;
+  chunks_count?: number;
+  created_at: string;
+};
 
 export default function KnowledgePage() {
-  const [items, setItems] = useState<KnowledgeItem[]>([]);
-  const [title, setTitle] = useState('');
-  const [content, setContent] = useState('');
-  const [crawlUrl, setCrawlUrl] = useState('');
+  const [sources, setSources] = useState<KnowledgeSource[]>([]);
+  const [file, setFile] = useState<File | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [uploading, setUploading] = useState(false);
   const [error, setError] = useState('');
-  const [info, setInfo] = useState('');
-  const [saving, setSaving] = useState(false);
-  const [uploadingPdf, setUploadingPdf] = useState(false);
-  const [crawlLoading, setCrawlLoading] = useState(false);
-  const [crawlStage, setCrawlStage] = useState('');
-  const [dragActive, setDragActive] = useState(false);
 
-  async function loadKnowledge() {
-    const data = await getKnowledge();
-    setItems(data);
-  }
-
-  useEffect(() => {
-    loadKnowledge().catch(() => setError('Falha real ao sincronizar a base de conhecimento. Tente novamente em alguns instantes.'));
-  }, []);
-
-  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  async function loadSources() {
+    setLoading(true);
     setError('');
-
-    if (!title.trim() || !content.trim()) {
-      setError('Título e conteúdo são obrigatórios.');
-      return;
-    }
-
-    setSaving(true);
     try {
-      await createKnowledge({
-        title: title.trim(),
-        content: content.trim()
-      });
-      setTitle('');
-      setContent('');
-      await loadKnowledge();
-    } catch {
-      setError('Falha ao salvar conteúdo.');
+      const response = await apiFetch('/api/knowledge/sources');
+      if (!response.ok) throw new Error('Falha ao carregar fontes');
+      setSources(await response.json());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Falha ao carregar fontes');
     } finally {
-      setSaving(false);
+      setLoading(false);
     }
   }
 
-  async function handleDelete(itemId: string) {
-    setError('');
-    try {
-      await deleteKnowledge(itemId);
-      await loadKnowledge();
-    } catch {
-      setError('Falha ao excluir conteúdo.');
-    }
-  }
+  useEffect(() => { void loadSources(); }, []);
 
-  async function processPdf(file: File) {
-    setError('');
-    setInfo('');
-    setUploadingPdf(true);
-    try {
-      const result = await uploadKnowledgePdf(file);
-      setInfo(`PDF "${result.source}" processado com ${result.chunks_created} chunks.`);
-      await loadKnowledge();
-    } catch {
-      setError('Falha ao processar PDF.');
-    } finally {
-      setUploadingPdf(false);
-    }
-  }
-
-  async function handleCrawlSubmit(event: FormEvent<HTMLFormElement>) {
+  async function upload(event: FormEvent) {
     event.preventDefault();
+    if (!file) return;
+    setUploading(true);
     setError('');
-    setInfo('');
-
-    if (!crawlUrl.trim()) {
-      setError('Informe uma URL para iniciar o treinamento por site.');
-      return;
-    }
-
-    setCrawlLoading(true);
-    setCrawlStage('Coletando páginas...');
-
+    const formData = new FormData();
+    formData.append('file', file);
     try {
-      const crawlPromise = crawlKnowledgeSite({ url: crawlUrl.trim(), depth: 2 });
-      setCrawlStage('Processando conteúdo...');
-      const result = await crawlPromise;
-      setInfo(
-        `Treinamento concluído. ${result.pages_collected} páginas coletadas e ${result.chunks_created} chunks criados.`
-      );
-      setCrawlUrl('');
-      await loadKnowledge();
-    } catch {
-      setError('Falha ao treinar com site. Verifique se a URL é pública e válida.');
+      const response = await apiFetch('/api/knowledge/upload', { method: 'POST', body: formData });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(payload.detail || 'Falha ao enviar arquivo');
+      }
+      setFile(null);
+      await loadSources();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Falha ao enviar arquivo');
     } finally {
-      setCrawlLoading(false);
-      setCrawlStage('');
+      setUploading(false);
     }
   }
 
-  function handleDrop(event: DragEvent<HTMLDivElement>) {
-    event.preventDefault();
-    setDragActive(false);
-    const file = event.dataTransfer.files?.[0];
-    if (file) {
-      processPdf(file).catch(() => setError('Falha ao processar PDF.'));
-    }
+  async function remove(id: string) {
+    if (!confirm('Excluir esta fonte e todos os chunks?')) return;
+    const response = await apiFetch(`/api/knowledge/sources/${id}`, { method: 'DELETE' });
+    if (response.ok) setSources((current) => current.filter((source) => source.id !== id));
   }
 
   return (
-    <main className="dashboard-page">
-      <section className="dashboard-hero">
-        <div>
-          <h1>Knowledge Base</h1>
-          <p>Alimente a IA com conteúdos próprios da sua conta para respostas mais precisas.</p>
-        </div>
-        <div className="dashboard-actions">
-          <Link href="/dashboard" className="secondary-button">
-            Dashboard
-          </Link>
-          <Link href="/chat" className="primary-button">
-            Abrir chat
-          </Link>
-        </div>
-      </section>
+    <main className="min-h-screen bg-slate-50 p-6">
+      <section className="mx-auto max-w-5xl space-y-6">
+        <header>
+          <p className="text-sm font-semibold uppercase tracking-wide text-indigo-600">RAG</p>
+          <h1 className="text-3xl font-bold text-slate-900">Base de conhecimento</h1>
+          <p className="text-slate-600">Envie PDFs pesquisáveis ou arquivos TXT para alimentar nodes IA / RAG dos fluxos.</p>
+        </header>
 
-      {error ? <p className="error-text">{error}</p> : null}
-      {info ? <p>{info}</p> : null}
-
-      <section className="products-layout">
-        <article className="products-form-card">
-          <h2>Adicionar conteúdo</h2>
-
-          <form className="products-form" onSubmit={handleCrawlSubmit} style={{ marginBottom: 16 }}>
-            <label htmlFor="knowledge-url">URL do site</label>
-            <input
-              id="knowledge-url"
-              type="url"
-              placeholder="https://site.com"
-              value={crawlUrl}
-              onChange={(event) => setCrawlUrl(event.target.value)}
-            />
-            <div className="products-form-actions">
-              <button type="submit" className="primary-button" disabled={crawlLoading}>
-                {crawlLoading ? 'Treinando...' : 'Treinar com site'}
-              </button>
-            </div>
-            {crawlLoading && crawlStage ? <p>{crawlStage}</p> : null}
-          </form>
-
-          <div
-            onDragOver={(event) => {
-              event.preventDefault();
-              setDragActive(true);
-            }}
-            onDragLeave={() => setDragActive(false)}
-            onDrop={handleDrop}
-            style={{
-              border: '1px dashed #6b7280',
-              borderRadius: 12,
-              padding: 16,
-              marginBottom: 16,
-              backgroundColor: dragActive ? 'rgba(59, 130, 246, 0.1)' : 'transparent'
-            }}
-          >
-            <strong>Upload PDF</strong>
-            <p>Arraste e solte um PDF aqui para processar automaticamente no RAG.</p>
-            <label htmlFor="pdf-upload" className="secondary-button" style={{ display: 'inline-block', cursor: 'pointer' }}>
-              Upload PDF
-            </label>
-            <input
-              id="pdf-upload"
-              type="file"
-              accept="application/pdf"
-              style={{ display: 'none' }}
-              onChange={(event) => {
-                const selected = event.target.files?.[0];
-                if (selected) {
-                  processPdf(selected).catch(() => setError('Falha ao processar PDF.'));
-                }
-              }}
-            />
-            {uploadingPdf ? <p>Processando documento...</p> : null}
+        <form onSubmit={upload} className="rounded-2xl border bg-white p-5 shadow-sm">
+          <label className="block text-sm font-medium text-slate-700">Upload PDF/TXT</label>
+          <div className="mt-3 flex flex-col gap-3 sm:flex-row">
+            <input className="flex-1 rounded-lg border px-3 py-2" type="file" accept="application/pdf,text/plain,.pdf,.txt" onChange={(event) => setFile(event.target.files?.[0] || null)} />
+            <button disabled={!file || uploading} className="rounded-lg bg-indigo-600 px-5 py-2 font-semibold text-white disabled:opacity-50" type="submit">{uploading ? 'Processando...' : 'Enviar'}</button>
           </div>
+          <p className="mt-2 text-sm text-slate-500">PDF escaneado sem texto pesquisável será recusado com mensagem amigável.</p>
+        </form>
 
-          <form className="products-form" onSubmit={handleSubmit}>
-            <label htmlFor="knowledge-title">Título</label>
-            <input id="knowledge-title" value={title} onChange={(event) => setTitle(event.target.value)} required />
+        {error ? <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-red-700">{error}</div> : null}
 
-            <label htmlFor="knowledge-content">Conteúdo</label>
-            <textarea
-              id="knowledge-content"
-              value={content}
-              onChange={(event) => setContent(event.target.value)}
-              required
-              rows={8}
-            />
-
-            <div className="products-form-actions">
-              <button type="submit" className="primary-button" disabled={saving}>
-                {saving ? 'Salvando...' : 'Salvar'}
-              </button>
+        <section className="rounded-2xl border bg-white shadow-sm">
+          <div className="border-b p-5"><h2 className="text-lg font-semibold">Fontes cadastradas</h2></div>
+          {loading ? <p className="p-5 text-slate-500">Carregando...</p> : sources.length === 0 ? <p className="p-8 text-center text-slate-500">Nenhuma base cadastrada ainda.</p> : (
+            <div className="divide-y">
+              {sources.map((source) => (
+                <article key={source.id} className="flex flex-col gap-3 p-5 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <h3 className="font-semibold text-slate-900">{source.name}</h3>
+                    <p className="text-sm text-slate-500">{source.type.toUpperCase()} • {source.chunks_count || 0} chunks • {(source.size_bytes || 0).toLocaleString('pt-BR')} bytes</p>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <span className={`rounded-full px-3 py-1 text-xs font-semibold ${source.status === 'ready' ? 'bg-emerald-100 text-emerald-700' : source.status === 'failed' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'}`}>{source.status}</span>
+                    <button onClick={() => void remove(source.id)} className="rounded-lg border px-3 py-1 text-sm text-slate-700" type="button">Deletar</button>
+                  </div>
+                </article>
+              ))}
             </div>
-          </form>
-        </article>
-
-        <article className="products-list-card">
-          <h2>Conteúdos cadastrados</h2>
-          <div className="products-list">
-            {items.map((item) => (
-              <div className="product-card" key={item.id}>
-                <strong>{item.title}</strong>
-                <p>{item.content}</p>
-                <div className="product-actions">
-                  <button type="button" className="ghost-button" onClick={() => handleDelete(item.id)}>
-                    Excluir
-                  </button>
-                </div>
-              </div>
-            ))}
-
-            {!items.length ? (
-              <div className="empty-state" style={{ border: '1px solid #1f2937', borderRadius: 12, padding: 16 }}>
-                <strong>Nenhum item criado ainda</strong>
-                <p style={{ marginTop: 8 }}>Crie seu primeiro conteúdo para treinar respostas contextualizadas. Comece com uma destas opções:</p>
-                <ul style={{ marginTop: 8, paddingLeft: 18 }}>
-                  <li>Upload de PDF com catálogo, políticas ou manuais.</li>
-                  <li>Adicionar URL pública para ingestão automática.</li>
-                  <li>Criar FAQ com perguntas e respostas frequentes.</li>
-                </ul>
-              </div>
-            ) : null}
-          </div>
-        </article>
+          )}
+        </section>
       </section>
     </main>
   );

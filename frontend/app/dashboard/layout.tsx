@@ -157,9 +157,14 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
             <span className="dash-nav-label">Produtos</span>
           </Link>
 
-          <Link href="/knowledge" className="dash-nav-item">
+          <Link href="/dashboard/knowledge" className={`dash-nav-item ${pathname === '/dashboard/knowledge' ? 'active' : ''}`}>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
-            <span className="dash-nav-label">Knowledge</span>
+            <span className="dash-nav-label">Base de conhecimento</span>
+          </Link>
+
+          <Link href="/dashboard/ai-settings" className={`dash-nav-item ${pathname === '/dashboard/ai-settings' ? 'active' : ''}`}>
+            <span aria-hidden="true" className="text-lg">✨</span>
+            <span className="dash-nav-label">Configurações de IA</span>
           </Link>
 
           <Link
