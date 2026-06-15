@@ -1981,6 +1981,7 @@ def get_tenant_flow_by_id(
 def get_tenant_flow_analytics(
     flow_id: str,
     period: str = "7d",
+    range: str | None = None,
     x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
     db: Session = Depends(get_db),
 ):
@@ -1989,9 +1990,10 @@ def get_tenant_flow_analytics(
     if not flow:
         raise HTTPException(status_code=404, detail="Flow not found")
 
-    resolved_period = resolve_analytics_period(period)
-    if resolved_period != period:
-        logger.info("[FLOW ANALYTICS] invalid period=%s fallback=%s allowed=%s", period, resolved_period, "|".join(PERIODS.keys()))
+    requested_period = range or period
+    resolved_period = resolve_analytics_period(requested_period)
+    if resolved_period != requested_period:
+        logger.info("[FLOW ANALYTICS] invalid period=%s fallback=%s allowed=%s", requested_period, resolved_period, "|".join(PERIODS.keys()))
 
     analytics = get_flow_analytics(db=db, tenant_id=tenant_uuid, flow_id=flow.id, period=resolved_period)
     logger.info("[FLOW ANALYTICS] flow_id=%s tenant_id=%s analytics=%s", flow_id, tenant_uuid, analytics)

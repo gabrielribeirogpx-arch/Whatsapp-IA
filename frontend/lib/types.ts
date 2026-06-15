@@ -392,10 +392,10 @@ export type FlowAnalytics = {
   flow_id: string;
   flow_name: string;
   period: '24h' | '7d' | '30d' | '90d' | string;
-  summary: { entries: number; messages_sent: number; completed: number; conversion_rate: number; dropoff_rate: number; avg_time_seconds: number; avg_messages_per_user: number; };
-  funnel: Array<{ node_id: string; node_label: string; node_type: string; entries: number; exits: number; dropoff_rate: number; conversion_to_next_rate: number; avg_time_seconds: number; }>;
+  summary: { entries: number; conversions?: number; conversion_rate: number; abandonments?: number; abandonment_rate?: number; avg_duration_seconds?: number; messages_handled?: number; messages_sent: number; completed: number; dropoff_rate: number; avg_time_seconds: number; avg_messages_per_user?: number; };
+  funnel: Array<{ node_id: string; node_label: string; node_type: string; entries?: number; entered?: number; exits?: number; completed?: number; dropoff?: number; dropoffs?: number; dropoff_rate: number; conversion_to_next_rate?: number; avg_time_seconds?: number; }>;
   top_dropoffs: Array<{ node_id: string; node_label: string; node_type: string; entries: number; exits: number; dropoff_rate: number; conversion_to_next_rate: number; avg_time_seconds: number; }>;
-  common_replies: Array<{ reply: string; count: number; rate: number }>;
+  common_replies: Array<{ text?: string; reply?: string; count: number; rate?: number }>;
   timeline: Array<{ date: string; entries: number; messages_sent: number; completed: number }>;
   insights: Array<{ type: 'warning' | 'info' | 'success' | string; title: string; message: string; node_id?: string | null }>;
 };

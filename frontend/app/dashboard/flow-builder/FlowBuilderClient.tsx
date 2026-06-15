@@ -455,6 +455,23 @@ function FlowNodeEditorPanel({
       {showVariablesHelp && supportsVariables ? <FlowVariablesHelp onClose={() => setShowVariablesHelp(false)} /> : null}
 
       <div className="flow-node-editor-content">
+        <div className="flow-editor-info-card" title="Use isto para definir o objetivo do fluxo. Ex: lead qualificado, fatura acessada, pedido criado, atendimento encaminhado.">
+          <label className="flow-editor-radio">
+            <input
+              type="checkbox"
+              checked={draft.is_conversion === true}
+              onChange={(event) => onDraftChange({ is_conversion: event.target.checked, ...(event.target.checked ? {} : { conversion_label: '' }) })}
+            />
+            Marcar como conversão do fluxo
+          </label>
+          <small>Use isto para definir o objetivo do fluxo. Ex: lead qualificado, fatura acessada, pedido criado, atendimento encaminhado.</small>
+          {draft.is_conversion === true ? (
+            <label className="flow-editor-field">
+              Label da conversão (opcional)
+              <input value={toText(draft.conversion_label)} onChange={(event) => onDraftChange({ conversion_label: event.target.value })} placeholder="Ex.: Lead qualificado" />
+            </label>
+          ) : null}
+        </div>
         {kind === 'message' && (
           <label className="flow-editor-field">
             Mensagem
