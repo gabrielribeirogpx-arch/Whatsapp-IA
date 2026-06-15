@@ -674,10 +674,11 @@ def _version_payload(db: Session, *, tenant_id: uuid.UUID, flow: Flow, selected_
     versions = (
         db.query(FlowVersion)
         .filter(FlowVersion.flow_id == flow.id, FlowVersion.tenant_id == tenant_id)
-        .order_by(FlowVersion.is_published.desc(), FlowVersion.is_active.desc(), FlowVersion.created_at.desc())
+        .order_by(FlowVersion.created_at.desc(), FlowVersion.id.desc())
         .all()
     )
     active_id = flow.published_version_id or flow.current_version_id or next((v.id for v in versions if v.is_published or v.is_active), None)
+    version_numbers = {version.id: f"v{number}" for number, version in enumerate(reversed(versions), start=1)}
     return {
         "mode": "all" if all_versions else ("specific" if selected_version_id and selected_version_id != active_id else "active"),
         "active_flow_version_id": str(active_id) if active_id else None,
@@ -685,9 +686,10 @@ def _version_payload(db: Session, *, tenant_id: uuid.UUID, flow: Flow, selected_
         "available_versions": [
             {
                 "id": str(version.id),
-                "label": f"Snapshot publicado em {version.created_at.strftime('%d/%m/%Y %H:%M')}",
+                "display_version": version_numbers.get(version.id, "v?"),
+                "label": f"{version_numbers.get(version.id, 'v?')}{' (Atual)' if version.id == active_id else ''} • {version.created_at.strftime('%d/%m/%Y %H:%M') if version.created_at else 'Data indisponível'}",
                 "created_at": version.created_at.isoformat() if version.created_at else None,
-                "is_active": version.id == active_id or bool(version.is_published or version.is_active),
+                "is_active": version.id == active_id,
             }
             for version in versions
         ],

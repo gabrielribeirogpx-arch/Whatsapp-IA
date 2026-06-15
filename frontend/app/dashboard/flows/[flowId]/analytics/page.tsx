@@ -27,7 +27,7 @@ type FlowAnalyticsApi = {
     avg_time_seconds?: number;
     handled_messages?: number;
   };
-  version?: { mode?: string; active_flow_version_id?: string | null; selected_flow_version_id?: string | null; available_versions?: Array<{ id: string; label: string; created_at?: string | null; is_active?: boolean }> };
+  version?: { mode?: string; active_flow_version_id?: string | null; selected_flow_version_id?: string | null; available_versions?: Array<{ id: string; label: string; display_version?: string; created_at?: string | null; is_active?: boolean }> };
   node_metrics?: Array<{ node_id: string; node_label: string; node_type: string; entered: number; completed: number; conversions: number; dropoff: number; dropoff_rate: number; avg_time_seconds?: number | null }>;
   funnel?: Array<{ node_id: string; node_label: string; node_type: string; entries?: number; entered?: number; completed?: number; conversions?: number; dropoff?: number; dropoff_rate?: number; conversion_to_next_rate?: number; avg_time_seconds?: number | null }>;
   dropoffs?: Array<{ node_id: string; node_label: string; node_type: string; entries?: number; entered?: number; completed?: number; conversions?: number; dropoff?: number; dropoff_rate?: number; conversion_to_next_rate?: number; avg_time_seconds?: number | null }>;
@@ -36,6 +36,31 @@ type FlowAnalyticsApi = {
 };
 
 const periods = ['24h', '7d', '30d', '90d'];
+
+function formatSnapshotDate(value?: string | null, includeConnector = false) {
+  if (!value) return 'Data indisponível';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return 'Data indisponível';
+  const formatted = new Intl.DateTimeFormat('pt-BR', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(date);
+  return includeConnector ? formatted.replace(', ', ' às ') : formatted.replace(', ', ' ');
+}
+
+function formatVersionOption(item: { label?: string; display_version?: string; created_at?: string | null; is_active?: boolean }) {
+  const displayVersion = item.display_version || item.label?.split(' • ')[0]?.replace(' (Atual)', '') || 'Versão';
+  const activeSuffix = item.is_active ? ' (Atual)' : '';
+  return `${displayVersion}${activeSuffix} • ${formatSnapshotDate(item.created_at)}`;
+}
+
+function formatSnapshotCount(count: number) {
+  if (count === 1) return '1 versão disponível';
+  return `${count} versões disponíveis`;
+}
 function formatDuration(totalSeconds?: number) {
   const seconds = Math.max(0, Math.round(Number(totalSeconds) || 0));
   const minutes = Math.floor(seconds / 60);
@@ -88,9 +113,21 @@ export default function Page({ params }: Props) {
     ['Mensagens tratadas', Number(data?.summary?.messages_handled ?? data?.kpis?.handled_messages ?? 0)],
   ], [data]);
 
+  const availableVersions = data?.version?.available_versions ?? [];
+  const selectedVersion = data?.version?.mode === 'specific'
+    ? availableVersions.find((item) => item.id === data.version?.selected_flow_version_id || item.id === version)
+    : data?.version?.mode === 'active'
+      ? availableVersions.find((item) => item.id === data.version?.active_flow_version_id || item.is_active)
+      : undefined;
+  const activeDisplayVersion = availableVersions.find((item) => item.id === data?.version?.active_flow_version_id || item.is_active)?.display_version;
+  const versionSummaryTitle = data?.version?.mode === 'all'
+    ? 'Todas as versões'
+    : data?.version?.mode === 'specific'
+      ? (selectedVersion?.display_version || 'Versão selecionada')
+      : `Versão atual${activeDisplayVersion ? ` (${activeDisplayVersion})` : ''}`;
+  const versionSummaryDate = data?.version?.mode === 'all' ? null : selectedVersion?.created_at;
   const nodeFunnel = data?.node_metrics?.length ? data.node_metrics : (data?.funnel ?? []);
   const dropoffList = (data?.node_metrics?.length ? [...data.node_metrics].sort((a, b) => Number(b.dropoff ?? 0) - Number(a.dropoff ?? 0)) : (data?.dropoffs ?? [])).filter((item) => Number(item.dropoff ?? item.dropoff_rate ?? 0) > 0);
-  const versionDescription = data?.version?.mode === 'all' ? 'Visualizando todas as versões' : data?.version?.mode === 'specific' ? 'Visualizando snapshot selecionado' : 'Visualizando versão atual';
   const noData = Number(data?.summary?.entries ?? data?.kpis?.entries ?? 0) === 0;
   const timeseries = (data?.timeseries ?? []).map((point) => ({
     date: point.date ?? '',
@@ -137,18 +174,33 @@ export default function Page({ params }: Props) {
               </button>
             ))}
           </div>
-          <div className='period-label'>Versão:</div>
-          <select className='version-select' value={version} onChange={(event) => setVersion(event.target.value)}>
-            <option value='active'>Atual</option>
-            <option value='all'>Todas</option>
-            {(data?.version?.available_versions ?? []).map((item) => (
-              <option key={item.id} value={item.id}>{item.label}</option>
-            ))}
-          </select>
+          <div className='version-control'>
+            <label className='period-label' htmlFor='analytics-version-select'>Versão:</label>
+            <select id='analytics-version-select' className='version-select' value={version} onChange={(event) => setVersion(event.target.value)}>
+              <option value='active'>Atual</option>
+              <option value='all'>Todas</option>
+              {availableVersions.length > 0 && <option disabled>──────────────</option>}
+              {availableVersions.map((item) => (
+                <option key={item.id} value={item.id}>{formatVersionOption(item)}</option>
+              ))}
+            </select>
+            <span className='version-count'>{formatSnapshotCount(availableVersions.length)}</span>
+          </div>
         </div>
       </header>
 
-      <div className='version-note'>{versionDescription}</div>
+      <section className='version-summary' aria-label='Resumo da versão visualizada'>
+        <div>
+          <span className='version-summary-label'>Visualizando:</span>
+          <strong>{versionSummaryTitle}</strong>
+        </div>
+        {versionSummaryDate && (
+          <div>
+            <span className='version-summary-label'>Publicada em:</span>
+            <strong>{formatSnapshotDate(versionSummaryDate, true)}</strong>
+          </div>
+        )}
+      </section>
 
       <div className='kpi-grid'>
         {kpis.map(([label, value], index) => (
@@ -365,8 +417,21 @@ export default function Page({ params }: Props) {
         .period-label {
           font-weight: 600;
         }
-        .version-note { margin: -8px 0 16px; color: #64748b; font-size: 13px; }
-        .version-select { border: 1px solid #e2e8f0; border-radius: 12px; padding: 8px 10px; background: #fff; color: #334155; font-size: 13px; }
+        .version-control { display: grid; gap: 4px; align-items: center; }
+        .version-count { color: #94a3b8; font-size: 11px; line-height: 1; }
+        .version-summary {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 14px 24px;
+          align-items: center;
+          margin: -14px 0 16px;
+          color: #334155;
+          font-size: 13px;
+        }
+        .version-summary div { display: inline-flex; gap: 6px; align-items: baseline; }
+        .version-summary-label { color: #64748b; font-weight: 500; }
+        .version-summary strong { color: #0f172a; font-weight: 700; }
+        .version-select { border: 1px solid #e2e8f0; border-radius: 12px; padding: 8px 10px; background: #fff; color: #334155; font-size: 13px; min-width: 220px; max-width: 300px; }
         .segmented-control {
           display: inline-flex;
           padding: 4px;
