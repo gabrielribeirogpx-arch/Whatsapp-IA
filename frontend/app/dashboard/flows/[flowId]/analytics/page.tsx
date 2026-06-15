@@ -279,7 +279,7 @@ export default function Page({ params }: Props) {
   );
 
   return (
-    <section className="w-full min-w-0 px-5 py-6 lg:px-6">
+    <section className="w-full min-w-0 py-6">
       <div className="w-full min-w-0 space-y-5">
         <div className="analytics-page">
           <header className="analytics-header">
@@ -663,7 +663,13 @@ export default function Page({ params }: Props) {
               max-width: none;
               background: #f8fafc;
               color: #0f172a;
-              padding: 0 0 28px;
+              padding: 0 1.25rem 28px;
+            }
+            @media (min-width: 1024px) {
+              .analytics-page {
+                padding-left: 1.5rem;
+                padding-right: 1.5rem;
+              }
             }
             .analytics-header {
               display: grid;
