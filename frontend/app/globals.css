@@ -4988,3 +4988,65 @@ input {
   background: #eff6ff;
   color: #1d4ed8;
 }
+
+.flow-rename-modal {
+  width: min(420px, 100%);
+  background: #fff;
+  border: 1px solid #e6ebe3;
+  border-radius: 16px;
+  box-shadow: 0 22px 56px rgba(15, 23, 42, 0.2);
+  overflow: hidden;
+}
+
+.flow-rename-header {
+  padding: 18px 20px;
+  border-bottom: 1px solid #edf1ea;
+}
+
+.flow-rename-header h3 {
+  margin: 0;
+  font-size: 16px;
+  color: #111827;
+}
+
+.flow-rename-header p {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: #6b7280;
+}
+
+.flow-rename-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 18px 20px 8px;
+  font-size: 12px;
+  font-weight: 650;
+  color: #334155;
+}
+
+.flow-rename-field input {
+  width: 100%;
+  border: 1px solid #dbe2ea;
+  border-radius: 10px;
+  padding: 11px 12px;
+  color: #111827;
+  background: #fcfdfc;
+  font: inherit;
+  font-size: 14px;
+  outline: none;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+}
+
+.flow-rename-field input:focus {
+  border-color: #86efac;
+  background: #fff;
+  box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.14);
+}
+
+.flow-rename-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 14px 20px 20px;
+}

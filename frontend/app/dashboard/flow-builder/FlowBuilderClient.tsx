@@ -871,6 +871,8 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
   const [isRestoringVersion, setIsRestoringVersion] = useState(false);
   const [isCreatingFlow, setIsCreatingFlow] = useState(false);
   const [isCreateFlowOpen, setIsCreateFlowOpen] = useState(false);
+  const [isRenameFlowOpen, setIsRenameFlowOpen] = useState(false);
+  const [renameFlowName, setRenameFlowName] = useState('');
   const [flowVersions, setFlowVersions] = useState<FlowVersionItem[]>([]);
   const [activeVersionId, setActiveVersionId] = useState<string | null>(null);
   const [flowSource, setFlowSource] = useState<string>('version');
@@ -906,6 +908,8 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
 
   const flowSelectRef = useRef<HTMLDivElement | null>(null);
   const flowCanvasRef = useRef<HTMLElement | null>(null);
+  const renameInputRef = useRef<HTMLInputElement | null>(null);
+  const renameTriggerRef = useRef<HTMLButtonElement | null>(null);
   const selectedFlow = useMemo(
     () => normalizedFlows.find((flow) => flow.id === selectedFlowId) || null,
     [normalizedFlows, selectedFlowId],
@@ -2199,9 +2203,8 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
     }
   }, [logFlowHttpError, parseHttpStatus, selectedFlowId]);
 
-  const renameFlow = useCallback(async () => {
+  const renameFlow = useCallback(async (name: string) => {
     if (!selectedFlowId) return;
-    const name = prompt('Novo nome do flow:');
     if (!name) return;
     const response = await apiFetch(`/api/flows/${selectedFlowId}/rename`, {
       method: 'PUT',
@@ -2211,6 +2214,31 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
 
     setFlows((prev) => prev.map((flow) => (flow.id === selectedFlowId ? { ...flow, name } : flow)));
   }, [selectedFlowId]);
+
+  const closeRenameFlowModal = useCallback(() => {
+    setIsRenameFlowOpen(false);
+    renameTriggerRef.current?.focus();
+  }, []);
+
+  const openRenameFlowModal = useCallback(() => {
+    if (!selectedFlowId) return;
+    setRenameFlowName(selectedFlow?.name || selectedFlowId);
+    setIsRenameFlowOpen(true);
+  }, [selectedFlow?.name, selectedFlowId]);
+
+  const handleRenameFlowSubmit = useCallback(async () => {
+    const nextName = renameFlowName;
+    closeRenameFlowModal();
+    await renameFlow(nextName);
+  }, [closeRenameFlowModal, renameFlow, renameFlowName]);
+
+  useEffect(() => {
+    if (!isRenameFlowOpen) return;
+    requestAnimationFrame(() => {
+      renameInputRef.current?.focus();
+      renameInputRef.current?.select();
+    });
+  }, [isRenameFlowOpen]);
 
   const handleRestoreVersion = useCallback(async (versionId: string) => {
     const tenantSession = getTenantSessionFromStorage();
@@ -2520,7 +2548,8 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
                   <button
                     type="button"
                     className="flow-top-btn flow-top-btn-neutral"
-                    onClick={renameFlow}
+                    ref={renameTriggerRef}
+                    onClick={openRenameFlowModal}
                     disabled={!selectedFlowId}
                   >
                     Renomear
@@ -2987,6 +3016,51 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
           </button>
         </div>
         </aside>
+      )}
+
+      {isRenameFlowOpen && (
+        <div className="flow-versions-backdrop" onClick={closeRenameFlowModal}>
+          <form
+            className="flow-rename-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="flow-rename-title"
+            onClick={(event) => event.stopPropagation()}
+            onSubmit={(event) => {
+              event.preventDefault();
+              void handleRenameFlowSubmit();
+            }}
+            onKeyDown={(event) => {
+              if (event.key === 'Escape') {
+                event.preventDefault();
+                closeRenameFlowModal();
+              }
+            }}
+          >
+            <div className="flow-rename-header">
+              <div>
+                <h3 id="flow-rename-title">Renomear fluxo</h3>
+                <p>Atualize o nome exibido no Flow Builder.</p>
+              </div>
+            </div>
+            <label className="flow-rename-field">
+              Nome do fluxo
+              <input
+                ref={renameInputRef}
+                value={renameFlowName}
+                onChange={(event) => setRenameFlowName(event.target.value)}
+              />
+            </label>
+            <div className="flow-rename-actions">
+              <button type="button" className="flow-top-btn flow-top-btn-neutral" onClick={closeRenameFlowModal}>
+                Cancelar
+              </button>
+              <button type="submit" className="flow-top-btn flow-top-btn-primary">
+                Salvar
+              </button>
+            </div>
+          </form>
+        </div>
       )}
       {isVersionsModalOpen && (
         <div className="flow-versions-backdrop" onClick={() => setIsVersionsModalOpen(false)}>
