@@ -197,6 +197,54 @@ def _log_publish_source_divergence(*, flow: Flow, published_version: FlowVersion
         _graph_node_ids(flow_version_nodes),
     )
 
+
+def _media_node_diagnostics(nodes: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    diagnostics: list[dict[str, Any]] = []
+    for node in nodes or []:
+        if not isinstance(node, dict):
+            continue
+        data = node.get("data") if isinstance(node.get("data"), dict) else {}
+        node_type = str(node.get("type") or data.get("type") or "").lower()
+        media_type = str(node.get("media_type") or data.get("media_type") or "").strip().lower()
+        media_url = str(node.get("media_url") or data.get("media_url") or data.get("url") or "").strip()
+        if node_type != "media" and not media_type and not media_url:
+            continue
+        diagnostics.append({
+            "node_id": str(node.get("id") or ""),
+            "node_type": node_type,
+            "media_type": media_type,
+            "media_url": media_url,
+            "filename": str(node.get("filename") or data.get("filename") or "").strip() or None,
+            "media_source": node.get("media_source") or data.get("media_source"),
+        })
+    return diagnostics
+
+
+def _log_publish_media_diagnostics(*, flow: Flow, version: FlowVersion | None, editor_nodes: list[dict[str, Any]], snapshot_nodes: list[dict[str, Any]], reason: str) -> None:
+    editor_media = _media_node_diagnostics(editor_nodes)
+    snapshot_media = _media_node_diagnostics(snapshot_nodes)
+    editor_by_id = {item["node_id"]: item for item in editor_media}
+    snapshot_by_id = {item["node_id"]: item for item in snapshot_media}
+    comparison = []
+    for node_id in sorted(set(editor_by_id) | set(snapshot_by_id)):
+        editor_url = (editor_by_id.get(node_id) or {}).get("media_url")
+        snapshot_url = (snapshot_by_id.get(node_id) or {}).get("media_url")
+        comparison.append({
+            "node_id": node_id,
+            "editor_media_url": editor_url,
+            "snapshot_media_url": snapshot_url,
+            "same_media_url": editor_url == snapshot_url,
+        })
+    logger.info(
+        "[PUBLISH MEDIA DIAGNOSTIC] flow_id=%s snapshot_id=%s reason=%s editor_media=%s snapshot_media=%s comparison=%s",
+        flow.id,
+        getattr(version, "id", None),
+        reason,
+        json.dumps(editor_media, ensure_ascii=False, sort_keys=True),
+        json.dumps(snapshot_media, ensure_ascii=False, sort_keys=True),
+        json.dumps(comparison, ensure_ascii=False, sort_keys=True),
+    )
+
 def _extract_start_preview(nodes: list[dict[str, Any]]) -> str:
     for node in nodes:
         if not isinstance(node, dict):
@@ -398,6 +446,7 @@ def _publish_fresh_snapshot(db: Session, flow: Flow, *, reason: str) -> FlowVers
         db.add(flow)
         db.flush()
         _log_publish_graph_snapshot(label="PUBLISH GRAPH", flow=flow, nodes=nodes, edges=edges, version=latest_published)
+        _log_publish_media_diagnostics(flow=flow, version=latest_published, editor_nodes=nodes, snapshot_nodes=latest_published.nodes if isinstance(latest_published.nodes, list) else [], reason=reason)
         _log_flow_publish_result(flow=flow, version=latest_published, nodes=nodes, edges=edges, reason=reason)
         logger.info("[PUBLISH GRAPH SOURCE] flow_id=%s reused_version_id=%s nodes_count=%s edges_count=%s checksum=%s", flow.id, latest_published.id, len(nodes), len(edges), checksum)
         return latest_published
@@ -432,6 +481,7 @@ def _publish_fresh_snapshot(db: Session, flow: Flow, *, reason: str) -> FlowVers
     db.add(flow)
     db.flush()
     _log_publish_graph_snapshot(label="PUBLISH GRAPH", flow=flow, nodes=nodes, edges=edges, version=fresh_version)
+    _log_publish_media_diagnostics(flow=flow, version=fresh_version, editor_nodes=nodes, snapshot_nodes=fresh_version.nodes if isinstance(fresh_version.nodes, list) else [], reason=reason)
     _log_flow_publish_result(flow=flow, version=fresh_version, nodes=nodes, edges=edges, reason=reason)
     logger.info("[PUBLISH GRAPH SOURCE] flow_id=%s nodes_count=%s edges_count=%s checksum=%s start_text_preview=%s runtime=%s snapshot_hash=%s", flow.id, len(nodes), len(edges), checksum, start_text_preview, getattr(flow, "runtime", None), getattr(fresh_version, "v2_snapshot_hash", None))
     return fresh_version
