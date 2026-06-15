@@ -5,6 +5,7 @@ from app.models.tenant import AIConfig, Tenant
 from app.models.product import Product
 from app.models.knowledge_base import KnowledgeBase
 from app.models.knowledge_chunk import KnowledgeChunk
+from app.models.knowledge_source import KnowledgeSource
 from app.models.lead import Lead
 from app.models.pipeline_stage import PipelineStage
 from app.models.bot_rule import BotRule
@@ -21,8 +22,9 @@ from app.models.audit_log import AuditLog
 from app.models.task import Task
 from app.models.user_session import UserSession
 
-__all__ = ["Tenant", "AIConfig", "Conversation", "Contact", "Message", "Product", "KnowledgeBase", "KnowledgeChunk", "Lead", "PipelineStage", "BotRule", "ConversationLog", "Flow", "FlowStep", "FlowNode", "FlowEdge", "FlowVersion", "FlowExecution", "FlowExecutionEvent", "ProcessedMessage", "FlowEvent", "FlowAnalyticsEvent", "FailedMessage", "FlowSession", "FlowV2Event", "FlowV2Session", "FlowV2ScheduledJob", "FlowV2IdempotencyKey", "FlowV2DeadLetter", "TenantUser", "PasswordResetToken", "AuditLog", "UserSession", "Task", "TenantWhatsAppProvider", "WhatsAppMessageTemplate", "WhatsAppCampaign", "WhatsAppCampaignRecipient"]
+__all__ = ["Tenant", "AIConfig", "Conversation", "Contact", "Message", "Product", "KnowledgeBase", "KnowledgeSource", "KnowledgeChunk", "Lead", "PipelineStage", "BotRule", "ConversationLog", "Flow", "FlowStep", "FlowNode", "FlowEdge", "FlowVersion", "FlowExecution", "FlowExecutionEvent", "ProcessedMessage", "FlowEvent", "FlowAnalyticsEvent", "FailedMessage", "FlowSession", "FlowV2Event", "FlowV2Session", "FlowV2ScheduledJob", "FlowV2IdempotencyKey", "FlowV2DeadLetter", "TenantUser", "PasswordResetToken", "AuditLog", "UserSession", "Task", "TenantAISetting", "TenantWhatsAppProvider", "WhatsAppMessageTemplate", "WhatsAppCampaign", "WhatsAppCampaignRecipient"]
 
+from app.models.tenant_ai_setting import TenantAISetting
 from app.models.tenant_whatsapp_provider import TenantWhatsAppProvider
 from app.models.whatsapp_message_template import WhatsAppMessageTemplate
 

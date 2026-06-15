@@ -29,6 +29,7 @@ from app.services.contact_tag_service import add_tag_to_contact
 from app.services.conversation_mode_service import ConversationModeError, set_conversation_mode
 from app.services.audit_service import write_audit_log
 from app.services.realtime_service import sync_publish
+from app.services.rag_service import answer_with_rag
 from app.flow_v2.snapshot import FlowV2Snapshot, build_transitions_from_edges
 from app.flow_v2.transition_resolver import TransitionResolver
 from app.flow_v2.template_renderer import FlowRenderContext, render_template
@@ -1464,6 +1465,59 @@ class ActionNodeExecutor(BaseNodeExecutor):
         return external_user_id.split(":", 1)[1] if ":" in external_user_id else external_user_id
 
 
+class AiRagNodeExecutor(BaseNodeExecutor):
+    def execute(self, db, *, snapshot, session, node, runtime_input) -> NodeExecutionResult:
+        node_id = str(node["id"])
+        data = self._node_data(node)
+        instruction = self._render(data.get("instruction") or data.get("assistant_instruction") or "Responda como atendente.", db, snapshot=snapshot, session=session, runtime_input=runtime_input)
+        question = self._render(data.get("question") or "{{last_message}}", db, snapshot=snapshot, session=session, runtime_input=runtime_input)
+        fallback = self._render(data.get("fallback_message") or "Não encontrei essa informação na base disponível. Posso encaminhar para um atendente?", db, snapshot=snapshot, session=session, runtime_input=runtime_input)
+        try:
+            top_k = int(data.get("top_k") or data.get("topK") or 5)
+        except (TypeError, ValueError):
+            top_k = 5
+        try:
+            temperature = float(data.get("temperature", 0.2))
+        except (TypeError, ValueError):
+            temperature = 0.2
+        try:
+            use_workspace_ai_settings = data.get("use_workspace_ai_settings", data.get("useWorkspaceAiSettings", True)) is not False
+            rag_answer = answer_with_rag(
+                db,
+                session.tenant_id,
+                str(question),
+                system_policy=str(instruction),
+                top_k=top_k,
+                temperature=None if use_workspace_ai_settings else temperature,
+                model=None if use_workspace_ai_settings else (data.get("model_override") or data.get("model") or None),
+                max_tokens=None if use_workspace_ai_settings else (data.get("max_tokens") or data.get("maxTokens") or None),
+                fallback_message=str(fallback),
+            )
+            text = rag_answer.answer if rag_answer.found_context else str(fallback)
+            metadata = {
+                "node_id": node_id,
+                "intent": "ai_rag_answer",
+                "found_context": rag_answer.found_context,
+                "source_ids": [c.get("source_id") for c in rag_answer.contexts if c.get("source_id")],
+                "chunk_ids": [c.get("chunk_id") for c in rag_answer.contexts if c.get("chunk_id")],
+            }
+        except Exception as exc:
+            logger.warning("[AI RAG NODE] failed node_id=%s error=%s", node_id, exc)
+            text = str(fallback)
+            metadata = {"node_id": node_id, "intent": "ai_rag_answer", "error": "rag_failed"}
+        self.event_store.append(db, session=session, event_type=FlowV2EventType.MESSAGE_SENT, node_id=node_id, payload={"node_id": node_id, "message": text, "metadata": metadata})
+        try:
+            
+            if runtime_input.conversation_id:
+                db.add(ConversationLog(tenant_id=session.tenant_id, conversation_id=runtime_input.conversation_id, message=str(question)[:1000], mode="flow_v2", intent="ai_rag_answer", response=text[:1000], used_fallback=not metadata.get("found_context", False)))
+        except Exception:
+            logger.debug("[AI RAG NODE] conversation log skipped", exc_info=True)
+        action = SendMessageAction(tenant_id=session.tenant_id, session_id=session.id, external_user_id=runtime_input.external_user_id, conversation_id=runtime_input.conversation_id, contact_id=runtime_input.contact_id, text=text, metadata={**runtime_input.metadata, **metadata})
+        next_node_id = self._default_next_or_terminal(db, snapshot=snapshot, session=session, node_id=node_id)
+        is_terminal = bool(data.get("is_terminal") or data.get("isTerminal") or data.get("endFlow"))
+        return NodeExecutionResult(actions=(action,), next_node_id=None if is_terminal else next_node_id, status="complete" if is_terminal or next_node_id is None else "continue")
+
+
 class NodeExecutorRegistry:
     def __init__(self, *, event_store, transition_resolver: TransitionResolver) -> None:
         self._executors: dict[str, NodeExecutor] = {
@@ -1489,6 +1543,9 @@ class NodeExecutorRegistry:
                 event_store=event_store, transition_resolver=transition_resolver
             ),
             "cta_link": CtaUrlNodeExecutor(
+                event_store=event_store, transition_resolver=transition_resolver
+            ),
+            "ai_rag": AiRagNodeExecutor(
                 event_store=event_store, transition_resolver=transition_resolver
             ),
         }

@@ -27,7 +27,28 @@ class KnowledgeOut(BaseModel):
 
 class KnowledgeUploadOut(BaseModel):
     source: str
+    source_id: uuid.UUID | None = None
+    status: str = "ready"
     chunks_created: int
+
+
+class KnowledgeSourceOut(BaseModel):
+    id: uuid.UUID
+    tenant_id: uuid.UUID
+    name: str
+    type: str
+    status: str
+    original_filename: str | None = None
+    mime_type: str | None = None
+    size_bytes: int | None = None
+    storage_url: str | None = None
+    metadata_json: dict | None = None
+    chunks_count: int = 0
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
 
 
 class KnowledgeCrawlOut(BaseModel):

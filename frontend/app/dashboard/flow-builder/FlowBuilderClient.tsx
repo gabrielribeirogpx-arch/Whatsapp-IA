@@ -14,9 +14,10 @@ import ReactFlow, {
 } from 'reactflow';
 import type { Connection, Edge, EdgeChange, Node, NodeChange, ReactFlowInstance } from 'reactflow';
 import 'reactflow/dist/style.css';
-import { Clock, ExternalLink, FileImage, GitBranch, HelpCircle, History, ListChecks, MessageSquare, RotateCcw, Zap } from 'lucide-react';
+import { Bot, Clock, ExternalLink, FileImage, GitBranch, HelpCircle, History, ListChecks, MessageSquare, RotateCcw, Zap } from 'lucide-react';
 
 import ActionNode from '@/components/flow/nodes/ActionNode';
+import AiRagNode from '@/components/flow/nodes/AiRagNode';
 import ChoiceNode from '@/components/flow/nodes/ChoiceNode';
 import ConditionNode from '@/components/flow/nodes/ConditionNode';
 import CtaUrlNode from '@/components/flow/nodes/CtaUrlNode';
@@ -42,6 +43,7 @@ const nodeTypes = {
   action: ActionNode,
   media: MediaNode,
   cta_url: CtaUrlNode,
+  ai_rag: AiRagNode,
   cta_link: CtaUrlNode,
   messageNode: MessageNode,
   choiceNode: ChoiceNode,
@@ -52,7 +54,7 @@ const nodeTypes = {
   ctaUrlNode: CtaUrlNode,
 };
 
-type FlowNodeKind = 'message' | 'choice' | 'condition' | 'delay' | 'action' | 'media' | 'cta_url';
+type FlowNodeKind = 'message' | 'choice' | 'condition' | 'delay' | 'action' | 'media' | 'cta_url' | 'ai_rag';
 type FlowConnection = Connection & { sourceHandle?: string | null };
 type ChoiceConnectDebug = {
   nodeId: string;
@@ -114,6 +116,7 @@ const NODE_PRESETS: Record<FlowNodeKind, { label: string; type: string; data: Re
   action: { label: 'Ação', type: 'action', data: { action_type: 'create_lead', action: 'create_lead', params: {} } },
   media: { label: 'Mídia', type: 'media', data: { media_type: 'image', media_url: '', caption: '', filename: '' } },
   cta_url: { label: 'CTA / Link', type: 'cta_url', data: { content: '', text: '', button_text: '', url: '', is_terminal: false } },
+  ai_rag: { label: 'IA / RAG', type: 'ai_rag', data: { instruction: 'Responda como atendente da prefeitura.', question: '{{last_message}}', top_k: 5, use_workspace_ai_settings: true, model_override: '', temperature: 0.2, max_tokens: 1200, knowledge_only: true, fallback_message: 'Não encontrei essa informação na base disponível. Posso encaminhar para um atendente?', is_terminal: false } },
 };
 
 const initialNodes: Node[] = [];
@@ -428,7 +431,7 @@ function FlowNodeEditorPanel({
     if (displayMode === 'buttons' && buttons.length >= 3) return;
     onDraftChange({ buttons: [...buttons, { id: `${node.id}-button-${nextIndex}`, label: `Opção ${nextIndex}`, handleId: `option_${nextIndex}` }] });
   };
-  const supportsVariables = ['message', 'choice', 'media', 'cta_url', 'condition', 'action'].includes(kind);
+  const supportsVariables = ['message', 'choice', 'media', 'cta_url', 'condition', 'action', 'ai_rag'].includes(kind);
 
 
   return (
@@ -547,6 +550,55 @@ function FlowNodeEditorPanel({
             <textarea value={toText(draft.condition)} onChange={(event) => onDraftChange({ condition: event.target.value })} placeholder="sim, suporte, ajuda" />
             <small>Separe múltiplas palavras por vírgula. Saídas: Sim e Não.</small>
           </label>
+        )}
+
+        {kind === 'ai_rag' && (
+          <>
+            <div className="flow-editor-info-card"><strong>Tipo:</strong> IA com RAG <span>Base de conhecimento</span></div>
+            <label className="flow-editor-field">
+              Instrução do assistente
+              <textarea value={toText(draft.instruction)} onChange={(event) => onDraftChange({ instruction: event.target.value })} placeholder="Responda como atendente da prefeitura." />
+            </label>
+            <label className="flow-editor-field">
+              Pergunta
+              <input value={toText(draft.question || '{{last_message}}')} onChange={(event) => onDraftChange({ question: event.target.value })} placeholder="{{last_message}}" />
+            </label>
+            <label className="flow-editor-radio">
+              <input type="checkbox" checked={draft.use_workspace_ai_settings !== false} onChange={(event) => onDraftChange({ use_workspace_ai_settings: event.target.checked })} />
+              Usar configuração padrão do workspace
+            </label>
+            <label className="flow-editor-field">
+              Sobrescrever modelo (opcional)
+              <input value={toText(draft.model_override)} onChange={(event) => onDraftChange({ model_override: event.target.value })} placeholder="Ex.: gpt-4o-mini" disabled={draft.use_workspace_ai_settings !== false} />
+              <small>Não insira API key neste node. Use Configurações de IA do workspace.</small>
+            </label>
+            <div className="flow-editor-row">
+              <label className="flow-editor-field">
+                Top K
+                <input type="number" min="1" max="10" value={toText(draft.top_k || 5)} onChange={(event) => onDraftChange({ top_k: Number(event.target.value || 5) })} />
+              </label>
+              <label className="flow-editor-field">
+                Temperatura
+                <input type="number" min="0" max="1" step="0.1" value={toText(draft.temperature ?? 0.2)} onChange={(event) => onDraftChange({ temperature: Number(event.target.value || 0.2), use_workspace_ai_settings: false })} />
+              </label>
+              <label className="flow-editor-field">
+                Máx. tokens
+                <input type="number" min="1" max="8000" value={toText(draft.max_tokens || 1200)} onChange={(event) => onDraftChange({ max_tokens: Number(event.target.value || 1200), use_workspace_ai_settings: false })} />
+              </label>
+            </div>
+            <label className="flow-editor-radio">
+              <input type="checkbox" checked={draft.knowledge_only !== false} onChange={(event) => onDraftChange({ knowledge_only: event.target.checked })} />
+              Responder somente com base de conhecimento
+            </label>
+            <label className="flow-editor-field">
+              Mensagem fallback
+              <textarea value={toText(draft.fallback_message)} onChange={(event) => onDraftChange({ fallback_message: event.target.value })} placeholder="Não encontrei essa informação na base disponível. Posso encaminhar para um atendente?" />
+            </label>
+            <label className="flow-editor-radio">
+              <input type="checkbox" checked={draft.is_terminal === true || draft.endFlow === true} onChange={(event) => onDraftChange({ is_terminal: event.target.checked, endFlow: event.target.checked })} />
+              Marcar como fim do fluxo
+            </label>
+          </>
         )}
 
         {kind === 'delay' && (
@@ -2418,6 +2470,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
           { kind: 'message' as FlowNodeKind, label: 'Mensagem', icon: MessageSquare },
           { kind: 'media' as FlowNodeKind, label: 'Mídia', icon: FileImage },
           { kind: 'cta_url' as FlowNodeKind, label: 'CTA / Link', icon: ExternalLink },
+          { kind: 'ai_rag' as FlowNodeKind, label: 'IA / RAG', icon: Bot },
         ]).map(({ kind, label, icon: Icon }) => (
           <button key={kind} type="button" className="dash-nav-item" onClick={() => addNode(kind)} title={label} style={{ border: 'none', background: 'none', cursor: 'pointer', width: '100%', textAlign: 'left' }}>
             <Icon size={18} strokeWidth={1.8} className="text-current" />
@@ -2722,6 +2775,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
               { kind: 'message' as FlowNodeKind, label: 'Mensagem', icon: MessageSquare },
               { kind: 'media' as FlowNodeKind, label: 'Mídia', icon: FileImage },
               { kind: 'cta_url' as FlowNodeKind, label: 'CTA / Link', icon: ExternalLink },
+          { kind: 'ai_rag' as FlowNodeKind, label: 'IA / RAG', icon: Bot },
               { kind: 'choice' as FlowNodeKind, label: 'Escolha', icon: ListChecks },
               { kind: 'condition' as FlowNodeKind, label: 'Condição', icon: GitBranch },
               { kind: 'delay' as FlowNodeKind, label: 'Delay', icon: Clock },
