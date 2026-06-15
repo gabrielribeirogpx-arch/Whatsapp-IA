@@ -14,7 +14,7 @@ import ReactFlow, {
 } from 'reactflow';
 import type { Connection, Edge, EdgeChange, Node, NodeChange, ReactFlowInstance } from 'reactflow';
 import 'reactflow/dist/style.css';
-import { Clock, ExternalLink, FileImage, GitBranch, History, ListChecks, MessageSquare, RotateCcw, Zap } from 'lucide-react';
+import { Clock, ExternalLink, FileImage, GitBranch, HelpCircle, History, ListChecks, MessageSquare, RotateCcw, Zap } from 'lucide-react';
 
 import ActionNode from '@/components/flow/nodes/ActionNode';
 import ChoiceNode from '@/components/flow/nodes/ChoiceNode';
@@ -360,17 +360,20 @@ function VariableChips({
   );
 }
 
-function FlowVariablesHelp() {
+function FlowVariablesHelp({ onClose }: { onClose: () => void }) {
   return (
-    <details className="flow-editor-info-card flow-editor-variables-help">
-      <summary>Variáveis</summary>
+    <div className="flow-editor-variables-popover" role="dialog" aria-label="Variáveis disponíveis">
+      <div className="flow-editor-variables-popover-header">
+        <strong>Variáveis disponíveis</strong>
+        <button type="button" onClick={onClose} aria-label="Fechar ajuda de variáveis">×</button>
+      </div>
       <div className="flow-editor-variable-list">
         {FLOW_TEMPLATE_VARIABLES.map((variable) => (
           <code key={variable}>{variable}</code>
         ))}
       </div>
       <small>Variáveis serão preenchidas quando o fluxo rodar.</small>
-    </details>
+    </div>
   );
 }
 
@@ -404,6 +407,11 @@ function FlowNodeEditorPanel({
   const taskDescriptionRef = useRef<HTMLTextAreaElement>(null);
   const taskAssigneeRef = useRef<HTMLInputElement>(null);
   const transferReasonRef = useRef<HTMLInputElement>(null);
+  const [showVariablesHelp, setShowVariablesHelp] = useState(false);
+
+  useEffect(() => {
+    setShowVariablesHelp(false);
+  }, [node?.id]);
 
   if (!node) return null;
   const kind = getBuilderNodeKind(node);
@@ -420,6 +428,7 @@ function FlowNodeEditorPanel({
     if (displayMode === 'buttons' && buttons.length >= 3) return;
     onDraftChange({ buttons: [...buttons, { id: `${node.id}-button-${nextIndex}`, label: `Opção ${nextIndex}`, handleId: `option_${nextIndex}` }] });
   };
+  const supportsVariables = ['message', 'choice', 'media', 'cta_url', 'condition', 'action'].includes(kind);
 
 
   return (
@@ -429,11 +438,23 @@ function FlowNodeEditorPanel({
           <span className="flow-node-editor-kicker">Editar bloco</span>
           <h3>{title}</h3>
         </div>
-        <button type="button" onClick={onClose} aria-label="Fechar painel">×</button>
+        <div className="flow-node-editor-actions">
+          {supportsVariables ? (
+            <button
+              type="button"
+              className="flow-node-editor-help-button"
+              onClick={() => setShowVariablesHelp((current) => !current)}
+              aria-expanded={showVariablesHelp}
+            >
+              <HelpCircle size={14} /> Variáveis disponíveis
+            </button>
+          ) : null}
+          <button type="button" className="flow-node-editor-close-button" onClick={onClose} aria-label="Fechar painel">×</button>
+        </div>
       </div>
+      {showVariablesHelp && supportsVariables ? <FlowVariablesHelp onClose={() => setShowVariablesHelp(false)} /> : null}
 
       <div className="flow-node-editor-content">
-        {['message', 'choice', 'media', 'cta_url', 'condition', 'action'].includes(kind) ? <FlowVariablesHelp /> : null}
         {kind === 'message' && (
           <label className="flow-editor-field">
             Mensagem
