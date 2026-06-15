@@ -393,7 +393,7 @@ export type FlowAnalytics = {
   flow_name: string;
   period: '24h' | '7d' | '30d' | '90d' | string;
   summary: { entries: number; conversions?: number; conversion_rate: number; abandonments?: number; abandonment_rate?: number; avg_duration_seconds?: number; messages_handled?: number; messages_sent: number; completed: number; dropoff_rate: number; avg_time_seconds: number; avg_messages_per_user?: number; };
-  version?: { mode: string; active_flow_version_id?: string | null; selected_flow_version_id?: string | null; available_versions?: Array<{ id: string; label: string; created_at?: string | null; is_active?: boolean }> };
+  version?: { mode: string; active_flow_version_id?: string | null; selected_flow_version_id?: string | null; available_versions?: Array<{ id: string; label: string; display_version?: string; created_at?: string | null; is_active?: boolean }> };
   funnel: Array<{ node_id: string; node_label: string; node_type: string; entries?: number; entered?: number; exits?: number; completed?: number; conversions?: number; dropoff?: number; dropoffs?: number; dropoff_rate: number; conversion_to_next_rate?: number; avg_time_seconds?: number | null; }>;
   node_metrics?: Array<{ node_id: string; node_label: string; node_type: string; entered: number; completed: number; conversions: number; dropoff: number; dropoff_rate: number; avg_time_seconds?: number | null; }>;
   transition_metrics?: Array<{ source_node_id: string; target_node_id: string; source_handle?: string | null; count: number; rate_from_source: number }>;
