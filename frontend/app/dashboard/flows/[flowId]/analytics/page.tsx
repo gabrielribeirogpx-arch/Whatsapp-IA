@@ -404,256 +404,258 @@ export default function Page({ params }: Props) {
             </div>
           )}
 
-          <div className="main-grid">
-            <div className="card card-soft funnel-card">
-              <h3 className="section-title">
-                <Funnel size={18} />
-                Funil do fluxo
-              </h3>
-              <div className="funnel-content">
-                {nodeFunnel.length === 0 ? (
-                  <div className="funnel-empty">
-                    <svg
-                      viewBox="0 0 320 180"
-                      className="funnel-illustration"
-                      aria-hidden
-                    >
-                      <defs>
-                        <linearGradient
-                          id="funnelGradient"
-                          x1="0%"
-                          y1="0%"
-                          x2="100%"
-                          y2="100%"
-                        >
-                          <stop
-                            offset="0%"
-                            stopColor="#22c55e"
-                            stopOpacity="0.3"
-                          />
-                          <stop
-                            offset="100%"
-                            stopColor="#16a34a"
-                            stopOpacity="0.55"
-                          />
-                        </linearGradient>
-                      </defs>
-                      <ellipse
-                        cx="116"
-                        cy="38"
-                        rx="92"
-                        ry="12"
-                        fill="url(#funnelGradient)"
-                      />
-                      <path
-                        d="M24 38h184l-22 35H46z"
-                        fill="url(#funnelGradient)"
-                        opacity="0.9"
-                      />
-                      <ellipse
-                        cx="116"
-                        cy="73"
-                        rx="70"
-                        ry="10"
-                        fill="url(#funnelGradient)"
-                        opacity="0.8"
-                      />
-                      <path
-                        d="M46 73h140l-18 30H64z"
-                        fill="url(#funnelGradient)"
-                        opacity="0.75"
-                      />
-                      <ellipse
-                        cx="116"
-                        cy="103"
-                        rx="50"
-                        ry="8"
-                        fill="url(#funnelGradient)"
-                        opacity="0.7"
-                      />
-                      <path
-                        d="M64 103h104l-14 25H78z"
-                        fill="url(#funnelGradient)"
-                        opacity="0.6"
-                      />
-                      <ellipse
-                        cx="116"
-                        cy="128"
-                        rx="34"
-                        ry="6"
-                        fill="url(#funnelGradient)"
-                        opacity="0.58"
-                      />
-                    </svg>
-                    <div>
-                      <h4>Sem dados ainda</h4>
-                      <p className="secondary-text">
-                        O funil será exibido assim que houver movimentação de
-                        usuários neste fluxo.
-                      </p>
-                    </div>
-                  </div>
-                ) : (
-                  nodeFunnel.map((n, i) => {
-                    const dropoffRate = Number(n.dropoff_rate ?? 0);
-                    const color =
-                      dropoffRate > 40
-                        ? "#EF4444"
-                        : dropoffRate > 20
-                          ? "#EAB308"
-                          : "#22C55E";
-                    const nodeEntries = Number(n.entered ?? n.entries ?? 0);
-                    const firstNode = nodeFunnel[0] as
-                      | { entered?: number; entries?: number }
-                      | undefined;
-                    const pct =
-                      i === 0
-                        ? 100
-                        : Math.round(
-                            (nodeEntries /
-                              (Number(
-                                firstNode?.entered ?? firstNode?.entries ?? 1,
-                              ) || 1)) *
-                              100,
-                          );
-                    return (
-                      <div key={n.node_id} className="funnel-row">
-                        <div className="funnel-row-header">
-                          <span>
-                            {n.node_label} ({n.node_type})
-                          </span>
-                          <span>{pct}%</span>
-                        </div>
-                        <div className="progress-track">
-                          <div
-                            className="progress-fill"
-                            style={{ width: `${pct}%`, background: color }}
-                          />
-                        </div>
-                        <small className="secondary-text">
-                          Entradas {n.entered ?? n.entries ?? 0} • Concluídos{" "}
-                          {n.completed ?? 0} • Abandono {n.dropoff ?? 0} (
-                          {n.dropoff_rate ?? 0}%) • Conversões{" "}
-                          {n.conversions ?? 0}
-                          {n.avg_time_seconds != null
-                            ? ` • Tempo ${formatDuration(n.avg_time_seconds)}`
-                            : ""}
-                        </small>
+          <div className="analytics-sections">
+            <div className="main-grid">
+              <div className="card card-soft funnel-card">
+                <h3 className="section-title">
+                  <Funnel size={18} />
+                  Funil do fluxo
+                </h3>
+                <div className="funnel-content">
+                  {nodeFunnel.length === 0 ? (
+                    <div className="funnel-empty">
+                      <svg
+                        viewBox="0 0 320 180"
+                        className="funnel-illustration"
+                        aria-hidden
+                      >
+                        <defs>
+                          <linearGradient
+                            id="funnelGradient"
+                            x1="0%"
+                            y1="0%"
+                            x2="100%"
+                            y2="100%"
+                          >
+                            <stop
+                              offset="0%"
+                              stopColor="#22c55e"
+                              stopOpacity="0.3"
+                            />
+                            <stop
+                              offset="100%"
+                              stopColor="#16a34a"
+                              stopOpacity="0.55"
+                            />
+                          </linearGradient>
+                        </defs>
+                        <ellipse
+                          cx="116"
+                          cy="38"
+                          rx="92"
+                          ry="12"
+                          fill="url(#funnelGradient)"
+                        />
+                        <path
+                          d="M24 38h184l-22 35H46z"
+                          fill="url(#funnelGradient)"
+                          opacity="0.9"
+                        />
+                        <ellipse
+                          cx="116"
+                          cy="73"
+                          rx="70"
+                          ry="10"
+                          fill="url(#funnelGradient)"
+                          opacity="0.8"
+                        />
+                        <path
+                          d="M46 73h140l-18 30H64z"
+                          fill="url(#funnelGradient)"
+                          opacity="0.75"
+                        />
+                        <ellipse
+                          cx="116"
+                          cy="103"
+                          rx="50"
+                          ry="8"
+                          fill="url(#funnelGradient)"
+                          opacity="0.7"
+                        />
+                        <path
+                          d="M64 103h104l-14 25H78z"
+                          fill="url(#funnelGradient)"
+                          opacity="0.6"
+                        />
+                        <ellipse
+                          cx="116"
+                          cy="128"
+                          rx="34"
+                          ry="6"
+                          fill="url(#funnelGradient)"
+                          opacity="0.58"
+                        />
+                      </svg>
+                      <div>
+                        <h4>Sem dados ainda</h4>
+                        <p className="secondary-text">
+                          O funil será exibido assim que houver movimentação de
+                          usuários neste fluxo.
+                        </p>
                       </div>
-                    );
-                  })
-                )}
-              </div>
-            </div>
-
-            <div className="side-stack">
-              <div className="card card-soft">
-                <h3 className="section-title">
-                  <GitBranch size={18} />
-                  Pontos de abandono
-                </h3>
-                {dropoffList.length === 0 ? (
-                  <div className="side-empty">
-                    <span className="side-icon">
-                      <GitBranch size={22} />
-                    </span>
-                    <strong>—</strong>
-                    <span className="secondary-text">
-                      Sem dados suficientes
-                    </span>
-                  </div>
-                ) : (
-                  dropoffList.map((n) => (
-                    <div key={n.node_id} className="secondary-text">
-                      ⚠️ Bloco “{n.node_label}” — {n.dropoff_rate}% de abandono.
-                      Sugestão: simplifique a pergunta.
                     </div>
-                  ))
-                )}
+                  ) : (
+                    nodeFunnel.map((n, i) => {
+                      const dropoffRate = Number(n.dropoff_rate ?? 0);
+                      const color =
+                        dropoffRate > 40
+                          ? "#EF4444"
+                          : dropoffRate > 20
+                            ? "#EAB308"
+                            : "#22C55E";
+                      const nodeEntries = Number(n.entered ?? n.entries ?? 0);
+                      const firstNode = nodeFunnel[0] as
+                        | { entered?: number; entries?: number }
+                        | undefined;
+                      const pct =
+                        i === 0
+                          ? 100
+                          : Math.round(
+                              (nodeEntries /
+                                (Number(
+                                  firstNode?.entered ?? firstNode?.entries ?? 1,
+                                ) || 1)) *
+                                100,
+                            );
+                      return (
+                        <div key={n.node_id} className="funnel-row">
+                          <div className="funnel-row-header">
+                            <span>
+                              {n.node_label} ({n.node_type})
+                            </span>
+                            <span>{pct}%</span>
+                          </div>
+                          <div className="progress-track">
+                            <div
+                              className="progress-fill"
+                              style={{ width: `${pct}%`, background: color }}
+                            />
+                          </div>
+                          <small className="secondary-text">
+                            Entradas {n.entered ?? n.entries ?? 0} • Concluídos{" "}
+                            {n.completed ?? 0} • Abandono {n.dropoff ?? 0} (
+                            {n.dropoff_rate ?? 0}%) • Conversões{" "}
+                            {n.conversions ?? 0}
+                            {n.avg_time_seconds != null
+                              ? ` • Tempo ${formatDuration(n.avg_time_seconds)}`
+                              : ""}
+                          </small>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
               </div>
-              <div className="card card-soft">
-                <h3 className="section-title">
-                  <MessageSquareText size={18} />
-                  Respostas mais comuns
-                </h3>
-                {(data?.common_responses ?? []).length === 0 ? (
-                  <div className="side-empty">
-                    <span className="side-icon">
-                      <MessageSquareText size={22} />
-                    </span>
-                    <strong>—</strong>
-                    <span className="secondary-text">
-                      Sem dados suficientes
-                    </span>
-                  </div>
-                ) : (
-                  (data?.common_responses ?? []).map((r, idx) => (
-                    <div
-                      key={`${r.reply ?? r.response ?? "response"}-${idx}`}
-                      className="reply-row"
-                    >
-                      <span>{r.reply ?? r.response ?? "—"}</span>
+
+              <div className="side-stack">
+                <div className="card card-soft">
+                  <h3 className="section-title">
+                    <GitBranch size={18} />
+                    Pontos de abandono
+                  </h3>
+                  {dropoffList.length === 0 ? (
+                    <div className="side-empty">
+                      <span className="side-icon">
+                        <GitBranch size={22} />
+                      </span>
+                      <strong>—</strong>
                       <span className="secondary-text">
-                        {Number(r.rate ?? 0)}%
+                        Sem dados suficientes
                       </span>
                     </div>
-                  ))
-                )}
+                  ) : (
+                    dropoffList.map((n) => (
+                      <div key={n.node_id} className="secondary-text">
+                        ⚠️ Bloco “{n.node_label}” — {n.dropoff_rate}% de
+                        abandono. Sugestão: simplifique a pergunta.
+                      </div>
+                    ))
+                  )}
+                </div>
+                <div className="card card-soft">
+                  <h3 className="section-title">
+                    <MessageSquareText size={18} />
+                    Respostas mais comuns
+                  </h3>
+                  {(data?.common_responses ?? []).length === 0 ? (
+                    <div className="side-empty">
+                      <span className="side-icon">
+                        <MessageSquareText size={22} />
+                      </span>
+                      <strong>—</strong>
+                      <span className="secondary-text">
+                        Sem dados suficientes
+                      </span>
+                    </div>
+                  ) : (
+                    (data?.common_responses ?? []).map((r, idx) => (
+                      <div
+                        key={`${r.reply ?? r.response ?? "response"}-${idx}`}
+                        className="reply-row"
+                      >
+                        <span>{r.reply ?? r.response ?? "—"}</span>
+                        <span className="secondary-text">
+                          {Number(r.rate ?? 0)}%
+                        </span>
+                      </div>
+                    ))
+                  )}
+                </div>
               </div>
             </div>
-          </div>
 
-          <div className="card card-soft card-full-width">
-            <div className="section-header">
-              <h3 className="section-title">
-                <TrendingUp size={18} />
-                Performance ao longo do tempo
-              </h3>
-              <select
-                className="metric-select"
-                value={timelineMetric}
-                onChange={(event) => setTimelineMetric(event.target.value)}
-                aria-label="Selecionar métrica do gráfico"
-              >
-                <option value="entries">Entradas</option>
-                <option value="messages_sent">Mensagens tratadas</option>
-                <option value="completed">Concluídos</option>
-              </select>
-            </div>
-            <div style={{ height: 280 }}>
-              {timelineHasRelevantPoints ? (
-                <ResponsiveContainer>
-                  <LineChart data={timeseries}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
-                    <XAxis dataKey="date" stroke="#64748B" />
-                    <YAxis stroke="#64748B" />
-                    <Tooltip />
-                    <Line
-                      dataKey={timelineMetric}
-                      stroke={
-                        timelineMetric === "entries"
-                          ? "#2563EB"
-                          : timelineMetric === "messages_sent"
-                            ? "#22C55E"
-                            : "#16A34A"
-                      }
-                      strokeWidth={2}
-                    />
-                  </LineChart>
-                </ResponsiveContainer>
-              ) : (
-                <div className="timeline-empty">
-                  <div className="timeline-lines" aria-hidden>
-                    <span />
-                    <span />
-                    <span />
+            <div className="card card-soft card-full-width">
+              <div className="section-header">
+                <h3 className="section-title">
+                  <TrendingUp size={18} />
+                  Performance ao longo do tempo
+                </h3>
+                <select
+                  className="metric-select"
+                  value={timelineMetric}
+                  onChange={(event) => setTimelineMetric(event.target.value)}
+                  aria-label="Selecionar métrica do gráfico"
+                >
+                  <option value="entries">Entradas</option>
+                  <option value="messages_sent">Mensagens tratadas</option>
+                  <option value="completed">Concluídos</option>
+                </select>
+              </div>
+              <div style={{ height: 280 }}>
+                {timelineHasRelevantPoints ? (
+                  <ResponsiveContainer>
+                    <LineChart data={timeseries}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
+                      <XAxis dataKey="date" stroke="#64748B" />
+                      <YAxis stroke="#64748B" />
+                      <Tooltip />
+                      <Line
+                        dataKey={timelineMetric}
+                        stroke={
+                          timelineMetric === "entries"
+                            ? "#2563EB"
+                            : timelineMetric === "messages_sent"
+                              ? "#22C55E"
+                              : "#16A34A"
+                        }
+                        strokeWidth={2}
+                      />
+                    </LineChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <div className="timeline-empty">
+                    <div className="timeline-lines" aria-hidden>
+                      <span />
+                      <span />
+                      <span />
+                    </div>
+                    <div className="timeline-empty-icon">
+                      <BarChart3 size={18} />
+                    </div>
+                    <p>Sem dados para o período selecionado</p>
                   </div>
-                  <div className="timeline-empty-icon">
-                    <BarChart3 size={18} />
-                  </div>
-                  <p>Sem dados para o período selecionado</p>
-                </div>
-              )}
+                )}
+              </div>
             </div>
           </div>
 
@@ -1050,6 +1052,10 @@ export default function Page({ params }: Props) {
             .progress-fill {
               height: 8px;
               border-radius: 999px;
+            }
+            .analytics-sections {
+              display: grid;
+              gap: 12px;
             }
             .main-grid {
               display: grid;
