@@ -29,6 +29,7 @@ export default function MessageNode({ id, data, selected }: NodeProps) {
       isStart={nodeData.isStart}
       hasValidationError={nodeData.hasValidationError}
       onToggleStart={nodeData.onToggleStart}
+      analytics={(nodeData as any).analytics}
     />
   );
 }

@@ -28,6 +28,7 @@ type CompactFlowNodeProps = {
   hasValidationError?: boolean;
   onToggleStart?: (nodeId: string) => void;
   isConnectable?: boolean;
+  analytics?: { entered?: number; conversions?: number; dropoff?: number; dropoff_rate?: number } | null;
 };
 
 function CompactFlowNode({
@@ -47,6 +48,7 @@ function CompactFlowNode({
   hasValidationError,
   onToggleStart,
   isConnectable = true,
+  analytics,
 }: CompactFlowNodeProps) {
   const handles = useMemo(() => (sourceHandles?.length ? sourceHandles : [{ id: undefined, color: accent }]), [accent, sourceHandles]);
   const handleStep = handles.length > 1 ? 24 : 0;
@@ -62,7 +64,7 @@ function CompactFlowNode({
       style={{
         '--flow-node-accent': accent,
         border: hasValidationError ? '2px solid #dc2626' : undefined,
-        boxShadow: hasValidationError ? '0 0 0 4px rgba(220,38,38,0.15)' : undefined,
+        boxShadow: hasValidationError ? '0 0 0 4px rgba(220,38,38,0.15)' : analytics ? `0 0 0 ${Math.min(12, 3 + Math.log10(Number(analytics.entered || 1)) * 4)}px ${Number(analytics.dropoff_rate || 0) > 30 ? 'rgba(245,158,11,0.22)' : 'rgba(34,197,94,0.18)'}` : undefined,
       } as CSSProperties}
     >
       <div className="flow-node-header-bar" style={{ background: accent }} />
@@ -97,6 +99,14 @@ function CompactFlowNode({
           {isStart ? '▶ Início' : '▶'}
         </button>
       </div>
+
+      {analytics ? (
+        <div style={{ margin: "8px 12px 0", display: "flex", gap: 6, flexWrap: "wrap", fontSize: 10, fontWeight: 700, color: "#0f172a" }}>
+          <span style={{ borderRadius: 999, background: "#dcfce7", padding: "3px 7px" }}>{analytics.entered || 0} entradas</span>
+          {Number(analytics.conversions || 0) > 0 ? <span style={{ borderRadius: 999, background: "#dbeafe", padding: "3px 7px" }}>{analytics.conversions} conversões</span> : null}
+          {Number(analytics.dropoff || 0) > 0 ? <span style={{ borderRadius: 999, background: "#fef3c7", padding: "3px 7px" }}>{analytics.dropoff} abandono</span> : null}
+        </div>
+      ) : null}
 
       <div className="flow-node-compact-body">
         <p className="flow-node-summary">{summary || 'Clique para configurar no painel lateral'}</p>

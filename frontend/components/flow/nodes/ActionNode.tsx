@@ -82,6 +82,7 @@ export default function ActionNode({ id, data, selected }: NodeProps) {
       isStart={nodeData.isStart}
       hasValidationError={nodeData.hasValidationError}
       onToggleStart={nodeData.onToggleStart}
+      analytics={(nodeData as any).analytics}
     />
   );
 }
