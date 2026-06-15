@@ -68,6 +68,55 @@ function getInitials(name?: string) {
   return (first + last).toUpperCase();
 }
 
+
+const MEDIA_PREVIEW_LABELS: Array<{ pattern: RegExp; label: string }> = [
+  { pattern: /(video|vídeo|mp4|mov|webm)/i, label: '📹 Vídeo enviado' },
+  { pattern: /(image|imagem|foto|jpeg|jpg|png|gif|webp)/i, label: '🖼️ Imagem enviada' },
+  { pattern: /(document|documento|pdf|docx?|xlsx?|arquivo|file)/i, label: '📄 Documento enviado' },
+  { pattern: /(audio|áudio|voice|voz|ogg|mp3|wav|m4a)/i, label: '🎧 Áudio enviado' },
+  { pattern: /(media|mídia|attachment|anexo)/i, label: '📎 Mídia enviada' },
+];
+
+function truncateText(value: string, maxLength = 55) {
+  if (value.length <= maxLength) return value;
+  return `${value.slice(0, Math.max(0, maxLength - 1)).trimEnd()}…`;
+}
+
+function formatLastMessagePreview(message?: string | null) {
+  const rawMessage = (message || '').trim();
+  if (!rawMessage) return 'Sem mensagem recente.';
+
+  const mediaLabel = MEDIA_PREVIEW_LABELS.find(({ pattern }) => pattern.test(rawMessage));
+  if (mediaLabel) return mediaLabel.label;
+
+  const withoutLongUrls = rawMessage
+    .replace(/https?:\/\/\S+/gi, '[link]')
+    .replace(/www\.\S+/gi, '[link]')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  return truncateText(withoutLongUrls || 'Mensagem recebida.');
+}
+
+function getConversationStatusLabel(conversation: Conversation) {
+  const rawStatus = (conversation.status || '').toLowerCase();
+
+  if (rawStatus.includes('resolved') || rawStatus.includes('resolvido')) return 'Resolvido';
+  if (rawStatus.includes('waiting') || rawStatus.includes('pending') || rawStatus.includes('aguard')) return 'Aguardando';
+
+  if (conversation.mode === 'human') return 'Humano';
+  if (conversation.mode === 'bot') return 'Bot';
+  if (conversation.mode === 'ai') return 'IA';
+
+  return 'Aguardando';
+}
+
+function getConversationHref(conversation: Conversation) {
+  if (conversation.contact_id) return `/chat?contact_id=${encodeURIComponent(conversation.contact_id)}`;
+  if (conversation.phone) return `/chat?phone=${encodeURIComponent(conversation.phone)}`;
+  return '/chat';
+}
+
 function getGreeting() {
   const hour = new Date().getHours();
 
@@ -524,13 +573,14 @@ export default function DashboardPage() {
             <span className="flex items-center gap-2 text-xs text-slate-500"><span className={`h-1.5 w-1.5 rounded-full ${isActivityLive ? 'bg-emerald-500' : 'bg-slate-300'}`} />{isActivityLive ? 'Ao vivo' : 'Atualizado agora'}</span>
           </div>
           {conversationsError ? <p className="mt-3 rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-700">{conversationsError}</p> : null}
-          {recentConversations.length === 0 ? <div className="mt-4 grid h-[290px] place-items-center rounded-xl border border-dashed border-emerald-200 bg-emerald-50/40 text-center"><div><p className="m-0 font-semibold text-slate-700">Sem conversas recentes</p><p className="m-0 mt-1 text-sm text-slate-500">Quando novas mensagens chegarem, elas aparecerão aqui.</p></div></div> : <div className="mt-4 divide-y divide-slate-100">{recentConversations.map((conversation) => {
+          {recentConversations.length === 0 ? <div className="mt-4 grid h-[290px] place-items-center rounded-xl border border-dashed border-emerald-200 bg-emerald-50/40 px-6 text-center"><div><p className="m-0 font-semibold text-slate-700">Sem conversas recentes</p><p className="m-0 mt-1 text-sm text-slate-500">Quando novas mensagens chegarem, elas aparecerão aqui.</p></div></div> : <div className="mt-4 overflow-hidden rounded-2xl border border-slate-100 bg-slate-50/40">{recentConversations.map((conversation) => {
             const displayName = conversation.name?.trim() || conversation.phone?.trim() || 'Conversa';
             const attendantName = conversation.assigned_user_name?.trim() || 'Sem atendente';
-            const modeLabel = conversation.mode === 'human' ? 'Humano' : conversation.mode === 'bot' ? 'Bot' : conversation.mode === 'ai' ? 'IA' : 'Aguardando';
-            const unreadCount = Number((conversation as Conversation & { unread_count?: number }).unread_count || 0);
-            const unreadLabel = unreadCount > 0 ? ` · ${unreadCount} não lida${unreadCount > 1 ? 's' : ''}` : '';
-            return <div key={conversation.id} className="flex items-start gap-3 py-3"><div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-emerald-50 to-slate-100 text-xs font-bold text-emerald-700 ring-1 ring-emerald-100">{getInitials(displayName)}</div><div className="min-w-0 flex-1"><div className="flex items-start justify-between gap-3"><p className="m-0 truncate text-sm font-semibold leading-tight text-slate-800">{displayName}</p><span className="shrink-0 text-xs text-slate-400">{formatRelativeTime(conversation.updated_at)}</span></div><p className="m-0 mt-1 truncate text-xs leading-relaxed text-slate-500">{conversation.last_message || 'Sem mensagem recente.'}</p><p className="m-0 mt-1 text-[11px] font-medium text-slate-500">Atendente: {attendantName} · {modeLabel}{unreadLabel}</p></div></div>;
+            const statusLabel = getConversationStatusLabel(conversation);
+            const unreadCount = Number(conversation.unread_count || 0);
+            const unreadLabel = unreadCount > 0 ? `${unreadCount} nova${unreadCount > 1 ? 's' : ''}` : null;
+            const badges = [`Atendente: ${attendantName}`, statusLabel, unreadLabel].filter(Boolean);
+            return <button type="button" key={conversation.id} onClick={() => router.push(getConversationHref(conversation))} className="group flex w-full items-start gap-3 border-b border-slate-100 bg-white px-3.5 py-3 text-left transition-colors duration-200 last:border-b-0 hover:bg-emerald-50/35 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-emerald-200"><div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-emerald-50 via-white to-slate-100 text-xs font-bold text-emerald-700 ring-1 ring-emerald-100 transition-transform duration-200 group-hover:scale-[1.03]">{getInitials(displayName)}</div><div className="min-w-0 flex-1"><div className="flex items-start justify-between gap-3"><p className="m-0 truncate text-sm font-bold leading-tight text-slate-900">{displayName}</p><span className="shrink-0 text-[11px] font-medium text-slate-400">{formatRelativeTime(conversation.updated_at)}</span></div><p className="m-0 mt-1 truncate text-xs leading-relaxed text-slate-500">{formatLastMessagePreview(conversation.last_message)}</p><div className="mt-2 flex flex-wrap gap-1.5">{badges.map((badge) => <span key={badge} className="inline-flex max-w-full items-center rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-semibold leading-4 text-slate-600">{badge}</span>)}</div></div></button>;
           })}</div>}
           <div className="mt-4 border-t border-slate-100 pt-4 text-center">
             <button type="button" onClick={() => router.push('/chat')} className="text-sm font-medium text-emerald-600 hover:text-emerald-700">
