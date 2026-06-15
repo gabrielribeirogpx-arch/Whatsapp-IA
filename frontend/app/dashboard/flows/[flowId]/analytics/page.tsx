@@ -279,8 +279,8 @@ export default function Page({ params }: Props) {
   );
 
   return (
-    <div className="w-full">
-      <div className="analytics-shell">
+    <section className="w-full min-w-0 px-5 py-6 lg:px-6">
+      <div className="w-full min-w-0 space-y-5">
         <div className="analytics-page">
           <header className="analytics-header">
             <div className="header-left">
@@ -658,18 +658,12 @@ export default function Page({ params }: Props) {
           {loading && <div className="secondary-text">Carregando...</div>}
 
           <style jsx>{`
-            .analytics-shell {
-              width: 100%;
-              max-width: none;
-              box-sizing: border-box;
-              padding: 0 0 32px 24px;
-            }
             .analytics-page {
               width: 100%;
               max-width: none;
               background: #f8fafc;
               color: #0f172a;
-              padding: 16px 0 28px;
+              padding: 0 0 28px;
             }
             .analytics-header {
               display: grid;
@@ -1124,9 +1118,6 @@ export default function Page({ params }: Props) {
               }
             }
             @media (max-width: 760px) {
-              .analytics-shell {
-                padding: 0 16px 24px;
-              }
               .header-left {
                 align-items: flex-start;
               }
@@ -1154,6 +1145,6 @@ export default function Page({ params }: Props) {
           `}</style>
         </div>
       </div>
-    </div>
+    </section>
   );
 }
