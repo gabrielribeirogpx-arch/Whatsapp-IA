@@ -3,7 +3,7 @@
 import { useEffect, useId, useMemo, useState } from 'react';
 import { Cell, Pie, PieChart } from 'recharts';
 import { useRouter } from 'next/navigation';
-import { MessageSquare, RadioTower, TrendingUp, Zap } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Clock3, MessageSquare, RadioTower, Star, TrendingUp, Zap } from "lucide-react";
 
 import DashboardChart from '../../components/DashboardChart';
 import DashboardInsightPanel from '@/components/dashboard/DashboardInsightPanel';
@@ -439,6 +439,12 @@ export default function DashboardPage() {
   }, [viewModel.channels]);
   const safeKpis = Array.isArray(kpiMeta) ? kpiMeta : [];
   const isPanelLoading = (!flows.length && !conversations.length) && (isLoading || !mounted);
+  const performanceKpis = [
+    { label: 'Resp. méd.', value: viewModel.performance.avgResponseTimeSeconds !== null ? `${viewModel.performance.avgResponseTimeSeconds}s` : 'Sem dados', icon: Clock3, className: 'border-indigo-100 bg-indigo-50/70 text-indigo-600 ring-indigo-100' },
+    { label: 'Resolvidas', value: viewModel.performance.resolvedConversations, icon: CheckCircle2, className: 'border-emerald-100 bg-emerald-50/80 text-emerald-600 ring-emerald-100' },
+    { label: 'CSAT', value: viewModel.performance.csat ?? 'Sem dados', icon: Star, className: 'border-amber-100 bg-amber-50/80 text-amber-600 ring-amber-100' },
+    { label: 'Abandono', value: `${viewModel.performance.abandonmentRate}%`, icon: AlertTriangle, className: 'border-orange-100 bg-orange-50/80 text-orange-600 ring-orange-100' },
+  ];
 
   const panelConfig = {
     flows: {
@@ -610,9 +616,9 @@ export default function DashboardPage() {
         </div>
 
         <div className={`${cardClassName} flex min-h-[232px] flex-col p-4 sm:p-5`}>
-          <p className="m-0 mb-3 text-base font-semibold text-slate-900">Desempenho geral</p>
-          {viewModel.performance.avgResponseTimeSeconds === null && viewModel.performance.resolvedConversations === 0 && viewModel.performance.csat === null ? <div className="flex-1 rounded-xl border border-dashed border-emerald-200 bg-gradient-to-b from-emerald-50/60 to-white p-4"><div className="mb-3 flex items-center gap-2"><span className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-emerald-200 bg-white text-emerald-600 shadow-sm"><TrendingUp size={16} /></span><div><p className="m-0 text-sm font-semibold text-slate-800">Dados aparecerão aqui conforme as conversas acontecerem.</p></div></div><div className="grid grid-cols-2 gap-2">{[1,2,3,4].map((item) => <div key={item} className="rounded-lg border border-emerald-100/70 bg-white/80 p-2.5"><SkeletonLine width="65%" height={8} /><div className="mt-2"><SkeletonLine width="42%" height={10} /></div></div>)}</div></div> : <div className="space-y-2.5 text-sm text-slate-700">{<div className="grid grid-cols-[1fr_auto] items-center rounded-lg border border-slate-100 bg-slate-50/70 px-3 py-2.5"><span>Tempo médio de resposta</span><span className="text-base font-bold text-slate-900">{viewModel.performance.avgResponseTimeSeconds ?? 'Sem dados'}{viewModel.performance.avgResponseTimeSeconds !== null ? 's' : ''}</span></div>}<div className="grid grid-cols-[1fr_auto] items-center rounded-lg border border-slate-100 bg-slate-50/70 px-3 py-2.5"><span>Conversas resolvidas</span><span className="text-base font-bold text-slate-900">{viewModel.performance.resolvedConversations}</span></div><div className="grid grid-cols-[1fr_auto] items-center rounded-lg border border-slate-100 bg-slate-50/70 px-3 py-2.5"><span>Satisfação (CSAT)</span><span className="text-base font-bold text-slate-900">{viewModel.performance.csat ?? 'Sem dados'}</span></div><div className="grid grid-cols-[1fr_auto] items-center rounded-lg border border-slate-100 bg-slate-50/70 px-3 py-2.5"><span>Abandono de conversas</span><span className="text-base font-bold text-slate-900">{viewModel.performance.abandonmentRate}%</span></div></div>}
-          <button type="button" onClick={() => setActivePanel('report')} className="mt-4 inline-flex items-center justify-center border-t border-slate-100 pt-3 text-sm font-semibold text-emerald-600 transition-colors duration-200 hover:text-emerald-700">Ver relatório completo →</button>
+          <p className="m-0 mb-4 text-base font-semibold text-slate-900">Desempenho geral</p>
+          {viewModel.performance.avgResponseTimeSeconds === null && viewModel.performance.resolvedConversations === 0 && viewModel.performance.csat === null ? <div className="flex-1 rounded-xl border border-dashed border-emerald-200 bg-gradient-to-b from-emerald-50/60 to-white p-4"><div className="mb-3 flex items-center gap-2"><span className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-emerald-200 bg-white text-emerald-600 shadow-sm"><TrendingUp size={16} /></span><div><p className="m-0 text-sm font-semibold text-slate-800">Dados aparecerão aqui conforme as conversas acontecerem.</p></div></div><div className="grid grid-cols-1 gap-2 min-[360px]:grid-cols-2">{[1,2,3,4].map((item) => <div key={item} className="rounded-xl border border-emerald-100/70 bg-white/80 p-3"><SkeletonLine width="36%" height={8} /><div className="mt-3"><SkeletonLine width="58%" height={14} /></div><div className="mt-2"><SkeletonLine width="44%" height={8} /></div></div>)}</div></div> : <div className="grid grid-cols-1 gap-3 min-[360px]:grid-cols-2">{performanceKpis.map((item) => { const Icon = item.icon; return <div key={item.label} className="group rounded-2xl border border-slate-100 bg-slate-50/80 p-3.5 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-slate-200 hover:bg-white hover:shadow-md"><span className={`inline-flex h-8 w-8 items-center justify-center rounded-full border ring-4 ${item.className}`}><Icon size={15} strokeWidth={2.4} /></span><p className="m-0 mt-3 text-xl font-bold leading-tight text-slate-950">{item.value}</p><p className="m-0 mt-1 text-xs font-medium leading-tight text-slate-500">{item.label}</p></div>; })}</div>}
+          <div className="mt-auto pt-4"><button type="button" onClick={() => setActivePanel('report')} className="inline-flex w-full items-center justify-center border-t border-slate-100 pt-3 text-sm font-semibold text-emerald-600 transition-colors duration-200 hover:text-emerald-700">Ver relatório completo →</button></div>
         </div>
       </div>
 
