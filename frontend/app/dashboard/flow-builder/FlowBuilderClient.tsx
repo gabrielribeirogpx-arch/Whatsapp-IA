@@ -1001,9 +1001,9 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
 
   const saveButtonLabel = useMemo(() => {
     if (flowSaveStatus === 'saving') return 'Salvando...';
-    if (flowSaveStatus === 'success') return 'Salvo agora';
+    if (flowSaveStatus === 'success') return 'Salvo';
     if (flowSaveStatus === 'error') return 'Erro ao salvar';
-    return '✓ Salvar alterações';
+    return 'Salvar';
   }, [flowSaveStatus]);
 
   useEffect(() => () => {
@@ -2380,24 +2380,6 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
           </button>
         ))}
 
-        <div className="dash-nav-divider" />
-
-        <button
-          type="button"
-          className="dash-nav-item"
-          onClick={() => void handleSaveFlow(false, { showToast: true })}
-          disabled={isSaving || !selectedFlowId}
-          title={isEditing ? 'Salvar alterações' : 'Visualização'}
-          style={{ border: flowDirty ? '1px solid #22c55e' : 'none', background: flowDirty ? '#ecfdf5' : 'none', cursor: isSaving ? 'not-allowed' : 'pointer', width: '100%', textAlign: 'left', opacity: isSaving ? 0.6 : 1 }}
-        >
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/>
-            <polyline points="17 21 17 13 7 13 7 21"/>
-            <polyline points="7 3 7 8 15 8"/>
-          </svg>
-          <span className="dash-nav-label">{saveButtonLabel}</span>
-        </button>
-
         <div style={{ marginTop: 'auto' }}>
           <div className="dash-nav-divider" />
           <Link href="/dashboard/flows" className="dash-nav-item active" title="Lista de fluxos" style={{ textDecoration: 'none' }}>
@@ -2576,6 +2558,17 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
                   </button>
                 </div>
                 <div className="flow-toolbar-group flow-toolbar-group-primary-actions">
+                  {(flowDirty || flowSaveStatus === 'saving') && (
+                    <button
+                      type="button"
+                      className="flow-top-btn flow-top-btn-primary"
+                      onClick={() => void handleSaveFlow(false, { showToast: true })}
+                      disabled={isSaving || !selectedFlowId}
+                      title={isEditing ? 'Salvar alterações' : 'Visualização'}
+                    >
+                      {saveButtonLabel}
+                    </button>
+                  )}
                   {!isSimulatorOpen && (
                     <button
                       type="button"
