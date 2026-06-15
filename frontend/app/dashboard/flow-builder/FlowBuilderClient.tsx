@@ -2422,159 +2422,166 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
         </div>
       )}
       <main ref={flowCanvasRef} style={{ flex: 1, background: '#F7F7F5', position: 'relative', minWidth: 0 }}>
-        <div className="flow-builder-breadcrumb" aria-label="Breadcrumb">
-          <Link href="/dashboard/flows">Fluxos</Link>
-          <span aria-hidden="true">›</span>
-          <span>{selectedFlow ? (selectedFlow.name || selectedFlow.id) : 'Selecione um fluxo'}</span>
-          <span aria-hidden="true">›</span>
-          <strong>Builder</strong>
-        </div>
-        <div className="flow-builder-top-actions">
-          {normalizedFlows.length === 0 && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <span style={{ color: '#6b7280', fontSize: 14 }}>Nenhum fluxo criado ainda</span>
-              <button
-                type="button"
-                className="flow-top-btn flow-top-btn-secondary"
-                onClick={() => {
-                  void createDefaultFlow();
-                }}
-                disabled={isCreatingFlow}
-              >
-                {isCreatingFlow ? 'Criando...' : 'Criar primeiro fluxo'}
-              </button>
-            </div>
-          )}
+        <div className="flow-builder-header">
+          <div className="flow-builder-breadcrumb" aria-label="Breadcrumb">
+            <Link href="/dashboard/flows" aria-label="Voltar para Fluxos">← Fluxos</Link>
+            {selectedFlow && (
+              <>
+                <span aria-hidden="true">/</span>
+                <span>{selectedFlow.name || selectedFlow.id}</span>
+              </>
+            )}
+          </div>
 
-          <div className="flow-toolbar-groups">
-            <div className="flow-toolbar-section flow-toolbar-left">
-              <div className="flow-toolbar-group flow-toolbar-group-select">
-                <div className="flow-select-wrapper" ref={flowSelectRef}>
-                  <button
-                    type="button"
-                    className="flow-select-trigger"
-                    onClick={() => setIsFlowSelectOpen((prev) => !prev)}
-                    disabled={normalizedFlows.length === 0}
-                    aria-haspopup="listbox"
-                    aria-expanded={isFlowSelectOpen}
-                  >
-                    <div className="flow-selected-label" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, minWidth: 0 }}>
-                      <span className="flow-name" style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {selectedFlow ? (selectedFlow.name || selectedFlow.id) : (normalizedFlows.length === 0 ? 'Nenhum flow disponível' : 'Selecione um flow')}
-                      </span>
-                      {selectedFlow && (() => {
-                        const badge = getFlowBadge(selectedFlow);
-                        return (
-                          <span className="flow-status-cluster">
-                            <span className="flow-badge" style={badge.style}>{badge.label}</span>
-                            {flowStatusIndicator && (
-                              <span className={flowStatusIndicator.className} title={flowStatusIndicator.title}>
-                                <span aria-hidden="true">•</span>
-                                <span>{flowStatusIndicator.label}</span>
-                              </span>
-                            )}
-                          </span>
-                        );
-                      })()}
-                    </div>
-                  </button>
-                  {isFlowSelectOpen && normalizedFlows.length > 0 && (
-                    <div className="flow-select-dropdown" role="listbox">
-                      {normalizedFlows.map((flow) => (
-                        <button
-                          key={flow.id}
-                          type="button"
-                          className={`flow-select-option${flow.id === selectedFlowId ? ' flow-select-option-active' : ''}`}
-                          style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}
-                          onClick={async () => {
-                            await handleSelectFlow(flow.id);
-                          }}
-                        >
-                          <span className="flow-name" style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{flow.name || flow.id}</span>
-                          {(() => {
-                            const badge = getFlowBadge(flow);
-                            return <span className="flow-badge" style={badge.style}>{badge.label}</span>;
-                          })()}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            <div className="flow-toolbar-section flow-toolbar-center" aria-label="Ações do flow">
-              <div className="flow-toolbar-group flow-toolbar-group-primary-actions">
+          <div className="flow-builder-top-actions">
+            {normalizedFlows.length === 0 && (
+              <div className="flow-empty-create-row">
+                <span>Nenhum fluxo criado ainda</span>
                 <button
                   type="button"
                   className="flow-top-btn flow-top-btn-secondary"
-                  onClick={handleCreateFlow}
+                  onClick={() => {
+                    void createDefaultFlow();
+                  }}
                   disabled={isCreatingFlow}
                 >
-                  {isCreatingFlow ? 'Criando...' : 'Novo'}
+                  {isCreatingFlow ? 'Criando...' : 'Criar primeiro fluxo'}
                 </button>
-                <button
-                  type="button"
-                  className="flow-top-btn flow-top-btn-neutral"
-                  onClick={renameFlow}
-                  disabled={!selectedFlowId}
-                >
-                  Renomear
-                </button>
-                <button
-                  type="button"
-                  className="flow-top-btn flow-top-btn-neutral"
-                  onClick={openVersionsModal}
-                  disabled={!selectedFlowId}
-                >
-                  <History size={14} />
-                  Histórico
-                </button>
-                <button
-                  type="button"
-                  className="flow-top-btn flow-top-btn-neutral"
-                  onClick={() => {
-                    setIsSnapshotPanelOpen((open) => !open);
-                    void loadRuntimeObservability();
-                  }}
-                  disabled={!selectedFlowId}
-                >
-                  Snapshot
-                </button>
-                {!isSimulatorOpen && (
+              </div>
+            )}
+
+            <div className="flow-toolbar-groups">
+              <div className="flow-toolbar-section flow-toolbar-left">
+                <div className="flow-toolbar-group flow-toolbar-group-select">
+                  <div className="flow-select-wrapper" ref={flowSelectRef}>
+                    <button
+                      type="button"
+                      className="flow-select-trigger"
+                      onClick={() => setIsFlowSelectOpen((prev) => !prev)}
+                      disabled={normalizedFlows.length === 0}
+                      aria-haspopup="listbox"
+                      aria-expanded={isFlowSelectOpen}
+                    >
+                      <div className="flow-selected-label">
+                        <span className="flow-name">
+                          {selectedFlow ? (selectedFlow.name || selectedFlow.id) : (normalizedFlows.length === 0 ? 'Nenhum flow disponível' : 'Selecione um flow')}
+                        </span>
+                        {selectedFlow && (() => {
+                          const badge = getFlowBadge(selectedFlow);
+                          return (
+                            <span className="flow-status-cluster">
+                              <span className="flow-badge" style={badge.style}>{badge.label}</span>
+                              {flowStatusIndicator && (
+                                <span className={flowStatusIndicator.className} title={flowStatusIndicator.title}>
+                                  <span aria-hidden="true">•</span>
+                                  <span>{flowStatusIndicator.label}</span>
+                                </span>
+                              )}
+                            </span>
+                          );
+                        })()}
+                      </div>
+                    </button>
+                    {isFlowSelectOpen && normalizedFlows.length > 0 && (
+                      <div className="flow-select-dropdown" role="listbox">
+                        {normalizedFlows.map((flow) => (
+                          <button
+                            key={flow.id}
+                            type="button"
+                            className={`flow-select-option${flow.id === selectedFlowId ? ' flow-select-option-active' : ''}`}
+                            style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}
+                            onClick={async () => {
+                              await handleSelectFlow(flow.id);
+                            }}
+                          >
+                            <span className="flow-name" style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{flow.name || flow.id}</span>
+                            {(() => {
+                              const badge = getFlowBadge(flow);
+                              return <span className="flow-badge" style={badge.style}>{badge.label}</span>;
+                            })()}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              <div className="flow-toolbar-section flow-toolbar-center" aria-label="Ações do flow">
+                <div className="flow-toolbar-group flow-toolbar-group-secondary-actions">
                   <button
                     type="button"
-                    className="flow-top-btn flow-top-btn-simulate"
-                    onClick={() => {
-                      setIsSimulatorOpen(true);
-                      if (simulationStartedRef.current || nodes.length === 0) return;
-
-                      simulationStartedRef.current = true;
-                      setMessages([]);
-                      setCurrentChoices([]);
-                      setCurrentNodeId(null);
-                      setActiveEdgeIds([]);
-                      setIsTyping(false);
-
-                      const markedStart = nodes.find((node) => (node.data as { isStart?: boolean }).isStart);
-                      const incomingTargets = new Set(edges.map((edge) => edge.target));
-                      const startNode = markedStart || nodes.find((node) => !incomingTargets.has(node.id)) || nodes[0];
-                      if (startNode) {
-                        void runFlowStep('oi');
-                      }
-                    }}
+                    className="flow-top-btn flow-top-btn-secondary"
+                    onClick={handleCreateFlow}
+                    disabled={isCreatingFlow}
                   >
-                    Simular
+                    {isCreatingFlow ? 'Criando...' : 'Novo'}
                   </button>
-                )}
-                <button
-                  type="button"
-                  className="flow-top-btn flow-top-btn-primary"
-                  onClick={handleActivateFlow}
-                  disabled={!selectedFlowId || validationErrors.length > 0}
-                >
-                  Ativar
-                </button>
+                  <button
+                    type="button"
+                    className="flow-top-btn flow-top-btn-neutral"
+                    onClick={renameFlow}
+                    disabled={!selectedFlowId}
+                  >
+                    Renomear
+                  </button>
+                  <button
+                    type="button"
+                    className="flow-top-btn flow-top-btn-neutral"
+                    onClick={openVersionsModal}
+                    disabled={!selectedFlowId}
+                  >
+                    <History size={14} />
+                    Histórico
+                  </button>
+                  <button
+                    type="button"
+                    className="flow-top-btn flow-top-btn-neutral"
+                    onClick={() => {
+                      setIsSnapshotPanelOpen((open) => !open);
+                      void loadRuntimeObservability();
+                    }}
+                    disabled={!selectedFlowId}
+                  >
+                    Snapshot
+                  </button>
+                </div>
+                <div className="flow-toolbar-group flow-toolbar-group-primary-actions">
+                  {!isSimulatorOpen && (
+                    <button
+                      type="button"
+                      className="flow-top-btn flow-top-btn-simulate"
+                      onClick={() => {
+                        setIsSimulatorOpen(true);
+                        if (simulationStartedRef.current || nodes.length === 0) return;
+
+                        simulationStartedRef.current = true;
+                        setMessages([]);
+                        setCurrentChoices([]);
+                        setCurrentNodeId(null);
+                        setActiveEdgeIds([]);
+                        setIsTyping(false);
+
+                        const markedStart = nodes.find((node) => (node.data as { isStart?: boolean }).isStart);
+                        const incomingTargets = new Set(edges.map((edge) => edge.target));
+                        const startNode = markedStart || nodes.find((node) => !incomingTargets.has(node.id)) || nodes[0];
+                        if (startNode) {
+                          void runFlowStep('oi');
+                        }
+                      }}
+                    >
+                      Simular
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    className="flow-top-btn flow-top-btn-primary"
+                    onClick={handleActivateFlow}
+                    disabled={!selectedFlowId || validationErrors.length > 0}
+                  >
+                    Ativar
+                  </button>
+                </div>
               </div>
             </div>
           </div>
