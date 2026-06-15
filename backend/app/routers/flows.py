@@ -1982,6 +1982,7 @@ def get_tenant_flow_analytics(
     flow_id: str,
     period: str = "7d",
     range: str | None = None,
+    version: str | None = None,
     x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
     db: Session = Depends(get_db),
 ):
@@ -1995,7 +1996,22 @@ def get_tenant_flow_analytics(
     if resolved_period != requested_period:
         logger.info("[FLOW ANALYTICS] invalid period=%s fallback=%s allowed=%s", requested_period, resolved_period, "|".join(PERIODS.keys()))
 
-    analytics = get_flow_analytics(db=db, tenant_id=tenant_uuid, flow_id=flow.id, period=resolved_period)
+    selected_version_id = None
+    all_versions = True
+    if version == "active":
+        selected_version_id = flow.published_version_id or flow.current_version_id
+        all_versions = selected_version_id is None
+    elif version and version != "all":
+        try:
+            selected_version_id = uuid.UUID(version)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid flow version")
+        exists = db.query(FlowVersion.id).filter(FlowVersion.id == selected_version_id, FlowVersion.flow_id == flow.id, FlowVersion.tenant_id == tenant_uuid).first()
+        if not exists:
+            raise HTTPException(status_code=404, detail="Flow version not found")
+        all_versions = False
+
+    analytics = get_flow_analytics(db=db, tenant_id=tenant_uuid, flow_id=flow.id, period=resolved_period, flow_version_id=selected_version_id, all_versions=all_versions)
     logger.info("[FLOW ANALYTICS] flow_id=%s tenant_id=%s analytics=%s", flow_id, tenant_uuid, analytics)
     return analytics
 

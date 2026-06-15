@@ -24,11 +24,11 @@ import DelayNode from '@/components/flow/nodes/DelayNode';
 import MessageNode from '@/components/flow/nodes/MessageNode';
 import MediaNode from '@/components/flow/nodes/MediaNode';
 import CreateFlowModal from '@/components/flows/CreateFlowModal';
-import { apiFetch, getFlowGraph, getTenantSessionFromStorage, listFlowVersions, parseApiResponse, restoreFlowVersion } from '@/lib/api';
+import { apiFetch, getFlowAnalytics, getFlowGraph, getTenantSessionFromStorage, listFlowVersions, parseApiResponse, restoreFlowVersion } from '@/lib/api';
 import { getLayoutedElements } from '@/lib/autoLayout';
 import { orderChoiceChildrenEdges } from '@/lib/flowChoiceOrdering';
 import { normalizeFlow } from '@/lib/flowNormalization';
-import { FlowEdgePayload, FlowNodePayload, FlowVersionItem } from '@/lib/types';
+import { FlowAnalytics, FlowEdgePayload, FlowNodePayload, FlowVersionItem } from '@/lib/types';
 
 const FETCH_TIMEOUT_MS = 8000;
 const INVALID_UPLOAD_PUBLIC_URL_MESSAGE = 'Upload concluído, mas a URL pública gerada é inválida.';
@@ -912,6 +912,8 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
   const [isRenameFlowOpen, setIsRenameFlowOpen] = useState(false);
   const [renameFlowName, setRenameFlowName] = useState('');
   const [flowVersions, setFlowVersions] = useState<FlowVersionItem[]>([]);
+  const [analyticsOverlayEnabled, setAnalyticsOverlayEnabled] = useState(false);
+  const [analyticsData, setAnalyticsData] = useState<FlowAnalytics | null>(null);
   const [activeVersionId, setActiveVersionId] = useState<string | null>(null);
   const [flowSource, setFlowSource] = useState<string>('version');
   const [showEmptyFlowWarning, setShowEmptyFlowWarning] = useState(false);
@@ -2319,6 +2321,21 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
     if (first?.node_id) focusNodeIssue(first.node_id);
   }, [focusNodeIssue, validationErrors]);
 
+  const analyticsByNode = useMemo(() => new Map((analyticsData?.node_metrics ?? []).map((item) => [item.node_id, item])), [analyticsData]);
+  const analyticsByEdge = useMemo(() => new Map((analyticsData?.transition_metrics ?? []).map((item) => [`${item.source_node_id}->${item.target_node_id}:${item.source_handle || ''}`, item])), [analyticsData]);
+
+  useEffect(() => {
+    if (!analyticsOverlayEnabled || !selectedFlowId) {
+      if (!analyticsOverlayEnabled) setAnalyticsData(null);
+      return;
+    }
+    let active = true;
+    getFlowAnalytics(selectedFlowId, '7d', 'active')
+      .then((payload) => { if (active) setAnalyticsData(payload); })
+      .catch(() => { if (active) { setAnalyticsOverlayEnabled(false); setAnalyticsData(null); setToastMessage({ type: 'error', message: 'Não foi possível carregar o heatmap.' }); } });
+    return () => { active = false; };
+  }, [analyticsOverlayEnabled, selectedFlowId]);
+
   const decoratedNodes = useMemo(
     () => nodes.map((node) => ({
       ...node,
@@ -2327,9 +2344,10 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
         running: node.id === currentNodeId,
         onToggleStart: toggleStartNode,
         hasValidationError: node.id === highlightedNodeId,
+        analytics: analyticsOverlayEnabled ? analyticsByNode.get(node.id) ?? null : null,
       },
     })),
-    [currentNodeId, highlightedNodeId, nodes, toggleStartNode],
+    [analyticsByNode, analyticsOverlayEnabled, currentNodeId, highlightedNodeId, nodes, toggleStartNode],
   );
 
   const safeNodes = useMemo(
@@ -2350,8 +2368,10 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
       safeEdges.map((edge) => ({
         ...edge,
         className: activeEdgeIds.includes(edge.id) ? 'flow-edge flow-edge-active' : 'flow-edge',
+        label: analyticsOverlayEnabled ? (() => { const metric = analyticsByEdge.get(`${edge.source}->${edge.target}:${edge.sourceHandle || ''}`) || analyticsByEdge.get(`${edge.source}->${edge.target}:default`) || analyticsByEdge.get(`${edge.source}->${edge.target}:`); return metric ? `${metric.rate_from_source}%` : edge.label; })() : edge.label,
+        style: analyticsOverlayEnabled ? { ...(edge.style || {}), strokeWidth: Math.min(6, 1 + Math.log10(((analyticsByEdge.get(`${edge.source}->${edge.target}:${edge.sourceHandle || ''}`) || analyticsByEdge.get(`${edge.source}->${edge.target}:default`) || analyticsByEdge.get(`${edge.source}->${edge.target}:`))?.count || 1)) * 2), opacity: 0.85 } : edge.style,
       })),
-    [activeEdgeIds, safeEdges],
+    [activeEdgeIds, analyticsByEdge, analyticsOverlayEnabled, safeEdges],
   );
 
   // Fecha o menu de contexto ao clicar fora
@@ -2582,6 +2602,15 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
                   >
                     <History size={14} />
                     Histórico
+                  </button>
+                  <button
+                    type="button"
+                    className="flow-top-btn flow-top-btn-neutral"
+                    onClick={() => setAnalyticsOverlayEnabled((enabled) => !enabled)}
+                    disabled={!selectedFlowId}
+                    title="Camada visual read-only de analytics"
+                  >
+                    {analyticsOverlayEnabled ? 'Heatmap ligado' : 'Heatmap'}
                   </button>
                   <button
                     type="button"

@@ -27,8 +27,10 @@ type FlowAnalyticsApi = {
     avg_time_seconds?: number;
     handled_messages?: number;
   };
-  funnel?: Array<{ node_id: string; node_label: string; node_type: string; entries?: number; dropoff_rate?: number; conversion_to_next_rate?: number }>;
-  dropoffs?: Array<{ node_id: string; node_label: string; node_type: string; entries?: number; dropoff_rate?: number; conversion_to_next_rate?: number }>;
+  version?: { mode?: string; active_flow_version_id?: string | null; selected_flow_version_id?: string | null; available_versions?: Array<{ id: string; label: string; created_at?: string | null; is_active?: boolean }> };
+  node_metrics?: Array<{ node_id: string; node_label: string; node_type: string; entered: number; completed: number; conversions: number; dropoff: number; dropoff_rate: number; avg_time_seconds?: number | null }>;
+  funnel?: Array<{ node_id: string; node_label: string; node_type: string; entries?: number; entered?: number; completed?: number; conversions?: number; dropoff?: number; dropoff_rate?: number; conversion_to_next_rate?: number; avg_time_seconds?: number | null }>;
+  dropoffs?: Array<{ node_id: string; node_label: string; node_type: string; entries?: number; entered?: number; completed?: number; conversions?: number; dropoff?: number; dropoff_rate?: number; conversion_to_next_rate?: number; avg_time_seconds?: number | null }>;
   common_responses?: Array<{ reply?: string; response?: string; count?: number; rate?: number }>;
   timeseries?: Array<{ date?: string; entries?: number; conversions?: number; abandonments?: number; messages?: number }>;
 };
@@ -47,6 +49,7 @@ function formatDuration(totalSeconds?: number) {
 export default function Page({ params }: Props) {
   const [period, setPeriod] = useState('7d');
   const [timelineMetric, setTimelineMetric] = useState('entries');
+  const [version, setVersion] = useState('active');
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState<FlowAnalyticsApi | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -57,7 +60,7 @@ export default function Page({ params }: Props) {
       setLoading(true);
       setError(null);
       try {
-        setData((await getFlowAnalytics(params.flowId, period)) as FlowAnalyticsApi);
+        setData((await getFlowAnalytics(params.flowId, period, version)) as FlowAnalyticsApi);
       } catch {
         setData(null);
         setError('Não foi possível carregar os analytics agora. Tente novamente em instantes.');
@@ -65,7 +68,7 @@ export default function Page({ params }: Props) {
         setLoading(false);
       }
     })();
-  }, [params.flowId, period]);
+  }, [params.flowId, period, version]);
 
   useEffect(() => {
     (async () => {
@@ -85,6 +88,9 @@ export default function Page({ params }: Props) {
     ['Mensagens tratadas', Number(data?.summary?.messages_handled ?? data?.kpis?.handled_messages ?? 0)],
   ], [data]);
 
+  const nodeFunnel = data?.node_metrics?.length ? data.node_metrics : (data?.funnel ?? []);
+  const dropoffList = (data?.node_metrics?.length ? [...data.node_metrics].sort((a, b) => Number(b.dropoff ?? 0) - Number(a.dropoff ?? 0)) : (data?.dropoffs ?? [])).filter((item) => Number(item.dropoff ?? item.dropoff_rate ?? 0) > 0);
+  const versionDescription = data?.version?.mode === 'all' ? 'Visualizando todas as versões' : data?.version?.mode === 'specific' ? 'Visualizando snapshot selecionado' : 'Visualizando versão atual';
   const noData = Number(data?.summary?.entries ?? data?.kpis?.entries ?? 0) === 0;
   const timeseries = (data?.timeseries ?? []).map((point) => ({
     date: point.date ?? '',
@@ -131,9 +137,18 @@ export default function Page({ params }: Props) {
               </button>
             ))}
           </div>
+          <div className='period-label'>Versão:</div>
+          <select className='version-select' value={version} onChange={(event) => setVersion(event.target.value)}>
+            <option value='active'>Atual</option>
+            <option value='all'>Todas</option>
+            {(data?.version?.available_versions ?? []).map((item) => (
+              <option key={item.id} value={item.id}>{item.label}</option>
+            ))}
+          </select>
         </div>
       </header>
 
+      <div className='version-note'>{versionDescription}</div>
 
       <div className='kpi-grid'>
         {kpis.map(([label, value], index) => (
@@ -167,7 +182,7 @@ export default function Page({ params }: Props) {
       <div className='main-grid'>
         <div className='card card-soft'>
           <h3 className='section-title'><Funnel size={18} />Funil do fluxo</h3>
-          {(data?.funnel ?? []).length === 0 ? (
+          {nodeFunnel.length === 0 ? (
             <div className='funnel-empty'>
               <svg viewBox='0 0 320 180' className='funnel-illustration' aria-hidden>
                 <defs>
@@ -190,10 +205,12 @@ export default function Page({ params }: Props) {
               </div>
             </div>
           ) : (
-            (data?.funnel ?? []).map((n, i) => {
+            nodeFunnel.map((n, i) => {
           const dropoffRate = Number(n.dropoff_rate ?? 0);
           const color = dropoffRate > 40 ? '#EF4444' : dropoffRate > 20 ? '#EAB308' : '#22C55E';
-          const pct = i === 0 ? 100 : Math.round(((n.entries ?? 0) / ((data?.funnel ?? [])[0]?.entries || 1)) * 100);
+          const nodeEntries = Number(n.entered ?? n.entries ?? 0);
+          const firstNode = nodeFunnel[0] as { entered?: number; entries?: number } | undefined;
+          const pct = i === 0 ? 100 : Math.round((nodeEntries / (Number(firstNode?.entered ?? firstNode?.entries ?? 1) || 1)) * 100);
           return (
             <div key={n.node_id} className='funnel-row'>
               <div className='funnel-row-header'>
@@ -206,7 +223,7 @@ export default function Page({ params }: Props) {
                 <div className='progress-fill' style={{ width: `${pct}%`, background: color }} />
               </div>
               <small className='secondary-text'>
-                Entradas {n.entries ?? 0} • Dropoff {n.dropoff_rate ?? 0}% • Conversão próximo {n.conversion_to_next_rate ?? 0}%
+                Entradas {n.entered ?? n.entries ?? 0} • Concluídos {n.completed ?? 0} • Abandono {n.dropoff ?? 0} ({n.dropoff_rate ?? 0}%) • Conversões {n.conversions ?? 0}{n.avg_time_seconds != null ? ` • Tempo ${formatDuration(n.avg_time_seconds)}` : ''}
               </small>
             </div>
           );
@@ -217,7 +234,7 @@ export default function Page({ params }: Props) {
         <div className='side-stack'>
           <div className='card card-soft'>
           <h3 className='section-title'><GitBranch size={18} />Pontos de abandono</h3>
-          {(data?.dropoffs ?? []).length === 0 ? <div className='side-empty'><span className='side-icon'><GitBranch size={22} /></span><strong>—</strong><span className='secondary-text'>Sem dados suficientes</span></div> : (data?.dropoffs ?? []).map((n) => (
+          {dropoffList.length === 0 ? <div className='side-empty'><span className='side-icon'><GitBranch size={22} /></span><strong>—</strong><span className='secondary-text'>Sem dados suficientes</span></div> : dropoffList.map((n) => (
             <div key={n.node_id} className='secondary-text'>
               ⚠️ Bloco “{n.node_label}” — {n.dropoff_rate}% de abandono. Sugestão: simplifique a pergunta.
             </div>
@@ -348,6 +365,8 @@ export default function Page({ params }: Props) {
         .period-label {
           font-weight: 600;
         }
+        .version-note { margin: -8px 0 16px; color: #64748b; font-size: 13px; }
+        .version-select { border: 1px solid #e2e8f0; border-radius: 12px; padding: 8px 10px; background: #fff; color: #334155; font-size: 13px; }
         .segmented-control {
           display: inline-flex;
           padding: 4px;

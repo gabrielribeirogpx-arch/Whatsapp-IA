@@ -651,20 +651,86 @@ def _flow_version_node_map(db: Session, tenant_id: uuid.UUID, flow_id: uuid.UUID
     return mapped
 
 
-def _analytics_events(db: Session, tenant_id: uuid.UUID, flow_id: uuid.UUID, period_start: datetime) -> list[FlowAnalyticsEvent]:
-    return (
-        db.query(FlowAnalyticsEvent)
-        .filter(
-            FlowAnalyticsEvent.tenant_id == tenant_id,
-            FlowAnalyticsEvent.flow_id == flow_id,
-            FlowAnalyticsEvent.created_at >= period_start,
-        )
-        .order_by(FlowAnalyticsEvent.created_at.asc())
+def _analytics_events(
+    db: Session,
+    tenant_id: uuid.UUID,
+    flow_id: uuid.UUID,
+    period_start: datetime,
+    *,
+    flow_version_id: uuid.UUID | None = None,
+    all_versions: bool = True,
+) -> list[FlowAnalyticsEvent]:
+    query = db.query(FlowAnalyticsEvent).filter(
+        FlowAnalyticsEvent.tenant_id == tenant_id,
+        FlowAnalyticsEvent.flow_id == flow_id,
+        FlowAnalyticsEvent.created_at >= period_start,
+    )
+    if not all_versions:
+        query = query.filter(FlowAnalyticsEvent.flow_version_id == flow_version_id)
+    return query.order_by(FlowAnalyticsEvent.created_at.asc()).all()
+
+
+def _version_payload(db: Session, *, tenant_id: uuid.UUID, flow: Flow, selected_version_id: uuid.UUID | None, all_versions: bool) -> dict[str, Any]:
+    versions = (
+        db.query(FlowVersion)
+        .filter(FlowVersion.flow_id == flow.id, FlowVersion.tenant_id == tenant_id)
+        .order_by(FlowVersion.is_published.desc(), FlowVersion.is_active.desc(), FlowVersion.created_at.desc())
         .all()
     )
+    active_id = flow.published_version_id or flow.current_version_id or next((v.id for v in versions if v.is_published or v.is_active), None)
+    return {
+        "mode": "all" if all_versions else ("specific" if selected_version_id and selected_version_id != active_id else "active"),
+        "active_flow_version_id": str(active_id) if active_id else None,
+        "selected_flow_version_id": None if all_versions or not selected_version_id else str(selected_version_id),
+        "available_versions": [
+            {
+                "id": str(version.id),
+                "label": f"Snapshot publicado em {version.created_at.strftime('%d/%m/%Y %H:%M')}",
+                "created_at": version.created_at.isoformat() if version.created_at else None,
+                "is_active": version.id == active_id or bool(version.is_published or version.is_active),
+            }
+            for version in versions
+        ],
+    }
 
 
-def get_flow_analytics(db: Session, *, tenant_id: uuid.UUID, flow_id: uuid.UUID, period: str = DEFAULT_PERIOD, range_days: int | None = None) -> dict[str, Any]:
+def _node_and_transition_metrics(analytics_events: list[FlowAnalyticsEvent], node_map: dict[str, dict[str, str]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    entered: Counter[str] = Counter()
+    completed: Counter[str] = Counter()
+    conversions: Counter[str] = Counter()
+    first_entered: dict[tuple[uuid.UUID, str], datetime] = {}
+    durations: defaultdict[str, list[float]] = defaultdict(list)
+    transitions: Counter[tuple[str, str, str]] = Counter()
+    for event in analytics_events:
+        if event.node_id and event.event_type == "node_entered":
+            entered[event.node_id] += 1
+            if event.session_id:
+                first_entered.setdefault((event.session_id, event.node_id), event.created_at)
+        elif event.node_id and event.event_type == "node_completed":
+            completed[event.node_id] += 1
+            if event.session_id and (event.session_id, event.node_id) in first_entered:
+                durations[event.node_id].append((event.created_at - first_entered[(event.session_id, event.node_id)]).total_seconds())
+        elif event.node_id and event.event_type == "conversion_reached":
+            conversions[event.node_id] += 1
+        if event.node_id and event.event_type in {"transition_taken", "choice_selected"}:
+            metadata = event.metadata_json if isinstance(event.metadata_json, dict) else {}
+            target = str(metadata.get("target_node_id") or event.event_key or "").strip()
+            if target:
+                transitions[(event.node_id, target, str(metadata.get("source_handle") or "default"))] += 1
+    node_ids = set(entered) | set(completed) | set(conversions)
+    node_metrics = []
+    for node_id in node_ids:
+        meta = node_map.get(node_id, {"label": "Bloco", "type": "unknown"})
+        entered_count = entered[node_id]
+        completed_count = completed[node_id]
+        dropoff = max(entered_count - completed_count, 0)
+        samples = durations.get(node_id, [])
+        node_metrics.append({"node_id": node_id, "node_label": meta["label"], "node_type": meta["type"], "entered": entered_count, "completed": completed_count, "conversions": conversions[node_id], "dropoff": dropoff, "dropoff_rate": _safe_rate(dropoff, entered_count), "avg_time_seconds": round(sum(samples) / len(samples), 2) if samples else None})
+    transition_metrics = [{"source_node_id": s, "target_node_id": t, "source_handle": h, "count": count, "rate_from_source": _safe_rate(count, entered[s])} for (s, t, h), count in transitions.items()]
+    return sorted(node_metrics, key=lambda item: item["entered"], reverse=True), transition_metrics
+
+
+def get_flow_analytics(db: Session, *, tenant_id: uuid.UUID, flow_id: uuid.UUID, period: str = DEFAULT_PERIOD, range_days: int | None = None, flow_version_id: uuid.UUID | None = None, all_versions: bool = True) -> dict[str, Any]:
     resolved_period = resolve_analytics_period(period)
     flow = db.query(Flow).filter(Flow.id == flow_id, Flow.tenant_id == tenant_id).first()
     base = _empty_response(str(flow_id), flow.name if flow else None, resolved_period)
@@ -672,12 +738,19 @@ def get_flow_analytics(db: Session, *, tenant_id: uuid.UUID, flow_id: uuid.UUID,
         return base
 
     period_start = datetime.utcnow() - (timedelta(days=range_days) if range_days else PERIODS[resolved_period])
-    analytics_events = _analytics_events(db, tenant_id, flow_id, period_start)
+    version_info = _version_payload(db, tenant_id=tenant_id, flow=flow, selected_version_id=flow_version_id, all_versions=all_versions)
+    base["version"] = version_info
+    analytics_events = _analytics_events(db, tenant_id, flow_id, period_start, flow_version_id=flow_version_id, all_versions=all_versions)
     if not analytics_events:
         # Backward compatible fallback for historical pre-Runtime-V2 analytics.
-        return _get_legacy_flow_analytics(db=db, tenant_id=tenant_id, flow_id=flow_id, period=resolved_period)
+        legacy = _get_legacy_flow_analytics(db=db, tenant_id=tenant_id, flow_id=flow_id, period=resolved_period)
+        legacy["version"] = version_info
+        legacy.setdefault("node_metrics", [])
+        legacy.setdefault("transition_metrics", [])
+        return legacy
 
     node_map = _flow_version_node_map(db, tenant_id, flow_id)
+    node_metrics, transition_metrics = _node_and_transition_metrics(analytics_events, node_map)
     session_ids = {event.session_id for event in analytics_events if event.session_id}
     entries = sum(1 for event in analytics_events if event.event_type == "flow_started")
     conversions = sum(1 for event in analytics_events if event.event_type == "conversion_reached")
@@ -748,7 +821,7 @@ def get_flow_analytics(db: Session, *, tenant_id: uuid.UUID, flow_id: uuid.UUID,
     timeseries = [{"date": date, **metrics} for date, metrics in sorted(daily.items())]
 
     summary = {"entries": entries, "conversions": conversions, "conversion_rate": _safe_rate(conversions, entries), "abandonments": abandoned, "abandonment_rate": _safe_rate(abandoned, entries), "avg_duration_seconds": avg_duration_seconds, "messages_handled": handled_messages, "completed": completed, "messages": handled_messages, "messages_sent": handled_messages, "dropoff_rate": _safe_rate(abandoned, entries), "avg_time_seconds": avg_duration_seconds}
-    base.update({"summary": summary, "kpis": {"entries": entries, "conversion_rate": summary["conversion_rate"], "abandonment_rate": summary["abandonment_rate"], "avg_time_seconds": avg_duration_seconds, "handled_messages": handled_messages}, "funnel": funnel, "dropoff_points": dropoff_points, "dropoffs": dropoff_points, "top_dropoffs": dropoff_points, "common_replies": common_replies, "common_responses": common_replies, "timeseries": timeseries, "timeline": timeseries})
+    base.update({"summary": summary, "kpis": {"entries": entries, "conversion_rate": summary["conversion_rate"], "abandonment_rate": summary["abandonment_rate"], "avg_time_seconds": avg_duration_seconds, "handled_messages": handled_messages}, "funnel": node_metrics or funnel, "node_metrics": node_metrics, "transition_metrics": transition_metrics, "dropoff_points": sorted((item for item in node_metrics if item["dropoff"] > 0), key=lambda item: item["dropoff"], reverse=True)[:5] if node_metrics else dropoff_points, "dropoffs": sorted((item for item in node_metrics if item["dropoff"] > 0), key=lambda item: item["dropoff"], reverse=True)[:5] if node_metrics else dropoff_points, "top_dropoffs": sorted((item for item in node_metrics if item["dropoff"] > 0), key=lambda item: item["dropoff"], reverse=True)[:5] if node_metrics else dropoff_points, "common_replies": common_replies, "common_responses": common_replies, "timeseries": timeseries, "timeline": timeseries})
     return base
 
 

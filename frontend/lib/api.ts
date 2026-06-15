@@ -621,8 +621,10 @@ export async function restoreFlowVersion(flowId: string, versionId: string): Pro
   return parseApiResponse<FlowItem>(res);
 }
 
-export async function getFlowAnalytics(flowId: string, period: string = "7d"): Promise<FlowAnalytics> {
-  const res = await apiFetch(`/api/flows/${flowId}/analytics?range=${encodeURIComponent(period)}`);
+export async function getFlowAnalytics(flowId: string, period: string = "7d", version?: string): Promise<FlowAnalytics> {
+  const params = new URLSearchParams({ range: period });
+  if (version) params.set("version", version);
+  const res = await apiFetch(`/api/flows/${flowId}/analytics?${params.toString()}`);
   return parseApiResponse<FlowAnalytics>(res);
 }
 

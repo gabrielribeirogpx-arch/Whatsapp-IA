@@ -53,6 +53,7 @@ export default function MediaNode({ id, data, selected }: NodeProps) {
       isStart={nodeData.isStart}
       hasValidationError={nodeData.hasValidationError || !String(nodeData.media_url || '').startsWith('https://')}
       onToggleStart={nodeData.onToggleStart}
+      analytics={(nodeData as any).analytics}
     />
   );
 }

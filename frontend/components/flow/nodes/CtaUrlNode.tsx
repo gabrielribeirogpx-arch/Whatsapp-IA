@@ -49,6 +49,7 @@ export default function CtaUrlNode({ id, data, selected }: NodeProps) {
       isStart={nodeData.isStart}
       hasValidationError={nodeData.hasValidationError || !message || hasInvalidButton || hasInvalidUrl}
       onToggleStart={nodeData.onToggleStart}
+      analytics={(nodeData as any).analytics}
     />
   );
 }

@@ -346,6 +346,7 @@ class FlowV2Executor:
                 payload={"target_node_id": result.next_node_id},
             )
             self._track_analytics(db, session=session, flow_id=flow_id, event_type="choice_selected", node_id=node_id, node_type=node_type, event_key=str(result.next_node_id), metadata={"target_node_id": result.next_node_id})
+            self._track_analytics(db, session=session, flow_id=flow_id, event_type="transition_taken", node_id=node_id, node_type=node_type, event_key=str(result.next_node_id), metadata={"source_handle": "default", "target_node_id": result.next_node_id, "target_node_type": None})
             self.session_manager.move_to(db, session=session, node_id=result.next_node_id, status=FlowV2SessionStatus.RUNNING)
 
         current_node_id = session.current_node_id
