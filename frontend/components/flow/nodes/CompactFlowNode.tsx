@@ -86,18 +86,20 @@ function CompactFlowNode({
           <span className="flow-node-title">{title}</span>
           {meta ? <span className="flow-node-compact-meta">{meta}</span> : null}
         </div>
-        <span className="flow-node-badge" style={badgeTone}>{badge}</span>
-        <button
-          type="button"
-          className={`flow-node-start-button nodrag ${isStart ? 'is-start' : ''}`}
-          title={isStart ? 'Bloco inicial' : 'Marcar como início'}
-          onClick={(event) => {
-            event.stopPropagation();
-            onToggleStart?.(id);
-          }}
-        >
-          {isStart ? '▶ Início' : '▶'}
-        </button>
+        <div className="flow-node-header-actions">
+          <span className="flow-node-badge" style={badgeTone}>{badge}</span>
+          <button
+            type="button"
+            className={`flow-node-start-button nodrag ${isStart ? 'is-start' : ''}`}
+            title={isStart ? 'Bloco inicial' : 'Marcar como início'}
+            onClick={(event) => {
+              event.stopPropagation();
+              onToggleStart?.(id);
+            }}
+          >
+            {isStart ? '▶ Início' : '▶'}
+          </button>
+        </div>
       </div>
 
       {analytics ? (
