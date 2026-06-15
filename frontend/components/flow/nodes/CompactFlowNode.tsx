@@ -66,7 +66,17 @@ function CompactFlowNode({
       } as CSSProperties}
     >
       <div className="flow-node-header-bar" style={{ background: accent }} />
-      <Handle type="target" position={Position.Left} isConnectable={isConnectable} />
+      <Handle
+        type="target"
+        position={Position.Left}
+        className="flow-node-handle flow-node-target-handle"
+        isConnectable={isConnectable}
+        style={{
+          '--flow-handle-color': accent,
+          '--flow-handle-transform': 'translate(0, -50%)',
+          pointerEvents: isConnectable ? 'auto' : 'none',
+        } as CSSProperties}
+      />
 
       <div className="flow-node-compact-header">
         <span className="flow-node-emoji" aria-hidden="true">{emoji}</span>
@@ -107,7 +117,7 @@ function CompactFlowNode({
           type="source"
           position={Position.Right}
           title={handle.label}
-          className="flow-node-source-handle nodrag nopan"
+          className="flow-node-handle flow-node-source-handle nodrag nopan"
           isConnectable={isConnectable}
           data-option-value={handle.optionValue}
           style={{
@@ -117,11 +127,14 @@ function CompactFlowNode({
             height: 14,
             background: '#fff',
             border: `2px solid ${handle.color || accent}`,
+            boxShadow: '0 4px 10px rgba(15, 23, 42, 0.18), 0 0 0 2px rgba(255, 255, 255, 0.9)',
+            transition: 'transform 120ms ease, box-shadow 120ms ease, border-color 120ms ease',
+            '--flow-handle-transform': 'translate(0, -50%)',
             borderRadius: '50%',
             cursor: 'crosshair',
             pointerEvents: isConnectable ? 'auto' : 'none',
             zIndex: 30,
-          }}
+          } as CSSProperties}
         />
       ))}
     </div>

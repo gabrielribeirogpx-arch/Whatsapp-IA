@@ -3576,16 +3576,39 @@ input {
   contain: layout style;
 }
 
-.flow-node-source-handle {
+.flow-node-handle {
+  width: 14px;
+  height: 14px;
+  background: #fff;
+  border: 2px solid var(--flow-handle-color, var(--flow-node-accent, #10b981));
+  border-radius: 999px;
+  box-shadow: 0 4px 10px rgba(15, 23, 42, 0.18), 0 0 0 2px rgba(255, 255, 255, 0.9);
+  cursor: crosshair;
   pointer-events: auto;
+  transform: var(--flow-handle-transform, translate(0, -50%));
+  transition: transform 120ms ease, box-shadow 120ms ease, border-color 120ms ease;
   z-index: 30;
 }
 
-.flow-node-source-handle::after {
+.flow-node-handle:hover {
+  box-shadow: 0 6px 14px rgba(15, 23, 42, 0.22), 0 0 0 3px rgba(255, 255, 255, 0.95);
+  transform: var(--flow-handle-transform, translate(0, -50%)) scale(1.16);
+}
+
+.flow-node-handle::after {
   content: '';
   position: absolute;
   inset: -8px;
   border-radius: 999px;
+}
+
+.flow-node-target-handle {
+  left: -8px;
+}
+
+.flow-node-source-handle {
+  pointer-events: auto;
+  z-index: 30;
 }
 
 .flow-node-compact-header {
