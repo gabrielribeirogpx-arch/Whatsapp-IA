@@ -1055,7 +1055,7 @@ export default function Page({ params }: Props) {
             }
             .analytics-sections {
               display: grid;
-              gap: 12px;
+              gap: 16px;
             }
             .main-grid {
               display: grid;
