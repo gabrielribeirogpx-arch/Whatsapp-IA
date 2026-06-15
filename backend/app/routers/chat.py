@@ -165,6 +165,7 @@ def tenant_login(payload: TenantLoginRequest, db: Session = Depends(get_db)):
 
 @router.get("/conversations", response_model=list[ConversationOut])
 def list_conversations(
+    limit: int | None = Query(default=None, ge=1, le=100),
     tenant: Tenant = Depends(get_current_tenant),
     db: Session = Depends(get_db),
 ):
@@ -242,6 +243,8 @@ def list_conversations(
                     assigned_users_by_id=assigned_users_by_id,
                 )
             )
+            if limit is not None and len(response) >= limit:
+                break
 
         return response
     except Exception as exc:

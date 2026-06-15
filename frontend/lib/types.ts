@@ -10,6 +10,8 @@ export type Conversation = {
   mode: 'human' | 'bot' | 'ai' | string;
   assigned_user_id?: string | null;
   assigned_user_name?: string | null;
+  status?: string | null;
+  unread_count?: number;
   last_message: string;
   updated_at: string;
 };

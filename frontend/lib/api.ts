@@ -229,8 +229,9 @@ export async function resetConversation(conversationId: string): Promise<{ ok: b
   return parseApiResponse<{ ok: boolean }>(res);
 }
 
-export async function getConversations(): Promise<Conversation[]> {
-  const res = await apiFetch('/api/conversations');
+export async function getConversations(limit?: number): Promise<Conversation[]> {
+  const query = typeof limit === 'number' && Number.isFinite(limit) ? `?limit=${Math.max(1, Math.floor(limit))}` : '';
+  const res = await apiFetch(`/api/conversations${query}`);
   return parseApiResponse<Conversation[]>(res);
 }
 
