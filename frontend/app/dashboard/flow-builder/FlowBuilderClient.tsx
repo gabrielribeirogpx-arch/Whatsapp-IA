@@ -2447,9 +2447,6 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
                       <span className="flow-name" style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                         {selectedFlow ? (selectedFlow.name || selectedFlow.id) : (normalizedFlows.length === 0 ? 'Nenhum flow disponível' : 'Selecione um flow')}
                       </span>
-                      {flowDirty && (
-                        <span className="flow-badge" style={{ background: '#FEF3C7', color: '#92400E' }}>● Alterações não salvas</span>
-                      )}
                       {selectedFlow && (() => {
                         const badge = getFlowBadge(selectedFlow);
                         return <span className="flow-badge" style={badge.style}>{badge.label}</span>;
