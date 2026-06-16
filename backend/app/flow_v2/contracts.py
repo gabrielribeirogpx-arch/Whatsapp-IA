@@ -33,8 +33,10 @@ class FlowV2EventType(StrEnum):
 
 class FlowV2SessionStatus(StrEnum):
     RUNNING = "running"
+    ACTIVE = "running"
     WAITING = "waiting"
     COMPLETED = "completed"
+    FINISHED = "completed"
     FAILED = "failed"
 
 
