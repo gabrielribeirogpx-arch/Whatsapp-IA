@@ -322,28 +322,39 @@ class FlowV2Executor:
                 return actions
             if result.status == "wait":
                 waiting_node_id = result.next_node_id or node_id
+                wait_reason = "ai_rag_wait_same_node" if node_type == "ai_rag" and waiting_node_id == node_id else "executor_result_wait"
                 logger.info(
-                    "[SESSION WAITING] node_id=%s node_type=%s waiting_node_id=%s reason=executor_result_wait actions_count=%s",
+                    "[SESSION WAITING] node_id=%s node_type=%s waiting_node_id=%s reason=%s actions_count=%s",
                     node_id,
                     node_type,
                     waiting_node_id,
+                    wait_reason,
                     len(result.actions),
                 )
+                if wait_reason == "ai_rag_wait_same_node":
+                    logger.info(
+                        "[FLOW SESSION TRANSITION] flow_id=%s session_id=%s node_id=%s from=ACTIVE to=WAITING reason=ai_rag_wait_same_node",
+                        flow_id,
+                        session.id,
+                        node_id,
+                    )
                 self.event_store.append(db, session=session, event_type=FlowV2EventType.SESSION_WAITING, node_id=waiting_node_id)
                 self.session_manager.move_to(db, session=session, node_id=waiting_node_id, status=FlowV2SessionStatus.WAITING)
                 logger.info(
-                    "[SESSION STATUS] node_id=%s node_type=%s current_node_id=%s session_status=%s reason=executor_result_wait",
+                    "[SESSION STATUS] node_id=%s node_type=%s current_node_id=%s session_status=%s reason=%s",
                     node_id,
                     node_type,
                     session.current_node_id,
                     session.status,
+                    wait_reason,
                 )
                 logger.info(
-                    "[EXECUTOR STOP] node_id=%s node_type=%s current_node_id=%s session_status=%s reason=executor_result_wait actions_count=%s",
+                    "[EXECUTOR STOP] node_id=%s node_type=%s current_node_id=%s session_status=%s reason=%s actions_count=%s",
                     node_id,
                     node_type,
                     session.current_node_id,
                     session.status,
+                    wait_reason,
                     len(actions),
                 )
                 return actions

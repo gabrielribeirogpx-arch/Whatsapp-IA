@@ -31,6 +31,12 @@ class FlowV2EventType(StrEnum):
     SESSION_FAILED = "session.failed"
 
 
+class AiRagAfterAnswerBehavior(StrEnum):
+    END_FLOW = "end_flow"
+    CONTINUE_TO_NEXT = "continue_to_next"
+    WAIT_SAME_NODE = "wait_same_node"
+
+
 class FlowV2SessionStatus(StrEnum):
     RUNNING = "running"
     ACTIVE = "running"

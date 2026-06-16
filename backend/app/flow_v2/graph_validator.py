@@ -37,6 +37,7 @@ class FlowV2GraphValidator:
         node_ids = self._validate_nodes(nodes_payload, errors)
         self._validate_edges(edges_payload, node_ids, errors)
         self._validate_choice_edges(nodes_payload, edges_payload, errors)
+        self._validate_ai_rag_edges(nodes_payload, edges_payload, errors)
         start_node_ids = self._start_node_ids(nodes_payload)
         if len(start_node_ids) != 1:
             errors.append("FLOW_V2_REQUIRES_EXACTLY_ONE_START_NODE")
@@ -128,6 +129,28 @@ class FlowV2GraphValidator:
             )
             if source_handle in (None, ""):
                 errors.append(f"FLOW_V2_CHOICE_SOURCE_HANDLE_REQUIRED:{source}:{index}")
+
+
+    def _validate_ai_rag_edges(
+        self,
+        nodes: list[dict[str, Any]],
+        edges: list[dict[str, Any]],
+        errors: list[str],
+    ) -> None:
+        outgoing_sources = {str(self._edge_source(edge)) for edge in edges if isinstance(edge, dict) and self._edge_source(edge) not in (None, "")}
+        for node in nodes:
+            if not isinstance(node, dict) or node.get("id") in (None, "") or self._node_type(node) != "ai_rag":
+                continue
+            node_id = str(node["id"])
+            data = self._node_data(node)
+            if self._is_terminal_node(node):
+                continue
+            behavior = str(data.get("after_answer_behavior") or data.get("afterAnswerBehavior") or "end_flow").strip().lower()
+            if behavior not in {"end_flow", "continue_to_next", "wait_same_node"}:
+                errors.append(f"FLOW_V2_AI_RAG_AFTER_ANSWER_BEHAVIOR_INVALID:{node_id}")
+                continue
+            if behavior == "continue_to_next" and node_id not in outgoing_sources:
+                errors.append(f"FLOW_V2_AI_RAG_CONTINUE_TO_NEXT_REQUIRES_EDGE:{node_id}")
 
     def _validate_reachability(
         self,
@@ -282,6 +305,11 @@ class FlowV2GraphValidator:
             or cls._node_type(node) == "start"
             or str(node.get("id")) == "start"
         )
+
+    @classmethod
+    def _is_terminal_node(cls, node: dict[str, Any]) -> bool:
+        data = cls._node_data(node)
+        return bool(node.get("is_terminal") or node.get("isTerminal") or node.get("endFlow") or data.get("is_terminal") or data.get("isTerminal") or data.get("endFlow"))
 
     @staticmethod
     def _node_type(node: dict[str, Any]) -> str:

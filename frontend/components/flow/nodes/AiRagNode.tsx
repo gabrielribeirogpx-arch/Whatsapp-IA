@@ -11,6 +11,7 @@ type AiRagNodeData = {
   onToggleStart?: (nodeId: string) => void;
   hasValidationError?: boolean;
   analytics?: unknown;
+  after_answer_behavior?: string;
 };
 
 export default function AiRagNode({ id, data, selected }: NodeProps) {
@@ -23,8 +24,8 @@ export default function AiRagNode({ id, data, selected }: NodeProps) {
       running={nodeData.running}
       title="IA / RAG"
       emoji="✨"
-      badge="RAG"
-      badgeTitle="Base de conhecimento"
+      badge={nodeData.after_answer_behavior === 'wait_same_node' ? 'Contínuo' : 'RAG'}
+      badgeTitle={nodeData.after_answer_behavior === 'wait_same_node' ? 'Aguarda nova mensagem neste node' : 'Base de conhecimento'}
       badgeTone={{ background: '#f5f3ff', color: '#6d28d9' }}
       accent="linear-gradient(90deg, #7c3aed, #06b6d4)"
       summary={truncateText(summary, 58, 'IA baseada na base de conhecimento')}

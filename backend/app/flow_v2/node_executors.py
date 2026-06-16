@@ -18,7 +18,7 @@ from app.flow_v2.actions import (
     SendMediaAction,
     SendMessageAction,
 )
-from app.flow_v2.contracts import FlowV2EventType, RuntimeInput
+from app.flow_v2.contracts import AiRagAfterAnswerBehavior, FlowV2EventType, RuntimeInput
 from app.flow_v2.models import FlowV2ScheduledJob
 from app.models.contact import Contact
 from app.models.conversation import Conversation
@@ -1518,6 +1518,7 @@ class AiRagNodeExecutor(BaseNodeExecutor):
         use_workspace_ai_settings = data.get("use_workspace_ai_settings", data.get("useWorkspaceAiSettings", True)) is not False
         temperature = None if use_workspace_ai_settings else self._coerce_float_config(data.get("temperature"), default=0.2, field_name="temperature", node_id=node_id)
         max_tokens = None if use_workspace_ai_settings else self._coerce_int_config(data.get("max_tokens", data.get("maxTokens")), default=1200, field_name="max_tokens", node_id=node_id)
+        behavior = _normalize_ai_rag_after_answer_behavior(data)
         try:
             rag_answer = answer_with_rag(
                 db,
@@ -1542,6 +1543,18 @@ class AiRagNodeExecutor(BaseNodeExecutor):
             logger.warning("[AI RAG NODE] failed node_id=%s error=%s", node_id, exc)
             text = str(fallback)
             metadata = {"node_id": node_id, "intent": "ai_rag_answer", "error": "rag_failed"}
+        sources_count = len(metadata.get("source_ids") or [])
+        retrieval_mode = "vector" if metadata.get("found_context") else ("fallback" if metadata.get("error") else "text")
+        logger.info(
+            "[AI RAG NODE] flow_id=%s session_id=%s node_id=%s behavior=%s retrieval_mode=%s sources_count=%s answered=%s",
+            getattr(snapshot, "flow_id", None) or getattr(session, "flow_id", None),
+            session.id,
+            node_id,
+            behavior,
+            retrieval_mode,
+            sources_count,
+            bool(text),
+        )
         self.event_store.append(db, session=session, event_type=FlowV2EventType.MESSAGE_SENT, node_id=node_id, payload={"node_id": node_id, "message": text, "metadata": metadata})
         try:
             
@@ -1552,7 +1565,23 @@ class AiRagNodeExecutor(BaseNodeExecutor):
         action = SendMessageAction(tenant_id=session.tenant_id, session_id=session.id, external_user_id=runtime_input.external_user_id, conversation_id=runtime_input.conversation_id, contact_id=runtime_input.contact_id, text=text, metadata={**runtime_input.metadata, **metadata})
         next_node_id = self._default_next_or_terminal(db, snapshot=snapshot, session=session, node_id=node_id)
         is_terminal = bool(data.get("is_terminal") or data.get("isTerminal") or data.get("endFlow"))
-        return NodeExecutionResult(actions=(action,), next_node_id=None if is_terminal else next_node_id, status="complete" if is_terminal or next_node_id is None else "continue")
+        if is_terminal or behavior == AiRagAfterAnswerBehavior.END_FLOW:
+            return NodeExecutionResult(actions=(action,), next_node_id=None, status="complete")
+        if behavior == AiRagAfterAnswerBehavior.WAIT_SAME_NODE:
+            return NodeExecutionResult(actions=(action,), next_node_id=node_id, status="wait")
+        if next_node_id is None:
+            logger.info("[AI RAG NODE] node_id=%s behavior=continue_to_next next_node_id=None reason=no_outgoing_edge_finishing", node_id)
+            return NodeExecutionResult(actions=(action,), next_node_id=None, status="complete")
+        return NodeExecutionResult(actions=(action,), next_node_id=next_node_id, status="continue")
+
+
+def _normalize_ai_rag_after_answer_behavior(data: dict[str, Any]) -> AiRagAfterAnswerBehavior:
+    raw = data.get("after_answer_behavior", data.get("afterAnswerBehavior", AiRagAfterAnswerBehavior.END_FLOW))
+    try:
+        return AiRagAfterAnswerBehavior(str(raw).strip())
+    except ValueError:
+        logger.info("[AI RAG NODE] default_used field=after_answer_behavior default=%s invalid_value=%r", AiRagAfterAnswerBehavior.END_FLOW, raw)
+        return AiRagAfterAnswerBehavior.END_FLOW
 
 
 class NodeExecutorRegistry:
