@@ -1,7 +1,7 @@
 'use client';
 
 import { FormEvent, useEffect, useState } from 'react';
-import { CheckCircle2, Loader2, Shield } from 'lucide-react';
+import { AlertCircle, CheckCircle2, Loader2, Shield } from 'lucide-react';
 import { apiFetch } from '@/lib/api';
 
 type AIProvider = 'openai' | 'gemini' | 'anthropic' | 'wazza_default';
@@ -22,6 +22,40 @@ const providerModels: Record<AIProvider, string> = {
   wazza_default: '',
 };
 
+const providerSuggestions: Partial<Record<AIProvider, string[]>> = {
+  openai: ['gpt-4o-mini', 'gpt-4o'],
+  gemini: ['gemini-1.5-flash', 'gemini-1.5-pro'],
+  anthropic: ['claude-3-5-haiku-latest'],
+};
+
+function extractErrorMessage(payload: unknown, fallback: string): string {
+  if (!payload || typeof payload !== 'object') return fallback;
+
+  const record = payload as Record<string, unknown>;
+  const candidates = [record.detail, record.message];
+
+  for (const candidate of candidates) {
+    if (typeof candidate === 'string' && candidate.trim()) return candidate;
+    if (candidate && typeof candidate === 'object') {
+      const nested = candidate as Record<string, unknown>;
+      if (typeof nested.message === 'string' && nested.message.trim()) return nested.message;
+      if (typeof nested.detail === 'string' && nested.detail.trim()) return nested.detail;
+    }
+  }
+
+  return fallback;
+}
+
+function isValidModel(provider: AIProvider, model: string | null): boolean {
+  if (provider === 'wazza_default') return true;
+
+  const normalizedModel = (model || '').trim();
+  if (!normalizedModel) return false;
+
+  const suggestions = providerSuggestions[provider];
+  return !suggestions?.length || suggestions.includes(normalizedModel);
+}
+
 export default function AISettingsPage() {
   const [settings, setSettings] = useState<AISettings>({ provider: 'wazza_default', model: '', temperature: 0.2, max_tokens: 1200, is_enabled: true, has_api_key: false });
   const [apiKey, setApiKey] = useState('');
@@ -29,6 +63,11 @@ export default function AISettingsPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
+
+  const suggestedModels = providerSuggestions[settings.provider] || [];
+  const modelValue = settings.model || '';
+  const modelInvalid = !isValidModel(settings.provider, modelValue);
+  const isWazzaDefault = settings.provider === 'wazza_default';
 
   async function load() {
     setLoading(true);
@@ -49,7 +88,7 @@ export default function AISettingsPage() {
     const response = await apiFetch('/api/ai/settings', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...settings, api_key: apiKey || undefined }),
+      body: JSON.stringify({ ...settings, api_key: isWazzaDefault ? undefined : apiKey || undefined }),
     });
     if (response.ok) {
       setSettings(await response.json());
@@ -57,12 +96,17 @@ export default function AISettingsPage() {
       setStatus('Configurações salvas.');
     } else {
       const payload = await response.json().catch(() => ({}));
-      setStatus(payload.detail || 'Falha ao salvar configurações.');
+      setStatus(extractErrorMessage(payload, 'Falha ao salvar configurações.'));
     }
     setSaving(false);
   }
 
   async function testConnection() {
+    if (modelInvalid) {
+      setStatus('Informe um modelo válido antes de testar a conexão.');
+      return;
+    }
+
     setTesting(true); setStatus('');
     const response = await apiFetch('/api/ai/settings/test', {
       method: 'POST',
@@ -70,7 +114,7 @@ export default function AISettingsPage() {
       body: JSON.stringify({ provider: settings.provider, model: settings.model || undefined, api_key: apiKey || undefined }),
     });
     const payload = await response.json().catch(() => ({}));
-    setStatus(response.ok ? (payload.message || 'Conexão validada.') : (payload.detail || 'Não foi possível validar a conexão.'));
+    setStatus(response.ok ? extractErrorMessage(payload, 'Conexão validada.') : extractErrorMessage(payload, 'Não foi possível validar a conexão.'));
     setTesting(false);
   }
 
@@ -127,7 +171,10 @@ export default function AISettingsPage() {
               </label>
 
               <label className="block text-xs font-semibold uppercase tracking-wide text-slate-500">Modelo
-                <input className="mt-2 h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-emerald-300 focus:ring-2 focus:ring-emerald-100" value={settings.model || ''} onChange={(event) => update({ model: event.target.value })} placeholder={providerModels[settings.provider] || 'Configuração global Wazza'} />
+                <input className={`mt-2 h-11 w-full rounded-xl border bg-white px-3 text-sm font-semibold text-slate-800 outline-none transition placeholder:text-slate-400 focus:ring-2 ${modelInvalid ? 'border-red-300 focus:border-red-300 focus:ring-red-100' : 'border-slate-200 focus:border-emerald-300 focus:ring-emerald-100'}`} value={modelValue} onChange={(event) => update({ model: event.target.value })} placeholder={providerModels[settings.provider] || 'Configuração global Wazza'} disabled={isWazzaDefault} aria-invalid={modelInvalid} />
+                {suggestedModels.length ? <span className="mt-2 block text-xs font-medium normal-case tracking-normal text-slate-500">Sugestões: {suggestedModels.join(' / ')}</span> : null}
+                {isWazzaDefault ? <span className="mt-2 block text-xs font-medium normal-case tracking-normal text-slate-500">O Wazza default usa o modelo definido globalmente pela plataforma.</span> : null}
+                {modelInvalid ? <span className="mt-2 flex items-center gap-1.5 text-xs font-semibold normal-case tracking-normal text-red-600"><AlertCircle size={14} /> Modelo obrigatório ou fora das sugestões deste provedor.</span> : null}
               </label>
 
               <label className="flex items-center justify-between gap-4 rounded-2xl border border-slate-100 bg-slate-50/80 p-4 text-sm font-semibold text-slate-800">
@@ -147,17 +194,24 @@ export default function AISettingsPage() {
             </div>
 
             <div className="space-y-5">
-              <div>
-                <label className="block text-xs font-semibold uppercase tracking-wide text-slate-500" htmlFor="ai-api-key">API Key</label>
-                <div className="mt-2 flex flex-col gap-3 sm:flex-row">
-                  <input id="ai-api-key" className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-emerald-300 focus:ring-2 focus:ring-emerald-100" type="password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder={settings.has_api_key ? '••••••••••••••••••' : 'Cole sua API key'} />
-                  {settings.has_api_key ? <button className="h-11 shrink-0 rounded-xl border border-red-100 bg-white px-4 text-sm font-semibold text-red-600 transition hover:border-red-200 hover:bg-red-50" type="button" onClick={() => void removeKey()}>Remover chave</button> : null}
+              {isWazzaDefault ? (
+                <div className="rounded-2xl border border-emerald-100 bg-emerald-50/70 p-4 text-sm text-emerald-800">
+                  <p className="m-0 font-semibold">API Key gerenciada pelo Wazza</p>
+                  <p className="m-0 mt-1 text-xs leading-relaxed">O provedor Wazza default usa a chave global da plataforma, então não é necessário informar uma chave própria.</p>
                 </div>
-                <span className={`mt-2 flex items-center gap-1.5 text-xs font-semibold ${settings.has_api_key ? 'text-emerald-600' : 'text-slate-500'}`}>
-                  {settings.has_api_key ? <CheckCircle2 size={14} /> : null}
-                  {settings.has_api_key ? 'Chave configurada' : 'Nenhuma chave configurada'}
-                </span>
-              </div>
+              ) : (
+                <div>
+                  <label className="block text-xs font-semibold uppercase tracking-wide text-slate-500" htmlFor="ai-api-key">API Key</label>
+                  <div className="mt-2 flex flex-col gap-3 sm:flex-row">
+                    <input id="ai-api-key" className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-emerald-300 focus:ring-2 focus:ring-emerald-100" type="password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder={settings.has_api_key ? '••••••••••••••••••' : 'Cole sua API key'} />
+                    {settings.has_api_key ? <button className="h-11 shrink-0 rounded-xl border border-red-100 bg-white px-4 text-sm font-semibold text-red-600 transition hover:border-red-200 hover:bg-red-50" type="button" onClick={() => void removeKey()}>Remover chave</button> : null}
+                  </div>
+                  <span className={`mt-2 flex items-center gap-1.5 text-xs font-semibold ${settings.has_api_key ? 'text-emerald-600' : 'text-slate-500'}`}>
+                    {settings.has_api_key ? <CheckCircle2 size={14} /> : null}
+                    {settings.has_api_key ? 'Chave configurada' : 'Nenhuma chave configurada'}
+                  </span>
+                </div>
+              )}
 
               <div className="grid gap-4 sm:grid-cols-2">
                 <label className="block text-xs font-semibold uppercase tracking-wide text-slate-500">Temperatura
@@ -170,9 +224,9 @@ export default function AISettingsPage() {
 
               <div className="rounded-2xl border border-slate-100 bg-slate-50/80 p-4">
                 <p className="m-0 text-xs font-semibold uppercase tracking-wide text-slate-500">Status da chave</p>
-                <p className={`m-0 mt-2 flex items-center gap-2 text-base font-bold ${settings.has_api_key ? 'text-emerald-700' : 'text-slate-700'}`}>
-                  {settings.has_api_key ? <CheckCircle2 size={18} /> : null}
-                  {settings.has_api_key ? 'Chave configurada' : 'Nenhuma chave configurada'}
+                <p className={`m-0 mt-2 flex items-center gap-2 text-base font-bold ${settings.has_api_key || isWazzaDefault ? 'text-emerald-700' : 'text-slate-700'}`}>
+                  {settings.has_api_key || isWazzaDefault ? <CheckCircle2 size={18} /> : null}
+                  {isWazzaDefault ? 'Chave global Wazza' : settings.has_api_key ? 'Chave configurada' : 'Nenhuma chave configurada'}
                 </p>
               </div>
             </div>
@@ -182,7 +236,7 @@ export default function AISettingsPage() {
         {status ? <div className="rounded-2xl border border-slate-100 bg-white p-4 text-sm font-medium text-slate-700 shadow-[0_12px_30px_rgba(15,23,42,0.04)]">{status}</div> : null}
 
         <div className="flex flex-col-reverse items-stretch justify-end gap-3 sm:flex-row sm:items-center">
-          <button disabled={testing} className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-5 text-sm font-semibold text-slate-700 transition hover:border-emerald-200 hover:bg-emerald-50/40 disabled:cursor-not-allowed disabled:opacity-50" type="button" onClick={() => void testConnection()}>{testing ? <Loader2 className="animate-spin" size={16} /> : null}{testing ? 'Testando...' : 'Testar conexão'}</button>
+          <button disabled={testing || modelInvalid} className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-5 text-sm font-semibold text-slate-700 transition hover:border-emerald-200 hover:bg-emerald-50/40 disabled:cursor-not-allowed disabled:opacity-50" type="button" onClick={() => void testConnection()}>{testing ? <Loader2 className="animate-spin" size={16} /> : null}{testing ? 'Testando...' : 'Testar conexão'}</button>
           <button disabled={saving} className="inline-flex h-11 items-center justify-center rounded-xl bg-emerald-600 px-6 text-sm font-semibold text-white shadow-[0_12px_24px_rgba(16,185,129,0.22)] transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50" type="submit">{saving ? 'Salvando...' : 'Salvar'}</button>
         </div>
       </form>
