@@ -10,6 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models.tenant_ai_setting import TenantAISetting
+from app.services.ai_model_validation import validate_chat_model
 from app.utils.encryption import decrypt_secret
 
 
@@ -60,7 +61,7 @@ def _resolve_tenant_config(db: Session | None, tenant_id: uuid.UUID | str | None
         return {
             "provider": provider,
             "api_key": api_key,
-            "model": opts.get("model") or setting.model or DEFAULT_MODELS.get(provider),
+            "chat_model": validate_chat_model(opts.get("chat_model") or opts.get("model") or setting.chat_model or DEFAULT_MODELS.get(provider)),
             "temperature": opts.get("temperature", float(setting.temperature or 0.2)),
             "max_tokens": opts.get("max_tokens", int(setting.max_tokens or 1200)),
         }
@@ -70,7 +71,7 @@ def _resolve_tenant_config(db: Session | None, tenant_id: uuid.UUID | str | None
     return {
         "provider": provider,
         "api_key": api_key,
-        "model": opts.get("model") or os.getenv("AI_MODEL") or DEFAULT_MODELS.get(provider),
+        "chat_model": validate_chat_model(opts.get("chat_model") or opts.get("model") or os.getenv("AI_MODEL") or DEFAULT_MODELS.get(provider)),
         "temperature": opts.get("temperature", float(os.getenv("AI_TEMPERATURE", "0.2"))),
         "max_tokens": opts.get("max_tokens", int(os.getenv("AI_MAX_TOKENS", "1200"))),
     }
@@ -118,7 +119,7 @@ def generate_answer(messages: list[dict[str, str]], model: str | None = None, te
     resolved_key = api_key or os.getenv(_provider_env_key(resolved_provider) or "")
     if not resolved_key:
         raise LLMConfigurationError("IA não configurada para este workspace.")
-    resolved_model = model or DEFAULT_MODELS.get(resolved_provider) or "gemini-1.5-flash"
+    resolved_model = validate_chat_model(model) or DEFAULT_MODELS.get(resolved_provider) or "gemini-1.5-flash"
     temp = float(temperature if temperature is not None else os.getenv("AI_TEMPERATURE", "0.2"))
     limit = int(max_tokens if max_tokens is not None else os.getenv("AI_MAX_TOKENS", "1200"))
     try:
@@ -143,13 +144,13 @@ def generate_answer_for_tenant(db: Session, tenant_id: uuid.UUID, messages: list
         messages,
         provider=config["provider"],
         api_key=config["api_key"],
-        model=config["model"],
+        model=config["chat_model"],
         temperature=float(config["temperature"]),
         max_tokens=int(config["max_tokens"]),
     )
 
 
-def test_provider_connection(provider: str, api_key: str, model: str | None = None) -> None:
+def test_provider_connection(provider: str, api_key: str, chat_model: str | None = None) -> None:
     provider = provider.strip().lower()
     if provider == "wazza_default":
         provider, api_key = _wazza_default_provider()
@@ -159,7 +160,7 @@ def test_provider_connection(provider: str, api_key: str, model: str | None = No
         [{"role": "user", "content": "Responda apenas OK."}],
         provider=provider,
         api_key=api_key,
-        model=model or DEFAULT_MODELS.get(provider),
+        model=validate_chat_model(chat_model) or DEFAULT_MODELS.get(provider),
         temperature=0,
         max_tokens=8,
     )
