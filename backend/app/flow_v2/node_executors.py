@@ -1520,6 +1520,7 @@ class AiRagNodeExecutor(BaseNodeExecutor):
         max_tokens = None if use_workspace_ai_settings else self._coerce_int_config(data.get("max_tokens", data.get("maxTokens")), default=1200, field_name="max_tokens", node_id=node_id)
         behavior = _normalize_ai_rag_after_answer_behavior(data)
         include_sources = data.get("include_sources", data.get("includeSources", False)) is True
+        response_style = data.get("response_style", data.get("responseStyle", "whatsapp_short")) or "whatsapp_short"
         try:
             rag_answer = answer_with_rag(
                 db,
@@ -1532,6 +1533,7 @@ class AiRagNodeExecutor(BaseNodeExecutor):
                 max_tokens=max_tokens,
                 fallback_message=str(fallback),
                 include_sources=include_sources,
+                response_style=str(response_style),
             )
             text = rag_answer.answer if rag_answer.found_context else str(fallback)
             metadata = {
