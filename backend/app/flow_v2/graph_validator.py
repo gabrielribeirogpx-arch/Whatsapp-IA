@@ -143,8 +143,6 @@ class FlowV2GraphValidator:
                 continue
             node_id = str(node["id"])
             data = self._node_data(node)
-            if self._is_terminal_node(node):
-                continue
             behavior = str(data.get("after_answer_behavior") or data.get("afterAnswerBehavior") or "end_flow").strip().lower()
             if behavior not in {"end_flow", "continue_to_next", "wait_same_node"}:
                 errors.append(f"FLOW_V2_AI_RAG_AFTER_ANSWER_BEHAVIOR_INVALID:{node_id}")

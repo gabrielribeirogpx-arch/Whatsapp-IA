@@ -605,29 +605,33 @@ function FlowNodeEditorPanel({
               Mensagem fallback
               <textarea value={toText(draft.fallback_message)} onChange={(event) => onDraftChange({ fallback_message: event.target.value })} placeholder="Não encontrei essa informação na base disponível. Posso encaminhar para um atendente?" />
             </label>
-            <fieldset className="flow-editor-field">
+            <fieldset className="flow-editor-field flow-editor-after-answer">
               <legend>Depois de responder</legend>
-              <label className="flow-editor-radio">
-                <input type="radio" name={`ai-rag-after-answer-${node.id}`} checked={(draft.is_terminal === true || draft.endFlow === true) || (draft.after_answer_behavior || 'end_flow') === 'end_flow'} onChange={() => onDraftChange({ after_answer_behavior: 'end_flow' })} />
-                Encerrar fluxo
+              <label className="flow-editor-choice-card">
+                <input type="radio" name={`ai-rag-after-answer-${node.id}`} checked={(draft.after_answer_behavior || 'end_flow') === 'end_flow'} onChange={() => onDraftChange({ after_answer_behavior: 'end_flow', is_terminal: false, endFlow: false })} />
+                <span className="flow-editor-choice-icon" aria-hidden="true">✓</span>
+                <span>
+                  <strong>Encerrar conversa</strong>
+                  <small>A sessão termina após a resposta da IA.</small>
+                </span>
               </label>
-              <small>A conversa termina após a resposta da IA.</small>
-              <label className="flow-editor-radio">
-                <input type="radio" name={`ai-rag-after-answer-${node.id}`} checked={draft.is_terminal !== true && draft.endFlow !== true && draft.after_answer_behavior === 'continue_to_next'} onChange={() => onDraftChange({ after_answer_behavior: 'continue_to_next' })} disabled={draft.is_terminal === true || draft.endFlow === true} />
-                Continuar para próximo node
+              <label className="flow-editor-choice-card">
+                <input type="radio" name={`ai-rag-after-answer-${node.id}`} checked={draft.after_answer_behavior === 'continue_to_next'} onChange={() => onDraftChange({ after_answer_behavior: 'continue_to_next', is_terminal: false, endFlow: false })} />
+                <span className="flow-editor-choice-icon" aria-hidden="true">↗</span>
+                <span>
+                  <strong>Continuar para outro bloco</strong>
+                  <small>O fluxo segue pela conexão de saída.</small>
+                </span>
               </label>
-              <small>Após responder, o fluxo segue pela saída conectada.</small>
-              <label className="flow-editor-radio">
-                <input type="radio" name={`ai-rag-after-answer-${node.id}`} checked={draft.is_terminal !== true && draft.endFlow !== true && draft.after_answer_behavior === 'wait_same_node'} onChange={() => onDraftChange({ after_answer_behavior: 'wait_same_node' })} disabled={draft.is_terminal === true || draft.endFlow === true} />
-                Aguardar nova mensagem neste node
+              <label className="flow-editor-choice-card">
+                <input type="radio" name={`ai-rag-after-answer-${node.id}`} checked={draft.after_answer_behavior === 'wait_same_node'} onChange={() => onDraftChange({ after_answer_behavior: 'wait_same_node', is_terminal: false, endFlow: false })} />
+                <span className="flow-editor-choice-icon" aria-hidden="true">↻</span>
+                <span>
+                  <strong>Manter conversa neste bloco</strong>
+                  <small>Ideal para atendimento contínuo. Cada nova mensagem retorna para este mesmo node.</small>
+                </span>
               </label>
-              <small>Ideal para atendimento 100% IA ou suporte contínuo. Cada nova mensagem volta para este mesmo node.</small>
-              {(draft.is_terminal === true || draft.endFlow === true) ? <small className="flow-editor-error">“Marcar como fim do fluxo” tem prioridade e força Encerrar fluxo.</small> : null}
             </fieldset>
-            <label className="flow-editor-radio">
-              <input type="checkbox" checked={draft.is_terminal === true || draft.endFlow === true} onChange={(event) => onDraftChange({ is_terminal: event.target.checked, endFlow: event.target.checked, ...(event.target.checked ? { after_answer_behavior: 'end_flow' } : {}) })} />
-              Marcar como fim do fluxo
-            </label>
           </>
         )}
 

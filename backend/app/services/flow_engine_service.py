@@ -414,6 +414,15 @@ def _is_terminal_message_node(data: dict[str, Any]) -> bool:
     )
 
 
+def _ai_rag_after_answer_behavior(data: dict[str, Any]) -> str:
+    behavior = str(data.get("after_answer_behavior") or data.get("afterAnswerBehavior") or "end_flow").strip().lower()
+    return behavior if behavior in {"end_flow", "continue_to_next", "wait_same_node"} else "end_flow"
+
+
+def _ai_rag_allows_missing_output(data: dict[str, Any]) -> bool:
+    return _ai_rag_after_answer_behavior(data) in {"end_flow", "wait_same_node"}
+
+
 def validate_flow_graph(nodes: list[dict[str, Any]] | None, edges: list[dict[str, Any]] | None, mode: str = "draft") -> dict[str, Any]:
     strict_mode = str(mode).lower() in {"published", "publish", "simulate"}
     nodes_payload = nodes if isinstance(nodes, list) else []
@@ -518,9 +527,15 @@ def validate_flow_graph(nodes: list[dict[str, Any]] | None, edges: list[dict[str
             if not {"true", "false"}.issubset(handles):
                 add_issue(errors, "CONDITION_REQUIRES_TRUE_FALSE", node_id, "Condition precisa ter saída SIM e saída NÃO.")
 
-        if node_type == "message" and outgoing.get(node_id, 0) < 1 and is_terminal:
+        missing_output = outgoing.get(node_id, 0) < 1
+        if node_type == "ai_rag" and missing_output:
+            if _ai_rag_allows_missing_output(data):
+                logger.info("[FLOW VALIDATION AI_RAG NO_OUTPUT OK] node_id=%s behavior=%s", node_id, _ai_rag_after_answer_behavior(data))
+            else:
+                add_issue(errors if strict_mode else warnings, "NODE_WITHOUT_OUTPUT", node_id, "Este node não tem saída. Conecte a outro node ou marque como final.")
+        elif node_type == "message" and missing_output and is_terminal:
             logger.info("[FLOW VALIDATION TERMINAL MESSAGE OK] node_id=%s", node_id)
-        elif not is_terminal and outgoing.get(node_id, 0) < 1:
+        elif not is_terminal and missing_output:
             add_issue(errors if strict_mode else warnings, "NODE_WITHOUT_OUTPUT", node_id, "Este node não tem saída. Conecte a outro node ou marque como final.")
 
     logger.info("[FLOW VALIDATION] mode=%s valid=%s errors=%s warnings=%s", mode, len(errors)==0, len(errors), len(warnings))

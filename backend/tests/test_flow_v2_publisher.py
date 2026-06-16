@@ -451,3 +451,21 @@ def test_ai_rag_continue_to_next_requires_edge() -> None:
 
     valid = FlowV2GraphValidator().validate(nodes=nodes, edges=[{"id": "e1", "source": "start", "target": "next"}])
     assert valid.status == GraphValidationStatus.VALID
+
+
+def test_ai_rag_wait_same_node_allows_missing_edge() -> None:
+    nodes = [
+        {"id": "start", "type": "ai_rag", "data": {"isStart": True, "after_answer_behavior": "wait_same_node"}},
+    ]
+
+    result = FlowV2GraphValidator().validate(nodes=nodes, edges=[])
+    assert result.status == GraphValidationStatus.VALID
+
+
+def test_ai_rag_end_flow_allows_missing_edge() -> None:
+    nodes = [
+        {"id": "start", "type": "ai_rag", "data": {"isStart": True, "after_answer_behavior": "end_flow"}},
+    ]
+
+    result = FlowV2GraphValidator().validate(nodes=nodes, edges=[])
+    assert result.status == GraphValidationStatus.VALID

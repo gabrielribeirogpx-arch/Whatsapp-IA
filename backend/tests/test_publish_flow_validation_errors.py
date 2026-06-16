@@ -190,3 +190,35 @@ def test_publish_fresh_snapshot_republishes_latest_matching_checksum(monkeypatch
     assert flow.current_version_id == latest_id
     assert len(published.nodes) == 5
     assert published.nodes[2]['data']['text'] == 'Aguarde mais um momento'
+
+
+def test_validate_flow_graph_accepts_ai_rag_wait_same_node_without_edge():
+    result = flows.validate_flow_graph(
+        [{'id': 'rag', 'type': 'ai_rag', 'data': {'isStart': True, 'after_answer_behavior': 'wait_same_node'}}],
+        [],
+        mode='publish',
+    )
+
+    assert result['errors'] == []
+    assert result['warnings'] == []
+
+
+def test_validate_flow_graph_accepts_ai_rag_end_flow_without_edge():
+    result = flows.validate_flow_graph(
+        [{'id': 'rag', 'type': 'ai_rag', 'data': {'isStart': True, 'after_answer_behavior': 'end_flow'}}],
+        [],
+        mode='publish',
+    )
+
+    assert result['errors'] == []
+    assert result['warnings'] == []
+
+
+def test_validate_flow_graph_requires_ai_rag_continue_to_next_edge():
+    result = flows.validate_flow_graph(
+        [{'id': 'rag', 'type': 'ai_rag', 'data': {'isStart': True, 'after_answer_behavior': 'continue_to_next'}}],
+        [],
+        mode='publish',
+    )
+
+    assert any(issue['code'] == 'NODE_WITHOUT_OUTPUT' and issue['node_id'] == 'rag' for issue in result['errors'])
