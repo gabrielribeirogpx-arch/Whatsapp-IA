@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import math
 import os
 import re
@@ -15,6 +16,8 @@ from sqlalchemy.orm import Session
 from app.models.tenant_ai_setting import TenantAISetting
 from app.services.ai_model_validation import validate_embedding_model
 from app.utils.encryption import decrypt_secret
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_EMBEDDING_MODEL = os.getenv("OPENAI_EMBEDDING_MODEL", "text-embedding-3-small")
 DEFAULT_GEMINI_EMBEDDING_MODEL = os.getenv("GEMINI_EMBEDDING_MODEL", "gemini-embedding-001")
@@ -116,9 +119,21 @@ def cosine_similarity(left: list[float] | None, right: list[float] | None) -> fl
     shared = min(len(left), len(right))
     if shared == 0:
         return 0.0
-    numerator = sum(float(left[index]) * float(right[index]) for index in range(shared))
-    left_norm = math.sqrt(sum(float(value) * float(value) for value in left[:shared]))
-    right_norm = math.sqrt(sum(float(value) * float(value) for value in right[:shared]))
+    def _safe_vector_value(value: float | int | str | None, *, index: int, side: str) -> float:
+        if value is None:
+            logger.info("[RAG DEFAULT] field=embedding_%s[%s] default=0.0 reason=missing", side, index)
+            return 0.0
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            logger.info("[RAG DEFAULT] field=embedding_%s[%s] default=0.0 invalid_value=%r", side, index, value)
+            return 0.0
+
+    left_values = [_safe_vector_value(left[index], index=index, side="left") for index in range(shared)]
+    right_values = [_safe_vector_value(right[index], index=index, side="right") for index in range(shared)]
+    numerator = sum(left_values[index] * right_values[index] for index in range(shared))
+    left_norm = math.sqrt(sum(value * value for value in left_values))
+    right_norm = math.sqrt(sum(value * value for value in right_values))
     if left_norm == 0 or right_norm == 0:
         return 0.0
     return numerator / (left_norm * right_norm)
