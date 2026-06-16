@@ -8,6 +8,7 @@ type MessageNodeData = {
   content?: string;
   running?: boolean;
   isStart?: boolean;
+  wait_for_reply?: boolean;
   onToggleStart?: (nodeId: string) => void;
   hasValidationError?: boolean;
 };
@@ -25,7 +26,7 @@ export default function MessageNode({ id, data, selected }: NodeProps) {
       badge="MSG"
       badgeTone={{ background: '#eef2ff', color: '#4338ca' }}
       accent="linear-gradient(90deg, #4f46e5, #6366f1)"
-      summary={`"${truncateText(nodeData.content || nodeData.label, 50, 'Mensagem vazia')}"`}
+      summary={`${nodeData.wait_for_reply ? '⏸ ' : ''}"${truncateText(nodeData.content || nodeData.label, 50, 'Mensagem vazia')}"`}
       isStart={nodeData.isStart}
       hasValidationError={nodeData.hasValidationError}
       onToggleStart={nodeData.onToggleStart}

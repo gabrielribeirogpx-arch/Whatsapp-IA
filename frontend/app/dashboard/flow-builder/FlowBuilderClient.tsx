@@ -98,7 +98,7 @@ const isConversationMode = (value: string): value is ConversationMode => CONVERS
 const isActionType = (value: string): value is ActionType => ACTION_TYPE_OPTIONS.some((option) => option.value === value);
 
 const NODE_PRESETS: Record<FlowNodeKind, { label: string; type: string; data: Record<string, unknown> }> = {
-  message: { label: 'Mensagem', type: 'message', data: { content: '' } },
+  message: { label: 'Mensagem', type: 'message', data: { content: '', wait_for_reply: false } },
   choice: {
     label: 'Escolha',
     type: 'choice',
@@ -476,11 +476,22 @@ function FlowNodeEditorPanel({
           ) : null}
         </div>
         {kind === 'message' && (
-          <label className="flow-editor-field">
-            Mensagem
-            <textarea ref={messageContentRef} value={toText(draft.content)} onChange={(event) => onDraftChange({ content: event.target.value })} placeholder="Digite a mensagem..." />
-            <VariableChips targetRef={messageContentRef} value={toText(draft.content)} onChange={(next) => onDraftChange({ content: next })} />
-          </label>
+          <>
+            <label className="flow-editor-field">
+              Mensagem
+              <textarea ref={messageContentRef} value={toText(draft.content)} onChange={(event) => onDraftChange({ content: event.target.value })} placeholder="Digite a mensagem..." />
+              <VariableChips targetRef={messageContentRef} value={toText(draft.content)} onChange={(next) => onDraftChange({ content: next })} />
+            </label>
+            <label className="flow-editor-radio">
+              <input
+                type="checkbox"
+                checked={draft.wait_for_reply === true}
+                onChange={(event) => onDraftChange({ wait_for_reply: event.target.checked })}
+              />
+              Aguardar resposta antes de continuar
+            </label>
+            <small>Quando marcado, o fluxo envia esta mensagem e só avança para o próximo bloco após a próxima resposta do usuário.</small>
+          </>
         )}
 
         {kind === 'choice' && (

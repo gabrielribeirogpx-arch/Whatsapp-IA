@@ -543,6 +543,30 @@ def test_non_terminal_cta_url_node_continues_to_next_node() -> None:
     assert output.actions[1].as_effect()["text"] == "Depois do link"
     assert any(event["event_type"] == "TRANSITION_SELECTED" and event["payload"] == {"target_node_id": "next"} for event in event_store.events)
 
+def test_message_wait_for_reply_pauses_at_next_node_and_does_not_repeat_greeting() -> None:
+    raw_snapshot = {
+        "schema_version": 1,
+        "start_node_id": "start",
+        "nodes": [
+            {"id": "start", "type": "message", "content": "Olá! Como posso te ajudar?", "data": {"wait_for_reply": True}},
+            {"id": "rag", "type": "ai_rag", "data": {"question": "{{last_message}}", "fallback_message": "Resposta IA/RAG"}},
+        ],
+        "edges": [{"id": "e1", "source": "start", "target": "rag"}],
+    }
+    executor, snapshot, _event_store, session, db = _executor(raw_snapshot)
+
+    initial = executor.handle_input(db, _input_with_text(snapshot, "wamid.start", "oi"))
+
+    assert initial.status == FlowV2SessionStatus.WAITING
+    assert initial.current_node_id == "rag"
+    assert [action.as_effect()["text"] for action in initial.actions] == ["Olá! Como posso te ajudar?"]
+
+    resumed = executor.handle_input(db, _input_with_text(snapshot, "wamid.rag", "me fale sobre o edital"))
+
+    assert resumed.status == FlowV2SessionStatus.COMPLETED
+    assert resumed.current_node_id is None
+    assert [action.as_effect()["text"] for action in resumed.actions] == ["Resposta IA/RAG"]
+
 def test_delay_scheduling_creates_scheduled_job_and_does_not_execute_next_node() -> None:
     raw_snapshot = {
         "schema_version": 1,

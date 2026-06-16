@@ -150,6 +150,16 @@ def calculate_typing_delay_seconds(text: str) -> float:
     return min(max(len(normalized_text) / 18, 1.2), 5.0)
 
 
+def _is_truthy_node_flag(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "sim", "on"}
+    return False
+
+
 class MessageNodeExecutor(BaseNodeExecutor):
     def execute(
         self, db, *, snapshot, session, node, runtime_input
@@ -241,13 +251,18 @@ class MessageNodeExecutor(BaseNodeExecutor):
         # boundary: the condition must evaluate the next inbound user message,
         # not the message that triggered the current runtime call.
         wait_after_start_condition = next_node_type == "condition"
+        wait_for_reply = _is_truthy_node_flag(
+            node.get("wait_for_reply")
+            if "wait_for_reply" in node
+            else data.get("wait_for_reply", data.get("waitForReply", data.get("await_reply", data.get("awaitReply"))))
+        )
         status = (
             "complete"
             if next_node_id is None
-            else ("wait" if wait_after_start_condition else "continue")
+            else ("wait" if wait_for_reply or wait_after_start_condition else "continue")
         )
         logger.info(
-            "[MESSAGE AUTO CONTINUE] node_id=%s next_node_id=%s next_node_type=%s status=%s auto_continue=%s legacy_wait_after_start_condition=%s wait_after_start_condition=%s next_node_is_interactive=%s blocking_condition=%s",
+            "[MESSAGE AUTO CONTINUE] node_id=%s next_node_id=%s next_node_type=%s status=%s auto_continue=%s legacy_wait_after_start_condition=%s wait_after_start_condition=%s wait_for_reply=%s next_node_is_interactive=%s blocking_condition=%s",
             node_id,
             next_node_id,
             next_node_type,
@@ -255,6 +270,7 @@ class MessageNodeExecutor(BaseNodeExecutor):
             status == "continue",
             legacy_wait_after_start_condition,
             wait_after_start_condition,
+            wait_for_reply,
             next_node_is_interactive,
             "none",
         )
