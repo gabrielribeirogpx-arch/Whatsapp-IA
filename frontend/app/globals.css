@@ -229,7 +229,10 @@ input {
   color: #1a1a18;
   letter-spacing: -0.01em;
   flex: 1;
+  min-width: 0;
+  overflow: hidden;
   white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .flow-node-badge {
@@ -239,7 +242,7 @@ input {
   border-radius: 4px;
   text-transform: uppercase;
   letter-spacing: 0.03em;
-  flex: 0 1 auto;
+  flex: 0 0 auto;
   max-width: 92px;
   min-width: 0;
   overflow: hidden;
@@ -3652,7 +3655,7 @@ input {
   align-items: center;
   justify-content: flex-end;
   gap: 6px;
-  flex: 0 1 auto;
+  flex: 0 0 auto;
 }
 
 .flow-node-compact-meta {
