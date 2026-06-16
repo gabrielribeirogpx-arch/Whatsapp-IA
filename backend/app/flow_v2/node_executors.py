@@ -1526,6 +1526,11 @@ class AiRagNodeExecutor(BaseNodeExecutor):
         memory_enabled = data.get("memory_enabled", data.get("memoryEnabled", True)) is not False
         memory_max_messages = self._coerce_int_config(data.get("memory_max_messages", data.get("memoryMaxMessages")), default=10, field_name="memory_max_messages", node_id=node_id)
         memory_max_chars = self._coerce_int_config(data.get("memory_max_chars", data.get("memoryMaxChars")), default=4000, field_name="memory_max_chars", node_id=node_id)
+        knowledge_source_ids = data.get("knowledge_source_ids", data.get("knowledgeSourceIds")) or []
+        knowledge_scope = data.get("knowledge_scope", data.get("knowledgeScope"))
+        rag_filters = {"source_ids": knowledge_source_ids, "knowledge_scope": knowledge_scope} if knowledge_source_ids else None
+        fallback_when_low_confidence = data.get("fallback_when_low_confidence", data.get("fallbackWhenLowConfidence", False)) is True
+        min_confidence_level = str(data.get("min_confidence_level", data.get("minConfidenceLevel", "low")) or "low")
         conversation_history = ""
         is_first_ai_turn = True
         flow_id = getattr(snapshot, "flow_id", None)
@@ -1563,6 +1568,9 @@ class AiRagNodeExecutor(BaseNodeExecutor):
                 fallback_message=str(fallback),
                 include_sources=include_sources,
                 response_style=str(response_style),
+                filters=rag_filters,
+                fallback_when_low_confidence=fallback_when_low_confidence,
+                min_confidence_level=min_confidence_level,
             )
             text = rag_answer.answer if rag_answer.found_context else str(fallback)
             metadata = {
