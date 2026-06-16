@@ -54,6 +54,12 @@ class FlowV2SessionManager:
             .order_by(FlowV2Session.started_at.desc())
         ).scalar_one_or_none()
         if session is not None and str(session.status) in {str(FlowV2SessionStatus.RUNNING), str(FlowV2SessionStatus.WAITING)}:
+            if str(session.status) == str(FlowV2SessionStatus.WAITING):
+                logger.info(
+                    "[FLOW SESSION CONTINUE] session_id=%s node_id=%s reason=incoming_message_waiting_session",
+                    session.id,
+                    session.current_node_id,
+                )
             logger.info(
                 "[CHOICE SESSION FOUND] session_id=%s status=%s current_node_id=%s flow_version_id=%s external_user_id=%s incoming_selected_row_id=%s incoming_row_id=%s incoming_sourceHandle=%s",
                 session.id,

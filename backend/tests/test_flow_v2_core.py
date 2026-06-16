@@ -1951,3 +1951,92 @@ def test_publish_accepts_templated_media_and_cta_urls() -> None:
     )
 
     assert published.validation.is_valid
+
+
+def test_ai_rag_end_flow_finishes_session() -> None:
+    raw_snapshot = {
+        "schema_version": 1,
+        "start_node_id": "rag",
+        "nodes": [{"id": "rag", "type": "ai_rag", "data": {"question": "{{last_message}}", "fallback_message": "Resposta IA/RAG", "after_answer_behavior": "end_flow", "isStart": True}}],
+        "edges": [],
+    }
+    executor, snapshot, _event_store, _session, db = _executor(raw_snapshot)
+
+    first = executor.handle_input(db, _input_with_text(snapshot, "wamid.ai.end.1", "oi"))
+    second = executor.handle_input(db, _input_with_text(snapshot, "wamid.ai.end.2", "nova pergunta"))
+
+    assert first.status == FlowV2SessionStatus.COMPLETED
+    assert first.current_node_id is None
+    assert [action.as_effect()["text"] for action in first.actions] == ["Resposta IA/RAG"]
+    assert second.status == FlowV2SessionStatus.COMPLETED
+    assert second.actions == ()
+
+
+def test_ai_rag_wait_same_node_keeps_session_waiting() -> None:
+    raw_snapshot = {
+        "schema_version": 1,
+        "start_node_id": "start",
+        "nodes": [
+            {"id": "start", "type": "message", "content": "Olá! Como posso te ajudar?", "data": {"wait_for_reply": True}},
+            {"id": "rag", "type": "ai_rag", "data": {"question": "{{last_message}}", "fallback_message": "Resposta IA/RAG", "after_answer_behavior": "wait_same_node"}},
+        ],
+        "edges": [{"id": "e1", "source": "start", "target": "rag"}],
+    }
+    executor, snapshot, event_store, _session, db = _executor(raw_snapshot)
+
+    initial = executor.handle_input(db, _input_with_text(snapshot, "wamid.ai.wait.1", "oi"))
+    first_ai = executor.handle_input(db, _input_with_text(snapshot, "wamid.ai.wait.2", "qual o prazo?"))
+    second_ai = executor.handle_input(db, _input_with_text(snapshot, "wamid.ai.wait.3", "e documentos?"))
+
+    assert initial.status == FlowV2SessionStatus.WAITING
+    assert initial.current_node_id == "rag"
+    assert first_ai.status == FlowV2SessionStatus.WAITING
+    assert first_ai.current_node_id == "rag"
+    assert second_ai.status == FlowV2SessionStatus.WAITING
+    assert second_ai.current_node_id == "rag"
+    sent_texts = [event["payload"].get("message") for event in event_store.events if event["event_type"] == str(FlowV2EventType.MESSAGE_SENT)]
+    assert sent_texts == ["Olá! Como posso te ajudar?", "Resposta IA/RAG", "Resposta IA/RAG"]
+
+
+def test_ai_rag_initial_node_continuous_chat() -> None:
+    raw_snapshot = {
+        "schema_version": 1,
+        "start_node_id": "rag",
+        "nodes": [{"id": "rag", "type": "ai_rag", "data": {"isStart": True, "question": "{{last_message}}", "fallback_message": "Resposta IA/RAG", "after_answer_behavior": "wait_same_node"}}],
+        "edges": [],
+    }
+    executor, snapshot, _event_store, _session, db = _executor(raw_snapshot)
+
+    first = executor.handle_input(db, _input_with_text(snapshot, "wamid.ai.initial.1", "oi"))
+    second = executor.handle_input(db, _input_with_text(snapshot, "wamid.ai.initial.2", "outra dúvida"))
+
+    assert first.status == FlowV2SessionStatus.WAITING
+    assert first.current_node_id == "rag"
+    assert second.status == FlowV2SessionStatus.WAITING
+    assert second.current_node_id == "rag"
+    assert [action.as_effect()["text"] for action in first.actions] == ["Resposta IA/RAG"]
+    assert [action.as_effect()["text"] for action in second.actions] == ["Resposta IA/RAG"]
+
+
+def test_message_wait_for_reply_then_ai_rag_wait_same_node() -> None:
+    raw_snapshot = {
+        "schema_version": 1,
+        "start_node_id": "start",
+        "nodes": [
+            {"id": "start", "type": "message", "content": "Escolha uma área", "data": {"wait_for_reply": True}},
+            {"id": "rag", "type": "ai_rag", "data": {"question": "{{last_message}}", "fallback_message": "Resposta IA/RAG", "after_answer_behavior": "wait_same_node"}},
+        ],
+        "edges": [{"id": "e1", "source": "start", "target": "rag"}],
+    }
+    executor, snapshot, event_store, _session, db = _executor(raw_snapshot)
+
+    greeting = executor.handle_input(db, _input_with_text(snapshot, "wamid.hybrid.1", "oi"))
+    area_answer = executor.handle_input(db, _input_with_text(snapshot, "wamid.hybrid.2", "saúde"))
+    follow_up = executor.handle_input(db, _input_with_text(snapshot, "wamid.hybrid.3", "horário?"))
+
+    assert greeting.status == FlowV2SessionStatus.WAITING
+    assert area_answer.status == FlowV2SessionStatus.WAITING
+    assert follow_up.status == FlowV2SessionStatus.WAITING
+    assert follow_up.current_node_id == "rag"
+    sent_texts = [event["payload"].get("message") for event in event_store.events if event["event_type"] == str(FlowV2EventType.MESSAGE_SENT)]
+    assert sent_texts == ["Escolha uma área", "Resposta IA/RAG", "Resposta IA/RAG"]

@@ -437,3 +437,17 @@ def test_cta_url_without_https_fails_with_specific_error() -> None:
 
     assert result.status == GraphValidationStatus.INVALID
     assert "FLOW_V2_CTA_URL_HTTPS_REQUIRED:cta" in result.errors
+
+
+def test_ai_rag_continue_to_next_requires_edge() -> None:
+    nodes = [
+        {"id": "start", "type": "ai_rag", "data": {"isStart": True, "after_answer_behavior": "continue_to_next"}},
+        {"id": "next", "type": "message", "content": "Depois"},
+    ]
+
+    invalid = FlowV2GraphValidator().validate(nodes=nodes, edges=[])
+    assert invalid.status == GraphValidationStatus.INVALID
+    assert "FLOW_V2_AI_RAG_CONTINUE_TO_NEXT_REQUIRES_EDGE:start" in invalid.errors
+
+    valid = FlowV2GraphValidator().validate(nodes=nodes, edges=[{"id": "e1", "source": "start", "target": "next"}])
+    assert valid.status == GraphValidationStatus.VALID
