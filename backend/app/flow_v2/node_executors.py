@@ -23,12 +23,14 @@ from app.flow_v2.models import FlowV2ScheduledJob
 from app.models.contact import Contact
 from app.models.conversation import Conversation
 from app.models.conversation_log import ConversationLog
+from app.models.flow import FlowVersion
 from app.models.lead import Lead
 from app.models.task import Task
 from app.services.contact_tag_service import add_tag_to_contact
 from app.services.conversation_mode_service import ConversationModeError, set_conversation_mode
 from app.services.audit_service import write_audit_log
 from app.services.realtime_service import sync_publish
+from app.services.flow_ai_memory_service import flow_ai_memory_service
 from app.services.rag_service import answer_with_rag
 from app.flow_v2.snapshot import FlowV2Snapshot, build_transitions_from_edges
 from app.flow_v2.transition_resolver import TransitionResolver
@@ -1521,12 +1523,39 @@ class AiRagNodeExecutor(BaseNodeExecutor):
         behavior = _normalize_ai_rag_after_answer_behavior(data)
         include_sources = data.get("include_sources", data.get("includeSources", False)) is True
         response_style = data.get("response_style", data.get("responseStyle", "whatsapp_short")) or "whatsapp_short"
+        memory_enabled = data.get("memory_enabled", data.get("memoryEnabled", True)) is not False
+        memory_max_messages = self._coerce_int_config(data.get("memory_max_messages", data.get("memoryMaxMessages")), default=10, field_name="memory_max_messages", node_id=node_id)
+        memory_max_chars = self._coerce_int_config(data.get("memory_max_chars", data.get("memoryMaxChars")), default=4000, field_name="memory_max_chars", node_id=node_id)
+        conversation_history = ""
+        is_first_ai_turn = True
+        flow_id = getattr(snapshot, "flow_id", None)
+        if flow_id is None and hasattr(db, "get"):
+            flow_version = db.get(FlowVersion, session.flow_version_id)
+            flow_id = getattr(flow_version, "flow_id", None)
+        if memory_enabled and flow_id is not None:
+            flow_ai_memory_service.append_user_message(
+                db,
+                tenant_id=session.tenant_id,
+                flow_id=flow_id,
+                flow_version_id=session.flow_version_id,
+                session_id=session.id,
+                conversation_id=runtime_input.conversation_id,
+                contact_id=runtime_input.contact_id,
+                node_id=node_id,
+                content=str(question),
+                metadata=runtime_input.metadata,
+            )
+            history_messages = flow_ai_memory_service.get_recent_history(db, tenant_id=session.tenant_id, session_id=session.id, max_messages=memory_max_messages, max_chars=memory_max_chars)
+            conversation_history = flow_ai_memory_service.build_history_for_prompt(history_messages)
+            is_first_ai_turn = not any(message.role == "assistant" for message in history_messages)
         try:
             rag_answer = answer_with_rag(
                 db,
                 session.tenant_id,
                 str(question),
                 system_policy=str(instruction),
+                conversation_context=conversation_history,
+                is_first_ai_turn=is_first_ai_turn,
                 top_k=top_k,
                 temperature=temperature,
                 chat_model=None if use_workspace_ai_settings else (data.get("chat_model_override") or data.get("chat_model") or data.get("model_override") or data.get("model") or None),
@@ -1560,6 +1589,19 @@ class AiRagNodeExecutor(BaseNodeExecutor):
             bool(text),
         )
         self.event_store.append(db, session=session, event_type=FlowV2EventType.MESSAGE_SENT, node_id=node_id, payload={"node_id": node_id, "message": text, "metadata": metadata})
+        if memory_enabled and flow_id is not None and text:
+            flow_ai_memory_service.append_assistant_message(
+                db,
+                tenant_id=session.tenant_id,
+                flow_id=flow_id,
+                flow_version_id=session.flow_version_id,
+                session_id=session.id,
+                conversation_id=runtime_input.conversation_id,
+                contact_id=runtime_input.contact_id,
+                node_id=node_id,
+                content=text,
+                metadata={"intent": "ai_rag_answer", "found_context": metadata.get("found_context")},
+            )
         try:
             
             if runtime_input.conversation_id:
