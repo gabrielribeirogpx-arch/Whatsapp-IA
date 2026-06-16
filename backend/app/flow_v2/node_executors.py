@@ -1466,31 +1466,52 @@ class ActionNodeExecutor(BaseNodeExecutor):
 
 
 class AiRagNodeExecutor(BaseNodeExecutor):
+    @staticmethod
+    def _coerce_int_config(value: Any, *, default: int, field_name: str, node_id: str) -> int:
+        if value is None or value == "":
+            logger.info("[AI RAG NODE] default_used node_id=%s field=%s default=%s reason=missing", node_id, field_name, default)
+            return default
+        try:
+            parsed = int(value)
+        except (TypeError, ValueError):
+            logger.info("[AI RAG NODE] default_used node_id=%s field=%s default=%s invalid_value=%r", node_id, field_name, default, value)
+            return default
+        if parsed <= 0:
+            logger.info("[AI RAG NODE] default_used node_id=%s field=%s default=%s invalid_value=%r", node_id, field_name, default, value)
+            return default
+        return parsed
+
+    @staticmethod
+    def _coerce_float_config(value: Any, *, default: float, field_name: str, node_id: str) -> float:
+        if value is None or value == "":
+            logger.info("[AI RAG NODE] default_used node_id=%s field=%s default=%s reason=missing", node_id, field_name, default)
+            return default
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            logger.info("[AI RAG NODE] default_used node_id=%s field=%s default=%s invalid_value=%r", node_id, field_name, default, value)
+            return default
+
     def execute(self, db, *, snapshot, session, node, runtime_input) -> NodeExecutionResult:
         node_id = str(node["id"])
         data = self._node_data(node)
         instruction = self._render(data.get("instruction") or data.get("assistant_instruction") or "Responda como atendente.", db, snapshot=snapshot, session=session, runtime_input=runtime_input)
         question = self._render(data.get("question") or "{{last_message}}", db, snapshot=snapshot, session=session, runtime_input=runtime_input)
         fallback = self._render(data.get("fallback_message") or "Não encontrei essa informação na base disponível. Posso encaminhar para um atendente?", db, snapshot=snapshot, session=session, runtime_input=runtime_input)
+        top_k = self._coerce_int_config(data.get("top_k", data.get("topK")), default=5, field_name="top_k", node_id=node_id)
+        use_workspace_ai_settings = data.get("use_workspace_ai_settings", data.get("useWorkspaceAiSettings", True)) is not False
+        temperature = None if use_workspace_ai_settings else self._coerce_float_config(data.get("temperature"), default=0.2, field_name="temperature", node_id=node_id)
+        max_tokens = None if use_workspace_ai_settings else self._coerce_int_config(data.get("max_tokens", data.get("maxTokens")), default=1200, field_name="max_tokens", node_id=node_id)
         try:
-            top_k = int(data.get("top_k") or data.get("topK") or 5)
-        except (TypeError, ValueError):
-            top_k = 5
-        try:
-            temperature = float(data.get("temperature", 0.2))
-        except (TypeError, ValueError):
-            temperature = 0.2
-        try:
-            use_workspace_ai_settings = data.get("use_workspace_ai_settings", data.get("useWorkspaceAiSettings", True)) is not False
             rag_answer = answer_with_rag(
                 db,
                 session.tenant_id,
                 str(question),
                 system_policy=str(instruction),
                 top_k=top_k,
-                temperature=None if use_workspace_ai_settings else temperature,
+                temperature=temperature,
                 chat_model=None if use_workspace_ai_settings else (data.get("chat_model_override") or data.get("chat_model") or data.get("model_override") or data.get("model") or None),
-                max_tokens=None if use_workspace_ai_settings else (data.get("max_tokens") or data.get("maxTokens") or None),
+                max_tokens=max_tokens,
                 fallback_message=str(fallback),
             )
             text = rag_answer.answer if rag_answer.found_context else str(fallback)

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 import uuid
 from typing import Any
@@ -12,6 +13,8 @@ from sqlalchemy.orm import Session
 from app.models.tenant_ai_setting import TenantAISetting
 from app.services.ai_model_validation import validate_chat_model
 from app.utils.encryption import decrypt_secret
+
+logger = logging.getLogger(__name__)
 
 
 class LLMConfigurationError(RuntimeError):
@@ -28,6 +31,36 @@ DEFAULT_MODELS = {
     "anthropic": "claude-3-5-haiku-latest",
     "wazza_default": os.getenv("AI_MODEL", "gemini-1.5-flash"),
 }
+
+DEFAULT_TEMPERATURE = 0.2
+DEFAULT_MAX_TOKENS = 1200
+
+
+def _coerce_float(value: Any, *, default: float, field_name: str, source: str) -> float:
+    if value is None or value == "":
+        logger.info("[AI DEFAULT] field=%s source=%s default=%s reason=missing", field_name, source, default)
+        return default
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        logger.info("[AI DEFAULT] field=%s source=%s default=%s invalid_value=%r", field_name, source, default, value)
+        return default
+
+
+def _coerce_int(value: Any, *, default: int, field_name: str, source: str) -> int:
+    if value is None or value == "":
+        logger.info("[AI DEFAULT] field=%s source=%s default=%s reason=missing", field_name, source, default)
+        return default
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        logger.info("[AI DEFAULT] field=%s source=%s default=%s invalid_value=%r", field_name, source, default, value)
+        return default
+
+
+def _option_or_default(opts: dict[str, Any], key: str, default_factory) -> Any:
+    value = opts.get(key)
+    return default_factory() if value is None or value == "" else value
 
 
 def _provider_env_key(provider: str) -> str | None:
@@ -62,8 +95,8 @@ def _resolve_tenant_config(db: Session | None, tenant_id: uuid.UUID | str | None
             "provider": provider,
             "api_key": api_key,
             "chat_model": validate_chat_model(opts.get("chat_model") or opts.get("model") or setting.chat_model or DEFAULT_MODELS.get(provider)),
-            "temperature": opts.get("temperature", float(setting.temperature or 0.2)),
-            "max_tokens": opts.get("max_tokens", int(setting.max_tokens or 1200)),
+            "temperature": _option_or_default(opts, "temperature", lambda: _coerce_float(setting.temperature, default=DEFAULT_TEMPERATURE, field_name="temperature", source="workspace")),
+            "max_tokens": _option_or_default(opts, "max_tokens", lambda: _coerce_int(setting.max_tokens, default=DEFAULT_MAX_TOKENS, field_name="max_tokens", source="workspace")),
         }
     provider, api_key = _wazza_default_provider()
     if not api_key:
@@ -72,8 +105,8 @@ def _resolve_tenant_config(db: Session | None, tenant_id: uuid.UUID | str | None
         "provider": provider,
         "api_key": api_key,
         "chat_model": validate_chat_model(opts.get("chat_model") or opts.get("model") or os.getenv("AI_MODEL") or DEFAULT_MODELS.get(provider)),
-        "temperature": opts.get("temperature", float(os.getenv("AI_TEMPERATURE", "0.2"))),
-        "max_tokens": opts.get("max_tokens", int(os.getenv("AI_MAX_TOKENS", "1200"))),
+        "temperature": _option_or_default(opts, "temperature", lambda: _coerce_float(os.getenv("AI_TEMPERATURE"), default=DEFAULT_TEMPERATURE, field_name="temperature", source="env")),
+        "max_tokens": _option_or_default(opts, "max_tokens", lambda: _coerce_int(os.getenv("AI_MAX_TOKENS"), default=DEFAULT_MAX_TOKENS, field_name="max_tokens", source="env")),
     }
 
 
@@ -120,8 +153,8 @@ def generate_answer(messages: list[dict[str, str]], model: str | None = None, te
     if not resolved_key:
         raise LLMConfigurationError("IA não configurada para este workspace.")
     resolved_model = validate_chat_model(model) or DEFAULT_MODELS.get(resolved_provider) or "gemini-1.5-flash"
-    temp = float(temperature if temperature is not None else os.getenv("AI_TEMPERATURE", "0.2"))
-    limit = int(max_tokens if max_tokens is not None else os.getenv("AI_MAX_TOKENS", "1200"))
+    temp = _coerce_float(temperature if temperature is not None else os.getenv("AI_TEMPERATURE"), default=DEFAULT_TEMPERATURE, field_name="temperature", source="generate_answer")
+    limit = _coerce_int(max_tokens if max_tokens is not None else os.getenv("AI_MAX_TOKENS"), default=DEFAULT_MAX_TOKENS, field_name="max_tokens", source="generate_answer")
     try:
         if resolved_provider == "openai":
             text = _generate_openai(messages, api_key=resolved_key, model=resolved_model, temperature=temp, max_tokens=limit)
@@ -145,8 +178,8 @@ def generate_answer_for_tenant(db: Session, tenant_id: uuid.UUID, messages: list
         provider=config["provider"],
         api_key=config["api_key"],
         model=config["chat_model"],
-        temperature=float(config["temperature"]),
-        max_tokens=int(config["max_tokens"]),
+        temperature=_coerce_float(config.get("temperature"), default=DEFAULT_TEMPERATURE, field_name="temperature", source="resolved_config"),
+        max_tokens=_coerce_int(config.get("max_tokens"), default=DEFAULT_MAX_TOKENS, field_name="max_tokens", source="resolved_config"),
     )
 
 
