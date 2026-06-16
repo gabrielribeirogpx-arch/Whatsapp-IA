@@ -92,6 +92,19 @@ class FlowV2Executor:
         )
         session = self.session_manager.get_or_create(db, runtime_input=runtime_input, snapshot=snapshot)
         flow_id = self._flow_id_for_version(db, tenant_id=runtime_input.tenant_id, flow_version_id=runtime_input.flow_version_id)
+        if str(getattr(session, "status", "")) == str(FlowV2SessionStatus.COMPLETED):
+            logger.info(
+                "[SESSION FINISHED] session_id=%s status=%s current_node_id=%s reason=ignore_future_message_auto_restart_disabled",
+                session.id,
+                session.status,
+                session.current_node_id,
+            )
+            return RuntimeOutput(
+                session_id=session.id,
+                status=FlowV2SessionStatus.COMPLETED,
+                current_node_id=session.current_node_id,
+                emitted_event_count=0,
+            )
         if getattr(session, "last_event_index", 0) == 0:
             self._track_analytics(db, session=session, flow_id=flow_id, event_type="flow_started", metadata={"external_user_id": runtime_input.external_user_id})
         idempotency_metadata = {
@@ -270,6 +283,18 @@ class FlowV2Executor:
                 if isinstance(action, SendMessageAction):
                     self._track_analytics(db, session=session, flow_id=flow_id, event_type="message_sent", node_id=node_id, node_type=node_type, metadata={"text": action.text})
 
+            if self._is_terminal_node(node):
+                logger.info(
+                    "[SESSION FINISHED] node_id=%s node_type=%s reason=terminal_node_marked_end_flow actions_count=%s",
+                    node_id,
+                    node_type,
+                    len(actions),
+                )
+                self.event_store.append(db, session=session, event_type=FlowV2EventType.SESSION_COMPLETED, node_id=node_id)
+                self._track_analytics(db, session=session, flow_id=flow_id, event_type="flow_completed", node_id=node_id, node_type=node_type)
+                self.session_manager.move_to(db, session=session, node_id=None, status=FlowV2SessionStatus.COMPLETED)
+                return actions
+
             if result.status == "scheduled":
                 logger.info(
                     "[SESSION WAITING] node_id=%s node_type=%s waiting_node_id=%s reason=scheduled",
@@ -395,6 +420,18 @@ class FlowV2Executor:
     @staticmethod
     def _is_delay_resumed(runtime_input: RuntimeInput) -> bool:
         return runtime_input.metadata.get("event_type") == str(FlowV2EventType.DELAY_RESUMED)
+
+    @staticmethod
+    def _is_terminal_node(node: dict[str, Any]) -> bool:
+        data = FlowV2Executor._node_data(node)
+        value = node.get("is_terminal", node.get("isTerminal", node.get("endFlow", data.get("is_terminal", data.get("isTerminal", data.get("endFlow"))))))
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, (int, float)):
+            return value != 0
+        if isinstance(value, str):
+            return value.strip().lower() in {"1", "true", "yes", "sim", "on"}
+        return False
 
     @staticmethod
     def _legacy_effect(action: RuntimeAction) -> dict[str, Any] | None:

@@ -567,6 +567,50 @@ def test_message_wait_for_reply_pauses_at_next_node_and_does_not_repeat_greeting
     assert resumed.current_node_id is None
     assert [action.as_effect()["text"] for action in resumed.actions] == ["Resposta IA/RAG"]
 
+    after_finished = executor.handle_input(db, _input_with_text(snapshot, "wamid.after-finished", "tenho outra pergunta"))
+
+    assert after_finished.status == FlowV2SessionStatus.COMPLETED
+    assert after_finished.current_node_id is None
+    assert after_finished.actions == ()
+    sent_texts = [
+        event["payload"].get("message")
+        for event in _event_store.events
+        if event["event_type"] == str(FlowV2EventType.MESSAGE_SENT)
+    ]
+    assert sent_texts == ["Olá! Como posso te ajudar?", "Resposta IA/RAG"]
+
+
+def test_terminal_marked_node_finishes_even_when_edge_exists() -> None:
+    raw_snapshot = {
+        "schema_version": 1,
+        "start_node_id": "start",
+        "nodes": [
+            {"id": "start", "type": "message", "content": "Olá", "data": {"wait_for_reply": True}},
+            {"id": "rag", "type": "ai_rag", "data": {"question": "{{last_message}}", "fallback_message": "Resposta IA/RAG", "endFlow": True}},
+            {"id": "restart", "type": "message", "content": "Olá! Como posso te ajudar?"},
+        ],
+        "edges": [
+            {"id": "e1", "source": "start", "target": "rag"},
+            {"id": "e2", "source": "rag", "target": "restart"},
+        ],
+    }
+    executor, snapshot, event_store, _session, db = _executor(raw_snapshot)
+
+    initial = executor.handle_input(db, _input_with_text(snapshot, "wamid.terminal.start", "oi"))
+    resumed = executor.handle_input(db, _input_with_text(snapshot, "wamid.terminal.rag", "qual o prazo?"))
+
+    assert initial.status == FlowV2SessionStatus.WAITING
+    assert resumed.status == FlowV2SessionStatus.COMPLETED
+    assert resumed.current_node_id is None
+    assert [action.as_effect()["text"] for action in resumed.actions] == ["Resposta IA/RAG"]
+    sent_texts = [
+        event["payload"].get("message")
+        for event in event_store.events
+        if event["event_type"] == str(FlowV2EventType.MESSAGE_SENT)
+    ]
+    assert sent_texts == ["Olá", "Resposta IA/RAG"]
+
+
 def test_delay_scheduling_creates_scheduled_job_and_does_not_execute_next_node() -> None:
     raw_snapshot = {
         "schema_version": 1,
