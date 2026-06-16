@@ -1489,7 +1489,7 @@ class AiRagNodeExecutor(BaseNodeExecutor):
                 system_policy=str(instruction),
                 top_k=top_k,
                 temperature=None if use_workspace_ai_settings else temperature,
-                model=None if use_workspace_ai_settings else (data.get("model_override") or data.get("model") or None),
+                chat_model=None if use_workspace_ai_settings else (data.get("chat_model_override") or data.get("chat_model") or data.get("model_override") or data.get("model") or None),
                 max_tokens=None if use_workspace_ai_settings else (data.get("max_tokens") or data.get("maxTokens") or None),
                 fallback_message=str(fallback),
             )
