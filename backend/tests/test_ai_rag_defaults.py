@@ -135,3 +135,85 @@ def test_rag_includes_sources_only_when_question_asks_for_source(monkeypatch):
 
     user_prompt = captured["messages"][1]["content"]
     assert "Fonte: edital.pdf, página 4" in user_prompt
+
+
+def test_ai_rag_prompt_receives_history(monkeypatch):
+    from app.services import rag_service
+
+    captured = {}
+    monkeypatch.setattr(rag_service, "retrieve_context", lambda db, tenant_id, question, top_k: [{"content": "E-mail: contato@example.com", "metadata": {}, "source_name": "kb"}])
+
+    def fake_generate(db, tenant_id, messages, options=None):
+        captured["user_prompt"] = messages[1]["content"]
+        return "O e-mail é contato@example.com"
+
+    monkeypatch.setattr(rag_service, "generate_answer_for_tenant", fake_generate)
+
+    rag_service.answer_with_rag(None, uuid.uuid4(), "e o e-mail?", conversation_context="Usuário: Quero atendimento\nAssistente: Claro.")
+
+    assert "HISTÓRICO RECENTE DA CONVERSA" in captured["user_prompt"]
+    assert "Usuário: Quero atendimento" in captured["user_prompt"]
+    assert "PERGUNTA ATUAL:\ne o e-mail?" in captured["user_prompt"]
+
+
+def test_ai_rag_does_not_greet_again_when_history_exists(monkeypatch):
+    from app.services import rag_service
+
+    captured = {}
+    monkeypatch.setattr(rag_service, "retrieve_context", lambda db, tenant_id, question, top_k: [{"content": "Prazo: 5 dias úteis", "metadata": {}, "source_name": "kb"}])
+    monkeypatch.setattr(rag_service, "generate_answer_for_tenant", lambda db, tenant_id, messages, options=None: captured.setdefault("system_prompt", messages[0]["content"]) or "5 dias úteis")
+
+    rag_service.answer_with_rag(None, uuid.uuid4(), "e o prazo?", conversation_context="Assistente: Olá!", is_first_ai_turn=False)
+
+    assert "Esta conversa já está em andamento. Não cumprimente novamente." in captured["system_prompt"]
+
+
+def test_ai_rag_wait_same_node_reuses_memory(monkeypatch):
+    from types import SimpleNamespace
+    from app.flow_v2.contracts import RuntimeInput
+    from app.flow_v2.node_executors import AiRagNodeExecutor
+    from app.flow_v2.snapshot import FlowV2Snapshot
+    from app.services import rag_service
+    import app.flow_v2.node_executors as node_executors
+
+    calls = {"user": 0, "assistant": 0, "history": 0}
+
+    class Memory:
+        def append_user_message(self, *args, **kwargs):
+            calls["user"] += 1
+        def append_assistant_message(self, *args, **kwargs):
+            calls["assistant"] += 1
+        def get_recent_history(self, *args, **kwargs):
+            calls["history"] += 1
+            return [SimpleNamespace(role="user", content="Quero prazo")]
+        def build_history_for_prompt(self, messages):
+            return "Usuário: Quero prazo"
+
+    class EventStore:
+        def append(self, *args, **kwargs):
+            pass
+
+    class Resolver:
+        pass
+
+    class DB:
+        def get(self, model, item_id):
+            return SimpleNamespace(flow_id=flow_id)
+
+    flow_id = uuid.uuid4()
+    tenant_id = uuid.uuid4()
+    flow_version_id = uuid.uuid4()
+    session_id = uuid.uuid4()
+    node_id = str(uuid.uuid4())
+    snapshot = FlowV2Snapshot(flow_version_id=flow_version_id, tenant_id=tenant_id, hash="h", nodes=({"id": node_id, "type": "ai_rag", "data": {"after_answer_behavior": "wait_same_node"}},), edges=(), start_node_id=node_id)
+    session = SimpleNamespace(id=session_id, tenant_id=tenant_id, flow_version_id=flow_version_id)
+    runtime_input = RuntimeInput(tenant_id=tenant_id, flow_version_id=flow_version_id, external_user_id="whatsapp:+55", message_text="e o prazo?", metadata={"message_id": "m1"})
+
+    monkeypatch.setattr(node_executors, "flow_ai_memory_service", Memory())
+    monkeypatch.setattr(node_executors, "answer_with_rag", lambda *args, **kwargs: rag_service.RagAnswer(answer="5 dias úteis", contexts=[], found_context=True))
+
+    result = AiRagNodeExecutor(event_store=EventStore(), transition_resolver=Resolver()).execute(DB(), snapshot=snapshot, session=session, node=snapshot.nodes[0], runtime_input=runtime_input)
+
+    assert result.status == "wait"
+    assert result.next_node_id == node_id
+    assert calls == {"user": 1, "assistant": 1, "history": 1}

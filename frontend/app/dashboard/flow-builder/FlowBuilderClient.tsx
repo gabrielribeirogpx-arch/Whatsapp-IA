@@ -116,7 +116,7 @@ const NODE_PRESETS: Record<FlowNodeKind, { label: string; type: string; data: Re
   action: { label: 'Ação', type: 'action', data: { action_type: 'create_lead', action: 'create_lead', params: {} } },
   media: { label: 'Mídia', type: 'media', data: { media_type: 'image', media_url: '', caption: '', filename: '' } },
   cta_url: { label: 'CTA / Link', type: 'cta_url', data: { content: '', text: '', button_text: '', url: '', is_terminal: false } },
-  ai_rag: { label: 'IA / RAG', type: 'ai_rag', data: { after_answer_behavior: 'end_flow', instruction: 'Responda como atendente da prefeitura.', question: '{{last_message}}', top_k: 5, use_workspace_ai_settings: true, model_override: '', temperature: 0.2, max_tokens: 1200, knowledge_only: true, fallback_message: 'Não encontrei essa informação na base disponível. Posso encaminhar para um atendente?', is_terminal: false } },
+  ai_rag: { label: 'IA / RAG', type: 'ai_rag', data: { after_answer_behavior: 'end_flow', instruction: 'Responda como atendente da prefeitura.', question: '{{last_message}}', top_k: 5, use_workspace_ai_settings: true, model_override: '', temperature: 0.2, max_tokens: 1200, knowledge_only: true, memory_enabled: true, memory_max_messages: 10, memory_max_chars: 4000, fallback_message: 'Não encontrei essa informação na base disponível. Posso encaminhar para um atendente?', is_terminal: false } },
 };
 
 const initialNodes: Node[] = [];
@@ -601,6 +601,20 @@ function FlowNodeEditorPanel({
               <input type="checkbox" checked={draft.knowledge_only !== false} onChange={(event) => onDraftChange({ knowledge_only: event.target.checked })} />
               Responder somente com base de conhecimento
             </label>
+            <label className="flow-editor-radio">
+              <input type="checkbox" checked={draft.memory_enabled !== false} onChange={(event) => onDraftChange({ memory_enabled: event.target.checked })} />
+              Usar memória da conversa
+            </label>
+            <div className="flow-editor-row">
+              <label className="flow-editor-field">
+                Nº máximo de mensagens
+                <input type="number" min="1" max="30" value={toText(draft.memory_max_messages || 10)} onChange={(event) => onDraftChange({ memory_max_messages: Number(event.target.value || 10) })} disabled={draft.memory_enabled === false} />
+              </label>
+              <label className="flow-editor-field">
+                Limite de caracteres
+                <input type="number" min="500" max="12000" value={toText(draft.memory_max_chars || 4000)} onChange={(event) => onDraftChange({ memory_max_chars: Number(event.target.value || 4000) })} disabled={draft.memory_enabled === false} />
+              </label>
+            </div>
             <label className="flow-editor-field">
               Mensagem fallback
               <textarea value={toText(draft.fallback_message)} onChange={(event) => onDraftChange({ fallback_message: event.target.value })} placeholder="Não encontrei essa informação na base disponível. Posso encaminhar para um atendente?" />
