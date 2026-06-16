@@ -1519,6 +1519,7 @@ class AiRagNodeExecutor(BaseNodeExecutor):
         temperature = None if use_workspace_ai_settings else self._coerce_float_config(data.get("temperature"), default=0.2, field_name="temperature", node_id=node_id)
         max_tokens = None if use_workspace_ai_settings else self._coerce_int_config(data.get("max_tokens", data.get("maxTokens")), default=1200, field_name="max_tokens", node_id=node_id)
         behavior = _normalize_ai_rag_after_answer_behavior(data)
+        include_sources = data.get("include_sources", data.get("includeSources", False)) is True
         try:
             rag_answer = answer_with_rag(
                 db,
@@ -1530,6 +1531,7 @@ class AiRagNodeExecutor(BaseNodeExecutor):
                 chat_model=None if use_workspace_ai_settings else (data.get("chat_model_override") or data.get("chat_model") or data.get("model_override") or data.get("model") or None),
                 max_tokens=max_tokens,
                 fallback_message=str(fallback),
+                include_sources=include_sources,
             )
             text = rag_answer.answer if rag_answer.found_context else str(fallback)
             metadata = {

@@ -37,3 +37,39 @@ def test_resolve_tenant_config_uses_defaults_when_rag_options_are_none(monkeypat
 
 def test_cosine_similarity_treats_none_vector_values_as_zero():
     assert cosine_similarity([None, 1.0], [1.0, 1.0]) > 0
+
+
+def test_rag_context_omits_source_labels_by_default():
+    from app.services.rag_service import _format_context_for_prompt
+
+    contexts = [
+        {
+            "source_name": "EDITAL_2026.pdf",
+            "content": "Prazo de inscrição até 30 de junho.",
+            "metadata": {"page": 4},
+        }
+    ]
+
+    prompt_context = _format_context_for_prompt(contexts)
+
+    assert "Prazo de inscrição" in prompt_context
+    assert "Fonte:" not in prompt_context
+    assert "EDITAL_2026" not in prompt_context
+    assert "página" not in prompt_context.lower()
+
+
+def test_rag_context_can_include_source_labels_when_enabled():
+    from app.services.rag_service import _format_context_for_prompt
+
+    contexts = [
+        {
+            "source_name": "EDITAL_2026.pdf",
+            "content": "Prazo de inscrição até 30 de junho.",
+            "metadata": {"page": 4},
+        }
+    ]
+
+    prompt_context = _format_context_for_prompt(contexts, include_sources=True)
+
+    assert "Fonte: EDITAL_2026.pdf, página 4" in prompt_context
+    assert "Prazo de inscrição" in prompt_context
