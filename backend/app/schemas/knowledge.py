@@ -44,6 +44,8 @@ class KnowledgeSourceOut(BaseModel):
     storage_url: str | None = None
     metadata_json: dict | None = None
     chunks_count: int = 0
+    embedded_chunks_count: int = 0
+    embedding_status: str = "text_only"
     created_at: datetime
     updated_at: datetime
 
@@ -55,3 +57,11 @@ class KnowledgeCrawlOut(BaseModel):
     source: str
     pages_collected: int
     chunks_created: int
+
+
+class KnowledgeReindexOut(BaseModel):
+    source_id: uuid.UUID
+    chunks_total: int
+    embedded: int
+    failed: int
+    status: str
