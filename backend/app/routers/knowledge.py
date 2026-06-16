@@ -11,8 +11,8 @@ from app.database import get_db
 from app.models.knowledge_chunk import KnowledgeChunk
 from app.models.knowledge_source import KnowledgeSource
 from app.models.tenant import Tenant
-from app.schemas.knowledge import KnowledgeSourceOut, KnowledgeUploadOut
-from app.services.rag_service import ingest_knowledge_source
+from app.schemas.knowledge import KnowledgeReindexOut, KnowledgeSourceOut, KnowledgeUploadOut
+from app.services.rag_service import ingest_knowledge_source, reindex_knowledge_source
 from app.services.tenant_service import get_current_tenant
 
 router = APIRouter(prefix="/knowledge", tags=["knowledge"])
@@ -24,6 +24,29 @@ STORAGE_ROOT = Path(os.getenv("KNOWLEDGE_STORAGE_DIR", "/data/knowledge"))
 def _safe_filename(filename: str) -> str:
     name = re.sub(r"[^A-Za-z0-9._-]+", "_", filename or "documento")[:180]
     return name or "documento"
+
+
+def _source_embedding_stats(db: Session, tenant_id: UUID) -> dict[UUID, dict[str, int]]:
+    rows = db.execute(
+        select(
+            KnowledgeChunk.source_id,
+            func.count(KnowledgeChunk.id),
+            func.count(KnowledgeChunk.embedding_json),
+        )
+        .where(KnowledgeChunk.tenant_id == tenant_id)
+        .group_by(KnowledgeChunk.source_id)
+    ).all()
+    return {source_id: {"chunks_count": int(total or 0), "embedded_chunks_count": int(embedded or 0)} for source_id, total, embedded in rows}
+
+
+def _embedding_status(source: KnowledgeSource, chunks_count: int, embedded_chunks_count: int) -> str:
+    if source.status == "processing":
+        return "processing"
+    if chunks_count <= 0 or embedded_chunks_count <= 0:
+        return "text_only"
+    if embedded_chunks_count >= chunks_count:
+        return "vectorized"
+    return "partial"
 
 
 @router.post("/upload", response_model=KnowledgeUploadOut)
@@ -66,9 +89,18 @@ async def upload_knowledge(
 
 @router.get("/sources", response_model=list[KnowledgeSourceOut])
 def list_sources(tenant: Tenant = Depends(get_current_tenant), db: Session = Depends(get_db)):
-    chunk_counts = dict(db.execute(select(KnowledgeChunk.source_id, func.count(KnowledgeChunk.id)).where(KnowledgeChunk.tenant_id == tenant.id).group_by(KnowledgeChunk.source_id)).all())
+    stats = _source_embedding_stats(db, tenant.id)
     sources = db.execute(select(KnowledgeSource).where(KnowledgeSource.tenant_id == tenant.id).order_by(KnowledgeSource.created_at.desc())).scalars().all()
-    return [KnowledgeSourceOut.model_validate(src, from_attributes=True).model_copy(update={"chunks_count": int(chunk_counts.get(src.id, 0))}) for src in sources]
+    return [
+        KnowledgeSourceOut.model_validate(src, from_attributes=True).model_copy(
+            update={
+                "chunks_count": stats.get(src.id, {}).get("chunks_count", 0),
+                "embedded_chunks_count": stats.get(src.id, {}).get("embedded_chunks_count", 0),
+                "embedding_status": _embedding_status(src, stats.get(src.id, {}).get("chunks_count", 0), stats.get(src.id, {}).get("embedded_chunks_count", 0)),
+            }
+        )
+        for src in sources
+    ]
 
 
 @router.get("/sources/{source_id}", response_model=KnowledgeSourceOut)
@@ -77,7 +109,18 @@ def get_source(source_id: UUID, tenant: Tenant = Depends(get_current_tenant), db
     if not source:
         raise HTTPException(status_code=404, detail="Fonte não encontrada")
     chunks_count = db.scalar(select(func.count(KnowledgeChunk.id)).where(KnowledgeChunk.tenant_id == tenant.id, KnowledgeChunk.source_id == source.id)) or 0
-    return KnowledgeSourceOut.model_validate(source, from_attributes=True).model_copy(update={"chunks_count": int(chunks_count)})
+    embedded_chunks_count = db.scalar(select(func.count(KnowledgeChunk.id)).where(KnowledgeChunk.tenant_id == tenant.id, KnowledgeChunk.source_id == source.id, KnowledgeChunk.embedding_json.is_not(None))) or 0
+    return KnowledgeSourceOut.model_validate(source, from_attributes=True).model_copy(update={"chunks_count": int(chunks_count), "embedded_chunks_count": int(embedded_chunks_count), "embedding_status": _embedding_status(source, int(chunks_count), int(embedded_chunks_count))})
+
+
+@router.post("/sources/{source_id}/reindex", response_model=KnowledgeReindexOut)
+def reindex_source(source_id: UUID, tenant: Tenant = Depends(get_current_tenant), db: Session = Depends(get_db)):
+    try:
+        return reindex_knowledge_source(db, tenant_id=tenant.id, source_id=source_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail="Falha ao reindexar fonte") from exc
 
 
 @router.delete("/sources/{source_id}")

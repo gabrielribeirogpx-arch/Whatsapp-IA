@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useState } from "react";
-import { Database, FileText, UploadCloud } from "lucide-react";
+import { Database, FileText, RefreshCw, UploadCloud } from "lucide-react";
 import { apiFetch } from "@/lib/api";
 
 type KnowledgeSource = {
@@ -12,6 +12,8 @@ type KnowledgeSource = {
   original_filename?: string | null;
   size_bytes?: number | null;
   chunks_count?: number;
+  embedded_chunks_count?: number;
+  embedding_status?: "vectorized" | "partial" | "text_only" | "processing" | string;
   created_at: string;
 };
 
@@ -21,6 +23,7 @@ export default function KnowledgePage() {
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState("");
+  const [reindexingId, setReindexingId] = useState<string | null>(null);
 
   async function loadSources() {
     setLoading(true);
@@ -65,6 +68,25 @@ export default function KnowledgePage() {
     }
   }
 
+  async function reindex(id: string) {
+    setReindexingId(id);
+    setError("");
+    try {
+      const response = await apiFetch(`/api/knowledge/sources/${id}/reindex`, {
+        method: "POST",
+      });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(payload.detail || "Falha ao reindexar fonte");
+      }
+      await loadSources();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Falha ao reindexar fonte");
+    } finally {
+      setReindexingId(null);
+    }
+  }
+
   async function remove(id: string) {
     if (!confirm("Excluir esta fonte e todos os chunks?")) return;
     const response = await apiFetch(`/api/knowledge/sources/${id}`, {
@@ -72,6 +94,17 @@ export default function KnowledgePage() {
     });
     if (response.ok)
       setSources((current) => current.filter((source) => source.id !== id));
+  }
+
+  function embeddingBadge(source: KnowledgeSource) {
+    const status = source.embedding_status || "text_only";
+    const map: Record<string, { label: string; className: string }> = {
+      vectorized: { label: "Vetorizado", className: "border-emerald-200 bg-emerald-50 text-emerald-700" },
+      partial: { label: "Parcial", className: "border-amber-200 bg-amber-50 text-amber-700" },
+      text_only: { label: "Apenas texto", className: "border-slate-200 bg-slate-50 text-slate-600" },
+      processing: { label: "Processando", className: "border-emerald-200 bg-emerald-50 text-emerald-700" },
+    };
+    return map[status] || map.text_only;
   }
 
   return (
@@ -201,16 +234,30 @@ export default function KnowledgePage() {
                       </h3>
                       <p className="mt-1 text-sm text-slate-500">
                         {source.type.toUpperCase()} • {source.chunks_count || 0}{" "}
-                        chunks •{" "}
+                        chunks • {source.embedded_chunks_count || 0} vetorizados •{" "}
                         {(source.size_bytes || 0).toLocaleString("pt-BR")} bytes
                       </p>
                     </div>
-                    <div className="flex shrink-0 items-center gap-3">
+                    <div className="flex shrink-0 flex-wrap items-center gap-3">
+                      <span
+                        className={`rounded-full border px-3 py-1 text-xs font-semibold ${embeddingBadge(source).className}`}
+                      >
+                        {embeddingBadge(source).label}
+                      </span>
                       <span
                         className={`rounded-full px-3 py-1 text-xs font-semibold ${source.status === "ready" ? "bg-emerald-100 text-emerald-700" : source.status === "failed" ? "bg-red-100 text-red-700" : "bg-amber-100 text-amber-700"}`}
                       >
                         {source.status}
                       </span>
+                      <button
+                        onClick={() => void reindex(source.id)}
+                        disabled={reindexingId === source.id}
+                        className="inline-flex items-center gap-1 rounded-lg border border-emerald-200 bg-white px-3 py-1 text-sm font-medium text-emerald-700 transition hover:bg-emerald-50 focus:outline-none focus:ring-2 focus:ring-emerald-100 disabled:cursor-not-allowed disabled:opacity-60"
+                        type="button"
+                      >
+                        <RefreshCw className={`h-3.5 w-3.5 ${reindexingId === source.id ? "animate-spin" : ""}`} aria-hidden="true" />
+                        {reindexingId === source.id ? "Reindexando..." : "Reindexar"}
+                      </button>
                       <button
                         onClick={() => void remove(source.id)}
                         className="rounded-lg border border-slate-200 bg-white px-3 py-1 text-sm font-medium text-slate-700 transition hover:border-red-200 hover:bg-red-50 hover:text-red-700 focus:outline-none focus:ring-2 focus:ring-slate-200"

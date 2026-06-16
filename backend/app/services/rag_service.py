@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 import re
 import uuid
@@ -15,12 +16,18 @@ from sqlalchemy.orm import Session
 from app.models.knowledge_base import KnowledgeBase
 from app.models.knowledge_chunk import KnowledgeChunk
 from app.models.knowledge_source import KnowledgeSource
-from app.services.embedding_service import cosine_similarity, generate_embedding_for_tenant
+from app.services.embedding_service import (
+    cosine_similarity,
+    generate_embedding_for_tenant,
+    get_embedding_config_for_tenant,
+)
 from app.services.llm_service import generate_answer_for_tenant
 
 CHUNK_SIZE = int(os.getenv("RAG_CHUNK_SIZE", "4000"))
 CHUNK_OVERLAP = int(os.getenv("RAG_CHUNK_OVERLAP", "300"))
 DEFAULT_TOP_K = int(os.getenv("RAG_TOP_K", "5"))
+MIN_SIMILARITY_SCORE = float(os.getenv("RAG_MIN_SIMILARITY_SCORE", "0.25"))
+logger = logging.getLogger(__name__)
 FALLBACK_MESSAGE = "Não encontrei essa informação na base disponível. Posso encaminhar para um atendente."
 
 
@@ -70,10 +77,30 @@ def ingest_knowledge_source(db: Session, *, tenant_id: uuid.UUID, source: Knowle
         else:
             page_texts = [(None, text if text is not None else (raw_bytes or b"").decode("utf-8", errors="ignore"))]
         chunk_index = 0
+        embedding_config = get_embedding_config_for_tenant(db, tenant_id)
         for page, content in page_texts:
             for chunk in chunk_text(content):
-                embedding = generate_embedding_for_tenant(db, tenant_id, chunk)
-                db.add(KnowledgeChunk(tenant_id=tenant_id, source_id=source.id, source=source.name, chunk_index=chunk_index, title=source.name, content=chunk, embedding=embedding, embedding_json=embedding, metadata_json={"page": page} if page else {}))
+                metadata = {"page": page} if page else {}
+                embedding = None
+                embedding_status = "skipped"
+                try:
+                    embedding = generate_embedding_for_tenant(db, tenant_id, chunk)
+                    embedding_status = "ready" if embedding else "skipped"
+                except Exception:
+                    embedding_status = "failed"
+                metadata.update({
+                    "embedding_provider": embedding_config.get("provider"),
+                    "embedding_model": embedding_config.get("model"),
+                    "embedding_dimensions": len(embedding or []),
+                    "embedding_status": embedding_status,
+                })
+                chunk_row = KnowledgeChunk(tenant_id=tenant_id, source_id=source.id, source=source.name, chunk_index=chunk_index, title=source.name, content=chunk, embedding=None, embedding_json=embedding, metadata_json=metadata)
+                db.add(chunk_row)
+                db.flush()
+                logger.info(
+                    "[KNOWLEDGE EMBEDDING] tenant_id=%s source_id=%s chunk_id=%s provider=%s model=%s status=%s dimensions=%s",
+                    tenant_id, source.id, chunk_row.id, embedding_config.get("provider"), embedding_config.get("model"), embedding_status, len(embedding or []),
+                )
                 chunk_index += 1
                 chunks_created += 1
         if not chunks_created:
@@ -89,37 +116,106 @@ def ingest_knowledge_source(db: Session, *, tenant_id: uuid.UUID, source: Knowle
         raise
 
 
-def retrieve_context(db: Session, tenant_id: uuid.UUID, query: str, top_k: int = DEFAULT_TOP_K, filters: dict[str, Any] | None = None) -> list[dict[str, Any]]:
-    query = clean_text(query)
-    if not query:
-        return []
+def _textual_retrieve_context(db: Session, tenant_id: uuid.UUID, query: str, top_k: int, filters: dict[str, Any] | None = None) -> list[dict[str, Any]]:
     stmt = select(KnowledgeChunk, KnowledgeSource.name).join(KnowledgeSource, KnowledgeChunk.source_id == KnowledgeSource.id, isouter=True).where(KnowledgeChunk.tenant_id == tenant_id)
     if filters and filters.get("source_id"):
         stmt = stmt.where(KnowledgeChunk.source_id == filters["source_id"])
     chunks = db.execute(stmt).all()
-    query_embedding = generate_embedding_for_tenant(db, tenant_id, query)
-    ranked: list[tuple[float, KnowledgeChunk, str | None]] = []
     terms = [t.lower() for t in re.findall(r"\w+", query) if len(t) > 2]
+    ranked: list[tuple[float, KnowledgeChunk, str | None]] = []
     for chunk, source_name in chunks:
-        score = cosine_similarity(getattr(chunk, "embedding", None) or getattr(chunk, "embedding_json", None), query_embedding) if query_embedding else 0.0
         content_l = chunk.content.lower()
         text_score = sum(content_l.count(term) for term in terms) / max(1, len(terms))
         if text_score:
-            score = max(score, min(1.0, 0.25 + text_score / 10))
-        if score > 0:
-            ranked.append((score, chunk, source_name))
+            ranked.append((min(1.0, 0.25 + text_score / 10), chunk, source_name))
     ranked.sort(key=lambda item: item[0], reverse=True)
-    results = []
-    for score, chunk, source_name in ranked[:top_k]:
-        results.append({"source_id": str(chunk.source_id or ""), "source_name": source_name or chunk.source, "chunk_id": str(chunk.id), "content": chunk.content, "score": float(score), "metadata": getattr(chunk, "metadata_json", None) or {}})
+    results = [{"source_id": str(chunk.source_id or ""), "source_name": source_name or chunk.source, "chunk_id": str(chunk.id), "content": chunk.content, "score": float(score), "retrieval_mode": "text", "page": (getattr(chunk, "metadata_json", None) or {}).get("page"), "metadata": getattr(chunk, "metadata_json", None) or {}} for score, chunk, source_name in ranked[:top_k]]
     if results:
         return results
-    # legacy textual fallback
     pattern_terms = terms[:6]
     if pattern_terms:
         legacy = db.execute(select(KnowledgeBase).where(KnowledgeBase.tenant_id == tenant_id, or_(*[func.lower(KnowledgeBase.content).contains(t) for t in pattern_terms])).limit(top_k)).scalars().all()
-        return [{"source_id": "", "source_name": item.title, "chunk_id": str(item.id), "content": item.content, "score": 0.2, "metadata": {"legacy": True}} for item in legacy]
+        return [{"source_id": "", "source_name": item.title, "chunk_id": str(item.id), "content": item.content, "score": 0.2, "retrieval_mode": "text", "page": None, "metadata": {"legacy": True}} for item in legacy]
     return []
+
+
+def retrieve_context(db: Session, tenant_id: uuid.UUID, query: str, top_k: int = DEFAULT_TOP_K, filters: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+    query = clean_text(query)
+    if not query:
+        return []
+    top_k = top_k or DEFAULT_TOP_K
+    best_score = 0.0
+    try:
+        query_embedding = generate_embedding_for_tenant(db, tenant_id, query)
+    except Exception:
+        query_embedding = []
+
+    if query_embedding:
+        stmt = select(KnowledgeChunk, KnowledgeSource.name).join(KnowledgeSource, KnowledgeChunk.source_id == KnowledgeSource.id, isouter=True).where(KnowledgeChunk.tenant_id == tenant_id, KnowledgeChunk.embedding_json.is_not(None))
+        if filters and filters.get("source_id"):
+            stmt = stmt.where(KnowledgeChunk.source_id == filters["source_id"])
+        ranked: list[tuple[float, KnowledgeChunk, str | None]] = []
+        for chunk, source_name in db.execute(stmt).all():
+            score = cosine_similarity(getattr(chunk, "embedding_json", None), query_embedding)
+            best_score = max(best_score, score)
+            if score >= MIN_SIMILARITY_SCORE:
+                ranked.append((score, chunk, source_name))
+        ranked.sort(key=lambda item: item[0], reverse=True)
+        results = [{"source_id": str(chunk.source_id or ""), "source_name": source_name or chunk.source, "chunk_id": str(chunk.id), "content": chunk.content, "score": float(score), "retrieval_mode": "vector", "page": (getattr(chunk, "metadata_json", None) or {}).get("page"), "metadata": getattr(chunk, "metadata_json", None) or {}} for score, chunk, source_name in ranked[:top_k]]
+        if results:
+            logger.info("[RAG RETRIEVAL] tenant_id=%s mode=vector top_k=%s best_score=%.4f chunks=%s", tenant_id, top_k, best_score, len(results))
+            return results
+
+    results = _textual_retrieve_context(db, tenant_id, query, top_k, filters=filters)
+    logger.info("[RAG RETRIEVAL] tenant_id=%s mode=text top_k=%s best_score=%.4f chunks=%s", tenant_id, top_k, best_score, len(results))
+    return results
+
+def reindex_knowledge_source(db: Session, *, tenant_id: uuid.UUID, source_id: uuid.UUID) -> dict[str, Any]:
+    source = db.execute(select(KnowledgeSource).where(KnowledgeSource.id == source_id, KnowledgeSource.tenant_id == tenant_id)).scalars().first()
+    if not source:
+        raise ValueError("Fonte não encontrada")
+    chunks = db.execute(select(KnowledgeChunk).where(KnowledgeChunk.tenant_id == tenant_id, KnowledgeChunk.source_id == source_id).order_by(KnowledgeChunk.chunk_index.asc())).scalars().all()
+    embedding_config = get_embedding_config_for_tenant(db, tenant_id)
+    embedded = 0
+    failed = 0
+    source.status = "processing"
+    db.flush()
+    for chunk in chunks:
+        metadata = {k: v for k, v in ((chunk.metadata_json or {}).items()) if not k.startswith("embedding_")}
+        chunk.embedding = None
+        chunk.embedding_json = None
+        try:
+            embedding = generate_embedding_for_tenant(db, tenant_id, chunk.content)
+            chunk.embedding_json = embedding
+            metadata.update({
+                "embedding_provider": embedding_config.get("provider"),
+                "embedding_model": embedding_config.get("model"),
+                "embedding_dimensions": len(embedding or []),
+                "embedding_status": "ready" if embedding else "skipped",
+            })
+            if embedding:
+                embedded += 1
+            else:
+                failed += 1
+        except Exception:
+            failed += 1
+            metadata.update({
+                "embedding_provider": embedding_config.get("provider"),
+                "embedding_model": embedding_config.get("model"),
+                "embedding_dimensions": 0,
+                "embedding_status": "failed",
+            })
+        chunk.metadata_json = metadata
+        logger.info(
+            "[KNOWLEDGE EMBEDDING] tenant_id=%s source_id=%s chunk_id=%s provider=%s model=%s status=%s dimensions=%s",
+            tenant_id, source_id, chunk.id, embedding_config.get("provider"), embedding_config.get("model"), metadata.get("embedding_status"), metadata.get("embedding_dimensions", 0),
+        )
+    total = len(chunks)
+    status = "ready" if total and embedded == total else "partial" if embedded else "failed"
+    source.status = "ready" if embedded or total else "failed"
+    source.metadata_json = {**(source.metadata_json or {}), "chunks_count": total, "embedded_chunks_count": embedded, "embedding_status": status}
+    db.commit()
+    return {"source_id": str(source_id), "chunks_total": total, "embedded": embedded, "failed": failed, "status": status}
 
 
 def answer_with_rag(db: Session, tenant_id: uuid.UUID, question: str, conversation_context: str | None = None, system_policy: str | None = None, top_k: int = DEFAULT_TOP_K, temperature: float | None = None, chat_model: str | None = None, max_tokens: int | None = None, fallback_message: str = FALLBACK_MESSAGE) -> RagAnswer:
