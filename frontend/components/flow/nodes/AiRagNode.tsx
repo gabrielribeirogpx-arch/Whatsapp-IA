@@ -23,7 +23,8 @@ export default function AiRagNode({ id, data, selected }: NodeProps) {
       running={nodeData.running}
       title="IA / RAG"
       emoji="✨"
-      badge="Base de conhecimento"
+      badge="RAG"
+      badgeTitle="Base de conhecimento"
       badgeTone={{ background: '#f5f3ff', color: '#6d28d9' }}
       accent="linear-gradient(90deg, #7c3aed, #06b6d4)"
       summary={truncateText(summary, 58, 'IA baseada na base de conhecimento')}

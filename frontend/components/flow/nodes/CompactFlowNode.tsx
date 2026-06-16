@@ -18,6 +18,7 @@ type CompactFlowNodeProps = {
   title: string;
   emoji: string;
   badge: string;
+  badgeTitle?: string;
   badgeTone: { background: string; color: string };
   accent: string;
   summary: string;
@@ -38,6 +39,7 @@ function CompactFlowNode({
   title,
   emoji,
   badge,
+  badgeTitle,
   badgeTone,
   accent,
   summary,
@@ -87,7 +89,7 @@ function CompactFlowNode({
           {meta ? <span className="flow-node-compact-meta">{meta}</span> : null}
         </div>
         <div className="flow-node-header-actions">
-          <span className="flow-node-badge" style={badgeTone}>{badge}</span>
+          <span className="flow-node-badge" style={badgeTone} title={badgeTitle}>{badge}</span>
           <button
             type="button"
             className={`flow-node-start-button nodrag ${isStart ? 'is-start' : ''}`}
