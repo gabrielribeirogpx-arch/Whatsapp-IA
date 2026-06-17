@@ -162,6 +162,11 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
             <span className="dash-nav-label">Base de conhecimento</span>
           </Link>
 
+          <Link href="/dashboard/ai/playground" className={`dash-nav-item ${pathname === '/dashboard/ai/playground' ? 'active' : ''}`}>
+            <span aria-hidden="true" className="text-lg">🧪</span>
+            <span className="dash-nav-label">Playground IA</span>
+          </Link>
+
           <Link href="/dashboard/ai-settings" className={`dash-nav-item ${pathname === '/dashboard/ai-settings' ? 'active' : ''}`}>
             <span aria-hidden="true" className="text-lg">✨</span>
             <span className="dash-nav-label">Configurações de IA</span>

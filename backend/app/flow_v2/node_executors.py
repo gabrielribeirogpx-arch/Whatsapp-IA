@@ -42,6 +42,7 @@ from app.services.rag_service import answer_with_rag
 from app.services.llm_service import generate_answer_for_tenant
 from app.services.ai_structured_service import classify_for_tenant, extract_for_tenant
 from app.services.ai_summary_service import summarize_for_tenant
+from app.services.ai_execution_service import get_flow_id, record_ai_execution, redact_text, resolve_ai_config, score_confidence
 from app.flow_v2.snapshot import FlowV2Snapshot, build_transitions_from_edges
 from app.flow_v2.transition_resolver import TransitionResolver
 from app.flow_v2.template_renderer import FlowRenderContext, render_template
@@ -1537,6 +1538,8 @@ class AiRagNodeExecutor(BaseNodeExecutor):
     def execute(self, db, *, snapshot, session, node, runtime_input) -> NodeExecutionResult:
         node_id = str(node["id"])
         data = self._node_data(node)
+        ai_started_at = datetime.now(UTC)
+        ai_config = resolve_ai_config(db, session.tenant_id, {"chat_model": data.get("chat_model_override") or data.get("chat_model") or data.get("model_override") or data.get("model")})
         instruction = self._render_rag_public_template(data.get("instruction") or data.get("assistant_instruction"), "Responda como atendente.", db, snapshot=snapshot, session=session, runtime_input=runtime_input)
         question = self._render_rag_public_template(data.get("question"), "{{last_message}}", db, snapshot=snapshot, session=session, runtime_input=runtime_input)
         fallback = self._render_rag_public_template(data.get("fallback_message"), "Não encontrei essa informação com segurança na base disponível. Quer que eu encaminhe para um atendente?", db, snapshot=snapshot, session=session, runtime_input=runtime_input)
@@ -1652,8 +1655,12 @@ class AiRagNodeExecutor(BaseNodeExecutor):
             logger.warning("[AI RAG NODE] failed node_id=%s error=%s", node_id, exc)
             text = str(fallback)
             metadata = {"node_id": node_id, "intent": "ai_rag_answer", "error": "rag_failed"}
+        contexts = locals().get("rag_answer").contexts if "rag_answer" in locals() else []
         sources_count = len(metadata.get("source_ids") or [])
-        retrieval_mode = "vector" if metadata.get("found_context") else ("fallback" if metadata.get("error") else "text")
+        retrieval_mode = (contexts[0].get("retrieval_mode") if contexts else None) or ("fallback" if metadata.get("error") or not metadata.get("found_context") else "vector")
+        fallback_used = not bool(metadata.get("found_context")) or bool(metadata.get("error"))
+        confidence = score_confidence(contexts, fallback=fallback_used)
+        record_ai_execution(db, tenant_id=session.tenant_id, conversation_id=runtime_input.conversation_id, session_id=session.id, flow_id=get_flow_id(db, snapshot, session), flow_version_id=session.flow_version_id, node_id=node_id, node_type="ai_rag", provider=ai_config.get("provider"), model=ai_config.get("model"), started_at=ai_started_at, status="error" if metadata.get("error") else "success", input_text=question, output_text=text, retrieval_mode=retrieval_mode, confidence=confidence, fallback_used=fallback_used, metadata={"prompt_summary": redact_text(instruction), "original_question": redact_text(question), "standalone_question": redact_text(effective_question), "chunks_count": len(contexts), "chunks": [{"chunk_id": c.get("chunk_id"), "source_id": c.get("source_id"), "source_name": c.get("source_name"), "page": c.get("page") or (c.get("metadata") or {}).get("page"), "score": c.get("final_score", c.get("score"))} for c in contexts], "scores": [c.get("final_score", c.get("score")) for c in contexts], "rewrite": effective_question != str(question), "recent_chunk_hit": bool(contexts and contexts[0].get("retrieval_mode") == "recent")})
         logger.info(
             "[AI RAG NODE] flow_id=%s session_id=%s node_id=%s behavior=%s retrieval_mode=%s sources_count=%s answered=%s",
             getattr(snapshot, "flow_id", None) or getattr(session, "flow_id", None),
@@ -1703,6 +1710,8 @@ class AiResponseNodeExecutor(AiRagNodeExecutor):
     def execute(self, db, *, snapshot, session, node, runtime_input) -> NodeExecutionResult:
         node_id = str(node["id"])
         data = self._node_data(node)
+        ai_started_at = datetime.now(UTC)
+        ai_config = resolve_ai_config(db, session.tenant_id, {"chat_model": data.get("chat_model_override") or data.get("chat_model") or data.get("model_override") or data.get("model")})
         instruction = self._render_rag_public_template(
             data.get("instruction") or data.get("assistant_instruction"),
             "Responda como atendente.",
@@ -1772,6 +1781,7 @@ class AiResponseNodeExecutor(AiRagNodeExecutor):
             text = "Não consegui gerar uma resposta agora. Tente novamente em instantes."
             metadata = {"node_id": node_id, "intent": "ai_response", "error": "llm_failed", "memory_enabled": memory_enabled, "is_first_ai_turn": is_first_ai_turn}
 
+        record_ai_execution(db, tenant_id=session.tenant_id, conversation_id=runtime_input.conversation_id, session_id=session.id, flow_id=get_flow_id(db, snapshot, session), flow_version_id=session.flow_version_id, node_id=node_id, node_type="ai_response", provider=ai_config.get("provider"), model=ai_config.get("model"), started_at=ai_started_at, status="error" if metadata.get("error") else "success", input_text=question, output_text=text, confidence=None, fallback_used=bool(metadata.get("error")), metadata={"prompt_summary": redact_text(instruction), "history_messages": len(conversation_history.splitlines()) if conversation_history else 0, "memory_enabled": memory_enabled})
         self.event_store.append(db, session=session, event_type=FlowV2EventType.MESSAGE_SENT, node_id=node_id, payload={"node_id": node_id, "message": text, "metadata": metadata})
         if memory_enabled and flow_id is not None and text:
             flow_ai_memory_service.append_assistant_message(
@@ -1835,6 +1845,8 @@ class AiSummaryNodeExecutor(BaseNodeExecutor):
     def execute(self, db, *, snapshot, session, node, runtime_input) -> NodeExecutionResult:
         node_id = str(node["id"])
         data = self._node_data(node)
+        ai_started_at = datetime.now(UTC)
+        ai_config = resolve_ai_config(db, session.tenant_id, {"chat_model": data.get("chat_model_override") or data.get("chat_model") or data.get("model_override") or data.get("model")})
         continue_on_error = data.get("continue_on_error", data.get("continueOnError", True)) is not False
         try:
             source = str(data.get("summary_source", data.get("summarySource", "conversation_history")) or "conversation_history").strip().lower()
@@ -1867,6 +1879,7 @@ class AiSummaryNodeExecutor(BaseNodeExecutor):
             )
             output_variable = str(data.get("output_variable") or data.get("outputVariable") or "ai.summary")
             self._save_text(db, session=session, output_variable=output_variable, text=text)
+            record_ai_execution(db, tenant_id=session.tenant_id, conversation_id=runtime_input.conversation_id, session_id=session.id, flow_id=get_flow_id(db, snapshot, session), flow_version_id=session.flow_version_id, node_id=node_id, node_type="ai_summary", provider=ai_config.get("provider"), model=ai_config.get("model"), started_at=ai_started_at, status="success", input_text=source_text, output_text=text, metadata={"summary_format": str(data.get("summary_format", data.get("summaryFormat", "handoff")) or "handoff"), "summary_source": source, "history_messages": len(source_text.splitlines()) if source_text else 0, "history_chars": len(source_text or "")})
             self.event_store.append(db, session=session, event_type=FlowV2EventType.OUTPUT_EMITTED, node_id=node_id, payload={"analytics_event": "ai_summary_completed", "output_variable": output_variable, "source": source})
             actions = ()
             if data.get("send_message", data.get("sendMessage", False)) is True:
@@ -1874,6 +1887,7 @@ class AiSummaryNodeExecutor(BaseNodeExecutor):
             return NodeExecutionResult(actions=actions, next_node_id=self._default_next_or_terminal(db, snapshot=snapshot, session=session, node_id=node_id), status="continue")
         except Exception as exc:
             logger.warning("[AI SUMMARY NODE] failed node_id=%s error=%s", node_id, exc)
+            record_ai_execution(db, tenant_id=session.tenant_id, conversation_id=runtime_input.conversation_id, session_id=session.id, flow_id=get_flow_id(db, snapshot, session), flow_version_id=session.flow_version_id, node_id=node_id, node_type="ai_summary", provider=ai_config.get("provider"), model=ai_config.get("model"), started_at=ai_started_at, status="error", fallback_used=True, metadata={"error": "ai_summary_failed"})
             self._save_error(db, session=session, node_id=node_id, error="ai_summary_failed")
             self.event_store.append(db, session=session, event_type=FlowV2EventType.OUTPUT_EMITTED, node_id=node_id, payload={"analytics_event": "ai_summary_failed", "error": "ai_summary_failed"})
             if continue_on_error:
@@ -1928,10 +1942,14 @@ class AiClassificationNodeExecutor(AiStructuredNodeExecutor):
     def execute(self, db, *, snapshot, session, node, runtime_input) -> NodeExecutionResult:
         node_id = str(node["id"])
         data = self._node_data(node)
+        ai_started_at = datetime.now(UTC)
+        ai_config = resolve_ai_config(db, session.tenant_id, None)
         try:
             input_text = str(self._render(data.get("input_template") or data.get("inputTemplate") or "{{last_message}}", db, snapshot=snapshot, session=session, runtime_input=runtime_input) or "")
             result = classify_for_tenant(db, session.tenant_id, input_text, data.get("categories") or [], instruction=data.get("instruction"), options={"allow_other": data.get("allow_other", data.get("allowOther", True)), "confidence_threshold": data.get("confidence_threshold", data.get("confidenceThreshold", 0.6))})
             self._save_result(db, session=session, output_variable=str(data.get("output_variable") or data.get("outputVariable") or "ai.classification"), result=result)
+            threshold = data.get("confidence_threshold", data.get("confidenceThreshold", 0.6))
+            record_ai_execution(db, tenant_id=session.tenant_id, conversation_id=runtime_input.conversation_id, session_id=session.id, flow_id=get_flow_id(db, snapshot, session), flow_version_id=session.flow_version_id, node_id=node_id, node_type="ai_classification", provider=ai_config.get("provider"), model=ai_config.get("model"), started_at=ai_started_at, status="success", input_text=input_text, output_text=result.get("category"), confidence=result.get("confidence"), fallback_used=str(result.get("category")) == "outro" or float(result.get("confidence") or 0) < float(threshold or 0), metadata={"category": result.get("category"), "threshold": threshold})
             self.event_store.append(db, session=session, event_type=FlowV2EventType.OUTPUT_EMITTED, node_id=node_id, payload={"analytics_event": "ai_classification_completed", "category": result.get("category"), "confidence": result.get("confidence")})
             actions = ()
             if data.get("send_debug_message") is True or data.get("sendDebugMessage") is True:
@@ -1939,6 +1957,7 @@ class AiClassificationNodeExecutor(AiStructuredNodeExecutor):
             return NodeExecutionResult(actions=actions, next_node_id=self._default_next_or_terminal(db, snapshot=snapshot, session=session, node_id=node_id), status="continue")
         except Exception as exc:
             logger.warning("[AI STRUCTURED NODE] classification failed node_id=%s error=%s", node_id, exc)
+            record_ai_execution(db, tenant_id=session.tenant_id, conversation_id=runtime_input.conversation_id, session_id=session.id, flow_id=get_flow_id(db, snapshot, session), flow_version_id=session.flow_version_id, node_id=node_id, node_type="ai_classification", provider=ai_config.get("provider"), model=ai_config.get("model"), started_at=ai_started_at, status="error", fallback_used=True, metadata={"error": "ai_classification_failed"})
             return self._fail(db, snapshot=snapshot, session=session, node_id=node_id, error="ai_classification_failed")
 
 
@@ -1946,6 +1965,8 @@ class AiExtractionNodeExecutor(AiStructuredNodeExecutor):
     def execute(self, db, *, snapshot, session, node, runtime_input) -> NodeExecutionResult:
         node_id = str(node["id"])
         data = self._node_data(node)
+        ai_started_at = datetime.now(UTC)
+        ai_config = resolve_ai_config(db, session.tenant_id, None)
         try:
             input_text = str(self._render(data.get("input_template") or data.get("inputTemplate") or "{{last_message}}", db, snapshot=snapshot, session=session, runtime_input=runtime_input) or "")
             history = None
@@ -1953,6 +1974,8 @@ class AiExtractionNodeExecutor(AiStructuredNodeExecutor):
                 history = str((session.context or {}).get("conversation_history") or "") if isinstance(session.context, dict) else ""
             result = extract_for_tenant(db, session.tenant_id, input_text, data.get("fields") or [], instruction=data.get("instruction"), conversation_history=history, options={})
             self._save_result(db, session=session, output_variable=str(data.get("output_variable") or data.get("outputVariable") or "ai.extraction"), result=result)
+            found_fields = [k for k, v in (result.get("data") or {}).items() if v not in (None, "")]
+            record_ai_execution(db, tenant_id=session.tenant_id, conversation_id=runtime_input.conversation_id, session_id=session.id, flow_id=get_flow_id(db, snapshot, session), flow_version_id=session.flow_version_id, node_id=node_id, node_type="ai_extraction", provider=ai_config.get("provider"), model=ai_config.get("model"), started_at=ai_started_at, status="success", input_text=input_text, output_text=json.dumps({"fields": found_fields}, ensure_ascii=False), confidence=result.get("confidence"), fallback_used=False, metadata={"found_fields": found_fields, "missing_fields": result.get("missing_fields") or []})
             self.event_store.append(db, session=session, event_type=FlowV2EventType.OUTPUT_EMITTED, node_id=node_id, payload={"analytics_event": "ai_extraction_completed", "fields": list((result.get("data") or {}).keys()), "confidence": result.get("confidence")})
             actions = ()
             if data.get("send_debug_message") is True or data.get("sendDebugMessage") is True:
@@ -1960,6 +1983,7 @@ class AiExtractionNodeExecutor(AiStructuredNodeExecutor):
             return NodeExecutionResult(actions=actions, next_node_id=self._default_next_or_terminal(db, snapshot=snapshot, session=session, node_id=node_id), status="continue")
         except Exception as exc:
             logger.warning("[AI STRUCTURED NODE] extraction failed node_id=%s error=%s", node_id, exc)
+            record_ai_execution(db, tenant_id=session.tenant_id, conversation_id=runtime_input.conversation_id, session_id=session.id, flow_id=get_flow_id(db, snapshot, session), flow_version_id=session.flow_version_id, node_id=node_id, node_type="ai_extraction", provider=ai_config.get("provider"), model=ai_config.get("model"), started_at=ai_started_at, status="error", fallback_used=True, metadata={"error": "ai_extraction_failed"})
             return self._fail(db, snapshot=snapshot, session=session, node_id=node_id, error="ai_extraction_failed")
 
 
