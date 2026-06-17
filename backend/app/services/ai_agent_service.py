@@ -13,12 +13,13 @@ from urllib.parse import urlparse
 from sqlalchemy.orm import Session
 
 from app.services.llm_service import generate_answer_for_tenant
+from app.services.long_term_memory_service import ALLOWED_FACT_TYPES, SECRET_RE, store_fact
 
 SAFE_VARIABLE_RE = re.compile(r"^[A-Za-z0-9_.]+$")
 FORBIDDEN_NAME_PARTS = ("api_key", "apikey", "token", "secret", "password")
 SENSITIVE_HEADER_RE = re.compile(r"(authorization|api[-_]?key|token|secret|password|cookie)", re.I)
 PLACEHOLDER_TOOLS = {"criar_evento", "consultar_crm", "criar_pedido", "enviar_email", "transferir_humano"}
-SUPPORTED_TOOLS = {"responder", "definir_variavel", "chamar_webhook", "executar_node", "executar_subflow", "finalizar"} | PLACEHOLDER_TOOLS
+SUPPORTED_TOOLS = {"responder", "definir_variavel", "chamar_webhook", "executar_node", "executar_subflow", "salvar_memoria", "finalizar"} | PLACEHOLDER_TOOLS
 
 
 @dataclass
@@ -212,6 +213,25 @@ def run_agent_for_tenant(db: Session, tenant_id, input_text: str, instruction: s
             subflow_tool_calls.append({"tool_id": tool_id, "status": tool_result.get("status"), "flow_id": tool_result.get("flow_id"), "duration_ms": tool_result.get("duration_ms")})
             state.append({"tool": tool, "tool_id": tool_id, "ok": tool_result.get("status") == "success", "result": tool_result.get("output"), "error": tool_result.get("error")})
             continue
+        if tool == "salvar_memoria":
+            memory_ctx = (tool_configs or {}).get("memory_context") if isinstance(tool_configs, dict) else {}
+            contact_id = memory_ctx.get("contact_id") if isinstance(memory_ctx, dict) else None
+            fact_text = str(args.get("fact_text") or "").strip()
+            fact_type = str(args.get("fact_type") or "custom").strip()
+            if not contact_id:
+                state.append({"tool": tool, "ok": False, "error": "missing_contact"})
+                continue
+            if not fact_text or len(fact_text) > 1000 or SECRET_RE.search(fact_text):
+                state.append({"tool": tool, "ok": False, "error": "invalid_or_sensitive_fact"})
+                continue
+            if fact_type not in ALLOWED_FACT_TYPES:
+                fact_type = "custom"
+            try:
+                row = store_fact(db, tenant_id, contact_id, fact_text, fact_type=fact_type, importance_score=args.get("importance_score", 0.7), conversation_id=memory_ctx.get("conversation_id"), session_id=memory_ctx.get("session_id"), source="ai_agent_tool", metadata={"source": "ai_agent_tool"})
+                state.append({"tool": tool, "ok": bool(row), "memory_id": str(row.id) if row else None})
+            except Exception as exc:
+                state.append({"tool": tool, "ok": False, "error": type(exc).__name__})
+            continue
         if tool == "chamar_webhook":
             webhook_id = str(args.get("webhook_id") or "")
             webhook = next((w for w in webhooks if str(w.get("id")) == webhook_id), None)
@@ -231,5 +251,5 @@ def run_agent_for_tenant(db: Session, tenant_id, input_text: str, instruction: s
         result.status = "error"
         result.fallback_used = True
         result.final_tool = "responder"
-    result.metadata = {"latency_ms": int((time.monotonic() - started) * 1000), "node_tools_used": node_tool_calls, "node_tool_calls_count": len(node_tool_calls), "subflow_tools_used": subflow_tool_calls, "subflow_calls_count": len(subflow_tool_calls), "subflow_results_summary": subflow_tool_calls, "subflow_errors": [c for c in subflow_tool_calls if c.get("status") != "success"], "timeout_count": len([c for c in subflow_tool_calls if c.get("status") == "timeout"]), "blocked_tool_calls": blocked_tool_calls, "max_steps_reached": result.fallback_used}
+    result.metadata = {"latency_ms": int((time.monotonic() - started) * 1000), "node_tools_used": node_tool_calls, "node_tool_calls_count": len(node_tool_calls), "subflow_tools_used": subflow_tool_calls, "subflow_calls_count": len(subflow_tool_calls), "subflow_results_summary": subflow_tool_calls, "subflow_errors": [c for c in subflow_tool_calls if c.get("status") != "success"], "timeout_count": len([c for c in subflow_tool_calls if c.get("status") == "timeout"]), "blocked_tool_calls": blocked_tool_calls, "max_steps_reached": result.fallback_used, "memory_saved_count": len([item for item in state if item.get("tool") == "salvar_memoria" and item.get("ok")])}
     return result

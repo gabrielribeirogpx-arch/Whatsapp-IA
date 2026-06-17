@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import logging
 import re
 import uuid
@@ -43,6 +44,8 @@ from app.services.llm_service import generate_answer_for_tenant
 from app.services.ai_structured_service import classify_for_tenant, extract_for_tenant
 from app.services.ai_summary_service import summarize_for_tenant
 from app.services.ai_agent_service import run_agent_for_tenant
+from app.services.context_builder_service import build_context, context_builder_enabled
+from app.services.long_term_memory_service import store_fact
 from app.services.ai_execution_service import get_flow_id, record_ai_execution, redact_text, resolve_ai_config, score_confidence
 from app.flow_v2.snapshot import FlowV2Snapshot, build_transitions_from_edges
 from app.flow_v2.transition_resolver import TransitionResolver
@@ -1607,6 +1610,16 @@ class AiRagNodeExecutor(BaseNodeExecutor):
             len(conversation_history.splitlines()) if conversation_history else 0,
             len(recent_retrieved_chunks),
         )
+        context_builder_meta: dict[str, Any] = {"context_builder_enabled": False, "long_term_memory_count": 0, "long_term_memory_types": [], "memory_latency_ms": 0, "memory_backend": "json_embedding"}
+        if context_builder_enabled():
+            try:
+                ctx = build_context(db, session.tenant_id, contact_id=runtime_input.contact_id, conversation_id=runtime_input.conversation_id, session_id=session.id, current_query=effective_question, include_short_memory=memory_enabled, include_long_memory=True, include_rag_context=False, short_memory_options={"max_messages": memory_max_messages, "max_chars": memory_max_chars})
+                cb_section = str(ctx.get("combined_prompt_section") or "")
+                if cb_section:
+                    conversation_history = cb_section
+                context_builder_meta.update({"context_builder_enabled": True, "long_term_memory_count": ctx.get("metadata", {}).get("long_memory_count", 0), "long_term_memory_types": sorted({m.get("fact_type") for m in ctx.get("long_term_memory", []) if m.get("fact_type")}), "memory_latency_ms": ctx.get("metadata", {}).get("memory_latency_ms", 0), "context_builder_fallback_used": ctx.get("metadata", {}).get("fallback_used", False)})
+            except Exception as exc:
+                logger.warning("[AI RAG NODE] context_builder_failed node_id=%s error=%s", node_id, type(exc).__name__)
         try:
             rag_answer = answer_with_rag(
                 db,
@@ -1661,7 +1674,7 @@ class AiRagNodeExecutor(BaseNodeExecutor):
         retrieval_mode = (contexts[0].get("retrieval_mode") if contexts else None) or ("fallback" if metadata.get("error") or not metadata.get("found_context") else "vector")
         fallback_used = not bool(metadata.get("found_context")) or bool(metadata.get("error"))
         confidence = score_confidence(contexts, fallback=fallback_used)
-        record_ai_execution(db, tenant_id=session.tenant_id, conversation_id=runtime_input.conversation_id, session_id=session.id, flow_id=get_flow_id(db, snapshot, session), flow_version_id=session.flow_version_id, node_id=node_id, node_type="ai_rag", provider=ai_config.get("provider"), model=ai_config.get("model"), started_at=ai_started_at, status="error" if metadata.get("error") else "success", input_text=question, output_text=text, retrieval_mode=retrieval_mode, confidence=confidence, fallback_used=fallback_used, metadata={"prompt_summary": redact_text(instruction), "original_question": redact_text(question), "standalone_question": redact_text(effective_question), "chunks_count": len(contexts), "chunks": [{"chunk_id": c.get("chunk_id"), "source_id": c.get("source_id"), "source_name": c.get("source_name"), "page": c.get("page") or (c.get("metadata") or {}).get("page"), "score": c.get("final_score", c.get("score"))} for c in contexts], "scores": [c.get("final_score", c.get("score")) for c in contexts], "rewrite": effective_question != str(question), "recent_chunk_hit": bool(contexts and contexts[0].get("retrieval_mode") == "recent")})
+        record_ai_execution(db, tenant_id=session.tenant_id, conversation_id=runtime_input.conversation_id, session_id=session.id, flow_id=get_flow_id(db, snapshot, session), flow_version_id=session.flow_version_id, node_id=node_id, node_type="ai_rag", provider=ai_config.get("provider"), model=ai_config.get("model"), started_at=ai_started_at, status="error" if metadata.get("error") else "success", input_text=question, output_text=text, retrieval_mode=retrieval_mode, confidence=confidence, fallback_used=fallback_used, metadata={"prompt_summary": redact_text(instruction), "original_question": redact_text(question), "standalone_question": redact_text(effective_question), "chunks_count": len(contexts), "chunks": [{"chunk_id": c.get("chunk_id"), "source_id": c.get("source_id"), "source_name": c.get("source_name"), "page": c.get("page") or (c.get("metadata") or {}).get("page"), "score": c.get("final_score", c.get("score"))} for c in contexts], "scores": [c.get("final_score", c.get("score")) for c in contexts], "rewrite": effective_question != str(question), "recent_chunk_hit": bool(contexts and contexts[0].get("retrieval_mode") == "recent"), **context_builder_meta})
         logger.info(
             "[AI RAG NODE] flow_id=%s session_id=%s node_id=%s behavior=%s retrieval_mode=%s sources_count=%s answered=%s",
             getattr(snapshot, "flow_id", None) or getattr(session, "flow_id", None),
@@ -1760,8 +1773,20 @@ class AiResponseNodeExecutor(AiRagNodeExecutor):
             conversation_history = flow_ai_memory_service.build_history_for_prompt(history_messages)
             is_first_ai_turn = not any(message.role == "assistant" for message in history_messages)
 
+        context_builder_meta: dict[str, Any] = {"context_builder_enabled": False, "long_term_memory_count": 0, "long_term_memory_types": [], "memory_latency_ms": 0, "memory_backend": "json_embedding", "auto_memory_saved_count": 0}
+        context_prompt_section = ""
+        if context_builder_enabled():
+            try:
+                ctx = build_context(db, session.tenant_id, contact_id=runtime_input.contact_id, conversation_id=runtime_input.conversation_id, session_id=session.id, current_query=str(question), include_short_memory=memory_enabled, include_long_memory=True, include_rag_context=False, short_memory_options={"max_messages": memory_max_messages, "max_chars": memory_max_chars})
+                context_prompt_section = str(ctx.get("combined_prompt_section") or "")
+                context_builder_meta.update({"context_builder_enabled": True, "long_term_memory_count": ctx.get("metadata", {}).get("long_memory_count", 0), "long_term_memory_types": sorted({m.get("fact_type") for m in ctx.get("long_term_memory", []) if m.get("fact_type")}), "memory_latency_ms": ctx.get("metadata", {}).get("memory_latency_ms", 0), "context_builder_fallback_used": ctx.get("metadata", {}).get("fallback_used", False)})
+            except Exception as exc:
+                logger.warning("[AI RESPONSE NODE] context_builder_failed node_id=%s error=%s", node_id, type(exc).__name__)
+
         messages: list[dict[str, str]] = [{"role": "system", "content": str(instruction)}]
-        if conversation_history:
+        if context_prompt_section:
+            messages.append({"role": "system", "content": context_prompt_section})
+        elif conversation_history:
             messages.append({"role": "system", "content": f"Histórico recente da conversa:\n{conversation_history}"})
         messages.append({"role": "user", "content": str(question)})
         options = {
@@ -1782,7 +1807,7 @@ class AiResponseNodeExecutor(AiRagNodeExecutor):
             text = "Não consegui gerar uma resposta agora. Tente novamente em instantes."
             metadata = {"node_id": node_id, "intent": "ai_response", "error": "llm_failed", "memory_enabled": memory_enabled, "is_first_ai_turn": is_first_ai_turn}
 
-        record_ai_execution(db, tenant_id=session.tenant_id, conversation_id=runtime_input.conversation_id, session_id=session.id, flow_id=get_flow_id(db, snapshot, session), flow_version_id=session.flow_version_id, node_id=node_id, node_type="ai_response", provider=ai_config.get("provider"), model=ai_config.get("model"), started_at=ai_started_at, status="error" if metadata.get("error") else "success", input_text=question, output_text=text, confidence=None, fallback_used=bool(metadata.get("error")), metadata={"prompt_summary": redact_text(instruction), "history_messages": len(conversation_history.splitlines()) if conversation_history else 0, "memory_enabled": memory_enabled})
+        record_ai_execution(db, tenant_id=session.tenant_id, conversation_id=runtime_input.conversation_id, session_id=session.id, flow_id=get_flow_id(db, snapshot, session), flow_version_id=session.flow_version_id, node_id=node_id, node_type="ai_response", provider=ai_config.get("provider"), model=ai_config.get("model"), started_at=ai_started_at, status="error" if metadata.get("error") else "success", input_text=question, output_text=text, confidence=None, fallback_used=bool(metadata.get("error")), metadata={"prompt_summary": redact_text(instruction), "history_messages": len(conversation_history.splitlines()) if conversation_history else 0, "memory_enabled": memory_enabled, **context_builder_meta})
         self.event_store.append(db, session=session, event_type=FlowV2EventType.MESSAGE_SENT, node_id=node_id, payload={"node_id": node_id, "message": text, "metadata": metadata})
         if memory_enabled and flow_id is not None and text:
             flow_ai_memory_service.append_assistant_message(
@@ -1830,12 +1855,22 @@ class AiAgentNodeExecutor(AiResponseNodeExecutor):
         allowed_tools = data.get("allowed_tools") or data.get("allowedTools") or ["responder", "definir_variavel"]
         if not isinstance(allowed_tools, list):
             allowed_tools = ["responder", "definir_variavel"]
+        if context_builder_enabled() and runtime_input.contact_id and "salvar_memoria" not in [str(t) for t in allowed_tools]:
+            allowed_tools = [*allowed_tools, "salvar_memoria"]
         flow_id = get_flow_id(db, snapshot, session)
         conversation_history = ""
         if memory_enabled and flow_id is not None:
             flow_ai_memory_service.append_user_message(db, tenant_id=session.tenant_id, flow_id=flow_id, flow_version_id=session.flow_version_id, session_id=session.id, conversation_id=runtime_input.conversation_id, contact_id=runtime_input.contact_id, node_id=node_id, content=str(input_text), metadata={**runtime_input.metadata, "intent": "ai_agent"})
             history_messages = flow_ai_memory_service.get_recent_history(db, tenant_id=session.tenant_id, session_id=session.id, max_messages=memory_max_messages, max_chars=memory_max_chars)
             conversation_history = flow_ai_memory_service.build_history_for_prompt(history_messages)
+        context_builder_meta: dict[str, Any] = {"context_builder_enabled": False, "long_term_memory_count": 0, "long_term_memory_types": [], "memory_latency_ms": 0, "memory_backend": "json_embedding"}
+        if context_builder_enabled():
+            try:
+                ctx = build_context(db, session.tenant_id, contact_id=runtime_input.contact_id, conversation_id=runtime_input.conversation_id, session_id=session.id, current_query=str(input_text), include_short_memory=memory_enabled, include_long_memory=True, include_rag_context=False, short_memory_options={"max_messages": memory_max_messages, "max_chars": memory_max_chars})
+                conversation_history = str(ctx.get("combined_prompt_section") or conversation_history)
+                context_builder_meta.update({"context_builder_enabled": True, "long_term_memory_count": ctx.get("metadata", {}).get("long_memory_count", 0), "long_term_memory_types": sorted({m.get("fact_type") for m in ctx.get("long_term_memory", []) if m.get("fact_type")}), "memory_latency_ms": ctx.get("metadata", {}).get("memory_latency_ms", 0), "context_builder_fallback_used": ctx.get("metadata", {}).get("fallback_used", False)})
+            except Exception as exc:
+                logger.warning("[AI AGENT NODE] context_builder_failed node_id=%s error=%s", node_id, type(exc).__name__)
         allow_node_tools = data.get("allow_node_tools", data.get("allowNodeTools", False)) is True
         node_tools = data.get("node_tools", data.get("nodeTools", [])) if allow_node_tools else []
         if not isinstance(node_tools, list):
@@ -1867,7 +1902,7 @@ class AiAgentNodeExecutor(AiResponseNodeExecutor):
         def _execute_agent_subflow_tool(tool_config, tool_input, reason):
             from app.services.ai_agent_subflow_tool_service import execute_subflow_tool
             return execute_subflow_tool(session.tenant_id, flow_id, session.id, node_id, tool_config, tool_input, runtime_input, db)
-        result = run_agent_for_tenant(db, session.tenant_id, str(input_text), str(instruction), [str(t) for t in allowed_tools], {"webhooks": data.get("webhooks") or [], "node_tools": node_tools, "subflow_tools": subflow_tools}, memory_context=conversation_history, options=options, node_tool_executor=_execute_agent_node_tool if allow_node_tools else None, subflow_tool_executor=_execute_agent_subflow_tool if allow_subflow_tools else None)
+        result = run_agent_for_tenant(db, session.tenant_id, str(input_text), str(instruction), [str(t) for t in allowed_tools], {"webhooks": data.get("webhooks") or [], "node_tools": node_tools, "subflow_tools": subflow_tools, "memory_context": {"contact_id": runtime_input.contact_id, "conversation_id": runtime_input.conversation_id, "session_id": session.id}}, memory_context=conversation_history, options=options, node_tool_executor=_execute_agent_node_tool if allow_node_tools else None, subflow_tool_executor=_execute_agent_subflow_tool if allow_subflow_tools else None)
         actions: list[RuntimeAction] = []
         context = dict(session.context or {}) if isinstance(getattr(session, "context", None), dict) else {}
         for agent_action in result.actions:
@@ -1878,7 +1913,7 @@ class AiAgentNodeExecutor(AiResponseNodeExecutor):
         session.context = context
         if hasattr(db, "add"):
             db.add(session)
-        metadata = {"tools_allowed": [str(t) for t in allowed_tools], "node_tools_allowed": [{"tool_id": str(t.get("tool_id")), "node_id": str(t.get("node_id")), "label": str(t.get("label", ""))[:80]} for t in node_tools if isinstance(t, dict)], "tools_used": result.tools_used, "node_tools_used": result.metadata.get("node_tools_used", []), "subflow_tools_allowed": [{"tool_id": str(t.get("tool_id")), "flow_id": str(t.get("flow_id")), "label": str(t.get("label", ""))[:80]} for t in subflow_tools if isinstance(t, dict)], "subflow_tools_used": result.metadata.get("subflow_tools_used", []), "subflow_calls_count": result.metadata.get("subflow_calls_count", 0), "subflow_results_summary": result.metadata.get("subflow_results_summary", []), "subflow_errors": result.metadata.get("subflow_errors", []), "timeout_count": result.metadata.get("timeout_count", 0), "parent_session_id": str(session.id), "subflow_session_ids": [], "node_tool_calls_count": result.metadata.get("node_tool_calls_count", 0), "node_tool_results_summary": result.metadata.get("node_tools_used", []), "blocked_tool_calls": result.metadata.get("blocked_tool_calls", []), "max_steps_reached": result.metadata.get("max_steps_reached", False), "steps_count": result.steps_count, "final_tool": result.final_tool, "status": result.status, "webhook_count": len(data.get("webhooks") or []), "latency_ms": result.metadata.get("latency_ms")}
+        metadata = {"tools_allowed": [str(t) for t in allowed_tools], "node_tools_allowed": [{"tool_id": str(t.get("tool_id")), "node_id": str(t.get("node_id")), "label": str(t.get("label", ""))[:80]} for t in node_tools if isinstance(t, dict)], "tools_used": result.tools_used, "node_tools_used": result.metadata.get("node_tools_used", []), "subflow_tools_allowed": [{"tool_id": str(t.get("tool_id")), "flow_id": str(t.get("flow_id")), "label": str(t.get("label", ""))[:80]} for t in subflow_tools if isinstance(t, dict)], "subflow_tools_used": result.metadata.get("subflow_tools_used", []), "subflow_calls_count": result.metadata.get("subflow_calls_count", 0), "subflow_results_summary": result.metadata.get("subflow_results_summary", []), "subflow_errors": result.metadata.get("subflow_errors", []), "timeout_count": result.metadata.get("timeout_count", 0), "parent_session_id": str(session.id), "subflow_session_ids": [], "node_tool_calls_count": result.metadata.get("node_tool_calls_count", 0), "node_tool_results_summary": result.metadata.get("node_tools_used", []), "blocked_tool_calls": result.metadata.get("blocked_tool_calls", []), "max_steps_reached": result.metadata.get("max_steps_reached", False), "steps_count": result.steps_count, "final_tool": result.final_tool, "status": result.status, "webhook_count": len(data.get("webhooks") or []), "latency_ms": result.metadata.get("latency_ms"), **context_builder_meta, "auto_memory_saved_count": result.metadata.get("memory_saved_count", 0)}
         record_ai_execution(db, tenant_id=session.tenant_id, conversation_id=runtime_input.conversation_id, session_id=session.id, flow_id=flow_id, flow_version_id=session.flow_version_id, node_id=node_id, node_type="ai_agent", provider=ai_config.get("provider"), model=ai_config.get("model"), started_at=ai_started_at, status=result.status, input_text=input_text, output_text=result.message, fallback_used=result.fallback_used, metadata=metadata)
         self.event_store.append(db, session=session, event_type=FlowV2EventType.OUTPUT_EMITTED, node_id=node_id, payload={"analytics_event": "ai_agent_completed", **metadata})
         if memory_enabled and flow_id is not None and result.message:
@@ -2054,8 +2089,19 @@ class AiExtractionNodeExecutor(AiStructuredNodeExecutor):
             result = extract_for_tenant(db, session.tenant_id, input_text, data.get("fields") or [], instruction=data.get("instruction"), conversation_history=history, options={})
             self._save_result(db, session=session, output_variable=str(data.get("output_variable") or data.get("outputVariable") or "ai.extraction"), result=result)
             found_fields = [k for k, v in (result.get("data") or {}).items() if v not in (None, "")]
-            record_ai_execution(db, tenant_id=session.tenant_id, conversation_id=runtime_input.conversation_id, session_id=session.id, flow_id=get_flow_id(db, snapshot, session), flow_version_id=session.flow_version_id, node_id=node_id, node_type="ai_extraction", provider=ai_config.get("provider"), model=ai_config.get("model"), started_at=ai_started_at, status="success", input_text=input_text, output_text=json.dumps({"fields": found_fields}, ensure_ascii=False), confidence=result.get("confidence"), fallback_used=False, metadata={"found_fields": found_fields, "missing_fields": result.get("missing_fields") or []})
-            self.event_store.append(db, session=session, event_type=FlowV2EventType.OUTPUT_EMITTED, node_id=node_id, payload={"analytics_event": "ai_extraction_completed", "fields": list((result.get("data") or {}).keys()), "confidence": result.get("confidence")})
+            memory_saved_count = 0
+            if data.get("enable_long_term_memory", data.get("enableLongTermMemory", False)) is True and runtime_input.contact_id:
+                for field, value in (result.get("data") or {}).items():
+                    if value in (None, ""):
+                        continue
+                    try:
+                        metadata = {"source_node_id": node_id, "source": "ai_extraction", "sensitive": str(field).lower() in {"cpf", "cnpj", "email", "e-mail"}}
+                        if store_fact(db, session.tenant_id, runtime_input.contact_id, f"{field}: {value}", fact_type=data.get("memory_type", data.get("memoryType", "custom")), importance_score=data.get("memory_importance_score", data.get("memoryImportanceScore", 0.7)), conversation_id=runtime_input.conversation_id, session_id=session.id, source="ai_extraction", metadata=metadata):
+                            memory_saved_count += 1
+                    except Exception as exc:
+                        logger.warning("[AI EXTRACTION NODE] memory_save_failed node_id=%s error=%s", node_id, type(exc).__name__)
+            record_ai_execution(db, tenant_id=session.tenant_id, conversation_id=runtime_input.conversation_id, session_id=session.id, flow_id=get_flow_id(db, snapshot, session), flow_version_id=session.flow_version_id, node_id=node_id, node_type="ai_extraction", provider=ai_config.get("provider"), model=ai_config.get("model"), started_at=ai_started_at, status="success", input_text=input_text, output_text=json.dumps({"fields": found_fields}, ensure_ascii=False), confidence=result.get("confidence"), fallback_used=False, metadata={"found_fields": found_fields, "missing_fields": result.get("missing_fields") or [], "auto_memory_saved_count": memory_saved_count})
+            self.event_store.append(db, session=session, event_type=FlowV2EventType.OUTPUT_EMITTED, node_id=node_id, payload={"analytics_event": "ai_extraction_completed", "fields": list((result.get("data") or {}).keys()), "confidence": result.get("confidence"), "auto_memory_saved_count": memory_saved_count})
             actions = ()
             if data.get("send_debug_message") is True or data.get("sendDebugMessage") is True:
                 actions = (SendMessageAction(tenant_id=session.tenant_id, session_id=session.id, external_user_id=runtime_input.external_user_id, conversation_id=runtime_input.conversation_id, contact_id=runtime_input.contact_id, text=f"IA Extração: {json.dumps(result.get('data'), ensure_ascii=False)}", metadata={"node_id": node_id, "intent": "ai_extraction_debug"}),)
