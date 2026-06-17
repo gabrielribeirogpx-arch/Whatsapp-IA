@@ -14,7 +14,8 @@ import ReactFlow, {
 } from 'reactflow';
 import type { Connection, Edge, EdgeChange, Node, NodeChange, ReactFlowInstance } from 'reactflow';
 import 'reactflow/dist/style.css';
-import { Bot, Clock, ExternalLink, FileImage, GitBranch, HelpCircle, History, ListChecks, MessageSquare, RotateCcw, Zap } from 'lucide-react';
+import { Bot, ChevronDown, Clock, ExternalLink, FileImage, GitBranch, HelpCircle, History, ListChecks, MessageSquare, RotateCcw, Sparkles, Zap } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 
 import ActionNode from '@/components/flow/nodes/ActionNode';
 import AiRagNode from '@/components/flow/nodes/AiRagNode';
@@ -60,6 +61,57 @@ const nodeTypes = {
 
 type FlowNodeKind = 'message' | 'choice' | 'condition' | 'delay' | 'action' | 'media' | 'cta_url' | 'ai_rag' | 'ai_classification' | 'ai_extraction';
 type FlowConnection = Connection & { sourceHandle?: string | null };
+type NodePaletteItem = { kind: FlowNodeKind; label: string; icon: LucideIcon };
+type NodePaletteGroup = { id: 'communication' | 'ai' | 'logic' | 'actions'; title: string; icon: LucideIcon; nodes: NodePaletteItem[] };
+
+const NODE_GROUPS: NodePaletteGroup[] = [
+  {
+    id: 'communication',
+    title: 'Comunicação',
+    icon: MessageSquare,
+    nodes: [
+      { kind: 'message', label: 'Mensagem', icon: MessageSquare },
+      { kind: 'media', label: 'Mídia', icon: FileImage },
+      { kind: 'cta_url', label: 'CTA / Link', icon: ExternalLink },
+    ],
+  },
+  {
+    id: 'ai',
+    title: 'Inteligência Artificial',
+    icon: Sparkles,
+    nodes: [
+      { kind: 'ai_rag', label: 'IA / RAG', icon: Bot },
+      { kind: 'ai_classification', label: 'IA Classificação', icon: Bot },
+      { kind: 'ai_extraction', label: 'IA Extração', icon: Bot },
+      // Futuros nodes de IA: IA Resposta, IA Resumo, IA Memória, IA Agente.
+    ],
+  },
+  {
+    id: 'logic',
+    title: 'Lógica',
+    icon: GitBranch,
+    nodes: [
+      { kind: 'choice', label: 'Escolha', icon: ListChecks },
+      { kind: 'condition', label: 'Condição', icon: GitBranch },
+      { kind: 'delay', label: 'Delay', icon: Clock },
+    ],
+  },
+  {
+    id: 'actions',
+    title: 'Ações',
+    icon: Zap,
+    nodes: [
+      { kind: 'action', label: 'Ação', icon: Zap },
+    ],
+  },
+];
+
+const NODE_GROUPS_DEFAULT_OPEN: Record<NodePaletteGroup['id'], boolean> = {
+  communication: true,
+  ai: true,
+  logic: true,
+  actions: true,
+};
 type ChoiceConnectDebug = {
   nodeId: string;
   handleId: string | null;
@@ -1030,6 +1082,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
   const [activeEdgeIds, setActiveEdgeIds] = useState<string[]>([]);
   const [isSimulatorOpen, setIsSimulatorOpen] = useState(false);
   const [isSidebarExpanded, setIsSidebarExpanded] = useState(false);
+  const [openNodeGroups, setOpenNodeGroups] = useState<Record<NodePaletteGroup['id'], boolean>>(NODE_GROUPS_DEFAULT_OPEN);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
   const [isTyping, setIsTyping] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -2543,33 +2596,37 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
           />
         </div>
 
-        <span className="dash-nav-section">Comunicação</span>
-        {([
-          { kind: 'message' as FlowNodeKind, label: 'Mensagem', icon: MessageSquare },
-          { kind: 'media' as FlowNodeKind, label: 'Mídia', icon: FileImage },
-          { kind: 'cta_url' as FlowNodeKind, label: 'CTA / Link', icon: ExternalLink },
-          { kind: 'ai_rag' as FlowNodeKind, label: 'IA / RAG', icon: Bot },
-          { kind: 'ai_classification' as FlowNodeKind, label: 'IA Classificação', icon: Bot },
-          { kind: 'ai_extraction' as FlowNodeKind, label: 'IA Extração', icon: Bot },
-        ]).map(({ kind, label, icon: Icon }) => (
-          <button key={kind} type="button" className="dash-nav-item" onClick={() => addNode(kind)} title={label} style={{ border: 'none', background: 'none', cursor: 'pointer', width: '100%', textAlign: 'left' }}>
-            <Icon size={18} strokeWidth={1.8} className="text-current" />
-            <span className="dash-nav-label">{label}</span>
-          </button>
-        ))}
+        <div className="flow-node-palette" aria-label="Paleta de nodes do Flow Builder">
+          {NODE_GROUPS.map((group) => {
+            const GroupIcon = group.icon;
+            const isOpen = openNodeGroups[group.id];
 
-        <span className="dash-nav-section">Lógica</span>
-        {([
-          { kind: 'choice' as FlowNodeKind, label: 'Escolha', icon: ListChecks },
-          { kind: 'condition' as FlowNodeKind, label: 'Condição', icon: GitBranch },
-          { kind: 'delay' as FlowNodeKind, label: 'Delay', icon: Clock },
-          { kind: 'action' as FlowNodeKind, label: 'Ação', icon: Zap },
-        ]).map(({ kind, label, icon: Icon }) => (
-          <button key={kind} type="button" className="dash-nav-item" onClick={() => addNode(kind)} title={label} style={{ border: 'none', background: 'none', cursor: 'pointer', width: '100%', textAlign: 'left' }}>
-            <Icon size={18} strokeWidth={1.8} className="text-current" />
-            <span className="dash-nav-label">{label}</span>
-          </button>
-        ))}
+            return (
+              <div key={group.id} className={`flow-node-group ${isOpen ? 'is-open' : ''}`}>
+                <button
+                  type="button"
+                  className="flow-node-group-toggle"
+                  onClick={() => setOpenNodeGroups((current) => ({ ...current, [group.id]: !current[group.id] }))}
+                  title={group.title}
+                  aria-expanded={isOpen}
+                >
+                  <GroupIcon size={16} strokeWidth={1.9} className="flow-node-group-icon" />
+                  <span className="flow-node-group-title">{group.title}</span>
+                  <ChevronDown size={14} strokeWidth={2.1} className="flow-node-group-chevron" />
+                </button>
+
+                <div className="flow-node-group-items" aria-hidden={!isOpen}>
+                  {group.nodes.map(({ kind, label, icon: Icon }) => (
+                    <button key={kind} type="button" className="dash-nav-item flow-node-palette-item" onClick={() => addNode(kind)} title={label}>
+                      <Icon size={18} strokeWidth={1.8} className="text-current" />
+                      <span className="dash-nav-label">{label}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+        </div>
 
         <div style={{ marginTop: 'auto' }}>
           <div className="dash-nav-divider" />
@@ -2851,18 +2908,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
             <div style={{ fontSize: 10, fontWeight: 700, color: '#a8b0a0', letterSpacing: '0.08em', textTransform: 'uppercase', padding: '4px 8px 2px' }}>
               Adicionar bloco
             </div>
-            {([
-              { kind: 'message' as FlowNodeKind, label: 'Mensagem', icon: MessageSquare },
-              { kind: 'media' as FlowNodeKind, label: 'Mídia', icon: FileImage },
-              { kind: 'cta_url' as FlowNodeKind, label: 'CTA / Link', icon: ExternalLink },
-          { kind: 'ai_rag' as FlowNodeKind, label: 'IA / RAG', icon: Bot },
-          { kind: 'ai_classification' as FlowNodeKind, label: 'IA Classificação', icon: Bot },
-          { kind: 'ai_extraction' as FlowNodeKind, label: 'IA Extração', icon: Bot },
-              { kind: 'choice' as FlowNodeKind, label: 'Escolha', icon: ListChecks },
-              { kind: 'condition' as FlowNodeKind, label: 'Condição', icon: GitBranch },
-              { kind: 'delay' as FlowNodeKind, label: 'Delay', icon: Clock },
-              { kind: 'action' as FlowNodeKind, label: 'Ação', icon: Zap },
-            ]).map(({ kind, label, icon: Icon }) => (
+            {NODE_GROUPS.flatMap((group) => group.nodes).map(({ kind, label, icon: Icon }) => (
               <button
                 key={kind}
                 type="button"
