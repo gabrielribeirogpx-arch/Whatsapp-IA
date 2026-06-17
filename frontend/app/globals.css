@@ -5553,3 +5553,27 @@ input {
 .flow-editor-tab-section details { border: 1px solid #e2e8f0; border-radius: 14px; padding: 10px; background: #f8fafc; }
 .flow-editor-tab-section details summary { cursor: pointer; color: #334155; font-size: 12px; font-weight: 900; }
 @media (max-width: 640px) { .flow-editor-tool-grid, .flow-editor-row { grid-template-columns: 1fr; } .flow-editor-agent-hero, .flow-editor-subflow-header, .flow-editor-subflow-card-title { align-items: stretch; flex-direction: column; } }
+
+.flow-editor-smart-tools { position: relative; overflow: hidden; }
+.flow-editor-smart-heading, .flow-editor-smart-toolbar { display: flex; justify-content: space-between; gap: 10px; align-items: center; }
+.flow-editor-smart-toolbar input { flex: 1; min-width: 0; border: 1px solid #cbd5e1; border-radius: 999px; padding: 10px 12px; color: #0f172a; font-size: 12px; font-weight: 800; }
+.flow-editor-quick-add { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; border: 1px solid #dbeafe; border-radius: 16px; background: #eff6ff; padding: 10px; }
+.flow-editor-quick-add button { border: 1px solid #bfdbfe; border-radius: 12px; background: #fff; color: #1d4ed8; padding: 9px; font-size: 12px; font-weight: 900; }
+.flow-editor-smart-groups { display: grid; gap: 12px; }
+.flow-editor-smart-group { display: grid; gap: 8px; border: 1px solid #e2e8f0; border-radius: 18px; background: linear-gradient(135deg, #fff 0%, #f8fafc 100%); padding: 12px; }
+.flow-editor-smart-group h5 { margin: 0; color: #0f172a; font-size: 13px; font-weight: 950; }
+.flow-editor-smart-card { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; gap: 10px; align-items: center; border: 1px solid #e2e8f0; border-radius: 15px; background: #fff; padding: 10px; cursor: pointer; transition: border-color .15s ease, transform .15s ease; }
+.flow-editor-smart-card:hover { border-color: #93c5fd; transform: translateY(-1px); }
+.flow-editor-smart-card span { font-size: 20px; }
+.flow-editor-smart-card div { display: grid; gap: 3px; min-width: 0; }
+.flow-editor-smart-card strong { color: #0f172a; font-size: 12px; font-weight: 950; }
+.flow-editor-smart-card small { color: #64748b; font-size: 11px; font-weight: 700; }
+.flow-editor-smart-card code { width: fit-content; border-radius: 999px; background: #f1f5f9; color: #475569; padding: 3px 7px; font-size: 10px; font-weight: 900; }
+.flow-editor-smart-card button { border: 1px solid #e2e8f0; border-radius: 999px; background: #fff; color: #334155; padding: 6px 8px; font-size: 10px; font-weight: 900; }
+.flow-editor-smart-drawer { position: sticky; bottom: 10px; z-index: 3; display: grid; gap: 8px; border: 1px solid #bfdbfe; border-radius: 18px; background: #ffffff; box-shadow: 0 24px 60px rgba(15, 23, 42, 0.18); padding: 14px; }
+.flow-editor-smart-drawer > button { justify-self: end; border: 0; background: #f1f5f9; border-radius: 999px; width: 28px; height: 28px; font-weight: 950; }
+.flow-editor-smart-drawer h4 { margin: 0; color: #0f172a; font-size: 15px; font-weight: 950; }
+.flow-editor-smart-drawer p, .flow-editor-smart-drawer small { margin: 0; color: #64748b; font-size: 12px; font-weight: 700; }
+.flow-editor-smart-drawer strong { color: #334155; font-size: 11px; font-weight: 950; text-transform: uppercase; }
+.flow-editor-smart-drawer pre { max-height: 180px; overflow: auto; border: 1px solid #e2e8f0; border-radius: 12px; background: #0f172a; color: #e2e8f0; padding: 10px; font-size: 11px; }
+@media (max-width: 640px) { .flow-editor-smart-heading, .flow-editor-smart-toolbar { align-items: stretch; flex-direction: column; } .flow-editor-quick-add { grid-template-columns: 1fr 1fr; } .flow-editor-smart-card { grid-template-columns: auto minmax(0, 1fr); } }

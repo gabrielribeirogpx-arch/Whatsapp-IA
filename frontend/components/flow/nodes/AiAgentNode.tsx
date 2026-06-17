@@ -23,12 +23,12 @@ export default function AiAgentNode({ id, data, selected }: NodeProps) {
   const baseTools = Array.isArray(nodeData.allowed_tools) ? nodeData.allowed_tools.length : 2;
   const nodeTools = Array.isArray(nodeData.node_tools) ? nodeData.node_tools.length : 0;
   const subflows = Array.isArray(nodeData.subflow_tools) ? nodeData.subflow_tools.length : 0;
-  const tools = baseTools + nodeTools;
+  const webhooks = Array.isArray((nodeData as { webhooks?: unknown[] }).webhooks) ? (nodeData as { webhooks?: unknown[] }).webhooks?.length || 0 : 0;
+  const tools = baseTools;
   const behavior = nodeData.after_agent_behavior || nodeData.after_answer_behavior || 'wait_same_node';
   const behaviorLabel = behavior === 'end_flow' ? 'Encerra atendimento' : behavior === 'continue_to_next' ? 'Continua fluxo' : 'Aguarda próxima mensagem';
   const model = nodeData.model_override || 'Modelo global';
-  const memory = nodeData.use_memory === false ? 'Memória OFF' : 'Memória';
-  const summary = `${model} · 🛠 ${tools} ferramentas · 📂 ${subflows} subflows · 🧠 ${memory} · ⏳ ${behaviorLabel}`;
+  const summary = `${model} · 🛠 ${tools} · 🔀 ${nodeTools} · 📂 ${subflows} · 🌐 ${webhooks} · 🧠 ${nodeData.use_memory === false ? 'OFF' : 'ON'} · ⏳ ${behaviorLabel}`;
 
   return (
     <CompactFlowNode
@@ -41,7 +41,7 @@ export default function AiAgentNode({ id, data, selected }: NodeProps) {
       badgeTitle="Usa IA para decidir e executar ferramentas permitidas"
       badgeTone={{ background: '#f5f3ff', color: '#6d28d9' }}
       accent="linear-gradient(90deg, #8b5cf6, #06b6d4)"
-      summary={truncateText(summary, 92, 'Modelo global · 🛠 2 ferramentas · 📂 0 subflows · 🧠 Memória · ⏳ Aguarda próxima mensagem')}
+      summary={truncateText(summary, 92, 'Modelo global · 🛠 2 · 🔀 0 · 📂 0 · 🌐 0 · 🧠 ON · ⏳ Aguarda próxima mensagem')}
       isStart={nodeData.isStart}
       hasValidationError={nodeData.hasValidationError}
       onToggleStart={nodeData.onToggleStart}
