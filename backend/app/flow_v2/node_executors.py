@@ -1836,14 +1836,26 @@ class AiAgentNodeExecutor(AiResponseNodeExecutor):
             flow_ai_memory_service.append_user_message(db, tenant_id=session.tenant_id, flow_id=flow_id, flow_version_id=session.flow_version_id, session_id=session.id, conversation_id=runtime_input.conversation_id, contact_id=runtime_input.contact_id, node_id=node_id, content=str(input_text), metadata={**runtime_input.metadata, "intent": "ai_agent"})
             history_messages = flow_ai_memory_service.get_recent_history(db, tenant_id=session.tenant_id, session_id=session.id, max_messages=memory_max_messages, max_chars=memory_max_chars)
             conversation_history = flow_ai_memory_service.build_history_for_prompt(history_messages)
+        allow_node_tools = data.get("allow_node_tools", data.get("allowNodeTools", False)) is True
+        node_tools = data.get("node_tools", data.get("nodeTools", [])) if allow_node_tools else []
+        if not isinstance(node_tools, list):
+            node_tools = []
+        max_node_tool_calls = self._coerce_int_config(data.get("max_node_tool_calls", data.get("maxNodeToolCalls")), default=3, field_name="max_node_tool_calls", node_id=node_id)
+        max_node_tool_calls = min(max(max_node_tool_calls, 1), 5)
+        if allow_node_tools and "executar_node" not in [str(t) for t in allowed_tools]:
+            allowed_tools = [*allowed_tools, "executar_node"]
         options = {
             "chat_model": data.get("chat_model_override") or data.get("chat_model") or data.get("model_override") or data.get("model"),
             "temperature": self._coerce_float_config(data.get("temperature"), default=0.2, field_name="temperature", node_id=node_id),
             "max_tokens": self._coerce_int_config(data.get("max_tokens", data.get("maxTokens")), default=1200, field_name="max_tokens", node_id=node_id),
             "max_steps": self._coerce_int_config(data.get("max_steps", data.get("maxSteps")), default=3, field_name="max_steps", node_id=node_id),
             "fallback_message": data.get("fallback_message") or data.get("fallbackMessage"),
+            "max_node_tool_calls": max_node_tool_calls,
         }
-        result = run_agent_for_tenant(db, session.tenant_id, str(input_text), str(instruction), [str(t) for t in allowed_tools], {"webhooks": data.get("webhooks") or []}, memory_context=conversation_history, options=options)
+        def _execute_agent_node_tool(tool_config, tool_input, reason):
+            from app.services.ai_agent_node_tool_service import execute_node_tool
+            return execute_node_tool(session.tenant_id, snapshot, session, node_id, tool_config, tool_input, runtime_input, db)
+        result = run_agent_for_tenant(db, session.tenant_id, str(input_text), str(instruction), [str(t) for t in allowed_tools], {"webhooks": data.get("webhooks") or [], "node_tools": node_tools}, memory_context=conversation_history, options=options, node_tool_executor=_execute_agent_node_tool if allow_node_tools else None)
         actions: list[RuntimeAction] = []
         context = dict(session.context or {}) if isinstance(getattr(session, "context", None), dict) else {}
         for agent_action in result.actions:
@@ -1854,7 +1866,7 @@ class AiAgentNodeExecutor(AiResponseNodeExecutor):
         session.context = context
         if hasattr(db, "add"):
             db.add(session)
-        metadata = {"tools_allowed": [str(t) for t in allowed_tools], "tools_used": result.tools_used, "steps_count": result.steps_count, "final_tool": result.final_tool, "status": result.status, "webhook_count": len(data.get("webhooks") or []), "latency_ms": result.metadata.get("latency_ms")}
+        metadata = {"tools_allowed": [str(t) for t in allowed_tools], "node_tools_allowed": [{"tool_id": str(t.get("tool_id")), "node_id": str(t.get("node_id")), "label": str(t.get("label", ""))[:80]} for t in node_tools if isinstance(t, dict)], "tools_used": result.tools_used, "node_tools_used": result.metadata.get("node_tools_used", []), "node_tool_calls_count": result.metadata.get("node_tool_calls_count", 0), "node_tool_results_summary": result.metadata.get("node_tools_used", []), "blocked_tool_calls": result.metadata.get("blocked_tool_calls", []), "max_steps_reached": result.metadata.get("max_steps_reached", False), "steps_count": result.steps_count, "final_tool": result.final_tool, "status": result.status, "webhook_count": len(data.get("webhooks") or []), "latency_ms": result.metadata.get("latency_ms")}
         record_ai_execution(db, tenant_id=session.tenant_id, conversation_id=runtime_input.conversation_id, session_id=session.id, flow_id=flow_id, flow_version_id=session.flow_version_id, node_id=node_id, node_type="ai_agent", provider=ai_config.get("provider"), model=ai_config.get("model"), started_at=ai_started_at, status=result.status, input_text=input_text, output_text=result.message, fallback_used=result.fallback_used, metadata=metadata)
         self.event_store.append(db, session=session, event_type=FlowV2EventType.OUTPUT_EMITTED, node_id=node_id, payload={"analytics_event": "ai_agent_completed", **metadata})
         if memory_enabled and flow_id is not None and result.message:

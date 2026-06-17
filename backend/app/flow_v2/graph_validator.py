@@ -25,6 +25,10 @@ class GraphValidationResult:
 
 SAFE_NAME_RE = re.compile(r"^[A-Za-z0-9_.]+$")
 
+NODE_TOOL_ALLOWED_TYPES = {"ai_classification", "ai_extraction", "ai_summary", "ai_response", "action", "condition", "message"}
+NODE_TOOL_ID_RE = re.compile(r"^[A-Za-z0-9_]{1,64}$")
+
+
 class FlowV2GraphValidator:
     """Validates Flow Publisher V2 graphs before immutable snapshot creation."""
 
@@ -78,7 +82,7 @@ class FlowV2GraphValidator:
             node_type = self._node_type(node)
             if node_type not in self.SUPPORTED_NODE_TYPES:
                 errors.append(f"FLOW_V2_NODE_TYPE_UNSUPPORTED:{node_id_str}:{node_type}")
-            self._validate_node_config(node_id_str, node, errors)
+            self._validate_node_config(node_id_str, node, errors, nodes=nodes)
         return node_ids
 
     def _validate_edges(
@@ -191,7 +195,7 @@ class FlowV2GraphValidator:
             errors.append(f"FLOW_V2_ORPHAN_NODE:{node_id}")
 
     def _validate_node_config(
-        self, node_id: str, node: dict[str, Any], errors: list[str]
+        self, node_id: str, node: dict[str, Any], errors: list[str], *, nodes: list[dict[str, Any]] | None = None
     ) -> None:
         node_type = self._node_type(node)
         data = self._node_data(node)
@@ -259,6 +263,34 @@ class FlowV2GraphValidator:
                     errors.append(f"FLOW_V2_AI_AGENT_MAX_STEPS_INVALID:{node_id}")
             except (TypeError, ValueError):
                 errors.append(f"FLOW_V2_AI_AGENT_MAX_STEPS_INVALID:{node_id}")
+            node_tools = data.get("node_tools") or data.get("nodeTools") or []
+            if data.get("allow_node_tools", data.get("allowNodeTools", False)) is True:
+                if not isinstance(node_tools, list):
+                    errors.append(f"FLOW_V2_AI_AGENT_NODE_TOOLS_INVALID:{node_id}")
+                else:
+                    node_by_id = {str(n.get("id")): n for n in (nodes or []) if isinstance(n, dict)}
+                    for index, tool in enumerate(node_tools):
+                        if not isinstance(tool, dict):
+                            errors.append(f"FLOW_V2_AI_AGENT_NODE_TOOL_INVALID:{node_id}:{index}")
+                            continue
+                        tool_id = str(tool.get("tool_id") or "")
+                        target_id = str(tool.get("node_id") or "")
+                        if not NODE_TOOL_ID_RE.match(tool_id):
+                            errors.append(f"FLOW_V2_AI_AGENT_NODE_TOOL_ID_INVALID:{node_id}:{index}")
+                        if len(str(tool.get("label") or "")) > 80 or len(str(tool.get("description") or "")) > 500:
+                            errors.append(f"FLOW_V2_AI_AGENT_NODE_TOOL_TEXT_TOO_LONG:{node_id}:{index}")
+                        target = node_by_id.get(target_id)
+                        target_type = self._node_type(target) if isinstance(target, dict) else ""
+                        if not target or target_id == str(node_id) or target_type == "ai_agent" or target_type not in NODE_TOOL_ALLOWED_TYPES:
+                            errors.append(f"FLOW_V2_AI_AGENT_NODE_TOOL_TARGET_INVALID:{node_id}:{index}")
+                        if self._contains_forbidden_secret(tool):
+                            errors.append(f"FLOW_V2_AI_AGENT_NODE_TOOL_SECRET_FORBIDDEN:{node_id}:{index}")
+                try:
+                    calls = int(data.get("max_node_tool_calls", data.get("maxNodeToolCalls", 3)))
+                    if calls < 1 or calls > 5:
+                        errors.append(f"FLOW_V2_AI_AGENT_MAX_NODE_TOOL_CALLS_INVALID:{node_id}")
+                except (TypeError, ValueError):
+                    errors.append(f"FLOW_V2_AI_AGENT_MAX_NODE_TOOL_CALLS_INVALID:{node_id}")
             if isinstance(allowed_tools, list) and "chamar_webhook" in [str(t) for t in allowed_tools]:
                 webhooks = data.get("webhooks") or []
                 if not isinstance(webhooks, list) or not webhooks:
