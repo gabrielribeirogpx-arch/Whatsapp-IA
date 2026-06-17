@@ -31,7 +31,7 @@ import DelayNode from '@/components/flow/nodes/DelayNode';
 import MessageNode from '@/components/flow/nodes/MessageNode';
 import MediaNode from '@/components/flow/nodes/MediaNode';
 import CreateFlowModal from '@/components/flows/CreateFlowModal';
-import { apiFetch, getFlowAnalytics, getFlowGraph, getTenantSessionFromStorage, listFlowVersions, parseApiResponse, restoreFlowVersion } from '@/lib/api';
+import { apiFetch, getFlowAnalytics, getFlowGraph, getTenantSessionFromStorage, listFlowVersions, parseApiResponse, restoreFlowVersion, listFlows } from '@/lib/api';
 import { getLayoutedElements } from '@/lib/autoLayout';
 import { orderChoiceChildrenEdges } from '@/lib/flowChoiceOrdering';
 import { normalizeFlow } from '@/lib/flowNormalization';
@@ -69,6 +69,33 @@ type FlowNodeKind = 'message' | 'choice' | 'condition' | 'delay' | 'action' | 'm
 type FlowConnection = Connection & { sourceHandle?: string | null };
 type NodePaletteItem = { kind: FlowNodeKind; label: string; icon: LucideIcon; description?: string };
 type NodePaletteGroup = { id: 'communication' | 'ai' | 'logic' | 'actions'; title: string; icon: LucideIcon; nodes: NodePaletteItem[] };
+
+type FlowListOption = { id: string; name?: string | null; created_at?: string | null; is_active?: boolean; status?: string | null; is_published?: boolean | null; published_version_id?: string | null; flow_version_id?: string | null; version_id?: string | null };
+type SubflowToolDraft = Record<string, unknown> & {
+  tool_id?: string;
+  label?: string;
+  description?: string;
+  flow_id?: string;
+  flow_version_id?: string | null;
+  input_variable?: string;
+  output_variable?: string;
+  timeout_seconds?: number;
+};
+
+const SUBFLOW_TOOL_ID_PATTERN = /^[A-Za-z0-9_]+$/;
+
+const slugifyToolId = (value: string) =>
+  value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .replace(/_{2,}/g, '_');
+
+const getFlowDisplayName = (flow?: FlowListOption | null) => flow?.name || (flow?.id ? `Fluxo ${flow.id.slice(0, 8)}` : 'Fluxo não selecionado');
+const isPublishedFlow = (flow: FlowListOption) => flow.is_published === true || flow.status === 'published' || flow.status === 'active' || flow.is_active === true;
+const getPublishedVersionId = (flow: FlowListOption) => flow.published_version_id || flow.flow_version_id || flow.version_id || null;
 
 const NODE_GROUPS: NodePaletteGroup[] = [
   {
@@ -483,6 +510,8 @@ function FlowNodeEditorPanel({
   onUpload,
   isUploading,
   uploadError,
+  flows,
+  currentFlowId,
 }: {
   node: Node | null;
   draft: Record<string, unknown>;
@@ -491,6 +520,8 @@ function FlowNodeEditorPanel({
   onUpload: (file: File | null, mediaType: 'image' | 'document' | 'audio' | 'video') => void;
   isUploading: boolean;
   uploadError: string | null;
+  flows: FlowListOption[];
+  currentFlowId: string | null;
 }) {
   const messageContentRef = useRef<HTMLTextAreaElement>(null);
   const ctaTextRef = useRef<HTMLTextAreaElement>(null);
@@ -527,6 +558,51 @@ function FlowNodeEditorPanel({
     onDraftChange({ buttons: [...buttons, { id: `${node.id}-button-${nextIndex}`, label: `Opção ${nextIndex}`, handleId: `option_${nextIndex}` }] });
   };
   const supportsVariables = ['message', 'choice', 'media', 'cta_url', 'condition', 'action', 'ai_rag', 'ai_response', 'ai_classification', 'ai_extraction', 'ai_summary', 'ai_agent'].includes(kind);
+  const publishedSubflowOptions = flows.filter((flow) => flow.id !== currentFlowId && isPublishedFlow(flow));
+  const subflowTools = Array.isArray(draft.subflow_tools) ? (draft.subflow_tools as SubflowToolDraft[]) : [];
+  const subflowToolIds = subflowTools.map((tool) => toText(tool.tool_id).trim());
+  const subflowErrors = subflowTools.flatMap((tool, index) => {
+    const errors: string[] = [];
+    const toolId = toText(tool.tool_id).trim();
+    if (!toolId) errors.push(`Subflow ${index + 1}: tool_id obrigatório.`);
+    if (toolId && !SUBFLOW_TOOL_ID_PATTERN.test(toolId)) errors.push(`Subflow ${index + 1}: tool_id aceita apenas letras, números e underscore.`);
+    if (toolId && subflowToolIds.filter((id) => id === toolId).length > 1) errors.push(`Subflow ${index + 1}: tool_id duplicado.`);
+    if (!toText(tool.flow_id).trim()) errors.push(`Subflow ${index + 1}: selecione um fluxo publicado.`);
+    if (toText(tool.label).length > 80) errors.push(`Subflow ${index + 1}: nome da ferramenta deve ter no máximo 80 caracteres.`);
+    if (toText(tool.description).length > 300) errors.push(`Subflow ${index + 1}: descrição deve ter no máximo 300 caracteres.`);
+    const timeout = Number(tool.timeout_seconds || 20);
+    if (timeout < 3 || timeout > 60) errors.push(`Subflow ${index + 1}: timeout deve ficar entre 3 e 60 segundos.`);
+    return errors;
+  });
+  if (draft.allow_subflow_tools === true && subflowTools.length === 0) subflowErrors.push('Ative pelo menos 1 subflow ou desative esta opção.');
+  const maxSubflowCalls = Number(draft.max_subflow_calls || 2);
+  if (maxSubflowCalls < 1 || maxSubflowCalls > 3) subflowErrors.push('Limite de chamadas deve ficar entre 1 e 3.');
+  const updateSubflowTool = (index: number, patch: Partial<SubflowToolDraft>) => {
+    const next = [...subflowTools];
+    next[index] = { ...next[index], ...patch };
+    onDraftChange({ subflow_tools: next });
+  };
+  const addSubflowTool = () => {
+    const flow = publishedSubflowOptions[0];
+    const baseLabel = flow ? getFlowDisplayName(flow) : 'Nova ferramenta';
+    const toolId = slugifyToolId(baseLabel) || `subflow_${subflowTools.length + 1}`;
+    onDraftChange({
+      allow_subflow_tools: true,
+      subflow_tools: [
+        ...subflowTools,
+        {
+          tool_id: toolId,
+          label: baseLabel.slice(0, 80),
+          description: '',
+          flow_id: flow?.id || '',
+          ...(flow ? { flow_version_id: getPublishedVersionId(flow) } : {}),
+          input_variable: 'agent.subflow_input',
+          output_variable: `agent.subflows.${toolId}.output`,
+          timeout_seconds: 20,
+        },
+      ],
+    });
+  };
 
 
   return (
@@ -890,16 +966,61 @@ function FlowNodeEditorPanel({
               </label>
             </fieldset>
 
-            <fieldset className="flow-editor-field">
+            <fieldset className="flow-editor-field flow-editor-subflow-tools">
               <legend>Subflows como ferramentas</legend>
-              <label className="flow-editor-radio"><input type="checkbox" checked={draft.allow_subflow_tools === true} onChange={(event) => onDraftChange({ allow_subflow_tools: event.target.checked })} />Ativar subflows</label>
-              <label className="flow-editor-field">Limite de chamadas de subflows
+              <div className="flow-editor-subflow-header">
+                <label className="flow-editor-radio"><input type="checkbox" checked={draft.allow_subflow_tools === true} onChange={(event) => onDraftChange({ allow_subflow_tools: event.target.checked })} />Ativar subflows como ferramentas</label>
+                <button type="button" className="flow-editor-secondary-btn" onClick={addSubflowTool}>+ Adicionar subflow</button>
+              </div>
+              <label className="flow-editor-field">Limite de chamadas
                 <input type="number" min="1" max="3" value={toText(draft.max_subflow_calls || 2)} onChange={(event) => onDraftChange({ max_subflow_calls: Math.min(3, Math.max(1, Number(event.target.value || 2))) })} />
               </label>
-              <label className="flow-editor-field">Subflows permitidos (JSON)
+              {publishedSubflowOptions.length === 0 ? <small>Nenhum outro fluxo publicado disponível para seleção.</small> : null}
+              <div className="flow-editor-subflow-list">
+                {subflowTools.map((tool, index) => {
+                  const selectedFlow = publishedSubflowOptions.find((flow) => flow.id === tool.flow_id) || flows.find((flow) => flow.id === tool.flow_id);
+                  const toolId = toText(tool.tool_id);
+                  return (
+                    <article key={`${toolId || 'subflow'}-${index}`} className="flow-editor-subflow-card">
+                      <div className="flow-editor-subflow-card-title">
+                        <strong>{toText(tool.label) || 'Subflow sem nome'}</strong>
+                        <button type="button" onClick={() => onDraftChange({ subflow_tools: subflowTools.filter((_, itemIndex) => itemIndex !== index) })}>Remover</button>
+                      </div>
+                      <small>{toText(tool.description).slice(0, 120) || 'Sem descrição'} · {getFlowDisplayName(selectedFlow)} · timeout {Number(tool.timeout_seconds || 20)}s</small>
+                      <label className="flow-editor-field">Select de fluxo publicado existente
+                        <select value={toText(tool.flow_id)} onChange={(event) => { const flow = publishedSubflowOptions.find((item) => item.id === event.target.value); updateSubflowTool(index, { flow_id: event.target.value, ...(flow ? { flow_version_id: getPublishedVersionId(flow) } : {}) }); }}>
+                          <option value="">Selecione um fluxo publicado</option>
+                          {publishedSubflowOptions.map((flow) => <option key={flow.id} value={flow.id}>{getFlowDisplayName(flow)}</option>)}
+                        </select>
+                      </label>
+                      <div className="flow-editor-row">
+                        <label className="flow-editor-field">Nome da ferramenta
+                          <input maxLength={80} value={toText(tool.label)} onChange={(event) => { const previousLabelSlug = slugifyToolId(toText(tool.label)); const label = event.target.value.slice(0, 80); const generatedToolId = slugifyToolId(label); const shouldRegenerateToolId = !toolId || toolId === previousLabelSlug || toolId.startsWith('nova_ferramenta'); const nextToolId = shouldRegenerateToolId ? generatedToolId : toolId; updateSubflowTool(index, { label, tool_id: nextToolId, output_variable: toText(tool.output_variable) || `agent.subflows.${nextToolId}.output` }); }} />
+                        </label>
+                        <label className="flow-editor-field">tool_id
+                          <input value={toolId} onChange={(event) => updateSubflowTool(index, { tool_id: event.target.value.replace(/[^A-Za-z0-9_]/g, '') })} placeholder="agendamento_comercial" />
+                        </label>
+                      </div>
+                      <label className="flow-editor-field">Descrição
+                        <input maxLength={300} value={toText(tool.description)} onChange={(event) => updateSubflowTool(index, { description: event.target.value.slice(0, 300) })} placeholder="Explique quando a IA deve usar este subflow" />
+                      </label>
+                      <div className="flow-editor-row">
+                        <label className="flow-editor-field">Variável de entrada<input value={toText(tool.input_variable)} onChange={(event) => updateSubflowTool(index, { input_variable: event.target.value })} placeholder="agent.subflow_input" /></label>
+                        <label className="flow-editor-field">Variável de saída<input value={toText(tool.output_variable)} onChange={(event) => updateSubflowTool(index, { output_variable: event.target.value })} placeholder="agent.subflows.agendamento.output" /></label>
+                      </div>
+                      <label className="flow-editor-field">Timeout
+                        <input type="number" min="3" max="60" value={toText(tool.timeout_seconds || 20)} onChange={(event) => updateSubflowTool(index, { timeout_seconds: Math.min(60, Math.max(3, Number(event.target.value || 20))) })} />
+                      </label>
+                    </article>
+                  );
+                })}
+              </div>
+              {subflowErrors.length > 0 ? <div className="flow-editor-validation-list">{subflowErrors.map((error) => <small key={error}>⚠️ {error}</small>)}</div> : null}
+              <details className="flow-editor-advanced-json">
+                <summary>Editar JSON avançado</summary>
                 <textarea value={JSON.stringify(draft.subflow_tools || [], null, 2)} onChange={(event) => { try { onDraftChange({ subflow_tools: JSON.parse(event.target.value) }); } catch { onDraftChange({ subflow_tools_json_error: true }); } }} placeholder='[{"tool_id":"agendamento","label":"Agendamento","description":"Usa o fluxo de agendamento.","flow_id":"...","flow_version_id":"...","input_variable":"agent.subflow_input","output_variable":"agent.subflows.agendamento.output","timeout_seconds":20}]' />
                 <small>A IA escolhe apenas tool_id. O backend resolve o flow_id autorizado, bloqueia outro tenant e impede recursão direta.</small>
-              </label>
+              </details>
             </fieldset>
             <label className="flow-editor-radio"><input type="checkbox" checked={draft.use_memory !== false} onChange={(event) => onDraftChange({ use_memory: event.target.checked })} />Usar memória da conversa</label>
             <label className="flow-editor-field">Fallback<textarea value={toText(draft.fallback_message || 'Não consegui concluir essa ação agora. Quer que eu encaminhe para um atendente?')} onChange={(event) => onDraftChange({ fallback_message: event.target.value })} /></label>
@@ -1232,7 +1353,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
   const router = useRouter();
   const searchParams = useSearchParams();
   const flowIdFromUrl = searchParams.get('flow_id') || searchParams.get('flowId') || _initialFlowId || '';
-  const [flows, setFlows] = useState<Array<{ id: string; name?: string | null; created_at?: string | null; is_active?: boolean; status?: string | null; is_published?: boolean | null }>>([]);
+  const [flows, setFlows] = useState<FlowListOption[]>([]);
   const normalizedFlows = useMemo(
     () =>
       flows.map((flow) => ({
@@ -1579,8 +1700,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
 
     const loadFlows = async () => {
       try {
-        const response = await apiFetch('/api/flows', { method: 'GET' });
-        const data = await parseApiResponse<Array<{ id: string; name?: string | null; created_at?: string | null; is_active?: boolean }>>(response);
+        const data = await listFlows() as FlowListOption[];
         const safeFlows = Array.isArray(data) ? data : [];
         if (!active) return;
         setFlows(safeFlows);
@@ -3215,6 +3335,8 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
             onUpload={(file, mediaType) => { void uploadEditorMedia(file, mediaType); }}
             isUploading={isMediaUploading}
             uploadError={mediaUploadError}
+            flows={normalizedFlows}
+            currentFlowId={selectedFlowId}
           />
         </>
       )}
