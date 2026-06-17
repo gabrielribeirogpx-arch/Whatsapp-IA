@@ -31,6 +31,13 @@ from app.services.conversation_mode_service import ConversationModeError, set_co
 from app.services.audit_service import write_audit_log
 from app.services.realtime_service import sync_publish
 from app.services.flow_ai_memory_service import flow_ai_memory_service
+from app.services.contextual_query_service import (
+    contains_context_reference,
+    generate_standalone_question,
+    get_cached_standalone,
+    is_greeting,
+    store_cached_standalone,
+)
 from app.services.rag_service import answer_with_rag
 from app.flow_v2.snapshot import FlowV2Snapshot, build_transitions_from_edges
 from app.flow_v2.transition_resolver import TransitionResolver
@@ -1547,6 +1554,8 @@ class AiRagNodeExecutor(BaseNodeExecutor):
         min_confidence_level = str(data.get("min_confidence_level", data.get("minConfidenceLevel", "low")) or "low")
         conversation_history = ""
         is_first_ai_turn = True
+        session_context = session.context if isinstance(getattr(session, "context", None), dict) else {}
+        recent_retrieved_chunks = session_context.get("recent_retrieved_chunks") if isinstance(session_context.get("recent_retrieved_chunks"), list) else []
         flow_id = getattr(snapshot, "flow_id", None)
         if flow_id is None and hasattr(db, "get"):
             flow_version = db.get(FlowVersion, session.flow_version_id)
@@ -1567,11 +1576,35 @@ class AiRagNodeExecutor(BaseNodeExecutor):
             history_messages = flow_ai_memory_service.get_recent_history(db, tenant_id=session.tenant_id, session_id=session.id, max_messages=memory_max_messages, max_chars=memory_max_chars)
             conversation_history = flow_ai_memory_service.build_history_for_prompt(history_messages)
             is_first_ai_turn = not any(message.role == "assistant" for message in history_messages)
+        effective_question = str(question)
+        contextual_result = {"standalone_question": effective_question, "used_history": False}
+        if not is_greeting(effective_question) and contains_context_reference(effective_question):
+            cached = get_cached_standalone(session_context, tenant_id=session.tenant_id, current_question=effective_question)
+            if cached:
+                contextual_result = cached
+            else:
+                contextual_result = generate_standalone_question(
+                    db,
+                    session.tenant_id,
+                    effective_question,
+                    conversation_history,
+                    assistant_instruction=str(instruction),
+                )
+                store_cached_standalone(session_context, tenant_id=session.tenant_id, current_question=effective_question, result=contextual_result)
+            effective_question = str(contextual_result.get("standalone_question") or question)
+        logger.info(
+            "[CONTEXTUAL QUERY] tenant=%s used_history=%s rewritten=%s history_messages=%s recent_chunks_consulted=%s recent_chunk_hit=false",
+            session.tenant_id,
+            bool(contextual_result.get("used_history")),
+            effective_question != str(question),
+            len(conversation_history.splitlines()) if conversation_history else 0,
+            len(recent_retrieved_chunks),
+        )
         try:
             rag_answer = answer_with_rag(
                 db,
                 session.tenant_id,
-                str(question),
+                effective_question,
                 system_policy=str(instruction),
                 conversation_context=conversation_history,
                 is_first_ai_turn=is_first_ai_turn,
@@ -1585,12 +1618,30 @@ class AiRagNodeExecutor(BaseNodeExecutor):
                 filters=rag_filters,
                 fallback_when_low_confidence=fallback_when_low_confidence,
                 min_confidence_level=min_confidence_level,
+                recent_retrieved_chunks=recent_retrieved_chunks,
             )
+            now_iso = datetime.now(UTC).isoformat()
+            session_context["recent_retrieved_chunks"] = [
+                {
+                    "chunk_id": c.get("chunk_id"),
+                    "source_id": c.get("source_id"),
+                    "score": c.get("final_score", c.get("score")),
+                    "page": c.get("page") or (c.get("metadata") or {}).get("page"),
+                    "source_name": c.get("source_name"),
+                    "timestamp": now_iso,
+                }
+                for c in rag_answer.contexts
+                if c.get("chunk_id")
+            ][:10]
+            session.context = session_context
+            if hasattr(db, "add"):
+                db.add(session)
             text = rag_answer.answer if rag_answer.found_context else str(fallback)
             metadata = {
                 "node_id": node_id,
                 "intent": "ai_rag_answer",
                 "found_context": rag_answer.found_context,
+                "standalone_question_used": effective_question != str(question),
                 "source_ids": [c.get("source_id") for c in rag_answer.contexts if c.get("source_id")],
                 "chunk_ids": [c.get("chunk_id") for c in rag_answer.contexts if c.get("chunk_id")],
             }

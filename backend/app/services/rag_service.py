@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
 from typing import Any
+from datetime import datetime, timedelta, timezone
 
 from PyPDF2 import PdfReader
 from sqlalchemy import func, or_, select
@@ -406,12 +407,78 @@ def _confidence_level(contexts: list[dict[str, Any]]) -> str:
     return "fallback"
 
 
-def retrieve_context(db: Session, tenant_id: uuid.UUID, query: str, top_k: int = DEFAULT_TOP_K, filters: dict[str, Any] | None = None, rewritten_queries: list[str] | None = None) -> list[dict[str, Any]]:
+def _recent_chunk_ids(recent_retrieved_chunks: list[dict[str, Any]] | None) -> list[uuid.UUID]:
+    ids: list[uuid.UUID] = []
+    for item in recent_retrieved_chunks or []:
+        try:
+            ids.append(uuid.UUID(str(item.get("chunk_id"))))
+        except (AttributeError, TypeError, ValueError):
+            continue
+    return ids[:10]
+
+
+def _parse_recent_timestamp(value: Any) -> datetime | None:
+    if isinstance(value, datetime):
+        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+    if isinstance(value, (int, float)):
+        return datetime.fromtimestamp(value, tz=timezone.utc)
+    if isinstance(value, str):
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+        except ValueError:
+            return None
+    return None
+
+
+def _recent_source_ids(recent_retrieved_chunks: list[dict[str, Any]] | None) -> set[str]:
+    cutoff = datetime.now(timezone.utc) - timedelta(minutes=10)
+    ids: set[str] = set()
+    for item in recent_retrieved_chunks or []:
+        if not isinstance(item, dict):
+            continue
+        timestamp = _parse_recent_timestamp(item.get("timestamp"))
+        if timestamp and timestamp >= cutoff and item.get("source_id"):
+            ids.add(str(item.get("source_id")))
+    return ids
+
+
+def retrieve_recent_chunks(db: Session, tenant_id: uuid.UUID, query: str, top_k: int, recent_retrieved_chunks: list[dict[str, Any]] | None = None, filters: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+    query = clean_text(query)
+    ids = _recent_chunk_ids(recent_retrieved_chunks)
+    if not query or not ids:
+        return []
+    stmt = (
+        select(KnowledgeChunk, KnowledgeSource.name)
+        .join(KnowledgeSource, KnowledgeChunk.source_id == KnowledgeSource.id, isouter=True)
+        .where(KnowledgeChunk.tenant_id == tenant_id, KnowledgeChunk.id.in_(ids))
+    )
+    stmt = _apply_chunk_filters(stmt, filters)
+    rows = db.execute(stmt).all()
+    recent_sources = _recent_source_ids(recent_retrieved_chunks)
+    ranked: list[dict[str, Any]] = []
+    for chunk, source_name in rows:
+        score = _text_score(chunk.content, query)
+        if str(chunk.source_id) in recent_sources:
+            score = min(1.0, score + 0.08)
+        if score >= MIN_SIMILARITY_SCORE:
+            ranked.append(_candidate_metadata(chunk, source_name, score=score, mode="recent", text_score=score))
+    ranked.sort(key=lambda item: item.get("final_score", 0), reverse=True)
+    return ranked[:top_k]
+
+
+def retrieve_context(db: Session, tenant_id: uuid.UUID, query: str, top_k: int = DEFAULT_TOP_K, filters: dict[str, Any] | None = None, rewritten_queries: list[str] | None = None, recent_retrieved_chunks: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
     query = clean_text(query)
     if not query:
         return []
     top_k = _coerce_int(top_k, default=DEFAULT_TOP_K, field_name="top_k")
     queries = rewritten_queries or [query]
+    recent_contexts = retrieve_recent_chunks(db, tenant_id, query, top_k, recent_retrieved_chunks=recent_retrieved_chunks, filters=filters)
+    if recent_contexts:
+        logger.info("[CONTEXTUAL QUERY] tenant=%s recent_chunks_consulted=%s recent_chunk_hit=true", tenant_id, len(recent_retrieved_chunks or []))
+        return recent_contexts
+    if recent_retrieved_chunks:
+        logger.info("[CONTEXTUAL QUERY] tenant=%s recent_chunks_consulted=%s recent_chunk_hit=false", tenant_id, len(recent_retrieved_chunks or []))
     if not RAG_HYBRID_SEARCH_ENABLED:
         try:
             query_embedding = generate_embedding_for_tenant(db, tenant_id, query)
@@ -508,12 +575,12 @@ def _format_context_for_prompt(contexts: list[dict[str, Any]], *, include_source
     return "\n\n".join(str(c.get("content") or "") for c in contexts)
 
 
-def answer_with_rag(db: Session, tenant_id: uuid.UUID, question: str, conversation_context: str | None = None, system_policy: str | None = None, top_k: int = DEFAULT_TOP_K, temperature: float | None = None, chat_model: str | None = None, max_tokens: int | None = None, fallback_message: str = FALLBACK_MESSAGE, include_sources: bool = False, response_style: str | None = DEFAULT_RESPONSE_STYLE, is_first_ai_turn: bool = True, filters: dict[str, Any] | None = None, fallback_when_low_confidence: bool = False, min_confidence_level: str = "low") -> RagAnswer:
+def answer_with_rag(db: Session, tenant_id: uuid.UUID, question: str, conversation_context: str | None = None, system_policy: str | None = None, top_k: int = DEFAULT_TOP_K, temperature: float | None = None, chat_model: str | None = None, max_tokens: int | None = None, fallback_message: str = FALLBACK_MESSAGE, include_sources: bool = False, response_style: str | None = DEFAULT_RESPONSE_STYLE, is_first_ai_turn: bool = True, filters: dict[str, Any] | None = None, fallback_when_low_confidence: bool = False, min_confidence_level: str = "low", recent_retrieved_chunks: list[dict[str, Any]] | None = None) -> RagAnswer:
     top_k = _coerce_int(top_k, default=DEFAULT_TOP_K, field_name="top_k")
     queries = rewrite_query_for_retrieval(db, tenant_id, question, conversation_context, system_policy, max_queries=RAG_MAX_REWRITE_QUERIES)
 
     try:
-        contexts = retrieve_context(db, tenant_id, question, top_k=top_k, filters=filters, rewritten_queries=queries)
+        contexts = retrieve_context(db, tenant_id, question, top_k=top_k, filters=filters, rewritten_queries=queries, recent_retrieved_chunks=recent_retrieved_chunks)
     except TypeError:
         # Compatibility for tests/extensions monkeypatching the historical signature.
         contexts = retrieve_context(db, tenant_id, question, top_k=top_k)
