@@ -5,6 +5,10 @@ import CompactFlowNode, { truncateText } from './CompactFlowNode';
 
 type AiAgentNodeData = {
   allowed_tools?: string[];
+  node_tools?: unknown[];
+  subflow_tools?: unknown[];
+  use_memory?: boolean;
+  model_override?: string;
   after_agent_behavior?: string;
   after_answer_behavior?: string;
   running?: boolean;
@@ -16,9 +20,15 @@ type AiAgentNodeData = {
 
 export default function AiAgentNode({ id, data, selected }: NodeProps) {
   const nodeData = (data || {}) as AiAgentNodeData;
-  const tools = Array.isArray(nodeData.allowed_tools) ? nodeData.allowed_tools.length : 2;
+  const baseTools = Array.isArray(nodeData.allowed_tools) ? nodeData.allowed_tools.length : 2;
+  const nodeTools = Array.isArray(nodeData.node_tools) ? nodeData.node_tools.length : 0;
+  const subflows = Array.isArray(nodeData.subflow_tools) ? nodeData.subflow_tools.length : 0;
+  const tools = baseTools + nodeTools;
   const behavior = nodeData.after_agent_behavior || nodeData.after_answer_behavior || 'wait_same_node';
-  const summary = `${tools} ferramentas · ${behavior}`;
+  const behaviorLabel = behavior === 'end_flow' ? 'Encerra atendimento' : behavior === 'continue_to_next' ? 'Continua fluxo' : 'Aguarda próxima mensagem';
+  const model = nodeData.model_override || 'Modelo global';
+  const memory = nodeData.use_memory === false ? 'Memória OFF' : 'Memória';
+  const summary = `${model} · 🛠 ${tools} ferramentas · 📂 ${subflows} subflows · 🧠 ${memory} · ⏳ ${behaviorLabel}`;
 
   return (
     <CompactFlowNode
@@ -26,12 +36,12 @@ export default function AiAgentNode({ id, data, selected }: NodeProps) {
       selected={selected}
       running={nodeData.running}
       title="IA Agente"
-      emoji="🧠"
+      emoji="🤖"
       badge="AGENTE"
       badgeTitle="Usa IA para decidir e executar ferramentas permitidas"
       badgeTone={{ background: '#f5f3ff', color: '#6d28d9' }}
       accent="linear-gradient(90deg, #8b5cf6, #06b6d4)"
-      summary={truncateText(summary, 58, '2 ferramentas · wait_same_node')}
+      summary={truncateText(summary, 92, 'Modelo global · 🛠 2 ferramentas · 📂 0 subflows · 🧠 Memória · ⏳ Aguarda próxima mensagem')}
       isStart={nodeData.isStart}
       hasValidationError={nodeData.hasValidationError}
       onToggleStart={nodeData.onToggleStart}

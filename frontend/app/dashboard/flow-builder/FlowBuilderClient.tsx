@@ -512,6 +512,7 @@ function FlowNodeEditorPanel({
   uploadError,
   flows,
   currentFlowId,
+  allNodes,
 }: {
   node: Node | null;
   draft: Record<string, unknown>;
@@ -522,6 +523,7 @@ function FlowNodeEditorPanel({
   uploadError: string | null;
   flows: FlowListOption[];
   currentFlowId: string | null;
+  allNodes: Node[];
 }) {
   const messageContentRef = useRef<HTMLTextAreaElement>(null);
   const ctaTextRef = useRef<HTMLTextAreaElement>(null);
@@ -603,6 +605,34 @@ function FlowNodeEditorPanel({
       ],
     });
   };
+  const agentToolCatalog = [
+    { id: 'responder', icon: '💬', name: 'Responder', description: 'Permite responder o usuário.' },
+    { id: 'definir_variavel', icon: '🏷️', name: 'Definir variável', description: 'Salva informações no contexto.' },
+    { id: 'chamar_webhook', icon: '🔗', name: 'Chamar webhook', description: 'Executa integrações HTTP autorizadas.' },
+    { id: 'criar_evento', icon: '📅', name: 'Criar evento', description: 'Agenda eventos quando disponível.' },
+    { id: 'consultar_crm', icon: '👤', name: 'Consultar CRM', description: 'Consulta dados do cliente.' },
+    { id: 'criar_pedido', icon: '🛒', name: 'Criar pedido', description: 'Cria pedidos em sistemas conectados.' },
+    { id: 'enviar_email', icon: '📧', name: 'Enviar Email', description: 'Permite disparar e-mails.' },
+    { id: 'transferir_humano', icon: '🙋', name: 'Transferir para humano', description: 'Encaminha para atendimento humano.' },
+  ];
+  const allowedTools = Array.isArray(draft.allowed_tools) ? draft.allowed_tools.map(String) : ['responder', 'definir_variavel'];
+  const nodeTools = Array.isArray(draft.node_tools) ? (draft.node_tools as Array<Record<string, unknown>>) : [];
+  const allowedNodeKinds = new Set(['ai_response', 'ai_rag', 'ai_classification', 'ai_extraction', 'ai_summary', 'message', 'action']);
+  const nodeToolOptions = allNodes.filter((item) => item.id !== node.id && allowedNodeKinds.has(getBuilderNodeKind(item)));
+  const addNodeTool = () => {
+    const selected = nodeToolOptions.find((item) => !nodeTools.some((tool) => toText(tool.node_id) === item.id)) || nodeToolOptions[0];
+    if (!selected) return;
+    const label = getBuilderNodeTitle(selected);
+    const toolId = slugifyToolId(label) || `node_tool_${nodeTools.length + 1}`;
+    onDraftChange({ allow_node_tools: true, node_tools: [...nodeTools, { tool_id: toolId, node_id: selected.id, label, description: `Executa o bloco ${label}.`, pass_context: true }] });
+  };
+  const updateNodeTool = (index: number, patch: Record<string, unknown>) => { const next = [...nodeTools]; next[index] = { ...next[index], ...patch }; onDraftChange({ node_tools: next }); };
+  const nodeToolIds = nodeTools.map((tool) => toText(tool.tool_id).trim());
+  const nodeToolErrors = nodeTools.flatMap((tool, index) => { const errors: string[] = []; const toolId = toText(tool.tool_id).trim(); if (!toolId) errors.push(`Ferramenta ${index + 1}: tool_id obrigatório.`); if (toolId && !SUBFLOW_TOOL_ID_PATTERN.test(toolId)) errors.push(`Ferramenta ${index + 1}: tool_id aceita apenas letras, números e underscore.`); if (toolId && nodeToolIds.filter((id) => id === toolId).length > 1) errors.push(`Ferramenta ${index + 1}: tool_id duplicado.`); if (!toText(tool.label).trim()) errors.push(`Ferramenta ${index + 1}: label obrigatório.`); if (!toText(tool.description).trim()) errors.push(`Ferramenta ${index + 1}: descrição obrigatória.`); return errors; });
+  const modelUsesGlobal = !toText(draft.model_override).trim();
+  const modelLabel = modelUsesGlobal ? 'Configuração global' : toText(draft.model_override);
+  const complexityScore = allowedTools.length + nodeTools.length + subflowTools.length * 2 + (Array.isArray(draft.webhooks) ? draft.webhooks.length : 0);
+  const complexity = complexityScore >= 8 ? { label: 'Avançado', tone: 'danger' } : complexityScore >= 4 ? { label: 'Intermediário', tone: 'warning' } : { label: 'Agente simples', tone: 'success' };
 
 
   return (
@@ -927,112 +957,22 @@ function FlowNodeEditorPanel({
 
         {kind === 'ai_agent' && (
           <>
-            <div className="flow-editor-info-card"><strong>Tipo:</strong> IA Agente <span>AGENTE</span></div>
-            <label className="flow-editor-field">
-              Instrução do agente
-              <textarea value={toText(draft.instruction || 'Você é um agente de atendimento. Use apenas as ferramentas permitidas.')} onChange={(event) => onDraftChange({ instruction: event.target.value })} />
-            </label>
-            <label className="flow-editor-field">
-              Input template
-              <input value={toText(draft.input_template || '{{last_message}}')} onChange={(event) => onDraftChange({ input_template: event.target.value })} placeholder="{{last_message}}" />
-            </label>
-            <fieldset className="flow-editor-field">
-              <legend>Ferramentas permitidas</legend>
-              {['responder', 'definir_variavel', 'chamar_webhook', 'criar_evento', 'consultar_crm', 'criar_pedido', 'enviar_email', 'transferir_humano'].map((tool) => {
-                const current = Array.isArray(draft.allowed_tools) ? draft.allowed_tools.map(String) : ['responder', 'definir_variavel'];
-                return (
-                  <label key={tool} className="flow-editor-radio">
-                    <input type="checkbox" checked={current.includes(tool)} onChange={(event) => onDraftChange({ allowed_tools: event.target.checked ? Array.from(new Set([...current, tool])) : current.filter((item) => item !== tool) })} />
-                    {tool}
-                  </label>
-                );
-              })}
-            </fieldset>
-            <div className="flow-editor-row">
-              <label className="flow-editor-field">Max steps<input type="number" min="1" max="5" value={toText(draft.max_steps || 3)} onChange={(event) => onDraftChange({ max_steps: Number(event.target.value || 3) })} /></label>
-              <label className="flow-editor-field">Temperatura<input type="number" min="0" max="1" step="0.1" value={toText(draft.temperature ?? 0.2)} onChange={(event) => onDraftChange({ temperature: Number(event.target.value || 0.2) })} /></label>
-              <label className="flow-editor-field">Máx tokens<input type="number" min="1" max="8000" value={toText(draft.max_tokens || 1200)} onChange={(event) => onDraftChange({ max_tokens: Number(event.target.value || 1200) })} /></label>
-            </div>
-
-            <fieldset className="flow-editor-field">
-              <legend>Ferramentas do fluxo</legend>
-              <label className="flow-editor-radio"><input type="checkbox" checked={draft.allow_node_tools === true} onChange={(event) => onDraftChange({ allow_node_tools: event.target.checked })} />Ativar ferramentas do fluxo</label>
-              <label className="flow-editor-field">Limite de chamadas de ferramentas
-                <input type="number" min="1" max="5" value={toText(draft.max_node_tool_calls || 3)} onChange={(event) => onDraftChange({ max_node_tool_calls: Math.min(5, Math.max(1, Number(event.target.value || 3))) })} />
-              </label>
-              <label className="flow-editor-field">Nodes disponíveis como ferramentas (JSON)
-                <textarea value={JSON.stringify(draft.node_tools || [], null, 2)} onChange={(event) => { try { onDraftChange({ node_tools: JSON.parse(event.target.value) }); } catch { onDraftChange({ node_tools_json_error: true }); } }} placeholder='[{"tool_id":"extract_lead","node_id":"node-123","label":"Extrair lead","description":"Extrai dados do lead","pass_context":true}]' />
-                <small>Use apenas nodes permitidos: IA Classificação, IA Extração, IA Resumo, IA Resposta, Ação ou Mensagem. IA Agente, Delay e Escolha são bloqueados no backend.</small>
-              </label>
-            </fieldset>
-
-            <fieldset className="flow-editor-field flow-editor-subflow-tools">
-              <legend>Subflows como ferramentas</legend>
-              <div className="flow-editor-subflow-header">
-                <label className="flow-editor-radio"><input type="checkbox" checked={draft.allow_subflow_tools === true} onChange={(event) => onDraftChange({ allow_subflow_tools: event.target.checked })} />Ativar subflows como ferramentas</label>
-                <button type="button" className="flow-editor-secondary-btn" onClick={addSubflowTool}>+ Adicionar subflow</button>
-              </div>
-              <label className="flow-editor-field">Limite de chamadas
-                <input type="number" min="1" max="3" value={toText(draft.max_subflow_calls || 2)} onChange={(event) => onDraftChange({ max_subflow_calls: Math.min(3, Math.max(1, Number(event.target.value || 2))) })} />
-              </label>
-              {publishedSubflowOptions.length === 0 ? <small>Nenhum outro fluxo publicado disponível para seleção.</small> : null}
-              <div className="flow-editor-subflow-list">
-                {subflowTools.map((tool, index) => {
-                  const selectedFlow = publishedSubflowOptions.find((flow) => flow.id === tool.flow_id) || flows.find((flow) => flow.id === tool.flow_id);
-                  const toolId = toText(tool.tool_id);
-                  return (
-                    <article key={`${toolId || 'subflow'}-${index}`} className="flow-editor-subflow-card">
-                      <div className="flow-editor-subflow-card-title">
-                        <strong>{toText(tool.label) || 'Subflow sem nome'}</strong>
-                        <button type="button" onClick={() => onDraftChange({ subflow_tools: subflowTools.filter((_, itemIndex) => itemIndex !== index) })}>Remover</button>
-                      </div>
-                      <small>{toText(tool.description).slice(0, 120) || 'Sem descrição'} · {getFlowDisplayName(selectedFlow)} · timeout {Number(tool.timeout_seconds || 20)}s</small>
-                      <label className="flow-editor-field">Select de fluxo publicado existente
-                        <select value={toText(tool.flow_id)} onChange={(event) => { const flow = publishedSubflowOptions.find((item) => item.id === event.target.value); updateSubflowTool(index, { flow_id: event.target.value, ...(flow ? { flow_version_id: getPublishedVersionId(flow) } : {}) }); }}>
-                          <option value="">Selecione um fluxo publicado</option>
-                          {publishedSubflowOptions.map((flow) => <option key={flow.id} value={flow.id}>{getFlowDisplayName(flow)}</option>)}
-                        </select>
-                      </label>
-                      <div className="flow-editor-row">
-                        <label className="flow-editor-field">Nome da ferramenta
-                          <input maxLength={80} value={toText(tool.label)} onChange={(event) => { const previousLabelSlug = slugifyToolId(toText(tool.label)); const label = event.target.value.slice(0, 80); const generatedToolId = slugifyToolId(label); const shouldRegenerateToolId = !toolId || toolId === previousLabelSlug || toolId.startsWith('nova_ferramenta'); const nextToolId = shouldRegenerateToolId ? generatedToolId : toolId; updateSubflowTool(index, { label, tool_id: nextToolId, output_variable: toText(tool.output_variable) || `agent.subflows.${nextToolId}.output` }); }} />
-                        </label>
-                        <label className="flow-editor-field">tool_id
-                          <input value={toolId} onChange={(event) => updateSubflowTool(index, { tool_id: event.target.value.replace(/[^A-Za-z0-9_]/g, '') })} placeholder="agendamento_comercial" />
-                        </label>
-                      </div>
-                      <label className="flow-editor-field">Descrição
-                        <input maxLength={300} value={toText(tool.description)} onChange={(event) => updateSubflowTool(index, { description: event.target.value.slice(0, 300) })} placeholder="Explique quando a IA deve usar este subflow" />
-                      </label>
-                      <div className="flow-editor-row">
-                        <label className="flow-editor-field">Variável de entrada<input value={toText(tool.input_variable)} onChange={(event) => updateSubflowTool(index, { input_variable: event.target.value })} placeholder="agent.subflow_input" /></label>
-                        <label className="flow-editor-field">Variável de saída<input value={toText(tool.output_variable)} onChange={(event) => updateSubflowTool(index, { output_variable: event.target.value })} placeholder="agent.subflows.agendamento.output" /></label>
-                      </div>
-                      <label className="flow-editor-field">Timeout
-                        <input type="number" min="3" max="60" value={toText(tool.timeout_seconds || 20)} onChange={(event) => updateSubflowTool(index, { timeout_seconds: Math.min(60, Math.max(3, Number(event.target.value || 20))) })} />
-                      </label>
-                    </article>
-                  );
-                })}
-              </div>
-              {subflowErrors.length > 0 ? <div className="flow-editor-validation-list">{subflowErrors.map((error) => <small key={error}>⚠️ {error}</small>)}</div> : null}
-              <details className="flow-editor-advanced-json">
-                <summary>Editar JSON avançado</summary>
-                <textarea value={JSON.stringify(draft.subflow_tools || [], null, 2)} onChange={(event) => { try { onDraftChange({ subflow_tools: JSON.parse(event.target.value) }); } catch { onDraftChange({ subflow_tools_json_error: true }); } }} placeholder='[{"tool_id":"agendamento","label":"Agendamento","description":"Usa o fluxo de agendamento.","flow_id":"...","flow_version_id":"...","input_variable":"agent.subflow_input","output_variable":"agent.subflows.agendamento.output","timeout_seconds":20}]' />
-                <small>A IA escolhe apenas tool_id. O backend resolve o flow_id autorizado, bloqueia outro tenant e impede recursão direta.</small>
-              </details>
-            </fieldset>
-            <label className="flow-editor-radio"><input type="checkbox" checked={draft.use_memory !== false} onChange={(event) => onDraftChange({ use_memory: event.target.checked })} />Usar memória da conversa</label>
-            <label className="flow-editor-field">Fallback<textarea value={toText(draft.fallback_message || 'Não consegui concluir essa ação agora. Quer que eu encaminhe para um atendente?')} onChange={(event) => onDraftChange({ fallback_message: event.target.value })} /></label>
-            <label className="flow-editor-field">Webhooks permitidos (JSON)
-              <textarea value={JSON.stringify(draft.webhooks || [], null, 2)} onChange={(event) => { try { onDraftChange({ webhooks: JSON.parse(event.target.value) }); } catch { onDraftChange({ webhooks_json_error: true }); } }} />
-              <small>A IA escolhe apenas webhook_id. Use apenas URLs https públicas.</small>
-            </label>
-            <fieldset className="flow-editor-field flow-editor-after-answer"><legend>Depois do agente</legend>
-              {['end_flow', 'continue_to_next', 'wait_same_node'].map((behavior) => (
-                <label key={behavior} className="flow-editor-choice-card"><input type="radio" name={`ai-agent-after-${node.id}`} checked={(draft.after_agent_behavior || draft.after_answer_behavior || 'wait_same_node') === behavior} onChange={() => onDraftChange({ after_agent_behavior: behavior, after_answer_behavior: behavior })} /><span><strong>{behavior}</strong></span></label>
-              ))}
-            </fieldset>
+            <div className="flow-editor-agent-hero"><div><strong>🤖 IA Agente</strong><small>Editor premium compatível com o payload atual.</small></div><span className={`flow-editor-complexity flow-editor-complexity-${complexity.tone}`}>{complexity.label}</span></div>
+            <div className="flow-editor-agent-metrics"><span>🛠 {allowedTools.length + nodeTools.length} ferramentas</span><span>📂 {subflowTools.length} subflows</span><span>🧠 Memória {draft.use_memory !== false ? 'ON' : 'OFF'}</span><span>⚡ {modelLabel}</span><span>🔁 {Number(draft.max_steps || 3)} steps</span></div>
+            <div className="flow-editor-tabs"><a href="#agent-general">Geral</a><a href="#agent-tools">Ferramentas</a><a href="#agent-memory">Memória</a><a href="#agent-subflows">Subflows</a><a href="#agent-advanced">Avançado</a></div>
+            <section id="agent-general" className="flow-editor-tab-section"><h4>Geral</h4><p>Configure identidade, prompt, modelo e comportamento do agente.</p>
+              <label className="flow-editor-field">Nome do agente<input value={toText(draft.agent_name)} onChange={(event) => onDraftChange({ agent_name: event.target.value })} placeholder="Assistente comercial" /><small>Campo visual para facilitar manutenção do fluxo.</small></label>
+              <label className="flow-editor-field">Descrição opcional<input value={toText(draft.description)} onChange={(event) => onDraftChange({ description: event.target.value })} /><small>Explique o objetivo deste agente.</small></label>
+              <label className="flow-editor-field">Instrução do agente<textarea value={toText(draft.instruction || 'Você é um agente de atendimento. Use apenas as ferramentas permitidas.')} onChange={(event) => onDraftChange({ instruction: event.target.value })} /><small>Defina tom, limites e quando usar ferramentas.</small></label>
+              <label className="flow-editor-field">Input template<input value={toText(draft.input_template || '{{last_message}}')} onChange={(event) => onDraftChange({ input_template: event.target.value })} placeholder="{{last_message}}" /><small>Entrada enviada para a IA com suporte a variáveis.</small></label>
+              <fieldset className="flow-editor-field flow-editor-after-answer"><legend>Modelo IA</legend><label className="flow-editor-choice-card"><input type="radio" name={`ai-agent-model-${node.id}`} checked={modelUsesGlobal} onChange={() => onDraftChange({ model_override: '' })} /><span className="flow-editor-choice-icon">⚡</span><span><strong>Usar configuração global</strong><small>Usa o modelo do workspace.</small></span></label><label className="flow-editor-choice-card"><input type="radio" name={`ai-agent-model-${node.id}`} checked={!modelUsesGlobal} onChange={() => onDraftChange({ model_override: toText(draft.model_override) || 'gpt-4o-mini' })} /><span className="flow-editor-choice-icon">✎</span><span><strong>Sobrescrever neste node</strong><small>Habilita modelo, temperatura e tokens locais.</small></span></label></fieldset>
+              {!modelUsesGlobal ? <div className="flow-editor-row"><label className="flow-editor-field">Modelo IA<input value={toText(draft.model_override)} onChange={(event) => onDraftChange({ model_override: event.target.value })} /><small>Não insira API key neste node.</small></label><label className="flow-editor-field">Temperatura<input type="number" min="0" max="1" step="0.1" value={toText(draft.temperature ?? 0.2)} onChange={(event) => onDraftChange({ temperature: Number(event.target.value || 0.2) })} /><small>Controla criatividade.</small></label><label className="flow-editor-field">Máx Tokens<input type="number" min="1" max="8000" value={toText(draft.max_tokens || 1200)} onChange={(event) => onDraftChange({ max_tokens: Number(event.target.value || 1200) })} /><small>Limite da resposta.</small></label></div> : null}
+              <fieldset className="flow-editor-field flow-editor-after-answer"><legend>Comportamento após responder</legend>{[['end_flow','✓','Encerrar atendimento'],['continue_to_next','↗','Continuar fluxo'],['wait_same_node','↻','Permanecer aguardando novas mensagens']].map(([value, icon, label]) => <label key={value} className="flow-editor-choice-card"><input type="radio" name={`ai-agent-after-${node.id}`} checked={(draft.after_agent_behavior || draft.after_answer_behavior || 'wait_same_node') === value} onChange={() => onDraftChange({ after_agent_behavior: value, after_answer_behavior: value })} /><span className="flow-editor-choice-icon">{icon}</span><span><strong>{label}</strong><small>Salva internamente como {value}.</small></span></label>)}</fieldset>
+            </section>
+            <section id="agent-tools" className="flow-editor-tab-section"><h4>Ferramentas</h4><p>Ferramentas definem quais ações a IA poderá executar.</p><div className="flow-editor-tool-grid">{agentToolCatalog.map((tool) => <label key={tool.id} className="flow-editor-tool-card"><span className="flow-editor-tool-icon">{tool.icon}</span><strong>{tool.name}</strong><small>{tool.description}</small><input type="checkbox" checked={allowedTools.includes(tool.id)} onChange={(event) => onDraftChange({ allowed_tools: event.target.checked ? Array.from(new Set([...allowedTools, tool.id])) : allowedTools.filter((item) => item !== tool.id) })} /><em>{allowedTools.includes(tool.id) ? 'Ativado' : 'Desativado'}</em></label>)}</div><div className="flow-editor-subflow-header"><label className="flow-editor-radio"><input type="checkbox" checked={draft.allow_node_tools === true} onChange={(event) => onDraftChange({ allow_node_tools: event.target.checked })} />Ativar ferramentas do fluxo</label><button type="button" className="flow-editor-secondary-btn" onClick={addNodeTool} disabled={nodeToolOptions.length === 0}>+ Adicionar ferramenta</button></div><label className="flow-editor-field">Limite de chamadas<input type="number" min="1" max="5" value={toText(draft.max_node_tool_calls || 3)} onChange={(event) => onDraftChange({ max_node_tool_calls: Math.min(5, Math.max(1, Number(event.target.value || 3))) })} /><small>Apenas IA Resposta, IA Conhecimento, IA Classificação, IA Extração, IA Resumo, Mensagem e Ação.</small></label><div className="flow-editor-subflow-list">{nodeTools.map((tool, index) => <article key={`${toText(tool.tool_id)}-${index}`} className="flow-editor-subflow-card"><div className="flow-editor-subflow-card-title"><strong>🧩 {toText(tool.label) || 'Ferramenta sem nome'}</strong><button type="button" onClick={() => onDraftChange({ node_tools: nodeTools.filter((_, itemIndex) => itemIndex !== index) })}>Remover</button></div><label className="flow-editor-field">Node<select value={toText(tool.node_id)} onChange={(event) => { const selected = nodeToolOptions.find((item) => item.id === event.target.value); const label = selected ? getBuilderNodeTitle(selected) : toText(tool.label); updateNodeTool(index, { node_id: event.target.value, label, tool_id: slugifyToolId(label), description: toText(tool.description) || `Executa o bloco ${label}.` }); }}>{nodeToolOptions.map((item) => <option key={item.id} value={item.id}>{getBuilderNodeTitle(item)}</option>)}</select></label><div className="flow-editor-row"><label className="flow-editor-field">Label<input value={toText(tool.label)} onChange={(event) => updateNodeTool(index, { label: event.target.value })} /></label><label className="flow-editor-field">tool_id<input value={toText(tool.tool_id)} onChange={(event) => updateNodeTool(index, { tool_id: event.target.value.replace(/[^A-Za-z0-9_]/g, '') })} /></label></div><label className="flow-editor-field">Descrição<input value={toText(tool.description)} onChange={(event) => updateNodeTool(index, { description: event.target.value })} /></label></article>)}</div>{nodeToolErrors.length > 0 ? <div className="flow-editor-validation-list">{nodeToolErrors.map((error) => <small key={error}>⚠️ {error}</small>)}</div> : null}<details className="flow-editor-advanced-json"><summary>Editar JSON avançado</summary><textarea value={JSON.stringify(draft.node_tools || [], null, 2)} onChange={(event) => { try { onDraftChange({ node_tools: JSON.parse(event.target.value) }); } catch { onDraftChange({ node_tools_json_error: true }); } }} /></details></section>
+            <section id="agent-memory" className="flow-editor-tab-section"><h4>Memória</h4><p>Memória permite manter contexto entre mensagens.</p><label className="flow-editor-radio"><input type="checkbox" checked={draft.use_memory !== false} onChange={(event) => onDraftChange({ use_memory: event.target.checked })} />Usar memória da conversa</label><label className="flow-editor-radio flow-editor-disabled"><input type="checkbox" disabled />Usar memória de longo prazo</label><label className="flow-editor-radio flow-editor-disabled"><input type="checkbox" disabled />Permitir atualização automática da memória</label></section>
+            <section id="agent-subflows" className="flow-editor-tab-section"><h4>Subflows</h4><p>Subflows permitem reutilizar fluxos completos.</p><div className="flow-editor-subflow-header"><label className="flow-editor-radio"><input type="checkbox" checked={draft.allow_subflow_tools === true} onChange={(event) => onDraftChange({ allow_subflow_tools: event.target.checked })} />Ativar subflows como ferramentas</label><button type="button" className="flow-editor-secondary-btn" onClick={addSubflowTool}>+ Adicionar Subflow</button></div><label className="flow-editor-field">Limite de chamadas<input type="number" min="1" max="3" value={toText(draft.max_subflow_calls || 2)} onChange={(event) => onDraftChange({ max_subflow_calls: Math.min(3, Math.max(1, Number(event.target.value || 2))) })} /></label><div className="flow-editor-subflow-list">{subflowTools.map((tool, index) => { const toolId = toText(tool.tool_id); return <article key={`${toolId || 'subflow'}-${index}`} className="flow-editor-subflow-card"><div className="flow-editor-subflow-card-title"><strong>📅 {toText(tool.label) || 'Subflow sem nome'}</strong><button type="button" onClick={() => onDraftChange({ subflow_tools: subflowTools.filter((_, itemIndex) => itemIndex !== index) })}>Remover</button></div><small>{toText(tool.description).slice(0, 120) || 'Sem descrição'} · Timeout: {Number(tool.timeout_seconds || 20)}s · Ferramenta: {toolId || 'sem_tool_id'}</small><label className="flow-editor-field">Fluxo publicado<select value={toText(tool.flow_id)} onChange={(event) => { const flow = publishedSubflowOptions.find((item) => item.id === event.target.value); updateSubflowTool(index, { flow_id: event.target.value, ...(flow ? { flow_version_id: getPublishedVersionId(flow) } : {}) }); }}><option value="">Selecione um fluxo publicado</option>{publishedSubflowOptions.map((flow) => <option key={flow.id} value={flow.id}>{getFlowDisplayName(flow)}</option>)}</select></label><div className="flow-editor-row"><label className="flow-editor-field">Nome<input maxLength={80} value={toText(tool.label)} onChange={(event) => updateSubflowTool(index, { label: event.target.value.slice(0, 80) })} /></label><label className="flow-editor-field">tool_id<input value={toolId} onChange={(event) => updateSubflowTool(index, { tool_id: event.target.value.replace(/[^A-Za-z0-9_]/g, '') })} /></label></div><label className="flow-editor-field">Descrição<input maxLength={300} value={toText(tool.description)} onChange={(event) => updateSubflowTool(index, { description: event.target.value.slice(0, 300) })} /></label><label className="flow-editor-field">Timeout<input type="number" min="3" max="60" value={toText(tool.timeout_seconds || 20)} onChange={(event) => updateSubflowTool(index, { timeout_seconds: Math.min(60, Math.max(3, Number(event.target.value || 20))) })} /></label></article>; })}</div>{subflowErrors.length > 0 ? <div className="flow-editor-validation-list">{subflowErrors.map((error) => <small key={error}>⚠️ {error}</small>)}</div> : null}<details className="flow-editor-advanced-json"><summary>Editar JSON avançado</summary><textarea value={JSON.stringify(draft.subflow_tools || [], null, 2)} onChange={(event) => { try { onDraftChange({ subflow_tools: JSON.parse(event.target.value) }); } catch { onDraftChange({ subflow_tools_json_error: true }); } }} /></details></section>
+            <section id="agent-advanced" className="flow-editor-tab-section"><h4>Avançado</h4><p>Configurações técnicas ficam recolhidas inicialmente.</p><details><summary>Max Steps</summary><label className="flow-editor-field">Max steps<input type="number" min="1" max="5" value={toText(draft.max_steps || 3)} onChange={(event) => onDraftChange({ max_steps: Number(event.target.value || 3) })} /></label></details><details><summary>Fallback</summary><fieldset className="flow-editor-field flow-editor-after-answer"><legend>Quando ocorrer erro</legend><label className="flow-editor-choice-card"><input type="radio" checked readOnly /><span className="flow-editor-choice-icon">💬</span><span><strong>Responder mensagem</strong><small>Persistido como fallback_message.</small></span></label><label className="flow-editor-choice-card flow-editor-disabled"><input type="radio" disabled /><span className="flow-editor-choice-icon">↗</span><span><strong>Continuar fluxo</strong><small>Opção futura.</small></span></label><label className="flow-editor-choice-card flow-editor-disabled"><input type="radio" disabled /><span className="flow-editor-choice-icon">🙋</span><span><strong>Transferir para humano</strong><small>Opção futura.</small></span></label></fieldset><label className="flow-editor-field">Mensagem de fallback<textarea value={toText(draft.fallback_message || 'Não consegui concluir essa ação agora. Quer que eu encaminhe para um atendente?')} onChange={(event) => onDraftChange({ fallback_message: event.target.value })} /></label></details><details><summary>Webhooks</summary><label className="flow-editor-field">Webhooks permitidos (JSON)<textarea value={JSON.stringify(draft.webhooks || [], null, 2)} onChange={(event) => { try { onDraftChange({ webhooks: JSON.parse(event.target.value) }); } catch { onDraftChange({ webhooks_json_error: true }); } }} /><small>A IA escolhe apenas webhook_id. Use apenas URLs https públicas.</small></label></details><details><summary>Timeouts e configurações experimentais</summary><small className="flow-editor-muted">Reservado para opções já presentes ou futuras do payload.</small></details></section>
           </>
         )}
 
@@ -3337,6 +3277,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
             uploadError={mediaUploadError}
             flows={normalizedFlows}
             currentFlowId={selectedFlowId}
+            allNodes={nodes}
           />
         </>
       )}

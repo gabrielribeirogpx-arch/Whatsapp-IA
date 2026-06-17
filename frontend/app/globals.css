@@ -5527,3 +5527,29 @@ input {
   font-size: 12px;
   font-weight: 800;
 }
+
+.flow-editor-agent-hero { display: flex; justify-content: space-between; gap: 12px; align-items: center; border: 1px solid #ddd6fe; border-radius: 18px; padding: 14px; background: linear-gradient(135deg, #f5f3ff 0%, #ecfeff 100%); color: #312e81; }
+.flow-editor-agent-hero div, .flow-editor-tab-section { display: grid; gap: 6px; }
+.flow-editor-agent-hero strong { color: #1e1b4b; font-size: 16px; font-weight: 950; }
+.flow-editor-agent-metrics, .flow-editor-tabs { display: flex; flex-wrap: wrap; gap: 8px; }
+.flow-editor-agent-metrics span, .flow-editor-tabs a, .flow-editor-complexity { border: 1px solid #e2e8f0; border-radius: 999px; background: #fff; color: #334155; padding: 7px 10px; font-size: 11px; font-weight: 900; text-decoration: none; }
+.flow-editor-tabs { position: sticky; top: 0; z-index: 2; padding: 8px 0; background: rgba(255, 255, 255, 0.92); backdrop-filter: blur(10px); }
+.flow-editor-tabs a { border-color: #dbeafe; color: #1d4ed8; }
+.flow-editor-tab-section { scroll-margin-top: 72px; border: 1px solid #e2e8f0; border-radius: 18px; background: #ffffff; box-shadow: 0 12px 30px rgba(15, 23, 42, 0.06); padding: 14px; margin-top: 10px; }
+.flow-editor-tab-section h4 { margin: 0; color: #0f172a; font-size: 14px; font-weight: 950; }
+.flow-editor-tab-section p { margin: 0 0 4px; color: #64748b; font-size: 12px; font-weight: 600; }
+.flow-editor-tool-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; }
+.flow-editor-tool-card { position: relative; display: grid; gap: 6px; border: 1px solid #e2e8f0; border-radius: 16px; background: linear-gradient(135deg, #fff 0%, #f8fafc 100%); padding: 12px; cursor: pointer; }
+.flow-editor-tool-card:has(input:checked) { border-color: #22c55e; background: linear-gradient(135deg, #f0fdf4 0%, #fff 100%); }
+.flow-editor-tool-card input { position: absolute; right: 12px; top: 12px; accent-color: #16a34a; }
+.flow-editor-tool-icon { font-size: 22px; }
+.flow-editor-tool-card strong { color: #0f172a; font-size: 13px; font-weight: 950; }
+.flow-editor-tool-card small, .flow-editor-agent-hero small { color: #64748b; font-size: 11px; font-weight: 600; }
+.flow-editor-tool-card em { color: #475569; font-size: 11px; font-style: normal; font-weight: 900; }
+.flow-editor-complexity-success { border-color: #bbf7d0; color: #166534; background: #f0fdf4; }
+.flow-editor-complexity-warning { border-color: #fde68a; color: #92400e; background: #fffbeb; }
+.flow-editor-complexity-danger { border-color: #fecaca; color: #991b1b; background: #fef2f2; }
+.flow-editor-disabled { opacity: 0.58; cursor: not-allowed; }
+.flow-editor-tab-section details { border: 1px solid #e2e8f0; border-radius: 14px; padding: 10px; background: #f8fafc; }
+.flow-editor-tab-section details summary { cursor: pointer; color: #334155; font-size: 12px; font-weight: 900; }
+@media (max-width: 640px) { .flow-editor-tool-grid, .flow-editor-row { grid-template-columns: 1fr; } .flow-editor-agent-hero, .flow-editor-subflow-header, .flow-editor-subflow-card-title { align-items: stretch; flex-direction: column; } }
