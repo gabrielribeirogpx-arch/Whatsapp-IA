@@ -291,6 +291,40 @@ class FlowV2GraphValidator:
                         errors.append(f"FLOW_V2_AI_AGENT_MAX_NODE_TOOL_CALLS_INVALID:{node_id}")
                 except (TypeError, ValueError):
                     errors.append(f"FLOW_V2_AI_AGENT_MAX_NODE_TOOL_CALLS_INVALID:{node_id}")
+            subflow_tools = data.get("subflow_tools") or data.get("subflowTools") or []
+            if data.get("allow_subflow_tools", data.get("allowSubflowTools", False)) is True:
+                if not isinstance(subflow_tools, list) or not subflow_tools:
+                    errors.append(f"FLOW_V2_AI_AGENT_SUBFLOW_TOOLS_REQUIRED:{node_id}")
+                else:
+                    for index, tool in enumerate(subflow_tools):
+                        if not isinstance(tool, dict):
+                            errors.append(f"FLOW_V2_AI_AGENT_SUBFLOW_TOOL_INVALID:{node_id}:{index}")
+                            continue
+                        tool_id = str(tool.get("tool_id") or "")
+                        if not NODE_TOOL_ID_RE.match(tool_id):
+                            errors.append(f"FLOW_V2_AI_AGENT_SUBFLOW_TOOL_ID_INVALID:{node_id}:{index}")
+                        if len(str(tool.get("label") or "")) > 80 or len(str(tool.get("description") or "")) > 300:
+                            errors.append(f"FLOW_V2_AI_AGENT_SUBFLOW_TOOL_TEXT_TOO_LONG:{node_id}:{index}")
+                        flow_ref = str(tool.get("flow_id") or tool.get("flowId") or "").strip()
+                        if not flow_ref or flow_ref == str(data.get("flow_id") or data.get("flowId") or ""):
+                            errors.append(f"FLOW_V2_AI_AGENT_SUBFLOW_FLOW_INVALID:{node_id}:{index}")
+                        for var_key in ("input_variable", "inputVariable", "output_variable", "outputVariable"):
+                            if tool.get(var_key) and not SAFE_NAME_RE.match(str(tool.get(var_key))):
+                                errors.append(f"FLOW_V2_AI_AGENT_SUBFLOW_VARIABLE_INVALID:{node_id}:{index}")
+                        try:
+                            timeout = int(tool.get("timeout_seconds", tool.get("timeoutSeconds", 20)))
+                            if timeout < 3 or timeout > 60:
+                                errors.append(f"FLOW_V2_AI_AGENT_SUBFLOW_TIMEOUT_INVALID:{node_id}:{index}")
+                        except (TypeError, ValueError):
+                            errors.append(f"FLOW_V2_AI_AGENT_SUBFLOW_TIMEOUT_INVALID:{node_id}:{index}")
+                        if self._contains_forbidden_secret(tool):
+                            errors.append(f"FLOW_V2_AI_AGENT_SUBFLOW_SECRET_FORBIDDEN:{node_id}:{index}")
+                try:
+                    calls = int(data.get("max_subflow_calls", data.get("maxSubflowCalls", 2)))
+                    if calls < 1 or calls > 3:
+                        errors.append(f"FLOW_V2_AI_AGENT_MAX_SUBFLOW_CALLS_INVALID:{node_id}")
+                except (TypeError, ValueError):
+                    errors.append(f"FLOW_V2_AI_AGENT_MAX_SUBFLOW_CALLS_INVALID:{node_id}")
             if isinstance(allowed_tools, list) and "chamar_webhook" in [str(t) for t in allowed_tools]:
                 webhooks = data.get("webhooks") or []
                 if not isinstance(webhooks, list) or not webhooks:
