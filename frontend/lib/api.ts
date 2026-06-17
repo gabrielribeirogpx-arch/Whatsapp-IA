@@ -836,3 +836,59 @@ export async function completeTask(taskId: string): Promise<TaskItem> {
   const res = await apiFetch(`/api/tasks/${taskId}/complete`, { method: 'POST' });
   return parseApiResponse<TaskItem>(res);
 }
+
+export type AIExecution = {
+  id: string;
+  tenant_id: string;
+  conversation_id: string | null;
+  session_id: string | null;
+  flow_id: string | null;
+  flow_version_id: string | null;
+  node_id: string;
+  node_type: string;
+  provider: string | null;
+  model: string | null;
+  started_at: string;
+  finished_at: string | null;
+  latency_ms: number | null;
+  status: string;
+  input_size: number | null;
+  output_size: number | null;
+  prompt_tokens: number | null;
+  completion_tokens: number | null;
+  total_tokens: number | null;
+  retrieval_mode: string | null;
+  confidence: number | null;
+  fallback_used: boolean;
+  created_at: string;
+  metadata: Record<string, unknown>;
+};
+
+export type AIExecutionsResponse = {
+  items: AIExecution[];
+  page: number;
+  page_size: number;
+  total: number;
+  metrics: {
+    today: number;
+    avg_latency_ms: number;
+    fallback_percent: number;
+    avg_confidence: number | null;
+    top_providers: Array<{ name: string; count: number }>;
+    top_models: Array<{ name: string; count: number }>;
+  };
+};
+
+export async function listAIExecutions(filters: Record<string, string | number | boolean | undefined | null> = {}): Promise<AIExecutionsResponse> {
+  const params = new URLSearchParams();
+  Object.entries(filters).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && value !== '') params.set(key, String(value));
+  });
+  const res = await apiFetch(`/api/ai/executions${params.toString() ? `?${params.toString()}` : ''}`);
+  return parseApiResponse<AIExecutionsResponse>(res);
+}
+
+export async function getAIExecution(id: string): Promise<AIExecution> {
+  const res = await apiFetch(`/api/ai/executions/${id}`);
+  return parseApiResponse<AIExecution>(res);
+}
