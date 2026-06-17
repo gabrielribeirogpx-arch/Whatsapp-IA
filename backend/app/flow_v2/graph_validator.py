@@ -26,7 +26,7 @@ SAFE_NAME_RE = re.compile(r"^[A-Za-z0-9_.]+$")
 class FlowV2GraphValidator:
     """Validates Flow Publisher V2 graphs before immutable snapshot creation."""
 
-    SUPPORTED_NODE_TYPES = {"message", "choice", "condition", "delay", "action", "media", "cta_url", "ai_rag", "ai_response", "ai_classification", "ai_extraction", "start"}
+    SUPPORTED_NODE_TYPES = {"message", "choice", "condition", "delay", "action", "media", "cta_url", "ai_rag", "ai_response", "ai_classification", "ai_extraction", "ai_summary", "start"}
     SUPPORTED_CONDITION_OPERATORS = {"==", "eq", "equals"}
     SUPPORTED_BUILDER_MATCH_TYPES = {"contains", "equals", "eq", "=="}
 
@@ -266,6 +266,20 @@ class FlowV2GraphValidator:
                     if not SAFE_NAME_RE.match(name):
                         errors.append(f"FLOW_V2_AI_EXTRACTION_FIELD_NAME_INVALID:{node_id}:{index}")
             output_variable = str(data.get("output_variable") or data.get("outputVariable") or "ai.extraction")
+            if not SAFE_NAME_RE.match(output_variable):
+                errors.append(f"FLOW_V2_AI_OUTPUT_VARIABLE_INVALID:{node_id}")
+        elif node_type == "ai_summary":
+            if any(str(data.get(key) or "").strip() for key in ("api_key", "apiKey", "openai_api_key", "provider_api_key")):
+                errors.append(f"FLOW_V2_AI_NODE_API_KEY_FORBIDDEN:{node_id}")
+            summary_source = str(data.get("summary_source") or data.get("summarySource") or "conversation_history").strip().lower()
+            if summary_source not in {"conversation_history", "custom_text"}:
+                errors.append(f"FLOW_V2_AI_SUMMARY_SOURCE_INVALID:{node_id}")
+            if summary_source == "custom_text" and not str(data.get("input_template") or data.get("inputTemplate") or "").strip():
+                errors.append(f"FLOW_V2_AI_SUMMARY_INPUT_TEMPLATE_REQUIRED:{node_id}")
+            summary_format = str(data.get("summary_format") or data.get("summaryFormat") or "handoff").strip().lower()
+            if summary_format not in {"short", "detailed", "bullet_points", "handoff"}:
+                errors.append(f"FLOW_V2_AI_SUMMARY_FORMAT_INVALID:{node_id}")
+            output_variable = str(data.get("output_variable") or data.get("outputVariable") or "ai.summary")
             if not SAFE_NAME_RE.match(output_variable):
                 errors.append(f"FLOW_V2_AI_OUTPUT_VARIABLE_INVALID:{node_id}")
 
