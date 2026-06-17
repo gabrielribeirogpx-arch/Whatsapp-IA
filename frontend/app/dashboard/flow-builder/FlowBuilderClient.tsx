@@ -19,6 +19,7 @@ import type { LucideIcon } from 'lucide-react';
 
 import ActionNode from '@/components/flow/nodes/ActionNode';
 import AiRagNode from '@/components/flow/nodes/AiRagNode';
+import AiResponseNode from '@/components/flow/nodes/AiResponseNode';
 import AiClassificationNode from '@/components/flow/nodes/AiClassificationNode';
 import AiExtractionNode from '@/components/flow/nodes/AiExtractionNode';
 import ChoiceNode from '@/components/flow/nodes/ChoiceNode';
@@ -47,6 +48,7 @@ const nodeTypes = {
   media: MediaNode,
   cta_url: CtaUrlNode,
   ai_rag: AiRagNode,
+  ai_response: AiResponseNode,
   ai_classification: AiClassificationNode,
   ai_extraction: AiExtractionNode,
   cta_link: CtaUrlNode,
@@ -59,7 +61,7 @@ const nodeTypes = {
   ctaUrlNode: CtaUrlNode,
 };
 
-type FlowNodeKind = 'message' | 'choice' | 'condition' | 'delay' | 'action' | 'media' | 'cta_url' | 'ai_rag' | 'ai_classification' | 'ai_extraction';
+type FlowNodeKind = 'message' | 'choice' | 'condition' | 'delay' | 'action' | 'media' | 'cta_url' | 'ai_rag' | 'ai_response' | 'ai_classification' | 'ai_extraction';
 type FlowConnection = Connection & { sourceHandle?: string | null };
 type NodePaletteItem = { kind: FlowNodeKind; label: string; icon: LucideIcon; description?: string };
 type NodePaletteGroup = { id: 'communication' | 'ai' | 'logic' | 'actions'; title: string; icon: LucideIcon; nodes: NodePaletteItem[] };
@@ -80,6 +82,12 @@ const NODE_GROUPS: NodePaletteGroup[] = [
     title: 'Inteligência Artificial',
     icon: Sparkles,
     nodes: [
+      {
+        kind: 'ai_response',
+        label: 'IA Resposta',
+        icon: Sparkles,
+        description: 'Converse utilizando Inteligência Artificial sem utilizar Base de Conhecimento.',
+      },
       {
         kind: 'ai_rag',
         label: 'IA Conhecimento',
@@ -188,6 +196,7 @@ const NODE_PRESETS: Record<FlowNodeKind, { label: string; type: string; data: Re
   media: { label: 'Mídia', type: 'media', data: { media_type: 'image', media_url: '', caption: '', filename: '' } },
   cta_url: { label: 'CTA / Link', type: 'cta_url', data: { content: '', text: '', button_text: '', url: '', is_terminal: false } },
   ai_rag: { label: 'IA / RAG', type: 'ai_rag', data: { after_answer_behavior: 'end_flow', instruction: 'Responda como atendente da prefeitura.', question: '{{last_message}}', top_k: 5, use_workspace_ai_settings: true, model_override: '', temperature: 0.2, max_tokens: 1200, knowledge_only: true, memory_enabled: true, memory_max_messages: 10, memory_max_chars: 4000, fallback_message: 'Não encontrei essa informação com segurança na base disponível. Quer que eu encaminhe para um atendente?', is_terminal: false } },
+  ai_response: { label: 'IA Resposta', type: 'ai_response', data: { after_answer_behavior: 'end_flow', instruction: 'Responda como atendente.', question: '{{last_message}}', model_override: '', temperature: 0.2, max_tokens: 1200, memory_enabled: true, memory_max_messages: 10, memory_max_chars: 4000 } },
   ai_classification: { label: 'IA Classificação', type: 'ai_classification', data: { instruction: '', input_template: '{{last_message}}', categories: ['financeiro', 'vendas', 'suporte', 'outro'], allow_other: true, confidence_threshold: 0.6, output_variable: 'ai.classification', save_to_contact: false, save_to_lead: false, send_debug_message: false } },
   ai_extraction: { label: 'IA Extração', type: 'ai_extraction', data: { instruction: '', input_template: '{{last_message}}', fields: [{ name: 'nome', type: 'string', description: 'Nome da pessoa' }, { name: 'email', type: 'email', description: 'E-mail' }], include_conversation_history: true, output_variable: 'ai.extraction', save_to_contact: false, save_to_lead: true, send_debug_message: false } },
 };
@@ -505,7 +514,7 @@ function FlowNodeEditorPanel({
     if (displayMode === 'buttons' && buttons.length >= 3) return;
     onDraftChange({ buttons: [...buttons, { id: `${node.id}-button-${nextIndex}`, label: `Opção ${nextIndex}`, handleId: `option_${nextIndex}` }] });
   };
-  const supportsVariables = ['message', 'choice', 'media', 'cta_url', 'condition', 'action', 'ai_rag', 'ai_classification', 'ai_extraction'].includes(kind);
+  const supportsVariables = ['message', 'choice', 'media', 'cta_url', 'condition', 'action', 'ai_rag', 'ai_response', 'ai_classification', 'ai_extraction'].includes(kind);
 
 
   return (
@@ -741,6 +750,67 @@ function FlowNodeEditorPanel({
                   <strong>Manter conversa neste bloco</strong>
                   <small>Ideal para atendimento contínuo. Cada nova mensagem retorna para este mesmo node.</small>
                 </span>
+              </label>
+            </fieldset>
+          </>
+        )}
+
+        {kind === 'ai_response' && (
+          <>
+            <div className="flow-editor-info-card"><strong>Tipo:</strong> IA Resposta <span>IA</span></div>
+            <label className="flow-editor-field">
+              Instrução do assistente
+              <textarea value={toText(draft.instruction)} onChange={(event) => onDraftChange({ instruction: event.target.value })} placeholder="Responda como atendente." />
+            </label>
+            <label className="flow-editor-field">
+              Pergunta
+              <input value={toText(draft.question || '{{last_message}}')} onChange={(event) => onDraftChange({ question: event.target.value })} placeholder="{{last_message}}" />
+            </label>
+            <label className="flow-editor-radio">
+              <input type="checkbox" checked={draft.memory_enabled !== false} onChange={(event) => onDraftChange({ memory_enabled: event.target.checked })} />
+              Usar memória da conversa
+            </label>
+            <div className="flow-editor-row">
+              <label className="flow-editor-field">
+                Máximo de mensagens
+                <input type="number" min="1" max="30" value={toText(draft.memory_max_messages || 10)} onChange={(event) => onDraftChange({ memory_max_messages: Number(event.target.value || 10) })} disabled={draft.memory_enabled === false} />
+              </label>
+              <label className="flow-editor-field">
+                Máximo de caracteres
+                <input type="number" min="500" max="12000" value={toText(draft.memory_max_chars || 4000)} onChange={(event) => onDraftChange({ memory_max_chars: Number(event.target.value || 4000) })} disabled={draft.memory_enabled === false} />
+              </label>
+            </div>
+            <label className="flow-editor-field">
+              Sobrescrever modelo (opcional)
+              <input value={toText(draft.model_override)} onChange={(event) => onDraftChange({ model_override: event.target.value })} placeholder="Ex.: gpt-4o-mini" />
+              <small>Não insira API key neste node. A IA sempre usa as configurações do workspace.</small>
+            </label>
+            <div className="flow-editor-row">
+              <label className="flow-editor-field">
+                Temperatura
+                <input type="number" min="0" max="1" step="0.1" value={toText(draft.temperature ?? 0.2)} onChange={(event) => onDraftChange({ temperature: Number(event.target.value || 0.2) })} />
+              </label>
+              <label className="flow-editor-field">
+                Máx tokens
+                <input type="number" min="1" max="8000" value={toText(draft.max_tokens || 1200)} onChange={(event) => onDraftChange({ max_tokens: Number(event.target.value || 1200) })} />
+              </label>
+            </div>
+            <fieldset className="flow-editor-field flow-editor-after-answer">
+              <legend>Depois de responder</legend>
+              <label className="flow-editor-choice-card">
+                <input type="radio" name={`ai-response-after-answer-${node.id}`} checked={(draft.after_answer_behavior || 'end_flow') === 'end_flow'} onChange={() => onDraftChange({ after_answer_behavior: 'end_flow', is_terminal: false, endFlow: false })} />
+                <span className="flow-editor-choice-icon" aria-hidden="true">✓</span>
+                <span><strong>Encerrar fluxo</strong><small>A sessão termina após a resposta da IA.</small></span>
+              </label>
+              <label className="flow-editor-choice-card">
+                <input type="radio" name={`ai-response-after-answer-${node.id}`} checked={draft.after_answer_behavior === 'continue_to_next'} onChange={() => onDraftChange({ after_answer_behavior: 'continue_to_next', is_terminal: false, endFlow: false })} />
+                <span className="flow-editor-choice-icon" aria-hidden="true">↗</span>
+                <span><strong>Continuar para próximo node</strong><small>O fluxo segue pela conexão de saída.</small></span>
+              </label>
+              <label className="flow-editor-choice-card">
+                <input type="radio" name={`ai-response-after-answer-${node.id}`} checked={draft.after_answer_behavior === 'wait_same_node'} onChange={() => onDraftChange({ after_answer_behavior: 'wait_same_node', is_terminal: false, endFlow: false })} />
+                <span className="flow-editor-choice-icon" aria-hidden="true">↻</span>
+                <span><strong>Aguardar nova mensagem neste node</strong><small>Cada nova mensagem retorna para este mesmo node.</small></span>
               </label>
             </fieldset>
           </>

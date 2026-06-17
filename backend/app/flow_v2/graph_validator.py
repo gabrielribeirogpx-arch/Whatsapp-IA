@@ -26,7 +26,7 @@ SAFE_NAME_RE = re.compile(r"^[A-Za-z0-9_.]+$")
 class FlowV2GraphValidator:
     """Validates Flow Publisher V2 graphs before immutable snapshot creation."""
 
-    SUPPORTED_NODE_TYPES = {"message", "choice", "condition", "delay", "action", "media", "cta_url", "ai_rag", "ai_classification", "ai_extraction", "start"}
+    SUPPORTED_NODE_TYPES = {"message", "choice", "condition", "delay", "action", "media", "cta_url", "ai_rag", "ai_response", "ai_classification", "ai_extraction", "start"}
     SUPPORTED_CONDITION_OPERATORS = {"==", "eq", "equals"}
     SUPPORTED_BUILDER_MATCH_TYPES = {"contains", "equals", "eq", "=="}
 
@@ -40,7 +40,7 @@ class FlowV2GraphValidator:
         node_ids = self._validate_nodes(nodes_payload, errors)
         self._validate_edges(edges_payload, node_ids, errors)
         self._validate_choice_edges(nodes_payload, edges_payload, errors)
-        self._validate_ai_rag_edges(nodes_payload, edges_payload, errors)
+        self._validate_ai_answer_edges(nodes_payload, edges_payload, errors)
         start_node_ids = self._start_node_ids(nodes_payload)
         if len(start_node_ids) != 1:
             errors.append("FLOW_V2_REQUIRES_EXACTLY_ONE_START_NODE")
@@ -134,7 +134,7 @@ class FlowV2GraphValidator:
                 errors.append(f"FLOW_V2_CHOICE_SOURCE_HANDLE_REQUIRED:{source}:{index}")
 
 
-    def _validate_ai_rag_edges(
+    def _validate_ai_answer_edges(
         self,
         nodes: list[dict[str, Any]],
         edges: list[dict[str, Any]],
@@ -142,16 +142,17 @@ class FlowV2GraphValidator:
     ) -> None:
         outgoing_sources = {str(self._edge_source(edge)) for edge in edges if isinstance(edge, dict) and self._edge_source(edge) not in (None, "")}
         for node in nodes:
-            if not isinstance(node, dict) or node.get("id") in (None, "") or self._node_type(node) != "ai_rag":
+            if not isinstance(node, dict) or node.get("id") in (None, "") or self._node_type(node) not in {"ai_rag", "ai_response"}:
                 continue
             node_id = str(node["id"])
+            node_type = self._node_type(node).upper()
             data = self._node_data(node)
             behavior = str(data.get("after_answer_behavior") or data.get("afterAnswerBehavior") or "end_flow").strip().lower()
             if behavior not in {"end_flow", "continue_to_next", "wait_same_node"}:
-                errors.append(f"FLOW_V2_AI_RAG_AFTER_ANSWER_BEHAVIOR_INVALID:{node_id}")
+                errors.append(f"FLOW_V2_{node_type}_AFTER_ANSWER_BEHAVIOR_INVALID:{node_id}")
                 continue
             if behavior == "continue_to_next" and node_id not in outgoing_sources:
-                errors.append(f"FLOW_V2_AI_RAG_CONTINUE_TO_NEXT_REQUIRES_EDGE:{node_id}")
+                errors.append(f"FLOW_V2_{node_type}_CONTINUE_TO_NEXT_REQUIRES_EDGE:{node_id}")
 
     def _validate_reachability(
         self,
@@ -241,6 +242,9 @@ class FlowV2GraphValidator:
             for index, condition in enumerate(conditions):
                 if not self._is_valid_condition(condition):
                     errors.append(f"FLOW_V2_CONDITION_CONFIG_INVALID:{node_id}:{index}")
+        elif node_type in {"ai_rag", "ai_response"}:
+            if any(str(data.get(key) or "").strip() for key in ("api_key", "apiKey", "openai_api_key", "provider_api_key")):
+                errors.append(f"FLOW_V2_AI_NODE_API_KEY_FORBIDDEN:{node_id}")
         elif node_type == "ai_classification":
             if any(str(data.get(key) or "").strip() for key in ("api_key", "apiKey", "openai_api_key", "provider_api_key")):
                 errors.append(f"FLOW_V2_AI_NODE_API_KEY_FORBIDDEN:{node_id}")
