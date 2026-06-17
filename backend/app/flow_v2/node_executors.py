@@ -1484,6 +1484,20 @@ class ActionNodeExecutor(BaseNodeExecutor):
 
 
 class AiRagNodeExecutor(BaseNodeExecutor):
+    _INTERNAL_RAG_PLACEHOLDER_RE = re.compile(r"{{\s*(assistant_instruction|chunks|history)\s*}}")
+
+    @classmethod
+    def _strip_internal_rag_placeholders(cls, value: Any) -> Any:
+        if not isinstance(value, str):
+            return value
+        return cls._INTERNAL_RAG_PLACEHOLDER_RE.sub("", value)
+
+    def _render_rag_public_template(self, value: Any, default: str, db, *, snapshot, session, runtime_input) -> str:
+        cleaned = self._strip_internal_rag_placeholders(value)
+        rendered = self._render(cleaned if cleaned not in (None, "") else default, db, snapshot=snapshot, session=session, runtime_input=runtime_input)
+        text = str(rendered or "").strip()
+        return text or default
+
     @staticmethod
     def _coerce_int_config(value: Any, *, default: int, field_name: str, node_id: str) -> int:
         if value is None or value == "":
@@ -1513,9 +1527,9 @@ class AiRagNodeExecutor(BaseNodeExecutor):
     def execute(self, db, *, snapshot, session, node, runtime_input) -> NodeExecutionResult:
         node_id = str(node["id"])
         data = self._node_data(node)
-        instruction = self._render(data.get("instruction") or data.get("assistant_instruction") or "Responda como atendente.", db, snapshot=snapshot, session=session, runtime_input=runtime_input)
-        question = self._render(data.get("question") or "{{last_message}}", db, snapshot=snapshot, session=session, runtime_input=runtime_input)
-        fallback = self._render(data.get("fallback_message") or "Não encontrei essa informação na base disponível. Posso encaminhar para um atendente?", db, snapshot=snapshot, session=session, runtime_input=runtime_input)
+        instruction = self._render_rag_public_template(data.get("instruction") or data.get("assistant_instruction"), "Responda como atendente.", db, snapshot=snapshot, session=session, runtime_input=runtime_input)
+        question = self._render_rag_public_template(data.get("question"), "{{last_message}}", db, snapshot=snapshot, session=session, runtime_input=runtime_input)
+        fallback = self._render_rag_public_template(data.get("fallback_message"), "Não encontrei essa informação com segurança na base disponível. Quer que eu encaminhe para um atendente?", db, snapshot=snapshot, session=session, runtime_input=runtime_input)
         top_k = self._coerce_int_config(data.get("top_k", data.get("topK")), default=5, field_name="top_k", node_id=node_id)
         use_workspace_ai_settings = data.get("use_workspace_ai_settings", data.get("useWorkspaceAiSettings", True)) is not False
         temperature = None if use_workspace_ai_settings else self._coerce_float_config(data.get("temperature"), default=0.2, field_name="temperature", node_id=node_id)
