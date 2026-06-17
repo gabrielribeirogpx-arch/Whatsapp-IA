@@ -23,7 +23,7 @@ export default function AiRagNode({ id, data, selected }: NodeProps) {
       id={id}
       selected={selected}
       running={nodeData.running}
-      title="IA / RAG"
+      title="IA Conhecimento"
       emoji="✨"
       badge={nodeData.memory_enabled === false ? 'Sem memória' : (nodeData.after_answer_behavior === 'wait_same_node' ? 'Contínuo' : 'RAG')}
       badgeTitle={nodeData.after_answer_behavior === 'wait_same_node' ? 'Aguarda nova mensagem neste node' : 'Base de conhecimento'}

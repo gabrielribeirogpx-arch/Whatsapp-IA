@@ -14,7 +14,7 @@ import ReactFlow, {
 } from 'reactflow';
 import type { Connection, Edge, EdgeChange, Node, NodeChange, ReactFlowInstance } from 'reactflow';
 import 'reactflow/dist/style.css';
-import { Bot, ChevronDown, Clock, ExternalLink, FileImage, GitBranch, HelpCircle, History, ListChecks, MessageSquare, RotateCcw, Sparkles, Zap } from 'lucide-react';
+import { BookOpen, ChevronDown, Clock, ExternalLink, FileDown, FileImage, GitBranch, HelpCircle, History, ListChecks, MessageSquare, RotateCcw, Sparkles, Tags, Zap } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 
 import ActionNode from '@/components/flow/nodes/ActionNode';
@@ -61,7 +61,7 @@ const nodeTypes = {
 
 type FlowNodeKind = 'message' | 'choice' | 'condition' | 'delay' | 'action' | 'media' | 'cta_url' | 'ai_rag' | 'ai_classification' | 'ai_extraction';
 type FlowConnection = Connection & { sourceHandle?: string | null };
-type NodePaletteItem = { kind: FlowNodeKind; label: string; icon: LucideIcon };
+type NodePaletteItem = { kind: FlowNodeKind; label: string; icon: LucideIcon; description?: string };
 type NodePaletteGroup = { id: 'communication' | 'ai' | 'logic' | 'actions'; title: string; icon: LucideIcon; nodes: NodePaletteItem[] };
 
 const NODE_GROUPS: NodePaletteGroup[] = [
@@ -80,9 +80,24 @@ const NODE_GROUPS: NodePaletteGroup[] = [
     title: 'Inteligência Artificial',
     icon: Sparkles,
     nodes: [
-      { kind: 'ai_rag', label: 'IA / RAG', icon: Bot },
-      { kind: 'ai_classification', label: 'IA Classificação', icon: Bot },
-      { kind: 'ai_extraction', label: 'IA Extração', icon: Bot },
+      {
+        kind: 'ai_rag',
+        label: 'IA Conhecimento',
+        icon: BookOpen,
+        description: 'Responde utilizando documentos e base de conhecimento.',
+      },
+      {
+        kind: 'ai_classification',
+        label: 'IA Classificação',
+        icon: Tags,
+        description: 'Classifica automaticamente a intenção da mensagem.',
+      },
+      {
+        kind: 'ai_extraction',
+        label: 'IA Extração',
+        icon: FileDown,
+        description: 'Extrai informações estruturadas da conversa.',
+      },
       // Futuros nodes de IA: IA Resposta, IA Resumo, IA Memória, IA Agente.
     ],
   },
@@ -2616,9 +2631,18 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
                 </button>
 
                 <div className="flow-node-group-items" aria-hidden={!isOpen}>
-                  {group.nodes.map(({ kind, label, icon: Icon }) => (
-                    <button key={kind} type="button" className="dash-nav-item flow-node-palette-item" onClick={() => addNode(kind)} title={label}>
-                      <Icon size={18} strokeWidth={1.8} className="text-current" />
+                  {group.nodes.map(({ kind, label, icon: Icon, description }) => (
+                    <button
+                      key={kind}
+                      type="button"
+                      className="dash-nav-item flow-node-palette-item"
+                      onClick={() => addNode(kind)}
+                      title={description || label}
+                      data-tooltip={description}
+                    >
+                      <span className="flow-node-palette-item-icon" aria-hidden="true">
+                        <Icon size={17} strokeWidth={1.9} className="text-current" />
+                      </span>
                       <span className="dash-nav-label">{label}</span>
                     </button>
                   ))}
