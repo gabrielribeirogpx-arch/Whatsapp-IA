@@ -526,6 +526,14 @@ def validate_flow_graph(nodes: list[dict[str, Any]] | None, edges: list[dict[str
             handles = condition_handles.get(node_id, set())
             if not {"true", "false"}.issubset(handles):
                 add_issue(errors, "CONDITION_REQUIRES_TRUE_FALSE", node_id, "Condition precisa ter saída SIM e saída NÃO.")
+        elif node_type == "ai_classification":
+            categories = data.get("categories")
+            if not isinstance(categories, list) or len([c for c in categories if str(c).strip()]) < 2:
+                add_issue(errors, "AI_CLASSIFICATION_CATEGORIES_INVALID", node_id, "IA Classificação precisa de pelo menos 2 categorias.")
+        elif node_type == "ai_extraction":
+            fields = data.get("fields")
+            if not isinstance(fields, list) or not fields:
+                add_issue(errors, "AI_EXTRACTION_FIELDS_INVALID", node_id, "IA Extração precisa de pelo menos 1 campo.")
 
         missing_output = outgoing.get(node_id, 0) < 1
         if node_type == "ai_rag" and missing_output:
