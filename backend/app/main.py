@@ -25,6 +25,7 @@ from app.routers import settings
 from app.routers import account
 from app.routers import ai_settings
 from app.routers import ai_executions
+from app.routers import ai_memories
 from app.routers import bot_rules
 from app.routers import flows
 from app.routers import flow_media
@@ -233,6 +234,7 @@ app.include_router(settings.router, prefix="/api")
 app.include_router(account.router, prefix="/api")
 app.include_router(ai_settings.router, prefix="/api")
 app.include_router(ai_executions.router, prefix="/api")
+app.include_router(ai_memories.router, prefix="/api")
 app.include_router(bot_rules.router)
 app.include_router(flows.crud_router, prefix="/api/flows", tags=["flows"])
 app.include_router(flow_media.router)
