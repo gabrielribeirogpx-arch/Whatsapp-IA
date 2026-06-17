@@ -39,6 +39,7 @@ from app.services.contextual_query_service import (
     store_cached_standalone,
 )
 from app.services.rag_service import answer_with_rag
+from app.services.llm_service import generate_answer_for_tenant
 from app.services.ai_structured_service import classify_for_tenant, extract_for_tenant
 from app.flow_v2.snapshot import FlowV2Snapshot, build_transitions_from_edges
 from app.flow_v2.transition_resolver import TransitionResolver
@@ -1695,6 +1696,111 @@ class AiRagNodeExecutor(BaseNodeExecutor):
         return NodeExecutionResult(actions=(action,), next_node_id=next_node_id, status="continue")
 
 
+class AiResponseNodeExecutor(AiRagNodeExecutor):
+    """Pure LLM response node: tenant AI settings + optional flow memory, no RAG."""
+
+    def execute(self, db, *, snapshot, session, node, runtime_input) -> NodeExecutionResult:
+        node_id = str(node["id"])
+        data = self._node_data(node)
+        instruction = self._render_rag_public_template(
+            data.get("instruction") or data.get("assistant_instruction"),
+            "Responda como atendente.",
+            db,
+            snapshot=snapshot,
+            session=session,
+            runtime_input=runtime_input,
+        )
+        question = self._render_rag_public_template(
+            data.get("question") or data.get("input_template") or data.get("inputTemplate"),
+            "{{last_message}}",
+            db,
+            snapshot=snapshot,
+            session=session,
+            runtime_input=runtime_input,
+        )
+        behavior = _normalize_ai_rag_after_answer_behavior(data)
+        memory_enabled = data.get("memory_enabled", data.get("memoryEnabled", True)) is not False
+        memory_max_messages = self._coerce_int_config(data.get("memory_max_messages", data.get("memoryMaxMessages")), default=10, field_name="memory_max_messages", node_id=node_id)
+        memory_max_chars = self._coerce_int_config(data.get("memory_max_chars", data.get("memoryMaxChars")), default=4000, field_name="memory_max_chars", node_id=node_id)
+        temperature = None if data.get("temperature") in (None, "") else self._coerce_float_config(data.get("temperature"), default=0.2, field_name="temperature", node_id=node_id)
+        max_tokens = None if data.get("max_tokens", data.get("maxTokens")) in (None, "") else self._coerce_int_config(data.get("max_tokens", data.get("maxTokens")), default=1200, field_name="max_tokens", node_id=node_id)
+        chat_model = data.get("chat_model_override") or data.get("chat_model") or data.get("model_override") or data.get("model") or None
+
+        conversation_history = ""
+        is_first_ai_turn = True
+        flow_id = getattr(snapshot, "flow_id", None)
+        if flow_id is None and hasattr(db, "get"):
+            flow_version = db.get(FlowVersion, session.flow_version_id)
+            flow_id = getattr(flow_version, "flow_id", None)
+        if memory_enabled and flow_id is not None:
+            flow_ai_memory_service.append_user_message(
+                db,
+                tenant_id=session.tenant_id,
+                flow_id=flow_id,
+                flow_version_id=session.flow_version_id,
+                session_id=session.id,
+                conversation_id=runtime_input.conversation_id,
+                contact_id=runtime_input.contact_id,
+                node_id=node_id,
+                content=str(question),
+                metadata={**runtime_input.metadata, "intent": "ai_response"},
+            )
+            history_messages = flow_ai_memory_service.get_recent_history(db, tenant_id=session.tenant_id, session_id=session.id, max_messages=memory_max_messages, max_chars=memory_max_chars)
+            conversation_history = flow_ai_memory_service.build_history_for_prompt(history_messages)
+            is_first_ai_turn = not any(message.role == "assistant" for message in history_messages)
+
+        messages: list[dict[str, str]] = [{"role": "system", "content": str(instruction)}]
+        if conversation_history:
+            messages.append({"role": "system", "content": f"Histórico recente da conversa:\n{conversation_history}"})
+        messages.append({"role": "user", "content": str(question)})
+        options = {
+            key: value
+            for key, value in {"chat_model": chat_model, "temperature": temperature, "max_tokens": max_tokens}.items()
+            if value not in (None, "")
+        }
+        try:
+            text = generate_answer_for_tenant(db, session.tenant_id, messages, options=options)
+            metadata = {
+                "node_id": node_id,
+                "intent": "ai_response",
+                "memory_enabled": memory_enabled,
+                "is_first_ai_turn": is_first_ai_turn,
+            }
+        except Exception as exc:
+            logger.warning("[AI RESPONSE NODE] failed node_id=%s error=%s", node_id, exc)
+            text = "Não consegui gerar uma resposta agora. Tente novamente em instantes."
+            metadata = {"node_id": node_id, "intent": "ai_response", "error": "llm_failed", "memory_enabled": memory_enabled, "is_first_ai_turn": is_first_ai_turn}
+
+        self.event_store.append(db, session=session, event_type=FlowV2EventType.MESSAGE_SENT, node_id=node_id, payload={"node_id": node_id, "message": text, "metadata": metadata})
+        if memory_enabled and flow_id is not None and text:
+            flow_ai_memory_service.append_assistant_message(
+                db,
+                tenant_id=session.tenant_id,
+                flow_id=flow_id,
+                flow_version_id=session.flow_version_id,
+                session_id=session.id,
+                conversation_id=runtime_input.conversation_id,
+                contact_id=runtime_input.contact_id,
+                node_id=node_id,
+                content=text,
+                metadata={"intent": "ai_response", "is_first_ai_turn": is_first_ai_turn},
+            )
+        try:
+            if runtime_input.conversation_id:
+                db.add(ConversationLog(tenant_id=session.tenant_id, conversation_id=runtime_input.conversation_id, message=str(question)[:1000], mode="flow_v2", intent="ai_response", response=text[:1000], used_fallback=bool(metadata.get("error"))))
+        except Exception:
+            logger.debug("[AI RESPONSE NODE] conversation log skipped", exc_info=True)
+        action = SendMessageAction(tenant_id=session.tenant_id, session_id=session.id, external_user_id=runtime_input.external_user_id, conversation_id=runtime_input.conversation_id, contact_id=runtime_input.contact_id, text=text, metadata={**runtime_input.metadata, **metadata})
+        next_node_id = self._default_next_or_terminal(db, snapshot=snapshot, session=session, node_id=node_id)
+        if behavior == AiRagAfterAnswerBehavior.END_FLOW:
+            return NodeExecutionResult(actions=(action,), next_node_id=None, status="complete")
+        if behavior == AiRagAfterAnswerBehavior.WAIT_SAME_NODE:
+            return NodeExecutionResult(actions=(action,), next_node_id=node_id, status="wait")
+        if next_node_id is None:
+            return NodeExecutionResult(actions=(action,), next_node_id=None, status="complete")
+        return NodeExecutionResult(actions=(action,), next_node_id=next_node_id, status="continue")
+
+
 def _set_nested_value(target: dict[str, Any], path: str, value: Any) -> None:
     parts = [part for part in str(path or "").split(".") if part]
     if not parts:
@@ -1814,6 +1920,9 @@ class NodeExecutorRegistry:
                 event_store=event_store, transition_resolver=transition_resolver
             ),
             "ai_rag": AiRagNodeExecutor(
+                event_store=event_store, transition_resolver=transition_resolver
+            ),
+            "ai_response": AiResponseNodeExecutor(
                 event_store=event_store, transition_resolver=transition_resolver
             ),
             "ai_classification": AiClassificationNodeExecutor(

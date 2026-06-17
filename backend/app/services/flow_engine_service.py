@@ -414,13 +414,13 @@ def _is_terminal_message_node(data: dict[str, Any]) -> bool:
     )
 
 
-def _ai_rag_after_answer_behavior(data: dict[str, Any]) -> str:
+def _ai_after_answer_behavior(data: dict[str, Any]) -> str:
     behavior = str(data.get("after_answer_behavior") or data.get("afterAnswerBehavior") or "end_flow").strip().lower()
     return behavior if behavior in {"end_flow", "continue_to_next", "wait_same_node"} else "end_flow"
 
 
-def _ai_rag_allows_missing_output(data: dict[str, Any]) -> bool:
-    return _ai_rag_after_answer_behavior(data) in {"end_flow", "wait_same_node"}
+def _ai_allows_missing_output(data: dict[str, Any]) -> bool:
+    return _ai_after_answer_behavior(data) in {"end_flow", "wait_same_node"}
 
 
 def validate_flow_graph(nodes: list[dict[str, Any]] | None, edges: list[dict[str, Any]] | None, mode: str = "draft") -> dict[str, Any]:
@@ -536,9 +536,9 @@ def validate_flow_graph(nodes: list[dict[str, Any]] | None, edges: list[dict[str
                 add_issue(errors, "AI_EXTRACTION_FIELDS_INVALID", node_id, "IA Extração precisa de pelo menos 1 campo.")
 
         missing_output = outgoing.get(node_id, 0) < 1
-        if node_type == "ai_rag" and missing_output:
-            if _ai_rag_allows_missing_output(data):
-                logger.info("[FLOW VALIDATION AI_RAG NO_OUTPUT OK] node_id=%s behavior=%s", node_id, _ai_rag_after_answer_behavior(data))
+        if node_type in {"ai_rag", "ai_response"} and missing_output:
+            if _ai_allows_missing_output(data):
+                logger.info("[FLOW VALIDATION AI NO_OUTPUT OK] node_id=%s node_type=%s behavior=%s", node_id, node_type, _ai_after_answer_behavior(data))
             else:
                 add_issue(errors if strict_mode else warnings, "NODE_WITHOUT_OUTPUT", node_id, "Este node não tem saída. Conecte a outro node ou marque como final.")
         elif node_type == "message" and missing_output and is_terminal:
