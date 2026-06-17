@@ -1,3 +1,5 @@
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -12,6 +14,7 @@ from app.services.tenant_service import get_current_tenant
 from app.utils.encryption import decrypt_secret, encrypt_secret
 
 router = APIRouter(prefix="/ai/settings", tags=["ai-settings"])
+logger = logging.getLogger(__name__)
 
 
 def _get_settings(db: Session, tenant_id):
@@ -65,22 +68,36 @@ def update_ai_settings(payload: TenantAISettingsUpdate, tenant: Tenant = Depends
 def test_ai_settings(payload: TenantAISettingsTestRequest, tenant: Tenant = Depends(get_current_tenant), db: Session = Depends(get_db)):
     setting = _get_settings(db, tenant.id)
     provider = payload.provider or (setting.provider if setting else "wazza_default")
-    chat_model = payload.chat_model or (setting.chat_model if setting else None)
+    provider = provider.strip().lower()
+
+    api_key = ""
+    chat_model = None
+    if provider == "wazza_default":
+        try:
+            chat_model = validate_chat_model(payload.chat_model)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+    else:
+        chat_model = payload.chat_model or (setting.chat_model if setting else None)
+        try:
+            chat_model = validate_chat_model(chat_model)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        if not chat_model:
+            logger.warning("[AI SETTINGS TEST] validation_failed tenant_id=%s provider=%s reason=missing_chat_model", tenant.id, provider)
+            raise HTTPException(status_code=400, detail="Selecione um modelo de conversação.")
+        api_key = payload.api_key.strip() if payload.api_key else ""
+        if not api_key and setting and setting.encrypted_api_key:
+            api_key = decrypt_secret(setting.encrypted_api_key) or ""
+
     try:
-        chat_model = validate_chat_model(chat_model)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    if not chat_model:
-        raise HTTPException(status_code=400, detail="Selecione um modelo de conversação.")
-    api_key = payload.api_key.strip() if payload.api_key else None
-    if not api_key and setting and setting.encrypted_api_key:
-        api_key = decrypt_secret(setting.encrypted_api_key)
-    try:
-        test_provider_connection(provider, api_key or "", chat_model=chat_model)
+        test_provider_connection(provider, api_key, chat_model=chat_model)
     except LLMConfigurationError as exc:
+        logger.warning("[AI SETTINGS TEST] configuration_failed tenant_id=%s provider=%s model=%s reason=%s", tenant.id, provider, chat_model, exc)
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except LLMGenerationError as exc:
-        raise HTTPException(status_code=400, detail="Não foi possível validar a conexão com este provedor.") from exc
+        logger.warning("[AI SETTINGS TEST] provider_test_failed tenant_id=%s provider=%s model=%s reason=%s", tenant.id, provider, chat_model, exc)
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return TenantAISettingsTestOut(ok=True, message="Conexão validada com sucesso.")
 
 

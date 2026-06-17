@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import uuid
 from typing import Any
 
@@ -71,12 +72,71 @@ def _provider_env_key(provider: str) -> str | None:
     }.get(provider)
 
 
+def _sanitize_provider_message(value: Any) -> str:
+    message = str(value or "").replace("\n", " ").replace("\r", " ").strip()
+    message = re.sub(r"(?i)([?&](?:key|api_key)=)[^&\s]+", r"\1[REDACTED]", message)
+    message = re.sub(r"(?i)((?:x-api-key|api-key|authorization)\s*[:=]\s*)(bearer\s+)?\S+", r"\1[REDACTED]", message)
+    return message[:500]
+
+
+def _provider_error_details(exc: Exception) -> tuple[int | None, str | None, str]:
+    response = getattr(exc, "response", None)
+    status_code = getattr(exc, "status_code", None) or getattr(response, "status_code", None)
+    error_code = getattr(exc, "code", None)
+    message = getattr(exc, "message", None) or str(exc)
+
+    if response is not None:
+        try:
+            body = response.json()
+        except Exception:
+            body = None
+        if isinstance(body, dict):
+            error = body.get("error")
+            if isinstance(error, dict):
+                error_code = error_code or error.get("code") or error.get("type") or error.get("status")
+                message = error.get("message") or message
+            elif isinstance(error, str):
+                message = error or message
+            else:
+                error_code = error_code or body.get("code") or body.get("error_code")
+                message = body.get("message") or body.get("detail") or message
+
+    return status_code, str(error_code) if error_code else None, _sanitize_provider_message(message)
+
+
+def _friendly_provider_error(status_code: int | None, error_code: str | None, message: str) -> str:
+    normalized_code = (error_code or "").lower()
+    normalized_message = (message or "").lower()
+    if (
+        status_code == 401
+        or "invalid_api_key" in normalized_code
+        or "api_key_invalid" in normalized_code
+        or "authentication" in normalized_code
+        or "api key not valid" in normalized_message
+        or "invalid api key" in normalized_message
+    ):
+        return "A chave foi recusada pelo provedor."
+    if (
+        status_code in {403, 404}
+        or "model_not_found" in normalized_code
+        or "not_found" in normalized_code
+        or "permission" in normalized_message
+        or "model" in normalized_message and ("not found" in normalized_message or "not exist" in normalized_message)
+    ):
+        return "Modelo não encontrado ou sem permissão."
+    return "Não foi possível validar a conexão com este provedor."
+
+
 def _wazza_default_provider() -> tuple[str, str | None]:
     provider = os.getenv("AI_PROVIDER", "gemini").strip().lower()
     if provider not in {"openai", "gemini", "anthropic"}:
         provider = "gemini"
     api_key = os.getenv(_provider_env_key(provider) or "") or None
     return provider, api_key
+
+
+def _wazza_default_chat_model(provider: str) -> str | None:
+    return validate_chat_model(os.getenv("AI_MODEL") or DEFAULT_MODELS.get(provider) or DEFAULT_MODELS["wazza_default"])
 
 
 def _resolve_tenant_config(db: Session | None, tenant_id: uuid.UUID | str | None, options: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -156,16 +216,27 @@ def generate_answer(messages: list[dict[str, str]], model: str | None = None, te
     temp = _coerce_float(temperature if temperature is not None else os.getenv("AI_TEMPERATURE"), default=DEFAULT_TEMPERATURE, field_name="temperature", source="generate_answer")
     limit = _coerce_int(max_tokens if max_tokens is not None else os.getenv("AI_MAX_TOKENS"), default=DEFAULT_MAX_TOKENS, field_name="max_tokens", source="generate_answer")
     try:
+        logger.info("[AI PROVIDER CALL] provider=%s model=%s", resolved_provider, resolved_model)
         if resolved_provider == "openai":
             text = _generate_openai(messages, api_key=resolved_key, model=resolved_model, temperature=temp, max_tokens=limit)
         elif resolved_provider == "anthropic":
             text = _generate_anthropic(messages, api_key=resolved_key, model=resolved_model, temperature=temp, max_tokens=limit)
         else:
             text = _generate_gemini(messages, api_key=resolved_key, model=resolved_model, temperature=temp, max_tokens=limit)
+        logger.info("[AI PROVIDER RESPONSE] provider=%s model=%s status_code=ok", resolved_provider, resolved_model)
     except LLMConfigurationError:
         raise
     except Exception as exc:
-        raise LLMGenerationError("Falha ao gerar resposta de IA") from exc
+        status_code, error_code, message = _provider_error_details(exc)
+        logger.warning(
+            "[AI PROVIDER ERROR] provider=%s model=%s status_code=%s error_code=%s message=%s",
+            resolved_provider,
+            resolved_model,
+            status_code,
+            error_code,
+            message,
+        )
+        raise LLMGenerationError(_friendly_provider_error(status_code, error_code, message)) from exc
     if not text:
         raise LLMGenerationError("Resposta vazia do provedor de IA")
     return text
@@ -185,15 +256,21 @@ def generate_answer_for_tenant(db: Session, tenant_id: uuid.UUID, messages: list
 
 def test_provider_connection(provider: str, api_key: str, chat_model: str | None = None) -> None:
     provider = provider.strip().lower()
+    model = validate_chat_model(chat_model)
     if provider == "wazza_default":
         provider, api_key = _wazza_default_provider()
+        model = model or _wazza_default_chat_model(provider)
+        if not api_key:
+            raise LLMConfigurationError("IA padrão do Wazza não está configurada neste ambiente.")
+    elif not model:
+        raise LLMConfigurationError("Selecione um modelo de conversação.")
     if not api_key:
         raise LLMConfigurationError("Informe uma API key para testar a conexão.")
     generate_answer(
         [{"role": "user", "content": "Responda apenas OK."}],
         provider=provider,
         api_key=api_key,
-        model=validate_chat_model(chat_model) or DEFAULT_MODELS.get(provider),
+        model=model or DEFAULT_MODELS.get(provider),
         temperature=0,
         max_tokens=8,
     )
