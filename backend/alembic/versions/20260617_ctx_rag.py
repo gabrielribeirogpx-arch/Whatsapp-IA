@@ -1,6 +1,6 @@
 """flow v2 contextual retrieval session context
 
-Revision ID: 20260617_flow_v2_contextual_retrieval
+Revision ID: 20260617_ctx_rag
 Revises: 20260616_flow_ai_conversation_messages
 Create Date: 2026-06-17 00:00:00.000000
 """
@@ -10,7 +10,7 @@ from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
-revision = "20260617_flow_v2_contextual_retrieval"
+revision = "20260617_ctx_rag"
 down_revision = "20260616_flow_ai_memory"
 branch_labels = None
 depends_on = None
