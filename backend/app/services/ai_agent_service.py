@@ -18,7 +18,7 @@ SAFE_VARIABLE_RE = re.compile(r"^[A-Za-z0-9_.]+$")
 FORBIDDEN_NAME_PARTS = ("api_key", "apikey", "token", "secret", "password")
 SENSITIVE_HEADER_RE = re.compile(r"(authorization|api[-_]?key|token|secret|password|cookie)", re.I)
 PLACEHOLDER_TOOLS = {"criar_evento", "consultar_crm", "criar_pedido", "enviar_email", "transferir_humano"}
-SUPPORTED_TOOLS = {"responder", "definir_variavel", "chamar_webhook", "executar_node", "finalizar"} | PLACEHOLDER_TOOLS
+SUPPORTED_TOOLS = {"responder", "definir_variavel", "chamar_webhook", "executar_node", "executar_subflow", "finalizar"} | PLACEHOLDER_TOOLS
 
 
 @dataclass
@@ -116,7 +116,7 @@ def _call_webhook(webhook: dict[str, Any], payload: Any) -> dict[str, Any]:
         return {"ok": False, "error": type(exc).__name__}
 
 
-def run_agent_for_tenant(db: Session, tenant_id, input_text: str, instruction: str, allowed_tools: list[str], tool_configs: dict[str, Any] | None, memory_context: str | None = None, options: dict[str, Any] | None = None, node_tool_executor=None) -> AgentRunResult:
+def run_agent_for_tenant(db: Session, tenant_id, input_text: str, instruction: str, allowed_tools: list[str], tool_configs: dict[str, Any] | None, memory_context: str | None = None, options: dict[str, Any] | None = None, node_tool_executor=None, subflow_tool_executor=None) -> AgentRunResult:
     started = time.monotonic()
     opts = options or {}
     fallback = str(opts.get("fallback_message") or "Não consegui concluir essa ação agora. Quer que eu encaminhe para um atendente?")
@@ -124,10 +124,14 @@ def run_agent_for_tenant(db: Session, tenant_id, input_text: str, instruction: s
     allowed = [str(t) for t in (allowed_tools or []) if str(t) in SUPPORTED_TOOLS and str(t) != "finalizar"]
     webhooks = [w for w in ((tool_configs or {}).get("webhooks") or []) if isinstance(w, dict)]
     node_tools = [t for t in ((tool_configs or {}).get("node_tools") or []) if isinstance(t, dict)]
+    subflow_tools = [t for t in ((tool_configs or {}).get("subflow_tools") or []) if isinstance(t, dict)]
     blocked_tool_calls: list[dict[str, Any]] = []
     node_tool_calls: list[dict[str, Any]] = []
+    subflow_tool_calls: list[dict[str, Any]] = []
+    seen_subflow_inputs: set[tuple[str, str]] = set()
     seen_node_inputs: set[tuple[str, str]] = set()
     max_node_tool_calls = min(max(int(opts.get("max_node_tool_calls") or 3), 1), 5)
+    max_subflow_calls = min(max(int(opts.get("max_subflow_calls") or 2), 1), 3)
     state: list[dict[str, Any]] = []
     result = AgentRunResult()
     if not allowed:
@@ -139,6 +143,8 @@ def run_agent_for_tenant(db: Session, tenant_id, input_text: str, instruction: s
             "Use apenas ferramentas permitidas. Para responder ao usuário, use responder. Não invente resultado de ferramenta.",
             "Ferramentas/webhooks permitidos: " + _summarize_tools(allowed, webhooks),
             "Ferramentas do fluxo disponíveis: " + json.dumps([{"tool_id": str(t.get("tool_id")), "label": str(t.get("label", ""))[:80], "description": str(t.get("description", ""))[:300]} for t in node_tools], ensure_ascii=False),
+            "Subflows disponíveis como ferramenta executar_subflow: " + json.dumps([{"tool_id": str(t.get("tool_id")), "label": str(t.get("label", ""))[:80], "description": str(t.get("description", ""))[:300]} for t in subflow_tools], ensure_ascii=False),
+            "Para executar subflow use somente {\"tool\":\"executar_subflow\",\"arguments\":{\"tool_id\":\"id_permitido\",\"input\":\"texto\",\"reason\":\"motivo curto\"}}. Não invente tool_id nem envie flow_id.",
         ])
         messages = [{"role": "system", "content": system}]
         if memory_context:
@@ -188,6 +194,24 @@ def run_agent_for_tenant(db: Session, tenant_id, input_text: str, instruction: s
             node_tool_calls.append({"tool_id": tool_id, "status": tool_result.get("status"), "node_type": tool_result.get("node_type")})
             state.append({"tool": tool, "tool_id": tool_id, "ok": tool_result.get("status") == "success", "result": tool_result.get("output"), "error": tool_result.get("error")})
             continue
+        if tool == "executar_subflow":
+            tool_id = str(args.get("tool_id") or "").strip()
+            tool_input = str(args.get("input") or input_text or "")[:12000]
+            match = next((t for t in subflow_tools if str(t.get("tool_id")) == tool_id), None)
+            key = (tool_id, tool_input)
+            if match is None or subflow_tool_executor is None:
+                blocked_tool_calls.append({"tool_id": tool_id, "error": "subflow_tool_not_allowed"})
+                state.append({"tool": tool, "tool_id": tool_id, "ok": False, "error": "subflow_tool_not_allowed"})
+                continue
+            if len(subflow_tool_calls) >= max_subflow_calls or key in seen_subflow_inputs:
+                blocked_tool_calls.append({"tool_id": tool_id, "error": "subflow_tool_limit_or_repeat"})
+                state.append({"tool": tool, "tool_id": tool_id, "ok": False, "error": "subflow_tool_limit_or_repeat"})
+                continue
+            seen_subflow_inputs.add(key)
+            tool_result = subflow_tool_executor(match, tool_input, str(args.get("reason") or "")[:200])
+            subflow_tool_calls.append({"tool_id": tool_id, "status": tool_result.get("status"), "flow_id": tool_result.get("flow_id"), "duration_ms": tool_result.get("duration_ms")})
+            state.append({"tool": tool, "tool_id": tool_id, "ok": tool_result.get("status") == "success", "result": tool_result.get("output"), "error": tool_result.get("error")})
+            continue
         if tool == "chamar_webhook":
             webhook_id = str(args.get("webhook_id") or "")
             webhook = next((w for w in webhooks if str(w.get("id")) == webhook_id), None)
@@ -207,5 +231,5 @@ def run_agent_for_tenant(db: Session, tenant_id, input_text: str, instruction: s
         result.status = "error"
         result.fallback_used = True
         result.final_tool = "responder"
-    result.metadata = {"latency_ms": int((time.monotonic() - started) * 1000), "node_tools_used": node_tool_calls, "node_tool_calls_count": len(node_tool_calls), "blocked_tool_calls": blocked_tool_calls, "max_steps_reached": result.fallback_used}
+    result.metadata = {"latency_ms": int((time.monotonic() - started) * 1000), "node_tools_used": node_tool_calls, "node_tool_calls_count": len(node_tool_calls), "subflow_tools_used": subflow_tool_calls, "subflow_calls_count": len(subflow_tool_calls), "subflow_results_summary": subflow_tool_calls, "subflow_errors": [c for c in subflow_tool_calls if c.get("status") != "success"], "timeout_count": len([c for c in subflow_tool_calls if c.get("status") == "timeout"]), "blocked_tool_calls": blocked_tool_calls, "max_steps_reached": result.fallback_used}
     return result

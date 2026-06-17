@@ -210,7 +210,7 @@ const NODE_PRESETS: Record<FlowNodeKind, { label: string; type: string; data: Re
   ai_classification: { label: 'IA Classificação', type: 'ai_classification', data: { instruction: '', input_template: '{{last_message}}', categories: ['financeiro', 'vendas', 'suporte', 'outro'], allow_other: true, confidence_threshold: 0.6, output_variable: 'ai.classification', save_to_contact: false, save_to_lead: false, send_debug_message: false } },
   ai_extraction: { label: 'IA Extração', type: 'ai_extraction', data: { instruction: '', input_template: '{{last_message}}', fields: [{ name: 'nome', type: 'string', description: 'Nome da pessoa' }, { name: 'email', type: 'email', description: 'E-mail' }], include_conversation_history: true, output_variable: 'ai.extraction', save_to_contact: false, save_to_lead: true, send_debug_message: false } },
   ai_summary: { label: 'IA Resumo', type: 'ai_summary', data: { summary_source: 'conversation_history', input_template: '{{last_message}}', instruction: '', summary_format: 'handoff', max_history_messages: 30, max_history_chars: 8000, output_variable: 'ai.summary', send_message: false, continue_on_error: true, model_override: '', temperature: 0.2, max_tokens: 800 } },
-  ai_agent: { label: 'IA Agente', type: 'ai_agent', data: { instruction: 'Você é um agente de atendimento. Use apenas as ferramentas permitidas.', input_template: '{{last_message}}', allowed_tools: ['responder', 'definir_variavel'], allow_node_tools: false, node_tools: [], max_node_tool_calls: 3, max_steps: 3, use_memory: true, memory_max_messages: 10, memory_max_chars: 4000, model_override: '', temperature: 0.2, max_tokens: 1200, after_agent_behavior: 'wait_same_node', after_answer_behavior: 'wait_same_node', fallback_message: 'Não consegui concluir essa ação agora. Quer que eu encaminhe para um atendente?', webhooks: [] } },
+  ai_agent: { label: 'IA Agente', type: 'ai_agent', data: { instruction: 'Você é um agente de atendimento. Use apenas as ferramentas permitidas.', input_template: '{{last_message}}', allowed_tools: ['responder', 'definir_variavel'], allow_node_tools: false, node_tools: [], max_node_tool_calls: 3, allow_subflow_tools: false, subflow_tools: [], max_subflow_calls: 2, max_steps: 3, use_memory: true, memory_max_messages: 10, memory_max_chars: 4000, model_override: '', temperature: 0.2, max_tokens: 1200, after_agent_behavior: 'wait_same_node', after_answer_behavior: 'wait_same_node', fallback_message: 'Não consegui concluir essa ação agora. Quer que eu encaminhe para um atendente?', webhooks: [] } },
 };
 
 const initialNodes: Node[] = [];
@@ -887,6 +887,18 @@ function FlowNodeEditorPanel({
               <label className="flow-editor-field">Nodes disponíveis como ferramentas (JSON)
                 <textarea value={JSON.stringify(draft.node_tools || [], null, 2)} onChange={(event) => { try { onDraftChange({ node_tools: JSON.parse(event.target.value) }); } catch { onDraftChange({ node_tools_json_error: true }); } }} placeholder='[{"tool_id":"extract_lead","node_id":"node-123","label":"Extrair lead","description":"Extrai dados do lead","pass_context":true}]' />
                 <small>Use apenas nodes permitidos: IA Classificação, IA Extração, IA Resumo, IA Resposta, Ação ou Mensagem. IA Agente, Delay e Escolha são bloqueados no backend.</small>
+              </label>
+            </fieldset>
+
+            <fieldset className="flow-editor-field">
+              <legend>Subflows como ferramentas</legend>
+              <label className="flow-editor-radio"><input type="checkbox" checked={draft.allow_subflow_tools === true} onChange={(event) => onDraftChange({ allow_subflow_tools: event.target.checked })} />Ativar subflows</label>
+              <label className="flow-editor-field">Limite de chamadas de subflows
+                <input type="number" min="1" max="3" value={toText(draft.max_subflow_calls || 2)} onChange={(event) => onDraftChange({ max_subflow_calls: Math.min(3, Math.max(1, Number(event.target.value || 2))) })} />
+              </label>
+              <label className="flow-editor-field">Subflows permitidos (JSON)
+                <textarea value={JSON.stringify(draft.subflow_tools || [], null, 2)} onChange={(event) => { try { onDraftChange({ subflow_tools: JSON.parse(event.target.value) }); } catch { onDraftChange({ subflow_tools_json_error: true }); } }} placeholder='[{"tool_id":"agendamento","label":"Agendamento","description":"Usa o fluxo de agendamento.","flow_id":"...","flow_version_id":"...","input_variable":"agent.subflow_input","output_variable":"agent.subflows.agendamento.output","timeout_seconds":20}]' />
+                <small>A IA escolhe apenas tool_id. O backend resolve o flow_id autorizado, bloqueia outro tenant e impede recursão direta.</small>
               </label>
             </fieldset>
             <label className="flow-editor-radio"><input type="checkbox" checked={draft.use_memory !== false} onChange={(event) => onDraftChange({ use_memory: event.target.checked })} />Usar memória da conversa</label>
