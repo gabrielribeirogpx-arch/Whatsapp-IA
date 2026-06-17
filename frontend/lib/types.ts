@@ -322,6 +322,17 @@ export type FlowNodePayload = {
     onChange?: (nodeId: string, patch: Record<string, unknown>) => void;
     is_terminal?: boolean;
     hasValidationError?: boolean;
+    instruction?: string;
+    input_template?: string;
+    categories?: string[];
+    allow_other?: boolean;
+    confidence_threshold?: number;
+    output_variable?: string;
+    save_to_contact?: boolean;
+    save_to_lead?: boolean;
+    send_debug_message?: boolean;
+    fields?: Array<{ name: string; type: 'string' | 'number' | 'boolean' | 'date' | 'email' | 'phone' | 'cpf' | 'cnpj'; description?: string }>;
+    include_conversation_history?: boolean;
   };
 };
 

@@ -18,6 +18,8 @@ import { Bot, Clock, ExternalLink, FileImage, GitBranch, HelpCircle, History, Li
 
 import ActionNode from '@/components/flow/nodes/ActionNode';
 import AiRagNode from '@/components/flow/nodes/AiRagNode';
+import AiClassificationNode from '@/components/flow/nodes/AiClassificationNode';
+import AiExtractionNode from '@/components/flow/nodes/AiExtractionNode';
 import ChoiceNode from '@/components/flow/nodes/ChoiceNode';
 import ConditionNode from '@/components/flow/nodes/ConditionNode';
 import CtaUrlNode from '@/components/flow/nodes/CtaUrlNode';
@@ -44,6 +46,8 @@ const nodeTypes = {
   media: MediaNode,
   cta_url: CtaUrlNode,
   ai_rag: AiRagNode,
+  ai_classification: AiClassificationNode,
+  ai_extraction: AiExtractionNode,
   cta_link: CtaUrlNode,
   messageNode: MessageNode,
   choiceNode: ChoiceNode,
@@ -54,7 +58,7 @@ const nodeTypes = {
   ctaUrlNode: CtaUrlNode,
 };
 
-type FlowNodeKind = 'message' | 'choice' | 'condition' | 'delay' | 'action' | 'media' | 'cta_url' | 'ai_rag';
+type FlowNodeKind = 'message' | 'choice' | 'condition' | 'delay' | 'action' | 'media' | 'cta_url' | 'ai_rag' | 'ai_classification' | 'ai_extraction';
 type FlowConnection = Connection & { sourceHandle?: string | null };
 type ChoiceConnectDebug = {
   nodeId: string;
@@ -117,6 +121,8 @@ const NODE_PRESETS: Record<FlowNodeKind, { label: string; type: string; data: Re
   media: { label: 'Mídia', type: 'media', data: { media_type: 'image', media_url: '', caption: '', filename: '' } },
   cta_url: { label: 'CTA / Link', type: 'cta_url', data: { content: '', text: '', button_text: '', url: '', is_terminal: false } },
   ai_rag: { label: 'IA / RAG', type: 'ai_rag', data: { after_answer_behavior: 'end_flow', instruction: 'Responda como atendente da prefeitura.', question: '{{last_message}}', top_k: 5, use_workspace_ai_settings: true, model_override: '', temperature: 0.2, max_tokens: 1200, knowledge_only: true, memory_enabled: true, memory_max_messages: 10, memory_max_chars: 4000, fallback_message: 'Não encontrei essa informação com segurança na base disponível. Quer que eu encaminhe para um atendente?', is_terminal: false } },
+  ai_classification: { label: 'IA Classificação', type: 'ai_classification', data: { instruction: '', input_template: '{{last_message}}', categories: ['financeiro', 'vendas', 'suporte', 'outro'], allow_other: true, confidence_threshold: 0.6, output_variable: 'ai.classification', save_to_contact: false, save_to_lead: false, send_debug_message: false } },
+  ai_extraction: { label: 'IA Extração', type: 'ai_extraction', data: { instruction: '', input_template: '{{last_message}}', fields: [{ name: 'nome', type: 'string', description: 'Nome da pessoa' }, { name: 'email', type: 'email', description: 'E-mail' }], include_conversation_history: true, output_variable: 'ai.extraction', save_to_contact: false, save_to_lead: true, send_debug_message: false } },
 };
 
 const initialNodes: Node[] = [];
@@ -295,6 +301,7 @@ const getMiniMapNodeColor = (type: string) => {
   if (normalized === 'message') return '#3b82f6';
   if (normalized === 'media') return '#06b6d4';
   if (normalized === 'cta_url' || normalized === 'cta_link') return '#7c3aed';
+  if (normalized === 'ai_classification' || normalized === 'ai_extraction') return '#06b6d4';
   if (['choice', 'condition', 'delay', 'action'].includes(normalized)) return '#f97316';
   return '#94a3b8';
 };
@@ -431,7 +438,7 @@ function FlowNodeEditorPanel({
     if (displayMode === 'buttons' && buttons.length >= 3) return;
     onDraftChange({ buttons: [...buttons, { id: `${node.id}-button-${nextIndex}`, label: `Opção ${nextIndex}`, handleId: `option_${nextIndex}` }] });
   };
-  const supportsVariables = ['message', 'choice', 'media', 'cta_url', 'condition', 'action', 'ai_rag'].includes(kind);
+  const supportsVariables = ['message', 'choice', 'media', 'cta_url', 'condition', 'action', 'ai_rag', 'ai_classification', 'ai_extraction'].includes(kind);
 
 
   return (
@@ -561,6 +568,29 @@ function FlowNodeEditorPanel({
             <textarea value={toText(draft.condition)} onChange={(event) => onDraftChange({ condition: event.target.value })} placeholder="sim, suporte, ajuda" />
             <small>Separe múltiplas palavras por vírgula. Saídas: Sim e Não.</small>
           </label>
+        )}
+
+        {kind === 'ai_classification' && (
+          <>
+            <div className="flow-editor-info-card"><strong>Tipo:</strong> IA Classificação <span>IA</span></div>
+            <label className="flow-editor-field">Instrução<textarea value={toText(draft.instruction)} onChange={(event) => onDraftChange({ instruction: event.target.value })} /></label>
+            <label className="flow-editor-field">Input template<input value={toText(draft.input_template || '{{last_message}}')} onChange={(event) => onDraftChange({ input_template: event.target.value })} /></label>
+            <label className="flow-editor-field">Categorias<textarea value={((draft.categories as string[] | undefined) || []).join('\n')} onChange={(event) => onDraftChange({ categories: event.target.value.split(/\n|,/).map((v) => v.trim()).filter(Boolean) })} placeholder="financeiro\nvendas\nsuporte\noutro" /><small>Uma por linha ou separadas por vírgula.</small></label>
+            <div className="flow-editor-row"><label className="flow-editor-field">Threshold<input type="number" min="0" max="1" step="0.1" value={toText(draft.confidence_threshold ?? 0.6)} onChange={(event) => onDraftChange({ confidence_threshold: Number(event.target.value || 0.6) })} /></label><label className="flow-editor-field">Output variable<input value={toText(draft.output_variable || 'ai.classification')} onChange={(event) => onDraftChange({ output_variable: event.target.value })} /></label></div>
+            <label className="flow-editor-radio"><input type="checkbox" checked={draft.send_debug_message === true} onChange={(event) => onDraftChange({ send_debug_message: event.target.checked })} /> Enviar debug message</label>
+          </>
+        )}
+
+        {kind === 'ai_extraction' && (
+          <>
+            <div className="flow-editor-info-card"><strong>Tipo:</strong> IA Extração <span>IA</span></div>
+            <label className="flow-editor-field">Instrução<textarea value={toText(draft.instruction)} onChange={(event) => onDraftChange({ instruction: event.target.value })} /></label>
+            <label className="flow-editor-field">Input template<input value={toText(draft.input_template || '{{last_message}}')} onChange={(event) => onDraftChange({ input_template: event.target.value })} /></label>
+            <div className="flow-editor-repeatable"><strong>Campos</strong>{(((draft.fields as any[]) || [])).map((field, index) => <div key={index} className="flow-editor-row"><input value={toText(field.name)} onChange={(event) => { const next = [...(((draft.fields as any[]) || []))]; next[index] = { ...field, name: event.target.value }; onDraftChange({ fields: next }); }} placeholder="nome" /><select value={toText(field.type || 'string')} onChange={(event) => { const next = [...(((draft.fields as any[]) || []))]; next[index] = { ...field, type: event.target.value }; onDraftChange({ fields: next }); }}><option value="string">string</option><option value="number">number</option><option value="boolean">boolean</option><option value="date">date</option><option value="email">email</option><option value="phone">phone</option><option value="cpf">cpf</option><option value="cnpj">cnpj</option></select><input value={toText(field.description)} onChange={(event) => { const next = [...(((draft.fields as any[]) || []))]; next[index] = { ...field, description: event.target.value }; onDraftChange({ fields: next }); }} placeholder="Descrição" /><button type="button" onClick={() => onDraftChange({ fields: (((draft.fields as any[]) || [])).filter((_, i) => i !== index) })}>Remover</button></div>)}<button type="button" className="flow-editor-secondary-btn" onClick={() => onDraftChange({ fields: [...(((draft.fields as any[]) || [])), { name: '', type: 'string', description: '' }] })}>+ Adicionar campo</button></div>
+            <label className="flow-editor-radio"><input type="checkbox" checked={draft.include_conversation_history !== false} onChange={(event) => onDraftChange({ include_conversation_history: event.target.checked })} /> Incluir histórico</label>
+            <label className="flow-editor-field">Output variable<input value={toText(draft.output_variable || 'ai.extraction')} onChange={(event) => onDraftChange({ output_variable: event.target.value })} /></label>
+            <label className="flow-editor-radio"><input type="checkbox" checked={draft.send_debug_message === true} onChange={(event) => onDraftChange({ send_debug_message: event.target.checked })} /> Enviar debug message</label>
+          </>
         )}
 
         {kind === 'ai_rag' && (
@@ -2519,6 +2549,8 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
           { kind: 'media' as FlowNodeKind, label: 'Mídia', icon: FileImage },
           { kind: 'cta_url' as FlowNodeKind, label: 'CTA / Link', icon: ExternalLink },
           { kind: 'ai_rag' as FlowNodeKind, label: 'IA / RAG', icon: Bot },
+          { kind: 'ai_classification' as FlowNodeKind, label: 'IA Classificação', icon: Bot },
+          { kind: 'ai_extraction' as FlowNodeKind, label: 'IA Extração', icon: Bot },
         ]).map(({ kind, label, icon: Icon }) => (
           <button key={kind} type="button" className="dash-nav-item" onClick={() => addNode(kind)} title={label} style={{ border: 'none', background: 'none', cursor: 'pointer', width: '100%', textAlign: 'left' }}>
             <Icon size={18} strokeWidth={1.8} className="text-current" />
@@ -2824,6 +2856,8 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
               { kind: 'media' as FlowNodeKind, label: 'Mídia', icon: FileImage },
               { kind: 'cta_url' as FlowNodeKind, label: 'CTA / Link', icon: ExternalLink },
           { kind: 'ai_rag' as FlowNodeKind, label: 'IA / RAG', icon: Bot },
+          { kind: 'ai_classification' as FlowNodeKind, label: 'IA Classificação', icon: Bot },
+          { kind: 'ai_extraction' as FlowNodeKind, label: 'IA Extração', icon: Bot },
               { kind: 'choice' as FlowNodeKind, label: 'Escolha', icon: ListChecks },
               { kind: 'condition' as FlowNodeKind, label: 'Condição', icon: GitBranch },
               { kind: 'delay' as FlowNodeKind, label: 'Delay', icon: Clock },

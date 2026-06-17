@@ -48,6 +48,7 @@ class FlowRenderContext:
             "today_iso": now_br.date().isoformat(),
             "flow": _object_map(self.flow, ("id", "name")),
             "session": _object_map(self.session, ("id",)),
+            **(_public_context_values(getattr(self.session, "context", None))),
         }
 
 
@@ -105,3 +106,7 @@ def _localized_datetime(value: datetime) -> datetime:
     if value.tzinfo is None:
         return value.replace(tzinfo=UTC).astimezone(DEFAULT_RENDER_TIMEZONE)
     return value.astimezone(DEFAULT_RENDER_TIMEZONE)
+
+
+def _public_context_values(context: Any) -> dict[str, Any]:
+    return context if isinstance(context, dict) else {}

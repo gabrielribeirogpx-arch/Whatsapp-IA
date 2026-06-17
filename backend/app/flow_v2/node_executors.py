@@ -39,6 +39,7 @@ from app.services.contextual_query_service import (
     store_cached_standalone,
 )
 from app.services.rag_service import answer_with_rag
+from app.services.ai_structured_service import classify_for_tenant, extract_for_tenant
 from app.flow_v2.snapshot import FlowV2Snapshot, build_transitions_from_edges
 from app.flow_v2.transition_resolver import TransitionResolver
 from app.flow_v2.template_renderer import FlowRenderContext, render_template
@@ -1694,6 +1695,88 @@ class AiRagNodeExecutor(BaseNodeExecutor):
         return NodeExecutionResult(actions=(action,), next_node_id=next_node_id, status="continue")
 
 
+def _set_nested_value(target: dict[str, Any], path: str, value: Any) -> None:
+    parts = [part for part in str(path or "").split(".") if part]
+    if not parts:
+        return
+    current = target
+    for part in parts[:-1]:
+        child = current.get(part)
+        if not isinstance(child, dict):
+            child = {}
+            current[part] = child
+        current = child
+    current[parts[-1]] = value
+
+
+class AiStructuredNodeExecutor(BaseNodeExecutor):
+    kind = "ai_structured"
+
+    def _save_result(self, db, *, session, output_variable: str, result: dict[str, Any]) -> None:
+        context = dict(session.context or {}) if isinstance(getattr(session, "context", None), dict) else {}
+        _set_nested_value(context, output_variable, result)
+        if output_variable == "ai.classification":
+            _set_nested_value(context, "ai.classification.category", result.get("category"))
+            _set_nested_value(context, "ai.classification.confidence", result.get("confidence"))
+            _set_nested_value(context, "ai.classification.reason", result.get("reason"))
+        if output_variable == "ai.extraction":
+            for key, value in (result.get("data") or {}).items():
+                _set_nested_value(context, f"ai.extraction.data.{key}", value)
+            _set_nested_value(context, "ai.extraction.missing_fields", result.get("missing_fields"))
+            _set_nested_value(context, "ai.extraction.confidence", result.get("confidence"))
+        session.context = context
+        if hasattr(db, "add"):
+            db.add(session)
+
+    def _fail(self, db, *, snapshot, session, node_id: str, error: str) -> NodeExecutionResult:
+        context = dict(session.context or {}) if isinstance(getattr(session, "context", None), dict) else {}
+        _set_nested_value(context, "ai.error", {"node_id": node_id, "error": error})
+        session.context = context
+        if hasattr(db, "add"):
+            db.add(session)
+        self.event_store.append(db, session=session, event_type=FlowV2EventType.OUTPUT_EMITTED, node_id=node_id, payload={"analytics_event": "ai_structured_failed", "error": error})
+        return NodeExecutionResult(next_node_id=self._default_next_or_terminal(db, snapshot=snapshot, session=session, node_id=node_id), status="continue")
+
+
+class AiClassificationNodeExecutor(AiStructuredNodeExecutor):
+    def execute(self, db, *, snapshot, session, node, runtime_input) -> NodeExecutionResult:
+        node_id = str(node["id"])
+        data = self._node_data(node)
+        try:
+            input_text = str(self._render(data.get("input_template") or data.get("inputTemplate") or "{{last_message}}", db, snapshot=snapshot, session=session, runtime_input=runtime_input) or "")
+            result = classify_for_tenant(db, session.tenant_id, input_text, data.get("categories") or [], instruction=data.get("instruction"), options={"allow_other": data.get("allow_other", data.get("allowOther", True)), "confidence_threshold": data.get("confidence_threshold", data.get("confidenceThreshold", 0.6))})
+            self._save_result(db, session=session, output_variable=str(data.get("output_variable") or data.get("outputVariable") or "ai.classification"), result=result)
+            self.event_store.append(db, session=session, event_type=FlowV2EventType.OUTPUT_EMITTED, node_id=node_id, payload={"analytics_event": "ai_classification_completed", "category": result.get("category"), "confidence": result.get("confidence")})
+            actions = ()
+            if data.get("send_debug_message") is True or data.get("sendDebugMessage") is True:
+                actions = (SendMessageAction(tenant_id=session.tenant_id, session_id=session.id, external_user_id=runtime_input.external_user_id, conversation_id=runtime_input.conversation_id, contact_id=runtime_input.contact_id, text=f"IA Classificação: {result.get('category')} ({result.get('confidence')})", metadata={"node_id": node_id, "intent": "ai_classification_debug"}),)
+            return NodeExecutionResult(actions=actions, next_node_id=self._default_next_or_terminal(db, snapshot=snapshot, session=session, node_id=node_id), status="continue")
+        except Exception as exc:
+            logger.warning("[AI STRUCTURED NODE] classification failed node_id=%s error=%s", node_id, exc)
+            return self._fail(db, snapshot=snapshot, session=session, node_id=node_id, error="ai_classification_failed")
+
+
+class AiExtractionNodeExecutor(AiStructuredNodeExecutor):
+    def execute(self, db, *, snapshot, session, node, runtime_input) -> NodeExecutionResult:
+        node_id = str(node["id"])
+        data = self._node_data(node)
+        try:
+            input_text = str(self._render(data.get("input_template") or data.get("inputTemplate") or "{{last_message}}", db, snapshot=snapshot, session=session, runtime_input=runtime_input) or "")
+            history = None
+            if data.get("include_conversation_history", data.get("includeConversationHistory", True)) is not False:
+                history = str((session.context or {}).get("conversation_history") or "") if isinstance(session.context, dict) else ""
+            result = extract_for_tenant(db, session.tenant_id, input_text, data.get("fields") or [], instruction=data.get("instruction"), conversation_history=history, options={})
+            self._save_result(db, session=session, output_variable=str(data.get("output_variable") or data.get("outputVariable") or "ai.extraction"), result=result)
+            self.event_store.append(db, session=session, event_type=FlowV2EventType.OUTPUT_EMITTED, node_id=node_id, payload={"analytics_event": "ai_extraction_completed", "fields": list((result.get("data") or {}).keys()), "confidence": result.get("confidence")})
+            actions = ()
+            if data.get("send_debug_message") is True or data.get("sendDebugMessage") is True:
+                actions = (SendMessageAction(tenant_id=session.tenant_id, session_id=session.id, external_user_id=runtime_input.external_user_id, conversation_id=runtime_input.conversation_id, contact_id=runtime_input.contact_id, text=f"IA Extração: {json.dumps(result.get('data'), ensure_ascii=False)}", metadata={"node_id": node_id, "intent": "ai_extraction_debug"}),)
+            return NodeExecutionResult(actions=actions, next_node_id=self._default_next_or_terminal(db, snapshot=snapshot, session=session, node_id=node_id), status="continue")
+        except Exception as exc:
+            logger.warning("[AI STRUCTURED NODE] extraction failed node_id=%s error=%s", node_id, exc)
+            return self._fail(db, snapshot=snapshot, session=session, node_id=node_id, error="ai_extraction_failed")
+
+
 def _normalize_ai_rag_after_answer_behavior(data: dict[str, Any]) -> AiRagAfterAnswerBehavior:
     raw = data.get("after_answer_behavior", data.get("afterAnswerBehavior", AiRagAfterAnswerBehavior.END_FLOW))
     try:
@@ -1731,6 +1814,12 @@ class NodeExecutorRegistry:
                 event_store=event_store, transition_resolver=transition_resolver
             ),
             "ai_rag": AiRagNodeExecutor(
+                event_store=event_store, transition_resolver=transition_resolver
+            ),
+            "ai_classification": AiClassificationNodeExecutor(
+                event_store=event_store, transition_resolver=transition_resolver
+            ),
+            "ai_extraction": AiExtractionNodeExecutor(
                 event_store=event_store, transition_resolver=transition_resolver
             ),
         }

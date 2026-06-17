@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
+import re
 
 
 class GraphValidationStatus(StrEnum):
@@ -20,10 +21,12 @@ class GraphValidationResult:
         return self.status == GraphValidationStatus.VALID
 
 
+SAFE_NAME_RE = re.compile(r"^[A-Za-z0-9_.]+$")
+
 class FlowV2GraphValidator:
     """Validates Flow Publisher V2 graphs before immutable snapshot creation."""
 
-    SUPPORTED_NODE_TYPES = {"message", "choice", "condition", "delay", "action", "media", "cta_url", "ai_rag", "start"}
+    SUPPORTED_NODE_TYPES = {"message", "choice", "condition", "delay", "action", "media", "cta_url", "ai_rag", "ai_classification", "ai_extraction", "start"}
     SUPPORTED_CONDITION_OPERATORS = {"==", "eq", "equals"}
     SUPPORTED_BUILDER_MATCH_TYPES = {"contains", "equals", "eq", "=="}
 
@@ -238,6 +241,29 @@ class FlowV2GraphValidator:
             for index, condition in enumerate(conditions):
                 if not self._is_valid_condition(condition):
                     errors.append(f"FLOW_V2_CONDITION_CONFIG_INVALID:{node_id}:{index}")
+        elif node_type == "ai_classification":
+            if any(str(data.get(key) or "").strip() for key in ("api_key", "apiKey", "openai_api_key", "provider_api_key")):
+                errors.append(f"FLOW_V2_AI_NODE_API_KEY_FORBIDDEN:{node_id}")
+            categories = data.get("categories")
+            if not isinstance(categories, list) or len([c for c in categories if str(c).strip()]) < 2:
+                errors.append(f"FLOW_V2_AI_CLASSIFICATION_CATEGORIES_INVALID:{node_id}")
+            output_variable = str(data.get("output_variable") or data.get("outputVariable") or "ai.classification")
+            if not SAFE_NAME_RE.match(output_variable):
+                errors.append(f"FLOW_V2_AI_OUTPUT_VARIABLE_INVALID:{node_id}")
+        elif node_type == "ai_extraction":
+            if any(str(data.get(key) or "").strip() for key in ("api_key", "apiKey", "openai_api_key", "provider_api_key")):
+                errors.append(f"FLOW_V2_AI_NODE_API_KEY_FORBIDDEN:{node_id}")
+            fields = data.get("fields")
+            if not isinstance(fields, list) or not fields:
+                errors.append(f"FLOW_V2_AI_EXTRACTION_FIELDS_INVALID:{node_id}")
+            else:
+                for index, field in enumerate(fields):
+                    name = str(field.get("name") if isinstance(field, dict) else "")
+                    if not SAFE_NAME_RE.match(name):
+                        errors.append(f"FLOW_V2_AI_EXTRACTION_FIELD_NAME_INVALID:{node_id}:{index}")
+            output_variable = str(data.get("output_variable") or data.get("outputVariable") or "ai.extraction")
+            if not SAFE_NAME_RE.match(output_variable):
+                errors.append(f"FLOW_V2_AI_OUTPUT_VARIABLE_INVALID:{node_id}")
 
     def _has_valid_builder_condition(self, data: dict[str, Any]) -> bool:
         keywords = self._builder_keywords(data)
