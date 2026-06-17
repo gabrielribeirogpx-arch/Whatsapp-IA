@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
 import re
+from urllib.parse import urlparse
+import ipaddress
 
 
 class GraphValidationStatus(StrEnum):
@@ -26,7 +28,7 @@ SAFE_NAME_RE = re.compile(r"^[A-Za-z0-9_.]+$")
 class FlowV2GraphValidator:
     """Validates Flow Publisher V2 graphs before immutable snapshot creation."""
 
-    SUPPORTED_NODE_TYPES = {"message", "choice", "condition", "delay", "action", "media", "cta_url", "ai_rag", "ai_response", "ai_classification", "ai_extraction", "ai_summary", "start"}
+    SUPPORTED_NODE_TYPES = {"message", "choice", "condition", "delay", "action", "media", "cta_url", "ai_rag", "ai_response", "ai_classification", "ai_extraction", "ai_summary", "ai_agent", "start"}
     SUPPORTED_CONDITION_OPERATORS = {"==", "eq", "equals"}
     SUPPORTED_BUILDER_MATCH_TYPES = {"contains", "equals", "eq", "=="}
 
@@ -142,7 +144,7 @@ class FlowV2GraphValidator:
     ) -> None:
         outgoing_sources = {str(self._edge_source(edge)) for edge in edges if isinstance(edge, dict) and self._edge_source(edge) not in (None, "")}
         for node in nodes:
-            if not isinstance(node, dict) or node.get("id") in (None, "") or self._node_type(node) not in {"ai_rag", "ai_response"}:
+            if not isinstance(node, dict) or node.get("id") in (None, "") or self._node_type(node) not in {"ai_rag", "ai_response", "ai_agent"}:
                 continue
             node_id = str(node["id"])
             node_type = self._node_type(node).upper()
@@ -243,8 +245,32 @@ class FlowV2GraphValidator:
                 if not self._is_valid_condition(condition):
                     errors.append(f"FLOW_V2_CONDITION_CONFIG_INVALID:{node_id}:{index}")
         elif node_type in {"ai_rag", "ai_response"}:
-            if any(str(data.get(key) or "").strip() for key in ("api_key", "apiKey", "openai_api_key", "provider_api_key")):
+            if self._contains_forbidden_secret(data):
                 errors.append(f"FLOW_V2_AI_NODE_API_KEY_FORBIDDEN:{node_id}")
+        elif node_type == "ai_agent":
+            if self._contains_forbidden_secret(data):
+                errors.append(f"FLOW_V2_AI_NODE_API_KEY_FORBIDDEN:{node_id}")
+            allowed_tools = data.get("allowed_tools") or data.get("allowedTools") or []
+            if not isinstance(allowed_tools, list) or not [t for t in allowed_tools if str(t).strip()]:
+                errors.append(f"FLOW_V2_AI_AGENT_ALLOWED_TOOLS_REQUIRED:{node_id}")
+            max_steps = data.get("max_steps", data.get("maxSteps", 3))
+            try:
+                if int(max_steps) < 1 or int(max_steps) > 5:
+                    errors.append(f"FLOW_V2_AI_AGENT_MAX_STEPS_INVALID:{node_id}")
+            except (TypeError, ValueError):
+                errors.append(f"FLOW_V2_AI_AGENT_MAX_STEPS_INVALID:{node_id}")
+            if isinstance(allowed_tools, list) and "chamar_webhook" in [str(t) for t in allowed_tools]:
+                webhooks = data.get("webhooks") or []
+                if not isinstance(webhooks, list) or not webhooks:
+                    errors.append(f"FLOW_V2_AI_AGENT_WEBHOOKS_REQUIRED:{node_id}")
+                else:
+                    for index, webhook in enumerate(webhooks):
+                        url = str(webhook.get("url") if isinstance(webhook, dict) else "")
+                        method = str(webhook.get("method", "POST") if isinstance(webhook, dict) else "POST").upper()
+                        if method not in {"GET", "POST"}:
+                            errors.append(f"FLOW_V2_AI_AGENT_WEBHOOK_METHOD_INVALID:{node_id}:{index}")
+                        if self._is_internal_url(url):
+                            errors.append(f"FLOW_V2_AI_AGENT_WEBHOOK_URL_INVALID:{node_id}:{index}")
         elif node_type == "ai_classification":
             if any(str(data.get(key) or "").strip() for key in ("api_key", "apiKey", "openai_api_key", "provider_api_key")):
                 errors.append(f"FLOW_V2_AI_NODE_API_KEY_FORBIDDEN:{node_id}")
@@ -282,6 +308,32 @@ class FlowV2GraphValidator:
             output_variable = str(data.get("output_variable") or data.get("outputVariable") or "ai.summary")
             if not SAFE_NAME_RE.match(output_variable):
                 errors.append(f"FLOW_V2_AI_OUTPUT_VARIABLE_INVALID:{node_id}")
+
+    def _contains_forbidden_secret(self, value: Any) -> bool:
+        forbidden = ("api_key", "apikey", "token", "secret", "password", "openai_api_key", "provider_api_key")
+        if isinstance(value, dict):
+            for key, item in value.items():
+                key_l = str(key).lower()
+                if any(part in key_l for part in forbidden) and str(item or "").strip():
+                    return True
+                if self._contains_forbidden_secret(item):
+                    return True
+        elif isinstance(value, list):
+            return any(self._contains_forbidden_secret(item) for item in value)
+        return False
+
+    def _is_internal_url(self, url: str) -> bool:
+        parsed = urlparse(str(url or ""))
+        if parsed.scheme != "https" or not parsed.hostname:
+            return True
+        host = parsed.hostname.lower()
+        if host in {"localhost", "0.0.0.0"} or host.endswith(".localhost"):
+            return True
+        try:
+            ip = ipaddress.ip_address(host)
+        except ValueError:
+            return False
+        return ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_unspecified
 
     def _has_valid_builder_condition(self, data: dict[str, Any]) -> bool:
         keywords = self._builder_keywords(data)

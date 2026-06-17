@@ -23,6 +23,7 @@ import AiResponseNode from '@/components/flow/nodes/AiResponseNode';
 import AiClassificationNode from '@/components/flow/nodes/AiClassificationNode';
 import AiExtractionNode from '@/components/flow/nodes/AiExtractionNode';
 import AiSummaryNode from '@/components/flow/nodes/AiSummaryNode';
+import AiAgentNode from '@/components/flow/nodes/AiAgentNode';
 import ChoiceNode from '@/components/flow/nodes/ChoiceNode';
 import ConditionNode from '@/components/flow/nodes/ConditionNode';
 import CtaUrlNode from '@/components/flow/nodes/CtaUrlNode';
@@ -53,6 +54,7 @@ const nodeTypes = {
   ai_classification: AiClassificationNode,
   ai_extraction: AiExtractionNode,
   ai_summary: AiSummaryNode,
+  ai_agent: AiAgentNode,
   cta_link: CtaUrlNode,
   messageNode: MessageNode,
   choiceNode: ChoiceNode,
@@ -63,7 +65,7 @@ const nodeTypes = {
   ctaUrlNode: CtaUrlNode,
 };
 
-type FlowNodeKind = 'message' | 'choice' | 'condition' | 'delay' | 'action' | 'media' | 'cta_url' | 'ai_rag' | 'ai_response' | 'ai_classification' | 'ai_extraction' | 'ai_summary';
+type FlowNodeKind = 'message' | 'choice' | 'condition' | 'delay' | 'action' | 'media' | 'cta_url' | 'ai_rag' | 'ai_response' | 'ai_classification' | 'ai_extraction' | 'ai_summary' | 'ai_agent';
 type FlowConnection = Connection & { sourceHandle?: string | null };
 type NodePaletteItem = { kind: FlowNodeKind; label: string; icon: LucideIcon; description?: string };
 type NodePaletteGroup = { id: 'communication' | 'ai' | 'logic' | 'actions'; title: string; icon: LucideIcon; nodes: NodePaletteItem[] };
@@ -114,7 +116,7 @@ const NODE_GROUPS: NodePaletteGroup[] = [
         icon: FileText,
         description: 'Resume histórico ou texto para handoff, CRM e notas internas.',
       },
-      // Futuros nodes de IA: IA Memória, IA Agente.
+      { kind: 'ai_agent', label: 'IA Agente', icon: Sparkles, description: 'Usa IA para decidir e executar ferramentas permitidas.' },
     ],
   },
   {
@@ -208,6 +210,7 @@ const NODE_PRESETS: Record<FlowNodeKind, { label: string; type: string; data: Re
   ai_classification: { label: 'IA Classificação', type: 'ai_classification', data: { instruction: '', input_template: '{{last_message}}', categories: ['financeiro', 'vendas', 'suporte', 'outro'], allow_other: true, confidence_threshold: 0.6, output_variable: 'ai.classification', save_to_contact: false, save_to_lead: false, send_debug_message: false } },
   ai_extraction: { label: 'IA Extração', type: 'ai_extraction', data: { instruction: '', input_template: '{{last_message}}', fields: [{ name: 'nome', type: 'string', description: 'Nome da pessoa' }, { name: 'email', type: 'email', description: 'E-mail' }], include_conversation_history: true, output_variable: 'ai.extraction', save_to_contact: false, save_to_lead: true, send_debug_message: false } },
   ai_summary: { label: 'IA Resumo', type: 'ai_summary', data: { summary_source: 'conversation_history', input_template: '{{last_message}}', instruction: '', summary_format: 'handoff', max_history_messages: 30, max_history_chars: 8000, output_variable: 'ai.summary', send_message: false, continue_on_error: true, model_override: '', temperature: 0.2, max_tokens: 800 } },
+  ai_agent: { label: 'IA Agente', type: 'ai_agent', data: { instruction: 'Você é um agente de atendimento. Use apenas as ferramentas permitidas.', input_template: '{{last_message}}', allowed_tools: ['responder', 'definir_variavel'], max_steps: 3, use_memory: true, memory_max_messages: 10, memory_max_chars: 4000, model_override: '', temperature: 0.2, max_tokens: 1200, after_agent_behavior: 'wait_same_node', after_answer_behavior: 'wait_same_node', fallback_message: 'Não consegui concluir essa ação agora. Quer que eu encaminhe para um atendente?', webhooks: [] } },
 };
 
 const initialNodes: Node[] = [];
@@ -523,7 +526,7 @@ function FlowNodeEditorPanel({
     if (displayMode === 'buttons' && buttons.length >= 3) return;
     onDraftChange({ buttons: [...buttons, { id: `${node.id}-button-${nextIndex}`, label: `Opção ${nextIndex}`, handleId: `option_${nextIndex}` }] });
   };
-  const supportsVariables = ['message', 'choice', 'media', 'cta_url', 'condition', 'action', 'ai_rag', 'ai_response', 'ai_classification', 'ai_extraction', 'ai_summary'].includes(kind);
+  const supportsVariables = ['message', 'choice', 'media', 'cta_url', 'condition', 'action', 'ai_rag', 'ai_response', 'ai_classification', 'ai_extraction', 'ai_summary', 'ai_agent'].includes(kind);
 
 
   return (
@@ -841,6 +844,49 @@ function FlowNodeEditorPanel({
                 <span className="flow-editor-choice-icon" aria-hidden="true">↻</span>
                 <span><strong>Aguardar nova mensagem neste node</strong><small>Cada nova mensagem retorna para este mesmo node.</small></span>
               </label>
+            </fieldset>
+          </>
+        )}
+
+
+        {kind === 'ai_agent' && (
+          <>
+            <div className="flow-editor-info-card"><strong>Tipo:</strong> IA Agente <span>AGENTE</span></div>
+            <label className="flow-editor-field">
+              Instrução do agente
+              <textarea value={toText(draft.instruction || 'Você é um agente de atendimento. Use apenas as ferramentas permitidas.')} onChange={(event) => onDraftChange({ instruction: event.target.value })} />
+            </label>
+            <label className="flow-editor-field">
+              Input template
+              <input value={toText(draft.input_template || '{{last_message}}')} onChange={(event) => onDraftChange({ input_template: event.target.value })} placeholder="{{last_message}}" />
+            </label>
+            <fieldset className="flow-editor-field">
+              <legend>Ferramentas permitidas</legend>
+              {['responder', 'definir_variavel', 'chamar_webhook', 'criar_evento', 'consultar_crm', 'criar_pedido', 'enviar_email', 'transferir_humano'].map((tool) => {
+                const current = Array.isArray(draft.allowed_tools) ? draft.allowed_tools.map(String) : ['responder', 'definir_variavel'];
+                return (
+                  <label key={tool} className="flow-editor-radio">
+                    <input type="checkbox" checked={current.includes(tool)} onChange={(event) => onDraftChange({ allowed_tools: event.target.checked ? Array.from(new Set([...current, tool])) : current.filter((item) => item !== tool) })} />
+                    {tool}
+                  </label>
+                );
+              })}
+            </fieldset>
+            <div className="flow-editor-row">
+              <label className="flow-editor-field">Max steps<input type="number" min="1" max="5" value={toText(draft.max_steps || 3)} onChange={(event) => onDraftChange({ max_steps: Number(event.target.value || 3) })} /></label>
+              <label className="flow-editor-field">Temperatura<input type="number" min="0" max="1" step="0.1" value={toText(draft.temperature ?? 0.2)} onChange={(event) => onDraftChange({ temperature: Number(event.target.value || 0.2) })} /></label>
+              <label className="flow-editor-field">Máx tokens<input type="number" min="1" max="8000" value={toText(draft.max_tokens || 1200)} onChange={(event) => onDraftChange({ max_tokens: Number(event.target.value || 1200) })} /></label>
+            </div>
+            <label className="flow-editor-radio"><input type="checkbox" checked={draft.use_memory !== false} onChange={(event) => onDraftChange({ use_memory: event.target.checked })} />Usar memória da conversa</label>
+            <label className="flow-editor-field">Fallback<textarea value={toText(draft.fallback_message || 'Não consegui concluir essa ação agora. Quer que eu encaminhe para um atendente?')} onChange={(event) => onDraftChange({ fallback_message: event.target.value })} /></label>
+            <label className="flow-editor-field">Webhooks permitidos (JSON)
+              <textarea value={JSON.stringify(draft.webhooks || [], null, 2)} onChange={(event) => { try { onDraftChange({ webhooks: JSON.parse(event.target.value) }); } catch { onDraftChange({ webhooks_json_error: true }); } }} />
+              <small>A IA escolhe apenas webhook_id. Use apenas URLs https públicas.</small>
+            </label>
+            <fieldset className="flow-editor-field flow-editor-after-answer"><legend>Depois do agente</legend>
+              {['end_flow', 'continue_to_next', 'wait_same_node'].map((behavior) => (
+                <label key={behavior} className="flow-editor-choice-card"><input type="radio" name={`ai-agent-after-${node.id}`} checked={(draft.after_agent_behavior || draft.after_answer_behavior || 'wait_same_node') === behavior} onChange={() => onDraftChange({ after_agent_behavior: behavior, after_answer_behavior: behavior })} /><span><strong>{behavior}</strong></span></label>
+              ))}
             </fieldset>
           </>
         )}
