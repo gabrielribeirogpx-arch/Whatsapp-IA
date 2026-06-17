@@ -41,6 +41,7 @@ from app.services.contextual_query_service import (
 from app.services.rag_service import answer_with_rag
 from app.services.llm_service import generate_answer_for_tenant
 from app.services.ai_structured_service import classify_for_tenant, extract_for_tenant
+from app.services.ai_summary_service import summarize_for_tenant
 from app.flow_v2.snapshot import FlowV2Snapshot, build_transitions_from_edges
 from app.flow_v2.transition_resolver import TransitionResolver
 from app.flow_v2.template_renderer import FlowRenderContext, render_template
@@ -1815,6 +1816,85 @@ def _set_nested_value(target: dict[str, Any], path: str, value: Any) -> None:
     current[parts[-1]] = value
 
 
+class AiSummaryNodeExecutor(BaseNodeExecutor):
+    def _save_text(self, db, *, session, output_variable: str, text: str) -> None:
+        context = dict(session.context or {}) if isinstance(getattr(session, "context", None), dict) else {}
+        _set_nested_value(context, "ai.summary", text)
+        _set_nested_value(context, output_variable, text)
+        session.context = context
+        if hasattr(db, "add"):
+            db.add(session)
+
+    def _save_error(self, db, *, session, node_id: str, error: str) -> None:
+        context = dict(session.context or {}) if isinstance(getattr(session, "context", None), dict) else {}
+        _set_nested_value(context, "ai.error", {"node_id": node_id, "error": error})
+        session.context = context
+        if hasattr(db, "add"):
+            db.add(session)
+
+    def execute(self, db, *, snapshot, session, node, runtime_input) -> NodeExecutionResult:
+        node_id = str(node["id"])
+        data = self._node_data(node)
+        continue_on_error = data.get("continue_on_error", data.get("continueOnError", True)) is not False
+        try:
+            source = str(data.get("summary_source", data.get("summarySource", "conversation_history")) or "conversation_history").strip().lower()
+            if source == "custom_text":
+                source_text = str(self._render(data.get("input_template") or data.get("inputTemplate") or "{{last_message}}", db, snapshot=snapshot, session=session, runtime_input=runtime_input) or "")
+            else:
+                max_messages = self._coerce_int(data.get("max_history_messages", data.get("maxHistoryMessages")), default=30)
+                max_chars = self._coerce_int(data.get("max_history_chars", data.get("maxHistoryChars")), default=8000)
+                history = flow_ai_memory_service.get_recent_history(db, tenant_id=session.tenant_id, session_id=session.id, max_messages=max_messages, max_chars=max_chars)
+                source_text = flow_ai_memory_service.build_history_for_prompt(history)
+                if not source_text.strip() and runtime_input.message_text:
+                    source_text = str(runtime_input.message_text)
+
+            options = {
+                key: value
+                for key, value in {
+                    "chat_model": data.get("chat_model_override") or data.get("chat_model") or data.get("model_override") or data.get("model"),
+                    "temperature": self._coerce_float(data.get("temperature"), default=0.2) if data.get("temperature") not in (None, "") else 0.2,
+                    "max_tokens": self._coerce_int(data.get("max_tokens", data.get("maxTokens")), default=800) if data.get("max_tokens", data.get("maxTokens")) not in (None, "") else 800,
+                }.items()
+                if value not in (None, "")
+            }
+            text = summarize_for_tenant(
+                db,
+                session.tenant_id,
+                source_text,
+                instruction=data.get("instruction"),
+                summary_format=str(data.get("summary_format", data.get("summaryFormat", "handoff")) or "handoff"),
+                options=options,
+            )
+            output_variable = str(data.get("output_variable") or data.get("outputVariable") or "ai.summary")
+            self._save_text(db, session=session, output_variable=output_variable, text=text)
+            self.event_store.append(db, session=session, event_type=FlowV2EventType.OUTPUT_EMITTED, node_id=node_id, payload={"analytics_event": "ai_summary_completed", "output_variable": output_variable, "source": source})
+            actions = ()
+            if data.get("send_message", data.get("sendMessage", False)) is True:
+                actions = (SendMessageAction(tenant_id=session.tenant_id, session_id=session.id, external_user_id=runtime_input.external_user_id, conversation_id=runtime_input.conversation_id, contact_id=runtime_input.contact_id, text=text, metadata={"node_id": node_id, "intent": "ai_summary"}),)
+            return NodeExecutionResult(actions=actions, next_node_id=self._default_next_or_terminal(db, snapshot=snapshot, session=session, node_id=node_id), status="continue")
+        except Exception as exc:
+            logger.warning("[AI SUMMARY NODE] failed node_id=%s error=%s", node_id, exc)
+            self._save_error(db, session=session, node_id=node_id, error="ai_summary_failed")
+            self.event_store.append(db, session=session, event_type=FlowV2EventType.OUTPUT_EMITTED, node_id=node_id, payload={"analytics_event": "ai_summary_failed", "error": "ai_summary_failed"})
+            if continue_on_error:
+                return NodeExecutionResult(next_node_id=self._default_next_or_terminal(db, snapshot=snapshot, session=session, node_id=node_id), status="continue")
+            return NodeExecutionResult(next_node_id=None, status="error")
+
+    @staticmethod
+    def _coerce_int(value: Any, *, default: int) -> int:
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return default
+
+    @staticmethod
+    def _coerce_float(value: Any, *, default: float) -> float:
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return default
+
+
 class AiStructuredNodeExecutor(BaseNodeExecutor):
     kind = "ai_structured"
 
@@ -1929,6 +2009,9 @@ class NodeExecutorRegistry:
                 event_store=event_store, transition_resolver=transition_resolver
             ),
             "ai_extraction": AiExtractionNodeExecutor(
+                event_store=event_store, transition_resolver=transition_resolver
+            ),
+            "ai_summary": AiSummaryNodeExecutor(
                 event_store=event_store, transition_resolver=transition_resolver
             ),
         }

@@ -14,7 +14,7 @@ import ReactFlow, {
 } from 'reactflow';
 import type { Connection, Edge, EdgeChange, Node, NodeChange, ReactFlowInstance } from 'reactflow';
 import 'reactflow/dist/style.css';
-import { BookOpen, ChevronDown, Clock, ExternalLink, FileDown, FileImage, GitBranch, HelpCircle, History, ListChecks, MessageSquare, RotateCcw, Sparkles, Tags, Zap } from 'lucide-react';
+import { BookOpen, ChevronDown, Clock, ExternalLink, FileDown, FileImage, FileText, GitBranch, HelpCircle, History, ListChecks, MessageSquare, RotateCcw, Sparkles, Tags, Zap } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 
 import ActionNode from '@/components/flow/nodes/ActionNode';
@@ -22,6 +22,7 @@ import AiRagNode from '@/components/flow/nodes/AiRagNode';
 import AiResponseNode from '@/components/flow/nodes/AiResponseNode';
 import AiClassificationNode from '@/components/flow/nodes/AiClassificationNode';
 import AiExtractionNode from '@/components/flow/nodes/AiExtractionNode';
+import AiSummaryNode from '@/components/flow/nodes/AiSummaryNode';
 import ChoiceNode from '@/components/flow/nodes/ChoiceNode';
 import ConditionNode from '@/components/flow/nodes/ConditionNode';
 import CtaUrlNode from '@/components/flow/nodes/CtaUrlNode';
@@ -51,6 +52,7 @@ const nodeTypes = {
   ai_response: AiResponseNode,
   ai_classification: AiClassificationNode,
   ai_extraction: AiExtractionNode,
+  ai_summary: AiSummaryNode,
   cta_link: CtaUrlNode,
   messageNode: MessageNode,
   choiceNode: ChoiceNode,
@@ -61,7 +63,7 @@ const nodeTypes = {
   ctaUrlNode: CtaUrlNode,
 };
 
-type FlowNodeKind = 'message' | 'choice' | 'condition' | 'delay' | 'action' | 'media' | 'cta_url' | 'ai_rag' | 'ai_response' | 'ai_classification' | 'ai_extraction';
+type FlowNodeKind = 'message' | 'choice' | 'condition' | 'delay' | 'action' | 'media' | 'cta_url' | 'ai_rag' | 'ai_response' | 'ai_classification' | 'ai_extraction' | 'ai_summary';
 type FlowConnection = Connection & { sourceHandle?: string | null };
 type NodePaletteItem = { kind: FlowNodeKind; label: string; icon: LucideIcon; description?: string };
 type NodePaletteGroup = { id: 'communication' | 'ai' | 'logic' | 'actions'; title: string; icon: LucideIcon; nodes: NodePaletteItem[] };
@@ -106,7 +108,13 @@ const NODE_GROUPS: NodePaletteGroup[] = [
         icon: FileDown,
         description: 'Extrai informações estruturadas da conversa.',
       },
-      // Futuros nodes de IA: IA Resposta, IA Resumo, IA Memória, IA Agente.
+      {
+        kind: 'ai_summary',
+        label: 'IA Resumo',
+        icon: FileText,
+        description: 'Resume histórico ou texto para handoff, CRM e notas internas.',
+      },
+      // Futuros nodes de IA: IA Memória, IA Agente.
     ],
   },
   {
@@ -199,6 +207,7 @@ const NODE_PRESETS: Record<FlowNodeKind, { label: string; type: string; data: Re
   ai_response: { label: 'IA Resposta', type: 'ai_response', data: { after_answer_behavior: 'end_flow', instruction: 'Responda como atendente.', question: '{{last_message}}', model_override: '', temperature: 0.2, max_tokens: 1200, memory_enabled: true, memory_max_messages: 10, memory_max_chars: 4000 } },
   ai_classification: { label: 'IA Classificação', type: 'ai_classification', data: { instruction: '', input_template: '{{last_message}}', categories: ['financeiro', 'vendas', 'suporte', 'outro'], allow_other: true, confidence_threshold: 0.6, output_variable: 'ai.classification', save_to_contact: false, save_to_lead: false, send_debug_message: false } },
   ai_extraction: { label: 'IA Extração', type: 'ai_extraction', data: { instruction: '', input_template: '{{last_message}}', fields: [{ name: 'nome', type: 'string', description: 'Nome da pessoa' }, { name: 'email', type: 'email', description: 'E-mail' }], include_conversation_history: true, output_variable: 'ai.extraction', save_to_contact: false, save_to_lead: true, send_debug_message: false } },
+  ai_summary: { label: 'IA Resumo', type: 'ai_summary', data: { summary_source: 'conversation_history', input_template: '{{last_message}}', instruction: '', summary_format: 'handoff', max_history_messages: 30, max_history_chars: 8000, output_variable: 'ai.summary', send_message: false, continue_on_error: true, model_override: '', temperature: 0.2, max_tokens: 800 } },
 };
 
 const initialNodes: Node[] = [];
@@ -377,7 +386,7 @@ const getMiniMapNodeColor = (type: string) => {
   if (normalized === 'message') return '#3b82f6';
   if (normalized === 'media') return '#06b6d4';
   if (normalized === 'cta_url' || normalized === 'cta_link') return '#7c3aed';
-  if (normalized === 'ai_classification' || normalized === 'ai_extraction') return '#06b6d4';
+  if (normalized === 'ai_classification' || normalized === 'ai_extraction' || normalized === 'ai_summary') return '#06b6d4';
   if (['choice', 'condition', 'delay', 'action'].includes(normalized)) return '#f97316';
   return '#94a3b8';
 };
@@ -514,7 +523,7 @@ function FlowNodeEditorPanel({
     if (displayMode === 'buttons' && buttons.length >= 3) return;
     onDraftChange({ buttons: [...buttons, { id: `${node.id}-button-${nextIndex}`, label: `Opção ${nextIndex}`, handleId: `option_${nextIndex}` }] });
   };
-  const supportsVariables = ['message', 'choice', 'media', 'cta_url', 'condition', 'action', 'ai_rag', 'ai_response', 'ai_classification', 'ai_extraction'].includes(kind);
+  const supportsVariables = ['message', 'choice', 'media', 'cta_url', 'condition', 'action', 'ai_rag', 'ai_response', 'ai_classification', 'ai_extraction', 'ai_summary'].includes(kind);
 
 
   return (
@@ -666,6 +675,26 @@ function FlowNodeEditorPanel({
             <label className="flow-editor-radio"><input type="checkbox" checked={draft.include_conversation_history !== false} onChange={(event) => onDraftChange({ include_conversation_history: event.target.checked })} /> Incluir histórico</label>
             <label className="flow-editor-field">Output variable<input value={toText(draft.output_variable || 'ai.extraction')} onChange={(event) => onDraftChange({ output_variable: event.target.value })} /></label>
             <label className="flow-editor-radio"><input type="checkbox" checked={draft.send_debug_message === true} onChange={(event) => onDraftChange({ send_debug_message: event.target.checked })} /> Enviar debug message</label>
+          </>
+        )}
+
+
+        {kind === 'ai_summary' && (
+          <>
+            <div className="flow-editor-info-card"><strong>Tipo:</strong> IA Resumo <span>IA</span><small>Usa as configurações de IA do workspace. Não insira API key no node.</small></div>
+            <fieldset className="flow-editor-field">
+              <legend>Fonte do resumo</legend>
+              <label className="flow-editor-radio"><input type="radio" name={`ai-summary-source-${node.id}`} checked={(draft.summary_source || 'conversation_history') === 'conversation_history'} onChange={() => onDraftChange({ summary_source: 'conversation_history' })} /> Histórico da conversa</label>
+              <label className="flow-editor-radio"><input type="radio" name={`ai-summary-source-${node.id}`} checked={draft.summary_source === 'custom_text'} onChange={() => onDraftChange({ summary_source: 'custom_text' })} /> Texto customizado</label>
+            </fieldset>
+            {draft.summary_source === 'custom_text' ? <label className="flow-editor-field">Texto customizado / input template<textarea value={toText(draft.input_template || '{{last_message}}')} onChange={(event) => onDraftChange({ input_template: event.target.value })} placeholder="{{last_message}}" /></label> : null}
+            <label className="flow-editor-field">Instrução adicional<textarea value={toText(draft.instruction)} onChange={(event) => onDraftChange({ instruction: event.target.value })} placeholder="Ex.: destaque risco de churn e próximos passos." /></label>
+            <label className="flow-editor-field">Formato<select value={toText(draft.summary_format || 'handoff')} onChange={(event) => onDraftChange({ summary_format: event.target.value })}><option value="handoff">Handoff</option><option value="short">Curto</option><option value="detailed">Detalhado</option><option value="bullet_points">Tópicos</option></select></label>
+            <div className="flow-editor-row"><label className="flow-editor-field">Máximo de mensagens<input type="number" min="1" max="100" value={toText(draft.max_history_messages || 30)} onChange={(event) => onDraftChange({ max_history_messages: Number(event.target.value || 30) })} disabled={draft.summary_source === 'custom_text'} /></label><label className="flow-editor-field">Máximo de caracteres<input type="number" min="500" max="20000" value={toText(draft.max_history_chars || 8000)} onChange={(event) => onDraftChange({ max_history_chars: Number(event.target.value || 8000) })} disabled={draft.summary_source === 'custom_text'} /></label></div>
+            <label className="flow-editor-field">Variável de saída<input value={toText(draft.output_variable || 'ai.summary')} onChange={(event) => onDraftChange({ output_variable: event.target.value })} /></label>
+            <label className="flow-editor-radio"><input type="checkbox" checked={draft.send_message === true} onChange={(event) => onDraftChange({ send_message: event.target.checked })} /> Enviar resumo como mensagem</label>
+            <label className="flow-editor-radio"><input type="checkbox" checked={draft.continue_on_error !== false} onChange={(event) => onDraftChange({ continue_on_error: event.target.checked })} /> Continuar em caso de erro</label>
+            <details className="flow-editor-info-card"><summary>Avançado: modelo, temperatura e tokens</summary><label className="flow-editor-field">Modelo (opcional)<input value={toText(draft.model_override)} onChange={(event) => onDraftChange({ model_override: event.target.value })} placeholder="Ex.: gpt-4o-mini" /></label><div className="flow-editor-row"><label className="flow-editor-field">Temperatura<input type="number" min="0" max="1" step="0.1" value={toText(draft.temperature ?? 0.2)} onChange={(event) => onDraftChange({ temperature: Number(event.target.value || 0.2) })} /></label><label className="flow-editor-field">Máx tokens<input type="number" min="1" max="8000" value={toText(draft.max_tokens || 800)} onChange={(event) => onDraftChange({ max_tokens: Number(event.target.value || 800) })} /></label></div></details>
           </>
         )}
 
