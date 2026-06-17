@@ -28,9 +28,9 @@ class LLMGenerationError(RuntimeError):
 
 DEFAULT_MODELS = {
     "openai": "gpt-4o-mini",
-    "gemini": "gemini-1.5-flash",
+    "gemini": "gemini-3.1-flash-lite",
     "anthropic": "claude-3-5-haiku-latest",
-    "wazza_default": os.getenv("AI_MODEL", "gemini-1.5-flash"),
+    "wazza_default": os.getenv("AI_MODEL", "gemini-3.1-flash-lite"),
 }
 
 DEFAULT_TEMPERATURE = 0.2
@@ -108,6 +108,16 @@ def _friendly_provider_error(status_code: int | None, error_code: str | None, me
     normalized_code = (error_code or "").lower()
     normalized_message = (message or "").lower()
     if (
+        status_code == 429
+        or "rate_limit" in normalized_code
+        or "quota" in normalized_code
+        or "resource_exhausted" in normalized_code
+        or "rate limit" in normalized_message
+        or "quota" in normalized_message
+        or "resource exhausted" in normalized_message
+    ):
+        return "Limite de uso do provedor atingido. Aguarde alguns minutos ou use outro modelo/chave."
+    if (
         status_code == 401
         or "invalid_api_key" in normalized_code
         or "api_key_invalid" in normalized_code
@@ -123,7 +133,7 @@ def _friendly_provider_error(status_code: int | None, error_code: str | None, me
         or "permission" in normalized_message
         or "model" in normalized_message and ("not found" in normalized_message or "not exist" in normalized_message)
     ):
-        return "Modelo não encontrado ou sem permissão."
+        return "Modelo não encontrado ou sem permissão nesta chave."
     return "Não foi possível validar a conexão com este provedor."
 
 
@@ -212,7 +222,7 @@ def generate_answer(messages: list[dict[str, str]], model: str | None = None, te
     resolved_key = api_key or os.getenv(_provider_env_key(resolved_provider) or "")
     if not resolved_key:
         raise LLMConfigurationError("IA não configurada para este workspace.")
-    resolved_model = validate_chat_model(model) or DEFAULT_MODELS.get(resolved_provider) or "gemini-1.5-flash"
+    resolved_model = validate_chat_model(model) or DEFAULT_MODELS.get(resolved_provider) or "gemini-3.1-flash-lite"
     temp = _coerce_float(temperature if temperature is not None else os.getenv("AI_TEMPERATURE"), default=DEFAULT_TEMPERATURE, field_name="temperature", source="generate_answer")
     limit = _coerce_int(max_tokens if max_tokens is not None else os.getenv("AI_MAX_TOKENS"), default=DEFAULT_MAX_TOKENS, field_name="max_tokens", source="generate_answer")
     try:

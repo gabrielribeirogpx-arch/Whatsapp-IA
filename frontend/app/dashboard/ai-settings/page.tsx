@@ -18,21 +18,22 @@ type AISettings = {
 };
 
 const chatModels: Record<AIProvider, string[]> = {
-  openai: ['gpt-4o', 'gpt-4o-mini'],
-  gemini: ['gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-1.5-flash'],
-  anthropic: ['claude-sonnet', 'claude-opus'],
+  openai: ['gpt-4o-mini', 'gpt-4o', 'gpt-4.1-mini', 'gpt-4.1'],
+  gemini: ['gemini-3.1-flash-lite', 'gemini-3-flash', 'gemini-3.5-flash', 'gemini-2.5-flash-lite', 'gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-1.5-flash'],
+  anthropic: ['claude-3-5-haiku-latest', 'claude-3-5-sonnet-latest', 'claude-3-7-sonnet-latest'],
   wazza_default: [],
 };
 
 const embeddingModels: Record<AIProvider, string[]> = {
   openai: ['text-embedding-3-small', 'text-embedding-3-large'],
-  gemini: ['gemini-embedding-001'],
+  gemini: ['gemini-embedding-001', 'text-embedding-004', 'gemini-embedding-exp-03-07'],
   anthropic: [],
   wazza_default: [],
 };
 
-const defaultChatModel: Record<AIProvider, string> = { openai: 'gpt-4o', gemini: 'gemini-2.5-flash', anthropic: 'claude-sonnet', wazza_default: '' };
+const defaultChatModel: Record<AIProvider, string> = { openai: 'gpt-4o-mini', gemini: 'gemini-3.1-flash-lite', anthropic: 'claude-3-5-haiku-latest', wazza_default: '' };
 const defaultEmbeddingModel: Record<AIProvider, string> = { openai: 'text-embedding-3-small', gemini: 'gemini-embedding-001', anthropic: '', wazza_default: '' };
+const embeddingProviderOptions: AIProvider[] = ['gemini', 'openai'];
 
 function extractErrorMessage(payload: unknown, fallback: string): string {
   if (!payload || typeof payload !== 'object') return fallback;
@@ -55,7 +56,44 @@ function isEmbeddingLike(model: string | null): boolean {
 
 function isChatLike(model: string | null): boolean {
   const normalized = (model || '').toLowerCase();
-  return normalized.includes('gpt-4o') || normalized.includes('gemini-2.5') || normalized.includes('gemini-1.5') || normalized.includes('claude');
+  return ['flash', 'pro', 'sonnet', 'haiku', 'opus', 'gpt-4', 'gpt-3'].some((marker) => normalized.includes(marker));
+}
+
+function asAIProvider(value: string | null | undefined): AIProvider | null {
+  return value === 'openai' || value === 'gemini' || value === 'anthropic' || value === 'wazza_default' ? value : null;
+}
+
+type ModelInputProps = {
+  label: string;
+  value: string | null;
+  suggestions: string[];
+  disabled?: boolean;
+  invalid?: boolean;
+  placeholder: string;
+  datalistId: string;
+  help: string;
+  error?: string;
+  onChange: (value: string) => void;
+};
+
+function ModelInput({ label, value, suggestions, disabled, invalid, placeholder, datalistId, help, error, onChange }: ModelInputProps) {
+  return (
+    <label className="block text-xs font-semibold uppercase tracking-wide text-slate-500">
+      {label}
+      <input
+        className={`mt-2 h-11 w-full rounded-xl border bg-white px-3 text-sm font-semibold text-slate-800 outline-none transition placeholder:text-slate-400 focus:ring-2 ${invalid ? 'border-red-300 focus:border-red-300 focus:ring-red-100' : 'border-slate-200 focus:border-emerald-300 focus:ring-emerald-100'}`}
+        value={value || ''}
+        onChange={(event) => onChange(event.target.value)}
+        disabled={disabled}
+        aria-invalid={invalid}
+        list={disabled ? undefined : datalistId}
+        placeholder={placeholder}
+      />
+      <datalist id={datalistId}>{suggestions.map((model) => <option key={model} value={model} />)}</datalist>
+      <span className="mt-2 block text-xs font-medium normal-case tracking-normal text-slate-500">{help}</span>
+      {error ? <span className="mt-2 flex items-center gap-1.5 text-xs font-semibold normal-case tracking-normal text-red-600"><AlertCircle size={14} /> {error}</span> : null}
+    </label>
+  );
 }
 
 export default function AISettingsPage() {
@@ -68,9 +106,11 @@ export default function AISettingsPage() {
 
   const isWazzaDefault = settings.provider === 'wazza_default';
   const availableChatModels = chatModels[settings.provider];
-  const availableEmbeddingModels = embeddingModels[settings.provider];
+  const embeddingProvider = asAIProvider(settings.embedding_provider) || (settings.provider === 'anthropic' ? null : settings.provider);
+  const availableEmbeddingModels = embeddingProvider ? embeddingModels[embeddingProvider] : [];
+  const supportsEmbeddingProvider = Boolean(embeddingProvider && availableEmbeddingModels.length > 0);
   const chatModelInvalid = !isWazzaDefault && (!(settings.chat_model || '').trim() || isEmbeddingLike(settings.chat_model));
-  const embeddingModelInvalid = !isWazzaDefault && availableEmbeddingModels.length > 0 && (!(settings.embedding_model || '').trim() || isChatLike(settings.embedding_model));
+  const embeddingModelInvalid = !isWazzaDefault && supportsEmbeddingProvider && (!(settings.embedding_model || '').trim() || isChatLike(settings.embedding_model));
 
   async function load() {
     setLoading(true);
@@ -89,6 +129,10 @@ export default function AISettingsPage() {
     update({ provider, chat_model: defaultChatModel[provider], embedding_provider: provider === 'anthropic' || provider === 'wazza_default' ? null : provider, embedding_model: defaultEmbeddingModel[provider] });
   }
 
+  function updateEmbeddingProvider(provider: AIProvider | '') {
+    update({ embedding_provider: provider || null, embedding_model: provider ? defaultEmbeddingModel[provider] : '' });
+  }
+
   async function save(event: FormEvent) {
     event.preventDefault();
     if (chatModelInvalid) { setStatus('Selecione um modelo de conversação válido.'); return; }
@@ -97,7 +141,7 @@ export default function AISettingsPage() {
     const response = await apiFetch('/api/ai/settings', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...settings, embedding_provider: availableEmbeddingModels.length ? (settings.embedding_provider || settings.provider) : undefined, embedding_model: availableEmbeddingModels.length ? settings.embedding_model : undefined, api_key: isWazzaDefault ? undefined : apiKey || undefined }),
+      body: JSON.stringify({ ...settings, embedding_provider: supportsEmbeddingProvider ? embeddingProvider : undefined, embedding_model: supportsEmbeddingProvider ? settings.embedding_model : undefined, api_key: isWazzaDefault ? undefined : apiKey || undefined }),
     });
     if (response.ok) {
       setSettings(await response.json());
@@ -139,8 +183,11 @@ export default function AISettingsPage() {
         <div className="grid w-full grid-cols-1 gap-4 xl:grid-cols-2">
           <section className="rounded-2xl border border-slate-100 bg-white p-5 shadow-[0_12px_30px_rgba(15,23,42,0.05)]"><div className="mb-5"><h2 className="text-base font-bold text-slate-900">Provedor de IA</h2><p className="mt-1 text-xs leading-relaxed text-slate-500">Defina qual motor será usado nas automações inteligentes.</p></div><div className="space-y-5">
             <label className="block text-xs font-semibold uppercase tracking-wide text-slate-500">Provider<select className="mt-2 h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-800 outline-none transition focus:border-emerald-300 focus:ring-2 focus:ring-emerald-100" value={settings.provider} onChange={(event) => updateProvider(event.target.value as AIProvider)}><option value="wazza_default">Wazza default</option><option value="openai">OpenAI</option><option value="gemini">Gemini</option><option value="anthropic">Anthropic</option></select></label>
-            <label className="block text-xs font-semibold uppercase tracking-wide text-slate-500">Modelo de conversação<select className={`mt-2 h-11 w-full rounded-xl border bg-white px-3 text-sm font-semibold text-slate-800 outline-none transition focus:ring-2 ${chatModelInvalid ? 'border-red-300 focus:border-red-300 focus:ring-red-100' : 'border-slate-200 focus:border-emerald-300 focus:ring-emerald-100'}`} value={settings.chat_model || ''} onChange={(event) => update({ chat_model: event.target.value })} disabled={isWazzaDefault} aria-invalid={chatModelInvalid}><option value="">{isWazzaDefault ? 'Configuração global Wazza' : 'Selecione'}</option>{availableChatModels.map((model) => <option key={model} value={model}>{model}</option>)}</select><span className="mt-2 block text-xs font-medium normal-case tracking-normal text-slate-500">Utilizado para gerar respostas da IA.</span>{chatModelInvalid ? <span className="mt-2 flex items-center gap-1.5 text-xs font-semibold normal-case tracking-normal text-red-600"><AlertCircle size={14} /> Selecione um modelo de conversação.</span> : null}</label>
-            <label className="block text-xs font-semibold uppercase tracking-wide text-slate-500">Modelo de embeddings<select className={`mt-2 h-11 w-full rounded-xl border bg-white px-3 text-sm font-semibold text-slate-800 outline-none transition focus:ring-2 ${embeddingModelInvalid ? 'border-red-300 focus:border-red-300 focus:ring-red-100' : 'border-slate-200 focus:border-emerald-300 focus:ring-emerald-100'}`} value={settings.embedding_model || ''} onChange={(event) => update({ embedding_model: event.target.value, embedding_provider: settings.provider })} disabled={isWazzaDefault || availableEmbeddingModels.length === 0}><option value="">{availableEmbeddingModels.length === 0 && !isWazzaDefault ? 'Embeddings não disponíveis para este provider' : isWazzaDefault ? 'Configuração global Wazza' : 'Selecione'}</option>{availableEmbeddingModels.map((model) => <option key={model} value={model}>{model}</option>)}</select><span className="mt-2 block text-xs font-medium normal-case tracking-normal text-slate-500">Utilizado apenas para indexação e busca semântica da Base de Conhecimento (RAG).</span>{embeddingModelInvalid ? <span className="mt-2 flex items-center gap-1.5 text-xs font-semibold normal-case tracking-normal text-red-600"><AlertCircle size={14} /> Selecione um modelo de embeddings.</span> : null}</label>
+            <ModelInput label="Modelo de conversação" value={settings.chat_model} suggestions={availableChatModels} disabled={isWazzaDefault} invalid={chatModelInvalid} placeholder={isWazzaDefault ? 'Configuração global Wazza' : 'Digite ou selecione um modelo'} datalistId="ai-chat-models" help={settings.provider === 'gemini' ? 'Você pode selecionar uma sugestão ou digitar manualmente o ID do modelo disponível na sua conta do provedor. Consulte os modelos disponíveis no Google AI Studio.' : 'Você pode selecionar uma sugestão ou digitar manualmente o ID do modelo disponível na sua conta do provedor.'} error={chatModelInvalid ? 'Selecione um modelo de conversação.' : undefined} onChange={(value) => update({ chat_model: value })} />
+            <div className="space-y-3">
+              <label className="block text-xs font-semibold uppercase tracking-wide text-slate-500">Provider de embeddings<select className="mt-2 h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-800 outline-none transition focus:border-emerald-300 focus:ring-2 focus:ring-emerald-100 disabled:cursor-not-allowed disabled:opacity-60" value={embeddingProvider || ''} onChange={(event) => updateEmbeddingProvider(event.target.value as AIProvider | '')} disabled={isWazzaDefault}><option value="">{isWazzaDefault ? 'Configuração global Wazza' : 'Sem embeddings neste MVP'}</option>{embeddingProviderOptions.map((provider) => <option key={provider} value={provider}>{provider === 'gemini' ? 'Gemini' : 'OpenAI'}</option>)}</select>{settings.provider === 'anthropic' ? <span className="mt-2 block text-xs font-medium normal-case tracking-normal text-slate-500">Anthropic não possui embeddings nativo neste MVP. Use Gemini/OpenAI para embeddings.</span> : null}</label>
+              <ModelInput label="Modelo de embeddings" value={settings.embedding_model} suggestions={availableEmbeddingModels} disabled={isWazzaDefault || !supportsEmbeddingProvider} invalid={embeddingModelInvalid} placeholder={isWazzaDefault ? 'Configuração global Wazza' : supportsEmbeddingProvider ? 'Digite ou selecione um modelo' : 'Embeddings não disponíveis para este provider'} datalistId="ai-embedding-models" help="Você pode selecionar uma sugestão ou digitar manualmente o ID do modelo disponível na sua conta do provedor." error={embeddingModelInvalid ? 'Selecione um modelo de embeddings.' : undefined} onChange={(value) => update({ embedding_model: value, embedding_provider: embeddingProvider })} />
+            </div>
             <label className="flex items-center justify-between gap-4 rounded-2xl border border-slate-100 bg-slate-50/80 p-4 text-sm font-semibold text-slate-800"><span><span className="block text-xs font-semibold uppercase tracking-wide text-slate-500">Ativar IA</span><span className="mt-1 block text-sm text-slate-700">IA habilitada neste workspace</span></span><input className="h-5 w-5 rounded border-slate-300 text-emerald-600 focus:ring-emerald-200" type="checkbox" checked={settings.is_enabled} onChange={(event) => update({ is_enabled: event.target.checked })} /></label>
           </div></section>
 
