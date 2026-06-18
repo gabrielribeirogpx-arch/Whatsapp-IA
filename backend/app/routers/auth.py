@@ -9,6 +9,8 @@ import re
 import secrets
 import time
 import unicodedata
+from argon2 import PasswordHasher
+from argon2.exceptions import InvalidHashError, VerifyMismatchError, VerificationError
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -25,6 +27,7 @@ from app.services.session_service import create_user_session
 router = APIRouter(tags=["auth"])
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 RESET_WINDOW_SECONDS = int(os.getenv("PASSWORD_RESET_TTL_SECONDS", "1800"))
+_password_hasher = PasswordHasher()
 
 
 def _rate_identity(email: str) -> str:
@@ -48,18 +51,38 @@ def _build_unique_slug(db: Session, name: str) -> str:
 
 
 def _hash_password(password: str) -> str:
-    salt = os.urandom(16).hex()
-    digest = hashlib.sha256(f"{salt}:{password}".encode("utf-8")).hexdigest()
-    return f"sha256${salt}${digest}"
+    return _password_hasher.hash(password)
 
 
-def _verify_password(password: str, password_hash: str) -> bool:
+def _verify_legacy_sha256_password(password: str, password_hash: str) -> bool:
     try:
-        _, salt, digest = password_hash.split("$", 2)
+        scheme, salt, digest = password_hash.split("$", 2)
     except ValueError:
+        return False
+    if scheme != "sha256":
         return False
     expected = hashlib.sha256(f"{salt}:{password}".encode("utf-8")).hexdigest()
     return hmac.compare_digest(expected, digest)
+
+
+def _verify_password(password: str, password_hash: str) -> bool:
+    if not password_hash:
+        return False
+    if password_hash.startswith("sha256$"):
+        return _verify_legacy_sha256_password(password, password_hash)
+    try:
+        return _password_hasher.verify(password_hash, password)
+    except (InvalidHashError, VerificationError, VerifyMismatchError):
+        return False
+
+
+def _password_needs_rehash(password_hash: str) -> bool:
+    if password_hash.startswith("sha256$"):
+        return True
+    try:
+        return _password_hasher.check_needs_rehash(password_hash)
+    except InvalidHashError:
+        return False
 
 
 def _create_token(tenant_id: str, email: str, session_id: str | None = None) -> str:
@@ -100,7 +123,7 @@ def _send_reset_email(email: str, reset_link: str) -> None:
     sender = os.getenv("RESEND_FROM_EMAIL", "no-reply@wazza.local")
     masked = f"{email[:2]}***@***"
     if not resend_api_key:
-        print(f"[PASSWORD RESET REQUEST] provider=mock target={masked} link={reset_link[:60]}...")
+        print(f"[PASSWORD RESET REQUEST] provider=mock target={masked}")
         return
 
     try:
@@ -233,6 +256,8 @@ def login(payload: LoginRequest, request: Request, db: Session = Depends(get_db)
     if not tenant:
         raise HTTPException(status_code=401, detail="Credenciais inválidas")
 
+    if _password_needs_rehash(user.password_hash):
+        user.password_hash = _hash_password(payload.password)
     user.last_login_at = datetime.utcnow()
     db.add(user)
     token = _create_token(str(tenant.id), user.email, session_id=str(user.id))

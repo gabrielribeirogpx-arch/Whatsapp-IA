@@ -173,7 +173,15 @@ def import_recipients_from_contacts(campaign_id: str, payload: dict, db: Session
 
     imported = 0
     for contact in contacts:
-        exists = db.execute(select(WhatsAppCampaignRecipient).where(WhatsAppCampaignRecipient.campaign_id == c.id, WhatsAppCampaignRecipient.phone == contact.phone)).scalars().first()
+        exists = db.execute(
+            select(WhatsAppCampaignRecipient)
+            .join(WhatsAppCampaign, WhatsAppCampaignRecipient.campaign_id == WhatsAppCampaign.id)
+            .where(
+                WhatsAppCampaign.tenant_id == tenant.id,
+                WhatsAppCampaignRecipient.campaign_id == c.id,
+                WhatsAppCampaignRecipient.phone == contact.phone,
+            )
+        ).scalars().first()
         if exists:
             continue
         first_name_from_name = (str(contact.name or "").strip().split(" ", 1)[0] if contact.name else "").strip()
@@ -221,7 +229,11 @@ def start_campaign(campaign_id: str, db: Session = Depends(get_db), tenant: Tena
     ).scalars().first()
     if not template or str(template.status or "").lower() != "approved":
         raise HTTPException(status_code=400, detail="Template is not approved")
-    recipients = db.execute(select(WhatsAppCampaignRecipient).where(WhatsAppCampaignRecipient.campaign_id == c.id)).scalars().all()
+    recipients = db.execute(
+        select(WhatsAppCampaignRecipient)
+        .join(WhatsAppCampaign, WhatsAppCampaignRecipient.campaign_id == WhatsAppCampaign.id)
+        .where(WhatsAppCampaign.tenant_id == tenant.id, WhatsAppCampaignRecipient.campaign_id == c.id)
+    ).scalars().all()
     if not recipients:
         raise HTTPException(status_code=400, detail="Campaign has no recipients")
     required_vars = _extract_template_variables(template)
@@ -256,5 +268,10 @@ def list_recipients(campaign_id: str, db: Session = Depends(get_db), tenant: Ten
     c = db.execute(select(WhatsAppCampaign).where(WhatsAppCampaign.id == campaign_id, WhatsAppCampaign.tenant_id == tenant.id)).scalars().first()
     if not c:
         raise HTTPException(status_code=404, detail="Campaign not found")
-    rows = db.execute(select(WhatsAppCampaignRecipient).where(WhatsAppCampaignRecipient.campaign_id == c.id).order_by(WhatsAppCampaignRecipient.created_at.desc())).scalars().all()
+    rows = db.execute(
+        select(WhatsAppCampaignRecipient)
+        .join(WhatsAppCampaign, WhatsAppCampaignRecipient.campaign_id == WhatsAppCampaign.id)
+        .where(WhatsAppCampaign.tenant_id == tenant.id, WhatsAppCampaignRecipient.campaign_id == c.id)
+        .order_by(WhatsAppCampaignRecipient.created_at.desc())
+    ).scalars().all()
     return [{"id": str(r.id), "campaign_id": str(r.campaign_id), "phone": r.phone, "first_name": r.first_name, "status": r.status, "provider_message_id": r.provider_message_id, "error_message": r.error_message} for r in rows]
