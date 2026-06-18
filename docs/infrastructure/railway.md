@@ -16,7 +16,7 @@ O repositório contém configurações explícitas e implícitas usadas pelo Rai
 
 1. O Railway detecta o runtime a partir dos arquivos do repositório.
 2. A versão Python é declarada em `runtime.txt` como `python-3.11`.
-3. O `railway.json` define um `deploy.preDeployCommand` seguro: ele executa `bash release.sh` somente quando há um script de release no diretório do serviço; caso contrário, imprime `No backend release context detected; skipping migrations` e termina com sucesso. Isso impede que o serviço Frontend/Node falhe tentando executar Alembic.
+3. O `railway.json` define um `deploy.preDeployCommand` global defensivo: `if [ -f release.sh ]; then bash release.sh; else echo 'No backend release context detected; skipping migrations'; fi`. Como configurações versionadas sobrescrevem as configurações do dashboard no deploy, o comando precisa ser seguro para todos os serviços que leem esse arquivo. No serviço Frontend com Root Directory `/frontend`, não existe `frontend/release.sh`; portanto o pre-deploy apenas imprime `No backend release context detected; skipping migrations` e termina com sucesso, sem chamar Alembic.
 4. O `release.sh` da raiz é um roteador idempotente: no contexto da raiz do monorepo ele delega para `backend/release.sh`; no contexto de `/backend` o próprio `backend/release.sh` executa as migrations; em contextos não-backend ele faz no-op. `backend/release.sh` chama `scripts/run_release_migrations.py`, que serializa execuções concorrentes com um advisory lock do Postgres; se mais de um serviço backend/worker disparar o pre-deploy, apenas uma migration roda por vez e os demais observam o banco já no head.
 5. O serviço backend usa o `Procfile`:
    - `release`: compatibilidade com Procfile/Heroku-style, entrando em `backend` e executando `bash release.sh`.
@@ -82,7 +82,7 @@ Responsável pela API FastAPI, webhooks da Meta/WhatsApp, autenticação de tena
 
 - Start atual pelo `Procfile`: `cd backend && bash start.sh`.
 - Não executa migrations no processo web; apenas valida conectividade do banco e se o schema está no Alembic head antes de subir a API.
-- As migrations Alembic devem rodar somente na etapa de release/deploy do backend: `bash release.sh` quando o serviço usa Root Directory `/backend`, ou `bash release.sh` na raiz do monorepo delegando para `backend/release.sh`. O `preDeployCommand` global é seguro para serviços Node porque só executa um `release.sh` local quando ele existe; no Frontend ele deve fazer no-op e não executar Alembic.
+- As migrations Alembic devem rodar somente na etapa de release/deploy do backend: `bash release.sh` quando o serviço usa Root Directory `/backend`, ou `bash release.sh` na raiz do monorepo delegando para `backend/release.sh`. O `preDeployCommand` global é seguro para serviços Node porque só executa um `release.sh` local quando ele existe; no Frontend com Root Directory `/frontend`, a ausência de `frontend/release.sh` transforma o pre-deploy em no-op e impede qualquer execução de Alembic.
 - Depende de Postgres (`DATABASE_URL`) em produção.
 - Deve receber `MISE_PYTHON_GITHUB_ATTESTATIONS=false` no Railway enquanto o problema de attestation do mise/Railpack puder ocorrer.
 
@@ -102,8 +102,9 @@ Responsável por tarefas assíncronas e filas RQ.
 Responsável pela interface Next.js.
 
 - Código em `frontend/`.
+- Configuração esperada do serviço Railway Frontend: Root Directory `/frontend`, builder Railpack/Node, build command `npm run build`, start command `npm run start` e variável `NEXT_PUBLIC_API_URL` apontando para a URL pública do backend.
 - É Node/Railpack e não executa migrations Alembic nem scripts de release do backend.
-- Se o `preDeployCommand` global for avaliado no diretório do Frontend, ele deve apenas imprimir `No backend release context detected; skipping migrations` e sair `0`.
+- Se o `preDeployCommand` global for avaliado no diretório do Frontend, ele deve apenas imprimir `No backend release context detected; skipping migrations` e sair `0`. Como o comando global agora verifica `[ -f release.sh ]` antes de executar, o contexto `/frontend` é 100% no-op.
 - Depende de `NEXT_PUBLIC_API_URL` apontando para o backend correto por ambiente.
 - Depende de `NEXT_PUBLIC_TURNSTILE_SITE_KEY` em staging/produção.
 
