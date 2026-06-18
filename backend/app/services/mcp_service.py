@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 from app.models.tenant_mcp import TenantMCPServer, TenantMCPTool
 from app.utils.encryption import decrypt_secret, encrypt_secret
 from app.services.execution_budget_service import ExecutionBudget, ExecutionBudgetExceeded
+from app.services.circuit_breaker_service import CircuitBreakerOpen, check_circuit, record_failure, record_success
 
 logger = logging.getLogger(__name__)
 ALLOWED_TRANSPORTS = {"http", "sse", "stdio_future"}
@@ -146,8 +147,17 @@ def discover_mcp_tools(db: Session, tenant_id: uuid.UUID, server_id: uuid.UUID) 
     if len(count) >= MAX_TOOLS_PER_TENANT:
         raise MCPError("Limite de ferramentas MCP por workspace atingido.")
     payload = {"jsonrpc": "2.0", "id": "discover", "method": "tools/list", "params": {}}
-    response = requests.post(str(server.server_url), headers=_headers(server), json=payload, timeout=MAX_TIMEOUT_SECONDS)
-    response.raise_for_status()
+    circuit_key = f"mcp:{tenant_id}:{server.id}"
+    check_circuit(circuit_key)
+    try:
+        response = requests.post(str(server.server_url), headers=_headers(server), json=payload, timeout=MAX_TIMEOUT_SECONDS)
+        response.raise_for_status()
+        record_success(circuit_key)
+    except requests.RequestException as exc:
+        status = getattr(getattr(exc, "response", None), "status_code", None)
+        if status is None or status >= 500 or status == 429:
+            record_failure(circuit_key, reason=f"mcp_discover:{status or type(exc).__name__}")
+        raise
     data = response.json()
     tools = ((data.get("result") or {}).get("tools") or data.get("tools") or []) if isinstance(data, dict) else []
     saved: list[TenantMCPTool] = []
@@ -194,13 +204,22 @@ def call_mcp_tool(db: Session, tenant_id: uuid.UUID, tool_id: uuid.UUID | str, a
             return {"ok": False, "status": "budget_exceeded", "tool_id": str(tool.id), "tool_name": tool.tool_name, "latency_ms": int((time.monotonic() - started) * 1000), "error": "deadline_exceeded", **budget.safe_metadata()}
         timeout = max(1, min(timeout, remaining // 1000))
     payload = {"jsonrpc": "2.0", "id": str(uuid.uuid4()), "method": "tools/call", "params": {"name": tool.tool_name, "arguments": args}}
+    circuit_key = f"mcp:{tenant_id}:{server.id}"
+    try:
+        cb_meta = check_circuit(circuit_key)
+    except CircuitBreakerOpen:
+        return {"ok": False, "status": "circuit_open", "message": "Integração temporariamente indisponível.", "tool_id": str(tool.id), "tool_name": tool.tool_name, "latency_ms": int((time.monotonic() - started) * 1000), "error": "circuit_open"}
     try:
         response = requests.post(str(server.server_url), headers=_headers(server), json=payload, timeout=timeout)
         response.raise_for_status()
+        record_success(circuit_key)
         raw = response.json()
         ok = not (isinstance(raw, dict) and raw.get("error"))
         result = (raw.get("result") if isinstance(raw, dict) else raw)
         return {"ok": ok, "status": "success" if ok else "error", "tool_id": str(tool.id), "tool_name": tool.tool_name, "latency_ms": int((time.monotonic() - started) * 1000), "result": sanitize_value(result), "error": sanitize_value(raw.get("error")) if isinstance(raw, dict) else None}
     except (requests.RequestException, ValueError, TimeoutError) as exc:
-        logger.warning("[MCP CALL FAILED] tenant_id=%s tool_id=%s error=%s", tenant_id, tool.id, type(exc).__name__)
+        status = getattr(getattr(exc, "response", None), "status_code", None)
+        if status is None or status >= 500 or status == 429 or isinstance(exc, (requests.Timeout, requests.ConnectionError, TimeoutError)):
+            record_failure(circuit_key, reason=f"mcp_call:{status or type(exc).__name__}")
+        logger.warning("[MCP CALL FAILED] tenant_id=%s tool_id=%s error=%s circuit_breaker_key_hash=%s", tenant_id, tool.id, type(exc).__name__, cb_meta.get("circuit_breaker_key_hash"))
         return {"ok": False, "status": "timeout" if "timeout" in type(exc).__name__.lower() else "error", "tool_id": str(tool.id), "tool_name": tool.tool_name, "latency_ms": int((time.monotonic() - started) * 1000), "error": type(exc).__name__}

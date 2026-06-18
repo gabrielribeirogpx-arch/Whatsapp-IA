@@ -7,6 +7,8 @@ from typing import Any
 
 import httpx
 
+from app.services.circuit_breaker_service import CircuitBreakerOpen, check_circuit, record_failure, record_success
+
 logger = logging.getLogger(__name__)
 
 META_GRAPH_API_VERSION = os.getenv("META_GRAPH_API_VERSION", "v23.0").strip() or "v23.0"
@@ -41,13 +43,23 @@ class MetaCloudClient:
             "Accept": "application/json",
             "Content-Type": "application/json",
         }
+        phone_number_id = context.get("phone_number_id") or endpoint_path.strip("/").split("/", 1)[0] or "unknown"
+        circuit_key = f"whatsapp:{context.get('tenant_id') or 'global'}:{phone_number_id}"
+        try:
+            cb_meta = check_circuit(circuit_key)
+        except CircuitBreakerOpen as exc:
+            logger.warning("[META API CIRCUIT OPEN] tenant_id=%s phone_number_id=%s", context.get("tenant_id"), phone_number_id)
+            raise MetaApiError("Integração WhatsApp temporariamente indisponível.", status_code=503) from exc
 
         for attempt in range(1, 4):
             try:
                 async with httpx.AsyncClient(timeout=self.timeout) as client:
                     response = await client.request(method, url, headers=headers, **kwargs)
                 if response.status_code >= 400:
+                    if response.status_code == 429 or response.status_code >= 500:
+                        record_failure(circuit_key, reason=f"meta_status:{response.status_code}")
                     self._raise_api_error(response, endpoint_path, context)
+                record_success(circuit_key)
                 return response.json()
             except (httpx.TimeoutException, httpx.TransportError) as exc:
                 if attempt == 3:
@@ -63,6 +75,7 @@ class MetaCloudClient:
                         context.get("token_length", len(self.access_token or "")),
                         str(exc),
                     )
+                    record_failure(circuit_key, reason=f"meta_transport:{type(exc).__name__}")
                     raise MetaApiError("Falha de conexão com a Meta. Tente novamente.", status_code=503) from exc
                 await asyncio.sleep(attempt * 0.4)
 
