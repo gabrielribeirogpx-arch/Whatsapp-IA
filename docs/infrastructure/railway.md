@@ -16,12 +16,14 @@ O repositório contém configurações explícitas e implícitas usadas pelo Rai
 
 1. O Railway detecta o runtime a partir dos arquivos do repositório.
 2. A versão Python é declarada em `runtime.txt` como `python-3.11`.
-3. O serviço backend usa o `Procfile`:
-   - `release`: entra em `backend` e executa `alembic upgrade head` uma única vez como etapa explícita de deploy.
+3. O `railway.json` define `deploy.preDeployCommand` como `cd backend && bash release.sh`, garantindo que a etapa de deploy execute `alembic upgrade head` antes de qualquer processo web/worker iniciar.
+4. `backend/release.sh` chama `scripts/run_release_migrations.py`, que serializa execuções concorrentes com um advisory lock do Postgres; se mais de um serviço disparar o pre-deploy, apenas uma migration roda por vez e os demais observam o banco já no head.
+5. O serviço backend usa o `Procfile`:
+   - `release`: compatibilidade com Procfile/Heroku-style, entrando em `backend` e executando `bash release.sh`.
    - `web`: entra em `backend` e inicia `backend/start.sh`, que apenas valida conectividade/schema antes do Uvicorn.
    - `worker`: executa `python backend/worker_rq.py`, validando banco, Redis e Alembic head antes de consumir jobs.
-4. O backend instala dependências Python a partir de `backend/requirements.txt` no pipeline do serviço backend.
-5. O frontend instala dependências Node a partir de `frontend/package.json` e `frontend/package-lock.json` no pipeline do serviço frontend.
+6. O backend instala dependências Python a partir de `backend/requirements.txt` no pipeline do serviço backend.
+7. O frontend instala dependências Node a partir de `frontend/package.json` e `frontend/package-lock.json` no pipeline do serviço frontend.
 
 > Importante: não alterar runtime, versão Python ou pipeline de build sem uma mudança planejada e testada separadamente.
 
@@ -80,7 +82,7 @@ Responsável pela API FastAPI, webhooks da Meta/WhatsApp, autenticação de tena
 
 - Start atual pelo `Procfile`: `cd backend && bash start.sh`.
 - Não executa migrations no processo web; apenas valida conectividade do banco e se o schema está no Alembic head antes de subir a API.
-- As migrations Alembic devem rodar somente na etapa `release`: `cd backend && alembic upgrade head`.
+- As migrations Alembic devem rodar somente na etapa de release/deploy: `cd backend && bash release.sh` (via `railway.json` `deploy.preDeployCommand` e, por compatibilidade, `Procfile` `release`).
 - Depende de Postgres (`DATABASE_URL`) em produção.
 - Deve receber `MISE_PYTHON_GITHUB_ATTESTATIONS=false` no Railway enquanto o problema de attestation do mise/Railpack puder ocorrer.
 
@@ -109,7 +111,7 @@ Banco relacional de produção.
 
 - Deve ser provisionado como serviço Railway Postgres ou equivalente.
 - O backend usa `DATABASE_URL` para conexão.
-- Migrations são aplicadas por Alembic somente na etapa única de release/deploy, antes dos processos web/worker.
+- Migrations são aplicadas por Alembic somente na etapa única de release/deploy, antes dos processos web/worker, via `cd backend && bash release.sh`. O script usa advisory lock no Postgres para serializar pre-deploys concorrentes e garantir que `20260618_worker_dlq` seja aplicada antes dos workers passarem no check de Alembic head.
 - Web e workers devem falhar com erro claro se o banco não estiver no Alembic head.
 - Antes de alterações de schema, validar rollback, backup e compatibilidade com dados existentes.
 
