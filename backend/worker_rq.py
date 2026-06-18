@@ -4,21 +4,33 @@ import subprocess
 import redis
 from rq import Connection, Queue, Worker
 
+from app.core.startup_checks import (
+    WORKER_REQUIRED_DEPENDENCIES,
+    verify_alembic_at_head,
+    verify_required_dependencies,
+    verify_required_env_vars,
+    verify_runtime_secrets,
+    wait_for_database,
+)
 from app.db.session import dispose_engine_connections_after_fork
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 REDIS_URL = os.getenv("REDIS_URL")
 
-if not DATABASE_URL:
-    raise Exception("DATABASE_URL não configurado")
 
-if not REDIS_URL:
-    raise Exception("REDIS_URL não configurado")
+def run_startup_checks() -> redis.Redis:
+    print("[WORKER] Running startup checks...")
+    verify_required_env_vars("DATABASE_URL", "REDIS_URL")
+    verify_required_dependencies(WORKER_REQUIRED_DEPENDENCIES)
+    verify_runtime_secrets()
+    wait_for_database()
+    verify_alembic_at_head()
 
-print("[WORKER] DB engine configured with pooled connection health checks")
-
-print("[WORKER] Connecting Redis...")
-conn = redis.from_url(REDIS_URL)
+    print("[WORKER] Connecting Redis...")
+    redis_conn = redis.from_url(str(os.getenv("REDIS_URL")))
+    redis_conn.ping()
+    print("[WORKER] Startup checks passed")
+    return redis_conn
 
 
 def runtime_commit_sha() -> str:
@@ -71,8 +83,10 @@ class LoggingWorker(Worker):
 
 
 if __name__ == "__main__":
-    print(f"[RQ WORKER] started commit_sha={runtime_commit_sha()} queues={','.join(listen)}")
+    print(f"[RQ WORKER] starting commit_sha={runtime_commit_sha()} queues={','.join(listen)}")
+    conn = run_startup_checks()
     dispose_engine_connections_after_fork()
+    print(f"[RQ WORKER] started commit_sha={runtime_commit_sha()} queues={','.join(listen)}")
     with Connection(conn):
         worker = LoggingWorker(list(map(Queue, listen)))
         worker.work()
