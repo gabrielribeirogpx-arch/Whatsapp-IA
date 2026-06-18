@@ -97,8 +97,16 @@ class RedisRealtimeBroker:
         print("[REDIS SUBSCRIBE SSE]", channel)
         queue = asyncio.Queue()
         # Tarefa de background gerencia a ponte Redis -> Queue
-        asyncio.create_task(self._listen_to_redis(channel, queue))
+        task = asyncio.create_task(self._listen_to_redis(channel, queue))
+        setattr(queue, "_redis_realtime_task", task)
         return queue
+
+    def unsubscribe(self, channel: str, queue: asyncio.Queue) -> None:
+        """Stop the Redis -> Queue bridge created for an SSE subscriber."""
+        print("[REDIS UNSUBSCRIBE SSE]", channel)
+        task = getattr(queue, "_redis_realtime_task", None)
+        if task is not None:
+            task.cancel()
 
     async def _listen_to_redis(self, channel: str, queue: asyncio.Queue):
         pubsub = self.client.pubsub()
@@ -107,6 +115,8 @@ class RedisRealtimeBroker:
             async for message in pubsub.listen():
                 if message['type'] == 'message':
                     await queue.put(message['data'])
+        except asyncio.CancelledError:
+            raise
         finally:
             await pubsub.unsubscribe(channel)
             await pubsub.close()
