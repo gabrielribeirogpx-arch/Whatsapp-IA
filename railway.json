@@ -1,6 +1,6 @@
 {
   "$schema": "https://railway.com/railway.schema.json",
   "deploy": {
-    "preDeployCommand": "if [ -f backend/release.sh ]; then bash backend/release.sh; else bash release.sh; fi"
+    "preDeployCommand": "if [ -f release.sh ]; then bash release.sh; else echo \"No backend release context detected; skipping migrations\"; fi"
   }
 }
