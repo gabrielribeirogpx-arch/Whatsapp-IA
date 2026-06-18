@@ -5,10 +5,14 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response
 from alembic.config import Config
 from alembic import command
+import importlib.util
+import logging
 import os
+
+from alembic.script import ScriptDirectory
+from alembic.runtime.migration import MigrationContext
 from sqlalchemy import text
 
-from app.db.base import Base
 from app.db.session import engine
 
 import app.models  # noqa: F401
@@ -44,61 +48,53 @@ from app.api.runtime_metrics import router as runtime_metrics_router
 from app.api.runtime_flow_debug import router as runtime_flow_debug_router
 
 
-# ✅ MIGRATIONS
-def run_migrations():
-    try:
-        if os.getenv("RUN_MIGRATIONS", "true") == "true":
-            alembic_cfg = Config("alembic.ini")
-            command.upgrade(alembic_cfg, "head")
-            print("✅ Migrations aplicadas com sucesso")
-    except Exception as e:
-        print("❌ Erro ao rodar migrations:", e)
+logger = logging.getLogger(__name__)
+
+PRODUCTION_ENV_NAMES = {"production", "prod"}
+REQUIRED_DEPENDENCIES = ("alembic", "sqlalchemy", "fastapi", "argon2")
+WEAK_PRODUCTION_SECRETS = {"", "wazza-dev-secret", "changeme", "change-me", "secret", "dev-secret"}
 
 
-# ✅ SAFE ALTER TABLE
-def ensure_conversations_columns():
-    statements = [
-        "ALTER TABLE conversations ADD COLUMN IF NOT EXISTS last_bot_question TEXT;",
-        "ALTER TABLE conversations ADD COLUMN IF NOT EXISTS current_objective TEXT;",
-        "ALTER TABLE conversations ADD COLUMN IF NOT EXISTS last_bot_triggered_message_id UUID;",
-        "ALTER TABLE conversations ADD COLUMN IF NOT EXISTS last_intent TEXT;",
-        "ALTER TABLE conversations ADD COLUMN IF NOT EXISTS intent_history JSONB;",
-        "ALTER TABLE conversations ADD COLUMN IF NOT EXISTS last_intent_at TIMESTAMP;",
-        "ALTER TABLE conversations ADD COLUMN IF NOT EXISTS lead_score INTEGER DEFAULT 0;",
-        "ALTER TABLE conversations ADD COLUMN IF NOT EXISTS assigned_user_id UUID;",
-        "ALTER TABLE conversations ADD COLUMN IF NOT EXISTS assigned_user_name VARCHAR(150);",
-        "ALTER TABLE conversations ADD COLUMN IF NOT EXISTS current_step TEXT;",
-        "ALTER TABLE conversations ADD COLUMN IF NOT EXISTS current_flow UUID;",
-        "ALTER TABLE conversations ADD COLUMN IF NOT EXISTS current_node_id UUID;",
-        "ALTER TABLE conversations ADD COLUMN IF NOT EXISTS context JSONB;",
-        "ALTER TABLE conversations ADD COLUMN IF NOT EXISTS last_input TEXT;",
-        "ALTER TABLE conversations ADD COLUMN IF NOT EXISTS retries INTEGER DEFAULT 0;",
-        "ALTER TABLE flows ADD COLUMN IF NOT EXISTS published_version_id UUID;",
-        "ALTER TABLE flows ADD COLUMN IF NOT EXISTS current_version_id UUID;",
-        "ALTER TABLE flows ADD COLUMN IF NOT EXISTS version INTEGER DEFAULT 1;",
-        "ALTER TABLE flow_versions ADD COLUMN IF NOT EXISTS tenant_id UUID;",
-        "ALTER TABLE flow_versions ADD COLUMN IF NOT EXISTS snapshot JSONB;",
-        "ALTER TABLE flow_versions ADD COLUMN IF NOT EXISTS nodes JSONB;",
-        "ALTER TABLE flow_versions ADD COLUMN IF NOT EXISTS edges JSONB;",
-        "ALTER TABLE flow_versions ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT false;",
-        "ALTER TABLE flow_versions ADD COLUMN IF NOT EXISTS graph_checksum VARCHAR(64);",
-        "ALTER TABLE flow_versions ADD COLUMN IF NOT EXISTS v2_snapshot_hash VARCHAR(64);",
-        "ALTER TABLE flow_versions ADD COLUMN IF NOT EXISTS v2_snapshot_schema_version INTEGER;",
-        "ALTER TABLE flow_versions ADD COLUMN IF NOT EXISTS start_node_id VARCHAR;",
-        "ALTER TABLE flow_versions ADD COLUMN IF NOT EXISTS start_text_preview VARCHAR(255);",
-        "ALTER TABLE flow_versions ADD COLUMN IF NOT EXISTS created_from_source VARCHAR(64);",
-        "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS completed_at TIMESTAMP;",
-        "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS completed_by UUID;",
-    ]
-    try:
-        with engine.begin() as connection:
-            for statement in statements:
-                connection.execute(text(statement))
-        print("✅ Estrutura de conversations validada com SQL de segurança")
-    except Exception as e:
-        print("❌ Erro ao validar estrutura:", e)
+def _is_production() -> bool:
+    return (os.getenv("APP_ENV") or os.getenv("ENV") or os.getenv("ENVIRONMENT") or "").strip().lower() in PRODUCTION_ENV_NAMES
 
 
+def _require_strong_secret(name: str) -> None:
+    value = (os.getenv(name) or "").strip()
+    if _is_production() and (len(value) < 32 or value.lower() in WEAK_PRODUCTION_SECRETS):
+        raise RuntimeError(f"{name} must be set to a strong value (>=32 chars) in production")
+
+
+def validate_runtime_dependencies() -> None:
+    missing = [package for package in REQUIRED_DEPENDENCIES if importlib.util.find_spec(package) is None]
+    if missing:
+        raise RuntimeError(f"Missing required dependencies: {', '.join(missing)}")
+
+
+def run_migrations() -> None:
+    if os.getenv("RUN_MIGRATIONS", "true").lower() != "true":
+        if _is_production():
+            raise RuntimeError("RUN_MIGRATIONS cannot be disabled in production")
+        logger.warning("event=migrations_skipped")
+        return
+    alembic_cfg = Config("alembic.ini")
+    command.upgrade(alembic_cfg, "head")
+    logger.info("event=migrations_applied")
+
+
+def verify_alembic_at_head() -> None:
+    alembic_cfg = Config("alembic.ini")
+    script = ScriptDirectory.from_config(alembic_cfg)
+    expected_heads = set(script.get_heads())
+    with engine.connect() as connection:
+        current_heads = set(MigrationContext.configure(connection).get_current_heads())
+    if current_heads != expected_heads:
+        raise RuntimeError(f"Database migrations are not at head: current={sorted(current_heads)} expected={sorted(expected_heads)}")
+
+
+def validate_production_secrets() -> None:
+    _require_strong_secret("AUTH_SECRET")
+    _require_strong_secret("PASSWORD_RESET_SECRET")
 
 
 def verify_contacts_columns() -> None:
@@ -122,11 +118,11 @@ def verify_contacts_columns() -> None:
         existing_columns = {row[0] for row in rows}
         missing = sorted(required_columns - existing_columns)
         if missing:
-            print(f"[DB CHECK] contacts missing columns: {missing}")
+            logger.warning("event=db_check_contacts_missing_columns missing=%s", missing)
         else:
-            print("[DB CHECK] contacts columns verified")
+            logger.info("event=db_check_contacts_columns_verified")
     except Exception as exc:
-        print(f"[DB CHECK] contacts verification failed: {exc}")
+        logger.warning("event=db_check_contacts_verification_failed error=%s", type(exc).__name__)
 
 
 REQUIRED_CORS_ORIGINS = (
@@ -186,17 +182,10 @@ app.add_middleware(
 )
 
 
-@app.middleware("http")
-async def cors_debug_middleware(request: Request, call_next):
-    origin = request.headers.get("origin")
-    if origin:
-        print(f"[CORS DEBUG] origin={origin} path={request.url.path}", flush=True)
-    return await call_next(request)
-
 
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
-    print("ERRO 422 DETALHADO:", exc.errors())
+    logger.info("event=request_validation_failed path=%s", request.url.path)
     return JSONResponse(
         status_code=422,
         content={"detail": exc.errors()},
@@ -206,11 +195,12 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 # ✅ STARTUP (CORRETO)
 @app.on_event("startup")
 def on_startup():
-    print(f"[CORS] enabled origins={ALLOWED_ORIGINS} origin_regex={ALLOWED_ORIGIN_REGEX}")
+    logger.info("event=startup production=%s", _is_production())
+    validate_runtime_dependencies()
+    validate_production_secrets()
     flow_media.log_upload_storage_status()
     run_migrations()
-    Base.metadata.create_all(bind=engine)
-    ensure_conversations_columns()
+    verify_alembic_at_head()
     verify_contacts_columns()
 
 

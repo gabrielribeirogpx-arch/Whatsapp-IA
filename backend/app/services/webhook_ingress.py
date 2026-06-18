@@ -47,7 +47,14 @@ def _log_media_delivery_statuses(payload: dict) -> None:
 
 
 def _recalculate_campaign_metrics(db, campaign: WhatsAppCampaign) -> None:
-    rows = db.execute(select(WhatsAppCampaignRecipient).where(WhatsAppCampaignRecipient.campaign_id == campaign.id)).scalars().all()
+    rows = db.execute(
+        select(WhatsAppCampaignRecipient)
+        .join(WhatsAppCampaign, WhatsAppCampaignRecipient.campaign_id == WhatsAppCampaign.id)
+        .where(
+            WhatsAppCampaign.tenant_id == campaign.tenant_id,
+            WhatsAppCampaignRecipient.campaign_id == campaign.id,
+        )
+    ).scalars().all()
     campaign.total_recipients = len(rows)
     campaign.total_sent = sum(1 for r in rows if r.status in {"sent", "delivered", "read"})
     campaign.total_delivered = sum(1 for r in rows if r.status in {"delivered", "read"})
@@ -70,10 +77,21 @@ def _update_campaign_status_from_meta(payload: dict) -> None:
                 provider_message_id=str(st.get("id") or "").strip()
                 if not provider_message_id:
                     continue
-                rec=db.execute(select(WhatsAppCampaignRecipient).where(WhatsAppCampaignRecipient.provider_message_id==provider_message_id)).scalars().first()
-                if not rec:
+                campaign = db.execute(
+                    select(WhatsAppCampaign)
+                    .join(WhatsAppCampaignRecipient, WhatsAppCampaignRecipient.campaign_id == WhatsAppCampaign.id)
+                    .where(WhatsAppCampaignRecipient.provider_message_id == provider_message_id)
+                ).scalars().first()
+                if not campaign:
                     continue
-                campaign=db.execute(select(WhatsAppCampaign).where(WhatsAppCampaign.id==rec.campaign_id)).scalars().first()
+                rec = db.execute(
+                    select(WhatsAppCampaignRecipient)
+                    .join(WhatsAppCampaign, WhatsAppCampaignRecipient.campaign_id == WhatsAppCampaign.id)
+                    .where(
+                        WhatsAppCampaign.tenant_id == campaign.tenant_id,
+                        WhatsAppCampaignRecipient.provider_message_id == provider_message_id,
+                    )
+                ).scalars().first()
                 status=str(st.get("status") or "").lower()
                 ts_raw=st.get("timestamp")
                 ts=None

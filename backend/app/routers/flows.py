@@ -2767,7 +2767,7 @@ def get_published_snapshot(
     version = None
     if flow.published_version_id:
         version = db.execute(
-            select(FlowVersion).where(FlowVersion.id == flow.published_version_id, FlowVersion.flow_id == flow.id)
+            select(FlowVersion).where(FlowVersion.id == flow.published_version_id, FlowVersion.flow_id == flow.id, FlowVersion.tenant_id == tenant_uuid)
         ).scalars().first()
     if not version:
         return {"flow_id": str(flow.id), "version_id": None, "nodes": [], "edges": [], "transitions": [], "snapshot": None, "nodes_count": 0, "edges_count": 0, "transitions_count": 0, "graph_hash": None}
@@ -2810,7 +2810,7 @@ def get_runtime_inspector(
     ).scalars().first()
     version = None
     if session and session.flow_version_id:
-        version = db.execute(select(FlowVersion).where(FlowVersion.id == session.flow_version_id)).scalars().first()
+        version = db.execute(select(FlowVersion).where(FlowVersion.id == session.flow_version_id, FlowVersion.tenant_id == tenant_uuid)).scalars().first()
     nodes = version.nodes_json if version and isinstance(getattr(version, "nodes_json", None), list) else version.nodes if version and isinstance(version.nodes, list) else []
     edges = version.edges_json if version and isinstance(getattr(version, "edges_json", None), list) else version.edges if version and isinstance(version.edges, list) else []
     current_node_id = str(session.current_node_id) if session and session.current_node_id else None

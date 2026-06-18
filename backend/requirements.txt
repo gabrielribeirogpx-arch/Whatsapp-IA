@@ -14,3 +14,4 @@ google-genai
 redis==5.0.4
 rq==1.16.2
 cryptography==42.0.8
+argon2-cffi==23.1.0
