@@ -51,7 +51,7 @@ def _server_out(row) -> dict[str, Any]:
 
 
 def _tool_out(row: TenantMCPTool) -> dict[str, Any]:
-    return {"id": str(row.id), "tenant_id": str(row.tenant_id), "server_id": str(row.server_id), "tool_name": row.tool_name, "display_name": row.display_name, "description": row.description, "input_schema": row.input_schema, "is_enabled": row.is_enabled, "metadata": row.metadata or {}, "created_at": row.created_at, "updated_at": row.updated_at}
+    return {"id": str(row.id), "tenant_id": str(row.tenant_id), "server_id": str(row.server_id), "tool_name": row.tool_name, "display_name": row.display_name, "description": row.description, "input_schema": row.input_schema, "is_enabled": row.is_enabled, "metadata": row.metadata_json or {}, "created_at": row.created_at, "updated_at": row.updated_at}
 
 
 def _mcp_error(exc: MCPError) -> HTTPException:
@@ -111,7 +111,7 @@ def patch_tool(tool_id: uuid.UUID, payload: MCPToolPatch, tenant: Tenant = Depen
     changes = payload.model_dump(exclude_unset=True)
     for field in ("display_name", "description", "is_enabled", "metadata"):
         if field in changes:
-            setattr(row, field, changes[field])
+            setattr(row, "metadata_json" if field == "metadata" else field, changes[field])
     db.commit(); db.refresh(row)
     return _tool_out(row)
 

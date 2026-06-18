@@ -160,7 +160,7 @@ def discover_mcp_tools(db: Session, tenant_id: uuid.UUID, server_id: uuid.UUID) 
             db.add(row)
         row.description = str(item.get("description") or "")[:4000]
         row.input_schema = item.get("inputSchema") if isinstance(item.get("inputSchema"), dict) else {"type": "object"}
-        row.metadata = sanitize_value({"discovered": True})
+        row.metadata_json = sanitize_value({"discovered": True})
         saved.append(row)
     db.commit()
     for row in saved: db.refresh(row)
