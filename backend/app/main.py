@@ -3,17 +3,20 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response
-from alembic.config import Config
-from alembic import command
-import importlib.util
 import logging
 import os
 
-from alembic.script import ScriptDirectory
-from alembic.runtime.migration import MigrationContext
 from sqlalchemy import text
 
 from app.db.session import engine
+from app.core.startup_checks import (
+    is_production,
+    run_migrations_if_enabled,
+    verify_alembic_at_head,
+    verify_required_dependencies,
+    verify_runtime_secrets,
+    wait_for_database,
+)
 
 import app.models  # noqa: F401
 
@@ -49,53 +52,6 @@ from app.api.runtime_flow_debug import router as runtime_flow_debug_router
 
 
 logger = logging.getLogger(__name__)
-
-PRODUCTION_ENV_NAMES = {"production", "prod"}
-REQUIRED_DEPENDENCIES = ("alembic", "sqlalchemy", "fastapi", "argon2")
-WEAK_PRODUCTION_SECRETS = {"", "wazza-dev-secret", "changeme", "change-me", "secret", "dev-secret"}
-
-
-def _is_production() -> bool:
-    return (os.getenv("APP_ENV") or os.getenv("ENV") or os.getenv("ENVIRONMENT") or "").strip().lower() in PRODUCTION_ENV_NAMES
-
-
-def _require_strong_secret(name: str) -> None:
-    value = (os.getenv(name) or "").strip()
-    if _is_production() and (len(value) < 32 or value.lower() in WEAK_PRODUCTION_SECRETS):
-        raise RuntimeError(f"{name} must be set to a strong value (>=32 chars) in production")
-
-
-def validate_runtime_dependencies() -> None:
-    missing = [package for package in REQUIRED_DEPENDENCIES if importlib.util.find_spec(package) is None]
-    if missing:
-        raise RuntimeError(f"Missing required dependencies: {', '.join(missing)}")
-
-
-def run_migrations() -> None:
-    if os.getenv("RUN_MIGRATIONS", "true").lower() != "true":
-        if _is_production():
-            raise RuntimeError("RUN_MIGRATIONS cannot be disabled in production")
-        logger.warning("event=migrations_skipped")
-        return
-    alembic_cfg = Config("alembic.ini")
-    command.upgrade(alembic_cfg, "head")
-    logger.info("event=migrations_applied")
-
-
-def verify_alembic_at_head() -> None:
-    alembic_cfg = Config("alembic.ini")
-    script = ScriptDirectory.from_config(alembic_cfg)
-    expected_heads = set(script.get_heads())
-    with engine.connect() as connection:
-        current_heads = set(MigrationContext.configure(connection).get_current_heads())
-    if current_heads != expected_heads:
-        raise RuntimeError(f"Database migrations are not at head: current={sorted(current_heads)} expected={sorted(expected_heads)}")
-
-
-def validate_production_secrets() -> None:
-    _require_strong_secret("AUTH_SECRET")
-    _require_strong_secret("PASSWORD_RESET_SECRET")
-
 
 def verify_contacts_columns() -> None:
     required_columns = {
@@ -195,11 +151,12 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 # ✅ STARTUP (CORRETO)
 @app.on_event("startup")
 def on_startup():
-    logger.info("event=startup production=%s", _is_production())
-    validate_runtime_dependencies()
-    validate_production_secrets()
+    logger.info("event=startup production=%s", is_production())
+    verify_required_dependencies()
+    verify_runtime_secrets()
+    wait_for_database()
     flow_media.log_upload_storage_status()
-    run_migrations()
+    run_migrations_if_enabled()
     verify_alembic_at_head()
     verify_contacts_columns()
 

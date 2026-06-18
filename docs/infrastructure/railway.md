@@ -16,9 +16,10 @@ O repositório contém configurações explícitas e implícitas usadas pelo Rai
 
 1. O Railway detecta o runtime a partir dos arquivos do repositório.
 2. A versão Python é declarada em `runtime.txt` como `python-3.11`.
-3. O serviço web usa o `Procfile`:
-   - `web`: entra em `backend`, executa `alembic upgrade head` e inicia `backend/start.sh`.
-   - `worker`: executa `python backend/worker_rq.py`.
+3. O serviço backend usa o `Procfile`:
+   - `release`: entra em `backend` e executa `alembic upgrade head` uma única vez como etapa explícita de deploy.
+   - `web`: entra em `backend` e inicia `backend/start.sh`, que apenas valida conectividade/schema antes do Uvicorn.
+   - `worker`: executa `python backend/worker_rq.py`, validando banco, Redis e Alembic head antes de consumir jobs.
 4. O backend instala dependências Python a partir de `backend/requirements.txt` no pipeline do serviço backend.
 5. O frontend instala dependências Node a partir de `frontend/package.json` e `frontend/package-lock.json` no pipeline do serviço frontend.
 
@@ -77,8 +78,9 @@ Conclusão operacional: a versão Python versionada no repositório está em `ru
 
 Responsável pela API FastAPI, webhooks da Meta/WhatsApp, autenticação de tenant, SSE e orquestração de IA.
 
-- Start atual pelo `Procfile`: `cd backend && alembic upgrade head && bash start.sh`.
-- Executa migrations Alembic antes de subir a aplicação.
+- Start atual pelo `Procfile`: `cd backend && bash start.sh`.
+- Não executa migrations no processo web; apenas valida conectividade do banco e se o schema está no Alembic head antes de subir a API.
+- As migrations Alembic devem rodar somente na etapa `release`: `cd backend && alembic upgrade head`.
 - Depende de Postgres (`DATABASE_URL`) em produção.
 - Deve receber `MISE_PYTHON_GITHUB_ATTESTATIONS=false` no Railway enquanto o problema de attestation do mise/Railpack puder ocorrer.
 
@@ -87,6 +89,7 @@ Responsável pela API FastAPI, webhooks da Meta/WhatsApp, autenticação de tena
 Responsável por tarefas assíncronas e filas RQ.
 
 - Start atual pelo `Procfile`: `python backend/worker_rq.py`.
+- Antes de consumir jobs, valida `DATABASE_URL`, `REDIS_URL`, conectividade com Postgres/Redis e se o schema está no Alembic head.
 - Depende de Redis (`REDIS_URL`) quando filas estão habilitadas.
 - Deve usar a mesma versão Python efetiva do backend.
 - Deve receber as mesmas variáveis críticas de integração necessárias para processar tarefas com segurança.
@@ -106,7 +109,8 @@ Banco relacional de produção.
 
 - Deve ser provisionado como serviço Railway Postgres ou equivalente.
 - O backend usa `DATABASE_URL` para conexão.
-- Migrations são aplicadas no start do serviço web via Alembic.
+- Migrations são aplicadas por Alembic somente na etapa única de release/deploy, antes dos processos web/worker.
+- Web e workers devem falhar com erro claro se o banco não estiver no Alembic head.
 - Antes de alterações de schema, validar rollback, backup e compatibilidade com dados existentes.
 
 ### Redis

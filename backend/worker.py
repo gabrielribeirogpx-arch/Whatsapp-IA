@@ -12,6 +12,14 @@ from time import time
 
 from redis.asyncio import Redis
 
+from app.core.startup_checks import (
+    WORKER_REQUIRED_DEPENDENCIES,
+    verify_alembic_at_head,
+    verify_required_dependencies,
+    verify_required_env_vars,
+    verify_runtime_secrets,
+    wait_for_database,
+)
 from app.db.session import SessionLocal, dispose_engine_connections_after_fork
 from app.flow_v2.delay_worker import FlowV2DelayWorker
 from app.services.delay_queue_service import DELAY_ZSET_KEY
@@ -159,8 +167,29 @@ class DelayWorker:
             db.commit()
 
 
+async def verify_redis(redis_url: str) -> None:
+    redis_client = Redis.from_url(redis_url, decode_responses=True)
+    try:
+        await redis_client.ping()
+    finally:
+        await redis_client.aclose()
+
+
+async def run_startup_checks() -> str:
+    logger.info("event=delay_worker_startup_checks_start")
+    verify_required_env_vars("DATABASE_URL", "REDIS_URL")
+    verify_required_dependencies(WORKER_REQUIRED_DEPENDENCIES)
+    verify_runtime_secrets()
+    wait_for_database()
+    verify_alembic_at_head()
+    redis_url = str(os.getenv("REDIS_URL"))
+    await verify_redis(redis_url)
+    logger.info("event=delay_worker_startup_checks_passed")
+    return redis_url
+
+
 async def main() -> None:
-    redis_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+    redis_url = await run_startup_checks()
     DelayWorker.reset_db_connections()
     worker = DelayWorker(redis_url=redis_url, poll_interval_seconds=1.0)
     await worker.start()

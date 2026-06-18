@@ -1,36 +1,26 @@
 #!/bin/bash
+set -euo pipefail
 
 echo "🚀 Starting app..."
 
-if [ -z "$DATABASE_URL" ]; then
+if [ -z "${DATABASE_URL:-}" ]; then
   echo "❌ DATABASE_URL not set"
   exit 1
 fi
 
-echo "⏳ Waiting for DB..."
+if [ -z "${PORT:-}" ]; then
+  echo "❌ PORT not set"
+  exit 1
+fi
 
-python - << END
-import time, os
-from sqlalchemy import create_engine
+echo "⏳ Verifying database and Alembic schema head..."
+python - <<'PY'
+from app.core.startup_checks import wait_for_database, verify_alembic_at_head
 
-db_url = os.getenv("DATABASE_URL")
-
-for i in range(10):
-    try:
-        engine = create_engine(db_url)
-        conn = engine.connect()
-        conn.close()
-        print("✅ DB OK")
-        break
-    except Exception as e:
-        print("Retry DB...", e)
-        time.sleep(2)
-else:
-    raise Exception("❌ DB not reachable")
-END
-
-echo "📦 Running migrations..."
-alembic upgrade head
+wait_for_database()
+verify_alembic_at_head()
+print("✅ DB reachable and Alembic is at head")
+PY
 
 echo "🔥 Starting API..."
-uvicorn app.main:app --host 0.0.0.0 --port $PORT
+exec uvicorn app.main:app --host 0.0.0.0 --port "$PORT"
