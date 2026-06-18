@@ -16,8 +16,8 @@ O repositório contém configurações explícitas e implícitas usadas pelo Rai
 
 1. O Railway detecta o runtime a partir dos arquivos do repositório.
 2. A versão Python é declarada em `runtime.txt` como `python-3.11`.
-3. O `railway.json` define um `deploy.preDeployCommand` global controlado por flag explícita: `if [ "${RUN_RELEASE_MIGRATIONS:-false}" = "true" ]; then bash release.sh; else echo "Skipping release migrations for this service"; fi`. Como configurações versionadas sobrescrevem as configurações do dashboard no deploy, somente o serviço Backend/Whatsapp-IA deve configurar `RUN_RELEASE_MIGRATIONS=true`; workers e Frontend devem deixar essa variável ausente ou diferente de `true`, fazendo o pre-deploy imprimir `Skipping release migrations for this service` e terminar com sucesso sem chamar Alembic.
-4. O `release.sh` da raiz é um roteador idempotente: no contexto da raiz do monorepo ele delega para `backend/release.sh`; no contexto de `/backend` o próprio `backend/release.sh` executa as migrations; em contextos não-backend ele faz no-op. `backend/release.sh` chama `scripts/run_release_migrations.py`, que serializa execuções concorrentes com um advisory lock do Postgres. Operacionalmente, a flag `RUN_RELEASE_MIGRATIONS=true` deve existir apenas no serviço Backend/Whatsapp-IA para evitar que workers disputem ou executem migrations no pre-deploy.
+3. O `railway.json` **não** define `deploy.preDeployCommand` global. Configurações versionadas são compartilhadas por Backend, workers e Frontend no monorepo; por isso migrations Alembic não devem rodar por configuração global do `railway.json`.
+4. O `release.sh` da raiz continua disponível como roteador idempotente: no contexto da raiz do monorepo ele delega para `backend/release.sh`; no contexto de `/backend` o próprio `backend/release.sh` executa as migrations; em contextos não-backend ele faz no-op. `backend/release.sh` chama `scripts/run_release_migrations.py`, que serializa execuções concorrentes com um advisory lock do Postgres. Operacionalmente, migrations devem rodar em uma etapa isolada do Backend ou manualmente, nunca como pre-deploy global compartilhado por workers/Frontend.
 5. O serviço backend usa o `Procfile`:
    - `release`: compatibilidade com Procfile/Heroku-style, entrando em `backend` e executando `bash release.sh`.
    - `web`: entra em `backend` e inicia `backend/start.sh`, que apenas valida conectividade/schema antes do Uvicorn.
@@ -52,7 +52,7 @@ Conclusão operacional: a versão Python versionada no repositório está em `ru
 | `DATABASE_URL` | Backend/Worker | Sim em produção | URL do Postgres gerenciado pelo Railway. |
 | `REDIS_URL` | Worker/Backend que usa fila | Sim quando filas estão habilitadas | URL do Redis gerenciado pelo Railway para RQ/filas. |
 | `PYTHONPATH` | Backend/Worker | Conforme imagem/pipeline | Deve permitir imports do pacote `backend/app`; no Dockerfile atual é `/app/backend`. |
-| `RUN_RELEASE_MIGRATIONS=true` | Somente Backend/Whatsapp-IA | Sim somente no Backend | Habilita o `preDeployCommand` global a executar `bash release.sh` e aplicar migrations Alembic antes do start do backend. Não configurar como `true` em RQ Worker, RQ Worker 2, Delay Worker ou Frontend. |
+| `RUN_RELEASE_MIGRATIONS=true` | Serviço isolado de Release/Migrations ou pre-deploy configurado apenas no Backend via Dashboard | Opcional, somente fora do `railway.json` global | Pode ser usada em uma etapa isolada para executar `bash release.sh` e aplicar migrations Alembic antes do start do backend. Não configurar como variável operacional de workers ou Frontend. |
 
 ### Backend/API
 
@@ -83,9 +83,10 @@ Responsável pela API FastAPI, webhooks da Meta/WhatsApp, autenticação de tena
 
 - Start atual pelo `Procfile`: `cd backend && bash start.sh`.
 - Não executa migrations no processo web; apenas valida conectividade do banco e se o schema está no Alembic head antes de subir a API.
-- As migrations Alembic devem rodar somente na etapa de release/deploy do backend: o serviço Backend/Whatsapp-IA deve configurar `RUN_RELEASE_MIGRATIONS=true`, fazendo o `preDeployCommand` global executar `bash release.sh` quando o serviço usa Root Directory `/backend`, ou `bash release.sh` na raiz do monorepo delegando para `backend/release.sh`.
+- As migrations Alembic devem rodar somente em etapa isolada do Backend ou manualmente; o `railway.json` global não deve executar migrations.
+- Configuração ideal: criar um serviço Railway separado chamado `Release/Migrations` para executar `bash release.sh`, ou configurar `preDeployCommand` somente no serviço Backend pelo Dashboard do Railway, nunca via `railway.json` global do monorepo.
+- Comando manual emergencial: `cd backend && bash release.sh`.
 - Depende de Postgres (`DATABASE_URL`) em produção.
-- Deve receber `RUN_RELEASE_MIGRATIONS=true` no Railway para aplicar migrations Alembic no pre-deploy.
 - Deve receber `MISE_PYTHON_GITHUB_ATTESTATIONS=false` no Railway enquanto o problema de attestation do mise/Railpack puder ocorrer.
 
 ### Worker
@@ -97,7 +98,7 @@ Responsável por tarefas assíncronas e filas RQ.
 - Depende de Redis (`REDIS_URL`) quando filas estão habilitadas.
 - Deve usar a mesma versão Python efetiva do backend.
 - Deve receber as mesmas variáveis críticas de integração necessárias para processar tarefas com segurança.
-- Não deve receber `RUN_RELEASE_MIGRATIONS=true`; RQ Worker, RQ Worker 2 e Delay Worker devem deixar essa variável ausente ou diferente de `true`, para que o pre-deploy seja no-op com exit `0`.
+- Não deve receber `RUN_RELEASE_MIGRATIONS=true` e não deve ser afetado por `preDeployCommand` global; o `railway.json` do monorepo não executa migrations. RQ Worker, RQ Worker 2 e Delay Worker apenas verificam Alembic head antes de consumir jobs.
 - Em investigações de mídia/filas, confirmar nos logs que o serviço worker ativo emitiu `[RQ WORKER] started commit_sha=...` com o mesmo commit selecionado para a API; commits divergentes indicam worker rodando build antigo.
 
 ### Frontend
@@ -107,7 +108,7 @@ Responsável pela interface Next.js.
 - Código em `frontend/`.
 - Configuração esperada do serviço Railway Frontend: Root Directory `/frontend`, builder Railpack/Node, build command `npm run build`, start command `npm run start` e variável `NEXT_PUBLIC_API_URL` apontando para a URL pública do backend.
 - É Node/Railpack e não executa migrations Alembic nem scripts de release do backend.
-- Não deve receber `RUN_RELEASE_MIGRATIONS=true`; se o `preDeployCommand` global for avaliado no diretório do Frontend, ele deve apenas imprimir `Skipping release migrations for this service` e sair `0`, sem executar Alembic ou scripts de release do backend.
+- Não deve receber `RUN_RELEASE_MIGRATIONS=true` e não deve ser afetado por `preDeployCommand` global; o `railway.json` do monorepo não executa migrations.
 - Depende de `NEXT_PUBLIC_API_URL` apontando para o backend correto por ambiente.
 - Depende de `NEXT_PUBLIC_TURNSTILE_SITE_KEY` em staging/produção.
 
@@ -117,8 +118,8 @@ Banco relacional de produção.
 
 - Deve ser provisionado como serviço Railway Postgres ou equivalente.
 - O backend usa `DATABASE_URL` para conexão.
-- Migrations são aplicadas por Alembic somente na etapa de release/deploy do backend, antes dos processos web/worker, via `backend/release.sh` e `scripts/run_release_migrations.py`. O script usa advisory lock no Postgres para serializar pre-deploys concorrentes e garantir que `20260618_worker_dlq` seja aplicada antes dos workers passarem no check de Alembic head.
-- Frontend não roda migrations; qualquer pre-deploy em contexto Node deve ser no-op.
+- Migrations são aplicadas por Alembic somente em etapa isolada do Backend, antes dos processos web/worker, via `backend/release.sh` e `scripts/run_release_migrations.py`; em emergência, execute `cd backend && bash release.sh`. O script usa advisory lock no Postgres para serializar execuções concorrentes e garantir que `20260618_worker_dlq` seja aplicada antes dos workers passarem no check de Alembic head.
+- Frontend não roda migrations; o `railway.json` global não define pre-deploy para contexto Node.
 - Web e workers devem falhar com erro claro se o banco não estiver no Alembic head; workers apenas verificam o head com `verify_alembic_at_head` antes de consumir filas, sem aplicar migrations.
 - Antes de alterações de schema, validar rollback, backup e compatibilidade com dados existentes.
 
