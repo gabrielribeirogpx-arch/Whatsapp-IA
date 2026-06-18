@@ -51,7 +51,23 @@ class FlowV2ArchitectureTestSuite:
     def _supported_node_surface(self) -> ArchitectureTestResult:
         registry = NodeExecutorRegistry(event_store=_NoopEventStore(), transition_resolver=TransitionResolver(_NoopEventStore()))
         supported = tuple(sorted(registry._executors))
-        expected = ("choice", "condition", "delay", "message")
+        expected = (
+            "action",
+            "ai_agent",
+            "ai_classification",
+            "ai_extraction",
+            "ai_rag",
+            "ai_response",
+            "ai_summary",
+            "ai_supervisor",
+            "choice",
+            "condition",
+            "cta_link",
+            "cta_url",
+            "delay",
+            "media",
+            "message",
+        )
         return ArchitectureTestResult(
             name="supported_node_surface",
             passed=supported == expected,
