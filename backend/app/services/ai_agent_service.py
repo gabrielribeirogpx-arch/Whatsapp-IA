@@ -13,6 +13,7 @@ from urllib.parse import urlparse
 from sqlalchemy.orm import Session
 
 from app.services.llm_service import generate_answer_for_tenant
+from app.services.circuit_breaker_service import CircuitBreakerOpen, check_circuit, record_failure, record_success
 from app.services.execution_budget_service import ExecutionBudgetExceeded, ExecutionBudget
 from app.services.long_term_memory_service import ALLOWED_FACT_TYPES, SECRET_RE, store_fact
 
@@ -99,7 +100,7 @@ def _summarize_tools(tools: list[str], webhooks: list[dict[str, Any]]) -> str:
     return json.dumps({"tools": visible, "webhook_ids": webhook_ids}, ensure_ascii=False)
 
 
-def _call_webhook(webhook: dict[str, Any], payload: Any, budget: ExecutionBudget | None = None) -> dict[str, Any]:
+def _call_webhook(webhook: dict[str, Any], payload: Any, budget: ExecutionBudget | None = None, tenant_id: Any | None = None) -> dict[str, Any]:
     if budget is not None:
         budget.consume_webhook_call()
     err = validate_webhook_config(webhook)
@@ -114,12 +115,28 @@ def _call_webhook(webhook: dict[str, Any], payload: Any, budget: ExecutionBudget
     if method == "POST":
         body = json.dumps(payload if isinstance(payload, dict) else {}, ensure_ascii=False)[:20000].encode("utf-8")
     req = urllib.request.Request(str(webhook["url"]), data=body, headers=headers, method=method)
+    host = (urlparse(str(webhook.get("url") or "")).hostname or "unknown").lower()
+    circuit_key = f"webhook:{tenant_id or 'global'}:{host}"
+    try:
+        cb_meta = check_circuit(circuit_key)
+    except CircuitBreakerOpen:
+        return {"ok": False, "error": "circuit_open", "status": "circuit_open", "message": "Integração temporariamente indisponível."}
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             text = resp.read(2000).decode("utf-8", errors="replace")
-            return {"ok": 200 <= resp.status < 300, "status_code": resp.status, "body_preview": text[:500]}
+            ok = 200 <= resp.status < 300
+            if ok:
+                record_success(circuit_key)
+            elif resp.status >= 500 or resp.status == 429:
+                record_failure(circuit_key, reason=f"webhook_status:{resp.status}")
+            return {"ok": ok, "status_code": resp.status, "body_preview": text[:500], "circuit_breaker_checked": cb_meta.get("circuit_breaker_checked"), "circuit_breaker_key_hash": cb_meta.get("circuit_breaker_key_hash"), "circuit_breaker_state": cb_meta.get("circuit_breaker_state"), "circuit_breaker_open": False}
+    except urllib.error.HTTPError as exc:
+        if exc.code >= 500 or exc.code == 429:
+            record_failure(circuit_key, reason=f"webhook_status:{exc.code}")
+        return {"ok": False, "status_code": exc.code, "error": type(exc).__name__, "circuit_breaker_checked": cb_meta.get("circuit_breaker_checked"), "circuit_breaker_key_hash": cb_meta.get("circuit_breaker_key_hash"), "circuit_breaker_state": cb_meta.get("circuit_breaker_state"), "circuit_breaker_open": False}
     except (urllib.error.URLError, TimeoutError, ValueError) as exc:
-        return {"ok": False, "error": type(exc).__name__}
+        record_failure(circuit_key, reason=f"webhook:{type(exc).__name__}")
+        return {"ok": False, "error": type(exc).__name__, "circuit_breaker_checked": cb_meta.get("circuit_breaker_checked"), "circuit_breaker_key_hash": cb_meta.get("circuit_breaker_key_hash"), "circuit_breaker_state": cb_meta.get("circuit_breaker_state"), "circuit_breaker_open": False}
 
 
 def run_agent_for_tenant(db: Session, tenant_id, input_text: str, instruction: str, allowed_tools: list[str], tool_configs: dict[str, Any] | None, memory_context: str | None = None, options: dict[str, Any] | None = None, node_tool_executor=None, subflow_tool_executor=None, mcp_tool_executor=None, budget: ExecutionBudget | None = None) -> AgentRunResult:
@@ -285,7 +302,7 @@ def run_agent_for_tenant(db: Session, tenant_id, input_text: str, instruction: s
                 state.append({"tool": tool, "ok": False, "error": "webhook_not_allowed"})
                 continue
             try:
-                webhook_result = _call_webhook(webhook, args.get("payload") if isinstance(args.get("payload"), dict) else {}, budget=budget)
+                webhook_result = _call_webhook(webhook, args.get("payload") if isinstance(args.get("payload"), dict) else {}, budget=budget, tenant_id=tenant_id)
             except ExecutionBudgetExceeded:
                 return AgentRunResult(message=fallback, status="budget_exceeded", fallback_used=True, steps_count=step + 1, final_tool=tool, tools_used=result.tools_used, metadata={**(budget.safe_metadata() if budget else {}), "budget_exceeded": True})
             result.actions.append(AgentToolAction("webhook", {"webhook_id": webhook_id, "ok": webhook_result.get("ok"), "status_code": webhook_result.get("status_code")}))

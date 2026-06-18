@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 
 from app.models.tenant_ai_setting import TenantAISetting
 from app.services.ai_model_validation import validate_chat_model
+from app.services.circuit_breaker_service import CircuitBreakerOpen, check_circuit, record_failure, record_success
 from app.utils.encryption import decrypt_secret
 
 logger = logging.getLogger(__name__)
@@ -102,6 +103,23 @@ def _provider_error_details(exc: Exception) -> tuple[int | None, str | None, str
                 message = body.get("message") or body.get("detail") or message
 
     return status_code, str(error_code) if error_code else None, _sanitize_provider_message(message)
+
+
+def _is_transient_provider_error(status_code: int | None, error_code: str | None, message: str) -> bool:
+    normalized = f"{error_code or ''} {message or ''}".lower()
+    return bool(status_code in {408, 429, 500, 502, 503, 504} or "timeout" in normalized or "connection" in normalized or "rate_limit" in normalized or "resource_exhausted" in normalized)
+
+
+def _is_tenant_config_provider_error(status_code: int | None, error_code: str | None, message: str) -> bool:
+    normalized = f"{error_code or ''} {message or ''}".lower()
+    return bool(status_code in {400, 401, 403, 404} or "invalid_api_key" in normalized or "api_key_invalid" in normalized or "permission" in normalized or "model_not_found" in normalized)
+
+
+def _circuit_key(provider: str, model: str, tenant_id: uuid.UUID | str | None = None, *, config_error: bool = False) -> str:
+    if config_error and tenant_id is not None:
+        return f"tenant:{tenant_id}:provider:{provider}:{model}:config"
+    tenant_scope = f":tenant:{tenant_id}" if tenant_id is not None else ""
+    return f"provider:{provider}:{model}{tenant_scope}"
 
 
 def _friendly_provider_error(status_code: int | None, error_code: str | None, message: str) -> str:
@@ -217,7 +235,7 @@ def _generate_anthropic(messages: list[dict[str, str]], *, api_key: str, model: 
     return "".join(block.get("text", "") for block in data.get("content", []) if block.get("type") == "text").strip()
 
 
-def generate_answer(messages: list[dict[str, str]], model: str | None = None, temperature: float | None = None, max_tokens: int | None = None, api_key: str | None = None, provider: str | None = None) -> str:
+def generate_answer(messages: list[dict[str, str]], model: str | None = None, temperature: float | None = None, max_tokens: int | None = None, api_key: str | None = None, provider: str | None = None, tenant_id: uuid.UUID | str | None = None) -> str:
     resolved_provider = (provider or os.getenv("AI_PROVIDER", "gemini")).strip().lower()
     resolved_key = api_key or os.getenv(_provider_env_key(resolved_provider) or "")
     if not resolved_key:
@@ -225,26 +243,37 @@ def generate_answer(messages: list[dict[str, str]], model: str | None = None, te
     resolved_model = validate_chat_model(model) or DEFAULT_MODELS.get(resolved_provider) or "gemini-3.1-flash-lite"
     temp = _coerce_float(temperature if temperature is not None else os.getenv("AI_TEMPERATURE"), default=DEFAULT_TEMPERATURE, field_name="temperature", source="generate_answer")
     limit = _coerce_int(max_tokens if max_tokens is not None else os.getenv("AI_MAX_TOKENS"), default=DEFAULT_MAX_TOKENS, field_name="max_tokens", source="generate_answer")
+    circuit_key = _circuit_key(resolved_provider, resolved_model, tenant_id)
     try:
-        logger.info("[AI PROVIDER CALL] provider=%s model=%s", resolved_provider, resolved_model)
+        cb_meta = check_circuit(circuit_key)
+    except CircuitBreakerOpen as exc:
+        raise LLMGenerationError("Provedor de IA temporariamente indisponível. Tente novamente em instantes.") from exc
+    try:
+        logger.info("[AI PROVIDER CALL] provider=%s model=%s circuit_breaker_checked=%s circuit_breaker_key_hash=%s circuit_breaker_state=%s circuit_breaker_open=%s", resolved_provider, resolved_model, cb_meta.get("circuit_breaker_checked"), cb_meta.get("circuit_breaker_key_hash"), cb_meta.get("circuit_breaker_state"), cb_meta.get("circuit_breaker_open"))
         if resolved_provider == "openai":
             text = _generate_openai(messages, api_key=resolved_key, model=resolved_model, temperature=temp, max_tokens=limit)
         elif resolved_provider == "anthropic":
             text = _generate_anthropic(messages, api_key=resolved_key, model=resolved_model, temperature=temp, max_tokens=limit)
         else:
             text = _generate_gemini(messages, api_key=resolved_key, model=resolved_model, temperature=temp, max_tokens=limit)
+        record_success(circuit_key)
         logger.info("[AI PROVIDER RESPONSE] provider=%s model=%s status_code=ok", resolved_provider, resolved_model)
     except LLMConfigurationError:
         raise
     except Exception as exc:
         status_code, error_code, message = _provider_error_details(exc)
+        if _is_transient_provider_error(status_code, error_code, message):
+            record_failure(circuit_key, reason=f"provider_error:{status_code or type(exc).__name__}")
+        elif _is_tenant_config_provider_error(status_code, error_code, message):
+            record_failure(_circuit_key(resolved_provider, resolved_model, tenant_id, config_error=True), reason=f"tenant_config:{status_code or error_code or type(exc).__name__}")
         logger.warning(
-            "[AI PROVIDER ERROR] provider=%s model=%s status_code=%s error_code=%s message=%s",
+            "[AI PROVIDER ERROR] provider=%s model=%s status_code=%s error_code=%s message=%s circuit_breaker_key_hash=%s",
             resolved_provider,
             resolved_model,
             status_code,
             error_code,
             message,
+            cb_meta.get("circuit_breaker_key_hash"),
         )
         raise LLMGenerationError(_friendly_provider_error(status_code, error_code, message)) from exc
     if not text:
@@ -261,6 +290,7 @@ def generate_answer_for_tenant(db: Session, tenant_id: uuid.UUID, messages: list
         model=config["chat_model"],
         temperature=_coerce_float(config.get("temperature"), default=DEFAULT_TEMPERATURE, field_name="temperature", source="resolved_config"),
         max_tokens=_coerce_int(config.get("max_tokens"), default=DEFAULT_MAX_TOKENS, field_name="max_tokens", source="resolved_config"),
+        tenant_id=tenant_id,
     )
 
 
