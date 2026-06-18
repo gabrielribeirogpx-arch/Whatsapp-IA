@@ -32,7 +32,7 @@ NODE_TOOL_ID_RE = re.compile(r"^[A-Za-z0-9_]{1,64}$")
 class FlowV2GraphValidator:
     """Validates Flow Publisher V2 graphs before immutable snapshot creation."""
 
-    SUPPORTED_NODE_TYPES = {"message", "choice", "condition", "delay", "action", "media", "cta_url", "ai_rag", "ai_response", "ai_classification", "ai_extraction", "ai_summary", "ai_agent", "start"}
+    SUPPORTED_NODE_TYPES = {"message", "choice", "condition", "delay", "action", "media", "cta_url", "ai_rag", "ai_response", "ai_classification", "ai_extraction", "ai_summary", "ai_agent", "ai_supervisor", "start"}
     SUPPORTED_CONDITION_OPERATORS = {"==", "eq", "equals"}
     SUPPORTED_BUILDER_MATCH_TYPES = {"contains", "equals", "eq", "=="}
 
@@ -148,7 +148,7 @@ class FlowV2GraphValidator:
     ) -> None:
         outgoing_sources = {str(self._edge_source(edge)) for edge in edges if isinstance(edge, dict) and self._edge_source(edge) not in (None, "")}
         for node in nodes:
-            if not isinstance(node, dict) or node.get("id") in (None, "") or self._node_type(node) not in {"ai_rag", "ai_response", "ai_agent"}:
+            if not isinstance(node, dict) or node.get("id") in (None, "") or self._node_type(node) not in {"ai_rag", "ai_response", "ai_agent", "ai_supervisor"}:
                 continue
             node_id = str(node["id"])
             node_type = self._node_type(node).upper()
@@ -337,6 +337,33 @@ class FlowV2GraphValidator:
                             errors.append(f"FLOW_V2_AI_AGENT_WEBHOOK_METHOD_INVALID:{node_id}:{index}")
                         if self._is_internal_url(url):
                             errors.append(f"FLOW_V2_AI_AGENT_WEBHOOK_URL_INVALID:{node_id}:{index}")
+        elif node_type == "ai_supervisor":
+            if self._contains_forbidden_secret(data):
+                errors.append(f"FLOW_V2_AI_NODE_API_KEY_FORBIDDEN:{node_id}")
+            agent_ids = data.get("agent_ids") or data.get("agentIds") or data.get("agents") or []
+            if not isinstance(agent_ids, list) or not [item for item in agent_ids if str(item).strip()]:
+                errors.append(f"FLOW_V2_AI_SUPERVISOR_AGENTS_REQUIRED:{node_id}")
+                return
+            node_by_id = {str(n.get("id")): n for n in (nodes or []) if isinstance(n, dict) and n.get("id") not in (None, "")}
+            for index, raw_target_id in enumerate(agent_ids):
+                target_id = str(raw_target_id)
+                target = node_by_id.get(target_id)
+                target_type = self._node_type(target) if isinstance(target, dict) else ""
+                if target_id == node_id:
+                    errors.append(f"FLOW_V2_AI_SUPERVISOR_SELF_TARGET_INVALID:{node_id}:{index}")
+                if target_type == "ai_supervisor":
+                    errors.append(f"FLOW_V2_AI_SUPERVISOR_TARGET_SUPERVISOR_INVALID:{node_id}:{index}")
+                if target_type != "ai_agent":
+                    errors.append(f"FLOW_V2_AI_SUPERVISOR_TARGET_INVALID:{node_id}:{index}")
+            fallback_id = str(data.get("fallback_agent_id") or data.get("fallbackAgentId") or "").strip()
+            if fallback_id and fallback_id not in {str(item) for item in agent_ids}:
+                errors.append(f"FLOW_V2_AI_SUPERVISOR_FALLBACK_INVALID:{node_id}")
+            try:
+                max_agents = int(data.get("max_agents", data.get("maxAgents", 1)))
+                if max_agents != 1:
+                    errors.append(f"FLOW_V2_AI_SUPERVISOR_MAX_AGENTS_INVALID:{node_id}")
+            except (TypeError, ValueError):
+                errors.append(f"FLOW_V2_AI_SUPERVISOR_MAX_AGENTS_INVALID:{node_id}")
         elif node_type == "ai_classification":
             if any(str(data.get(key) or "").strip() for key in ("api_key", "apiKey", "openai_api_key", "provider_api_key")):
                 errors.append(f"FLOW_V2_AI_NODE_API_KEY_FORBIDDEN:{node_id}")
