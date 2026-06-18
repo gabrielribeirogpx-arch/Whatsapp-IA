@@ -9,6 +9,7 @@ from typing import Any
 
 from redis import Redis
 from rq import Queue
+from rq.exceptions import NoSuchJobError
 from rq.registry import DeferredJobRegistry, FailedJobRegistry, StartedJobRegistry
 
 try:
@@ -108,6 +109,51 @@ def on_job_failure(job, connection, type_, value, traceback) -> None:  # noqa: A
     record_dead_letter(str(job_type or getattr(job, "description", "unknown"))[:80], tenant_id, getattr(getattr(job, "origin", None), "name", None) or getattr(job, "origin", None), f"{getattr(type_, '__name__', 'Exception')}: {str(value)[:300]}", sanitize_payload_summary(raw), {"job_id": getattr(job, "id", None), "exc_type": getattr(type_, "__name__", None)})
 
 
+def _remove_unreadable_job(queue: Queue, registry: Any, registry_name: str, job_id: str, exc: Exception) -> None:
+    """Drop a registry entry whose RQ job hash cannot be decoded/restored."""
+    logger.warning(
+        "event=invalid_rq_job_removed queue=%s registry=%s job_id=%s error=%s: %s",
+        queue.name,
+        registry_name,
+        job_id,
+        exc.__class__.__name__,
+        str(exc)[:300],
+    )
+    try:
+        registry.remove(job_id)
+    except Exception as remove_exc:  # pragma: no cover - defensive cleanup logging
+        logger.warning(
+            "event=invalid_rq_job_registry_remove_failed queue=%s registry=%s job_id=%s error=%s: %s",
+            queue.name,
+            registry_name,
+            job_id,
+            remove_exc.__class__.__name__,
+            str(remove_exc)[:300],
+        )
+    try:
+        queue.remove(job_id)
+    except Exception as remove_exc:  # pragma: no cover - defensive cleanup logging
+        logger.warning(
+            "event=invalid_rq_job_queue_remove_failed queue=%s registry=%s job_id=%s error=%s: %s",
+            queue.name,
+            registry_name,
+            job_id,
+            remove_exc.__class__.__name__,
+            str(remove_exc)[:300],
+        )
+    try:
+        queue.connection.delete(queue.job_class(job_id, connection=queue.connection, serializer=queue.serializer).key)
+    except Exception as remove_exc:  # pragma: no cover - defensive cleanup logging
+        logger.warning(
+            "event=invalid_rq_job_delete_failed queue=%s registry=%s job_id=%s error=%s: %s",
+            queue.name,
+            registry_name,
+            job_id,
+            remove_exc.__class__.__name__,
+            str(remove_exc)[:300],
+        )
+
+
 def reap_stuck_jobs(queue_names: list[str] | None = None) -> int:
     max_age = int(os.getenv("WORKER_STUCK_JOB_MAX_AGE_SECONDS", "1800"))
     conn = redis_connection()
@@ -118,7 +164,14 @@ def reap_stuck_jobs(queue_names: list[str] | None = None) -> int:
         for registry_cls in (StartedJobRegistry, FailedJobRegistry, DeferredJobRegistry):
             registry = registry_cls(queue=queue)
             for job_id in registry.get_job_ids():
-                job = queue.fetch_job(job_id)
+                try:
+                    job = queue.fetch_job(job_id)
+                except NoSuchJobError:
+                    registry.remove(job_id)
+                    continue
+                except (UnicodeDecodeError, UnicodeError, ValueError, TypeError, AttributeError) as exc:
+                    _remove_unreadable_job(queue, registry, registry_cls.__name__, job_id, exc)
+                    continue
                 if not job:
                     continue
                 age = (datetime.now(UTC) - (job.started_at or job.ended_at or job.created_at).replace(tzinfo=UTC)).total_seconds()
