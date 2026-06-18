@@ -59,7 +59,7 @@ export default function AIPlaygroundPage() {
   const totalPages = Math.max(1, Math.ceil((data?.total || 0) / 25));
 
   return (
-    <div className="min-h-screen bg-slate-50 p-8 text-slate-900">
+    <div className="w-full min-w-0 bg-slate-50 p-6 text-slate-900 sm:p-8">
       <div className="mb-6">
         <p className="text-sm font-semibold uppercase tracking-wide text-emerald-600">Dashboard → IA</p>
         <h1 className="text-3xl font-bold">Playground de IA</h1>

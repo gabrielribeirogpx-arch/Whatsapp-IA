@@ -5,6 +5,7 @@ import { ReactNode, useEffect, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { deleteFlow, duplicateFlow, listFlows, updateFlowStatus } from '@/lib/api';
 import SidebarUserProfile from '@/components/SidebarUserProfile';
+import { dashboardSidebarSections, isDashboardSidebarItemActive } from '@/components/dashboard/sidebar-items';
 
 function FlowAnalyticsSidebar({ flowId, expanded }: { flowId?: string; expanded: boolean }) {
   const router = useRouter();
@@ -81,12 +82,46 @@ function FlowAnalyticsSidebar({ flowId, expanded }: { flowId?: string; expanded:
   );
 }
 
+function DashboardSidebar({ expanded }: { expanded: boolean }) {
+  const pathname = usePathname();
+
+  return (
+    <nav className={`dash-sidebar ${expanded ? 'is-expanded' : ''}`}>
+      <div className="dash-sidebar-logo">
+        <img src="/Logo.svg" alt="Ícone" className="logo-icon" />
+        <img src="/Logo2.svg" alt="Logo" className="logo-full" />
+      </div>
+
+      {dashboardSidebarSections.map((section, sectionIndex) => (
+        <div key={section.label}>
+          {sectionIndex > 0 ? <div className="dash-nav-divider" /> : null}
+          <span className="dash-nav-section">{section.label}</span>
+          {section.items.map((item) => {
+            const active = isDashboardSidebarItemActive(pathname, item);
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                className={`dash-nav-item ${active ? 'active' : ''}`}
+                aria-current={active ? 'page' : undefined}
+              >
+                {item.icon}
+                <span className="dash-nav-label">{item.label}</span>
+              </Link>
+            );
+          })}
+        </div>
+      ))}
+
+      <SidebarUserProfile expanded={expanded} />
+    </nav>
+  );
+}
+
 export default function DashboardLayout({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const isFlowBuilder = pathname.startsWith('/dashboard/flow-builder');
   const isFlowAnalytics = pathname.includes('/dashboard/flows/') && pathname.endsWith('/analytics');
-  const isDashboardActive = pathname === '/dashboard';
-  const isFlowsActive = pathname === '/dashboard/flows' || pathname.startsWith('/dashboard/flows/') || isFlowBuilder;
   const [sidebarExpanded, setSidebarExpanded] = useState(false);
 
   const pathnameSegments = pathname.split('/');
@@ -101,98 +136,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
           onMouseEnter={() => setSidebarExpanded(true)}
           onMouseLeave={() => setSidebarExpanded(false)}
         >
-          <nav className={`dash-sidebar ${sidebarExpanded ? 'is-expanded' : ''}`}>
-            <div className="dash-sidebar-logo">
-              <img src="/Logo.svg" alt="Ícone" className="logo-icon" />
-              <img src="/Logo2.svg" alt="Logo" className="logo-full" />
-            </div>
-
-            <span className="dash-nav-section">Principal</span>
-
-            <Link
-              href="/dashboard"
-              className={`dash-nav-item ${isDashboardActive ? 'active' : ''}`}
-              aria-current={isDashboardActive ? 'page' : undefined}
-            >
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
-              <span className="dash-nav-label">Dashboard</span>
-            </Link>
-
-          <Link href="/chat" className="dash-nav-item">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-            <span className="dash-nav-label">Inbox</span>
-          </Link>
-
-          <Link href="/crm" className="dash-nav-item">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-            <span className="dash-nav-label">Clientes</span>
-          </Link>
-
-          <Link href="/pipeline" className="dash-nav-item">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
-            <span className="dash-nav-label">Pipeline</span>
-          </Link>
-
-          <Link href="/tasks" className={`dash-nav-item ${pathname === '/tasks' ? 'active' : ''}`}>
-            <span aria-hidden="true" className="text-lg">📋</span>
-            <span className="dash-nav-label">Tarefas</span>
-          </Link>
-
-
-          <Link href="/dashboard/campaigns" className={`dash-nav-item ${pathname === '/dashboard/campaigns' ? 'active' : ''}`}>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 11l18-5-5 18-2-7-7-2z"/></svg>
-            <span className="dash-nav-label">Campanhas</span>
-          </Link>
-
-          <Link href="/dashboard/contacts" className={`dash-nav-item ${pathname === '/dashboard/contacts' ? 'active' : ''}`}>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><line x1="20" y1="8" x2="20" y2="14"/><line x1="23" y1="11" x2="17" y2="11"/></svg>
-            <span className="dash-nav-label">Contatos</span>
-          </Link>
-
-          <div className="dash-nav-divider" />
-          <span className="dash-nav-section">Ferramentas</span>
-
-          <Link href="/products" className="dash-nav-item">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>
-            <span className="dash-nav-label">Produtos</span>
-          </Link>
-
-          <Link href="/dashboard/knowledge" className={`dash-nav-item ${pathname === '/dashboard/knowledge' ? 'active' : ''}`}>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
-            <span className="dash-nav-label">Base de conhecimento</span>
-          </Link>
-
-          <Link href="/dashboard/ai/playground" className={`dash-nav-item ${pathname === '/dashboard/ai/playground' ? 'active' : ''}`}>
-            <span aria-hidden="true" className="text-lg">🧪</span>
-            <span className="dash-nav-label">Playground IA</span>
-          </Link>
-
-          <Link href="/dashboard/ai/mcp" className={`dash-nav-item ${pathname === '/dashboard/ai/mcp' ? 'active' : ''}`}>
-            <span aria-hidden="true" className="text-lg">🔌</span>
-            <span className="dash-nav-label">MCP / Integrações</span>
-          </Link>
-
-          <Link href="/dashboard/ai-settings" className={`dash-nav-item ${pathname === '/dashboard/ai-settings' ? 'active' : ''}`}>
-            <span aria-hidden="true" className="text-lg">✨</span>
-            <span className="dash-nav-label">Configurações de IA</span>
-          </Link>
-
-          <Link
-            href="/dashboard/flows"
-            className={`dash-nav-item ${isFlowsActive ? 'active' : ''}`}
-            aria-current={isFlowsActive ? 'page' : undefined}
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="5" cy="5" r="2"/><circle cx="19" cy="5" r="2"/><circle cx="12" cy="19" r="2"/><line x1="7" y1="6.5" x2="10.5" y2="16.5"/><line x1="17" y1="6.5" x2="13.5" y2="16.5"/></svg>
-            <span className="dash-nav-label">Fluxos</span>
-          </Link>
-
-          <Link href="/dashboard/settings?tab=whatsapp-business" className={`dash-nav-item ${pathname === '/dashboard/settings' ? 'active' : ''}`}>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33h.01a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h.01a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.01a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-            <span className="dash-nav-label">Configurações</span>
-          </Link>
-
-          <SidebarUserProfile expanded={sidebarExpanded} />
-          </nav>
+          <DashboardSidebar expanded={sidebarExpanded} />
         </aside>
       )}
 
