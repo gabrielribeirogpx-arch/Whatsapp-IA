@@ -1887,6 +1887,29 @@ class AiAgentNodeExecutor(AiResponseNodeExecutor):
         max_subflow_calls = min(max(max_subflow_calls, 1), 3)
         if allow_subflow_tools and "executar_subflow" not in [str(t) for t in allowed_tools]:
             allowed_tools = [*allowed_tools, "executar_subflow"]
+        allow_mcp_tools = data.get("allow_mcp_tools", data.get("allowMcpTools", False)) is True
+        raw_mcp_tool_ids = data.get("mcp_tool_ids", data.get("mcpToolIds", [])) if allow_mcp_tools else []
+        if not isinstance(raw_mcp_tool_ids, list):
+            raw_mcp_tool_ids = []
+        mcp_tool_ids = [str(item) for item in raw_mcp_tool_ids if item]
+        mcp_tools = []
+        if allow_mcp_tools and mcp_tool_ids:
+            from app.models.tenant_mcp import TenantMCPTool
+            from sqlalchemy import select
+            import uuid as _uuid
+            parsed_ids = []
+            for item in mcp_tool_ids:
+                try:
+                    parsed_ids.append(_uuid.UUID(str(item)))
+                except ValueError:
+                    continue
+            if parsed_ids:
+                rows = db.execute(select(TenantMCPTool).where(TenantMCPTool.tenant_id == session.tenant_id, TenantMCPTool.id.in_(parsed_ids), TenantMCPTool.is_enabled.is_(True))).scalars().all()
+                mcp_tools = [{"tool_id": str(row.id), "name": row.display_name or row.tool_name, "description": row.description, "input_schema": row.input_schema or {}} for row in rows]
+        max_mcp_calls = self._coerce_int_config(data.get("max_mcp_calls", data.get("maxMcpCalls")), default=3, field_name="max_mcp_calls", node_id=node_id)
+        max_mcp_calls = min(max(max_mcp_calls, 0), 3)
+        if allow_mcp_tools and mcp_tools and "chamar_mcp" not in [str(t) for t in allowed_tools]:
+            allowed_tools = [*allowed_tools, "chamar_mcp"]
         options = {
             "chat_model": data.get("chat_model_override") or data.get("chat_model") or data.get("model_override") or data.get("model"),
             "temperature": self._coerce_float_config(data.get("temperature"), default=0.2, field_name="temperature", node_id=node_id),
@@ -1895,6 +1918,7 @@ class AiAgentNodeExecutor(AiResponseNodeExecutor):
             "fallback_message": data.get("fallback_message") or data.get("fallbackMessage"),
             "max_node_tool_calls": max_node_tool_calls,
             "max_subflow_calls": max_subflow_calls,
+            "max_mcp_calls": max_mcp_calls,
         }
         def _execute_agent_node_tool(tool_config, tool_input, reason):
             from app.services.ai_agent_node_tool_service import execute_node_tool
@@ -1902,7 +1926,10 @@ class AiAgentNodeExecutor(AiResponseNodeExecutor):
         def _execute_agent_subflow_tool(tool_config, tool_input, reason):
             from app.services.ai_agent_subflow_tool_service import execute_subflow_tool
             return execute_subflow_tool(session.tenant_id, flow_id, session.id, node_id, tool_config, tool_input, runtime_input, db)
-        result = run_agent_for_tenant(db, session.tenant_id, str(input_text), str(instruction), [str(t) for t in allowed_tools], {"webhooks": data.get("webhooks") or [], "node_tools": node_tools, "subflow_tools": subflow_tools, "memory_context": {"contact_id": runtime_input.contact_id, "conversation_id": runtime_input.conversation_id, "session_id": session.id}}, memory_context=conversation_history, options=options, node_tool_executor=_execute_agent_node_tool if allow_node_tools else None, subflow_tool_executor=_execute_agent_subflow_tool if allow_subflow_tools else None)
+        def _execute_agent_mcp_tool(tool_config, tool_input):
+            from app.services.mcp_service import call_mcp_tool
+            return call_mcp_tool(db, session.tenant_id, str(tool_config.get("tool_id")), tool_input, timeout_seconds=15)
+        result = run_agent_for_tenant(db, session.tenant_id, str(input_text), str(instruction), [str(t) for t in allowed_tools], {"webhooks": data.get("webhooks") or [], "node_tools": node_tools, "subflow_tools": subflow_tools, "mcp_tools": mcp_tools, "memory_context": {"contact_id": runtime_input.contact_id, "conversation_id": runtime_input.conversation_id, "session_id": session.id}}, memory_context=conversation_history, options=options, node_tool_executor=_execute_agent_node_tool if allow_node_tools else None, subflow_tool_executor=_execute_agent_subflow_tool if allow_subflow_tools else None, mcp_tool_executor=_execute_agent_mcp_tool if allow_mcp_tools else None)
         actions: list[RuntimeAction] = []
         context = dict(session.context or {}) if isinstance(getattr(session, "context", None), dict) else {}
         for agent_action in result.actions:
@@ -1913,7 +1940,7 @@ class AiAgentNodeExecutor(AiResponseNodeExecutor):
         session.context = context
         if hasattr(db, "add"):
             db.add(session)
-        metadata = {"tools_allowed": [str(t) for t in allowed_tools], "node_tools_allowed": [{"tool_id": str(t.get("tool_id")), "node_id": str(t.get("node_id")), "label": str(t.get("label", ""))[:80]} for t in node_tools if isinstance(t, dict)], "tools_used": result.tools_used, "node_tools_used": result.metadata.get("node_tools_used", []), "subflow_tools_allowed": [{"tool_id": str(t.get("tool_id")), "flow_id": str(t.get("flow_id")), "label": str(t.get("label", ""))[:80]} for t in subflow_tools if isinstance(t, dict)], "subflow_tools_used": result.metadata.get("subflow_tools_used", []), "subflow_calls_count": result.metadata.get("subflow_calls_count", 0), "subflow_results_summary": result.metadata.get("subflow_results_summary", []), "subflow_errors": result.metadata.get("subflow_errors", []), "timeout_count": result.metadata.get("timeout_count", 0), "parent_session_id": str(session.id), "subflow_session_ids": [], "node_tool_calls_count": result.metadata.get("node_tool_calls_count", 0), "node_tool_results_summary": result.metadata.get("node_tools_used", []), "blocked_tool_calls": result.metadata.get("blocked_tool_calls", []), "max_steps_reached": result.metadata.get("max_steps_reached", False), "steps_count": result.steps_count, "final_tool": result.final_tool, "status": result.status, "webhook_count": len(data.get("webhooks") or []), "latency_ms": result.metadata.get("latency_ms"), **context_builder_meta, "auto_memory_saved_count": result.metadata.get("memory_saved_count", 0)}
+        metadata = {"tools_allowed": [str(t) for t in allowed_tools], "node_tools_allowed": [{"tool_id": str(t.get("tool_id")), "node_id": str(t.get("node_id")), "label": str(t.get("label", ""))[:80]} for t in node_tools if isinstance(t, dict)], "tools_used": result.tools_used, "mcp_tools_allowed": mcp_tools, "mcp_tools_used": result.metadata.get("mcp_tools_used", []), "mcp_call_count": result.metadata.get("mcp_call_count", 0), "mcp_latency_ms": result.metadata.get("mcp_latency_ms", 0), "mcp_status": result.metadata.get("mcp_status", "not_used"), "mcp_error_sanitized": result.metadata.get("mcp_error_sanitized"), "node_tools_used": result.metadata.get("node_tools_used", []), "subflow_tools_allowed": [{"tool_id": str(t.get("tool_id")), "flow_id": str(t.get("flow_id")), "label": str(t.get("label", ""))[:80]} for t in subflow_tools if isinstance(t, dict)], "subflow_tools_used": result.metadata.get("subflow_tools_used", []), "subflow_calls_count": result.metadata.get("subflow_calls_count", 0), "subflow_results_summary": result.metadata.get("subflow_results_summary", []), "subflow_errors": result.metadata.get("subflow_errors", []), "timeout_count": result.metadata.get("timeout_count", 0), "parent_session_id": str(session.id), "subflow_session_ids": [], "node_tool_calls_count": result.metadata.get("node_tool_calls_count", 0), "node_tool_results_summary": result.metadata.get("node_tools_used", []), "blocked_tool_calls": result.metadata.get("blocked_tool_calls", []), "max_steps_reached": result.metadata.get("max_steps_reached", False), "steps_count": result.steps_count, "final_tool": result.final_tool, "status": result.status, "webhook_count": len(data.get("webhooks") or []), "latency_ms": result.metadata.get("latency_ms"), **context_builder_meta, "auto_memory_saved_count": result.metadata.get("memory_saved_count", 0)}
         record_ai_execution(db, tenant_id=session.tenant_id, conversation_id=runtime_input.conversation_id, session_id=session.id, flow_id=flow_id, flow_version_id=session.flow_version_id, node_id=node_id, node_type="ai_agent", provider=ai_config.get("provider"), model=ai_config.get("model"), started_at=ai_started_at, status=result.status, input_text=input_text, output_text=result.message, fallback_used=result.fallback_used, metadata=metadata)
         self.event_store.append(db, session=session, event_type=FlowV2EventType.OUTPUT_EMITTED, node_id=node_id, payload={"analytics_event": "ai_agent_completed", **metadata})
         if memory_enabled and flow_id is not None and result.message:

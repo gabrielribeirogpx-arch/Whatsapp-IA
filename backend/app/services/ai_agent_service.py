@@ -19,7 +19,7 @@ SAFE_VARIABLE_RE = re.compile(r"^[A-Za-z0-9_.]+$")
 FORBIDDEN_NAME_PARTS = ("api_key", "apikey", "token", "secret", "password")
 SENSITIVE_HEADER_RE = re.compile(r"(authorization|api[-_]?key|token|secret|password|cookie)", re.I)
 PLACEHOLDER_TOOLS = {"criar_evento", "consultar_crm", "criar_pedido", "enviar_email", "transferir_humano"}
-SUPPORTED_TOOLS = {"responder", "definir_variavel", "chamar_webhook", "executar_node", "executar_subflow", "salvar_memoria", "finalizar"} | PLACEHOLDER_TOOLS
+SUPPORTED_TOOLS = {"responder", "definir_variavel", "chamar_webhook", "executar_node", "executar_subflow", "salvar_memoria", "chamar_mcp", "finalizar"} | PLACEHOLDER_TOOLS
 
 
 @dataclass
@@ -117,7 +117,7 @@ def _call_webhook(webhook: dict[str, Any], payload: Any) -> dict[str, Any]:
         return {"ok": False, "error": type(exc).__name__}
 
 
-def run_agent_for_tenant(db: Session, tenant_id, input_text: str, instruction: str, allowed_tools: list[str], tool_configs: dict[str, Any] | None, memory_context: str | None = None, options: dict[str, Any] | None = None, node_tool_executor=None, subflow_tool_executor=None) -> AgentRunResult:
+def run_agent_for_tenant(db: Session, tenant_id, input_text: str, instruction: str, allowed_tools: list[str], tool_configs: dict[str, Any] | None, memory_context: str | None = None, options: dict[str, Any] | None = None, node_tool_executor=None, subflow_tool_executor=None, mcp_tool_executor=None) -> AgentRunResult:
     started = time.monotonic()
     opts = options or {}
     fallback = str(opts.get("fallback_message") or "Não consegui concluir essa ação agora. Quer que eu encaminhe para um atendente?")
@@ -129,10 +129,13 @@ def run_agent_for_tenant(db: Session, tenant_id, input_text: str, instruction: s
     blocked_tool_calls: list[dict[str, Any]] = []
     node_tool_calls: list[dict[str, Any]] = []
     subflow_tool_calls: list[dict[str, Any]] = []
+    mcp_tools = [t for t in ((tool_configs or {}).get("mcp_tools") or []) if isinstance(t, dict)]
+    mcp_tool_calls: list[dict[str, Any]] = []
     seen_subflow_inputs: set[tuple[str, str]] = set()
     seen_node_inputs: set[tuple[str, str]] = set()
     max_node_tool_calls = min(max(int(opts.get("max_node_tool_calls") or 3), 1), 5)
     max_subflow_calls = min(max(int(opts.get("max_subflow_calls") or 2), 1), 3)
+    max_mcp_calls = min(max(int(opts.get("max_mcp_calls") or 3), 0), 3)
     state: list[dict[str, Any]] = []
     result = AgentRunResult()
     if not allowed:
@@ -145,6 +148,8 @@ def run_agent_for_tenant(db: Session, tenant_id, input_text: str, instruction: s
             "Ferramentas/webhooks permitidos: " + _summarize_tools(allowed, webhooks),
             "Ferramentas do fluxo disponíveis: " + json.dumps([{"tool_id": str(t.get("tool_id")), "label": str(t.get("label", ""))[:80], "description": str(t.get("description", ""))[:300]} for t in node_tools], ensure_ascii=False),
             "Subflows disponíveis como ferramenta executar_subflow: " + json.dumps([{"tool_id": str(t.get("tool_id")), "label": str(t.get("label", ""))[:80], "description": str(t.get("description", ""))[:300]} for t in subflow_tools], ensure_ascii=False),
+            "Ferramentas MCP disponíveis como chamar_mcp: " + json.dumps([{"tool_id": str(t.get("tool_id")), "name": str(t.get("name", ""))[:120], "description": str(t.get("description", ""))[:300], "input_schema": t.get("input_schema") if isinstance(t.get("input_schema"), dict) else {}} for t in mcp_tools], ensure_ascii=False),
+            "Para executar MCP use somente {\"tool\":\"chamar_mcp\",\"arguments\":{\"tool_id\":\"id_permitido\",\"input\":{}}}. Não invente tool_id, URL, headers ou credenciais.",
             "Para executar subflow use somente {\"tool\":\"executar_subflow\",\"arguments\":{\"tool_id\":\"id_permitido\",\"input\":\"texto\",\"reason\":\"motivo curto\"}}. Não invente tool_id nem envie flow_id.",
         ])
         messages = [{"role": "system", "content": system}]
@@ -213,6 +218,23 @@ def run_agent_for_tenant(db: Session, tenant_id, input_text: str, instruction: s
             subflow_tool_calls.append({"tool_id": tool_id, "status": tool_result.get("status"), "flow_id": tool_result.get("flow_id"), "duration_ms": tool_result.get("duration_ms")})
             state.append({"tool": tool, "tool_id": tool_id, "ok": tool_result.get("status") == "success", "result": tool_result.get("output"), "error": tool_result.get("error")})
             continue
+        if tool == "chamar_mcp":
+            tool_id = str(args.get("tool_id") or "").strip()
+            tool_input = args.get("input") if isinstance(args.get("input"), dict) else {}
+            match = next((t for t in mcp_tools if str(t.get("tool_id")) == tool_id), None)
+            if match is None or mcp_tool_executor is None:
+                blocked_tool_calls.append({"tool_id": tool_id, "error": "mcp_tool_not_allowed"})
+                state.append({"tool": tool, "tool_id": tool_id, "ok": False, "error": "mcp_tool_not_allowed"})
+                continue
+            if len(mcp_tool_calls) >= max_mcp_calls:
+                blocked_tool_calls.append({"tool_id": tool_id, "error": "mcp_tool_limit"})
+                state.append({"tool": tool, "tool_id": tool_id, "ok": False, "error": "mcp_tool_limit"})
+                continue
+            tool_result = mcp_tool_executor(match, tool_input)
+            mcp_call = {"tool_id": tool_id, "status": tool_result.get("status"), "latency_ms": tool_result.get("latency_ms"), "error": tool_result.get("error")}
+            mcp_tool_calls.append(mcp_call)
+            state.append({"tool": tool, "tool_id": tool_id, "ok": tool_result.get("ok") is True, "result": tool_result.get("result"), "error": tool_result.get("error")})
+            continue
         if tool == "salvar_memoria":
             memory_ctx = (tool_configs or {}).get("memory_context") if isinstance(tool_configs, dict) else {}
             contact_id = memory_ctx.get("contact_id") if isinstance(memory_ctx, dict) else None
@@ -251,5 +273,5 @@ def run_agent_for_tenant(db: Session, tenant_id, input_text: str, instruction: s
         result.status = "error"
         result.fallback_used = True
         result.final_tool = "responder"
-    result.metadata = {"latency_ms": int((time.monotonic() - started) * 1000), "node_tools_used": node_tool_calls, "node_tool_calls_count": len(node_tool_calls), "subflow_tools_used": subflow_tool_calls, "subflow_calls_count": len(subflow_tool_calls), "subflow_results_summary": subflow_tool_calls, "subflow_errors": [c for c in subflow_tool_calls if c.get("status") != "success"], "timeout_count": len([c for c in subflow_tool_calls if c.get("status") == "timeout"]), "blocked_tool_calls": blocked_tool_calls, "max_steps_reached": result.fallback_used, "memory_saved_count": len([item for item in state if item.get("tool") == "salvar_memoria" and item.get("ok")])}
+    result.metadata = {"latency_ms": int((time.monotonic() - started) * 1000), "node_tools_used": node_tool_calls, "node_tool_calls_count": len(node_tool_calls), "subflow_tools_used": subflow_tool_calls, "subflow_calls_count": len(subflow_tool_calls), "subflow_results_summary": subflow_tool_calls, "mcp_tools_used": mcp_tool_calls, "mcp_call_count": len(mcp_tool_calls), "mcp_latency_ms": sum(int(c.get("latency_ms") or 0) for c in mcp_tool_calls), "mcp_status": "error" if any(c.get("status") != "success" for c in mcp_tool_calls) else ("success" if mcp_tool_calls else "not_used"), "mcp_error_sanitized": next((c.get("error") for c in mcp_tool_calls if c.get("error")), None), "subflow_errors": [c for c in subflow_tool_calls if c.get("status") != "success"], "timeout_count": len([c for c in subflow_tool_calls if c.get("status") == "timeout"]), "blocked_tool_calls": blocked_tool_calls, "max_steps_reached": result.fallback_used, "memory_saved_count": len([item for item in state if item.get("tool") == "salvar_memoria" and item.get("ok")])}
     return result

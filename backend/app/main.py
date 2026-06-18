@@ -26,6 +26,7 @@ from app.routers import account
 from app.routers import ai_settings
 from app.routers import ai_executions
 from app.routers import ai_memories
+from app.routers import mcp
 from app.routers import bot_rules
 from app.routers import flows
 from app.routers import flow_media
@@ -170,6 +171,7 @@ ALLOWED_ORIGIN_REGEX = _parse_allowed_origin_regex()
 app = FastAPI()
 
 app.include_router(flow_media.public_router)
+app.include_router(mcp.router)
 app.mount("/uploads", StaticFiles(directory=os.getenv("FLOW_MEDIA_STATIC_DIR", "/data/uploads"), check_dir=False), name="uploads")
 
 app.add_middleware(TenantContextMiddleware)
