@@ -25,6 +25,6 @@ class WorkerDeadLetter(Base):
     queue_name: Mapped[str | None] = mapped_column(String(80), nullable=True)
     reason: Mapped[str] = mapped_column(Text, nullable=False)
     payload_summary: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict, server_default="{}")
-    metadata: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict, server_default="{}")
+    job_metadata: Mapped[dict] = mapped_column("metadata", JSONB, nullable=False, default=dict, server_default="{}")
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

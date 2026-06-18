@@ -64,7 +64,7 @@ def record_dead_letter(
                 queue_name=str(queue_name or "")[:80] or None,
                 reason=str(reason or "unknown")[:500],
                 payload_summary=safe_payload,
-                metadata=safe_metadata,
+                job_metadata=safe_metadata,
                 created_at=datetime.utcnow(),
             )
             db.add(row)
