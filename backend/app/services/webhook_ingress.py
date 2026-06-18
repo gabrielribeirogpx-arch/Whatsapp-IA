@@ -1,15 +1,91 @@
 import json
 import logging
 import uuid
+from dataclasses import dataclass
+from typing import Any
 
 from fastapi import Request
 
 from app.services.queue import enqueue_incoming_message
 from app.db.session import SessionLocal
+from app.models import Tenant
+from app.models.tenant_whatsapp_provider import TenantWhatsAppProvider
 from app.models.whatsapp_campaign import WhatsAppCampaign, WhatsAppCampaignRecipient
 from sqlalchemy import select
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class InboundTenantResolution:
+    tenant_id: str | None
+    provider_id: str | None
+    phone_number_id: str | None
+    reason: str | None = None
+
+
+def _extract_first_meta_value(payload: dict[str, Any]) -> dict[str, Any]:
+    entry = (payload.get("entry") or [None])[0] or {}
+    change = (entry.get("changes") or [None])[0] or {}
+    value = change.get("value") or {}
+    return value if isinstance(value, dict) else {}
+
+
+def _extract_inbound_phone_number_id(payload: dict[str, Any]) -> str | None:
+    value = _extract_first_meta_value(payload)
+    metadata = value.get("metadata") if isinstance(value.get("metadata"), dict) else {}
+    candidates = (
+        metadata.get("phone_number_id"),
+        value.get("phone_number_id"),
+        payload.get("phone_number_id"),
+    )
+    for candidate in candidates:
+        normalized = str(candidate or "").strip()
+        if normalized:
+            return normalized
+    return None
+
+
+def _resolve_inbound_tenant(db, payload: dict[str, Any]) -> InboundTenantResolution:
+    phone_number_id = _extract_inbound_phone_number_id(payload)
+    if not phone_number_id:
+        return InboundTenantResolution(None, None, None, "missing_phone_number_id")
+
+    provider = (
+        db.execute(
+            select(TenantWhatsAppProvider)
+            .where(TenantWhatsAppProvider.phone_number_id == phone_number_id)
+            .order_by(
+                TenantWhatsAppProvider.is_active.desc(),
+                TenantWhatsAppProvider.updated_at.desc(),
+                TenantWhatsAppProvider.created_at.desc(),
+            )
+        )
+        .scalars()
+        .first()
+    )
+    if provider:
+        return InboundTenantResolution(str(provider.tenant_id), str(provider.id), phone_number_id)
+
+    tenant = db.execute(select(Tenant).where(Tenant.phone_number_id == phone_number_id)).scalars().first()
+    if tenant:
+        return InboundTenantResolution(str(tenant.id), None, phone_number_id)
+
+    return InboundTenantResolution(None, None, phone_number_id, "provider_not_found")
+
+
+def _redact_message_content(value: object) -> object:
+    if isinstance(value, dict):
+        redacted: dict[str, object] = {}
+        for key, item in value.items():
+            if key in {"text", "body", "caption"}:
+                redacted[key] = "<redacted>"
+            else:
+                redacted[key] = _redact_message_content(item)
+        return redacted
+    if isinstance(value, list):
+        return [_redact_message_content(item) for item in value]
+    return value
 
 
 def _json_log_payload(payload: object) -> str:
@@ -17,6 +93,10 @@ def _json_log_payload(payload: object) -> str:
         return json.dumps(payload, default=str, ensure_ascii=False, sort_keys=True)
     except Exception:
         return str(payload)
+
+
+def _safe_webhook_log_payload(payload: dict[str, Any]) -> str:
+    return _json_log_payload(_redact_message_content(payload))
 
 
 def _log_media_delivery_statuses(payload: dict) -> None:
@@ -124,7 +204,7 @@ async def enqueue_webhook_payload(request: Request) -> tuple[bool, str | None]:
         logger.warning("event=webhook_invalid_payload_type type=%s", type(payload).__name__)
         return False, None
 
-    logger.info("[META WEBHOOK RAW PAYLOAD] payload=%s", _json_log_payload(payload))
+    logger.info("[META WEBHOOK PAYLOAD] payload=%s", _safe_webhook_log_payload(payload))
 
     correlation_id = str(payload.get("message_id") or "").strip() or str(uuid.uuid4())
     payload["correlation_id"] = correlation_id
@@ -147,8 +227,33 @@ async def enqueue_webhook_payload(request: Request) -> tuple[bool, str | None]:
     _update_campaign_status_from_meta(payload)
 
     try:
+        with SessionLocal() as db:
+            resolution = _resolve_inbound_tenant(db, payload)
+        if not resolution.tenant_id:
+            logger.warning(
+                "event=inbound_tenant_resolution_failed correlation_id=%s phone_number_id=%s provider_id=%s reason=%s",
+                correlation_id,
+                resolution.phone_number_id or "n/a",
+                resolution.provider_id or "n/a",
+                resolution.reason or "unknown",
+            )
+            return False, correlation_id
+
+        payload["tenant_id"] = resolution.tenant_id
+        if resolution.provider_id:
+            payload["provider_id"] = resolution.provider_id
+        if resolution.phone_number_id:
+            payload["phone_number_id"] = resolution.phone_number_id
+
         job_id = enqueue_incoming_message(payload)
-        logger.info("event=webhook_enqueue_success correlation_id=%s tenant_id=%s phone=%s job_id=%s stage=webhook_enqueue", correlation_id, payload.get("tenant_id") or "n/a", payload.get("phone") or "n/a", job_id)
+        logger.info(
+            "event=inbound_enqueued correlation_id=%s tenant_id=%s provider_id=%s phone_number_id=%s job_id=%s stage=webhook_enqueue",
+            correlation_id,
+            resolution.tenant_id,
+            resolution.provider_id or "n/a",
+            resolution.phone_number_id or "n/a",
+            job_id,
+        )
         return True, correlation_id
     except Exception:
         logger.exception("event=webhook_enqueue_error correlation_id=%s tenant_id=%s phone=%s job_id=%s stage=webhook_enqueue", correlation_id, payload.get("tenant_id") or "n/a", payload.get("phone") or "n/a", "n/a")

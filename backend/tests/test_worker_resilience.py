@@ -152,3 +152,14 @@ def test_redis_realtime_broker_unsubscribe_cancels_sse_task(monkeypatch) -> None
         assert task.cancelled()
 
     asyncio.run(run_test())
+
+
+def test_missing_tenant_for_inbound_job_goes_to_dlq(monkeypatch) -> None:
+    calls = []
+    monkeypatch.setattr(job_queue_service, "record_dead_letter", lambda *args, **kwargs: calls.append((args, kwargs)) or "dlq-1")
+    result = job_queue_service.unwrap_job_envelope(
+        {"job_schema_version": 1, "job_type": "inbound_message", "tenant_id": None, "payload": {"phone": "551199"}},
+        expected_job_type="inbound_message",
+    )
+    assert result is None
+    assert calls and calls[0][0][3] == "missing_tenant_id"

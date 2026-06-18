@@ -209,6 +209,11 @@ def test_enqueue_webhook_payload_logs_complete_meta_payload(caplog, monkeypatch)
         ]
     }
     monkeypatch.setattr(webhook_ingress, "_update_campaign_status_from_meta", lambda payload: None)
+    monkeypatch.setattr(webhook_ingress, "_resolve_inbound_tenant", lambda db, payload: webhook_ingress.InboundTenantResolution("tenant-raw", "provider-raw", "123"))
+    class _Session:
+        def __enter__(self): return self
+        def __exit__(self, *args): return False
+    monkeypatch.setattr(webhook_ingress, "SessionLocal", lambda: _Session())
     monkeypatch.setattr(webhook_ingress, "enqueue_incoming_message", lambda payload: "job-raw")
 
     import asyncio
@@ -219,5 +224,75 @@ def test_enqueue_webhook_payload_logs_complete_meta_payload(caplog, monkeypatch)
     log_text = "\n".join(record.getMessage() for record in caplog.records)
     assert enqueued is True
     assert correlation_id == "wamid.raw"
-    assert "[META WEBHOOK RAW PAYLOAD]" in log_text
+    assert "[META WEBHOOK PAYLOAD]" in log_text
     assert '"id": "opcao_raw"' in log_text
+
+
+def test_enqueue_webhook_payload_resolves_known_provider_before_enqueue(caplog, monkeypatch):
+    from app.services import webhook_ingress
+
+    payload = {
+        "entry": [{"changes": [{"value": {"metadata": {"phone_number_id": "123"}, "messages": [{"id": "wamid.known", "from": "5511999990000", "type": "text", "text": {"body": "Oi"}}]}}]}]
+    }
+    enqueued_payloads = []
+    monkeypatch.setattr(webhook_ingress, "_update_campaign_status_from_meta", lambda payload: None)
+    monkeypatch.setattr(
+        webhook_ingress,
+        "_resolve_inbound_tenant",
+        lambda db, payload: webhook_ingress.InboundTenantResolution("tenant-1", "provider-1", "123"),
+    )
+    monkeypatch.setattr(webhook_ingress, "enqueue_incoming_message", lambda payload: enqueued_payloads.append(dict(payload)) or "job-1")
+
+    class _Session:
+        def __enter__(self): return self
+        def __exit__(self, *args): return False
+    monkeypatch.setattr(webhook_ingress, "SessionLocal", lambda: _Session())
+
+    import asyncio
+
+    with caplog.at_level("INFO"):
+        enqueued, correlation_id = asyncio.run(webhook_ingress.enqueue_webhook_payload(_DummyWebhookRequest(payload)))
+
+    assert enqueued is True
+    assert correlation_id == "wamid.known"
+    assert enqueued_payloads[0]["tenant_id"] == "tenant-1"
+    assert enqueued_payloads[0]["provider_id"] == "provider-1"
+    assert enqueued_payloads[0]["phone_number_id"] == "123"
+    assert enqueued_payloads[0]["correlation_id"] == "wamid.known"
+    log_text = "\n".join(record.getMessage() for record in caplog.records)
+    assert "event=inbound_enqueued" in log_text
+    assert "tenant_id=tenant-1" in log_text
+
+
+def test_enqueue_webhook_payload_unknown_provider_does_not_enqueue(caplog, monkeypatch):
+    from app.services import webhook_ingress
+
+    payload = {
+        "entry": [{"changes": [{"value": {"metadata": {"phone_number_id": "404"}, "messages": [{"id": "wamid.unknown", "from": "5511999990000", "type": "text", "text": {"body": "Oi"}}]}}]}]
+    }
+    calls = []
+    monkeypatch.setattr(webhook_ingress, "_update_campaign_status_from_meta", lambda payload: None)
+    monkeypatch.setattr(
+        webhook_ingress,
+        "_resolve_inbound_tenant",
+        lambda db, payload: webhook_ingress.InboundTenantResolution(None, None, "404", "provider_not_found"),
+    )
+    monkeypatch.setattr(webhook_ingress, "enqueue_incoming_message", lambda payload: calls.append(payload) or "job-should-not-run")
+
+    class _Session:
+        def __enter__(self): return self
+        def __exit__(self, *args): return False
+    monkeypatch.setattr(webhook_ingress, "SessionLocal", lambda: _Session())
+
+    import asyncio
+
+    with caplog.at_level("WARNING"):
+        enqueued, correlation_id = asyncio.run(webhook_ingress.enqueue_webhook_payload(_DummyWebhookRequest(payload)))
+
+    assert enqueued is False
+    assert correlation_id == "wamid.unknown"
+    assert calls == []
+    log_text = "\n".join(record.getMessage() for record in caplog.records)
+    assert "event=inbound_tenant_resolution_failed" in log_text
+    assert "phone_number_id=404" in log_text
+    assert "reason=provider_not_found" in log_text
