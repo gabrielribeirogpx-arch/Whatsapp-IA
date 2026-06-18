@@ -12,6 +12,7 @@ from typing import Any
 from sqlalchemy import select
 
 from app.db.session import SessionLocal
+from app.services.job_queue_service import unwrap_job_envelope
 from app.models import Message, TenantWhatsAppProvider
 from app.models.flow_session import FINAL_SESSION_STATUSES, FlowSession, set_current_node_write_reason
 from app.services.contact_sync_service import ensure_conversation_contact_link, upsert_contact_for_phone
@@ -259,6 +260,10 @@ def _pick_message(payload: dict[str, Any]) -> dict[str, Any] | None:
 
 
 def process_incoming_message(payload: dict[str, Any]) -> None:
+    unwrapped = unwrap_job_envelope(payload, expected_job_type="inbound_message")
+    if unwrapped is None:
+        return
+    payload = unwrapped
     raw_correlation = payload.get("correlation_id") or payload.get("message_id")
     correlation_id = str(raw_correlation or "n/a")
     logger.info(
