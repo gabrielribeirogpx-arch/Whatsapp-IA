@@ -7,6 +7,7 @@ from typing import Any
 from app.flow_v2.actions import SendMessageAction
 from app.flow_v2.node_executors import NodeExecutorRegistry
 from app.flow_v2.transition_resolver import TransitionResolver
+from app.services.execution_budget_service import ExecutionBudget
 
 ALLOWED_NODE_TOOL_TYPES = {"ai_classification", "ai_extraction", "ai_summary", "ai_response", "action", "condition", "message"}
 SAFE_TOOL_ID_RE = re.compile(r"^[A-Za-z0-9_]{1,64}$")
@@ -27,12 +28,14 @@ def _safe_preview(value: Any, limit: int = 1200) -> Any:
     return value
 
 
-def execute_node_tool(tenant_id, flow, session, current_agent_node_id: str, tool_config: dict[str, Any], input_text: str | None, runtime_context, db) -> dict[str, Any]:
+def execute_node_tool(tenant_id, flow, session, current_agent_node_id: str, tool_config: dict[str, Any], input_text: str | None, runtime_context, db, budget: ExecutionBudget | None = None) -> dict[str, Any]:
     """Execute an explicitly allowed flow node as a controlled AI-agent tool.
 
     The called node is executed against the same session context but its routing result is
     intentionally ignored: no edges are advanced and the main session pointer is not changed here.
     """
+    if budget is not None:
+        budget.checkpoint("node_tool_start")
     tool_id = str(tool_config.get("tool_id") or "").strip()
     node_id = str(tool_config.get("node_id") or "").strip()
     base = {"tool_id": tool_id, "node_id": node_id, "node_type": None, "status": "error", "output": {}, "message_actions": [], "variables_written": {}, "error": None}
@@ -58,7 +61,7 @@ def execute_node_tool(tenant_id, flow, session, current_agent_node_id: str, tool
         try:
             runtime_input.message_text = str(input_text)
             runtime_input.text = str(input_text)
-            runtime_input.metadata = {**(getattr(runtime_input, "metadata", {}) or {}), "last_message": str(input_text), "tool_mode": True}
+            runtime_input.metadata = {**(getattr(runtime_input, "metadata", {}) or {}), "last_message": str(input_text), "tool_mode": True, **(budget.to_metadata() if budget else {})}
         except Exception:
             pass
 

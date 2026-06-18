@@ -48,6 +48,7 @@ from app.services.supervisor_service import FALLBACK_MESSAGE as SUPERVISOR_FALLB
 from app.services.context_builder_service import build_context, context_builder_enabled
 from app.services.long_term_memory_service import store_fact
 from app.services.ai_execution_service import get_flow_id, record_ai_execution, redact_text, resolve_ai_config, score_confidence
+from app.services.execution_budget_service import ExecutionBudgetExceeded, get_or_create_budget, persist_budget
 from app.flow_v2.snapshot import FlowV2Snapshot, build_transitions_from_edges
 from app.flow_v2.transition_resolver import TransitionResolver
 from app.flow_v2.template_renderer import FlowRenderContext, render_template
@@ -1542,6 +1543,7 @@ class AiRagNodeExecutor(BaseNodeExecutor):
 
     def execute(self, db, *, snapshot, session, node, runtime_input) -> NodeExecutionResult:
         node_id = str(node["id"])
+        budget = get_or_create_budget(runtime_input.metadata, session.tenant_id)
         data = self._node_data(node)
         ai_started_at = datetime.now(UTC)
         ai_config = resolve_ai_config(db, session.tenant_id, {"chat_model": data.get("chat_model_override") or data.get("chat_model") or data.get("model_override") or data.get("model")})
@@ -1844,6 +1846,7 @@ class AiAgentNodeExecutor(AiResponseNodeExecutor):
 
     def execute(self, db, *, snapshot, session, node, runtime_input) -> NodeExecutionResult:
         node_id = str(node["id"])
+        budget = get_or_create_budget(runtime_input.metadata, session.tenant_id)
         data = self._node_data(node)
         ai_started_at = datetime.now(UTC)
         ai_config = resolve_ai_config(db, session.tenant_id, {"chat_model": data.get("chat_model_override") or data.get("chat_model") or data.get("model_override") or data.get("model")})
@@ -1923,14 +1926,15 @@ class AiAgentNodeExecutor(AiResponseNodeExecutor):
         }
         def _execute_agent_node_tool(tool_config, tool_input, reason):
             from app.services.ai_agent_node_tool_service import execute_node_tool
-            return execute_node_tool(session.tenant_id, snapshot, session, node_id, tool_config, tool_input, runtime_input, db)
+            return execute_node_tool(session.tenant_id, snapshot, session, node_id, tool_config, tool_input, runtime_input, db, budget=budget)
         def _execute_agent_subflow_tool(tool_config, tool_input, reason):
             from app.services.ai_agent_subflow_tool_service import execute_subflow_tool
-            return execute_subflow_tool(session.tenant_id, flow_id, session.id, node_id, tool_config, tool_input, runtime_input, db)
+            return execute_subflow_tool(session.tenant_id, flow_id, session.id, node_id, tool_config, tool_input, runtime_input, db, budget=budget)
         def _execute_agent_mcp_tool(tool_config, tool_input):
             from app.services.mcp_service import call_mcp_tool
-            return call_mcp_tool(db, session.tenant_id, str(tool_config.get("tool_id")), tool_input, timeout_seconds=15)
-        result = run_agent_for_tenant(db, session.tenant_id, str(input_text), str(instruction), [str(t) for t in allowed_tools], {"webhooks": data.get("webhooks") or [], "node_tools": node_tools, "subflow_tools": subflow_tools, "mcp_tools": mcp_tools, "memory_context": {"contact_id": runtime_input.contact_id, "conversation_id": runtime_input.conversation_id, "session_id": session.id}}, memory_context=conversation_history, options=options, node_tool_executor=_execute_agent_node_tool if allow_node_tools else None, subflow_tool_executor=_execute_agent_subflow_tool if allow_subflow_tools else None, mcp_tool_executor=_execute_agent_mcp_tool if allow_mcp_tools else None)
+            return call_mcp_tool(db, session.tenant_id, str(tool_config.get("tool_id")), tool_input, timeout_seconds=15, budget=budget)
+        result = run_agent_for_tenant(db, session.tenant_id, str(input_text), str(instruction), [str(t) for t in allowed_tools], {"webhooks": data.get("webhooks") or [], "node_tools": node_tools, "subflow_tools": subflow_tools, "mcp_tools": mcp_tools, "memory_context": {"contact_id": runtime_input.contact_id, "conversation_id": runtime_input.conversation_id, "session_id": session.id}}, memory_context=conversation_history, options=options, node_tool_executor=_execute_agent_node_tool if allow_node_tools else None, subflow_tool_executor=_execute_agent_subflow_tool if allow_subflow_tools else None, mcp_tool_executor=_execute_agent_mcp_tool if allow_mcp_tools else None, budget=budget)
+        persist_budget(runtime_input.metadata, budget)
         actions: list[RuntimeAction] = []
         context = dict(session.context or {}) if isinstance(getattr(session, "context", None), dict) else {}
         for agent_action in result.actions:
@@ -1941,7 +1945,7 @@ class AiAgentNodeExecutor(AiResponseNodeExecutor):
         session.context = context
         if hasattr(db, "add"):
             db.add(session)
-        metadata = {"tools_allowed": [str(t) for t in allowed_tools], "node_tools_allowed": [{"tool_id": str(t.get("tool_id")), "node_id": str(t.get("node_id")), "label": str(t.get("label", ""))[:80]} for t in node_tools if isinstance(t, dict)], "tools_used": result.tools_used, "mcp_tools_allowed": mcp_tools, "mcp_tools_used": result.metadata.get("mcp_tools_used", []), "mcp_call_count": result.metadata.get("mcp_call_count", 0), "mcp_latency_ms": result.metadata.get("mcp_latency_ms", 0), "mcp_status": result.metadata.get("mcp_status", "not_used"), "mcp_error_sanitized": result.metadata.get("mcp_error_sanitized"), "node_tools_used": result.metadata.get("node_tools_used", []), "subflow_tools_allowed": [{"tool_id": str(t.get("tool_id")), "flow_id": str(t.get("flow_id")), "label": str(t.get("label", ""))[:80]} for t in subflow_tools if isinstance(t, dict)], "subflow_tools_used": result.metadata.get("subflow_tools_used", []), "subflow_calls_count": result.metadata.get("subflow_calls_count", 0), "subflow_results_summary": result.metadata.get("subflow_results_summary", []), "subflow_errors": result.metadata.get("subflow_errors", []), "timeout_count": result.metadata.get("timeout_count", 0), "parent_session_id": str(session.id), "subflow_session_ids": [], "node_tool_calls_count": result.metadata.get("node_tool_calls_count", 0), "node_tool_results_summary": result.metadata.get("node_tools_used", []), "blocked_tool_calls": result.metadata.get("blocked_tool_calls", []), "max_steps_reached": result.metadata.get("max_steps_reached", False), "steps_count": result.steps_count, "final_tool": result.final_tool, "status": result.status, "webhook_count": len(data.get("webhooks") or []), "latency_ms": result.metadata.get("latency_ms"), **context_builder_meta, "auto_memory_saved_count": result.metadata.get("memory_saved_count", 0)}
+        metadata = {"tools_allowed": [str(t) for t in allowed_tools], "node_tools_allowed": [{"tool_id": str(t.get("tool_id")), "node_id": str(t.get("node_id")), "label": str(t.get("label", ""))[:80]} for t in node_tools if isinstance(t, dict)], "tools_used": result.tools_used, "mcp_tools_allowed": mcp_tools, "mcp_tools_used": result.metadata.get("mcp_tools_used", []), "mcp_call_count": result.metadata.get("mcp_call_count", 0), "mcp_latency_ms": result.metadata.get("mcp_latency_ms", 0), "mcp_status": result.metadata.get("mcp_status", "not_used"), "mcp_error_sanitized": result.metadata.get("mcp_error_sanitized"), "node_tools_used": result.metadata.get("node_tools_used", []), "subflow_tools_allowed": [{"tool_id": str(t.get("tool_id")), "flow_id": str(t.get("flow_id")), "label": str(t.get("label", ""))[:80]} for t in subflow_tools if isinstance(t, dict)], "subflow_tools_used": result.metadata.get("subflow_tools_used", []), "subflow_calls_count": result.metadata.get("subflow_calls_count", 0), "subflow_results_summary": result.metadata.get("subflow_results_summary", []), "subflow_errors": result.metadata.get("subflow_errors", []), "timeout_count": result.metadata.get("timeout_count", 0), "parent_session_id": str(session.id), "subflow_session_ids": [], "node_tool_calls_count": result.metadata.get("node_tool_calls_count", 0), "node_tool_results_summary": result.metadata.get("node_tools_used", []), "blocked_tool_calls": result.metadata.get("blocked_tool_calls", []), "max_steps_reached": result.metadata.get("max_steps_reached", False), "steps_count": result.steps_count, "final_tool": result.final_tool, "status": result.status, "webhook_count": len(data.get("webhooks") or []), "latency_ms": result.metadata.get("latency_ms"), **context_builder_meta, "auto_memory_saved_count": result.metadata.get("memory_saved_count", 0), **budget.safe_metadata()}
         record_ai_execution(db, tenant_id=session.tenant_id, conversation_id=runtime_input.conversation_id, session_id=session.id, flow_id=flow_id, flow_version_id=session.flow_version_id, node_id=node_id, node_type="ai_agent", provider=ai_config.get("provider"), model=ai_config.get("model"), started_at=ai_started_at, status=result.status, input_text=input_text, output_text=result.message, fallback_used=result.fallback_used, metadata=metadata)
         self.event_store.append(db, session=session, event_type=FlowV2EventType.OUTPUT_EMITTED, node_id=node_id, payload={"analytics_event": "ai_agent_completed", **metadata})
         if memory_enabled and flow_id is not None and result.message:
@@ -1959,6 +1963,7 @@ class AiSupervisorNodeExecutor(AiResponseNodeExecutor):
 
     def execute(self, db, *, snapshot, session, node, runtime_input) -> NodeExecutionResult:
         node_id = str(node["id"])
+        budget = get_or_create_budget(runtime_input.metadata, session.tenant_id)
         data = self._node_data(node)
         stack = list(runtime_input.metadata.get("supervisor_stack") or [])
         if node_id in stack or len(stack) >= MAX_SUPERVISOR_DEPTH:
@@ -1973,10 +1978,20 @@ class AiSupervisorNodeExecutor(AiResponseNodeExecutor):
         ctx = get_supervisor_context(db, session.tenant_id, contact_id=runtime_input.contact_id, conversation_id=runtime_input.conversation_id, session_id=session.id, current_query=str(input_text), memory_max_messages=self._coerce_int_config(data.get("memory_max_messages", data.get("memoryMaxMessages")), default=10, field_name="memory_max_messages", node_id=node_id), memory_max_chars=self._coerce_int_config(data.get("memory_max_chars", data.get("memoryMaxChars")), default=4000, field_name="memory_max_chars", node_id=node_id))
         ai_started_at = datetime.now(UTC)
         ai_config = resolve_ai_config(db, session.tenant_id, {"chat_model": data.get("chat_model_override") or data.get("chat_model") or data.get("model_override") or data.get("model")})
+        try:
+            budget.enter_depth()
+            budget.consume_llm_call(prompt_tokens_estimate=(len(str(input_text)) + len(str(ctx.get("combined_prompt_section") or ""))) // 4, completion_tokens_estimate=180)
+        except ExecutionBudgetExceeded:
+            persist_budget(runtime_input.metadata, budget)
+            metadata = {"selected_agent": None, "fallback_used": True, "budget_exceeded": True, **budget.safe_metadata()}
+            action = SendMessageAction(tenant_id=session.tenant_id, session_id=session.id, external_user_id=runtime_input.external_user_id, conversation_id=runtime_input.conversation_id, contact_id=runtime_input.contact_id, text=SUPERVISOR_FALLBACK_MESSAGE, metadata={**runtime_input.metadata, **metadata, "node_id": node_id, "intent": "ai_supervisor"})
+            return NodeExecutionResult(actions=(action,), next_node_id=None, status="complete")
         decision = decide_supervisor_agent(db, session.tenant_id, message=str(input_text), supervisor_prompt=str(data.get("supervisor_prompt") or data.get("prompt") or ""), agents=agents, context_section=str(ctx.get("combined_prompt_section") or ""), fallback_agent_id=fallback_agent_id, options={"chat_model": data.get("chat_model_override") or data.get("chat_model") or data.get("model_override") or data.get("model"), "temperature": 0, "max_tokens": 180})
         selected_agent = decision.selected_agent
         fallback_used = decision.fallback_used
-        metadata = {"selected_agent": selected_agent, "selection_latency": decision.latency_ms, "selection_reason": decision.reason[:240], "fallback_used": fallback_used, "supervisor_execution": True, "available_agents_count": len(agents), "context_builder_enabled": True, "long_term_memory_count": ctx.get("metadata", {}).get("long_memory_count", 0), "memory_latency_ms": ctx.get("metadata", {}).get("memory_latency_ms", 0)}
+        budget.exit_depth()
+        persist_budget(runtime_input.metadata, budget)
+        metadata = {"selected_agent": selected_agent, "selection_latency": decision.latency_ms, "selection_reason": decision.reason[:240], "fallback_used": fallback_used, "supervisor_execution": True, "available_agents_count": len(agents), "context_builder_enabled": True, "long_term_memory_count": ctx.get("metadata", {}).get("long_memory_count", 0), "memory_latency_ms": ctx.get("metadata", {}).get("memory_latency_ms", 0), **budget.safe_metadata()}
         if not selected_agent:
             record_ai_execution(db, tenant_id=session.tenant_id, conversation_id=runtime_input.conversation_id, session_id=session.id, flow_id=get_flow_id(db, snapshot, session), flow_version_id=session.flow_version_id, node_id=node_id, node_type="ai_supervisor", provider=ai_config.get("provider"), model=ai_config.get("model"), started_at=ai_started_at, status="fallback", input_text=input_text, output_text=SUPERVISOR_FALLBACK_MESSAGE, fallback_used=True, metadata=metadata)
             action = SendMessageAction(tenant_id=session.tenant_id, session_id=session.id, external_user_id=runtime_input.external_user_id, conversation_id=runtime_input.conversation_id, contact_id=runtime_input.contact_id, text=SUPERVISOR_FALLBACK_MESSAGE, metadata={**runtime_input.metadata, **metadata, "node_id": node_id, "intent": "ai_supervisor"})

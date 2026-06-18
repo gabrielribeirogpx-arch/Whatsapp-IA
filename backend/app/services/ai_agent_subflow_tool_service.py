@@ -15,6 +15,7 @@ from app.flow_v2.models import FlowV2Session
 from app.flow_v2.node_executors import NodeExecutorRegistry
 from app.flow_v2.snapshot import FlowV2Snapshot, FlowV2SnapshotRepository
 from app.flow_v2.transition_resolver import TransitionResolver
+from app.services.execution_budget_service import ExecutionBudget, ExecutionBudgetExceeded
 from app.models.flow import Flow, FlowVersion
 
 logger = logging.getLogger(__name__)
@@ -81,8 +82,10 @@ def _has_recursive_agent(snapshot: FlowV2Snapshot, parent_flow_id: str) -> bool:
     return False
 
 
-def execute_subflow_tool(tenant_id, parent_flow_id, parent_session_id, parent_agent_node_id, tool_config: dict[str, Any], input_text: str | None, runtime_context, db) -> dict[str, Any]:
+def execute_subflow_tool(tenant_id, parent_flow_id, parent_session_id, parent_agent_node_id, tool_config: dict[str, Any], input_text: str | None, runtime_context, db, budget: ExecutionBudget | None = None) -> dict[str, Any]:
     started = time.monotonic()
+    if budget is not None:
+        budget.checkpoint("subflow_start")
     tool_id = str(tool_config.get("tool_id") or "").strip()
     base = {"tool_id": tool_id, "flow_id": str(tool_config.get("flow_id") or ""), "flow_version_id": str(tool_config.get("flow_version_id") or ""), "status": "error", "output": {}, "messages": [], "variables_written": {}, "error": None, "duration_ms": 0}
     if not SAFE_TOOL_ID_RE.match(tool_id):
@@ -103,13 +106,19 @@ def execute_subflow_tool(tenant_id, parent_flow_id, parent_session_id, parent_ag
     child = FlowV2Session(tenant_id=tenant_id, flow_version_id=version.id, contact_id=getattr(runtime_context, "contact_id", None), conversation_id=getattr(runtime_context, "conversation_id", None), external_user_id=f"subflow:{parent_session_id}:{tool_id}:{uuid.uuid4()}", status="running", current_node_id=snapshot.start_node_id, context=context)
     child.id = uuid.uuid4()
     child.metadata = {"execution_mode": "tool_subflow", "parent_session_id": str(parent_session_id), "started_by_agent_node_id": str(parent_agent_node_id)}
-    runtime_input = RuntimeInput(tenant_id=tenant_id, flow_version_id=version.id, external_user_id=getattr(runtime_context, "external_user_id", "subflow"), message_text=str(input_text or ""), contact_id=getattr(runtime_context, "contact_id", None), conversation_id=getattr(runtime_context, "conversation_id", None), metadata={"execution_mode": "tool_subflow", "parent_session_id": str(parent_session_id), "last_message": str(input_text or "")})
+    runtime_input = RuntimeInput(tenant_id=tenant_id, flow_version_id=version.id, external_user_id=getattr(runtime_context, "external_user_id", "subflow"), message_text=str(input_text or ""), contact_id=getattr(runtime_context, "contact_id", None), conversation_id=getattr(runtime_context, "conversation_id", None), metadata={"execution_mode": "tool_subflow", "parent_session_id": str(parent_session_id), "last_message": str(input_text or ""), **(budget.to_metadata() if budget else {})})
     registry = NodeExecutorRegistry(event_store=_ToolEventStore(), transition_resolver=TransitionResolver(_ToolEventStore()))
     messages: list[str] = []
     steps = 0
     status = "success"
     error = None
     while child.current_node_id and steps < MAX_STEPS:
+        try:
+            if budget is not None:
+                budget.checkpoint("subflow_step")
+        except ExecutionBudgetExceeded:
+            status, error = "budget_exceeded", "budget_exceeded"
+            break
         if time.monotonic() - started > timeout_seconds:
             status, error = "timeout", "timeout"
             break

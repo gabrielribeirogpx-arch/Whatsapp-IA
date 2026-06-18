@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 
 from app.models.tenant_mcp import TenantMCPServer, TenantMCPTool
 from app.utils.encryption import decrypt_secret, encrypt_secret
+from app.services.execution_budget_service import ExecutionBudget, ExecutionBudgetExceeded
 
 logger = logging.getLogger(__name__)
 ALLOWED_TRANSPORTS = {"http", "sse", "stdio_future"}
@@ -167,8 +168,13 @@ def discover_mcp_tools(db: Session, tenant_id: uuid.UUID, server_id: uuid.UUID) 
     return saved
 
 
-def call_mcp_tool(db: Session, tenant_id: uuid.UUID, tool_id: uuid.UUID | str, arguments: dict[str, Any] | None, timeout_seconds: int = MAX_TIMEOUT_SECONDS) -> dict[str, Any]:
+def call_mcp_tool(db: Session, tenant_id: uuid.UUID, tool_id: uuid.UUID | str, arguments: dict[str, Any] | None, timeout_seconds: int = MAX_TIMEOUT_SECONDS, budget: ExecutionBudget | None = None) -> dict[str, Any]:
     started = time.monotonic()
+    if budget is not None:
+        try:
+            budget.consume_mcp_call()
+        except ExecutionBudgetExceeded:
+            return {"ok": False, "status": "budget_exceeded", "tool_id": str(tool_id), "latency_ms": 0, "error": "budget_exceeded", **budget.safe_metadata()}
     parsed_tool_id = uuid.UUID(str(tool_id))
     tool = _tool(db, tenant_id, parsed_tool_id)
     if not tool.is_enabled:
@@ -182,6 +188,11 @@ def call_mcp_tool(db: Session, tenant_id: uuid.UUID, tool_id: uuid.UUID | str, a
     except ValidationError as exc:
         raise MCPError("Argumentos inválidos para schema da ferramenta MCP.") from exc
     timeout = min(max(int(timeout_seconds or MAX_TIMEOUT_SECONDS), 1), MAX_TIMEOUT_SECONDS)
+    if budget is not None:
+        remaining = budget.remaining_ms()
+        if remaining <= 250:
+            return {"ok": False, "status": "budget_exceeded", "tool_id": str(tool.id), "tool_name": tool.tool_name, "latency_ms": int((time.monotonic() - started) * 1000), "error": "deadline_exceeded", **budget.safe_metadata()}
+        timeout = max(1, min(timeout, remaining // 1000))
     payload = {"jsonrpc": "2.0", "id": str(uuid.uuid4()), "method": "tools/call", "params": {"name": tool.tool_name, "arguments": args}}
     try:
         response = requests.post(str(server.server_url), headers=_headers(server), json=payload, timeout=timeout)
