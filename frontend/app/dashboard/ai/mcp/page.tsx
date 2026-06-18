@@ -62,7 +62,7 @@ export default function MCPDashboardPage() {
   }
 
   return (
-    <main className="space-y-6 p-6">
+    <section className="w-full min-w-0 space-y-6 p-6">
       <div>
         <p className="text-sm font-semibold uppercase tracking-wide text-blue-600">Dashboard → IA → MCP</p>
         <h1 className="text-2xl font-bold text-slate-900">MCP / Integrações</h1>
@@ -117,6 +117,6 @@ export default function MCPDashboardPage() {
           {tools.length === 0 && <p className="text-sm text-slate-500">Descubra ferramentas em um servidor para exibí-las aqui.</p>}
         </div>
       </section>
-    </main>
+    </section>
   );
 }
