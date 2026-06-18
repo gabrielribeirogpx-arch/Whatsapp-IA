@@ -13,7 +13,9 @@ except ImportError:
     Retry = None
 
 from app.db.session import SessionLocal
+from app.models.conversation import Conversation
 from app.services.flow_runtime_service import FlowRuntimeService
+from app.services.job_queue_service import make_job_envelope, on_job_failure, unwrap_job_envelope
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +23,15 @@ REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 FLOW_RUNTIME_QUEUE_NAME = os.getenv("FLOW_RUNTIME_QUEUE", "default")
 
 
-def run_flow_job(flow_id: str, conversation_id: str, message: str, message_id: str | None = None) -> dict[str, Any]:
+def run_flow_job(flow_id: str | dict[str, Any], conversation_id: str = "", message: str = "", message_id: str | None = None) -> dict[str, Any]:
+    if isinstance(flow_id, dict):
+        payload = unwrap_job_envelope(flow_id, expected_job_type="flow_execution")
+        if payload is None:
+            return {"status": "skipped"}
+        flow_id = str(payload.get("flow_id") or "")
+        conversation_id = str(payload.get("conversation_id") or "")
+        message = str(payload.get("message") or "")
+        message_id = str(payload.get("message_id") or "")
     job = get_current_job()
     logger.info(
         "[FLOW JOB START] job_id=%s flow_id=%s conversation_id=%s",
@@ -37,7 +47,6 @@ def run_flow_job(flow_id: str, conversation_id: str, message: str, message_id: s
                 conversation_id=str(conversation_id),
                 input_text=str(message or ""),
             )
-            from app.models import Conversation
             from app.services.whatsapp_service import (
                 send_whatsapp_document_cloud,
                 send_whatsapp_image_cloud,
@@ -83,19 +92,28 @@ def run_flow_job(flow_id: str, conversation_id: str, message: str, message_id: s
         raise
 
 
+def _tenant_id_for_conversation(conversation_id: str) -> str | None:
+    try:
+        with SessionLocal() as db:
+            conversation = db.query(Conversation).filter(Conversation.id == conversation_id).first()
+            return str(conversation.tenant_id) if conversation else None
+    except Exception:
+        logger.warning("event=flow_execution_tenant_lookup_failed conversation_id=%s", conversation_id, exc_info=True)
+        return None
+
+
 def enqueue_run_flow_job(flow_id: str, conversation_id: str, message: str, message_id: str | None = None) -> str:
     redis_conn = Redis.from_url(REDIS_URL, decode_responses=True)
     queue = Queue(name=FLOW_RUNTIME_QUEUE_NAME, connection=redis_conn)
 
     job = queue.enqueue(
         run_flow_job,
-        str(flow_id),
-        str(conversation_id),
-        str(message or ""),
-        str(message_id or ""),
+        make_job_envelope("flow_execution", {"flow_id": str(flow_id), "conversation_id": str(conversation_id), "message": str(message or ""), "message_id": str(message_id or ""), "tenant_id": _tenant_id_for_conversation(str(conversation_id))}, idempotency_key=str(message_id or conversation_id)),
         retry=Retry(max=3, interval=[5, 15, 45]) if Retry else None,
+        job_timeout=120,
         failure_ttl=86400,
         result_ttl=3600,
+        on_failure=on_job_failure,
     )
     return str(job.id)
 

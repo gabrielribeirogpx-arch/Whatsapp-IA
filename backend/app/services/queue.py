@@ -20,6 +20,8 @@ from app.db.session import SessionLocal
 from app.models import FailedMessage, Tenant
 from app.services.cache_service import check_rate_limit
 from app.services.message_origin_trace import log_message_origin_trace
+from app.services.job_queue_service import enqueue_profiled_job, make_job_envelope, on_job_failure
+from app.services.dead_letter_service import record_dead_letter
 
 logger = logging.getLogger(__name__)
 
@@ -82,9 +84,11 @@ def enqueue_incoming_message(payload: dict[str, Any]) -> str:
         logger.warning("event=rate_limit_exceeded tenant_id=%s stage=incoming_enqueue", tenant_for_limit)
         return "rate_limited"
 
-    job = get_queue(INCOMING_QUEUE_NAME).enqueue(
+    job = enqueue_profiled_job(
+        "inbound_message",
         "app.workers.message_worker.process_incoming_message",
-        payload,
+        payload=payload,
+        on_failure=on_job_failure,
     )
     logger.info(
         "event=incoming_message_enqueued correlation_id=%s tenant_id=%s phone=%s job_id=%s stage=incoming_enqueue",
@@ -131,6 +135,9 @@ def _on_send_failure(job, connection, type_, value, traceback) -> None:  # noqa:
         return
 
     message_data = job.kwargs.get("message_data", {}) if hasattr(job, "kwargs") else {}
+    envelope = message_data if isinstance(message_data, dict) and "job_schema_version" in message_data else {}
+    if envelope:
+        message_data = envelope.get("payload", {}) if isinstance(envelope.get("payload"), dict) else {}
     tenant_id = str(message_data.get("tenant_id") or "")
     phone = str(message_data.get("phone") or "")
     text = str(message_data.get("text") or "")
@@ -140,6 +147,14 @@ def _on_send_failure(job, connection, type_, value, traceback) -> None:  # noqa:
     interactive_type = str(message_data.get("interactive_type") or ("button" if isinstance(buttons, list) and buttons else "")).strip().lower() or None
     error = f"{type_.__name__}: {value}" if type_ else str(value)
 
+    record_dead_letter(
+        "whatsapp_send",
+        tenant_id=str(tenant_id),
+        queue_name=getattr(job, "origin", None),
+        reason=error,
+        payload_summary={"tenant_id": tenant_id, "phone": phone, "has_text": bool(text), "has_buttons": isinstance(buttons, list) and bool(buttons)},
+        metadata={"job_id": getattr(job, "id", None)},
+    )
     _record_failed_message(
         tenant_id=str(tenant_id),
         phone=str(phone),
@@ -307,7 +322,7 @@ def enqueue_send_message(message_data: dict[str, Any]) -> str | None:
 
     job = queue.enqueue(
         "app.workers.send_worker.send_whatsapp_message",
-        message_data=payload,
+        message_data=make_job_envelope("whatsapp_send", payload, tenant_id=payload.get("tenant_id"), idempotency_key=str(payload.get("idempotency_key") or payload.get("message_id") or payload.get("correlation_id") or uuid.uuid4()), trace_id=payload.get("trace_id") or payload.get("correlation_id")),
         retry=Retry(max=3, interval=[5, 15, 45]) if Retry else None,
         job_timeout=90,
         failure_ttl=86400,

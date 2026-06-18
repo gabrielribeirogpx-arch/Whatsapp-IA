@@ -24,6 +24,8 @@ from app.db.session import SessionLocal, dispose_engine_connections_after_fork
 from app.flow_v2.delay_worker import FlowV2DelayWorker
 from app.services.delay_queue_service import DELAY_ZSET_KEY
 from app.services.flow_engine_service import process_flow_engine
+from app.services.dead_letter_service import record_dead_letter
+from app.services.job_queue_service import build_version
 
 logging.basicConfig(
     level=os.getenv("LOG_LEVEL", "INFO"),
@@ -61,6 +63,7 @@ class DelayWorker:
         self.redis: Redis = Redis.from_url(redis_url, decode_responses=True)
         self.flow_v2_delay_worker = flow_v2_delay_worker or FlowV2DelayWorker()
         self._stop_event = asyncio.Event()
+        self.graceful_shutdown_seconds = int(os.getenv("WORKER_GRACEFUL_SHUTDOWN_SECONDS", "30"))
 
     @staticmethod
     def reset_db_connections() -> None:
@@ -73,7 +76,8 @@ class DelayWorker:
     async def start(self) -> None:
         self._register_signal_handlers()
         logger.info(
-            "Delay worker iniciado. redis=%s zset=%s v2_table=%s",
+            "event=delay_worker_started build_version=%s redis=%s zset=%s v2_table=%s",
+            build_version(),
             self.redis_url,
             DELAY_ZSET_KEY,
             "flow_v2_scheduled_jobs",
@@ -88,9 +92,10 @@ class DelayWorker:
                     pass
         finally:
             await self.redis.aclose()
-            logger.info("Delay worker finalizado")
+            logger.info("event=worker_drain_finished worker=delay")
 
     def stop(self) -> None:
+        logger.info("event=worker_drain_started worker=delay deadline_seconds=%s", self.graceful_shutdown_seconds)
         self._stop_event.set()
 
     def _register_signal_handlers(self) -> None:
@@ -122,7 +127,8 @@ class DelayWorker:
             try:
                 job = DelayJob.from_raw(raw_job)
             except Exception:
-                logger.exception("Payload inválido removido da fila: %s", raw_job)
+                record_dead_letter("delay", None, None, "invalid_delay_payload", {"raw_length": len(str(raw_job))}, {})
+                logger.exception("Payload inválido removido da fila")
                 continue
 
             try:
@@ -134,6 +140,7 @@ class DelayWorker:
                     job.next_node_id,
                 )
             except Exception:
+                record_dead_letter("delay", job.tenant_id, None, "delay_job_failed", {"phone": job.phone, "next_node_id": str(job.next_node_id)}, {})
                 logger.exception(
                     "Falha ao executar job, reinserindo na fila tenant_id=%s phone=%s next_node_id=%s",
                     job.tenant_id,
@@ -184,7 +191,7 @@ async def run_startup_checks() -> str:
     verify_alembic_at_head()
     redis_url = str(os.getenv("REDIS_URL"))
     await verify_redis(redis_url)
-    logger.info("event=delay_worker_startup_checks_passed")
+    logger.info("event=delay_worker_startup_checks_passed build_version=%s", build_version())
     return redis_url
 
 

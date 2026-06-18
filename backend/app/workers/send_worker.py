@@ -37,6 +37,7 @@ from app.services.whatsapp_message_service import (
 )
 from app.services.whatsapp_credentials_service import WhatsAppCredentialsNotConfiguredError, get_tenant_whatsapp_credentials
 from app.integrations.meta.meta_cloud_client import MetaApiError
+from app.services.job_queue_service import unwrap_job_envelope
 
 logger = logging.getLogger(__name__)
 
@@ -562,6 +563,10 @@ def send_whatsapp_message(*, message_data: dict[str, Any]) -> None:
     print("[SEND_WORKER FILE]", __file__)
     print("[SEND_WORKER COMMIT]", commit)
     print("[SEND_WORKER FUNCTION EXECUTED]")
+    unwrapped = unwrap_job_envelope(message_data, expected_job_type="whatsapp_send")
+    if unwrapped is None:
+        return
+    message_data = unwrapped
     tenant_id = str(message_data.get("tenant_id") or "")
     phone = str(message_data.get("phone") or "")
     text = str(message_data.get("text") or "").strip()
