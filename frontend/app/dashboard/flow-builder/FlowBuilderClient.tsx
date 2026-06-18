@@ -24,6 +24,7 @@ import AiClassificationNode from '@/components/flow/nodes/AiClassificationNode';
 import AiExtractionNode from '@/components/flow/nodes/AiExtractionNode';
 import AiSummaryNode from '@/components/flow/nodes/AiSummaryNode';
 import AiAgentNode from '@/components/flow/nodes/AiAgentNode';
+import AiSupervisorNode from '@/components/flow/nodes/AiSupervisorNode';
 import ChoiceNode from '@/components/flow/nodes/ChoiceNode';
 import ConditionNode from '@/components/flow/nodes/ConditionNode';
 import CtaUrlNode from '@/components/flow/nodes/CtaUrlNode';
@@ -55,6 +56,7 @@ const nodeTypes = {
   ai_extraction: AiExtractionNode,
   ai_summary: AiSummaryNode,
   ai_agent: AiAgentNode,
+  ai_supervisor: AiSupervisorNode,
   cta_link: CtaUrlNode,
   messageNode: MessageNode,
   choiceNode: ChoiceNode,
@@ -65,7 +67,7 @@ const nodeTypes = {
   ctaUrlNode: CtaUrlNode,
 };
 
-type FlowNodeKind = 'message' | 'choice' | 'condition' | 'delay' | 'action' | 'media' | 'cta_url' | 'ai_rag' | 'ai_response' | 'ai_classification' | 'ai_extraction' | 'ai_summary' | 'ai_agent';
+type FlowNodeKind = 'message' | 'choice' | 'condition' | 'delay' | 'action' | 'media' | 'cta_url' | 'ai_rag' | 'ai_response' | 'ai_classification' | 'ai_extraction' | 'ai_summary' | 'ai_agent' | 'ai_supervisor';
 type FlowConnection = Connection & { sourceHandle?: string | null };
 type NodePaletteItem = { kind: FlowNodeKind; label: string; icon: LucideIcon; description?: string };
 type NodePaletteGroup = { id: 'communication' | 'ai' | 'logic' | 'actions'; title: string; icon: LucideIcon; nodes: NodePaletteItem[] };
@@ -144,6 +146,7 @@ const NODE_GROUPS: NodePaletteGroup[] = [
         description: 'Resume histórico ou texto para handoff, CRM e notas internas.',
       },
       { kind: 'ai_agent', label: 'IA Agente', icon: Sparkles, description: 'Usa IA para decidir e executar ferramentas permitidas.' },
+      { kind: 'ai_supervisor', label: 'Supervisor IA', icon: Sparkles, description: 'Escolhe automaticamente um IA Agente especializado.' },
     ],
   },
   {
@@ -237,6 +240,7 @@ const NODE_PRESETS: Record<FlowNodeKind, { label: string; type: string; data: Re
   ai_classification: { label: 'IA Classificação', type: 'ai_classification', data: { instruction: '', input_template: '{{last_message}}', categories: ['financeiro', 'vendas', 'suporte', 'outro'], allow_other: true, confidence_threshold: 0.6, output_variable: 'ai.classification', save_to_contact: false, save_to_lead: false, send_debug_message: false } },
   ai_extraction: { label: 'IA Extração', type: 'ai_extraction', data: { instruction: '', input_template: '{{last_message}}', fields: [{ name: 'nome', type: 'string', description: 'Nome da pessoa' }, { name: 'email', type: 'email', description: 'E-mail' }], include_conversation_history: true, output_variable: 'ai.extraction', save_to_contact: false, save_to_lead: true, send_debug_message: false } },
   ai_summary: { label: 'IA Resumo', type: 'ai_summary', data: { summary_source: 'conversation_history', input_template: '{{last_message}}', instruction: '', summary_format: 'handoff', max_history_messages: 30, max_history_chars: 8000, output_variable: 'ai.summary', send_message: false, continue_on_error: true, model_override: '', temperature: 0.2, max_tokens: 800 } },
+  ai_supervisor: { label: 'Supervisor IA', type: 'ai_supervisor', data: { name: 'Supervisor', description: '', supervisor_prompt: 'Escolha o especialista mais adequado para atender a solicitação.', input_template: '{{last_message}}', max_agents: 1, mode: 'single', agent_ids: [], fallback_agent_id: '', memory_max_messages: 10, memory_max_chars: 4000 } },
   ai_agent: { label: 'IA Agente', type: 'ai_agent', data: { instruction: 'Você é um agente de atendimento. Use apenas as ferramentas permitidas.', input_template: '{{last_message}}', allowed_tools: ['responder', 'definir_variavel'], allow_node_tools: false, node_tools: [], max_node_tool_calls: 3, allow_subflow_tools: false, subflow_tools: [], max_subflow_calls: 2, max_steps: 3, use_memory: true, memory_max_messages: 10, memory_max_chars: 4000, model_override: '', temperature: 0.2, max_tokens: 1200, after_agent_behavior: 'wait_same_node', after_answer_behavior: 'wait_same_node', fallback_message: 'Não consegui concluir essa ação agora. Quer que eu encaminhe para um atendente?', webhooks: [] } },
 };
 
@@ -563,7 +567,7 @@ function FlowNodeEditorPanel({
     if (displayMode === 'buttons' && buttons.length >= 3) return;
     onDraftChange({ buttons: [...buttons, { id: `${node.id}-button-${nextIndex}`, label: `Opção ${nextIndex}`, handleId: `option_${nextIndex}` }] });
   };
-  const supportsVariables = ['message', 'choice', 'media', 'cta_url', 'condition', 'action', 'ai_rag', 'ai_response', 'ai_classification', 'ai_extraction', 'ai_summary', 'ai_agent'].includes(kind);
+  const supportsVariables = ['message', 'choice', 'media', 'cta_url', 'condition', 'action', 'ai_rag', 'ai_response', 'ai_classification', 'ai_extraction', 'ai_summary', 'ai_agent', 'ai_supervisor'].includes(kind);
   const publishedSubflowOptions = flows.filter((flow) => flow.id !== currentFlowId && isPublishedFlow(flow));
   const subflowTools = Array.isArray(draft.subflow_tools) ? (draft.subflow_tools as SubflowToolDraft[]) : [];
   const subflowToolIds = subflowTools.map((tool) => toText(tool.tool_id).trim());
@@ -989,6 +993,27 @@ function FlowNodeEditorPanel({
             <section id="agent-advanced" className="flow-editor-tab-section"><h4>Avançado</h4><p>Configurações técnicas ficam recolhidas inicialmente.</p><details><summary>Max Steps</summary><label className="flow-editor-field">Max steps<input type="number" min="1" max="5" value={toText(draft.max_steps || 3)} onChange={(event) => onDraftChange({ max_steps: Number(event.target.value || 3) })} /></label></details><details><summary>Fallback</summary><fieldset className="flow-editor-field flow-editor-after-answer"><legend>Quando ocorrer erro</legend><label className="flow-editor-choice-card"><input type="radio" checked readOnly /><span className="flow-editor-choice-icon">💬</span><span><strong>Responder mensagem</strong><small>Persistido como fallback_message.</small></span></label><label className="flow-editor-choice-card flow-editor-disabled"><input type="radio" disabled /><span className="flow-editor-choice-icon">↗</span><span><strong>Continuar fluxo</strong><small>Opção futura.</small></span></label><label className="flow-editor-choice-card flow-editor-disabled"><input type="radio" disabled /><span className="flow-editor-choice-icon">🙋</span><span><strong>Transferir para humano</strong><small>Opção futura.</small></span></label></fieldset><label className="flow-editor-field">Mensagem de fallback<textarea value={toText(draft.fallback_message || 'Não consegui concluir essa ação agora. Quer que eu encaminhe para um atendente?')} onChange={(event) => onDraftChange({ fallback_message: event.target.value })} /></label></details><details><summary>Webhooks</summary><label className="flow-editor-field">Webhooks permitidos (JSON)<textarea value={JSON.stringify(draft.webhooks || [], null, 2)} onChange={(event) => { try { onDraftChange({ webhooks: JSON.parse(event.target.value) }); } catch { onDraftChange({ webhooks_json_error: true }); } }} /><small>A IA escolhe apenas webhook_id. Use apenas URLs https públicas.</small></label></details><details><summary>Timeouts e configurações experimentais</summary><small className="flow-editor-muted">Reservado para opções já presentes ou futuras do payload.</small></details></section>
           </>
         )}
+
+        {kind === 'ai_supervisor' && (() => {
+          const agentOptions = allNodes.filter((item) => item.id !== node.id && getBuilderNodeKind(item) === 'ai_agent');
+          const selectedAgentIds = Array.isArray(draft.agent_ids) ? draft.agent_ids.map(String) : [];
+          const fallbackId = toText(draft.fallback_agent_id);
+          const fallbackLabel = agentOptions.find((item) => item.id === fallbackId) ? getBuilderNodeTitle(agentOptions.find((item) => item.id === fallbackId) as Node) : 'Não definido';
+          return (
+            <>
+              <div className="flow-editor-agent-hero"><div><strong>🧠 Supervisor</strong><small>{selectedAgentIds.length} agentes disponíveis</small></div><span className="flow-editor-complexity flow-editor-complexity-low">SUPERVISOR</span></div>
+              <div className="flow-editor-agent-metrics"><span>🧠 Supervisor</span><span>{selectedAgentIds.length} agentes disponíveis</span><span>Fallback: {fallbackLabel}</span><span>Modo: Escolher um</span></div>
+              <label className="flow-editor-field">Nome<input value={toText(draft.name)} onChange={(event) => onDraftChange({ name: event.target.value })} /></label>
+              <label className="flow-editor-field">Descrição<input value={toText(draft.description)} onChange={(event) => onDraftChange({ description: event.target.value })} /></label>
+              <label className="flow-editor-field">Prompt do supervisor<textarea value={toText(draft.supervisor_prompt)} onChange={(event) => onDraftChange({ supervisor_prompt: event.target.value })} /></label>
+              <label className="flow-editor-field">Input template<input value={toText(draft.input_template || '{{last_message}}')} onChange={(event) => onDraftChange({ input_template: event.target.value })} /></label>
+              <label className="flow-editor-field">Máximo de agentes<input type="number" min="1" max="1" value={toText(draft.max_agents || 1)} onChange={() => onDraftChange({ max_agents: 1 })} /><small>Execução multiagente será habilitada em versão futura.</small></label>
+              <fieldset className="flow-editor-field flow-editor-after-answer"><legend>Modo</legend><label className="flow-editor-choice-card"><input type="radio" checked readOnly /><span className="flow-editor-choice-icon">●</span><span><strong>Escolher apenas um</strong><small>Executa um IA Agente por solicitação.</small></span></label><label className="flow-editor-choice-card flow-editor-disabled"><input type="radio" disabled /><span className="flow-editor-choice-icon">○</span><span><strong>Permitir múltiplos</strong><small>Desabilitado por enquanto.</small></span></label></fieldset>
+              <label className="flow-editor-field">Agente fallback<select value={fallbackId} onChange={(event) => onDraftChange({ fallback_agent_id: event.target.value })}><option value="">Sem fallback</option>{agentOptions.map((item) => <option key={item.id} value={item.id}>{getBuilderNodeTitle(item)}</option>)}</select></label>
+              <section className="flow-editor-tab-section"><h4>Agentes disponíveis</h4><div className="flow-editor-subflow-list">{agentOptions.map((item) => { const checked = selectedAgentIds.includes(item.id); return <label key={item.id} className="flow-editor-choice-card"><input type="checkbox" checked={checked} onChange={(event) => onDraftChange({ agent_ids: event.target.checked ? Array.from(new Set([...selectedAgentIds, item.id])) : selectedAgentIds.filter((id) => id !== item.id) })} /><span className="flow-editor-choice-icon">☑</span><span><strong>{getBuilderNodeTitle(item)}</strong><small>ID persistido: {item.id}</small></span></label>; })}</div>{agentOptions.length === 0 ? <small className="flow-editor-error">Crie ao menos um IA Agente no fluxo.</small> : null}</section>
+            </>
+          );
+        })()}
 
         {kind === 'delay' && (
           <>

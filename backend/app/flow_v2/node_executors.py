@@ -44,6 +44,7 @@ from app.services.llm_service import generate_answer_for_tenant
 from app.services.ai_structured_service import classify_for_tenant, extract_for_tenant
 from app.services.ai_summary_service import summarize_for_tenant
 from app.services.ai_agent_service import run_agent_for_tenant
+from app.services.supervisor_service import FALLBACK_MESSAGE as SUPERVISOR_FALLBACK_MESSAGE, MAX_SUPERVISOR_DEPTH, build_available_agents, decide_supervisor_agent, get_supervisor_context
 from app.services.context_builder_service import build_context, context_builder_enabled
 from app.services.long_term_memory_service import store_fact
 from app.services.ai_execution_service import get_flow_id, record_ai_execution, redact_text, resolve_ai_config, score_confidence
@@ -1953,6 +1954,50 @@ class AiAgentNodeExecutor(AiResponseNodeExecutor):
         return NodeExecutionResult(actions=tuple(actions), next_node_id=next_node_id, status="continue" if next_node_id else "complete")
 
 
+class AiSupervisorNodeExecutor(AiResponseNodeExecutor):
+    """Supervisor node that routes one request to one existing IA Agente."""
+
+    def execute(self, db, *, snapshot, session, node, runtime_input) -> NodeExecutionResult:
+        node_id = str(node["id"])
+        data = self._node_data(node)
+        stack = list(runtime_input.metadata.get("supervisor_stack") or [])
+        if node_id in stack or len(stack) >= MAX_SUPERVISOR_DEPTH:
+            action = SendMessageAction(tenant_id=session.tenant_id, session_id=session.id, external_user_id=runtime_input.external_user_id, conversation_id=runtime_input.conversation_id, contact_id=runtime_input.contact_id, text=SUPERVISOR_FALLBACK_MESSAGE, metadata={**runtime_input.metadata, "node_id": node_id, "intent": "ai_supervisor", "recursion_blocked": True})
+            return NodeExecutionResult(actions=(action,), next_node_id=None, status="complete")
+        input_text = self._render_rag_public_template(data.get("input_template") or data.get("inputTemplate") or "{{last_message}}", "{{last_message}}", db, snapshot=snapshot, session=session, runtime_input=runtime_input)
+        selected_ids = data.get("agent_ids") or data.get("agentIds") or data.get("agents") or []
+        if not isinstance(selected_ids, list):
+            selected_ids = []
+        agents = build_available_agents(snapshot, node_id, selected_ids)
+        fallback_agent_id = str(data.get("fallback_agent_id") or data.get("fallbackAgentId") or "") or None
+        ctx = get_supervisor_context(db, session.tenant_id, contact_id=runtime_input.contact_id, conversation_id=runtime_input.conversation_id, session_id=session.id, current_query=str(input_text), memory_max_messages=self._coerce_int_config(data.get("memory_max_messages", data.get("memoryMaxMessages")), default=10, field_name="memory_max_messages", node_id=node_id), memory_max_chars=self._coerce_int_config(data.get("memory_max_chars", data.get("memoryMaxChars")), default=4000, field_name="memory_max_chars", node_id=node_id))
+        ai_started_at = datetime.now(UTC)
+        ai_config = resolve_ai_config(db, session.tenant_id, {"chat_model": data.get("chat_model_override") or data.get("chat_model") or data.get("model_override") or data.get("model")})
+        decision = decide_supervisor_agent(db, session.tenant_id, message=str(input_text), supervisor_prompt=str(data.get("supervisor_prompt") or data.get("prompt") or ""), agents=agents, context_section=str(ctx.get("combined_prompt_section") or ""), fallback_agent_id=fallback_agent_id, options={"chat_model": data.get("chat_model_override") or data.get("chat_model") or data.get("model_override") or data.get("model"), "temperature": 0, "max_tokens": 180})
+        selected_agent = decision.selected_agent
+        fallback_used = decision.fallback_used
+        metadata = {"selected_agent": selected_agent, "selection_latency": decision.latency_ms, "selection_reason": decision.reason[:240], "fallback_used": fallback_used, "supervisor_execution": True, "available_agents_count": len(agents), "context_builder_enabled": True, "long_term_memory_count": ctx.get("metadata", {}).get("long_memory_count", 0), "memory_latency_ms": ctx.get("metadata", {}).get("memory_latency_ms", 0)}
+        if not selected_agent:
+            record_ai_execution(db, tenant_id=session.tenant_id, conversation_id=runtime_input.conversation_id, session_id=session.id, flow_id=get_flow_id(db, snapshot, session), flow_version_id=session.flow_version_id, node_id=node_id, node_type="ai_supervisor", provider=ai_config.get("provider"), model=ai_config.get("model"), started_at=ai_started_at, status="fallback", input_text=input_text, output_text=SUPERVISOR_FALLBACK_MESSAGE, fallback_used=True, metadata=metadata)
+            action = SendMessageAction(tenant_id=session.tenant_id, session_id=session.id, external_user_id=runtime_input.external_user_id, conversation_id=runtime_input.conversation_id, contact_id=runtime_input.contact_id, text=SUPERVISOR_FALLBACK_MESSAGE, metadata={**runtime_input.metadata, **metadata, "node_id": node_id, "intent": "ai_supervisor"})
+            return NodeExecutionResult(actions=(action,), next_node_id=None, status="complete")
+        target = snapshot.node_by_id.get(selected_agent)
+        if not isinstance(target, dict):
+            return NodeExecutionResult(actions=(), next_node_id=None, status="complete")
+        original_context = dict(session.context or {}) if isinstance(getattr(session, "context", None), dict) else None
+        sub_input = RuntimeInput(**{**runtime_input.__dict__, "metadata": {**runtime_input.metadata, "supervisor_stack": [*stack, node_id], "supervisor_execution": True, "supervisor_node_id": node_id}})
+        try:
+            result = AiAgentNodeExecutor(event_store=self.event_store, transition_resolver=self.transition_resolver).execute(db, snapshot=snapshot, session=session, node=target, runtime_input=sub_input)
+        finally:
+            if original_context is not None:
+                session.context = original_context
+                if hasattr(db, "add"):
+                    db.add(session)
+        record_ai_execution(db, tenant_id=session.tenant_id, conversation_id=runtime_input.conversation_id, session_id=session.id, flow_id=get_flow_id(db, snapshot, session), flow_version_id=session.flow_version_id, node_id=node_id, node_type="ai_supervisor", provider=ai_config.get("provider"), model=ai_config.get("model"), started_at=ai_started_at, status="success", input_text=input_text, output_text="", fallback_used=fallback_used, metadata=metadata)
+        self.event_store.append(db, session=session, event_type=FlowV2EventType.OUTPUT_EMITTED, node_id=node_id, payload={"analytics_event": "ai_supervisor_completed", **metadata})
+        return NodeExecutionResult(actions=result.actions, next_node_id=None, status="complete")
+
+
 def _set_nested_value(target: dict[str, Any], path: str, value: Any) -> None:
     parts = [part for part in str(path or "").split(".") if part]
     if not parts:
@@ -2182,6 +2227,9 @@ class NodeExecutorRegistry:
                 event_store=event_store, transition_resolver=transition_resolver
             ),
             "ai_agent": AiAgentNodeExecutor(
+                event_store=event_store, transition_resolver=transition_resolver
+            ),
+            "ai_supervisor": AiSupervisorNodeExecutor(
                 event_store=event_store, transition_resolver=transition_resolver
             ),
             "ai_classification": AiClassificationNodeExecutor(
