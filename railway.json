@@ -1,6 +1,3 @@
 {
-  "$schema": "https://railway.com/railway.schema.json",
-  "deploy": {
-    "preDeployCommand": "if [ \"${RUN_RELEASE_MIGRATIONS:-false}\" = \"true\" ]; then bash release.sh; else echo \"Skipping release migrations for this service\"; fi"
-  }
+  "$schema": "https://railway.com/railway.schema.json"
 }
