@@ -16,8 +16,8 @@ O repositório contém configurações explícitas e implícitas usadas pelo Rai
 
 1. O Railway detecta o runtime a partir dos arquivos do repositório.
 2. A versão Python é declarada em `runtime.txt` como `python-3.11`.
-3. O `railway.json` define `deploy.preDeployCommand` como `cd backend && bash release.sh`, garantindo que a etapa de deploy execute `alembic upgrade head` antes de qualquer processo web/worker iniciar.
-4. `backend/release.sh` chama `scripts/run_release_migrations.py`, que serializa execuções concorrentes com um advisory lock do Postgres; se mais de um serviço disparar o pre-deploy, apenas uma migration roda por vez e os demais observam o banco já no head.
+3. O `railway.json` define um `deploy.preDeployCommand` seguro: ele executa `bash release.sh` somente quando há um script de release no diretório do serviço; caso contrário, imprime `No backend release context detected; skipping migrations` e termina com sucesso. Isso impede que o serviço Frontend/Node falhe tentando executar Alembic.
+4. O `release.sh` da raiz é um roteador idempotente: no contexto da raiz do monorepo ele delega para `backend/release.sh`; no contexto de `/backend` o próprio `backend/release.sh` executa as migrations; em contextos não-backend ele faz no-op. `backend/release.sh` chama `scripts/run_release_migrations.py`, que serializa execuções concorrentes com um advisory lock do Postgres; se mais de um serviço backend/worker disparar o pre-deploy, apenas uma migration roda por vez e os demais observam o banco já no head.
 5. O serviço backend usa o `Procfile`:
    - `release`: compatibilidade com Procfile/Heroku-style, entrando em `backend` e executando `bash release.sh`.
    - `web`: entra em `backend` e inicia `backend/start.sh`, que apenas valida conectividade/schema antes do Uvicorn.
@@ -82,7 +82,7 @@ Responsável pela API FastAPI, webhooks da Meta/WhatsApp, autenticação de tena
 
 - Start atual pelo `Procfile`: `cd backend && bash start.sh`.
 - Não executa migrations no processo web; apenas valida conectividade do banco e se o schema está no Alembic head antes de subir a API.
-- As migrations Alembic devem rodar somente na etapa de release/deploy: `cd backend && bash release.sh` (via `railway.json` `deploy.preDeployCommand` e, por compatibilidade, `Procfile` `release`).
+- As migrations Alembic devem rodar somente na etapa de release/deploy do backend: `bash release.sh` quando o serviço usa Root Directory `/backend`, ou `bash release.sh` na raiz do monorepo delegando para `backend/release.sh`. O `preDeployCommand` global é seguro para serviços Node porque só executa um `release.sh` local quando ele existe; no Frontend ele deve fazer no-op e não executar Alembic.
 - Depende de Postgres (`DATABASE_URL`) em produção.
 - Deve receber `MISE_PYTHON_GITHUB_ATTESTATIONS=false` no Railway enquanto o problema de attestation do mise/Railpack puder ocorrer.
 
@@ -102,6 +102,8 @@ Responsável por tarefas assíncronas e filas RQ.
 Responsável pela interface Next.js.
 
 - Código em `frontend/`.
+- É Node/Railpack e não executa migrations Alembic nem scripts de release do backend.
+- Se o `preDeployCommand` global for avaliado no diretório do Frontend, ele deve apenas imprimir `No backend release context detected; skipping migrations` e sair `0`.
 - Depende de `NEXT_PUBLIC_API_URL` apontando para o backend correto por ambiente.
 - Depende de `NEXT_PUBLIC_TURNSTILE_SITE_KEY` em staging/produção.
 
@@ -111,8 +113,9 @@ Banco relacional de produção.
 
 - Deve ser provisionado como serviço Railway Postgres ou equivalente.
 - O backend usa `DATABASE_URL` para conexão.
-- Migrations são aplicadas por Alembic somente na etapa única de release/deploy, antes dos processos web/worker, via `cd backend && bash release.sh`. O script usa advisory lock no Postgres para serializar pre-deploys concorrentes e garantir que `20260618_worker_dlq` seja aplicada antes dos workers passarem no check de Alembic head.
-- Web e workers devem falhar com erro claro se o banco não estiver no Alembic head.
+- Migrations são aplicadas por Alembic somente na etapa de release/deploy do backend, antes dos processos web/worker, via `backend/release.sh` e `scripts/run_release_migrations.py`. O script usa advisory lock no Postgres para serializar pre-deploys concorrentes e garantir que `20260618_worker_dlq` seja aplicada antes dos workers passarem no check de Alembic head.
+- Frontend não roda migrations; qualquer pre-deploy em contexto Node deve ser no-op.
+- Web e workers devem falhar com erro claro se o banco não estiver no Alembic head; workers apenas verificam o head com `verify_alembic_at_head` antes de consumir filas, sem aplicar migrations.
 - Antes de alterações de schema, validar rollback, backup e compatibilidade com dados existentes.
 
 ### Redis
