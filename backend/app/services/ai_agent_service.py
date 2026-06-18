@@ -13,6 +13,7 @@ from urllib.parse import urlparse
 from sqlalchemy.orm import Session
 
 from app.services.llm_service import generate_answer_for_tenant
+from app.services.execution_budget_service import ExecutionBudgetExceeded, ExecutionBudget
 from app.services.long_term_memory_service import ALLOWED_FACT_TYPES, SECRET_RE, store_fact
 
 SAFE_VARIABLE_RE = re.compile(r"^[A-Za-z0-9_.]+$")
@@ -98,11 +99,15 @@ def _summarize_tools(tools: list[str], webhooks: list[dict[str, Any]]) -> str:
     return json.dumps({"tools": visible, "webhook_ids": webhook_ids}, ensure_ascii=False)
 
 
-def _call_webhook(webhook: dict[str, Any], payload: Any) -> dict[str, Any]:
+def _call_webhook(webhook: dict[str, Any], payload: Any, budget: ExecutionBudget | None = None) -> dict[str, Any]:
+    if budget is not None:
+        budget.consume_webhook_call()
     err = validate_webhook_config(webhook)
     if err:
         return {"ok": False, "error": err}
     timeout = min(max(int(webhook.get("timeout_seconds") or 10), 1), 15)
+    if budget is not None:
+        timeout = max(1, min(timeout, max(1, budget.remaining_ms() // 1000)))
     method = str(webhook.get("method") or "POST").upper()
     body = None
     headers = {"Content-Type": "application/json", **_sanitize_headers(webhook.get("headers"))}
@@ -117,7 +122,7 @@ def _call_webhook(webhook: dict[str, Any], payload: Any) -> dict[str, Any]:
         return {"ok": False, "error": type(exc).__name__}
 
 
-def run_agent_for_tenant(db: Session, tenant_id, input_text: str, instruction: str, allowed_tools: list[str], tool_configs: dict[str, Any] | None, memory_context: str | None = None, options: dict[str, Any] | None = None, node_tool_executor=None, subflow_tool_executor=None, mcp_tool_executor=None) -> AgentRunResult:
+def run_agent_for_tenant(db: Session, tenant_id, input_text: str, instruction: str, allowed_tools: list[str], tool_configs: dict[str, Any] | None, memory_context: str | None = None, options: dict[str, Any] | None = None, node_tool_executor=None, subflow_tool_executor=None, mcp_tool_executor=None, budget: ExecutionBudget | None = None) -> AgentRunResult:
     started = time.monotonic()
     opts = options or {}
     fallback = str(opts.get("fallback_message") or "Não consegui concluir essa ação agora. Quer que eu encaminhe para um atendente?")
@@ -158,6 +163,12 @@ def run_agent_for_tenant(db: Session, tenant_id, input_text: str, instruction: s
         if state:
             messages.append({"role": "system", "content": "Estado/resultados anteriores:\n" + json.dumps(state[-5:], ensure_ascii=False)})
         messages.append({"role": "user", "content": str(input_text or "")[:12000]})
+        try:
+            if budget is not None:
+                approx_prompt = (len(system) + len(str(memory_context or "")) + len(str(input_text or ""))) // 4
+                budget.consume_llm_call(prompt_tokens_estimate=approx_prompt, completion_tokens_estimate=int(opts.get("max_tokens") or 1200))
+        except ExecutionBudgetExceeded:
+            return AgentRunResult(message=fallback, status="budget_exceeded", fallback_used=True, steps_count=step, final_tool="responder", metadata={**(budget.safe_metadata() if budget else {}), "budget_exceeded": True})
         raw = generate_answer_for_tenant(db, tenant_id, messages, options={k: v for k, v in {"chat_model": opts.get("chat_model"), "temperature": opts.get("temperature", 0.2), "max_tokens": opts.get("max_tokens", 1200)}.items() if v not in (None, "")})
         decision = _safe_json_loads(raw)
         result.steps_count = step + 1
@@ -196,7 +207,12 @@ def run_agent_for_tenant(db: Session, tenant_id, input_text: str, instruction: s
                 state.append({"tool": tool, "tool_id": tool_id, "ok": False, "error": "node_tool_limit_or_repeat"})
                 continue
             seen_node_inputs.add(key)
-            tool_result = node_tool_executor(match, tool_input, str(args.get("reason") or "")[:200])
+            try:
+                if budget is not None:
+                    budget.consume_node_tool_call()
+                tool_result = node_tool_executor(match, tool_input, str(args.get("reason") or "")[:200])
+            except ExecutionBudgetExceeded:
+                return AgentRunResult(message=fallback, status="budget_exceeded", fallback_used=True, steps_count=step + 1, final_tool=tool, tools_used=result.tools_used, metadata={**(budget.safe_metadata() if budget else {}), "budget_exceeded": True})
             node_tool_calls.append({"tool_id": tool_id, "status": tool_result.get("status"), "node_type": tool_result.get("node_type")})
             state.append({"tool": tool, "tool_id": tool_id, "ok": tool_result.get("status") == "success", "result": tool_result.get("output"), "error": tool_result.get("error")})
             continue
@@ -214,7 +230,12 @@ def run_agent_for_tenant(db: Session, tenant_id, input_text: str, instruction: s
                 state.append({"tool": tool, "tool_id": tool_id, "ok": False, "error": "subflow_tool_limit_or_repeat"})
                 continue
             seen_subflow_inputs.add(key)
-            tool_result = subflow_tool_executor(match, tool_input, str(args.get("reason") or "")[:200])
+            try:
+                if budget is not None:
+                    budget.consume_subflow_call()
+                tool_result = subflow_tool_executor(match, tool_input, str(args.get("reason") or "")[:200])
+            except ExecutionBudgetExceeded:
+                return AgentRunResult(message=fallback, status="budget_exceeded", fallback_used=True, steps_count=step + 1, final_tool=tool, tools_used=result.tools_used, metadata={**(budget.safe_metadata() if budget else {}), "budget_exceeded": True})
             subflow_tool_calls.append({"tool_id": tool_id, "status": tool_result.get("status"), "flow_id": tool_result.get("flow_id"), "duration_ms": tool_result.get("duration_ms")})
             state.append({"tool": tool, "tool_id": tool_id, "ok": tool_result.get("status") == "success", "result": tool_result.get("output"), "error": tool_result.get("error")})
             continue
@@ -230,7 +251,10 @@ def run_agent_for_tenant(db: Session, tenant_id, input_text: str, instruction: s
                 blocked_tool_calls.append({"tool_id": tool_id, "error": "mcp_tool_limit"})
                 state.append({"tool": tool, "tool_id": tool_id, "ok": False, "error": "mcp_tool_limit"})
                 continue
-            tool_result = mcp_tool_executor(match, tool_input)
+            try:
+                tool_result = mcp_tool_executor(match, tool_input)
+            except ExecutionBudgetExceeded:
+                return AgentRunResult(message=fallback, status="budget_exceeded", fallback_used=True, steps_count=step + 1, final_tool=tool, tools_used=result.tools_used, metadata={**(budget.safe_metadata() if budget else {}), "budget_exceeded": True})
             mcp_call = {"tool_id": tool_id, "status": tool_result.get("status"), "latency_ms": tool_result.get("latency_ms"), "error": tool_result.get("error")}
             mcp_tool_calls.append(mcp_call)
             state.append({"tool": tool, "tool_id": tool_id, "ok": tool_result.get("ok") is True, "result": tool_result.get("result"), "error": tool_result.get("error")})
@@ -260,7 +284,10 @@ def run_agent_for_tenant(db: Session, tenant_id, input_text: str, instruction: s
             if webhook is None:
                 state.append({"tool": tool, "ok": False, "error": "webhook_not_allowed"})
                 continue
-            webhook_result = _call_webhook(webhook, args.get("payload") if isinstance(args.get("payload"), dict) else {})
+            try:
+                webhook_result = _call_webhook(webhook, args.get("payload") if isinstance(args.get("payload"), dict) else {}, budget=budget)
+            except ExecutionBudgetExceeded:
+                return AgentRunResult(message=fallback, status="budget_exceeded", fallback_used=True, steps_count=step + 1, final_tool=tool, tools_used=result.tools_used, metadata={**(budget.safe_metadata() if budget else {}), "budget_exceeded": True})
             result.actions.append(AgentToolAction("webhook", {"webhook_id": webhook_id, "ok": webhook_result.get("ok"), "status_code": webhook_result.get("status_code")}))
             state.append({"tool": tool, "webhook_id": webhook_id, **webhook_result})
             continue
@@ -273,5 +300,5 @@ def run_agent_for_tenant(db: Session, tenant_id, input_text: str, instruction: s
         result.status = "error"
         result.fallback_used = True
         result.final_tool = "responder"
-    result.metadata = {"latency_ms": int((time.monotonic() - started) * 1000), "node_tools_used": node_tool_calls, "node_tool_calls_count": len(node_tool_calls), "subflow_tools_used": subflow_tool_calls, "subflow_calls_count": len(subflow_tool_calls), "subflow_results_summary": subflow_tool_calls, "mcp_tools_used": mcp_tool_calls, "mcp_call_count": len(mcp_tool_calls), "mcp_latency_ms": sum(int(c.get("latency_ms") or 0) for c in mcp_tool_calls), "mcp_status": "error" if any(c.get("status") != "success" for c in mcp_tool_calls) else ("success" if mcp_tool_calls else "not_used"), "mcp_error_sanitized": next((c.get("error") for c in mcp_tool_calls if c.get("error")), None), "subflow_errors": [c for c in subflow_tool_calls if c.get("status") != "success"], "timeout_count": len([c for c in subflow_tool_calls if c.get("status") == "timeout"]), "blocked_tool_calls": blocked_tool_calls, "max_steps_reached": result.fallback_used, "memory_saved_count": len([item for item in state if item.get("tool") == "salvar_memoria" and item.get("ok")])}
+    result.metadata = {"latency_ms": int((time.monotonic() - started) * 1000), "node_tools_used": node_tool_calls, "node_tool_calls_count": len(node_tool_calls), "subflow_tools_used": subflow_tool_calls, "subflow_calls_count": len(subflow_tool_calls), "subflow_results_summary": subflow_tool_calls, "mcp_tools_used": mcp_tool_calls, "mcp_call_count": len(mcp_tool_calls), "mcp_latency_ms": sum(int(c.get("latency_ms") or 0) for c in mcp_tool_calls), "mcp_status": "error" if any(c.get("status") != "success" for c in mcp_tool_calls) else ("success" if mcp_tool_calls else "not_used"), "mcp_error_sanitized": next((c.get("error") for c in mcp_tool_calls if c.get("error")), None), "subflow_errors": [c for c in subflow_tool_calls if c.get("status") != "success"], "timeout_count": len([c for c in subflow_tool_calls if c.get("status") == "timeout"]), "blocked_tool_calls": blocked_tool_calls, "max_steps_reached": result.fallback_used, "memory_saved_count": len([item for item in state if item.get("tool") == "salvar_memoria" and item.get("ok")]), **(budget.safe_metadata() if budget else {})}
     return result

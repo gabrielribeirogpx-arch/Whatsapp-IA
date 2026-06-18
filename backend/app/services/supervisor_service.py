@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.services.context_builder_service import build_context
 from app.services.llm_service import generate_answer_for_tenant
+from app.services.execution_budget_service import ExecutionBudget, ExecutionBudgetExceeded
 
 MAX_SUPERVISOR_DEPTH = 3
 FALLBACK_MESSAGE = "Não consegui identificar o especialista adequado."
@@ -75,6 +76,7 @@ def decide_supervisor_agent(
     context_section: str,
     fallback_agent_id: str | None,
     options: dict[str, Any] | None = None,
+    budget: ExecutionBudget | None = None,
 ) -> SupervisorDecision:
     started = time.monotonic()
     valid_ids = {agent["id"] for agent in agents}
@@ -100,6 +102,8 @@ Mensagem do usuário:
 {message}
 """
     try:
+        if budget is not None:
+            budget.consume_llm_call(prompt_tokens_estimate=(len(system) + len(user)) // 4, completion_tokens_estimate=180)
         raw = generate_answer_for_tenant(db, tenant_id, [{"role": "system", "content": system}, {"role": "user", "content": user}], options=options or {"temperature": 0, "max_tokens": 180})
         parsed = _extract_json_object(raw)
         selected = str((parsed or {}).get("selected_agent") or "")
@@ -107,6 +111,8 @@ Mensagem do usuário:
         if selected in valid_ids:
             return SupervisorDecision(selected, reason, False, int((time.monotonic() - started) * 1000), True)
         return SupervisorDecision(fallback, "invalid_or_unknown_agent", True, int((time.monotonic() - started) * 1000), False)
+    except ExecutionBudgetExceeded:
+        return SupervisorDecision(None, "budget_exceeded", True, int((time.monotonic() - started) * 1000), False)
     except Exception:
         return SupervisorDecision(fallback, "selection_failed", True, int((time.monotonic() - started) * 1000), False)
 

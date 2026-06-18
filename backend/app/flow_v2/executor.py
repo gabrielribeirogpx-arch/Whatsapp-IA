@@ -19,6 +19,7 @@ from app.flow_v2.session_lock import FlowV2SessionLock
 from app.flow_v2.session_manager import FlowV2SessionManager
 from app.flow_v2.snapshot import FlowV2Snapshot, FlowV2SnapshotRepository
 from app.flow_v2.transition_resolver import FlowV2TransitionError, TransitionResolver
+from app.services.execution_budget_service import ExecutionBudgetExceeded, get_or_create_budget, persist_budget
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +62,8 @@ class FlowV2Executor:
         self.session_lock = session_lock or FlowV2SessionLock()
 
     def handle_input(self, db: Session, runtime_input: RuntimeInput) -> RuntimeOutput:
+        budget = get_or_create_budget(runtime_input.metadata, runtime_input.tenant_id)
+        persist_budget(runtime_input.metadata, budget)
         if self._conversation_is_human(db, runtime_input=runtime_input):
             logger.info(
                 "[V2 RUNTIME SKIPPED] reason=human_mode tenant_id=%s conversation_id=%s external_user_id=%s",
@@ -215,6 +218,9 @@ class FlowV2Executor:
             if self._node_data(node).get("is_conversion") is True:
                 self._track_analytics(db, session=session, flow_id=flow_id, event_type="conversion_reached", node_id=node_id, node_type=node_type, event_key=str(self._node_data(node).get("conversion_label") or node_id), metadata={"conversion_label": self._node_data(node).get("conversion_label")})
             try:
+                budget = get_or_create_budget(runtime_input.metadata, session.tenant_id)
+                budget.consume_runtime_step()
+                persist_budget(runtime_input.metadata, budget)
                 node_type = str(node.get("type") or self._node_data(node).get("type") or "message")
                 logger.info(
                     "[V2 NODE EXECUTION] enter node_id=%s node_type=%s current_node_id=%s transitions_count=%s step=%s",
@@ -252,6 +258,13 @@ class FlowV2Executor:
                 )
                 self.event_store.append(db, session=session, event_type=FlowV2EventType.NODE_COMPLETED, node_id=node_id)
                 self._track_analytics(db, session=session, flow_id=flow_id, event_type="node_completed", node_id=node_id, node_type=node_type)
+            except ExecutionBudgetExceeded as exc:
+                persist_budget(runtime_input.metadata, budget)
+                logger.warning("[V2 BUDGET EXCEEDED] tenant_id=%s session_id=%s node_id=%s reason=%s", session.tenant_id, session.id, node_id, budget.exceeded_reason)
+                self.event_store.append(db, session=session, event_type=FlowV2EventType.NODE_EXECUTED, node_id=node_id, payload={"status": "budget_exceeded", **budget.safe_metadata()})
+                self.event_store.append(db, session=session, event_type=FlowV2EventType.NODE_COMPLETED, node_id=node_id)
+                self.session_manager.move_to(db, session=session, node_id=node_id, status=FlowV2SessionStatus.COMPLETED)
+                return actions
             except FlowV2TransitionError as exc:
                 logger.exception("[V2 NODE EXECUTION] transition_failed node_id=%s error=%s", node_id, exc)
                 self.event_store.append(
