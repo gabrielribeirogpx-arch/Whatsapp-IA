@@ -38,6 +38,6 @@ class TenantMCPTool(Base):
     description: Mapped[str] = mapped_column(Text, nullable=False, default="")
     input_schema: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
     is_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
-    metadata: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+    metadata_json: Mapped[dict[str, Any]] = mapped_column("metadata", JSONB, nullable=False, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
