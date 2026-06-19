@@ -798,6 +798,110 @@ def test_menu_reply_two_resumes_conditions_and_routes_to_comercial() -> None:
     assert [event["payload"]["result"] for event in condition_events] == [False, True]
 
 
+@pytest.mark.parametrize(
+    ("reply", "expected_text"),
+    [
+        ("1", "Financeiro"),
+        ("2", "Comercial"),
+        ("3", "Suporte Técnico"),
+        ("4", "Humano"),
+    ],
+)
+def test_numeric_text_resumes_waiting_condition_menu_branches(reply, expected_text, caplog) -> None:
+    raw_snapshot = {
+        "schema_version": 1,
+        "start_node_id": "start",
+        "nodes": [
+            {"id": "start", "type": "message", "content": "Menu: 1 Financeiro, 2 Comercial, 3 Suporte Técnico, 4 Humano"},
+            {"id": "condition_1", "type": "condition", "data": {"keywords": ["1"]}},
+            {"id": "condition_2", "type": "condition", "data": {"keywords": ["2"]}},
+            {"id": "condition_3", "type": "condition", "data": {"keywords": ["3"]}},
+            {"id": "condition_4", "type": "condition", "data": {"keywords": ["4"]}},
+            {"id": "financeiro", "type": "message", "content": "Financeiro"},
+            {"id": "comercial", "type": "message", "content": "Comercial"},
+            {"id": "suporte", "type": "message", "content": "Suporte Técnico"},
+            {"id": "humano", "type": "message", "content": "Humano"},
+            {"id": "fallback", "type": "message", "content": "Opção inválida"},
+        ],
+        "edges": [
+            {"id": "e1", "source": "start", "target": "condition_1"},
+            {"id": "e2", "source": "condition_1", "sourceHandle": "true", "target": "financeiro"},
+            {"id": "e3", "source": "condition_1", "sourceHandle": "false", "target": "condition_2"},
+            {"id": "e4", "source": "condition_2", "sourceHandle": "true", "target": "comercial"},
+            {"id": "e5", "source": "condition_2", "sourceHandle": "false", "target": "condition_3"},
+            {"id": "e6", "source": "condition_3", "sourceHandle": "true", "target": "suporte"},
+            {"id": "e7", "source": "condition_3", "sourceHandle": "false", "target": "condition_4"},
+            {"id": "e8", "source": "condition_4", "sourceHandle": "true", "target": "humano"},
+            {"id": "e9", "source": "condition_4", "sourceHandle": "false", "target": "fallback"},
+        ],
+    }
+    executor, snapshot, event_store, session, db = _executor(raw_snapshot)
+
+    initial = executor.handle_input(db, _input_with_text(snapshot, f"wamid.numeric.initial.{reply}", "oi"))
+    assert initial.status == FlowV2SessionStatus.WAITING
+    assert initial.current_node_id == "condition_1"
+
+    with caplog.at_level("INFO", logger="app.flow_v2.executor"):
+        resumed = executor.handle_input(db, _input_with_text(snapshot, f"wamid.numeric.reply.{reply}", reply))
+
+    assert resumed.status == FlowV2SessionStatus.COMPLETED
+    assert resumed.effects == ({"type": "send_message", "text": expected_text},)
+    assert session.current_node_id is None
+    assert any(
+        "event=runtime_numeric_choice_detected" in record.message
+        and f"message_text={reply}" in record.message
+        and "current_node_id=condition_1" in record.message
+        for record in caplog.records
+    )
+    condition_events = [event for event in event_store.events if event["event_type"] == "CONDITION_EVALUATED"]
+    assert all(event["payload"]["message"] == reply for event in condition_events)
+
+
+def test_numeric_text_resumes_waiting_choice_without_breaking_interactive_reply() -> None:
+    raw_snapshot = {
+        "schema_version": 1,
+        "start_node_id": "start",
+        "nodes": [
+            {"id": "start", "type": "message", "content": "Escolha"},
+            {"id": "choice", "type": "choice", "data": {"options": [{"id": "1", "label": "Financeiro"}, {"id": "2", "label": "Comercial"}]}},
+            {"id": "financeiro", "type": "message", "content": "Financeiro"},
+            {"id": "comercial", "type": "message", "content": "Comercial"},
+        ],
+        "edges": [
+            {"id": "e1", "source": "start", "target": "choice"},
+            {"id": "e2", "source": "choice", "sourceHandle": "1", "target": "financeiro"},
+            {"id": "e3", "source": "choice", "sourceHandle": "2", "target": "comercial"},
+        ],
+    }
+    executor, snapshot, event_store, session, db = _executor(raw_snapshot)
+
+    initial = executor.handle_input(db, _input_with_text(snapshot, "wamid.choice.initial.numeric", "oi"))
+    assert initial.status == FlowV2SessionStatus.WAITING
+    assert initial.current_node_id == "choice"
+
+    selected = executor.handle_input(db, _input_with_text(snapshot, "wamid.choice.reply.numeric", "2"))
+
+    assert selected.status == FlowV2SessionStatus.COMPLETED
+    assert selected.effects == ({"type": "send_message", "text": "Comercial"},)
+    assert any(event["payload"] == {"node_id": "choice", "row_id": "2"} for event in event_store.events)
+
+    executor, snapshot, event_store, session, db = _executor(raw_snapshot)
+    executor.handle_input(db, _input_with_text(snapshot, "wamid.choice.initial.interactive", "oi"))
+    selected = executor.handle_input(
+        db,
+        _input_with_text(
+            snapshot,
+            "wamid.choice.reply.interactive",
+            "texto ignorado",
+            {"interactive_reply_id": "1", "interactive_type": "button_reply"},
+        ),
+    )
+
+    assert selected.status == FlowV2SessionStatus.COMPLETED
+    assert selected.effects == ({"type": "send_message", "text": "Financeiro"},)
+    assert any(event["payload"] == {"node_id": "choice", "row_id": "1"} for event in event_store.events)
+
+
 def test_message_to_condition_wait_logs_waiting_for_reply(caplog) -> None:
     raw_snapshot = {
         "schema_version": 1,

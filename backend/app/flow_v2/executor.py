@@ -94,6 +94,7 @@ class FlowV2Executor:
             snapshot.hash,
         )
         session = self.session_manager.get_or_create(db, runtime_input=runtime_input, snapshot=snapshot)
+        self._bind_numeric_choice_if_waiting(snapshot=snapshot, session=session, runtime_input=runtime_input)
         flow_id = self._flow_id_for_version(db, tenant_id=runtime_input.tenant_id, flow_version_id=runtime_input.flow_version_id)
         if str(getattr(session, "status", "")) == str(FlowV2SessionStatus.COMPLETED):
             logger.info(
@@ -179,6 +180,31 @@ class FlowV2Executor:
                     output.emitted_event_count,
                 )
             return output
+
+
+    @staticmethod
+    def _bind_numeric_choice_if_waiting(*, snapshot: FlowV2Snapshot, session: Any, runtime_input: RuntimeInput) -> None:
+        current_node_id = str(getattr(session, "current_node_id", "") or "")
+        node = snapshot.node_by_id.get(current_node_id) if current_node_id else None
+        node_type = str((node or {}).get("type") or FlowV2Executor._node_data(node or {}).get("type") or "").strip().lower()
+        if node_type not in {"condition", "choice"}:
+            return
+        metadata = runtime_input.metadata
+        if metadata.get("row_id") or metadata.get("sourceHandle") or metadata.get("selected_row_id") or metadata.get("interactive_reply_id"):
+            return
+        normalized_choice = str(runtime_input.message_text or "").strip()
+        if not normalized_choice.isdecimal():
+            return
+        metadata["row_id"] = normalized_choice
+        metadata["sourceHandle"] = normalized_choice
+        metadata["selected_row_id"] = normalized_choice
+        metadata.setdefault("runtime_choice_key", normalized_choice)
+        logger.info(
+            "event=runtime_numeric_choice_detected message_text=%s normalized_choice=%s current_node_id=%s",
+            runtime_input.message_text,
+            normalized_choice,
+            current_node_id,
+        )
 
     @staticmethod
     def _conversation_is_human(db: Session, *, runtime_input: RuntimeInput) -> bool:
