@@ -144,9 +144,11 @@ def discover_mcp_tools(db: Session, tenant_id: uuid.UUID, server_id: uuid.UUID) 
     server = _server(db, tenant_id, server_id)
     if not server.is_enabled:
         raise MCPError("Servidor MCP desabilitado.")
-    count = db.execute(select(TenantMCPTool).where(TenantMCPTool.tenant_id == tenant_id)).scalars().all()
-    if len(count) >= MAX_TOOLS_PER_TENANT:
-        raise MCPError("Limite de ferramentas MCP por workspace atingido.")
+    started = time.monotonic()
+    trace = TraceContext(tenant_id=str(tenant_id))
+    record_event(db, trace, TraceEventType.MCP_DISCOVERY_STARTED, metadata={"server_id": str(server.id), "server_url": server.server_url})
+    existing_tools = list(db.execute(select(TenantMCPTool).where(TenantMCPTool.tenant_id == tenant_id)).scalars())
+    existing_count = len(existing_tools)
     payload = {"jsonrpc": "2.0", "id": "discover", "method": "tools/list", "params": {}}
     circuit_key = f"mcp:{tenant_id}:{server.id}"
     check_circuit(circuit_key)
@@ -154,28 +156,45 @@ def discover_mcp_tools(db: Session, tenant_id: uuid.UUID, server_id: uuid.UUID) 
         response = requests.post(str(server.server_url), headers=_headers(server), json=payload, timeout=MAX_TIMEOUT_SECONDS)
         response.raise_for_status()
         record_success(circuit_key)
+        data = response.json()
     except requests.RequestException as exc:
         status = getattr(getattr(exc, "response", None), "status_code", None)
         if status is None or status >= 500 or status == 429:
             record_failure(circuit_key, reason=f"mcp_discover:{status or type(exc).__name__}")
+        record_event(db, trace, TraceEventType.MCP_DISCOVERY_FINISHED, duration_ms=int((time.monotonic() - started) * 1000), metadata={"server_id": str(server.id), "status": "error", "error": type(exc).__name__})
         raise
-    data = response.json()
     tools = ((data.get("result") or {}).get("tools") or data.get("tools") or []) if isinstance(data, dict) else []
+    if not isinstance(tools, list):
+        tools = []
     saved: list[TenantMCPTool] = []
+    discovered_names: set[str] = set()
+    new_count = 0
     for item in tools[:MAX_TOOLS_PER_TENANT]:
         if not isinstance(item, dict) or not item.get("name"):
             continue
         name = str(item["name"])[:180]
+        discovered_names.add(name)
         row = db.execute(select(TenantMCPTool).where(TenantMCPTool.tenant_id == tenant_id, TenantMCPTool.server_id == server.id, TenantMCPTool.tool_name == name)).scalars().first()
         if row is None:
+            if existing_count + new_count >= MAX_TOOLS_PER_TENANT:
+                break
             row = TenantMCPTool(tenant_id=tenant_id, server_id=server.id, tool_name=name, display_name=str(item.get("title") or name)[:180])
             db.add(row)
+            new_count += 1
+        elif not row.display_name:
+            row.display_name = str(item.get("title") or name)[:180]
         row.description = str(item.get("description") or "")[:4000]
         row.input_schema = item.get("inputSchema") if isinstance(item.get("inputSchema"), dict) else {"type": "object"}
-        row.metadata_json = sanitize_value({"discovered": True})
+        row.metadata_json = sanitize_value({**(row.metadata_json or {}), "discovered": True, "last_discovered_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "missing_from_last_discovery": False})
         saved.append(row)
+    server_tools = [tool for tool in existing_tools if str(tool.server_id) == str(server.id)]
+    for stale in server_tools:
+        if stale.tool_name not in discovered_names:
+            stale.metadata_json = sanitize_value({**(stale.metadata_json or {}), "missing_from_last_discovery": True, "last_missing_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())})
     db.commit()
     for row in saved: db.refresh(row)
+    duration_ms = int((time.monotonic() - started) * 1000)
+    record_event(db, trace, TraceEventType.MCP_DISCOVERY_FINISHED, duration_ms=duration_ms, metadata={"server_id": str(server.id), "status": "success", "tools_discovered": len(saved), "tools_new": new_count, "latency_ms": duration_ms})
     return saved
 
 

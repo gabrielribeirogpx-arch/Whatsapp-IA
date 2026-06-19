@@ -65,10 +65,19 @@ def get_servers(tenant: Tenant = Depends(get_current_tenant), db: Session = Depe
 
 @router.post("/servers", status_code=201)
 def create_server(payload: MCPServerIn, tenant: Tenant = Depends(get_current_tenant), db: Session = Depends(get_db)):
+    server = None
     try:
-        return _server_out(create_mcp_server(db, tenant.id, **payload.model_dump()))
+        server = create_mcp_server(db, tenant.id, **payload.model_dump())
+        tools = discover_mcp_tools(db, tenant.id, server.id)
+        return {**_server_out(server), "discovery": {"status": "success", "tools_discovered": len(tools)}}
     except MCPError as exc:
+        if server is not None:
+            delete_mcp_server(db, tenant.id, server.id)
         raise _mcp_error(exc) from exc
+    except Exception as exc:
+        if server is not None:
+            delete_mcp_server(db, tenant.id, server.id)
+        raise HTTPException(status_code=502, detail="Falha controlada ao descobrir ferramentas MCP; integração não foi cadastrada.") from exc
 
 
 @router.put("/servers/{server_id}")
