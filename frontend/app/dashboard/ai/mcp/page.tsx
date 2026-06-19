@@ -21,6 +21,7 @@ type MCPServer = {
   transport: string;
   is_enabled: boolean;
   has_config: boolean;
+  discovery?: { status: string; tools_discovered: number };
 };
 type MCPTool = {
   id: string;
@@ -30,6 +31,7 @@ type MCPTool = {
   description: string;
   input_schema: Record<string, unknown>;
   is_enabled: boolean;
+  metadata?: { last_discovered_at?: string; missing_from_last_discovery?: boolean };
 };
 type MessageTone = "success" | "error" | "warning";
 
@@ -161,7 +163,7 @@ export default function MCPDashboardPage() {
         config: bearerToken ? { bearer_token: bearerToken } : undefined,
         is_enabled: true,
       });
-      await parseApiResponse<MCPServer>(
+      const saved = await parseApiResponse<MCPServer>(
         await apiFetch(
           editingId ? `/api/mcp/servers/${editingId}` : "/api/mcp/servers",
           { method: editingId ? "PUT" : "POST", body },
@@ -171,7 +173,7 @@ export default function MCPDashboardPage() {
       setMessage(
         editingId
           ? "Integração atualizada com segurança."
-          : "Integração salva com segurança.",
+          : `Integração salva e descoberta automática concluída (${saved.discovery?.tools_discovered ?? 0} ferramentas).`,
       );
       resetForm();
       await load();
@@ -476,6 +478,16 @@ export default function MCPDashboardPage() {
                     <p className="mt-3 text-xs font-semibold text-slate-400">
                       Identificador: {tool.tool_name}
                     </p>
+                    {tool.metadata?.last_discovered_at ? (
+                      <p className="mt-1 text-xs font-semibold text-slate-400">
+                        Última descoberta: {new Date(tool.metadata.last_discovered_at).toLocaleString("pt-BR")}
+                      </p>
+                    ) : null}
+                    {tool.metadata?.missing_from_last_discovery ? (
+                      <p className="mt-2 rounded-full bg-amber-50 px-3 py-1 text-xs font-bold text-amber-700 ring-1 ring-amber-100">
+                        Ausente na última atualização do servidor
+                      </p>
+                    ) : null}
                   </div>
                   <button
                     className={
