@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ipaddress
 import json
+import logging
 import re
 import time
 import urllib.error
@@ -30,6 +31,8 @@ SENSITIVE_HEADER_RE = re.compile(r"(authorization|api[-_]?key|token|secret|passw
 PLACEHOLDER_TOOLS = {"criar_evento", "consultar_crm", "criar_pedido", "enviar_email", "transferir_humano"}
 SUPPORTED_TOOLS = {"responder", "definir_variavel", "chamar_webhook", "executar_node", "executar_subflow", "salvar_memoria", "chamar_mcp", "finalizar"} | PLACEHOLDER_TOOLS
 
+logger = logging.getLogger(__name__)
+
 
 @dataclass
 class AgentToolAction:
@@ -48,6 +51,39 @@ class AgentRunResult:
     fallback_used: bool = False
     metadata: dict[str, Any] = field(default_factory=dict)
 
+
+
+def _extract_tool_result_text(value: Any) -> str | None:
+    """Return user-visible text from tool outputs, including MCP content blocks."""
+    if value is None:
+        return None
+    if isinstance(value, str):
+        text = value.strip()
+        return text or None
+    if isinstance(value, (int, float, bool)):
+        return str(value)
+    if isinstance(value, dict):
+        content = value.get("content")
+        if isinstance(content, list):
+            parts: list[str] = []
+            for item in content:
+                if isinstance(item, dict) and str(item.get("type") or "") == "text":
+                    text = str(item.get("text") or "").strip()
+                    if text:
+                        parts.append(text)
+            if parts:
+                return "\n".join(parts)
+        for key in ("text", "message", "output", "result"):
+            if key in value:
+                text = _extract_tool_result_text(value.get(key))
+                if text:
+                    return text
+        return None
+    if isinstance(value, list):
+        parts = [_extract_tool_result_text(item) for item in value]
+        joined = "\n".join(part for part in parts if part)
+        return joined or None
+    return None
 
 def _safe_json_loads(raw: str) -> dict[str, Any] | None:
     try:
@@ -176,6 +212,7 @@ def run_agent_for_tenant(db: Session, tenant_id, input_text: str, instruction: s
     tool_registry.register(MCPToolAdapter(mcp_tool_executor))
     tool_registry.register(WebhookToolAdapter(_call_webhook, validate_webhook_config))
     if not allowed:
+        logger.warning("event=AI_AGENT_FALLBACK_REASON reason=no_allowed_tools")
         return AgentRunResult(message=fallback, status="error", fallback_used=True, final_tool="responder", steps_count=0)
     try:
         package = UnifiedContextEngine(db).build(tenant_id=tenant_id, execution_context={"tenant_id": str(tenant_id), "trace_id": tool_context.trace_id, "tool_outputs": state}, budget=budget, flags={"include_short_memory": False, "include_long_memory": False, "include_rag_context": False})
@@ -210,20 +247,27 @@ def run_agent_for_tenant(db: Session, tenant_id, input_text: str, instruction: s
             return AgentRunResult(message=fallback, status="budget_exceeded", fallback_used=True, steps_count=step, final_tool="responder", metadata={**(budget.safe_metadata() if budget else {}), "budget_exceeded": True})
         llm_started = time.monotonic()
         record_event(db, trace, TraceEventType.LLM_REQUEST, metadata={"step": step + 1, "model": opts.get("chat_model"), "messages_count": len(messages), "prompt": "[REDACTED]"})
-        raw = generate_answer_for_tenant(db, tenant_id, messages, options={k: v for k, v in {"chat_model": opts.get("chat_model"), "temperature": opts.get("temperature", 0.2), "max_tokens": opts.get("max_tokens", 1200)}.items() if v not in (None, "")})
+        try:
+            raw = generate_answer_for_tenant(db, tenant_id, messages, options={k: v for k, v in {"chat_model": opts.get("chat_model"), "temperature": opts.get("temperature", 0.2), "max_tokens": opts.get("max_tokens", 1200)}.items() if v not in (None, "")})
+        except Exception as exc:
+            logger.exception("event=AI_AGENT_FALLBACK_REASON reason=llm_failed step=%s error=%s", step + 1, type(exc).__name__)
+            return AgentRunResult(message=fallback, status="error", fallback_used=True, steps_count=step + 1, final_tool="responder", tools_used=result.tools_used)
         record_event(db, trace, TraceEventType.LLM_RESPONSE, duration_ms=int((time.monotonic() - llm_started) * 1000), metadata={"step": step + 1, "response_size": len(str(raw or ""))})
         decision = _safe_json_loads(raw)
         result.steps_count = step + 1
         if not decision:
+            logger.warning("event=AI_AGENT_FALLBACK_REASON reason=invalid_llm_json step=%s", step + 1)
             return AgentRunResult(message=fallback, status="error", fallback_used=True, steps_count=step + 1, final_tool="responder")
         tool = str(decision.get("tool") or "").strip()
         args = decision.get("arguments") if isinstance(decision.get("arguments"), dict) else {}
         if tool not in allowed and tool != "finalizar":
+            logger.warning("event=AI_AGENT_FALLBACK_REASON reason=tool_not_allowed tool=%s step=%s", tool, step + 1)
             return AgentRunResult(message=fallback, status="error", fallback_used=True, steps_count=step + 1, final_tool=tool or None, tools_used=result.tools_used)
         result.tools_used.append(tool)
         result.final_tool = tool
         if tool == "responder":
             msg = str(args.get("message") or fallback)[:4000]
+            logger.info("event=AI_AGENT_FINAL_RESPONSE step=%s response_size=%s fallback=%s", step + 1, len(msg), msg == fallback)
             result.message = msg
             result.actions.append(AgentToolAction("message", {"message": msg}))
             break
@@ -302,7 +346,13 @@ def run_agent_for_tenant(db: Session, tenant_id, input_text: str, instruction: s
                 return AgentRunResult(message=fallback, status="budget_exceeded", fallback_used=True, steps_count=step + 1, final_tool=tool, tools_used=result.tools_used, metadata={**(budget.safe_metadata() if budget else {}), "budget_exceeded": True})
             mcp_call = {"tool_id": tool_id, "status": tool_result.get("status"), "latency_ms": tool_result.get("latency_ms"), "error": tool_result.get("error")}
             mcp_tool_calls.append(mcp_call)
-            state.append({"tool": tool, "tool_id": tool_id, "ok": tool_result.get("ok") is True, "result": tool_result.get("result"), "error": tool_result.get("error")})
+            result_text = _extract_tool_result_text(tool_result.get("result")) if tool_result.get("ok") is True else None
+            logger.info("event=AI_AGENT_TOOL_RESULT_RECEIVED tool_type=mcp_tool tool_id=%s ok=%s has_text=%s", tool_id, tool_result.get("ok") is True, bool(result_text))
+            if result_text:
+                logger.info("event=AI_AGENT_TOOL_RESULT_TEXT tool_type=mcp_tool tool_id=%s text_size=%s", tool_id, len(result_text))
+            else:
+                logger.warning("event=AI_AGENT_FALLBACK_REASON reason=mcp_no_text tool_id=%s ok=%s", tool_id, tool_result.get("ok") is True)
+            state.append({"tool": tool, "tool_id": tool_id, "ok": tool_result.get("ok") is True, "result": tool_result.get("result"), "result_text": result_text, "error": tool_result.get("error")})
             continue
         if tool == "salvar_memoria":
             memory_ctx = (tool_configs or {}).get("memory_context") if isinstance(tool_configs, dict) else {}
@@ -341,11 +391,21 @@ def run_agent_for_tenant(db: Session, tenant_id, input_text: str, instruction: s
             break
         state.append({"tool": tool, "ok": False, "error": "not_implemented"})
     else:
-        result.message = fallback
-        result.actions.append(AgentToolAction("message", {"message": fallback}))
-        result.status = "error"
-        result.fallback_used = True
-        result.final_tool = "responder"
+        successful_text = next((str(item.get("result_text")).strip() for item in reversed(state) if item.get("ok") is True and str(item.get("result_text") or "").strip()), None)
+        if successful_text:
+            result.message = f"O resultado é {successful_text}."[:4000]
+            result.actions.append(AgentToolAction("message", {"message": result.message}))
+            result.status = "success"
+            result.fallback_used = False
+            result.final_tool = "responder"
+            logger.info("event=AI_AGENT_FINAL_RESPONSE response_size=%s source=tool_result", len(result.message))
+        else:
+            logger.warning("event=AI_AGENT_FALLBACK_REASON reason=max_steps_or_no_valid_tool_text")
+            result.message = fallback
+            result.actions.append(AgentToolAction("message", {"message": fallback}))
+            result.status = "error"
+            result.fallback_used = True
+            result.final_tool = "responder"
     total_latency_ms = int((time.monotonic() - started) * 1000)
     record_event(db, trace, TraceEventType.AI_AGENT_FINISHED, duration_ms=total_latency_ms, metadata={"status": result.status, "final_tool": result.final_tool, "tools_used": result.tools_used})
     result.metadata = {"latency_ms": total_latency_ms, "node_tools_used": node_tool_calls, "node_tool_calls_count": len(node_tool_calls), "subflow_tools_used": subflow_tool_calls, "subflow_calls_count": len(subflow_tool_calls), "subflow_results_summary": subflow_tool_calls, "mcp_tools_used": mcp_tool_calls, "mcp_call_count": len(mcp_tool_calls), "mcp_latency_ms": sum(int(c.get("latency_ms") or 0) for c in mcp_tool_calls), "mcp_status": "error" if any(c.get("status") != "success" for c in mcp_tool_calls) else ("success" if mcp_tool_calls else "not_used"), "mcp_error_sanitized": next((c.get("error") for c in mcp_tool_calls if c.get("error")), None), "subflow_errors": [c for c in subflow_tool_calls if c.get("status") != "success"], "timeout_count": len([c for c in subflow_tool_calls if c.get("status") == "timeout"]), "blocked_tool_calls": blocked_tool_calls, "max_steps_reached": result.fallback_used, "memory_saved_count": len([item for item in state if item.get("tool") == "salvar_memoria" and item.get("ok")]), **(budget.safe_metadata() if budget else {})}

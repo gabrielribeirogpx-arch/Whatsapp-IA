@@ -49,3 +49,38 @@ def test_ai_agent_validator_blocks_internal_webhook_and_requires_edge_for_contin
 def test_ai_agent_validator_blocks_secret_in_config():
     result = FlowV2GraphValidator().validate(nodes=[{"id": "agent", "type": "ai_agent", "data": {"isStart": True, "allowed_tools": ["responder"], "api_key": "sk-test"}}], edges=[])
     assert "FLOW_V2_AI_NODE_API_KEY_FORBIDDEN:agent" in result.errors
+
+
+def test_ai_agent_mcp_calculate_result_text_used_in_final_response(monkeypatch):
+    calls = iter([
+        '{"thought_summary":"calcular","tool":"chamar_mcp","arguments":{"tool_id":"calculate","input":{"expression":"1234 * 567"}}}',
+        '{"thought_summary":"responder","tool":"responder","arguments":{"message":"O resultado é 699678."}}',
+    ])
+    seen_messages = []
+
+    def fake_llm(_db, _tenant_id, messages, options=None):
+        seen_messages.append(messages)
+        return next(calls)
+
+    def fake_mcp_executor(tool, args):
+        assert tool["tool_id"] == "calculate"
+        assert args == {"expression": "1234 * 567"}
+        return {"ok": True, "status": "success", "result": {"content": [{"type": "text", "text": "699678"}]}, "latency_ms": 1}
+
+    monkeypatch.setattr(svc, "generate_answer_for_tenant", fake_llm)
+    result = svc.run_agent_for_tenant(
+        object(),
+        uuid.uuid4(),
+        "calcule 1234 * 567",
+        "Use a ferramenta calculate para cálculos.",
+        ["chamar_mcp", "responder"],
+        {"mcp_tools": [{"tool_id": "calculate", "name": "calculate", "description": "Calculadora"}]},
+        options={"max_steps": 2, "fallback_message": "fallback"},
+        mcp_tool_executor=fake_mcp_executor,
+    )
+
+    assert result.fallback_used is False
+    assert result.message is not None
+    assert "699678" in result.message
+    assert result.message != "fallback"
+    assert any("699678" in str(message.get("content")) for message in seen_messages[1])
