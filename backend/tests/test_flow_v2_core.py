@@ -2209,3 +2209,59 @@ def test_message_wait_for_reply_then_ai_rag_wait_same_node() -> None:
     assert follow_up.current_node_id == "rag"
     sent_texts = [event["payload"].get("message") for event in event_store.events if event["event_type"] == str(FlowV2EventType.MESSAGE_SENT)]
     assert sent_texts == ["Escolha uma área", "Resposta IA/RAG", "Resposta IA/RAG"]
+
+
+def test_ai_agent_terminal_wait_same_node_processes_follow_up_without_restart_block(caplog, monkeypatch) -> None:
+    from app.flow_v2.executors import _legacy as legacy_executors
+    from app.services.ai_agent_service import AgentRunResult, AgentToolAction
+
+    def fake_run_agent(*_args, **_kwargs):
+        return AgentRunResult(
+            message="Resposta do agente",
+            actions=[AgentToolAction(type="message", data={"message": "Resposta do agente"})],
+            tools_used=[],
+            steps_count=1,
+            final_tool="responder",
+            status="success",
+            fallback_used=False,
+            metadata={},
+        )
+
+    monkeypatch.setattr(legacy_executors, "run_agent_for_tenant", fake_run_agent)
+    raw_snapshot = {
+        "schema_version": 1,
+        "start_node_id": "agent",
+        "nodes": [
+            {
+                "id": "agent",
+                "type": "ai_agent",
+                "data": {
+                    "isStart": True,
+                    "is_terminal": True,
+                    "endFlow": True,
+                    "input_template": "{{last_message}}",
+                    "allowed_tools": ["responder"],
+                    "after_agent_behavior": "wait_same_node",
+                    "allow_mcp_tools": True,
+                    "mcp_tool_ids": [],
+                },
+            }
+        ],
+        "edges": [],
+    }
+    executor, snapshot, event_store, _session, db = _executor(raw_snapshot)
+
+    with caplog.at_level("INFO"):
+        first = executor.handle_input(db, _input_with_text(snapshot, "wamid.agent.wait.1", "oi"))
+        second = executor.handle_input(db, _input_with_text(snapshot, "wamid.agent.wait.2", "outra pergunta"))
+
+    assert first.status == FlowV2SessionStatus.WAITING
+    assert first.current_node_id == "agent"
+    assert second.status == FlowV2SessionStatus.WAITING
+    assert second.current_node_id == "agent"
+    assert [action.as_effect()["text"] for action in first.actions] == ["Resposta do agente"]
+    assert [action.as_effect()["text"] for action in second.actions] == ["Resposta do agente"]
+    sent_texts = [event["payload"].get("message") for event in event_store.events if event["event_type"] == str(FlowV2EventType.MESSAGE_SENT)]
+    assert sent_texts == []
+    assert "SESSION RESTART BLOCKED" not in caplog.text
+    assert "ignore_future_message_auto_restart_disabled" not in caplog.text

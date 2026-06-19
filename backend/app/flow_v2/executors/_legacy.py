@@ -2209,7 +2209,10 @@ class AiExtractionNodeExecutor(AiStructuredNodeExecutor):
 
 
 def _normalize_ai_rag_after_answer_behavior(data: dict[str, Any]) -> AiRagAfterAnswerBehavior:
-    raw = data.get("after_answer_behavior", data.get("afterAnswerBehavior", AiRagAfterAnswerBehavior.END_FLOW))
+    raw = data.get(
+        "after_agent_behavior",
+        data.get("afterAgentBehavior", data.get("after_answer_behavior", data.get("afterAnswerBehavior", AiRagAfterAnswerBehavior.END_FLOW))),
+    )
     try:
         return AiRagAfterAnswerBehavior(str(raw).strip())
     except ValueError:

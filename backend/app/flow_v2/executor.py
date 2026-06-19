@@ -182,6 +182,27 @@ class FlowV2Executor:
             return output
 
 
+
+    @staticmethod
+    def _result_keeps_terminal_node_waiting(*, node: dict[str, Any], node_type: str, result: Any) -> bool:
+        if str(getattr(result, "status", "") or "") != "wait":
+            return False
+        data = FlowV2Executor._node_data(node)
+        normalized_node_type = str(node_type or "").strip().lower()
+        if normalized_node_type == "ai_agent":
+            behavior = str(
+                data.get("after_agent_behavior")
+                or data.get("afterAgentBehavior")
+                or data.get("after_answer_behavior")
+                or data.get("afterAnswerBehavior")
+                or ""
+            ).strip().lower()
+            return behavior == "wait_same_node" and (getattr(result, "next_node_id", None) in (None, str(node.get("id"))))
+        if normalized_node_type in {"ai_rag", "ai_response"}:
+            behavior = str(data.get("after_answer_behavior") or data.get("afterAnswerBehavior") or "").strip().lower()
+            return behavior == "wait_same_node" and (getattr(result, "next_node_id", None) in (None, str(node.get("id"))))
+        return False
+
     @staticmethod
     def _bind_numeric_choice_if_waiting(*, snapshot: FlowV2Snapshot, session: Any, runtime_input: RuntimeInput) -> None:
         current_node_id = str(getattr(session, "current_node_id", "") or "")
@@ -322,7 +343,7 @@ class FlowV2Executor:
                 if isinstance(action, SendMessageAction):
                     self._track_analytics(db, session=session, flow_id=flow_id, event_type="message_sent", node_id=node_id, node_type=node_type, metadata={"text": action.text})
 
-            if self._is_terminal_node(node):
+            if self._is_terminal_node(node) and not self._result_keeps_terminal_node_waiting(node=node, node_type=node_type, result=result):
                 logger.info(
                     "[SESSION FINISHED] node_id=%s node_type=%s reason=terminal_node_marked_end_flow actions_count=%s",
                     node_id,
