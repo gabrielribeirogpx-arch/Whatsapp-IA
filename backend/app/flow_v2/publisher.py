@@ -72,6 +72,8 @@ def _runtime_v2_node_payload(node: dict[str, Any]) -> dict[str, Any]:
     ).lower()
     if node_type in {"buttons", "buttons_node", "list", "list_node"}:
         return _legacy_interactive_node_to_choice(node, node_type)
+    if node_type == "ai_agent":
+        return _sanitize_ai_agent_node(node)
     if node_type != "choice":
         return normalize_delay_nodes([node])[0]
 
@@ -90,6 +92,71 @@ def _runtime_v2_node_payload(node: dict[str, Any]) -> dict[str, Any]:
     next_data["options"] = options
     next_node["data"] = next_data
     return next_node
+
+
+def _sanitize_ai_agent_node(node: dict[str, Any]) -> dict[str, Any]:
+    """Keep IA Agent MCP publication data to safe references only.
+
+    MCP credentials live on tenant integration/server records and must never be
+    copied into an immutable flow snapshot. The builder normally sends only
+    ``mcp_tool_ids``; this also handles richer MCP payloads defensively.
+    """
+    next_node = normalize_delay_nodes([node])[0]
+    data = _node_data(next_node)
+    if not data:
+        return next_node
+
+    next_data = dict(data)
+    if isinstance(next_data.get("mcp_tools"), list):
+        next_data["mcp_tools"] = [
+            _safe_mcp_tool_ref(item, next_data.get("max_mcp_calls"))
+            for item in next_data["mcp_tools"]
+            if isinstance(item, dict)
+        ]
+    if isinstance(next_data.get("mcpTools"), list):
+        next_data["mcpTools"] = [
+            _safe_mcp_tool_ref(
+                item, next_data.get("maxMcpCalls", next_data.get("max_mcp_calls"))
+            )
+            for item in next_data["mcpTools"]
+            if isinstance(item, dict)
+        ]
+    next_node = dict(next_node)
+    next_node["data"] = next_data
+    return next_node
+
+
+def _safe_mcp_tool_ref(
+    tool: dict[str, Any], default_max_calls: Any = None
+) -> dict[str, Any]:
+    safe: dict[str, Any] = {}
+    for source_key, target_key in (
+        ("tool_id", "tool_id"),
+        ("toolId", "tool_id"),
+        ("id", "tool_id"),
+        ("tool_name", "tool_name"),
+        ("toolName", "tool_name"),
+        ("name", "tool_name"),
+        ("server_id", "server_id"),
+        ("serverId", "server_id"),
+        ("integration_id", "integration_id"),
+        ("integrationId", "integration_id"),
+    ):
+        value = tool.get(source_key)
+        if value not in (None, "") and target_key not in safe:
+            safe[target_key] = str(value)
+    if "enabled" in tool:
+        safe["enabled"] = bool(tool.get("enabled"))
+    elif "is_enabled" in tool:
+        safe["enabled"] = bool(tool.get("is_enabled"))
+    else:
+        safe["enabled"] = True
+    raw_max_calls = tool.get("max_calls", tool.get("maxCalls", default_max_calls))
+    try:
+        safe["max_calls"] = max(0, min(int(raw_max_calls), 3))
+    except (TypeError, ValueError):
+        safe["max_calls"] = 3
+    return safe
 
 
 def _legacy_interactive_node_to_choice(node: dict[str, Any], node_type: str) -> dict[str, Any]:

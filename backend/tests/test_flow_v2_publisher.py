@@ -469,3 +469,78 @@ def test_ai_rag_end_flow_allows_missing_edge() -> None:
 
     result = FlowV2GraphValidator().validate(nodes=nodes, edges=[])
     assert result.status == GraphValidationStatus.VALID
+
+
+def test_ai_agent_with_global_model_and_mcp_tools_publishes_safe_snapshot() -> None:
+    nodes = [
+        {"id": "start", "type": "message", "data": {"isStart": True, "content": "Olá"}},
+        {
+            "id": "agent",
+            "type": "ai_agent",
+            "data": {
+                "instruction": "Use apenas ferramentas permitidas.",
+                "input_template": "{{last_message}}",
+                "allowed_tools": ["responder", "chamar_mcp"],
+                "allow_mcp_tools": True,
+                "mcp_tool_ids": ["tool-123"],
+                "mcp_tools": [
+                    {
+                        "tool_id": "tool-123",
+                        "tool_name": "consultar_pedido",
+                        "server_id": "server-456",
+                        "enabled": True,
+                        "max_calls": 2,
+                        "api_key": "must-not-be-snapshotted",
+                        "headers": {"Authorization": "Bearer secret"},
+                    }
+                ],
+                "model_override": "",
+                "max_tokens": 1200,
+                "max_mcp_calls": 2,
+                "max_steps": 3,
+                "after_answer_behavior": "end_flow",
+            },
+        },
+    ]
+    edges = [{"id": "e1", "source": "start", "target": "agent"}]
+
+    result = FlowV2Publisher().publish(nodes=nodes, edges=edges)
+
+    agent = _snapshot_node(result.snapshot, "agent")
+    assert agent["data"]["max_tokens"] == 1200
+    assert agent["data"]["mcp_tool_ids"] == ["tool-123"]
+    assert agent["data"]["mcp_tools"] == [
+        {
+            "tool_id": "tool-123",
+            "tool_name": "consultar_pedido",
+            "server_id": "server-456",
+            "enabled": True,
+            "max_calls": 2,
+        }
+    ]
+    serialized = str(agent["data"]).lower()
+    assert "api_key" not in serialized
+    assert "authorization" not in serialized
+    assert "headers" not in serialized
+
+
+def test_ai_agent_still_rejects_real_api_key() -> None:
+    nodes = [
+        {"id": "start", "type": "message", "data": {"isStart": True, "content": "Olá"}},
+        {
+            "id": "agent",
+            "type": "ai_agent",
+            "data": {
+                "instruction": "Responda.",
+                "allowed_tools": ["responder"],
+                "max_steps": 3,
+                "api_key": "sk-real-secret",
+            },
+        },
+    ]
+    edges = [{"id": "e1", "source": "start", "target": "agent"}]
+
+    with pytest.raises(FlowV2PublishError) as exc:
+        FlowV2Publisher().publish(nodes=nodes, edges=edges)
+
+    assert "FLOW_V2_AI_NODE_API_KEY_FORBIDDEN:agent" in exc.value.errors
