@@ -49,6 +49,7 @@ from app.api.whatsapp import router as whatsapp_router
 from app.api.runtime_health import router as runtime_health_router
 from app.api.runtime_metrics import router as runtime_metrics_router
 from app.api.runtime_flow_debug import router as runtime_flow_debug_router
+from app.api.debugger import router as debugger_router
 
 
 logger = logging.getLogger(__name__)
@@ -210,6 +211,7 @@ app.include_router(whatsapp_router, prefix="/api")
 app.include_router(runtime_health_router, prefix="/api")
 app.include_router(runtime_metrics_router, prefix="/api")
 app.include_router(runtime_flow_debug_router)
+app.include_router(debugger_router)
 
 
 # ✅ HEALTH
