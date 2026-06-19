@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.models.flow_ai_long_term_memory import FlowAILongTermMemory
 from app.services.vector_backend import JsonEmbeddingBackend
+from app.services.vector_store_service import VectorStoreService
 
 logger = logging.getLogger(__name__)
 ALLOWED_FACT_TYPES = {'custom','identity','contact','company','preference','product_interest','note'}
@@ -51,7 +52,12 @@ def store_fact(db: Session, tenant_id, contact_id, fact_text: str, fact_type='cu
     try: embedding = JsonEmbeddingBackend(db).embed_text(tenant_id, fact)
     except Exception as exc: logger.warning('[AI LTM] embedding_failed tenant_id=%s contact_id=%s error=%s', tenant_id, contact_id, type(exc).__name__)
     row = FlowAILongTermMemory(tenant_id=tenant_id, contact_id=contact_id, conversation_id=_uuid(conversation_id), session_id=_uuid(session_id), fact_text=fact, fact_embedding_json=embedding, fact_type=fact_type, importance_score=max(0, min(float(importance_score or 0.5), 1)), source=str(source)[:120] if source else None, metadata_json=dict(metadata or {}))
-    db.add(row); db.flush(); return row
+    db.add(row); db.flush()
+    try:
+        VectorStoreService(db).upsert_embedding(tenant_id=tenant_id, namespace="memory", object_id=row.id, content_text=fact, embedding=embedding, metadata={**dict(metadata or {}), "memory_type": fact_type}, importance_score=float(row.importance_score or 0))
+    except Exception as exc:
+        logger.warning('event=vector_store_error tenant_id=%s backend=unknown error_code=%s', tenant_id, type(exc).__name__)
+    return row
 
 
 def search_memory(db: Session, tenant_id, contact_id, query: str, top_k=5, min_similarity=0.25, fact_types=None):
@@ -61,6 +67,18 @@ def search_memory(db: Session, tenant_id, contact_id, query: str, top_k=5, min_s
     if fact_types: stmt = stmt.where(FlowAILongTermMemory.fact_type.in_([t for t in fact_types if t in ALLOWED_FACT_TYPES]))
     rows = db.execute(stmt.order_by(FlowAILongTermMemory.created_at.desc()).limit(200)).scalars().all()
     if not rows: return []
+    try:
+        vector_results = VectorStoreService(db).search_similar(tenant_id=tenant_id, namespace="memory", query_text=query or '', top_k=top_k, filters={"contact_id": contact_id}, min_score=float(min_similarity))
+        by_id = {str(r.id): r for r in rows}
+        scored = []
+        for item in vector_results:
+            row = by_id.get(str(item.get("memory_id") or item.get("id")))
+            if row:
+                scored.append((_serialize(row, float(item.get("score") or 0)), float(item.get("score") or 0)))
+        if scored:
+            return [x for x,_ in sorted(scored, key=lambda p:p[1], reverse=True)[:max(1,int(top_k or 5))]]
+    except Exception as exc:
+        logger.warning('event=vector_store_fallback tenant_id=%s backend=unknown error_code=%s', tenant_id, type(exc).__name__)
     backend = JsonEmbeddingBackend(db); q_emb = None
     try: q_emb = backend.embed_text(tenant_id, query or '') if query else None
     except Exception as exc: logger.warning('[AI LTM] query_embedding_failed tenant_id=%s contact_id=%s error=%s', tenant_id, contact_id, type(exc).__name__)

@@ -26,6 +26,7 @@ from app.services.embedding_service import (
     get_embedding_config_for_tenant,
 )
 from app.services.llm_service import generate_answer_for_tenant
+from app.services.vector_store_service import VectorStoreService
 
 logger = logging.getLogger(__name__)
 
@@ -67,8 +68,7 @@ RAG_TEXT_SEARCH_WEIGHT = _coerce_float(os.getenv("RAG_TEXT_SEARCH_WEIGHT"), defa
 RAG_VECTOR_SEARCH_WEIGHT = _coerce_float(os.getenv("RAG_VECTOR_SEARCH_WEIGHT"), default=0.65, field_name="vector_search_weight")
 RAG_MAX_REWRITE_QUERIES = _coerce_int(os.getenv("RAG_MAX_REWRITE_QUERIES"), default=4, field_name="max_rewrite_queries")
 RAG_MAX_CANDIDATE_CHUNKS = _coerce_int(os.getenv("RAG_MAX_CANDIDATE_CHUNKS"), default=1000, field_name="max_candidate_chunks")
-VECTOR_SEARCH_BACKEND = os.getenv("RAG_VECTOR_SEARCH_BACKEND", "json_embedding").strip().lower() or "json_embedding"
-# TODO: migrar VectorSearchBackend para pgvector/Qdrant quando o volume exigir.
+VECTOR_SEARCH_BACKEND = (os.getenv("VECTOR_BACKEND") or os.getenv("RAG_VECTOR_SEARCH_BACKEND", "json_embedding")).strip().lower() or "json_embedding"
 FALLBACK_MESSAGE = "Não encontrei essa informação com segurança na base disponível. Quer que eu encaminhe para um atendente?"
 DEFAULT_RESPONSE_STYLE = "whatsapp_short"
 SUPPORTED_RESPONSE_STYLES = {"whatsapp_short", "whatsapp_detailed", "formal", "technical"}
@@ -198,6 +198,10 @@ def ingest_knowledge_source(db: Session, *, tenant_id: uuid.UUID, source: Knowle
                 chunk_row = KnowledgeChunk(tenant_id=tenant_id, source_id=source.id, source=source.name, chunk_index=chunk_index, title=source.name, content=chunk, embedding=None, embedding_json=embedding, metadata_json=metadata)
                 db.add(chunk_row)
                 db.flush()
+                try:
+                    VectorStoreService(db).upsert_embedding(tenant_id=tenant_id, namespace="document", object_id=chunk_row.id, content_text=chunk, embedding=embedding, metadata=metadata | {"source_id": str(source.id), "embedding_model": embedding_config.get("model")})
+                except Exception as exc:
+                    logger.warning("event=vector_store_error tenant_id=%s backend=unknown error_code=%s", tenant_id, type(exc).__name__)
                 logger.info(
                     "[KNOWLEDGE EMBEDDING] tenant_id=%s source_id=%s chunk_id=%s provider=%s model=%s status=%s dimensions=%s",
                     tenant_id, source.id, chunk_row.id, embedding_config.get("provider"), embedding_config.get("model"), embedding_status, len(embedding or []),
@@ -499,14 +503,15 @@ def retrieve_context(db: Session, tenant_id: uuid.UUID, query: str, top_k: int =
         text_candidates: list[dict[str, Any]] = []
         for q in queries:
             try:
-                q_embedding = generate_embedding_for_tenant(db, tenant_id, q) if VECTOR_SEARCH_BACKEND == "json_embedding" else []
+                vector_results = VectorStoreService(db).search_similar(tenant_id=tenant_id, namespace="document", query_text=q, top_k=RAG_MAX_CANDIDATE_CHUNKS, filters=filters, min_score=MIN_SIMILARITY_SCORE)
             except Exception:
-                q_embedding = []
-            if q_embedding:
-                for chunk, source_name in _load_candidate_chunks(db, tenant_id, filters=filters, embeddings_only=True):
-                    score = cosine_similarity(getattr(chunk, "embedding_json", None), q_embedding)
-                    if score >= MIN_SIMILARITY_SCORE:
-                        vector_candidates.append(_candidate_metadata(chunk, source_name, score=score, mode="vector", vector_score=score))
+                vector_results = []
+            for result in vector_results:
+                vector_candidates.append({
+                    "source_id": result.get("source_id", ""), "source_name": result.get("source_name"), "chunk_id": result.get("chunk_id") or result.get("id"), "content": result.get("content"),
+                    "score": float(result.get("score") or 0), "final_score": float(result.get("score") or 0), "vector_score": float(result.get("score") or 0), "text_score": 0.0,
+                    "retrieval_mode": "vector", "matched_query_count": 1, "page": (result.get("metadata") or {}).get("page"), "metadata": result.get("metadata") or {},
+                })
             text_candidates.extend(_textual_retrieve_context(db, tenant_id, q, top_k=20, filters=filters, original_question=query))
         merged = _merge_candidates([*vector_candidates, *text_candidates])
         selected = _rerank_candidates(merged, query, queries, top_k)
@@ -534,6 +539,10 @@ def reindex_knowledge_source(db: Session, *, tenant_id: uuid.UUID, source_id: uu
         try:
             embedding = generate_embedding_for_tenant(db, tenant_id, chunk.content)
             chunk.embedding_json = embedding
+            try:
+                VectorStoreService(db).upsert_embedding(tenant_id=tenant_id, namespace="document", object_id=chunk.id, content_text=chunk.content, embedding=embedding, metadata=metadata | {"source_id": str(source_id), "embedding_model": embedding_config.get("model")})
+            except Exception as exc:
+                logger.warning("event=vector_store_error tenant_id=%s backend=unknown error_code=%s", tenant_id, type(exc).__name__)
             metadata.update({
                 "embedding_provider": embedding_config.get("provider"),
                 "embedding_model": embedding_config.get("model"),
