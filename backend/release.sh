@@ -3,7 +3,7 @@ set -euo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")"
 
-if [ -n "${RAILWAY_SERVICE_NAME:-}" ] && [ "${RAILWAY_SERVICE_NAME}" != "Backend" ]; then
+if [ -n "${RAILWAY_SERVICE_NAME:-}" ] && [ "${RAILWAY_SERVICE_NAME}" != "Backend" ] && [ "${RAILWAY_SERVICE_NAME}" != "Migration Service" ]; then
   echo "Skipping release migrations for Railway service: ${RAILWAY_SERVICE_NAME}"
   exit 0
 fi

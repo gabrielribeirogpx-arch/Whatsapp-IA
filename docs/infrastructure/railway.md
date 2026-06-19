@@ -5,7 +5,8 @@ Este documento registra decisões operacionais do deploy no Railway para reduzir
 ## Escopo
 
 - Backend FastAPI executado como serviço web.
-- Worker Python para processamento assíncrono.
+- Migration Service dedicado e one-shot para migrations Alembic.
+- Workers Python para processamento assíncrono.
 - Frontend Next.js como serviço separado quando publicado no Railway.
 - Postgres gerenciado pelo Railway via `DATABASE_URL`.
 - Redis gerenciado pelo Railway via `REDIS_URL` para filas/worker.
@@ -17,7 +18,7 @@ O repositório contém configurações explícitas e implícitas usadas pelo Rai
 1. O Railway detecta o runtime a partir dos arquivos do repositório.
 2. A versão Python é declarada em `runtime.txt` como `python-3.11`.
 3. O `railway.json` **não** define `deploy.preDeployCommand` global. Configurações versionadas são compartilhadas por Backend, workers e Frontend no monorepo; por isso migrations Alembic não devem rodar por configuração global do `railway.json`.
-4. O `release.sh` da raiz continua disponível como roteador idempotente: no contexto da raiz do monorepo ele delega para `backend/release.sh`; no contexto de `/backend` o próprio `backend/release.sh` executa as migrations; em contextos não-backend ele faz no-op. `backend/release.sh` chama `scripts/run_release_migrations.py`, que serializa execuções concorrentes com um advisory lock do Postgres. Operacionalmente, migrations devem rodar em uma etapa isolada do Backend ou manualmente, nunca como pre-deploy global compartilhado por workers/Frontend.
+4. O `release.sh` da raiz continua disponível como roteador idempotente: no contexto da raiz do monorepo ele delega para `backend/release.sh`; no contexto de `/backend` o próprio `backend/release.sh` executa as migrations; em contextos não-backend ele faz no-op. `backend/release.sh` chama `scripts/run_release_migrations.py`, que serializa execuções concorrentes com um advisory lock do Postgres. Operacionalmente, migrations devem rodar somente no serviço Railway dedicado **Migration Service** ou manualmente, nunca como `preDeployCommand` global compartilhado por Backend, workers ou Frontend.
 5. O serviço backend usa o `Procfile`:
    - `release`: compatibilidade com Procfile/Heroku-style, entrando em `backend` e executando `bash release.sh`.
    - `web`: entra em `backend` e inicia `backend/start.sh`, que apenas valida conectividade/schema antes do Uvicorn.
@@ -48,8 +49,8 @@ Conclusão operacional: a versão Python versionada no repositório está em `ru
 
 | Variável | Serviço | Obrigatória | Descrição |
 | --- | --- | --- | --- |
-| `MISE_PYTHON_GITHUB_ATTESTATIONS=false` | Backend/Worker Python | Sim no Railway enquanto o incidente persistir | Workaround para falhas de verificação de GitHub Artifact Attestations no mise/Railpack antes da instalação das dependências. |
-| `DATABASE_URL` | Backend/Worker | Sim em produção | URL do Postgres gerenciado pelo Railway. |
+| `MISE_PYTHON_GITHUB_ATTESTATIONS=false` | Migration Service/Backend/Worker Python | Sim no Railway enquanto o incidente persistir | Workaround para falhas de verificação de GitHub Artifact Attestations no mise/Railpack antes da instalação das dependências. |
+| `DATABASE_URL` | Migration Service/Backend/Worker | Sim em produção | URL do Postgres gerenciado pelo Railway. |
 | `REDIS_URL` | Worker/Backend que usa fila | Sim quando filas estão habilitadas | URL do Redis gerenciado pelo Railway para RQ/filas. |
 | `PYTHONPATH` | Backend/Worker | Conforme imagem/pipeline | Deve permitir imports do pacote `backend/app`; no Dockerfile atual é `/app/backend`. |
 | `RUN_RELEASE_MIGRATIONS=true` | Serviço isolado de Release/Migrations ou pre-deploy configurado apenas no Backend via Dashboard | Opcional, somente fora do `railway.json` global | Pode ser usada em uma etapa isolada para executar `bash release.sh` e aplicar migrations Alembic antes do start do backend. Não configurar como variável operacional de workers ou Frontend. |
@@ -77,14 +78,28 @@ Conclusão operacional: a versão Python versionada no repositório está em `ru
 
 ## Railway services
 
+
+### Migration Service
+
+Responsável exclusivamente por aplicar migrations Alembic em produção/staging antes do Backend e dos workers iniciarem.
+
+- Nome do serviço Railway: `Migration Service`.
+- Start Command: `python backend/migration_service.py`.
+- O processo delega para `backend/release.sh`, que chama `backend/scripts/run_release_migrations.py` e executa `alembic upgrade head` sob advisory lock PostgreSQL.
+- Encerra com código `0` após concluir com sucesso.
+- Não inicia Uvicorn/FastAPI, não inicia RQ Worker, não inicia Delay Worker, não consome filas e não deve ficar rodando permanentemente.
+- Deve compartilhar `DATABASE_URL` com os serviços Python do ambiente. Não precisa de `REDIS_URL`.
+- Logs esperados: `event=migration_service_started`, `event=migration_service_acquired_lock`, `event=migration_service_running_upgrade`, `event=migration_service_completed` ou `event=migration_service_failed`.
+- Se outro processo estiver segurando o advisory lock, o serviço falha antes de executar Alembic; aguarde a execução em andamento terminar e redeploye apenas o `Migration Service`.
+- Comando manual equivalente: `cd backend && bash release.sh`.
+
 ### Backend
 
 Responsável pela API FastAPI, webhooks da Meta/WhatsApp, autenticação de tenant, SSE e orquestração de IA.
 
-- Start atual pelo `Procfile`: `cd backend && bash start.sh`.
+- Start Command: `bash backend/start.sh`.
 - Não executa migrations no processo web; apenas valida conectividade do banco e se o schema está no Alembic head antes de subir a API.
-- As migrations Alembic devem rodar somente em etapa isolada do Backend ou manualmente; o `railway.json` global não deve executar migrations.
-- Configuração ideal: criar um serviço Railway separado chamado `Release/Migrations` para executar `bash release.sh`, ou configurar `preDeployCommand` somente no serviço Backend pelo Dashboard do Railway, nunca via `railway.json` global do monorepo.
+- As migrations Alembic devem rodar somente no `Migration Service`; o `railway.json` global não deve executar migrations.
 - Comando manual emergencial: `cd backend && bash release.sh`.
 - Depende de Postgres (`DATABASE_URL`) em produção.
 - Deve receber `MISE_PYTHON_GITHUB_ATTESTATIONS=false` no Railway enquanto o problema de attestation do mise/Railpack puder ocorrer.
@@ -93,7 +108,9 @@ Responsável pela API FastAPI, webhooks da Meta/WhatsApp, autenticação de tena
 
 Responsável por tarefas assíncronas e filas RQ.
 
-- Start atual pelo `Procfile`: `python backend/worker_rq.py`.
+- Start Command RQ Worker: `python backend/worker_rq.py`.
+- Start Command RQ Worker 2: `python backend/worker_rq.py`.
+- Start Command Delay Worker: `python backend/worker.py`.
 - Antes de consumir jobs, valida `DATABASE_URL`, `REDIS_URL`, conectividade com Postgres/Redis e se o schema está no Alembic head.
 - Depende de Redis (`REDIS_URL`) quando filas estão habilitadas.
 - Deve usar a mesma versão Python efetiva do backend.
@@ -106,7 +123,7 @@ Responsável por tarefas assíncronas e filas RQ.
 Responsável pela interface Next.js.
 
 - Código em `frontend/`.
-- Configuração esperada do serviço Railway Frontend: Root Directory `/frontend`, builder Railpack/Node, build command `npm run build`, start command `npm run start` e variável `NEXT_PUBLIC_API_URL` apontando para a URL pública do backend.
+- Configuração esperada do serviço Railway Frontend: Root Directory `/frontend`, builder Railpack/Node, build command `npm run build`, Start Command `npm run start` e variável `NEXT_PUBLIC_API_URL` apontando para a URL pública do backend.
 - É Node/Railpack e não executa migrations Alembic nem scripts de release do backend.
 - Não deve receber `RUN_RELEASE_MIGRATIONS=true` e não deve ser afetado por `preDeployCommand` global; o `railway.json` do monorepo não executa migrations.
 - Depende de `NEXT_PUBLIC_API_URL` apontando para o backend correto por ambiente.

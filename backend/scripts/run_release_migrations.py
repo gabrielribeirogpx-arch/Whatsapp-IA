@@ -22,9 +22,13 @@ def main() -> int:
     with psycopg2.connect(database_url) as conn:
         conn.autocommit = True
         with conn.cursor() as cursor:
-            cursor.execute("SELECT pg_advisory_lock(%s)", (ALEMBIC_RELEASE_LOCK_ID,))
+            cursor.execute("SELECT pg_try_advisory_lock(%s)", (ALEMBIC_RELEASE_LOCK_ID,))
+            lock_acquired = bool(cursor.fetchone()[0])
+            if not lock_acquired:
+                raise RuntimeError("Alembic release advisory lock is already held")
             try:
-                print("[RELEASE] Alembic advisory lock acquired", flush=True)
+                print("event=migration_service_acquired_lock", flush=True)
+                print("event=migration_service_running_upgrade", flush=True)
                 subprocess.run(["alembic", "upgrade", "head"], check=True)
                 print("[RELEASE] Alembic upgrade head completed", flush=True)
             finally:

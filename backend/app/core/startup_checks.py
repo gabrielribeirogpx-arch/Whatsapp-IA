@@ -96,20 +96,35 @@ def run_migrations_if_enabled() -> None:
     logger.info("event=migrations_applied_on_start")
 
 
-def verify_alembic_at_head() -> None:
+def check_database_revision() -> dict[str, object]:
+    """Return the current and expected Alembic revisions for troubleshooting."""
     cfg = alembic_config()
     script = ScriptDirectory.from_config(cfg)
-    expected_heads = set(script.get_heads())
+    expected_heads = sorted(script.get_heads())
     from app.db.session import engine
 
     with engine.connect() as connection:
-        current_heads = set(MigrationContext.configure(connection).get_current_heads())
-    if current_heads != expected_heads:
+        current_heads = sorted(MigrationContext.configure(connection).get_current_heads())
+
+    return {
+        "current_revision": current_heads[0] if len(current_heads) == 1 else current_heads,
+        "expected_revision": expected_heads[0] if len(expected_heads) == 1 else expected_heads,
+        "at_head": current_heads == expected_heads,
+    }
+
+
+def verify_alembic_at_head() -> None:
+    revision = check_database_revision()
+    if not revision["at_head"]:
+        current_revision = revision["current_revision"]
+        expected_revision = revision["expected_revision"]
+        current_heads = current_revision if isinstance(current_revision, list) else [current_revision]
+        expected_heads = expected_revision if isinstance(expected_revision, list) else [expected_revision]
         raise RuntimeError(
             "Database migrations are not at Alembic head; run `alembic upgrade head` in the release/deploy step "
             f"before starting services. current={sorted(current_heads)} expected={sorted(expected_heads)}"
         )
-    logger.info("event=alembic_head_verified heads=%s", sorted(current_heads))
+    logger.info("event=alembic_head_verified heads=%s", revision["current_revision"])
 
 
 def verify_required_env_vars(*names: str) -> None:
