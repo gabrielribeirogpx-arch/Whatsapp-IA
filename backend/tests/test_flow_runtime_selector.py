@@ -205,3 +205,145 @@ def test_human_conversation_does_not_dispatch_v2_runtime() -> None:
     assert result.automation_skipped is True
     assert result.should_run_v1 is False
     assert worker.calls == []
+
+
+def test_restart_keyword_metadata_forces_v2_restart_without_public_payload_change() -> None:
+    tenant_id = uuid.uuid4()
+    flow_version_id = uuid.uuid4()
+    worker = _FakeWorker()
+    flow_id = uuid.uuid4()
+    flow = SimpleNamespace(id=flow_id, runtime="v2", published_version_id=flow_version_id)
+    conversation = SimpleNamespace(id=uuid.uuid4(), current_flow_id=flow_id)
+    public_metadata = {"source": "test", "provider_id": "provider-1"}
+
+    FlowRuntimeSelector(runtime_worker=worker).dispatch(
+        db=object(),
+        flow=flow,
+        tenant_id=tenant_id,
+        phone="5511999999999",
+        message_text="olá",
+        conversation=conversation,
+        metadata=public_metadata,
+    )
+
+    input_event = worker.calls[0]["input_event"]
+    assert input_event.metadata["restart_keyword"] == "ola"
+    assert input_event.metadata["auto_restart_flow"] is True
+    assert input_event.metadata["flow_id"] == str(flow_id)
+    assert public_metadata == {"source": "test", "provider_id": "provider-1"}
+
+
+def test_numeric_choice_does_not_set_restart_metadata() -> None:
+    worker = _FakeWorker()
+    flow = SimpleNamespace(id=uuid.uuid4(), runtime="v2", published_version_id=uuid.uuid4())
+
+    FlowRuntimeSelector(runtime_worker=worker).dispatch(
+        db=object(),
+        flow=flow,
+        tenant_id=uuid.uuid4(),
+        phone="5511999999999",
+        message_text="1",
+        conversation=SimpleNamespace(id=uuid.uuid4(), current_flow_id=flow.id),
+    )
+
+    assert "restart_keyword" not in worker.calls[0]["input_event"].metadata
+    assert "auto_restart_flow" not in worker.calls[0]["input_event"].metadata
+
+
+def test_restart_keyword_archives_active_v2_session_and_starts_at_snapshot_start() -> None:
+    from app.flow_v2.contracts import FlowV2SessionStatus, RuntimeInput
+    from app.flow_v2.models import FlowV2Session
+    from app.flow_v2.session_manager import FlowV2SessionManager
+
+    tenant_id = uuid.uuid4()
+    flow_version_id = uuid.uuid4()
+    previous = FlowV2Session(
+        id=uuid.uuid4(),
+        tenant_id=tenant_id,
+        flow_version_id=flow_version_id,
+        external_user_id="5511999999999",
+        status=str(FlowV2SessionStatus.WAITING),
+        current_node_id="old-condition-false-node",
+    )
+
+    class _Result:
+        def scalar_one_or_none(self):
+            return previous
+
+    class _FakeDb:
+        def __init__(self):
+            self.added = []
+        def execute(self, *_args, **_kwargs):
+            return _Result()
+        def add(self, obj):
+            self.added.append(obj)
+        def flush(self):
+            for obj in self.added:
+                if getattr(obj, "id", None) is None:
+                    obj.id = uuid.uuid4()
+
+    class _Events:
+        def append(self, *args, **kwargs):
+            return None
+
+    db = _FakeDb()
+    runtime_input = RuntimeInput(
+        tenant_id=tenant_id,
+        flow_version_id=flow_version_id,
+        external_user_id="5511999999999",
+        message_text="oi",
+        metadata={"restart_keyword": "oi", "auto_restart_flow": True},
+    )
+
+    session = FlowV2SessionManager(event_store=_Events()).get_or_create(
+        db,
+        runtime_input=runtime_input,
+        snapshot=SimpleNamespace(start_node_id="start-node", hash="hash-1"),
+    )
+
+    assert previous.status == str(FlowV2SessionStatus.COMPLETED)
+    assert session is not previous
+    assert session.current_node_id == "start-node"
+    assert session.status == str(FlowV2SessionStatus.RUNNING)
+
+
+def test_active_waiting_v2_session_continues_for_numeric_choice() -> None:
+    from app.flow_v2.contracts import FlowV2SessionStatus, RuntimeInput
+    from app.flow_v2.models import FlowV2Session
+    from app.flow_v2.session_manager import FlowV2SessionManager
+
+    tenant_id = uuid.uuid4()
+    flow_version_id = uuid.uuid4()
+    previous = FlowV2Session(
+        id=uuid.uuid4(),
+        tenant_id=tenant_id,
+        flow_version_id=flow_version_id,
+        external_user_id="5511999999999",
+        status=str(FlowV2SessionStatus.WAITING),
+        current_node_id="choice-node",
+    )
+
+    class _Result:
+        def scalar_one_or_none(self):
+            return previous
+    class _FakeDb:
+        def execute(self, *_args, **_kwargs):
+            return _Result()
+    class _Events:
+        def append(self, *args, **kwargs):
+            raise AssertionError("should not create a new session")
+
+    session = FlowV2SessionManager(event_store=_Events()).get_or_create(
+        _FakeDb(),
+        runtime_input=RuntimeInput(
+            tenant_id=tenant_id,
+            flow_version_id=flow_version_id,
+            external_user_id="5511999999999",
+            message_text="1",
+            metadata={},
+        ),
+        snapshot=SimpleNamespace(start_node_id="start-node", hash="hash-1"),
+    )
+
+    assert session is previous
+    assert session.current_node_id == "choice-node"
