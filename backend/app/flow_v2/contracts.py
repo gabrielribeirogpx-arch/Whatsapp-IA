@@ -63,6 +63,8 @@ class RuntimeInput:
 
     def __post_init__(self) -> None:
         metadata = dict(self.metadata or {})
+        if self.message_text is not None and not metadata.get("message_text"):
+            metadata["message_text"] = str(self.message_text)
         choice_id = metadata.get("selected_row_id") or metadata.get("interactive_reply_id")
         if choice_id:
             if not metadata.get("row_id"):
