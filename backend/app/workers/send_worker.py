@@ -38,8 +38,34 @@ from app.services.whatsapp_message_service import (
 from app.services.whatsapp_credentials_service import WhatsAppCredentialsNotConfiguredError, get_tenant_whatsapp_credentials
 from app.integrations.meta.meta_cloud_client import MetaApiError
 from app.services.job_queue_service import unwrap_job_envelope
+from app.observability import TraceContext, TraceEventType, record_event
 
 logger = logging.getLogger(__name__)
+
+
+def _build_trace_context_best_effort(message_data: dict[str, Any], **overrides: Any) -> TraceContext | None:
+    try:
+        return TraceContext.from_mapping(message_data, **overrides)
+    except Exception as exc:
+        logger.warning("[SEND_WORKER OBSERVABILITY WARNING] failed_to_build_trace_context error=%s", exc, exc_info=True)
+        return None
+
+
+def _record_observability_event_best_effort(
+    trace: TraceContext | dict[str, Any] | None,
+    event_type: TraceEventType | str,
+    *,
+    metadata: dict[str, Any] | None = None,
+) -> None:
+    try:
+        record_event(None, trace, event_type, metadata=metadata)
+    except Exception as exc:
+        logger.warning(
+            "[SEND_WORKER OBSERVABILITY WARNING] failed_to_record_event event_type=%s error=%s",
+            event_type.value if isinstance(event_type, TraceEventType) else event_type,
+            exc,
+            exc_info=True,
+        )
 
 
 def _payload_summary(payload: Any, limit: int = 1200) -> str:
@@ -605,8 +631,8 @@ def send_whatsapp_message(*, message_data: dict[str, Any]) -> None:
     flow_send_source = message_data.get("flow_send_source")
     flow_session_id = message_data.get("session_id")
     conversation_id = str(message_data.get("conversation_id") or "") or None
-    trace = TraceContext.from_mapping(message_data, tenant_id=tenant_id, conversation_id=conversation_id, flow_id=flow_id)
-    record_event(None, trace, TraceEventType.WORKER_STARTED, metadata={"job_id": job_id, "queue": getattr(current_job, "origin", None), "node_id": node_id})
+    trace = _build_trace_context_best_effort(message_data, tenant_id=tenant_id, conversation_id=conversation_id, flow_id=flow_id)
+    _record_observability_event_best_effort(trace, TraceEventType.WORKER_STARTED, metadata={"job_id": job_id, "queue": getattr(current_job, "origin", None), "node_id": node_id})
     is_flow_message = bool(flow_id or flow_version_id or session_id or node_id or sequence_number_raw is not None)
     payload_provider_id = str(message_data.get("provider_id") or "unresolved")
     is_media_message = message_type_hint == "media" or bool(media_type or media_url)
@@ -1176,13 +1202,10 @@ def send_whatsapp_message(*, message_data: dict[str, Any]) -> None:
                 flow_session_id=flow_session_id,
                 node_id=node_id,
             )
-        record_event(None, trace, TraceEventType.MESSAGE_SENT, metadata={"job_id": job_id, "message_type": message_type, "node_id": node_id, "provider_id": provider_id})
+        _record_observability_event_best_effort(trace, TraceEventType.MESSAGE_SENT, metadata={"job_id": job_id, "message_type": message_type, "node_id": node_id, "provider_id": provider_id})
         logger.info("[WORKER EXIT SUCCESS] job_id=%s", job_id)
     except Exception as exc:
-        try:
-            record_event(None, trace, TraceEventType.MESSAGE_FAILED, metadata={"job_id": job_id, "error": type(exc).__name__})
-        except Exception:
-            pass
+        _record_observability_event_best_effort(trace, TraceEventType.MESSAGE_FAILED, metadata={"job_id": job_id, "error": type(exc).__name__})
         logger.exception("[WORKER EXIT FAILURE] job_id=%s reason=unhandled_exception", job_id)
         raise
     finally:
