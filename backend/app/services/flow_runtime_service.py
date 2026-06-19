@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from app.services.flow_engine_service import get_flow_for_builder
 from app.services.flow_session_service import FlowSessionService
 from app.services.message_origin_trace import log_message_origin_trace
+from app.observability import TraceContext, TraceEventType, record_event
 
 
 logger = logging.getLogger(__name__)
@@ -158,6 +159,8 @@ async def execute_node_chain_until_reply(
         }
 
     context = context or {}
+    trace_context = TraceContext.from_mapping(context, tenant_id=tenant_id, flow_id=context.get("flow_id"))
+    record_event(db, trace_context, TraceEventType.FLOW_SELECTED, metadata={"start_node_id": start_node_id, "nodes_count": len(graph.get("nodes", []) if isinstance(graph, dict) else [])})
     nodes = graph.get("nodes", []) if isinstance(graph, dict) else []
     edges = graph.get("edges", []) if isinstance(graph, dict) else []
     node_map = {str(n.get("id")): n for n in nodes if isinstance(n, dict) and n.get("id") is not None}
@@ -181,10 +184,12 @@ async def execute_node_chain_until_reply(
     while cursor:
         node = node_map.get(str(cursor))
         if not node:
+            record_event(db, trace_context, TraceEventType.NODE_FAILED, metadata={"node_id": str(cursor), "error": "node_not_found"})
             break
         ntype = _node_type(node)
         data = node.get("data") if isinstance(node.get("data"), dict) else {}
         logger.info("[CORE NODE TYPE] node_id=%s node_type=%s", cursor, ntype)
+        record_event(db, trace_context, TraceEventType.NODE_EXECUTED, metadata={"node_id": str(cursor), "node_type": ntype})
 
         if ntype == "message":
             reply = str(data.get("text") or data.get("content") or data.get("label") or "")
@@ -401,6 +406,7 @@ async def execute_node_chain_until_reply(
 
         cursor = find_next(str(cursor))
 
+    record_event(db, trace_context, TraceEventType.EXECUTION_FINISHED, metadata={"response_node_id": response_node_id, "events_count": len(events)})
     return _result(pending=False, events=events, response_node_id=response_node_id, next_node_id=None)
 
 
