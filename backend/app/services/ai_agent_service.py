@@ -16,6 +16,11 @@ from app.services.llm_service import generate_answer_for_tenant
 from app.services.circuit_breaker_service import CircuitBreakerOpen, check_circuit, record_failure, record_success
 from app.services.execution_budget_service import ExecutionBudgetExceeded, ExecutionBudget
 from app.services.long_term_memory_service import ALLOWED_FACT_TYPES, SECRET_RE, store_fact
+from app.tools import ToolContext, ToolRegistry
+from app.tools.adapters.mcp_tool_adapter import MCPToolAdapter
+from app.tools.adapters.node_tool_adapter import NodeToolAdapter
+from app.tools.adapters.subflow_tool_adapter import SubflowToolAdapter
+from app.tools.adapters.webhook_tool_adapter import WebhookToolAdapter
 
 SAFE_VARIABLE_RE = re.compile(r"^[A-Za-z0-9_.]+$")
 FORBIDDEN_NAME_PARTS = ("api_key", "apikey", "token", "secret", "password")
@@ -160,6 +165,12 @@ def run_agent_for_tenant(db: Session, tenant_id, input_text: str, instruction: s
     max_mcp_calls = min(max(int(opts.get("max_mcp_calls") or 3), 0), 3)
     state: list[dict[str, Any]] = []
     result = AgentRunResult()
+    tool_context = ToolContext(tenant_id=tenant_id, execution_budget=budget, trace_id=str(opts.get("trace_id") or opts.get("correlation_id") or ""), metadata={"source": "ai_agent"})
+    tool_registry = ToolRegistry()
+    tool_registry.register(NodeToolAdapter(node_tool_executor))
+    tool_registry.register(SubflowToolAdapter(subflow_tool_executor))
+    tool_registry.register(MCPToolAdapter(mcp_tool_executor))
+    tool_registry.register(WebhookToolAdapter(_call_webhook, validate_webhook_config))
     if not allowed:
         return AgentRunResult(message=fallback, status="error", fallback_used=True, final_tool="responder", steps_count=0)
     for step in range(max_steps):
@@ -227,7 +238,8 @@ def run_agent_for_tenant(db: Session, tenant_id, input_text: str, instruction: s
             try:
                 if budget is not None:
                     budget.consume_node_tool_call()
-                tool_result = node_tool_executor(match, tool_input, str(args.get("reason") or "")[:200])
+                registry_result = tool_registry.execute("node_tool", tool_id, tool_input, tool_context, {"node_tools": node_tools, "reason": str(args.get("reason") or "")[:200], "consume_budget": False})
+                tool_result = {"status": "success" if registry_result.ok else "error", "output": registry_result.output, "error": registry_result.error_code, **(registry_result.metadata or {})}
             except ExecutionBudgetExceeded:
                 return AgentRunResult(message=fallback, status="budget_exceeded", fallback_used=True, steps_count=step + 1, final_tool=tool, tools_used=result.tools_used, metadata={**(budget.safe_metadata() if budget else {}), "budget_exceeded": True})
             node_tool_calls.append({"tool_id": tool_id, "status": tool_result.get("status"), "node_type": tool_result.get("node_type")})
@@ -250,7 +262,8 @@ def run_agent_for_tenant(db: Session, tenant_id, input_text: str, instruction: s
             try:
                 if budget is not None:
                     budget.consume_subflow_call()
-                tool_result = subflow_tool_executor(match, tool_input, str(args.get("reason") or "")[:200])
+                registry_result = tool_registry.execute("subflow_tool", tool_id, tool_input, tool_context, {"subflow_tools": subflow_tools, "reason": str(args.get("reason") or "")[:200], "consume_budget": False})
+                tool_result = {"status": "success" if registry_result.ok else "error", "output": registry_result.output, "error": registry_result.error_code, **(registry_result.metadata or {})}
             except ExecutionBudgetExceeded:
                 return AgentRunResult(message=fallback, status="budget_exceeded", fallback_used=True, steps_count=step + 1, final_tool=tool, tools_used=result.tools_used, metadata={**(budget.safe_metadata() if budget else {}), "budget_exceeded": True})
             subflow_tool_calls.append({"tool_id": tool_id, "status": tool_result.get("status"), "flow_id": tool_result.get("flow_id"), "duration_ms": tool_result.get("duration_ms")})
@@ -269,7 +282,8 @@ def run_agent_for_tenant(db: Session, tenant_id, input_text: str, instruction: s
                 state.append({"tool": tool, "tool_id": tool_id, "ok": False, "error": "mcp_tool_limit"})
                 continue
             try:
-                tool_result = mcp_tool_executor(match, tool_input)
+                registry_result = tool_registry.execute("mcp_tool", tool_id, tool_input, tool_context, {"mcp_tools": mcp_tools})
+                tool_result = {"ok": registry_result.ok, "status": "success" if registry_result.ok else "error", "result": registry_result.output, "error": registry_result.error_code, **(registry_result.metadata or {})}
             except ExecutionBudgetExceeded:
                 return AgentRunResult(message=fallback, status="budget_exceeded", fallback_used=True, steps_count=step + 1, final_tool=tool, tools_used=result.tools_used, metadata={**(budget.safe_metadata() if budget else {}), "budget_exceeded": True})
             mcp_call = {"tool_id": tool_id, "status": tool_result.get("status"), "latency_ms": tool_result.get("latency_ms"), "error": tool_result.get("error")}
@@ -302,7 +316,8 @@ def run_agent_for_tenant(db: Session, tenant_id, input_text: str, instruction: s
                 state.append({"tool": tool, "ok": False, "error": "webhook_not_allowed"})
                 continue
             try:
-                webhook_result = _call_webhook(webhook, args.get("payload") if isinstance(args.get("payload"), dict) else {}, budget=budget, tenant_id=tenant_id)
+                registry_result = tool_registry.execute("webhook", webhook_id, args.get("payload") if isinstance(args.get("payload"), dict) else {}, tool_context, {"webhooks": webhooks})
+                webhook_result = {"ok": registry_result.ok, **(registry_result.output if isinstance(registry_result.output, dict) else {}), "error": registry_result.error_code}
             except ExecutionBudgetExceeded:
                 return AgentRunResult(message=fallback, status="budget_exceeded", fallback_used=True, steps_count=step + 1, final_tool=tool, tools_used=result.tools_used, metadata={**(budget.safe_metadata() if budget else {}), "budget_exceeded": True})
             result.actions.append(AgentToolAction("webhook", {"webhook_id": webhook_id, "ok": webhook_result.get("ok"), "status_code": webhook_result.get("status_code")}))
