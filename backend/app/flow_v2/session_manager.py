@@ -44,6 +44,7 @@ class FlowV2SessionManager:
 
         self._lock_active_session_identity(db, runtime_input=runtime_input)
         auto_restart = _metadata_allows_auto_restart(runtime_input.metadata)
+        restart_requested = _metadata_requests_restart(runtime_input.metadata)
         session = db.execute(
             select(FlowV2Session)
             .where(
@@ -53,6 +54,19 @@ class FlowV2SessionManager:
             )
             .order_by(FlowV2Session.started_at.desc())
         ).scalar_one_or_none()
+        previous_session_id = getattr(session, "id", None) if session is not None else None
+        if session is not None and restart_requested and str(session.status) in {str(FlowV2SessionStatus.RUNNING), str(FlowV2SessionStatus.WAITING)}:
+            session.status = str(FlowV2SessionStatus.COMPLETED)
+            session.updated_at = datetime.utcnow()
+            db.add(session)
+            db.flush()
+            logger.info(
+                "event=flow_restart_keyword_detected previous_session_id=%s new_session_id=%s reason=restart_keyword",
+                session.id,
+                None,
+            )
+            session = None
+
         if session is not None and str(session.status) in {str(FlowV2SessionStatus.RUNNING), str(FlowV2SessionStatus.WAITING)}:
             if str(session.status) == str(FlowV2SessionStatus.WAITING):
                 logger.info(
@@ -94,6 +108,12 @@ class FlowV2SessionManager:
         )
         db.add(session)
         db.flush()
+        if restart_requested:
+            logger.info(
+                "event=flow_restart_keyword_detected previous_session_id=%s new_session_id=%s reason=restart_keyword",
+                previous_session_id,
+                session.id,
+            )
         self.event_store.append(
             db,
             session=session,
@@ -135,6 +155,10 @@ class FlowV2SessionManager:
             node_id,
         )
         db.add(session)
+
+
+def _metadata_requests_restart(metadata: dict | None) -> bool:
+    return bool((metadata or {}).get("restart_keyword"))
 
 
 def _metadata_allows_auto_restart(metadata: dict | None) -> bool:

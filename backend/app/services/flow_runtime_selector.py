@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import unicodedata
 from dataclasses import dataclass
 from typing import Any
 from uuid import UUID
@@ -21,6 +22,7 @@ FLOW_RUNTIME_SELECTOR = "flow.runtime"
 FLOW_RUNTIME_V1 = "v1"
 FLOW_RUNTIME_V2 = "v2"
 SUPPORTED_FLOW_RUNTIMES = {FLOW_RUNTIME_V1, FLOW_RUNTIME_V2}
+RESTART_KEYWORDS = {"oi", "ola", "menu", "iniciar", "comecar", "start"}
 
 
 @dataclass(frozen=True)
@@ -33,6 +35,18 @@ class FlowRuntimeDispatchResult:
     @property
     def should_run_v1(self) -> bool:
         return self.runtime == FLOW_RUNTIME_V1 and not self.processed_by_v2 and not self.automation_skipped
+
+
+def normalize_restart_keyword(message_text: str | None) -> str:
+    text = str(message_text or "").strip().lower()
+    text = "".join(
+        char for char in unicodedata.normalize("NFKD", text) if not unicodedata.combining(char)
+    )
+    return " ".join(text.split())
+
+
+def is_restart_keyword(message_text: str | None) -> bool:
+    return normalize_restart_keyword(message_text) in RESTART_KEYWORDS
 
 
 def resolve_flow_runtime(flow: Flow | None) -> str:
@@ -67,8 +81,16 @@ def resolve_runtime_flow_for_conversation(
         )
         return None
 
+    restart_requested = is_restart_keyword(message_text)
+    if restart_requested:
+        logger.info(
+            "event=flow_restart_keyword_detected tenant_id=%s conversation_id=%s reason=restart_keyword",
+            tenant_id,
+            getattr(conversation, "id", None),
+        )
+
     current_flow_id = getattr(conversation, "current_flow_id", None) or getattr(conversation, "current_flow", None)
-    if current_flow_id:
+    if current_flow_id and not restart_requested:
         current_flow = db.execute(
             select(Flow).where(
                 Flow.id == current_flow_id,
@@ -206,9 +228,14 @@ class FlowRuntimeSelector:
         runtime_metadata.setdefault("conversation_id", str(conversation.id) if conversation else None)
         runtime_metadata.setdefault("contact_id", str(contact_id) if contact_id else None)
         runtime_metadata.setdefault("flow_runtime_selector", FLOW_RUNTIME_SELECTOR)
+        if is_restart_keyword(message_text):
+            runtime_metadata["restart_keyword"] = normalize_restart_keyword(message_text)
+            runtime_metadata["auto_restart_flow"] = True
         selection_reason = runtime_metadata.get("selected_flow_reason") or (
             "conversation_current_flow_id" if conversation and getattr(conversation, "current_flow_id", None) == flow.id else "provided_flow"
         )
+        if runtime_metadata.get("restart_keyword"):
+            selection_reason = "restart_keyword"
         logger.info(
             "[V2 FLOW SELECTED]\ntenant_id=%s\nflow_id=%s\nflow_version_id=%s\nreason=%s",
             tenant_id,
