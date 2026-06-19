@@ -13,6 +13,7 @@ from urllib.parse import urlparse
 from sqlalchemy.orm import Session
 
 from app.services.llm_service import generate_answer_for_tenant
+from app.context_engine import UnifiedContextEngine
 from app.services.circuit_breaker_service import CircuitBreakerOpen, check_circuit, record_failure, record_success
 from app.services.execution_budget_service import ExecutionBudgetExceeded, ExecutionBudget
 from app.services.long_term_memory_service import ALLOWED_FACT_TYPES, SECRET_RE, store_fact
@@ -173,6 +174,13 @@ def run_agent_for_tenant(db: Session, tenant_id, input_text: str, instruction: s
     tool_registry.register(WebhookToolAdapter(_call_webhook, validate_webhook_config))
     if not allowed:
         return AgentRunResult(message=fallback, status="error", fallback_used=True, final_tool="responder", steps_count=0)
+    try:
+        package = UnifiedContextEngine(db).build(tenant_id=tenant_id, execution_context={"tenant_id": str(tenant_id), "trace_id": tool_context.trace_id, "tool_outputs": state}, budget=budget, flags={"include_short_memory": False, "include_long_memory": False, "include_rag_context": False})
+        result.metadata["unified_context_engine"] = True
+        if package.safe_metadata.get("context_reduced"):
+            result.metadata["context_reduced"] = package.safe_metadata.get("context_reduced")
+    except Exception:
+        result.metadata["unified_context_engine"] = False
     for step in range(max_steps):
         system = "\n".join([
             str(instruction or "Você é um agente de atendimento. Use apenas as ferramentas permitidas."),
