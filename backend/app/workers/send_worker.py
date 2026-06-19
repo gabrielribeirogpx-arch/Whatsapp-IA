@@ -605,6 +605,8 @@ def send_whatsapp_message(*, message_data: dict[str, Any]) -> None:
     flow_send_source = message_data.get("flow_send_source")
     flow_session_id = message_data.get("session_id")
     conversation_id = str(message_data.get("conversation_id") or "") or None
+    trace = TraceContext.from_mapping(message_data, tenant_id=tenant_id, conversation_id=conversation_id, flow_id=flow_id)
+    record_event(None, trace, TraceEventType.WORKER_STARTED, metadata={"job_id": job_id, "queue": getattr(current_job, "origin", None), "node_id": node_id})
     is_flow_message = bool(flow_id or flow_version_id or session_id or node_id or sequence_number_raw is not None)
     payload_provider_id = str(message_data.get("provider_id") or "unresolved")
     is_media_message = message_type_hint == "media" or bool(media_type or media_url)
@@ -1174,8 +1176,13 @@ def send_whatsapp_message(*, message_data: dict[str, Any]) -> None:
                 flow_session_id=flow_session_id,
                 node_id=node_id,
             )
+        record_event(None, trace, TraceEventType.MESSAGE_SENT, metadata={"job_id": job_id, "message_type": message_type, "node_id": node_id, "provider_id": provider_id})
         logger.info("[WORKER EXIT SUCCESS] job_id=%s", job_id)
-    except Exception:
+    except Exception as exc:
+        try:
+            record_event(None, trace, TraceEventType.MESSAGE_FAILED, metadata={"job_id": job_id, "error": type(exc).__name__})
+        except Exception:
+            pass
         logger.exception("[WORKER EXIT FAILURE] job_id=%s reason=unhandled_exception", job_id)
         raise
     finally:

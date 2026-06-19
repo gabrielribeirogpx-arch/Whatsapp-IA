@@ -8,6 +8,8 @@ import traceback
 import uuid
 from typing import Any
 
+from app.observability import TraceContext, TraceEventType, record_event
+
 from redis import Redis
 from rq import Queue
 
@@ -175,6 +177,9 @@ def _on_send_failure(job, connection, type_, value, traceback) -> None:  # noqa:
 
 def enqueue_send_message(message_data: dict[str, Any]) -> str | None:
     tenant_id = message_data.get("tenant_id")
+    trace = TraceContext.from_mapping(message_data if isinstance(message_data, dict) else {})
+    record_event(None, trace, TraceEventType.JOB_ENQUEUED, metadata={"queue": "send", "payload": message_data})
+
     phone = str(message_data.get("phone") or "")
     correlation_id = str(message_data.get("correlation_id") or message_data.get("message_id") or "n/a")
     content = str(message_data.get("text") or "").strip()

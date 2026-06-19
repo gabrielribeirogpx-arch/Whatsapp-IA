@@ -20,6 +20,7 @@ from app.services.long_term_memory_service import ALLOWED_FACT_TYPES, SECRET_RE,
 from app.tools import ToolContext, ToolRegistry
 from app.tools.adapters.mcp_tool_adapter import MCPToolAdapter
 from app.tools.adapters.node_tool_adapter import NodeToolAdapter
+from app.observability import TraceContext, TraceEventType, record_event
 from app.tools.adapters.subflow_tool_adapter import SubflowToolAdapter
 from app.tools.adapters.webhook_tool_adapter import WebhookToolAdapter
 
@@ -147,6 +148,8 @@ def _call_webhook(webhook: dict[str, Any], payload: Any, budget: ExecutionBudget
 
 def run_agent_for_tenant(db: Session, tenant_id, input_text: str, instruction: str, allowed_tools: list[str], tool_configs: dict[str, Any] | None, memory_context: str | None = None, options: dict[str, Any] | None = None, node_tool_executor=None, subflow_tool_executor=None, mcp_tool_executor=None, budget: ExecutionBudget | None = None) -> AgentRunResult:
     started = time.monotonic()
+    trace = TraceContext.from_mapping(options or {}, tenant_id=tenant_id)
+    record_event(db, trace, TraceEventType.AI_AGENT_STARTED, metadata={"allowed_tools": allowed_tools, "has_memory_context": bool(memory_context)})
     opts = options or {}
     fallback = str(opts.get("fallback_message") or "Não consegui concluir essa ação agora. Quer que eu encaminhe para um atendente?")
     max_steps = min(max(int(opts.get("max_steps") or 3), 1), 5)
@@ -205,7 +208,10 @@ def run_agent_for_tenant(db: Session, tenant_id, input_text: str, instruction: s
                 budget.consume_llm_call(prompt_tokens_estimate=approx_prompt, completion_tokens_estimate=int(opts.get("max_tokens") or 1200))
         except ExecutionBudgetExceeded:
             return AgentRunResult(message=fallback, status="budget_exceeded", fallback_used=True, steps_count=step, final_tool="responder", metadata={**(budget.safe_metadata() if budget else {}), "budget_exceeded": True})
+        llm_started = time.monotonic()
+        record_event(db, trace, TraceEventType.LLM_REQUEST, metadata={"step": step + 1, "model": opts.get("chat_model"), "messages_count": len(messages), "prompt": "[REDACTED]"})
         raw = generate_answer_for_tenant(db, tenant_id, messages, options={k: v for k, v in {"chat_model": opts.get("chat_model"), "temperature": opts.get("temperature", 0.2), "max_tokens": opts.get("max_tokens", 1200)}.items() if v not in (None, "")})
+        record_event(db, trace, TraceEventType.LLM_RESPONSE, duration_ms=int((time.monotonic() - llm_started) * 1000), metadata={"step": step + 1, "response_size": len(str(raw or ""))})
         decision = _safe_json_loads(raw)
         result.steps_count = step + 1
         if not decision:
@@ -340,5 +346,7 @@ def run_agent_for_tenant(db: Session, tenant_id, input_text: str, instruction: s
         result.status = "error"
         result.fallback_used = True
         result.final_tool = "responder"
-    result.metadata = {"latency_ms": int((time.monotonic() - started) * 1000), "node_tools_used": node_tool_calls, "node_tool_calls_count": len(node_tool_calls), "subflow_tools_used": subflow_tool_calls, "subflow_calls_count": len(subflow_tool_calls), "subflow_results_summary": subflow_tool_calls, "mcp_tools_used": mcp_tool_calls, "mcp_call_count": len(mcp_tool_calls), "mcp_latency_ms": sum(int(c.get("latency_ms") or 0) for c in mcp_tool_calls), "mcp_status": "error" if any(c.get("status") != "success" for c in mcp_tool_calls) else ("success" if mcp_tool_calls else "not_used"), "mcp_error_sanitized": next((c.get("error") for c in mcp_tool_calls if c.get("error")), None), "subflow_errors": [c for c in subflow_tool_calls if c.get("status") != "success"], "timeout_count": len([c for c in subflow_tool_calls if c.get("status") == "timeout"]), "blocked_tool_calls": blocked_tool_calls, "max_steps_reached": result.fallback_used, "memory_saved_count": len([item for item in state if item.get("tool") == "salvar_memoria" and item.get("ok")]), **(budget.safe_metadata() if budget else {})}
+    total_latency_ms = int((time.monotonic() - started) * 1000)
+    record_event(db, trace, TraceEventType.AI_AGENT_FINISHED, duration_ms=total_latency_ms, metadata={"status": result.status, "final_tool": result.final_tool, "tools_used": result.tools_used})
+    result.metadata = {"latency_ms": total_latency_ms, "node_tools_used": node_tool_calls, "node_tool_calls_count": len(node_tool_calls), "subflow_tools_used": subflow_tool_calls, "subflow_calls_count": len(subflow_tool_calls), "subflow_results_summary": subflow_tool_calls, "mcp_tools_used": mcp_tool_calls, "mcp_call_count": len(mcp_tool_calls), "mcp_latency_ms": sum(int(c.get("latency_ms") or 0) for c in mcp_tool_calls), "mcp_status": "error" if any(c.get("status") != "success" for c in mcp_tool_calls) else ("success" if mcp_tool_calls else "not_used"), "mcp_error_sanitized": next((c.get("error") for c in mcp_tool_calls if c.get("error")), None), "subflow_errors": [c for c in subflow_tool_calls if c.get("status") != "success"], "timeout_count": len([c for c in subflow_tool_calls if c.get("status") == "timeout"]), "blocked_tool_calls": blocked_tool_calls, "max_steps_reached": result.fallback_used, "memory_saved_count": len([item for item in state if item.get("tool") == "salvar_memoria" and item.get("ok")]), **(budget.safe_metadata() if budget else {})}
     return result

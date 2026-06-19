@@ -37,6 +37,7 @@ from app.utils.phone import normalize_phone
 from app.utils.text import normalize_text
 from app.services.queue import enqueue_send_message
 from app.services.webhook_ingress import enqueue_webhook_payload
+from app.observability import TraceContext, TraceEventType, record_event
 from app.services.tenant_service import resolve_tenant_by_phone_number_id
 
 router = APIRouter()
@@ -704,6 +705,8 @@ async def verify(
 async def webhook(request: Request, db: Session = Depends(get_db)):
     # Endpoint canônico de entrada Meta: ACK imediato + enqueue no worker.
     # Mantemos esse endpoint sem prefixo porque já é usado por integrações atuais.
+    trace = TraceContext()
+    record_event(None, trace, TraceEventType.WEBHOOK_RECEIVED, metadata={"path": str(request.url.path), "headers": dict(request.headers)})
     await enqueue_webhook_payload(request)
     return {"status": "received"}
 

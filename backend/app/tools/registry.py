@@ -8,6 +8,7 @@ from app.services.execution_budget_service import ExecutionBudgetExceeded
 from app.tools.base import BaseToolAdapter, ToolResult
 from app.tools.context import ToolContext, sanitize_metadata
 from app.tools.errors import ToolNotFound, ToolRegistryError
+from app.observability import TraceContext, TraceEventType, record_event
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +34,8 @@ class ToolRegistry:
         adapter = self._adapters.get(str(tool_type))
         safe = {"tenant_id": str(context.tenant_id or ""), "tool_type": str(tool_type), "tool_id": str(tool_id), "trace_id": context.trace_id, "budget_snapshot": context.budget_snapshot()}
         logger.info("event=tool_registry_execute %s", sanitize_metadata(safe))
+        trace = TraceContext.from_mapping({"trace_id": context.trace_id, "tenant_id": context.tenant_id, "conversation_id": context.conversation_id, "flow_id": context.flow_id})
+        record_event(None, trace, TraceEventType.TOOL_CALLED, metadata={**safe, "input": input})
         if adapter is None:
             logger.warning("event=tool_registry_blocked %s", {**safe, "error_code": "tool_not_found"})
             return ToolResult(False, str(tool_type), tool_id=str(tool_id), error_code="tool_not_found", metadata=safe)
@@ -46,6 +49,7 @@ class ToolRegistry:
             result = adapter.execute(str(tool_id), input, context, config or {})
             result.metadata = sanitize_metadata({**safe, **(result.metadata or {}), "duration_ms": int((time.monotonic() - started) * 1000)})
             logger.info("event=tool_registry_success %s", {**safe, "duration_ms": result.metadata.get("duration_ms"), "ok": result.ok, "error_code": result.error_code})
+            record_event(None, trace, TraceEventType.TOOL_FINISHED, duration_ms=result.metadata.get("duration_ms"), metadata={**safe, "ok": result.ok, "error_code": result.error_code})
             return result
         except ExecutionBudgetExceeded as exc:
             if context.execution_budget is not None:

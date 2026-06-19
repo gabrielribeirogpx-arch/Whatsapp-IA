@@ -17,6 +17,7 @@ from app.models.tenant_mcp import TenantMCPServer, TenantMCPTool
 from app.utils.encryption import decrypt_secret, encrypt_secret
 from app.services.execution_budget_service import ExecutionBudget, ExecutionBudgetExceeded
 from app.services.circuit_breaker_service import CircuitBreakerOpen, check_circuit, record_failure, record_success
+from app.observability import TraceContext, TraceEventType, record_event
 
 logger = logging.getLogger(__name__)
 ALLOWED_TRANSPORTS = {"http", "sse", "stdio_future"}
@@ -180,6 +181,8 @@ def discover_mcp_tools(db: Session, tenant_id: uuid.UUID, server_id: uuid.UUID) 
 
 def call_mcp_tool(db: Session, tenant_id: uuid.UUID, tool_id: uuid.UUID | str, arguments: dict[str, Any] | None, timeout_seconds: int = MAX_TIMEOUT_SECONDS, budget: ExecutionBudget | None = None) -> dict[str, Any]:
     started = time.monotonic()
+    trace = TraceContext(tenant_id=str(tenant_id))
+    record_event(db, trace, TraceEventType.MCP_CALLED, metadata={"tool_id": str(tool_id), "arguments": arguments})
     if budget is not None:
         try:
             budget.consume_mcp_call()
@@ -216,10 +219,14 @@ def call_mcp_tool(db: Session, tenant_id: uuid.UUID, tool_id: uuid.UUID | str, a
         raw = response.json()
         ok = not (isinstance(raw, dict) and raw.get("error"))
         result = (raw.get("result") if isinstance(raw, dict) else raw)
-        return {"ok": ok, "status": "success" if ok else "error", "tool_id": str(tool.id), "tool_name": tool.tool_name, "latency_ms": int((time.monotonic() - started) * 1000), "result": sanitize_value(result), "error": sanitize_value(raw.get("error")) if isinstance(raw, dict) else None}
+        out = {"ok": ok, "status": "success" if ok else "error", "tool_id": str(tool.id), "tool_name": tool.tool_name, "latency_ms": int((time.monotonic() - started) * 1000), "result": sanitize_value(result), "error": sanitize_value(raw.get("error")) if isinstance(raw, dict) else None}
+        record_event(db, trace, TraceEventType.MCP_FINISHED, duration_ms=out["latency_ms"], metadata=out)
+        return out
     except (requests.RequestException, ValueError, TimeoutError) as exc:
         status = getattr(getattr(exc, "response", None), "status_code", None)
         if status is None or status >= 500 or status == 429 or isinstance(exc, (requests.Timeout, requests.ConnectionError, TimeoutError)):
             record_failure(circuit_key, reason=f"mcp_call:{status or type(exc).__name__}")
         logger.warning("[MCP CALL FAILED] tenant_id=%s tool_id=%s error=%s circuit_breaker_key_hash=%s", tenant_id, tool.id, type(exc).__name__, cb_meta.get("circuit_breaker_key_hash"))
-        return {"ok": False, "status": "timeout" if "timeout" in type(exc).__name__.lower() else "error", "tool_id": str(tool.id), "tool_name": tool.tool_name, "latency_ms": int((time.monotonic() - started) * 1000), "error": type(exc).__name__}
+        out = {"ok": False, "status": "timeout" if "timeout" in type(exc).__name__.lower() else "error", "tool_id": str(tool.id), "tool_name": tool.tool_name, "latency_ms": int((time.monotonic() - started) * 1000), "error": type(exc).__name__}
+        record_event(db, trace, TraceEventType.MCP_FINISHED, duration_ms=out["latency_ms"], metadata=out)
+        return out
