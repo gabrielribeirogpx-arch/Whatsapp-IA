@@ -761,6 +761,71 @@ def test_waiting_message_to_condition_resumes_with_next_user_message() -> None:
     assert [event["payload"]["target_node_id"] for event in event_store.events if event["event_type"] == "TRANSITION_SELECTED"] == ["final"]
 
 
+def test_menu_reply_two_resumes_conditions_and_routes_to_comercial() -> None:
+    raw_snapshot = {
+        "schema_version": 1,
+        "start_node_id": "start",
+        "nodes": [
+            {"id": "start", "type": "message", "content": "Menu inicial: 1 Suporte, 2 Comercial"},
+            {"id": "condition_1", "type": "condition", "data": {"keywords": ["1"]}},
+            {"id": "condition_2", "type": "condition", "data": {"keywords": ["2"]}},
+            {"id": "suporte", "type": "message", "content": "Suporte"},
+            {"id": "comercial", "type": "message", "content": "Comercial"},
+            {"id": "fallback", "type": "message", "content": "Opção inválida"},
+        ],
+        "edges": [
+            {"id": "e1", "source": "start", "target": "condition_1"},
+            {"id": "e2", "source": "condition_1", "sourceHandle": "true", "target": "suporte"},
+            {"id": "e3", "source": "condition_1", "sourceHandle": "false", "target": "condition_2"},
+            {"id": "e4", "source": "condition_2", "sourceHandle": "true", "target": "comercial"},
+            {"id": "e5", "source": "condition_2", "sourceHandle": "false", "target": "fallback"},
+        ],
+    }
+    executor, snapshot, event_store, session, db = _executor(raw_snapshot)
+
+    initial = executor.handle_input(db, _input_with_text(snapshot, "wamid.menu.initial.2", "oi"))
+    resumed = executor.handle_input(db, _input_with_text(snapshot, "wamid.menu.reply.2", "2"))
+
+    assert initial.status == FlowV2SessionStatus.WAITING
+    assert initial.current_node_id == "condition_1"
+    assert resumed.status == FlowV2SessionStatus.COMPLETED
+    assert resumed.current_node_id is None
+    assert session.status == FlowV2SessionStatus.COMPLETED
+    assert resumed.effects == ({"type": "send_message", "text": "Comercial"},)
+    condition_events = [event for event in event_store.events if event["event_type"] == "CONDITION_EVALUATED"]
+    assert [event["node_id"] for event in condition_events] == ["condition_1", "condition_2"]
+    assert [event["payload"]["message"] for event in condition_events] == ["2", "2"]
+    assert [event["payload"]["result"] for event in condition_events] == [False, True]
+
+
+def test_message_to_condition_wait_logs_waiting_for_reply(caplog) -> None:
+    raw_snapshot = {
+        "schema_version": 1,
+        "start_node_id": "start",
+        "nodes": [
+            {"id": "start", "type": "message", "content": "Menu inicial"},
+            {"id": "check", "type": "condition", "data": {"keywords": ["1"]}},
+            {"id": "final", "type": "message", "content": "okk1"},
+            {"id": "fallback", "type": "message", "content": "Opção inválida"},
+        ],
+        "edges": [
+            {"id": "e1", "source": "start", "target": "check"},
+            {"id": "e2", "source": "check", "sourceHandle": "true", "target": "final"},
+            {"id": "e3", "source": "check", "sourceHandle": "false", "target": "fallback"},
+        ],
+    }
+    executor, snapshot, _event_store, _session, db = _executor(raw_snapshot)
+
+    with caplog.at_level("INFO", logger="app.flow_v2.executors._legacy"):
+        executor.handle_input(db, _input_with_text(snapshot, "wamid.menu.log", "oi"))
+
+    assert any(
+        "event=message_node_waiting_for_reply" in record.message
+        and "message_node_id=start" in record.message
+        and "next_node_id=check" in record.message
+        for record in caplog.records
+    )
+
 def test_start_message_to_message_chain_continues_automatically() -> None:
     raw_snapshot = {
         "schema_version": 1,
