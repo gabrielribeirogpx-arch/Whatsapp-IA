@@ -68,6 +68,16 @@ A versão Python versionada no repositório está em `runtime.txt` como `python-
 
 Para detalhes operacionais, variáveis críticas, serviços Railway, Postgres, Redis, worker, backend e frontend, consulte `docs/infrastructure/railway.md`.
 
+### Migration Service dedicado no Railway
+
+As migrations Alembic devem ser aplicadas por um serviço Railway separado chamado `Migration Service`, com Start Command:
+
+```bash
+python backend/migration_service.py
+```
+
+Esse serviço é one-shot: executa `backend/release.sh`, reaproveita `backend/scripts/run_release_migrations.py`, usa advisory lock PostgreSQL, aplica `alembic upgrade head` e encerra. Backend e workers continuam apenas validando `verify_alembic_at_head()` antes de iniciar e não devem receber `preDeployCommand` global de migrations.
+
 ## Proteção anti-bot (Cloudflare Turnstile)
 Os fluxos públicos de maior risco (`/login`, `/register` e `/forgot-password`) usam Cloudflare Turnstile no frontend e validação server-side no backend antes de consultar/criar credenciais. A API também aplica rate limit básico em memória por IP e por hash de email para reduzir brute force, spam e enumeração.
 
