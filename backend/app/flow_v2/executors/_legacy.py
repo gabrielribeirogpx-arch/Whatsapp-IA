@@ -270,6 +270,14 @@ class MessageNodeExecutor(BaseNodeExecutor):
         # boundary: the condition must evaluate the next inbound user message,
         # not the message that triggered the current runtime call.
         wait_after_start_condition = next_node_type == "condition"
+        user_input_next_node_types = {"condition"}
+        wait_after_user_input_next_node = next_node_type in user_input_next_node_types
+        if wait_after_user_input_next_node and next_node_id is not None:
+            logger.info(
+                "event=message_node_waiting_for_reply message_node_id=%s next_node_id=%s",
+                node_id,
+                next_node_id,
+            )
         wait_for_reply = _is_truthy_node_flag(
             node.get("wait_for_reply")
             if "wait_for_reply" in node
@@ -278,10 +286,10 @@ class MessageNodeExecutor(BaseNodeExecutor):
         status = (
             "complete"
             if next_node_id is None
-            else ("wait" if wait_for_reply or wait_after_start_condition else "continue")
+            else ("wait" if wait_for_reply or wait_after_user_input_next_node else "continue")
         )
         logger.info(
-            "[MESSAGE AUTO CONTINUE] node_id=%s next_node_id=%s next_node_type=%s status=%s auto_continue=%s legacy_wait_after_start_condition=%s wait_after_start_condition=%s wait_for_reply=%s next_node_is_interactive=%s blocking_condition=%s",
+            "[MESSAGE AUTO CONTINUE] node_id=%s next_node_id=%s next_node_type=%s status=%s auto_continue=%s legacy_wait_after_start_condition=%s wait_after_start_condition=%s wait_after_user_input_next_node=%s wait_for_reply=%s next_node_is_interactive=%s blocking_condition=%s",
             node_id,
             next_node_id,
             next_node_type,
@@ -289,6 +297,7 @@ class MessageNodeExecutor(BaseNodeExecutor):
             status == "continue",
             legacy_wait_after_start_condition,
             wait_after_start_condition,
+            wait_after_user_input_next_node,
             wait_for_reply,
             next_node_is_interactive,
             "none",
