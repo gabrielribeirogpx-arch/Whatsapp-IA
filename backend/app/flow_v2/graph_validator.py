@@ -403,17 +403,53 @@ class FlowV2GraphValidator:
                 errors.append(f"FLOW_V2_AI_OUTPUT_VARIABLE_INVALID:{node_id}")
 
     def _contains_forbidden_secret(self, value: Any) -> bool:
-        forbidden = ("api_key", "apikey", "token", "secret", "password", "openai_api_key", "provider_api_key")
+        """Return True when a graph payload embeds credential material.
+
+        Uses precise credential field names instead of broad substring matching
+        so safe runtime fields such as ``max_tokens`` and MCP tool references
+        are not interpreted as API keys.
+        """
         if isinstance(value, dict):
             for key, item in value.items():
-                key_l = str(key).lower()
-                if any(part in key_l for part in forbidden) and str(item or "").strip():
+                if self._is_forbidden_secret_key(key) and str(item or "").strip():
                     return True
                 if self._contains_forbidden_secret(item):
                     return True
         elif isinstance(value, list):
             return any(self._contains_forbidden_secret(item) for item in value)
         return False
+
+    @staticmethod
+    def _is_forbidden_secret_key(key: Any) -> bool:
+        normalized = re.sub(r"[^a-z0-9]", "_", str(key).strip().lower()).strip("_")
+        if not normalized:
+            return False
+        forbidden_exact = {
+            "api_key",
+            "apikey",
+            "openai_api_key",
+            "provider_api_key",
+            "secret",
+            "client_secret",
+            "password",
+            "credential",
+            "credentials",
+            "headers",
+            "authorization",
+            "cookie",
+            "token",
+            "access_token",
+            "refresh_token",
+            "auth_token",
+            "bearer_token",
+        }
+        if normalized in forbidden_exact:
+            return True
+        return (
+            normalized.endswith("_api_key")
+            or normalized.endswith("_secret")
+            or normalized.endswith("_token")
+        )
 
     def _is_internal_url(self, url: str) -> bool:
         parsed = urlparse(str(url or ""))
