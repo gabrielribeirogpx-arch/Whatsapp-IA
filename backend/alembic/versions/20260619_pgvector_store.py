@@ -6,9 +6,7 @@ Create Date: 2026-06-19
 """
 from __future__ import annotations
 
-import sqlalchemy as sa
 from alembic import op
-from sqlalchemy.dialects import postgresql
 
 revision = "20260619_pgvector"
 down_revision = "20260618_worker_dlq"
@@ -16,59 +14,94 @@ branch_labels = None
 depends_on = None
 
 
-def _vector_type() -> sa.Text:
-    return sa.Text()
+PGVECTOR_DIMENSION = 1536
+
+
+def _vector_type_sql() -> str:
+    """Return the fixed pgvector type used by this migration.
+
+    Migrations must be deterministic, so do not read PGVECTOR_DIMENSION from the
+    runtime environment here. The application default is 1536 and the vector
+    indexes below require a fixed vector(N) column.
+    """
+    return f"vector({PGVECTOR_DIMENSION})"
+
+
+def _ensure_vector_column(table_name: str) -> None:
+    op.execute(
+        f"""
+        ALTER TABLE {table_name}
+        ALTER COLUMN embedding TYPE {_vector_type_sql()}
+        USING embedding::{_vector_type_sql()}
+        """
+    )
 
 
 def upgrade() -> None:
     op.execute("CREATE EXTENSION IF NOT EXISTS vector")
-    op.create_table(
-        "document_chunk_embeddings",
-        sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True, nullable=False),
-        sa.Column("tenant_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False),
-        sa.Column("source_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("knowledge_sources.id", ondelete="CASCADE"), nullable=True),
-        sa.Column("chunk_id", sa.Text(), nullable=False),
-        sa.Column("content_hash", sa.Text(), nullable=False),
-        sa.Column("content_text", sa.Text(), nullable=True),
-        sa.Column("embedding", _vector_type(), nullable=False),
-        sa.Column("embedding_model", sa.Text(), nullable=True),
-        sa.Column("metadata", postgresql.JSONB(astext_type=sa.Text()), nullable=False, server_default="{}"),
-        sa.Column("created_at", sa.DateTime(), nullable=False, server_default=sa.text("now()")),
-        sa.Column("updated_at", sa.DateTime(), nullable=False, server_default=sa.text("now()")),
+
+    op.execute(
+        f"""
+        CREATE TABLE IF NOT EXISTS document_chunk_embeddings (
+            id UUID PRIMARY KEY NOT NULL,
+            tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+            source_id UUID NULL REFERENCES knowledge_sources(id) ON DELETE CASCADE,
+            chunk_id TEXT NOT NULL,
+            content_hash TEXT NOT NULL,
+            content_text TEXT NULL,
+            embedding {_vector_type_sql()} NOT NULL,
+            embedding_model TEXT NULL,
+            metadata JSONB NOT NULL DEFAULT '{{}}',
+            created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT now(),
+            updated_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT now()
+        )
+        """
     )
-    op.execute("ALTER TABLE document_chunk_embeddings ALTER COLUMN embedding TYPE vector USING embedding::vector")
-    op.create_table(
-        "long_term_memory_embeddings",
-        sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True, nullable=False),
-        sa.Column("tenant_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False),
-        sa.Column("conversation_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("conversations.id", ondelete="SET NULL"), nullable=True),
-        sa.Column("contact_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("contacts.id", ondelete="SET NULL"), nullable=True),
-        sa.Column("external_user_id", sa.Text(), nullable=True),
-        sa.Column("memory_id", sa.Text(), nullable=True),
-        sa.Column("memory_type", sa.Text(), nullable=True),
-        sa.Column("content_hash", sa.Text(), nullable=False),
-        sa.Column("memory_text", sa.Text(), nullable=True),
-        sa.Column("embedding", _vector_type(), nullable=False),
-        sa.Column("embedding_model", sa.Text(), nullable=True),
-        sa.Column("metadata", postgresql.JSONB(astext_type=sa.Text()), nullable=False, server_default="{}"),
-        sa.Column("importance_score", sa.Float(), nullable=True),
-        sa.Column("created_at", sa.DateTime(), nullable=False, server_default=sa.text("now()")),
-        sa.Column("updated_at", sa.DateTime(), nullable=False, server_default=sa.text("now()")),
-        sa.Column("expires_at", sa.DateTime(), nullable=True),
+    _ensure_vector_column("document_chunk_embeddings")
+
+    op.execute(
+        f"""
+        CREATE TABLE IF NOT EXISTS long_term_memory_embeddings (
+            id UUID PRIMARY KEY NOT NULL,
+            tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+            conversation_id UUID NULL REFERENCES conversations(id) ON DELETE SET NULL,
+            contact_id UUID NULL REFERENCES contacts(id) ON DELETE SET NULL,
+            external_user_id TEXT NULL,
+            memory_id TEXT NULL,
+            memory_type TEXT NULL,
+            content_hash TEXT NOT NULL,
+            memory_text TEXT NULL,
+            embedding {_vector_type_sql()} NOT NULL,
+            embedding_model TEXT NULL,
+            metadata JSONB NOT NULL DEFAULT '{{}}',
+            importance_score DOUBLE PRECISION NULL,
+            created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT now(),
+            updated_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT now(),
+            expires_at TIMESTAMP WITHOUT TIME ZONE NULL
+        )
+        """
     )
-    op.execute("ALTER TABLE long_term_memory_embeddings ALTER COLUMN embedding TYPE vector USING embedding::vector")
+    _ensure_vector_column("long_term_memory_embeddings")
+
     for table, cols in {
         "document_chunk_embeddings": ["tenant_id", "source_id", "chunk_id", "content_hash", "created_at"],
         "long_term_memory_embeddings": ["tenant_id", "conversation_id", "contact_id", "external_user_id", "content_hash", "created_at"],
     }.items():
         for col in cols:
-            op.create_index(f"ix_{table}_{col}", table, [col])
-    op.execute("CREATE INDEX IF NOT EXISTS ix_doc_chunk_embeddings_vector ON document_chunk_embeddings USING ivfflat (embedding vector_cosine_ops)")
-    op.execute("CREATE INDEX IF NOT EXISTS ix_ltm_embeddings_vector ON long_term_memory_embeddings USING ivfflat (embedding vector_cosine_ops)")
+            op.execute(f"CREATE INDEX IF NOT EXISTS ix_{table}_{col} ON {table} ({col})")
+
+    op.execute(
+        "CREATE INDEX IF NOT EXISTS ix_doc_chunk_embeddings_vector "
+        "ON document_chunk_embeddings USING ivfflat (embedding vector_cosine_ops)"
+    )
+    op.execute(
+        "CREATE INDEX IF NOT EXISTS ix_ltm_embeddings_vector "
+        "ON long_term_memory_embeddings USING ivfflat (embedding vector_cosine_ops)"
+    )
 
 
 def downgrade() -> None:
     op.execute("DROP INDEX IF EXISTS ix_ltm_embeddings_vector")
     op.execute("DROP INDEX IF EXISTS ix_doc_chunk_embeddings_vector")
-    op.drop_table("long_term_memory_embeddings")
-    op.drop_table("document_chunk_embeddings")
+    op.execute("DROP TABLE IF EXISTS long_term_memory_embeddings")
+    op.execute("DROP TABLE IF EXISTS document_chunk_embeddings")

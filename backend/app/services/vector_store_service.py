@@ -19,6 +19,7 @@ from app.services.embedding_service import cosine_similarity, generate_embedding
 logger = logging.getLogger(__name__)
 
 VectorNamespace = Literal["document", "memory"]
+DEFAULT_PGVECTOR_DIMENSION = 1536
 
 
 def _env_bool(name: str, default: str = "false") -> bool:
@@ -31,9 +32,9 @@ def _configured_backend() -> str:
 
 def _dimension() -> int:
     try:
-        return max(1, int(os.getenv("PGVECTOR_DIMENSION", "1536")))
+        return max(1, int(os.getenv("PGVECTOR_DIMENSION", str(DEFAULT_PGVECTOR_DIMENSION))))
     except ValueError:
-        return 1536
+        return DEFAULT_PGVECTOR_DIMENSION
 
 
 def _distance() -> str:
