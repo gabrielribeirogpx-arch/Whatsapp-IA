@@ -15,6 +15,7 @@ from datetime import datetime, timedelta, timezone
 from PyPDF2 import PdfReader
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
+from app.context_engine import UnifiedContextEngine
 
 from app.models.knowledge_base import KnowledgeBase
 from app.models.knowledge_chunk import KnowledgeChunk
@@ -584,6 +585,11 @@ def answer_with_rag(db: Session, tenant_id: uuid.UUID, question: str, conversati
     except TypeError:
         # Compatibility for tests/extensions monkeypatching the historical signature.
         contexts = retrieve_context(db, tenant_id, question, top_k=top_k)
+    try:
+        context_package = UnifiedContextEngine(db).build(tenant_id=tenant_id, execution_context={"tenant_id": str(tenant_id), "current_query": str(question or "")}, flags={"include_short_memory": False, "include_long_memory": False, "include_rag_context": True, "source_options": {"rag": {"chunks": contexts}}})
+        contexts = context_package.rag_chunks
+    except Exception:
+        pass
     confidence = _confidence_level(contexts)
     best_score = max([float(c.get("final_score") or c.get("score") or 0) for c in contexts] or [0.0])
     retrieval_mode = contexts[0].get("retrieval_mode", "fallback") if contexts else "fallback"
