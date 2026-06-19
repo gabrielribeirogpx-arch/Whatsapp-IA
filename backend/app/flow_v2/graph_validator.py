@@ -153,7 +153,13 @@ class FlowV2GraphValidator:
             node_id = str(node["id"])
             node_type = self._node_type(node).upper()
             data = self._node_data(node)
-            behavior = str(data.get("after_answer_behavior") or data.get("afterAnswerBehavior") or "end_flow").strip().lower()
+            behavior = str(
+                data.get("after_agent_behavior")
+                or data.get("afterAgentBehavior")
+                or data.get("after_answer_behavior")
+                or data.get("afterAnswerBehavior")
+                or "end_flow"
+            ).strip().lower()
             if behavior not in {"end_flow", "continue_to_next", "wait_same_node"}:
                 errors.append(f"FLOW_V2_{node_type}_AFTER_ANSWER_BEHAVIOR_INVALID:{node_id}")
                 continue

@@ -84,3 +84,11 @@ def test_ai_agent_mcp_calculate_result_text_used_in_final_response(monkeypatch):
     assert "699678" in result.message
     assert result.message != "fallback"
     assert any("699678" in str(message.get("content")) for message in seen_messages[1])
+
+
+def test_ai_agent_validator_wait_same_node_after_agent_allows_missing_edge():
+    result = FlowV2GraphValidator().validate(
+        nodes=[{"id": "agent", "type": "ai_agent", "data": {"isStart": True, "after_agent_behavior": "wait_same_node"}}],
+        edges=[],
+    )
+    assert result.status == GraphValidationStatus.VALID
