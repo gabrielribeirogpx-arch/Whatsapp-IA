@@ -53,94 +53,31 @@ class AgentRunResult:
 
 
 
-def _extract_tool_result_text(value: Any) -> str | None:
-    """Return user-visible text from tool outputs, including MCP content blocks."""
-    if value is None:
-        return None
-    if isinstance(value, str):
-        text = value.strip()
-        return text or None
-    if isinstance(value, (int, float, bool)):
-        return str(value)
-    if isinstance(value, dict):
-        content = value.get("content")
-        if isinstance(content, list):
-            parts: list[str] = []
-            for item in content:
-                if isinstance(item, dict) and str(item.get("type") or "") == "text":
-                    text = str(item.get("text") or "").strip()
-                    if text:
-                        parts.append(text)
-            if parts:
-                return "\n".join(parts)
-        for key in ("text", "message", "output", "result"):
-            if key in value:
-                text = _extract_tool_result_text(value.get(key))
-                if text:
-                    return text
-        return None
-    if isinstance(value, list):
-        parts = [_extract_tool_result_text(item) for item in value]
-        joined = "\n".join(part for part in parts if part)
-        return joined or None
-    return None
-
-
-
-def _extract_structured_content(value: Any, explicit: Any = None) -> dict[str, Any] | None:
-    """Return MCP structuredContent from known wrapper shapes."""
-    if isinstance(explicit, dict):
-        return explicit
-    if isinstance(value, dict):
-        structured = value.get("structuredContent")
-        if isinstance(structured, dict):
-            return structured
-        result = value.get("result")
-        if isinstance(result, dict) and isinstance(result.get("structuredContent"), dict):
-            return result.get("structuredContent")
-    return None
-
-
-def _extract_mcp_tool_result_fields(tool_result: dict[str, Any], registry_structured_content: Any = None) -> dict[str, Any]:
-    raw_result = tool_result.get("result")
-    structured_content = _extract_structured_content(raw_result, registry_structured_content)
-    result_text = _extract_tool_result_text(raw_result)
-    structured_result = structured_content.get("result") if isinstance(structured_content, dict) else None
-    structured_ok = structured_content.get("ok") if isinstance(structured_content, dict) else None
-    structured_tool = structured_content.get("tool") if isinstance(structured_content, dict) else None
-    structured_error = structured_content.get("error") if isinstance(structured_content, dict) else None
-    effective_ok = tool_result.get("ok") is True and structured_ok is not False
-    return {
-        "result_text": result_text,
-        "structured_content": structured_content,
-        "structured_result": structured_result,
-        "structured_ok": structured_ok,
-        "structured_tool": structured_tool,
-        "structured_error": structured_error,
-        "effective_ok": effective_ok,
-    }
-
-
 def _format_tool_result_context(item: dict[str, Any]) -> str:
+    normalized = item.get("normalized_result") if isinstance(item.get("normalized_result"), dict) else {}
+    display_type = normalized.get("type") or normalized.get("tool") or item.get("tool_id") or item.get("tool")
+    data = normalized.get("data") if isinstance(normalized.get("data"), dict) else {}
     return "\n".join([
         "Tool result:",
-        f"tool={item.get('structured_tool') or item.get('tool_name') or item.get('tool_id') or item.get('tool')}",
-        f"ok={str(item.get('structured_ok') if item.get('structured_ok') is not None else item.get('ok')).lower()}",
-        "text=" + json.dumps(item.get("result_text") or "", ensure_ascii=False),
-        "structured_result=" + json.dumps(item.get("structured_result"), ensure_ascii=False),
+        f"Tool:\n{display_type}",
+        "",
+        f"Success:\n{str(normalized.get('ok') if 'ok' in normalized else item.get('ok')).lower()}",
+        "",
+        f"Summary:\n{normalized.get('summary') or normalized.get('result_text') or ''}",
+        "",
+        "Data:\n" + json.dumps(data, ensure_ascii=False, indent=2),
     ])
 
 
-def _format_structured_tool_response(item: dict[str, Any]) -> str | None:
-    structured_result = item.get("structured_result")
-    tool_name = str(item.get("structured_tool") or item.get("tool_name") or item.get("tool_id") or "").strip().lower()
-    if tool_name == "calendar_create_event" and isinstance(structured_result, dict):
-        title = str(structured_result.get("title") or "evento").strip()
-        date = str(structured_result.get("date") or "").strip()
-        time_value = str(structured_result.get("time") or "").strip()
-        if title and date and time_value:
-            return f"Perfeito! Agendei {title} para {date} às {time_value}."
-    return None
+def _format_universal_tool_response(item: dict[str, Any]) -> str:
+    normalized = item.get("normalized_result") if isinstance(item.get("normalized_result"), dict) else {}
+    summary = str(normalized.get("summary") or "").strip()
+    result_text = str(normalized.get("result_text") or "").strip()
+    if summary:
+        return f"Perfeito! {summary}." if not summary.endswith((".", "!", "?")) else f"Perfeito! {summary}"
+    if result_text:
+        return result_text
+    return "Perfeito! Sua solicitação foi concluída com sucesso."
 
 def _json_log(event: str, **metadata: Any) -> None:
     logger.info("event=%s %s", event, json.dumps(metadata, ensure_ascii=False, default=str))
@@ -155,30 +92,14 @@ def _fallback_result(fallback: str, reason: str, *, step: int = 0, final_tool: s
 
 def _latest_valid_result_text(state: list[dict[str, Any]]) -> str | None:
     item = _latest_valid_tool_result(state)
-    return str(item.get("result_text")).strip() if item else None
+    if not item:
+        return None
+    normalized = item.get("normalized_result") if isinstance(item.get("normalized_result"), dict) else {}
+    return str(normalized.get("result_text") or normalized.get("summary") or "").strip() or None
 
 
 def _latest_valid_tool_result(state: list[dict[str, Any]]) -> dict[str, Any] | None:
-    return next((item for item in reversed(state) if item.get("ok") is True and (str(item.get("result_text") or "").strip() or item.get("structured_result") is not None)), None)
-
-
-def _looks_like_natural_sentence(result_text: str) -> bool:
-    text = str(result_text or "").strip()
-    if not text:
-        return False
-    lowered = text.lower()
-    common_words = ("segunda", "sexta", "horário", "atendimento", "das", "às")
-    return " " in text or text.endswith((".", "!", "?")) or any(word in lowered for word in common_words)
-
-
-def _format_deterministic_tool_response(tool_name: str | None, result_text: str) -> str:
-    text = str(result_text or "").strip()
-    normalized_tool = str(tool_name or "").strip().lower()
-    if normalized_tool == "get_business_hours" and text == "Segunda a sexta das 08h às 18h.":
-        return "Atendemos de segunda a sexta, das 08h às 18h."
-    if normalized_tool != "calculate" and _looks_like_natural_sentence(text):
-        return text
-    return f"O resultado é {text}."
+    return next((item for item in reversed(state) if item.get("ok") is True and isinstance(item.get("normalized_result"), dict)), None)
 
 
 def _extract_final_response_text(parsed: dict[str, Any], *, tool: str | None = None) -> str | None:
@@ -387,7 +308,8 @@ def run_agent_for_tenant(db: Session, tenant_id, input_text: str, instruction: s
             latest_tool_result = _latest_valid_tool_result(state)
             if latest_tool_result:
                 context_payload["tool_result_context"] = _format_tool_result_context(latest_tool_result)
-            messages.append({"role": "system", "content": "Estado/resultados anteriores:\n" + json.dumps(state[-5:], ensure_ascii=False)})
+            messages.append({"role": "system", "content": "Estado/resultados anteriores:\n" + "\n\n".join(_format_tool_result_context(item) for item in state[-5:] if isinstance(item.get("normalized_result"), dict))})
+            _json_log("AI_AGENT_ASSISTANT_CONTEXT", assistant_context=messages[-1]["content"])
             if result_text or latest_tool_result:
                 messages.append({"role": "assistant", "name": "assistant_context", "content": json.dumps(context_payload, ensure_ascii=False)})
         messages.append({"role": "user", "content": str(input_text or "")[:12000]})
@@ -412,8 +334,9 @@ def run_agent_for_tenant(db: Session, tenant_id, input_text: str, instruction: s
         if not decision:
             successful_tool_result = _latest_valid_tool_result(state)
             if successful_tool_result:
-                msg = (_format_structured_tool_response(successful_tool_result) or _format_deterministic_tool_response(successful_tool_result.get("tool_name") or successful_tool_result.get("tool_id") or successful_tool_result.get("tool"), str(successful_tool_result.get("result_text") or "")))[:4000]
+                msg = (_format_universal_tool_response(successful_tool_result))[:4000]
                 _json_log("AI_AGENT_RESPONSE_EXTRACTION_FAILED", step=step + 1, reason="invalid_llm_json", has_tool_result_text=True)
+                _json_log("AI_AGENT_UNIVERSAL_FALLBACK", response=msg, source="tool_result_after_invalid_llm_json")
                 _json_log("AI_AGENT_FINAL_RESPONSE", response=msg, fallback=False, source="tool_result_after_invalid_llm_json")
                 result.message = msg
                 result.actions.append(AgentToolAction("message", {"message": msg}))
@@ -449,8 +372,9 @@ def run_agent_for_tenant(db: Session, tenant_id, input_text: str, instruction: s
         if tool not in allowed and tool != "finalizar":
             successful_tool_result = _latest_valid_tool_result(state)
             if successful_tool_result:
-                msg = (_format_structured_tool_response(successful_tool_result) or _format_deterministic_tool_response(successful_tool_result.get("tool_name") or successful_tool_result.get("tool_id") or successful_tool_result.get("tool"), str(successful_tool_result.get("result_text") or "")))[:4000]
+                msg = (_format_universal_tool_response(successful_tool_result))[:4000]
                 _json_log("AI_AGENT_RESPONSE_EXTRACTION_FAILED", step=step + 1, reason="tool_not_allowed", has_tool_result_text=True, tool=tool)
+                _json_log("AI_AGENT_UNIVERSAL_FALLBACK", response=msg, source="tool_result_after_tool_not_allowed", tool=tool)
                 _json_log("AI_AGENT_FINAL_RESPONSE", response=msg, fallback=False, source="tool_result_after_tool_not_allowed", tool=tool)
                 result.message = msg
                 result.actions.append(AgentToolAction("message", {"message": msg}))
@@ -467,7 +391,7 @@ def run_agent_for_tenant(db: Session, tenant_id, input_text: str, instruction: s
                 msg = response_text[:4000]
                 fallback_used = False
             elif successful_tool_result:
-                msg = (_format_structured_tool_response(successful_tool_result) or _format_deterministic_tool_response(successful_tool_result.get("tool_name") or successful_tool_result.get("tool_id") or successful_tool_result.get("tool"), str(successful_tool_result.get("result_text") or "")))[:4000]
+                msg = (_format_universal_tool_response(successful_tool_result))[:4000]
                 fallback_used = False
                 _json_log("AI_AGENT_RESPONSE_EXTRACTION_FAILED", step=step + 1, reason="responder_without_text", has_tool_result_text=True)
             else:
@@ -556,23 +480,17 @@ def run_agent_for_tenant(db: Session, tenant_id, input_text: str, instruction: s
                 _json_log("AI_AGENT_TOOL_CALL_RESULT", ok=tool_result.get("ok"), raw_result=tool_result.get("result"), error=tool_result.get("error"))
             except ExecutionBudgetExceeded:
                 return AgentRunResult(message=fallback, status="budget_exceeded", fallback_used=True, steps_count=step + 1, final_tool=tool, tools_used=result.tools_used, metadata={**(budget.safe_metadata() if budget else {}), "budget_exceeded": True})
-            fields = _extract_mcp_tool_result_fields(tool_result, tool_result.get("structured_content"))
-            result_text = fields.get("result_text") if fields.get("effective_ok") is True else None
-            error = fields.get("structured_error") or tool_result.get("error")
-            status = "success" if fields.get("effective_ok") is True else "error"
-            mcp_call = {"tool_id": tool_id, "status": status, "latency_ms": tool_result.get("latency_ms"), "error": error}
+            normalized = registry_result.normalized_result.to_dict() if registry_result.normalized_result else (registry_result.output if isinstance(registry_result.output, dict) else {})
+            _json_log("AI_AGENT_TOOL_NORMALIZED", tool_original=tool_id, normalized_result=normalized)
+            _json_log("AI_AGENT_TOOL_RESULT_MODEL", tool_original=tool_id, normalized_result=normalized)
+            error = normalized.get("error") if isinstance(normalized.get("error"), dict) else None
+            status = "success" if normalized.get("ok") is True else "error"
+            mcp_call = {"tool_id": tool_id, "status": status, "latency_ms": tool_result.get("latency_ms"), "error": (error or {}).get("code")}
             mcp_tool_calls.append(mcp_call)
-            logger.info("event=AI_AGENT_TOOL_RESULT_RECEIVED tool_type=mcp_tool tool_id=%s ok=%s has_text=%s", tool_id, fields.get("effective_ok") is True, bool(result_text))
-            extracted_json = tool_result.get("result") if isinstance(tool_result.get("result"), dict) else None
-            _json_log("AI_AGENT_TOOL_RESULT_EXTRACTED", extracted_text=result_text, extracted_json=extracted_json)
-            if fields.get("structured_result") is not None:
-                _json_log("AI_AGENT_TOOL_STRUCTURED_RESULT", tool_id=tool_id, structured_tool=fields.get("structured_tool"), structured_result=fields.get("structured_result"))
-            if fields.get("structured_ok") is False or fields.get("structured_error"):
-                _json_log("AI_AGENT_TOOL_STRUCTURED_ERROR", tool_id=tool_id, structured_tool=fields.get("structured_tool"), structured_error=fields.get("structured_error"), structured_ok=fields.get("structured_ok"))
-            if not result_text and fields.get("structured_result") is None:
-                _json_log("AI_AGENT_FALLBACK_REASON", reason="mcp_no_text", tool_id=tool_id, ok=fields.get("effective_ok") is True)
-            state.append({"tool": tool, "tool_id": tool_id, "tool_name": match.get("name"), "tool_type": "mcp_tool", "ok": fields.get("effective_ok") is True, "result": tool_result.get("result"), "result_text": result_text, "structuredContent": fields.get("structured_content"), "structured_result": fields.get("structured_result"), "structured_ok": fields.get("structured_ok"), "structured_tool": fields.get("structured_tool"), "structured_error": fields.get("structured_error"), "error": error})
-            _json_log("AI_AGENT_CONTEXT_AFTER_TOOL", messages=[{"role": "tool", "name": str(match.get("name") or tool_id), "content": result_text or ""}], tool_results=state[-5:], result_text=result_text, state_keys=sorted({key for item in state for key in item.keys()}))
+            logger.info("event=AI_AGENT_TOOL_RESULT_RECEIVED tool_type=mcp_tool tool_id=%s ok=%s has_text=%s", tool_id, normalized.get("ok") is True, bool(normalized.get("result_text")))
+            if not normalized.get("result_text") and not normalized.get("data"):
+                _json_log("AI_AGENT_FALLBACK_REASON", reason="mcp_no_text", tool_id=tool_id, ok=normalized.get("ok") is True)
+            state.append({"tool": tool, "tool_id": tool_id, "tool_name": match.get("name"), "tool_type": "mcp_tool", "ok": normalized.get("ok") is True, "normalized_result": normalized, "error": (error or {}).get("code")})
             continue
         if tool == "salvar_memoria":
             memory_ctx = (tool_configs or {}).get("memory_context") if isinstance(tool_configs, dict) else {}
@@ -613,7 +531,7 @@ def run_agent_for_tenant(db: Session, tenant_id, input_text: str, instruction: s
     else:
         successful_tool_result = _latest_valid_tool_result(state)
         if successful_tool_result:
-            result.message = _format_deterministic_tool_response(successful_tool_result.get("tool_name") or successful_tool_result.get("tool_id") or successful_tool_result.get("tool"), str(successful_tool_result.get("result_text") or ""))[:4000]
+            result.message = _format_universal_tool_response(successful_tool_result)[:4000]
             result.actions.append(AgentToolAction("message", {"message": result.message}))
             result.status = "success"
             result.fallback_used = False
