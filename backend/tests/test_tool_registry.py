@@ -83,3 +83,12 @@ def test_webhook_adapter_blocks_insecure_url():
 
 def test_metadata_is_sanitized():
     assert sanitize_metadata({"Authorization": "Bearer x", "nested": {"api_key": "k", "ok": "v"}}) == {"Authorization": "[REDACTED]", "nested": {"api_key": "[REDACTED]", "ok": "v"}}
+
+
+def test_mcp_adapter_preserves_structured_content_from_result():
+    structured_content = {"ok": True, "tool": "calendar_create_event", "result": {"title": "Reunião"}}
+    adapter = MCPToolAdapter(lambda tool, args: {"ok": True, "status": "success", "result": {"content": [{"type": "text", "text": "ok"}], "structuredContent": structured_content}})
+    result = adapter.execute("m1", {}, ToolContext(), {"mcp_tools": [{"tool_id": "m1"}]})
+    assert result.ok is True
+    assert result.output["structuredContent"] == structured_content
+    assert result.structured_content == structured_content

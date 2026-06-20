@@ -13,6 +13,7 @@ class ToolResult:
     tool_id: str | None = None
     tool_name: str | None = None
     output: Any = None
+    structured_content: dict[str, Any] | None = None
     error_code: str | None = None
     error_message: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
@@ -26,6 +27,7 @@ class ToolResult:
             "tool_id": self.tool_id,
             "tool_name": self.tool_name,
             "output": sanitize_metadata(self.output),
+            "structured_content": sanitize_metadata(self.structured_content),
             "error_code": self.error_code,
             "error_message": self.error_message,
             "metadata": sanitize_metadata(self.metadata),

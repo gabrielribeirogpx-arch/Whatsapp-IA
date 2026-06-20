@@ -252,3 +252,121 @@ def test_ai_agent_mcp_get_business_hours_uses_responder_arguments_text(monkeypat
     assert "segunda a sexta" in result.message.lower()
     assert result.message == "Nosso horário de atendimento é de segunda a sexta, das 08h às 18h."
     assert result.message != "fallback"
+
+
+def test_ai_agent_mcp_calendar_structured_result_in_context_and_final_response(monkeypatch):
+    calls = iter([
+        '{"thought_summary":"agendar","tool":"chamar_mcp","arguments":{"tool_id":"calendar_create_event","input":{"title":"Reunião com João"}}}',
+        '{"thought_summary":"responder","tool":"responder","arguments":{"message":"Perfeito! Agendei Reunião com João para amanhã às 14:00."}}',
+    ])
+    seen_messages = []
+
+    def fake_llm(_db, _tenant_id, messages, options=None):
+        seen_messages.append(messages)
+        return next(calls)
+
+    def fake_mcp_executor(tool, args):
+        return {
+            "ok": True,
+            "status": "success",
+            "result": {
+                "content": [{"type": "text", "text": "Evento criado: Reunião com João em amanhã às 14:00 por 60 minutos."}],
+                "structuredContent": {
+                    "ok": True,
+                    "tool": "calendar_create_event",
+                    "result": {
+                        "event_id": "evt_123",
+                        "title": "Reunião com João",
+                        "date": "amanhã",
+                        "time": "14:00",
+                        "duration_minutes": 60,
+                        "attendees": [],
+                        "description": "",
+                    },
+                },
+            },
+            "latency_ms": 1,
+        }
+
+    monkeypatch.setattr(svc, "generate_answer_for_tenant", fake_llm)
+    result = svc.run_agent_for_tenant(
+        object(),
+        uuid.uuid4(),
+        "Agende reunião com João amanhã às 14h",
+        "Use calendar_create_event para criar eventos.",
+        ["chamar_mcp", "responder"],
+        {"mcp_tools": [{"tool_id": "calendar_create_event", "name": "calendar_create_event", "description": "Agenda"}]},
+        options={"max_steps": 2, "fallback_message": "fallback"},
+        mcp_tool_executor=fake_mcp_executor,
+    )
+
+    assert result.fallback_used is False
+    assert result.message == "Perfeito! Agendei Reunião com João para amanhã às 14:00."
+    final_context = str(seen_messages[1])
+    assert "Tool result:" in final_context
+    assert "tool=calendar_create_event" in final_context
+    assert "structured_result" in final_context
+    assert "Reunião com João" in final_context
+    assert "14:00" in final_context
+
+
+def test_ai_agent_mcp_calendar_structured_result_deterministic_when_final_llm_invalid(monkeypatch):
+    calls = iter([
+        '{"thought_summary":"agendar","tool":"chamar_mcp","arguments":{"tool_id":"calendar_create_event","input":{}}}',
+        'not json',
+    ])
+
+    def fake_llm(_db, _tenant_id, messages, options=None):
+        return next(calls)
+
+    def fake_mcp_executor(tool, args):
+        return {
+            "ok": True,
+            "status": "success",
+            "result": {
+                "content": [{"type": "text", "text": "Evento criado."}],
+                "structuredContent": {"ok": True, "tool": "calendar_create_event", "result": {"title": "Reunião com João", "date": "amanhã", "time": "14:00"}},
+            },
+        }
+
+    monkeypatch.setattr(svc, "generate_answer_for_tenant", fake_llm)
+    result = svc.run_agent_for_tenant(
+        object(), uuid.uuid4(), "agendar", "instr", ["chamar_mcp", "responder"],
+        {"mcp_tools": [{"tool_id": "calendar_create_event", "name": "calendar_create_event"}]},
+        options={"max_steps": 2, "fallback_message": "fallback"}, mcp_tool_executor=fake_mcp_executor,
+    )
+
+    assert result.fallback_used is False
+    assert result.message == "Perfeito! Agendei Reunião com João para amanhã às 14:00."
+
+
+def test_ai_agent_mcp_structured_ok_false_not_success(monkeypatch):
+    calls = iter([
+        '{"thought_summary":"agendar","tool":"chamar_mcp","arguments":{"tool_id":"calendar_create_event","input":{}}}',
+        '{"thought_summary":"responder","tool":"responder","arguments":{}}',
+    ])
+
+    def fake_llm(_db, _tenant_id, messages, options=None):
+        return next(calls)
+
+    def fake_mcp_executor(tool, args):
+        return {
+            "ok": True,
+            "status": "success",
+            "result": {
+                "content": [{"type": "text", "text": "Não consegui criar o evento."}],
+                "structuredContent": {"ok": False, "tool": "calendar_create_event", "error": "calendar_conflict"},
+            },
+        }
+
+    monkeypatch.setattr(svc, "generate_answer_for_tenant", fake_llm)
+    result = svc.run_agent_for_tenant(
+        object(), uuid.uuid4(), "agendar", "instr", ["chamar_mcp", "responder"],
+        {"mcp_tools": [{"tool_id": "calendar_create_event", "name": "calendar_create_event"}]},
+        options={"max_steps": 2, "fallback_message": "fallback"}, mcp_tool_executor=fake_mcp_executor,
+    )
+
+    assert result.fallback_used is True
+    assert result.message == "fallback"
+    assert result.metadata["mcp_status"] == "error"
+    assert result.metadata["mcp_error_sanitized"] == "calendar_conflict"
