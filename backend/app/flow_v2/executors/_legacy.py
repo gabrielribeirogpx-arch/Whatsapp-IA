@@ -1908,17 +1908,27 @@ class AiAgentNodeExecutor(AiResponseNodeExecutor):
         mcp_tools = []
         if allow_mcp_tools and mcp_tool_ids:
             from app.models.tenant_mcp import TenantMCPTool
+            from app.services.google_calendar_service import PROVIDER as GOOGLE_CALENDAR_PROVIDER
+            from app.services.integration_connection_service import IntegrationConnectionService
+            from app.tools.adapters.google_calendar_tool_adapter import GOOGLE_CALENDAR_TOOL_IDS, google_calendar_tool_definitions
             from sqlalchemy import select
             import uuid as _uuid
             parsed_ids = []
+            internal_google_ids = []
             for item in mcp_tool_ids:
+                if str(item) in GOOGLE_CALENDAR_TOOL_IDS:
+                    internal_google_ids.append(str(item))
+                    continue
                 try:
                     parsed_ids.append(_uuid.UUID(str(item)))
                 except ValueError:
                     continue
             if parsed_ids:
                 rows = db.execute(select(TenantMCPTool).where(TenantMCPTool.tenant_id == session.tenant_id, TenantMCPTool.id.in_(parsed_ids), TenantMCPTool.is_enabled.is_(True))).scalars().all()
-                mcp_tools = [{"tool_id": str(row.id), "name": row.display_name or row.tool_name, "description": row.description, "input_schema": row.input_schema or {}} for row in rows]
+                mcp_tools = [{"tool_id": str(row.id), "name": row.display_name or row.tool_name, "description": row.description, "input_schema": row.input_schema or {}, "source": "MCP"} for row in rows]
+            if internal_google_ids and IntegrationConnectionService(db).get_active_connection(session.tenant_id, GOOGLE_CALENDAR_PROVIDER) is not None:
+                google_tools = [tool for tool in google_calendar_tool_definitions(connected=True) if str(tool.get("tool_id")) in internal_google_ids]
+                mcp_tools.extend(google_tools)
         max_mcp_calls = self._coerce_int_config(data.get("max_mcp_calls", data.get("maxMcpCalls")), default=3, field_name="max_mcp_calls", node_id=node_id)
         max_mcp_calls = min(max(max_mcp_calls, 0), 3)
         if allow_mcp_tools and mcp_tools and "chamar_mcp" not in [str(t) for t in allowed_tools]:

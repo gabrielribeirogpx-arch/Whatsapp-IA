@@ -11,7 +11,10 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models.tenant import Tenant
 from app.models.tenant_mcp import TenantMCPTool
+from app.services.google_calendar_service import PROVIDER as GOOGLE_CALENDAR_PROVIDER
+from app.services.integration_connection_service import IntegrationConnectionService
 from app.services.mcp_service import MCPError, call_mcp_tool, create_mcp_server, delete_mcp_server, discover_mcp_tools, list_mcp_servers, update_mcp_server
+from app.tools.adapters.google_calendar_tool_adapter import google_calendar_tool_definitions
 from app.services.tenant_service import get_current_tenant
 
 router = APIRouter(prefix="/api/mcp", tags=["mcp"])
@@ -52,6 +55,13 @@ def _server_out(row) -> dict[str, Any]:
 
 def _tool_out(row: TenantMCPTool) -> dict[str, Any]:
     return {"id": str(row.id), "tenant_id": str(row.tenant_id), "server_id": str(row.server_id), "tool_name": row.tool_name, "display_name": row.display_name, "description": row.description, "input_schema": row.input_schema, "is_enabled": row.is_enabled, "metadata": row.metadata_json or {}, "created_at": row.created_at, "updated_at": row.updated_at}
+
+
+def _google_calendar_tools_out(db: Session, tenant_id: uuid.UUID) -> list[dict[str, Any]]:
+    connected = IntegrationConnectionService(db).get_active_connection(tenant_id, GOOGLE_CALENDAR_PROVIDER) is not None
+    if not connected:
+        return []
+    return [{**tool, "tenant_id": str(tenant_id)} for tool in google_calendar_tool_definitions(connected=True)]
 
 
 def _mcp_error(exc: MCPError) -> HTTPException:
@@ -109,7 +119,7 @@ def discover(server_id: uuid.UUID, tenant: Tenant = Depends(get_current_tenant),
 @router.get("/tools")
 def get_tools(tenant: Tenant = Depends(get_current_tenant), db: Session = Depends(get_db)):
     rows = db.execute(select(TenantMCPTool).where(TenantMCPTool.tenant_id == tenant.id).order_by(TenantMCPTool.created_at.desc())).scalars().all()
-    return [_tool_out(row) for row in rows]
+    return [*_google_calendar_tools_out(db, tenant.id), *[_tool_out(row) for row in rows]]
 
 
 @router.put("/tools/{tool_id}")

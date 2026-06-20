@@ -19,6 +19,7 @@ from app.services.circuit_breaker_service import CircuitBreakerOpen, check_circu
 from app.services.execution_budget_service import ExecutionBudgetExceeded, ExecutionBudget
 from app.services.long_term_memory_service import ALLOWED_FACT_TYPES, SECRET_RE, store_fact
 from app.tools import ToolContext, ToolRegistry
+from app.tools.adapters.google_calendar_tool_adapter import GOOGLE_CALENDAR_TOOL_IDS, GoogleCalendarToolAdapter
 from app.tools.adapters.mcp_tool_adapter import MCPToolAdapter
 from app.tools.adapters.node_tool_adapter import NodeToolAdapter
 from app.observability import TraceContext, TraceEventType, record_event
@@ -276,6 +277,7 @@ def run_agent_for_tenant(db: Session, tenant_id, input_text: str, instruction: s
     tool_registry.register(NodeToolAdapter(node_tool_executor))
     tool_registry.register(SubflowToolAdapter(subflow_tool_executor))
     tool_registry.register(MCPToolAdapter(mcp_tool_executor))
+    tool_registry.register(GoogleCalendarToolAdapter(db))
     tool_registry.register(WebhookToolAdapter(_call_webhook, validate_webhook_config))
     if not allowed:
         return _fallback_result(fallback, "no_allowed_tools", step=0)
@@ -294,7 +296,7 @@ def run_agent_for_tenant(db: Session, tenant_id, input_text: str, instruction: s
             "Ferramentas/webhooks permitidos: " + _summarize_tools(allowed, webhooks),
             "Ferramentas do fluxo disponíveis: " + json.dumps([{"tool_id": str(t.get("tool_id")), "label": str(t.get("label", ""))[:80], "description": str(t.get("description", ""))[:300]} for t in node_tools], ensure_ascii=False),
             "Subflows disponíveis como ferramenta executar_subflow: " + json.dumps([{"tool_id": str(t.get("tool_id")), "label": str(t.get("label", ""))[:80], "description": str(t.get("description", ""))[:300]} for t in subflow_tools], ensure_ascii=False),
-            "Ferramentas MCP disponíveis como chamar_mcp: " + json.dumps([{"tool_id": str(t.get("tool_id")), "name": str(t.get("name", ""))[:120], "description": str(t.get("description", ""))[:300], "input_schema": t.get("input_schema") if isinstance(t.get("input_schema"), dict) else {}} for t in mcp_tools], ensure_ascii=False),
+            "Ferramentas MCP/internas disponíveis como chamar_mcp: " + json.dumps([{"tool_id": str(t.get("tool_id")), "name": str(t.get("name", ""))[:120], "description": str(t.get("description", ""))[:300], "input_schema": t.get("input_schema") if isinstance(t.get("input_schema"), dict) else {}, "source": str(t.get("source") or t.get("server_name") or "")} for t in mcp_tools], ensure_ascii=False),
             "Para executar MCP use somente {\"tool\":\"chamar_mcp\",\"arguments\":{\"tool_id\":\"id_permitido\",\"input\":{}}}. Não invente tool_id, URL, headers ou credenciais.",
             "Para executar subflow use somente {\"tool\":\"executar_subflow\",\"arguments\":{\"tool_id\":\"id_permitido\",\"input\":\"texto\",\"reason\":\"motivo curto\"}}. Não invente tool_id nem envie flow_id.",
         ])
@@ -463,7 +465,8 @@ def run_agent_for_tenant(db: Session, tenant_id, input_text: str, instruction: s
         if tool == "chamar_mcp":
             tool_id, tool_input = _normalize_mcp_tool_call(raw_call, args)
             match = next((t for t in mcp_tools if str(t.get("tool_id")) == tool_id), None)
-            if match is None or mcp_tool_executor is None:
+            is_google_calendar_tool = tool_id in GOOGLE_CALENDAR_TOOL_IDS
+            if match is None or (mcp_tool_executor is None and not is_google_calendar_tool):
                 allowed_tool_ids = [str(t.get("tool_id")) for t in mcp_tools if t.get("tool_id") is not None]
                 _json_log("AI_AGENT_MCP_TOOL_RESOLUTION_FAILED", tool_id=tool_id, allowed_tool_ids=allowed_tool_ids, raw_call=raw_call)
                 blocked_tool_calls.append({"tool_id": tool_id, "error": "mcp_tool_not_allowed"})
@@ -475,7 +478,7 @@ def run_agent_for_tenant(db: Session, tenant_id, input_text: str, instruction: s
                 continue
             _json_log("AI_AGENT_TOOL_CALL_BEGIN", tool_id=tool_id, tool_name=match.get("name"), tool_type="mcp_tool", input=tool_input)
             try:
-                registry_result = tool_registry.execute("mcp_tool", tool_id, tool_input, tool_context, {"mcp_tools": mcp_tools})
+                registry_result = tool_registry.execute("google_calendar" if is_google_calendar_tool else "mcp_tool", tool_id, tool_input, tool_context, {"mcp_tools": mcp_tools, "db": db})
                 tool_result = {"ok": registry_result.ok, "status": "success" if registry_result.ok else "error", "result": registry_result.output, "structured_content": registry_result.structured_content, "error": registry_result.error_code, **(registry_result.metadata or {})}
                 _json_log("AI_AGENT_TOOL_CALL_RESULT", ok=tool_result.get("ok"), raw_result=tool_result.get("result"), error=tool_result.get("error"))
             except ExecutionBudgetExceeded:
