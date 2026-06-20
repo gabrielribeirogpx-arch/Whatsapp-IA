@@ -15,4 +15,21 @@ class MCPToolAdapter:
     def execute(self, tool_id: str, input: Any, context: ToolContext, config: dict[str, Any] | None = None) -> ToolResult:
         cfg = config or {}; tool = self._find(tool_id, cfg) or {}; executor = self.executor or cfg.get("executor")
         raw = executor(tool, input if isinstance(input, dict) else {})
-        return ToolResult(raw.get("ok") is True, self.tool_type, tool_id=tool_id, tool_name=raw.get("tool_name"), output=sanitize_metadata(raw.get("result")), error_code=raw.get("error"), metadata={"status": raw.get("status"), "latency_ms": raw.get("latency_ms")})
+        raw_result = raw.get("result")
+        structured_content = None
+        if isinstance(raw_result, dict) and isinstance(raw_result.get("structuredContent"), dict):
+            structured_content = raw_result.get("structuredContent")
+        elif isinstance(raw.get("structuredContent"), dict):
+            structured_content = raw.get("structuredContent")
+            if isinstance(raw_result, dict) and "structuredContent" not in raw_result:
+                raw_result = {**raw_result, "structuredContent": structured_content}
+        return ToolResult(
+            raw.get("ok") is True,
+            self.tool_type,
+            tool_id=tool_id,
+            tool_name=raw.get("tool_name"),
+            output=sanitize_metadata(raw_result),
+            structured_content=sanitize_metadata(structured_content),
+            error_code=raw.get("error"),
+            metadata={"status": raw.get("status"), "latency_ms": raw.get("latency_ms")},
+        )
