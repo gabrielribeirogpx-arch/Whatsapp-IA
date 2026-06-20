@@ -100,6 +100,34 @@ def _fallback_result(fallback: str, reason: str, *, step: int = 0, final_tool: s
 def _latest_valid_result_text(state: list[dict[str, Any]]) -> str | None:
     return next((str(item.get("result_text")).strip() for item in reversed(state) if item.get("ok") is True and str(item.get("result_text") or "").strip()), None)
 
+
+def _first_text_value(*values: Any) -> str:
+    for value in values:
+        text = str(value or "").strip()
+        if text:
+            return text
+    return ""
+
+
+def _normalize_tool_decision(decision: dict[str, Any]) -> tuple[str, dict[str, Any], dict[str, Any]]:
+    raw_call: dict[str, Any] = decision
+    if isinstance(decision.get("tool_calls"), list):
+        raw_call = next((call for call in decision.get("tool_calls") or [] if isinstance(call, dict)), decision)
+    args = raw_call.get("arguments") if isinstance(raw_call.get("arguments"), dict) else {}
+    tool = _first_text_value(raw_call.get("tool"), decision.get("tool"))
+    return tool, args, raw_call
+
+
+def _normalize_mcp_tool_call(raw_call: dict[str, Any], args: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+    tool_id = _first_text_value(args.get("tool_id"), args.get("id"), raw_call.get("tool_id"), raw_call.get("id"))
+    if isinstance(args.get("input"), dict):
+        tool_input = args.get("input")
+    elif isinstance(raw_call.get("input"), dict):
+        tool_input = raw_call.get("input")
+    else:
+        tool_input = {}
+    return tool_id, tool_input
+
 def _safe_json_loads(raw: str) -> dict[str, Any] | None:
     try:
         value = json.loads(str(raw or "").strip())
@@ -289,11 +317,16 @@ def run_agent_for_tenant(db: Session, tenant_id, input_text: str, instruction: s
                 result.final_tool = "responder"
                 break
             return _fallback_result(fallback, "invalid_llm_json", step=step + 1)
-        tool = str(decision.get("tool") or "").strip()
-        args = decision.get("arguments") if isinstance(decision.get("arguments"), dict) else {}
-        selected_tool_id = str(args.get("tool_id") or args.get("webhook_id") or tool).strip()
-        selected_match = next((t for t in [*node_tools, *subflow_tools, *mcp_tools] if str(t.get("tool_id")) == selected_tool_id), None)
-        _json_log("AI_AGENT_TOOL_SELECTED", tool_id=selected_tool_id, tool_name=(selected_match or {}).get("name") or (selected_match or {}).get("label") or tool, tool_type=tool, step=step + 1)
+        tool, args, raw_call = _normalize_tool_decision(decision)
+        if tool == "chamar_mcp":
+            selected_tool_id, _selected_tool_input = _normalize_mcp_tool_call(raw_call, args)
+            selected_match = next((t for t in mcp_tools if str(t.get("tool_id")) == selected_tool_id), None)
+            selected_tool_type = "mcp_tool" if selected_match is not None else tool
+        else:
+            selected_tool_id = _first_text_value(args.get("tool_id"), args.get("webhook_id"), raw_call.get("tool_id"), raw_call.get("id"), tool)
+            selected_match = next((t for t in [*node_tools, *subflow_tools] if str(t.get("tool_id")) == selected_tool_id), None)
+            selected_tool_type = tool
+        _json_log("AI_AGENT_TOOL_SELECTED", tool_id=selected_tool_id, tool_name=(selected_match or {}).get("name") or (selected_match or {}).get("label") or tool, tool_type=selected_tool_type, step=step + 1)
         if tool not in allowed and tool != "finalizar":
             successful_text = _latest_valid_result_text(state)
             if successful_text:
@@ -371,10 +404,11 @@ def run_agent_for_tenant(db: Session, tenant_id, input_text: str, instruction: s
             state.append({"tool": tool, "tool_id": tool_id, "ok": tool_result.get("status") == "success", "result": tool_result.get("output"), "error": tool_result.get("error")})
             continue
         if tool == "chamar_mcp":
-            tool_id = str(args.get("tool_id") or "").strip()
-            tool_input = args.get("input") if isinstance(args.get("input"), dict) else {}
+            tool_id, tool_input = _normalize_mcp_tool_call(raw_call, args)
             match = next((t for t in mcp_tools if str(t.get("tool_id")) == tool_id), None)
             if match is None or mcp_tool_executor is None:
+                allowed_tool_ids = [str(t.get("tool_id")) for t in mcp_tools if t.get("tool_id") is not None]
+                _json_log("AI_AGENT_MCP_TOOL_RESOLUTION_FAILED", tool_id=tool_id, allowed_tool_ids=allowed_tool_ids, raw_call=raw_call)
                 blocked_tool_calls.append({"tool_id": tool_id, "error": "mcp_tool_not_allowed"})
                 state.append({"tool": tool, "tool_id": tool_id, "ok": False, "error": "mcp_tool_not_allowed"})
                 continue

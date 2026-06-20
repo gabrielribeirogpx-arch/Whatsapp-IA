@@ -121,3 +121,51 @@ def test_ai_agent_mcp_result_text_deterministic_when_final_llm_invalid(monkeypat
     assert result.fallback_used is False
     assert result.message == "O resultado é 699678."
     assert result.message != "fallback"
+
+
+def test_ai_agent_mcp_get_business_hours_resolves_tool_id_inside_tool_calls_arguments(monkeypatch):
+    get_business_hours_id = "70d58c9b-84e0-40fb-994b-ce86a1266d64"
+    calls = iter([
+        '{"tool_calls":[{"tool":"chamar_mcp","arguments":{"tool_id":"70d58c9b-84e0-40fb-994b-ce86a1266d64","input":{}}}]}',
+        '{"thought_summary":"responder","tool":"responder","arguments":{"message":"Nosso horário de atendimento é de segunda a sexta, das 9h às 18h."}}',
+    ])
+    registry_calls = []
+    original_execute = svc.ToolRegistry.execute
+
+    def fake_llm(_db, _tenant_id, messages, options=None):
+        return next(calls)
+
+    def fake_mcp_executor(tool, args):
+        assert tool["tool_id"] == get_business_hours_id
+        assert tool["name"] == "get_business_hours"
+        assert args == {}
+        return {
+            "ok": True,
+            "status": "success",
+            "result": {"content": [{"type": "text", "text": "segunda a sexta, das 9h às 18h"}]},
+            "latency_ms": 1,
+        }
+
+    def spy_execute(self, tool_type, tool_id, input, context, config=None):
+        registry_calls.append({"tool_type": tool_type, "tool_id": tool_id, "input": input})
+        return original_execute(self, tool_type, tool_id, input, context, config)
+
+    monkeypatch.setattr(svc, "generate_answer_for_tenant", fake_llm)
+    monkeypatch.setattr(svc.ToolRegistry, "execute", spy_execute)
+
+    result = svc.run_agent_for_tenant(
+        object(),
+        uuid.uuid4(),
+        "Qual é o horário de atendimento?",
+        "Use get_business_hours para consultar horário de atendimento.",
+        ["chamar_mcp", "responder"],
+        {"mcp_tools": [{"tool_id": get_business_hours_id, "name": "get_business_hours", "description": "Horário de atendimento"}]},
+        options={"max_steps": 2, "fallback_message": "fallback"},
+        mcp_tool_executor=fake_mcp_executor,
+    )
+
+    assert registry_calls == [{"tool_type": "mcp_tool", "tool_id": get_business_hours_id, "input": {}}]
+    assert result.fallback_used is False
+    assert result.message == "Nosso horário de atendimento é de segunda a sexta, das 9h às 18h."
+    assert result.message != "fallback"
+    assert result.metadata["mcp_tools_used"][0]["tool_id"] == get_business_hours_id
