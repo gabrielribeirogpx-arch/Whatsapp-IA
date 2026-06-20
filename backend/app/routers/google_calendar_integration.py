@@ -55,9 +55,8 @@ def _frontend_base_url() -> str:
 
 def _frontend_oauth_result_url(status: str) -> str:
     base = _frontend_base_url()
-    parsed = urlparse(f"{base}/dashboard/account")
+    parsed = urlparse(f"{base}/dashboard/ai/mcp")
     query = urlencode({
-        "tab": "integrations",
         "integration": PROVIDER,
         "status": status,
     })

@@ -316,8 +316,8 @@ def test_callback_exchanges_code_fetches_email_and_persists_encrypted_tokens(mon
 
     assert response.status_code == 302
     assert response.headers["location"] == (
-        "https://frontend.example.com/dashboard/account?"
-        "tab=integrations&integration=google_calendar&status=connected"
+        "https://frontend.example.com/dashboard/ai/mcp?"
+        "integration=google_calendar&status=connected"
     )
     connection = db.connections[0]
     assert connection.provider == PROVIDER
@@ -342,7 +342,7 @@ def test_callback_redirects_to_frontend_error_on_oauth_failure():
 
     assert response.status_code == 302
     assert response.headers["location"] == (
-        "https://frontend.example.com/dashboard/account?"
-        "tab=integrations&integration=google_calendar&status=error"
+        "https://frontend.example.com/dashboard/ai/mcp?"
+        "integration=google_calendar&status=error"
     )
     assert db.connections == []
