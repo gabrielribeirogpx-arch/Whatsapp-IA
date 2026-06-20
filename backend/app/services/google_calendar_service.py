@@ -3,9 +3,10 @@ from __future__ import annotations
 import logging
 import os
 import re
+import traceback
 import uuid
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import Any, Callable
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import requests
@@ -28,17 +29,49 @@ def _now_utc_naive() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
+def _connection_metadata(conn: IntegrationConnection | None) -> dict[str, Any]:
+    metadata = conn.metadata_json if conn and isinstance(conn.metadata_json, dict) else {}
+    return {
+        "account_email": metadata.get("account_email"),
+        "calendar_id": metadata.get("calendar_id") or "primary",
+        "provider": conn.provider if conn else PROVIDER,
+        "connected": bool(conn and conn.status == "active" and conn.auth_type == "oauth2"),
+        "status": conn.status if conn else None,
+    }
+
+
 class GoogleCalendarService:
     def __init__(self, db: Session, tenant_id: uuid.UUID | str):
         self.db = db
         self.tenant_id = uuid.UUID(str(tenant_id))
         self.connection_service = IntegrationConnectionService(db)
 
-    def _connection(self) -> IntegrationConnection | None:
+    def _log(self, event: str, *, tool_name: str | None = None, input: Any = None, conn: IntegrationConnection | None = None, calendar_id: str | None = None, exception: BaseException | None = None, **extra: Any) -> None:
+        payload = {
+            "tenant_id": str(self.tenant_id),
+            "tool_name": tool_name,
+            "input": input,
+            **_connection_metadata(conn),
+            **extra,
+        }
+        if calendar_id:
+            payload["calendar_id"] = calendar_id
+        if exception is not None:
+            payload.update({
+                "exception_class": type(exception).__name__,
+                "exception_message": str(exception),
+                "traceback": "".join(traceback.format_exception(type(exception), exception, exception.__traceback__)),
+            })
+            logger.exception("%s %s", event, sanitize_metadata(payload))
+        else:
+            logger.info("%s %s", event, sanitize_metadata(payload))
+
+    def _connection(self, *, tool_name: str | None = None, input: Any = None) -> IntegrationConnection | None:
         conn = self.connection_service.get_active_connection(self.tenant_id, PROVIDER)
         if not conn or conn.auth_type != "oauth2":
-            logger.warning("GOOGLE_CALENDAR_NOT_CONNECTED tenant_id=%s", self.tenant_id)
+            self._log("GOOGLE_CALENDAR_CONNECTION_NOT_FOUND", tool_name=tool_name, input=input, conn=conn)
             return None
+        self._log("GOOGLE_CALENDAR_CONNECTION_FOUND", tool_name=tool_name, input=input, conn=conn)
         return conn
 
     def _tokens(self, conn: IntegrationConnection) -> tuple[str | None, str | None]:
@@ -101,7 +134,7 @@ class GoogleCalendarService:
         return payload
 
     def refresh_access_token_if_needed(self, force: bool = False) -> dict[str, Any]:
-        conn = self._connection()
+        conn = self._connection(tool_name="refresh_access_token", input={"force": force})
         if not conn:
             return {"ok": False, "message": NOT_CONNECTED_MESSAGE}
         if not force and conn.expires_at and conn.expires_at > _now_utc_naive() + timedelta(seconds=60):
@@ -127,73 +160,113 @@ class GoogleCalendarService:
             expires_at = _now_utc_naive() + timedelta(seconds=int(data.get("expires_in") or 3600))
             self.connection_service.update_tokens(tenant_id=self.tenant_id, provider=PROVIDER, access_token=access, expires_at=expires_at)
             return {"ok": True, "refreshed": True}
-        except requests.RequestException:
-            logger.exception("GOOGLE_CALENDAR_TOKEN_REFRESH_FAILED tenant_id=%s", self.tenant_id)
-            return {"ok": False, "message": "Não foi possível renovar o acesso ao Google Calendar."}
+        except requests.RequestException as exc:
+            self._log("GOOGLE_CALENDAR_SERVICE_EXCEPTION", tool_name="refresh_access_token", input={"force": force}, conn=conn, exception=exc)
+            raise
 
     def _request(self, method: str, path: str, *, params: dict[str, Any] | None = None, json_body: dict[str, Any] | None = None, retry: bool = True) -> tuple[bool, Any, int]:
-        conn = self._connection()
+        conn = self._connection(tool_name=f"{method} {path}", input={"params": params, "json_body": json_body})
         if not conn:
             return False, {"message": NOT_CONNECTED_MESSAGE}, 0
         if conn.expires_at and conn.expires_at <= _now_utc_naive() + timedelta(seconds=60):
             refreshed = self.refresh_access_token_if_needed(force=True)
             if refreshed.get("ok") is False:
                 return False, refreshed, 0
-            conn = self._connection()
+            conn = self._connection(tool_name=f"{method} {path}", input={"params": params, "json_body": json_body})
         access, _refresh = self._tokens(conn)
         if not access:
             return False, {"message": NOT_CONNECTED_MESSAGE}, 0
-        logger.info("GOOGLE_CALENDAR_SERVICE_REQUEST %s", sanitize_metadata({"tenant_id": str(self.tenant_id), "method": method, "path": path, "params": params}))
-        resp = requests.request(method, f"{BASE_URL}{path}", headers={"Authorization": f"Bearer {access}", "Accept": "application/json"}, params=params, json=json_body, timeout=15)
+        calendar_id = "primary"
+        if path.startswith("/calendars/"):
+            calendar_id = path.split("/", 3)[2]
+        request_input = {"method": method, "path": path, "params": params, "json_body": json_body}
+        self._log("GOOGLE_CALENDAR_API_REQUEST", tool_name=f"{method} {path}", input=request_input, conn=conn, calendar_id=calendar_id, method=method, path=path)
+        try:
+            resp = requests.request(method, f"{BASE_URL}{path}", headers={"Authorization": f"Bearer {access}", "Accept": "application/json"}, params=params, json=json_body, timeout=15)
+        except Exception as exc:
+            self._log("GOOGLE_CALENDAR_SERVICE_EXCEPTION", tool_name=f"{method} {path}", input=request_input, conn=conn, calendar_id=calendar_id, exception=exc)
+            raise
         if resp.status_code == 401 and retry:
             refreshed = self.refresh_access_token_if_needed(force=True)
             if refreshed.get("ok"):
                 return self._request(method, path, params=params, json_body=json_body, retry=False)
             return False, refreshed, resp.status_code
+        response_payload = {"status_code": resp.status_code, "path": path}
         if resp.status_code >= 400:
-            logger.warning("GOOGLE_CALENDAR_API_ERROR tenant_id=%s status=%s path=%s", self.tenant_id, resp.status_code, path)
-            return False, {"message": "Erro ao chamar Google Calendar.", "status_code": resp.status_code}, resp.status_code
-        data = {} if resp.status_code == 204 or not resp.content else resp.json()
-        logger.info("GOOGLE_CALENDAR_SERVICE_RESPONSE %s", sanitize_metadata({"tenant_id": str(self.tenant_id), "status": resp.status_code, "path": path}))
+            try:
+                response_payload["body"] = resp.json()
+            except Exception:
+                response_payload["body"] = getattr(resp, "text", None)
+            self._log("GOOGLE_CALENDAR_API_ERROR", tool_name=f"{method} {path}", input=request_input, conn=conn, calendar_id=calendar_id, **response_payload)
+            return False, {"message": "Erro ao chamar Google Calendar.", "status_code": resp.status_code, "api_error": response_payload.get("body")}, resp.status_code
+        try:
+            data = {} if resp.status_code == 204 or not resp.content else resp.json()
+        except Exception as exc:
+            self._log("GOOGLE_CALENDAR_SERVICE_EXCEPTION", tool_name=f"{method} {path}", input=request_input, conn=conn, calendar_id=calendar_id, exception=exc, status_code=resp.status_code)
+            raise
+        self._log("GOOGLE_CALENDAR_API_RESPONSE", tool_name=f"{method} {path}", input=request_input, conn=conn, calendar_id=calendar_id, status_code=resp.status_code, response=data)
         return True, data, resp.status_code
 
+    def _service_call(self, tool_name: str, input: dict[str, Any], operation: Callable[[], dict[str, Any]]) -> dict[str, Any]:
+        conn = self.connection_service.get_connection(self.tenant_id, PROVIDER)
+        self._log("GOOGLE_CALENDAR_SERVICE_CALL", tool_name=tool_name, input=input, conn=conn)
+        try:
+            result = operation()
+        except Exception as exc:
+            self._log("GOOGLE_CALENDAR_SERVICE_EXCEPTION", tool_name=tool_name, input=input, conn=conn, exception=exc)
+            raise
+        self._log("GOOGLE_CALENDAR_SERVICE_RESULT", tool_name=tool_name, input=input, conn=conn, result=result)
+        return result
+
     def list_events(self, **kwargs: Any) -> dict[str, Any]:
-        tz = self._tenant_timezone(kwargs.get("timezone"))
-        params = {"singleEvents": True, "orderBy": "startTime", "timeZone": tz}
-        for src, dest in [("time_min", "timeMin"), ("timeMin", "timeMin"), ("time_max", "timeMax"), ("timeMax", "timeMax"), ("max_results", "maxResults"), ("maxResults", "maxResults")]:
-            if kwargs.get(src) is not None:
-                params[dest] = self._normalize_datetime(kwargs[src], tz) if "time" in src.lower() else kwargs[src]
-        ok, data, _ = self._request("GET", "/calendars/primary/events", params=params)
-        if not ok:
-            return {"ok": False, **data}
-        events = [{"event_id": e.get("id"), "html_link": e.get("htmlLink"), "title": e.get("summary"), "start": (e.get("start") or {}).get("dateTime") or (e.get("start") or {}).get("date"), "end": (e.get("end") or {}).get("dateTime") or (e.get("end") or {}).get("date")} for e in data.get("items", [])]
-        return {"ok": True, "events": events}
+        def operation() -> dict[str, Any]:
+            tz = self._tenant_timezone(kwargs.get("timezone"))
+            params = {"singleEvents": True, "orderBy": "startTime", "timeZone": tz}
+            for src, dest in [("time_min", "timeMin"), ("timeMin", "timeMin"), ("time_max", "timeMax"), ("timeMax", "timeMax"), ("max_results", "maxResults"), ("maxResults", "maxResults")]:
+                if kwargs.get(src) is not None:
+                    params[dest] = self._normalize_datetime(kwargs[src], tz) if "time" in src.lower() else kwargs[src]
+            ok, data, _ = self._request("GET", "/calendars/primary/events", params=params)
+            if not ok:
+                return {"ok": False, **data}
+            events = [{"event_id": e.get("id"), "html_link": e.get("htmlLink"), "title": e.get("summary"), "start": (e.get("start") or {}).get("dateTime") or (e.get("start") or {}).get("date"), "end": (e.get("end") or {}).get("dateTime") or (e.get("end") or {}).get("date")} for e in data.get("items", [])]
+            return {"ok": True, "events": events}
+        return self._service_call("google_calendar_list_events", kwargs, operation)
 
     def create_event(self, **kwargs: Any) -> dict[str, Any]:
-        ok, data, _ = self._request("POST", "/calendars/primary/events", json_body=self._event_payload(kwargs))
-        if not ok:
-            return {"ok": False, **data}
-        return {"ok": True, "event_id": data.get("id"), "html_link": data.get("htmlLink"), "title": data.get("summary"), "start": (data.get("start") or {}).get("dateTime") or (data.get("start") or {}).get("date"), "end": (data.get("end") or {}).get("dateTime") or (data.get("end") or {}).get("date")}
+        def operation() -> dict[str, Any]:
+            ok, data, _ = self._request("POST", "/calendars/primary/events", json_body=self._event_payload(kwargs))
+            if not ok:
+                return {"ok": False, **data}
+            return {"ok": True, "event_id": data.get("id"), "html_link": data.get("htmlLink"), "title": data.get("summary"), "start": (data.get("start") or {}).get("dateTime") or (data.get("start") or {}).get("date"), "end": (data.get("end") or {}).get("dateTime") or (data.get("end") or {}).get("date")}
+        return self._service_call("google_calendar_create_event", kwargs, operation)
 
     def update_event(self, event_id: str, **kwargs: Any) -> dict[str, Any]:
-        ok, data, _ = self._request("PATCH", f"/calendars/primary/events/{event_id}", json_body=self._event_payload(kwargs))
-        if not ok:
-            return {"ok": False, **data}
-        return {"ok": True, "event_id": data.get("id"), "html_link": data.get("htmlLink"), "title": data.get("summary"), "start": (data.get("start") or {}).get("dateTime"), "end": (data.get("end") or {}).get("dateTime")}
+        input_payload = {"event_id": event_id, **kwargs}
+        def operation() -> dict[str, Any]:
+            ok, data, _ = self._request("PATCH", f"/calendars/primary/events/{event_id}", json_body=self._event_payload(kwargs))
+            if not ok:
+                return {"ok": False, **data}
+            return {"ok": True, "event_id": data.get("id"), "html_link": data.get("htmlLink"), "title": data.get("summary"), "start": (data.get("start") or {}).get("dateTime"), "end": (data.get("end") or {}).get("dateTime")}
+        return self._service_call("google_calendar_update_event", input_payload, operation)
 
     def delete_event(self, event_id: str) -> dict[str, Any]:
-        ok, data, _ = self._request("DELETE", f"/calendars/primary/events/{event_id}")
-        if not ok:
-            return {"ok": False, **data}
-        return {"ok": True, "deleted": True, "event_id": event_id}
+        input_payload = {"event_id": event_id}
+        def operation() -> dict[str, Any]:
+            ok, data, _ = self._request("DELETE", f"/calendars/primary/events/{event_id}")
+            if not ok:
+                return {"ok": False, **data}
+            return {"ok": True, "deleted": True, "event_id": event_id}
+        return self._service_call("google_calendar_delete_event", input_payload, operation)
 
     def check_availability(self, **kwargs: Any) -> dict[str, Any]:
-        tz = self._tenant_timezone(kwargs.get("timezone"))
-        start = kwargs.get("start") or kwargs.get("timeMin") or kwargs.get("time_min")
-        end = kwargs.get("end") or kwargs.get("timeMax") or kwargs.get("time_max")
-        body = {"timeMin": self._normalize_datetime(start, tz), "timeMax": self._normalize_datetime(end, tz), "timeZone": tz, "items": [{"id": "primary"}]}
-        ok, data, _ = self._request("POST", "/freeBusy", json_body=body)
-        if not ok:
-            return {"ok": False, **data}
-        busy = ((data.get("calendars") or {}).get("primary") or {}).get("busy") or []
-        return {"ok": True, "busy": busy, "available_slots": []}
+        def operation() -> dict[str, Any]:
+            tz = self._tenant_timezone(kwargs.get("timezone"))
+            start = kwargs.get("start") or kwargs.get("timeMin") or kwargs.get("time_min")
+            end = kwargs.get("end") or kwargs.get("timeMax") or kwargs.get("time_max")
+            body = {"timeMin": self._normalize_datetime(start, tz), "timeMax": self._normalize_datetime(end, tz), "timeZone": tz, "items": [{"id": "primary"}]}
+            ok, data, _ = self._request("POST", "/freeBusy", json_body=body)
+            if not ok:
+                return {"ok": False, **data}
+            busy = ((data.get("calendars") or {}).get("primary") or {}).get("busy") or []
+            return {"ok": True, "busy": busy, "available_slots": []}
+        return self._service_call("google_calendar_check_availability", kwargs, operation)
