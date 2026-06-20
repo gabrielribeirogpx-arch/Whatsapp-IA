@@ -1,7 +1,10 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
+  AlertCircle,
+  CalendarDays,
   CheckCircle2,
   Edit3,
   Link2,
@@ -10,8 +13,16 @@ import {
   ServerCog,
   Trash2,
   Wrench,
+  XCircle,
 } from "lucide-react";
-import { apiFetch, parseApiResponse } from "../../../../lib/api";
+import {
+  apiFetch,
+  disconnectGoogleCalendar,
+  getGoogleCalendarConnectUrl,
+  getGoogleCalendarStatus,
+  parseApiResponse,
+} from "../../../../lib/api";
+import type { GoogleCalendarConnectionStatus } from "../../../../lib/types";
 
 type MCPServer = {
   id: string;
@@ -31,7 +42,12 @@ type MCPTool = {
   description: string;
   input_schema: Record<string, unknown>;
   is_enabled: boolean;
-  metadata?: { last_discovered_at?: string; missing_from_last_discovery?: boolean };
+  server_name?: string;
+  metadata?: {
+    last_discovered_at?: string;
+    missing_from_last_discovery?: boolean;
+    provider?: string;
+  };
 };
 type MessageTone = "success" | "error" | "warning";
 
@@ -83,6 +99,9 @@ function EmptyState({
 }
 
 export default function MCPDashboardPage() {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
   const [servers, setServers] = useState<MCPServer[]>([]);
   const [tools, setTools] = useState<MCPTool[]>([]);
   const [name, setName] = useState("");
@@ -98,18 +117,49 @@ export default function MCPDashboardPage() {
   );
   const [removingServerId, setRemovingServerId] = useState<string | null>(null);
   const [togglingToolId, setTogglingToolId] = useState<string | null>(null);
+  const [calendarStatus, setCalendarStatus] =
+    useState<GoogleCalendarConnectionStatus | null>(null);
+  const [loadingCalendar, setLoadingCalendar] = useState(true);
+  const [calendarActionLoading, setCalendarActionLoading] = useState(false);
+  const [calendarError, setCalendarError] = useState("");
+
+  const mcpTools = useMemo(
+    () => tools.filter((tool) => tool.metadata?.provider !== "google_calendar"),
+    [tools],
+  );
+  const googleCalendarTools = useMemo(
+    () => tools.filter((tool) => tool.metadata?.provider === "google_calendar"),
+    [tools],
+  );
 
   const toolsByServer = useMemo(
     () =>
-      tools.reduce<Record<string, number>>(
+      mcpTools.reduce<Record<string, number>>(
         (acc, tool) => ({
           ...acc,
           [tool.server_id]: (acc[tool.server_id] || 0) + 1,
         }),
         {},
       ),
-    [tools],
+    [mcpTools],
   );
+
+  async function refreshCalendarStatus(successMessage?: string) {
+    setLoadingCalendar(true);
+    setCalendarError("");
+    try {
+      const status = await getGoogleCalendarStatus();
+      setCalendarStatus(status);
+      if (successMessage) {
+        setMessageTone("success");
+        setMessage(successMessage);
+      }
+    } catch {
+      setCalendarError("Falha ao carregar status do Google Calendar.");
+    } finally {
+      setLoadingCalendar(false);
+    }
+  }
 
   async function load() {
     const [serverRows, toolRows] = await Promise.all([
@@ -120,6 +170,29 @@ export default function MCPDashboardPage() {
     setTools(toolRows);
   }
   useEffect(() => {
+    const integration = searchParams.get("integration");
+    const status = searchParams.get("status");
+    const isGoogleCalendarReturn = integration === "google_calendar";
+
+    if (isGoogleCalendarReturn && status === "connected") {
+      refreshCalendarStatus("Google Calendar conectado com sucesso.");
+    } else if (isGoogleCalendarReturn && status === "error") {
+      refreshCalendarStatus();
+      setCalendarError("Falha ao conectar Google Calendar.");
+    } else {
+      refreshCalendarStatus();
+    }
+
+    if (isGoogleCalendarReturn) {
+      const nextParams = new URLSearchParams(searchParams.toString());
+      nextParams.delete("integration");
+      nextParams.delete("status");
+      const query = nextParams.toString();
+      router.replace(query ? `${pathname}?${query}` : pathname, {
+        scroll: false,
+      });
+    }
+
     load().catch((error) => {
       setMessageTone("error");
       setMessage(
@@ -128,7 +201,7 @@ export default function MCPDashboardPage() {
           : "Falha ao carregar integrações.",
       );
     });
-  }, []);
+  }, [pathname, router, searchParams]);
 
   function resetForm() {
     setName("");
@@ -172,8 +245,8 @@ export default function MCPDashboardPage() {
       setMessageTone("success");
       setMessage(
         editingId
-          ? "Integração atualizada com segurança."
-          : `Integração salva e descoberta automática concluída (${saved.discovery?.tools_discovered ?? 0} ferramentas).`,
+          ? "Servidor MCP atualizado com segurança."
+          : `Servidor MCP salvo e descoberta automática concluída (${saved.discovery?.tools_discovered ?? 0} ferramentas).`,
       );
       resetForm();
       await load();
@@ -182,12 +255,12 @@ export default function MCPDashboardPage() {
     }
   }
   async function removeServer(serverId: string) {
-    if (!confirm("Remover esta integração?")) return;
+    if (!confirm("Remover este servidor MCP?")) return;
     setRemovingServerId(serverId);
     try {
       await apiFetch(`/api/mcp/servers/${serverId}`, { method: "DELETE" });
       setMessageTone("success");
-      setMessage("Integração removida.");
+      setMessage("Servidor MCP removido.");
       await load();
     } finally {
       setRemovingServerId(null);
@@ -210,6 +283,31 @@ export default function MCPDashboardPage() {
       setDiscoveringServerId(null);
     }
   }
+  function connectCalendar() {
+    setCalendarError("");
+    try {
+      window.location.href = getGoogleCalendarConnectUrl();
+    } catch {
+      setCalendarError("Falha ao conectar Google Calendar.");
+    }
+  }
+
+  async function disconnectCalendar() {
+    setCalendarActionLoading(true);
+    setCalendarError("");
+    try {
+      const status = await disconnectGoogleCalendar();
+      setCalendarStatus(status);
+      setMessageTone("success");
+      setMessage("Google Calendar desconectado.");
+      await load();
+    } catch {
+      setCalendarError("Falha ao desconectar Google Calendar.");
+    } finally {
+      setCalendarActionLoading(false);
+    }
+  }
+
   async function toggleTool(tool: MCPTool) {
     setTogglingToolId(tool.id);
     try {
@@ -224,6 +322,12 @@ export default function MCPDashboardPage() {
       setTogglingToolId(null);
     }
   }
+
+  const isCalendarConnected = calendarStatus?.connected === true;
+  const calendarAccountEmail =
+    typeof calendarStatus?.metadata?.account_email === "string"
+      ? calendarStatus.metadata.account_email
+      : "Nenhuma conta conectada";
 
   const messageClass =
     messageTone === "error"
@@ -257,17 +361,123 @@ export default function MCPDashboardPage() {
         </header>
 
         <section className={cardClass}>
+          <div className="mb-5">
+            <p className="text-xs font-bold uppercase tracking-[0.16em] text-emerald-600">
+              Integrações oficiais
+            </p>
+            <h2 className="mt-2 text-lg font-bold text-slate-950">
+              Apps conectados ao Wazza
+            </h2>
+            <p className="mt-1 text-sm text-slate-500">
+              Conectores mantidos pela plataforma, separados dos servidores MCP
+              externos.
+            </p>
+          </div>
+          <article className="rounded-3xl border border-slate-200 bg-gradient-to-br from-white via-slate-50 to-emerald-50/40 p-5 shadow-sm">
+            <div className="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
+              <div className="flex gap-4">
+                <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-emerald-100 text-emerald-700">
+                  <CalendarDays size={22} />
+                </span>
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h3 className="font-bold text-slate-950">
+                      Google Calendar
+                    </h3>
+                    <span
+                      className={`inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs font-bold ${isCalendarConnected ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-600"}`}
+                    >
+                      {loadingCalendar ? (
+                        <Loader2 size={12} className="animate-spin" />
+                      ) : isCalendarConnected ? (
+                        <CheckCircle2 size={12} />
+                      ) : (
+                        <XCircle size={12} />
+                      )}
+                      {loadingCalendar
+                        ? "Carregando..."
+                        : isCalendarConnected
+                          ? "Conectado"
+                          : "Não conectado"}
+                    </span>
+                  </div>
+                  <p className="mt-2 text-sm leading-relaxed text-slate-600">
+                    Permita que a IA consulte disponibilidade e eventos sem
+                    expor tokens no frontend.
+                  </p>
+                  <div className="mt-4 grid gap-2 text-sm sm:grid-cols-2">
+                    <p className="rounded-2xl bg-white/80 px-4 py-3 text-slate-600">
+                      <b className="block text-xs uppercase tracking-[0.12em] text-slate-400">
+                        Provider
+                      </b>
+                      {calendarStatus?.provider || "google_calendar"}
+                    </p>
+                    <p className="rounded-2xl bg-white/80 px-4 py-3 text-slate-600">
+                      <b className="block text-xs uppercase tracking-[0.12em] text-slate-400">
+                        Conta
+                      </b>
+                      {loadingCalendar
+                        ? "Consultando status..."
+                        : calendarAccountEmail}
+                    </p>
+                  </div>
+                </div>
+              </div>
+              <div className="flex w-full flex-col gap-2 sm:w-auto sm:min-w-56">
+                {isCalendarConnected ? (
+                  <button
+                    type="button"
+                    disabled={calendarActionLoading || loadingCalendar}
+                    onClick={() => disconnectCalendar()}
+                    className={dangerButtonClass}
+                  >
+                    {calendarActionLoading ? (
+                      <Loader2 size={16} className="animate-spin" />
+                    ) : (
+                      <XCircle size={16} />
+                    )}{" "}
+                    Desconectar
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    disabled={loadingCalendar}
+                    onClick={connectCalendar}
+                    className={primaryButtonClass}
+                  >
+                    <CalendarDays size={16} /> Conectar Google Calendar
+                  </button>
+                )}
+                <button
+                  type="button"
+                  disabled={loadingCalendar}
+                  onClick={() => refreshCalendarStatus()}
+                  className={secondaryButtonClass}
+                >
+                  Atualizar status
+                </button>
+              </div>
+            </div>
+            {calendarError ? (
+              <p className="mt-4 inline-flex items-center gap-2 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">
+                <AlertCircle size={16} /> {calendarError}
+              </p>
+            ) : null}
+          </article>
+        </section>
+
+        <section className={cardClass}>
           <div className="mb-5 flex items-start gap-3">
             <span className="rounded-2xl bg-emerald-50 p-3 text-emerald-600">
               <PlugZap size={22} />
             </span>
             <div>
               <h2 className="text-lg font-bold text-slate-950">
-                Nova integração
+                Novo servidor MCP
               </h2>
               <p className="mt-1 text-sm text-slate-500">
-                Informe o nome, a URL segura e, se necessário, o token
-                protegido.
+                Informe o nome, a URL segura e, se necessário, o token protegido
+                do servidor MCP.
               </p>
             </div>
           </div>
@@ -323,7 +533,7 @@ export default function MCPDashboardPage() {
                   setMessage(
                     error instanceof Error
                       ? error.message
-                      : "Falha ao salvar integração.",
+                      : "Falha ao salvar servidor MCP.",
                   );
                 })
               }
@@ -349,11 +559,10 @@ export default function MCPDashboardPage() {
 
         <section className={cardClass}>
           <div className="mb-5">
-            <h2 className="text-lg font-bold text-slate-950">
-              Integrações conectadas
-            </h2>
+            <h2 className="text-lg font-bold text-slate-950">Servidores MCP</h2>
             <p className="mt-1 text-sm text-slate-500">
-              Gerencie conexões e descubra ferramentas disponíveis.
+              Gerencie servidores MCP externos e descubra ferramentas
+              disponíveis.
             </p>
           </div>
           <div className="grid gap-4 xl:grid-cols-2">
@@ -421,7 +630,7 @@ export default function MCPDashboardPage() {
                         setMessage(
                           error instanceof Error
                             ? error.message
-                            : "Falha ao remover integração.",
+                            : "Falha ao remover servidor MCP.",
                         );
                       })
                     }
@@ -441,8 +650,8 @@ export default function MCPDashboardPage() {
               <div className="xl:col-span-2">
                 <EmptyState
                   icon={ServerCog}
-                  title="Nenhuma integração conectada"
-                  description="Adicione a primeira integração para disponibilizar novas capacidades de IA ao workspace."
+                  title="Nenhum servidor MCP conectado"
+                  description="Adicione o primeiro servidor MCP para disponibilizar novas capacidades externas de IA ao workspace."
                 />
               </div>
             )}
@@ -455,75 +664,151 @@ export default function MCPDashboardPage() {
               Ferramentas disponíveis
             </h2>
             <p className="mt-1 text-sm text-slate-500">
-              Habilite ou pause recursos descobertos nas integrações conectadas.
+              Ferramentas reais do Google Calendar aparecem separadas das
+              ferramentas descobertas via MCP.
             </p>
           </div>
-          <div className="grid gap-4 lg:grid-cols-2">
-            {tools.map((tool) => (
-              <article
-                key={tool.id}
-                className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm transition hover:border-emerald-200 hover:bg-emerald-50/20"
-              >
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <h3 className="font-bold text-slate-950">
-                        {tool.display_name || tool.tool_name}
-                      </h3>
-                      <StatusBadge active={tool.is_enabled} />
-                    </div>
-                    <p className="mt-2 text-sm leading-relaxed text-slate-600">
-                      {tool.description || "Sem descrição informada."}
-                    </p>
-                    <p className="mt-3 text-xs font-semibold text-slate-400">
-                      Identificador: {tool.tool_name}
-                    </p>
-                    {tool.metadata?.last_discovered_at ? (
-                      <p className="mt-1 text-xs font-semibold text-slate-400">
-                        Última descoberta: {new Date(tool.metadata.last_discovered_at).toLocaleString("pt-BR")}
-                      </p>
-                    ) : null}
-                    {tool.metadata?.missing_from_last_discovery ? (
-                      <p className="mt-2 rounded-full bg-amber-50 px-3 py-1 text-xs font-bold text-amber-700 ring-1 ring-amber-100">
-                        Ausente na última atualização do servidor
-                      </p>
-                    ) : null}
-                  </div>
-                  <button
-                    className={
-                      tool.is_enabled
-                        ? secondaryButtonClass
-                        : primaryButtonClass
-                    }
-                    onClick={() =>
-                      toggleTool(tool).catch((error) => {
-                        setMessageTone("error");
-                        setMessage(
-                          error instanceof Error
-                            ? error.message
-                            : "Falha ao alternar ferramenta.",
-                        );
-                      })
-                    }
-                    disabled={togglingToolId === tool.id}
-                  >
-                    {togglingToolId === tool.id ? (
-                      <Loader2 className="animate-spin" size={15} />
-                    ) : null}
-                    {tool.is_enabled ? "Desabilitar" : "Habilitar"}
-                  </button>
+
+          <div className="space-y-6">
+            <div>
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-[0.16em] text-emerald-600">
+                    Google Calendar
+                  </p>
+                  <h3 className="text-base font-bold text-slate-950">
+                    Ferramentas oficiais
+                  </h3>
                 </div>
-              </article>
-            ))}
-            {tools.length === 0 && (
-              <div className="lg:col-span-2">
-                <EmptyState
-                  icon={Wrench}
-                  title="Nenhuma ferramenta descoberta"
-                  description="Use “Descobrir Ferramentas” em uma integração conectada para preencher esta área com recursos prontos para ativação."
-                />
+                <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-bold text-emerald-700 ring-1 ring-emerald-100">
+                  {googleCalendarTools.length} ferramentas
+                </span>
               </div>
-            )}
+              <div className="grid gap-4 lg:grid-cols-2">
+                {googleCalendarTools.map((tool) => (
+                  <article
+                    key={tool.id}
+                    className="rounded-3xl border border-emerald-100 bg-emerald-50/40 p-5 shadow-sm"
+                  >
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <h4 className="font-bold text-slate-950">
+                            {tool.display_name || tool.tool_name}
+                          </h4>
+                          <StatusBadge active={tool.is_enabled} />
+                        </div>
+                        <p className="mt-2 text-sm leading-relaxed text-slate-600">
+                          {tool.description || "Sem descrição informada."}
+                        </p>
+                        <p className="mt-3 text-xs font-semibold text-slate-400">
+                          Origem:{" "}
+                          {tool.server_name || "Google Calendar conectado"}
+                        </p>
+                        <p className="mt-1 text-xs font-semibold text-slate-400">
+                          Identificador: {tool.tool_name}
+                        </p>
+                      </div>
+                    </div>
+                  </article>
+                ))}
+                {googleCalendarTools.length === 0 ? (
+                  <div className="lg:col-span-2">
+                    <EmptyState
+                      icon={CalendarDays}
+                      title="Nenhuma ferramenta do Google Calendar disponível"
+                      description="Conecte o Google Calendar nas integrações oficiais para liberar ações reais de agenda para a IA."
+                    />
+                  </div>
+                ) : null}
+              </div>
+            </div>
+
+            <div>
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-6">
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-[0.16em] text-slate-500">
+                    MCP
+                  </p>
+                  <h3 className="text-base font-bold text-slate-950">
+                    Ferramentas de servidores MCP
+                  </h3>
+                </div>
+                <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-600 ring-1 ring-slate-200">
+                  {mcpTools.length} ferramentas
+                </span>
+              </div>
+              <div className="grid gap-4 lg:grid-cols-2">
+                {mcpTools.map((tool) => (
+                  <article
+                    key={tool.id}
+                    className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm transition hover:border-emerald-200 hover:bg-emerald-50/20"
+                  >
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <h4 className="font-bold text-slate-950">
+                            {tool.display_name || tool.tool_name}
+                          </h4>
+                          <StatusBadge active={tool.is_enabled} />
+                        </div>
+                        <p className="mt-2 text-sm leading-relaxed text-slate-600">
+                          {tool.description || "Sem descrição informada."}
+                        </p>
+                        <p className="mt-3 text-xs font-semibold text-slate-400">
+                          Identificador: {tool.tool_name}
+                        </p>
+                        {tool.metadata?.last_discovered_at ? (
+                          <p className="mt-1 text-xs font-semibold text-slate-400">
+                            Última descoberta:{" "}
+                            {new Date(
+                              tool.metadata.last_discovered_at,
+                            ).toLocaleString("pt-BR")}
+                          </p>
+                        ) : null}
+                        {tool.metadata?.missing_from_last_discovery ? (
+                          <p className="mt-2 rounded-full bg-amber-50 px-3 py-1 text-xs font-bold text-amber-700 ring-1 ring-amber-100">
+                            Ausente na última atualização do servidor
+                          </p>
+                        ) : null}
+                      </div>
+                      <button
+                        className={
+                          tool.is_enabled
+                            ? secondaryButtonClass
+                            : primaryButtonClass
+                        }
+                        onClick={() =>
+                          toggleTool(tool).catch((error) => {
+                            setMessageTone("error");
+                            setMessage(
+                              error instanceof Error
+                                ? error.message
+                                : "Falha ao alternar ferramenta.",
+                            );
+                          })
+                        }
+                        disabled={togglingToolId === tool.id}
+                      >
+                        {togglingToolId === tool.id ? (
+                          <Loader2 className="animate-spin" size={15} />
+                        ) : null}
+                        {tool.is_enabled ? "Desabilitar" : "Habilitar"}
+                      </button>
+                    </div>
+                  </article>
+                ))}
+                {mcpTools.length === 0 ? (
+                  <div className="lg:col-span-2">
+                    <EmptyState
+                      icon={Wrench}
+                      title="Nenhuma ferramenta MCP descoberta"
+                      description="Use “Descobrir Ferramentas” em um servidor MCP para preencher esta área com recursos prontos para ativação."
+                    />
+                  </div>
+                ) : null}
+              </div>
+            </div>
           </div>
         </section>
       </div>
