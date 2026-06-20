@@ -30,6 +30,7 @@ def oauth_env(monkeypatch):
     monkeypatch.setenv("GOOGLE_CALENDAR_CLIENT_ID", "client-id")
     monkeypatch.setenv("GOOGLE_CALENDAR_CLIENT_SECRET", "client-secret")
     monkeypatch.setenv("GOOGLE_CALENDAR_REDIRECT_URI", "https://app.example.com/api/integrations/google-calendar/callback")
+    monkeypatch.setenv("FRONTEND_URL", "https://frontend.example.com")
 
 
 def _client(tenant_id: uuid.UUID, db: FakeDb) -> TestClient:
@@ -308,10 +309,16 @@ def test_callback_exchanges_code_fetches_email_and_persists_encrypted_tokens(mon
     monkeypatch.setattr(router_module.requests, "post", fake_post)
     monkeypatch.setattr(router_module.requests, "get", fake_get)
 
-    response = _client(tenant_id, db).get(f"/api/integrations/google-calendar/callback?code=auth-code&state={state}")
+    response = _client(tenant_id, db).get(
+        f"/api/integrations/google-calendar/callback?code=auth-code&state={state}",
+        follow_redirects=False,
+    )
 
-    assert response.status_code == 200
-    assert response.json() == {"provider": PROVIDER, "connected": True, "account_email": "calendar@example.com"}
+    assert response.status_code == 302
+    assert response.headers["location"] == (
+        "https://frontend.example.com/dashboard/account?"
+        "tab=integrations&integration=google_calendar&status=connected"
+    )
     connection = db.connections[0]
     assert connection.provider == PROVIDER
     assert connection.auth_type == "oauth2"
@@ -322,3 +329,20 @@ def test_callback_exchanges_code_fetches_email_and_persists_encrypted_tokens(mon
     assert IntegrationConnectionService.decrypt_credential(connection.refresh_token_encrypted) == "refresh-token"
     assert "access-token" not in response.text
     assert "refresh-token" not in response.text
+
+
+def test_callback_redirects_to_frontend_error_on_oauth_failure():
+    tenant_id = uuid.uuid4()
+    db = FakeDb()
+
+    response = _client(tenant_id, db).get(
+        "/api/integrations/google-calendar/callback?error=access_denied",
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 302
+    assert response.headers["location"] == (
+        "https://frontend.example.com/dashboard/account?"
+        "tab=integrations&integration=google_calendar&status=error"
+    )
+    assert db.connections == []

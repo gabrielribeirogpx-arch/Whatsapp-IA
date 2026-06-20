@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { AlertCircle, Bell, Building2, CalendarDays, CheckCircle2, Clock3, CreditCard, Globe2, KeyRound, Layers3, Loader2, LockKeyhole, LogOut, Mail, MessageSquareText, Pencil, Plus, Save, ShieldCheck, Smartphone, User, UsersRound, XCircle } from 'lucide-react';
 import ProvidersTab from '@/components/settings/whatsapp-business/ProvidersTab';
@@ -164,6 +165,9 @@ function UsersTab() {
 function PermissionsTab() { const roles = [{ name: 'Owner', desc: 'Controle total do workspace, billing, integrações e RBAC.' }, { name: 'Admin', desc: 'Gerencia usuários, fluxos, campanhas e configurações operacionais.' }, { name: 'Member', desc: 'Opera inbox, CRM, campanhas e automações liberadas.' }, { name: 'Viewer', desc: 'Acesso somente leitura para auditoria e liderança.' }]; return <Card><HubHeader icon={ShieldCheck} eyebrow='Governança' title='Permissões' description='RBAC permanece no roadmap, mas a política alvo já está clara: papéis por módulo, ações críticas e escopos de workspace.' /><div className='grid gap-4 p-5 md:grid-cols-4 md:p-6'>{roles.map(r => <div key={r.name} className='rounded-3xl border border-slate-200 p-5'><p className='text-lg font-semibold text-slate-950'>{r.name}</p><p className='mt-2 text-sm leading-relaxed text-slate-600'>{r.desc}</p></div>)}</div></Card>; }
 function BillingTab() { const limits = ['1.000 mensagens/mês', '1 workspace', 'Até 5 usuários', 'WhatsApp Business básico']; return <Card><HubHeader icon={CreditCard} eyebrow='Revenue Operations' title='Billing' description='Resumo financeiro sem integração de cobrança: plano atual, status e limites operacionais da POC.' /><div className='grid gap-5 p-5 md:grid-cols-[320px_1fr] md:p-6'><div className='rounded-3xl bg-slate-950 p-6 text-white'><p className='text-sm text-emerald-200'>Plano atual</p><h3 className='mt-2 text-3xl font-bold'>Starter POC</h3><p className='mt-4 inline-flex rounded-full bg-emerald-400/15 px-3 py-1 text-sm font-semibold text-emerald-200'>Status: Ativo</p></div><div className='grid gap-3 md:grid-cols-2'>{limits.map(limit => <div key={limit} className='flex items-center gap-3 rounded-2xl border border-slate-200 p-4'><CheckCircle2 className='text-emerald-500' size={18} /><span className='text-sm font-semibold text-slate-700'>{limit}</span></div>)}</div></div></Card>; }
 function IntegrationsTab() {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
   const integrations = [{ name: 'WhatsApp Business', status: 'Configurável', icon: Smartphone, desc: 'Providers, tokens, WABA e templates oficiais.' }, { name: 'Webhooks', status: 'Disponível', icon: Globe2, desc: 'Eventos de entrada e callbacks para automações.' }, { name: 'APIs', status: 'Operacional', icon: Layers3, desc: 'Endpoints protegidos por tenant e token.' }];
   const [calendarStatus, setCalendarStatus] = useState<GoogleCalendarConnectionStatus | null>(null);
   const [loadingCalendar, setLoadingCalendar] = useState(true);
@@ -177,23 +181,45 @@ function IntegrationsTab() {
     try {
       const status = await getGoogleCalendarStatus();
       setCalendarStatus(status);
-      setCalendarMessage(successMessage || (status.connected ? 'Google Calendar conectado com sucesso' : 'Não conectado'));
+      setCalendarMessage(successMessage || '');
     } catch {
-      setCalendarError('Falha ao conectar');
+      setCalendarError('Falha ao carregar status do Google Calendar.');
       setCalendarMessage('');
     } finally {
       setLoadingCalendar(false);
     }
   };
 
-  useEffect(() => { refreshCalendarStatus(); }, []);
+  useEffect(() => {
+    const integration = searchParams.get('integration');
+    const status = searchParams.get('status');
+    const isGoogleCalendarReturn = integration === 'google_calendar';
+
+    if (isGoogleCalendarReturn && status === 'connected') {
+      refreshCalendarStatus('Google Calendar conectado com sucesso.');
+    } else if (isGoogleCalendarReturn && status === 'error') {
+      refreshCalendarStatus();
+      setCalendarError('Falha ao conectar Google Calendar.');
+      setCalendarMessage('');
+    } else {
+      refreshCalendarStatus();
+    }
+
+    if (isGoogleCalendarReturn) {
+      const nextParams = new URLSearchParams(searchParams.toString());
+      nextParams.delete('integration');
+      nextParams.delete('status');
+      const query = nextParams.toString();
+      router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false });
+    }
+  }, [pathname, router, searchParams]);
 
   const connectCalendar = () => {
     setCalendarError('');
     try {
       window.location.href = getGoogleCalendarConnectUrl();
     } catch {
-      setCalendarError('Falha ao conectar');
+      setCalendarError('Falha ao conectar Google Calendar.');
     }
   };
 
