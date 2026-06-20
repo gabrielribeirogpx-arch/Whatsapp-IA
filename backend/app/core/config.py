@@ -12,6 +12,7 @@ class Settings:
     phone_number_id: str = os.getenv("PHONE_NUMBER_ID", "")
     whatsapp_phone_id: str = os.getenv("WHATSAPP_PHONE_ID", "")
     whatsapp_verify_token: str = os.getenv("WHATSAPP_VERIFY_TOKEN", "")
+    oauth_token_encryption_key: str = os.getenv("OAUTH_TOKEN_ENCRYPTION_KEY", "")
 
 
 settings = Settings()
