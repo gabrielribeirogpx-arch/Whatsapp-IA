@@ -18,6 +18,7 @@ from app.utils.encryption import decrypt_secret, encrypt_secret
 from app.services.execution_budget_service import ExecutionBudget, ExecutionBudgetExceeded
 from app.services.circuit_breaker_service import CircuitBreakerOpen, check_circuit, record_failure, record_success
 from app.observability import TraceContext, TraceEventType, record_event
+from app.services.google_calendar_service import GoogleCalendarService
 
 logger = logging.getLogger(__name__)
 ALLOWED_TRANSPORTS = {"http", "sse", "stdio_future"}
@@ -28,6 +29,32 @@ SENSITIVE_KEYS = ("api_key", "apikey", "token", "secret", "password", "authoriza
 
 class MCPError(ValueError):
     pass
+
+CALENDAR_TOOL_IDS = {"calendar_create_event", "calendar_list_events", "calendar_check_availability", "calendar_delete_event"}
+
+
+def _call_builtin_calendar_tool(db: Session, tenant_id: uuid.UUID, tool_id: str, arguments: dict[str, Any] | None) -> dict[str, Any]:
+    args = arguments if isinstance(arguments, dict) else {}
+    service = GoogleCalendarService(db, tenant_id)
+    if tool_id == "calendar_create_event":
+        result = service.create_event(**args)
+    elif tool_id == "calendar_list_events":
+        result = service.list_events(**args)
+    elif tool_id == "calendar_check_availability":
+        result = service.check_availability(**args)
+    elif tool_id == "calendar_delete_event":
+        result = service.delete_event(str(args.get("event_id") or args.get("id") or ""))
+    else:
+        raise MCPError("Ferramenta MCP não encontrada para este workspace.")
+    return {
+        "ok": result.get("ok") is True,
+        "status": "success" if result.get("ok") is True else "error",
+        "tool_id": tool_id,
+        "tool_name": tool_id,
+        "latency_ms": 0,
+        "result": {"structuredContent": {"ok": result.get("ok") is True, "tool": tool_id, "result": result if result.get("ok") is True else {}, "error": result.get("message") if result.get("ok") is not True else None}},
+        "error": result.get("message") if result.get("ok") is not True else None,
+    }
 
 
 def _is_sensitive_key(key: str) -> bool:
@@ -207,6 +234,8 @@ def call_mcp_tool(db: Session, tenant_id: uuid.UUID, tool_id: uuid.UUID | str, a
             budget.consume_mcp_call()
         except ExecutionBudgetExceeded:
             return {"ok": False, "status": "budget_exceeded", "tool_id": str(tool_id), "latency_ms": 0, "error": "budget_exceeded", **budget.safe_metadata()}
+    if str(tool_id) in CALENDAR_TOOL_IDS:
+        return _call_builtin_calendar_tool(db, tenant_id, str(tool_id), arguments)
     parsed_tool_id = uuid.UUID(str(tool_id))
     tool = _tool(db, tenant_id, parsed_tool_id)
     if not tool.is_enabled:
