@@ -2,6 +2,7 @@ from datetime import datetime
 import os
 import logging
 import uuid
+from dataclasses import dataclass
 
 from fastapi import Depends, Header, HTTPException, Query, Request
 from sqlalchemy import select
@@ -13,6 +14,12 @@ from app.models.tenant_whatsapp_provider import TenantWhatsAppProvider
 from app.services.cache_service import TTL_TENANT_SECONDS, cache_aside_json
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class TenantResolution:
+    tenant: Tenant
+    source: str
 
 
 class TenantLimitError(RuntimeError):
@@ -125,17 +132,39 @@ def resolve_tenant_by_phone_number_id(db: Session, phone_number_id: str | None) 
     return get_tenant_by_phone_number_id(db, phone_number_id)
 
 
-def get_current_tenant(
+def resolve_current_tenant(
     request: Request,
-    x_tenant_slug: str = Header(default="", alias="X-Tenant-Slug"),
-    x_tenant_id: str = Header(default="", alias="X-Tenant-Id"),
-    x_tenant_id_alt: str = Header(default="", alias="X-Tenant-ID"),
-    tenant_slug: str = Query(default=""),
-    tenant_id: str = Query(default=""),
-    db: Session = Depends(get_db),
-) -> Tenant:
-    raw_tenant_id = (x_tenant_id or x_tenant_id_alt or tenant_id).strip()
-    slug = (x_tenant_slug or tenant_slug).strip()
+    *,
+    db: Session,
+    x_tenant_slug: str = "",
+    x_tenant_id: str = "",
+    x_tenant_id_alt: str = "",
+    tenant_slug: str = "",
+    tenant_id: str = "",
+) -> TenantResolution | None:
+    candidates = [
+        ("query id", tenant_id),
+        ("header X-Tenant-Id", x_tenant_id),
+        ("header X-Tenant-ID", x_tenant_id_alt),
+    ]
+    raw_tenant_id = ""
+    id_source = ""
+    for source, value in candidates:
+        normalized = (value or "").strip()
+        if normalized:
+            raw_tenant_id = normalized
+            id_source = source
+            break
+
+    slug_candidates = [("query slug", tenant_slug), ("header X-Tenant-Slug", x_tenant_slug)]
+    slug = ""
+    slug_source = ""
+    for source, value in slug_candidates:
+        normalized = (value or "").strip()
+        if normalized:
+            slug = normalized
+            slug_source = source
+            break
 
     middleware_tenant_id = getattr(request.state, "tenant_id", None)
 
@@ -150,17 +179,63 @@ def get_current_tenant(
 
         tenant = get_tenant_cached(db, parsed_tenant_id)
         if not tenant:
-            raise HTTPException(status_code=401, detail="Credenciais inválidas")
-        return tenant
+            return None
+        return TenantResolution(tenant=tenant, source=id_source)
 
     if not slug:
-        raise HTTPException(status_code=401, detail="Tenant não autenticado")
+        return None
 
     tenant = db.execute(select(Tenant).where(Tenant.slug == slug)).scalars().first()
     if not tenant:
-        raise HTTPException(status_code=401, detail="Credenciais inválidas")
+        return None
 
-    return tenant
+    return TenantResolution(tenant=tenant, source=slug_source)
+
+
+def get_current_tenant_resolution(
+    request: Request,
+    x_tenant_slug: str = Header(default="", alias="X-Tenant-Slug"),
+    x_tenant_id: str = Header(default="", alias="X-Tenant-Id"),
+    x_tenant_id_alt: str = Header(default="", alias="X-Tenant-ID"),
+    tenant_slug: str = Query(default=""),
+    tenant_id: str = Query(default=""),
+    db: Session = Depends(get_db),
+) -> TenantResolution | None:
+    return resolve_current_tenant(
+        request,
+        db=db,
+        x_tenant_slug=x_tenant_slug,
+        x_tenant_id=x_tenant_id,
+        x_tenant_id_alt=x_tenant_id_alt,
+        tenant_slug=tenant_slug,
+        tenant_id=tenant_id,
+    )
+
+
+def get_current_tenant(
+    request: Request,
+    x_tenant_slug: str = Header(default="", alias="X-Tenant-Slug"),
+    x_tenant_id: str = Header(default="", alias="X-Tenant-Id"),
+    x_tenant_id_alt: str = Header(default="", alias="X-Tenant-ID"),
+    tenant_slug: str = Query(default=""),
+    tenant_id: str = Query(default=""),
+    db: Session = Depends(get_db),
+) -> Tenant:
+    resolution = resolve_current_tenant(
+        request,
+        db=db,
+        x_tenant_slug=x_tenant_slug,
+        x_tenant_id=x_tenant_id,
+        x_tenant_id_alt=x_tenant_id_alt,
+        tenant_slug=tenant_slug,
+        tenant_id=tenant_id,
+    )
+    if not resolution:
+        if (tenant_id or x_tenant_id or x_tenant_id_alt or tenant_slug or x_tenant_slug):
+            raise HTTPException(status_code=401, detail="Credenciais inválidas")
+        raise HTTPException(status_code=401, detail="Tenant não autenticado")
+
+    return resolution.tenant
 
 
 def login_tenant(db: Session, slug: str) -> Tenant | None:
