@@ -10,7 +10,7 @@ import secrets
 import uuid
 from datetime import datetime, timedelta
 from typing import Any
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlparse
 
 import requests
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
@@ -55,23 +55,57 @@ def get_google_calendar_connect_tenant(
 
 
 def _client_id() -> str:
-    return (os.getenv("GOOGLE_CALENDAR_CLIENT_ID") or os.getenv("GOOGLE_OAUTH_CLIENT_ID") or "").strip()
+    return (
+        os.getenv("GOOGLE_CALENDAR_CLIENT_ID")
+        or os.getenv("GOOGLE_CLIENT_ID")
+        or os.getenv("GOOGLE_OAUTH_CLIENT_ID")
+        or ""
+    ).strip()
 
 
 def _client_secret() -> str:
-    return (os.getenv("GOOGLE_CALENDAR_CLIENT_SECRET") or os.getenv("GOOGLE_OAUTH_CLIENT_SECRET") or "").strip()
+    return (
+        os.getenv("GOOGLE_CALENDAR_CLIENT_SECRET")
+        or os.getenv("GOOGLE_CLIENT_SECRET")
+        or os.getenv("GOOGLE_OAUTH_CLIENT_SECRET")
+        or ""
+    ).strip()
 
 
 def _state_secret() -> bytes:
-    secret = (os.getenv("GOOGLE_CALENDAR_STATE_SECRET") or os.getenv("SECRET_KEY") or os.getenv("OAUTH_TOKEN_ENCRYPTION_KEY") or "").strip()
+    secret = (
+        os.getenv("GOOGLE_CALENDAR_STATE_SECRET")
+        or os.getenv("AUTH_SECRET")
+        or os.getenv("SECRET_KEY")
+        or os.getenv("OAUTH_TOKEN_ENCRYPTION_KEY")
+        or ""
+    ).strip()
     if not secret:
         raise HTTPException(status_code=500, detail="Segredo OAuth não configurado")
     return secret.encode("utf-8")
 
 
 def _redirect_uri(request: Request) -> str:
-    configured = (os.getenv("GOOGLE_CALENDAR_REDIRECT_URI") or os.getenv("GOOGLE_OAUTH_REDIRECT_URI") or "").strip()
-    return configured or str(request.url_for("google_calendar_callback"))
+    configured = (
+        os.getenv("GOOGLE_CALENDAR_REDIRECT_URI")
+        or os.getenv("GOOGLE_REDIRECT_URI")
+        or os.getenv("GOOGLE_OAUTH_REDIRECT_URI")
+        or ""
+    ).strip()
+    redirect_uri = configured or str(request.url_for("google_calendar_callback"))
+    parsed = urlparse(redirect_uri)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise HTTPException(status_code=500, detail="GOOGLE_CALENDAR_REDIRECT_URI inválida")
+    return redirect_uri
+
+
+def _validate_google_calendar_connect_config(request: Request) -> None:
+    if not _client_id():
+        raise HTTPException(status_code=500, detail="GOOGLE_CALENDAR_CLIENT_ID não configurado")
+    if not _client_secret():
+        raise HTTPException(status_code=500, detail="GOOGLE_CALENDAR_CLIENT_SECRET não configurado")
+    _state_secret()
+    _redirect_uri(request)
 
 
 def create_oauth_state(tenant_id: uuid.UUID, *, nonce: str | None = None, issued_at: int | None = None) -> str:
@@ -141,48 +175,57 @@ def connect_google_calendar(
     x_tenant_id_upper: str | None = Header(None, alias="X-Tenant-ID"),
     db: Session = Depends(get_db),
 ):
-    logger.warning("ENTERED GOOGLE CALENDAR CONNECT ENDPOINT")
-    logger.info(
-        "GOOGLE_CALENDAR_CONNECT_REQUEST tenant_slug=%s tenant_id=%s x_tenant_slug=%s x_tenant_id=%s x_tenant_id_upper=%s",
-        tenant_slug,
-        tenant_id,
-        x_tenant_slug,
-        x_tenant_id,
-        x_tenant_id_upper,
-    )
-    resolution = resolve_current_tenant(
-        request,
-        db=db,
-        x_tenant_slug=x_tenant_slug or "",
-        x_tenant_id=x_tenant_id or "",
-        x_tenant_id_alt=x_tenant_id_upper or "",
-        tenant_slug=tenant_slug or "",
-        tenant_id=tenant_id or "",
-    )
-    logger.info(
-        "GOOGLE_CALENDAR_TENANT_RESOLUTION_RESULT resolved=%s tenant_id=%s source=%s",
-        bool(resolution),
-        resolution.tenant.id if resolution else None,
-        resolution.source if resolution else None,
-    )
-    if not resolution:
-        raise HTTPException(status_code=400, detail="Tenant não identificado")
+    try:
+        logger.warning("ENTERED GOOGLE CALENDAR CONNECT ENDPOINT")
+        logger.info(
+            "GOOGLE_CALENDAR_CONNECT_REQUEST tenant_slug=%s tenant_id=%s x_tenant_slug=%s x_tenant_id=%s x_tenant_id_upper=%s",
+            tenant_slug,
+            tenant_id,
+            x_tenant_slug,
+            x_tenant_id,
+            x_tenant_id_upper,
+        )
+        _validate_google_calendar_connect_config(request)
+        resolution = resolve_current_tenant(
+            request,
+            db=db,
+            x_tenant_slug=x_tenant_slug or "",
+            x_tenant_id=x_tenant_id or "",
+            x_tenant_id_alt=x_tenant_id_upper or "",
+            tenant_slug=tenant_slug or "",
+            tenant_id=tenant_id or "",
+        )
+        logger.info(
+            "GOOGLE_CALENDAR_TENANT_RESOLUTION_RESULT resolved=%s tenant_id=%s source=%s",
+            bool(resolution),
+            resolution.tenant.id if resolution else None,
+            resolution.source if resolution else None,
+        )
+        if not resolution:
+            raise HTTPException(status_code=400, detail="Tenant não identificado")
 
-    tenant = resolution.tenant
-    if not _client_id():
-        raise HTTPException(status_code=500, detail="GOOGLE_CALENDAR_CLIENT_ID não configurado")
-    state = create_oauth_state(tenant.id)
-    params = {
-        "client_id": _client_id(),
-        "redirect_uri": _redirect_uri(request),
-        "response_type": "code",
-        "scope": " ".join(SCOPES),
-        "access_type": "offline",
-        "include_granted_scopes": "true",
-        "prompt": "consent",
-        "state": state,
-    }
-    return RedirectResponse(f"{AUTH_URL}?{urlencode(params)}", status_code=302)
+        tenant = resolution.tenant
+        if not getattr(tenant, "id", None):
+            raise HTTPException(status_code=500, detail="Tenant sem ID")
+        state = create_oauth_state(tenant.id)
+        params = {
+            "client_id": _client_id(),
+            "redirect_uri": _redirect_uri(request),
+            "response_type": "code",
+            "scope": " ".join(SCOPES),
+            "access_type": "offline",
+            "include_granted_scopes": "true",
+            "prompt": "consent",
+            "state": state,
+        }
+        return RedirectResponse(f"{AUTH_URL}?{urlencode(params)}", status_code=302)
+    except Exception as exc:
+        logger.exception(
+            "GOOGLE_CALENDAR_CONNECT_EXCEPTION exception_type=%s exception_message=%s",
+            type(exc).__name__,
+            str(exc),
+        )
+        raise
 
 
 @router.get("/callback", name="google_calendar_callback")

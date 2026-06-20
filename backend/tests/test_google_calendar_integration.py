@@ -224,6 +224,36 @@ def test_connect_without_tenant_returns_tenant_not_identified():
     assert response.json() == {"detail": "Tenant não identificado"}
 
 
+def test_connect_accepts_generic_google_oauth_env_names(monkeypatch):
+    monkeypatch.delenv("GOOGLE_CALENDAR_CLIENT_ID", raising=False)
+    monkeypatch.delenv("GOOGLE_CALENDAR_CLIENT_SECRET", raising=False)
+    monkeypatch.delenv("GOOGLE_CALENDAR_REDIRECT_URI", raising=False)
+    monkeypatch.delenv("GOOGLE_CALENDAR_STATE_SECRET", raising=False)
+    monkeypatch.delenv("OAUTH_TOKEN_ENCRYPTION_KEY", raising=False)
+    monkeypatch.setenv("GOOGLE_CLIENT_ID", "generic-client-id")
+    monkeypatch.setenv("GOOGLE_CLIENT_SECRET", "generic-client-secret")
+    monkeypatch.setenv(
+        "GOOGLE_REDIRECT_URI",
+        "https://app.example.com/api/integrations/google-calendar/callback",
+    )
+    monkeypatch.setenv("AUTH_SECRET", "auth-secret")
+    tenant_id = uuid.uuid4()
+    tenant = Tenant(id=tenant_id, name="Tenant", slug="tenant-ok")
+
+    response = _tenant_client(TenantFakeDb([tenant])).get(
+        "/api/integrations/google-calendar/connect?tenant_slug=tenant-ok",
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 302
+    params = parse_qs(urlparse(response.headers["location"]).query)
+    assert params["client_id"] == ["generic-client-id"]
+    assert params["redirect_uri"] == [
+        "https://app.example.com/api/integrations/google-calendar/callback"
+    ]
+    assert verify_oauth_state(params["state"][0])["tenant_id"] == str(tenant_id)
+
+
 def test_status_and_disconnect_use_integration_connections_without_exposing_tokens():
     tenant_id = uuid.uuid4()
     db = FakeDb()
