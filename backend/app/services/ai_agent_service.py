@@ -101,6 +101,27 @@ def _latest_valid_result_text(state: list[dict[str, Any]]) -> str | None:
     return next((str(item.get("result_text")).strip() for item in reversed(state) if item.get("ok") is True and str(item.get("result_text") or "").strip()), None)
 
 
+def _extract_final_response_text(parsed: dict[str, Any], *, tool: str | None = None) -> str | None:
+    """Extract the final user-facing response from supported LLM JSON shapes."""
+    if not isinstance(parsed, dict):
+        return None
+    arguments = parsed.get("arguments") if isinstance(parsed.get("arguments"), dict) else {}
+    if tool == "responder":
+        for key in ("text", "message", "response"):
+            text = str(arguments.get(key) or "").strip()
+            if text:
+                return text
+    for key in ("response", "message", "text", "answer"):
+        text = str(parsed.get(key) or "").strip()
+        if text:
+            return text
+    for key in ("text", "message", "response"):
+        text = str(arguments.get(key) or "").strip()
+        if text:
+            return text
+    return None
+
+
 def _first_text_value(*values: Any) -> str:
     for value in values:
         text = str(value or "").strip()
@@ -309,6 +330,7 @@ def run_agent_for_tenant(db: Session, tenant_id, input_text: str, instruction: s
             successful_text = _latest_valid_result_text(state)
             if successful_text:
                 msg = f"O resultado é {successful_text}."[:4000]
+                _json_log("AI_AGENT_RESPONSE_EXTRACTION_FAILED", step=step + 1, reason="invalid_llm_json", has_tool_result_text=True)
                 _json_log("AI_AGENT_FINAL_RESPONSE", response=msg, fallback=False, source="tool_result_after_invalid_llm_json")
                 result.message = msg
                 result.actions.append(AgentToolAction("message", {"message": msg}))
@@ -318,6 +340,11 @@ def run_agent_for_tenant(db: Session, tenant_id, input_text: str, instruction: s
                 break
             return _fallback_result(fallback, "invalid_llm_json", step=step + 1)
         tool, args, raw_call = _normalize_tool_decision(decision)
+        response_text = _extract_final_response_text(decision, tool=tool)
+        if state or tool == "responder" or response_text:
+            _json_log("AI_AGENT_FINAL_RESPONSE_PARSED", step=step + 1, tool=tool, has_response_text=bool(response_text), parsed=decision)
+        if response_text:
+            _json_log("AI_AGENT_RESPONSE_TEXT_EXTRACTED", step=step + 1, tool=tool, source="arguments" if tool == "responder" and isinstance(decision.get("arguments"), dict) and any(str(decision["arguments"].get(key) or "").strip() == response_text for key in ("text", "message", "response")) else "root", response_size=len(response_text))
         if tool == "chamar_mcp":
             selected_tool_id, _selected_tool_input = _normalize_mcp_tool_call(raw_call, args)
             selected_match = next((t for t in mcp_tools if str(t.get("tool_id")) == selected_tool_id), None)
@@ -327,10 +354,20 @@ def run_agent_for_tenant(db: Session, tenant_id, input_text: str, instruction: s
             selected_match = next((t for t in [*node_tools, *subflow_tools] if str(t.get("tool_id")) == selected_tool_id), None)
             selected_tool_type = tool
         _json_log("AI_AGENT_TOOL_SELECTED", tool_id=selected_tool_id, tool_name=(selected_match or {}).get("name") or (selected_match or {}).get("label") or tool, tool_type=selected_tool_type, step=step + 1)
+        if response_text and (not tool or tool == "finalizar"):
+            msg = response_text[:4000]
+            _json_log("AI_AGENT_FINAL_RESPONSE", step=step + 1, response=msg, response_size=len(msg), fallback=False)
+            result.message = msg
+            result.actions.append(AgentToolAction("message", {"message": msg}))
+            result.status = "success"
+            result.fallback_used = False
+            result.final_tool = "responder"
+            break
         if tool not in allowed and tool != "finalizar":
             successful_text = _latest_valid_result_text(state)
             if successful_text:
                 msg = f"O resultado é {successful_text}."[:4000]
+                _json_log("AI_AGENT_RESPONSE_EXTRACTION_FAILED", step=step + 1, reason="tool_not_allowed", has_tool_result_text=True, tool=tool)
                 _json_log("AI_AGENT_FINAL_RESPONSE", response=msg, fallback=False, source="tool_result_after_tool_not_allowed", tool=tool)
                 result.message = msg
                 result.actions.append(AgentToolAction("message", {"message": msg}))
@@ -342,10 +379,23 @@ def run_agent_for_tenant(db: Session, tenant_id, input_text: str, instruction: s
         result.tools_used.append(tool)
         result.final_tool = tool
         if tool == "responder":
-            msg = str(args.get("message") or fallback)[:4000]
-            _json_log("AI_AGENT_FINAL_RESPONSE", step=step + 1, response=msg, response_size=len(msg), fallback=(msg == fallback))
+            successful_text = _latest_valid_result_text(state)
+            if response_text:
+                msg = response_text[:4000]
+                fallback_used = False
+            elif successful_text:
+                msg = f"O resultado é {successful_text}."[:4000]
+                fallback_used = False
+                _json_log("AI_AGENT_RESPONSE_EXTRACTION_FAILED", step=step + 1, reason="responder_without_text", has_tool_result_text=True)
+            else:
+                msg = fallback[:4000]
+                fallback_used = True
+                _json_log("AI_AGENT_RESPONSE_EXTRACTION_FAILED", step=step + 1, reason="responder_without_text", has_tool_result_text=False)
+            _json_log("AI_AGENT_FINAL_RESPONSE", step=step + 1, response=msg, response_size=len(msg), fallback=fallback_used)
             result.message = msg
             result.actions.append(AgentToolAction("message", {"message": msg}))
+            result.status = "success" if not fallback_used else "error"
+            result.fallback_used = fallback_used
             break
         if tool == "definir_variavel":
             ok, err = _validate_variable(args.get("name"), args.get("value"))
