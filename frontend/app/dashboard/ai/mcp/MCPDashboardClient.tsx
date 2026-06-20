@@ -63,6 +63,21 @@ const secondaryButtonClass =
 const dangerButtonClass =
   "inline-flex h-10 items-center justify-center gap-2 rounded-2xl border border-red-100 bg-white px-4 text-sm font-bold text-red-600 transition hover:bg-red-50 focus:outline-none focus:ring-4 focus:ring-red-100 disabled:cursor-not-allowed disabled:opacity-50";
 
+const googleCalendarToolNames: Record<string, string> = {
+  google_calendar_create_event: "Criar evento",
+  google_calendar_list_events: "Listar eventos",
+  google_calendar_check_availability: "Verificar disponibilidade",
+  google_calendar_delete_event: "Excluir evento",
+};
+
+function getToolDisplayName(tool: MCPTool) {
+  return (
+    googleCalendarToolNames[tool.tool_name] ||
+    tool.display_name?.replace(/^\[Google Calendar\]\s*/, "") ||
+    tool.tool_name
+  );
+}
+
 function StatusBadge({ active }: { active: boolean }) {
   return active ? (
     <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-3 py-1 text-xs font-bold text-emerald-700 ring-1 ring-emerald-100">
@@ -541,6 +556,51 @@ export default function MCPDashboardClient() {
                 </button>
               </div>
             </div>
+            <div className="mt-5 border-t border-emerald-100 pt-5">
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <h4 className="text-sm font-bold text-slate-950">
+                    Ferramentas disponíveis
+                  </h4>
+                  <p className="mt-1 text-xs font-semibold text-slate-500">
+                    Origem: Google Calendar conectado
+                  </p>
+                </div>
+                <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-bold text-emerald-700 ring-1 ring-emerald-100">
+                  {googleCalendarTools.length} ferramentas
+                </span>
+              </div>
+              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                {googleCalendarTools.map((tool) => (
+                  <div
+                    key={tool.id}
+                    className="rounded-2xl border border-emerald-100 bg-white/85 p-4 shadow-sm"
+                  >
+                    <div className="flex flex-wrap items-start justify-between gap-2">
+                      <p className="text-sm font-bold text-slate-950">
+                        {getToolDisplayName(tool)}
+                      </p>
+                      <StatusBadge active={tool.is_enabled} />
+                    </div>
+                    <p className="mt-3 text-xs font-semibold text-slate-500">
+                      Origem: Google Calendar conectado
+                    </p>
+                    <p
+                      className="mt-1 truncate font-mono text-[11px] text-slate-400"
+                      title={tool.tool_name}
+                    >
+                      {tool.tool_name}
+                    </p>
+                  </div>
+                ))}
+                {googleCalendarTools.length === 0 ? (
+                  <div className="rounded-2xl border border-dashed border-emerald-200 bg-white/70 px-4 py-5 text-sm font-semibold text-slate-500 sm:col-span-2 xl:col-span-4">
+                    Conecte o Google Calendar para exibir as ferramentas
+                    oficiais de agenda.
+                  </div>
+                ) : null}
+              </div>
+            </div>
             {calendarError ? (
               <p className="mt-4 inline-flex items-center gap-2 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">
                 <AlertCircle size={16} /> {calendarError}
@@ -664,151 +724,80 @@ export default function MCPDashboardClient() {
               Ferramentas disponíveis
             </h2>
             <p className="mt-1 text-sm text-slate-500">
-              Ferramentas reais do Google Calendar aparecem separadas das
-              ferramentas descobertas via MCP.
+              Exibe apenas ferramentas MCP externas ou recursos não associados a
+              uma integração oficial.
             </p>
           </div>
 
-          <div className="space-y-6">
-            <div>
-              <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                <div>
-                  <p className="text-xs font-bold uppercase tracking-[0.16em] text-emerald-600">
-                    Google Calendar
-                  </p>
-                  <h3 className="text-base font-bold text-slate-950">
-                    Ferramentas oficiais
-                  </h3>
-                </div>
-                <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-bold text-emerald-700 ring-1 ring-emerald-100">
-                  {googleCalendarTools.length} ferramentas
-                </span>
-              </div>
-              <div className="grid gap-4 lg:grid-cols-2">
-                {googleCalendarTools.map((tool) => (
-                  <article
-                    key={tool.id}
-                    className="rounded-3xl border border-emerald-100 bg-emerald-50/40 p-5 shadow-sm"
-                  >
-                    <div className="flex flex-wrap items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <h4 className="font-bold text-slate-950">
-                            {tool.display_name || tool.tool_name}
-                          </h4>
-                          <StatusBadge active={tool.is_enabled} />
-                        </div>
-                        <p className="mt-2 text-sm leading-relaxed text-slate-600">
-                          {tool.description || "Sem descrição informada."}
-                        </p>
-                        <p className="mt-3 text-xs font-semibold text-slate-400">
-                          Origem:{" "}
-                          {tool.server_name || "Google Calendar conectado"}
-                        </p>
-                        <p className="mt-1 text-xs font-semibold text-slate-400">
-                          Identificador: {tool.tool_name}
-                        </p>
-                      </div>
+          <div className="grid gap-4 lg:grid-cols-2">
+            {mcpTools.map((tool) => (
+              <article
+                key={tool.id}
+                className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm transition hover:border-emerald-200 hover:bg-emerald-50/20"
+              >
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h4 className="font-bold text-slate-950">
+                        {tool.display_name || tool.tool_name}
+                      </h4>
+                      <StatusBadge active={tool.is_enabled} />
                     </div>
-                  </article>
-                ))}
-                {googleCalendarTools.length === 0 ? (
-                  <div className="lg:col-span-2">
-                    <EmptyState
-                      icon={CalendarDays}
-                      title="Nenhuma ferramenta do Google Calendar disponível"
-                      description="Conecte o Google Calendar nas integrações oficiais para liberar ações reais de agenda para a IA."
-                    />
+                    <p className="mt-2 text-sm leading-relaxed text-slate-600">
+                      {tool.description || "Sem descrição informada."}
+                    </p>
+                    <p className="mt-3 text-xs font-semibold text-slate-400">
+                      Identificador: {tool.tool_name}
+                    </p>
+                    {tool.metadata?.last_discovered_at ? (
+                      <p className="mt-1 text-xs font-semibold text-slate-400">
+                        Última descoberta:{" "}
+                        {new Date(
+                          tool.metadata.last_discovered_at,
+                        ).toLocaleString("pt-BR")}
+                      </p>
+                    ) : null}
+                    {tool.metadata?.missing_from_last_discovery ? (
+                      <p className="mt-2 rounded-full bg-amber-50 px-3 py-1 text-xs font-bold text-amber-700 ring-1 ring-amber-100">
+                        Ausente na última atualização do servidor
+                      </p>
+                    ) : null}
                   </div>
-                ) : null}
-              </div>
-            </div>
-
-            <div>
-              <div className="mb-3 flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-6">
-                <div>
-                  <p className="text-xs font-bold uppercase tracking-[0.16em] text-slate-500">
-                    MCP
-                  </p>
-                  <h3 className="text-base font-bold text-slate-950">
-                    Ferramentas de servidores MCP
-                  </h3>
-                </div>
-                <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-600 ring-1 ring-slate-200">
-                  {mcpTools.length} ferramentas
-                </span>
-              </div>
-              <div className="grid gap-4 lg:grid-cols-2">
-                {mcpTools.map((tool) => (
-                  <article
-                    key={tool.id}
-                    className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm transition hover:border-emerald-200 hover:bg-emerald-50/20"
+                  <button
+                    className={
+                      tool.is_enabled
+                        ? secondaryButtonClass
+                        : primaryButtonClass
+                    }
+                    onClick={() =>
+                      toggleTool(tool).catch((error) => {
+                        setMessageTone("error");
+                        setMessage(
+                          error instanceof Error
+                            ? error.message
+                            : "Falha ao alternar ferramenta.",
+                        );
+                      })
+                    }
+                    disabled={togglingToolId === tool.id}
                   >
-                    <div className="flex flex-wrap items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <h4 className="font-bold text-slate-950">
-                            {tool.display_name || tool.tool_name}
-                          </h4>
-                          <StatusBadge active={tool.is_enabled} />
-                        </div>
-                        <p className="mt-2 text-sm leading-relaxed text-slate-600">
-                          {tool.description || "Sem descrição informada."}
-                        </p>
-                        <p className="mt-3 text-xs font-semibold text-slate-400">
-                          Identificador: {tool.tool_name}
-                        </p>
-                        {tool.metadata?.last_discovered_at ? (
-                          <p className="mt-1 text-xs font-semibold text-slate-400">
-                            Última descoberta:{" "}
-                            {new Date(
-                              tool.metadata.last_discovered_at,
-                            ).toLocaleString("pt-BR")}
-                          </p>
-                        ) : null}
-                        {tool.metadata?.missing_from_last_discovery ? (
-                          <p className="mt-2 rounded-full bg-amber-50 px-3 py-1 text-xs font-bold text-amber-700 ring-1 ring-amber-100">
-                            Ausente na última atualização do servidor
-                          </p>
-                        ) : null}
-                      </div>
-                      <button
-                        className={
-                          tool.is_enabled
-                            ? secondaryButtonClass
-                            : primaryButtonClass
-                        }
-                        onClick={() =>
-                          toggleTool(tool).catch((error) => {
-                            setMessageTone("error");
-                            setMessage(
-                              error instanceof Error
-                                ? error.message
-                                : "Falha ao alternar ferramenta.",
-                            );
-                          })
-                        }
-                        disabled={togglingToolId === tool.id}
-                      >
-                        {togglingToolId === tool.id ? (
-                          <Loader2 className="animate-spin" size={15} />
-                        ) : null}
-                        {tool.is_enabled ? "Desabilitar" : "Habilitar"}
-                      </button>
-                    </div>
-                  </article>
-                ))}
-                {mcpTools.length === 0 ? (
-                  <div className="lg:col-span-2">
-                    <EmptyState
-                      icon={Wrench}
-                      title="Nenhuma ferramenta MCP descoberta"
-                      description="Use “Descobrir Ferramentas” em um servidor MCP para preencher esta área com recursos prontos para ativação."
-                    />
-                  </div>
-                ) : null}
+                    {togglingToolId === tool.id ? (
+                      <Loader2 className="animate-spin" size={15} />
+                    ) : null}
+                    {tool.is_enabled ? "Desabilitar" : "Habilitar"}
+                  </button>
+                </div>
+              </article>
+            ))}
+            {mcpTools.length === 0 ? (
+              <div className="lg:col-span-2">
+                <EmptyState
+                  icon={Wrench}
+                  title="Nenhuma ferramenta MCP disponível."
+                  description="Ferramentas oficiais, como Google Calendar, aparecem dentro do card da própria integração."
+                />
               </div>
-            </div>
+            ) : null}
           </div>
         </section>
       </div>
