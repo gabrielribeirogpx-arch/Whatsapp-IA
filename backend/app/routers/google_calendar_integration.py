@@ -10,7 +10,7 @@ import secrets
 import uuid
 from datetime import datetime, timedelta
 from typing import Any
-from urllib.parse import urlencode, urlparse
+from urllib.parse import urlencode, urlparse, urlunparse
 
 import requests
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
@@ -39,6 +39,29 @@ STATE_TTL_SECONDS = 10 * 60
 
 router = APIRouter(prefix="/integrations/google-calendar", tags=["google-calendar-integration"])
 logger = logging.getLogger(__name__)
+
+
+def _frontend_base_url() -> str:
+    configured = (
+        os.getenv("FRONTEND_URL")
+        or "https://frontend-whatsapp-ia-production.up.railway.app"
+    ).strip().rstrip("/")
+    parsed = urlparse(configured)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        logger.warning("GOOGLE_CALENDAR_INVALID_FRONTEND_URL value=%s", configured)
+        return "https://frontend-whatsapp-ia-production.up.railway.app"
+    return configured
+
+
+def _frontend_oauth_result_url(status: str) -> str:
+    base = _frontend_base_url()
+    parsed = urlparse(f"{base}/dashboard/account")
+    query = urlencode({
+        "tab": "integrations",
+        "integration": PROVIDER,
+        "status": status,
+    })
+    return urlunparse((parsed.scheme, parsed.netloc, parsed.path, "", query, ""))
 
 
 def get_google_calendar_connect_tenant(
@@ -230,32 +253,40 @@ def connect_google_calendar(
 
 @router.get("/callback", name="google_calendar_callback")
 def google_calendar_callback(request: Request, code: str | None = None, state: str | None = None, error: str | None = None, db: Session = Depends(get_db)):
-    if error:
-        raise HTTPException(status_code=400, detail="OAuth Google recusado")
-    if not code or not state:
-        raise HTTPException(status_code=400, detail="Callback OAuth inválido")
-    payload = verify_oauth_state(state)
-    tenant_id = uuid.UUID(str(payload["tenant_id"]))
-    token_payload = _exchange_code_for_tokens(code, _redirect_uri(request))
-    access_token = token_payload.get("access_token")
-    if not access_token:
-        raise HTTPException(status_code=400, detail="Access token ausente")
-    account_email = _fetch_account_email(access_token)
-    expires_at = None
-    if token_payload.get("expires_in"):
-        expires_at = datetime.utcnow() + timedelta(seconds=int(token_payload["expires_in"]))
-    scopes = token_payload.get("scope", " ".join(SCOPES)).split()
-    IntegrationConnectionService(db).upsert_connection(
-        tenant_id=tenant_id,
-        provider=PROVIDER,
-        auth_type=AUTH_TYPE,
-        access_token=access_token,
-        refresh_token=token_payload.get("refresh_token"),
-        expires_at=expires_at,
-        scopes=scopes,
-        metadata={"account_email": account_email} if account_email else {},
-    )
-    return {"provider": PROVIDER, "connected": True, "account_email": account_email}
+    try:
+        if error:
+            raise HTTPException(status_code=400, detail="OAuth Google recusado")
+        if not code or not state:
+            raise HTTPException(status_code=400, detail="Callback OAuth inválido")
+        payload = verify_oauth_state(state)
+        tenant_id = uuid.UUID(str(payload["tenant_id"]))
+        token_payload = _exchange_code_for_tokens(code, _redirect_uri(request))
+        access_token = token_payload.get("access_token")
+        if not access_token:
+            raise HTTPException(status_code=400, detail="Access token ausente")
+        account_email = _fetch_account_email(access_token)
+        expires_at = None
+        if token_payload.get("expires_in"):
+            expires_at = datetime.utcnow() + timedelta(seconds=int(token_payload["expires_in"]))
+        scopes = token_payload.get("scope", " ".join(SCOPES)).split()
+        IntegrationConnectionService(db).upsert_connection(
+            tenant_id=tenant_id,
+            provider=PROVIDER,
+            auth_type=AUTH_TYPE,
+            access_token=access_token,
+            refresh_token=token_payload.get("refresh_token"),
+            expires_at=expires_at,
+            scopes=scopes,
+            metadata={"account_email": account_email} if account_email else {},
+        )
+        return RedirectResponse(_frontend_oauth_result_url("connected"), status_code=302)
+    except Exception as exc:
+        logger.exception(
+            "GOOGLE_CALENDAR_CALLBACK_EXCEPTION exception_type=%s exception_message=%s",
+            type(exc).__name__,
+            str(exc),
+        )
+        return RedirectResponse(_frontend_oauth_result_url("error"), status_code=302)
 
 
 @router.get("/status", response_model=IntegrationConnectionStatusOut)
