@@ -11,7 +11,7 @@ from alembic import op
 from sqlalchemy.dialects import postgresql
 
 revision = "20260620_integration_connections"
-down_revision = "20260619_pgvector"
+down_revision = "20260619_execution_traces"
 branch_labels = None
 depends_on = None
 
