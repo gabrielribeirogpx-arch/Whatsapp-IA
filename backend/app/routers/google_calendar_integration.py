@@ -4,6 +4,7 @@ import base64
 import hashlib
 import hmac
 import json
+import logging
 import os
 import secrets
 import uuid
@@ -20,7 +21,7 @@ from app.database import get_db
 from app.models.tenant import Tenant
 from app.schemas.integration_connection import IntegrationConnectionStatusOut
 from app.services.integration_connection_service import IntegrationConnectionService
-from app.services.tenant_service import get_current_tenant
+from app.services.tenant_service import TenantResolution, get_current_tenant, get_current_tenant_resolution
 
 PROVIDER = "google_calendar"
 AUTH_TYPE = "oauth2"
@@ -37,6 +38,20 @@ USERINFO_URL = "https://openidconnect.googleapis.com/v1/userinfo"
 STATE_TTL_SECONDS = 10 * 60
 
 router = APIRouter(prefix="/integrations/google-calendar", tags=["google-calendar-integration"])
+logger = logging.getLogger(__name__)
+
+
+def get_google_calendar_connect_tenant(
+    resolution: TenantResolution | None = Depends(get_current_tenant_resolution),
+) -> Tenant:
+    if not resolution:
+        raise HTTPException(status_code=400, detail="Tenant não identificado")
+    logger.info(
+        "event=google_calendar_connect_tenant_resolved tenant_id=%s source=%s",
+        resolution.tenant.id,
+        resolution.source,
+    )
+    return resolution.tenant
 
 
 def _client_id() -> str:
@@ -117,7 +132,7 @@ def _fetch_account_email(access_token: str) -> str | None:
 
 
 @router.get("/connect")
-def connect_google_calendar(request: Request, tenant: Tenant = Depends(get_current_tenant)):
+def connect_google_calendar(request: Request, tenant: Tenant = Depends(get_google_calendar_connect_tenant)):
     if not _client_id():
         raise HTTPException(status_code=500, detail="GOOGLE_CALENDAR_CLIENT_ID não configurado")
     state = create_oauth_state(tenant.id)
