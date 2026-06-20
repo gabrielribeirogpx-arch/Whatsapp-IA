@@ -2,13 +2,13 @@
 
 import Link from 'next/link';
 import { FormEvent, useEffect, useMemo, useState } from 'react';
-import { Bell, Building2, CheckCircle2, Clock3, CreditCard, Globe2, KeyRound, Layers3, LockKeyhole, LogOut, Mail, MessageSquareText, Pencil, Plus, Save, ShieldCheck, Smartphone, User, UsersRound, XCircle } from 'lucide-react';
+import { AlertCircle, Bell, Building2, CalendarDays, CheckCircle2, Clock3, CreditCard, Globe2, KeyRound, Layers3, Loader2, LockKeyhole, LogOut, Mail, MessageSquareText, Pencil, Plus, Save, ShieldCheck, Smartphone, User, UsersRound, XCircle } from 'lucide-react';
 import ProvidersTab from '@/components/settings/whatsapp-business/ProvidersTab';
 import TemplatesTab from '@/components/settings/whatsapp-business/TemplatesTab';
 import PipelineSettingsTab from '@/components/settings/PipelineSettingsTab';
 import { ClientDateTime } from '@/components/settings/whatsapp-business/ui';
-import { activateWhatsAppProvider, createTemplate, createWhatsAppProvider, deactivateWorkspaceUser, deleteWhatsAppProvider, getAccountMe, getAccountSecurity, getSystemSettings, inviteWorkspaceUser, listTemplates, listWhatsAppProviders, listWorkspaceUsers, revokeAccountSession, revokeOtherAccountSessions, submitTemplate, syncTemplates, testWhatsAppProvider, updateAccountPassword, updateAccountPreferences, updateAccountProfile, updateSystemSettings, updateWhatsAppProvider, updateWorkspaceUser } from '@/lib/api';
-import { AccountMe, AccountPreferences, AccountProfile, AccountSecurity, SystemSettingsPayload, WhatsAppProvider, WhatsAppTemplate, WorkspaceUser } from '@/lib/types';
+import { activateWhatsAppProvider, createTemplate, createWhatsAppProvider, deactivateWorkspaceUser, deleteWhatsAppProvider, disconnectGoogleCalendar, getAccountMe, getAccountSecurity, getGoogleCalendarConnectUrl, getGoogleCalendarStatus, getSystemSettings, inviteWorkspaceUser, listTemplates, listWhatsAppProviders, listWorkspaceUsers, revokeAccountSession, revokeOtherAccountSessions, submitTemplate, syncTemplates, testWhatsAppProvider, updateAccountPassword, updateAccountPreferences, updateAccountProfile, updateSystemSettings, updateWhatsAppProvider, updateWorkspaceUser } from '@/lib/api';
+import { AccountMe, AccountPreferences, AccountProfile, AccountSecurity, GoogleCalendarConnectionStatus, SystemSettingsPayload, WhatsAppProvider, WhatsAppTemplate, WorkspaceUser } from '@/lib/types';
 import { friendlyToMeta, renderExample, validateMetaVariables } from '@/lib/templateVariableMapper';
 import { SettingsTabId } from './SettingsSidebar';
 import { AccountTabId } from '@/components/account/AccountSidebar';
@@ -163,7 +163,63 @@ function UsersTab() {
 
 function PermissionsTab() { const roles = [{ name: 'Owner', desc: 'Controle total do workspace, billing, integrações e RBAC.' }, { name: 'Admin', desc: 'Gerencia usuários, fluxos, campanhas e configurações operacionais.' }, { name: 'Member', desc: 'Opera inbox, CRM, campanhas e automações liberadas.' }, { name: 'Viewer', desc: 'Acesso somente leitura para auditoria e liderança.' }]; return <Card><HubHeader icon={ShieldCheck} eyebrow='Governança' title='Permissões' description='RBAC permanece no roadmap, mas a política alvo já está clara: papéis por módulo, ações críticas e escopos de workspace.' /><div className='grid gap-4 p-5 md:grid-cols-4 md:p-6'>{roles.map(r => <div key={r.name} className='rounded-3xl border border-slate-200 p-5'><p className='text-lg font-semibold text-slate-950'>{r.name}</p><p className='mt-2 text-sm leading-relaxed text-slate-600'>{r.desc}</p></div>)}</div></Card>; }
 function BillingTab() { const limits = ['1.000 mensagens/mês', '1 workspace', 'Até 5 usuários', 'WhatsApp Business básico']; return <Card><HubHeader icon={CreditCard} eyebrow='Revenue Operations' title='Billing' description='Resumo financeiro sem integração de cobrança: plano atual, status e limites operacionais da POC.' /><div className='grid gap-5 p-5 md:grid-cols-[320px_1fr] md:p-6'><div className='rounded-3xl bg-slate-950 p-6 text-white'><p className='text-sm text-emerald-200'>Plano atual</p><h3 className='mt-2 text-3xl font-bold'>Starter POC</h3><p className='mt-4 inline-flex rounded-full bg-emerald-400/15 px-3 py-1 text-sm font-semibold text-emerald-200'>Status: Ativo</p></div><div className='grid gap-3 md:grid-cols-2'>{limits.map(limit => <div key={limit} className='flex items-center gap-3 rounded-2xl border border-slate-200 p-4'><CheckCircle2 className='text-emerald-500' size={18} /><span className='text-sm font-semibold text-slate-700'>{limit}</span></div>)}</div></div></Card>; }
-function IntegrationsTab() { const integrations = [{ name: 'WhatsApp Business', status: 'Configurável', icon: Smartphone, desc: 'Providers, tokens, WABA e templates oficiais.' }, { name: 'Webhooks', status: 'Disponível', icon: Globe2, desc: 'Eventos de entrada e callbacks para automações.' }, { name: 'APIs', status: 'Operacional', icon: Layers3, desc: 'Endpoints protegidos por tenant e token.' }]; return <Card><HubHeader icon={Layers3} eyebrow='Integration Catalog' title='Integrações' description='Visão executiva dos conectores essenciais do workspace com status visual.' /><div className='grid gap-4 p-5 md:grid-cols-3 md:p-6'>{integrations.map(item => <div key={item.name} className='rounded-3xl border border-slate-200 p-5'><div className='flex items-center justify-between'><span className='flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-50 text-emerald-600'><item.icon size={20} /></span><span className='rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700'>{item.status}</span></div><h3 className='mt-5 text-lg font-semibold text-slate-950'>{item.name}</h3><p className='mt-2 text-sm text-slate-600'>{item.desc}</p></div>)}</div></Card>; }
+function IntegrationsTab() {
+  const integrations = [{ name: 'WhatsApp Business', status: 'Configurável', icon: Smartphone, desc: 'Providers, tokens, WABA e templates oficiais.' }, { name: 'Webhooks', status: 'Disponível', icon: Globe2, desc: 'Eventos de entrada e callbacks para automações.' }, { name: 'APIs', status: 'Operacional', icon: Layers3, desc: 'Endpoints protegidos por tenant e token.' }];
+  const [calendarStatus, setCalendarStatus] = useState<GoogleCalendarConnectionStatus | null>(null);
+  const [loadingCalendar, setLoadingCalendar] = useState(true);
+  const [calendarActionLoading, setCalendarActionLoading] = useState(false);
+  const [calendarMessage, setCalendarMessage] = useState('');
+  const [calendarError, setCalendarError] = useState('');
+
+  const refreshCalendarStatus = async (successMessage?: string) => {
+    setLoadingCalendar(true);
+    setCalendarError('');
+    try {
+      const status = await getGoogleCalendarStatus();
+      setCalendarStatus(status);
+      setCalendarMessage(successMessage || (status.connected ? 'Google Calendar conectado com sucesso' : 'Não conectado'));
+    } catch {
+      setCalendarError('Falha ao conectar');
+      setCalendarMessage('');
+    } finally {
+      setLoadingCalendar(false);
+    }
+  };
+
+  useEffect(() => { refreshCalendarStatus(); }, []);
+
+  const connectCalendar = () => {
+    setCalendarError('');
+    try {
+      window.location.href = getGoogleCalendarConnectUrl();
+    } catch {
+      setCalendarError('Falha ao conectar');
+    }
+  };
+
+  const disconnectCalendar = async () => {
+    setCalendarActionLoading(true);
+    setCalendarError('');
+    try {
+      const status = await disconnectGoogleCalendar();
+      setCalendarStatus(status);
+      setCalendarMessage('Não conectado');
+    } catch {
+      setCalendarError('Falha ao desconectar Google Calendar');
+    } finally {
+      setCalendarActionLoading(false);
+    }
+  };
+
+  const isConnected = calendarStatus?.connected === true;
+  const accountEmail = typeof calendarStatus?.metadata?.account_email === 'string' ? calendarStatus.metadata.account_email : 'Nenhuma conta conectada';
+
+  return <Card><HubHeader icon={Layers3} eyebrow='Integration Catalog' title='Integrações' description='Visão executiva dos conectores essenciais do workspace com status visual.' />
+    <div className='grid gap-4 p-5 md:grid-cols-3 md:p-6'>{integrations.map(item => <div key={item.name} className='rounded-3xl border border-slate-200 p-5'><div className='flex items-center justify-between'><span className='flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-50 text-emerald-600'><item.icon size={20} /></span><span className='rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700'>{item.status}</span></div><h3 className='mt-5 text-lg font-semibold text-slate-950'>{item.name}</h3><p className='mt-2 text-sm text-slate-600'>{item.desc}</p></div>)}</div>
+    <div className='border-t border-slate-100 p-5 md:p-6'><div className='mb-4'><p className='text-xs font-semibold uppercase tracking-[0.14em] text-slate-500'>Integrações externas</p><h3 className='mt-1 text-lg font-semibold text-slate-950'>Conecte apps ao workspace</h3></div>
+      <div className='rounded-3xl border border-slate-200 bg-gradient-to-br from-white via-slate-50 to-emerald-50/40 p-5 shadow-sm'><div className='flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between'><div className='flex gap-4'><span className='flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-emerald-100 text-emerald-700'><CalendarDays size={22} /></span><div><div className='flex flex-wrap items-center gap-2'><h4 className='text-base font-semibold text-slate-950'>Google Calendar</h4><span className={`inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs font-semibold ${isConnected ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-600'}`}>{loadingCalendar ? <Loader2 size={12} className='animate-spin' /> : isConnected ? <CheckCircle2 size={12} /> : <XCircle size={12} />}{loadingCalendar ? 'Carregando...' : isConnected ? 'Conectado' : 'Não conectado'}</span></div><p className='mt-2 text-sm text-slate-600'>Permita que a IA consulte disponibilidade e eventos sem expor tokens no frontend.</p><div className='mt-4 grid gap-2 text-sm sm:grid-cols-2'><p className='rounded-2xl bg-white/80 px-4 py-3 text-slate-600'><b className='block text-xs uppercase tracking-[0.12em] text-slate-400'>Provider</b>{calendarStatus?.provider || 'google_calendar'}</p><p className='rounded-2xl bg-white/80 px-4 py-3 text-slate-600'><b className='block text-xs uppercase tracking-[0.12em] text-slate-400'>Conta</b>{loadingCalendar ? 'Consultando status...' : accountEmail}</p></div></div></div><div className='flex w-full flex-col gap-2 sm:w-auto sm:min-w-56'>{isConnected ? <button type='button' disabled={calendarActionLoading || loadingCalendar} onClick={disconnectCalendar} className='inline-flex items-center justify-center gap-2 rounded-2xl border border-red-200 bg-white px-5 py-3 text-sm font-semibold text-red-600 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60'>{calendarActionLoading ? <Loader2 size={16} className='animate-spin' /> : <XCircle size={16} />} Desconectar</button> : <button type='button' disabled={loadingCalendar} onClick={connectCalendar} className='inline-flex items-center justify-center gap-2 rounded-2xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-slate-950/15 transition hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-60'><CalendarDays size={16} /> Conectar Google Calendar</button>}<button type='button' disabled={loadingCalendar} onClick={() => refreshCalendarStatus()} className='rounded-2xl border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60'>Atualizar status</button></div></div>{calendarMessage && <p className={`mt-4 inline-flex items-center gap-2 rounded-2xl px-4 py-3 text-sm font-semibold ${isConnected ? 'border border-emerald-200 bg-emerald-50 text-emerald-700' : 'border border-slate-200 bg-white text-slate-600'}`}><CheckCircle2 size={16} /> {calendarMessage}</p>}{calendarError && <p className='mt-4 inline-flex items-center gap-2 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700'><AlertCircle size={16} /> {calendarError}</p>}</div></div>
+  </Card>;
+}
 
 
 function WhatsAppBusinessConsole() {
