@@ -141,6 +141,7 @@ def connect_google_calendar(
     x_tenant_id_upper: str | None = Header(None, alias="X-Tenant-ID"),
     db: Session = Depends(get_db),
 ):
+    logger.warning("ENTERED GOOGLE CALENDAR CONNECT ENDPOINT")
     logger.info(
         "GOOGLE_CALENDAR_CONNECT_REQUEST tenant_slug=%s tenant_id=%s x_tenant_slug=%s x_tenant_id=%s x_tenant_id_upper=%s",
         tenant_slug,

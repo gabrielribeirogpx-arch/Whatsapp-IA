@@ -139,6 +139,7 @@ def test_connect_resolves_gabriel_ribeiro_slug_without_returning_400(caplog):
 
     assert response.status_code != 400
     _assert_connect_redirect_for_tenant(response, tenant_id)
+    assert "ENTERED GOOGLE CALENDAR CONNECT ENDPOINT" in caplog.text
     assert "GOOGLE_CALENDAR_CONNECT_REQUEST" in caplog.text
     assert "GOOGLE_CALENDAR_TENANT_RESOLUTION_RESULT" in caplog.text
 
