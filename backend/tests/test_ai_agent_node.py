@@ -92,3 +92,32 @@ def test_ai_agent_validator_wait_same_node_after_agent_allows_missing_edge():
         edges=[],
     )
     assert result.status == GraphValidationStatus.VALID
+
+
+def test_ai_agent_mcp_result_text_deterministic_when_final_llm_invalid(monkeypatch):
+    calls = iter([
+        '{"thought_summary":"calcular","tool":"chamar_mcp","arguments":{"tool_id":"calculate","input":{"expression":"1234 * 567"}}}',
+        'not json',
+    ])
+
+    def fake_llm(_db, _tenant_id, messages, options=None):
+        return next(calls)
+
+    def fake_mcp_executor(tool, args):
+        return {"ok": True, "status": "success", "result": {"content": [{"type": "text", "text": "699678"}]}, "latency_ms": 1}
+
+    monkeypatch.setattr(svc, "generate_answer_for_tenant", fake_llm)
+    result = svc.run_agent_for_tenant(
+        object(),
+        uuid.uuid4(),
+        "Quanto é 1234 * 567?",
+        "Use a ferramenta calculate para cálculos.",
+        ["chamar_mcp", "responder"],
+        {"mcp_tools": [{"tool_id": "calculate", "name": "calculate", "description": "Calculadora"}]},
+        options={"max_steps": 2, "fallback_message": "fallback"},
+        mcp_tool_executor=fake_mcp_executor,
+    )
+
+    assert result.fallback_used is False
+    assert result.message == "O resultado é 699678."
+    assert result.message != "fallback"
