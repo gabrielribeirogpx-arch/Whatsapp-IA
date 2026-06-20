@@ -1942,6 +1942,8 @@ class AiAgentNodeExecutor(AiResponseNodeExecutor):
             "max_node_tool_calls": max_node_tool_calls,
             "max_subflow_calls": max_subflow_calls,
             "max_mcp_calls": max_mcp_calls,
+            "node_id": node_id,
+            "selected_tool_ids": mcp_tool_ids,
         }
         def _execute_agent_node_tool(tool_config, tool_input, reason):
             from app.services.ai_agent_node_tool_service import execute_node_tool
