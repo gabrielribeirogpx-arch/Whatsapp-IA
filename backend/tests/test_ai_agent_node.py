@@ -86,6 +86,50 @@ def test_ai_agent_mcp_calculate_result_text_used_in_final_response(monkeypatch):
     assert any("699678" in str(message.get("content")) for message in seen_messages[1])
 
 
+def test_format_deterministic_tool_response_keeps_calculate_numeric_prefix():
+    assert svc._format_deterministic_tool_response("calculate", "699678") == "O resultado é 699678."
+
+
+def test_ai_agent_mcp_get_business_hours_deterministic_natural_without_result_prefix(monkeypatch):
+    get_business_hours_id = "70d58c9b-84e0-40fb-994b-ce86a1266d64"
+    calls = iter([
+        '{"tool_calls":[{"tool":"chamar_mcp","arguments":{"tool_id":"70d58c9b-84e0-40fb-994b-ce86a1266d64","input":{}}}]}',
+        '{"thought_summary":"responder","tool":"responder","arguments":{}}',
+    ])
+
+    def fake_llm(_db, _tenant_id, messages, options=None):
+        return next(calls)
+
+    def fake_mcp_executor(tool, args):
+        assert tool["tool_id"] == get_business_hours_id
+        assert tool["name"] == "get_business_hours"
+        assert args == {}
+        return {
+            "ok": True,
+            "status": "success",
+            "result": {"content": [{"type": "text", "text": "Segunda a sexta das 08h às 18h."}]},
+            "latency_ms": 1,
+        }
+
+    monkeypatch.setattr(svc, "generate_answer_for_tenant", fake_llm)
+    result = svc.run_agent_for_tenant(
+        object(),
+        uuid.uuid4(),
+        "Qual é o horário de atendimento?",
+        "Use get_business_hours para consultar horário de atendimento.",
+        ["chamar_mcp", "responder"],
+        {"mcp_tools": [{"tool_id": get_business_hours_id, "name": "get_business_hours", "description": "Horário de atendimento"}]},
+        options={"max_steps": 2, "fallback_message": "fallback"},
+        mcp_tool_executor=fake_mcp_executor,
+    )
+
+    assert result.fallback_used is False
+    assert result.message is not None
+    assert not result.message.startswith("O resultado é")
+    assert "segunda a sexta" in result.message.lower()
+    assert "08h às 18h" in result.message
+
+
 def test_ai_agent_validator_wait_same_node_after_agent_allows_missing_edge():
     result = FlowV2GraphValidator().validate(
         nodes=[{"id": "agent", "type": "ai_agent", "data": {"isStart": True, "after_agent_behavior": "wait_same_node"}}],

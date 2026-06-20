@@ -98,7 +98,31 @@ def _fallback_result(fallback: str, reason: str, *, step: int = 0, final_tool: s
 
 
 def _latest_valid_result_text(state: list[dict[str, Any]]) -> str | None:
-    return next((str(item.get("result_text")).strip() for item in reversed(state) if item.get("ok") is True and str(item.get("result_text") or "").strip()), None)
+    item = _latest_valid_tool_result(state)
+    return str(item.get("result_text")).strip() if item else None
+
+
+def _latest_valid_tool_result(state: list[dict[str, Any]]) -> dict[str, Any] | None:
+    return next((item for item in reversed(state) if item.get("ok") is True and str(item.get("result_text") or "").strip()), None)
+
+
+def _looks_like_natural_sentence(result_text: str) -> bool:
+    text = str(result_text or "").strip()
+    if not text:
+        return False
+    lowered = text.lower()
+    common_words = ("segunda", "sexta", "horário", "atendimento", "das", "às")
+    return " " in text or text.endswith((".", "!", "?")) or any(word in lowered for word in common_words)
+
+
+def _format_deterministic_tool_response(tool_name: str | None, result_text: str) -> str:
+    text = str(result_text or "").strip()
+    normalized_tool = str(tool_name or "").strip().lower()
+    if normalized_tool == "get_business_hours" and text == "Segunda a sexta das 08h às 18h.":
+        return "Atendemos de segunda a sexta, das 08h às 18h."
+    if normalized_tool != "calculate" and _looks_like_natural_sentence(text):
+        return text
+    return f"O resultado é {text}."
 
 
 def _extract_final_response_text(parsed: dict[str, Any], *, tool: str | None = None) -> str | None:
@@ -327,9 +351,9 @@ def run_agent_for_tenant(db: Session, tenant_id, input_text: str, instruction: s
         decision = _safe_json_loads(raw)
         result.steps_count = step + 1
         if not decision:
-            successful_text = _latest_valid_result_text(state)
-            if successful_text:
-                msg = f"O resultado é {successful_text}."[:4000]
+            successful_tool_result = _latest_valid_tool_result(state)
+            if successful_tool_result:
+                msg = _format_deterministic_tool_response(successful_tool_result.get("tool_name") or successful_tool_result.get("tool_id") or successful_tool_result.get("tool"), str(successful_tool_result.get("result_text") or ""))[:4000]
                 _json_log("AI_AGENT_RESPONSE_EXTRACTION_FAILED", step=step + 1, reason="invalid_llm_json", has_tool_result_text=True)
                 _json_log("AI_AGENT_FINAL_RESPONSE", response=msg, fallback=False, source="tool_result_after_invalid_llm_json")
                 result.message = msg
@@ -364,9 +388,9 @@ def run_agent_for_tenant(db: Session, tenant_id, input_text: str, instruction: s
             result.final_tool = "responder"
             break
         if tool not in allowed and tool != "finalizar":
-            successful_text = _latest_valid_result_text(state)
-            if successful_text:
-                msg = f"O resultado é {successful_text}."[:4000]
+            successful_tool_result = _latest_valid_tool_result(state)
+            if successful_tool_result:
+                msg = _format_deterministic_tool_response(successful_tool_result.get("tool_name") or successful_tool_result.get("tool_id") or successful_tool_result.get("tool"), str(successful_tool_result.get("result_text") or ""))[:4000]
                 _json_log("AI_AGENT_RESPONSE_EXTRACTION_FAILED", step=step + 1, reason="tool_not_allowed", has_tool_result_text=True, tool=tool)
                 _json_log("AI_AGENT_FINAL_RESPONSE", response=msg, fallback=False, source="tool_result_after_tool_not_allowed", tool=tool)
                 result.message = msg
@@ -379,12 +403,12 @@ def run_agent_for_tenant(db: Session, tenant_id, input_text: str, instruction: s
         result.tools_used.append(tool)
         result.final_tool = tool
         if tool == "responder":
-            successful_text = _latest_valid_result_text(state)
+            successful_tool_result = _latest_valid_tool_result(state)
             if response_text:
                 msg = response_text[:4000]
                 fallback_used = False
-            elif successful_text:
-                msg = f"O resultado é {successful_text}."[:4000]
+            elif successful_tool_result:
+                msg = _format_deterministic_tool_response(successful_tool_result.get("tool_name") or successful_tool_result.get("tool_id") or successful_tool_result.get("tool"), str(successful_tool_result.get("result_text") or ""))[:4000]
                 fallback_used = False
                 _json_log("AI_AGENT_RESPONSE_EXTRACTION_FAILED", step=step + 1, reason="responder_without_text", has_tool_result_text=True)
             else:
@@ -521,9 +545,9 @@ def run_agent_for_tenant(db: Session, tenant_id, input_text: str, instruction: s
             break
         state.append({"tool": tool, "ok": False, "error": "not_implemented"})
     else:
-        successful_text = next((str(item.get("result_text")).strip() for item in reversed(state) if item.get("ok") is True and str(item.get("result_text") or "").strip()), None)
-        if successful_text:
-            result.message = f"O resultado é {successful_text}."[:4000]
+        successful_tool_result = _latest_valid_tool_result(state)
+        if successful_tool_result:
+            result.message = _format_deterministic_tool_response(successful_tool_result.get("tool_name") or successful_tool_result.get("tool_id") or successful_tool_result.get("tool"), str(successful_tool_result.get("result_text") or ""))[:4000]
             result.actions.append(AgentToolAction("message", {"message": result.message}))
             result.status = "success"
             result.fallback_used = False
