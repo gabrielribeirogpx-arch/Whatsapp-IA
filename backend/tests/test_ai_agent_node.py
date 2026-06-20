@@ -169,3 +169,42 @@ def test_ai_agent_mcp_get_business_hours_resolves_tool_id_inside_tool_calls_argu
     assert result.message == "Nosso horário de atendimento é de segunda a sexta, das 9h às 18h."
     assert result.message != "fallback"
     assert result.metadata["mcp_tools_used"][0]["tool_id"] == get_business_hours_id
+
+
+def test_ai_agent_mcp_get_business_hours_uses_responder_arguments_text(monkeypatch):
+    get_business_hours_id = "70d58c9b-84e0-40fb-994b-ce86a1266d64"
+    calls = iter([
+        '{"tool_calls":[{"tool":"chamar_mcp","arguments":{"tool_id":"70d58c9b-84e0-40fb-994b-ce86a1266d64","input":{}}}]}',
+        '{"thought_summary":"responder","tool":"responder","arguments":{"text":"Nosso horário de atendimento é de segunda a sexta, das 08h às 18h."}}',
+    ])
+
+    def fake_llm(_db, _tenant_id, messages, options=None):
+        return next(calls)
+
+    def fake_mcp_executor(tool, args):
+        assert tool["tool_id"] == get_business_hours_id
+        assert args == {}
+        return {
+            "ok": True,
+            "status": "success",
+            "result": {"content": [{"type": "text", "text": "Segunda a sexta das 08h às 18h."}]},
+            "latency_ms": 1,
+        }
+
+    monkeypatch.setattr(svc, "generate_answer_for_tenant", fake_llm)
+    result = svc.run_agent_for_tenant(
+        object(),
+        uuid.uuid4(),
+        "Qual é o horário de atendimento?",
+        "Use get_business_hours para consultar horário de atendimento.",
+        ["chamar_mcp", "responder"],
+        {"mcp_tools": [{"tool_id": get_business_hours_id, "name": "get_business_hours", "description": "Horário de atendimento"}]},
+        options={"max_steps": 2, "fallback_message": "fallback"},
+        mcp_tool_executor=fake_mcp_executor,
+    )
+
+    assert result.fallback_used is False
+    assert result.message is not None
+    assert "segunda a sexta" in result.message.lower()
+    assert result.message == "Nosso horário de atendimento é de segunda a sexta, das 08h às 18h."
+    assert result.message != "fallback"
