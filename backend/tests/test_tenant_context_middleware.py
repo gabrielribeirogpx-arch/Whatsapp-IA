@@ -18,6 +18,14 @@ def _build_app() -> FastAPI:
     def protected_stub():
         return {"ok": True}
 
+    @app.get("/api/integrations/google-calendar/connect")
+    def google_calendar_connect_stub():
+        return {"entered": True}
+
+    @app.get("/api/integrations/google-calendar/callback")
+    def google_calendar_callback_stub():
+        return {"entered": True}
+
     return app
 
 
@@ -37,3 +45,21 @@ def test_other_protected_routes_still_require_tenant_header():
 
     assert response.status_code == 400
     assert response.json() == {"detail": "X-Tenant-ID é obrigatório"}
+
+
+def test_google_calendar_connect_bypasses_tenant_header_requirement():
+    client = TestClient(_build_app())
+
+    response = client.get("/api/integrations/google-calendar/connect?tenant_slug=gabriel-ribeiro")
+
+    assert response.status_code == 200
+    assert response.json() == {"entered": True}
+
+
+def test_google_calendar_callback_bypasses_tenant_header_requirement():
+    client = TestClient(_build_app())
+
+    response = client.get("/api/integrations/google-calendar/callback")
+
+    assert response.status_code == 200
+    assert response.json() == {"entered": True}

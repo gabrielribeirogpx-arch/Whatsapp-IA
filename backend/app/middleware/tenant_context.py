@@ -18,6 +18,8 @@ PUBLIC_PATHS = (
     "/api/login",
     "/api/forgot-password",
     "/api/reset-password",
+    "/api/integrations/google-calendar/connect",
+    "/api/integrations/google-calendar/callback",
     "/webhook",
     "/api/webhook",
     "/uploads",
