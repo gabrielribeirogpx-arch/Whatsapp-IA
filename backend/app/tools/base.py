@@ -7,6 +7,28 @@ from app.tools.context import sanitize_metadata, ToolContext
 
 
 @dataclass(slots=True)
+class NormalizedToolResult:
+    ok: bool
+    tool: str
+    type: str | None = None
+    summary: str | None = None
+    result_text: str | None = None
+    data: dict[str, Any] = field(default_factory=dict)
+    error: dict[str, Any] | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "ok": self.ok,
+            "tool": self.tool,
+            "type": self.type,
+            "summary": self.summary,
+            "result_text": self.result_text,
+            "data": sanitize_metadata(self.data),
+            "error": sanitize_metadata(self.error),
+        }
+
+
+@dataclass(slots=True)
 class ToolResult:
     ok: bool
     tool_type: str
@@ -19,6 +41,7 @@ class ToolResult:
     metadata: dict[str, Any] = field(default_factory=dict)
     usage: dict[str, Any] = field(default_factory=dict)
     side_effects: list[dict[str, Any]] = field(default_factory=list)
+    normalized_result: NormalizedToolResult | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -33,6 +56,7 @@ class ToolResult:
             "metadata": sanitize_metadata(self.metadata),
             "usage": sanitize_metadata(self.usage),
             "side_effects": sanitize_metadata(self.side_effects),
+            "normalized_result": self.normalized_result.to_dict() if self.normalized_result else None,
         }
 
 

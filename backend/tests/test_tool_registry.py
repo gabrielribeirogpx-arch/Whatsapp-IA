@@ -92,3 +92,49 @@ def test_mcp_adapter_preserves_structured_content_from_result():
     assert result.ok is True
     assert result.output["structuredContent"] == structured_content
     assert result.structured_content == structured_content
+
+
+def test_mcp_adapter_normalizes_structured_content_contract_for_known_and_unknown_tools():
+    tool_names = [
+        "calendar_create_event",
+        "calendar_list_events",
+        "calendar_check_availability",
+        "calendar_delete_event",
+        "calculate",
+        "get_business_hours",
+        "fake_custom_tool",
+    ]
+
+    def executor(tool, args):
+        return {
+            "ok": True,
+            "status": "success",
+            "result": {
+                "structuredContent": {
+                    "ok": True,
+                    "tool": tool["tool_id"],
+                    "type": "custom.operation" if tool["tool_id"] == "fake_custom_tool" else None,
+                    "summary": "Operação realizada",
+                    "data": {"foo": "bar"},
+                }
+            },
+        }
+
+    adapter = MCPToolAdapter(executor)
+    for name in tool_names:
+        result = adapter.execute(name, {}, ToolContext(), {"mcp_tools": [{"tool_id": name, "name": name}]})
+        assert result.ok is True
+        assert result.normalized_result is not None
+        assert result.normalized_result.ok is True
+        assert result.normalized_result.tool == name
+        assert result.normalized_result.summary == "Operação realizada"
+        assert result.normalized_result.data == {"foo": "bar"}
+
+
+def test_mcp_adapter_text_fallback_without_structured_content():
+    adapter = MCPToolAdapter(lambda tool, args: {"ok": True, "status": "success", "result": {"content": [{"type": "text", "text": "Texto legado"}]}})
+    result = adapter.execute("legacy_tool", {}, ToolContext(), {"mcp_tools": [{"tool_id": "legacy_tool"}]})
+    assert result.ok is True
+    assert result.normalized_result is not None
+    assert result.normalized_result.result_text == "Texto legado"
+    assert result.normalized_result.data == {}
