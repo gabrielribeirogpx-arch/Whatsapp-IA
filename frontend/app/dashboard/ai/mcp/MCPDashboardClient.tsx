@@ -1,17 +1,3 @@
-import { Suspense } from "react";
-import MCPDashboardClient from "./MCPDashboardClient";
-
-export default function MCPDashboardPage() {
-  return (
-    <Suspense
-      fallback={
-        <div className="min-h-screen bg-slate-50 p-8 text-sm font-semibold text-slate-500">
-          Carregando integrações...
-        </div>
-      }
-    >
-      <MCPDashboardClient />
-    </Suspense>
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -112,7 +98,7 @@ function EmptyState({
   );
 }
 
-export default function MCPDashboardPage() {
+export default function MCPDashboardClient() {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
