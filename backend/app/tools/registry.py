@@ -23,6 +23,9 @@ class ToolRegistry:
             raise ValueError("adapter.tool_type is required")
         self._adapters[tool_type] = adapter
 
+    def registered_tool_types(self) -> list[str]:
+        return sorted(self._adapters.keys())
+
     def get(self, tool_type: str) -> BaseToolAdapter:
         adapter = self._adapters.get(str(tool_type))
         if adapter is None:
@@ -33,6 +36,7 @@ class ToolRegistry:
         started = time.monotonic()
         adapter = self._adapters.get(str(tool_type))
         safe = {"tenant_id": str(context.tenant_id or ""), "tool_type": str(tool_type), "tool_id": str(tool_id), "trace_id": context.trace_id, "budget_snapshot": context.budget_snapshot()}
+        logger.info("event=TOOL_REGISTRY_CONTENTS %s", sanitize_metadata({**safe, "registered_tool_types": self.registered_tool_types()}))
         logger.info("event=tool_registry_execute %s", sanitize_metadata(safe))
         trace = TraceContext.from_mapping({"trace_id": context.trace_id, "tenant_id": context.tenant_id, "conversation_id": context.conversation_id, "flow_id": context.flow_id})
         record_event(None, trace, TraceEventType.TOOL_CALLED, metadata={**safe, "input": input})

@@ -57,6 +57,58 @@ class AgentRunResult:
 
 
 
+
+def _strip_mcp_display_prefix(value: Any) -> str:
+    text = str(value or "").strip()
+    return re.sub(r"^\s*\[[^\]]+\]\s*", "", text).strip()
+
+
+def _tool_identity_values(tool: dict[str, Any]) -> set[str]:
+    values: set[str] = set()
+    for key in ("tool_id", "id", "tool_name", "name", "display_name", "identifier"):
+        raw = str(tool.get(key) or "").strip()
+        if raw:
+            values.add(raw)
+            stripped = _strip_mcp_display_prefix(raw)
+            if stripped:
+                values.add(stripped)
+    metadata = tool.get("metadata") if isinstance(tool.get("metadata"), dict) else {}
+    for key in ("tool_id", "id", "tool_name", "display_name", "identifier", "provider", "origin", "source"):
+        raw = str(metadata.get(key) or "").strip()
+        if raw:
+            values.add(raw)
+            stripped = _strip_mcp_display_prefix(raw)
+            if stripped:
+                values.add(stripped)
+    return values
+
+
+def _resolve_allowed_tool(selected_tool_id: str, tools: list[dict[str, Any]]) -> tuple[dict[str, Any] | None, str]:
+    selected = str(selected_tool_id or "").strip()
+    selected_stripped = _strip_mcp_display_prefix(selected)
+    candidates = [selected, selected_stripped]
+    for candidate in candidates:
+        if not candidate:
+            continue
+        for tool in tools:
+            if str(tool.get("tool_id") or "").strip() == candidate:
+                return tool, str(tool.get("tool_id") or candidate)
+    for tool in tools:
+        identities = _tool_identity_values(tool)
+        if selected in identities or selected_stripped in identities:
+            return tool, str(tool.get("tool_id") or tool.get("id") or selected_stripped or selected)
+    return None, selected_stripped or selected
+
+
+def _has_google_calendar_connection(db: Session, tenant_id: Any) -> bool:
+    try:
+        from app.services.google_calendar_service import PROVIDER as GOOGLE_CALENDAR_PROVIDER
+        from app.services.integration_connection_service import IntegrationConnectionService
+
+        return IntegrationConnectionService(db).get_active_connection(tenant_id, GOOGLE_CALENDAR_PROVIDER) is not None
+    except Exception:
+        return False
+
 def _format_deterministic_tool_response(tool_name: str, result_text: str) -> str:
     text = str(result_text or "").strip()
     if not text:
@@ -311,7 +363,11 @@ def run_agent_for_tenant(db: Session, tenant_id, input_text: str, instruction: s
     node_tool_calls: list[dict[str, Any]] = []
     subflow_tool_calls: list[dict[str, Any]] = []
     mcp_tools = [t for t in ((tool_configs or {}).get("mcp_tools") or []) if isinstance(t, dict)]
-    _json_log("AI_AGENT_NODE_ALLOWED_TOOLS", node_id=str(opts.get("node_id") or opts.get("agent_node_id") or ""), selected_tool_ids=[str(t) for t in (opts.get("selected_tool_ids") or (tool_configs or {}).get("selected_tool_ids") or [])], resolved_tool_ids=[str(t.get("tool_id") or t.get("id")) for t in mcp_tools if t.get("tool_id") or t.get("id")])
+    selected_tool_ids_for_log = [str(t) for t in (opts.get("selected_tool_ids") or (tool_configs or {}).get("selected_tool_ids") or [])]
+    internal_google_tools_for_log = [str(t.get("tool_id") or t.get("id")) for t in mcp_tools if str(t.get("tool_id") or t.get("id") or "") in GOOGLE_CALENDAR_TOOL_IDS]
+    resolved_tool_ids_for_log = [str(t.get("tool_id") or t.get("id")) for t in mcp_tools if t.get("tool_id") or t.get("id")]
+    _json_log("NODE_ALLOWED_TOOLS", node_id=str(opts.get("node_id") or opts.get("agent_node_id") or ""), mcp_tool_ids=selected_tool_ids_for_log, internal_google_tools=internal_google_tools_for_log, final_allowed_tools=allowed, resolved_tool_ids=resolved_tool_ids_for_log)
+    _json_log("AI_AGENT_NODE_ALLOWED_TOOLS", node_id=str(opts.get("node_id") or opts.get("agent_node_id") or ""), selected_tool_ids=selected_tool_ids_for_log, resolved_tool_ids=resolved_tool_ids_for_log)
     _json_log("AI_AGENT_LLM_TOOLS_PAYLOAD", tools=[{"name": str(t.get("tool_id") or t.get("name") or t.get("tool_name") or ""), "origin": _google_calendar_origin(t)} for t in mcp_tools])
     mcp_tool_calls: list[dict[str, Any]] = []
     seen_subflow_inputs: set[tuple[str, str]] = set()
@@ -328,6 +384,7 @@ def run_agent_for_tenant(db: Session, tenant_id, input_text: str, instruction: s
     tool_registry.register(MCPToolAdapter(mcp_tool_executor))
     tool_registry.register(GoogleCalendarToolAdapter(db))
     tool_registry.register(WebhookToolAdapter(_call_webhook, validate_webhook_config))
+    _json_log("TOOL_REGISTRY_CONTENTS", tenant_id=str(tenant_id), node_id=str(opts.get("node_id") or opts.get("agent_node_id") or ""), registered_tool_types=tool_registry.registered_tool_types(), registered_google_calendar_tools=sorted(GOOGLE_CALENDAR_TOOL_IDS))
     if not allowed:
         return _fallback_result(fallback, "no_allowed_tools", step=0)
     try:
@@ -513,13 +570,17 @@ def run_agent_for_tenant(db: Session, tenant_id, input_text: str, instruction: s
             continue
         if tool == "chamar_mcp":
             tool_id, tool_input = _normalize_mcp_tool_call(raw_call, args)
-            match = next((t for t in mcp_tools if str(t.get("tool_id")) == tool_id), None)
+            match, resolved_tool_id = _resolve_allowed_tool(tool_id, mcp_tools)
+            original_tool_id = tool_id
+            tool_id = resolved_tool_id
             is_google_calendar_tool = tool_id in GOOGLE_CALENDAR_TOOL_IDS
+            has_google_connection = _has_google_calendar_connection(db, tenant_id) if is_google_calendar_tool else False
+            _json_log("AI_AGENT_TOOL_ROUTING_DEBUG", tenant_id=str(tenant_id), node_id=str(opts.get("node_id") or opts.get("agent_node_id") or ""), selected_tool_id=original_tool_id, resolved_tool_id=tool_id, expected_internal_tool=tool_id if is_google_calendar_tool else None, tool_origin=_google_calendar_origin(match or {}) if match else None, is_google_calendar_internal=is_google_calendar_tool, is_mcp_tool=not is_google_calendar_tool, has_google_connection=has_google_connection, available_internal_tools=[str(t.get("tool_id") or t.get("id")) for t in mcp_tools if str(t.get("tool_id") or t.get("id") or "") in GOOGLE_CALENDAR_TOOL_IDS], available_mcp_tools=[str(t.get("tool_id") or t.get("id")) for t in mcp_tools], will_route_to_google_adapter=bool(match is not None and is_google_calendar_tool), will_route_to_mcp=bool(match is not None and not is_google_calendar_tool and mcp_tool_executor is not None), will_use_fallback=bool(match is None or (mcp_tool_executor is None and not is_google_calendar_tool)), fallback_reason="mcp_tool_not_allowed" if match is None else ("mcp_executor_missing" if mcp_tool_executor is None and not is_google_calendar_tool else None), id_comparison={"selected_tool_id": original_tool_id, "resolved_tool_id": tool_id, "google_calendar_tool_ids": sorted(GOOGLE_CALENDAR_TOOL_IDS)})
             if match is None or (mcp_tool_executor is None and not is_google_calendar_tool):
                 allowed_tool_ids = [str(t.get("tool_id")) for t in mcp_tools if t.get("tool_id") is not None]
                 _json_log("AI_AGENT_MCP_TOOL_RESOLUTION_FAILED", tool_id=tool_id, allowed_tool_ids=allowed_tool_ids, raw_call=raw_call)
                 blocked_tool_calls.append({"tool_id": tool_id, "error": "mcp_tool_not_allowed"})
-                state.append({"tool": tool, "tool_id": tool_id, "ok": False, "error": "mcp_tool_not_allowed"})
+                state.append({"tool": tool, "tool_id": tool_id, "selected_tool_id": original_tool_id, "ok": False, "error": "mcp_tool_not_allowed"})
                 continue
             if len(mcp_tool_calls) >= max_mcp_calls:
                 blocked_tool_calls.append({"tool_id": tool_id, "error": "mcp_tool_limit"})
@@ -604,6 +665,7 @@ def run_agent_for_tenant(db: Session, tenant_id, input_text: str, instruction: s
         create_match = next((t for t in mcp_tools if str(t.get("tool_id")) == "google_calendar_create_event"), None)
         deterministic_input = _extract_calendar_create_event_input(str(input_text or "")) if create_match else None
         if deterministic_input:
+            _json_log("AI_AGENT_TOOL_ROUTING_DEBUG", tenant_id=str(tenant_id), node_id=str(opts.get("node_id") or opts.get("agent_node_id") or ""), selected_tool_id="google_calendar_create_event", resolved_tool_id="google_calendar_create_event", expected_internal_tool="google_calendar_create_event", tool_origin=_google_calendar_origin(create_match or {}), is_google_calendar_internal=True, is_mcp_tool=False, has_google_connection=_has_google_calendar_connection(db, tenant_id), available_internal_tools=[str(t.get("tool_id") or t.get("id")) for t in mcp_tools if str(t.get("tool_id") or t.get("id") or "") in GOOGLE_CALENDAR_TOOL_IDS], available_mcp_tools=[str(t.get("tool_id") or t.get("id")) for t in mcp_tools], will_route_to_google_adapter=True, will_route_to_mcp=False, will_use_fallback=False, fallback_reason=None, id_comparison={"selected_tool_id": "google_calendar_create_event", "expected_internal_tool": "google_calendar_create_event"})
             _json_log("AI_AGENT_TOOL_CALL_REQUESTED", tool_id="google_calendar_create_event", tool_name=(create_match or {}).get("name"), tool_type="deterministic_fallback", input=deterministic_input)
             _json_log("AI_AGENT_TOOL_CALL_ROUTED", tool_id="google_calendar_create_event", routed_tool_type="google_calendar", adapter="GoogleCalendarToolAdapter", deterministic=True)
             if budget is not None:

@@ -459,3 +459,27 @@ def test_ai_agent_google_calendar_logs_and_budget_increment(monkeypatch, caplog)
     assert "AI_AGENT_TOOL_CALL_RESULT" in caplog.text
     assert result.metadata["budget_node_tool_calls_used"] == 1
     assert result.metadata["budget_mcp_calls_used"] == 0
+
+
+def test_ai_agent_google_calendar_resolves_mcp_display_prefix(monkeypatch):
+    from app.tools.base import NormalizedToolResult, ToolResult
+
+    calls = iter([
+        '{"tool":"chamar_mcp","arguments":{"tool_id":"[MCP] google_calendar_create_event","input":{"title":"Reunião com Gabriel"}}}',
+        '{"tool":"responder","arguments":{"message":"Evento criado."}}',
+    ])
+    registry_calls = []
+
+    def fake_execute(self, tool_type, tool_id, input, context, config=None):
+        registry_calls.append({"tool_type": tool_type, "tool_id": tool_id, "input": input})
+        return ToolResult(True, "google_calendar", tool_id=tool_id, output={"ok": True}, normalized_result=NormalizedToolResult(True, tool_id, type="google_calendar.create_event", summary="Evento criado", data=input))
+
+    monkeypatch.setattr(svc, "generate_answer_for_tenant", lambda *a, **k: next(calls))
+    monkeypatch.setattr(svc.ToolRegistry, "execute", fake_execute)
+    result = svc.run_agent_for_tenant(
+        object(), uuid.uuid4(), "Crie um compromisso amanhã às 14:00 chamado Reunião com Gabriel", "instr",
+        ["chamar_mcp", "responder"], {"mcp_tools": [{"tool_id": "google_calendar_create_event", "name": "[Google Calendar] Criar evento"}]}, options={"max_steps": 2}, budget=None,
+    )
+    assert registry_calls[0]["tool_type"] == "google_calendar"
+    assert registry_calls[0]["tool_id"] == "google_calendar_create_event"
+    assert result.fallback_used is False
