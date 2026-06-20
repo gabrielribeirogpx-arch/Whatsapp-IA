@@ -13,7 +13,7 @@ from typing import Any
 from urllib.parse import urlencode
 
 import requests
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 
@@ -21,7 +21,7 @@ from app.database import get_db
 from app.models.tenant import Tenant
 from app.schemas.integration_connection import IntegrationConnectionStatusOut
 from app.services.integration_connection_service import IntegrationConnectionService
-from app.services.tenant_service import TenantResolution, get_current_tenant, get_current_tenant_resolution
+from app.services.tenant_service import TenantResolution, get_current_tenant, get_current_tenant_resolution, resolve_current_tenant
 
 PROVIDER = "google_calendar"
 AUTH_TYPE = "oauth2"
@@ -132,7 +132,42 @@ def _fetch_account_email(access_token: str) -> str | None:
 
 
 @router.get("/connect")
-def connect_google_calendar(request: Request, tenant: Tenant = Depends(get_google_calendar_connect_tenant)):
+def connect_google_calendar(
+    request: Request,
+    tenant_slug: str | None = Query(None),
+    tenant_id: str | None = Query(None),
+    x_tenant_slug: str | None = Header(None, alias="X-Tenant-Slug"),
+    x_tenant_id: str | None = Header(None, alias="X-Tenant-Id"),
+    x_tenant_id_upper: str | None = Header(None, alias="X-Tenant-ID"),
+    db: Session = Depends(get_db),
+):
+    logger.info(
+        "GOOGLE_CALENDAR_CONNECT_REQUEST tenant_slug=%s tenant_id=%s x_tenant_slug=%s x_tenant_id=%s x_tenant_id_upper=%s",
+        tenant_slug,
+        tenant_id,
+        x_tenant_slug,
+        x_tenant_id,
+        x_tenant_id_upper,
+    )
+    resolution = resolve_current_tenant(
+        request,
+        db=db,
+        x_tenant_slug=x_tenant_slug or "",
+        x_tenant_id=x_tenant_id or "",
+        x_tenant_id_alt=x_tenant_id_upper or "",
+        tenant_slug=tenant_slug or "",
+        tenant_id=tenant_id or "",
+    )
+    logger.info(
+        "GOOGLE_CALENDAR_TENANT_RESOLUTION_RESULT resolved=%s tenant_id=%s source=%s",
+        bool(resolution),
+        resolution.tenant.id if resolution else None,
+        resolution.source if resolution else None,
+    )
+    if not resolution:
+        raise HTTPException(status_code=400, detail="Tenant não identificado")
+
+    tenant = resolution.tenant
     if not _client_id():
         raise HTTPException(status_code=500, detail="GOOGLE_CALENDAR_CLIENT_ID não configurado")
     state = create_oauth_state(tenant.id)

@@ -92,7 +92,11 @@ def test_google_calendar_state_contains_tenant_nonce_and_rejects_tampering():
 
 def test_connect_redirect_includes_secure_state_and_required_scopes():
     tenant_id = uuid.uuid4()
-    response = _client(tenant_id, FakeDb()).get("/api/integrations/google-calendar/connect", follow_redirects=False)
+    tenant = Tenant(id=tenant_id, name="Tenant", slug="tenant-ok")
+    response = _tenant_client(TenantFakeDb([tenant])).get(
+        "/api/integrations/google-calendar/connect?tenant_slug=tenant-ok",
+        follow_redirects=False,
+    )
 
     assert response.status_code == 302
     parsed = urlparse(response.headers["location"])
@@ -121,6 +125,22 @@ def test_connect_resolves_valid_tenant_slug(monkeypatch, caplog):
     _assert_connect_redirect_for_tenant(response, tenant_id)
     assert "source=query slug" in caplog.text
 
+
+
+def test_connect_resolves_gabriel_ribeiro_slug_without_returning_400(caplog):
+    caplog.set_level("INFO")
+    tenant_id = uuid.uuid4()
+    tenant = Tenant(id=tenant_id, name="Gabriel Ribeiro", slug="gabriel-ribeiro")
+
+    response = _tenant_client(TenantFakeDb([tenant])).get(
+        "/api/integrations/google-calendar/connect?tenant_slug=gabriel-ribeiro",
+        follow_redirects=False,
+    )
+
+    assert response.status_code != 400
+    _assert_connect_redirect_for_tenant(response, tenant_id)
+    assert "GOOGLE_CALENDAR_CONNECT_REQUEST" in caplog.text
+    assert "GOOGLE_CALENDAR_TENANT_RESOLUTION_RESULT" in caplog.text
 
 def test_connect_resolves_valid_tenant_id(monkeypatch, caplog):
     caplog.set_level("INFO")
