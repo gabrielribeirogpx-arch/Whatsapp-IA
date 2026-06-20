@@ -90,6 +90,16 @@ export type TenantSession = {
   slug?: string;
 };
 
+export type GoogleCalendarConnectionStatus = {
+  provider: 'google_calendar' | string;
+  auth_type?: string | null;
+  status: string;
+  connected: boolean;
+  scopes: string[];
+  metadata: { account_email?: string | null; [key: string]: unknown };
+  expires_at?: string | null;
+};
+
 
 export type BotMatchType = 'contains' | 'exact';
 

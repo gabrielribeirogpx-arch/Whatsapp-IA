@@ -37,7 +37,8 @@ import type {
   AuditLog,
   WorkspaceUser,
   TaskItem,
-  TaskUpdatePayload
+  TaskUpdatePayload,
+  GoogleCalendarConnectionStatus
 } from './types';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL;
@@ -54,6 +55,23 @@ function getTenantFromSubdomain(hostname: string): string | null {
   const subdomain = parts[0]?.trim();
   if (!subdomain || subdomain === 'www') return null;
   return subdomain;
+}
+
+export function getTenantSlugOrId(): string | null {
+  if (typeof window === 'undefined') return null;
+
+  const storedTenant = localStorage.getItem(TENANT_STORAGE_KEY);
+  if (storedTenant) {
+    try {
+      const parsed = JSON.parse(storedTenant) as Partial<TenantSession>;
+      if (parsed.slug) return parsed.slug;
+      if (parsed.tenant_id) return parsed.tenant_id;
+    } catch {
+      if (storedTenant.trim()) return storedTenant.trim();
+    }
+  }
+
+  return localStorage.getItem(TENANT_ID_STORAGE_KEY) || getTenantFromSubdomain(window.location.hostname);
 }
 
 export function getTenant(): string | null {
@@ -739,6 +757,26 @@ export async function resetPassword(token: string, new_password: string, confirm
   return parseApiResponse<{ message: string }>(res);
 }
 
+
+export async function getGoogleCalendarStatus(): Promise<GoogleCalendarConnectionStatus> {
+  const tenant = getTenantSlugOrId();
+  const query = tenant ? `?tenant_slug=${encodeURIComponent(tenant)}` : '';
+  const res = await apiFetch(`/api/integrations/google-calendar/status${query}`);
+  return parseApiResponse<GoogleCalendarConnectionStatus>(res);
+}
+
+export async function disconnectGoogleCalendar(): Promise<GoogleCalendarConnectionStatus> {
+  const tenant = getTenantSlugOrId();
+  const query = tenant ? `?tenant_slug=${encodeURIComponent(tenant)}` : '';
+  const res = await apiFetch(`/api/integrations/google-calendar/disconnect${query}`, { method: 'DELETE' });
+  return parseApiResponse<GoogleCalendarConnectionStatus>(res);
+}
+
+export function getGoogleCalendarConnectUrl(): string {
+  const tenant = getTenantSlugOrId();
+  if (!tenant) throw new Error('Tenant atual não encontrado para conectar o Google Calendar.');
+  return buildApiUrl(`/api/integrations/google-calendar/connect?tenant_slug=${encodeURIComponent(tenant)}`);
+}
 
 export async function getAccountMe(): Promise<AccountMe> {
   const res = await apiFetch('/api/account/me');
