@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 
 from app.models.integration_connection import IntegrationConnection
 
-_AUTH_TYPES = {"oauth", "api_key"}
+_AUTH_TYPES = {"oauth", "oauth2", "api_key"}
 _PREFIX = "oauth:v1:"
 
 
@@ -35,10 +35,10 @@ class IntegrationConnectionService:
         return value
 
     @staticmethod
-    def normalize_auth_type(auth_type: str) -> Literal["oauth", "api_key"]:
+    def normalize_auth_type(auth_type: str) -> Literal["oauth", "oauth2", "api_key"]:
         value = (auth_type or "").strip().lower()
         if value not in _AUTH_TYPES:
-            raise ValueError("auth_type deve ser 'oauth' ou 'api_key'")
+            raise ValueError("auth_type deve ser 'oauth', 'oauth2' ou 'api_key'")
         return value  # type: ignore[return-value]
 
     @staticmethod
