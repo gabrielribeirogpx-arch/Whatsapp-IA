@@ -361,6 +361,89 @@ export default function MCPDashboardClient() {
         </header>
 
         <section className={cardClass}>
+          <div className="mb-5 flex items-start gap-3">
+            <span className="rounded-2xl bg-emerald-50 p-3 text-emerald-600">
+              <PlugZap size={22} />
+            </span>
+            <div>
+              <h2 className="text-lg font-bold text-slate-950">
+                Novo servidor MCP
+              </h2>
+              <p className="mt-1 text-sm text-slate-500">
+                Informe o nome, a URL segura e, se necessário, o token protegido
+                do servidor MCP.
+              </p>
+            </div>
+          </div>
+          <div className="grid gap-4">
+            <label className="space-y-2">
+              <span className={labelClass}>Nome</span>
+              <input
+                className={inputClass}
+                placeholder="Ex.: Catálogo interno"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+              />
+            </label>
+            <label className="space-y-2">
+              <span className={labelClass}>URL</span>
+              <input
+                className={inputClass}
+                placeholder="https://integracao.exemplo.com"
+                value={serverUrl}
+                onChange={(e) => setServerUrl(e.target.value)}
+              />
+            </label>
+            <label className="space-y-2">
+              <span className={labelClass}>Token de acesso (opcional)</span>
+              <input
+                className={inputClass}
+                placeholder="Nunca exibido após salvar"
+                type="password"
+                value={bearerToken}
+                onChange={(e) => setBearerToken(e.target.value)}
+              />
+            </label>
+          </div>
+          <div className="mt-5 flex flex-wrap gap-3">
+            <button
+              className={secondaryButtonClass}
+              disabled={!serverUrl || testing}
+              onClick={validateConnection}
+            >
+              {testing ? (
+                <Loader2 className="animate-spin" size={16} />
+              ) : (
+                <Link2 size={16} />
+              )}
+              Testar conexão
+            </button>
+            <button
+              className={primaryButtonClass}
+              disabled={!name || !serverUrl || creating}
+              onClick={() =>
+                saveServer().catch((error) => {
+                  setMessageTone("error");
+                  setMessage(
+                    error instanceof Error
+                      ? error.message
+                      : "Falha ao salvar servidor MCP.",
+                  );
+                })
+              }
+            >
+              {creating ? <Loader2 className="animate-spin" size={16} /> : null}
+              {creating ? "Salvando..." : "Salvar integração"}
+            </button>
+            {editingId ? (
+              <button className={secondaryButtonClass} onClick={resetForm}>
+                Cancelar edição
+              </button>
+            ) : null}
+          </div>
+        </section>
+
+        <section className={cardClass}>
           <div className="mb-5">
             <p className="text-xs font-bold uppercase tracking-[0.16em] text-emerald-600">
               Integrações oficiais
@@ -464,89 +547,6 @@ export default function MCPDashboardClient() {
               </p>
             ) : null}
           </article>
-        </section>
-
-        <section className={cardClass}>
-          <div className="mb-5 flex items-start gap-3">
-            <span className="rounded-2xl bg-emerald-50 p-3 text-emerald-600">
-              <PlugZap size={22} />
-            </span>
-            <div>
-              <h2 className="text-lg font-bold text-slate-950">
-                Novo servidor MCP
-              </h2>
-              <p className="mt-1 text-sm text-slate-500">
-                Informe o nome, a URL segura e, se necessário, o token protegido
-                do servidor MCP.
-              </p>
-            </div>
-          </div>
-          <div className="grid gap-4">
-            <label className="space-y-2">
-              <span className={labelClass}>Nome</span>
-              <input
-                className={inputClass}
-                placeholder="Ex.: Catálogo interno"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-              />
-            </label>
-            <label className="space-y-2">
-              <span className={labelClass}>URL</span>
-              <input
-                className={inputClass}
-                placeholder="https://integracao.exemplo.com"
-                value={serverUrl}
-                onChange={(e) => setServerUrl(e.target.value)}
-              />
-            </label>
-            <label className="space-y-2">
-              <span className={labelClass}>Token de acesso (opcional)</span>
-              <input
-                className={inputClass}
-                placeholder="Nunca exibido após salvar"
-                type="password"
-                value={bearerToken}
-                onChange={(e) => setBearerToken(e.target.value)}
-              />
-            </label>
-          </div>
-          <div className="mt-5 flex flex-wrap gap-3">
-            <button
-              className={secondaryButtonClass}
-              disabled={!serverUrl || testing}
-              onClick={validateConnection}
-            >
-              {testing ? (
-                <Loader2 className="animate-spin" size={16} />
-              ) : (
-                <Link2 size={16} />
-              )}
-              Testar conexão
-            </button>
-            <button
-              className={primaryButtonClass}
-              disabled={!name || !serverUrl || creating}
-              onClick={() =>
-                saveServer().catch((error) => {
-                  setMessageTone("error");
-                  setMessage(
-                    error instanceof Error
-                      ? error.message
-                      : "Falha ao salvar servidor MCP.",
-                  );
-                })
-              }
-            >
-              {creating ? <Loader2 className="animate-spin" size={16} /> : null}
-              {creating ? "Salvando..." : "Salvar integração"}
-            </button>
-            {editingId ? (
-              <button className={secondaryButtonClass} onClick={resetForm}>
-                Cancelar edição
-              </button>
-            ) : null}
-          </div>
         </section>
 
         {message && (
