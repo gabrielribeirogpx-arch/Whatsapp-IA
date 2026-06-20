@@ -5,6 +5,8 @@ import json
 import logging
 import re
 import time
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
@@ -52,6 +54,51 @@ class AgentRunResult:
     fallback_used: bool = False
     metadata: dict[str, Any] = field(default_factory=dict)
 
+
+
+
+def _format_deterministic_tool_response(tool_name: str, result_text: str) -> str:
+    text = str(result_text or "").strip()
+    if not text:
+        return "Perfeito! Sua solicitação foi concluída com sucesso."
+    if str(tool_name or "").strip() == "calculate":
+        return f"O resultado é {text}."
+    return text if text.endswith((".", "!", "?")) else f"{text}."
+
+
+def _google_calendar_origin(tool: dict[str, Any]) -> str:
+    tool_id = str(tool.get("tool_id") or tool.get("id") or "")
+    if tool_id in GOOGLE_CALENDAR_TOOL_IDS or (tool.get("metadata") or {}).get("provider") == "google_calendar":
+        return "internal/google_calendar"
+    return "mcp"
+
+
+def _extract_calendar_create_event_input(text: str, *, now: datetime | None = None, timezone: str = "America/Sao_Paulo") -> dict[str, Any] | None:
+    raw = str(text or "").strip()
+    lowered = raw.lower()
+    if not re.search(r"\b(crie|criar|agende|agendar|marque|marcar)\b", lowered):
+        return None
+    if not re.search(r"\b(compromisso|evento|reuni[aã]o|agenda(?:mento)?)\b", lowered):
+        return None
+    hour_match = re.search(r"(?:às|as|para(?:\s+o)?|\b)(?:\s*)(\d{1,2})(?::|h)(\d{2})?", lowered)
+    if not hour_match:
+        return None
+    title_match = re.search(r"(?:chamad[oa]|t[ií]tulo|nome)\s+(.+)$", raw, flags=re.I)
+    title = (title_match.group(1).strip(' .,!?:;') if title_match else "Evento") or "Evento"
+    tz = ZoneInfo(timezone)
+    base = now.astimezone(tz) if now and now.tzinfo else (now.replace(tzinfo=tz) if now else datetime.now(tz))
+    if "amanhã" in lowered or "amanha" in lowered:
+        day = base.date() + timedelta(days=1)
+    elif "hoje" in lowered:
+        day = base.date()
+    else:
+        return None
+    hour = int(hour_match.group(1)); minute = int(hour_match.group(2) or 0)
+    if hour > 23 or minute > 59:
+        return None
+    start = datetime(day.year, day.month, day.day, hour, minute, tzinfo=tz)
+    end = start + timedelta(hours=1)
+    return {"title": title, "start": start.isoformat(), "end": end.isoformat(), "timezone": timezone}
 
 
 def _format_tool_result_context(item: dict[str, Any]) -> str:
@@ -264,6 +311,8 @@ def run_agent_for_tenant(db: Session, tenant_id, input_text: str, instruction: s
     node_tool_calls: list[dict[str, Any]] = []
     subflow_tool_calls: list[dict[str, Any]] = []
     mcp_tools = [t for t in ((tool_configs or {}).get("mcp_tools") or []) if isinstance(t, dict)]
+    _json_log("AI_AGENT_NODE_ALLOWED_TOOLS", node_id=str(opts.get("node_id") or opts.get("agent_node_id") or ""), selected_tool_ids=[str(t) for t in (opts.get("selected_tool_ids") or (tool_configs or {}).get("selected_tool_ids") or [])], resolved_tool_ids=[str(t.get("tool_id") or t.get("id")) for t in mcp_tools if t.get("tool_id") or t.get("id")])
+    _json_log("AI_AGENT_LLM_TOOLS_PAYLOAD", tools=[{"name": str(t.get("tool_id") or t.get("name") or t.get("tool_name") or ""), "origin": _google_calendar_origin(t)} for t in mcp_tools])
     mcp_tool_calls: list[dict[str, Any]] = []
     seen_subflow_inputs: set[tuple[str, str]] = set()
     seen_node_inputs: set[tuple[str, str]] = set()
@@ -476,9 +525,13 @@ def run_agent_for_tenant(db: Session, tenant_id, input_text: str, instruction: s
                 blocked_tool_calls.append({"tool_id": tool_id, "error": "mcp_tool_limit"})
                 state.append({"tool": tool, "tool_id": tool_id, "ok": False, "error": "mcp_tool_limit"})
                 continue
-            _json_log("AI_AGENT_TOOL_CALL_BEGIN", tool_id=tool_id, tool_name=match.get("name"), tool_type="mcp_tool", input=tool_input)
+            routed_tool_type = "google_calendar" if is_google_calendar_tool else "mcp_tool"
+            _json_log("AI_AGENT_TOOL_CALL_REQUESTED", tool_id=tool_id, tool_name=match.get("name"), tool_type="mcp_tool", input=tool_input)
+            _json_log("AI_AGENT_TOOL_CALL_ROUTED", tool_id=tool_id, routed_tool_type=routed_tool_type, adapter="GoogleCalendarToolAdapter" if is_google_calendar_tool else "MCPToolAdapter")
             try:
-                registry_result = tool_registry.execute("google_calendar" if is_google_calendar_tool else "mcp_tool", tool_id, tool_input, tool_context, {"mcp_tools": mcp_tools, "db": db})
+                if budget is not None and is_google_calendar_tool:
+                    budget.consume_node_tool_call()
+                registry_result = tool_registry.execute(routed_tool_type, tool_id, tool_input, tool_context, {"mcp_tools": mcp_tools, "db": db})
                 tool_result = {"ok": registry_result.ok, "status": "success" if registry_result.ok else "error", "result": registry_result.output, "structured_content": registry_result.structured_content, "error": registry_result.error_code, **(registry_result.metadata or {})}
                 _json_log("AI_AGENT_TOOL_CALL_RESULT", ok=tool_result.get("ok"), raw_result=tool_result.get("result"), error=tool_result.get("error"))
             except ExecutionBudgetExceeded:
@@ -488,7 +541,7 @@ def run_agent_for_tenant(db: Session, tenant_id, input_text: str, instruction: s
             _json_log("AI_AGENT_TOOL_RESULT_MODEL", tool_original=tool_id, normalized_result=normalized)
             error = normalized.get("error") if isinstance(normalized.get("error"), dict) else None
             status = "success" if normalized.get("ok") is True else "error"
-            mcp_call = {"tool_id": tool_id, "status": status, "latency_ms": tool_result.get("latency_ms"), "error": (error or {}).get("code")}
+            mcp_call = {"tool_id": tool_id, "status": status, "latency_ms": tool_result.get("latency_ms"), "error": (error or {}).get("code"), "tool_type": routed_tool_type}
             mcp_tool_calls.append(mcp_call)
             logger.info("event=AI_AGENT_TOOL_RESULT_RECEIVED tool_type=mcp_tool tool_id=%s ok=%s has_text=%s", tool_id, normalized.get("ok") is True, bool(normalized.get("result_text")))
             if not normalized.get("result_text") and not normalized.get("data"):
@@ -547,6 +600,28 @@ def run_agent_for_tenant(db: Session, tenant_id, input_text: str, instruction: s
             result.status = "error"
             result.fallback_used = True
             result.final_tool = "responder"
+    if result.fallback_used and not _latest_valid_tool_result(state):
+        create_match = next((t for t in mcp_tools if str(t.get("tool_id")) == "google_calendar_create_event"), None)
+        deterministic_input = _extract_calendar_create_event_input(str(input_text or "")) if create_match else None
+        if deterministic_input:
+            _json_log("AI_AGENT_TOOL_CALL_REQUESTED", tool_id="google_calendar_create_event", tool_name=(create_match or {}).get("name"), tool_type="deterministic_fallback", input=deterministic_input)
+            _json_log("AI_AGENT_TOOL_CALL_ROUTED", tool_id="google_calendar_create_event", routed_tool_type="google_calendar", adapter="GoogleCalendarToolAdapter", deterministic=True)
+            if budget is not None:
+                budget.consume_node_tool_call()
+            registry_result = tool_registry.execute("google_calendar", "google_calendar_create_event", deterministic_input, tool_context, {"mcp_tools": mcp_tools, "db": db})
+            normalized = registry_result.normalized_result.to_dict() if registry_result.normalized_result else {}
+            _json_log("AI_AGENT_TOOL_CALL_RESULT", ok=registry_result.ok, raw_result=registry_result.output, error=registry_result.error_code, deterministic=True)
+            error = normalized.get("error") if isinstance(normalized.get("error"), dict) else {}
+            mcp_tool_calls.append({"tool_id": "google_calendar_create_event", "status": "success" if registry_result.ok else "error", "latency_ms": (registry_result.metadata or {}).get("duration_ms"), "error": (error or {}).get("code") or registry_result.error_code, "tool_type": "google_calendar"})
+            if registry_result.ok:
+                result.message = _format_universal_tool_response({"normalized_result": normalized})[:4000]
+                result.actions = [AgentToolAction("message", {"message": result.message})]
+                result.status = "success"; result.fallback_used = False; result.final_tool = "chamar_mcp"; result.tools_used.append("chamar_mcp")
+            else:
+                message = str(((registry_result.output or {}).get("message") if isinstance(registry_result.output, dict) else "") or "Não consegui acessar o Google Calendar agora.")
+                result.message = message[:4000]
+                result.actions = [AgentToolAction("message", {"message": result.message})]
+                result.status = "error"; result.fallback_used = False; result.final_tool = "chamar_mcp"
     total_latency_ms = int((time.monotonic() - started) * 1000)
     _json_log("AI_AGENT_FINISHED", status=result.status, final_tool=result.final_tool, tools_used=result.tools_used, fallback_used=result.fallback_used)
     record_event(db, trace, TraceEventType.AI_AGENT_FINISHED, duration_ms=total_latency_ms, metadata={"status": result.status, "final_tool": result.final_tool, "tools_used": result.tools_used})
