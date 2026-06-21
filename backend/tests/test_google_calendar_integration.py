@@ -1,6 +1,11 @@
 from __future__ import annotations
 
+import base64
+import hashlib
+import hmac
+import json
 import uuid
+from datetime import datetime
 from types import SimpleNamespace
 from urllib.parse import parse_qs, urlparse
 
@@ -253,6 +258,41 @@ def test_connect_accepts_generic_google_oauth_env_names(monkeypatch):
         "https://app.example.com/api/integrations/google-calendar/callback"
     ]
     assert verify_oauth_state(params["state"][0])["tenant_id"] == str(tenant_id)
+
+
+def test_google_calendar_connect_url_does_not_use_gmail_callback():
+    tenant_id = uuid.uuid4()
+    tenant = Tenant(id=tenant_id, name="Tenant", slug="tenant-ok")
+
+    response = _tenant_client(TenantFakeDb([tenant])).get(
+        "/api/integrations/google-calendar/connect?tenant_slug=tenant-ok",
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 302
+    params = parse_qs(urlparse(response.headers["location"]).query)
+    assert params["redirect_uri"] == ["https://app.example.com/api/integrations/google-calendar/callback"]
+    assert "gmail/callback" not in params["redirect_uri"][0]
+
+
+def test_google_calendar_state_contains_provider_and_rejects_gmail_provider():
+    tenant_id = uuid.uuid4()
+    payload = verify_oauth_state(create_oauth_state(tenant_id, nonce="calendar-nonce"))
+    assert payload["provider"] == "google_calendar"
+
+    gmail_payload = {
+        "tenant_id": str(tenant_id),
+        "provider": "gmail",
+        "nonce": "n",
+        "iat": int(datetime.utcnow().timestamp()),
+    }
+    payload_json = json.dumps(gmail_payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
+    payload_b64 = base64.urlsafe_b64encode(payload_json).decode("ascii").rstrip("=")
+    signature = hmac.new(b"state-secret", payload_b64.encode("ascii"), hashlib.sha256).digest()
+    sig_b64 = base64.urlsafe_b64encode(signature).decode("ascii").rstrip("=")
+
+    with pytest.raises(Exception):
+        verify_oauth_state(f"{payload_b64}.{sig_b64}")
 
 
 def test_status_and_disconnect_use_integration_connections_without_exposing_tokens():

@@ -796,7 +796,24 @@ export async function disconnectGmail(): Promise<GoogleCalendarConnectionStatus>
 export function getGmailConnectUrl(): string {
   const tenant = getTenantSlugOrId();
   if (!tenant) throw new Error('Tenant atual não encontrado para conectar o Gmail.');
-  return buildApiUrl(`/api/integrations/gmail/connect-url?tenant_slug=${encodeURIComponent(tenant)}`);
+  const path = `/api/integrations/gmail/connect-url?tenant_slug=${encodeURIComponent(tenant)}`;
+  const url = buildApiUrl(path);
+  console.info('GMAIL_OAUTH_CONNECT_URL_REQUESTED', {
+    provider: 'gmail',
+    callback_path: '/api/integrations/gmail/callback',
+    scopes: [
+      'https://www.googleapis.com/auth/gmail.readonly',
+      'https://www.googleapis.com/auth/gmail.compose',
+      'https://www.googleapis.com/auth/gmail.send',
+      'openid',
+      'email',
+      'profile',
+    ],
+    connect_path: path,
+    connect_url: url,
+    tenant_slug: tenant,
+  });
+  return url;
 }
 
 export async function getAccountMe(): Promise<AccountMe> {

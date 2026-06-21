@@ -109,12 +109,7 @@ def _state_secret() -> bytes:
 
 
 def _redirect_uri(request: Request) -> str:
-    configured = (
-        os.getenv("GMAIL_REDIRECT_URI")
-        or os.getenv("GOOGLE_REDIRECT_URI")
-        or os.getenv("GOOGLE_OAUTH_REDIRECT_URI")
-        or ""
-    ).strip()
+    configured = (os.getenv("GMAIL_REDIRECT_URI") or "").strip()
     redirect_uri = configured or str(request.url_for("gmail_callback"))
     parsed = urlparse(redirect_uri)
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
@@ -204,8 +199,16 @@ def connect_gmail(
 ):
     try:
         logger.warning("ENTERED GMAIL CONNECT ENDPOINT")
+        redirect_uri = _redirect_uri(request)
+        callback_path = urlparse(redirect_uri).path
+        frontend_return_url = _frontend_oauth_result_url("connected")
         logger.info(
-            "GMAIL_CONNECT_REQUEST tenant_slug=%s tenant_id=%s x_tenant_slug=%s x_tenant_id=%s x_tenant_id_upper=%s",
+            "GMAIL_OAUTH_CONNECT_URL_REQUESTED provider=%s redirect_uri=%s scopes=%s callback_path=%s frontend_return_url=%s tenant_slug=%s tenant_id=%s x_tenant_slug=%s x_tenant_id=%s x_tenant_id_upper=%s",
+            PROVIDER,
+            redirect_uri,
+            SCOPES,
+            callback_path,
+            frontend_return_url,
             tenant_slug,
             tenant_id,
             x_tenant_slug,
@@ -237,7 +240,7 @@ def connect_gmail(
         state = create_oauth_state(tenant.id)
         params = {
             "client_id": _client_id(),
-            "redirect_uri": _redirect_uri(request),
+            "redirect_uri": redirect_uri,
             "response_type": "code",
             "scope": " ".join(SCOPES),
             "access_type": "offline",
@@ -245,7 +248,16 @@ def connect_gmail(
             "prompt": "consent",
             "state": state,
         }
-        return RedirectResponse(f"{AUTH_URL}?{urlencode(params)}", status_code=302)
+        oauth_url = f"{AUTH_URL}?{urlencode(params)}"
+        logger.info(
+            "GMAIL_OAUTH_CONNECT_URL_GENERATED provider=%s redirect_uri=%s scopes=%s callback_path=%s frontend_return_url=%s",
+            PROVIDER,
+            redirect_uri,
+            SCOPES,
+            callback_path,
+            frontend_return_url,
+        )
+        return RedirectResponse(oauth_url, status_code=302)
     except Exception as exc:
         logger.exception(
             "GMAIL_CONNECT_EXCEPTION exception_type=%s exception_message=%s",
@@ -258,13 +270,39 @@ def connect_gmail(
 @router.get("/callback", name="gmail_callback")
 def gmail_callback(request: Request, code: str | None = None, state: str | None = None, error: str | None = None, db: Session = Depends(get_db)):
     try:
+        redirect_uri = _redirect_uri(request)
+        callback_path = urlparse(str(request.url)).path
+        frontend_return_url = _frontend_oauth_result_url("connected")
+        logger.info(
+            "GMAIL_OAUTH_CALLBACK_RECEIVED provider=%s redirect_uri=%s scopes=%s callback_path=%s frontend_return_url=%s has_code=%s has_state=%s error=%s integration=%s",
+            PROVIDER,
+            redirect_uri,
+            SCOPES,
+            callback_path,
+            frontend_return_url,
+            bool(code),
+            bool(state),
+            error,
+            PROVIDER,
+        )
         if error:
             raise HTTPException(status_code=400, detail="OAuth Google recusado")
         if not code or not state:
             raise HTTPException(status_code=400, detail="Callback OAuth inválido")
         payload = verify_oauth_state(state)
+        logger.info(
+            "GMAIL_OAUTH_CALLBACK_STATE_DECODED provider=%s state_provider=%s tenant_id=%s redirect_uri=%s scopes=%s callback_path=%s frontend_return_url=%s integration=%s",
+            PROVIDER,
+            payload.get("provider"),
+            payload.get("tenant_id"),
+            redirect_uri,
+            SCOPES,
+            callback_path,
+            frontend_return_url,
+            PROVIDER,
+        )
         tenant_id = uuid.UUID(str(payload["tenant_id"]))
-        token_payload = _exchange_code_for_tokens(code, _redirect_uri(request))
+        token_payload = _exchange_code_for_tokens(code, redirect_uri)
         access_token = token_payload.get("access_token")
         if not access_token:
             raise HTTPException(status_code=400, detail="Access token ausente")
