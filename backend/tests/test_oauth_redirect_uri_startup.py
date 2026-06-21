@@ -12,6 +12,10 @@ def test_startup_validates_google_redirect_uri(monkeypatch):
     monkeypatch.delenv("GMAIL_CLIENT_SECRET", raising=False)
     monkeypatch.delenv("GMAIL_ENABLED", raising=False)
     monkeypatch.delenv("ENABLE_GMAIL", raising=False)
+    monkeypatch.delenv("GOOGLE_DRIVE_CLIENT_ID", raising=False)
+    monkeypatch.delenv("GOOGLE_DRIVE_CLIENT_SECRET", raising=False)
+    monkeypatch.delenv("GOOGLE_DRIVE_ENABLED", raising=False)
+    monkeypatch.delenv("ENABLE_GOOGLE_DRIVE", raising=False)
 
     with pytest.raises(RuntimeError, match="GOOGLE_REDIRECT_URI"):
         verify_oauth_redirect_uris()
@@ -32,5 +36,32 @@ def test_startup_accepts_separate_calendar_and_gmail_redirect_uris(monkeypatch):
     monkeypatch.setenv("GOOGLE_REDIRECT_URI", "https://app.example.com/api/integrations/google-calendar/callback")
     monkeypatch.setenv("GMAIL_CLIENT_ID", "gmail-client-id")
     monkeypatch.setenv("GMAIL_REDIRECT_URI", "https://app.example.com/api/integrations/gmail/callback")
+
+    verify_oauth_redirect_uris()
+
+
+def test_startup_validates_google_drive_redirect_uri_when_drive_enabled(monkeypatch):
+    monkeypatch.setenv("APP_ENV", "development")
+    monkeypatch.setenv("GOOGLE_REDIRECT_URI", "https://app.example.com/api/integrations/google-calendar/callback")
+    monkeypatch.delenv("GMAIL_CLIENT_ID", raising=False)
+    monkeypatch.delenv("GMAIL_CLIENT_SECRET", raising=False)
+    monkeypatch.delenv("GMAIL_ENABLED", raising=False)
+    monkeypatch.delenv("ENABLE_GMAIL", raising=False)
+    monkeypatch.setenv("GOOGLE_DRIVE_CLIENT_ID", "drive-client-id")
+    monkeypatch.delenv("GOOGLE_DRIVE_REDIRECT_URI", raising=False)
+
+    with pytest.raises(RuntimeError, match="GOOGLE_DRIVE_REDIRECT_URI"):
+        verify_oauth_redirect_uris()
+
+
+def test_startup_accepts_google_drive_redirect_uri(monkeypatch):
+    monkeypatch.setenv("APP_ENV", "development")
+    monkeypatch.setenv("GOOGLE_REDIRECT_URI", "https://app.example.com/api/integrations/google-calendar/callback")
+    monkeypatch.delenv("GMAIL_CLIENT_ID", raising=False)
+    monkeypatch.delenv("GMAIL_CLIENT_SECRET", raising=False)
+    monkeypatch.delenv("GMAIL_ENABLED", raising=False)
+    monkeypatch.delenv("ENABLE_GMAIL", raising=False)
+    monkeypatch.setenv("GOOGLE_DRIVE_CLIENT_ID", "drive-client-id")
+    monkeypatch.setenv("GOOGLE_DRIVE_REDIRECT_URI", "https://app.example.com/api/integrations/google-drive/callback")
 
     verify_oauth_redirect_uris()
