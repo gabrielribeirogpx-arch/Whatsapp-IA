@@ -530,3 +530,64 @@ def test_ai_agent_google_calendar_resolves_mcp_display_prefix(monkeypatch):
     assert registry_calls[0]["tool_type"] == "google_calendar"
     assert registry_calls[0]["tool_id"] == "google_calendar_create_event"
     assert result.fallback_used is False
+
+
+def test_ai_agent_google_calendar_list_events_executes_directly_without_llm(monkeypatch, caplog):
+    from app.services.execution_budget_service import ExecutionBudget
+    from app.tools.base import NormalizedToolResult, ToolResult
+
+    registry_calls = []
+    budget = ExecutionBudget.defaults("tenant")
+
+    def fail_llm(*args, **kwargs):
+        raise AssertionError("LLM should not be called for deterministic calendar list")
+
+    def fake_execute(self, tool_type, tool_id, input, context, config=None):
+        registry_calls.append({"tool_type": tool_type, "tool_id": tool_id, "input": input})
+        return ToolResult(
+            True,
+            "google_calendar",
+            tool_id=tool_id,
+            output={"ok": True, "events": [
+                {"title": "Reunião com Gabriel", "start": "2026-06-22T14:00:00-03:00"},
+                {"title": "Teste Wazza Calendar", "start": "2026-06-22T16:30:00-03:00"},
+            ]},
+            normalized_result=NormalizedToolResult(True, tool_id, type="google_calendar.list_events", summary="ok", data={}),
+        )
+
+    monkeypatch.setattr(svc, "generate_answer_for_tenant", fail_llm)
+    monkeypatch.setattr(svc.ToolRegistry, "execute", fake_execute)
+    with caplog.at_level("INFO"):
+        result = svc.run_agent_for_tenant(
+            object(), uuid.uuid4(), "Liste meus eventos de amanhã", "instr",
+            ["chamar_mcp", "responder"], {"mcp_tools": [{"tool_id": "google_calendar_list_events", "name": "Listar eventos"}]},
+            options={"max_steps": 2, "timezone": "America/Sao_Paulo"}, budget=budget,
+        )
+
+    assert registry_calls == [{"tool_type": "google_calendar", "tool_id": "google_calendar_list_events", "input": registry_calls[0]["input"]}]
+    assert "2026-06-22T00:00:00" in registry_calls[0]["input"]["time_min"]
+    assert "2026-06-23T00:00:00" in registry_calls[0]["input"]["time_max"]
+    assert result.message == "Você possui 2 compromissos amanhã:\n\n• 14:00 - Reunião com Gabriel\n• 16:30 - Teste Wazza Calendar"
+    assert result.metadata["budget_llm_calls_used"] == 0
+    assert result.metadata["budget_node_tool_calls_used"] == 1
+    assert result.metadata["budget_mcp_calls_used"] == 0
+    assert result.metadata["mcp_call_count"] == 0
+    assert "AI_AGENT_DETERMINISTIC_CALENDAR_LIST_MATCH" in caplog.text
+    assert "AI_AGENT_DETERMINISTIC_CALENDAR_LIST_EXECUTE" in caplog.text
+    assert "AI_AGENT_DETERMINISTIC_CALENDAR_LIST_RESULT" in caplog.text
+
+
+def test_ai_agent_google_calendar_list_events_empty_response(monkeypatch):
+    from app.tools.base import NormalizedToolResult, ToolResult
+
+    monkeypatch.setattr(svc, "generate_answer_for_tenant", lambda *a, **k: (_ for _ in ()).throw(AssertionError("LLM should not be called")))
+    monkeypatch.setattr(
+        svc.ToolRegistry,
+        "execute",
+        lambda self, tool_type, tool_id, input, context, config=None: ToolResult(True, "google_calendar", tool_id=tool_id, output={"ok": True, "events": []}, normalized_result=NormalizedToolResult(True, tool_id, type="google_calendar.list_events", summary="ok", data={})),
+    )
+    result = svc.run_agent_for_tenant(
+        object(), uuid.uuid4(), "Quais eventos possuo hoje?", "instr",
+        ["chamar_mcp", "responder"], {"mcp_tools": [{"tool_id": "google_calendar_list_events"}]}, options={"max_steps": 1},
+    )
+    assert result.message == "Você não possui compromissos para hoje."
