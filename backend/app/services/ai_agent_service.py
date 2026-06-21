@@ -3,6 +3,7 @@ from __future__ import annotations
 import ipaddress
 import uuid
 import json
+import hashlib
 import logging
 import re
 import time
@@ -38,6 +39,17 @@ FORBIDDEN_NAME_PARTS = ("api_key", "apikey", "token", "secret", "password")
 SENSITIVE_HEADER_RE = re.compile(r"(authorization|api[-_]?key|token|secret|password|cookie)", re.I)
 PLACEHOLDER_TOOLS = {"criar_evento", "consultar_crm", "criar_pedido", "enviar_email", "transferir_humano"}
 SUPPORTED_TOOLS = {"responder", "definir_variavel", "chamar_webhook", "executar_node", "executar_subflow", "salvar_memoria", "chamar_mcp", "finalizar"} | PLACEHOLDER_TOOLS
+MUTATING_TOOL_IDS = {
+    "google_drive_create_folder",
+    "google_drive_create_document",
+    "gmail_send_email",
+    "gmail_create_draft",
+    "google_calendar_create_event",
+    "google_calendar_delete_event",
+    "google_drive_delete_file",
+    "google_drive_update_document",
+    "google_drive_share_file",
+}
 
 logger = logging.getLogger(__name__)
 
@@ -617,7 +629,11 @@ def format_tool_result_for_user(tool_id: Any, normalized_result: dict[str, Any])
 
     folder = data.get("folder") if isinstance(data.get("folder"), dict) else None
     if not response and folder is not None:
-        response = f"Pasta criada no Google Drive: {_safe_user_text(folder.get('name') or 'Nova pasta', limit=160)}."
+        name = _safe_user_text(folder.get('name') or 'Nova pasta', limit=160)
+        if data.get("existing") is True:
+            response = f'A pasta "{name}" já existe no Google Drive.'
+        else:
+            response = f"Pasta criada no Google Drive: {name}."
 
     messages = data.get("messages") if isinstance(data.get("messages"), list) else None
     if messages is not None:
@@ -785,6 +801,33 @@ def _normalize_mcp_tool_call(raw_call: dict[str, Any], args: dict[str, Any]) -> 
     else:
         tool_input = {}
     return tool_id, tool_input
+
+def _stable_json(value: Any) -> str:
+    try:
+        return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
+    except TypeError:
+        return json.dumps(str(value), ensure_ascii=False, sort_keys=True)
+
+
+def _tool_fingerprint(tool_id: str, tool_input: Any) -> str:
+    payload = f"{str(tool_id or '').strip()}:{_stable_json(tool_input)}"
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _is_mutating_tool(tool_id: Any) -> bool:
+    return str(tool_id or "").strip() in MUTATING_TOOL_IDS
+
+
+def _finalize_after_tool_result(result: AgentRunResult, tool_id: str, normalized: dict[str, Any], *, step: int, final_tool: str = "chamar_mcp") -> None:
+    msg = format_tool_result_for_user(tool_id, normalized)[:4000]
+    result.message = msg
+    result.actions.append(AgentToolAction("message", {"message": msg}))
+    result.status = "success"
+    result.fallback_used = False
+    result.final_tool = final_tool
+    _json_log("AI_AGENT_MUTATING_TOOL_SUCCESS_FINALIZE", tool_id=tool_id, step=step, response=msg)
+    _json_log("AI_AGENT_FINAL_RESPONSE", step=step, response=msg, response_size=len(msg), fallback=False, source="mutating_tool_result")
+
 
 def _safe_json_loads(raw: str) -> dict[str, Any] | None:
     try:
@@ -1033,6 +1076,8 @@ def run_agent_for_tenant(db: Session, tenant_id, input_text: str, instruction: s
     mcp_tool_calls: list[dict[str, Any]] = []
     seen_subflow_inputs: set[tuple[str, str]] = set()
     seen_node_inputs: set[tuple[str, str]] = set()
+    executed_tool_fingerprints: set[str] = set()
+    executed_tool_results: dict[str, dict[str, Any]] = {}
     max_node_tool_calls = min(max(int(opts.get("max_node_tool_calls") or 3), 1), 5)
     max_subflow_calls = min(max(int(opts.get("max_subflow_calls") or 2), 1), 3)
     max_mcp_calls = min(max(int(opts.get("max_mcp_calls") or 3), 0), 3)
@@ -1477,6 +1522,17 @@ def run_agent_for_tenant(db: Session, tenant_id, input_text: str, instruction: s
                 state.append({"tool": tool, "tool_id": tool_id, "ok": False, "error": "mcp_tool_limit"})
                 continue
             routed_tool_type = "google_calendar" if is_google_calendar_tool else ("gmail" if is_gmail_tool else ("google_drive" if is_google_drive_tool else "mcp_tool"))
+            fingerprint = _tool_fingerprint(tool_id, tool_input)
+            if fingerprint in executed_tool_fingerprints:
+                previous = executed_tool_results.get(fingerprint) or {}
+                _json_log("AI_AGENT_DUPLICATE_TOOL_CALL_BLOCKED", tool_id=tool_id, fingerprint=fingerprint, input=tool_input)
+                blocked_tool_calls.append({"tool_id": tool_id, "error": "duplicate_tool_call_blocked"})
+                normalized = previous.get("normalized_result") if isinstance(previous.get("normalized_result"), dict) else {}
+                if normalized.get("ok") is True and _is_mutating_tool(tool_id):
+                    _finalize_after_tool_result(result, tool_id, normalized, step=step + 1)
+                    break
+                state.append(previous or {"tool": tool, "tool_id": tool_id, "ok": False, "error": "duplicate_tool_call_blocked"})
+                continue
             _json_log("AI_AGENT_TOOL_CALL_REQUESTED", tool_id=tool_id, tool_name=match.get("name"), tool_type="mcp_tool", input=tool_input)
             _json_log("AI_AGENT_TOOL_CALL_ROUTED", tool_id=tool_id, routed_tool_type=routed_tool_type, adapter="GoogleCalendarToolAdapter" if is_google_calendar_tool else ("GmailToolAdapter" if is_gmail_tool else ("GoogleDriveToolAdapter" if is_google_drive_tool else "MCPToolAdapter")))
             try:
@@ -1509,7 +1565,13 @@ def run_agent_for_tenant(db: Session, tenant_id, input_text: str, instruction: s
             logger.info("event=AI_AGENT_TOOL_RESULT_RECEIVED tool_type=mcp_tool tool_id=%s ok=%s has_text=%s", tool_id, normalized.get("ok") is True, bool(normalized.get("result_text")))
             if not normalized.get("result_text") and not normalized.get("data"):
                 _json_log("AI_AGENT_FALLBACK_REASON", reason="mcp_no_text", tool_id=tool_id, ok=normalized.get("ok") is True)
-            state.append({"tool": tool, "tool_id": tool_id, "tool_name": match.get("name"), "tool_type": "mcp_tool", "ok": normalized.get("ok") is True, "normalized_result": normalized, "error": (error or {}).get("code")})
+            state_item = {"tool": tool, "tool_id": tool_id, "tool_name": match.get("name"), "tool_type": "mcp_tool", "ok": normalized.get("ok") is True, "normalized_result": normalized, "error": (error or {}).get("code")}
+            executed_tool_fingerprints.add(fingerprint)
+            executed_tool_results[fingerprint] = state_item
+            state.append(state_item)
+            if normalized.get("ok") is True and _is_mutating_tool(tool_id):
+                _finalize_after_tool_result(result, tool_id, normalized, step=step + 1)
+                break
             continue
         if tool == "salvar_memoria":
             memory_ctx = (tool_configs or {}).get("memory_context") if isinstance(tool_configs, dict) else {}

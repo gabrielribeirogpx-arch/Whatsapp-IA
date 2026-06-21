@@ -1031,3 +1031,82 @@ def test_ai_agent_final_response_not_generic_gmail_summary_when_messages_exist(m
     assert "Operação do Gmail concluída" not in (result.message or "")
     assert "message_id" not in (result.message or "")
     assert "thread_id" not in (result.message or "")
+
+
+def test_ai_agent_mutating_google_drive_create_folder_finalizes_without_second_llm(monkeypatch):
+    from app.tools.base import NormalizedToolResult, ToolResult
+
+    llm_calls = []
+    execute_calls = []
+
+    def fake_llm(*args, **kwargs):
+        llm_calls.append(args)
+        return '{"tool":"chamar_mcp","arguments":{"tool_id":"google_drive_create_folder","input":{"name":"Teste Google Drive"}}}'
+
+    def fake_execute(self, tool_type, tool_id, input, context, config=None):
+        execute_calls.append((tool_type, tool_id, input))
+        output = {"ok": True, "existing": False, "folder": {"name": input["name"], "file_id": "folder-1"}}
+        return ToolResult(True, "google_drive", tool_id=tool_id, output=output, normalized_result=NormalizedToolResult(True, tool_id, type="google_drive.create_folder", data=output))
+
+    monkeypatch.setattr(svc, "generate_answer_for_tenant", fake_llm)
+    monkeypatch.setattr(svc.ToolRegistry, "execute", fake_execute)
+
+    result = svc.run_agent_for_tenant(
+        object(), uuid.uuid4(), "Crie uma pasta chamado Teste Google Drive", "instr",
+        ["chamar_mcp", "responder"], {"mcp_tools": [{"tool_id": "google_drive_create_folder", "name": "Criar pasta"}]}, options={"max_steps": 3},
+    )
+
+    assert len(llm_calls) == 1
+    assert execute_calls == [("google_drive", "google_drive_create_folder", {"name": "Teste Google Drive"})]
+    assert result.message == "Pasta criada no Google Drive: Teste Google Drive."
+
+
+def test_ai_agent_duplicate_mutating_tool_fingerprint_blocks_repeat(monkeypatch):
+    from app.tools.base import NormalizedToolResult, ToolResult
+
+    execute_calls = []
+    fingerprint = svc._tool_fingerprint("google_drive_create_folder", {"name": "Teste Google Drive"})
+
+    def fake_execute(self, tool_type, tool_id, input, context, config=None):
+        execute_calls.append(tool_id)
+        output = {"ok": True, "folder": {"name": input["name"]}}
+        return ToolResult(True, "google_drive", tool_id=tool_id, output=output, normalized_result=NormalizedToolResult(True, tool_id, type="google_drive.create_folder", data=output))
+
+    monkeypatch.setattr(svc.ToolRegistry, "execute", fake_execute)
+    monkeypatch.setattr(svc, "generate_answer_for_tenant", lambda *a, **k: '{"tool":"chamar_mcp","arguments":{"tool_id":"google_drive_create_folder","input":{"name":"Teste Google Drive"}}}')
+    monkeypatch.setattr(svc, "_is_mutating_tool", lambda tool_id: False)
+    monkeypatch.setattr(svc, "_tool_fingerprint", lambda tool_id, tool_input: fingerprint)
+
+    result = svc.run_agent_for_tenant(
+        object(), uuid.uuid4(), "repita", "instr", ["chamar_mcp", "responder"],
+        {"mcp_tools": [{"tool_id": "google_drive_create_folder", "name": "Criar pasta"}]}, options={"max_steps": 2},
+    )
+
+    assert execute_calls == ["google_drive_create_folder"]
+    assert result.metadata["blocked_tool_calls"] == [{"tool_id": "google_drive_create_folder", "error": "duplicate_tool_call_blocked"}]
+
+
+def test_ai_agent_read_only_google_drive_list_files_can_iterate(monkeypatch):
+    from app.tools.base import NormalizedToolResult, ToolResult
+
+    calls = iter([
+        '{"tool":"chamar_mcp","arguments":{"tool_id":"google_drive_list_files","input":{"max_results":1}}}',
+        '{"tool":"responder","arguments":{"message":"Listei os arquivos."}}',
+    ])
+    execute_calls = []
+
+    def fake_execute(self, tool_type, tool_id, input, context, config=None):
+        execute_calls.append(tool_id)
+        output = {"ok": True, "files": []}
+        return ToolResult(True, "google_drive", tool_id=tool_id, output=output, normalized_result=NormalizedToolResult(True, tool_id, type="google_drive.list_files", data=output))
+
+    monkeypatch.setattr(svc, "generate_answer_for_tenant", lambda *a, **k: next(calls))
+    monkeypatch.setattr(svc.ToolRegistry, "execute", fake_execute)
+
+    result = svc.run_agent_for_tenant(
+        object(), uuid.uuid4(), "liste", "instr", ["chamar_mcp", "responder"],
+        {"mcp_tools": [{"tool_id": "google_drive_list_files", "name": "Listar"}]}, options={"max_steps": 2},
+    )
+
+    assert execute_calls == ["google_drive_list_files"]
+    assert result.message == "Listei os arquivos."

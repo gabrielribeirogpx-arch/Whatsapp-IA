@@ -85,3 +85,22 @@ def test_unconnected_tenant_does_not_see_google_drive_tools(monkeypatch):
     tenant_id = uuid.uuid4()
     payload = _client(FakeDb(), tenant_id).get("/api/mcp/tools").json()
     assert all(not str(item["id"]).startswith("google_drive_") for item in payload)
+
+
+def test_google_drive_create_folder_existing_found(monkeypatch):
+    from app.services.google_drive_service import GoogleDriveService
+
+    service = GoogleDriveService.__new__(GoogleDriveService)
+    calls = []
+
+    def fake_request(method, url, *, params=None, json_body=None, retry=True):
+        calls.append((method, params, json_body))
+        return True, {"files": [{"id": "folder-1", "name": "Teste Google Drive", "mimeType": "application/vnd.google-apps.folder"}]}, 200
+
+    service._request = fake_request
+    result = service.create_folder(name="Teste Google Drive")
+
+    assert result["ok"] is True
+    assert result["existing"] is True
+    assert result["folder"]["name"] == "Teste Google Drive"
+    assert [call[0] for call in calls] == ["GET"]
