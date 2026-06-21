@@ -816,6 +816,26 @@ export function getGmailConnectUrl(): string {
   return url;
 }
 
+export async function getGoogleDriveStatus(): Promise<GoogleCalendarConnectionStatus> {
+  const tenant = getTenantSlugOrId();
+  const query = tenant ? `?tenant_slug=${encodeURIComponent(tenant)}` : '';
+  const res = await apiFetch(`/api/integrations/google-drive/status${query}`);
+  return parseApiResponse<GoogleCalendarConnectionStatus>(res);
+}
+
+export async function disconnectGoogleDrive(): Promise<GoogleCalendarConnectionStatus> {
+  const tenant = getTenantSlugOrId();
+  const query = tenant ? `?tenant_slug=${encodeURIComponent(tenant)}` : '';
+  const res = await apiFetch(`/api/integrations/google-drive/disconnect${query}`, { method: 'POST' });
+  return parseApiResponse<GoogleCalendarConnectionStatus>(res);
+}
+
+export function getGoogleDriveConnectUrl(): string {
+  const tenant = getTenantSlugOrId();
+  if (!tenant) throw new Error('Tenant atual não encontrado para conectar o Google Drive.');
+  return buildApiUrl(`/api/integrations/google-drive/connect-url?tenant_slug=${encodeURIComponent(tenant)}`);
+}
+
 export async function getAccountMe(): Promise<AccountMe> {
   const res = await apiFetch('/api/account/me');
   return parseApiResponse<AccountMe>(res);
