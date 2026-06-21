@@ -684,7 +684,7 @@ def test_ai_agent_google_calendar_create_precheck_busy_sets_pending(monkeypatch)
 
     def fake_execute(self, tool_type, tool_id, input, context, config=None):
         calls.append(tool_id)
-        return ToolResult(True, "google_calendar", tool_id=tool_id, output={"ok": True, "busy": [{"title": "Reunião Online", "start": input["start"], "end": input["end"]}]}, normalized_result=NormalizedToolResult(True, tool_id, type="google_calendar.check_availability", data={}))
+        return ToolResult(True, "google_calendar", tool_id=tool_id, output={"ok": True, "busy": [{"summary": "Reunião Online", "title": "Título ignorado", "start": input["start"], "end": input["end"]}]}, normalized_result=NormalizedToolResult(True, tool_id, type="google_calendar.check_availability", data={}))
 
     monkeypatch.setattr(svc.ToolRegistry, "execute", fake_execute)
     result = svc.run_agent_for_tenant(object(), uuid.uuid4(), "Crie um compromisso amanhã às 09:00 chamado Call online", "instr", ["chamar_mcp", "responder"], {"mcp_tools": [{"tool_id": "google_calendar_create_event"}], "session_state": session_state}, options={"timezone": "America/Sao_Paulo"})
@@ -692,7 +692,52 @@ def test_ai_agent_google_calendar_create_precheck_busy_sets_pending(monkeypatch)
     assert result.message == "Você já possui compromisso amanhã às 09:00: Reunião Online. Deseja criar mesmo assim?"
     pending = session_state["pending_google_calendar_create_event"]
     assert pending["summary"] == "Call online"
-    assert pending["conflicting_events"][0]["title"] == "Reunião Online"
+    assert pending["conflicting_events"][0]["summary"] == "Reunião Online"
+
+
+def test_ai_agent_google_calendar_create_precheck_busy_uses_title_when_summary_missing(monkeypatch):
+    from app.tools.base import NormalizedToolResult, ToolResult
+
+    session_state = {}
+    monkeypatch.setattr(svc, "generate_answer_for_tenant", lambda *a, **k: (_ for _ in ()).throw(AssertionError("LLM should not be called")))
+
+    def fake_execute(self, tool_type, tool_id, input, context, config=None):
+        return ToolResult(True, "google_calendar", tool_id=tool_id, output={"ok": True, "busy": [{"title": "Reunião Online", "start": input["start"], "end": input["end"]}]}, normalized_result=NormalizedToolResult(True, tool_id, type="google_calendar.check_availability", data={}))
+
+    monkeypatch.setattr(svc.ToolRegistry, "execute", fake_execute)
+    result = svc.run_agent_for_tenant(object(), uuid.uuid4(), "Crie um compromisso amanhã às 09:00 chamado Call online", "instr", ["chamar_mcp", "responder"], {"mcp_tools": [{"tool_id": "google_calendar_create_event"}], "session_state": session_state}, options={"timezone": "America/Sao_Paulo"})
+    assert result.message == "Você já possui compromisso amanhã às 09:00: Reunião Online. Deseja criar mesmo assim?"
+
+
+def test_ai_agent_google_calendar_create_precheck_busy_lists_multiple_events(monkeypatch):
+    from app.tools.base import NormalizedToolResult, ToolResult
+
+    session_state = {}
+    monkeypatch.setattr(svc, "generate_answer_for_tenant", lambda *a, **k: (_ for _ in ()).throw(AssertionError("LLM should not be called")))
+
+    def fake_execute(self, tool_type, tool_id, input, context, config=None):
+        return ToolResult(True, "google_calendar", tool_id=tool_id, output={"ok": True, "busy": [
+            {"summary": "Reunião Online", "start": input["start"], "end": input["end"]},
+            {"name": "Café", "start": input["start"], "end": input["end"]},
+        ]}, normalized_result=NormalizedToolResult(True, tool_id, type="google_calendar.check_availability", data={}))
+
+    monkeypatch.setattr(svc.ToolRegistry, "execute", fake_execute)
+    result = svc.run_agent_for_tenant(object(), uuid.uuid4(), "Crie um compromisso amanhã às 09:00 chamado Call online", "instr", ["chamar_mcp", "responder"], {"mcp_tools": [{"tool_id": "google_calendar_create_event"}], "session_state": session_state}, options={"timezone": "America/Sao_Paulo"})
+    assert result.message == "Você já possui estes compromissos nesse horário:\n• Reunião Online\n• Café\nDeseja criar mesmo assim?"
+
+
+def test_ai_agent_google_calendar_create_precheck_busy_falls_back_to_compromisso_without_name(monkeypatch):
+    from app.tools.base import NormalizedToolResult, ToolResult
+
+    session_state = {}
+    monkeypatch.setattr(svc, "generate_answer_for_tenant", lambda *a, **k: (_ for _ in ()).throw(AssertionError("LLM should not be called")))
+
+    def fake_execute(self, tool_type, tool_id, input, context, config=None):
+        return ToolResult(True, "google_calendar", tool_id=tool_id, output={"ok": True, "busy": [{"start": input["start"], "end": input["end"]}]}, normalized_result=NormalizedToolResult(True, tool_id, type="google_calendar.check_availability", data={}))
+
+    monkeypatch.setattr(svc.ToolRegistry, "execute", fake_execute)
+    result = svc.run_agent_for_tenant(object(), uuid.uuid4(), "Crie um compromisso amanhã às 09:00 chamado Call online", "instr", ["chamar_mcp", "responder"], {"mcp_tools": [{"tool_id": "google_calendar_create_event"}], "session_state": session_state}, options={"timezone": "America/Sao_Paulo"})
+    assert result.message == "Você já possui compromisso amanhã às 09:00: compromisso. Deseja criar mesmo assim?"
 
 
 def test_ai_agent_google_calendar_pending_yes_creates(monkeypatch):
