@@ -554,15 +554,100 @@ def _format_tool_result_context(item: dict[str, Any]) -> str:
     ])
 
 
+def _safe_user_text(value: Any, *, limit: int = 280) -> str:
+    text = str(value or "").strip()
+    text = re.sub(r"[\r\n\t]+", " ", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text[:limit].strip()
+
+
+def _format_date_time_for_user(value: Any) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        if parsed.hour == 0 and parsed.minute == 0 and len(text) <= 10:
+            return parsed.strftime("%d/%m/%Y")
+        return parsed.strftime("%d/%m/%Y %H:%M")
+    except Exception:
+        return _safe_user_text(text, limit=80)
+
+
+def _tool_data(normalized_result: dict[str, Any]) -> dict[str, Any]:
+    data = normalized_result.get("data") if isinstance(normalized_result.get("data"), dict) else {}
+    if data:
+        return data
+    return normalized_result if isinstance(normalized_result, dict) else {}
+
+
+def format_tool_result_for_user(tool_id: Any, normalized_result: dict[str, Any]) -> str:
+    """Build a concise, sanitized WhatsApp-safe response from a normalized tool result."""
+    tool = str(tool_id or normalized_result.get("tool") or "").strip()
+    _json_log("AI_AGENT_TOOL_RESULT_FORMAT_START", tool_id=tool, result_type=normalized_result.get("type"))
+    data = _tool_data(normalized_result)
+    response = ""
+
+    messages = data.get("messages") if isinstance(data.get("messages"), list) else None
+    if messages is not None:
+        if not messages:
+            response = "Não encontrei e-mails recentes."
+        else:
+            count = len(messages)
+            lines = [f"Encontrei seus {count} últimos e-mails:" if count != 1 else "Encontrei seu último e-mail:"]
+            for index, message in enumerate(messages[:5], start=1):
+                if not isinstance(message, dict):
+                    continue
+                subject = _safe_user_text(message.get("subject") or "(sem assunto)", limit=160)
+                sender = _safe_user_text(message.get("from"), limit=180)
+                date = _format_date_time_for_user(message.get("date"))
+                snippet = _safe_user_text(message.get("snippet"), limit=240)
+                block = [f"{index}. {subject}"]
+                if sender:
+                    block.append(f"De: {sender}")
+                if date:
+                    block.append(f"Data: {date}")
+                if snippet:
+                    block.append(f"Resumo: {snippet}")
+                lines.append("\n".join(block))
+            response = "\n\n".join(lines)
+
+    events = data.get("events") if isinstance(data.get("events"), list) else None
+    if not response and events is not None:
+        if not events:
+            response = "Não encontrei eventos na agenda."
+        else:
+            lines = [f"Encontrei {len(events)} eventos:"]
+            for index, event in enumerate(events[:5], start=1):
+                if not isinstance(event, dict):
+                    continue
+                title = _safe_user_text(event.get("title") or event.get("summary") or "(sem título)", limit=160)
+                start = event.get("start")
+                if isinstance(start, dict):
+                    start = start.get("dateTime") or start.get("date")
+                when = _format_date_time_for_user(start or event.get("start_time") or event.get("date"))
+                lines.append(f"{index}. {when + ' - ' if when else ''}{title}")
+            response = "\n".join(lines)
+
+    result_text = _safe_user_text(normalized_result.get("result_text"), limit=2000)
+    if not response and result_text:
+        response = result_text
+
+    summary = _safe_user_text(normalized_result.get("summary"), limit=500)
+    if not response and summary:
+        response = summary if summary.endswith((".", "!", "?")) else f"{summary}."
+
+    if not response:
+        response = "Perfeito! Sua solicitação foi concluída com sucesso."
+    response = response[:4000].strip()
+    _json_log("AI_AGENT_TOOL_RESULT_FORMAT_DONE", tool_id=tool, response_size=len(response), used_data=bool(messages is not None or events is not None or result_text))
+    _json_log("AI_AGENT_FINAL_RESPONSE_FROM_TOOL_RESULT", tool_id=tool, response_size=len(response))
+    return response
+
+
 def _format_universal_tool_response(item: dict[str, Any]) -> str:
     normalized = item.get("normalized_result") if isinstance(item.get("normalized_result"), dict) else {}
-    summary = str(normalized.get("summary") or "").strip()
-    result_text = str(normalized.get("result_text") or "").strip()
-    if summary:
-        return f"Perfeito! {summary}." if not summary.endswith((".", "!", "?")) else f"Perfeito! {summary}"
-    if result_text:
-        return result_text
-    return "Perfeito! Sua solicitação foi concluída com sucesso."
+    return format_tool_result_for_user(item.get("tool_id") or item.get("tool"), normalized)
 
 def _json_log(event: str, **metadata: Any) -> None:
     logger.info("event=%s %s", event, json.dumps(metadata, ensure_ascii=False, default=str))
@@ -971,15 +1056,16 @@ def run_agent_for_tenant(db: Session, tenant_id, input_text: str, instruction: s
             return result
         registry_result = tool_registry.execute("gmail", gmail_tool_id, gmail_input, tool_context, {"mcp_tools": mcp_tools, "db": db})
         output = registry_result.output if isinstance(registry_result.output, dict) else {}
-        msg = "Operação do Gmail concluída." if registry_result.ok else f"Não consegui acessar o Gmail agora: {registry_result.error_code or 'gmail_error'}"
-        if registry_result.ok and gmail_tool_id in {"gmail_list_messages", "gmail_search_messages"}:
-            items = output.get("messages") or []
-            msg = "Encontrei estes e-mails:\n" + "\n".join(f"• {m.get('subject') or '(sem assunto)'} — {m.get('from') or ''}" for m in items[:5]) if items else "Não encontrei e-mails."
-        elif registry_result.ok and gmail_tool_id == "gmail_read_message":
-            m = output.get("message") or {}
-            msg = f"Último e-mail: {m.get('subject') or '(sem assunto)'} — {m.get('from') or ''}\n{m.get('snippet') or ''}"
-        elif registry_result.ok and gmail_tool_id == "gmail_create_draft":
-            msg = "Rascunho criado no Gmail."
+        if registry_result.ok:
+            normalized = registry_result.normalized_result.to_dict() if registry_result.normalized_result else {"ok": True, "tool": gmail_tool_id, "type": f"gmail.{gmail_tool_id}", "data": output}
+            msg = format_tool_result_for_user(gmail_tool_id, normalized)
+            if gmail_tool_id == "gmail_read_message" and output.get("message") and msg.startswith("Perfeito!"):
+                m = output.get("message") or {}
+                msg = f"Último e-mail: {_safe_user_text(m.get('subject') or '(sem assunto)')} — {_safe_user_text(m.get('from'))}\n{_safe_user_text(m.get('snippet'), limit=240)}"
+            elif gmail_tool_id == "gmail_create_draft" and msg.startswith("Perfeito!"):
+                msg = "Rascunho criado no Gmail."
+        else:
+            msg = f"Não consegui acessar o Gmail agora: {registry_result.error_code or 'gmail_error'}"
         result.message = msg[:4000]
         result.actions.append(AgentToolAction("message", {"message": result.message}))
         result.status = "success" if registry_result.ok else "error"
