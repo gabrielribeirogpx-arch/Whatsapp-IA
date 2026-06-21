@@ -8,6 +8,7 @@ from rq import Connection, Queue, Worker
 
 from app.core.startup_checks import (
     WORKER_REQUIRED_DEPENDENCIES,
+    validate_oauth_encryption_key,
     verify_alembic_at_head,
     verify_required_dependencies,
     verify_required_env_vars,
@@ -29,6 +30,7 @@ def run_startup_checks() -> redis.Redis:
     verify_required_env_vars("DATABASE_URL", "REDIS_URL")
     verify_required_dependencies(WORKER_REQUIRED_DEPENDENCIES)
     verify_runtime_secrets()
+    validate_oauth_encryption_key()
     wait_for_database()
     verify_alembic_at_head()
 

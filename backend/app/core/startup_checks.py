@@ -12,6 +12,8 @@ from alembic.runtime.migration import MigrationContext
 from alembic.script import ScriptDirectory
 from sqlalchemy import text
 
+from app.core.oauth_encryption_key import validate_oauth_encryption_key
+
 logger = logging.getLogger(__name__)
 
 PRODUCTION_ENV_NAMES = {"production", "prod"}

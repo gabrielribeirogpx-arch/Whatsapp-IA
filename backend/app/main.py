@@ -12,6 +12,7 @@ from app.db.session import engine
 from app.core.startup_checks import (
     is_production,
     run_migrations_if_enabled,
+    validate_oauth_encryption_key,
     verify_alembic_at_head,
     verify_required_dependencies,
     verify_runtime_secrets,
@@ -156,6 +157,7 @@ def on_startup():
     logger.info("event=startup production=%s", is_production())
     verify_required_dependencies()
     verify_runtime_secrets()
+    validate_oauth_encryption_key()
     wait_for_database()
     flow_media.log_upload_storage_status()
     run_migrations_if_enabled()
