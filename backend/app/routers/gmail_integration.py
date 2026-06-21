@@ -134,6 +134,7 @@ def _validate_gmail_connect_config(request: Request) -> None:
 def create_oauth_state(tenant_id: uuid.UUID, *, nonce: str | None = None, issued_at: int | None = None) -> str:
     payload = {
         "tenant_id": str(tenant_id),
+        "provider": PROVIDER,
         "nonce": nonce or secrets.token_urlsafe(24),
         "iat": issued_at or int(datetime.utcnow().timestamp()),
     }
@@ -158,6 +159,8 @@ def verify_oauth_state(state: str) -> dict[str, Any]:
     if int(datetime.utcnow().timestamp()) - issued_at > STATE_TTL_SECONDS:
         raise HTTPException(status_code=400, detail="State OAuth expirado")
     if not payload.get("tenant_id") or not payload.get("nonce"):
+        raise HTTPException(status_code=400, detail="State OAuth inválido")
+    if payload.get("provider") != PROVIDER:
         raise HTTPException(status_code=400, detail="State OAuth inválido")
     return payload
 
@@ -188,6 +191,7 @@ def _fetch_account_email(access_token: str) -> str | None:
     return response.json().get("email")
 
 
+@router.get("/connect-url")
 @router.get("/connect")
 def connect_gmail(
     request: Request,

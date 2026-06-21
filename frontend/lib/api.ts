@@ -796,7 +796,7 @@ export async function disconnectGmail(): Promise<GoogleCalendarConnectionStatus>
 export function getGmailConnectUrl(): string {
   const tenant = getTenantSlugOrId();
   if (!tenant) throw new Error('Tenant atual não encontrado para conectar o Gmail.');
-  return buildApiUrl(`/api/integrations/gmail/connect?tenant_slug=${encodeURIComponent(tenant)}`);
+  return buildApiUrl(`/api/integrations/gmail/connect-url?tenant_slug=${encodeURIComponent(tenant)}`);
 }
 
 export async function getAccountMe(): Promise<AccountMe> {
