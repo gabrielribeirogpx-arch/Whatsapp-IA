@@ -80,6 +80,7 @@ class GoogleCalendarService:
 
     def _log(self, event: str, *, tool_name: str | None = None, input: Any = None, conn: IntegrationConnection | None = None, calendar_id: str | None = None, exception: BaseException | None = None, **extra: Any) -> None:
         payload = {
+            "event": event,
             "tenant_id": str(self.tenant_id),
             "tool_name": tool_name,
             "input": input,
@@ -207,17 +208,62 @@ class GoogleCalendarService:
             return {"ok": False, "message": "google_calendar_refresh_token_empty_after_decrypt"}
         if not refresh:
             return {"ok": False, "message": "Refresh token do Google Calendar não está disponível."}
-        logger.info("GOOGLE_CALENDAR_TOKEN_REFRESH tenant_id=%s", self.tenant_id)
+        client_id = (
+            os.getenv("GOOGLE_CALENDAR_CLIENT_ID")
+            or os.getenv("GOOGLE_CLIENT_ID")
+            or os.getenv("GOOGLE_OAUTH_CLIENT_ID")
+            or ""
+        ).strip()
+        client_secret = (
+            os.getenv("GOOGLE_CALENDAR_CLIENT_SECRET")
+            or os.getenv("GOOGLE_CLIENT_SECRET")
+            or os.getenv("GOOGLE_OAUTH_CLIENT_SECRET")
+            or ""
+        ).strip()
+        grant_type = "refresh_token"
+        self._log(
+            "GOOGLE_CALENDAR_TOKEN_REFRESH_REQUEST",
+            conn=conn,
+            client_id_present=bool(client_id),
+            client_secret_present=bool(client_secret),
+            refresh_token_present=bool(refresh),
+            token_url=TOKEN_URL,
+            grant_type=grant_type,
+        )
         try:
             resp = requests.post(TOKEN_URL, data={
-                "client_id": os.getenv("GOOGLE_CALENDAR_CLIENT_ID", ""),
-                "client_secret": os.getenv("GOOGLE_CALENDAR_CLIENT_SECRET", ""),
+                "client_id": client_id,
+                "client_secret": client_secret,
                 "refresh_token": refresh,
-                "grant_type": "refresh_token",
+                "grant_type": grant_type,
             }, timeout=15)
             if resp.status_code >= 400:
-                logger.warning("GOOGLE_CALENDAR_TOKEN_REFRESH_FAILED tenant_id=%s status=%s", self.tenant_id, resp.status_code)
-                return {"ok": False, "message": "Não foi possível renovar o acesso ao Google Calendar."}
+                response_text = getattr(resp, "text", None)
+                response_json = None
+                if response_text is None:
+                    response_text = ""
+                try:
+                    response_json = resp.json()
+                except Exception:
+                    response_json = None
+                error = response_json.get("error") if isinstance(response_json, dict) else None
+                error_description = response_json.get("error_description") if isinstance(response_json, dict) else None
+                self._log(
+                    "GOOGLE_CALENDAR_TOKEN_REFRESH_FAILED",
+                    conn=conn,
+                    status_code=resp.status_code,
+                    response_text=response_text,
+                    response_json=response_json,
+                    error=error,
+                    error_description=error_description,
+                )
+                if error == "invalid_grant":
+                    return {"ok": False, "message": "google_calendar_refresh_invalid_grant", "user_message": "A autorização do Google Calendar expirou ou foi revogada. Reconecte o Google Calendar."}
+                if error == "invalid_client":
+                    return {"ok": False, "message": "google_calendar_refresh_invalid_client", "user_message": "Credenciais OAuth do Google Calendar inválidas. Verifique GOOGLE_CLIENT_ID e GOOGLE_CLIENT_SECRET."}
+                if error == "redirect_uri_mismatch":
+                    return {"ok": False, "message": "google_calendar_refresh_redirect_uri_mismatch"}
+                return {"ok": False, "message": "google_calendar_refresh_failed"}
             data = resp.json()
             access = data.get("access_token")
             if not access:

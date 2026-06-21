@@ -30,9 +30,10 @@ def _connect(db, tenant_id, access="access-token", refresh="refresh-token", expi
 
 
 class Resp:
-    def __init__(self, status_code=200, data=None):
+    def __init__(self, status_code=200, data=None, text=None):
         self.status_code = status_code
         self._data = data or {}
+        self.text = text if text is not None else str(self._data)
         self.content = b"" if status_code == 204 else b"{}"
     def json(self):
         return self._data
@@ -88,7 +89,30 @@ def test_invalid_refresh_token_returns_clear_error(monkeypatch):
     monkeypatch.setattr("app.services.google_calendar_service.requests.post", lambda *a, **k: Resp(400, {"error": "invalid_grant"}))
     result = GoogleCalendarService(db, tenant_id).list_events()
     assert result["ok"] is False
-    assert result["message"] == "Não foi possível renovar o acesso ao Google Calendar."
+    assert result["message"] == "google_calendar_refresh_invalid_grant"
+    assert result["user_message"] == "A autorização do Google Calendar expirou ou foi revogada. Reconecte o Google Calendar."
+
+
+def test_invalid_grant_refresh_logs_diagnostics_without_tokens(monkeypatch, caplog):
+    tenant_id = uuid.uuid4(); db = FakeDb(); _connect(db, tenant_id, expires_at=datetime.utcnow() - timedelta(minutes=1))
+    caplog.set_level("INFO")
+    body = {"error": "invalid_grant", "error_description": "Bad Request"}
+
+    monkeypatch.setattr("app.services.google_calendar_service.requests.post", lambda *a, **k: Resp(400, body, text='{"error":"invalid_grant","error_description":"Bad Request"}'))
+
+    result = GoogleCalendarService(db, tenant_id).list_events()
+
+    assert result["ok"] is False
+    assert result["message"] == "google_calendar_refresh_invalid_grant"
+    assert "GOOGLE_CALENDAR_TOKEN_REFRESH_REQUEST" in caplog.text
+    assert "GOOGLE_CALENDAR_TOKEN_REFRESH_FAILED" in caplog.text
+    assert "invalid_grant" in caplog.text
+    assert "Bad Request" in caplog.text
+    assert "client_id_present" in caplog.text
+    assert "client_secret_present" in caplog.text
+    assert "refresh_token_present" in caplog.text
+    assert "refresh-token" not in caplog.text
+    assert "client-secret" not in caplog.text
 
 
 def test_delete_event_calls_correct_calendar(monkeypatch):
