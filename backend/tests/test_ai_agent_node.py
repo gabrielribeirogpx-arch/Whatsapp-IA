@@ -591,3 +591,61 @@ def test_ai_agent_google_calendar_list_events_empty_response(monkeypatch):
         ["chamar_mcp", "responder"], {"mcp_tools": [{"tool_id": "google_calendar_list_events"}]}, options={"max_steps": 1},
     )
     assert result.message == "Você não possui compromissos para hoje."
+
+
+def test_ai_agent_google_calendar_check_availability_free_without_llm(monkeypatch, caplog):
+    from app.services.execution_budget_service import ExecutionBudget
+    from app.tools.base import NormalizedToolResult, ToolResult
+
+    registry_calls = []
+    budget = ExecutionBudget.defaults("tenant")
+
+    monkeypatch.setattr(svc, "generate_answer_for_tenant", lambda *a, **k: (_ for _ in ()).throw(AssertionError("LLM should not be called")))
+
+    def fake_execute(self, tool_type, tool_id, input, context, config=None):
+        registry_calls.append({"tool_type": tool_type, "tool_id": tool_id, "input": input})
+        return ToolResult(True, "google_calendar", tool_id=tool_id, output={"ok": True, "busy": []}, normalized_result=NormalizedToolResult(True, tool_id, type="google_calendar.check_availability", summary="ok", data={}))
+
+    monkeypatch.setattr(svc.ToolRegistry, "execute", fake_execute)
+    with caplog.at_level("INFO"):
+        result = svc.run_agent_for_tenant(object(), uuid.uuid4(), "Tenho horário livre amanhã às 14h?", "instr", ["chamar_mcp", "responder"], {"mcp_tools": [{"tool_id": "google_calendar_check_availability"}]}, options={"timezone": "America/Sao_Paulo"}, budget=budget)
+
+    assert registry_calls[0]["tool_type"] == "google_calendar"
+    assert registry_calls[0]["tool_id"] == "google_calendar_check_availability"
+    assert registry_calls[0]["input"]["start"] == "2026-06-22T14:00:00-03:00"
+    assert registry_calls[0]["input"]["end"] == "2026-06-22T15:00:00-03:00"
+    assert registry_calls[0]["input"]["timezone"] == "America/Sao_Paulo"
+    assert result.message == "Sim, você está livre amanhã às 14:00."
+    assert result.metadata["budget_llm_calls_used"] == 0
+    assert result.metadata["budget_node_tool_calls_used"] == 1
+    assert result.metadata["budget_mcp_calls_used"] == 0
+    assert "AI_AGENT_DETERMINISTIC_CALENDAR_AVAILABILITY_MATCH" in caplog.text
+    assert "AI_AGENT_DETERMINISTIC_CALENDAR_AVAILABILITY_EXECUTE" in caplog.text
+    assert "AI_AGENT_DETERMINISTIC_CALENDAR_AVAILABILITY_RESULT" in caplog.text
+
+
+def test_ai_agent_google_calendar_check_availability_busy_without_llm(monkeypatch):
+    from app.tools.base import NormalizedToolResult, ToolResult
+
+    monkeypatch.setattr(svc, "generate_answer_for_tenant", lambda *a, **k: (_ for _ in ()).throw(AssertionError("LLM should not be called")))
+    monkeypatch.setattr(
+        svc.ToolRegistry,
+        "execute",
+        lambda self, tool_type, tool_id, input, context, config=None: ToolResult(True, "google_calendar", tool_id=tool_id, output={"ok": True, "busy": [{"start": input["start"], "end": input["end"], "title": "Reunião com Gabriel"}]}, normalized_result=NormalizedToolResult(True, tool_id, type="google_calendar.check_availability", summary="ok", data={})),
+    )
+    result = svc.run_agent_for_tenant(object(), uuid.uuid4(), "Estou disponível amanhã às 16:30?", "instr", ["chamar_mcp", "responder"], {"mcp_tools": [{"tool_id": "google_calendar_check_availability"}]}, options={"timezone": "America/Sao_Paulo"})
+    assert result.message == "Não, você já possui compromisso amanhã às 16:30: Reunião com Gabriel."
+
+
+def test_ai_agent_google_calendar_check_availability_missing_date_without_llm(monkeypatch):
+    monkeypatch.setattr(svc, "generate_answer_for_tenant", lambda *a, **k: (_ for _ in ()).throw(AssertionError("LLM should not be called")))
+    monkeypatch.setattr(svc.ToolRegistry, "execute", lambda *a, **k: (_ for _ in ()).throw(AssertionError("Tool should not be called")))
+    result = svc.run_agent_for_tenant(object(), uuid.uuid4(), "Tenho horário livre às 14h?", "instr", ["chamar_mcp", "responder"], {"mcp_tools": [{"tool_id": "google_calendar_check_availability"}]})
+    assert result.message == "Para qual dia você quer verificar?"
+
+
+def test_ai_agent_google_calendar_check_availability_missing_time_without_llm(monkeypatch):
+    monkeypatch.setattr(svc, "generate_answer_for_tenant", lambda *a, **k: (_ for _ in ()).throw(AssertionError("LLM should not be called")))
+    monkeypatch.setattr(svc.ToolRegistry, "execute", lambda *a, **k: (_ for _ in ()).throw(AssertionError("Tool should not be called")))
+    result = svc.run_agent_for_tenant(object(), uuid.uuid4(), "Minha agenda está livre amanhã?", "instr", ["chamar_mcp", "responder"], {"mcp_tools": [{"tool_id": "google_calendar_check_availability"}]})
+    assert result.message == "Qual horário você quer verificar?"
