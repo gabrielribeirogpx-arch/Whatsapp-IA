@@ -7,7 +7,7 @@ from typing import Any, Callable
 
 from sqlalchemy.orm import Session
 
-from app.services.google_calendar_service import PROVIDER, GoogleCalendarService
+from app.services.google_calendar_service import PROVIDER, GoogleCalendarService, _connection_lookup_diagnostics
 from app.tools.base import NormalizedToolResult, ToolResult
 from app.tools.context import ToolContext, sanitize_metadata
 
@@ -54,12 +54,13 @@ def google_calendar_tool_definitions(*, connected: bool) -> list[dict[str, Any]]
 
 
 def _connection_log_context(db: Session | None, tenant_id: Any) -> dict[str, Any]:
-    payload: dict[str, Any] = {"connection_id": None, "connection_tenant_id": None, "account_email": None, "calendar_id": "primary", "provider": PROVIDER, "connected": False, "status": None, "access_token_present": False, "refresh_token_present": False}
+    payload: dict[str, Any] = {"connection_id": None, "connection_tenant_id": None, "account_email": None, "calendar_id": "primary", "provider": PROVIDER, "connected": False, "status": None, "access_token_encrypted_is_not_null": False, "refresh_token_encrypted_is_not_null": False, "access_token_present": False, "refresh_token_present": False}
     if db is None or tenant_id is None:
         return payload
     try:
         from app.services.integration_connection_service import IntegrationConnectionService
 
+        payload.update(_connection_lookup_diagnostics(tenant_id, PROVIDER))
         conn = IntegrationConnectionService(db).get_connection(tenant_id, PROVIDER)
         metadata = conn.metadata_json if conn and isinstance(conn.metadata_json, dict) else {}
         payload.update({
@@ -70,6 +71,8 @@ def _connection_log_context(db: Session | None, tenant_id: Any) -> dict[str, Any
             "provider": conn.provider if conn else PROVIDER,
             "connected": bool(conn and conn.status == "active" and conn.auth_type == "oauth2"),
             "status": conn.status if conn else None,
+            "access_token_encrypted_is_not_null": bool(conn and conn.access_token_encrypted is not None),
+            "refresh_token_encrypted_is_not_null": bool(conn and conn.refresh_token_encrypted is not None),
             "access_token_present": bool(conn and conn.access_token_encrypted),
             "refresh_token_present": bool(conn and conn.refresh_token_encrypted),
         })
