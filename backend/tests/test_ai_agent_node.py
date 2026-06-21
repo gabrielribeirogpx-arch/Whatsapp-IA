@@ -877,3 +877,80 @@ def test_ai_agent_google_calendar_llm_create_precheck_busy(monkeypatch):
     assert result.metadata["budget_node_tool_calls_used"] == 1
     assert result.metadata["budget_mcp_calls_used"] == 0
     assert result.metadata["mcp_call_count"] == 0
+
+
+def test_ai_agent_generic_pending_action_confirm_creates_directly_without_rechecking(monkeypatch):
+    from app.tools.base import NormalizedToolResult, ToolResult
+
+    tenant_id = uuid.uuid4()
+    conversation_id = uuid.uuid4()
+    pending_payload = {"summary": "Call online", "start_time": "2026-06-22T09:00:00-03:00", "end_time": "2026-06-22T10:00:00-03:00", "timezone": "America/Sao_Paulo", "conflicting_events": [{"title": "Reunião"}]}
+
+    class Pending:
+        id = uuid.uuid4()
+        action_type = svc.CALENDAR_CREATE_CONFIRMATION
+        payload_json = pending_payload
+
+    consumed = []
+
+    class FakePendingActionService:
+        def __init__(self, db):
+            pass
+
+        def get_pending_action(self, **kwargs):
+            return Pending()
+
+        def consume_pending_action(self, **kwargs):
+            consumed.append(kwargs)
+            return True
+
+        def cancel_pending_action(self, **kwargs):
+            raise AssertionError("should not cancel")
+
+    calls = []
+
+    def fake_execute(self, tool_type, tool_id, input, context, config=None):
+        calls.append(tool_id)
+        assert tool_id == "google_calendar_create_event"
+        assert input["ignore_conflicts"] is True
+        assert input["force_create"] is True
+        return ToolResult(True, "google_calendar", tool_id=tool_id, output={"ok": True}, normalized_result=NormalizedToolResult(True, tool_id, type="google_calendar.create_event", summary="Evento criado", data=input))
+
+    monkeypatch.setattr(svc, "PendingActionService", FakePendingActionService)
+    monkeypatch.setattr(svc.ToolRegistry, "execute", fake_execute)
+    result = svc.run_agent_for_tenant(object(), tenant_id, "sim", "instr", ["chamar_mcp", "responder"], {"mcp_tools": [{"tool_id": "google_calendar_create_event"}], "memory_context": {"conversation_id": conversation_id}}, options={})
+    assert result.status == "success"
+    assert calls == ["google_calendar_create_event"]
+    assert consumed
+
+
+def test_ai_agent_generic_pending_action_cancel_clears_without_tool_call(monkeypatch):
+    tenant_id = uuid.uuid4()
+    conversation_id = uuid.uuid4()
+
+    class Pending:
+        id = uuid.uuid4()
+        action_type = svc.CALENDAR_CREATE_CONFIRMATION
+        payload_json = {"summary": "Call", "start_time": "2026-06-22T09:00:00-03:00", "end_time": "2026-06-22T10:00:00-03:00"}
+
+    cancelled = []
+
+    class FakePendingActionService:
+        def __init__(self, db):
+            pass
+
+        def get_pending_action(self, **kwargs):
+            return Pending()
+
+        def consume_pending_action(self, **kwargs):
+            raise AssertionError("should not consume")
+
+        def cancel_pending_action(self, **kwargs):
+            cancelled.append(kwargs)
+            return True
+
+    monkeypatch.setattr(svc, "PendingActionService", FakePendingActionService)
+    monkeypatch.setattr(svc.ToolRegistry, "execute", lambda *a, **k: (_ for _ in ()).throw(AssertionError("should not call tools")))
+    result = svc.run_agent_for_tenant(object(), tenant_id, "não", "instr", ["chamar_mcp", "responder"], {"mcp_tools": [{"tool_id": "google_calendar_create_event"}], "memory_context": {"conversation_id": conversation_id}}, options={})
+    assert result.message == "Tudo bem, operação cancelada."
+    assert cancelled

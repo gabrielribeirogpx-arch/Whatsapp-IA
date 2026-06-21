@@ -28,8 +28,9 @@ from app.models.user_session import UserSession
 from app.models.tenant_mcp import TenantMCPServer, TenantMCPTool
 from app.models.integration_connection import IntegrationConnection
 from app.models.execution_trace import ExecutionTrace
+from app.models.pending_action import PendingAction
 
-__all__ = ["Tenant", "AIConfig", "Conversation", "Contact", "Message", "Product", "KnowledgeBase", "KnowledgeSource", "KnowledgeChunk", "Lead", "PipelineStage", "BotRule", "ConversationLog", "Flow", "FlowStep", "FlowNode", "FlowEdge", "FlowVersion", "FlowExecution", "FlowExecutionEvent", "ProcessedMessage", "FlowEvent", "FlowAnalyticsEvent", "FailedMessage", "WorkerDeadLetter", "FlowAIConversationMessage", "FlowAIExecution", "FlowAILongTermMemory", "FlowSession", "FlowV2Event", "FlowV2Session", "FlowV2ScheduledJob", "FlowV2IdempotencyKey", "FlowV2DeadLetter", "TenantUser", "PasswordResetToken", "AuditLog", "UserSession", "Task", "TenantAISetting", "TenantMCPServer", "TenantMCPTool", "ExecutionTrace", "IntegrationConnection", "TenantWhatsAppProvider", "WhatsAppMessageTemplate", "WhatsAppCampaign", "WhatsAppCampaignRecipient"]
+__all__ = ["Tenant", "AIConfig", "Conversation", "Contact", "Message", "Product", "KnowledgeBase", "KnowledgeSource", "KnowledgeChunk", "Lead", "PipelineStage", "BotRule", "ConversationLog", "Flow", "FlowStep", "FlowNode", "FlowEdge", "FlowVersion", "FlowExecution", "FlowExecutionEvent", "ProcessedMessage", "FlowEvent", "FlowAnalyticsEvent", "FailedMessage", "WorkerDeadLetter", "FlowAIConversationMessage", "FlowAIExecution", "FlowAILongTermMemory", "FlowSession", "FlowV2Event", "FlowV2Session", "FlowV2ScheduledJob", "FlowV2IdempotencyKey", "FlowV2DeadLetter", "TenantUser", "PasswordResetToken", "AuditLog", "UserSession", "Task", "TenantAISetting", "TenantMCPServer", "TenantMCPTool", "ExecutionTrace", "IntegrationConnection", "PendingAction", "TenantWhatsAppProvider", "WhatsAppMessageTemplate", "WhatsAppCampaign", "WhatsAppCampaignRecipient"]
 
 from app.models.tenant_ai_setting import TenantAISetting
 from app.models.tenant_whatsapp_provider import TenantWhatsAppProvider
