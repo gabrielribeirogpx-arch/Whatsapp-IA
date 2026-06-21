@@ -955,3 +955,79 @@ def test_ai_agent_generic_pending_action_cancel_clears_without_tool_call(monkeyp
     result = svc.run_agent_for_tenant(object(), tenant_id, "não", "instr", ["chamar_mcp", "responder"], {"mcp_tools": [{"tool_id": "google_calendar_create_event"}], "memory_context": {"conversation_id": conversation_id}}, options={})
     assert result.message == "Tudo bem, operação cancelada."
     assert cancelled
+
+
+def test_format_tool_result_gmail_messages_use_data_and_hide_internal_ids():
+    normalized = {
+        "ok": True,
+        "tool": "gmail_list_messages",
+        "type": "gmail.list_messages",
+        "summary": "Operação do Gmail concluída",
+        "data": {"messages": [
+            {"message_id": "m1", "thread_id": "t1", "raw": "secret", "subject": "Security alert", "from": "Google <no-reply@accounts.google.com>", "date": "2026-06-21T10:30:00-03:00", "snippet": "Novo login detectado."},
+            {"id": "m2", "thread_id": "t2", "token": "abc", "subject": "Deployment crashed", "from": "Railway <hello@notify.railway.app>", "date": "2026-06-21T09:00:00-03:00", "snippet": "O deploy falhou."},
+        ]},
+    }
+
+    response = svc.format_tool_result_for_user("gmail_list_messages", normalized)
+
+    assert "Encontrei seus 2 últimos e-mails" in response
+    assert "Security alert" in response
+    assert "Google <no-reply@accounts.google.com>" in response
+    assert "Deployment crashed" in response
+    assert "message_id" not in response
+    assert "thread_id" not in response
+    assert "raw" not in response
+    assert "token" not in response
+    assert response != "Perfeito! Operação do Gmail concluída."
+
+
+def test_format_tool_result_gmail_empty_messages():
+    response = svc.format_tool_result_for_user("gmail_list_messages", {"ok": True, "data": {"messages": []}, "summary": "ok"})
+    assert response == "Não encontrei e-mails recentes."
+
+
+def test_format_tool_result_calendar_events():
+    response = svc.format_tool_result_for_user("google_calendar_list_events", {"ok": True, "data": {"events": [
+        {"title": "Reunião", "start": "2026-06-22T14:00:00-03:00"},
+        {"summary": "Café", "start": {"dateTime": "2026-06-22T16:30:00-03:00"}},
+    ]}})
+    assert "Encontrei 2 eventos" in response
+    assert "22/06/2026 14:00 - Reunião" in response
+    assert "22/06/2026 16:30 - Café" in response
+
+
+def test_format_tool_result_result_text_before_summary():
+    response = svc.format_tool_result_for_user("calculate", {"ok": True, "summary": "Operação concluída", "result_text": "O resultado é 42."})
+    assert response == "O resultado é 42."
+
+
+def test_format_tool_result_summary_when_no_useful_data():
+    response = svc.format_tool_result_for_user("generic", {"ok": True, "summary": "Operação concluída"})
+    assert response == "Operação concluída."
+
+
+def test_ai_agent_final_response_not_generic_gmail_summary_when_messages_exist(monkeypatch):
+    from app.tools.base import NormalizedToolResult, ToolResult
+
+    calls = iter([
+        '{"thought_summary":"listar","tool":"chamar_mcp","arguments":{"tool_id":"gmail_list_messages","input":{"max_results":2}}}',
+        '{"thought_summary":"responder","tool":"responder","arguments":{}}',
+    ])
+
+    def fake_execute(self, tool_type, tool_id, input, context, config=None):
+        output = {"messages": [{"message_id": "m1", "thread_id": "t1", "subject": "Security alert", "from": "Google <no-reply@accounts.google.com>", "date": "2026-06-21T10:30:00-03:00", "snippet": "Novo login detectado."}]}
+        return ToolResult(True, "gmail", tool_id=tool_id, output=output, normalized_result=NormalizedToolResult(True, tool_id, type="gmail.list_messages", summary="Operação do Gmail concluída", data=output))
+
+    monkeypatch.setattr(svc, "generate_answer_for_tenant", lambda *a, **k: next(calls))
+    monkeypatch.setattr(svc.ToolRegistry, "execute", fake_execute)
+
+    result = svc.run_agent_for_tenant(
+        object(), uuid.uuid4(), "Liste meus últimos 2 e-mails", "instr",
+        ["chamar_mcp", "responder"], {"mcp_tools": [{"tool_id": "gmail_list_messages", "name": "Listar e-mails"}]}, options={"max_steps": 2},
+    )
+
+    assert "Security alert" in (result.message or "")
+    assert "Operação do Gmail concluída" not in (result.message or "")
+    assert "message_id" not in (result.message or "")
+    assert "thread_id" not in (result.message or "")
