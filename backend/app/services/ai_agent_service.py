@@ -22,9 +22,10 @@ from app.context_engine import UnifiedContextEngine
 from app.services.circuit_breaker_service import CircuitBreakerOpen, check_circuit, record_failure, record_success
 from app.services.execution_budget_service import ExecutionBudgetExceeded, ExecutionBudget
 from app.services.long_term_memory_service import ALLOWED_FACT_TYPES, SECRET_RE, store_fact
-from app.services.pending_action_service import CALENDAR_CREATE_CONFIRMATION, PendingActionHandlerRegistry, PendingActionService, detect_pending_action_decision, format_pending_calendar_create_conflict_message, normalize_calendar_conflicting_event
+from app.services.pending_action_service import CALENDAR_CREATE_CONFIRMATION, EMAIL_SEND_CONFIRMATION, PendingActionHandlerRegistry, PendingActionService, detect_pending_action_decision, format_pending_calendar_create_conflict_message, normalize_calendar_conflicting_event
 from app.tools import ToolContext, ToolRegistry
 from app.tools.adapters.google_calendar_tool_adapter import GOOGLE_CALENDAR_TOOL_IDS, GoogleCalendarToolAdapter
+from app.tools.adapters.gmail_tool_adapter import GMAIL_TOOL_IDS, GmailToolAdapter
 from app.tools.adapters.mcp_tool_adapter import MCPToolAdapter
 from app.tools.adapters.node_tool_adapter import NodeToolAdapter
 from app.observability import TraceContext, TraceEventType, record_event
@@ -733,9 +734,42 @@ def _handle_calendar_create_confirmation(*, tenant_id: Any, conversation_id: Any
     return f"Não consegui acessar o Google Calendar agora: {reason}"
 
 
+def _handle_email_send_confirmation(*, tenant_id: Any, conversation_id: Any, pending_action: Any, user_message: str, context: dict[str, Any]) -> str:
+    payload = getattr(pending_action, "payload_json", {}) or {}
+    tool_registry: ToolRegistry = context["tool_registry"]
+    tool_context: ToolContext = context["tool_context"]
+    db = context.get("db")
+    pending_action_service: PendingActionService | None = context.get("pending_action_service")
+    db_pending = context.get("db_pending")
+    registry_result = tool_registry.execute("gmail", "gmail_send_email", payload, tool_context, {"db": db, "mcp_tools": context.get("mcp_tools") or []})
+    if registry_result.ok:
+        if pending_action_service is not None and db_pending is not None and conversation_id is not None:
+            pending_action_service.consume_pending_action(tenant_id=tenant_id, conversation_id=conversation_id, pending_id=getattr(db_pending, "id", None))
+        return "E-mail enviado com sucesso."
+    return f"Não consegui enviar o e-mail agora: {registry_result.error_code or 'gmail_error'}"
+
+
+def _gmail_intent(text: str) -> tuple[str | None, dict[str, Any]]:
+    normalized = _strip_accents(text).lower()
+    email = re.search(r"[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}", text or "", re.I)
+    if "envie um e-mail" in normalized or "enviar um e-mail" in normalized or "mande um e-mail" in normalized:
+        return "gmail_send_email", {"to": email.group(0) if email else "", "subject": "", "body": str(text or "").strip()}
+    if "crie um rascunho" in normalized or "criar um rascunho" in normalized:
+        return "gmail_create_draft", {"to": email.group(0) if email else "", "subject": "", "body": str(text or "").strip()}
+    if "leia o ultimo e-mail" in normalized or "ler o ultimo e-mail" in normalized or "leia o ultimo email" in normalized:
+        return "gmail_read_message", {"latest": True}
+    search = re.search(r"procure e-mails de (.+)", normalized) or re.search(r"buscar e-mails de (.+)", normalized)
+    if search:
+        return "gmail_search_messages", {"query": f"from:{search.group(1).strip()}", "max_results": 10}
+    if "liste meus e-mails" in normalized or "listar meus e-mails" in normalized or "liste meus emails" in normalized:
+        return "gmail_list_messages", {"max_results": 10}
+    return None, {}
+
+
 def _pending_action_registry() -> PendingActionHandlerRegistry:
     registry = PendingActionHandlerRegistry()
     registry.register(action_type=CALENDAR_CREATE_CONFIRMATION, handler=_handle_calendar_create_confirmation)
+    registry.register(action_type=EMAIL_SEND_CONFIRMATION, handler=_handle_email_send_confirmation)
     return registry
 
 
@@ -775,6 +809,7 @@ def run_agent_for_tenant(db: Session, tenant_id, input_text: str, instruction: s
     tool_registry.register(SubflowToolAdapter(subflow_tool_executor))
     tool_registry.register(MCPToolAdapter(mcp_tool_executor))
     tool_registry.register(GoogleCalendarToolAdapter(db))
+    tool_registry.register(GmailToolAdapter(db))
     tool_registry.register(WebhookToolAdapter(_call_webhook, validate_webhook_config))
     session_state = _calendar_session_state(tool_configs, opts)
     conversation_id, session_id, external_user_id = _pending_context(tool_configs, opts)
@@ -823,7 +858,37 @@ def run_agent_for_tenant(db: Session, tenant_id, input_text: str, instruction: s
         result.tools_used.append("chamar_mcp")
         result.metadata = {"mcp_call_count": 0, "mcp_tools_used": [{"tool_id": "google_calendar_create_event", "status": result.status, "tool_type": "google_calendar"}], **(budget.safe_metadata() if budget else {})}
         return result
-    _json_log("TOOL_REGISTRY_CONTENTS", tenant_id=str(tenant_id), node_id=str(opts.get("node_id") or opts.get("agent_node_id") or ""), registered_tool_types=tool_registry.registered_tool_types(), registered_google_calendar_tools=sorted(GOOGLE_CALENDAR_TOOL_IDS))
+    gmail_tool_id, gmail_input = _gmail_intent(str(input_text or ""))
+    gmail_match = next((t for t in mcp_tools if str(t.get("tool_id") or t.get("id")) == gmail_tool_id), None) if gmail_tool_id else None
+    if gmail_match is not None and gmail_tool_id:
+        if gmail_tool_id == "gmail_send_email":
+            if conversation_id is not None:
+                pending_action_service.save_pending_action(tenant_id=tenant_id, conversation_id=conversation_id, session_id=session_id, external_user_id=external_user_id, action_type=EMAIL_SEND_CONFIRMATION, payload=gmail_input, metadata={"source": "ai_agent", "tool_id": "gmail_send_email"})
+            msg = "Você quer enviar este e-mail?"
+            result.message = msg
+            result.actions.append(AgentToolAction("message", {"message": msg}))
+            result.status = "success"
+            result.final_tool = "responder"
+            result.metadata = {"mcp_call_count": 0, "mcp_tools_used": [{"tool_id": "gmail_send_email", "status": "pending_confirmation", "tool_type": "gmail"}], **(budget.safe_metadata() if budget else {})}
+            return result
+        registry_result = tool_registry.execute("gmail", gmail_tool_id, gmail_input, tool_context, {"mcp_tools": mcp_tools, "db": db})
+        output = registry_result.output if isinstance(registry_result.output, dict) else {}
+        msg = "Operação do Gmail concluída." if registry_result.ok else f"Não consegui acessar o Gmail agora: {registry_result.error_code or 'gmail_error'}"
+        if registry_result.ok and gmail_tool_id in {"gmail_list_messages", "gmail_search_messages"}:
+            items = output.get("messages") or []
+            msg = "Encontrei estes e-mails:\n" + "\n".join(f"• {m.get('subject') or '(sem assunto)'} — {m.get('from') or ''}" for m in items[:5]) if items else "Não encontrei e-mails."
+        elif registry_result.ok and gmail_tool_id == "gmail_read_message":
+            m = output.get("message") or {}
+            msg = f"Último e-mail: {m.get('subject') or '(sem assunto)'} — {m.get('from') or ''}\n{m.get('snippet') or ''}"
+        elif registry_result.ok and gmail_tool_id == "gmail_create_draft":
+            msg = "Rascunho criado no Gmail."
+        result.message = msg[:4000]
+        result.actions.append(AgentToolAction("message", {"message": result.message}))
+        result.status = "success" if registry_result.ok else "error"
+        result.final_tool = "chamar_mcp"
+        result.metadata = {"mcp_call_count": 0, "mcp_tools_used": [{"tool_id": gmail_tool_id, "status": result.status, "tool_type": "gmail"}], **(budget.safe_metadata() if budget else {})}
+        return result
+    _json_log("TOOL_REGISTRY_CONTENTS", tenant_id=str(tenant_id), node_id=str(opts.get("node_id") or opts.get("agent_node_id") or ""), registered_tool_types=tool_registry.registered_tool_types(), registered_google_calendar_tools=sorted(GOOGLE_CALENDAR_TOOL_IDS), registered_gmail_tools=sorted(GMAIL_TOOL_IDS))
     availability_match = next((t for t in mcp_tools if str(t.get("tool_id") or t.get("id")) == "google_calendar_check_availability"), None)
     deterministic_availability_input, deterministic_availability_missing = _calendar_availability_intent_input(str(input_text or ""), timezone=str(opts.get("timezone") or "America/Sao_Paulo"))
     if availability_match is not None and (deterministic_availability_input is not None or deterministic_availability_missing is not None):

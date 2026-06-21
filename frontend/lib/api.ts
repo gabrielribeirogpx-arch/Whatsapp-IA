@@ -778,6 +778,27 @@ export function getGoogleCalendarConnectUrl(): string {
   return buildApiUrl(`/api/integrations/google-calendar/connect?tenant_slug=${encodeURIComponent(tenant)}`);
 }
 
+
+export async function getGmailStatus(): Promise<GoogleCalendarConnectionStatus> {
+  const tenant = getTenantSlugOrId();
+  const query = tenant ? `?tenant_slug=${encodeURIComponent(tenant)}` : '';
+  const res = await apiFetch(`/api/integrations/gmail/status${query}`);
+  return parseApiResponse<GoogleCalendarConnectionStatus>(res);
+}
+
+export async function disconnectGmail(): Promise<GoogleCalendarConnectionStatus> {
+  const tenant = getTenantSlugOrId();
+  const query = tenant ? `?tenant_slug=${encodeURIComponent(tenant)}` : '';
+  const res = await apiFetch(`/api/integrations/gmail/disconnect${query}`, { method: 'DELETE' });
+  return parseApiResponse<GoogleCalendarConnectionStatus>(res);
+}
+
+export function getGmailConnectUrl(): string {
+  const tenant = getTenantSlugOrId();
+  if (!tenant) throw new Error('Tenant atual não encontrado para conectar o Gmail.');
+  return buildApiUrl(`/api/integrations/gmail/connect?tenant_slug=${encodeURIComponent(tenant)}`);
+}
+
 export async function getAccountMe(): Promise<AccountMe> {
   const res = await apiFetch('/api/account/me');
   return parseApiResponse<AccountMe>(res);
