@@ -122,7 +122,7 @@ def _backend_base_url(request: Request) -> str:
 
 def _redirect_uri(request: Request) -> str:
     configured = (os.getenv("GOOGLE_DRIVE_REDIRECT_URI") or "").strip()
-    redirect_uri = configured or f"{_backend_base_url(request)}/api/integrations/google_drive/callback"
+    redirect_uri = configured or f"{_backend_base_url(request)}/api/integrations/google-drive/callback"
     parsed = urlparse(redirect_uri)
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
         raise HTTPException(status_code=500, detail="GOOGLE_DRIVE_REDIRECT_URI inválida")
