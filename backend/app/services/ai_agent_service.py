@@ -5,6 +5,7 @@ import json
 import logging
 import re
 import time
+import unicodedata
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 import urllib.error
@@ -124,6 +125,85 @@ def _google_calendar_origin(tool: dict[str, Any]) -> str:
         return "internal/google_calendar"
     return "mcp"
 
+
+
+def _strip_accents(value: str) -> str:
+    return "".join(ch for ch in unicodedata.normalize("NFD", str(value or "")) if unicodedata.category(ch) != "Mn")
+
+
+def _parse_calendar_target_date(text: str, *, now: datetime | None = None, timezone: str = "America/Sao_Paulo") -> tuple[Any | None, str | None]:
+    normalized = _strip_accents(text).lower()
+    tz = ZoneInfo(timezone)
+    base = now.astimezone(tz) if now and now.tzinfo else (now.replace(tzinfo=tz) if now else datetime.now(tz))
+    if "depois de amanha" in normalized:
+        return base.date() + timedelta(days=2), "depois de amanhã"
+    if "amanha" in normalized:
+        return base.date() + timedelta(days=1), "amanhã"
+    if "hoje" in normalized:
+        return base.date(), "hoje"
+    iso = re.search(r"\b(\d{4})-(\d{2})-(\d{2})\b", normalized)
+    if iso:
+        try:
+            parsed = datetime(int(iso.group(1)), int(iso.group(2)), int(iso.group(3))).date()
+            return parsed, parsed.isoformat()
+        except ValueError:
+            return None, None
+    br = re.search(r"\b(\d{1,2})[/-](\d{1,2})(?:[/-](\d{2,4}))?\b", normalized)
+    if br:
+        year = int(br.group(3)) if br.group(3) else base.year
+        if year < 100:
+            year += 2000
+        try:
+            parsed = datetime(year, int(br.group(2)), int(br.group(1))).date()
+            return parsed, parsed.isoformat()
+        except ValueError:
+            return None, None
+    return None, None
+
+
+def _calendar_list_intent_input(text: str, *, now: datetime | None = None, timezone: str = "America/Sao_Paulo") -> tuple[dict[str, Any] | None, str | None]:
+    normalized = _strip_accents(text).lower()
+    patterns = (
+        r"\blist(?:ar|e)?\s+(?:meus\s+|minhas\s+)?(?:eventos|compromissos|agenda|reunioes)\b",
+        r"\bquais\s+(?:eventos|compromissos|reunioes)\s+(?:eu\s+)?(?:tenho|possuo)\b",
+        r"\b(?:tenho|possuo)\s+(?:eventos|compromissos|reunioes)\b",
+        r"\bo\s+que\s+(?:eu\s+)?tenho\b",
+        r"\bo\s+que\s+esta\s+marcado\b",
+        r"\bagenda\s+(?:de|do|da|para)\b",
+    )
+    if not any(re.search(pattern, normalized) for pattern in patterns):
+        return None, None
+    day, label = _parse_calendar_target_date(text, now=now, timezone=timezone)
+    if day is None:
+        return None, "date"
+    tz = ZoneInfo(timezone)
+    start = datetime(day.year, day.month, day.day, 0, 0, 0, tzinfo=tz)
+    end = start + timedelta(days=1)
+    return {"time_min": start.isoformat(), "time_max": end.isoformat(), "max_results": 20, "timezone": timezone, "date_label": label or day.isoformat()}, None
+
+
+def _format_calendar_list_message(output: Any, date_label: str) -> str:
+    events = output.get("events") if isinstance(output, dict) else []
+    events = events if isinstance(events, list) else []
+    label = str(date_label or "a data solicitada")
+    if not events:
+        return f"Você não possui compromissos para {label}."
+    count = len(events)
+    noun = "compromisso" if count == 1 else "compromissos"
+    lines = [f"Você possui {count} {noun} {label}:", ""]
+    for event in events:
+        if not isinstance(event, dict):
+            continue
+        title = str(event.get("title") or "Sem título").strip()
+        start_raw = str(event.get("start") or "").strip()
+        hour = "Horário não informado"
+        if start_raw:
+            try:
+                hour = datetime.fromisoformat(start_raw.replace("Z", "+00:00")).strftime("%H:%M")
+            except ValueError:
+                hour = "Dia inteiro" if re.fullmatch(r"\d{4}-\d{2}-\d{2}", start_raw) else start_raw
+        lines.append(f"• {hour} - {title}")
+    return "\n".join(lines)
 
 def _calendar_create_intent_missing(text: str, *, now: datetime | None = None, timezone: str = "America/Sao_Paulo") -> tuple[dict[str, Any] | None, str | None]:
     raw = str(text or "").strip()
@@ -426,6 +506,45 @@ def run_agent_for_tenant(db: Session, tenant_id, input_text: str, instruction: s
     tool_registry.register(GoogleCalendarToolAdapter(db))
     tool_registry.register(WebhookToolAdapter(_call_webhook, validate_webhook_config))
     _json_log("TOOL_REGISTRY_CONTENTS", tenant_id=str(tenant_id), node_id=str(opts.get("node_id") or opts.get("agent_node_id") or ""), registered_tool_types=tool_registry.registered_tool_types(), registered_google_calendar_tools=sorted(GOOGLE_CALENDAR_TOOL_IDS))
+    list_match = next((t for t in mcp_tools if str(t.get("tool_id") or t.get("id")) == "google_calendar_list_events"), None)
+    deterministic_list_input, deterministic_list_missing = _calendar_list_intent_input(str(input_text or ""), timezone=str(opts.get("timezone") or "America/Sao_Paulo"))
+    if list_match is not None and (deterministic_list_input is not None or deterministic_list_missing is not None):
+        _json_log("AI_AGENT_DETERMINISTIC_CALENDAR_LIST_MATCH", node_id=str(opts.get("node_id") or opts.get("agent_node_id") or ""), missing=deterministic_list_missing, tool_id="google_calendar_list_events", matched=deterministic_list_input is not None)
+        if deterministic_list_missing:
+            question = "Para qual data você deseja consultar sua agenda?"
+            result.message = question
+            result.actions.append(AgentToolAction("message", {"message": question}))
+            result.status = "success"
+            result.final_tool = "responder"
+            result.metadata = {**(budget.safe_metadata() if budget else {}), "deterministic_calendar_list_missing": deterministic_list_missing}
+            _json_log("AI_AGENT_FINAL_RESPONSE", response=question, fallback=False, deterministic=True)
+            return result
+        _json_log("AI_AGENT_DETERMINISTIC_CALENDAR_LIST_EXECUTE", tool_id="google_calendar_list_events", input=deterministic_list_input)
+        try:
+            if budget is not None:
+                budget.consume_node_tool_call()
+            registry_result = tool_registry.execute("google_calendar", "google_calendar_list_events", deterministic_list_input, tool_context, {"mcp_tools": mcp_tools, "db": db})
+        except ExecutionBudgetExceeded:
+            return AgentRunResult(message=fallback, status="budget_exceeded", fallback_used=True, steps_count=0, final_tool="chamar_mcp", metadata={**(budget.safe_metadata() if budget else {}), "budget_exceeded": True})
+        normalized = registry_result.normalized_result.to_dict() if registry_result.normalized_result else {}
+        reason = None if registry_result.ok else _calendar_error_reason(registry_result, normalized)
+        _json_log("AI_AGENT_DETERMINISTIC_CALENDAR_LIST_RESULT", ok=registry_result.ok, error=reason, raw_result=registry_result.output)
+        if registry_result.ok:
+            msg = _format_calendar_list_message(registry_result.output, str(deterministic_list_input.get("date_label") or "a data solicitada"))
+            status = "success"
+        else:
+            msg = f"Não consegui acessar o Google Calendar agora: {reason}"
+            status = "error"
+        total_latency_ms = int((time.monotonic() - started) * 1000)
+        result.message = msg[:4000]
+        result.actions.append(AgentToolAction("message", {"message": result.message}))
+        result.status = status
+        result.final_tool = "chamar_mcp"
+        result.tools_used.append("chamar_mcp")
+        result.metadata = {"latency_ms": total_latency_ms, "node_tools_used": [], "node_tool_calls_count": 0, "subflow_tools_used": [], "subflow_calls_count": 0, "mcp_tools_used": [{"tool_id": "google_calendar_list_events", "status": status, "latency_ms": (registry_result.metadata or {}).get("duration_ms"), "error": reason, "tool_type": "google_calendar"}], "mcp_call_count": 0, "mcp_latency_ms": 0, "mcp_status": status, "mcp_error_sanitized": reason, "blocked_tool_calls": [], "max_steps_reached": False, **(budget.safe_metadata() if budget else {})}
+        _json_log("AI_AGENT_FINISHED", status=result.status, final_tool=result.final_tool, tools_used=result.tools_used, fallback_used=result.fallback_used, deterministic=True)
+        record_event(db, trace, TraceEventType.AI_AGENT_FINISHED, duration_ms=total_latency_ms, metadata={"status": result.status, "final_tool": result.final_tool, "tools_used": result.tools_used, "deterministic": True})
+        return result
     create_match = next((t for t in mcp_tools if str(t.get("tool_id") or t.get("id")) == "google_calendar_create_event"), None)
     deterministic_input, deterministic_missing = _calendar_create_intent_missing(str(input_text or ""), timezone=str(opts.get("timezone") or "America/Sao_Paulo"))
     if create_match is not None and (deterministic_input is not None or deterministic_missing is not None):
