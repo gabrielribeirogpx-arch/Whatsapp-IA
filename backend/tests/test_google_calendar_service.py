@@ -152,3 +152,55 @@ def test_multiple_connections_uses_latest_active_same_tenant(monkeypatch):
     result = GoogleCalendarService(db, tenant_id).list_events()
     assert result["ok"] is True
     assert auths == ["Bearer latest"]
+
+
+def test_check_availability_uses_same_request_auth_path_as_list_events(monkeypatch):
+    tenant_id = uuid.uuid4(); db = FakeDb(); _connect(db, tenant_id)
+    calls = []
+
+    def fake_request(self, method, path, *, params=None, json_body=None, retry=True, auth_trace=None):
+        calls.append({"method": method, "path": path, "params": params, "json_body": json_body, "retry": retry, "has_auth_trace": auth_trace is not None})
+        if auth_trace is not None:
+            auth_trace.update(access_token_present=True, refresh_token_present=True, refresh_attempted=False, refresh_success=False, refresh_failed_reason=None)
+        if method == "GET":
+            return True, {"items": []}, 200
+        return True, {"calendars": {"primary": {"busy": []}}}, 200
+
+    monkeypatch.setattr(GoogleCalendarService, "_request", fake_request)
+
+    service = GoogleCalendarService(db, tenant_id)
+    assert service.list_events()["ok"] is True
+    assert service.check_availability(start="2026-06-20T10:00:00", end="2026-06-20T11:00:00")["ok"] is True
+
+    assert calls[0]["method"] == "GET"
+    assert calls[0]["path"] == "/calendars/primary/events"
+    assert calls[0]["has_auth_trace"] is False
+    assert calls[1]["method"] == "POST"
+    assert calls[1]["path"] == "/freeBusy"
+    assert calls[1]["has_auth_trace"] is True
+
+
+def test_check_availability_logs_auth_diagnostics(monkeypatch, caplog):
+    tenant_id = uuid.uuid4(); db = FakeDb(); _connect(db, tenant_id)
+    caplog.set_level("INFO")
+
+    def fake_request(method, url, **kwargs):
+        return Resp(200, {"calendars": {"primary": {"busy": []}}})
+
+    monkeypatch.setattr("app.services.google_calendar_service.requests.request", fake_request)
+
+    result = GoogleCalendarService(db, tenant_id).check_availability(start="2026-06-20T10:00:00", end="2026-06-20T11:00:00")
+
+    assert result["ok"] is True
+    for event in [
+        "GOOGLE_CALENDAR_CHECK_AVAILABILITY_START",
+        "GOOGLE_CALENDAR_CHECK_AVAILABILITY_AUTH_READY",
+        "GOOGLE_CALENDAR_CHECK_AVAILABILITY_REQUEST",
+        "GOOGLE_CALENDAR_CHECK_AVAILABILITY_RESULT",
+    ]:
+        assert event in caplog.text
+    assert "access_token_present" in caplog.text
+    assert "refresh_token_present" in caplog.text
+    assert "refresh_attempted" in caplog.text
+    assert "refresh_success" in caplog.text
+    assert "refresh_failed_reason" in caplog.text

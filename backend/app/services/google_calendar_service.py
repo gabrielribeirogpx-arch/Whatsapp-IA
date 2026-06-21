@@ -229,23 +229,46 @@ class GoogleCalendarService:
             self._log("GOOGLE_CALENDAR_SERVICE_EXCEPTION", tool_name="refresh_access_token", input={"force": force}, conn=conn, exception=exc)
             raise
 
-    def _request(self, method: str, path: str, *, params: dict[str, Any] | None = None, json_body: dict[str, Any] | None = None, retry: bool = True) -> tuple[bool, Any, int]:
+    def _request(self, method: str, path: str, *, params: dict[str, Any] | None = None, json_body: dict[str, Any] | None = None, retry: bool = True, auth_trace: dict[str, Any] | None = None) -> tuple[bool, Any, int]:
+        if auth_trace is not None:
+            auth_trace.setdefault("access_token_present", False)
+            auth_trace.setdefault("refresh_token_present", False)
+            auth_trace.setdefault("refresh_attempted", False)
+            auth_trace.setdefault("refresh_success", False)
+            auth_trace.setdefault("refresh_failed_reason", None)
         conn = self._connection(tool_name=f"{method} {path}", input={"params": params, "json_body": json_body})
         if not conn:
+            if auth_trace is not None:
+                auth_trace["refresh_failed_reason"] = NOT_CONNECTED_MESSAGE
             return False, {"message": NOT_CONNECTED_MESSAGE}, 0
         if conn.expires_at and conn.expires_at <= _now_utc_naive() + timedelta(seconds=60):
+            if auth_trace is not None:
+                auth_trace["refresh_attempted"] = True
             refreshed = self.refresh_access_token_if_needed(force=True)
             if refreshed.get("ok") is False:
+                if auth_trace is not None:
+                    auth_trace["refresh_failed_reason"] = refreshed.get("message")
                 return False, refreshed, 0
+            if auth_trace is not None:
+                auth_trace["refresh_success"] = bool(refreshed.get("refreshed"))
             conn = self._connection(tool_name=f"{method} {path}", input={"params": params, "json_body": json_body})
         try:
             access, refresh = self._tokens(conn)
         except GoogleCalendarTokenDecryptError:
+            if auth_trace is not None:
+                auth_trace["refresh_failed_reason"] = "google_calendar_token_decrypt_failed"
             return False, {"message": "google_calendar_token_decrypt_failed"}, 0
+        if auth_trace is not None:
+            auth_trace["access_token_present"] = bool(access)
+            auth_trace["refresh_token_present"] = bool(refresh)
         if conn.refresh_token_encrypted and not refresh:
+            if auth_trace is not None:
+                auth_trace["refresh_failed_reason"] = "google_calendar_refresh_token_empty_after_decrypt"
             return False, {"message": "google_calendar_refresh_token_empty_after_decrypt"}, 0
         self._log("GOOGLE_CALENDAR_TOKEN_PRESENCE", tool_name=f"{method} {path}", input={"params": params, "json_body": json_body}, conn=conn, access_token_present=bool(access), refresh_token_present=bool(refresh))
         if not access:
+            if auth_trace is not None:
+                auth_trace["refresh_failed_reason"] = "missing_access_token"
             self._log("GOOGLE_CALENDAR_REQUEST_BLOCKED", tool_name=f"{method} {path}", input={"params": params, "json_body": json_body}, conn=conn, reason="missing_access_token")
             return False, {"message": NOT_CONNECTED_MESSAGE}, 0
         calendar_id = "primary"
@@ -260,9 +283,15 @@ class GoogleCalendarService:
             raise
         self._log("GOOGLE_CALENDAR_API_HTTP_STATUS", tool_name=f"{method} {path}", input=request_input, conn=conn, calendar_id=calendar_id, status_code=resp.status_code)
         if resp.status_code == 401 and retry:
+            if auth_trace is not None:
+                auth_trace["refresh_attempted"] = True
             refreshed = self.refresh_access_token_if_needed(force=True)
             if refreshed.get("ok"):
-                return self._request(method, path, params=params, json_body=json_body, retry=False)
+                if auth_trace is not None:
+                    auth_trace["refresh_success"] = bool(refreshed.get("refreshed"))
+                return self._request(method, path, params=params, json_body=json_body, retry=False, auth_trace=auth_trace)
+            if auth_trace is not None:
+                auth_trace["refresh_failed_reason"] = refreshed.get("message")
             return False, refreshed, resp.status_code
         response_payload = {"status_code": resp.status_code, "path": path}
         if resp.status_code >= 400:
@@ -335,13 +364,21 @@ class GoogleCalendarService:
 
     def check_availability(self, **kwargs: Any) -> dict[str, Any]:
         def operation() -> dict[str, Any]:
+            auth_trace: dict[str, Any] = {"access_token_present": False, "refresh_token_present": False, "refresh_attempted": False, "refresh_success": False, "refresh_failed_reason": None}
+            self._log("GOOGLE_CALENDAR_CHECK_AVAILABILITY_START", tool_name="google_calendar_check_availability", input=kwargs, **auth_trace)
             tz = self._tenant_timezone(kwargs.get("timezone"))
             start = kwargs.get("start") or kwargs.get("timeMin") or kwargs.get("time_min")
             end = kwargs.get("end") or kwargs.get("timeMax") or kwargs.get("time_max")
             body = {"timeMin": self._normalize_datetime(start, tz), "timeMax": self._normalize_datetime(end, tz), "timeZone": tz, "items": [{"id": "primary"}]}
-            ok, data, _ = self._request("POST", "/freeBusy", json_body=body)
+            self._log("GOOGLE_CALENDAR_CHECK_AVAILABILITY_REQUEST", tool_name="google_calendar_check_availability", input=kwargs, timezone=tz, calendar_id="primary", request_body=body, **auth_trace)
+            ok, data, _ = self._request("POST", "/freeBusy", json_body=body, auth_trace=auth_trace)
+            self._log("GOOGLE_CALENDAR_CHECK_AVAILABILITY_AUTH_READY", tool_name="google_calendar_check_availability", input=kwargs, timezone=tz, calendar_id="primary", **auth_trace)
             if not ok:
-                return {"ok": False, **data}
+                result = {"ok": False, **data}
+                self._log("GOOGLE_CALENDAR_CHECK_AVAILABILITY_RESULT", tool_name="google_calendar_check_availability", input=kwargs, timezone=tz, calendar_id="primary", result=result, **auth_trace)
+                return result
             busy = ((data.get("calendars") or {}).get("primary") or {}).get("busy") or []
-            return {"ok": True, "busy": busy, "available_slots": []}
+            result = {"ok": True, "busy": busy, "available_slots": []}
+            self._log("GOOGLE_CALENDAR_CHECK_AVAILABILITY_RESULT", tool_name="google_calendar_check_availability", input=kwargs, timezone=tz, calendar_id="primary", result=result, **auth_trace)
+            return result
         return self._service_call("google_calendar_check_availability", kwargs, operation)
