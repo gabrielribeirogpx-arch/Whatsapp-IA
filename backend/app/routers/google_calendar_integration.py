@@ -108,16 +108,12 @@ def _state_secret() -> bytes:
 
 
 def _redirect_uri(request: Request) -> str:
-    configured = (
-        os.getenv("GOOGLE_CALENDAR_REDIRECT_URI")
-        or os.getenv("GOOGLE_REDIRECT_URI")
-        or os.getenv("GOOGLE_OAUTH_REDIRECT_URI")
-        or ""
-    ).strip()
+    configured = (os.getenv("GOOGLE_REDIRECT_URI") or "").strip()
     redirect_uri = configured or str(request.url_for("google_calendar_callback"))
     parsed = urlparse(redirect_uri)
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
-        raise HTTPException(status_code=500, detail="GOOGLE_CALENDAR_REDIRECT_URI inválida")
+        raise HTTPException(status_code=500, detail="GOOGLE_REDIRECT_URI inválida")
+    logger.info("GOOGLE_CALENDAR_REDIRECT_URI_RESOLVED redirect_uri=%s source=%s", redirect_uri, "env" if configured else "fallback")
     return redirect_uri
 
 

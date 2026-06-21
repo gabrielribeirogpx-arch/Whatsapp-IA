@@ -108,12 +108,25 @@ def _state_secret() -> bytes:
     return secret.encode("utf-8")
 
 
+def _backend_base_url(request: Request) -> str:
+    configured = (
+        os.getenv("PUBLIC_BACKEND_URL")
+        or os.getenv("API_PUBLIC_URL")
+        or os.getenv("BACKEND_PUBLIC_URL")
+        or ""
+    ).strip().rstrip("/")
+    if configured:
+        return configured
+    return str(request.base_url).rstrip("/")
+
+
 def _redirect_uri(request: Request) -> str:
     configured = (os.getenv("GMAIL_REDIRECT_URI") or "").strip()
-    redirect_uri = configured or str(request.url_for("gmail_callback"))
+    redirect_uri = configured or f"{_backend_base_url(request)}/api/integrations/gmail/callback"
     parsed = urlparse(redirect_uri)
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
         raise HTTPException(status_code=500, detail="GMAIL_REDIRECT_URI inválida")
+    logger.info("GMAIL_REDIRECT_URI_RESOLVED redirect_uri=%s source=%s", redirect_uri, "env" if configured else "fallback")
     return redirect_uri
 
 

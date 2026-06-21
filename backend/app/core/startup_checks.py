@@ -129,6 +129,36 @@ def verify_alembic_at_head() -> None:
     logger.info("event=alembic_head_verified heads=%s", revision["current_revision"])
 
 
+def _validate_absolute_http_url(env_name: str, value: str) -> None:
+    from urllib.parse import urlparse
+
+    parsed = urlparse(value.strip())
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise RuntimeError(f"{env_name} must be an absolute http(s) URL")
+
+
+def gmail_oauth_enabled() -> bool:
+    if _env_flag("GMAIL_ENABLED", default=False) or _env_flag("ENABLE_GMAIL", default=False):
+        return True
+    return bool((os.getenv("GMAIL_CLIENT_ID") or "").strip() or (os.getenv("GMAIL_CLIENT_SECRET") or "").strip())
+
+
+def verify_oauth_redirect_uris() -> None:
+    google_redirect_uri = (os.getenv("GOOGLE_REDIRECT_URI") or "").strip()
+    if google_redirect_uri:
+        _validate_absolute_http_url("GOOGLE_REDIRECT_URI", google_redirect_uri)
+        logger.info("GOOGLE_CALENDAR_REDIRECT_URI_RESOLVED redirect_uri=%s source=env", google_redirect_uri)
+    elif is_production():
+        raise RuntimeError("GOOGLE_REDIRECT_URI is required in production for Google Calendar OAuth")
+
+    gmail_redirect_uri = (os.getenv("GMAIL_REDIRECT_URI") or "").strip()
+    if gmail_oauth_enabled():
+        if not gmail_redirect_uri:
+            raise RuntimeError("GMAIL_REDIRECT_URI is required when Gmail OAuth is enabled")
+        _validate_absolute_http_url("GMAIL_REDIRECT_URI", gmail_redirect_uri)
+        logger.info("GMAIL_REDIRECT_URI_RESOLVED redirect_uri=%s source=env", gmail_redirect_uri)
+
+
 def verify_required_env_vars(*names: str) -> None:
     missing = [name for name in names if not (os.getenv(name) or "").strip()]
     if missing:
