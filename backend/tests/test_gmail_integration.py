@@ -1,16 +1,31 @@
 from __future__ import annotations
 
+import base64
+import hashlib
+import hmac
+import json
 import uuid
 from datetime import datetime, timedelta
+from types import SimpleNamespace
+from urllib.parse import parse_qs, urlparse
 
+import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
+from app.database import get_db
 from app.models.integration_connection import IntegrationConnection
 from app.models.pending_action import PendingAction
+from app.routers import gmail_integration as gmail_router_module
+from app.routers.gmail_integration import create_oauth_state, router as gmail_router, verify_oauth_state
 from app.routers.mcp import _gmail_tools_out
 from app.services.ai_agent_service import run_agent_for_tenant
 from app.services.integration_connection_service import IntegrationConnectionService
 from app.services.pending_action_service import EMAIL_SEND_CONFIRMATION
+from app.services.tenant_service import get_current_tenant
 from app.tools.adapters.gmail_tool_adapter import GmailToolAdapter, gmail_tool_definitions
 from app.tools.context import ToolContext
+from tests.test_integration_connection_service import FakeDb
 
 
 class FakeDB:
@@ -135,3 +150,140 @@ def test_gmail_send_cancel_does_not_send(monkeypatch):
     assert result.message == "Tudo bem, operação cancelada."
     assert called is False
     assert db.pending == []
+
+
+@pytest.fixture
+def gmail_oauth_env(monkeypatch):
+    monkeypatch.setenv("OAUTH_TOKEN_ENCRYPTION_KEY", "integration-test-secret")
+    monkeypatch.setenv("GMAIL_STATE_SECRET", "state-secret")
+    monkeypatch.setenv("GMAIL_CLIENT_ID", "gmail-client-id")
+    monkeypatch.setenv("GMAIL_CLIENT_SECRET", "gmail-client-secret")
+    monkeypatch.setenv("GMAIL_REDIRECT_URI", "https://app.example.com/api/integrations/gmail/callback")
+    monkeypatch.setenv("FRONTEND_URL", "https://frontend.example.com")
+
+
+def _gmail_client(tenant_id: uuid.UUID, db: FakeDb) -> TestClient:
+    app = FastAPI()
+    app.include_router(gmail_router, prefix="/api")
+    app.dependency_overrides[get_current_tenant] = lambda: SimpleNamespace(id=tenant_id)
+    app.dependency_overrides[get_db] = lambda: db
+    return TestClient(app)
+
+
+def _signed_state(payload: dict) -> str:
+    payload_json = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
+    payload_b64 = base64.urlsafe_b64encode(payload_json).decode("ascii").rstrip("=")
+    signature = hmac.new(b"state-secret", payload_b64.encode("ascii"), hashlib.sha256).digest()
+    sig_b64 = base64.urlsafe_b64encode(signature).decode("ascii").rstrip("=")
+    return f"{payload_b64}.{sig_b64}"
+
+
+def test_gmail_state_contains_provider_and_rejects_google_calendar_provider(gmail_oauth_env):
+    tenant_id = uuid.uuid4()
+    state = create_oauth_state(tenant_id, nonce="gmail-nonce")
+
+    payload = verify_oauth_state(state)
+
+    assert payload["tenant_id"] == str(tenant_id)
+    assert payload["provider"] == "gmail"
+    google_calendar_state = _signed_state({
+        "tenant_id": str(tenant_id),
+        "provider": "google_calendar",
+        "nonce": "n",
+        "iat": int(datetime.utcnow().timestamp()),
+    })
+    with pytest.raises(Exception):
+        verify_oauth_state(google_calendar_state)
+
+
+def test_gmail_connect_url_route_redirects_to_gmail_oauth(gmail_oauth_env, monkeypatch):
+    tenant_id = uuid.uuid4()
+    monkeypatch.setattr(
+        gmail_router_module,
+        "resolve_current_tenant",
+        lambda *args, **kwargs: SimpleNamespace(tenant=SimpleNamespace(id=tenant_id), source="test"),
+    )
+
+    response = _gmail_client(tenant_id, FakeDb()).get("/api/integrations/gmail/connect-url?tenant_slug=tenant-ok", follow_redirects=False)
+
+    assert response.status_code == 302
+    params = parse_qs(urlparse(response.headers["location"]).query)
+    assert params["client_id"] == ["gmail-client-id"]
+    assert params["redirect_uri"] == ["https://app.example.com/api/integrations/gmail/callback"]
+    assert verify_oauth_state(params["state"][0])["provider"] == "gmail"
+
+
+def test_gmail_callback_persists_gmail_without_changing_google_calendar(gmail_oauth_env, monkeypatch):
+    tenant_id = uuid.uuid4()
+    db = FakeDb()
+    service = IntegrationConnectionService(db)  # type: ignore[arg-type]
+    service.upsert_connection(
+        tenant_id=tenant_id,
+        provider="google_calendar",
+        auth_type="oauth2",
+        access_token="calendar-access",
+        refresh_token="calendar-refresh",
+        metadata={"account_email": "calendar@example.com"},
+    )
+    calendar_connection = service.get_connection(tenant_id, "google_calendar")
+    assert calendar_connection is not None
+    calendar_access_before = calendar_connection.access_token_encrypted
+    state = create_oauth_state(tenant_id, nonce="callback-nonce")
+
+    class Response:
+        status_code = 200
+        def __init__(self, payload): self._payload = payload
+        def json(self): return self._payload
+
+    monkeypatch.setattr(
+        gmail_router_module.requests,
+        "post",
+        lambda *args, **kwargs: Response({
+            "access_token": "gmail-access",
+            "refresh_token": "gmail-refresh",
+            "expires_in": 3600,
+            "scope": "openid email profile",
+        }),
+    )
+    monkeypatch.setattr(
+        gmail_router_module.requests,
+        "get",
+        lambda *args, **kwargs: Response({"email": "gmail@example.com"}),
+    )
+
+    response = _gmail_client(tenant_id, db).get(f"/api/integrations/gmail/callback?code=auth-code&state={state}", follow_redirects=False)
+
+    assert response.status_code == 302
+    assert response.headers["location"] == "https://frontend.example.com/dashboard/ai/mcp?integration=gmail&status=connected"
+    gmail_connection = service.get_connection(tenant_id, "gmail")
+    google_connection = service.get_connection(tenant_id, "google_calendar")
+    assert gmail_connection is not None
+    assert gmail_connection.provider == "gmail"
+    assert gmail_connection.auth_type == "oauth2"
+    assert gmail_connection.status == "active"
+    assert google_connection is calendar_connection
+    assert google_connection.access_token_encrypted == calendar_access_before
+    status = _gmail_client(tenant_id, db).get("/api/integrations/gmail/status")
+    assert status.status_code == 200
+    assert status.json()["provider"] == "gmail"
+    assert status.json()["connected"] is True
+
+
+def test_gmail_callback_rejects_google_calendar_state_and_keeps_connections_independent(gmail_oauth_env):
+    tenant_id = uuid.uuid4()
+    db = FakeDb()
+    service = IntegrationConnectionService(db)  # type: ignore[arg-type]
+    service.upsert_connection(tenant_id=tenant_id, provider="google_calendar", auth_type="oauth2", access_token="calendar-access")
+    google_calendar_state = _signed_state({
+        "tenant_id": str(tenant_id),
+        "provider": "google_calendar",
+        "nonce": "n",
+        "iat": int(datetime.utcnow().timestamp()),
+    })
+
+    response = _gmail_client(tenant_id, db).get(f"/api/integrations/gmail/callback?code=auth-code&state={google_calendar_state}", follow_redirects=False)
+
+    assert response.status_code == 302
+    assert response.headers["location"] == "https://frontend.example.com/dashboard/ai/mcp?integration=gmail&status=error"
+    assert service.get_connection(tenant_id, "gmail") is None
+    assert service.get_connection(tenant_id, "google_calendar") is not None

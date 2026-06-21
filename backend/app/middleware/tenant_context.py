@@ -21,6 +21,7 @@ PUBLIC_PATHS = (
     "/api/integrations/google-calendar/connect",
     "/api/integrations/google-calendar/callback",
     "/api/integrations/gmail/connect",
+    "/api/integrations/gmail/connect-url",
     "/api/integrations/gmail/callback",
     "/webhook",
     "/api/webhook",
