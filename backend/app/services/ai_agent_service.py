@@ -361,11 +361,20 @@ def _google_calendar_availability_input(payload: dict[str, Any], opts: dict[str,
         return None
     return {"start": start, "end": end, "timezone": _calendar_create_timezone(payload, opts)}
 
+
 def _google_calendar_busy_events(output: Any) -> list[dict[str, Any]]:
     if not isinstance(output, dict):
         return []
     busy = output.get("busy") or output.get("conflicting_events") or output.get("events") or []
     return [item for item in busy if isinstance(item, dict)] if isinstance(busy, list) else []
+
+
+def _calendar_conflicting_event_title(event: dict[str, Any]) -> str:
+    return next(
+        (str(event.get(key) or "").strip() for key in ("summary", "title", "name") if str(event.get(key) or "").strip()),
+        "compromisso",
+    )
+
 
 def _format_calendar_conflict_prompt(payload: dict[str, Any], conflicting_events: list[dict[str, Any]]) -> str:
     start_raw = _calendar_create_start(payload) or ""
@@ -375,9 +384,12 @@ def _format_calendar_conflict_prompt(payload: dict[str, Any], conflicting_events
     except Exception:
         time_label = start_raw[11:16] if len(start_raw) >= 16 else start_raw
     date_label = str(payload.get("date_label") or "amanhã")
-    first = conflicting_events[0] if conflicting_events else {}
-    title = next((str(first.get(k) or "").strip() for k in ("title", "summary", "name", "description") if str(first.get(k) or "").strip()), "compromisso")
-    return f"Você já possui compromisso {date_label} às {time_label}: {title}. Deseja criar mesmo assim?"
+    titles = [_calendar_conflicting_event_title(event) for event in conflicting_events] or ["compromisso"]
+    if len(titles) > 1:
+        bullet_list = "\n".join(f"• {title}" for title in titles)
+        return f"Você já possui estes compromissos nesse horário:\n{bullet_list}\nDeseja criar mesmo assim?"
+    return f"Você já possui compromisso {date_label} às {time_label}: {titles[0]}. Deseja criar mesmo assim?"
+
 
 def _set_pending_google_calendar_create_event(session_state: dict[str, Any], payload: dict[str, Any], conflicting_events: list[dict[str, Any]], opts: dict[str, Any]) -> None:
     session_state["pending_google_calendar_create_event"] = {
