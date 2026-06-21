@@ -34,7 +34,7 @@ def oauth_env(monkeypatch):
     monkeypatch.setenv("GOOGLE_CALENDAR_STATE_SECRET", "state-secret")
     monkeypatch.setenv("GOOGLE_CALENDAR_CLIENT_ID", "client-id")
     monkeypatch.setenv("GOOGLE_CALENDAR_CLIENT_SECRET", "client-secret")
-    monkeypatch.setenv("GOOGLE_CALENDAR_REDIRECT_URI", "https://app.example.com/api/integrations/google-calendar/callback")
+    monkeypatch.setenv("GOOGLE_REDIRECT_URI", "https://app.example.com/api/integrations/google-calendar/callback")
     monkeypatch.setenv("FRONTEND_URL", "https://frontend.example.com")
 
 
@@ -234,6 +234,7 @@ def test_connect_accepts_generic_google_oauth_env_names(monkeypatch):
     monkeypatch.delenv("GOOGLE_CALENDAR_CLIENT_ID", raising=False)
     monkeypatch.delenv("GOOGLE_CALENDAR_CLIENT_SECRET", raising=False)
     monkeypatch.delenv("GOOGLE_CALENDAR_REDIRECT_URI", raising=False)
+    monkeypatch.delenv("GOOGLE_REDIRECT_URI", raising=False)
     monkeypatch.delenv("GOOGLE_CALENDAR_STATE_SECRET", raising=False)
     monkeypatch.delenv("OAUTH_TOKEN_ENCRYPTION_KEY", raising=False)
     monkeypatch.setenv("GOOGLE_CLIENT_ID", "generic-client-id")

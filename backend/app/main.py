@@ -16,6 +16,7 @@ from app.core.startup_checks import (
     verify_alembic_at_head,
     verify_required_dependencies,
     verify_runtime_secrets,
+    verify_oauth_redirect_uris,
     wait_for_database,
 )
 
@@ -158,6 +159,7 @@ def on_startup():
     verify_required_dependencies()
     verify_runtime_secrets()
     validate_oauth_encryption_key()
+    verify_oauth_redirect_uris()
     wait_for_database()
     flow_media.log_upload_storage_status()
     run_migrations_if_enabled()

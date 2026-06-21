@@ -159,6 +159,7 @@ def gmail_oauth_env(monkeypatch):
     monkeypatch.setenv("GMAIL_CLIENT_ID", "gmail-client-id")
     monkeypatch.setenv("GMAIL_CLIENT_SECRET", "gmail-client-secret")
     monkeypatch.setenv("GMAIL_REDIRECT_URI", "https://app.example.com/api/integrations/gmail/callback")
+    monkeypatch.setenv("GOOGLE_REDIRECT_URI", "https://app.example.com/api/integrations/google-calendar/callback")
     monkeypatch.setenv("FRONTEND_URL", "https://frontend.example.com")
 
 
@@ -306,3 +307,40 @@ def test_gmail_callback_rejects_google_calendar_state_and_keeps_connections_inde
     assert response.headers["location"] == "https://frontend.example.com/dashboard/ai/mcp?integration=gmail&status=error"
     assert service.get_connection(tenant_id, "gmail") is None
     assert service.get_connection(tenant_id, "google_calendar") is not None
+
+
+def test_gmail_connect_url_uses_gmail_redirect_uri_not_google_redirect_uri(gmail_oauth_env, monkeypatch):
+    tenant_id = uuid.uuid4()
+    monkeypatch.setenv("GMAIL_REDIRECT_URI", "https://gmail.example.com/api/integrations/gmail/callback")
+    monkeypatch.setenv("GOOGLE_REDIRECT_URI", "https://calendar.example.com/api/integrations/google-calendar/callback")
+    monkeypatch.setattr(
+        gmail_router_module,
+        "resolve_current_tenant",
+        lambda *args, **kwargs: SimpleNamespace(tenant=SimpleNamespace(id=tenant_id), source="test"),
+    )
+
+    response = _gmail_client(tenant_id, FakeDb()).get("/api/integrations/gmail/connect-url?tenant_slug=tenant-ok", follow_redirects=False)
+
+    assert response.status_code == 302
+    params = parse_qs(urlparse(response.headers["location"]).query)
+    assert params["redirect_uri"] == ["https://gmail.example.com/api/integrations/gmail/callback"]
+    assert params["redirect_uri"] != ["https://calendar.example.com/api/integrations/google-calendar/callback"]
+
+
+def test_gmail_connect_url_fallback_uses_backend_gmail_callback(gmail_oauth_env, monkeypatch):
+    tenant_id = uuid.uuid4()
+    monkeypatch.delenv("GMAIL_REDIRECT_URI", raising=False)
+    monkeypatch.setenv("GOOGLE_REDIRECT_URI", "https://calendar.example.com/api/integrations/google-calendar/callback")
+    monkeypatch.setenv("PUBLIC_BACKEND_URL", "https://backend.example.com")
+    monkeypatch.setattr(
+        gmail_router_module,
+        "resolve_current_tenant",
+        lambda *args, **kwargs: SimpleNamespace(tenant=SimpleNamespace(id=tenant_id), source="test"),
+    )
+
+    response = _gmail_client(tenant_id, FakeDb()).get("/api/integrations/gmail/connect-url?tenant_slug=tenant-ok", follow_redirects=False)
+
+    assert response.status_code == 302
+    params = parse_qs(urlparse(response.headers["location"]).query)
+    assert params["redirect_uri"] == ["https://backend.example.com/api/integrations/gmail/callback"]
+    assert "google-calendar/callback" not in params["redirect_uri"][0]
