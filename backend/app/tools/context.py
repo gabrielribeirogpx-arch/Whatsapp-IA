@@ -11,7 +11,7 @@ def sanitize_metadata(value: Any, *, depth: int = 0, limit: int = 1200) -> Any:
     if depth > 5:
         return "[TRUNCATED]"
     if isinstance(value, dict):
-        return {str(k): ("[REDACTED]" if SENSITIVE_KEY_RE.search(str(k)) else sanitize_metadata(v, depth=depth + 1, limit=limit)) for k, v in value.items()}
+        return {str(k): (sanitize_metadata(v, depth=depth + 1, limit=limit) if (SENSITIVE_KEY_RE.search(str(k)) and str(k).lower().endswith(("_present", "_available")) and isinstance(v, bool)) else ("[REDACTED]" if SENSITIVE_KEY_RE.search(str(k)) else sanitize_metadata(v, depth=depth + 1, limit=limit))) for k, v in value.items()}
     if isinstance(value, list):
         return [sanitize_metadata(v, depth=depth + 1, limit=limit) for v in value[:25]]
     if isinstance(value, str):

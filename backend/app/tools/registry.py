@@ -35,7 +35,11 @@ class ToolRegistry:
     def execute(self, tool_type: str, tool_id: str, input: Any, context: ToolContext, config: dict[str, Any] | None = None) -> ToolResult:
         started = time.monotonic()
         adapter = self._adapters.get(str(tool_type))
-        safe = {"tenant_id": str(context.tenant_id or ""), "tool_type": str(tool_type), "tool_id": str(tool_id), "trace_id": context.trace_id, "budget_snapshot": context.budget_snapshot()}
+        resolved_tool_type = str(tool_type)
+        safe = {"tenant_id": str(context.tenant_id or ""), "tool_type": resolved_tool_type, "tool_id": str(tool_id), "trace_id": context.trace_id, "budget_snapshot": context.budget_snapshot()}
+        logger.info("event=TOOL_REGISTRY_INPUT %s", sanitize_metadata({**safe, "input": input, "config_keys": sorted((config or {}).keys())}))
+        logger.info("event=TOOL_REGISTRY_TOOL_TYPE_RESOLVED %s", sanitize_metadata({**safe, "resolved_tool_type": resolved_tool_type}))
+        logger.info("event=TOOL_REGISTRY_ADAPTER_RESOLVED %s", sanitize_metadata({**safe, "adapter_found": adapter is not None, "adapter_class": type(adapter).__name__ if adapter is not None else None}))
         logger.info("event=TOOL_REGISTRY_CONTENTS %s", sanitize_metadata({**safe, "registered_tool_types": self.registered_tool_types()}))
         logger.info("event=tool_registry_execute %s", sanitize_metadata(safe))
         trace = TraceContext.from_mapping({"trace_id": context.trace_id, "tenant_id": context.tenant_id, "conversation_id": context.conversation_id, "flow_id": context.flow_id})
@@ -50,7 +54,9 @@ class ToolRegistry:
             if not adapter.can_execute(str(tool_id), input, context, config or {}):
                 logger.warning("event=tool_registry_blocked %s", {**safe, "error_code": "tool_not_allowed"})
                 return ToolResult(False, str(tool_type), tool_id=str(tool_id), error_code="tool_not_allowed", metadata=safe, normalized_result=NormalizedToolResult(False, str(tool_id), type=str(tool_type), error={"code": "tool_not_allowed"}))
+            logger.info("event=TOOL_REGISTRY_ADAPTER_PAYLOAD %s", sanitize_metadata({**safe, "adapter_class": type(adapter).__name__, "payload": input}))
             result = adapter.execute(str(tool_id), input, context, config or {})
+            logger.info("event=TOOL_REGISTRY_ADAPTER_RESULT %s", sanitize_metadata({**safe, "adapter_class": type(adapter).__name__, "ok": result.ok, "error_code": result.error_code, "output": result.output, "structured_content": result.structured_content}))
             if result.normalized_result is None:
                 result.normalized_result = NormalizedToolResult(result.ok, str(result.tool_name or result.tool_id or tool_id), type=str(tool_type), data=result.output if isinstance(result.output, dict) else {}, result_text=str(result.output) if isinstance(result.output, (str, int, float, bool)) else None, error={"code": result.error_code} if result.error_code else None)
             result.metadata = sanitize_metadata({**safe, **(result.metadata or {}), "duration_ms": int((time.monotonic() - started) * 1000)})

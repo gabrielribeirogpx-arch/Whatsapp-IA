@@ -32,11 +32,15 @@ def _now_utc_naive() -> datetime:
 def _connection_metadata(conn: IntegrationConnection | None) -> dict[str, Any]:
     metadata = conn.metadata_json if conn and isinstance(conn.metadata_json, dict) else {}
     return {
+        "connection_id": str(conn.id) if conn else None,
+        "connection_tenant_id": str(conn.tenant_id) if conn else None,
         "account_email": metadata.get("account_email"),
         "calendar_id": metadata.get("calendar_id") or "primary",
         "provider": conn.provider if conn else PROVIDER,
         "connected": bool(conn and conn.status == "active" and conn.auth_type == "oauth2"),
         "status": conn.status if conn else None,
+        "access_token_present": bool(conn and conn.access_token_encrypted),
+        "refresh_token_present": bool(conn and conn.refresh_token_encrypted),
     }
 
 
@@ -173,19 +177,22 @@ class GoogleCalendarService:
             if refreshed.get("ok") is False:
                 return False, refreshed, 0
             conn = self._connection(tool_name=f"{method} {path}", input={"params": params, "json_body": json_body})
-        access, _refresh = self._tokens(conn)
+        access, refresh = self._tokens(conn)
+        self._log("GOOGLE_CALENDAR_TOKEN_PRESENCE", tool_name=f"{method} {path}", input={"params": params, "json_body": json_body}, conn=conn, access_token_present=bool(access), refresh_token_present=bool(refresh))
         if not access:
+            self._log("GOOGLE_CALENDAR_REQUEST_BLOCKED", tool_name=f"{method} {path}", input={"params": params, "json_body": json_body}, conn=conn, reason="missing_access_token")
             return False, {"message": NOT_CONNECTED_MESSAGE}, 0
         calendar_id = "primary"
         if path.startswith("/calendars/"):
             calendar_id = path.split("/", 3)[2]
         request_input = {"method": method, "path": path, "params": params, "json_body": json_body}
-        self._log("GOOGLE_CALENDAR_API_REQUEST", tool_name=f"{method} {path}", input=request_input, conn=conn, calendar_id=calendar_id, method=method, path=path)
+        self._log("GOOGLE_CALENDAR_API_REQUEST", tool_name=f"{method} {path}", input=request_input, conn=conn, calendar_id=calendar_id, method=method, path=path, url=f"{BASE_URL}{path}", has_json_body=json_body is not None, has_params=params is not None)
         try:
             resp = requests.request(method, f"{BASE_URL}{path}", headers={"Authorization": f"Bearer {access}", "Accept": "application/json"}, params=params, json=json_body, timeout=15)
         except Exception as exc:
             self._log("GOOGLE_CALENDAR_SERVICE_EXCEPTION", tool_name=f"{method} {path}", input=request_input, conn=conn, calendar_id=calendar_id, exception=exc)
             raise
+        self._log("GOOGLE_CALENDAR_API_HTTP_STATUS", tool_name=f"{method} {path}", input=request_input, conn=conn, calendar_id=calendar_id, status_code=resp.status_code)
         if resp.status_code == 401 and retry:
             refreshed = self.refresh_access_token_if_needed(force=True)
             if refreshed.get("ok"):
@@ -209,6 +216,7 @@ class GoogleCalendarService:
 
     def _service_call(self, tool_name: str, input: dict[str, Any], operation: Callable[[], dict[str, Any]]) -> dict[str, Any]:
         conn = self.connection_service.get_connection(self.tenant_id, PROVIDER)
+        self._log("GOOGLE_CALENDAR_INTEGRATION_CONNECTION_LOADED", tool_name=tool_name, input=input, conn=conn)
         self._log("GOOGLE_CALENDAR_SERVICE_CALL", tool_name=tool_name, input=input, conn=conn)
         try:
             result = operation()
