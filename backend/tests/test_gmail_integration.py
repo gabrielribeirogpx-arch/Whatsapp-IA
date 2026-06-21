@@ -213,6 +213,25 @@ def test_gmail_connect_url_route_redirects_to_gmail_oauth(gmail_oauth_env, monke
     assert verify_oauth_state(params["state"][0])["provider"] == "gmail"
 
 
+def test_gmail_connect_url_uses_gmail_callback_and_scopes(gmail_oauth_env, monkeypatch):
+    tenant_id = uuid.uuid4()
+    monkeypatch.setattr(
+        gmail_router_module,
+        "resolve_current_tenant",
+        lambda *args, **kwargs: SimpleNamespace(tenant=SimpleNamespace(id=tenant_id), source="test"),
+    )
+
+    response = _gmail_client(tenant_id, FakeDb()).get("/api/integrations/gmail/connect-url?tenant_slug=tenant-ok", follow_redirects=False)
+
+    assert response.status_code == 302
+    params = parse_qs(urlparse(response.headers["location"]).query)
+    assert params["redirect_uri"] == ["https://app.example.com/api/integrations/gmail/callback"]
+    assert "/api/integrations/gmail/callback" in params["redirect_uri"][0]
+    assert "google-calendar/callback" not in params["redirect_uri"][0]
+    for scope in gmail_router_module.SCOPES:
+        assert scope in params["scope"][0].split()
+
+
 def test_gmail_callback_persists_gmail_without_changing_google_calendar(gmail_oauth_env, monkeypatch):
     tenant_id = uuid.uuid4()
     db = FakeDb()

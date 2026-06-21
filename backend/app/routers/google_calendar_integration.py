@@ -133,6 +133,7 @@ def _validate_google_calendar_connect_config(request: Request) -> None:
 def create_oauth_state(tenant_id: uuid.UUID, *, nonce: str | None = None, issued_at: int | None = None) -> str:
     payload = {
         "tenant_id": str(tenant_id),
+        "provider": PROVIDER,
         "nonce": nonce or secrets.token_urlsafe(24),
         "iat": issued_at or int(datetime.utcnow().timestamp()),
     }
@@ -157,6 +158,8 @@ def verify_oauth_state(state: str) -> dict[str, Any]:
     if int(datetime.utcnow().timestamp()) - issued_at > STATE_TTL_SECONDS:
         raise HTTPException(status_code=400, detail="State OAuth expirado")
     if not payload.get("tenant_id") or not payload.get("nonce"):
+        raise HTTPException(status_code=400, detail="State OAuth inválido")
+    if payload.get("provider") != PROVIDER:
         raise HTTPException(status_code=400, detail="State OAuth inválido")
     return payload
 
@@ -199,8 +202,16 @@ def connect_google_calendar(
 ):
     try:
         logger.warning("ENTERED GOOGLE CALENDAR CONNECT ENDPOINT")
+        redirect_uri = _redirect_uri(request)
+        callback_path = urlparse(redirect_uri).path
+        frontend_return_url = _frontend_oauth_result_url("connected")
         logger.info(
-            "GOOGLE_CALENDAR_CONNECT_REQUEST tenant_slug=%s tenant_id=%s x_tenant_slug=%s x_tenant_id=%s x_tenant_id_upper=%s",
+            "GOOGLE_CALENDAR_CONNECT_REQUEST provider=%s redirect_uri=%s scopes=%s callback_path=%s frontend_return_url=%s tenant_slug=%s tenant_id=%s x_tenant_slug=%s x_tenant_id=%s x_tenant_id_upper=%s",
+            PROVIDER,
+            redirect_uri,
+            SCOPES,
+            callback_path,
+            frontend_return_url,
             tenant_slug,
             tenant_id,
             x_tenant_slug,
@@ -232,7 +243,7 @@ def connect_google_calendar(
         state = create_oauth_state(tenant.id)
         params = {
             "client_id": _client_id(),
-            "redirect_uri": _redirect_uri(request),
+            "redirect_uri": redirect_uri,
             "response_type": "code",
             "scope": " ".join(SCOPES),
             "access_type": "offline",
@@ -253,13 +264,28 @@ def connect_google_calendar(
 @router.get("/callback", name="google_calendar_callback")
 def google_calendar_callback(request: Request, code: str | None = None, state: str | None = None, error: str | None = None, db: Session = Depends(get_db)):
     try:
+        redirect_uri = _redirect_uri(request)
+        callback_path = urlparse(str(request.url)).path
+        frontend_return_url = _frontend_oauth_result_url("connected")
+        logger.info(
+            "GOOGLE_CALENDAR_CALLBACK_RECEIVED provider=%s redirect_uri=%s scopes=%s callback_path=%s frontend_return_url=%s has_code=%s has_state=%s error=%s integration=%s",
+            PROVIDER,
+            redirect_uri,
+            SCOPES,
+            callback_path,
+            frontend_return_url,
+            bool(code),
+            bool(state),
+            error,
+            PROVIDER,
+        )
         if error:
             raise HTTPException(status_code=400, detail="OAuth Google recusado")
         if not code or not state:
             raise HTTPException(status_code=400, detail="Callback OAuth inválido")
         payload = verify_oauth_state(state)
         tenant_id = uuid.UUID(str(payload["tenant_id"]))
-        token_payload = _exchange_code_for_tokens(code, _redirect_uri(request))
+        token_payload = _exchange_code_for_tokens(code, redirect_uri)
         access_token = token_payload.get("access_token")
         if not access_token:
             raise HTTPException(status_code=400, detail="Access token ausente")
