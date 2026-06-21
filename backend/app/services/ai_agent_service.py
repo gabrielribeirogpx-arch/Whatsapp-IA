@@ -392,16 +392,27 @@ def _format_calendar_conflict_prompt(payload: dict[str, Any], conflicting_events
 
 
 def _set_pending_google_calendar_create_event(session_state: dict[str, Any], payload: dict[str, Any], conflicting_events: list[dict[str, Any]], opts: dict[str, Any]) -> None:
-    session_state["pending_google_calendar_create_event"] = {
-        "summary": _calendar_create_summary(payload),
-        "start_time": _calendar_create_start(payload),
-        "end_time": _calendar_create_end(payload),
-        "timezone": _calendar_create_timezone(payload, opts),
-        "conflicting_events": conflicting_events,
-    }
+    pending = dict(payload)
+    pending.setdefault("summary", _calendar_create_summary(payload))
+    pending.setdefault("title", _calendar_create_summary(payload))
+    pending.setdefault("start", _calendar_create_start(payload))
+    pending.setdefault("end", _calendar_create_end(payload))
+    pending.setdefault("timezone", _calendar_create_timezone(payload, opts))
+    pending["conflicting_events"] = conflicting_events
+    session_state["pending_google_calendar_create_event"] = pending
 
 def _pending_to_create_payload(pending: dict[str, Any]) -> dict[str, Any]:
-    return {"title": pending.get("summary"), "summary": pending.get("summary"), "start": pending.get("start_time"), "end": pending.get("end_time"), "timezone": pending.get("timezone")}
+    payload = dict(pending)
+    payload.pop("conflicting_events", None)
+    payload.setdefault("title", payload.get("summary"))
+    payload.setdefault("summary", payload.get("title"))
+    if "start" not in payload and pending.get("start_time") is not None:
+        payload["start"] = pending.get("start_time")
+    if "end" not in payload and pending.get("end_time") is not None:
+        payload["end"] = pending.get("end_time")
+    payload["ignore_conflicts"] = True
+    payload["force_create"] = True
+    return payload
 
 def _calendar_pending_reply_intent(text: str) -> str | None:
     normalized = _strip_accents(str(text or "")).lower().strip()
