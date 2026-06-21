@@ -67,7 +67,7 @@ class IntegrationConnectionService:
         return f"{_PREFIX}{encrypted}"
 
     @classmethod
-    def decrypt_credential(cls, value: str | None) -> str | None:
+    def decrypt_credential_strict(cls, value: str | None) -> str | None:
         if value is None:
             return None
         item = value.strip()
@@ -75,8 +75,12 @@ class IntegrationConnectionService:
             return None
         if not item.startswith(_PREFIX):
             return item
+        return cls._fernet().decrypt(item[len(_PREFIX) :].encode("utf-8")).decode("utf-8")
+
+    @classmethod
+    def decrypt_credential(cls, value: str | None) -> str | None:
         try:
-            return cls._fernet().decrypt(item[len(_PREFIX) :].encode("utf-8")).decode("utf-8")
+            return cls.decrypt_credential_strict(value)
         except InvalidToken:
             return None
 

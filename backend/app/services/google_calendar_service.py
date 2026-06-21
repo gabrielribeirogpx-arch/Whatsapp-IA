@@ -10,6 +10,7 @@ from typing import Any, Callable
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import requests
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models.integration_connection import IntegrationConnection
@@ -29,6 +30,25 @@ def _now_utc_naive() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
+def _connection_lookup_diagnostics(tenant_id: uuid.UUID | str, provider: str = PROVIDER, *, active_only: bool = False) -> dict[str, Any]:
+    statement = select(IntegrationConnection).where(
+        IntegrationConnection.tenant_id == tenant_id,
+        IntegrationConnection.provider == provider,
+    )
+    filters: dict[str, Any] = {"tenant_id": str(tenant_id), "provider": provider}
+    if active_only:
+        filters["status"] = "active"
+    try:
+        compiled = statement.compile(compile_kwargs={"literal_binds": False})
+        sql = str(compiled)
+        params = {key: str(value) for key, value in compiled.params.items()}
+    except Exception as exc:
+        sql = None
+        params = {}
+        filters["sql_compile_error"] = f"{type(exc).__name__}: {exc}"
+    return {"integration_connection_sql": sql, "integration_connection_sql_params": params, "integration_connection_filters": filters}
+
+
 def _connection_metadata(conn: IntegrationConnection | None) -> dict[str, Any]:
     metadata = conn.metadata_json if conn and isinstance(conn.metadata_json, dict) else {}
     return {
@@ -39,6 +59,8 @@ def _connection_metadata(conn: IntegrationConnection | None) -> dict[str, Any]:
         "provider": conn.provider if conn else PROVIDER,
         "connected": bool(conn and conn.status == "active" and conn.auth_type == "oauth2"),
         "status": conn.status if conn else None,
+        "access_token_encrypted_is_not_null": bool(conn and conn.access_token_encrypted is not None),
+        "refresh_token_encrypted_is_not_null": bool(conn and conn.refresh_token_encrypted is not None),
         "access_token_present": bool(conn and conn.access_token_encrypted),
         "refresh_token_present": bool(conn and conn.refresh_token_encrypted),
     }
@@ -71,6 +93,7 @@ class GoogleCalendarService:
             logger.info("%s %s", event, sanitize_metadata(payload))
 
     def _connection(self, *, tool_name: str | None = None, input: Any = None) -> IntegrationConnection | None:
+        self._log("GOOGLE_CALENDAR_INTEGRATION_CONNECTION_QUERY", tool_name=tool_name, input=input, **_connection_lookup_diagnostics(self.tenant_id, PROVIDER, active_only=True))
         conn = self.connection_service.get_active_connection(self.tenant_id, PROVIDER)
         if not conn or conn.auth_type != "oauth2":
             self._log("GOOGLE_CALENDAR_CONNECTION_NOT_FOUND", tool_name=tool_name, input=input, conn=conn)
@@ -78,11 +101,22 @@ class GoogleCalendarService:
         self._log("GOOGLE_CALENDAR_CONNECTION_FOUND", tool_name=tool_name, input=input, conn=conn)
         return conn
 
+    def _decrypt_token(self, conn: IntegrationConnection, field_name: str, encrypted_value: str | None) -> str | None:
+        event_payload = {"token_field": field_name, "encrypted_value_is_not_null": encrypted_value is not None}
+        self._log(f"GOOGLE_CALENDAR_DECRYPT_{field_name.upper()}_START", conn=conn, **event_payload)
+        try:
+            decrypted = IntegrationConnectionService.decrypt_credential_strict(encrypted_value)
+        except Exception as exc:
+            self._log(f"GOOGLE_CALENDAR_DECRYPT_{field_name.upper()}_EXCEPTION", conn=conn, exception=exc, **event_payload)
+            raise
+        self._log(f"GOOGLE_CALENDAR_DECRYPT_{field_name.upper()}_END", conn=conn, decrypted_value_loaded=bool(decrypted), **event_payload)
+        return decrypted
+
     def _tokens(self, conn: IntegrationConnection) -> tuple[str | None, str | None]:
-        return (
-            IntegrationConnectionService.decrypt_credential(conn.access_token_encrypted),
-            IntegrationConnectionService.decrypt_credential(conn.refresh_token_encrypted),
-        )
+        access = self._decrypt_token(conn, "access_token_encrypted", conn.access_token_encrypted)
+        refresh = self._decrypt_token(conn, "refresh_token_encrypted", conn.refresh_token_encrypted)
+        self._log("GOOGLE_CALENDAR_TOKEN_DECRYPT_RESULT", conn=conn, access_token_loaded=bool(access), refresh_token_loaded=bool(refresh))
+        return access, refresh
 
     def _tenant_timezone(self, explicit: str | None = None) -> str:
         candidates = [explicit]
@@ -215,6 +249,7 @@ class GoogleCalendarService:
         return True, data, resp.status_code
 
     def _service_call(self, tool_name: str, input: dict[str, Any], operation: Callable[[], dict[str, Any]]) -> dict[str, Any]:
+        self._log("GOOGLE_CALENDAR_INTEGRATION_CONNECTION_QUERY", tool_name=tool_name, input=input, **_connection_lookup_diagnostics(self.tenant_id, PROVIDER))
         conn = self.connection_service.get_connection(self.tenant_id, PROVIDER)
         self._log("GOOGLE_CALENDAR_INTEGRATION_CONNECTION_LOADED", tool_name=tool_name, input=input, conn=conn)
         self._log("GOOGLE_CALENDAR_SERVICE_CALL", tool_name=tool_name, input=input, conn=conn)
