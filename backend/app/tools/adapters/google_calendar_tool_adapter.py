@@ -54,7 +54,7 @@ def google_calendar_tool_definitions(*, connected: bool) -> list[dict[str, Any]]
 
 
 def _connection_log_context(db: Session | None, tenant_id: Any) -> dict[str, Any]:
-    payload: dict[str, Any] = {"account_email": None, "calendar_id": "primary", "provider": PROVIDER, "connected": False, "status": None}
+    payload: dict[str, Any] = {"connection_id": None, "connection_tenant_id": None, "account_email": None, "calendar_id": "primary", "provider": PROVIDER, "connected": False, "status": None, "access_token_present": False, "refresh_token_present": False}
     if db is None or tenant_id is None:
         return payload
     try:
@@ -63,11 +63,15 @@ def _connection_log_context(db: Session | None, tenant_id: Any) -> dict[str, Any
         conn = IntegrationConnectionService(db).get_connection(tenant_id, PROVIDER)
         metadata = conn.metadata_json if conn and isinstance(conn.metadata_json, dict) else {}
         payload.update({
+            "connection_id": str(conn.id) if conn else None,
+            "connection_tenant_id": str(conn.tenant_id) if conn else None,
             "account_email": metadata.get("account_email"),
             "calendar_id": metadata.get("calendar_id") or "primary",
             "provider": conn.provider if conn else PROVIDER,
             "connected": bool(conn and conn.status == "active" and conn.auth_type == "oauth2"),
             "status": conn.status if conn else None,
+            "access_token_present": bool(conn and conn.access_token_encrypted),
+            "refresh_token_present": bool(conn and conn.refresh_token_encrypted),
         })
     except Exception as exc:
         payload.update({"exception_class": type(exc).__name__, "exception_message": str(exc), "traceback": "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))})
@@ -102,6 +106,8 @@ class GoogleCalendarToolAdapter:
         _log_tool("GOOGLE_CALENDAR_CONNECTION_FOUND" if connection_context.get("connected") else "GOOGLE_CALENDAR_CONNECTION_NOT_FOUND", tenant_id=context.tenant_id, tool_name=tool_id, input=args, db=db)
         try:
             service = self.service_factory(db, context.tenant_id)
+            _log_tool("GOOGLE_CALENDAR_ADAPTER_PAYLOAD", tenant_id=context.tenant_id, tool_name=tool_id, input=args, db=db, payload=args)
+            _log_tool("GOOGLE_CALENDAR_SERVICE_PAYLOAD", tenant_id=context.tenant_id, tool_name=tool_id, input=args, db=db, payload=args)
             _log_tool("GOOGLE_CALENDAR_SERVICE_CALL", tenant_id=context.tenant_id, tool_name=tool_id, input=args, db=db)
             if tool_id == "google_calendar_create_event":
                 result = service.create_event(**args)
