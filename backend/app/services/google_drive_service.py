@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os, uuid
+import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any
 import requests
@@ -14,6 +15,7 @@ DRIVE_URL = "https://www.googleapis.com/drive/v3"
 UPLOAD_URL = "https://www.googleapis.com/upload/drive/v3"
 DOCS_URL = "https://docs.googleapis.com/v1"
 NOT_CONNECTED_MESSAGE = "Google Drive não está conectado para este workspace."
+logger = logging.getLogger(__name__)
 
 
 def _now() -> datetime:
@@ -125,6 +127,25 @@ class GoogleDriveService:
 
     def create_folder(self, **kwargs: Any) -> dict[str, Any]:
         name = str(kwargs.get("name") or kwargs.get("title") or "Nova pasta")
-        ok, data, _ = self._request("POST", f"{DRIVE_URL}/files", json_body={"name": name, "mimeType": "application/vnd.google-apps.folder"})
+        parent_id = str(kwargs.get("parent_id") or kwargs.get("parent") or "").strip()
+        escaped_name = name.replace("\\", "\\\\").replace("'", "\\'")
+        parent_ref = parent_id or "root"
+        parent_query = f" and '{parent_ref}' in parents"
+        params = {
+            "q": f"name = '{escaped_name}' and mimeType = 'application/vnd.google-apps.folder' and trashed=false{parent_query}",
+            "pageSize": 1,
+            "fields": "files(id,name,mimeType,modifiedTime,webViewLink)",
+        }
+        ok, existing_data, _ = self._request("GET", f"{DRIVE_URL}/files", params=params)
+        if not ok:
+            return {"ok": False, **existing_data}
+        existing_files = existing_data.get("files", []) if isinstance(existing_data, dict) else []
+        if existing_files:
+            logger.info("event=GOOGLE_DRIVE_CREATE_FOLDER_EXISTING_FOUND name=%s parent_id=%s", name, parent_ref)
+            return {"ok": True, "existing": True, "folder": self._file_out(existing_files[0])}
+        body = {"name": name, "mimeType": "application/vnd.google-apps.folder"}
+        if parent_id:
+            body["parents"] = [parent_id]
+        ok, data, _ = self._request("POST", f"{DRIVE_URL}/files", json_body=body)
         if not ok: return {"ok": False, **data}
-        return {"ok": True, "folder": self._file_out(data)}
+        return {"ok": True, "existing": False, "folder": self._file_out(data)}
