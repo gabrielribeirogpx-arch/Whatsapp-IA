@@ -94,10 +94,17 @@ class IntegrationConnectionService:
         ).scalars().first()
 
     def get_active_connection(self, tenant_id: uuid.UUID, provider: str) -> IntegrationConnection | None:
-        connection = self.get_connection(tenant_id, provider)
-        if not connection or connection.status != "active":
-            return None
-        return connection
+        provider = self.normalize_provider(provider)
+        return self.db.execute(
+            select(IntegrationConnection)
+            .where(
+                IntegrationConnection.tenant_id == tenant_id,
+                IntegrationConnection.provider == provider,
+                IntegrationConnection.status == "active",
+            )
+            .order_by(IntegrationConnection.updated_at.desc())
+            .limit(1)
+        ).scalars().first()
 
     def list_connections(self, tenant_id: uuid.UUID) -> list[IntegrationConnection]:
         return list(

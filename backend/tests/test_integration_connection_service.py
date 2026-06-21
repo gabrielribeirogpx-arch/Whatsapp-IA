@@ -58,9 +58,16 @@ class FakeDb:
         provider = params.get("provider_1")
         if tenant_id is not None:
             rows = [row for row in rows if row.tenant_id == tenant_id]
+        status = params.get("status_1")
         if provider is not None:
             rows = [row for row in rows if row.provider == provider]
-        rows.sort(key=lambda row: row.provider)
+        if status is not None:
+            rows = [row for row in rows if row.status == status]
+        if "updated_at" in str(statement) and "DESC" in str(statement):
+            rows.sort(key=lambda row: row.updated_at, reverse=True)
+            rows = rows[:1]
+        else:
+            rows.sort(key=lambda row: row.provider)
         return _ExecuteResult(rows)
 
 
