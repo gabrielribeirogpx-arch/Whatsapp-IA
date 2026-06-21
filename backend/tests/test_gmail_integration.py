@@ -4,6 +4,7 @@ import base64
 import hashlib
 import hmac
 import json
+import logging
 import uuid
 from datetime import datetime, timedelta
 from types import SimpleNamespace
@@ -176,6 +177,34 @@ def _signed_state(payload: dict) -> str:
     signature = hmac.new(b"state-secret", payload_b64.encode("ascii"), hashlib.sha256).digest()
     sig_b64 = base64.urlsafe_b64encode(signature).decode("ascii").rstrip("=")
     return f"{payload_b64}.{sig_b64}"
+
+
+def test_gmail_redirect_uri_uses_base_url_when_gmail_redirect_uri_absent(monkeypatch):
+    monkeypatch.delenv("GMAIL_REDIRECT_URI", raising=False)
+    monkeypatch.setenv("GOOGLE_REDIRECT_URI", "https://api.example.com/api/integrations/google-calendar/callback")
+    monkeypatch.setenv("BASE_URL", "https://api.example.com/")
+    app = FastAPI()
+    app.include_router(gmail_router, prefix="/api")
+    client = TestClient(app)
+
+    redirect_uri = gmail_router_module._redirect_uri(client.build_request("GET", "/api/integrations/gmail/connect"))
+
+    assert redirect_uri == "https://api.example.com/api/integrations/gmail/callback"
+    assert "google-calendar/callback" not in redirect_uri
+
+
+def test_gmail_redirect_uri_logs_resolved_value(gmail_oauth_env, caplog):
+    app = FastAPI()
+    app.include_router(gmail_router, prefix="/api")
+    client = TestClient(app)
+
+    with caplog.at_level(logging.INFO, logger=gmail_router_module.__name__):
+        redirect_uri = gmail_router_module._redirect_uri(client.build_request("GET", "/api/integrations/gmail/connect"))
+
+    assert redirect_uri == "https://app.example.com/api/integrations/gmail/callback"
+    assert "GMAIL_REDIRECT_URI_RESOLVED" in caplog.text
+    assert '"provider":"gmail"' in caplog.text
+    assert '"redirect_uri":"https://app.example.com/api/integrations/gmail/callback"' in caplog.text
 
 
 def test_gmail_state_contains_provider_and_rejects_google_calendar_provider(gmail_oauth_env):
