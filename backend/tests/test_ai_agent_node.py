@@ -689,7 +689,7 @@ def test_ai_agent_google_calendar_create_precheck_busy_sets_pending(monkeypatch)
     monkeypatch.setattr(svc.ToolRegistry, "execute", fake_execute)
     result = svc.run_agent_for_tenant(object(), uuid.uuid4(), "Crie um compromisso amanhã às 09:00 chamado Call online", "instr", ["chamar_mcp", "responder"], {"mcp_tools": [{"tool_id": "google_calendar_create_event"}], "session_state": session_state}, options={"timezone": "America/Sao_Paulo"})
     assert calls == ["google_calendar_check_availability"]
-    assert result.message == "Você já possui compromisso amanhã às 09:00: Reunião Online. Deseja criar mesmo assim?"
+    assert result.message == 'Você já possui um compromisso amanhã às 09:00:\n\n• Reunião Online\n\nDeseja criar "Call online" mesmo assim?'
     pending = session_state["pending_google_calendar_create_event"]
     assert pending["summary"] == "Call online"
     assert pending["conflicting_events"][0]["summary"] == "Reunião Online"
@@ -706,7 +706,7 @@ def test_ai_agent_google_calendar_create_precheck_busy_uses_title_when_summary_m
 
     monkeypatch.setattr(svc.ToolRegistry, "execute", fake_execute)
     result = svc.run_agent_for_tenant(object(), uuid.uuid4(), "Crie um compromisso amanhã às 09:00 chamado Call online", "instr", ["chamar_mcp", "responder"], {"mcp_tools": [{"tool_id": "google_calendar_create_event"}], "session_state": session_state}, options={"timezone": "America/Sao_Paulo"})
-    assert result.message == "Você já possui compromisso amanhã às 09:00: Reunião Online. Deseja criar mesmo assim?"
+    assert result.message == 'Você já possui um compromisso amanhã às 09:00:\n\n• Reunião Online\n\nDeseja criar "Call online" mesmo assim?'
 
 
 def test_ai_agent_google_calendar_create_precheck_busy_lists_multiple_events(monkeypatch):
@@ -723,7 +723,7 @@ def test_ai_agent_google_calendar_create_precheck_busy_lists_multiple_events(mon
 
     monkeypatch.setattr(svc.ToolRegistry, "execute", fake_execute)
     result = svc.run_agent_for_tenant(object(), uuid.uuid4(), "Crie um compromisso amanhã às 09:00 chamado Call online", "instr", ["chamar_mcp", "responder"], {"mcp_tools": [{"tool_id": "google_calendar_create_event"}], "session_state": session_state}, options={"timezone": "America/Sao_Paulo"})
-    assert result.message == "Você já possui estes compromissos nesse horário:\n• Reunião Online\n• Café\nDeseja criar mesmo assim?"
+    assert result.message == 'Já existem 2 compromissos amanhã às 09:00:\n\n• Reunião Online\n• Café\n\nDeseja criar "Call online" mesmo assim?'
 
 
 def test_ai_agent_google_calendar_create_precheck_busy_falls_back_to_compromisso_without_name(monkeypatch):
@@ -737,7 +737,7 @@ def test_ai_agent_google_calendar_create_precheck_busy_falls_back_to_compromisso
 
     monkeypatch.setattr(svc.ToolRegistry, "execute", fake_execute)
     result = svc.run_agent_for_tenant(object(), uuid.uuid4(), "Crie um compromisso amanhã às 09:00 chamado Call online", "instr", ["chamar_mcp", "responder"], {"mcp_tools": [{"tool_id": "google_calendar_create_event"}], "session_state": session_state}, options={"timezone": "America/Sao_Paulo"})
-    assert result.message == "Você já possui compromisso amanhã às 09:00: compromisso. Deseja criar mesmo assim?"
+    assert result.message == 'Você já possui um compromisso amanhã às 09:00:\n\n• compromisso\n\nDeseja criar "Call online" mesmo assim?'
 
 
 
@@ -778,7 +778,7 @@ def test_ai_agent_google_calendar_conflict_confirmation_creates_directly_without
         {"mcp_tools": [{"tool_id": "google_calendar_create_event"}], "session_state": session_state},
         options={"timezone": "America/Sao_Paulo"},
     )
-    assert first.message == "Você já possui compromisso amanhã às 09:00: Reunião Online. Deseja criar mesmo assim?"
+    assert first.message == 'Você já possui um compromisso amanhã às 09:00:\n\n• Reunião Online\n\nDeseja criar "Teste" mesmo assim?'
     assert calls == [("google_calendar_check_availability", calls[0][1])]
     assert "pending_google_calendar_create_event" in session_state
 
@@ -802,10 +802,11 @@ def test_ai_agent_google_calendar_conflict_confirmation_creates_directly_without
 
 
 def test_ai_agent_google_calendar_pending_confirmation_accepts_ok_and_confirmar(monkeypatch):
-    assert svc._calendar_pending_reply_intent("ok") == "confirm"
-    assert svc._calendar_pending_reply_intent("confirmar") == "confirm"
-    assert svc._calendar_pending_reply_intent("pode criar") == "confirm"
-    assert svc._calendar_pending_reply_intent("yes") == "confirm"
+    from app.services.pending_action_service import detect_pending_action_decision
+    assert detect_pending_action_decision("ok") == "confirm"
+    assert detect_pending_action_decision("confirmar") == "confirm"
+    assert detect_pending_action_decision("pode criar") == "confirm"
+    assert detect_pending_action_decision("yes") == "confirm"
 
 def test_ai_agent_google_calendar_pending_yes_creates(monkeypatch):
     from app.tools.base import NormalizedToolResult, ToolResult
@@ -830,7 +831,7 @@ def test_ai_agent_google_calendar_pending_no_cancels(monkeypatch):
     session_state = {"pending_google_calendar_create_event": {"summary": "Call online", "start_time": "2026-06-22T09:00:00-03:00", "end_time": "2026-06-22T10:00:00-03:00", "timezone": "America/Sao_Paulo", "conflicting_events": []}}
     monkeypatch.setattr(svc.ToolRegistry, "execute", lambda *a, **k: (_ for _ in ()).throw(AssertionError("Tool should not be called")))
     result = svc.run_agent_for_tenant(object(), uuid.uuid4(), "não", "instr", ["chamar_mcp", "responder"], {"mcp_tools": [{"tool_id": "google_calendar_create_event"}], "session_state": session_state})
-    assert result.message == "Tudo bem, não criei o compromisso."
+    assert result.message == "Tudo bem, operação cancelada."
     assert "pending_google_calendar_create_event" not in session_state
 
 
@@ -848,7 +849,7 @@ def test_ai_agent_google_calendar_after_pending_cancel_new_messages_follow_norma
 
     monkeypatch.setattr(svc.ToolRegistry, "execute", fake_execute)
     cancelled = svc.run_agent_for_tenant(object(), uuid.uuid4(), "não", "instr", ["chamar_mcp", "responder"], {"mcp_tools": [{"tool_id": "google_calendar_create_event"}], "session_state": session_state}, options={"timezone": "America/Sao_Paulo"})
-    assert cancelled.message == "Tudo bem, não criei o compromisso."
+    assert cancelled.message == "Tudo bem, operação cancelada."
     assert "pending_google_calendar_create_event" not in session_state
 
     created = svc.run_agent_for_tenant(object(), uuid.uuid4(), "Crie um compromisso amanhã às 09:00 chamado Novo", "instr", ["chamar_mcp", "responder"], {"mcp_tools": [{"tool_id": "google_calendar_create_event"}], "session_state": session_state}, options={"timezone": "America/Sao_Paulo"})
@@ -872,7 +873,7 @@ def test_ai_agent_google_calendar_llm_create_precheck_busy(monkeypatch):
     monkeypatch.setattr(svc.ToolRegistry, "execute", fake_execute)
     result = svc.run_agent_for_tenant(object(), uuid.uuid4(), "crie evento", "instr", ["chamar_mcp", "responder"], {"mcp_tools": [{"tool_id": "google_calendar_create_event"}], "session_state": session_state}, options={"max_steps": 1}, budget=budget)
     assert calls == ["google_calendar_check_availability"]
-    assert result.message == "Você já possui compromisso amanhã às 09:00: Reunião Online. Deseja criar mesmo assim?"
+    assert result.message == 'Você já possui um compromisso amanhã às 09:00:\n\n• Reunião Online\n\nDeseja criar "Call online" mesmo assim?'
     assert session_state["pending_google_calendar_create_event"]["summary"] == "Call online"
     assert result.metadata["budget_node_tool_calls_used"] == 1
     assert result.metadata["budget_mcp_calls_used"] == 0

@@ -22,7 +22,7 @@ from app.context_engine import UnifiedContextEngine
 from app.services.circuit_breaker_service import CircuitBreakerOpen, check_circuit, record_failure, record_success
 from app.services.execution_budget_service import ExecutionBudgetExceeded, ExecutionBudget
 from app.services.long_term_memory_service import ALLOWED_FACT_TYPES, SECRET_RE, store_fact
-from app.services.pending_action_service import CALENDAR_CREATE_CONFIRMATION, PendingActionService
+from app.services.pending_action_service import CALENDAR_CREATE_CONFIRMATION, PendingActionHandlerRegistry, PendingActionService, detect_pending_action_decision, format_pending_calendar_create_conflict_message, normalize_calendar_conflicting_event
 from app.tools import ToolContext, ToolRegistry
 from app.tools.adapters.google_calendar_tool_adapter import GOOGLE_CALENDAR_TOOL_IDS, GoogleCalendarToolAdapter
 from app.tools.adapters.mcp_tool_adapter import MCPToolAdapter
@@ -368,7 +368,7 @@ def _google_calendar_busy_events(output: Any) -> list[dict[str, Any]]:
     if not isinstance(output, dict):
         return []
     busy = output.get("busy") or output.get("conflicting_events") or output.get("events") or []
-    return [item for item in busy if isinstance(item, dict)] if isinstance(busy, list) else []
+    return [normalize_calendar_conflicting_event(item) for item in busy if isinstance(item, dict)] if isinstance(busy, list) else []
 
 
 def _calendar_conflicting_event_title(event: dict[str, Any]) -> str:
@@ -379,18 +379,8 @@ def _calendar_conflicting_event_title(event: dict[str, Any]) -> str:
 
 
 def _format_calendar_conflict_prompt(payload: dict[str, Any], conflicting_events: list[dict[str, Any]]) -> str:
-    start_raw = _calendar_create_start(payload) or ""
-    try:
-        start_dt = datetime.fromisoformat(start_raw)
-        time_label = start_dt.strftime("%H:%M")
-    except Exception:
-        time_label = start_raw[11:16] if len(start_raw) >= 16 else start_raw
-    date_label = str(payload.get("date_label") or "amanhã")
-    titles = [_calendar_conflicting_event_title(event) for event in conflicting_events] or ["compromisso"]
-    if len(titles) > 1:
-        bullet_list = "\n".join(f"• {title}" for title in titles)
-        return f"Você já possui estes compromissos nesse horário:\n{bullet_list}\nDeseja criar mesmo assim?"
-    return f"Você já possui compromisso {date_label} às {time_label}: {titles[0]}. Deseja criar mesmo assim?"
+    pending_payload = _build_calendar_pending_payload(payload, conflicting_events, {"timezone": payload.get("timezone")})
+    return format_pending_calendar_create_conflict_message(pending_payload)
 
 
 def _build_calendar_pending_payload(payload: dict[str, Any], conflicting_events: list[dict[str, Any]], opts: dict[str, Any]) -> dict[str, Any]:
@@ -400,7 +390,9 @@ def _build_calendar_pending_payload(payload: dict[str, Any], conflicting_events:
     pending.setdefault("start", _calendar_create_start(payload))
     pending.setdefault("end", _calendar_create_end(payload))
     pending.setdefault("timezone", _calendar_create_timezone(payload, opts))
-    pending["conflicting_events"] = conflicting_events
+    pending["start_time"] = _calendar_create_start(payload)
+    pending["end_time"] = _calendar_create_end(payload)
+    pending["conflicting_events"] = [normalize_calendar_conflicting_event(event) for event in conflicting_events if isinstance(event, dict)]
     return pending
 
 def _set_pending_google_calendar_create_event(session_state: dict[str, Any], payload: dict[str, Any], conflicting_events: list[dict[str, Any]], opts: dict[str, Any]) -> None:
@@ -711,6 +703,42 @@ def _pending_context(tool_configs: dict[str, Any] | None, opts: dict[str, Any]) 
     external_user_id = opts.get("external_user_id") or memory.get("contact_id") or memory.get("external_user_id")
     return conversation_id, session_id, str(external_user_id) if external_user_id else None
 
+@dataclass
+class _SessionPendingAction:
+    action_type: str
+    payload_json: dict[str, Any]
+    id: str = "session_state"
+
+
+def _handle_calendar_create_confirmation(*, tenant_id: Any, conversation_id: Any, pending_action: Any, user_message: str, context: dict[str, Any]) -> str:
+    payload = _pending_to_create_payload(getattr(pending_action, "payload_json", {}) or {})
+    tool_registry: ToolRegistry = context["tool_registry"]
+    tool_context: ToolContext = context["tool_context"]
+    mcp_tools = context.get("mcp_tools") or []
+    db = context.get("db")
+    budget: ExecutionBudget | None = context.get("budget")
+    pending_action_service: PendingActionService | None = context.get("pending_action_service")
+    db_pending = context.get("db_pending")
+    session_state = context.get("session_state") if isinstance(context.get("session_state"), dict) else {}
+    if budget is not None:
+        budget.consume_node_tool_call()
+    registry_result = tool_registry.execute("google_calendar", "google_calendar_create_event", payload, tool_context, {"mcp_tools": mcp_tools, "db": db})
+    if registry_result.ok:
+        if pending_action_service is not None and db_pending is not None and conversation_id is not None:
+            pending_action_service.consume_pending_action(tenant_id=tenant_id, conversation_id=conversation_id, pending_id=getattr(db_pending, "id", None))
+        session_state.pop("pending_google_calendar_create_event", None)
+        return _format_calendar_success_message({"title": _calendar_create_summary(payload), "start": payload["start"]})
+    normalized = registry_result.normalized_result.to_dict() if registry_result.normalized_result else {}
+    reason = _calendar_error_reason(registry_result, normalized)
+    return f"Não consegui acessar o Google Calendar agora: {reason}"
+
+
+def _pending_action_registry() -> PendingActionHandlerRegistry:
+    registry = PendingActionHandlerRegistry()
+    registry.register(action_type=CALENDAR_CREATE_CONFIRMATION, handler=_handle_calendar_create_confirmation)
+    return registry
+
+
 def run_agent_for_tenant(db: Session, tenant_id, input_text: str, instruction: str, allowed_tools: list[str], tool_configs: dict[str, Any] | None, memory_context: str | None = None, options: dict[str, Any] | None = None, node_tool_executor=None, subflow_tool_executor=None, mcp_tool_executor=None, budget: ExecutionBudget | None = None) -> AgentRunResult:
     started = time.monotonic()
     trace = TraceContext.from_mapping(options or {}, tenant_id=tenant_id)
@@ -752,41 +780,46 @@ def run_agent_for_tenant(db: Session, tenant_id, input_text: str, instruction: s
     conversation_id, session_id, external_user_id = _pending_context(tool_configs, opts)
     pending_action_service = PendingActionService(db)
     db_pending = pending_action_service.get_pending_action(tenant_id=tenant_id, conversation_id=conversation_id) if conversation_id is not None else None
-    pending_create = db_pending.payload_json if db_pending is not None else (session_state.get("pending_google_calendar_create_event") if isinstance(session_state, dict) else None)
-    pending_action_type = db_pending.action_type if db_pending is not None else (CALENDAR_CREATE_CONFIRMATION if isinstance(pending_create, dict) else None)
-    pending_intent = _calendar_pending_reply_intent(str(input_text or "")) if isinstance(pending_create, dict) else None
-    if pending_intent == "cancel":
-        if db_pending is not None and conversation_id is not None:
-            pending_action_service.cancel_pending_action(tenant_id=tenant_id, conversation_id=conversation_id, pending_id=db_pending.id)
-        session_state.pop("pending_google_calendar_create_event", None)
-        _json_log("AI_AGENT_CALENDAR_CREATE_CONFLICT_CANCELLED")
-        msg = "Tudo bem, operação cancelada."
-        result.message = msg
-        result.actions.append(AgentToolAction("message", {"message": msg}))
-        result.status = "success"
-        result.final_tool = "responder"
-        result.metadata = {**(budget.safe_metadata() if budget else {})}
-        return result
-    if pending_intent == "confirm" and pending_action_type == CALENDAR_CREATE_CONFIRMATION:
-        payload = _pending_to_create_payload(pending_create)
-        _json_log("AI_AGENT_CALENDAR_CREATE_CONFLICT_CONFIRMED", input=payload)
+    session_pending_payload = session_state.get("pending_google_calendar_create_event") if isinstance(session_state, dict) else None
+    pending_action = db_pending if db_pending is not None else (_SessionPendingAction(CALENDAR_CREATE_CONFIRMATION, session_pending_payload) if isinstance(session_pending_payload, dict) else None)
+    if pending_action is not None:
+        decision = detect_pending_action_decision(str(input_text or ""))
+        pending_action_type = str(getattr(pending_action, "action_type", "") or "")
+        pending_id = getattr(pending_action, "id", None)
+        _json_log("PENDING_ACTION_DECISION_DETECTED", tenant_id=str(tenant_id), conversation_id=str(conversation_id), action_type=pending_action_type, pending_id=str(pending_id), decision=decision)
+        if decision == "cancel":
+            if db_pending is not None and conversation_id is not None:
+                pending_action_service.cancel_pending_action(tenant_id=tenant_id, conversation_id=conversation_id, pending_id=db_pending.id)
+            session_state.pop("pending_google_calendar_create_event", None)
+            msg = "Tudo bem, operação cancelada."
+            result.message = msg
+            result.actions.append(AgentToolAction("message", {"message": msg}))
+            result.status = "success"
+            result.final_tool = "responder"
+            result.metadata = {**(budget.safe_metadata() if budget else {})}
+            return result
+        if decision == "unknown":
+            msg = "Entendi. Você quer confirmar ou cancelar essa ação?"
+            result.message = msg
+            result.actions.append(AgentToolAction("message", {"message": msg}))
+            result.status = "success"
+            result.final_tool = "responder"
+            result.metadata = {**(budget.safe_metadata() if budget else {})}
+            return result
         try:
-            if budget is not None:
-                budget.consume_node_tool_call()
-            registry_result = tool_registry.execute("google_calendar", "google_calendar_create_event", payload, tool_context, {"mcp_tools": mcp_tools, "db": db})
+            response = _pending_action_registry().handle(
+                tenant_id=tenant_id,
+                conversation_id=conversation_id,
+                pending_action=pending_action,
+                user_message=str(input_text or ""),
+                context={"decision": decision, "tool_registry": tool_registry, "tool_context": tool_context, "mcp_tools": mcp_tools, "db": db, "budget": budget, "pending_action_service": pending_action_service, "db_pending": db_pending, "session_state": session_state},
+            )
         except ExecutionBudgetExceeded:
             return AgentRunResult(message=fallback, status="budget_exceeded", fallback_used=True, steps_count=0, final_tool="chamar_mcp", metadata={**(budget.safe_metadata() if budget else {}), "budget_exceeded": True})
-        if registry_result.ok:
-            if db_pending is not None and conversation_id is not None:
-                pending_action_service.consume_pending_action(tenant_id=tenant_id, conversation_id=conversation_id, pending_id=db_pending.id)
-            session_state.pop("pending_google_calendar_create_event", None)
-        normalized = registry_result.normalized_result.to_dict() if registry_result.normalized_result else {}
-        reason = None if registry_result.ok else _calendar_error_reason(registry_result, normalized)
-        msg = _format_calendar_success_message({"title": _calendar_create_summary(payload), "start": payload["start"]}) if registry_result.ok else f"Não consegui acessar o Google Calendar agora: {reason}"
-        result.message = msg[:4000]
+        result.message = response[:4000]
         result.actions.append(AgentToolAction("message", {"message": result.message}))
-        result.status = "success" if registry_result.ok else "error"
-        result.final_tool = "chamar_mcp"
+        result.status = "error" if response.startswith("Não consegui") else "success"
+        result.final_tool = "chamar_mcp" if pending_action_type == CALENDAR_CREATE_CONFIRMATION and decision == "confirm" else "responder"
         result.tools_used.append("chamar_mcp")
         result.metadata = {"mcp_call_count": 0, "mcp_tools_used": [{"tool_id": "google_calendar_create_event", "status": result.status, "tool_type": "google_calendar"}], **(budget.safe_metadata() if budget else {})}
         return result
