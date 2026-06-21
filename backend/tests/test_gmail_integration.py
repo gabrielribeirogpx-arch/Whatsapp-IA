@@ -135,6 +135,35 @@ def test_gmail_send_creates_pending_and_confirmation_sends(monkeypatch):
     assert sent["tool_id"] == "gmail_send_email"
 
 
+def test_ai_agent_lists_latest_emails_with_dynamic_gmail_tool(monkeypatch):
+    tenant_id = uuid.uuid4()
+    db = FakeDB(active_connection(tenant_id))
+    monkeypatch.setattr(IntegrationConnectionService, "get_active_connection", lambda self, tenant, provider: active_connection(tenant) if provider == "gmail" else None)
+    monkeypatch.setattr("app.services.ai_agent_service.generate_answer_for_tenant", lambda *a, **k: (_ for _ in ()).throw(AssertionError("LLM should not deny email access when Gmail tool is connected")))
+
+    calls = {}
+    def fake_execute(self, tool_type, tool_id, input, context, config=None):
+        calls.update({"tool_type": tool_type, "tool_id": tool_id, "input": input})
+        from app.tools.base import ToolResult, NormalizedToolResult
+        output = {"ok": True, "messages": [{"id": "m1", "subject": "Bem-vindo", "from": "a@example.com"}]}
+        return ToolResult(
+            True,
+            "gmail",
+            tool_id=tool_id,
+            output=output,
+            normalized_result=NormalizedToolResult(True, tool_id, type="gmail.list_messages", summary="ok", data=output),
+        )
+    monkeypatch.setattr("app.tools.registry.ToolRegistry.execute", fake_execute)
+
+    result = run_agent_for_tenant(db, tenant_id, "Liste meus últimos e-mails", "", ["chamar_mcp", "responder"], {})
+
+    assert calls["tool_type"] == "gmail"
+    assert calls["tool_id"] == "gmail_list_messages"
+    assert result.final_tool == "chamar_mcp"
+    assert "não tenho acesso" not in (result.message or "").lower()
+    assert "Bem-vindo" in (result.message or "")
+
+
 def test_gmail_send_cancel_does_not_send(monkeypatch):
     tenant_id = uuid.uuid4()
     conversation_id = uuid.uuid4()
