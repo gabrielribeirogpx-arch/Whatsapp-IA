@@ -405,9 +405,43 @@ def _pending_to_create_payload(pending: dict[str, Any]) -> dict[str, Any]:
 
 def _calendar_pending_reply_intent(text: str) -> str | None:
     normalized = _strip_accents(str(text or "")).lower().strip()
-    if normalized in {"sim", "pode criar", "crie mesmo assim", "confirmo"}:
+    normalized = re.sub(r"[\s.!?,;:]+$", "", normalized)
+    confirm_phrases = {
+        "sim",
+        "s",
+        "ok",
+        "okay",
+        "confirmar",
+        "confirmo",
+        "confirmado",
+        "pode criar",
+        "pode agendar",
+        "crie",
+        "criar",
+        "crie mesmo assim",
+        "pode criar mesmo assim",
+        "sim pode criar",
+        "yes",
+        "y",
+        "yeah",
+        "yep",
+    }
+    cancel_phrases = {
+        "nao",
+        "não",
+        "n",
+        "cancela",
+        "cancelar",
+        "cancele",
+        "não precisa",
+        "nao precisa",
+        "não crie",
+        "nao crie",
+        "no",
+    }
+    if normalized in confirm_phrases:
         return "confirm"
-    if normalized in {"nao", "não", "cancela", "não precisa", "nao precisa"}:
+    if normalized in cancel_phrases:
         return "cancel"
     return None
 
@@ -690,7 +724,8 @@ def run_agent_for_tenant(db: Session, tenant_id, input_text: str, instruction: s
             registry_result = tool_registry.execute("google_calendar", "google_calendar_create_event", payload, tool_context, {"mcp_tools": mcp_tools, "db": db})
         except ExecutionBudgetExceeded:
             return AgentRunResult(message=fallback, status="budget_exceeded", fallback_used=True, steps_count=0, final_tool="chamar_mcp", metadata={**(budget.safe_metadata() if budget else {}), "budget_exceeded": True})
-        session_state.pop("pending_google_calendar_create_event", None)
+        if registry_result.ok:
+            session_state.pop("pending_google_calendar_create_event", None)
         normalized = registry_result.normalized_result.to_dict() if registry_result.normalized_result else {}
         reason = None if registry_result.ok else _calendar_error_reason(registry_result, normalized)
         msg = _format_calendar_success_message({"title": _calendar_create_summary(payload), "start": payload["start"]}) if registry_result.ok else f"Não consegui acessar o Google Calendar agora: {reason}"
