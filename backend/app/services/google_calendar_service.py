@@ -25,6 +25,9 @@ TOKEN_URL = "https://oauth2.googleapis.com/token"
 NOT_CONNECTED_MESSAGE = "Google Calendar não está conectado para este workspace."
 DEFAULT_TIMEZONE = "America/Sao_Paulo"
 
+class GoogleCalendarTokenDecryptError(RuntimeError):
+    """Raised when an encrypted Google Calendar credential cannot be decrypted."""
+
 
 def _now_utc_naive() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
@@ -37,7 +40,10 @@ def _connection_lookup_diagnostics(tenant_id: uuid.UUID | str, provider: str = P
     )
     filters: dict[str, Any] = {"tenant_id": str(tenant_id), "provider": provider}
     if active_only:
+        statement = statement.where(IntegrationConnection.status == "active").order_by(IntegrationConnection.updated_at.desc()).limit(1)
         filters["status"] = "active"
+        filters["order_by"] = "updated_at desc"
+        filters["limit"] = 1
     try:
         compiled = statement.compile(compile_kwargs={"literal_binds": False})
         sql = str(compiled)
@@ -99,16 +105,32 @@ class GoogleCalendarService:
             self._log("GOOGLE_CALENDAR_CONNECTION_NOT_FOUND", tool_name=tool_name, input=input, conn=conn)
             return None
         self._log("GOOGLE_CALENDAR_CONNECTION_FOUND", tool_name=tool_name, input=input, conn=conn)
+        self._log(
+            "GOOGLE_CALENDAR_CONNECTION_ROW",
+            tool_name=tool_name,
+            input=input,
+            conn=conn,
+            access_token_encrypted_len=len(conn.access_token_encrypted or "") if conn.access_token_encrypted is not None else 0,
+            refresh_token_encrypted_len=len(conn.refresh_token_encrypted or "") if conn.refresh_token_encrypted is not None else 0,
+            expires_at=conn.expires_at.isoformat() if conn.expires_at else None,
+        )
         return conn
 
     def _decrypt_token(self, conn: IntegrationConnection, field_name: str, encrypted_value: str | None) -> str | None:
         event_payload = {"token_field": field_name, "encrypted_value_is_not_null": encrypted_value is not None}
+        if field_name == "refresh_token_encrypted":
+            self._log("GOOGLE_CALENDAR_REFRESH_TOKEN_DECRYPT_START", conn=conn, **event_payload)
         self._log(f"GOOGLE_CALENDAR_DECRYPT_{field_name.upper()}_START", conn=conn, **event_payload)
         try:
             decrypted = IntegrationConnectionService.decrypt_credential_strict(encrypted_value)
         except Exception as exc:
+            if field_name == "refresh_token_encrypted":
+                self._log("GOOGLE_CALENDAR_REFRESH_TOKEN_DECRYPT_FAILED", conn=conn, exception=exc, **event_payload)
+                raise GoogleCalendarTokenDecryptError("google_calendar_token_decrypt_failed") from exc
             self._log(f"GOOGLE_CALENDAR_DECRYPT_{field_name.upper()}_EXCEPTION", conn=conn, exception=exc, **event_payload)
             raise
+        if field_name == "refresh_token_encrypted":
+            self._log("GOOGLE_CALENDAR_REFRESH_TOKEN_DECRYPT_SUCCESS", conn=conn, decrypted_value_loaded=bool(decrypted), **event_payload)
         self._log(f"GOOGLE_CALENDAR_DECRYPT_{field_name.upper()}_END", conn=conn, decrypted_value_loaded=bool(decrypted), **event_payload)
         return decrypted
 
@@ -177,7 +199,12 @@ class GoogleCalendarService:
             return {"ok": False, "message": NOT_CONNECTED_MESSAGE}
         if not force and conn.expires_at and conn.expires_at > _now_utc_naive() + timedelta(seconds=60):
             return {"ok": True, "refreshed": False}
-        _access, refresh = self._tokens(conn)
+        try:
+            _access, refresh = self._tokens(conn)
+        except GoogleCalendarTokenDecryptError:
+            return {"ok": False, "message": "google_calendar_token_decrypt_failed"}
+        if conn.refresh_token_encrypted and not refresh:
+            return {"ok": False, "message": "google_calendar_refresh_token_empty_after_decrypt"}
         if not refresh:
             return {"ok": False, "message": "Refresh token do Google Calendar não está disponível."}
         logger.info("GOOGLE_CALENDAR_TOKEN_REFRESH tenant_id=%s", self.tenant_id)
@@ -211,7 +238,12 @@ class GoogleCalendarService:
             if refreshed.get("ok") is False:
                 return False, refreshed, 0
             conn = self._connection(tool_name=f"{method} {path}", input={"params": params, "json_body": json_body})
-        access, refresh = self._tokens(conn)
+        try:
+            access, refresh = self._tokens(conn)
+        except GoogleCalendarTokenDecryptError:
+            return False, {"message": "google_calendar_token_decrypt_failed"}, 0
+        if conn.refresh_token_encrypted and not refresh:
+            return False, {"message": "google_calendar_refresh_token_empty_after_decrypt"}, 0
         self._log("GOOGLE_CALENDAR_TOKEN_PRESENCE", tool_name=f"{method} {path}", input={"params": params, "json_body": json_body}, conn=conn, access_token_present=bool(access), refresh_token_present=bool(refresh))
         if not access:
             self._log("GOOGLE_CALENDAR_REQUEST_BLOCKED", tool_name=f"{method} {path}", input={"params": params, "json_body": json_body}, conn=conn, reason="missing_access_token")

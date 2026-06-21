@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 
 import pytest
 
+from app.models.integration_connection import IntegrationConnection
 from app.services.google_calendar_service import GoogleCalendarService, NOT_CONNECTED_MESSAGE
 from app.services.integration_connection_service import IntegrationConnectionService
 from tests.test_integration_connection_service import FakeDb
@@ -109,3 +110,45 @@ def test_check_availability_calls_freebusy(monkeypatch):
     assert result["ok"] is True and result["busy"] == [{"start": "s", "end": "e"}]
     assert seen["method"] == "POST" and seen["url"].endswith("/freeBusy")
     assert seen["json"]["items"] == [{"id": "primary"}]
+
+
+def test_refresh_token_encrypted_attempts_decrypt_before_missing(monkeypatch):
+    tenant_id = uuid.uuid4(); db = FakeDb(); conn = _connect(db, tenant_id, expires_at=datetime.utcnow() - timedelta(minutes=1))
+    calls = []
+    def fake_decrypt(value):
+        calls.append(value)
+        if value == conn.refresh_token_encrypted:
+            return None
+        return IntegrationConnectionService.decrypt_credential(value)
+    monkeypatch.setattr("app.services.google_calendar_service.IntegrationConnectionService.decrypt_credential_strict", fake_decrypt)
+    result = GoogleCalendarService(db, tenant_id).list_events()
+    assert conn.refresh_token_encrypted in calls
+    assert result == {"ok": False, "message": "google_calendar_refresh_token_empty_after_decrypt"}
+
+
+def test_refresh_token_decrypt_error_returns_clear_code(monkeypatch):
+    tenant_id = uuid.uuid4(); db = FakeDb(); conn = _connect(db, tenant_id, expires_at=datetime.utcnow() - timedelta(minutes=1))
+    calls = []
+    def fake_decrypt(value):
+        calls.append(value)
+        if value == conn.refresh_token_encrypted:
+            raise ValueError("bad token")
+        return IntegrationConnectionService.decrypt_credential(value)
+    monkeypatch.setattr("app.services.google_calendar_service.IntegrationConnectionService.decrypt_credential_strict", fake_decrypt)
+    result = GoogleCalendarService(db, tenant_id).list_events()
+    assert conn.refresh_token_encrypted in calls
+    assert result == {"ok": False, "message": "google_calendar_token_decrypt_failed"}
+
+
+def test_multiple_connections_uses_latest_active_same_tenant(monkeypatch):
+    tenant_id = uuid.uuid4(); other_tenant = uuid.uuid4(); db = FakeDb()
+    old = IntegrationConnection(tenant_id=tenant_id, provider="google_calendar", auth_type="oauth2", status="active", access_token_encrypted=IntegrationConnectionService.encrypt_credential("old"), refresh_token_encrypted=IntegrationConnectionService.encrypt_credential("old-refresh"), updated_at=datetime.utcnow() - timedelta(days=2))
+    disconnected = IntegrationConnection(tenant_id=tenant_id, provider="google_calendar", auth_type="oauth2", status="disconnected", access_token_encrypted=IntegrationConnectionService.encrypt_credential("disconnected"), refresh_token_encrypted=IntegrationConnectionService.encrypt_credential("disconnected-refresh"), updated_at=datetime.utcnow())
+    latest = IntegrationConnection(tenant_id=tenant_id, provider="google_calendar", auth_type="oauth2", status="active", access_token_encrypted=IntegrationConnectionService.encrypt_credential("latest"), refresh_token_encrypted=IntegrationConnectionService.encrypt_credential("latest-refresh"), updated_at=datetime.utcnow() - timedelta(hours=1))
+    other = IntegrationConnection(tenant_id=other_tenant, provider="google_calendar", auth_type="oauth2", status="active", access_token_encrypted=IntegrationConnectionService.encrypt_credential("other"), refresh_token_encrypted=IntegrationConnectionService.encrypt_credential("other-refresh"), updated_at=datetime.utcnow() + timedelta(days=1))
+    db.connections = [old, disconnected, latest, other]
+    auths = []
+    monkeypatch.setattr("app.services.google_calendar_service.requests.request", lambda *a, **k: auths.append(k["headers"]["Authorization"]) or Resp(200, {"items": []}))
+    result = GoogleCalendarService(db, tenant_id).list_events()
+    assert result["ok"] is True
+    assert auths == ["Bearer latest"]

@@ -99,7 +99,7 @@ class MetaCloudClient:
         message = err.get("message") or "Erro ao comunicar com Meta Graph API"
         friendly = _friendly_error(message, response.status_code)
         logger.error(
-            "[META API ERROR] tenant_id=%s provider_id=%s template_id=%s graph_endpoint=%s phone_number_id=%s status_code=%s token_hash=%s token_length=%s graph_check=%s meta_message=%s",
+            "[META API ERROR] provider=meta_cloud event=META_CLOUD_API_ERROR tenant_id=%s provider_id=%s template_id=%s graph_endpoint=%s phone_number_id=%s status_code=%s token_hash=%s token_length=%s graph_check=%s meta_message=%s",
             context.get("tenant_id"),
             context.get("provider_id"),
             context.get("template_id"),
