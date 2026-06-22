@@ -26,6 +26,14 @@ def _build_app() -> FastAPI:
     def google_calendar_callback_stub():
         return {"entered": True}
 
+    @app.get("/api/integrations/google-sheets/connect-url")
+    def google_sheets_connect_url_stub():
+        return {"entered": True}
+
+    @app.get("/api/integrations/google-sheets/callback")
+    def google_sheets_callback_stub():
+        return {"entered": True}
+
     return app
 
 
@@ -60,6 +68,24 @@ def test_google_calendar_callback_bypasses_tenant_header_requirement():
     client = TestClient(_build_app())
 
     response = client.get("/api/integrations/google-calendar/callback")
+
+    assert response.status_code == 200
+    assert response.json() == {"entered": True}
+
+
+def test_google_sheets_connect_url_bypasses_tenant_header_requirement():
+    client = TestClient(_build_app())
+
+    response = client.get("/api/integrations/google-sheets/connect-url?tenant_slug=gabriel-ribeiro")
+
+    assert response.status_code == 200
+    assert response.json() == {"entered": True}
+
+
+def test_google_sheets_callback_bypasses_tenant_header_requirement():
+    client = TestClient(_build_app())
+
+    response = client.get("/api/integrations/google-sheets/callback")
 
     assert response.status_code == 200
     assert response.json() == {"entered": True}
