@@ -53,7 +53,7 @@ def test_preflight_allows_tenant_header():
 
 def test_preflight_allows_railway_frontend_origin():
     client = TestClient(_build_test_app())
-    origin = "https://frontend-whatsapp-ia-production.up.railway.app"
+    origin = "https://app.wazzaapi.com.br"
     response = client.options(
         "/api/flows",
         headers={
@@ -77,9 +77,9 @@ def test_required_cors_origins_are_kept_when_env_overrides_defaults(monkeypatch)
 
     assert parsed == [
         "https://custom.example.com",
-        "https://frontend-whatsapp-ia-production.up.railway.app",
+        "https://app.wazzaapi.com.br",
         "https://whatsapp-ia-nine.vercel.app",
-        "https://whatsapp-ia-production-4699.up.railway.app",
+        "https://api.wazzaapi.com.br",
     ]
 
 

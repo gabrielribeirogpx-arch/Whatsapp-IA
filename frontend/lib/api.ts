@@ -41,7 +41,7 @@ import type {
   GoogleCalendarConnectionStatus
 } from './types';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL;
+export const API_URL = (process.env.NEXT_PUBLIC_API_URL || "https://api.wazzaapi.com.br").replace(/\/$/, "");
 const TENANT_STORAGE_KEY = 'tenant';
 const TOKEN_STORAGE_KEY = 'token';
 const TENANT_ID_STORAGE_KEY = 'tenant_id';
@@ -95,10 +95,6 @@ export function getTenant(): string | null {
 }
 
 function buildApiUrl(path: string) {
-  if (!API_URL) {
-    throw new Error('NEXT_PUBLIC_API_URL não está configurado.');
-  }
-
   if (/^https?:\/\//.test(path)) return path;
   return `${API_URL}${path.startsWith('/') ? path : `/${path}`}`;
 }
@@ -261,12 +257,6 @@ export async function getMessagesByConversation(conversationId: string): Promise
 export async function updateConversationMode(conversationId: string, mode: ConversationMode) {
   const token = localStorage.getItem('token');
   const newMode = mode;
-  const API_URL = process.env.NEXT_PUBLIC_API_URL;
-
-  if (!API_URL) {
-    throw new Error('NEXT_PUBLIC_API_URL não está configurado.');
-  }
-
   console.log('TOKEN:', token);
   console.log('MODE:', newMode);
   console.log('PATCH MODE URL:', `${API_URL}/api/conversations/${conversationId}/mode?mode=${newMode}`);

@@ -93,7 +93,8 @@ def test_media_upload_returns_absolute_https_url_from_public_env(tmp_path, monke
     assert body["mime_type"] == "application/pdf"
 
 
-def test_media_upload_fallback_forces_https_on_railway_host(tmp_path, monkeypatch):
+def test_media_upload_uses_public_api_base_url(tmp_path, monkeypatch):
+    monkeypatch.setenv("PUBLIC_API_BASE_URL", "https://api.wazzaapi.com.br")
     monkeypatch.delenv("PUBLIC_BACKEND_URL", raising=False)
     monkeypatch.delenv("API_PUBLIC_URL", raising=False)
     monkeypatch.delenv("BACKEND_PUBLIC_URL", raising=False)
@@ -101,13 +102,13 @@ def test_media_upload_fallback_forces_https_on_railway_host(tmp_path, monkeypatc
 
     response = client.post(
         "/api/media/upload",
-        headers={**_headers(), "host": "whatsapp-ia-production-4699.up.railway.app", "x-forwarded-proto": "http"},
+        headers={**_headers(), "host": "api.wazzaapi.com.br", "x-forwarded-proto": "http"},
         files={"file": ("contrato.pdf", b"%PDF-1.4", "application/pdf")},
     )
 
     assert response.status_code == 200
     body = response.json()
-    assert body["url"].startswith("https://whatsapp-ia-production-4699.up.railway.app/uploads/flow-media/")
+    assert body["url"].startswith("https://api.wazzaapi.com.br/uploads/flow-media/")
     assert not body["url"].startswith("http://")
 
 

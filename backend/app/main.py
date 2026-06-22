@@ -86,9 +86,8 @@ def verify_contacts_columns() -> None:
 
 
 REQUIRED_CORS_ORIGINS = (
-    "https://frontend-whatsapp-ia-production.up.railway.app",
-    "https://whatsapp-ia-nine.vercel.app",
-    "https://whatsapp-ia-production-4699.up.railway.app",
+    "https://app.wazzaapi.com.br",
+    "https://api.wazzaapi.com.br",
 )
 
 DEFAULT_CORS_ORIGINS = (
