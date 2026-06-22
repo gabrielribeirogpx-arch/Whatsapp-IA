@@ -5577,3 +5577,25 @@ input {
 .flow-editor-smart-drawer strong { color: #334155; font-size: 11px; font-weight: 950; text-transform: uppercase; }
 .flow-editor-smart-drawer pre { max-height: 180px; overflow: auto; border: 1px solid #e2e8f0; border-radius: 12px; background: #0f172a; color: #e2e8f0; padding: 10px; font-size: 11px; }
 @media (max-width: 640px) { .flow-editor-smart-heading, .flow-editor-smart-toolbar { align-items: stretch; flex-direction: column; } .flow-editor-quick-add { grid-template-columns: 1fr 1fr; } .flow-editor-smart-card { grid-template-columns: auto minmax(0, 1fr); } }
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(18px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
