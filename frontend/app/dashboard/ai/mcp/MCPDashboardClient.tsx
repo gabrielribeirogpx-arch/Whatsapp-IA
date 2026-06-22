@@ -24,11 +24,14 @@ import {
   disconnectGoogleCalendar,
   disconnectGmail,
   disconnectGoogleDrive,
+  disconnectGoogleSheets,
   disconnectSuitable,
   getGmailConnectUrl,
   getGmailStatus,
   getGoogleDriveConnectUrl,
   getGoogleDriveStatus,
+  getGoogleSheetsConnectUrl,
+  getGoogleSheetsStatus,
   getGoogleCalendarConnectUrl,
   getGoogleCalendarStatus,
   getSuitableStatus,
@@ -95,6 +98,13 @@ const googleDriveToolNames: Record<string, string> = {
   google_drive_create_document: "Criar documento",
   google_drive_create_folder: "Criar pasta",
 };
+const googleSheetsToolNames: Record<string, string> = {
+  google_sheets_list_spreadsheets: "Listar planilhas",
+  google_sheets_read_sheet: "Ler planilha",
+  google_sheets_append_row: "Adicionar linha",
+  google_sheets_update_row: "Atualizar linha",
+  google_sheets_create_spreadsheet: "Criar planilha",
+};
 const suitableToolNames: Record<string, string> = {
   suitable_check_key: "Validar API Key",
   suitable_create_order: "Criar pedido",
@@ -105,9 +115,10 @@ function getToolDisplayName(tool: MCPTool) {
     googleCalendarToolNames[tool.tool_name] ||
     gmailToolNames[tool.tool_name] ||
     googleDriveToolNames[tool.tool_name] ||
+    googleSheetsToolNames[tool.tool_name] ||
     suitableToolNames[tool.tool_name] ||
     tool.display_name?.replace(
-      /^\[(Google Calendar|Gmail|Google Drive|Suitable)\]\s*/,
+      /^\[(Google Calendar|Gmail|Google Drive|Google Sheets|Suitable)\]\s*/,
       "",
     ) ||
     tool.tool_name
@@ -183,6 +194,11 @@ export default function MCPDashboardClient() {
   const [loadingDrive, setLoadingDrive] = useState(true);
   const [driveActionLoading, setDriveActionLoading] = useState(false);
   const [driveError, setDriveError] = useState("");
+  const [sheetsStatus, setSheetsStatus] =
+    useState<GoogleCalendarConnectionStatus | null>(null);
+  const [loadingSheets, setLoadingSheets] = useState(true);
+  const [sheetsActionLoading, setSheetsActionLoading] = useState(false);
+  const [sheetsError, setSheetsError] = useState("");
   const [suitableStatus, setSuitableStatus] =
     useState<GoogleCalendarConnectionStatus | null>(null);
   const [loadingSuitable, setLoadingSuitable] = useState(true);
@@ -195,7 +211,7 @@ export default function MCPDashboardClient() {
     () =>
       tools.filter(
         (tool) =>
-          !["google_calendar", "gmail", "google_drive", "suitable"].includes(
+          !["google_calendar", "gmail", "google_drive", "google_sheets", "suitable"].includes(
             String(tool.metadata?.provider || ""),
           ),
       ),
@@ -211,6 +227,10 @@ export default function MCPDashboardClient() {
   );
   const googleDriveTools = useMemo(
     () => tools.filter((tool) => tool.metadata?.provider === "google_drive"),
+    [tools],
+  );
+  const googleSheetsTools = useMemo(
+    () => tools.filter((tool) => tool.metadata?.provider === "google_sheets"),
     [tools],
   );
   const suitableTools = useMemo(
@@ -281,6 +301,23 @@ export default function MCPDashboardClient() {
     }
   }
 
+  async function refreshSheetsStatus(successMessage?: string) {
+    setLoadingSheets(true);
+    setSheetsError("");
+    try {
+      const status = await getGoogleSheetsStatus();
+      setSheetsStatus(status);
+      if (successMessage) {
+        setMessageTone("success");
+        setMessage(successMessage);
+      }
+    } catch {
+      setSheetsError("Falha ao carregar status do Google Sheets.");
+    } finally {
+      setLoadingSheets(false);
+    }
+  }
+
   async function refreshSuitableStatus(successMessage?: string) {
     setLoadingSuitable(true);
     setSuitableError("");
@@ -312,6 +349,7 @@ export default function MCPDashboardClient() {
     const isGoogleCalendarReturn = integration === "google_calendar";
     const isGmailReturn = integration === "gmail";
     const isGoogleDriveReturn = integration === "google_drive";
+    const isGoogleSheetsReturn = integration === "google_sheets";
 
     if (isGoogleCalendarReturn && status === "connected") {
       refreshCalendarStatus("Google Calendar conectado com sucesso.");
@@ -334,14 +372,26 @@ export default function MCPDashboardClient() {
       refreshCalendarStatus();
       refreshGmailStatus();
       setDriveError("Falha ao conectar Google Drive.");
+    } else if (isGoogleSheetsReturn && status === "connected") {
+      refreshSheetsStatus("Google Sheets conectado com sucesso.");
+      refreshCalendarStatus();
+      refreshGmailStatus();
+      refreshDriveStatus();
+    } else if (isGoogleSheetsReturn && status === "error") {
+      refreshSheetsStatus();
+      refreshCalendarStatus();
+      refreshGmailStatus();
+      refreshDriveStatus();
+      setSheetsError("Falha ao conectar Google Sheets.");
     } else {
       refreshCalendarStatus();
       refreshGmailStatus();
       refreshDriveStatus();
+      refreshSheetsStatus();
       refreshSuitableStatus();
     }
 
-    if (isGoogleCalendarReturn || isGmailReturn || isGoogleDriveReturn) {
+    if (isGoogleCalendarReturn || isGmailReturn || isGoogleDriveReturn || isGoogleSheetsReturn) {
       const nextParams = new URLSearchParams(searchParams.toString());
       nextParams.delete("integration");
       nextParams.delete("status");
@@ -491,6 +541,31 @@ export default function MCPDashboardClient() {
     }
   }
 
+  function connectSheets() {
+    setSheetsError("");
+    try {
+      window.location.href = getGoogleSheetsConnectUrl();
+    } catch {
+      setSheetsError("Falha ao conectar Google Sheets.");
+    }
+  }
+
+  async function disconnectSheetsAccount() {
+    setSheetsActionLoading(true);
+    setSheetsError("");
+    try {
+      const status = await disconnectGoogleSheets();
+      setSheetsStatus(status);
+      setMessageTone("success");
+      setMessage("Google Sheets desconectado.");
+      await load();
+    } catch {
+      setSheetsError("Falha ao desconectar Google Sheets.");
+    } finally {
+      setSheetsActionLoading(false);
+    }
+  }
+
   function connectCalendar() {
     setCalendarError("");
     try {
@@ -579,6 +654,11 @@ export default function MCPDashboardClient() {
   const gmailAccountEmail =
     typeof gmailStatus?.metadata?.account_email === "string"
       ? gmailStatus.metadata.account_email
+      : "Nenhuma conta conectada";
+  const isSheetsConnected = sheetsStatus?.connected === true;
+  const sheetsAccountEmail =
+    typeof sheetsStatus?.metadata?.account_email === "string"
+      ? sheetsStatus.metadata.account_email
       : "Nenhuma conta conectada";
   const isCalendarConnected = calendarStatus?.connected === true;
   const calendarAccountEmail =
@@ -1118,6 +1198,80 @@ export default function MCPDashboardClient() {
             {driveError ? (
               <p className="mt-4 inline-flex items-center gap-2 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">
                 <AlertCircle size={16} /> {driveError}
+              </p>
+            ) : null}
+          </article>
+          <article className="mt-4 rounded-3xl border border-slate-200 bg-gradient-to-br from-white via-slate-50 to-green-50/40 p-5 shadow-sm">
+            <div className="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
+              <div className="flex gap-4">
+                <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-green-100 text-green-700">
+                  <FolderOpen size={22} />
+                </span>
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h3 className="font-bold text-slate-950">Google Sheets</h3>
+                    <span className={`inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs font-bold ${isSheetsConnected ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-600"}`}>
+                      {loadingSheets ? <Loader2 size={12} className="animate-spin" /> : isSheetsConnected ? <CheckCircle2 size={12} /> : <XCircle size={12} />}
+                      {loadingSheets ? "Carregando..." : isSheetsConnected ? "Conectado" : "Não conectado"}
+                    </span>
+                  </div>
+                  <p className="mt-2 text-sm leading-relaxed text-slate-600">
+                    Permita que a IA liste, leia, crie e atualize planilhas oficiais do Google Sheets.
+                  </p>
+                  <div className="mt-4 grid gap-2 text-sm sm:grid-cols-2">
+                    <p className="rounded-2xl bg-white/80 px-4 py-3 text-slate-600">
+                      <b className="block text-xs uppercase tracking-[0.12em] text-slate-400">Provider</b>
+                      {sheetsStatus?.provider || "google_sheets"}
+                    </p>
+                    <p className="rounded-2xl bg-white/80 px-4 py-3 text-slate-600">
+                      <b className="block text-xs uppercase tracking-[0.12em] text-slate-400">Conta</b>
+                      {loadingSheets ? "Consultando status..." : sheetsAccountEmail}
+                    </p>
+                  </div>
+                </div>
+              </div>
+              <div className="flex w-full flex-col gap-2 sm:w-auto sm:min-w-56">
+                {isSheetsConnected ? (
+                  <button type="button" disabled={sheetsActionLoading || loadingSheets} onClick={() => disconnectSheetsAccount()} className={dangerButtonClass}>
+                    {sheetsActionLoading ? <Loader2 size={16} className="animate-spin" /> : <XCircle size={16} />} Desconectar
+                  </button>
+                ) : (
+                  <button type="button" disabled={loadingSheets} onClick={connectSheets} className={primaryButtonClass}>
+                    <FolderOpen size={16} /> Conectar Google Sheets
+                  </button>
+                )}
+                <button type="button" disabled={loadingSheets} onClick={() => refreshSheetsStatus()} className={secondaryButtonClass}>Atualizar status</button>
+              </div>
+            </div>
+            <div className="mt-5 border-t border-green-100 pt-5">
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <h4 className="text-sm font-bold text-slate-950">Ferramentas disponíveis</h4>
+                  <p className="mt-1 text-xs font-semibold text-slate-500">Origem: Google Sheets conectado</p>
+                </div>
+                <span className="rounded-full bg-green-50 px-3 py-1 text-xs font-bold text-green-700 ring-1 ring-green-100">{googleSheetsTools.length} ferramentas</span>
+              </div>
+              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+                {googleSheetsTools.map((tool) => (
+                  <div key={tool.id} className="rounded-2xl border border-green-100 bg-white/85 p-4 shadow-sm">
+                    <div className="flex flex-wrap items-start justify-between gap-2">
+                      <p className="text-sm font-bold text-slate-950">{getToolDisplayName(tool)}</p>
+                      <StatusBadge active={tool.is_enabled} />
+                    </div>
+                    <p className="mt-3 text-xs font-semibold text-slate-500">Origem: Google Sheets conectado</p>
+                    <p className="mt-1 truncate font-mono text-[11px] text-slate-400" title={tool.tool_name}>{tool.tool_name}</p>
+                  </div>
+                ))}
+                {googleSheetsTools.length === 0 ? (
+                  <div className="rounded-2xl border border-dashed border-green-200 bg-white/70 px-4 py-5 text-sm font-semibold text-slate-500 sm:col-span-2 xl:col-span-5">
+                    Conecte o Google Sheets para exibir as ferramentas oficiais: google_sheets_list_spreadsheets, google_sheets_read_sheet, google_sheets_append_row, google_sheets_update_row e google_sheets_create_spreadsheet.
+                  </div>
+                ) : null}
+              </div>
+            </div>
+            {sheetsError ? (
+              <p className="mt-4 inline-flex items-center gap-2 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">
+                <AlertCircle size={16} /> {sheetsError}
               </p>
             ) : null}
           </article>
