@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os, uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -13,6 +14,7 @@ TOKEN_URL = "https://oauth2.googleapis.com/token"
 SHEETS_URL = "https://sheets.googleapis.com/v4/spreadsheets"
 DRIVE_URL = "https://www.googleapis.com/drive/v3"
 NOT_CONNECTED_MESSAGE = "Google Sheets não está conectado para este workspace."
+logger = logging.getLogger(__name__)
 
 
 def _now() -> datetime:
@@ -111,8 +113,25 @@ class GoogleSheetsService:
         ok, data, _ = self._request("PUT", f"{SHEETS_URL}/{sid}/values/{rng}", params={"valueInputOption": kwargs.get("value_input_option") or "USER_ENTERED"}, json_body={"values": [values]})
         return {"ok": ok, **({"update": {"updated_range": data.get("updatedRange"), "updated_rows": data.get("updatedRows")}} if ok else data)}
 
+    def find_spreadsheet_by_name(self, name: str) -> dict[str, Any] | None:
+        safe_name = str(name or "").strip().replace("'", "\\'")
+        if not safe_name:
+            return None
+        params = {"q": f"name = '{safe_name}' and mimeType = 'application/vnd.google-apps.spreadsheet' and trashed=false", "pageSize": 1, "fields": "files(id,name,webViewLink)"}
+        ok, data, _ = self._request("GET", f"{DRIVE_URL}/files", params=params)
+        if not ok:
+            return None
+        file = next((item for item in data.get("files", []) if item.get("name") == name), None)
+        if not file:
+            return None
+        return {"spreadsheet_name": file.get("name"), "spreadsheet_url": file.get("webViewLink"), "spreadsheet_id": file.get("id")}
+
     def create_spreadsheet(self, **kwargs: Any) -> dict[str, Any]:
-        title = str(kwargs.get("title") or kwargs.get("name") or "Nova planilha")
+        title = str(kwargs.get("title") or kwargs.get("name") or "Nova planilha").strip() or "Nova planilha"
+        existing = self.find_spreadsheet_by_name(title)
+        if existing:
+            logger.info("event=GOOGLE_SHEETS_EXISTING_SPREADSHEET_FOUND provider=%s spreadsheet_name=%s", PROVIDER, title)
+            return {"ok": True, "existing": True, **existing}
         ok, data, _ = self._request("POST", SHEETS_URL, json_body={"properties": {"title": title}})
         if not ok: return {"ok": False, **data}
-        return {"ok": True, "spreadsheet": {"name": (data.get("properties") or {}).get("title") or title, "web_link": data.get("spreadsheetUrl"), "spreadsheet_id": data.get("spreadsheetId")}}
+        return {"ok": True, "existing": False, "spreadsheet": {"name": (data.get("properties") or {}).get("title") or title, "web_link": data.get("spreadsheetUrl"), "spreadsheet_id": data.get("spreadsheetId")}}

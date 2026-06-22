@@ -55,6 +55,7 @@ MUTATING_TOOL_IDS = {
     "google_drive_share_file",
     "google_sheets_append_row",
     "google_sheets_update_row",
+    "google_sheets_create_spreadsheet",
 }
 
 logger = logging.getLogger(__name__)
@@ -651,6 +652,10 @@ def format_tool_result_for_user(tool_id: Any, normalized_result: dict[str, Any])
             response = "\n".join(lines)
 
     spreadsheet = data.get("spreadsheet") if isinstance(data.get("spreadsheet"), dict) else None
+    if not response and data.get("existing") is True and data.get("spreadsheet_name"):
+        name = _safe_user_text(data.get("spreadsheet_name"), limit=160)
+        response = f'A planilha "{name}" já existe no Google Sheets.'
+
     if not response and spreadsheet is not None:
         name = _safe_user_text(spreadsheet.get("name") or "Nova planilha", limit=160)
         response = f"Planilha criada no Google Sheets: {name}."
@@ -862,7 +867,7 @@ def _stable_json(value: Any) -> str:
 
 
 def _tool_fingerprint(tool_id: str, tool_input: Any) -> str:
-    payload = f"{str(tool_id or '').strip()}:{_stable_json(tool_input)}"
+    payload = f"{str(tool_id or '').strip()}{_stable_json(tool_input)}"
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
@@ -1126,12 +1131,14 @@ def _handle_google_sheets_confirmation(*, tenant_id: Any, conversation_id: Any, 
     tool_context: ToolContext = context["tool_context"]
     pending_action_service: PendingActionService | None = context.get("pending_action_service")
     db_pending = context.get("db_pending")
-    registry_result = tool_registry.execute("google_sheets", tool_id, payload, tool_context, {"db": context.get("db"), "mcp_tools": context.get("mcp_tools") or []})
+    registry_result = tool_registry.execute("google_sheets", tool_id, payload, tool_context, {"db": context.get("db"), "mcp_tools": context.get("mcp_tools") or [], "confirmed_pending_action": True})
     if registry_result.ok:
         if pending_action_service is not None and db_pending is not None and conversation_id is not None:
             pending_action_service.consume_pending_action(tenant_id=tenant_id, conversation_id=conversation_id, pending_id=getattr(db_pending, "id", None))
         normalized = registry_result.normalized_result.to_dict() if registry_result.normalized_result else {}
-        return format_tool_result_for_user(tool_id, normalized)
+        response = format_tool_result_for_user(tool_id, normalized)
+        _json_log("AI_AGENT_MUTATING_TOOL_SUCCESS_FINALIZE", tool_id=tool_id, step=0, response=response)
+        return response
     return f"Não consegui executar Google Sheets agora: {registry_result.error_code or 'google_sheets_error'}"
 
 def _handle_suitable_create_order_confirmation(*, tenant_id: Any, conversation_id: Any, pending_action: Any, user_message: str, context: dict[str, Any]) -> str:
@@ -1198,7 +1205,8 @@ def run_agent_for_tenant(db: Session, tenant_id, input_text: str, instruction: s
     max_mcp_calls = min(max(int(opts.get("max_mcp_calls") or 3), 0), 3)
     state: list[dict[str, Any]] = []
     result = AgentRunResult()
-    tool_context = ToolContext(tenant_id=tenant_id, execution_budget=budget, trace_id=str(opts.get("trace_id") or opts.get("correlation_id") or ""), metadata={"source": "ai_agent"})
+    execution_id = str(opts.get("execution_id") or opts.get("flow_execution_id") or opts.get("trace_id") or opts.get("correlation_id") or uuid.uuid4())
+    tool_context = ToolContext(tenant_id=tenant_id, execution_budget=budget, trace_id=str(opts.get("trace_id") or opts.get("correlation_id") or execution_id), metadata={"source": "ai_agent", "execution_id": execution_id})
     tool_registry = ToolRegistry()
     tool_registry.register(NodeToolAdapter(node_tool_executor))
     tool_registry.register(SubflowToolAdapter(subflow_tool_executor))
@@ -1317,6 +1325,8 @@ def run_agent_for_tenant(db: Session, tenant_id, input_text: str, instruction: s
         else:
             msg = f"Não consegui acessar o Google Sheets agora: {registry_result.error_code or 'google_sheets_error'}"
         result.message = msg[:4000]; result.actions.append(AgentToolAction("message", {"message": result.message})); result.status = "success" if registry_result.ok else "error"; result.final_tool = "chamar_mcp"; result.tools_used.append("chamar_mcp")
+        if registry_result.ok and _is_mutating_tool(sheets_tool_id):
+            _json_log("AI_AGENT_MUTATING_TOOL_SUCCESS_FINALIZE", tool_id=sheets_tool_id, step=0, response=result.message)
         result.metadata = {"mcp_call_count": 0, "mcp_tools_used": [{"tool_id": sheets_tool_id, "status": result.status, "tool_type": "google_sheets"}], **(budget.safe_metadata() if budget else {})}
         return result
     drive_tool_id, drive_input = _google_drive_intent(str(input_text or ""))
