@@ -7,12 +7,22 @@ from pydantic import BaseModel, Field, field_validator
 from app.schemas.whatsapp_enums import ProviderTypeEnum, TemplateCategoryEnum, TemplateStatusEnum
 
 
+ConnectionType = Literal["cloud_api", "cloud_api_coexistence"]
+
+
 class TenantWhatsAppProviderCreate(BaseModel):
     provider_type: ProviderTypeEnum
     display_name: str | None = None
     waba_id: str | None = None
     phone_number_id: str | None = None
     business_id: str | None = None
+    connection_type: ConnectionType = "cloud_api"
+    coexistence_enabled: bool = False
+    coexistence_status: str | None = None
+    business_phone_number_id: str | None = None
+    phone_display_name: str | None = None
+    phone_verified_name: str | None = None
+    onboarding_metadata: dict | None = None
     bsp_account_id: str | None = None
     access_token: str | None = None
     app_id: str | None = None
@@ -46,6 +56,13 @@ class TenantWhatsAppProviderOut(BaseModel):
     waba_id: str | None = None
     phone_number_id: str | None = None
     business_id: str | None = None
+    connection_type: ConnectionType = "cloud_api"
+    coexistence_enabled: bool = False
+    coexistence_status: str | None = None
+    business_phone_number_id: str | None = None
+    phone_display_name: str | None = None
+    phone_verified_name: str | None = None
+    onboarding_metadata: dict | None = None
     bsp_account_id: str | None = None
     app_id: str | None = None
     webhook_verify_token: str | None = None
