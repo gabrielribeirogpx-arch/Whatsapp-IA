@@ -690,7 +690,7 @@ export async function getMetaIntegrationStatus(): Promise<Record<string, unknown
 }
 
 export async function getMetaConnectUrl(connection_type: 'cloud_api' | 'cloud_api_coexistence' = 'cloud_api'): Promise<{ url: string; state?: string; connection_type: string }> {
-  const res = await apiFetch('/api/integrations/meta/connect-url', { method: 'POST', body: JSON.stringify({ connection_type }) });
+  const res = await apiFetch(`/api/integrations/meta/connect-url?connection_type=${encodeURIComponent(connection_type)}`);
   return parseApiResponse<{ url: string; state?: string; connection_type: string }>(res);
 }
 
