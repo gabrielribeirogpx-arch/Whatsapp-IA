@@ -6,6 +6,7 @@ import {
   AlertCircle,
   CalendarDays,
   FolderOpen,
+  KeyRound,
   Mail,
   CheckCircle2,
   Edit3,
@@ -19,15 +20,18 @@ import {
 } from "lucide-react";
 import {
   apiFetch,
+  connectSuitable,
   disconnectGoogleCalendar,
   disconnectGmail,
   disconnectGoogleDrive,
+  disconnectSuitable,
   getGmailConnectUrl,
   getGmailStatus,
   getGoogleDriveConnectUrl,
   getGoogleDriveStatus,
   getGoogleCalendarConnectUrl,
   getGoogleCalendarStatus,
+  getSuitableStatus,
   parseApiResponse,
 } from "../../../../lib/api";
 import type { GoogleCalendarConnectionStatus } from "../../../../lib/types";
@@ -91,14 +95,19 @@ const googleDriveToolNames: Record<string, string> = {
   google_drive_create_document: "Criar documento",
   google_drive_create_folder: "Criar pasta",
 };
+const suitableToolNames: Record<string, string> = {
+  suitable_check_key: "Validar API Key",
+  suitable_create_order: "Criar pedido",
+};
 
 function getToolDisplayName(tool: MCPTool) {
   return (
     googleCalendarToolNames[tool.tool_name] ||
     gmailToolNames[tool.tool_name] ||
     googleDriveToolNames[tool.tool_name] ||
+    suitableToolNames[tool.tool_name] ||
     tool.display_name?.replace(
-      /^\[(Google Calendar|Gmail|Google Drive)\]\s*/,
+      /^\[(Google Calendar|Gmail|Google Drive|Suitable)\]\s*/,
       "",
     ) ||
     tool.tool_name
@@ -174,12 +183,19 @@ export default function MCPDashboardClient() {
   const [loadingDrive, setLoadingDrive] = useState(true);
   const [driveActionLoading, setDriveActionLoading] = useState(false);
   const [driveError, setDriveError] = useState("");
+  const [suitableStatus, setSuitableStatus] =
+    useState<GoogleCalendarConnectionStatus | null>(null);
+  const [loadingSuitable, setLoadingSuitable] = useState(true);
+  const [suitableActionLoading, setSuitableActionLoading] = useState(false);
+  const [suitableError, setSuitableError] = useState("");
+  const [suitableApiKey, setSuitableApiKey] = useState("");
+  const [showSuitableKeyField, setShowSuitableKeyField] = useState(false);
 
   const mcpTools = useMemo(
     () =>
       tools.filter(
         (tool) =>
-          !["google_calendar", "gmail", "google_drive"].includes(
+          !["google_calendar", "gmail", "google_drive", "suitable"].includes(
             String(tool.metadata?.provider || ""),
           ),
       ),
@@ -195,6 +211,10 @@ export default function MCPDashboardClient() {
   );
   const googleDriveTools = useMemo(
     () => tools.filter((tool) => tool.metadata?.provider === "google_drive"),
+    [tools],
+  );
+  const suitableTools = useMemo(
+    () => tools.filter((tool) => tool.metadata?.provider === "suitable"),
     [tools],
   );
 
@@ -261,6 +281,23 @@ export default function MCPDashboardClient() {
     }
   }
 
+  async function refreshSuitableStatus(successMessage?: string) {
+    setLoadingSuitable(true);
+    setSuitableError("");
+    try {
+      const status = await getSuitableStatus();
+      setSuitableStatus(status);
+      if (successMessage) {
+        setMessageTone("success");
+        setMessage(successMessage);
+      }
+    } catch {
+      setSuitableError("Falha ao carregar status da Suitable.");
+    } finally {
+      setLoadingSuitable(false);
+    }
+  }
+
   async function load() {
     const [serverRows, toolRows] = await Promise.all([
       parseApiResponse<MCPServer[]>(await apiFetch("/api/mcp/servers")),
@@ -301,6 +338,7 @@ export default function MCPDashboardClient() {
       refreshCalendarStatus();
       refreshGmailStatus();
       refreshDriveStatus();
+      refreshSuitableStatus();
     }
 
     if (isGoogleCalendarReturn || isGmailReturn || isGoogleDriveReturn) {
@@ -478,6 +516,45 @@ export default function MCPDashboardClient() {
     }
   }
 
+  async function connectSuitableAccount() {
+    if (!suitableApiKey.trim()) {
+      setSuitableError("Informe a SUITABLE_API_KEY do tenant.");
+      setShowSuitableKeyField(true);
+      return;
+    }
+    setSuitableActionLoading(true);
+    setSuitableError("");
+    try {
+      const status = await connectSuitable(suitableApiKey.trim());
+      setSuitableStatus(status);
+      setSuitableApiKey("");
+      setShowSuitableKeyField(false);
+      setMessageTone("success");
+      setMessage("Suitable conectada com API Key.");
+      await load();
+    } catch {
+      setSuitableError("Falha ao conectar Suitable com a API Key informada.");
+    } finally {
+      setSuitableActionLoading(false);
+    }
+  }
+
+  async function disconnectSuitableAccount() {
+    setSuitableActionLoading(true);
+    setSuitableError("");
+    try {
+      const status = await disconnectSuitable();
+      setSuitableStatus(status);
+      setMessageTone("success");
+      setMessage("Suitable desconectada.");
+      await load();
+    } catch {
+      setSuitableError("Falha ao desconectar Suitable.");
+    } finally {
+      setSuitableActionLoading(false);
+    }
+  }
+
   async function toggleTool(tool: MCPTool) {
     setTogglingToolId(tool.id);
     try {
@@ -508,6 +585,8 @@ export default function MCPDashboardClient() {
     typeof calendarStatus?.metadata?.account_email === "string"
       ? calendarStatus.metadata.account_email
       : "Nenhuma conta conectada";
+
+  const isSuitableConnected = suitableStatus?.connected === true;
 
   const messageClass =
     messageTone === "error"
@@ -1039,6 +1118,134 @@ export default function MCPDashboardClient() {
             {driveError ? (
               <p className="mt-4 inline-flex items-center gap-2 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">
                 <AlertCircle size={16} /> {driveError}
+              </p>
+            ) : null}
+          </article>
+          <article className="mt-4 rounded-3xl border border-slate-200 bg-gradient-to-br from-white via-slate-50 to-purple-50/40 p-5 shadow-sm">
+            <div className="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
+              <div className="flex gap-4">
+                <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-purple-100 text-purple-700">
+                  <KeyRound size={22} />
+                </span>
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h3 className="font-bold text-slate-950">Suitable</h3>
+                    <span
+                      className={`inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs font-bold ${isSuitableConnected ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-600"}`}
+                    >
+                      {loadingSuitable ? (
+                        <Loader2 size={12} className="animate-spin" />
+                      ) : isSuitableConnected ? (
+                        <CheckCircle2 size={12} />
+                      ) : (
+                        <XCircle size={12} />
+                      )}
+                      {loadingSuitable
+                        ? "Carregando..."
+                        : isSuitableConnected
+                          ? "Conectado"
+                          : "Não conectado"}
+                    </span>
+                  </div>
+                  <p className="mt-2 text-sm leading-relaxed text-slate-600">
+                    Permita que a IA valide a API Key e crie pedidos na Suitable.
+                  </p>
+                  <div className="mt-4 grid gap-2 text-sm sm:grid-cols-2">
+                    <p className="rounded-2xl bg-white/80 px-4 py-3 text-slate-600">
+                      <b className="block text-xs uppercase tracking-[0.12em] text-slate-400">
+                        Provider
+                      </b>
+                      {suitableStatus?.provider || "suitable"}
+                    </p>
+                    <p className="rounded-2xl bg-white/80 px-4 py-3 text-slate-600">
+                      <b className="block text-xs uppercase tracking-[0.12em] text-slate-400">
+                        Autenticação
+                      </b>
+                      API Key manual
+                    </p>
+                  </div>
+                  {!isSuitableConnected && showSuitableKeyField ? (
+                    <div className="mt-4 space-y-2">
+                      <span className={labelClass}>SUITABLE_API_KEY do tenant</span>
+                      <input
+                        className={inputClass}
+                        type="password"
+                        placeholder="Cole a API Key da Suitable"
+                        value={suitableApiKey}
+                        onChange={(event) => setSuitableApiKey(event.target.value)}
+                      />
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+              <div className="flex w-full flex-col gap-2 sm:w-auto sm:min-w-56">
+                {isSuitableConnected ? (
+                  <button
+                    type="button"
+                    disabled={suitableActionLoading || loadingSuitable}
+                    onClick={() => disconnectSuitableAccount()}
+                    className={dangerButtonClass}
+                  >
+                    {suitableActionLoading ? (
+                      <Loader2 size={16} className="animate-spin" />
+                    ) : (
+                      <XCircle size={16} />
+                    )}{" "}
+                    Desconectar
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    disabled={loadingSuitable || suitableActionLoading}
+                    onClick={() => showSuitableKeyField ? connectSuitableAccount() : setShowSuitableKeyField(true)}
+                    className={primaryButtonClass}
+                  >
+                    {suitableActionLoading ? <Loader2 size={16} className="animate-spin" /> : <KeyRound size={16} />} Conectar Suitable
+                  </button>
+                )}
+                <button
+                  type="button"
+                  disabled={loadingSuitable}
+                  onClick={() => refreshSuitableStatus()}
+                  className={secondaryButtonClass}
+                >
+                  Atualizar status
+                </button>
+              </div>
+            </div>
+            <div className="mt-5 border-t border-purple-100 pt-5">
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <h4 className="text-sm font-bold text-slate-950">
+                    Ferramentas disponíveis
+                  </h4>
+                  <p className="mt-1 text-xs font-semibold text-slate-500">
+                    Origem: Suitable conectado
+                  </p>
+                </div>
+                <span className="rounded-full bg-purple-50 px-3 py-1 text-xs font-bold text-purple-700 ring-1 ring-purple-100">
+                  {suitableTools.length} ferramentas
+                </span>
+              </div>
+              <div className="grid gap-3 sm:grid-cols-2">
+                {(suitableTools.length ? suitableTools : [
+                  { id: "suitable_check_key", tool_name: "suitable_check_key", display_name: "Validar API Key", description: "", input_schema: {}, is_enabled: false, server_id: "", metadata: { provider: "suitable" } },
+                  { id: "suitable_create_order", tool_name: "suitable_create_order", display_name: "Criar pedido", description: "", input_schema: {}, is_enabled: false, server_id: "", metadata: { provider: "suitable" } },
+                ]).map((tool) => (
+                  <div key={tool.id} className="rounded-2xl border border-purple-100 bg-white/85 p-4 shadow-sm">
+                    <div className="flex flex-wrap items-start justify-between gap-2">
+                      <p className="text-sm font-bold text-slate-950">{getToolDisplayName(tool)}</p>
+                      <StatusBadge active={tool.is_enabled} />
+                    </div>
+                    <p className="mt-3 text-xs font-semibold text-slate-500">Origem: Suitable conectado</p>
+                    <p className="mt-1 truncate font-mono text-[11px] text-slate-400" title={tool.tool_name}>{tool.tool_name}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+            {suitableError ? (
+              <p className="mt-4 inline-flex items-center gap-2 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">
+                <AlertCircle size={16} /> {suitableError}
               </p>
             ) : null}
           </article>
