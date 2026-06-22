@@ -8,7 +8,7 @@ Create Date: 2026-06-22
 from alembic import op
 
 revision = "20260622_meta_coexistence_phase2"
-down_revision = "20260622_meta_coexistence_phase1"
+down_revision = "20260622_meta_coex_phase1"
 branch_labels = None
 depends_on = None
 
