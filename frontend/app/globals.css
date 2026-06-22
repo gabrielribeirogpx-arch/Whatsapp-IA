@@ -5620,7 +5620,7 @@ input {
 }
 
 .login-captcha {
-  min-height: 63px;
+  min-height: 57px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -5636,7 +5636,7 @@ input {
 }
 
 .login-captcha .turnstile-shell {
-  min-height: 63px;
+  min-height: 57px;
 }
 
 @media (min-width: 1024px) and (max-height: 900px) {
