@@ -22,6 +22,8 @@ class InboundTenantResolution:
     provider_id: str | None
     phone_number_id: str | None
     reason: str | None = None
+    connection_type: str | None = None
+    coexistence_enabled: bool = False
 
 
 def _extract_first_meta_value(payload: dict[str, Any]) -> dict[str, Any]:
@@ -65,7 +67,7 @@ def _resolve_inbound_tenant(db, payload: dict[str, Any]) -> InboundTenantResolut
         .first()
     )
     if provider:
-        return InboundTenantResolution(str(provider.tenant_id), str(provider.id), phone_number_id)
+        return InboundTenantResolution(str(provider.tenant_id), str(provider.id), phone_number_id, connection_type=getattr(provider, "connection_type", None) or "cloud_api", coexistence_enabled=bool(getattr(provider, "coexistence_enabled", False)))
 
     tenant = db.execute(select(Tenant).where(Tenant.phone_number_id == phone_number_id)).scalars().first()
     if tenant:
@@ -244,6 +246,10 @@ async def enqueue_webhook_payload(request: Request) -> tuple[bool, str | None]:
             payload["provider_id"] = resolution.provider_id
         if resolution.phone_number_id:
             payload["phone_number_id"] = resolution.phone_number_id
+        value = _extract_first_meta_value(payload)
+        message = (value.get("messages") or [None])[0] or {}
+        if resolution.connection_type == "cloud_api_coexistence" or resolution.coexistence_enabled:
+            logger.info("META_WEBHOOK_COEX_CONTEXT tenant_id=%s phone_number_id=%s provider_id=%s connection_type=%s coexistence_enabled=%s message_type=%s source=%s", resolution.tenant_id, resolution.phone_number_id, resolution.provider_id, resolution.connection_type or "cloud_api", resolution.coexistence_enabled, message.get("type") or "unknown", "meta_webhook")
 
         job_id = enqueue_incoming_message(payload)
         logger.info(

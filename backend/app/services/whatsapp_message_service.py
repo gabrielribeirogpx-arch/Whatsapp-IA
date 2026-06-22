@@ -128,6 +128,8 @@ def resolve_active_meta_provider_credentials(db: Session, *, tenant_id: str, con
         return None
 
     token = decrypt_secret(provider.access_token_encrypted or "")
+    if (getattr(provider, "connection_type", None) or "cloud_api") == "cloud_api_coexistence":
+        logger.info("META_SEND_COEX_CONTEXT tenant_id=%s provider_id=%s phone_number_id=%s connection_type=%s coexistence_enabled=%s source=%s", tenant_id, provider.id, provider.phone_number_id, getattr(provider, "connection_type", None) or "cloud_api", bool(getattr(provider, "coexistence_enabled", False)), "resolve_active_meta_provider_credentials")
     _log_related_meta_provider_resolution(db, provider=provider, tenant_id=tenant_id, conversation_id=conversation_id)
     logger.info(
         "[META TOKEN SOURCE] provider_id=%s token_length=%s source=%s",
@@ -147,6 +149,8 @@ def resolve_active_meta_provider_credentials(db: Session, *, tenant_id: str, con
         "phone_number_id": str(provider.phone_number_id),
         "waba_id": str(provider.waba_id or ""),
         "business_id": str(provider.business_id or ""),
+        "connection_type": str(getattr(provider, "connection_type", None) or "cloud_api"),
+        "coexistence_enabled": str(bool(getattr(provider, "coexistence_enabled", False))),
         "status": str(getattr(provider, "connection_status", provider.status)),
         "connection_status": str(getattr(provider, "connection_status", provider.status)),
         "is_active": str(provider.is_active),
@@ -454,6 +458,8 @@ def send_template_message(db: Session, *, tenant_id: str, provider_id: str, temp
         raise ValueError("Provider/template inválido para tenant.")
 
     token = decrypt_secret(provider.access_token_encrypted or "")
+    if (getattr(provider, "connection_type", None) or "cloud_api") == "cloud_api_coexistence":
+        logger.info("META_SEND_COEX_CONTEXT tenant_id=%s provider_id=%s phone_number_id=%s connection_type=%s coexistence_enabled=%s source=%s", tenant_id, provider.id, provider.phone_number_id, getattr(provider, "connection_type", None) or "cloud_api", bool(getattr(provider, "coexistence_enabled", False)), "resolve_active_meta_provider_credentials")
     if not token:
         raise ValueError("Token do provider ausente/inválido")
 

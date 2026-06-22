@@ -683,6 +683,22 @@ export async function testWhatsAppProvider(providerId: string) {
   const res = await apiFetch(`/api/whatsapp/providers/${providerId}/test`, { method: 'POST' });
   return parseApiResponse<{ok:boolean;status:string;message:string}>(res);
 }
+
+export async function getMetaIntegrationStatus(): Promise<Record<string, unknown>> {
+  const res = await apiFetch('/api/integrations/meta/status');
+  return parseApiResponse<Record<string, unknown>>(res);
+}
+
+export async function getMetaConnectUrl(connection_type: 'cloud_api' | 'cloud_api_coexistence' = 'cloud_api'): Promise<{ url: string; state?: string; connection_type: string }> {
+  const res = await apiFetch('/api/integrations/meta/connect-url', { method: 'POST', body: JSON.stringify({ connection_type }) });
+  return parseApiResponse<{ url: string; state?: string; connection_type: string }>(res);
+}
+
+export async function disconnectMetaIntegration(): Promise<{ ok: boolean }> {
+  const res = await apiFetch('/api/integrations/meta/disconnect', { method: 'POST' });
+  return parseApiResponse<{ ok: boolean }>(res);
+}
+
 export async function listTemplates(): Promise<WhatsAppTemplate[]> { const res = await apiFetch('/api/whatsapp/templates'); return parseApiResponse<WhatsAppTemplate[]>(res); }
 export async function createTemplate(payload: Record<string, unknown>): Promise<WhatsAppTemplate> { const res = await apiFetch('/api/whatsapp/templates', { method:'POST', body: JSON.stringify(payload)}); return parseApiResponse<WhatsAppTemplate>(res); }
 export async function submitTemplate(templateId: string): Promise<WhatsAppTemplate> { const res = await apiFetch(`/api/whatsapp/templates/${templateId}/submit`, {method:'POST'}); return parseApiResponse<WhatsAppTemplate>(res); }
