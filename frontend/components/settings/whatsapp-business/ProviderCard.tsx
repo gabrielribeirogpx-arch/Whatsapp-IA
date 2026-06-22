@@ -25,10 +25,12 @@ export default function ProviderCard({ p, onTest, onActivate, onDelete, onEdit, 
     <div className='mt-4 grid gap-2 text-xs text-slate-600 sm:grid-cols-3'>
       <span className='inline-flex items-center gap-1'><Building2 size={12} />Meta: {meta.verified_name || '—'}</span>
       <span className='inline-flex items-center gap-1'><Signal size={12} />Última validação: <ClientDateTime value={p.last_validation_at || meta.last_sync_at || p.last_connection_check_at || p.updated_at} fallback='Nunca validado' /></span>
-      <span>Número: {p.phone_display_name || meta.display_phone_number || p.phone_number_id || '—'}</span>
+      <span>Número conectado: {p.phone_display_name || meta.display_phone_number || p.business_phone_number_id || p.phone_number_id || '—'}</span>
+      <span>Nome verificado: {p.phone_verified_name || meta.verified_name || '—'}</span>
+      <span>WABA: {p.waba_id || '—'}</span>
       <span>Tipo: {isCoexistence ? 'WhatsApp Coexistence' : 'Cloud API padrão'}</span>
-      <span>Coexistence: {String(Boolean(p.coexistence_enabled))}</span>
-      <span>Status CoEx: {p.coexistence_status || '—'}</span>
+      <span>Coexistência: {isCoexistence && p.coexistence_status === 'active' ? 'ativa' : (p.coexistence_status || '—')}</span>
+      <span>Business Manager: {p.business_manager_id || p.business_id || '—'}</span>
       {p.last_validation_error && <span className='sm:col-span-3 text-rose-700'>Erro Meta: {p.last_validation_error}</span>}
     </div>
     <div className='mt-4 flex flex-wrap gap-2'>

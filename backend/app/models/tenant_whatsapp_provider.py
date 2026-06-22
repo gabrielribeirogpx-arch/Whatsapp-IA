@@ -28,6 +28,7 @@ class TenantWhatsAppProvider(Base):
     waba_id: Mapped[str | None] = mapped_column(String(120), nullable=True)
     phone_number_id: Mapped[str | None] = mapped_column(String(120), nullable=True)
     business_id: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    business_manager_id: Mapped[str | None] = mapped_column(String(120), nullable=True)
     connection_type: Mapped[str] = mapped_column(String(40), nullable=False, default="cloud_api", server_default="cloud_api")
     coexistence_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     coexistence_status: Mapped[str | None] = mapped_column(String(80), nullable=True)
