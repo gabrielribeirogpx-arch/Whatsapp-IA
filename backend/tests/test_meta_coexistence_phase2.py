@@ -54,7 +54,9 @@ def test_state_generation_persists_nonce_and_validates(monkeypatch):
     meta._META_NONCES.clear()
     monkeypatch.setattr(meta.time, "time", lambda: 1890000000)
     tenant_id = uuid.uuid4()
-    state = meta.create_meta_oauth_state(tenant_id, connection_type="cloud_api_coexistence", nonce="unique-nonce")
+    state = meta.create_meta_oauth_state(
+        tenant_id, connection_type="cloud_api_coexistence", nonce="unique-nonce"
+    )
     assert "unique-nonce" in meta._META_NONCES
     payload = meta.verify_meta_oauth_state(state, consume_nonce=True)
     assert payload["tenant_id"] == str(tenant_id)
@@ -63,7 +65,12 @@ def test_state_generation_persists_nonce_and_validates(monkeypatch):
 
 def test_state_expiration(monkeypatch):
     meta._META_NONCES.clear()
-    state = meta.create_meta_oauth_state(uuid.uuid4(), connection_type="cloud_api_coexistence", nonce="old", issued_at=1000)
+    state = meta.create_meta_oauth_state(
+        uuid.uuid4(),
+        connection_type="cloud_api_coexistence",
+        nonce="old",
+        issued_at=1000,
+    )
     monkeypatch.setattr(meta.time, "time", lambda: 1000 + meta.STATE_TTL_SECONDS + 1)
     with pytest.raises(HTTPException) as exc:
         meta.verify_meta_oauth_state(state, consume_nonce=True)
@@ -73,7 +80,9 @@ def test_state_expiration(monkeypatch):
 def test_nonce_reuse_is_rejected(monkeypatch):
     meta._META_NONCES.clear()
     monkeypatch.setattr(meta.time, "time", lambda: 1890000000)
-    state = meta.create_meta_oauth_state(uuid.uuid4(), connection_type="cloud_api_coexistence", nonce="single-use")
+    state = meta.create_meta_oauth_state(
+        uuid.uuid4(), connection_type="cloud_api_coexistence", nonce="single-use"
+    )
     meta.verify_meta_oauth_state(state, consume_nonce=True)
     with pytest.raises(HTTPException) as exc:
         meta.verify_meta_oauth_state(state, consume_nonce=True)
@@ -82,7 +91,9 @@ def test_nonce_reuse_is_rejected(monkeypatch):
 
 def test_invalid_state_signature_rejected(monkeypatch):
     monkeypatch.setattr(meta.time, "time", lambda: 1890000000)
-    state = meta.create_meta_oauth_state(uuid.uuid4(), connection_type="cloud_api_coexistence")
+    state = meta.create_meta_oauth_state(
+        uuid.uuid4(), connection_type="cloud_api_coexistence"
+    )
     with pytest.raises(HTTPException):
         meta.verify_meta_oauth_state(state + "tampered")
 
@@ -96,7 +107,9 @@ def test_token_exchange(monkeypatch):
         return _Response({"access_token": "token-from-meta"})
 
     monkeypatch.setattr(meta.requests, "get", fake_get)
-    token = meta._exchange_code_for_token("oauth-code", "https://api.example.com/api/integrations/meta/callback")
+    token = meta._exchange_code_for_token(
+        "oauth-code", "https://api.example.com/api/integrations/meta/callback"
+    )
     assert token == "token-from-meta"
     assert captured["params"]["code"] == "oauth-code"
 
@@ -110,7 +123,15 @@ def test_business_and_phone_discovery(monkeypatch):
         if path == "bm-1/client_whatsapp_business_accounts":
             return {"data": []}
         if path == "waba-1/phone_numbers":
-            return {"data": [{"id": "phone-1", "display_phone_number": "+55 11", "verified_name": "Loja"}]}
+            return {
+                "data": [
+                    {
+                        "id": "phone-1",
+                        "display_phone_number": "+55 11",
+                        "verified_name": "Loja",
+                    }
+                ]
+            }
         raise AssertionError(path)
 
     monkeypatch.setattr(meta, "_meta_get", fake_meta_get)
@@ -124,12 +145,36 @@ def test_callback_creates_provider(monkeypatch):
     tenant_id = uuid.uuid4()
     meta._META_NONCES.clear()
     monkeypatch.setattr(meta.time, "time", lambda: 1890000000)
-    state = meta.create_meta_oauth_state(tenant_id, connection_type="cloud_api_coexistence", nonce="create")
-    monkeypatch.setattr(meta, "_exchange_code_for_token", lambda code, redirect_uri: "token")
-    monkeypatch.setattr(meta, "_discover_meta_business", lambda token: {"business_id": "bm-1", "business_name": "Biz", "waba_id": "waba-1", "waba_name": "WABA", "phone": {"id": "phone-1", "display_phone_number": "+55 11", "verified_name": "Loja"}})
+    state = meta.create_meta_oauth_state(
+        tenant_id, connection_type="cloud_api_coexistence", nonce="create"
+    )
+    monkeypatch.setattr(
+        meta, "_exchange_code_for_token", lambda code, redirect_uri: "token"
+    )
+    monkeypatch.setattr(
+        meta,
+        "_discover_meta_business",
+        lambda token: {
+            "business_id": "bm-1",
+            "business_name": "Biz",
+            "waba_id": "waba-1",
+            "waba_name": "WABA",
+            "phone": {
+                "id": "phone-1",
+                "display_phone_number": "+55 11",
+                "verified_name": "Loja",
+            },
+        },
+    )
     monkeypatch.setattr(meta, "encrypt_secret", lambda value: f"encrypted:{value}")
     db = _Db()
-    request = type("Request", (), {"url": "https://api.example.com/api/integrations/meta/callback?code=x&state=y"})()
+    request = type(
+        "Request",
+        (),
+        {
+            "url": "https://api.example.com/api/integrations/meta/callback?code=x&state=y"
+        },
+    )()
     result = meta.meta_callback(request, code="code", state=state, db=db)
     assert result["ok"] is True
     assert db.added.phone_number_id == "phone-1"
@@ -139,15 +184,40 @@ def test_callback_creates_provider(monkeypatch):
 
 def test_callback_updates_existing_provider(monkeypatch):
     tenant_id = uuid.uuid4()
-    existing = TenantWhatsAppProvider(id=uuid.uuid4(), tenant_id=tenant_id, provider_type="meta_cloud", phone_number_id="old")
+    existing = TenantWhatsAppProvider(
+        id=uuid.uuid4(),
+        tenant_id=tenant_id,
+        provider_type="meta_cloud",
+        phone_number_id="old",
+    )
     meta._META_NONCES.clear()
     monkeypatch.setattr(meta.time, "time", lambda: 1890000000)
-    state = meta.create_meta_oauth_state(tenant_id, connection_type="cloud_api_coexistence", nonce="update")
-    monkeypatch.setattr(meta, "_exchange_code_for_token", lambda code, redirect_uri: "token")
-    monkeypatch.setattr(meta, "_discover_meta_business", lambda token: {"business_id": "bm-2", "business_name": "Biz", "waba_id": "waba-2", "waba_name": "WABA 2", "phone": {"id": "phone-2", "display_phone_number": "+55 22", "verified_name": "Loja 2"}})
+    state = meta.create_meta_oauth_state(
+        tenant_id, connection_type="cloud_api_coexistence", nonce="update"
+    )
+    monkeypatch.setattr(
+        meta, "_exchange_code_for_token", lambda code, redirect_uri: "token"
+    )
+    monkeypatch.setattr(
+        meta,
+        "_discover_meta_business",
+        lambda token: {
+            "business_id": "bm-2",
+            "business_name": "Biz",
+            "waba_id": "waba-2",
+            "waba_name": "WABA 2",
+            "phone": {
+                "id": "phone-2",
+                "display_phone_number": "+55 22",
+                "verified_name": "Loja 2",
+            },
+        },
+    )
     monkeypatch.setattr(meta, "encrypt_secret", lambda value: f"encrypted:{value}")
     db = _Db(existing=existing)
-    request = type("Request", (), {"url": "https://api.example.com/api/integrations/meta/callback"})()
+    request = type(
+        "Request", (), {"url": "https://api.example.com/api/integrations/meta/callback"}
+    )()
     meta.meta_callback(request, code="code", state=state, db=db)
     assert db.added is None
     assert existing.phone_number_id == "phone-2"
@@ -156,9 +226,57 @@ def test_callback_updates_existing_provider(monkeypatch):
 
 
 def test_status_api_payload_includes_phase2_fields():
-    provider = TenantWhatsAppProvider(tenant_id=uuid.uuid4(), provider_type="meta_cloud", connection_status="connected", connection_type="cloud_api_coexistence", coexistence_enabled=True, coexistence_status="active", waba_id="waba", business_id="bm", business_manager_id="bm", phone_number_id="pnid", business_phone_number_id="+55 11", phone_display_name="+55 11", phone_verified_name="Loja")
+    provider = TenantWhatsAppProvider(
+        tenant_id=uuid.uuid4(),
+        provider_type="meta_cloud",
+        connection_status="connected",
+        connection_type="cloud_api_coexistence",
+        coexistence_enabled=True,
+        coexistence_status="active",
+        waba_id="waba",
+        business_id="bm",
+        business_manager_id="bm",
+        phone_number_id="pnid",
+        business_phone_number_id="+55 11",
+        phone_display_name="+55 11",
+        phone_verified_name="Loja",
+    )
     payload = meta._provider_status(provider)
     assert payload["connected"] is True
     assert payload["business_manager_id"] == "bm"
     assert payload["phone_number"] == "+55 11"
     assert payload["verified_name"] == "Loja"
+
+
+def test_connect_url_uses_only_whatsapp_embedded_signup_scopes(monkeypatch):
+    from urllib.parse import parse_qs, urlparse
+
+    monkeypatch.setenv("META_APP_ID", "app-123")
+    monkeypatch.setenv(
+        "META_REDIRECT_URI", "https://api.example.com/api/integrations/meta/callback"
+    )
+    monkeypatch.setenv("META_EMBEDDED_SIGNUP_CONFIG_ID", "config-123")
+    monkeypatch.setenv(
+        "META_EMBEDDED_SIGNUP_SCOPES",
+        "whatsapp_business_management,whatsapp_business_messaging,business_management",
+    )
+
+    url = meta._connect_url("state-123")
+    params = parse_qs(urlparse(url).query)
+
+    assert params["scope"] == [
+        "whatsapp_business_management,whatsapp_business_messaging"
+    ]
+    assert "business_management" not in params["scope"][0]
+    assert params["config_id"] == ["config-123"]
+    assert params["response_type"] == ["code"]
+    assert '"feature": "whatsapp_embedded_signup"' in params["extras"][0]
+    assert '"solution": "coexistence"' in params["extras"][0]
+
+
+def test_connect_url_defaults_to_official_whatsapp_embedded_signup_scopes(monkeypatch):
+    monkeypatch.delenv("META_EMBEDDED_SIGNUP_SCOPES", raising=False)
+    assert (
+        meta._embedded_signup_scopes()
+        == "whatsapp_business_management,whatsapp_business_messaging"
+    )
