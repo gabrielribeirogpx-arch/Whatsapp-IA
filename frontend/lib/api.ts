@@ -836,6 +836,34 @@ export function getGoogleDriveConnectUrl(): string {
   return buildApiUrl(`/api/integrations/google-drive/connect-url?tenant_slug=${encodeURIComponent(tenant)}`);
 }
 
+export async function getSuitableStatus(): Promise<GoogleCalendarConnectionStatus> {
+  const tenant = getTenantSlugOrId();
+  const query = tenant ? `?tenant_slug=${encodeURIComponent(tenant)}` : '';
+  const res = await apiFetch(`/api/integrations/suitable/status${query}`);
+  return parseApiResponse<GoogleCalendarConnectionStatus>(res);
+}
+
+export async function connectSuitable(apiKey: string): Promise<GoogleCalendarConnectionStatus> {
+  const tenant = getTenantSlugOrId();
+  const query = tenant ? `?tenant_slug=${encodeURIComponent(tenant)}` : '';
+  const res = await apiFetch(`/api/integrations/suitable/connect${query}`, {
+    method: 'POST',
+    body: JSON.stringify({ api_key: apiKey, metadata: { credential_source: 'manual_api_key' } })
+  });
+  return parseApiResponse<GoogleCalendarConnectionStatus>(res);
+}
+
+export async function saveSuitableApiKey(apiKey: string): Promise<GoogleCalendarConnectionStatus> {
+  return connectSuitable(apiKey);
+}
+
+export async function disconnectSuitable(): Promise<GoogleCalendarConnectionStatus> {
+  const tenant = getTenantSlugOrId();
+  const query = tenant ? `?tenant_slug=${encodeURIComponent(tenant)}` : '';
+  const res = await apiFetch(`/api/integrations/suitable/disconnect${query}`, { method: 'POST' });
+  return parseApiResponse<GoogleCalendarConnectionStatus>(res);
+}
+
 export async function getAccountMe(): Promise<AccountMe> {
   const res = await apiFetch('/api/account/me');
   return parseApiResponse<AccountMe>(res);
