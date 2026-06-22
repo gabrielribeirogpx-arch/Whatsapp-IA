@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 const source = readFileSync(new URL('./api.ts', import.meta.url), 'utf8');
 const settingsSource = readFileSync(new URL('../components/settings/SettingsContent.tsx', import.meta.url), 'utf8');
+const mcpDashboardSource = readFileSync(new URL('../app/dashboard/ai/mcp/MCPDashboardClient.tsx', import.meta.url), 'utf8');
 
 const connectFn = source.match(/export function getGoogleSheetsConnectUrl\(\): string \{[\s\S]*?\n\}/)?.[0] || '';
 const statusFn = source.match(/export async function getGoogleSheetsStatus\(\): Promise<GoogleCalendarConnectionStatus> \{[\s\S]*?\n\}/)?.[0] || '';
@@ -24,3 +25,13 @@ assert.match(settingsSource, /google_sheets_read_sheet/);
 assert.match(settingsSource, /google_sheets_append_row/);
 assert.match(settingsSource, /google_sheets_update_row/);
 assert.match(settingsSource, /google_sheets_create_spreadsheet/);
+
+
+assert.match(mcpDashboardSource, /Apps conectados ao Wazza/);
+assert.match(mcpDashboardSource, /<h3[^>]*>Google Sheets<\/h3>/);
+assert.match(mcpDashboardSource, /getGoogleSheetsStatus/);
+assert.match(mcpDashboardSource, /getGoogleSheetsConnectUrl/);
+assert.match(mcpDashboardSource, /disconnectGoogleSheets/);
+assert.match(mcpDashboardSource, /metadata\?\.provider === ["']google_sheets["']/);
+assert.match(mcpDashboardSource, /integration === ["']google_sheets["']/);
+assert.match(mcpDashboardSource, /!\["google_calendar", "gmail", "google_drive", "google_sheets", "suitable"\]/);
