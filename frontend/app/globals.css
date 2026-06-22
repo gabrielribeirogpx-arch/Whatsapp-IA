@@ -444,7 +444,7 @@ input {
   padding: 1rem;
 }
 
-.login-card {
+.login-screen > .login-card {
   width: min(420px, 100%);
   background: #fff;
   border: 1px solid #e5e7eb;
@@ -453,29 +453,29 @@ input {
   box-shadow: 0 10px 25px rgba(15, 23, 42, 0.08);
 }
 
-.login-card h1 {
+.login-screen > .login-card h1 {
   margin: 0;
 }
 
-.login-card p {
+.login-screen > .login-card p {
   color: #6b7280;
 }
 
-.login-card label {
+.login-screen > .login-card label {
   display: block;
   margin-top: 0.8rem;
   margin-bottom: 0.3rem;
   font-size: 0.9rem;
 }
 
-.login-card input {
+.login-screen > .login-card input {
   width: 100%;
   border: 1px solid #d1d5db;
   border-radius: 10px;
   padding: 0.7rem;
 }
 
-.login-card .primary-button {
+.login-screen > .login-card .primary-button {
   width: 100%;
   margin-top: 1rem;
 }
@@ -5600,9 +5600,40 @@ input {
   }
 }
 
-/* Premium login layout: redistribute content instead of shrinking the whole screen. */
-.login-premium-card {
-  max-height: calc(100vh - 2.5rem);
+/* Premium login layout: allow the login page to scroll instead of clipping the card. */
+.login-page {
+  min-height: 100dvh;
+  height: auto;
+  overflow-y: auto;
+}
+
+.login-premium-card,
+.login-card {
+  max-height: none;
+  overflow: visible;
+}
+
+@media (min-height: 821px) {
+  .login-premium-layout {
+    align-items: center;
+  }
+
+  .login-form-shell {
+    align-items: center;
+  }
+}
+
+@media (max-height: 820px) {
+  .login-page {
+    align-items: flex-start;
+    padding-top: 24px;
+    padding-bottom: 24px;
+  }
+
+  .login-card {
+    margin-top: 0;
+    margin-bottom: 24px;
+  }
 }
 
 .login-benefits {

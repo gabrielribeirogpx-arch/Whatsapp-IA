@@ -72,8 +72,8 @@ export default function LoginPage() {
   }
 
   return (
-    <main className="min-h-screen overflow-x-hidden bg-[#f7faf5] text-[#0e1c2a] antialiased lg:overflow-hidden">
-      <div className="login-premium-layout relative grid min-h-screen lg:grid-cols-2">
+    <main className="login-page min-h-dvh h-auto overflow-x-hidden overflow-y-auto bg-[#f7faf5] py-6 text-[#0e1c2a] antialiased lg:py-8">
+      <div className="login-premium-layout relative grid min-h-dvh items-start lg:grid-cols-2">
         <div className="login-decor login-decor-left pointer-events-none absolute -left-24 top-1/3 hidden h-72 w-72 rounded-full bg-[#6CBF2A]/20 blur-3xl lg:block" />
         <div className="login-decor pointer-events-none absolute right-0 top-10 h-96 w-96 rounded-full bg-[#55B521]/15 blur-3xl" />
         <div className="login-decor pointer-events-none absolute bottom-0 right-0 h-80 w-80 rounded-full bg-[#6CBF2A]/10 blur-3xl" />
@@ -112,8 +112,8 @@ export default function LoginPage() {
           </div>
         </section>
 
-        <section className="login-form-shell relative flex min-h-screen items-center justify-center px-4 py-4 sm:px-8 lg:px-10">
-          <form className="login-premium-card w-full max-w-[540px] animate-[fadeInUp_650ms_ease-out_both] rounded-[30px] border border-white/80 bg-white p-6 shadow-[0_28px_90px_rgba(15,23,42,0.14)] backdrop-blur-xl sm:p-8 xl:p-10" onSubmit={onSubmit}>
+        <section className="login-form-shell relative flex min-h-dvh items-start justify-center px-4 py-0 sm:px-8 lg:px-10">
+          <form className="login-card login-premium-card mb-6 w-full max-w-[540px] overflow-visible animate-[fadeInUp_650ms_ease-out_both] rounded-[30px] border border-white/80 bg-white p-6 shadow-[0_28px_90px_rgba(15,23,42,0.14)] backdrop-blur-xl sm:p-8 xl:p-10" onSubmit={onSubmit}>
             <div className="login-card-header text-center">
               <Image src="/Logo.svg" alt="Wazza" width={82} height={68} priority className="login-card-logo mx-auto h-[43px] w-[43px] object-contain drop-shadow-sm" />
               <h2 className="login-card-title mt-3 text-3xl font-black tracking-[-0.035em] text-[#0e1c2a] sm:text-[2rem]">Entrar no Wazza</h2>
