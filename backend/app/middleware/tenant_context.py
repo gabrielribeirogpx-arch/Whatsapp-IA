@@ -25,6 +25,8 @@ PUBLIC_PATHS = (
     "/api/integrations/gmail/callback",
     "/api/integrations/google-drive/connect-url",
     "/api/integrations/google-drive/callback",
+    "/api/integrations/google-sheets/connect-url",
+    "/api/integrations/google-sheets/callback",
     "/webhook",
     "/api/webhook",
     "/uploads",

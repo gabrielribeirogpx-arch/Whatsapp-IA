@@ -42,7 +42,7 @@ from app.routers import flow_media
 from app.routers import whatsapp_providers, whatsapp_templates, whatsapp_campaigns
 from app.routers import admin_investigation
 from app.routers import admin_conversation_reset
-from app.routers import integration_connections, google_calendar_integration, gmail_integration, google_drive_integration, suitable_integration
+from app.routers import integration_connections, google_calendar_integration, gmail_integration, google_drive_integration, google_sheets_integration, suitable_integration
 from app.middleware.tenant_context import TenantContextMiddleware
 from app.api.debug import router as debug_router
 from app.api.flow_runtime import router as flow_runtime_router
@@ -208,6 +208,7 @@ app.include_router(integration_connections.router, prefix="/api")
 app.include_router(google_calendar_integration.router, prefix="/api")
 app.include_router(gmail_integration.router, prefix="/api")
 app.include_router(google_drive_integration.router, prefix="/api")
+app.include_router(google_sheets_integration.router, prefix="/api")
 app.include_router(suitable_integration.router)
 # Webhooks ativos:
 # - Canônico (Meta): /webhook (sem prefixo), via app.routers.webhook
