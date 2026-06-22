@@ -6,7 +6,7 @@ import json
 from uuid import UUID
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from sqlalchemy import desc, select
 from sqlalchemy.orm import Session, load_only
 
@@ -684,20 +684,30 @@ async def _process_meta_webhook(request: Request, db: Session) -> dict[str, str]
 
 
 @router.get("/webhook")
-async def verify(
-    hub_mode: str = Query(default="", alias="hub.mode"),
-    hub_verify_token: str = Query(default="", alias="hub.verify_token"),
-    hub_challenge: str = Query(default="", alias="hub.challenge"),
-    db: Session = Depends(get_db),
-):
+async def verify(request: Request, db: Session = Depends(get_db)):
+    params = request.query_params
+    hub_mode = params.get("hub.mode") or params.get("mode") or ""
+    hub_verify_token = params.get("hub.verify_token") or params.get("verify_token") or ""
+    hub_challenge = params.get("hub.challenge") or params.get("challenge") or ""
+
+    if not hub_mode:
+        raise HTTPException(status_code=400, detail="hub.mode ausente")
     if hub_mode != "subscribe":
         raise HTTPException(status_code=400, detail="hub.mode inválido")
+    if not hub_verify_token:
+        raise HTTPException(status_code=400, detail="hub.verify_token ausente")
+    if not hub_challenge:
+        raise HTTPException(status_code=400, detail="hub.challenge ausente")
+
+    expected_verify_token = os.getenv("VERIFY_TOKEN") or os.getenv("WHATSAPP_VERIFY_TOKEN") or ""
+    token_matches_environment = bool(expected_verify_token and hub_verify_token == expected_verify_token)
 
     tenant = None
-    if hub_verify_token:
+    if not token_matches_environment:
         tenant = db.execute(select(Tenant).where(Tenant.verify_token == hub_verify_token)).scalars().first()
-    if not tenant:
-        raise HTTPException(status_code=403, detail="verify_token ausente")
+    if not (token_matches_environment or tenant):
+        raise HTTPException(status_code=403, detail="verify_token inválido")
+
     return Response(content=hub_challenge, media_type="text/plain")
 
 
