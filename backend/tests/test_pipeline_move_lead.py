@@ -199,7 +199,7 @@ def test_move_endpoint_null_stage_id_returns_clear_422_without_500() -> None:
 
 def test_move_endpoint_validation_error_contains_cors_headers() -> None:
     tenant = _tenant()
-    origin = "https://frontend-whatsapp-ia-production.up.railway.app"
+    origin = "https://app.wazzaapi.com.br"
     client = TestClient(_build_move_app(_FakeDb(), tenant))
 
     response = client.patch(
@@ -274,7 +274,7 @@ def test_move_endpoint_invalid_payload_returns_clear_422_without_500() -> None:
 
 def test_options_preflight_for_patch_move_contains_cors_headers() -> None:
     client = TestClient(_build_move_app())
-    origin = "https://frontend-whatsapp-ia-production.up.railway.app"
+    origin = "https://app.wazzaapi.com.br"
 
     response = client.options(
         f"/api/leads/{uuid.uuid4()}/move",

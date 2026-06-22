@@ -365,7 +365,7 @@ def _safe_original_stem(filename: str) -> str:
 
 
 def _configured_public_base_url() -> str | None:
-    for env_name in ("PUBLIC_BACKEND_URL", "API_PUBLIC_URL", "BACKEND_PUBLIC_URL"):
+    for env_name in ("PUBLIC_API_BASE_URL", "PUBLIC_BACKEND_URL", "API_PUBLIC_URL", "BACKEND_PUBLIC_URL"):
         value = str(os.getenv(env_name) or "").strip().rstrip("/")
         if value:
             return value
@@ -378,16 +378,12 @@ def _request_public_base_url(request: Request) -> str:
     forwarded_proto = str(request.headers.get("x-forwarded-proto") or "").split(",")[0].strip().lower()
     host = str(request.headers.get("x-forwarded-host") or request.headers.get("host") or parsed.netloc).split(",")[0].strip()
     scheme = forwarded_proto or parsed.scheme or "https"
-    if host.endswith(".up.railway.app") or os.getenv("RAILWAY_ENVIRONMENT") or os.getenv("RAILWAY_PUBLIC_DOMAIN"):
-        scheme = "https"
     return f"{scheme}://{host}".rstrip("/")
 
 
 def _public_url(request: Request, filename: str) -> str:
     public_base = _configured_public_base_url() or _request_public_base_url(request)
     parsed = urlparse(public_base)
-    if parsed.netloc.endswith(".up.railway.app") and parsed.scheme != "https":
-        public_base = f"https://{parsed.netloc}{parsed.path}".rstrip("/")
     return f"{public_base}/uploads/flow-media/{filename}"
 
 

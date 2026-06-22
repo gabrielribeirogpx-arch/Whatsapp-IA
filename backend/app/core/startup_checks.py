@@ -13,6 +13,7 @@ from alembic.script import ScriptDirectory
 from sqlalchemy import text
 
 from app.core.oauth_encryption_key import validate_oauth_encryption_key
+from app.core.public_urls import frontend_url, oauth_callback_url, public_api_base_url
 
 logger = logging.getLogger(__name__)
 
@@ -156,33 +157,26 @@ def google_sheets_oauth_enabled() -> bool:
 
 
 def verify_oauth_redirect_uris() -> None:
-    google_redirect_uri = (os.getenv("GOOGLE_REDIRECT_URI") or "").strip()
-    if google_redirect_uri:
-        _validate_absolute_http_url("GOOGLE_REDIRECT_URI", google_redirect_uri)
-        logger.info("GOOGLE_CALENDAR_REDIRECT_URI_RESOLVED redirect_uri=%s source=env", google_redirect_uri)
-    elif is_production():
-        raise RuntimeError("GOOGLE_REDIRECT_URI is required in production for Google Calendar OAuth")
+    frontend = frontend_url()
+    public_api = public_api_base_url()
+    _validate_absolute_http_url("FRONTEND_URL", frontend)
+    _validate_absolute_http_url("PUBLIC_API_BASE_URL", public_api)
+    logger.info("PUBLIC_URLS_RESOLVED frontend_url=%s public_api_base_url=%s", frontend, public_api)
 
-    gmail_redirect_uri = (os.getenv("GMAIL_REDIRECT_URI") or "").strip()
-    if gmail_oauth_enabled():
-        if not gmail_redirect_uri:
-            raise RuntimeError("GMAIL_REDIRECT_URI is required when Gmail OAuth is enabled")
-        _validate_absolute_http_url("GMAIL_REDIRECT_URI", gmail_redirect_uri)
-        logger.info("GMAIL_REDIRECT_URI_RESOLVED redirect_uri=%s source=env", gmail_redirect_uri)
-
-    google_drive_redirect_uri = (os.getenv("GOOGLE_DRIVE_REDIRECT_URI") or "").strip()
-    if google_drive_oauth_enabled():
-        if not google_drive_redirect_uri:
-            raise RuntimeError("GOOGLE_DRIVE_REDIRECT_URI is required when Google Drive OAuth is enabled")
-        _validate_absolute_http_url("GOOGLE_DRIVE_REDIRECT_URI", google_drive_redirect_uri)
-        logger.info("GOOGLE_DRIVE_REDIRECT_URI_RESOLVED redirect_uri=%s source=env", google_drive_redirect_uri)
-
-    google_sheets_redirect_uri = (os.getenv("GOOGLE_SHEETS_REDIRECT_URI") or "").strip()
-    if google_sheets_oauth_enabled():
-        if not google_sheets_redirect_uri:
-            raise RuntimeError("GOOGLE_SHEETS_REDIRECT_URI is required when Google Sheets OAuth is enabled")
-        _validate_absolute_http_url("GOOGLE_SHEETS_REDIRECT_URI", google_sheets_redirect_uri)
-        logger.info("GOOGLE_SHEETS_REDIRECT_URI_RESOLVED redirect_uri=%s source=env", google_sheets_redirect_uri)
+    callbacks = (
+        ("GOOGLE_REDIRECT_URI", "/api/integrations/google-calendar/callback", True),
+        ("GMAIL_REDIRECT_URI", "/api/integrations/gmail/callback", gmail_oauth_enabled()),
+        ("GOOGLE_DRIVE_REDIRECT_URI", "/api/integrations/google-drive/callback", google_drive_oauth_enabled()),
+        ("GOOGLE_SHEETS_REDIRECT_URI", "/api/integrations/google-sheets/callback", google_sheets_oauth_enabled()),
+    )
+    for env_name, path, enabled in callbacks:
+        if not enabled:
+            continue
+        try:
+            redirect_uri = oauth_callback_url(None, path, env_name)
+        except ValueError as exc:
+            raise RuntimeError(str(exc)) from exc
+        _validate_absolute_http_url(env_name, redirect_uri)
 
 
 def verify_required_env_vars(*names: str) -> None:

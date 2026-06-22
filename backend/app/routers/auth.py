@@ -17,6 +17,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.public_urls import frontend_url
 from app.database import get_db
 from app.models import PasswordResetToken, Tenant, TenantUser
 from app.schemas.auth import ForgotPasswordRequest, LoginRequest, RegisterRequest, ResetPasswordRequest, TenantAuthResponse
@@ -171,8 +172,7 @@ def forgot_password(payload: ForgotPasswordRequest, request: Request, db: Sessio
         db.add(PasswordResetToken(user_id=user.id, token_hash=token_hash, expires_at=expires_at))
         write_audit_log(db, action="PASSWORD_RESET_REQUESTED", tenant_id=user.tenant_id, user_id=user.id, entity_type="tenant_user", entity_id=user.id, metadata={"email_hint": email[:2] + "***"}, request=request)
         db.commit()
-        frontend_url = os.getenv("FRONTEND_URL", "http://localhost:3000")
-        _send_reset_email(email, f"{frontend_url}/reset-password?token={raw_token}")
+        _send_reset_email(email, f"{frontend_url()}/reset-password?token={raw_token}")
         print("[PASSWORD RESET EMAIL SENT]", f"user_id={user.id}")
     return {"message": "Se o email existir, enviaremos as instruções de recuperação."}
 

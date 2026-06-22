@@ -17,6 +17,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 
+from app.core.public_urls import frontend_url, oauth_callback_url, public_api_base_url
 from app.database import get_db
 from app.models.tenant import Tenant
 from app.schemas.integration_connection import IntegrationConnectionStatusOut
@@ -43,15 +44,7 @@ logger = logging.getLogger(__name__)
 
 
 def _frontend_base_url() -> str:
-    configured = (
-        os.getenv("FRONTEND_URL")
-        or "https://frontend-whatsapp-ia-production.up.railway.app"
-    ).strip().rstrip("/")
-    parsed = urlparse(configured)
-    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
-        logger.warning("GMAIL_INVALID_FRONTEND_URL value=%s", configured)
-        return "https://frontend-whatsapp-ia-production.up.railway.app"
-    return configured
+    return frontend_url()
 
 
 def _frontend_oauth_result_url(status: str) -> str:
@@ -109,25 +102,14 @@ def _state_secret() -> bytes:
 
 
 def _backend_base_url(request: Request) -> str:
-    configured = (
-        os.getenv("PUBLIC_BACKEND_URL")
-        or os.getenv("API_PUBLIC_URL")
-        or os.getenv("BACKEND_PUBLIC_URL")
-        or ""
-    ).strip().rstrip("/")
-    if configured:
-        return configured
-    return str(request.base_url).rstrip("/")
+    return public_api_base_url(request)
 
 
 def _redirect_uri(request: Request) -> str:
-    configured = (os.getenv("GMAIL_REDIRECT_URI") or "").strip()
-    redirect_uri = configured or f"{_backend_base_url(request)}/api/integrations/gmail/callback"
-    parsed = urlparse(redirect_uri)
-    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
-        raise HTTPException(status_code=500, detail="GMAIL_REDIRECT_URI inválida")
-    logger.info("GMAIL_REDIRECT_URI_RESOLVED redirect_uri=%s source=%s", redirect_uri, "env" if configured else "fallback")
-    return redirect_uri
+    try:
+        return oauth_callback_url(request, "/api/integrations/gmail/callback", "GMAIL_REDIRECT_URI")
+    except ValueError as exc:
+        raise HTTPException(status_code=500, detail="GMAIL_REDIRECT_URI inválida") from exc
 
 
 def _validate_gmail_connect_config(request: Request) -> None:
