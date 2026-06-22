@@ -149,6 +149,12 @@ def google_drive_oauth_enabled() -> bool:
     return bool((os.getenv("GOOGLE_DRIVE_CLIENT_ID") or "").strip() or (os.getenv("GOOGLE_DRIVE_CLIENT_SECRET") or "").strip())
 
 
+def google_sheets_oauth_enabled() -> bool:
+    if _env_flag("GOOGLE_SHEETS_ENABLED", default=False) or _env_flag("ENABLE_GOOGLE_SHEETS", default=False):
+        return True
+    return bool((os.getenv("GOOGLE_SHEETS_CLIENT_ID") or "").strip() or (os.getenv("GOOGLE_SHEETS_CLIENT_SECRET") or "").strip())
+
+
 def verify_oauth_redirect_uris() -> None:
     google_redirect_uri = (os.getenv("GOOGLE_REDIRECT_URI") or "").strip()
     if google_redirect_uri:
@@ -170,6 +176,13 @@ def verify_oauth_redirect_uris() -> None:
             raise RuntimeError("GOOGLE_DRIVE_REDIRECT_URI is required when Google Drive OAuth is enabled")
         _validate_absolute_http_url("GOOGLE_DRIVE_REDIRECT_URI", google_drive_redirect_uri)
         logger.info("GOOGLE_DRIVE_REDIRECT_URI_RESOLVED redirect_uri=%s source=env", google_drive_redirect_uri)
+
+    google_sheets_redirect_uri = (os.getenv("GOOGLE_SHEETS_REDIRECT_URI") or "").strip()
+    if google_sheets_oauth_enabled():
+        if not google_sheets_redirect_uri:
+            raise RuntimeError("GOOGLE_SHEETS_REDIRECT_URI is required when Google Sheets OAuth is enabled")
+        _validate_absolute_http_url("GOOGLE_SHEETS_REDIRECT_URI", google_sheets_redirect_uri)
+        logger.info("GOOGLE_SHEETS_REDIRECT_URI_RESOLVED redirect_uri=%s source=env", google_sheets_redirect_uri)
 
 
 def verify_required_env_vars(*names: str) -> None:

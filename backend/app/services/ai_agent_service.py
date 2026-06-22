@@ -23,11 +23,12 @@ from app.context_engine import UnifiedContextEngine
 from app.services.circuit_breaker_service import CircuitBreakerOpen, check_circuit, record_failure, record_success
 from app.services.execution_budget_service import ExecutionBudgetExceeded, ExecutionBudget
 from app.services.long_term_memory_service import ALLOWED_FACT_TYPES, SECRET_RE, store_fact
-from app.services.pending_action_service import CALENDAR_CREATE_CONFIRMATION, EMAIL_SEND_CONFIRMATION, SUITABLE_CREATE_ORDER_CONFIRMATION, PendingActionHandlerRegistry, PendingActionService, detect_pending_action_decision, format_pending_calendar_create_conflict_message, normalize_calendar_conflicting_event
+from app.services.pending_action_service import CALENDAR_CREATE_CONFIRMATION, EMAIL_SEND_CONFIRMATION, GOOGLE_SHEETS_APPEND_ROW_CONFIRMATION, GOOGLE_SHEETS_UPDATE_ROW_CONFIRMATION, SUITABLE_CREATE_ORDER_CONFIRMATION, PendingActionHandlerRegistry, PendingActionService, detect_pending_action_decision, format_pending_calendar_create_conflict_message, normalize_calendar_conflicting_event
 from app.tools import ToolContext, ToolRegistry
 from app.tools.adapters.google_calendar_tool_adapter import GOOGLE_CALENDAR_TOOL_IDS, GoogleCalendarToolAdapter, google_calendar_tool_definitions
 from app.tools.adapters.gmail_tool_adapter import GMAIL_TOOL_IDS, GmailToolAdapter, gmail_tool_definitions
 from app.tools.adapters.google_drive_tool_adapter import GOOGLE_DRIVE_TOOL_IDS, GoogleDriveToolAdapter, google_drive_tool_definitions
+from app.tools.adapters.google_sheets_tool_adapter import GOOGLE_SHEETS_TOOL_IDS, GoogleSheetsToolAdapter, google_sheets_tool_definitions
 from app.tools.adapters.suitable_tool_adapter import SUITABLE_TOOL_IDS, SuitableToolAdapter, suitable_tool_definitions
 from app.services.suitable_service import PROVIDER as SUITABLE_PROVIDER
 from app.tools.adapters.mcp_tool_adapter import MCPToolAdapter
@@ -52,6 +53,8 @@ MUTATING_TOOL_IDS = {
     "google_drive_delete_file",
     "google_drive_update_document",
     "google_drive_share_file",
+    "google_sheets_append_row",
+    "google_sheets_update_row",
 }
 
 logger = logging.getLogger(__name__)
@@ -146,6 +149,8 @@ def _google_calendar_origin(tool: dict[str, Any]) -> str:
         return "internal/gmail"
     if tool_id in GOOGLE_DRIVE_TOOL_IDS or (tool.get("metadata") or {}).get("provider") == "google_drive":
         return "internal/google_drive"
+    if tool_id in GOOGLE_SHEETS_TOOL_IDS or (tool.get("metadata") or {}).get("provider") == "google_sheets":
+        return "internal/google_sheets"
     return "mcp"
 
 
@@ -211,6 +216,7 @@ def _resolve_tenant_available_mcp_tools(db: Session, tenant_id: Any, configured_
     from app.services.google_calendar_service import PROVIDER as GOOGLE_CALENDAR_PROVIDER
     from app.services.gmail_service import PROVIDER as GMAIL_PROVIDER
     from app.services.google_drive_service import PROVIDER as GOOGLE_DRIVE_PROVIDER
+    from app.services.google_sheets_service import PROVIDER as GOOGLE_SHEETS_PROVIDER
 
     resolved = [_normalize_mcp_tool_definition(t) for t in configured_tools if isinstance(t, dict)]
     if _has_integration_connection(db, tenant_id, GOOGLE_CALENDAR_PROVIDER):
@@ -219,6 +225,8 @@ def _resolve_tenant_available_mcp_tools(db: Session, tenant_id: Any, configured_
         resolved.extend({**tool, "tenant_id": str(tenant_id)} for tool in gmail_tool_definitions(connected=True))
     if _has_integration_connection(db, tenant_id, GOOGLE_DRIVE_PROVIDER):
         resolved.extend({**tool, "tenant_id": str(tenant_id)} for tool in google_drive_tool_definitions(connected=True))
+    if _has_integration_connection(db, tenant_id, GOOGLE_SHEETS_PROVIDER):
+        resolved.extend({**tool, "tenant_id": str(tenant_id)} for tool in google_sheets_tool_definitions(connected=True))
     if _has_integration_connection(db, tenant_id, SUITABLE_PROVIDER):
         resolved.extend({**tool, "tenant_id": str(tenant_id)} for tool in suitable_tool_definitions(connected=True))
     resolved.extend(_tenant_mcp_tools_from_db(db, tenant_id))
@@ -610,6 +618,45 @@ def format_tool_result_for_user(tool_id: Any, normalized_result: dict[str, Any])
     _json_log("AI_AGENT_TOOL_RESULT_FORMAT_START", tool_id=tool, result_type=normalized_result.get("type"))
     data = _tool_data(normalized_result)
     response = ""
+
+
+    spreadsheets = data.get("spreadsheets") if isinstance(data.get("spreadsheets"), list) else None
+    if spreadsheets is not None:
+        if not spreadsheets:
+            response = "Não encontrei planilhas no Google Sheets."
+        else:
+            lines = [f"Encontrei {len(spreadsheets)} planilhas no Google Sheets:"]
+            for index, sheet in enumerate(spreadsheets[:8], start=1):
+                if not isinstance(sheet, dict):
+                    continue
+                name = _safe_user_text(sheet.get("name") or "(sem nome)", limit=160)
+                date = _format_date_time_for_user(sheet.get("modified_at") or sheet.get("modifiedTime"))
+                lines.append(f"{index}. {name}" + (f"\nData: {date}" if date else ""))
+            response = "\n\n".join(lines)
+
+    sheet_data = data.get("sheet") if isinstance(data.get("sheet"), dict) else None
+    if not response and sheet_data is not None:
+        rows = sheet_data.get("rows") if isinstance(sheet_data.get("rows"), list) else []
+        name = _safe_user_text(sheet_data.get("name") or "Planilha", limit=160)
+        if not rows:
+            response = f"A planilha {name} não retornou linhas nesse intervalo."
+        else:
+            lines = [f"Linhas resumidas de {name}:"]
+            for index, row in enumerate(rows[:8], start=1):
+                if isinstance(row, list):
+                    text = " | ".join(_safe_user_text(cell, limit=80) for cell in row[:6])
+                else:
+                    text = _safe_user_text(row, limit=240)
+                lines.append(f"{index}. {text}")
+            response = "\n".join(lines)
+
+    spreadsheet = data.get("spreadsheet") if isinstance(data.get("spreadsheet"), dict) else None
+    if not response and spreadsheet is not None:
+        name = _safe_user_text(spreadsheet.get("name") or "Nova planilha", limit=160)
+        response = f"Planilha criada no Google Sheets: {name}."
+
+    if not response and (data.get("append") is not None or data.get("update") is not None):
+        response = "Alteração confirmada e aplicada no Google Sheets."
 
     files = data.get("files") if isinstance(data.get("files"), list) else None
     if files is not None:
@@ -1051,6 +1098,42 @@ def _suitable_intent(text: str) -> tuple[str | None, dict[str, Any]]:
     return None, {}
 
 
+
+def _google_sheets_intent(text: str) -> tuple[str | None, dict[str, Any]]:
+    normalized = _strip_accents(str(text or "")).lower()
+    if "planilha" not in normalized and "sheets" not in normalized:
+        return None, {}
+    if any(phrase in normalized for phrase in ("liste minhas planilhas", "listar planilhas", "minhas planilhas", "procure planilha", "buscar planilha")):
+        m = re.search(r"(?:procure|buscar|busque) planilha(?: chamada)?\s+(.+)$", normalized)
+        return "google_sheets_list_spreadsheets", {"query": m.group(1).strip(), "max_results": 10} if m else {"max_results": 10}
+    if any(phrase in normalized for phrase in ("leia a planilha", "ler planilha", "leia planilha")):
+        return "google_sheets_read_sheet", {"spreadsheet_id": "", "range": "A1:Z20"}
+    if any(phrase in normalized for phrase in ("adicione linha", "registre na planilha", "adicionar linha")):
+        return "google_sheets_append_row", {"spreadsheet_id": "", "range": "A1", "values": []}
+    if "atualize linha" in normalized or "atualizar linha" in normalized:
+        return "google_sheets_update_row", {"spreadsheet_id": "", "range": "", "values": []}
+    if "crie uma planilha" in normalized or "criar planilha" in normalized:
+        title = re.sub(r".*(?:crie uma planilha|criar planilha)(?: chamada| com nome)?", "", str(text or ""), flags=re.I).strip(" .") or "Nova planilha"
+        return "google_sheets_create_spreadsheet", {"title": title}
+    return None, {}
+
+
+def _handle_google_sheets_confirmation(*, tenant_id: Any, conversation_id: Any, pending_action: Any, user_message: str, context: dict[str, Any]) -> str:
+    payload = getattr(pending_action, "payload_json", {}) or {}
+    action_type = str(getattr(pending_action, "action_type", "") or "")
+    tool_id = "google_sheets_update_row" if action_type == GOOGLE_SHEETS_UPDATE_ROW_CONFIRMATION else "google_sheets_append_row"
+    tool_registry: ToolRegistry = context["tool_registry"]
+    tool_context: ToolContext = context["tool_context"]
+    pending_action_service: PendingActionService | None = context.get("pending_action_service")
+    db_pending = context.get("db_pending")
+    registry_result = tool_registry.execute("google_sheets", tool_id, payload, tool_context, {"db": context.get("db"), "mcp_tools": context.get("mcp_tools") or []})
+    if registry_result.ok:
+        if pending_action_service is not None and db_pending is not None and conversation_id is not None:
+            pending_action_service.consume_pending_action(tenant_id=tenant_id, conversation_id=conversation_id, pending_id=getattr(db_pending, "id", None))
+        normalized = registry_result.normalized_result.to_dict() if registry_result.normalized_result else {}
+        return format_tool_result_for_user(tool_id, normalized)
+    return f"Não consegui executar Google Sheets agora: {registry_result.error_code or 'google_sheets_error'}"
+
 def _handle_suitable_create_order_confirmation(*, tenant_id: Any, conversation_id: Any, pending_action: Any, user_message: str, context: dict[str, Any]) -> str:
     payload = getattr(pending_action, "payload_json", {}) or {}
     tool_registry: ToolRegistry = context["tool_registry"]
@@ -1070,6 +1153,8 @@ def _pending_action_registry() -> PendingActionHandlerRegistry:
     registry = PendingActionHandlerRegistry()
     registry.register(action_type=CALENDAR_CREATE_CONFIRMATION, handler=_handle_calendar_create_confirmation)
     registry.register(action_type=EMAIL_SEND_CONFIRMATION, handler=_handle_email_send_confirmation)
+    registry.register(action_type=GOOGLE_SHEETS_APPEND_ROW_CONFIRMATION, handler=_handle_google_sheets_confirmation)
+    registry.register(action_type=GOOGLE_SHEETS_UPDATE_ROW_CONFIRMATION, handler=_handle_google_sheets_confirmation)
     registry.register(action_type=SUITABLE_CREATE_ORDER_CONFIRMATION, handler=_handle_suitable_create_order_confirmation)
     return registry
 
@@ -1102,7 +1187,7 @@ def run_agent_for_tenant(db: Session, tenant_id, input_text: str, instruction: s
     _json_log("AI_AGENT_LLM_TOOLS_PAYLOAD", tools=[{"name": str(t.get("tool_id") or t.get("name") or t.get("tool_name") or ""), "origin": _google_calendar_origin(t)} for t in mcp_tools])
     _json_log("AI_AGENT_AVAILABLE_TOOLS", tenant_id=str(tenant_id), tools=[{"tool_id": str(t.get("tool_id") or t.get("id") or ""), "name": str(t.get("name") or t.get("display_name") or ""), "origin": _google_calendar_origin(t)} for t in mcp_tools])
     _json_log("AI_AGENT_MCP_SERVERS", tenant_id=str(tenant_id), servers=sorted({str(t.get("server_name") or t.get("server_id") or (t.get("metadata") or {}).get("source") or "") for t in mcp_tools if str(t.get("server_name") or t.get("server_id") or (t.get("metadata") or {}).get("source") or "").strip()}))
-    _json_log("AI_AGENT_TOOL_COUNT", tenant_id=str(tenant_id), count=len(mcp_tools), gmail_tool_count=len([t for t in mcp_tools if str(t.get("tool_id") or t.get("id")) in GMAIL_TOOL_IDS]), google_calendar_tool_count=len([t for t in mcp_tools if str(t.get("tool_id") or t.get("id")) in GOOGLE_CALENDAR_TOOL_IDS]), google_drive_tool_count=len([t for t in mcp_tools if str(t.get("tool_id") or t.get("id")) in GOOGLE_DRIVE_TOOL_IDS]), suitable_tool_count=len([t for t in mcp_tools if str(t.get("tool_id") or t.get("id")) in SUITABLE_TOOL_IDS]))
+    _json_log("AI_AGENT_TOOL_COUNT", tenant_id=str(tenant_id), count=len(mcp_tools), gmail_tool_count=len([t for t in mcp_tools if str(t.get("tool_id") or t.get("id")) in GMAIL_TOOL_IDS]), google_calendar_tool_count=len([t for t in mcp_tools if str(t.get("tool_id") or t.get("id")) in GOOGLE_CALENDAR_TOOL_IDS]), google_drive_tool_count=len([t for t in mcp_tools if str(t.get("tool_id") or t.get("id")) in GOOGLE_DRIVE_TOOL_IDS]), google_sheets_tool_count=len([t for t in mcp_tools if str(t.get("tool_id") or t.get("id")) in GOOGLE_SHEETS_TOOL_IDS]), suitable_tool_count=len([t for t in mcp_tools if str(t.get("tool_id") or t.get("id")) in SUITABLE_TOOL_IDS]))
     mcp_tool_calls: list[dict[str, Any]] = []
     seen_subflow_inputs: set[tuple[str, str]] = set()
     seen_node_inputs: set[tuple[str, str]] = set()
@@ -1121,6 +1206,7 @@ def run_agent_for_tenant(db: Session, tenant_id, input_text: str, instruction: s
     tool_registry.register(GoogleCalendarToolAdapter(db))
     tool_registry.register(GmailToolAdapter(db))
     tool_registry.register(GoogleDriveToolAdapter(db))
+    tool_registry.register(GoogleSheetsToolAdapter(db))
     tool_registry.register(SuitableToolAdapter(db))
     tool_registry.register(WebhookToolAdapter(_call_webhook, validate_webhook_config))
     session_state = _calendar_session_state(tool_configs, opts)
@@ -1211,6 +1297,28 @@ def run_agent_for_tenant(db: Session, tenant_id, input_text: str, instruction: s
         result.final_tool = "chamar_mcp"
         result.metadata = {"mcp_call_count": 0, "mcp_tools_used": [{"tool_id": gmail_tool_id, "status": result.status, "tool_type": "gmail"}], **(budget.safe_metadata() if budget else {})}
         return result
+    sheets_tool_id, sheets_input = _google_sheets_intent(str(input_text or ""))
+    sheets_match = next((t for t in mcp_tools if str(t.get("tool_id") or t.get("id")) == sheets_tool_id), None) if sheets_tool_id else None
+    if sheets_match is not None and sheets_tool_id:
+        _json_log("AI_AGENT_SELECTED_TOOL", tool_id=sheets_tool_id, tool_name=sheets_match.get("name") or sheets_match.get("display_name") or sheets_tool_id, tool_type="google_sheets", step=0, deterministic=True)
+        if sheets_tool_id in {"google_sheets_append_row", "google_sheets_update_row"}:
+            action_type = GOOGLE_SHEETS_UPDATE_ROW_CONFIRMATION if sheets_tool_id == "google_sheets_update_row" else GOOGLE_SHEETS_APPEND_ROW_CONFIRMATION
+            if conversation_id is not None:
+                pending_action_service.save_pending_action(tenant_id=tenant_id, conversation_id=conversation_id, session_id=session_id, external_user_id=external_user_id, action_type=action_type, payload=sheets_input, metadata={"source": "ai_agent", "tool_id": sheets_tool_id})
+            msg = "Você deseja confirmar esta alteração na planilha?"
+            result.message = msg; result.actions.append(AgentToolAction("message", {"message": msg})); result.status = "success"; result.final_tool = "responder"
+            result.metadata = {"mcp_call_count": 0, "mcp_tools_used": [{"tool_id": sheets_tool_id, "status": "pending_confirmation", "tool_type": "google_sheets"}], **(budget.safe_metadata() if budget else {})}
+            return result
+        registry_result = tool_registry.execute("google_sheets", sheets_tool_id, sheets_input, tool_context, {"mcp_tools": mcp_tools, "db": db})
+        output = registry_result.output if isinstance(registry_result.output, dict) else {}
+        if registry_result.ok:
+            normalized = registry_result.normalized_result.to_dict() if registry_result.normalized_result else {"ok": True, "tool": sheets_tool_id, "type": f"google_sheets.{sheets_tool_id}", "data": output}
+            msg = format_tool_result_for_user(sheets_tool_id, normalized)
+        else:
+            msg = f"Não consegui acessar o Google Sheets agora: {registry_result.error_code or 'google_sheets_error'}"
+        result.message = msg[:4000]; result.actions.append(AgentToolAction("message", {"message": result.message})); result.status = "success" if registry_result.ok else "error"; result.final_tool = "chamar_mcp"; result.tools_used.append("chamar_mcp")
+        result.metadata = {"mcp_call_count": 0, "mcp_tools_used": [{"tool_id": sheets_tool_id, "status": result.status, "tool_type": "google_sheets"}], **(budget.safe_metadata() if budget else {})}
+        return result
     drive_tool_id, drive_input = _google_drive_intent(str(input_text or ""))
     drive_match = next((t for t in mcp_tools if str(t.get("tool_id") or t.get("id")) == drive_tool_id), None) if drive_tool_id else None
     if drive_match is not None and drive_tool_id:
@@ -1229,7 +1337,7 @@ def run_agent_for_tenant(db: Session, tenant_id, input_text: str, instruction: s
         result.tools_used.append("chamar_mcp")
         result.metadata = {"mcp_call_count": 0, "mcp_tools_used": [{"tool_id": drive_tool_id, "status": result.status, "tool_type": "google_drive"}], **(budget.safe_metadata() if budget else {})}
         return result
-    _json_log("TOOL_REGISTRY_CONTENTS", tenant_id=str(tenant_id), node_id=str(opts.get("node_id") or opts.get("agent_node_id") or ""), registered_tool_types=tool_registry.registered_tool_types(), registered_google_calendar_tools=sorted(GOOGLE_CALENDAR_TOOL_IDS), registered_gmail_tools=sorted(GMAIL_TOOL_IDS), registered_google_drive_tools=sorted(GOOGLE_DRIVE_TOOL_IDS), registered_suitable_tools=sorted(SUITABLE_TOOL_IDS))
+    _json_log("TOOL_REGISTRY_CONTENTS", tenant_id=str(tenant_id), node_id=str(opts.get("node_id") or opts.get("agent_node_id") or ""), registered_tool_types=tool_registry.registered_tool_types(), registered_google_calendar_tools=sorted(GOOGLE_CALENDAR_TOOL_IDS), registered_gmail_tools=sorted(GMAIL_TOOL_IDS), registered_google_drive_tools=sorted(GOOGLE_DRIVE_TOOL_IDS), registered_google_sheets_tools=sorted(GOOGLE_SHEETS_TOOL_IDS), registered_suitable_tools=sorted(SUITABLE_TOOL_IDS))
     availability_match = next((t for t in mcp_tools if str(t.get("tool_id") or t.get("id")) == "google_calendar_check_availability"), None)
     deterministic_availability_input, deterministic_availability_missing = _calendar_availability_intent_input(str(input_text or ""), timezone=str(opts.get("timezone") or "America/Sao_Paulo"))
     if availability_match is not None and (deterministic_availability_input is not None or deterministic_availability_missing is not None):
@@ -1548,10 +1656,11 @@ def run_agent_for_tenant(db: Session, tenant_id, input_text: str, instruction: s
             is_google_calendar_tool = tool_id in GOOGLE_CALENDAR_TOOL_IDS
             is_gmail_tool = tool_id in GMAIL_TOOL_IDS
             is_google_drive_tool = tool_id in GOOGLE_DRIVE_TOOL_IDS
+            is_google_sheets_tool = tool_id in GOOGLE_SHEETS_TOOL_IDS
             is_suitable_tool = tool_id in SUITABLE_TOOL_IDS
             has_google_connection = _has_google_calendar_connection(db, tenant_id) if is_google_calendar_tool else False
-            is_internal_tool = is_google_calendar_tool or is_gmail_tool or is_google_drive_tool or is_suitable_tool
-            _json_log("AI_AGENT_TOOL_ROUTING_DEBUG", tenant_id=str(tenant_id), node_id=str(opts.get("node_id") or opts.get("agent_node_id") or ""), selected_tool_id=original_tool_id, resolved_tool_id=tool_id, expected_internal_tool=tool_id if is_internal_tool else None, tool_origin=_google_calendar_origin(match or {}) if match else None, is_google_calendar_internal=is_google_calendar_tool, is_gmail_internal=is_gmail_tool, is_mcp_tool=not is_internal_tool, has_google_connection=has_google_connection, available_internal_tools=[str(t.get("tool_id") or t.get("id")) for t in mcp_tools if str(t.get("tool_id") or t.get("id") or "") in (GOOGLE_CALENDAR_TOOL_IDS | GMAIL_TOOL_IDS | GOOGLE_DRIVE_TOOL_IDS | SUITABLE_TOOL_IDS)], available_mcp_tools=[str(t.get("tool_id") or t.get("id")) for t in mcp_tools], will_route_to_google_adapter=bool(match is not None and is_google_calendar_tool), will_route_to_gmail_adapter=bool(match is not None and is_gmail_tool), will_route_to_mcp=bool(match is not None and not is_internal_tool and mcp_tool_executor is not None), will_use_fallback=bool(match is None or (mcp_tool_executor is None and not is_internal_tool)), fallback_reason="mcp_tool_not_allowed" if match is None else ("mcp_executor_missing" if mcp_tool_executor is None and not is_internal_tool else None), id_comparison={"selected_tool_id": original_tool_id, "resolved_tool_id": tool_id, "google_calendar_tool_ids": sorted(GOOGLE_CALENDAR_TOOL_IDS), "gmail_tool_ids": sorted(GMAIL_TOOL_IDS)})
+            is_internal_tool = is_google_calendar_tool or is_gmail_tool or is_google_drive_tool or is_google_sheets_tool or is_suitable_tool
+            _json_log("AI_AGENT_TOOL_ROUTING_DEBUG", tenant_id=str(tenant_id), node_id=str(opts.get("node_id") or opts.get("agent_node_id") or ""), selected_tool_id=original_tool_id, resolved_tool_id=tool_id, expected_internal_tool=tool_id if is_internal_tool else None, tool_origin=_google_calendar_origin(match or {}) if match else None, is_google_calendar_internal=is_google_calendar_tool, is_gmail_internal=is_gmail_tool, is_mcp_tool=not is_internal_tool, has_google_connection=has_google_connection, available_internal_tools=[str(t.get("tool_id") or t.get("id")) for t in mcp_tools if str(t.get("tool_id") or t.get("id") or "") in (GOOGLE_CALENDAR_TOOL_IDS | GMAIL_TOOL_IDS | GOOGLE_DRIVE_TOOL_IDS | GOOGLE_SHEETS_TOOL_IDS | SUITABLE_TOOL_IDS)], available_mcp_tools=[str(t.get("tool_id") or t.get("id")) for t in mcp_tools], will_route_to_google_adapter=bool(match is not None and is_google_calendar_tool), will_route_to_gmail_adapter=bool(match is not None and is_gmail_tool), will_route_to_mcp=bool(match is not None and not is_internal_tool and mcp_tool_executor is not None), will_use_fallback=bool(match is None or (mcp_tool_executor is None and not is_internal_tool)), fallback_reason="mcp_tool_not_allowed" if match is None else ("mcp_executor_missing" if mcp_tool_executor is None and not is_internal_tool else None), id_comparison={"selected_tool_id": original_tool_id, "resolved_tool_id": tool_id, "google_calendar_tool_ids": sorted(GOOGLE_CALENDAR_TOOL_IDS), "gmail_tool_ids": sorted(GMAIL_TOOL_IDS)})
             if match is None or (mcp_tool_executor is None and not is_internal_tool):
                 allowed_tool_ids = [str(t.get("tool_id")) for t in mcp_tools if t.get("tool_id") is not None]
                 _json_log("AI_AGENT_MCP_TOOL_RESOLUTION_FAILED", tool_id=tool_id, allowed_tool_ids=allowed_tool_ids, raw_call=raw_call)
@@ -1562,7 +1671,7 @@ def run_agent_for_tenant(db: Session, tenant_id, input_text: str, instruction: s
                 blocked_tool_calls.append({"tool_id": tool_id, "error": "mcp_tool_limit"})
                 state.append({"tool": tool, "tool_id": tool_id, "ok": False, "error": "mcp_tool_limit"})
                 continue
-            routed_tool_type = "google_calendar" if is_google_calendar_tool else ("gmail" if is_gmail_tool else ("google_drive" if is_google_drive_tool else ("suitable" if is_suitable_tool else "mcp_tool")))
+            routed_tool_type = "google_calendar" if is_google_calendar_tool else ("gmail" if is_gmail_tool else ("google_drive" if is_google_drive_tool else ("google_sheets" if is_google_sheets_tool else ("suitable" if is_suitable_tool else "mcp_tool"))))
             fingerprint = _tool_fingerprint(tool_id, tool_input)
             if fingerprint in executed_tool_fingerprints:
                 previous = executed_tool_results.get(fingerprint) or {}
@@ -1574,8 +1683,19 @@ def run_agent_for_tenant(db: Session, tenant_id, input_text: str, instruction: s
                     break
                 state.append(previous or {"tool": tool, "tool_id": tool_id, "ok": False, "error": "duplicate_tool_call_blocked"})
                 continue
+            if tool_id in {"google_sheets_append_row", "google_sheets_update_row"}:
+                action_type = GOOGLE_SHEETS_UPDATE_ROW_CONFIRMATION if tool_id == "google_sheets_update_row" else GOOGLE_SHEETS_APPEND_ROW_CONFIRMATION
+                if conversation_id is not None:
+                    pending_action_service.save_pending_action(tenant_id=tenant_id, conversation_id=conversation_id, session_id=session_id, external_user_id=external_user_id, action_type=action_type, payload=tool_input if isinstance(tool_input, dict) else {}, metadata={"source": "ai_agent", "tool_id": tool_id})
+                msg = "Você deseja confirmar esta alteração na planilha?"
+                result.message = msg[:4000]
+                result.actions.append(AgentToolAction("message", {"message": result.message}))
+                result.status = "success"
+                result.final_tool = "responder"
+                mcp_tool_calls.append({"tool_id": tool_id, "status": "pending_confirmation", "tool_type": "google_sheets"})
+                break
             _json_log("AI_AGENT_TOOL_CALL_REQUESTED", tool_id=tool_id, tool_name=match.get("name"), tool_type="mcp_tool", input=tool_input)
-            _json_log("AI_AGENT_TOOL_CALL_ROUTED", tool_id=tool_id, routed_tool_type=routed_tool_type, adapter="GoogleCalendarToolAdapter" if is_google_calendar_tool else ("GmailToolAdapter" if is_gmail_tool else ("GoogleDriveToolAdapter" if is_google_drive_tool else ("SuitableToolAdapter" if is_suitable_tool else "MCPToolAdapter"))))
+            _json_log("AI_AGENT_TOOL_CALL_ROUTED", tool_id=tool_id, routed_tool_type=routed_tool_type, adapter="GoogleCalendarToolAdapter" if is_google_calendar_tool else ("GmailToolAdapter" if is_gmail_tool else ("GoogleDriveToolAdapter" if is_google_drive_tool else ("GoogleSheetsToolAdapter" if is_google_sheets_tool else ("SuitableToolAdapter" if is_suitable_tool else "MCPToolAdapter")))))
             try:
                 if tool_id == "google_calendar_create_event":
                     precheck_state, _, conflicts = _precheck_google_calendar_create(tool_registry=tool_registry, tool_context=tool_context, db=db, mcp_tools=mcp_tools, payload=tool_input if isinstance(tool_input, dict) else {}, opts=opts, session_state=session_state, budget=budget, pending_action_service=pending_action_service, tenant_id=tenant_id, conversation_id=conversation_id, session_id=session_id, external_user_id=external_user_id)

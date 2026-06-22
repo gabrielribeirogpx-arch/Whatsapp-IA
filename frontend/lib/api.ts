@@ -836,6 +836,26 @@ export function getGoogleDriveConnectUrl(): string {
   return buildApiUrl(`/api/integrations/google-drive/connect-url?tenant_slug=${encodeURIComponent(tenant)}`);
 }
 
+export async function getGoogleSheetsStatus(): Promise<GoogleCalendarConnectionStatus> {
+  const tenant = getTenantSlugOrId();
+  const query = tenant ? `?tenant_slug=${encodeURIComponent(tenant)}` : '';
+  const res = await apiFetch(`/api/integrations/google-sheets/status${query}`);
+  return parseApiResponse<GoogleCalendarConnectionStatus>(res);
+}
+
+export async function disconnectGoogleSheets(): Promise<GoogleCalendarConnectionStatus> {
+  const tenant = getTenantSlugOrId();
+  const query = tenant ? `?tenant_slug=${encodeURIComponent(tenant)}` : '';
+  const res = await apiFetch(`/api/integrations/google-sheets/disconnect${query}`, { method: 'POST' });
+  return parseApiResponse<GoogleCalendarConnectionStatus>(res);
+}
+
+export function getGoogleSheetsConnectUrl(): string {
+  const tenant = getTenantSlugOrId();
+  if (!tenant) throw new Error('Tenant atual não encontrado para conectar o Google Sheets.');
+  return buildApiUrl(`/api/integrations/google-sheets/connect-url?tenant_slug=${encodeURIComponent(tenant)}`);
+}
+
 export async function getSuitableStatus(): Promise<GoogleCalendarConnectionStatus> {
   const tenant = getTenantSlugOrId();
   const query = tenant ? `?tenant_slug=${encodeURIComponent(tenant)}` : '';
