@@ -5620,7 +5620,7 @@ input {
 }
 
 .login-captcha {
-  min-height: 65px;
+  min-height: 63px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -5628,6 +5628,15 @@ input {
 
 .login-captcha > div {
   margin-block: 0 !important;
+}
+
+.login-captcha .turnstile-wrapper {
+  width: 100%;
+  margin-top: 0;
+}
+
+.login-captcha .turnstile-shell {
+  min-height: 63px;
 }
 
 @media (min-width: 1024px) and (max-height: 900px) {
@@ -5676,8 +5685,8 @@ input {
   }
 
   .login-card-logo {
-    height: 3.6rem;
-    width: 3.6rem;
+    height: 3.25rem;
+    width: 3.25rem;
   }
 
   .login-card-title {
@@ -5791,11 +5800,11 @@ input {
   }
 
   .login-fields label > span:first-child {
-    margin-bottom: 0.35rem;
+    margin-bottom: 0.3rem;
   }
 
   .login-input-wrap {
-    height: 2.85rem;
+    height: 2.65rem;
     border-radius: 1rem;
   }
 
@@ -5804,13 +5813,18 @@ input {
   }
 
   .login-captcha {
-    margin-top: 0.55rem;
-    min-height: 58px;
+    margin-top: 0.5rem;
+    min-height: 54px;
+  }
+
+  .login-captcha .turnstile-shell {
+    min-height: 54px;
   }
 
   .login-submit,
-  .login-google {
-    height: 3rem;
+  .login-google,
+  .login-create a {
+    height: 2.75rem;
   }
 
   .login-submit {
@@ -5890,6 +5904,10 @@ input {
   }
 
   .login-captcha {
-    min-height: 54px;
+    min-height: 50px;
+  }
+
+  .login-captcha .turnstile-shell {
+    min-height: 50px;
   }
 }
