@@ -40,6 +40,10 @@ META_EMBEDDED_SIGNUP_REQUIRED_SCOPES = (
     "whatsapp_business_management",
     "whatsapp_business_messaging",
 )
+META_EMBEDDED_SIGNUP_CONFIG_URL = (
+    "https://developers.facebook.com/apps/{app_id}/whatsapp-business/wa-settings/"
+    "?business_id={business_id}"
+)
 
 
 def _state_secret() -> bytes:
@@ -178,7 +182,18 @@ def _connect_url(state: str) -> str:
         or ""
     )
     if not config_id:
-        logger.warning("META_EMBEDDED_SIGNUP_CONFIG_ID_MISSING")
+        app_id = os.getenv("META_APP_ID") or os.getenv("FACEBOOK_APP_ID") or "<META_APP_ID>"
+        business_id = os.getenv("META_BUSINESS_ID") or os.getenv("FACEBOOK_BUSINESS_ID") or "<BUSINESS_ID>"
+        logger.warning(
+            "META_EMBEDDED_SIGNUP_CONFIG_ID_MISSING "
+            "config_id_required=true "
+            "set_env=META_EMBEDDED_SIGNUP_CONFIG_ID "
+            "fallback_env=WHATSAPP_EMBEDDED_SIGNUP_CONFIG_ID "
+            "configuration_url=%s",
+            META_EMBEDDED_SIGNUP_CONFIG_URL.format(
+                app_id=app_id, business_id=business_id
+            ),
+        )
     params = {
         "client_id": os.getenv("META_APP_ID") or os.getenv("FACEBOOK_APP_ID") or "",
         "redirect_uri": _redirect_uri(),
