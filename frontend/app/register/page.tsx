@@ -1,7 +1,8 @@
 'use client';
 
 import { FormEvent, useMemo, useState } from 'react';
-import { CheckCircle2, XCircle } from 'lucide-react';
+import Image from 'next/image';
+import { ArrowRight, CheckCircle2, LockKeyhole, MessageCircle, ShieldCheck, Sparkles } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import TurnstileWidget from '../../components/TurnstileWidget';
 import { registerTenant } from '../../lib/api';
@@ -147,13 +148,75 @@ export default function RegisterPage() {
 
   const hasError = (field: keyof RegisterForm) => Boolean(fieldErrors[field]);
 
-  return <main className="onboarding-shell"><section className="onboarding-hero" aria-hidden="true"><div className="onboarding-glow" /><div className="onboarding-hero-content"><p className="onboarding-kicker">Wazza API</p><h1>Atendimento WhatsApp em padrão SaaS.</h1><p className="onboarding-subtitle">Onboarding profissional para escalar seu time com automação, CRM e IA.</p></div></section><section className="onboarding-form-section"><form className="onboarding-card" onSubmit={submit}><div className="onboarding-step"><span>Etapa {step}</span><strong>{step} de 4</strong></div><h2>Crie sua conta</h2>
-<div className="onboarding-fields">
-  {step===1 && <><label className="onboarding-label">Nome completo</label><input className={`onboarding-input ${hasError('full_name') ? 'onboarding-input--error' : ''}`} value={form.full_name} onChange={e=>updateField('full_name', e.target.value)} required />{fieldErrors.full_name && <p className="error-text">{fieldErrors.full_name}</p>}<label className="onboarding-label">Email</label><input className={`onboarding-input ${hasError('email') ? 'onboarding-input--error' : ''}`} type="email" value={form.email} onChange={e=>updateField('email', e.target.value)} required />{fieldErrors.email && <p className="error-text">{fieldErrors.email}</p>}<label className="onboarding-label">Senha</label><input className={`onboarding-input ${hasError('password') ? 'onboarding-input--error' : ''}`} type="password" minLength={8} value={form.password} onChange={e=>updateField('password', e.target.value)} required /><div className="grid gap-2 rounded-2xl border border-slate-200 bg-slate-50 p-3 text-xs sm:grid-cols-2">{passwordRules.map(([label, ok]) => <span key={label} className={`inline-flex items-center gap-2 font-semibold ${ok ? 'text-emerald-700' : 'text-slate-500'}`}>{ok ? <CheckCircle2 size={14} /> : <XCircle size={14} />} {label}</span>)}</div><label className="onboarding-label">Confirmar senha</label><input className={`onboarding-input ${hasError('confirm_password') ? 'onboarding-input--error' : ''}`} type="password" minLength={8} value={form.confirm_password} onChange={e=>updateField('confirm_password', e.target.value)} required />{fieldErrors.confirm_password && <p className="error-text">{fieldErrors.confirm_password}</p>}</>}
-  {step===2 && <><label className="onboarding-label">Nome do negócio</label><input className={`onboarding-input ${hasError('business_name') ? 'onboarding-input--error' : ''}`} value={form.business_name} onChange={e=>updateField('business_name', e.target.value)} required />{fieldErrors.business_name && <p className="error-text">{fieldErrors.business_name}</p>}<label className="onboarding-label">Segmento</label><input className={`onboarding-input ${hasError('business_segment') ? 'onboarding-input--error' : ''}`} value={form.business_segment} onChange={e=>updateField('business_segment', e.target.value)} required />{fieldErrors.business_segment && <p className="error-text">{fieldErrors.business_segment}</p>}<label className="onboarding-label">Tamanho do time (opcional)</label><input className="onboarding-input" value={form.team_size} onChange={e=>updateField('team_size', e.target.value)} /></>}
-  {step===3 && <><label className="onboarding-label">Número WhatsApp</label><input className={`onboarding-input ${hasError('whatsapp_number') ? 'onboarding-input--error' : ''}`} value={form.whatsapp_number} onChange={e=>updateField('whatsapp_number', e.target.value)} required />{fieldErrors.whatsapp_number && <p className="error-text">{fieldErrors.whatsapp_number}</p>}<label className="onboarding-label">Volume mensal (opcional)</label><input className="onboarding-input" value={form.monthly_message_volume} onChange={e=>updateField('monthly_message_volume', e.target.value)} /><label className="onboarding-label">Uso pretendido</label><input className={`onboarding-input ${hasError('intended_use') ? 'onboarding-input--error' : ''}`} value={form.intended_use} onChange={e=>updateField('intended_use', e.target.value)} required />{fieldErrors.intended_use && <p className="error-text">{fieldErrors.intended_use}</p>}</>}
-  {step===4 && <><p className="onboarding-description">Revise os dados e finalize a criação do seu workspace.</p><TurnstileWidget key={turnstileKey} action="register" token={turnstileToken} onToken={setTurnstileToken} onError={setError} /></>}
-  </div>{error && <p className="error-text">{error}</p>}
-  <div className="onboarding-actions">{step>1 && <button type="button" className="onboarding-cta" onClick={prev}>Voltar</button>}{step<4 ? <button type="button" className="onboarding-cta" onClick={next}>Continuar</button> : <button type="submit" className="onboarding-cta" disabled={isLoading || !turnstileToken}>{isLoading ? 'Processando...' : 'Finalizar'}</button>}</div>
-</form></section></main>;
+  const progressPercent = (step / 4) * 100;
+  const stepTitles: Record<number, string> = {
+    1: 'Crie seu acesso seguro',
+    2: 'Conte sobre seu negócio',
+    3: 'Configure o canal principal',
+    4: 'Finalize seu workspace'
+  };
+  const stepDescriptions: Record<number, string> = {
+    1: 'Use um email profissional e uma senha forte para proteger seu workspace Wazza API.',
+    2: 'Essas informações ajudam a personalizar sua operação e experiência inicial.',
+    3: 'Informe o WhatsApp e o volume esperado para preparar sua automação.',
+    4: 'Revise os dados e conclua a validação de segurança para entrar no Wazza API.'
+  };
+
+  return (
+    <main className="onboarding-shell">
+      <div className="onboarding-decor onboarding-decor-left" />
+      <div className="onboarding-decor onboarding-decor-right" />
+
+      <section className="onboarding-hero" aria-label="Apresentação Wazza API">
+        <div className="onboarding-glow" />
+        <div className="onboarding-hero-content">
+          <Image src="/Logo2.svg" alt="Wazza API" width={210} height={48} priority className="onboarding-brand" />
+          <div className="onboarding-copy">
+            <p className="onboarding-kicker"><Sparkles size={15} /> Onboarding premium</p>
+            <h1>Comece sua operação inteligente no Wazza API.</h1>
+            <p className="onboarding-subtitle">Configure seu workspace com uma experiência segura, guiada e pronta para escalar atendimento, CRM e automações no WhatsApp.</p>
+          </div>
+          <div className="onboarding-mockup" aria-hidden="true">
+            <div className="mockup-header"><span /><span /><span /></div>
+            <div className="mockup-content">
+              <div className="mockup-card" />
+              <div className="mockup-card short" />
+              <div className="mockup-chart" />
+            </div>
+          </div>
+          <ul className="onboarding-badges" aria-label="Benefícios do Wazza API">
+            <li><ShieldCheck size={18} /> Segurança com validação</li>
+            <li><MessageCircle size={18} /> WhatsApp + CRM</li>
+            <li><LockKeyhole size={18} /> Senha forte</li>
+            <li><Sparkles size={18} /> IA para escalar</li>
+          </ul>
+        </div>
+      </section>
+
+      <section className="onboarding-form-section">
+        <form className="onboarding-card" onSubmit={submit}>
+          <div className="onboarding-card-header">
+            <Image src="/Logo.svg" alt="Wazza API" width={82} height={68} priority className="onboarding-card-logo" />
+            <div className="onboarding-step">
+              <span>Etapa {step}</span>
+              <strong>{step} de 4</strong>
+            </div>
+            <div className="onboarding-progress" aria-hidden="true"><span style={{ width: `${progressPercent}%` }} /></div>
+            <h2>{stepTitles[step]}</h2>
+            <p className="onboarding-description">{stepDescriptions[step]}</p>
+          </div>
+
+          <div className="onboarding-fields">
+            {step===1 && <><label className="onboarding-label">Nome completo</label><input className={`onboarding-input ${hasError('full_name') ? 'onboarding-input--error' : ''}`} placeholder="Seu nome completo" value={form.full_name} onChange={e=>updateField('full_name', e.target.value)} required />{fieldErrors.full_name && <p className="error-text">{fieldErrors.full_name}</p>}<label className="onboarding-label">Email</label><input className={`onboarding-input ${hasError('email') ? 'onboarding-input--error' : ''}`} placeholder="voce@empresa.com" type="email" value={form.email} onChange={e=>updateField('email', e.target.value)} required />{fieldErrors.email && <p className="error-text">{fieldErrors.email}</p>}<label className="onboarding-label">Senha</label><input className={`onboarding-input ${hasError('password') ? 'onboarding-input--error' : ''}`} placeholder="Crie uma senha forte" type="password" minLength={8} value={form.password} onChange={e=>updateField('password', e.target.value)} required /><div className="onboarding-password-rules">{passwordRules.map(([label, ok]) => <span key={label} className={ok ? 'is-valid' : ''}>{ok ? <CheckCircle2 size={15} /> : <span className="rule-dot" />} {label}</span>)}</div><label className="onboarding-label">Confirmar senha</label><input className={`onboarding-input ${hasError('confirm_password') ? 'onboarding-input--error' : ''}`} placeholder="Repita sua senha" type="password" minLength={8} value={form.confirm_password} onChange={e=>updateField('confirm_password', e.target.value)} required />{fieldErrors.confirm_password && <p className="error-text">{fieldErrors.confirm_password}</p>}</>}
+            {step===2 && <><label className="onboarding-label">Nome do negócio</label><input className={`onboarding-input ${hasError('business_name') ? 'onboarding-input--error' : ''}`} placeholder="Nome da sua empresa" value={form.business_name} onChange={e=>updateField('business_name', e.target.value)} required />{fieldErrors.business_name && <p className="error-text">{fieldErrors.business_name}</p>}<label className="onboarding-label">Segmento</label><input className={`onboarding-input ${hasError('business_segment') ? 'onboarding-input--error' : ''}`} placeholder="Ex.: Clínica, imobiliária, ecommerce" value={form.business_segment} onChange={e=>updateField('business_segment', e.target.value)} required />{fieldErrors.business_segment && <p className="error-text">{fieldErrors.business_segment}</p>}<label className="onboarding-label">Tamanho do time (opcional)</label><input className="onboarding-input" placeholder="Ex.: 2-5 pessoas" value={form.team_size} onChange={e=>updateField('team_size', e.target.value)} /></>}
+            {step===3 && <><label className="onboarding-label">Número WhatsApp</label><input className={`onboarding-input ${hasError('whatsapp_number') ? 'onboarding-input--error' : ''}`} placeholder="Ex.: +55 11 99999-9999" value={form.whatsapp_number} onChange={e=>updateField('whatsapp_number', e.target.value)} required />{fieldErrors.whatsapp_number && <p className="error-text">{fieldErrors.whatsapp_number}</p>}<label className="onboarding-label">Volume mensal (opcional)</label><input className="onboarding-input" placeholder="Ex.: 1.000 mensagens/mês" value={form.monthly_message_volume} onChange={e=>updateField('monthly_message_volume', e.target.value)} /><label className="onboarding-label">Uso pretendido</label><input className={`onboarding-input ${hasError('intended_use') ? 'onboarding-input--error' : ''}`} placeholder="Ex.: Atendimento, vendas e pós-venda" value={form.intended_use} onChange={e=>updateField('intended_use', e.target.value)} required />{fieldErrors.intended_use && <p className="error-text">{fieldErrors.intended_use}</p>}</>}
+            {step===4 && <><div className="onboarding-review-card"><CheckCircle2 size={18} /><div><strong>Quase lá</strong><p>Valide a segurança e finalize a criação do workspace Wazza API.</p></div></div><TurnstileWidget key={turnstileKey} action="register" token={turnstileToken} onToken={setTurnstileToken} onError={setError} /></>}
+          </div>
+
+          {error && <p className="error-text">{error}</p>}
+          <div className="onboarding-actions">{step>1 && <button type="button" className="onboarding-cta onboarding-cta--secondary" onClick={prev}>Voltar</button>}{step<4 ? <button type="button" className="onboarding-cta" onClick={next}>Continuar <ArrowRight size={18} /></button> : <button type="submit" className="onboarding-cta" disabled={isLoading || !turnstileToken}>{isLoading ? 'Processando...' : 'Finalizar'}</button>}</div>
+        </form>
+      </section>
+    </main>
+  );
 }
