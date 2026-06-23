@@ -34,6 +34,7 @@ export default function AiRagNode({ id, data, selected }: NodeProps) {
       hasValidationError={nodeData.hasValidationError}
       onToggleStart={nodeData.onToggleStart}
       analytics={nodeData.analytics}
+      statusLabel={nodeData.after_answer_behavior === 'wait_same_node' ? 'Aguardando mensagem' : 'Consulta pronta'}
     />
   );
 }

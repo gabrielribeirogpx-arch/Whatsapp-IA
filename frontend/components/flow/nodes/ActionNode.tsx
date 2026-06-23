@@ -75,14 +75,15 @@ export default function ActionNode({ id, data, selected }: NodeProps) {
       title="Ação"
       emoji="⚡"
       badge="LOGIC"
-      badgeTone={{ background: '#f5f3ff', color: '#5b21b6' }}
-      accent="linear-gradient(90deg, #7c3aed, #8b5cf6)"
+      badgeTone={{ background: '#ccfbf1', color: '#0f766e' }}
+      accent="linear-gradient(135deg, #14b8a6, #2563eb)"
       summary={truncateText(actionType === 'notify_team' ? notifySummary : actionType === 'create_task' ? taskSummary : actionLabel, 100, 'Ação não configurada')}
       meta={actionType === 'notify_team' ? `Prioridade: ${notificationPriorityLabel}` : actionType === 'create_task' ? `Prioridade: ${taskPriorityLabel}` : 'Automação interna'}
       isStart={nodeData.isStart}
       hasValidationError={nodeData.hasValidationError}
       onToggleStart={nodeData.onToggleStart}
       analytics={(nodeData as any).analytics}
+      statusLabel="Automação pronta"
     />
   );
 }

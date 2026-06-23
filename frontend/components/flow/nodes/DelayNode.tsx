@@ -25,7 +25,7 @@ export default function DelayNode({ id, data, selected }: NodeProps) {
       id={id}
       selected={selected}
       running={nodeData.running}
-      title="Delay"
+      title="Aguardar"
       emoji="⏱️"
       badge="WAIT"
       badgeTone={{ background: '#ecfeff', color: '#0e7490' }}
@@ -37,6 +37,7 @@ export default function DelayNode({ id, data, selected }: NodeProps) {
       hasValidationError={nodeData.hasValidationError}
       onToggleStart={nodeData.onToggleStart}
       analytics={(nodeData as any).analytics}
+      statusLabel={nodeData.show_typing ? 'Digitando antes de seguir' : 'Pausa programada'}
     />
   );
 }

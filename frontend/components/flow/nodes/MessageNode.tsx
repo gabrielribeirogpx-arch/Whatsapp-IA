@@ -24,13 +24,14 @@ export default function MessageNode({ id, data, selected }: NodeProps) {
       title="Mensagem"
       emoji="💬"
       badge="MSG"
-      badgeTone={{ background: '#eef2ff', color: '#4338ca' }}
-      accent="linear-gradient(90deg, #4f46e5, #6366f1)"
+      badgeTone={{ background: '#ecfdf5', color: '#047857' }}
+      accent="linear-gradient(135deg, #10b981, #22c55e)"
       summary={`${nodeData.wait_for_reply ? '⏸ ' : ''}"${truncateText(nodeData.content || nodeData.label, 50, 'Mensagem vazia')}"`}
       isStart={nodeData.isStart}
       hasValidationError={nodeData.hasValidationError}
       onToggleStart={nodeData.onToggleStart}
       analytics={(nodeData as any).analytics}
+      statusLabel={nodeData.wait_for_reply ? 'Aguardando resposta' : 'Envio configurado'}
     />
   );
 }

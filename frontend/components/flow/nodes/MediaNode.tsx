@@ -54,6 +54,8 @@ export default function MediaNode({ id, data, selected }: NodeProps) {
       hasValidationError={nodeData.hasValidationError || !String(nodeData.media_url || '').startsWith('https://')}
       onToggleStart={nodeData.onToggleStart}
       analytics={(nodeData as any).analytics}
+      statusLabel={!String(nodeData.media_url || '').startsWith('https://') ? 'Revisar mídia' : 'Mídia pronta'}
+      statusActive={String(nodeData.media_url || '').startsWith('https://')}
     />
   );
 }

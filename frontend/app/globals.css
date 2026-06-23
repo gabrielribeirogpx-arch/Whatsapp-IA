@@ -6346,3 +6346,54 @@ input {
   border: 1px solid rgba(79, 70, 229, 0.48) !important;
   box-shadow: 0 4px 12px rgba(15, 23, 42, 0.18) !important;
 }
+
+/* ── FLOW BUILDER NODE POLISH ─────────────────────── */
+.flow-node-compact::before {
+  content: '';
+  position: absolute;
+  inset: 1px;
+  border-radius: inherit;
+  pointer-events: none;
+  background: linear-gradient(135deg, rgba(255,255,255,0.74), transparent 42%);
+  z-index: 0;
+}
+
+.flow-node-compact > * {
+  position: relative;
+  z-index: 1;
+}
+
+.flow-node-emoji span {
+  filter: drop-shadow(0 2px 4px rgba(15, 23, 42, 0.12));
+}
+
+.flow-node-premium .flow-node-header-glow {
+  background: radial-gradient(circle at 12% 0%, rgba(124, 58, 237, 0.22), transparent 42%), radial-gradient(circle at 92% 10%, rgba(79, 70, 229, 0.18), transparent 38%), linear-gradient(135deg, rgba(238, 242, 255, 0.64), rgba(255, 255, 255, 0.72));
+}
+
+.flow-node-premium .flow-node-summary {
+  font-size: 12.5px;
+  color: #334155;
+}
+
+.flow-node-footer span:last-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.flow-node-compact:focus-within {
+  outline: 2px solid rgba(37, 99, 235, 0.8);
+  outline-offset: 3px;
+}
+
+.flow-node-compact.running .flow-node-header-bar {
+  background-size: 180% 100%;
+  animation: flow-node-accent-sweep 1.6s ease-in-out infinite;
+}
+
+@keyframes flow-node-accent-sweep {
+  0%, 100% { filter: saturate(1); opacity: 0.82; }
+  50% { filter: saturate(1.35) brightness(1.08); opacity: 1; }
+}

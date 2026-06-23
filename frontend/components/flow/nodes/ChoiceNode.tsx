@@ -58,6 +58,7 @@ export default function ChoiceNode({ id, data, selected, isConnectable }: NodePr
       hasValidationError={nodeData.hasValidationError}
       onToggleStart={nodeData.onToggleStart}
       analytics={(nodeData as any).analytics}
+      statusLabel={`${buttons.length} opções de saída`}
       isConnectable={isConnectable}
       sourceHandles={buttons.map((button) => ({ id: button.handleId, label: button.label, color: '#f97316', optionValue: button.value }))}
     />

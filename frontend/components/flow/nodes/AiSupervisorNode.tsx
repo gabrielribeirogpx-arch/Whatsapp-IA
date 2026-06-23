@@ -39,6 +39,7 @@ export default function AiSupervisorNode({ id, data, selected }: NodeProps) {
       hasValidationError={nodeData.hasValidationError}
       onToggleStart={nodeData.onToggleStart}
       analytics={nodeData.analytics}
+      statusLabel={`${agentIds.length} agentes disponíveis`}
     />
   );
 }
