@@ -37,6 +37,7 @@ import {
   getSuitableStatus,
   parseApiResponse,
 } from "../../../../lib/api";
+import { ENABLE_GMAIL_INTEGRATION } from "../../../../lib/features";
 import type { GoogleCalendarConnectionStatus } from "../../../../lib/types";
 
 type MCPServer = {
@@ -109,6 +110,29 @@ const suitableToolNames: Record<string, string> = {
   suitable_check_key: "Validar API Key",
   suitable_create_order: "Criar pedido",
 };
+
+function isGmailTool(tool: MCPTool) {
+  const provider = String(tool.metadata?.provider || "").toLowerCase();
+  const toolName = String(tool.tool_name || "").toLowerCase();
+  const displayName = String(tool.display_name || "").toLowerCase();
+  const name = String((tool as { name?: string }).name || "").toLowerCase();
+
+  return (
+    provider === "gmail" ||
+    toolName.startsWith("gmail_") ||
+    [displayName, name].some((value) =>
+      /(^|\[|\s)(gmail|gmail send|gmail draft|gmail read|gmail search|gmail labels|gmail threads|gmail attachments)(\]|\s|$)/i.test(
+        value,
+      ),
+    )
+  );
+}
+
+function getPresentationTools(tools: MCPTool[]) {
+  return ENABLE_GMAIL_INTEGRATION
+    ? tools
+    : tools.filter((tool) => !isGmailTool(tool));
+}
 
 function getToolDisplayName(tool: MCPTool) {
   return (
@@ -207,35 +231,57 @@ export default function MCPDashboardClient() {
   const [suitableApiKey, setSuitableApiKey] = useState("");
   const [showSuitableKeyField, setShowSuitableKeyField] = useState(false);
 
+  const presentationTools = useMemo(() => getPresentationTools(tools), [tools]);
+
   const mcpTools = useMemo(
     () =>
-      tools.filter(
+      presentationTools.filter(
         (tool) =>
-          !["google_calendar", "gmail", "google_drive", "google_sheets", "suitable"].includes(
-            String(tool.metadata?.provider || ""),
-          ),
+          ![
+            "google_calendar",
+            "google_drive",
+            "google_sheets",
+            "suitable",
+          ].includes(String(tool.metadata?.provider || "")),
       ),
-    [tools],
+    [presentationTools],
   );
   const googleCalendarTools = useMemo(
-    () => tools.filter((tool) => tool.metadata?.provider === "google_calendar"),
-    [tools],
+    () =>
+      presentationTools.filter(
+        (tool) => tool.metadata?.provider === "google_calendar",
+      ),
+    [presentationTools],
   );
   const gmailTools = useMemo(
-    () => tools.filter((tool) => tool.metadata?.provider === "gmail"),
-    [tools],
+    () =>
+      ENABLE_GMAIL_INTEGRATION
+        ? presentationTools.filter(
+            (tool) => tool.metadata?.provider === "gmail",
+          )
+        : [],
+    [presentationTools],
   );
   const googleDriveTools = useMemo(
-    () => tools.filter((tool) => tool.metadata?.provider === "google_drive"),
-    [tools],
+    () =>
+      presentationTools.filter(
+        (tool) => tool.metadata?.provider === "google_drive",
+      ),
+    [presentationTools],
   );
   const googleSheetsTools = useMemo(
-    () => tools.filter((tool) => tool.metadata?.provider === "google_sheets"),
-    [tools],
+    () =>
+      presentationTools.filter(
+        (tool) => tool.metadata?.provider === "google_sheets",
+      ),
+    [presentationTools],
   );
   const suitableTools = useMemo(
-    () => tools.filter((tool) => tool.metadata?.provider === "suitable"),
-    [tools],
+    () =>
+      presentationTools.filter(
+        (tool) => tool.metadata?.provider === "suitable",
+      ),
+    [presentationTools],
   );
 
   const toolsByServer = useMemo(
@@ -347,7 +393,7 @@ export default function MCPDashboardClient() {
     const integration = searchParams.get("integration");
     const status = searchParams.get("status");
     const isGoogleCalendarReturn = integration === "google_calendar";
-    const isGmailReturn = integration === "gmail";
+    const isGmailReturn = ENABLE_GMAIL_INTEGRATION && integration === "gmail";
     const isGoogleDriveReturn = integration === "google_drive";
     const isGoogleSheetsReturn = integration === "google_sheets";
 
@@ -357,41 +403,47 @@ export default function MCPDashboardClient() {
       refreshCalendarStatus();
       setCalendarError("Falha ao conectar Google Calendar.");
     } else if (isGmailReturn && status === "connected") {
-      refreshGmailStatus("Gmail conectado com sucesso.");
+      if (ENABLE_GMAIL_INTEGRATION)
+        refreshGmailStatus("Gmail conectado com sucesso.");
       refreshCalendarStatus();
     } else if (isGmailReturn && status === "error") {
-      refreshGmailStatus();
+      if (ENABLE_GMAIL_INTEGRATION) refreshGmailStatus();
       refreshCalendarStatus();
-      setGmailError("Falha ao conectar Gmail.");
+      if (ENABLE_GMAIL_INTEGRATION) setGmailError("Falha ao conectar Gmail.");
     } else if (isGoogleDriveReturn && status === "connected") {
       refreshDriveStatus("Google Drive conectado com sucesso.");
       refreshCalendarStatus();
-      refreshGmailStatus();
+      if (ENABLE_GMAIL_INTEGRATION) refreshGmailStatus();
     } else if (isGoogleDriveReturn && status === "error") {
       refreshDriveStatus();
       refreshCalendarStatus();
-      refreshGmailStatus();
+      if (ENABLE_GMAIL_INTEGRATION) refreshGmailStatus();
       setDriveError("Falha ao conectar Google Drive.");
     } else if (isGoogleSheetsReturn && status === "connected") {
       refreshSheetsStatus("Google Sheets conectado com sucesso.");
       refreshCalendarStatus();
-      refreshGmailStatus();
+      if (ENABLE_GMAIL_INTEGRATION) refreshGmailStatus();
       refreshDriveStatus();
     } else if (isGoogleSheetsReturn && status === "error") {
       refreshSheetsStatus();
       refreshCalendarStatus();
-      refreshGmailStatus();
+      if (ENABLE_GMAIL_INTEGRATION) refreshGmailStatus();
       refreshDriveStatus();
       setSheetsError("Falha ao conectar Google Sheets.");
     } else {
       refreshCalendarStatus();
-      refreshGmailStatus();
+      if (ENABLE_GMAIL_INTEGRATION) refreshGmailStatus();
       refreshDriveStatus();
       refreshSheetsStatus();
       refreshSuitableStatus();
     }
 
-    if (isGoogleCalendarReturn || isGmailReturn || isGoogleDriveReturn || isGoogleSheetsReturn) {
+    if (
+      isGoogleCalendarReturn ||
+      isGmailReturn ||
+      isGoogleDriveReturn ||
+      isGoogleSheetsReturn
+    ) {
       const nextParams = new URLSearchParams(searchParams.toString());
       nextParams.delete("integration");
       nextParams.delete("status");
@@ -496,7 +548,7 @@ export default function MCPDashboardClient() {
     try {
       window.location.href = getGmailConnectUrl();
     } catch {
-      setGmailError("Falha ao conectar Gmail.");
+      if (ENABLE_GMAIL_INTEGRATION) setGmailError("Falha ao conectar Gmail.");
     }
   }
 
@@ -650,7 +702,8 @@ export default function MCPDashboardClient() {
     typeof driveStatus?.metadata?.account_email === "string"
       ? driveStatus.metadata.account_email
       : "Nenhuma conta conectada";
-  const isGmailConnected = gmailStatus?.connected === true;
+  const isGmailConnected =
+    ENABLE_GMAIL_INTEGRATION && gmailStatus?.connected === true;
   const gmailAccountEmail =
     typeof gmailStatus?.metadata?.account_email === "string"
       ? gmailStatus.metadata.account_email
@@ -931,140 +984,142 @@ export default function MCPDashboardClient() {
               </p>
             ) : null}
           </article>
-          <article className="mt-4 rounded-3xl border border-slate-200 bg-gradient-to-br from-white via-slate-50 to-sky-50/40 p-5 shadow-sm">
-            <div className="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
-              <div className="flex gap-4">
-                <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-sky-100 text-sky-700">
-                  <Mail size={22} />
-                </span>
-                <div className="min-w-0">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <h3 className="font-bold text-slate-950">Gmail</h3>
-                    <span
-                      className={`inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs font-bold ${isGmailConnected ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-600"}`}
-                    >
-                      {loadingGmail ? (
-                        <Loader2 size={12} className="animate-spin" />
-                      ) : isGmailConnected ? (
-                        <CheckCircle2 size={12} />
-                      ) : (
-                        <XCircle size={12} />
-                      )}
-                      {loadingGmail
-                        ? "Carregando..."
-                        : isGmailConnected
-                          ? "Conectado"
-                          : "Não conectado"}
-                    </span>
-                  </div>
-                  <p className="mt-2 text-sm leading-relaxed text-slate-600">
-                    Permita que a IA liste, busque, leia, crie rascunhos e
-                    prepare envios de e-mail com confirmação obrigatória.
-                  </p>
-                  <div className="mt-4 grid gap-2 text-sm sm:grid-cols-2">
-                    <p className="rounded-2xl bg-white/80 px-4 py-3 text-slate-600">
-                      <b className="block text-xs uppercase tracking-[0.12em] text-slate-400">
-                        Provider
-                      </b>
-                      {gmailStatus?.provider || "gmail"}
+          {ENABLE_GMAIL_INTEGRATION ? (
+            <article className="mt-4 rounded-3xl border border-slate-200 bg-gradient-to-br from-white via-slate-50 to-sky-50/40 p-5 shadow-sm">
+              <div className="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
+                <div className="flex gap-4">
+                  <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-sky-100 text-sky-700">
+                    <Mail size={22} />
+                  </span>
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h3 className="font-bold text-slate-950">Gmail</h3>
+                      <span
+                        className={`inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs font-bold ${isGmailConnected ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-600"}`}
+                      >
+                        {loadingGmail ? (
+                          <Loader2 size={12} className="animate-spin" />
+                        ) : isGmailConnected ? (
+                          <CheckCircle2 size={12} />
+                        ) : (
+                          <XCircle size={12} />
+                        )}
+                        {loadingGmail
+                          ? "Carregando..."
+                          : isGmailConnected
+                            ? "Conectado"
+                            : "Não conectado"}
+                      </span>
+                    </div>
+                    <p className="mt-2 text-sm leading-relaxed text-slate-600">
+                      Permita que a IA liste, busque, leia, crie rascunhos e
+                      prepare envios de e-mail com confirmação obrigatória.
                     </p>
-                    <p className="rounded-2xl bg-white/80 px-4 py-3 text-slate-600">
-                      <b className="block text-xs uppercase tracking-[0.12em] text-slate-400">
-                        Conta
-                      </b>
-                      {loadingGmail
-                        ? "Consultando status..."
-                        : gmailAccountEmail}
-                    </p>
+                    <div className="mt-4 grid gap-2 text-sm sm:grid-cols-2">
+                      <p className="rounded-2xl bg-white/80 px-4 py-3 text-slate-600">
+                        <b className="block text-xs uppercase tracking-[0.12em] text-slate-400">
+                          Provider
+                        </b>
+                        {gmailStatus?.provider || "gmail"}
+                      </p>
+                      <p className="rounded-2xl bg-white/80 px-4 py-3 text-slate-600">
+                        <b className="block text-xs uppercase tracking-[0.12em] text-slate-400">
+                          Conta
+                        </b>
+                        {loadingGmail
+                          ? "Consultando status..."
+                          : gmailAccountEmail}
+                      </p>
+                    </div>
                   </div>
                 </div>
-              </div>
-              <div className="flex w-full flex-col gap-2 sm:w-auto sm:min-w-56">
-                {isGmailConnected ? (
-                  <button
-                    type="button"
-                    disabled={gmailActionLoading || loadingGmail}
-                    onClick={() => disconnectGmailAccount()}
-                    className={dangerButtonClass}
-                  >
-                    {gmailActionLoading ? (
-                      <Loader2 size={16} className="animate-spin" />
-                    ) : (
-                      <XCircle size={16} />
-                    )}{" "}
-                    Desconectar
-                  </button>
-                ) : (
+                <div className="flex w-full flex-col gap-2 sm:w-auto sm:min-w-56">
+                  {isGmailConnected ? (
+                    <button
+                      type="button"
+                      disabled={gmailActionLoading || loadingGmail}
+                      onClick={() => disconnectGmailAccount()}
+                      className={dangerButtonClass}
+                    >
+                      {gmailActionLoading ? (
+                        <Loader2 size={16} className="animate-spin" />
+                      ) : (
+                        <XCircle size={16} />
+                      )}{" "}
+                      Desconectar
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      disabled={loadingGmail}
+                      onClick={connectGmail}
+                      className={primaryButtonClass}
+                    >
+                      <Mail size={16} /> Conectar Gmail
+                    </button>
+                  )}
                   <button
                     type="button"
                     disabled={loadingGmail}
-                    onClick={connectGmail}
-                    className={primaryButtonClass}
+                    onClick={() => refreshGmailStatus()}
+                    className={secondaryButtonClass}
                   >
-                    <Mail size={16} /> Conectar Gmail
+                    Atualizar status
                   </button>
-                )}
-                <button
-                  type="button"
-                  disabled={loadingGmail}
-                  onClick={() => refreshGmailStatus()}
-                  className={secondaryButtonClass}
-                >
-                  Atualizar status
-                </button>
-              </div>
-            </div>
-            <div className="mt-5 border-t border-sky-100 pt-5">
-              <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                <div>
-                  <h4 className="text-sm font-bold text-slate-950">
-                    Ferramentas disponíveis
-                  </h4>
-                  <p className="mt-1 text-xs font-semibold text-slate-500">
-                    Origem: Gmail conectado
-                  </p>
                 </div>
-                <span className="rounded-full bg-sky-50 px-3 py-1 text-xs font-bold text-sky-700 ring-1 ring-sky-100">
-                  {gmailTools.length} ferramentas
-                </span>
               </div>
-              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
-                {gmailTools.map((tool) => (
-                  <div
-                    key={tool.id}
-                    className="rounded-2xl border border-sky-100 bg-white/85 p-4 shadow-sm"
-                  >
-                    <div className="flex flex-wrap items-start justify-between gap-2">
-                      <p className="text-sm font-bold text-slate-950">
-                        {getToolDisplayName(tool)}
-                      </p>
-                      <StatusBadge active={tool.is_enabled} />
-                    </div>
-                    <p className="mt-3 text-xs font-semibold text-slate-500">
+              <div className="mt-5 border-t border-sky-100 pt-5">
+                <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <h4 className="text-sm font-bold text-slate-950">
+                      Ferramentas disponíveis
+                    </h4>
+                    <p className="mt-1 text-xs font-semibold text-slate-500">
                       Origem: Gmail conectado
                     </p>
-                    <p
-                      className="mt-1 truncate font-mono text-[11px] text-slate-400"
-                      title={tool.tool_name}
+                  </div>
+                  <span className="rounded-full bg-sky-50 px-3 py-1 text-xs font-bold text-sky-700 ring-1 ring-sky-100">
+                    {gmailTools.length} ferramentas
+                  </span>
+                </div>
+                <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+                  {gmailTools.map((tool) => (
+                    <div
+                      key={tool.id}
+                      className="rounded-2xl border border-sky-100 bg-white/85 p-4 shadow-sm"
                     >
-                      {tool.tool_name}
-                    </p>
-                  </div>
-                ))}
-                {gmailTools.length === 0 ? (
-                  <div className="rounded-2xl border border-dashed border-sky-200 bg-white/70 px-4 py-5 text-sm font-semibold text-slate-500 sm:col-span-2 xl:col-span-5">
-                    Conecte o Gmail para exibir as ferramentas oficiais de
-                    e-mail.
-                  </div>
-                ) : null}
+                      <div className="flex flex-wrap items-start justify-between gap-2">
+                        <p className="text-sm font-bold text-slate-950">
+                          {getToolDisplayName(tool)}
+                        </p>
+                        <StatusBadge active={tool.is_enabled} />
+                      </div>
+                      <p className="mt-3 text-xs font-semibold text-slate-500">
+                        Origem: Gmail conectado
+                      </p>
+                      <p
+                        className="mt-1 truncate font-mono text-[11px] text-slate-400"
+                        title={tool.tool_name}
+                      >
+                        {tool.tool_name}
+                      </p>
+                    </div>
+                  ))}
+                  {gmailTools.length === 0 ? (
+                    <div className="rounded-2xl border border-dashed border-sky-200 bg-white/70 px-4 py-5 text-sm font-semibold text-slate-500 sm:col-span-2 xl:col-span-5">
+                      Conecte o Gmail para exibir as ferramentas oficiais de
+                      e-mail.
+                    </div>
+                  ) : null}
+                </div>
               </div>
-            </div>
-            {gmailError ? (
-              <p className="mt-4 inline-flex items-center gap-2 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">
-                <AlertCircle size={16} /> {gmailError}
-              </p>
-            ) : null}
-          </article>
+              {gmailError ? (
+                <p className="mt-4 inline-flex items-center gap-2 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">
+                  <AlertCircle size={16} /> {gmailError}
+                </p>
+              ) : null}
+            </article>
+          ) : null}
           <article className="mt-4 rounded-3xl border border-slate-200 bg-gradient-to-br from-white via-slate-50 to-blue-50/40 p-5 shadow-sm">
             <div className="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
               <div className="flex gap-4">
@@ -1210,61 +1265,123 @@ export default function MCPDashboardClient() {
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-2">
                     <h3 className="font-bold text-slate-950">Google Sheets</h3>
-                    <span className={`inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs font-bold ${isSheetsConnected ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-600"}`}>
-                      {loadingSheets ? <Loader2 size={12} className="animate-spin" /> : isSheetsConnected ? <CheckCircle2 size={12} /> : <XCircle size={12} />}
-                      {loadingSheets ? "Carregando..." : isSheetsConnected ? "Conectado" : "Não conectado"}
+                    <span
+                      className={`inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs font-bold ${isSheetsConnected ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-600"}`}
+                    >
+                      {loadingSheets ? (
+                        <Loader2 size={12} className="animate-spin" />
+                      ) : isSheetsConnected ? (
+                        <CheckCircle2 size={12} />
+                      ) : (
+                        <XCircle size={12} />
+                      )}
+                      {loadingSheets
+                        ? "Carregando..."
+                        : isSheetsConnected
+                          ? "Conectado"
+                          : "Não conectado"}
                     </span>
                   </div>
                   <p className="mt-2 text-sm leading-relaxed text-slate-600">
-                    Permita que a IA liste, leia, crie e atualize planilhas oficiais do Google Sheets.
+                    Permita que a IA liste, leia, crie e atualize planilhas
+                    oficiais do Google Sheets.
                   </p>
                   <div className="mt-4 grid gap-2 text-sm sm:grid-cols-2">
                     <p className="rounded-2xl bg-white/80 px-4 py-3 text-slate-600">
-                      <b className="block text-xs uppercase tracking-[0.12em] text-slate-400">Provider</b>
+                      <b className="block text-xs uppercase tracking-[0.12em] text-slate-400">
+                        Provider
+                      </b>
                       {sheetsStatus?.provider || "google_sheets"}
                     </p>
                     <p className="rounded-2xl bg-white/80 px-4 py-3 text-slate-600">
-                      <b className="block text-xs uppercase tracking-[0.12em] text-slate-400">Conta</b>
-                      {loadingSheets ? "Consultando status..." : sheetsAccountEmail}
+                      <b className="block text-xs uppercase tracking-[0.12em] text-slate-400">
+                        Conta
+                      </b>
+                      {loadingSheets
+                        ? "Consultando status..."
+                        : sheetsAccountEmail}
                     </p>
                   </div>
                 </div>
               </div>
               <div className="flex w-full flex-col gap-2 sm:w-auto sm:min-w-56">
                 {isSheetsConnected ? (
-                  <button type="button" disabled={sheetsActionLoading || loadingSheets} onClick={() => disconnectSheetsAccount()} className={dangerButtonClass}>
-                    {sheetsActionLoading ? <Loader2 size={16} className="animate-spin" /> : <XCircle size={16} />} Desconectar
+                  <button
+                    type="button"
+                    disabled={sheetsActionLoading || loadingSheets}
+                    onClick={() => disconnectSheetsAccount()}
+                    className={dangerButtonClass}
+                  >
+                    {sheetsActionLoading ? (
+                      <Loader2 size={16} className="animate-spin" />
+                    ) : (
+                      <XCircle size={16} />
+                    )}{" "}
+                    Desconectar
                   </button>
                 ) : (
-                  <button type="button" disabled={loadingSheets} onClick={connectSheets} className={primaryButtonClass}>
+                  <button
+                    type="button"
+                    disabled={loadingSheets}
+                    onClick={connectSheets}
+                    className={primaryButtonClass}
+                  >
                     <FolderOpen size={16} /> Conectar Google Sheets
                   </button>
                 )}
-                <button type="button" disabled={loadingSheets} onClick={() => refreshSheetsStatus()} className={secondaryButtonClass}>Atualizar status</button>
+                <button
+                  type="button"
+                  disabled={loadingSheets}
+                  onClick={() => refreshSheetsStatus()}
+                  className={secondaryButtonClass}
+                >
+                  Atualizar status
+                </button>
               </div>
             </div>
             <div className="mt-5 border-t border-green-100 pt-5">
               <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                 <div>
-                  <h4 className="text-sm font-bold text-slate-950">Ferramentas disponíveis</h4>
-                  <p className="mt-1 text-xs font-semibold text-slate-500">Origem: Google Sheets conectado</p>
+                  <h4 className="text-sm font-bold text-slate-950">
+                    Ferramentas disponíveis
+                  </h4>
+                  <p className="mt-1 text-xs font-semibold text-slate-500">
+                    Origem: Google Sheets conectado
+                  </p>
                 </div>
-                <span className="rounded-full bg-green-50 px-3 py-1 text-xs font-bold text-green-700 ring-1 ring-green-100">{googleSheetsTools.length} ferramentas</span>
+                <span className="rounded-full bg-green-50 px-3 py-1 text-xs font-bold text-green-700 ring-1 ring-green-100">
+                  {googleSheetsTools.length} ferramentas
+                </span>
               </div>
               <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
                 {googleSheetsTools.map((tool) => (
-                  <div key={tool.id} className="rounded-2xl border border-green-100 bg-white/85 p-4 shadow-sm">
+                  <div
+                    key={tool.id}
+                    className="rounded-2xl border border-green-100 bg-white/85 p-4 shadow-sm"
+                  >
                     <div className="flex flex-wrap items-start justify-between gap-2">
-                      <p className="text-sm font-bold text-slate-950">{getToolDisplayName(tool)}</p>
+                      <p className="text-sm font-bold text-slate-950">
+                        {getToolDisplayName(tool)}
+                      </p>
                       <StatusBadge active={tool.is_enabled} />
                     </div>
-                    <p className="mt-3 text-xs font-semibold text-slate-500">Origem: Google Sheets conectado</p>
-                    <p className="mt-1 truncate font-mono text-[11px] text-slate-400" title={tool.tool_name}>{tool.tool_name}</p>
+                    <p className="mt-3 text-xs font-semibold text-slate-500">
+                      Origem: Google Sheets conectado
+                    </p>
+                    <p
+                      className="mt-1 truncate font-mono text-[11px] text-slate-400"
+                      title={tool.tool_name}
+                    >
+                      {tool.tool_name}
+                    </p>
                   </div>
                 ))}
                 {googleSheetsTools.length === 0 ? (
                   <div className="rounded-2xl border border-dashed border-green-200 bg-white/70 px-4 py-5 text-sm font-semibold text-slate-500 sm:col-span-2 xl:col-span-5">
-                    Conecte o Google Sheets para exibir as ferramentas oficiais: google_sheets_list_spreadsheets, google_sheets_read_sheet, google_sheets_append_row, google_sheets_update_row e google_sheets_create_spreadsheet.
+                    Conecte o Google Sheets para exibir as ferramentas oficiais:
+                    google_sheets_list_spreadsheets, google_sheets_read_sheet,
+                    google_sheets_append_row, google_sheets_update_row e
+                    google_sheets_create_spreadsheet.
                   </div>
                 ) : null}
               </div>
@@ -1302,7 +1419,8 @@ export default function MCPDashboardClient() {
                     </span>
                   </div>
                   <p className="mt-2 text-sm leading-relaxed text-slate-600">
-                    Permita que a IA valide a API Key e crie pedidos na Suitable.
+                    Permita que a IA valide a API Key e crie pedidos na
+                    Suitable.
                   </p>
                   <div className="mt-4 grid gap-2 text-sm sm:grid-cols-2">
                     <p className="rounded-2xl bg-white/80 px-4 py-3 text-slate-600">
@@ -1320,13 +1438,17 @@ export default function MCPDashboardClient() {
                   </div>
                   {!isSuitableConnected && showSuitableKeyField ? (
                     <div className="mt-4 space-y-2">
-                      <span className={labelClass}>SUITABLE_API_KEY do tenant</span>
+                      <span className={labelClass}>
+                        SUITABLE_API_KEY do tenant
+                      </span>
                       <input
                         className={inputClass}
                         type="password"
                         placeholder="Cole a API Key da Suitable"
                         value={suitableApiKey}
-                        onChange={(event) => setSuitableApiKey(event.target.value)}
+                        onChange={(event) =>
+                          setSuitableApiKey(event.target.value)
+                        }
                       />
                     </div>
                   ) : null}
@@ -1351,10 +1473,19 @@ export default function MCPDashboardClient() {
                   <button
                     type="button"
                     disabled={loadingSuitable || suitableActionLoading}
-                    onClick={() => showSuitableKeyField ? connectSuitableAccount() : setShowSuitableKeyField(true)}
+                    onClick={() =>
+                      showSuitableKeyField
+                        ? connectSuitableAccount()
+                        : setShowSuitableKeyField(true)
+                    }
                     className={primaryButtonClass}
                   >
-                    {suitableActionLoading ? <Loader2 size={16} className="animate-spin" /> : <KeyRound size={16} />} Conectar Suitable
+                    {suitableActionLoading ? (
+                      <Loader2 size={16} className="animate-spin" />
+                    ) : (
+                      <KeyRound size={16} />
+                    )}{" "}
+                    Conectar Suitable
                   </button>
                 )}
                 <button
@@ -1382,17 +1513,50 @@ export default function MCPDashboardClient() {
                 </span>
               </div>
               <div className="grid gap-3 sm:grid-cols-2">
-                {(suitableTools.length ? suitableTools : [
-                  { id: "suitable_check_key", tool_name: "suitable_check_key", display_name: "Validar API Key", description: "", input_schema: {}, is_enabled: false, server_id: "", metadata: { provider: "suitable" } },
-                  { id: "suitable_create_order", tool_name: "suitable_create_order", display_name: "Criar pedido", description: "", input_schema: {}, is_enabled: false, server_id: "", metadata: { provider: "suitable" } },
-                ]).map((tool) => (
-                  <div key={tool.id} className="rounded-2xl border border-purple-100 bg-white/85 p-4 shadow-sm">
+                {(suitableTools.length
+                  ? suitableTools
+                  : [
+                      {
+                        id: "suitable_check_key",
+                        tool_name: "suitable_check_key",
+                        display_name: "Validar API Key",
+                        description: "",
+                        input_schema: {},
+                        is_enabled: false,
+                        server_id: "",
+                        metadata: { provider: "suitable" },
+                      },
+                      {
+                        id: "suitable_create_order",
+                        tool_name: "suitable_create_order",
+                        display_name: "Criar pedido",
+                        description: "",
+                        input_schema: {},
+                        is_enabled: false,
+                        server_id: "",
+                        metadata: { provider: "suitable" },
+                      },
+                    ]
+                ).map((tool) => (
+                  <div
+                    key={tool.id}
+                    className="rounded-2xl border border-purple-100 bg-white/85 p-4 shadow-sm"
+                  >
                     <div className="flex flex-wrap items-start justify-between gap-2">
-                      <p className="text-sm font-bold text-slate-950">{getToolDisplayName(tool)}</p>
+                      <p className="text-sm font-bold text-slate-950">
+                        {getToolDisplayName(tool)}
+                      </p>
                       <StatusBadge active={tool.is_enabled} />
                     </div>
-                    <p className="mt-3 text-xs font-semibold text-slate-500">Origem: Suitable conectado</p>
-                    <p className="mt-1 truncate font-mono text-[11px] text-slate-400" title={tool.tool_name}>{tool.tool_name}</p>
+                    <p className="mt-3 text-xs font-semibold text-slate-500">
+                      Origem: Suitable conectado
+                    </p>
+                    <p
+                      className="mt-1 truncate font-mono text-[11px] text-slate-400"
+                      title={tool.tool_name}
+                    >
+                      {tool.tool_name}
+                    </p>
                   </div>
                 ))}
               </div>
