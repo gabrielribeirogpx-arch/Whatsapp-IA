@@ -1,7 +1,7 @@
 'use client';
 
 import { NodeProps } from 'reactflow';
-import CompactFlowNode, { truncateText } from './CompactFlowNode';
+import CompactFlowNode from './CompactFlowNode';
 
 type AiAgentNodeData = {
   allowed_tools?: string[];
@@ -24,11 +24,12 @@ export default function AiAgentNode({ id, data, selected }: NodeProps) {
   const nodeTools = Array.isArray(nodeData.node_tools) ? nodeData.node_tools.length : 0;
   const subflows = Array.isArray(nodeData.subflow_tools) ? nodeData.subflow_tools.length : 0;
   const webhooks = Array.isArray((nodeData as { webhooks?: unknown[] }).webhooks) ? (nodeData as { webhooks?: unknown[] }).webhooks?.length || 0 : 0;
-  const tools = baseTools;
+  const tools = baseTools + nodeTools + subflows + webhooks;
   const behavior = nodeData.after_agent_behavior || nodeData.after_answer_behavior || 'wait_same_node';
-  const behaviorLabel = behavior === 'end_flow' ? 'Encerra atendimento' : behavior === 'continue_to_next' ? 'Continua fluxo' : 'Aguarda próxima mensagem';
+  const behaviorLabel = behavior === 'end_flow' ? 'Encerra atendimento' : behavior === 'continue_to_next' ? 'Continua fluxo' : 'Aguardando mensagem';
   const model = nodeData.model_override || 'Modelo global';
-  const summary = `${model} · 🛠 ${tools} · 🔀 ${nodeTools} · 📂 ${subflows} · 🌐 ${webhooks} · 🧠 ${nodeData.use_memory === false ? 'OFF' : 'ON'} · ⏳ ${behaviorLabel}`;
+  const isActive = nodeData.use_memory !== false;
+  const entered = typeof (nodeData.analytics as { entered?: unknown } | null)?.entered === 'number' ? (nodeData.analytics as { entered: number }).entered : 0;
 
   return (
     <CompactFlowNode
@@ -39,13 +40,23 @@ export default function AiAgentNode({ id, data, selected }: NodeProps) {
       emoji="🤖"
       badge="AGENTE"
       badgeTitle="Usa IA para decidir e executar ferramentas permitidas"
-      badgeTone={{ background: '#f5f3ff', color: '#6d28d9' }}
-      accent="linear-gradient(90deg, #8b5cf6, #06b6d4)"
-      summary={truncateText(summary, 92, 'Modelo global · 🛠 2 · 🔀 0 · 📂 0 · 🌐 0 · 🧠 ON · ⏳ Aguarda próxima mensagem')}
+      badgeTone={{ background: '#f4f0ff', color: '#6d28d9' }}
+      accent="linear-gradient(135deg, #7c3aed, #4f46e5 52%, #06b6d4)"
+      summary="Orquestra ações inteligentes usando IA, memória e ferramentas do fluxo."
+      meta={isActive ? 'Ativo' : 'Inativo'}
+      metrics={[
+        { label: 'Modelo de IA', value: model, icon: '✦', tone: '#4f46e5' },
+        { label: 'Ações', value: tools, icon: '⚡', tone: '#7c3aed' },
+        { label: 'Entradas', value: entered, icon: '↪', tone: '#2563eb' },
+        { label: 'Saídas', value: Math.max(0, nodeTools + subflows + webhooks), icon: '↗', tone: '#16a34a' },
+      ]}
+      chips={[nodeData.use_memory === false ? 'Memória OFF' : 'Memória ON', `${baseTools} ferramentas`, behaviorLabel]}
+      footer={<><span className={`flow-node-status-dot ${isActive ? 'is-on' : 'is-off'}`} /> <strong>{isActive ? 'ON' : 'OFF'}</strong><span>·</span><span>{behaviorLabel}</span></>}
+      premium
       isStart={nodeData.isStart}
       hasValidationError={nodeData.hasValidationError}
       onToggleStart={nodeData.onToggleStart}
-      analytics={nodeData.analytics}
+      analytics={nodeData.analytics as any}
     />
   );
 }

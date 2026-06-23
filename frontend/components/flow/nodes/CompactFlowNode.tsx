@@ -1,6 +1,6 @@
 'use client';
 
-import { memo, useEffect, useMemo } from 'react';
+import { memo, ReactNode, useEffect, useMemo } from 'react';
 import type { CSSProperties } from 'react';
 import { Handle, Position } from 'reactflow';
 
@@ -9,6 +9,13 @@ type SourceHandle = {
   label?: string;
   color?: string;
   optionValue?: string;
+};
+
+type NodeMetric = {
+  label: string;
+  value: string | number;
+  icon?: ReactNode;
+  tone?: string;
 };
 
 type CompactFlowNodeProps = {
@@ -24,6 +31,9 @@ type CompactFlowNodeProps = {
   summary: string;
   meta?: string;
   chips?: string[];
+  metrics?: NodeMetric[];
+  footer?: ReactNode;
+  premium?: boolean;
   sourceHandles?: SourceHandle[];
   isStart?: boolean;
   hasValidationError?: boolean;
@@ -45,6 +55,9 @@ function CompactFlowNode({
   summary,
   meta,
   chips = [],
+  metrics = [],
+  footer,
+  premium,
   sourceHandles,
   isStart,
   hasValidationError,
@@ -62,7 +75,7 @@ function CompactFlowNode({
 
   return (
     <div
-      className={`flow-node flow-node-compact ${selected ? 'is-selected' : ''} ${running ? 'running' : ''}`}
+      className={`flow-node flow-node-compact ${premium ? 'flow-node-premium' : ''} ${selected ? 'is-selected' : ''} ${running ? 'running' : ''}`}
       style={{
         '--flow-node-accent': accent,
         border: hasValidationError ? '2px solid #dc2626' : undefined,
@@ -83,6 +96,7 @@ function CompactFlowNode({
       />
 
       <div className="flow-node-compact-header">
+        <div className="flow-node-header-glow" aria-hidden="true" />
         <span className="flow-node-emoji" aria-hidden="true">{emoji}</span>
         <div className="flow-node-compact-title-wrap">
           <span className="flow-node-title">{title}</span>
@@ -114,6 +128,19 @@ function CompactFlowNode({
 
       <div className="flow-node-compact-body">
         <p className="flow-node-summary">{summary || 'Clique para configurar no painel lateral'}</p>
+        {metrics.length > 0 ? (
+          <div className="flow-node-metric-row">
+            {metrics.slice(0, 4).map((metric) => (
+              <span key={`${metric.label}-${metric.value}`} className="flow-node-metric">
+                {metric.icon ? <span className="flow-node-metric-icon" aria-hidden="true">{metric.icon}</span> : null}
+                <span className="flow-node-metric-copy">
+                  <span className="flow-node-metric-label">{metric.label}</span>
+                  <strong style={metric.tone ? { color: metric.tone } : undefined}>{metric.value}</strong>
+                </span>
+              </span>
+            ))}
+          </div>
+        ) : null}
         {chips.length > 0 ? (
           <div className="flow-node-chip-row">
             {chips.slice(0, 3).map((chip) => (
@@ -123,6 +150,8 @@ function CompactFlowNode({
           </div>
         ) : null}
       </div>
+
+      {footer ? <div className="flow-node-footer">{footer}</div> : null}
 
       {handles.map((handle, index) => (
         <Handle
