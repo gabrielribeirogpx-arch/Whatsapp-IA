@@ -11,7 +11,7 @@ import requests
 from sqlalchemy.orm import Session
 
 from app.models.integration_connection import IntegrationConnection
-from app.services.integration_connection_service import IntegrationConnectionService
+from app.services.integration_connection_service import GOOGLE_RECONNECT_MESSAGE, IntegrationConnectionService, is_google_auth_error
 
 PROVIDER = "gmail"
 BASE_URL = "https://gmail.googleapis.com/gmail/v1/users/me"
@@ -59,6 +59,13 @@ class GmailService:
             timeout=15,
         )
         if response.status_code >= 400:
+            try:
+                body = response.json()
+            except Exception:
+                body = getattr(response, "text", "")
+            if is_google_auth_error(response.status_code, body):
+                self.connection_service.mark_google_connection_revoked(self.tenant_id, PROVIDER)
+                return {"ok": False, "message": GOOGLE_RECONNECT_MESSAGE, "status_code": response.status_code, "api_error": body}
             return {"ok": False, "message": "Falha ao renovar token do Gmail.", "status_code": response.status_code}
         payload = response.json()
         self.connection_service.upsert_connection(
@@ -68,7 +75,7 @@ class GmailService:
             access_token=payload.get("access_token"),
             refresh_token=refresh,
             expires_at=datetime.utcnow() + timedelta(seconds=int(payload.get("expires_in") or 3600)),
-            scopes=conn.scopes_json or [],
+            scopes=conn.scopes or [],
             metadata=conn.metadata_json or {},
         )
         return {"ok": True, "refreshed": True}
@@ -91,6 +98,9 @@ class GmailService:
                 body = resp.json()
             except Exception:
                 body = resp.text
+            if is_google_auth_error(resp.status_code, body):
+                self.connection_service.mark_google_connection_revoked(self.tenant_id, PROVIDER)
+                return False, {"message": GOOGLE_RECONNECT_MESSAGE, "status_code": resp.status_code, "api_error": body}, resp.status_code
             return False, {"message": "Erro ao chamar Gmail.", "status_code": resp.status_code, "api_error": body}, resp.status_code
         return True, ({} if resp.status_code == 204 or not resp.content else resp.json()), resp.status_code
 

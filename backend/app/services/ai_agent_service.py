@@ -219,14 +219,34 @@ def _resolve_tenant_available_mcp_tools(db: Session, tenant_id: Any, configured_
     from app.services.google_drive_service import PROVIDER as GOOGLE_DRIVE_PROVIDER
     from app.services.google_sheets_service import PROVIDER as GOOGLE_SHEETS_PROVIDER
 
-    resolved = [_normalize_mcp_tool_definition(t) for t in configured_tools if isinstance(t, dict)]
-    if _has_integration_connection(db, tenant_id, GOOGLE_CALENDAR_PROVIDER):
+    google_connection_status = {
+        GOOGLE_CALENDAR_PROVIDER: _has_integration_connection(db, tenant_id, GOOGLE_CALENDAR_PROVIDER),
+        GMAIL_PROVIDER: _has_integration_connection(db, tenant_id, GMAIL_PROVIDER),
+        GOOGLE_DRIVE_PROVIDER: _has_integration_connection(db, tenant_id, GOOGLE_DRIVE_PROVIDER),
+        GOOGLE_SHEETS_PROVIDER: _has_integration_connection(db, tenant_id, GOOGLE_SHEETS_PROVIDER),
+    }
+    google_tool_providers = {
+        **{tool_id: GOOGLE_CALENDAR_PROVIDER for tool_id in GOOGLE_CALENDAR_TOOL_IDS},
+        **{tool_id: GMAIL_PROVIDER for tool_id in GMAIL_TOOL_IDS},
+        **{tool_id: GOOGLE_DRIVE_PROVIDER for tool_id in GOOGLE_DRIVE_TOOL_IDS},
+        **{tool_id: GOOGLE_SHEETS_PROVIDER for tool_id in GOOGLE_SHEETS_TOOL_IDS},
+    }
+    resolved = []
+    for configured_tool in configured_tools:
+        if not isinstance(configured_tool, dict):
+            continue
+        normalized = _normalize_mcp_tool_definition(configured_tool)
+        provider = google_tool_providers.get(str(normalized.get("tool_id") or "")) or (normalized.get("metadata") or {}).get("provider")
+        if provider in google_connection_status and not google_connection_status[provider]:
+            continue
+        resolved.append(normalized)
+    if google_connection_status[GOOGLE_CALENDAR_PROVIDER]:
         resolved.extend({**tool, "tenant_id": str(tenant_id)} for tool in google_calendar_tool_definitions(connected=True))
-    if _has_integration_connection(db, tenant_id, GMAIL_PROVIDER):
+    if google_connection_status[GMAIL_PROVIDER]:
         resolved.extend({**tool, "tenant_id": str(tenant_id)} for tool in gmail_tool_definitions(connected=True))
-    if _has_integration_connection(db, tenant_id, GOOGLE_DRIVE_PROVIDER):
+    if google_connection_status[GOOGLE_DRIVE_PROVIDER]:
         resolved.extend({**tool, "tenant_id": str(tenant_id)} for tool in google_drive_tool_definitions(connected=True))
-    if _has_integration_connection(db, tenant_id, GOOGLE_SHEETS_PROVIDER):
+    if google_connection_status[GOOGLE_SHEETS_PROVIDER]:
         resolved.extend({**tool, "tenant_id": str(tenant_id)} for tool in google_sheets_tool_definitions(connected=True))
     if _has_integration_connection(db, tenant_id, SUITABLE_PROVIDER):
         resolved.extend({**tool, "tenant_id": str(tenant_id)} for tool in suitable_tool_definitions(connected=True))

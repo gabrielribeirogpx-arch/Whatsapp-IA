@@ -16,6 +16,35 @@ from app.models.integration_connection import IntegrationConnection
 _AUTH_TYPES = {"oauth", "oauth2", "api_key"}
 _PREFIX = "oauth:v1:"
 
+GOOGLE_CONNECTION_PROVIDERS = {"google", "google_calendar", "google_drive", "google_sheets", "gmail"}
+GOOGLE_RECONNECT_MESSAGE = "Conecte sua conta Google novamente para usar esta ferramenta."
+GOOGLE_AUTH_ERROR_TOKENS = {"invalid_grant", "token_revoked", "unauthorized", "invalid_token"}
+
+
+def is_google_provider(provider: str) -> bool:
+    return IntegrationConnectionService.normalize_provider(provider) in GOOGLE_CONNECTION_PROVIDERS
+
+
+def is_google_auth_error(status_code: int | None = None, payload: Any | None = None, message: str | None = None) -> bool:
+    text_parts: list[str] = []
+    if message:
+        text_parts.append(str(message))
+    if isinstance(payload, dict):
+        for key in ("error", "error_description", "message"):
+            value = payload.get(key)
+            if value:
+                text_parts.append(str(value))
+        nested = payload.get("error")
+        if isinstance(nested, dict):
+            for key in ("status", "message", "reason"):
+                value = nested.get(key)
+                if value:
+                    text_parts.append(str(value))
+    elif payload is not None:
+        text_parts.append(str(payload))
+    haystack = " ".join(text_parts).lower()
+    return status_code == 401 or any(token in haystack for token in GOOGLE_AUTH_ERROR_TOKENS)
+
 
 class IntegrationConnectionConfigurationError(RuntimeError):
     """Raised when integration credential encryption is not configured."""
@@ -186,11 +215,11 @@ class IntegrationConnectionService:
             self.db.commit(); self.db.refresh(connection)
         return connection
 
-    def disconnect_connection(self, tenant_id: uuid.UUID, provider: str, *, commit: bool = True) -> IntegrationConnection | None:
+    def disconnect_connection(self, tenant_id: uuid.UUID, provider: str, *, commit: bool = True, status: str = "disconnected") -> IntegrationConnection | None:
         connection = self.get_connection(tenant_id, provider)
         if connection is None:
             return None
-        connection.status = "disconnected"
+        connection.status = status
         connection.access_token_encrypted = None
         connection.refresh_token_encrypted = None
         connection.api_key_encrypted = None
@@ -199,6 +228,31 @@ class IntegrationConnectionService:
         if commit:
             self.db.commit(); self.db.refresh(connection)
         return connection
+
+    def disconnect_google_connections(self, tenant_id: uuid.UUID, *, commit: bool = True, status: str = "disconnected") -> list[IntegrationConnection]:
+        connections = list(
+            self.db.execute(
+                select(IntegrationConnection).where(
+                    IntegrationConnection.tenant_id == tenant_id,
+                    IntegrationConnection.provider.in_(GOOGLE_CONNECTION_PROVIDERS),
+                )
+            ).scalars().all()
+        )
+        for connection in connections:
+            connection.status = status
+            connection.access_token_encrypted = None
+            connection.refresh_token_encrypted = None
+            connection.api_key_encrypted = None
+            connection.expires_at = None
+            connection.updated_at = datetime.utcnow()
+        if commit:
+            self.db.commit()
+            for connection in connections:
+                self.db.refresh(connection)
+        return connections
+
+    def mark_google_connection_revoked(self, tenant_id: uuid.UUID, provider: str, *, commit: bool = True) -> IntegrationConnection | None:
+        return self.disconnect_connection(tenant_id, provider, commit=commit, status="revoked")
 
     def is_connected(self, tenant_id: uuid.UUID, provider: str) -> bool:
         return self.get_active_connection(tenant_id, provider) is not None

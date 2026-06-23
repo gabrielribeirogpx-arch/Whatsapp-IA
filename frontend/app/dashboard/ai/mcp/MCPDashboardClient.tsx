@@ -21,6 +21,7 @@ import {
 import {
   apiFetch,
   connectSuitable,
+  disconnectGoogle,
   disconnectGoogleCalendar,
   disconnectGmail,
   disconnectGoogleDrive,
@@ -651,6 +652,36 @@ export default function MCPDashboardClient() {
     }
   }
 
+  async function disconnectGoogleAccount() {
+    setCalendarActionLoading(true);
+    setGmailActionLoading(true);
+    setDriveActionLoading(true);
+    setSheetsActionLoading(true);
+    setCalendarError("");
+    setGmailError("");
+    setDriveError("");
+    setSheetsError("");
+    try {
+      await disconnectGoogle();
+      await Promise.all([
+        refreshCalendarStatus(),
+        refreshGmailStatus(),
+        refreshDriveStatus(),
+        refreshSheetsStatus(),
+      ]);
+      setMessageTone("success");
+      setMessage("Conta Google desconectada de Calendar, Drive, Sheets e Gmail.");
+      await load();
+    } catch {
+      setCalendarError("Falha ao desconectar a conta Google.");
+    } finally {
+      setCalendarActionLoading(false);
+      setGmailActionLoading(false);
+      setDriveActionLoading(false);
+      setSheetsActionLoading(false);
+    }
+  }
+
   async function disconnectCalendar() {
     setCalendarActionLoading(true);
     setCalendarError("");
@@ -955,6 +986,19 @@ export default function MCPDashboardClient() {
                   className={secondaryButtonClass}
                 >
                   Atualizar status
+                </button>
+                <button
+                  type="button"
+                  disabled={
+                    calendarActionLoading ||
+                    gmailActionLoading ||
+                    driveActionLoading ||
+                    sheetsActionLoading
+                  }
+                  onClick={() => disconnectGoogleAccount()}
+                  className={dangerButtonClass}
+                >
+                  <XCircle size={16} /> Desconectar Google
                 </button>
               </div>
             </div>
