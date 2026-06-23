@@ -9,7 +9,7 @@ import {
   ArrowLeft, Bot, User, Clock, Send, Paperclip,
   MoreVertical, UserCheck, RefreshCw, CheckCheck, Check, LogOut,
 } from 'lucide-react';
-import { useRef, useEffect, useState, FormEvent } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, FormEvent } from 'react';
 import type { ChatMessage, Contact, ConversationMode } from '@/lib/types';
 import MessageMediaPreview, { getMessageMediaInfo, renderLinkedText } from '@/components/MessageMediaPreview';
 
@@ -54,16 +54,76 @@ export default function MobileChatView({
   onReset,
 }: MobileChatViewProps) {
   const listRef = useRef<HTMLDivElement>(null);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const isNearBottomRef = useRef(true);
+  const previousContactIdRef = useRef<string | null>(null);
+  const pendingInitialScrollRef = useRef(false);
+  const previousLastMessageIdRef = useRef<string | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [confirmReset, setConfirmReset] = useState(false);
   const [confirmRelease, setConfirmRelease] = useState(false);
+  const [showNewMessageIndicator, setShowNewMessageIndicator] = useState(false);
+
+  const isNearBottom = useCallback(() => {
+    const el = listRef.current;
+    if (!el) return true;
+    return el.scrollHeight - el.scrollTop - el.clientHeight <= 120;
+  }, []);
+
+  const scrollToBottom = useCallback(({ behavior = 'smooth' }: { behavior?: ScrollBehavior } = {}) => {
+    const scroll = () => {
+      const el = listRef.current;
+      if (!el) return;
+      messagesEndRef.current?.scrollIntoView({ block: 'end', behavior });
+      el.scrollTo({ top: el.scrollHeight, behavior });
+      isNearBottomRef.current = true;
+      setShowNewMessageIndicator(false);
+    };
+    requestAnimationFrame(() => {
+      scroll();
+      setTimeout(scroll, 80);
+    });
+  }, []);
+
+  const handleMessagesScroll = useCallback(() => {
+    const nearBottom = isNearBottom();
+    isNearBottomRef.current = nearBottom;
+    if (nearBottom) setShowNewMessageIndicator(false);
+  }, [isNearBottom]);
+
+  useLayoutEffect(() => {
+    if (previousContactIdRef.current === contact.id) return;
+
+    previousContactIdRef.current = contact.id;
+    previousLastMessageIdRef.current = null;
+    pendingInitialScrollRef.current = true;
+    isNearBottomRef.current = true;
+    setShowNewMessageIndicator(false);
+    if (messages.length > 0) scrollToBottom({ behavior: 'auto' });
+  }, [contact.id, messages.length, scrollToBottom]);
 
   useEffect(() => {
-    if (listRef.current) {
-      listRef.current.scrollTop = listRef.current.scrollHeight;
+    const lastMessage = messages[messages.length - 1];
+    const lastMessageId = lastMessage?.id ?? null;
+    if (!lastMessageId) return;
+
+    const isNewMessage = previousLastMessageIdRef.current !== null && previousLastMessageIdRef.current !== lastMessageId;
+    const shouldForceInitialScroll = pendingInitialScrollRef.current;
+    previousLastMessageIdRef.current = lastMessageId;
+
+    if (shouldForceInitialScroll) {
+      pendingInitialScrollRef.current = false;
+      scrollToBottom({ behavior: 'auto' });
+      return;
     }
-  }, [messages]);
+
+    if (lastMessage.fromMe || isNearBottomRef.current) {
+      scrollToBottom({ behavior: isNewMessage ? 'smooth' : 'auto' });
+    } else if (isNewMessage) {
+      setShowNewMessageIndicator(true);
+    }
+  }, [messages, scrollToBottom]);
 
   function handleInputChange(e: React.ChangeEvent<HTMLTextAreaElement>) {
     const el = e.target;
@@ -101,6 +161,7 @@ export default function MobileChatView({
 
   return (
     <div style={{
+      position: 'relative',
       display: 'flex', flexDirection: 'column', height: '100dvh',
       background: '#F9FAFB',
       fontFamily: "'DM Sans', sans-serif",
@@ -254,6 +315,13 @@ export default function MobileChatView({
       {/* ── Messages ── */}
       <div
         ref={listRef}
+        onScroll={handleMessagesScroll}
+        onLoadCapture={(event) => {
+          const target = event.target as HTMLElement;
+          if ((target.tagName === 'IMG' || target.tagName === 'VIDEO') && isNearBottomRef.current) {
+            scrollToBottom({ behavior: 'auto' });
+          }
+        }}
         style={{
           flex: 1, overflowY: 'auto',
           padding: '12px 12px 8px',
@@ -273,7 +341,23 @@ export default function MobileChatView({
         {messages.map((msg, i) => (
           <MessageBubble key={msg.id} msg={msg} prevFromMe={i > 0 ? messages[i - 1].fromMe : undefined} />
         ))}
+        <div ref={messagesEndRef} aria-hidden="true" />
       </div>
+
+      {showNewMessageIndicator && (
+        <button
+          type="button"
+          onClick={() => scrollToBottom()}
+          style={{
+            position: 'absolute', right: 16, bottom: 74, zIndex: 4,
+            border: 'none', borderRadius: 999, padding: '8px 12px',
+            background: '#59C414', color: '#fff', fontSize: 12, fontWeight: 700,
+            boxShadow: '0 10px 24px rgba(0,0,0,0.16)',
+          }}
+        >
+          Nova mensagem
+        </button>
+      )}
 
       {/* ── Input ── */}
       <div style={{
