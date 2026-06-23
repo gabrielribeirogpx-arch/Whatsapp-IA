@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { useRef, useEffect, useState, FormEvent } from 'react';
 import type { ChatMessage, Contact, ConversationMode } from '@/lib/types';
+import MessageMediaPreview, { getMessageMediaInfo, renderLinkedText } from '@/components/MessageMediaPreview';
 
 interface MobileChatViewProps {
   contact: Contact;
@@ -361,6 +362,8 @@ export default function MobileChatView({
 function MessageBubble({ msg, prevFromMe }: { msg: ChatMessage; prevFromMe?: boolean }) {
   const isMine = msg.fromMe;
   const grouped = prevFromMe === isMine;
+  const media = getMessageMediaInfo(msg);
+  const visibleText = media?.caption ?? msg.text;
 
   return (
     <div style={{
@@ -376,13 +379,16 @@ function MessageBubble({ msg, prevFromMe }: { msg: ChatMessage; prevFromMe?: boo
         boxShadow: isMine ? '0 2px 8px rgba(11,20,26,0.08)' : '0 1px 2px rgba(0,0,0,0.06)',
         border: isMine ? 'none' : '1px solid #E5E7EB',
       }}>
-        <p style={{
-          margin: 0, fontSize: '14px',
-          color: isMine ? '#0B141A' : '#111827',
-          lineHeight: 1.45, wordBreak: 'break-word',
-        }}>
-          {msg.text}
-        </p>
+        {media && media.kind !== 'unknown' ? <MessageMediaPreview media={media} compact /> : null}
+        {visibleText ? (
+          <p style={{
+            margin: media && media.kind !== 'unknown' ? '6px 0 0' : 0, fontSize: '14px',
+            color: isMine ? '#0B141A' : '#111827',
+            lineHeight: 1.45, wordBreak: 'break-word',
+          }}>
+            {renderLinkedText(visibleText)}
+          </p>
+        ) : null}
         <div style={{
           display: 'flex', alignItems: 'center', justifyContent: 'flex-end',
           gap: '3px', marginTop: '3px',

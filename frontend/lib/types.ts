@@ -23,6 +23,14 @@ export type Message = {
   content: string;
   role: string;
   created_at: string;
+  media_url?: string | null;
+  media_type?: string | null;
+  attachment_url?: string | null;
+  attachment_type?: string | null;
+  file_url?: string | null;
+  file_type?: string | null;
+  caption?: string | null;
+  filename?: string | null;
 };
 
 export type AccountProfile = {
@@ -145,6 +153,10 @@ export type ChatMessage = {
   status?: 'sent' | 'delivered' | 'read';
   mediaType?: 'image' | 'document' | string;
   mediaUrl?: string | null;
+  attachmentUrl?: string | null;
+  attachmentType?: string | null;
+  fileUrl?: string | null;
+  fileType?: string | null;
   caption?: string | null;
   filename?: string | null;
   isNew?: boolean;
