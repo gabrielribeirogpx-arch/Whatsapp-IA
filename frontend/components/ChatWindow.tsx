@@ -1,4 +1,4 @@
-import { FormEvent, KeyboardEvent, useEffect, useMemo, useRef, useState } from 'react';
+import { FormEvent, KeyboardEvent, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { MoreVertical, Paperclip, Mic, RotateCcw, SendHorizontal, Smile, X } from 'lucide-react';
 import { ChatMessage, Contact, ConversationMode } from '../lib/types';
 import { IconMenu } from './icons';
@@ -51,6 +51,11 @@ const formatSize = (bytes: number) => {
 export default function ChatWindow(props: ChatWindowProps) {
   const { contact, messages, inputValue, onInputChange, onSend, onToggleSidebar, mode, presenceStatus, typingText, modeUpdating = false, modeNotice, modeError, emptyStateMessage, onModeChange, onResetConversation, resetInProgress = false } = props;
   const messagesRef = useRef<HTMLElement | null>(null);
+  const messagesEndRef = useRef<HTMLDivElement | null>(null);
+  const isNearBottomRef = useRef(true);
+  const previousContactIdRef = useRef<string | null>(null);
+  const pendingInitialScrollRef = useRef(false);
+  const previousLastMessageIdRef = useRef<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const composerFormRef = useRef<HTMLFormElement | null>(null);
   const emojiRef = useRef<HTMLDivElement | null>(null);
@@ -60,15 +65,70 @@ export default function ChatWindow(props: ChatWindowProps) {
   const [dragActive, setDragActive] = useState(false);
   const [actionsOpen, setActionsOpen] = useState(false);
   const [confirmResetOpen, setConfirmResetOpen] = useState(false);
+  const [showNewMessageIndicator, setShowNewMessageIndicator] = useState(false);
+
+  const isNearBottom = useCallback(() => {
+    const el = messagesRef.current;
+    if (!el) return true;
+    return el.scrollHeight - el.scrollTop - el.clientHeight <= 120;
+  }, []);
+
+  const scrollToBottom = useCallback(({ behavior = 'smooth' }: { behavior?: ScrollBehavior } = {}) => {
+    const scroll = () => {
+      const el = messagesRef.current;
+      if (!el) return;
+      messagesEndRef.current?.scrollIntoView({ block: 'end', behavior });
+      el.scrollTo({ top: el.scrollHeight, behavior });
+      isNearBottomRef.current = true;
+      setShowNewMessageIndicator(false);
+    };
+
+    requestAnimationFrame(() => {
+      scroll();
+      setTimeout(scroll, 80);
+    });
+  }, []);
+
+  const handleMessagesScroll = useCallback(() => {
+    const nearBottom = isNearBottom();
+    isNearBottomRef.current = nearBottom;
+    if (nearBottom) setShowNewMessageIndicator(false);
+  }, [isNearBottom]);
+
+  useLayoutEffect(() => {
+    const contactId = contact?.id ?? null;
+    if (previousContactIdRef.current === contactId) return;
+
+    previousContactIdRef.current = contactId;
+    previousLastMessageIdRef.current = null;
+    pendingInitialScrollRef.current = Boolean(contactId);
+    isNearBottomRef.current = true;
+    setShowNewMessageIndicator(false);
+    if (contactId && messages.length > 0) scrollToBottom({ behavior: 'auto' });
+  }, [contact?.id, messages.length, scrollToBottom]);
 
   useEffect(() => {
-    if (!messagesRef.current) return;
-    const el = messagesRef.current;
-    const distanceToBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
-    if (distanceToBottom < 120) {
-      el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+    if (!contact) return;
+    const lastMessage = messages[messages.length - 1];
+    const lastMessageId = lastMessage?.id ?? null;
+    if (!lastMessageId) return;
+
+    const isNewMessage = previousLastMessageIdRef.current !== null && previousLastMessageIdRef.current !== lastMessageId;
+    const shouldForceInitialScroll = pendingInitialScrollRef.current;
+    previousLastMessageIdRef.current = lastMessageId;
+
+    if (shouldForceInitialScroll) {
+      pendingInitialScrollRef.current = false;
+      scrollToBottom({ behavior: 'auto' });
+      return;
     }
-  }, [messages]);
+
+    if (lastMessage.fromMe || isNearBottomRef.current) {
+      scrollToBottom({ behavior: isNewMessage ? 'smooth' : 'auto' });
+    } else if (isNewMessage) {
+      setShowNewMessageIndicator(true);
+    }
+  }, [contact, messages, scrollToBottom]);
 
   useEffect(() => {
     if (!textareaRef.current) return;
@@ -225,6 +285,13 @@ export default function ChatWindow(props: ChatWindowProps) {
       <main
         className="wa-messages-panel"
         ref={messagesRef}
+        onScroll={handleMessagesScroll}
+        onLoadCapture={(event) => {
+          const target = event.target as HTMLElement;
+          if ((target.tagName === 'IMG' || target.tagName === 'VIDEO') && isNearBottomRef.current) {
+            scrollToBottom({ behavior: 'auto' });
+          }
+        }}
         onDragOver={(event) => {
           event.preventDefault();
           if (contact) setDragActive(true);
@@ -249,12 +316,18 @@ export default function ChatWindow(props: ChatWindowProps) {
         ) : (
           <p className="empty-state">Nenhuma conversa selecionada.</p>
         )}
+        <div ref={messagesEndRef} aria-hidden="true" />
         {dragActive ? (
           <div className="wa-drop-overlay">
             <p>Solte para enviar</p>
           </div>
         ) : null}
       </main>
+      {showNewMessageIndicator ? (
+        <button type="button" className="wa-new-message-indicator" onClick={() => scrollToBottom()}>
+          Nova mensagem
+        </button>
+      ) : null}
       {typingText ? <div className="wa-typing-indicator" role="status">{typingText}</div> : null}
       <form ref={composerFormRef} className="wa-message-composer premium" onSubmit={onSend}>
         <div className="wa-composer-input-wrap">
