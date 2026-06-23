@@ -39,6 +39,7 @@ export default function AiResponseNode({ id, data, selected }: NodeProps) {
       hasValidationError={nodeData.hasValidationError}
       onToggleStart={nodeData.onToggleStart}
       analytics={nodeData.analytics}
+      statusLabel="Resposta pronta"
     />
   );
 }

@@ -50,6 +50,8 @@ export default function CtaUrlNode({ id, data, selected }: NodeProps) {
       hasValidationError={nodeData.hasValidationError || !message || hasInvalidButton || hasInvalidUrl}
       onToggleStart={nodeData.onToggleStart}
       analytics={(nodeData as any).analytics}
+      statusLabel={hasInvalidUrl || hasInvalidButton || !message ? 'Revisar configuração' : 'Link pronto'}
+      statusActive={!(hasInvalidUrl || hasInvalidButton || !message)}
     />
   );
 }

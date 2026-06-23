@@ -18,6 +18,17 @@ type NodeMetric = {
   tone?: string;
 };
 
+export function NodeStatus({ active = true, label }: { active?: boolean; label: string }) {
+  return (
+    <>
+      <span className={`flow-node-status-dot ${active ? 'is-on' : 'is-off'}`} />
+      <strong>{active ? 'ON' : 'OFF'}</strong>
+      <span>·</span>
+      <span>{label}</span>
+    </>
+  );
+}
+
 type CompactFlowNodeProps = {
   id: string;
   selected?: boolean;
@@ -40,6 +51,8 @@ type CompactFlowNodeProps = {
   onToggleStart?: (nodeId: string) => void;
   isConnectable?: boolean;
   analytics?: { entered?: number; conversions?: number; dropoff?: number; dropoff_rate?: number } | null;
+  statusLabel?: string;
+  statusActive?: boolean;
 };
 
 function CompactFlowNode({
@@ -64,6 +77,8 @@ function CompactFlowNode({
   onToggleStart,
   isConnectable = true,
   analytics,
+  statusLabel,
+  statusActive = true,
 }: CompactFlowNodeProps) {
   const handles = useMemo(() => (sourceHandles?.length ? sourceHandles : [{ id: undefined, color: accent }]), [accent, sourceHandles]);
   const handleStep = handles.length > 1 ? 24 : 0;
@@ -97,7 +112,7 @@ function CompactFlowNode({
 
       <div className="flow-node-compact-header">
         <div className="flow-node-header-glow" aria-hidden="true" />
-        <span className="flow-node-emoji" aria-hidden="true">{emoji}</span>
+        <span className="flow-node-emoji" aria-hidden="true"><span>{emoji}</span></span>
         <div className="flow-node-compact-title-wrap">
           <span className="flow-node-title">{title}</span>
           {meta ? <span className="flow-node-compact-meta">{meta}</span> : null}
@@ -151,7 +166,7 @@ function CompactFlowNode({
         ) : null}
       </div>
 
-      {footer ? <div className="flow-node-footer">{footer}</div> : null}
+      {footer || statusLabel ? <div className="flow-node-footer">{footer || <NodeStatus active={statusActive} label={statusLabel || 'Pronto'} />}</div> : null}
 
       {handles.map((handle, index) => (
         <Handle

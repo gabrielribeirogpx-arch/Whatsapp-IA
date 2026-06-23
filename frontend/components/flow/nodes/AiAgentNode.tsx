@@ -1,7 +1,7 @@
 'use client';
 
 import { NodeProps } from 'reactflow';
-import CompactFlowNode from './CompactFlowNode';
+import CompactFlowNode, { NodeStatus } from './CompactFlowNode';
 
 type AiAgentNodeData = {
   allowed_tools?: string[];
@@ -51,7 +51,7 @@ export default function AiAgentNode({ id, data, selected }: NodeProps) {
         { label: 'Saídas', value: Math.max(0, nodeTools + subflows + webhooks), icon: '↗', tone: '#16a34a' },
       ]}
       chips={[nodeData.use_memory === false ? 'Memória OFF' : 'Memória ON', `${baseTools} ferramentas`, behaviorLabel]}
-      footer={<><span className={`flow-node-status-dot ${isActive ? 'is-on' : 'is-off'}`} /> <strong>{isActive ? 'ON' : 'OFF'}</strong><span>·</span><span>{behaviorLabel}</span></>}
+      footer={<NodeStatus active={isActive} label={behaviorLabel} />}
       premium
       isStart={nodeData.isStart}
       hasValidationError={nodeData.hasValidationError}

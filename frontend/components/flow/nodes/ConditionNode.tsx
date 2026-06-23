@@ -96,6 +96,7 @@ export default function ConditionNode({ id, data, selected }: NodeProps) {
       hasValidationError={nodeData.hasValidationError}
       onToggleStart={nodeData.onToggleStart}
       analytics={(nodeData as any).analytics}
+      statusLabel={`${branches.length} saídas disponíveis`}
       sourceHandles={branches.map((branch, index) => ({ id: branch.handleId || branch.id, label: branch.label, color: index === 0 ? '#16a34a' : '#dc2626' }))}
     />
   );
