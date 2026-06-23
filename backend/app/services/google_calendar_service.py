@@ -14,7 +14,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models.integration_connection import IntegrationConnection
-from app.services.integration_connection_service import IntegrationConnectionService
+from app.services.integration_connection_service import GOOGLE_RECONNECT_MESSAGE, IntegrationConnectionService, is_google_auth_error
 from app.tools.context import sanitize_metadata
 
 logger = logging.getLogger(__name__)
@@ -257,8 +257,9 @@ class GoogleCalendarService:
                     error=error,
                     error_description=error_description,
                 )
-                if error == "invalid_grant":
-                    return {"ok": False, "message": "google_calendar_refresh_invalid_grant", "user_message": "A autorização do Google Calendar expirou ou foi revogada. Reconecte o Google Calendar."}
+                if is_google_auth_error(resp.status_code, response_json, error):
+                    self.connection_service.mark_google_connection_revoked(self.tenant_id, PROVIDER)
+                    return {"ok": False, "message": "google_calendar_refresh_invalid_grant", "user_message": GOOGLE_RECONNECT_MESSAGE, "status_code": resp.status_code, "api_error": response_json}
                 if error == "invalid_client":
                     return {"ok": False, "message": "google_calendar_refresh_invalid_client", "user_message": "Credenciais OAuth do Google Calendar inválidas. Verifique GOOGLE_CLIENT_ID e GOOGLE_CLIENT_SECRET."}
                 if error == "redirect_uri_mismatch":
@@ -346,6 +347,9 @@ class GoogleCalendarService:
             except Exception:
                 response_payload["body"] = getattr(resp, "text", None)
             self._log("GOOGLE_CALENDAR_API_ERROR", tool_name=f"{method} {path}", input=request_input, conn=conn, calendar_id=calendar_id, **response_payload)
+            if is_google_auth_error(resp.status_code, response_payload.get("body")):
+                self.connection_service.mark_google_connection_revoked(self.tenant_id, PROVIDER)
+                return False, {"message": GOOGLE_RECONNECT_MESSAGE, "status_code": resp.status_code, "api_error": response_payload.get("body")}, resp.status_code
             return False, {"message": "Erro ao chamar Google Calendar.", "status_code": resp.status_code, "api_error": response_payload.get("body")}, resp.status_code
         try:
             data = {} if resp.status_code == 204 or not resp.content else resp.json()

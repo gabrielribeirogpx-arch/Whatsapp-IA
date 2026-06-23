@@ -778,6 +778,13 @@ export async function disconnectGoogleCalendar(): Promise<GoogleCalendarConnecti
   return parseApiResponse<GoogleCalendarConnectionStatus>(res);
 }
 
+export async function disconnectGoogle(): Promise<GoogleCalendarConnectionStatus> {
+  const tenant = getTenantSlugOrId();
+  const query = tenant ? `?tenant_slug=${encodeURIComponent(tenant)}` : '';
+  const res = await apiFetch(`/api/integrations/connections/google${query}`, { method: 'DELETE' });
+  return parseApiResponse<GoogleCalendarConnectionStatus>(res);
+}
+
 export function getGoogleCalendarConnectUrl(): string {
   const tenant = getTenantSlugOrId();
   if (!tenant) throw new Error('Tenant atual não encontrado para conectar o Google Calendar.');

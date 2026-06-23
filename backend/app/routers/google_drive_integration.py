@@ -22,6 +22,7 @@ from app.database import get_db
 from app.models.tenant import Tenant
 from app.schemas.integration_connection import IntegrationConnectionStatusOut
 from app.services.integration_connection_service import IntegrationConnectionService
+from app.routers.integration_connections import validate_google_connection_status
 from app.services.tenant_service import TenantResolution, get_current_tenant, get_current_tenant_resolution, resolve_current_tenant
 
 PROVIDER = "google_drive"
@@ -329,7 +330,7 @@ def google_drive_callback(request: Request, code: str | None = None, state: str 
 @router.get("/status", response_model=IntegrationConnectionStatusOut)
 def google_drive_status(tenant: Tenant = Depends(get_current_tenant), db: Session = Depends(get_db)):
     service = IntegrationConnectionService(db)
-    return service.to_public_status(service.get_connection(tenant.id, PROVIDER), provider=PROVIDER)
+    return service.to_public_status(validate_google_connection_status(db, tenant.id, PROVIDER), provider=PROVIDER)
 
 
 @router.post("/disconnect", response_model=IntegrationConnectionStatusOut)

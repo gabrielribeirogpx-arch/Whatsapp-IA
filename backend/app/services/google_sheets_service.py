@@ -7,7 +7,7 @@ from typing import Any
 import requests
 from sqlalchemy.orm import Session
 from app.models.integration_connection import IntegrationConnection
-from app.services.integration_connection_service import IntegrationConnectionService
+from app.services.integration_connection_service import GOOGLE_RECONNECT_MESSAGE, IntegrationConnectionService, is_google_auth_error
 
 PROVIDER = "google_sheets"
 TOKEN_URL = "https://oauth2.googleapis.com/token"
@@ -53,6 +53,11 @@ class GoogleSheetsService:
             return {"ok": False, "message": "Refresh token do Google Sheets não está disponível."}
         resp = requests.post(TOKEN_URL, data={"client_id": _client_id(), "client_secret": _client_secret(), "refresh_token": refresh, "grant_type": "refresh_token"}, timeout=15)
         if resp.status_code >= 400:
+            try: body = resp.json()
+            except Exception: body = getattr(resp, "text", "")
+            if is_google_auth_error(resp.status_code, body):
+                self.connection_service.mark_google_connection_revoked(self.tenant_id, PROVIDER)
+                return {"ok": False, "message": GOOGLE_RECONNECT_MESSAGE, "status_code": resp.status_code, "api_error": body}
             return {"ok": False, "message": "google_sheets_refresh_failed", "status_code": resp.status_code}
         data = resp.json(); access = data.get("access_token")
         if not access:
@@ -80,6 +85,9 @@ class GoogleSheetsService:
         if resp.status_code >= 400:
             try: body = resp.json()
             except Exception: body = resp.text
+            if is_google_auth_error(resp.status_code, body):
+                self.connection_service.mark_google_connection_revoked(self.tenant_id, PROVIDER)
+                return False, {"message": GOOGLE_RECONNECT_MESSAGE, "status_code": resp.status_code, "api_error": body}, resp.status_code
             return False, {"message": "Erro ao chamar Google Sheets.", "status_code": resp.status_code, "api_error": body}, resp.status_code
         return True, ({} if resp.status_code == 204 or not resp.content else resp.json()), resp.status_code
 
