@@ -10,6 +10,10 @@ const mcpDashboardSource = readFileSync(
   new URL("../app/dashboard/ai/mcp/MCPDashboardClient.tsx", import.meta.url),
   "utf8",
 );
+const featuresSource = readFileSync(
+  new URL("./features.ts", import.meta.url),
+  "utf8",
+);
 
 const connectFn =
   source.match(
@@ -32,8 +36,10 @@ assert.match(statusFn, /\/api\/integrations\/google-sheets\/status/);
 assert.match(disconnectFn, /\/api\/integrations\/google-sheets\/disconnect/);
 assert.match(disconnectFn, /method: ["']POST["']/);
 
+assert.match(featuresSource, /ENABLE_GOOGLE_SHEETS_INTEGRATION = false/);
 assert.match(settingsSource, /Apps conectados ao Wazza/);
-assert.match(settingsSource, /<h4[^>]*>Google Sheets<\/h4>/);
+assert.match(settingsSource, /ENABLE_GOOGLE_SHEETS_INTEGRATION \? \(/);
+assert.match(settingsSource, /<h4[^>]*>[\s\S]*?Google Sheets[\s\S]*?<\/h4>/);
 assert.match(
   settingsSource,
   /Permita que a IA liste, leia, crie e atualize planilhas\./,
@@ -48,7 +54,11 @@ assert.match(settingsSource, /google_sheets_update_row/);
 assert.match(settingsSource, /google_sheets_create_spreadsheet/);
 
 assert.match(mcpDashboardSource, /Apps conectados ao Wazza/);
-assert.match(mcpDashboardSource, /<h3[^>]*>Google Sheets<\/h3>/);
+assert.match(mcpDashboardSource, /ENABLE_GOOGLE_SHEETS_INTEGRATION \? \(/);
+assert.match(
+  mcpDashboardSource,
+  /<h3[^>]*>[\s\S]*?Google Sheets[\s\S]*?<\/h3>/,
+);
 assert.match(mcpDashboardSource, /getGoogleSheetsStatus/);
 assert.match(mcpDashboardSource, /getGoogleSheetsConnectUrl/);
 assert.match(mcpDashboardSource, /disconnectGoogleSheets/);
@@ -58,6 +68,8 @@ assert.match(
 );
 assert.match(mcpDashboardSource, /integration === ["']google_sheets["']/);
 assert.match(mcpDashboardSource, /getPresentationTools/);
+assert.match(mcpDashboardSource, /isGoogleSheetsTool/);
+assert.match(mcpDashboardSource, /!isGoogleSheetsTool\(tool\)/);
 assert.match(mcpDashboardSource, /presentationTools\.filter/);
 assert.doesNotMatch(
   mcpDashboardSource,
