@@ -1,4 +1,4 @@
-/* Wazza Inbox Enterprise PWA service worker */
+/* Wazza API Enterprise PWA service worker */
 const SW_VERSION = 'wazza-mobile-pwa-v1';
 const APP_SHELL_CACHE = `${SW_VERSION}-shell`;
 const INBOX_CACHE = `${SW_VERSION}-inbox`;
@@ -94,7 +94,7 @@ self.addEventListener('push', (event) => {
     }
   })();
 
-  const title = payload.title || 'Wazza Inbox';
+  const title = payload.title || 'Wazza API';
   const body = payload.body || payload.text || 'Nova mensagem recebida.';
   const conversationId = payload.conversation_id || payload.conversationId || null;
   const badgeCount = Number(payload.badge ?? payload.badgeCount ?? 1);

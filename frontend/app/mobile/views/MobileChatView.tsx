@@ -1,7 +1,7 @@
 'use client';
 
 /**
- * MobileChatView.tsx — Wazza Inbox Mobile
+ * MobileChatView.tsx — Wazza API Mobile
  * Light Mode · Identidade Verde #59C414
  */
 

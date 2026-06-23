@@ -1,7 +1,7 @@
 'use client';
 
 /**
- * PushBanner.tsx — Wazza Inbox Mobile
+ * PushBanner.tsx — Wazza API Mobile
  * Light Mode · Identidade Verde #59C414
  */
 

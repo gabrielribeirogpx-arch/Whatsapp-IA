@@ -1,7 +1,7 @@
 'use client';
 
 /**
- * MobileConvoList.tsx — Wazza Inbox Mobile
+ * MobileConvoList.tsx — Wazza API Mobile
  * Light Mode · Identidade Verde #59C414
  */
 
@@ -125,7 +125,7 @@ export default function MobileConvoList({
                   letterSpacing: '-0.3px'
                  }}
               >
-                Wazza Inbox
+                Wazza API
               </h1>
             </div>
             {pendingCount > 0 && (

@@ -119,6 +119,10 @@ function DashboardSidebar({ expanded }: { expanded: boolean }) {
 }
 
 export default function DashboardLayout({ children }: { children: ReactNode }) {
+  useEffect(() => {
+    document.title = 'Wazza API Dashboard';
+  }, []);
+
   const pathname = usePathname();
   const isFlowBuilder = pathname.startsWith('/dashboard/flow-builder');
   const isFlowAnalytics = pathname.includes('/dashboard/flows/') && pathname.endsWith('/analytics');

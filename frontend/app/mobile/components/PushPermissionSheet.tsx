@@ -1,7 +1,7 @@
 'use client';
 
 /**
- * PushPermissionSheet.tsx — Wazza Inbox Mobile
+ * PushPermissionSheet.tsx — Wazza API Mobile
  * Light Mode · Identidade Verde #59C414
  */
 

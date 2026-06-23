@@ -1,7 +1,7 @@
 'use client';
 
 /**
- * InstallPrompt.tsx — Wazza Inbox Mobile
+ * InstallPrompt.tsx — Wazza API Mobile
  * Light Mode · Identidade Verde #59C414
  */
 
@@ -53,7 +53,7 @@ export default function InstallPrompt({ onInstall }: InstallPromptProps) {
 
       <div style={{ flex: 1, minWidth: 0 }}>
         <p style={{ margin: 0, fontSize: '13px', fontWeight: 600, color: '#111827' }}>
-          Instalar Wazza Inbox
+          Instalar Wazza API
         </p>
         <p style={{ margin: '1px 0 0', fontSize: '11px', color: '#6B7280' }}>
           Adicionar à tela inicial
