@@ -1,7 +1,7 @@
 'use client';
 
 /**
- * MobileProfileView.tsx — Wazza Inbox Mobile
+ * MobileProfileView.tsx — Wazza API Mobile
  * Light Mode · Identidade Verde #59C414
  */
 
@@ -55,7 +55,7 @@ export default function MobileProfileView({
           A
         </div>
         <p style={{ margin: 0, fontSize: '17px', fontWeight: 600, color: '#111827' }}>Atendente</p>
-        <p style={{ margin: 0, fontSize: '12px', color: '#6B7280' }}>Operador · Wazza Inbox</p>
+        <p style={{ margin: 0, fontSize: '12px', color: '#6B7280' }}>Operador · Wazza API</p>
       </div>
 
       {/* Section: Notificações */}
@@ -86,7 +86,7 @@ export default function MobileProfileView({
           <SettingRow
             icon={<CheckCircle size={18} />}
             label="Instalado como app"
-            value="Wazza Inbox"
+            value="Wazza API"
             valueColor="#59C414"
           />
         )}

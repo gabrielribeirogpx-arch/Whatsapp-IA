@@ -3,9 +3,9 @@ import type { MetadataRoute } from 'next';
 export default function manifest(): MetadataRoute.Manifest {
   return {
     id: '/mobile',
-    name: 'Wazza Inbox Enterprise',
-    short_name: 'Wazza Inbox',
-    description: 'Inbox mobile enterprise para atendimento WhatsApp com alertas em tempo real.',
+    name: 'Wazza API',
+    short_name: 'Wazza API',
+    description: 'Plataforma Wazza API para automação, atendimento e gestão de conversas com IA e operação humana.',
     start_url: '/mobile',
     scope: '/mobile',
     display: 'standalone',

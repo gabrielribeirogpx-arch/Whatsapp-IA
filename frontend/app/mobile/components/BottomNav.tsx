@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * BottomNav.tsx — Wazza Inbox Mobile
+ * BottomNav.tsx — Wazza API Mobile
  * Light Mode · Identidade Verde #59C414
  */
 

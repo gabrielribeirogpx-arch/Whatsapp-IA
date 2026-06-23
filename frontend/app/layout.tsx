@@ -2,8 +2,19 @@ import './globals.css';
 import type { Metadata } from 'next';
 
 export const metadata: Metadata = {
-  title: 'WhatsApp IA Dashboard',
-  description: 'Painel de atendimento WhatsApp com IA + humano'
+  title: 'Wazza API',
+  applicationName: 'Wazza API',
+  description: 'Plataforma Wazza API para automação, atendimento e gestão de conversas com IA e operação humana.',
+  openGraph: {
+    title: 'Wazza API',
+    description: 'Plataforma Wazza API para automação, atendimento e gestão de conversas com IA e operação humana.',
+    siteName: 'Wazza API',
+  },
+  twitter: {
+    card: 'summary',
+    title: 'Wazza API',
+    description: 'Plataforma Wazza API para automação, atendimento e gestão de conversas com IA e operação humana.',
+  }
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

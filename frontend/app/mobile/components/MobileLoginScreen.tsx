@@ -1,7 +1,7 @@
 'use client';
 
 /**
- * MobileLoginScreen.tsx — Wazza Inbox Mobile
+ * MobileLoginScreen.tsx — Wazza API Mobile
  * Tela de login mobile com identidade Wazza + Cloudflare Turnstile.
  * Reutiliza: TurnstileWidget, tenantLogin (lib/api), mesmo endpoint do desktop.
  */
