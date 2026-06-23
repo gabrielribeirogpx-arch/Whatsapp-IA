@@ -37,7 +37,10 @@ import {
   getSuitableStatus,
   parseApiResponse,
 } from "../../../../lib/api";
-import { ENABLE_GMAIL_INTEGRATION } from "../../../../lib/features";
+import {
+  ENABLE_GMAIL_INTEGRATION,
+  ENABLE_GOOGLE_SHEETS_INTEGRATION,
+} from "../../../../lib/features";
 import type { GoogleCalendarConnectionStatus } from "../../../../lib/types";
 
 type MCPServer = {
@@ -128,10 +131,27 @@ function isGmailTool(tool: MCPTool) {
   );
 }
 
+function isGoogleSheetsTool(tool: MCPTool) {
+  const provider = String(tool.metadata?.provider || "").toLowerCase();
+  const toolName = String(tool.tool_name || "").toLowerCase();
+  const displayName = String(tool.display_name || "").toLowerCase();
+  const name = String((tool as { name?: string }).name || "").toLowerCase();
+
+  return (
+    provider === "google_sheets" ||
+    toolName.startsWith("google_sheets_") ||
+    [displayName, name].some((value) =>
+      /(^|\[|\s)(google sheets|sheets)(\]|\s|$)/i.test(value),
+    )
+  );
+}
+
 function getPresentationTools(tools: MCPTool[]) {
-  return ENABLE_GMAIL_INTEGRATION
-    ? tools
-    : tools.filter((tool) => !isGmailTool(tool));
+  return tools.filter(
+    (tool) =>
+      (ENABLE_GMAIL_INTEGRATION || !isGmailTool(tool)) &&
+      (ENABLE_GOOGLE_SHEETS_INTEGRATION || !isGoogleSheetsTool(tool)),
+  );
 }
 
 function getToolDisplayName(tool: MCPTool) {
@@ -395,7 +415,8 @@ export default function MCPDashboardClient() {
     const isGoogleCalendarReturn = integration === "google_calendar";
     const isGmailReturn = ENABLE_GMAIL_INTEGRATION && integration === "gmail";
     const isGoogleDriveReturn = integration === "google_drive";
-    const isGoogleSheetsReturn = integration === "google_sheets";
+    const isGoogleSheetsReturn =
+      ENABLE_GOOGLE_SHEETS_INTEGRATION && integration === "google_sheets";
 
     if (isGoogleCalendarReturn && status === "connected") {
       refreshCalendarStatus("Google Calendar conectado com sucesso.");
@@ -420,21 +441,23 @@ export default function MCPDashboardClient() {
       if (ENABLE_GMAIL_INTEGRATION) refreshGmailStatus();
       setDriveError("Falha ao conectar Google Drive.");
     } else if (isGoogleSheetsReturn && status === "connected") {
-      refreshSheetsStatus("Google Sheets conectado com sucesso.");
+      if (ENABLE_GOOGLE_SHEETS_INTEGRATION)
+        refreshSheetsStatus("Google Sheets conectado com sucesso.");
       refreshCalendarStatus();
       if (ENABLE_GMAIL_INTEGRATION) refreshGmailStatus();
       refreshDriveStatus();
     } else if (isGoogleSheetsReturn && status === "error") {
-      refreshSheetsStatus();
+      if (ENABLE_GOOGLE_SHEETS_INTEGRATION) refreshSheetsStatus();
       refreshCalendarStatus();
       if (ENABLE_GMAIL_INTEGRATION) refreshGmailStatus();
       refreshDriveStatus();
-      setSheetsError("Falha ao conectar Google Sheets.");
+      if (ENABLE_GOOGLE_SHEETS_INTEGRATION)
+        setSheetsError("Falha ao conectar Google Sheets.");
     } else {
       refreshCalendarStatus();
       if (ENABLE_GMAIL_INTEGRATION) refreshGmailStatus();
       refreshDriveStatus();
-      refreshSheetsStatus();
+      if (ENABLE_GOOGLE_SHEETS_INTEGRATION) refreshSheetsStatus();
       refreshSuitableStatus();
     }
 
@@ -598,7 +621,8 @@ export default function MCPDashboardClient() {
     try {
       window.location.href = getGoogleSheetsConnectUrl();
     } catch {
-      setSheetsError("Falha ao conectar Google Sheets.");
+      if (ENABLE_GOOGLE_SHEETS_INTEGRATION)
+        setSheetsError("Falha ao conectar Google Sheets.");
     }
   }
 
@@ -708,7 +732,8 @@ export default function MCPDashboardClient() {
     typeof gmailStatus?.metadata?.account_email === "string"
       ? gmailStatus.metadata.account_email
       : "Nenhuma conta conectada";
-  const isSheetsConnected = sheetsStatus?.connected === true;
+  const isSheetsConnected =
+    ENABLE_GOOGLE_SHEETS_INTEGRATION && sheetsStatus?.connected === true;
   const sheetsAccountEmail =
     typeof sheetsStatus?.metadata?.account_email === "string"
       ? sheetsStatus.metadata.account_email
@@ -1256,142 +1281,147 @@ export default function MCPDashboardClient() {
               </p>
             ) : null}
           </article>
-          <article className="mt-4 rounded-3xl border border-slate-200 bg-gradient-to-br from-white via-slate-50 to-green-50/40 p-5 shadow-sm">
-            <div className="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
-              <div className="flex gap-4">
-                <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-green-100 text-green-700">
-                  <FolderOpen size={22} />
-                </span>
-                <div className="min-w-0">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <h3 className="font-bold text-slate-950">Google Sheets</h3>
-                    <span
-                      className={`inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs font-bold ${isSheetsConnected ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-600"}`}
-                    >
-                      {loadingSheets ? (
-                        <Loader2 size={12} className="animate-spin" />
-                      ) : isSheetsConnected ? (
-                        <CheckCircle2 size={12} />
-                      ) : (
-                        <XCircle size={12} />
-                      )}
-                      {loadingSheets
-                        ? "Carregando..."
-                        : isSheetsConnected
-                          ? "Conectado"
-                          : "Não conectado"}
-                    </span>
-                  </div>
-                  <p className="mt-2 text-sm leading-relaxed text-slate-600">
-                    Permita que a IA liste, leia, crie e atualize planilhas
-                    oficiais do Google Sheets.
-                  </p>
-                  <div className="mt-4 grid gap-2 text-sm sm:grid-cols-2">
-                    <p className="rounded-2xl bg-white/80 px-4 py-3 text-slate-600">
-                      <b className="block text-xs uppercase tracking-[0.12em] text-slate-400">
-                        Provider
-                      </b>
-                      {sheetsStatus?.provider || "google_sheets"}
+          {ENABLE_GOOGLE_SHEETS_INTEGRATION ? (
+            <article className="mt-4 rounded-3xl border border-slate-200 bg-gradient-to-br from-white via-slate-50 to-green-50/40 p-5 shadow-sm">
+              <div className="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
+                <div className="flex gap-4">
+                  <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-green-100 text-green-700">
+                    <FolderOpen size={22} />
+                  </span>
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h3 className="font-bold text-slate-950">
+                        Google Sheets
+                      </h3>
+                      <span
+                        className={`inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs font-bold ${isSheetsConnected ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-600"}`}
+                      >
+                        {loadingSheets ? (
+                          <Loader2 size={12} className="animate-spin" />
+                        ) : isSheetsConnected ? (
+                          <CheckCircle2 size={12} />
+                        ) : (
+                          <XCircle size={12} />
+                        )}
+                        {loadingSheets
+                          ? "Carregando..."
+                          : isSheetsConnected
+                            ? "Conectado"
+                            : "Não conectado"}
+                      </span>
+                    </div>
+                    <p className="mt-2 text-sm leading-relaxed text-slate-600">
+                      Permita que a IA liste, leia, crie e atualize planilhas
+                      oficiais do Google Sheets.
                     </p>
-                    <p className="rounded-2xl bg-white/80 px-4 py-3 text-slate-600">
-                      <b className="block text-xs uppercase tracking-[0.12em] text-slate-400">
-                        Conta
-                      </b>
-                      {loadingSheets
-                        ? "Consultando status..."
-                        : sheetsAccountEmail}
-                    </p>
+                    <div className="mt-4 grid gap-2 text-sm sm:grid-cols-2">
+                      <p className="rounded-2xl bg-white/80 px-4 py-3 text-slate-600">
+                        <b className="block text-xs uppercase tracking-[0.12em] text-slate-400">
+                          Provider
+                        </b>
+                        {sheetsStatus?.provider || "google_sheets"}
+                      </p>
+                      <p className="rounded-2xl bg-white/80 px-4 py-3 text-slate-600">
+                        <b className="block text-xs uppercase tracking-[0.12em] text-slate-400">
+                          Conta
+                        </b>
+                        {loadingSheets
+                          ? "Consultando status..."
+                          : sheetsAccountEmail}
+                      </p>
+                    </div>
                   </div>
                 </div>
-              </div>
-              <div className="flex w-full flex-col gap-2 sm:w-auto sm:min-w-56">
-                {isSheetsConnected ? (
-                  <button
-                    type="button"
-                    disabled={sheetsActionLoading || loadingSheets}
-                    onClick={() => disconnectSheetsAccount()}
-                    className={dangerButtonClass}
-                  >
-                    {sheetsActionLoading ? (
-                      <Loader2 size={16} className="animate-spin" />
-                    ) : (
-                      <XCircle size={16} />
-                    )}{" "}
-                    Desconectar
-                  </button>
-                ) : (
+                <div className="flex w-full flex-col gap-2 sm:w-auto sm:min-w-56">
+                  {isSheetsConnected ? (
+                    <button
+                      type="button"
+                      disabled={sheetsActionLoading || loadingSheets}
+                      onClick={() => disconnectSheetsAccount()}
+                      className={dangerButtonClass}
+                    >
+                      {sheetsActionLoading ? (
+                        <Loader2 size={16} className="animate-spin" />
+                      ) : (
+                        <XCircle size={16} />
+                      )}{" "}
+                      Desconectar
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      disabled={loadingSheets}
+                      onClick={connectSheets}
+                      className={primaryButtonClass}
+                    >
+                      <FolderOpen size={16} /> Conectar Google Sheets
+                    </button>
+                  )}
                   <button
                     type="button"
                     disabled={loadingSheets}
-                    onClick={connectSheets}
-                    className={primaryButtonClass}
+                    onClick={() => refreshSheetsStatus()}
+                    className={secondaryButtonClass}
                   >
-                    <FolderOpen size={16} /> Conectar Google Sheets
+                    Atualizar status
                   </button>
-                )}
-                <button
-                  type="button"
-                  disabled={loadingSheets}
-                  onClick={() => refreshSheetsStatus()}
-                  className={secondaryButtonClass}
-                >
-                  Atualizar status
-                </button>
-              </div>
-            </div>
-            <div className="mt-5 border-t border-green-100 pt-5">
-              <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                <div>
-                  <h4 className="text-sm font-bold text-slate-950">
-                    Ferramentas disponíveis
-                  </h4>
-                  <p className="mt-1 text-xs font-semibold text-slate-500">
-                    Origem: Google Sheets conectado
-                  </p>
                 </div>
-                <span className="rounded-full bg-green-50 px-3 py-1 text-xs font-bold text-green-700 ring-1 ring-green-100">
-                  {googleSheetsTools.length} ferramentas
-                </span>
               </div>
-              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
-                {googleSheetsTools.map((tool) => (
-                  <div
-                    key={tool.id}
-                    className="rounded-2xl border border-green-100 bg-white/85 p-4 shadow-sm"
-                  >
-                    <div className="flex flex-wrap items-start justify-between gap-2">
-                      <p className="text-sm font-bold text-slate-950">
-                        {getToolDisplayName(tool)}
-                      </p>
-                      <StatusBadge active={tool.is_enabled} />
-                    </div>
-                    <p className="mt-3 text-xs font-semibold text-slate-500">
+              <div className="mt-5 border-t border-green-100 pt-5">
+                <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <h4 className="text-sm font-bold text-slate-950">
+                      Ferramentas disponíveis
+                    </h4>
+                    <p className="mt-1 text-xs font-semibold text-slate-500">
                       Origem: Google Sheets conectado
                     </p>
-                    <p
-                      className="mt-1 truncate font-mono text-[11px] text-slate-400"
-                      title={tool.tool_name}
+                  </div>
+                  <span className="rounded-full bg-green-50 px-3 py-1 text-xs font-bold text-green-700 ring-1 ring-green-100">
+                    {googleSheetsTools.length} ferramentas
+                  </span>
+                </div>
+                <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+                  {googleSheetsTools.map((tool) => (
+                    <div
+                      key={tool.id}
+                      className="rounded-2xl border border-green-100 bg-white/85 p-4 shadow-sm"
                     >
-                      {tool.tool_name}
-                    </p>
-                  </div>
-                ))}
-                {googleSheetsTools.length === 0 ? (
-                  <div className="rounded-2xl border border-dashed border-green-200 bg-white/70 px-4 py-5 text-sm font-semibold text-slate-500 sm:col-span-2 xl:col-span-5">
-                    Conecte o Google Sheets para exibir as ferramentas oficiais:
-                    google_sheets_list_spreadsheets, google_sheets_read_sheet,
-                    google_sheets_append_row, google_sheets_update_row e
-                    google_sheets_create_spreadsheet.
-                  </div>
-                ) : null}
+                      <div className="flex flex-wrap items-start justify-between gap-2">
+                        <p className="text-sm font-bold text-slate-950">
+                          {getToolDisplayName(tool)}
+                        </p>
+                        <StatusBadge active={tool.is_enabled} />
+                      </div>
+                      <p className="mt-3 text-xs font-semibold text-slate-500">
+                        Origem: Google Sheets conectado
+                      </p>
+                      <p
+                        className="mt-1 truncate font-mono text-[11px] text-slate-400"
+                        title={tool.tool_name}
+                      >
+                        {tool.tool_name}
+                      </p>
+                    </div>
+                  ))}
+                  {googleSheetsTools.length === 0 ? (
+                    <div className="rounded-2xl border border-dashed border-green-200 bg-white/70 px-4 py-5 text-sm font-semibold text-slate-500 sm:col-span-2 xl:col-span-5">
+                      Conecte o Google Sheets para exibir as ferramentas
+                      oficiais: google_sheets_list_spreadsheets,
+                      google_sheets_read_sheet, google_sheets_append_row,
+                      google_sheets_update_row e
+                      google_sheets_create_spreadsheet.
+                    </div>
+                  ) : null}
+                </div>
               </div>
-            </div>
-            {sheetsError ? (
-              <p className="mt-4 inline-flex items-center gap-2 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">
-                <AlertCircle size={16} /> {sheetsError}
-              </p>
-            ) : null}
-          </article>
+              {sheetsError ? (
+                <p className="mt-4 inline-flex items-center gap-2 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">
+                  <AlertCircle size={16} /> {sheetsError}
+                </p>
+              ) : null}
+            </article>
+          ) : null}
           <article className="mt-4 rounded-3xl border border-slate-200 bg-gradient-to-br from-white via-slate-50 to-purple-50/40 p-5 shadow-sm">
             <div className="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
               <div className="flex gap-4">
