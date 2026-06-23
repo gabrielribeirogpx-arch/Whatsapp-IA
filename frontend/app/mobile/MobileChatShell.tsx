@@ -192,6 +192,14 @@ function toChatMessage(msg: Message): ChatMessage {
     time: isNaN(d.getTime()) ? "--:--" : formatTimeBR(msg.created_at),
     createdAt: msg.created_at,
     status: msg.role === "assistant" ? "read" : "delivered",
+    mediaType: msg.media_type || undefined,
+    mediaUrl: msg.media_url || undefined,
+    attachmentUrl: msg.attachment_url || undefined,
+    attachmentType: msg.attachment_type || undefined,
+    fileUrl: msg.file_url || undefined,
+    fileType: msg.file_type || undefined,
+    caption: msg.caption || undefined,
+    filename: msg.filename || undefined,
     isNew: Date.now() - d.getTime() < 5000,
   };
 }

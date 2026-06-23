@@ -224,6 +224,14 @@ function toChatMessage(message: Message): ChatMessage {
     time,
     createdAt: message.created_at,
     status: message.role === "assistant" ? "read" : "delivered",
+    mediaType: message.media_type || undefined,
+    mediaUrl: message.media_url || undefined,
+    attachmentUrl: message.attachment_url || undefined,
+    attachmentType: message.attachment_type || undefined,
+    fileUrl: message.file_url || undefined,
+    fileType: message.file_type || undefined,
+    caption: message.caption || undefined,
+    filename: message.filename || undefined,
     isNew: Date.now() - parsedDate.getTime() < 8000,
   };
 }
