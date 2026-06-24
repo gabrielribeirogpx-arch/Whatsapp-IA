@@ -286,6 +286,14 @@ def _calendar_now(*, now: datetime | None = None, timezone: str = "America/Sao_P
 def _parse_calendar_target_date(text: str, *, now: datetime | None = None, timezone: str = "America/Sao_Paulo") -> tuple[Any | None, str | None]:
     normalized = _strip_accents(text).lower()
     base, _tz_name = _calendar_now(now=now, timezone=timezone)
+    days_from_now = re.search(r"\bdaqui\s+(\d{1,3})\s+dias?\b", normalized)
+    if days_from_now:
+        days = int(days_from_now.group(1))
+        return base.date() + timedelta(days=days), f"daqui {days} dias"
+    weeks_from_now = re.search(r"\bdaqui\s+(\d{1,2})\s+semanas?\b", normalized)
+    if weeks_from_now:
+        weeks = int(weeks_from_now.group(1))
+        return base.date() + timedelta(weeks=weeks), f"daqui {weeks} semanas"
     if "depois de amanha" in normalized:
         return base.date() + timedelta(days=2), "depois de amanhã"
     if "amanha" in normalized:
@@ -306,8 +314,6 @@ def _parse_calendar_target_date(text: str, *, now: datetime | None = None, timez
             year += 2000
         try:
             parsed = datetime(year, int(br.group(2)), int(br.group(1))).date()
-            if not br.group(3) and parsed < base.date():
-                parsed = datetime(year + 1, int(br.group(2)), int(br.group(1))).date()
             return parsed, parsed.isoformat()
         except ValueError:
             return None, None
@@ -523,6 +529,8 @@ def _calendar_create_intent_missing(text: str, *, now: datetime | None = None, t
     if resolution.missing:
         return None, resolution.missing
     assert resolution.start is not None and resolution.end is not None
+    title = _calendar_title_case(title)
+    _json_log("CALENDAR_DATE_RESOLUTION", user_message=raw, resolved_date=resolution.start.isoformat(), timezone=resolver.timezone, server_now=resolver.now.isoformat(), source="relative_date_resolver")
     return {"title": title, "start": resolution.start.isoformat(), "end": resolution.end.isoformat(), "timezone": resolver.timezone, "date_label": resolution.source}, None
 
 
@@ -539,7 +547,23 @@ def _infer_calendar_event_title(text: str) -> str:
     value = re.sub(r"\b(?:às|as|para(?:\s+o)?)\s*\d{1,2}(?::|h)\d{0,2}\s*(?:hrs?|horas?)?\b", " ", value, flags=re.I)
     value = re.sub(r"\b\d{1,2}(?::|h)\d{0,2}\s*(?:hrs?|horas?)?\b", " ", value, flags=re.I)
     value = re.sub(r"\s+", " ", value).strip(" .,!?:;")
-    return value[:120]
+    value = value[:120]
+    return _calendar_title_case(value)
+
+
+def _calendar_title_case(value: str) -> str:
+    words = str(value or "").strip().split()
+    if not words:
+        return ""
+    lowercase = {"com", "de", "da", "do", "das", "dos", "e", "em", "para"}
+    titled: list[str] = []
+    for idx, word in enumerate(words):
+        clean = word.strip()
+        if idx > 0 and _strip_accents(clean).lower() in lowercase:
+            titled.append(_strip_accents(clean).lower() if clean.islower() else clean)
+        else:
+            titled.append(clean[:1].upper() + clean[1:])
+    return " ".join(titled)
 
 def _extract_calendar_create_event_input(text: str, *, now: datetime | None = None, timezone: str = "America/Sao_Paulo") -> dict[str, Any] | None:
     payload, missing = _calendar_create_intent_missing(text, now=now, timezone=timezone)
@@ -557,8 +581,46 @@ def _date_resolver_calendar_create_payload(text: str, tool_input: Any, *, timezo
     title = str(payload.get("title") or payload.get("summary") or "").strip() or _infer_calendar_event_title(text)
     if not title:
         return None, "title"
+    title = _calendar_title_case(title)
     payload.update({"title": title, "start": resolution.start.isoformat(), "end": resolution.end.isoformat(), "timezone": resolver.timezone, "date_label": resolution.source})
+    _json_log("CALENDAR_DATE_RESOLUTION", user_message=str(text or ""), resolved_date=resolution.start.isoformat(), timezone=resolver.timezone, server_now=resolver.now.isoformat(), source="relative_date_resolver")
     return payload, None
+
+
+def _resolve_calendar_timezone(db: Session | None, tenant_id: Any, opts: dict[str, Any], tool_configs: dict[str, Any] | None) -> str:
+    candidates: list[Any] = []
+    for source in (opts, tool_configs or {}):
+        for key in ("tenant_timezone", "tenant.timezone", "conversation_timezone", "conversation.timezone", "user_timezone", "user.timezone", "timezone"):
+            candidates.append(source.get(key) if isinstance(source, dict) else None)
+    metadata = (tool_configs or {}).get("metadata") if isinstance(tool_configs, dict) else None
+    if isinstance(metadata, dict):
+        for key in ("tenant_timezone", "conversation_timezone", "user_timezone", "timezone"):
+            candidates.append(metadata.get(key))
+    if db is not None:
+        try:
+            from sqlalchemy import select
+            from app.models.user import TenantUser
+            user_id = opts.get("user_id") or opts.get("tenant_user_id") or (tool_configs or {}).get("user_id")
+            if user_id:
+                user = db.execute(select(TenantUser).where(TenantUser.id == user_id, TenantUser.tenant_id == tenant_id)).scalar_one_or_none()
+                candidates.append(getattr(user, "timezone", None))
+        except Exception:
+            pass
+    candidates.append("America/Sao_Paulo")
+    for candidate in candidates:
+        name, _tz = _safe_zoneinfo(str(candidate) if candidate else None)
+        if candidate and name:
+            return name
+    return "America/Sao_Paulo"
+
+def _calendar_missing_question(missing: str, text: str) -> str:
+    title = _infer_calendar_event_title(text)
+    parsed_time, _ = _parse_calendar_target_time(text)
+    if missing == "date" and title and parsed_time:
+        return "📅 Será hoje ou amanhã?"
+    if missing in {"date", "time"}:
+        return "Para qual dia e horário você deseja agendar?"
+    return "Qual nome do compromisso?"
 
 def _format_calendar_success_message(payload: dict[str, Any]) -> str:
     start = datetime.fromisoformat(str(payload["start"]))
@@ -959,7 +1021,7 @@ def _precheck_google_calendar_create(
 ) -> tuple[str, Any, list[dict[str, Any]]]:
     start_dt = _calendar_parse_start_local(payload, opts)
     tz_name, _tz = _safe_zoneinfo(_calendar_create_timezone(payload, opts))
-    now_local = datetime.now(_tz)
+    now_local, _ = _calendar_now(timezone=tz_name)
     _json_log("AI_AGENT_CALENDAR_CREATE_TIMEZONE", timezone=tz_name, start=start_dt.isoformat() if start_dt else None, now=now_local.isoformat())
     if start_dt is not None and start_dt < now_local and payload.get("force_create") is not True and payload.get("confirmed_past_date") is not True:
         _json_log("AI_AGENT_CALENDAR_PAST_DATE_BLOCKED", timezone=tz_name, start=start_dt.isoformat(), now=now_local.isoformat(), payload=payload)
@@ -1428,7 +1490,8 @@ def run_agent_for_tenant(db: Session, tenant_id, input_text: str, instruction: s
     tool_registry.register(GoogleSheetsToolAdapter(db))
     tool_registry.register(SuitableToolAdapter(db))
     tool_registry.register(WebhookToolAdapter(_call_webhook, validate_webhook_config))
-    calendar_timezone = str(opts.get("timezone") or "America/Sao_Paulo")
+    calendar_timezone = _resolve_calendar_timezone(db, tenant_id, opts, tool_configs)
+    opts = {**opts, "timezone": calendar_timezone}
     date_resolver_context = _calendar_resolver(timezone=calendar_timezone)
     resolved_start_context = date_resolver_context.resolve_start(str(input_text or ""))
     session_state = _calendar_session_state(tool_configs, opts)
@@ -1940,7 +2003,7 @@ def run_agent_for_tenant(db: Session, tenant_id, input_text: str, instruction: s
                 if tool_id == "google_calendar_create_event":
                     resolved_payload, missing = _date_resolver_calendar_create_payload(str(input_text or ""), tool_input, timezone=calendar_timezone)
                     if missing:
-                        question = "Para qual dia e horário você deseja agendar?" if missing in {"date", "time"} else "Qual nome do compromisso?"
+                        question = _calendar_missing_question(missing, str(input_text or ""))
                         result.message = question[:4000]
                         result.actions.append(AgentToolAction("message", {"message": result.message}))
                         result.status = "success"
@@ -2048,7 +2111,7 @@ def run_agent_for_tenant(db: Session, tenant_id, input_text: str, instruction: s
             result.final_tool = "responder"
     if result.fallback_used and not _latest_valid_tool_result(state):
         create_match = next((t for t in mcp_tools if str(t.get("tool_id")) == "google_calendar_create_event"), None)
-        deterministic_input = _extract_calendar_create_event_input(str(input_text or "")) if create_match else None
+        deterministic_input = _extract_calendar_create_event_input(str(input_text or ""), timezone=calendar_timezone) if create_match else None
         if deterministic_input:
             _json_log("AI_AGENT_TOOL_ROUTING_DEBUG", tenant_id=str(tenant_id), node_id=str(opts.get("node_id") or opts.get("agent_node_id") or ""), selected_tool_id="google_calendar_create_event", resolved_tool_id="google_calendar_create_event", expected_internal_tool="google_calendar_create_event", tool_origin=_google_calendar_origin(create_match or {}), is_google_calendar_internal=True, is_mcp_tool=False, has_google_connection=_has_google_calendar_connection(db, tenant_id), available_internal_tools=[str(t.get("tool_id") or t.get("id")) for t in mcp_tools if str(t.get("tool_id") or t.get("id") or "") in GOOGLE_CALENDAR_TOOL_IDS], available_mcp_tools=[str(t.get("tool_id") or t.get("id")) for t in mcp_tools], will_route_to_google_adapter=True, will_route_to_mcp=False, will_use_fallback=False, fallback_reason=None, id_comparison={"selected_tool_id": "google_calendar_create_event", "expected_internal_tool": "google_calendar_create_event"})
             _json_log("AI_AGENT_TOOL_CALL_REQUESTED", tool_id="google_calendar_create_event", tool_name=(create_match or {}).get("name"), tool_type="deterministic_fallback", input=deterministic_input)
