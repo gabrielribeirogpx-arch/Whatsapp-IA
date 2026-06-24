@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.feature_flags import filter_google_sheets_tools, google_sheets_integration_enabled
 from app.database import get_db
 from app.models.tenant import Tenant
 from app.models.tenant_mcp import TenantMCPTool
@@ -81,6 +82,8 @@ def _google_drive_tools_out(db: Session, tenant_id: uuid.UUID) -> list[dict[str,
 
 
 def _google_sheets_tools_out(db: Session, tenant_id: uuid.UUID) -> list[dict[str, Any]]:
+    if not google_sheets_integration_enabled():
+        return []
     connected = IntegrationConnectionService(db).get_active_connection(tenant_id, GOOGLE_SHEETS_PROVIDER) is not None
     if not connected:
         return []
@@ -155,7 +158,8 @@ def discover(server_id: uuid.UUID, tenant: Tenant = Depends(get_current_tenant),
 @router.get("/tools")
 def get_tools(tenant: Tenant = Depends(get_current_tenant), db: Session = Depends(get_db)):
     rows = db.execute(select(TenantMCPTool).where(TenantMCPTool.tenant_id == tenant.id).order_by(TenantMCPTool.created_at.desc())).scalars().all()
-    return [*_google_calendar_tools_out(db, tenant.id), *_gmail_tools_out(db, tenant.id), *_google_drive_tools_out(db, tenant.id), *_google_sheets_tools_out(db, tenant.id), *_suitable_tools_out(db, tenant.id), *[_tool_out(row) for row in rows]]
+    tools = [*_google_calendar_tools_out(db, tenant.id), *_gmail_tools_out(db, tenant.id), *_google_drive_tools_out(db, tenant.id), *_google_sheets_tools_out(db, tenant.id), *_suitable_tools_out(db, tenant.id), *[_tool_out(row) for row in rows]]
+    return filter_google_sheets_tools(tools)
 
 
 @router.put("/tools/{tool_id}")

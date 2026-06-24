@@ -36,6 +36,7 @@ import { apiFetch, getFlowAnalytics, getFlowGraph, getTenantSessionFromStorage, 
 import { getLayoutedElements } from '@/lib/autoLayout';
 import { orderChoiceChildrenEdges } from '@/lib/flowChoiceOrdering';
 import { normalizeFlow } from '@/lib/flowNormalization';
+import { filterGoogleSheetsTools } from '@/lib/features';
 import { FlowAnalytics, FlowEdgePayload, FlowNodePayload, FlowVersionItem } from '@/lib/types';
 
 const FETCH_TIMEOUT_MS = 8000;
@@ -645,7 +646,7 @@ function FlowNodeEditorPanel({
   const modelLabel = modelUsesGlobal ? 'Configuração global' : toText(draft.model_override);
   const webhooks = Array.isArray(draft.webhooks) ? (draft.webhooks as Array<Record<string, unknown>>) : [];
   const mcpToolIds = Array.isArray(draft.mcp_tool_ids) ? draft.mcp_tool_ids.map(String) : [];
-  const activeMcpTools = mcpTools.filter((tool) => tool.is_enabled !== false);
+  const activeMcpTools = filterGoogleSheetsTools(mcpTools).filter((tool) => tool.is_enabled !== false);
   const selectedMcpTools = activeMcpTools.filter((tool) => mcpToolIds.includes(tool.id));
   const addMcpTool = (toolId: string) => { if (!toolId) return; onDraftChange({ allow_mcp_tools: true, mcp_tool_ids: Array.from(new Set([...mcpToolIds, toolId])), allowed_tools: Array.from(new Set([...allowedTools, 'chamar_mcp'])) }); };
   const removeMcpTool = (toolId: string) => { const nextIds = mcpToolIds.filter((id) => id !== toolId); onDraftChange({ allow_mcp_tools: nextIds.length > 0, mcp_tool_ids: nextIds }); };
@@ -1697,10 +1698,17 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
         ]);
         const safeFlows = Array.isArray(data) ? data : [];
         const serverNames = new Map((Array.isArray(mcpServersData) ? mcpServersData : []).map((server) => [server.id, server.name || 'Integração MCP']));
-        const safeMcpTools = (Array.isArray(mcpToolsData) ? mcpToolsData : []).map((tool) => ({ ...tool, server_name: tool.server_name || serverNames.get(String(tool.server_id || '')) || 'Integração MCP' }));
+        const safeMcpTools = filterGoogleSheetsTools((Array.isArray(mcpToolsData) ? mcpToolsData : []).map((tool) => ({ ...tool, server_name: tool.server_name || serverNames.get(String(tool.server_id || '')) || 'Integração MCP' })));
         if (!active) return;
         setFlows(safeFlows);
         setMcpTools(safeMcpTools);
+        const safeMcpToolIds = new Set(safeMcpTools.map((tool) => tool.id));
+        setNodes((currentNodes) => currentNodes.map((currentNode) => {
+          const data = (currentNode.data || {}) as Record<string, unknown>;
+          const currentIds = Array.isArray(data.mcp_tool_ids) ? data.mcp_tool_ids.map(String) : [];
+          const nextIds = currentIds.filter((toolId) => safeMcpToolIds.has(toolId));
+          return nextIds.length === currentIds.length ? currentNode : ({ ...currentNode, data: { ...data, mcp_tool_ids: nextIds, allow_mcp_tools: nextIds.length > 0 } } as unknown as typeof currentNode);
+        }));
 
         const currentActiveFlow = safeFlows.find((flow) => flow.is_active);
         setActiveFlowId(currentActiveFlow?.id || null);
