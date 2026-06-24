@@ -41,6 +41,7 @@ import {
 import {
   ENABLE_GMAIL_INTEGRATION,
   ENABLE_GOOGLE_SHEETS_INTEGRATION,
+  isGoogleSheetsToolPayload,
 } from "../../../../lib/features";
 import type { GoogleCalendarConnectionStatus } from "../../../../lib/types";
 
@@ -133,18 +134,7 @@ function isGmailTool(tool: MCPTool) {
 }
 
 function isGoogleSheetsTool(tool: MCPTool) {
-  const provider = String(tool.metadata?.provider || "").toLowerCase();
-  const toolName = String(tool.tool_name || "").toLowerCase();
-  const displayName = String(tool.display_name || "").toLowerCase();
-  const name = String((tool as { name?: string }).name || "").toLowerCase();
-
-  return (
-    provider === "google_sheets" ||
-    toolName.startsWith("google_sheets_") ||
-    [displayName, name].some((value) =>
-      /(^|\[|\s)(google sheets|sheets)(\]|\s|$)/i.test(value),
-    )
-  );
+  return isGoogleSheetsToolPayload(tool as unknown as Record<string, unknown>);
 }
 
 function getPresentationTools(tools: MCPTool[]) {
@@ -408,7 +398,7 @@ export default function MCPDashboardClient() {
       parseApiResponse<MCPTool[]>(await apiFetch("/api/mcp/tools")),
     ]);
     setServers(serverRows);
-    setTools(toolRows);
+    setTools(getPresentationTools(toolRows));
   }
   useEffect(() => {
     const integration = searchParams.get("integration");

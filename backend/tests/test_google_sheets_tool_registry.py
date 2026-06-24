@@ -54,8 +54,21 @@ def _client(db, tenant_id):
     return TestClient(app)
 
 
-def test_connected_tenant_sees_google_sheets_tools(monkeypatch):
+def test_connected_tenant_does_not_see_google_sheets_tools_when_feature_flag_is_off(monkeypatch):
     monkeypatch.setenv("OAUTH_TOKEN_ENCRYPTION_KEY", "integration-test-secret")
+    monkeypatch.delenv("ENABLE_GOOGLE_SHEETS_INTEGRATION", raising=False)
+    tenant_id = uuid.uuid4()
+    db = FakeDb()
+    db.connections.append(IntegrationConnection(tenant_id=tenant_id, provider="google_sheets", auth_type="oauth2", status="active"))
+
+    payload = _client(db, tenant_id).get("/api/mcp/tools").json()
+
+    assert all("google_sheets" not in str(item).lower() for item in payload)
+
+
+def test_connected_tenant_sees_google_sheets_tools_when_feature_flag_is_on(monkeypatch):
+    monkeypatch.setenv("OAUTH_TOKEN_ENCRYPTION_KEY", "integration-test-secret")
+    monkeypatch.setenv("ENABLE_GOOGLE_SHEETS_INTEGRATION", "true")
     tenant_id = uuid.uuid4()
     db = FakeDb()
     db.connections.append(IntegrationConnection(tenant_id=tenant_id, provider="google_sheets", auth_type="oauth2", status="active"))
