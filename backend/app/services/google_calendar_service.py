@@ -180,6 +180,7 @@ class GoogleCalendarService:
         title = data.get("title") or data.get("summary") or "Evento"
         start = data.get("start") or data.get("start_time") or data.get("startTime")
         end = data.get("end") or data.get("end_time") or data.get("endTime")
+        self._log("AI_AGENT_CALENDAR_CREATE_TIMEZONE", tool_name="google_calendar_create_event", input=data, timezone=tz, start=start, end=end)
         payload: dict[str, Any] = {"summary": str(title)}
         if data.get("description"):
             payload["description"] = str(data.get("description"))
@@ -388,6 +389,22 @@ class GoogleCalendarService:
 
     def create_event(self, **kwargs: Any) -> dict[str, Any]:
         def operation() -> dict[str, Any]:
+            tz = self._tenant_timezone(kwargs.get("timezone") or kwargs.get("timeZone"))
+            start_raw = kwargs.get("start") or kwargs.get("start_time") or kwargs.get("startTime")
+            start_norm = self._normalize_datetime(start_raw, tz) if start_raw else None
+            if start_norm and kwargs.get("force_create") is not True and kwargs.get("confirmed_past_date") is not True:
+                try:
+                    start_dt = datetime.fromisoformat(str(start_norm).replace("Z", "+00:00"))
+                    now_local = datetime.now(ZoneInfo(tz))
+                    if start_dt.tzinfo is None:
+                        start_dt = start_dt.replace(tzinfo=ZoneInfo(tz))
+                    else:
+                        start_dt = start_dt.astimezone(ZoneInfo(tz))
+                    if start_dt < now_local:
+                        self._log("AI_AGENT_CALENDAR_PAST_DATE_BLOCKED", tool_name="google_calendar_create_event", input=kwargs, timezone=tz, start=start_dt.isoformat(), now=now_local.isoformat())
+                        return {"ok": False, "message": "calendar_past_date_requires_confirmation", "start": start_dt.isoformat(), "timezone": tz}
+                except Exception:
+                    pass
             ok, data, _ = self._request("POST", "/calendars/primary/events", json_body=self._event_payload(kwargs))
             if not ok:
                 return {"ok": False, **data}
