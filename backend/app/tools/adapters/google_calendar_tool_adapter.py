@@ -53,6 +53,41 @@ def google_calendar_tool_definitions(*, connected: bool) -> list[dict[str, Any]]
     ]
 
 
+
+def _calendar_create_start_context(args: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "connection_id": None,
+        "calendar_id": "primary",
+        "title": args.get("title") or args.get("summary") or args.get("name"),
+        "start_time": args.get("start_time") or args.get("start") or args.get("time_min") or args.get("timeMin"),
+        "end_time": args.get("end_time") or args.get("end") or args.get("time_max") or args.get("timeMax"),
+    }
+
+
+def _calendar_event_result_data(result: dict[str, Any]) -> dict[str, Any]:
+    event = result.get("result") if isinstance(result.get("result"), dict) else result
+    start = event.get("start")
+    end = event.get("end")
+    if isinstance(start, dict):
+        start = start.get("dateTime") or start.get("date")
+    if isinstance(end, dict):
+        end = end.get("dateTime") or end.get("date")
+    return {
+        "event_id": event.get("event_id") or event.get("id"),
+        "event_link": event.get("event_link") or event.get("html_link") or event.get("htmlLink"),
+        "title": event.get("title") or event.get("summary") or event.get("name"),
+        "start": start or event.get("start_time"),
+        "end": end or event.get("end_time"),
+    }
+
+
+def _calendar_error_data(result: dict[str, Any], tool_result: ToolResult | None = None) -> dict[str, Any]:
+    message = result.get("message") or result.get("error") or result.get("api_error")
+    if isinstance(message, dict):
+        message = message.get("message") or message.get("error") or str(message)
+    error_type = result.get("error_type") or result.get("code") or result.get("status_code") or (tool_result.error_code if tool_result else None) or "google_calendar_error"
+    return {"error_type": str(error_type), "error_message": str(message or error_type)}
+
 def _connection_log_context(db: Session | None, tenant_id: Any) -> dict[str, Any]:
     payload: dict[str, Any] = {"connection_id": None, "connection_tenant_id": None, "account_email": None, "calendar_id": "primary", "provider": PROVIDER, "connected": False, "status": None, "access_token_encrypted_is_not_null": False, "refresh_token_encrypted_is_not_null": False, "access_token_present": False, "refresh_token_present": False}
     if db is None or tenant_id is None:
@@ -113,6 +148,8 @@ class GoogleCalendarToolAdapter:
             _log_tool("GOOGLE_CALENDAR_SERVICE_PAYLOAD", tenant_id=context.tenant_id, tool_name=tool_id, input=args, db=db, payload=args)
             _log_tool("GOOGLE_CALENDAR_SERVICE_CALL", tenant_id=context.tenant_id, tool_name=tool_id, input=args, db=db)
             if tool_id == "google_calendar_create_event":
+                create_context = {**_calendar_create_start_context(args), **connection_context}
+                _log_tool("AI_AGENT_CALENDAR_CREATE_START", tenant_id=context.tenant_id, tool_name=tool_id, input=args, db=db, **create_context)
                 result = service.create_event(**args)
                 action = "create_event"
             elif tool_id == "google_calendar_list_events":
@@ -131,9 +168,23 @@ class GoogleCalendarToolAdapter:
             _log_tool("GOOGLE_CALENDAR_SERVICE_EXCEPTION", tenant_id=context.tenant_id, tool_name=tool_id, input=args, db=db, exception=exc)
             raise
         _log_tool("GOOGLE_CALENDAR_SERVICE_RESULT", tenant_id=context.tenant_id, tool_name=tool_id, input=args, db=db, result=result)
+        if tool_id == "google_calendar_create_event":
+            _log_tool("AI_AGENT_CALENDAR_CREATE_RAW_RESULT", tenant_id=context.tenant_id, tool_name=tool_id, input=args, db=db, raw_response=result)
         ok = result.get("ok") is True
+        event_data = _calendar_event_result_data(result) if tool_id == "google_calendar_create_event" else {}
+        create_ok = ok and bool(event_data.get("event_id")) if tool_id == "google_calendar_create_event" else ok
+        if tool_id == "google_calendar_create_event" and ok and not event_data.get("event_id"):
+            result = {**result, "ok": False, "message": "google_calendar_missing_event_id", "original_ok": True}
+            ok = False
         summary = "Operação do Google Calendar concluída" if ok else str(result.get("message") or "Falha ao executar Google Calendar")
         normalized = NormalizedToolResult(ok, tool_id, type=f"google_calendar.{action}", summary=summary, data=result if ok else {}, error=None if ok else {"code": str(result.get("message") or "google_calendar_error")})
         tool_result = ToolResult(ok, self.tool_type, tool_id=tool_id, tool_name=tool_id, output=sanitize_metadata(result), structured_content={"ok": ok, "tool": tool_id, "result": sanitize_metadata(result) if ok else {}, "error": None if ok else result.get("message")}, error_code=None if ok else "google_calendar_error", metadata={"provider": "google_calendar", "source": "integration_connections"}, normalized_result=normalized)
+        if tool_id == "google_calendar_create_event":
+            normalized_payload = {"ok": create_ok, "error": None if create_ok else _calendar_error_data(result, tool_result), "event_id": event_data.get("event_id"), "event_link": event_data.get("event_link")}
+            _log_tool("AI_AGENT_CALENDAR_CREATE_NORMALIZED", tenant_id=context.tenant_id, tool_name=tool_id, input=args, db=db, **normalized_payload)
+            if create_ok:
+                _log_tool("GOOGLE_CALENDAR_EVENT_CREATED", tenant_id=context.tenant_id, tool_name=tool_id, input=args, db=db, event_id=event_data.get("event_id"), title=event_data.get("title"), start=event_data.get("start"), end=event_data.get("end"))
+            else:
+                _log_tool("GOOGLE_CALENDAR_EVENT_FAILED", tenant_id=context.tenant_id, tool_name=tool_id, input=args, db=db, **_calendar_error_data(result, tool_result))
         _log_tool("GOOGLE_CALENDAR_TOOL_RESULT", tenant_id=context.tenant_id, tool_name=tool_id, input=args, db=db, result=result, ok=ok, error_code=tool_result.error_code)
         return tool_result

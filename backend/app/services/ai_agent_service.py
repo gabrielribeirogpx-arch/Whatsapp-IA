@@ -494,11 +494,11 @@ def _calendar_event_data(normalized_result: dict[str, Any]) -> dict[str, Any]:
 
 
 def _format_calendar_create_result_for_user(normalized_result: dict[str, Any], registry_result: Any | None = None) -> tuple[str, str]:
-    if normalized_result.get("ok") is not True:
-        return "⚠️ Não consegui acessar seu Google Calendar. Conecte sua conta Google novamente.", "error"
     event = _calendar_event_data(normalized_result)
-    if not event.get("event_id") or not event.get("start") or not event.get("end"):
-        return "⚠️ Tentei criar o evento, mas não recebi confirmação do Google Calendar. Pode tentar novamente?", "incomplete"
+    if normalized_result.get("ok") is not True or not event.get("event_id"):
+        return "Não consegui criar o evento na agenda. Deseja tentar novamente?", "error"
+    if not event.get("start") or not event.get("end"):
+        return "Não consegui criar o evento na agenda. Deseja tentar novamente?", "incomplete"
     title = _safe_user_text(event.get("title") or "Evento", limit=120)
     when = _format_date_time_for_user(event.get("start"))
     lines = [f"✅ {title} criado!", f"📅 {when}" if when else "📅 Horário confirmado"]
@@ -955,7 +955,7 @@ def _finalize_after_tool_result(result: AgentRunResult, tool_id: str, normalized
     msg = format_tool_result_for_user(tool_id, normalized)[:4000]
     result.message = msg
     result.actions.append(AgentToolAction("message", {"message": msg}))
-    result.status = "success"
+    result.status = "error" if tool_id == "google_calendar_create_event" and not _calendar_event_data(normalized).get("event_id") else "success"
     result.fallback_used = False
     result.final_tool = final_tool
     _json_log("AI_AGENT_MUTATING_TOOL_SUCCESS_FINALIZE", tool_id=tool_id, step=step, response=msg)
@@ -1339,7 +1339,7 @@ def run_agent_for_tenant(db: Session, tenant_id, input_text: str, instruction: s
         result.status = "error" if response.startswith("Não consegui") else "success"
         result.final_tool = "chamar_mcp" if pending_action_type == CALENDAR_CREATE_CONFIRMATION and decision == "confirm" else "responder"
         result.tools_used.append("chamar_mcp")
-        result.metadata = {"mcp_call_count": 0, "mcp_tools_used": [{"tool_id": "google_calendar_create_event", "status": result.status, "tool_type": "google_calendar"}], **(budget.safe_metadata() if budget else {})}
+        result.metadata = {"mcp_tools_used": [{"tool_id": "google_calendar_create_event", "status": result.status, "tool_type": "google_calendar"}], "mcp_call_count": 1, **(budget.safe_metadata() if budget else {})}
         return result
     suitable_tool_id, suitable_input = _suitable_intent(str(input_text or ""))
     suitable_match = next((t for t in mcp_tools if str(t.get("tool_id") or t.get("id")) == suitable_tool_id), None) if suitable_tool_id else None
@@ -1460,7 +1460,7 @@ def run_agent_for_tenant(db: Session, tenant_id, input_text: str, instruction: s
         result.status = status
         result.final_tool = "chamar_mcp"
         result.tools_used.append("chamar_mcp")
-        result.metadata = {"latency_ms": total_latency_ms, "node_tools_used": [], "node_tool_calls_count": 0, "subflow_tools_used": [], "subflow_calls_count": 0, "mcp_tools_used": [{"tool_id": "google_calendar_check_availability", "status": status, "latency_ms": (registry_result.metadata or {}).get("duration_ms"), "error": reason, "tool_type": "google_calendar"}], "mcp_call_count": 0, "mcp_latency_ms": 0, "mcp_status": status, "mcp_error_sanitized": reason, "blocked_tool_calls": [], "max_steps_reached": False, **(budget.safe_metadata() if budget else {})}
+        result.metadata = {"latency_ms": total_latency_ms, "node_tools_used": [], "node_tool_calls_count": 0, "subflow_tools_used": [], "subflow_calls_count": 0, "mcp_tools_used": [{"tool_id": "google_calendar_check_availability", "status": status, "latency_ms": (registry_result.metadata or {}).get("duration_ms"), "error": reason, "tool_type": "google_calendar"}], "mcp_call_count": 1, "mcp_latency_ms": 0, "mcp_status": status, "mcp_error_sanitized": reason, "blocked_tool_calls": [], "max_steps_reached": False, **(budget.safe_metadata() if budget else {})}
         _json_log("AI_AGENT_FINISHED", status=result.status, final_tool=result.final_tool, tools_used=result.tools_used, fallback_used=result.fallback_used, deterministic=True)
         record_event(db, trace, TraceEventType.AI_AGENT_FINISHED, duration_ms=total_latency_ms, metadata={"status": result.status, "final_tool": result.final_tool, "tools_used": result.tools_used, "deterministic": True})
         return result
@@ -1499,7 +1499,7 @@ def run_agent_for_tenant(db: Session, tenant_id, input_text: str, instruction: s
         result.status = status
         result.final_tool = "chamar_mcp"
         result.tools_used.append("chamar_mcp")
-        result.metadata = {"latency_ms": total_latency_ms, "node_tools_used": [], "node_tool_calls_count": 0, "subflow_tools_used": [], "subflow_calls_count": 0, "mcp_tools_used": [{"tool_id": "google_calendar_list_events", "status": status, "latency_ms": (registry_result.metadata or {}).get("duration_ms"), "error": reason, "tool_type": "google_calendar"}], "mcp_call_count": 0, "mcp_latency_ms": 0, "mcp_status": status, "mcp_error_sanitized": reason, "blocked_tool_calls": [], "max_steps_reached": False, **(budget.safe_metadata() if budget else {})}
+        result.metadata = {"latency_ms": total_latency_ms, "node_tools_used": [], "node_tool_calls_count": 0, "subflow_tools_used": [], "subflow_calls_count": 0, "mcp_tools_used": [{"tool_id": "google_calendar_list_events", "status": status, "latency_ms": (registry_result.metadata or {}).get("duration_ms"), "error": reason, "tool_type": "google_calendar"}], "mcp_call_count": 1, "mcp_latency_ms": 0, "mcp_status": status, "mcp_error_sanitized": reason, "blocked_tool_calls": [], "max_steps_reached": False, **(budget.safe_metadata() if budget else {})}
         _json_log("AI_AGENT_FINISHED", status=result.status, final_tool=result.final_tool, tools_used=result.tools_used, fallback_used=result.fallback_used, deterministic=True)
         record_event(db, trace, TraceEventType.AI_AGENT_FINISHED, duration_ms=total_latency_ms, metadata={"status": result.status, "final_tool": result.final_tool, "tools_used": result.tools_used, "deterministic": True})
         return result
@@ -1525,7 +1525,7 @@ def run_agent_for_tenant(db: Session, tenant_id, input_text: str, instruction: s
                 result.actions.append(AgentToolAction("message", {"message": result.message}))
                 result.status = "success"
                 result.final_tool = "responder"
-                result.metadata = {"mcp_call_count": 0, "mcp_tools_used": [{"tool_id": "google_calendar_check_availability", "status": "success", "tool_type": "google_calendar"}], **(budget.safe_metadata() if budget else {})}
+                result.metadata = {"mcp_tools_used": [{"tool_id": "google_calendar_check_availability", "status": "success", "tool_type": "google_calendar"}], "mcp_call_count": 1, **(budget.safe_metadata() if budget else {})}
                 return result
             if budget is not None:
                 budget.consume_node_tool_call()
@@ -1545,7 +1545,7 @@ def run_agent_for_tenant(db: Session, tenant_id, input_text: str, instruction: s
         result.status = status
         result.final_tool = "chamar_mcp"
         result.tools_used.append("chamar_mcp")
-        result.metadata = {"latency_ms": total_latency_ms, "node_tools_used": [], "node_tool_calls_count": 0, "subflow_tools_used": [], "subflow_calls_count": 0, "mcp_tools_used": [{"tool_id": "google_calendar_create_event", "status": status, "latency_ms": (registry_result.metadata or {}).get("duration_ms"), "error": reason, "tool_type": "google_calendar"}], "mcp_call_count": 0, "mcp_latency_ms": 0, "mcp_status": status, "mcp_error_sanitized": reason, "blocked_tool_calls": [], "max_steps_reached": False, **(budget.safe_metadata() if budget else {})}
+        result.metadata = {"latency_ms": total_latency_ms, "node_tools_used": [], "node_tool_calls_count": 0, "subflow_tools_used": [], "subflow_calls_count": 0, "mcp_tools_used": [{"tool_id": "google_calendar_create_event", "status": status, "latency_ms": (registry_result.metadata or {}).get("duration_ms"), "error": reason, "tool_type": "google_calendar"}], "mcp_call_count": 1, "mcp_latency_ms": 0, "mcp_status": status, "mcp_error_sanitized": reason, "blocked_tool_calls": [], "max_steps_reached": False, **(budget.safe_metadata() if budget else {})}
         _json_log("AI_AGENT_FINISHED", status=result.status, final_tool=result.final_tool, tools_used=result.tools_used, fallback_used=result.fallback_used, deterministic=True)
         record_event(db, trace, TraceEventType.AI_AGENT_FINISHED, duration_ms=total_latency_ms, metadata={"status": result.status, "final_tool": result.final_tool, "tools_used": result.tools_used, "deterministic": True})
         return result
@@ -1764,6 +1764,13 @@ def run_agent_for_tenant(db: Session, tenant_id, input_text: str, instruction: s
                 blocked_tool_calls.append({"tool_id": tool_id, "error": "duplicate_tool_call_blocked"})
                 normalized = previous.get("normalized_result") if isinstance(previous.get("normalized_result"), dict) else {}
                 if normalized.get("ok") is True and _is_mutating_tool(tool_id):
+                    if tool_id == "google_calendar_create_event" and not _calendar_event_data(normalized).get("event_id"):
+                        msg, _ = _format_calendar_create_result_for_user(normalized)
+                        result.message = msg
+                        result.actions.append(AgentToolAction("message", {"message": msg}))
+                        result.status = "error"
+                        result.final_tool = "chamar_mcp"
+                        break
                     _finalize_after_tool_result(result, tool_id, normalized, step=step + 1)
                     break
                 state.append(previous or {"tool": tool, "tool_id": tool_id, "ok": False, "error": "duplicate_tool_call_blocked"})
@@ -1909,6 +1916,5 @@ def run_agent_for_tenant(db: Session, tenant_id, input_text: str, instruction: s
     total_latency_ms = int((time.monotonic() - started) * 1000)
     _json_log("AI_AGENT_FINISHED", status=result.status, final_tool=result.final_tool, tools_used=result.tools_used, fallback_used=result.fallback_used)
     record_event(db, trace, TraceEventType.AI_AGENT_FINISHED, duration_ms=total_latency_ms, metadata={"status": result.status, "final_tool": result.final_tool, "tools_used": result.tools_used})
-    external_mcp_tool_calls = [c for c in mcp_tool_calls if c.get("tool_type") != "google_calendar"]
-    result.metadata = {"latency_ms": total_latency_ms, "node_tools_used": node_tool_calls, "node_tool_calls_count": len(node_tool_calls), "subflow_tools_used": subflow_tool_calls, "subflow_calls_count": len(subflow_tool_calls), "subflow_results_summary": subflow_tool_calls, "mcp_tools_used": mcp_tool_calls, "mcp_call_count": len(external_mcp_tool_calls), "mcp_latency_ms": sum(int(c.get("latency_ms") or 0) for c in external_mcp_tool_calls), "mcp_status": "error" if any(c.get("status") != "success" for c in mcp_tool_calls) else ("success" if mcp_tool_calls else "not_used"), "mcp_error_sanitized": next((c.get("error") for c in mcp_tool_calls if c.get("error")), None), "subflow_errors": [c for c in subflow_tool_calls if c.get("status") != "success"], "timeout_count": len([c for c in subflow_tool_calls if c.get("status") == "timeout"]), "blocked_tool_calls": blocked_tool_calls, "max_steps_reached": result.fallback_used, "memory_saved_count": len([item for item in state if item.get("tool") == "salvar_memoria" and item.get("ok")]), **(budget.safe_metadata() if budget else {})}
+    result.metadata = {"latency_ms": total_latency_ms, "node_tools_used": node_tool_calls, "node_tool_calls_count": len(node_tool_calls), "subflow_tools_used": subflow_tool_calls, "subflow_calls_count": len(subflow_tool_calls), "subflow_results_summary": subflow_tool_calls, "mcp_tools_used": mcp_tool_calls, "mcp_call_count": len(mcp_tool_calls), "mcp_latency_ms": sum(int(c.get("latency_ms") or 0) for c in mcp_tool_calls), "mcp_status": "error" if any(c.get("status") != "success" for c in mcp_tool_calls) else ("success" if mcp_tool_calls else "not_used"), "mcp_error_sanitized": next((c.get("error") for c in mcp_tool_calls if c.get("error")), None), "subflow_errors": [c for c in subflow_tool_calls if c.get("status") != "success"], "timeout_count": len([c for c in subflow_tool_calls if c.get("status") == "timeout"]), "blocked_tool_calls": blocked_tool_calls, "max_steps_reached": result.fallback_used, "memory_saved_count": len([item for item in state if item.get("tool") == "salvar_memoria" and item.get("ok")]), **(budget.safe_metadata() if budget else {})}
     return result
