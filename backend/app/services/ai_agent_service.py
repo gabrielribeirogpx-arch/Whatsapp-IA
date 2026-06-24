@@ -269,10 +269,23 @@ def _strip_accents(value: str) -> str:
     return "".join(ch for ch in unicodedata.normalize("NFD", str(value or "")) if unicodedata.category(ch) != "Mn")
 
 
+def _safe_zoneinfo(timezone: str | None) -> tuple[str, ZoneInfo]:
+    tz_name = str(timezone or "America/Sao_Paulo").strip() or "America/Sao_Paulo"
+    try:
+        return tz_name, ZoneInfo(tz_name)
+    except Exception:
+        return "America/Sao_Paulo", ZoneInfo("America/Sao_Paulo")
+
+
+def _calendar_now(*, now: datetime | None = None, timezone: str = "America/Sao_Paulo") -> tuple[datetime, str]:
+    tz_name, tz = _safe_zoneinfo(timezone)
+    base = now.astimezone(tz) if now and now.tzinfo else (now.replace(tzinfo=tz) if now else datetime.now(tz))
+    return base, tz_name
+
+
 def _parse_calendar_target_date(text: str, *, now: datetime | None = None, timezone: str = "America/Sao_Paulo") -> tuple[Any | None, str | None]:
     normalized = _strip_accents(text).lower()
-    tz = ZoneInfo(timezone)
-    base = now.astimezone(tz) if now and now.tzinfo else (now.replace(tzinfo=tz) if now else datetime.now(tz))
+    base, _tz_name = _calendar_now(now=now, timezone=timezone)
     if "depois de amanha" in normalized:
         return base.date() + timedelta(days=2), "depois de amanhã"
     if "amanha" in normalized:
@@ -293,9 +306,37 @@ def _parse_calendar_target_date(text: str, *, now: datetime | None = None, timez
             year += 2000
         try:
             parsed = datetime(year, int(br.group(2)), int(br.group(1))).date()
+            if not br.group(3) and parsed < base.date():
+                parsed = datetime(year + 1, int(br.group(2)), int(br.group(1))).date()
             return parsed, parsed.isoformat()
         except ValueError:
             return None, None
+    day_only = re.search(r"\bdia\s*(\d{1,2})\b", normalized)
+    if day_only:
+        day = int(day_only.group(1))
+        if 1 <= day <= 31:
+            year, month = base.year, base.month
+            for _ in range(14):
+                try:
+                    parsed = datetime(year, month, day).date()
+                    if parsed >= base.date():
+                        return parsed, f"dia {day}"
+                except ValueError:
+                    pass
+                month += 1
+                if month > 12:
+                    month = 1; year += 1
+    weekdays = {"segunda": 0, "terca": 1, "terça": 1, "quarta": 2, "quinta": 3, "sexta": 4, "sabado": 5, "sábado": 5, "domingo": 6}
+    for name, idx in weekdays.items():
+        if re.search(rf"\b{name}(?:-feira)?\b", normalized):
+            delta = (idx - base.weekday()) % 7
+            if delta == 0:
+                delta = 7
+            if "semana que vem" in normalized or "proxima semana" in normalized or "próxima semana" in normalized:
+                delta += 7 if delta < 7 else 0
+            return base.date() + timedelta(days=delta), name
+    if "semana que vem" in normalized or "proxima semana" in normalized or "próxima semana" in normalized:
+        return base.date() + timedelta(days=7), "semana que vem"
     return None, None
 
 
@@ -336,7 +377,7 @@ def _calendar_availability_intent_input(text: str, *, now: datetime | None = Non
     if parsed_time is None:
         return None, "time"
     hour, minute = parsed_time
-    tz = ZoneInfo(timezone)
+    _tz_name, tz = _safe_zoneinfo(timezone)
     start = datetime(day.year, day.month, day.day, hour, minute, tzinfo=tz)
     end = start + timedelta(hours=1)
     return {"start": start.isoformat(), "end": end.isoformat(), "timezone": timezone, "date_label": label or day.isoformat(), "time_label": time_label}, None
@@ -373,7 +414,7 @@ def _calendar_list_intent_input(text: str, *, now: datetime | None = None, timez
     day, label = _parse_calendar_target_date(text, now=now, timezone=timezone)
     if day is None:
         return None, "date"
-    tz = ZoneInfo(timezone)
+    _tz_name, tz = _safe_zoneinfo(timezone)
     start = datetime(day.year, day.month, day.day, 0, 0, 0, tzinfo=tz)
     end = start + timedelta(days=1)
     return {"time_min": start.isoformat(), "time_max": end.isoformat(), "max_results": 20, "timezone": timezone, "date_label": label or day.isoformat()}, None
@@ -420,13 +461,8 @@ def _calendar_create_intent_missing(text: str, *, now: datetime | None = None, t
     if not clear_intent:
         return None, None
 
-    if "depois de amanhã" in lowered or "depois de amanha" in lowered:
-        day_offset = 2
-    elif "amanhã" in lowered or "amanha" in lowered:
-        day_offset = 1
-    elif "hoje" in lowered:
-        day_offset = 0
-    else:
+    day, date_label = _parse_calendar_target_date(raw, now=now, timezone=timezone)
+    if day is None:
         return None, "date"
 
     hour_match = re.search(r"(?:às|as|para(?:\s+o)?|\b)(?:\s*)(\d{1,2})(?::|h)(\d{2})?", lowered)
@@ -441,12 +477,13 @@ def _calendar_create_intent_missing(text: str, *, now: datetime | None = None, t
     if not title:
         return None, "title"
 
-    tz = ZoneInfo(timezone)
-    base = now.astimezone(tz) if now and now.tzinfo else (now.replace(tzinfo=tz) if now else datetime.now(tz))
-    day = base.date() + timedelta(days=day_offset)
+    base, tz_name = _calendar_now(now=now, timezone=timezone)
+    _tz_name, tz = _safe_zoneinfo(tz_name)
     start = datetime(day.year, day.month, day.day, hour, minute, tzinfo=tz)
     end = start + timedelta(hours=1)
-    return {"title": title, "start": start.isoformat(), "end": end.isoformat(), "timezone": timezone}, None
+    _json_log("AI_AGENT_DATE_RESOLUTION_INPUT", text=raw, timezone=tz_name, now=base.isoformat())
+    _json_log("AI_AGENT_DATE_RESOLUTION_OUTPUT", start=start.isoformat(), end=end.isoformat(), date_label=date_label)
+    return {"title": title, "start": start.isoformat(), "end": end.isoformat(), "timezone": tz_name, "date_label": date_label}, None
 
 
 def _extract_calendar_create_event_input(text: str, *, now: datetime | None = None, timezone: str = "America/Sao_Paulo") -> dict[str, Any] | None:
@@ -814,6 +851,27 @@ def _json_log(event: str, **metadata: Any) -> None:
     logger.info("event=%s %s", event, json.dumps(metadata, ensure_ascii=False, default=str))
 
 
+def _calendar_parse_start_local(payload: dict[str, Any], opts: dict[str, Any]) -> datetime | None:
+    start = _calendar_create_start(payload)
+    if not start:
+        return None
+    tz_name, tz = _safe_zoneinfo(_calendar_create_timezone(payload, opts))
+    try:
+        dt = datetime.fromisoformat(str(start).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=tz)
+    else:
+        dt = dt.astimezone(tz)
+    return dt
+
+
+def _calendar_past_date_block_message(start: datetime | None) -> str:
+    when = start.strftime("%d/%m/%Y às %H:%M") if start else "essa data"
+    return f"A data calculada ({when}) já passou. Você confirma que deseja criar o evento em uma data passada?"
+
+
 def _precheck_google_calendar_create(
     *,
     tool_registry: ToolRegistry,
@@ -830,6 +888,13 @@ def _precheck_google_calendar_create(
     session_id: Any | None = None,
     external_user_id: str | None = None,
 ) -> tuple[str, Any, list[dict[str, Any]]]:
+    start_dt = _calendar_parse_start_local(payload, opts)
+    tz_name, _tz = _safe_zoneinfo(_calendar_create_timezone(payload, opts))
+    now_local = datetime.now(_tz)
+    _json_log("AI_AGENT_CALENDAR_CREATE_TIMEZONE", timezone=tz_name, start=start_dt.isoformat() if start_dt else None, now=now_local.isoformat())
+    if start_dt is not None and start_dt < now_local and payload.get("force_create") is not True and payload.get("confirmed_past_date") is not True:
+        _json_log("AI_AGENT_CALENDAR_PAST_DATE_BLOCKED", timezone=tz_name, start=start_dt.isoformat(), now=now_local.isoformat(), payload=payload)
+        return "past_blocked", {"message": _calendar_past_date_block_message(start_dt), "start": start_dt.isoformat()}, []
     availability_input = _google_calendar_availability_input(payload, opts)
     if availability_input is None:
         return "free", None, []
@@ -1519,6 +1584,14 @@ def run_agent_for_tenant(db: Session, tenant_id, input_text: str, instruction: s
         _json_log("AI_AGENT_DETERMINISTIC_CALENDAR_EXECUTE", tool_id="google_calendar_create_event", input=deterministic_input)
         try:
             precheck_state, _, conflicts = _precheck_google_calendar_create(tool_registry=tool_registry, tool_context=tool_context, db=db, mcp_tools=mcp_tools, payload=deterministic_input, opts=opts, session_state=session_state, budget=budget, pending_action_service=pending_action_service, tenant_id=tenant_id, conversation_id=conversation_id, session_id=session_id, external_user_id=external_user_id)
+            if precheck_state == "past_blocked":
+                msg = _calendar_past_date_block_message(_calendar_parse_start_local(deterministic_input, opts))
+                result.message = msg[:4000]
+                result.actions.append(AgentToolAction("message", {"message": result.message}))
+                result.status = "success"
+                result.final_tool = "responder"
+                result.metadata = {"blocked_tool_calls": [{"tool_id": "google_calendar_create_event", "reason": "past_date"}], **(budget.safe_metadata() if budget else {})}
+                return result
             if precheck_state == "busy":
                 msg = _format_calendar_conflict_prompt(deterministic_input, conflicts)
                 result.message = msg[:4000]
@@ -1791,6 +1864,14 @@ def run_agent_for_tenant(db: Session, tenant_id, input_text: str, instruction: s
             try:
                 if tool_id == "google_calendar_create_event":
                     precheck_state, _, conflicts = _precheck_google_calendar_create(tool_registry=tool_registry, tool_context=tool_context, db=db, mcp_tools=mcp_tools, payload=tool_input if isinstance(tool_input, dict) else {}, opts=opts, session_state=session_state, budget=budget, pending_action_service=pending_action_service, tenant_id=tenant_id, conversation_id=conversation_id, session_id=session_id, external_user_id=external_user_id)
+                    if precheck_state == "past_blocked":
+                        msg = _calendar_past_date_block_message(_calendar_parse_start_local(tool_input if isinstance(tool_input, dict) else {}, opts))
+                        result.message = msg[:4000]
+                        result.actions.append(AgentToolAction("message", {"message": result.message}))
+                        result.status = "success"
+                        result.final_tool = "responder"
+                        mcp_tool_calls.append({"tool_id": "google_calendar_create_event", "status": "blocked", "tool_type": "google_calendar", "error": "past_date"})
+                        break
                     if precheck_state == "busy":
                         msg = _format_calendar_conflict_prompt(tool_input if isinstance(tool_input, dict) else {}, conflicts)
                         result.message = msg[:4000]
@@ -1888,7 +1969,13 @@ def run_agent_for_tenant(db: Session, tenant_id, input_text: str, instruction: s
             _json_log("AI_AGENT_TOOL_CALL_REQUESTED", tool_id="google_calendar_create_event", tool_name=(create_match or {}).get("name"), tool_type="deterministic_fallback", input=deterministic_input)
             _json_log("AI_AGENT_TOOL_CALL_ROUTED", tool_id="google_calendar_create_event", routed_tool_type="google_calendar", adapter="GoogleCalendarToolAdapter", deterministic=True)
             precheck_state, _, conflicts = _precheck_google_calendar_create(tool_registry=tool_registry, tool_context=tool_context, db=db, mcp_tools=mcp_tools, payload=deterministic_input, opts=opts, session_state=session_state, budget=budget, pending_action_service=pending_action_service, tenant_id=tenant_id, conversation_id=conversation_id, session_id=session_id, external_user_id=external_user_id)
-            if precheck_state == "busy":
+            if precheck_state == "past_blocked":
+                result.message = _calendar_past_date_block_message(_calendar_parse_start_local(deterministic_input, opts))[:4000]
+                result.actions = [AgentToolAction("message", {"message": result.message})]
+                result.status = "success"; result.fallback_used = False; result.final_tool = "responder"
+                mcp_tool_calls.append({"tool_id": "google_calendar_create_event", "status": "blocked", "tool_type": "google_calendar", "error": "past_date"})
+                registry_result = None
+            elif precheck_state == "busy":
                 result.message = _format_calendar_conflict_prompt(deterministic_input, conflicts)[:4000]
                 result.actions = [AgentToolAction("message", {"message": result.message})]
                 result.status = "success"; result.fallback_used = False; result.final_tool = "responder"
