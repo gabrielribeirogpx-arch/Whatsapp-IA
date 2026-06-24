@@ -70,3 +70,50 @@ def test_precheck_blocks_past_dates_before_google_calendar():
     assert state == "past_blocked"
     assert detail["message"] == "calendar_past_date_requires_confirmation" or "já passou" in detail["message"]
     assert conflicts == []
+
+
+def test_calendar_time_extraction_keeps_minutes_for_colon_with_hrs():
+    now = datetime(2026, 6, 24, 10, 0, tzinfo=ZoneInfo("America/Sao_Paulo"))
+    payload, missing = _calendar_create_intent_missing("Agende Call com Gustavo amanhã às 16:30hrs", now=now, timezone="America/Sao_Paulo")
+
+    assert missing is None
+    assert payload is not None
+    assert payload["start"] == "2026-06-25T16:30:00-03:00"
+    assert payload["end"] == "2026-06-25T17:30:00-03:00"
+
+
+def test_calendar_time_extraction_accepts_unaccented_as_colon():
+    now = datetime(2026, 6, 24, 10, 0, tzinfo=ZoneInfo("America/Sao_Paulo"))
+    payload, missing = _calendar_create_intent_missing("Agende Call amanhã as 16:30", now=now, timezone="America/Sao_Paulo")
+
+    assert missing is None
+    assert payload is not None
+    assert payload["start"].endswith("16:30:00-03:00")
+
+
+def test_calendar_time_extraction_accepts_h_compact_minutes():
+    now = datetime(2026, 6, 24, 10, 0, tzinfo=ZoneInfo("America/Sao_Paulo"))
+    payload, missing = _calendar_create_intent_missing("Agende Call amanhã 16h30", now=now, timezone="America/Sao_Paulo")
+
+    assert missing is None
+    assert payload is not None
+    assert payload["start"].endswith("16:30:00-03:00")
+
+
+def test_calendar_time_extraction_keeps_leading_zero_minutes():
+    now = datetime(2026, 6, 24, 10, 0, tzinfo=ZoneInfo("America/Sao_Paulo"))
+    payload, missing = _calendar_create_intent_missing("Agende Call amanhã às 09:05", now=now, timezone="America/Sao_Paulo")
+
+    assert missing is None
+    assert payload is not None
+    assert payload["start"].endswith("09:05:00-03:00")
+
+
+def test_calendar_title_cleaning_removes_temporal_tokens_and_trailing_as():
+    now = datetime(2026, 6, 24, 10, 0, tzinfo=ZoneInfo("America/Sao_Paulo"))
+    payload, missing = _calendar_create_intent_missing("Agende uma Call com Gustavo às amanhã às 16:30hrs", now=now, timezone="America/Sao_Paulo")
+
+    assert missing is None
+    assert payload is not None
+    assert payload["title"] == "Call com Gustavo"
+    assert not payload["title"].lower().endswith((" às", " as"))

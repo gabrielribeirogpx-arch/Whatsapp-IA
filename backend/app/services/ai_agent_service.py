@@ -348,20 +348,34 @@ def _parse_calendar_target_date(text: str, *, now: datetime | None = None, timez
 
 
 def _parse_calendar_target_time(text: str) -> tuple[tuple[int, int] | None, str | None]:
-    normalized = _strip_accents(text).lower()
+    raw = str(text or "")
+    normalized = _strip_accents(raw).lower()
     patterns = (
-        r"\b(?:as|às)\s*(\d{1,2})(?::\s*(\d{2}))?\b",
-        r"\b(\d{1,2})(?:h|:)\s*(\d{2})?\b",
+        ("colon_with_optional_marker", r"(?<!\d)(?:as|às)?\s*(\d{1,2})\s*:\s*(\d{2})\s*(?:h|hr|hrs|hora|horas)?\b"),
+        ("compact_h_minutes", r"(?<!\d)(?:as|às)?\s*(\d{1,2})\s*h\s*(\d{2})\b"),
+        ("words_hours_minutes", r"(?<!\d)(?:as|às)?\s*(\d{1,2})\s*horas?\s*(?:e\s*)?(\d{1,2})\s*min(?:uto)?s?\b"),
+        ("hour_only", r"(?<!\d)(?:as|às)?\s*(\d{1,2})\s*(?:h|hr|hrs|hora|horas)\b"),
     )
-    for pattern in patterns:
+    for pattern_name, pattern in patterns:
         match = re.search(pattern, normalized)
         if not match:
             continue
         hour = int(match.group(1))
         minute = int(match.group(2) or 0)
         if hour <= 23 and minute <= 59:
+            matched_time = match.group(0).strip()
+            _json_log(
+                "CALENDAR_TIME_EXTRACTION",
+                raw_text=raw,
+                matched_time=matched_time,
+                hour=hour,
+                minute=minute,
+                pattern=pattern_name,
+            )
             return (hour, minute), f"{hour:02d}:{minute:02d}"
+    _json_log("CALENDAR_TIME_EXTRACTION", raw_text=raw, matched_time=None, hour=None, minute=None, pattern=None)
     return None, None
+
 
 
 
@@ -510,11 +524,8 @@ def _calendar_create_intent_missing(text: str, *, now: datetime | None = None, t
     if day is None:
         return None, "date"
 
-    hour_match = re.search(r"(?:às|as|para(?:\s+o)?|\b)(?:\s*)(\d{1,2})(?::|h)(\d{2})?", lowered)
-    if not hour_match:
-        return None, "time"
-    hour = int(hour_match.group(1)); minute = int(hour_match.group(2) or 0)
-    if hour > 23 or minute > 59:
+    parsed_time, _time_label = _parse_calendar_target_time(raw)
+    if parsed_time is None:
         return None, "time"
 
     title_match = re.search(r"(?:chamad[oa]|t[ií]tulo|nome)\s+(.+)$", raw, flags=re.I)
@@ -536,19 +547,25 @@ def _calendar_create_intent_missing(text: str, *, now: datetime | None = None, t
 
 
 def _infer_calendar_event_title(text: str) -> str:
-    value = str(text or "").strip()
+    raw_title = str(text or "").strip()
+    value = raw_title
     value = re.sub(r"\b(?:ol[aá]|oi|por favor)\b", " ", value, flags=re.I)
     value = re.sub(r"\b(?:agende|agenda|agendar|marque|marcar|crie|criar)\b", " ", value, flags=re.I)
     value = re.sub(r"\b(?:um|uma|o|a)\b", " ", value, flags=re.I)
+    value = re.sub(r"\bpara\s+(?:hoje|amanh[aã]|depois\s+de\s+amanh[aã])\b", " ", value, flags=re.I)
     value = re.sub(r"\b(?:hoje|amanh[aã]|depois\s+de\s+amanh[aã]|semana\s+que\s+vem|pr[oó]xima?\s+semana)\b", " ", value, flags=re.I)
-    value = re.sub(r"\bdia\s+\d{1,2}\b", " ", value, flags=re.I)
+    value = re.sub(r"\bdia\s+\d{1,2}(?:/\d{1,2})?(?:/\d{2,4})?\b", " ", value, flags=re.I)
     value = re.sub(r"\b(?:pr[oó]xima?|proximo)\s+(?:segunda|ter[cç]a|quarta|quinta|sexta|s[aá]bado|domingo)(?:-feira)?\b", " ", value, flags=re.I)
     value = re.sub(r"\b(?:segunda|ter[cç]a|quarta|quinta|sexta|s[aá]bado|domingo)(?:-feira)?\b", " ", value, flags=re.I)
-    value = re.sub(r"\b(?:às|as|para(?:\s+o)?)\s*\d{1,2}(?::|h)\d{0,2}\s*(?:hrs?|horas?)?\b", " ", value, flags=re.I)
-    value = re.sub(r"\b\d{1,2}(?::|h)\d{0,2}\s*(?:hrs?|horas?)?\b", " ", value, flags=re.I)
+    value = re.sub(r"\b(?:às|as|para(?:\s+o)?)?\s*\d{1,2}\s*:\s*\d{2}\s*(?:h|hr|hrs|horas?)?\b", " ", value, flags=re.I)
+    value = re.sub(r"\b(?:às|as|para(?:\s+o)?)?\s*\d{1,2}\s*h\s*\d{2}\b", " ", value, flags=re.I)
+    value = re.sub(r"\b(?:às|as|para(?:\s+o)?)?\s*\d{1,2}\s*horas?\s*(?:e\s*)?\d{1,2}\s*min(?:uto)?s?\b", " ", value, flags=re.I)
+    value = re.sub(r"\b(?:às|as|para(?:\s+o)?)?\s*\d{1,2}\s*(?:h|hr|hrs|horas?)\b", " ", value, flags=re.I)
+    value = re.sub(r"\b(?:às|as|para)\b", " ", value, flags=re.I)
     value = re.sub(r"\s+", " ", value).strip(" .,!?:;")
-    value = value[:120]
-    return _calendar_title_case(value)
+    cleaned_title = _calendar_title_case(value[:120])
+    _json_log("CALENDAR_TITLE_CLEANED", raw_title=raw_title, cleaned_title=cleaned_title)
+    return cleaned_title
 
 
 def _calendar_title_case(value: str) -> str:
@@ -658,6 +675,7 @@ def _calendar_event_data(normalized_result: dict[str, Any]) -> dict[str, Any]:
         "title": data.get("title") or data.get("summary") or data.get("name"),
         "start": start or data.get("start_time"),
         "end": end or data.get("end_time"),
+        "timezone": data.get("timezone") or data.get("timeZone"),
     }
 
 
@@ -668,7 +686,7 @@ def _format_calendar_create_result_for_user(normalized_result: dict[str, Any], r
     if not event.get("start") or not event.get("end"):
         return "Não consegui criar o evento na agenda. Deseja tentar novamente?", "incomplete"
     title = _safe_user_text(event.get("title") or "Evento", limit=120)
-    when = _format_date_time_for_user(event.get("start"))
+    when = _format_date_time_for_user(event.get("start"), timezone=str(event.get("timezone") or "America/Sao_Paulo"))
     lines = [f"✅ {title} criado!", f"📅 {when}" if when else "📅 Horário confirmado"]
     return "\n".join(lines[:3]), "confirmed"
 
@@ -813,17 +831,27 @@ def _safe_user_text(value: Any, *, limit: int = 280) -> str:
     return text[:limit].strip()
 
 
-def _format_date_time_for_user(value: Any) -> str:
+def _format_date_time_for_user(value: Any, *, timezone: str = "America/Sao_Paulo") -> str:
     text = str(value or "").strip()
     if not text:
         return ""
+    tz_name, tz = _safe_zoneinfo(timezone)
     try:
         parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
         if parsed.hour == 0 and parsed.minute == 0 and len(text) <= 10:
-            return parsed.strftime("%d/%m/%Y")
-        return parsed.strftime("%d/%m/%Y %H:%M")
+            display_time = parsed.strftime("%d/%m/%Y")
+        else:
+            if parsed.tzinfo is None:
+                local = parsed.replace(tzinfo=tz)
+            else:
+                local = parsed.astimezone(tz)
+            display_time = local.strftime("%d/%m/%Y às %H:%M")
+        _json_log("CALENDAR_DISPLAY_TIME", start_raw=text, timezone=tz_name, display_time=display_time)
+        return display_time
     except Exception:
-        return _safe_user_text(text, limit=80)
+        display_time = _safe_user_text(text, limit=80)
+        _json_log("CALENDAR_DISPLAY_TIME", start_raw=text, timezone=tz_name, display_time=display_time)
+        return display_time
 
 
 def _tool_data(normalized_result: dict[str, Any]) -> dict[str, Any]:
