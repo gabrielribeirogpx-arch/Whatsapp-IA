@@ -400,7 +400,8 @@ def test_ai_agent_google_calendar_clear_intent_executes_directly_without_llm(mon
         registry_calls.append({"tool_type": tool_type, "tool_id": tool_id, "input": input})
         if tool_id == "google_calendar_check_availability":
             return ToolResult(True, "google_calendar", tool_id=tool_id, output={"ok": True, "busy": []}, normalized_result=NormalizedToolResult(True, tool_id, type="google_calendar.check_availability", data={}))
-        return ToolResult(True, "google_calendar", tool_id=tool_id, output={"ok": True, "title": input["title"]}, normalized_result=NormalizedToolResult(True, tool_id, type="google_calendar.create_event", summary="Evento criado", data=input))
+        data = {**input, "ok": True, "event_id": "evt_123", "html_link": "https://calendar.google.com/event?eid=evt_123"}
+        return ToolResult(True, "google_calendar", tool_id=tool_id, output=data, normalized_result=NormalizedToolResult(True, tool_id, type="google_calendar.create_event", summary="Evento criado", data=data))
 
     monkeypatch.setattr(svc, "generate_answer_for_tenant", fail_llm)
     monkeypatch.setattr(svc.ToolRegistry, "execute", fake_execute)
@@ -411,8 +412,8 @@ def test_ai_agent_google_calendar_clear_intent_executes_directly_without_llm(mon
     assert [call["tool_id"] for call in registry_calls] == ["google_calendar_check_availability", "google_calendar_create_event"]
     assert registry_calls[1]["input"]["title"] == "Reunião com Gabriel"
     assert "T14:00:00" in registry_calls[1]["input"]["start"]
-    assert result.message.startswith("Pronto! Agendei Reunião com Gabriel para ")
-    assert result.message.endswith(" às 14:00.")
+    assert result.message.startswith("✅ Reunião com Gabriel criado!\n📅 ")
+    assert "14:00" in result.message
     assert result.metadata["budget_llm_calls_used"] == 0
     assert result.metadata["budget_node_tool_calls_used"] == 2
     assert result.metadata["budget_mcp_calls_used"] == 0
@@ -427,7 +428,8 @@ def test_ai_agent_google_calendar_deterministic_fallback_when_llm_does_not_call_
         assert tool_type == "google_calendar"
         assert tool_id == "google_calendar_create_event"
         assert input["title"] == "Reunião com Gabriel"
-        return ToolResult(True, "google_calendar", tool_id=tool_id, output={"ok": True}, normalized_result=NormalizedToolResult(True, tool_id, type="google_calendar.create_event", summary="Evento Reunião com Gabriel criado", data=input))
+        data = {**input, "ok": True, "event_id": "evt_456", "htmlLink": "https://calendar.google.com/event?eid=evt_456"}
+        return ToolResult(True, "google_calendar", tool_id=tool_id, output=data, normalized_result=NormalizedToolResult(True, tool_id, type="google_calendar.create_event", summary="Evento Reunião com Gabriel criado", data=data))
 
     monkeypatch.setattr(svc.ToolRegistry, "execute", fake_execute)
     result = svc.run_agent_for_tenant(
@@ -445,7 +447,7 @@ def test_ai_agent_google_calendar_not_connected_returns_friendly_message(monkeyp
     msg = "Google Calendar não está conectado para este workspace."
     monkeypatch.setattr(svc.ToolRegistry, "execute", lambda self, *a, **k: ToolResult(False, "google_calendar", tool_id="google_calendar_create_event", output={"ok": False, "message": msg}, error_code="google_calendar_error", normalized_result=NormalizedToolResult(False, "google_calendar_create_event", type="google_calendar.create_event", error={"code": msg})))
     result = svc.run_agent_for_tenant(object(), uuid.uuid4(), "Crie um compromisso amanhã às 14:00 chamado Reunião", "instr", ["chamar_mcp", "responder"], {"mcp_tools": [{"tool_id": "google_calendar_create_event"}]}, options={"max_steps": 1, "fallback_message": "fallback"})
-    assert result.message == f"Não consegui acessar o Google Calendar agora: {msg}"
+    assert result.message == "⚠️ Não consegui acessar seu Google Calendar. Conecte sua conta Google novamente."
     assert result.message != "fallback"
 
 
@@ -507,7 +509,7 @@ def test_ai_agent_google_calendar_error_returns_reason(monkeypatch):
         object(), uuid.uuid4(), "Crie um compromisso amanhã às 14:00 chamado Reunião", "instr",
         ["chamar_mcp", "responder"], {"mcp_tools": [{"tool_id": "google_calendar_create_event"}]}, options={"max_steps": 1},
     )
-    assert result.message == "Não consegui acessar o Google Calendar agora: token_expired"
+    assert result.message == "⚠️ Não consegui acessar seu Google Calendar. Conecte sua conta Google novamente."
 
 
 def test_ai_agent_google_calendar_resolves_mcp_display_prefix(monkeypatch):
@@ -1110,3 +1112,39 @@ def test_ai_agent_read_only_google_drive_list_files_can_iterate(monkeypatch):
 
     assert execute_calls == ["google_drive_list_files"]
     assert result.message == "Listei os arquivos."
+
+
+def test_ai_agent_google_calendar_create_event_without_event_id_is_incomplete(monkeypatch):
+    from app.tools.base import NormalizedToolResult, ToolResult
+
+    monkeypatch.setattr(svc, "generate_answer_for_tenant", lambda *a, **k: '{"tool":"chamar_mcp","arguments":{"tool_id":"google_calendar_create_event","input":{"title":"Reunião","start":"2026-06-25T14:00:00-03:00","end":"2026-06-25T15:00:00-03:00"}}}')
+
+    def fake_execute(self, tool_type, tool_id, input, context, config=None):
+        return ToolResult(True, "google_calendar", tool_id=tool_id, output={"ok": True, "title": "Reunião", "start": input.get("start"), "end": input.get("end")}, normalized_result=NormalizedToolResult(True, tool_id, type="google_calendar.create_event", summary="Operação do Google Calendar concluída", data={"ok": True, "title": "Reunião", "start": input.get("start"), "end": input.get("end")}))
+
+    monkeypatch.setattr(svc.ToolRegistry, "execute", fake_execute)
+    result = svc.run_agent_for_tenant(object(), uuid.uuid4(), "agende", "instr", ["chamar_mcp", "responder"], {"mcp_tools": [{"tool_id": "google_calendar_create_event"}]}, options={"max_steps": 1, "fallback_message": "fallback"})
+    assert result.message == "⚠️ Tentei criar o evento, mas não recebi confirmação do Google Calendar. Pode tentar novamente?"
+    assert "Operação do Google Calendar concluída" not in result.message
+
+
+def test_ai_agent_final_response_extracts_nested_responder_text(monkeypatch):
+    import json
+
+    nested = json.dumps({"tool_results": [{"tool": "responder", "arguments": {"text": "✅ Reunião criada!\n📅 Amanhã, 14h\n📝 Reunião de Negócios com Vitor"}}]}, ensure_ascii=False)
+    monkeypatch.setattr(svc, "generate_answer_for_tenant", lambda *a, **k: nested)
+    result = svc.run_agent_for_tenant(object(), uuid.uuid4(), "oi", "instr", ["responder"], {}, options={"max_steps": 1, "fallback_message": "fallback"})
+    assert result.message == "✅ Reunião criada!\n📅 Amanhã, 14h\n📝 Reunião de Negócios com Vitor"
+    assert result.fallback_used is False
+
+
+def test_calendar_formatter_accepts_google_calendar_variations():
+    msg = svc.format_tool_result_for_user("google_calendar_create_event", {
+        "ok": True,
+        "type": "google_calendar.create_event",
+        "summary": "Operação do Google Calendar concluída",
+        "data": {"id": "evt_789", "summary": "Reunião de Negócios com Vitor", "htmlLink": "https://calendar.google.com", "start": {"dateTime": "2026-06-25T14:00:00-03:00"}, "end": {"dateTime": "2026-06-25T15:00:00-03:00"}},
+    })
+    assert "Operação do Google Calendar concluída" not in msg
+    assert "Reunião de Negócios com Vitor" in msg
+    assert "14:00" in msg

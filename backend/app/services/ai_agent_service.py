@@ -472,6 +472,38 @@ def _calendar_error_reason(registry_result: Any, normalized: dict[str, Any]) -> 
     return str(getattr(registry_result, "error_message", None) or "google_calendar_error")
 
 
+
+
+def _calendar_event_data(normalized_result: dict[str, Any]) -> dict[str, Any]:
+    data = _tool_data(normalized_result)
+    if isinstance(data.get("result"), dict):
+        data = data.get("result")
+    start = data.get("start")
+    end = data.get("end")
+    if isinstance(start, dict):
+        start = start.get("dateTime") or start.get("date")
+    if isinstance(end, dict):
+        end = end.get("dateTime") or end.get("date")
+    return {
+        "event_id": data.get("event_id") or data.get("id"),
+        "html_link": data.get("html_link") or data.get("htmlLink"),
+        "title": data.get("title") or data.get("summary") or data.get("name"),
+        "start": start or data.get("start_time"),
+        "end": end or data.get("end_time"),
+    }
+
+
+def _format_calendar_create_result_for_user(normalized_result: dict[str, Any], registry_result: Any | None = None) -> tuple[str, str]:
+    if normalized_result.get("ok") is not True:
+        return "⚠️ Não consegui acessar seu Google Calendar. Conecte sua conta Google novamente.", "error"
+    event = _calendar_event_data(normalized_result)
+    if not event.get("event_id") or not event.get("start") or not event.get("end"):
+        return "⚠️ Tentei criar o evento, mas não recebi confirmação do Google Calendar. Pode tentar novamente?", "incomplete"
+    title = _safe_user_text(event.get("title") or "Evento", limit=120)
+    when = _format_date_time_for_user(event.get("start"))
+    lines = [f"✅ {title} criado!", f"📅 {when}" if when else "📅 Horário confirmado"]
+    return "\n".join(lines[:3]), "confirmed"
+
 def _calendar_session_state(tool_configs: dict[str, Any] | None, opts: dict[str, Any]) -> dict[str, Any]:
     for container in (tool_configs, opts):
         if isinstance(container, dict):
@@ -736,6 +768,11 @@ def format_tool_result_for_user(tool_id: Any, normalized_result: dict[str, Any])
                 lines.append("\n".join(block))
             response = "\n\n".join(lines)
 
+    if not response and tool == "google_calendar_create_event":
+        response, calendar_status = _format_calendar_create_result_for_user(normalized_result)
+        _json_log("AI_AGENT_CALENDAR_CREATE_CONFIRMED" if calendar_status == "confirmed" else "AI_AGENT_CALENDAR_CREATE_INCOMPLETE", tool_id=tool, status=calendar_status)
+        _json_log("AI_AGENT_FINAL_RESPONSE_FROM_TOOL_DATA", tool_id=tool, response_size=len(response), status=calendar_status)
+
     events = data.get("events") if isinstance(data.get("events"), list) else None
     if not response and events is not None:
         if not events:
@@ -835,12 +872,31 @@ def _extract_final_response_text(parsed: dict[str, Any], *, tool: str | None = N
     """Extract the final user-facing response from supported LLM JSON shapes."""
     if not isinstance(parsed, dict):
         return None
+
+    def from_responder(obj: Any) -> str | None:
+        if not isinstance(obj, dict):
+            return None
+        obj_tool = str(obj.get("tool") or obj.get("name") or "").strip()
+        args = obj.get("arguments") if isinstance(obj.get("arguments"), dict) else {}
+        if obj_tool == "responder" or "text" in args or "message" in args or "response" in args:
+            for key in ("text", "message", "response"):
+                text = str(args.get(key) or "").strip()
+                if text:
+                    return text
+        return None
+
+    for candidate in (parsed.get("responder"), parsed):
+        text = from_responder(candidate)
+        if text:
+            return text
+    for container_key in ("tool_results", "tool_calls", "results"):
+        items = parsed.get(container_key)
+        if isinstance(items, list):
+            for item in items:
+                text = from_responder(item) or from_responder((item or {}).get("responder") if isinstance(item, dict) else None)
+                if text:
+                    return text
     arguments = parsed.get("arguments") if isinstance(parsed.get("arguments"), dict) else {}
-    if tool == "responder":
-        for key in ("text", "message", "response"):
-            text = str(arguments.get(key) or "").strip()
-            if text:
-                return text
     for key in ("response", "message", "text", "answer"):
         text = str(parsed.get(key) or "").strip()
         if text:
@@ -1043,14 +1099,15 @@ def _handle_calendar_create_confirmation(*, tenant_id: Any, conversation_id: Any
     if budget is not None:
         budget.consume_node_tool_call()
     registry_result = tool_registry.execute("google_calendar", "google_calendar_create_event", payload, tool_context, {"mcp_tools": mcp_tools, "db": db})
-    if registry_result.ok:
+    normalized = registry_result.normalized_result.to_dict() if registry_result.normalized_result else (registry_result.output if isinstance(registry_result.output, dict) else {})
+    _json_log("AI_AGENT_CALENDAR_CREATE_RESULT", ok=normalized.get("ok"), data=_calendar_event_data(normalized), error=normalized.get("error"))
+    message, calendar_status = _format_calendar_create_result_for_user(normalized, registry_result)
+    if calendar_status == "confirmed":
         if pending_action_service is not None and db_pending is not None and conversation_id is not None:
             pending_action_service.consume_pending_action(tenant_id=tenant_id, conversation_id=conversation_id, pending_id=getattr(db_pending, "id", None))
         session_state.pop("pending_google_calendar_create_event", None)
-        return _format_calendar_success_message({"title": _calendar_create_summary(payload), "start": payload["start"]})
-    normalized = registry_result.normalized_result.to_dict() if registry_result.normalized_result else {}
-    reason = _calendar_error_reason(registry_result, normalized)
-    return f"Não consegui acessar o Google Calendar agora: {reason}"
+    _json_log("AI_AGENT_CALENDAR_CREATE_CONFIRMED" if calendar_status == "confirmed" else "AI_AGENT_CALENDAR_CREATE_INCOMPLETE", status=calendar_status, event_id=_calendar_event_data(normalized).get("event_id"))
+    return message
 
 
 def _handle_email_send_confirmation(*, tenant_id: Any, conversation_id: Any, pending_action: Any, user_message: str, context: dict[str, Any]) -> str:
@@ -1475,15 +1532,13 @@ def run_agent_for_tenant(db: Session, tenant_id, input_text: str, instruction: s
             registry_result = tool_registry.execute("google_calendar", "google_calendar_create_event", deterministic_input, tool_context, {"mcp_tools": mcp_tools, "db": db})
         except ExecutionBudgetExceeded:
             return AgentRunResult(message=fallback, status="budget_exceeded", fallback_used=True, steps_count=0, final_tool="chamar_mcp", metadata={**(budget.safe_metadata() if budget else {}), "budget_exceeded": True})
-        normalized = registry_result.normalized_result.to_dict() if registry_result.normalized_result else {}
+        normalized = registry_result.normalized_result.to_dict() if registry_result.normalized_result else (registry_result.output if isinstance(registry_result.output, dict) else {})
         reason = None if registry_result.ok else _calendar_error_reason(registry_result, normalized)
         _json_log("AI_AGENT_DETERMINISTIC_CALENDAR_RESULT", ok=registry_result.ok, error=reason, raw_result=registry_result.output)
-        if registry_result.ok:
-            msg = _format_calendar_success_message(deterministic_input)
-            status = "success"
-        else:
-            msg = f"Não consegui acessar o Google Calendar agora: {reason}"
-            status = "error"
+        _json_log("AI_AGENT_CALENDAR_CREATE_RESULT", ok=normalized.get("ok"), data=_calendar_event_data(normalized), error=normalized.get("error"))
+        msg, calendar_status = _format_calendar_create_result_for_user(normalized, registry_result)
+        status = "success" if calendar_status == "confirmed" else "error"
+        _json_log("AI_AGENT_CALENDAR_CREATE_CONFIRMED" if calendar_status == "confirmed" else "AI_AGENT_CALENDAR_CREATE_INCOMPLETE", status=calendar_status, event_id=_calendar_event_data(normalized).get("event_id"))
         total_latency_ms = int((time.monotonic() - started) * 1000)
         result.message = msg[:4000]
         result.actions.append(AgentToolAction("message", {"message": result.message}))
@@ -1749,6 +1804,8 @@ def run_agent_for_tenant(db: Session, tenant_id, input_text: str, instruction: s
             normalized = registry_result.normalized_result.to_dict() if registry_result.normalized_result else (registry_result.output if isinstance(registry_result.output, dict) else {})
             _json_log("AI_AGENT_TOOL_NORMALIZED", tool_original=tool_id, normalized_result=normalized)
             _json_log("AI_AGENT_TOOL_RESULT_MODEL", tool_original=tool_id, normalized_result=normalized)
+            if tool_id == "google_calendar_create_event":
+                _json_log("AI_AGENT_CALENDAR_CREATE_RESULT", ok=normalized.get("ok"), data=_calendar_event_data(normalized), error=normalized.get("error"))
             error = normalized.get("error") if isinstance(normalized.get("error"), dict) else None
             status = "success" if normalized.get("ok") is True else "error"
             mcp_call = {"tool_id": tool_id, "status": status, "latency_ms": tool_result.get("latency_ms"), "error": (error or {}).get("code"), "tool_type": routed_tool_type}
@@ -1835,19 +1892,20 @@ def run_agent_for_tenant(db: Session, tenant_id, input_text: str, instruction: s
                     budget.consume_node_tool_call()
                 registry_result = tool_registry.execute("google_calendar", "google_calendar_create_event", deterministic_input, tool_context, {"mcp_tools": mcp_tools, "db": db})
             if registry_result is not None:
-                normalized = registry_result.normalized_result.to_dict() if registry_result.normalized_result else {}
+                normalized = registry_result.normalized_result.to_dict() if registry_result.normalized_result else (registry_result.output if isinstance(registry_result.output, dict) else {})
                 _json_log("AI_AGENT_TOOL_CALL_RESULT", ok=registry_result.ok, raw_result=registry_result.output, error=registry_result.error_code, deterministic=True)
+                _json_log("AI_AGENT_CALENDAR_CREATE_RESULT", ok=normalized.get("ok"), data=_calendar_event_data(normalized), error=normalized.get("error"))
                 error = normalized.get("error") if isinstance(normalized.get("error"), dict) else {}
                 mcp_tool_calls.append({"tool_id": "google_calendar_create_event", "status": "success" if registry_result.ok else "error", "latency_ms": (registry_result.metadata or {}).get("duration_ms"), "error": (error or {}).get("code") or registry_result.error_code, "tool_type": "google_calendar"})
-                if registry_result.ok:
-                    result.message = _format_universal_tool_response({"normalized_result": normalized})[:4000]
-                    result.actions = [AgentToolAction("message", {"message": result.message})]
-                    result.status = "success"; result.fallback_used = False; result.final_tool = "chamar_mcp"; result.tools_used.append("chamar_mcp")
-                else:
-                    message = str(((registry_result.output or {}).get("message") if isinstance(registry_result.output, dict) else "") or "Não consegui acessar o Google Calendar agora.")
-                    result.message = message[:4000]
-                    result.actions = [AgentToolAction("message", {"message": result.message})]
-                    result.status = "error"; result.fallback_used = False; result.final_tool = "chamar_mcp"
+                message, calendar_status = _format_calendar_create_result_for_user(normalized, registry_result)
+                _json_log("AI_AGENT_CALENDAR_CREATE_CONFIRMED" if calendar_status == "confirmed" else "AI_AGENT_CALENDAR_CREATE_INCOMPLETE", status=calendar_status, event_id=_calendar_event_data(normalized).get("event_id"))
+                result.message = message[:4000]
+                result.actions = [AgentToolAction("message", {"message": result.message})]
+                result.status = "success" if calendar_status == "confirmed" else "error"
+                result.fallback_used = False
+                result.final_tool = "chamar_mcp"
+                if calendar_status == "confirmed":
+                    result.tools_used.append("chamar_mcp")
     total_latency_ms = int((time.monotonic() - started) * 1000)
     _json_log("AI_AGENT_FINISHED", status=result.status, final_tool=result.final_tool, tools_used=result.tools_used, fallback_used=result.fallback_used)
     record_event(db, trace, TraceEventType.AI_AGENT_FINISHED, duration_ms=total_latency_ms, metadata={"status": result.status, "final_tool": result.final_tool, "tools_used": result.tools_used})
