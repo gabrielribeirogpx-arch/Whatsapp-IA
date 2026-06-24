@@ -36,7 +36,7 @@ assert.match(statusFn, /\/api\/integrations\/google-sheets\/status/);
 assert.match(disconnectFn, /\/api\/integrations\/google-sheets\/disconnect/);
 assert.match(disconnectFn, /method: ["']POST["']/);
 
-assert.match(featuresSource, /ENABLE_GOOGLE_SHEETS_INTEGRATION = false/);
+assert.match(featuresSource, /ENABLE_GOOGLE_SHEETS_INTEGRATION = true/);
 assert.match(settingsSource, /Apps conectados ao Wazza/);
 assert.match(settingsSource, /ENABLE_GOOGLE_SHEETS_INTEGRATION \? \(/);
 assert.match(settingsSource, /<h4[^>]*>[\s\S]*?Google Sheets[\s\S]*?<\/h4>/);
