@@ -123,19 +123,19 @@ function AiSystemNode({ id, data, selected }: NodeProps) {
       </div>
       <section className="ai-system-architecture" aria-hidden={!isExpanded}>
         <div className="ai-system-architecture-stage">
-          <svg className="ai-system-architecture-lines" viewBox="0 0 520 430" preserveAspectRatio="none" aria-hidden="true">
+          <svg className="ai-system-architecture-lines" viewBox="0 0 600 470" preserveAspectRatio="none" aria-hidden="true">
             {graphEdges.map((edge, index) => {
               const source = graphCards.find((card) => card.id === edge.source)?.visualKey || edge.source;
               const target = graphCards.find((card) => card.id === edge.target)?.visualKey || edge.target;
               const path = (source === 'dispatcher' || source === 'ai_dispatcher') && (target === 'greeting' || target === 'ai_greeting')
-                ? 'M260 82 C260 132 116 120 116 170'
+                ? 'M300 96 C300 136 123 126 123 164'
                 : (source === 'dispatcher' || source === 'ai_dispatcher') && (target === 'calendar' || target === 'ai_calendar_agent')
-                  ? 'M260 82 C260 132 404 120 404 170'
+                  ? 'M300 96 C300 136 477 126 477 164'
                   : target === 'google_calendar'
-                    ? 'M404 232 C404 270 404 278 404 312'
+                    ? 'M477 232 C477 252 477 262 477 282'
                     : source === 'google_calendar'
-                      ? 'M404 360 C404 392 260 386 260 410'
-                      : 'M260 82 C260 170 260 260 260 342';
+                      ? 'M477 350 C477 388 300 372 300 382'
+                      : 'M300 96 C300 170 300 275 300 382';
               return <path key={`${edge.source}-${edge.target}-${index}`} className="ai-system-architecture-line" d={path} />;
             })}
           </svg>
