@@ -544,3 +544,85 @@ def test_ai_agent_still_rejects_real_api_key() -> None:
         FlowV2Publisher().publish(nodes=nodes, edges=edges)
 
     assert "FLOW_V2_AI_NODE_API_KEY_FORBIDDEN:agent" in exc.value.errors
+
+
+def _ai_system_node(system_id: str = "system") -> dict:
+    return {
+        "id": system_id,
+        "type": "ai_system",
+        "data": {
+            "internal_nodes": [
+                {"id": "dispatcher", "type": "ai_dispatcher", "data": {"isStart": True}},
+                {"id": "greeting", "type": "ai_greeting", "data": {}},
+                {"id": "calendar", "type": "ai_calendar_agent", "data": {}},
+                {"id": "fallback", "type": "ai_safe_fallback", "data": {}},
+            ],
+            "internal_edges": [
+                {"id": "i1", "source": "dispatcher", "target": "greeting", "sourceHandle": "default"},
+                {"id": "i2", "source": "greeting", "target": "calendar", "sourceHandle": "default"},
+                {"id": "i3", "source": "calendar", "target": "fallback", "sourceHandle": "default"},
+            ],
+        },
+    }
+
+
+def test_ai_system_publish_expands_compile_time_node_from_external_start() -> None:
+    result = FlowV2Publisher().publish(
+        nodes=[{"id": "start", "type": "start"}, _ai_system_node()],
+        edges=[{"id": "e1", "source": "start", "target": "system"}],
+    )
+
+    node_types = {node["type"] for node in result.snapshot["nodes"]}
+    node_ids = {node["id"] for node in result.snapshot["nodes"]}
+    assert "ai_system" not in node_types
+    assert "system__dispatcher" in node_ids
+    assert any(edge["source"] == "start" and edge["target"] == "system__dispatcher" for edge in result.snapshot["edges"])
+    assert result.snapshot["start_node_id"] == "start"
+    assert result.validation.status == GraphValidationStatus.VALID
+
+
+def test_ai_system_publish_between_start_and_message_reconnects_exits() -> None:
+    result = FlowV2Publisher().publish(
+        nodes=[{"id": "start", "type": "start"}, _ai_system_node(), {"id": "done", "type": "message", "data": {"content": "Fim"}}],
+        edges=[
+            {"id": "e1", "source": "start", "target": "system"},
+            {"id": "e2", "source": "system", "target": "done"},
+        ],
+    )
+
+    assert not any(node["type"] == "ai_system" for node in result.snapshot["nodes"])
+    assert any(edge["source"] == "system__fallback" and edge["target"] == "done" for edge in result.snapshot["edges"])
+    assert len([node for node in result.snapshot["nodes"] if FlowV2GraphValidator._is_start_node(node)]) == 1
+
+
+def test_ai_system_as_canvas_start_creates_one_runtime_start() -> None:
+    system = _ai_system_node()
+    system["data"]["isStart"] = True
+    result = FlowV2Publisher().publish(nodes=[system], edges=[])
+
+    assert result.snapshot["start_node_id"] == "system__start"
+    assert len([node for node in result.snapshot["nodes"] if FlowV2GraphValidator._is_start_node(node)]) == 1
+    assert not any(node["type"] == "ai_system" for node in result.snapshot["nodes"])
+
+
+def test_legacy_start_to_ai_agent_still_publishes() -> None:
+    result = FlowV2Publisher().publish(
+        nodes=[
+            {"id": "start", "type": "start"},
+            {"id": "agent", "type": "ai_agent", "data": {"allowed_tools": ["responder"], "max_steps": 3}},
+        ],
+        edges=[{"id": "e1", "source": "start", "target": "agent"}],
+    )
+
+    assert result.validation.status == GraphValidationStatus.VALID
+    assert any(node["id"] == "agent" and node["type"] == "ai_agent" for node in result.snapshot["nodes"])
+
+
+def test_ai_system_internal_changes_affect_published_hash() -> None:
+    system = _ai_system_node()
+    first = FlowV2Publisher().publish(nodes=[{"id": "start", "type": "start"}, system], edges=[{"id": "e1", "source": "start", "target": "system"}])
+    changed = _ai_system_node()
+    changed["data"]["internal_nodes"][0]["data"]["prompt"] = "novo prompt"
+    second = FlowV2Publisher().publish(nodes=[{"id": "start", "type": "start"}, changed], edges=[{"id": "e1", "source": "start", "target": "system"}])
+
+    assert first.v2_snapshot_hash != second.v2_snapshot_hash
