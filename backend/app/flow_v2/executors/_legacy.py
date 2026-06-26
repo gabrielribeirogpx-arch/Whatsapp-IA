@@ -1980,6 +1980,79 @@ class AiAgentNodeExecutor(AiResponseNodeExecutor):
         return NodeExecutionResult(actions=tuple(actions), next_node_id=next_node_id, status="continue" if next_node_id else "complete")
 
 
+def _agent_system_message_intent(message: str) -> str:
+    text = (message or "").strip().lower()
+    if re.fullmatch(r"(oi+|ol[aá]|bom dia|boa tarde|boa noite|hey|hello|hi)[!?.\s]*", text):
+        return "greeting"
+    if any(term in text for term in ("cancel", "desmarc", "excluir evento", "remover evento")):
+        return "calendar_delete"
+    if any(term in text for term in ("agenda", "agende", "marque", "reunião", "reuniao", "evento", "compromisso", "disponibilidade", "horário", "horario")):
+        if any(term in text for term in ("listar", "liste", "consult", "ver", "tenho", "disponibilidade")):
+            return "calendar_list"
+        return "calendar_create"
+    if any(term in text for term in ("atendente", "humano", "pessoa")):
+        return "human_handoff"
+    if any(term in text for term in ("preço", "preco", "plano", "comprar", "orçamento", "orcamento", "vendas")):
+        return "sales_lead"
+    if any(term in text for term in ("suporte", "ajuda", "problema", "dúvida", "duvida")):
+        return "support_question"
+    return "unknown"
+
+
+class AiDispatcherNodeExecutor(BaseNodeExecutor):
+    """Deterministic first-pass intent router for agent system templates."""
+
+    def execute(self, db, *, snapshot, session, node, runtime_input) -> NodeExecutionResult:
+        node_id = str(node["id"])
+        intent = _agent_system_message_intent(runtime_input.message_text or "")
+        logger.info("event=AI_DISPATCHER_INTENT_DETECTED node_id=%s intent=%s", node_id, intent)
+        self.event_store.append(db, session=session, event_type=FlowV2EventType.OUTPUT_EMITTED, node_id=node_id, payload={"analytics_event": "AI_DISPATCHER_INTENT_DETECTED", "intent": intent})
+        resolution = self.transition_resolver.resolve(db, snapshot=snapshot, session=session, source_node_id=node_id, source_handle=intent)
+        next_node_id = resolution.target_node_id
+        if not next_node_id and intent != "unknown":
+            resolution = self.transition_resolver.resolve(db, snapshot=snapshot, session=session, source_node_id=node_id, source_handle="unknown")
+            next_node_id = resolution.target_node_id
+        logger.info("event=AI_DISPATCHER_ROUTED node_id=%s intent=%s next_node_id=%s", node_id, intent, next_node_id)
+        self.event_store.append(db, session=session, event_type=FlowV2EventType.OUTPUT_EMITTED, node_id=node_id, payload={"analytics_event": "AI_DISPATCHER_ROUTED", "intent": intent, "next_node_id": next_node_id})
+        return NodeExecutionResult(next_node_id=next_node_id, status="continue" if next_node_id else "complete")
+
+
+class AiGreetingNodeExecutor(BaseNodeExecutor):
+    def execute(self, db, *, snapshot, session, node, runtime_input) -> NodeExecutionResult:
+        node_id = str(node["id"])
+        logger.info("event=AI_SPECIALIZED_AGENT_STARTED node_id=%s node_type=ai_greeting", node_id)
+        action = SendMessageAction(tenant_id=session.tenant_id, session_id=session.id, external_user_id=runtime_input.external_user_id, conversation_id=runtime_input.conversation_id, contact_id=runtime_input.contact_id, text="Olá! 👋 Como posso ajudar?", metadata={**runtime_input.metadata, "node_id": node_id, "intent": "ai_greeting"})
+        logger.info("event=AI_SPECIALIZED_AGENT_FINISHED node_id=%s node_type=ai_greeting", node_id)
+        return NodeExecutionResult(actions=(action,), next_node_id=self._default_next_or_terminal(db, snapshot=snapshot, session=session, node_id=node_id), status="complete")
+
+
+class AiSafeFallbackNodeExecutor(BaseNodeExecutor):
+    def execute(self, db, *, snapshot, session, node, runtime_input) -> NodeExecutionResult:
+        node_id = str(node["id"])
+        data = self._node_data(node)
+        text = str(data.get("fallback_message") or data.get("instruction") or "Não consegui entender totalmente. Você quer agendar algo, tirar uma dúvida ou falar com um atendente?")
+        logger.info("event=AI_SAFE_FALLBACK_USED node_id=%s", node_id)
+        action = SendMessageAction(tenant_id=session.tenant_id, session_id=session.id, external_user_id=runtime_input.external_user_id, conversation_id=runtime_input.conversation_id, contact_id=runtime_input.contact_id, text=text, metadata={**runtime_input.metadata, "node_id": node_id, "intent": "ai_safe_fallback"})
+        return NodeExecutionResult(actions=(action,), next_node_id=self._default_next_or_terminal(db, snapshot=snapshot, session=session, node_id=node_id), status="complete")
+
+
+class AiCalendarAgentNodeExecutor(AiAgentNodeExecutor):
+    def execute(self, db, *, snapshot, session, node, runtime_input) -> NodeExecutionResult:
+        node_id = str(node["id"])
+        logger.info("event=AI_SPECIALIZED_AGENT_STARTED node_id=%s node_type=ai_calendar_agent", node_id)
+        wrapped = dict(node)
+        data = dict(self._node_data(node))
+        data.setdefault("instruction", "Você é um agente especializado em agenda. Use Google Calendar apenas quando necessário. Nunca confirme evento sem retorno real da ferramenta. Use o DateResolver determinístico.")
+        data["allow_mcp_tools"] = True
+        data.setdefault("mcp_tool_ids", ["google_calendar_create_event", "google_calendar_list_events", "google_calendar_delete_event"])
+        data.setdefault("allowed_tools", ["responder", "chamar_mcp"])
+        data.setdefault("after_agent_behavior", "end_flow")
+        wrapped["data"] = data
+        result = super().execute(db, snapshot=snapshot, session=session, node=wrapped, runtime_input=runtime_input)
+        logger.info("event=AI_SPECIALIZED_AGENT_FINISHED node_id=%s node_type=ai_calendar_agent status=%s", node_id, result.status)
+        return result
+
+
 class AiSupervisorNodeExecutor(AiResponseNodeExecutor):
     """Supervisor node that routes one request to one existing IA Agente."""
 

@@ -14,7 +14,7 @@ import ReactFlow, {
 } from 'reactflow';
 import type { Connection, Edge, EdgeChange, Node, NodeChange, ReactFlowInstance } from 'reactflow';
 import 'reactflow/dist/style.css';
-import { BookOpen, ChevronDown, Clock, ExternalLink, FileDown, FileImage, FileText, GitBranch, HelpCircle, History, ListChecks, MessageSquare, RotateCcw, Sparkles, Tags, Zap } from 'lucide-react';
+import { BookOpen, CalendarDays, ChevronDown, Clock, ExternalLink, FileDown, FileImage, FileText, GitBranch, HelpCircle, History, ListChecks, MessageSquare, RotateCcw, Sparkles, Tags, Zap } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 
 import ActionNode from '@/components/flow/nodes/ActionNode';
@@ -25,6 +25,7 @@ import AiExtractionNode from '@/components/flow/nodes/AiExtractionNode';
 import AiSummaryNode from '@/components/flow/nodes/AiSummaryNode';
 import AiAgentNode from '@/components/flow/nodes/AiAgentNode';
 import AiSupervisorNode from '@/components/flow/nodes/AiSupervisorNode';
+import AiSpecializedAgentNode from '@/components/flow/nodes/AiSpecializedAgentNode';
 import ChoiceNode from '@/components/flow/nodes/ChoiceNode';
 import ConditionNode from '@/components/flow/nodes/ConditionNode';
 import CtaUrlNode from '@/components/flow/nodes/CtaUrlNode';
@@ -38,6 +39,7 @@ import { orderChoiceChildrenEdges } from '@/lib/flowChoiceOrdering';
 import { normalizeFlow } from '@/lib/flowNormalization';
 import { filterGoogleSheetsTools } from '@/lib/features';
 import { FlowAnalytics, FlowEdgePayload, FlowNodePayload, FlowVersionItem } from '@/lib/types';
+import { AGENT_SYSTEM_TEMPLATES, ENABLE_AGENT_SYSTEM_TEMPLATES, instantiateAgentSystemTemplate } from '@/lib/agentSystemTemplates';
 
 const FETCH_TIMEOUT_MS = 8000;
 const INVALID_UPLOAD_PUBLIC_URL_MESSAGE = 'Upload concluído, mas a URL pública gerada é inválida.';
@@ -58,6 +60,10 @@ const nodeTypes = {
   ai_summary: AiSummaryNode,
   ai_agent: AiAgentNode,
   ai_supervisor: AiSupervisorNode,
+  ai_dispatcher: AiSpecializedAgentNode,
+  ai_greeting: AiSpecializedAgentNode,
+  ai_calendar_agent: AiSpecializedAgentNode,
+  ai_safe_fallback: AiSpecializedAgentNode,
   cta_link: CtaUrlNode,
   messageNode: MessageNode,
   choiceNode: ChoiceNode,
@@ -68,7 +74,7 @@ const nodeTypes = {
   ctaUrlNode: CtaUrlNode,
 };
 
-type FlowNodeKind = 'message' | 'choice' | 'condition' | 'delay' | 'action' | 'media' | 'cta_url' | 'ai_rag' | 'ai_response' | 'ai_classification' | 'ai_extraction' | 'ai_summary' | 'ai_agent' | 'ai_supervisor';
+type FlowNodeKind = 'message' | 'choice' | 'condition' | 'delay' | 'action' | 'media' | 'cta_url' | 'ai_rag' | 'ai_response' | 'ai_classification' | 'ai_extraction' | 'ai_summary' | 'ai_agent' | 'ai_supervisor' | 'ai_dispatcher' | 'ai_greeting' | 'ai_calendar_agent' | 'ai_safe_fallback';
 type FlowConnection = Connection & { sourceHandle?: string | null };
 type NodePaletteItem = { kind: FlowNodeKind; label: string; icon: LucideIcon; description?: string };
 type NodePaletteGroup = { id: 'communication' | 'ai' | 'logic' | 'actions'; title: string; icon: LucideIcon; nodes: NodePaletteItem[] };
@@ -244,6 +250,10 @@ const NODE_PRESETS: Record<FlowNodeKind, { label: string; type: string; data: Re
   ai_extraction: { label: 'IA Extração', type: 'ai_extraction', data: { instruction: '', input_template: '{{last_message}}', fields: [{ name: 'nome', type: 'string', description: 'Nome da pessoa' }, { name: 'email', type: 'email', description: 'E-mail' }], include_conversation_history: true, output_variable: 'ai.extraction', save_to_contact: false, save_to_lead: true, send_debug_message: false } },
   ai_summary: { label: 'IA Resumo', type: 'ai_summary', data: { summary_source: 'conversation_history', input_template: '{{last_message}}', instruction: '', summary_format: 'handoff', max_history_messages: 30, max_history_chars: 8000, output_variable: 'ai.summary', send_message: false, continue_on_error: true, model_override: '', temperature: 0.2, max_tokens: 800 } },
   ai_supervisor: { label: 'Supervisor IA', type: 'ai_supervisor', data: { name: 'Supervisor', description: '', supervisor_prompt: 'Escolha o especialista mais adequado para atender a solicitação.', input_template: '{{last_message}}', max_agents: 1, mode: 'single', agent_ids: [], fallback_agent_id: '', memory_max_messages: 10, memory_max_chars: 4000 } },
+  ai_dispatcher: { label: 'IA Dispatcher', type: 'ai_dispatcher', data: { instruction: 'Classifique a intenção da mensagem do usuário. Responda apenas com uma intent válida. Não execute ações.', input_template: '{{last_message}}', intents: ['greeting', 'calendar_create', 'calendar_list', 'calendar_delete', 'support_question', 'sales_lead', 'rag_question', 'human_handoff', 'unknown'], allow_mcp_tools: false, allowed_tools: ['responder'], after_agent_behavior: 'continue_to_next' } },
+  ai_greeting: { label: 'IA Greeting', type: 'ai_greeting', data: { instruction: 'Você responde saudações de forma curta, humana e natural no WhatsApp.', input_template: '{{last_message}}', allow_mcp_tools: false, allowed_tools: ['responder'], fallback_message: 'Olá! 👋 Como posso ajudar?', after_agent_behavior: 'end_flow' } },
+  ai_calendar_agent: { label: 'IA Calendar Agent', type: 'ai_calendar_agent', data: { instruction: 'Você é um agente especializado em agenda. Use Google Calendar apenas quando necessário. Nunca confirme evento sem retorno real da ferramenta. Use o DateResolver determinístico.', input_template: '{{last_message}}', allowed_tools: ['responder', 'chamar_mcp'], allow_mcp_tools: true, mcp_tool_ids: ['google_calendar_create_event', 'google_calendar_list_events', 'google_calendar_delete_event'], max_mcp_calls: 3, use_date_resolver: true, after_agent_behavior: 'end_flow' } },
+  ai_safe_fallback: { label: 'IA Fallback Seguro', type: 'ai_safe_fallback', data: { instruction: 'Não consegui entender totalmente. Você quer agendar algo, tirar uma dúvida ou falar com um atendente?', input_template: '{{last_message}}', allow_mcp_tools: false, allowed_tools: ['responder'], fallback_message: 'Não consegui entender totalmente. Você quer agendar algo, tirar uma dúvida ou falar com um atendente?', after_agent_behavior: 'end_flow' } },
   ai_agent: { label: 'IA Agente', type: 'ai_agent', data: { instruction: 'Você é um agente de atendimento. Use apenas as ferramentas permitidas.', input_template: '{{last_message}}', allowed_tools: ['responder', 'definir_variavel'], allow_node_tools: false, node_tools: [], max_node_tool_calls: 3, allow_subflow_tools: false, subflow_tools: [], max_subflow_calls: 2, allow_mcp_tools: false, mcp_tool_ids: [], max_mcp_calls: 3, max_steps: 3, use_memory: true, memory_max_messages: 10, memory_max_chars: 4000, model_override: '', temperature: 0.2, max_tokens: 1200, after_agent_behavior: 'wait_same_node', after_answer_behavior: 'wait_same_node', fallback_message: 'Não consegui concluir essa ação agora. Quer que eu encaminhe para um atendente?', webhooks: [] } },
 };
 
@@ -1356,6 +1366,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
   const [selectedFlowId, setSelectedFlowId] = useState<string | null>(flowIdFromUrl || null);
   const [activeFlowId, setActiveFlowId] = useState<string | null>(null);
   const [isFlowSelectOpen, setIsFlowSelectOpen] = useState(false);
+  const [isAgentSystemModalOpen, setIsAgentSystemModalOpen] = useState(false);
   console.log('FLOW SELECIONADO:', selectedFlowId);
   console.log('FLOW ATIVO:', activeFlowId);
   console.log('FLOWS DISPONÍVEIS:', flows);
@@ -2477,6 +2488,29 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
     }, 0);
   }, [rfInstance, setEdges, setNodes, toast, toggleStartNode, updateNodeData]);
 
+
+  const handleInsertAgentSystemTemplate = useCallback((templateId: string) => {
+    const template = AGENT_SYSTEM_TEMPLATES.find((item) => item.id === templateId);
+    if (!template || template.nodes.length === 0) {
+      toast.error('Template de sistema de agentes ainda não disponível.');
+      return;
+    }
+    console.info('AGENT_SYSTEM_TEMPLATE_SELECTED', { template_id: template.id, version: template.version });
+    const origin = rfInstance?.screenToFlowPosition({ x: 260, y: 120 }) || { x: 0, y: 0 };
+    const graph = instantiateAgentSystemTemplate(template, makeNodeId, origin);
+    const hydratedNodes = graph.nodes.map((node) => ({
+      ...node,
+      data: { ...node.data, onChange: updateNodeData, onToggleStart: toggleStartNode, hasValidationError: false },
+    }));
+    setNodes((current) => [...current, ...hydratedNodes]);
+    setEdges((current) => [...current, ...graph.edges]);
+    setShowEmptyFlowWarning(false);
+    setIsAgentSystemModalOpen(false);
+    toast.success(`Sistema de agentes inserido: ${template.name}`);
+    console.info('AGENT_SYSTEM_TEMPLATE_INSERTED', { template_id: template.id, nodes_count: graph.nodes.length, edges_count: graph.edges.length });
+    setTimeout(() => rfInstance?.fitView({ padding: 0.2, duration: 500 }), 0);
+  }, [rfInstance, setEdges, setNodes, toast, toggleStartNode, updateNodeData]);
+
   const getCurrentSerializedFlow = useCallback(() => {
     const realFlow = rfInstance?.toObject?.();
     const realFlowNodes = Array.isArray(realFlow?.nodes) ? (realFlow.nodes as Node[]) : nodesRef.current;
@@ -2906,6 +2940,20 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
         </div>
 
         <div className="flow-node-palette" aria-label="Paleta de nodes do Flow Builder">
+          {ENABLE_AGENT_SYSTEM_TEMPLATES ? (
+            <button
+              type="button"
+              className="dash-nav-item flow-node-palette-item"
+              onClick={() => setIsAgentSystemModalOpen(true)}
+              title="Inserir sistema profissional de agentes pré-montado"
+              data-tooltip="Templates modulares com IA Dispatcher, agentes especializados e fallback seguro."
+            >
+              <span className="flow-node-palette-item-icon" aria-hidden="true">
+                <CalendarDays size={17} strokeWidth={1.9} className="text-current" />
+              </span>
+              <span className="dash-nav-label">+ Sistema de Agentes</span>
+            </button>
+          ) : null}
           {NODE_GROUPS.map((group) => {
             const GroupIcon = group.icon;
             const isOpen = openNodeGroups[group.id];
@@ -3324,6 +3372,37 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
           <Controls />
         </ReactFlow>
       </main>
+
+      {isAgentSystemModalOpen && (
+        <div className="flow-modal-backdrop" role="dialog" aria-modal="true" aria-label="Selecionar Sistema de Agentes">
+          <div className="flow-modal-card" style={{ maxWidth: 920 }}>
+            <div className="flow-modal-header">
+              <div>
+                <h2>Sistema de Agentes</h2>
+                <p>Escolha um template pré-montado. Ele será inserido como nova camada opcional, sem alterar fluxos publicados nem remover o IA Agente atual.</p>
+              </div>
+              <button type="button" onClick={() => setIsAgentSystemModalOpen(false)}>×</button>
+            </div>
+            <div className="flow-template-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 12 }}>
+              {AGENT_SYSTEM_TEMPLATES.map((template) => (
+                <button
+                  key={template.id}
+                  type="button"
+                  className="flow-template-card"
+                  onClick={() => handleInsertAgentSystemTemplate(template.id)}
+                  disabled={template.nodes.length === 0}
+                  style={{ textAlign: 'left', border: '1px solid #e5e7eb', borderRadius: 16, padding: 16, background: template.nodes.length ? '#fff' : '#f9fafb', opacity: template.nodes.length ? 1 : 0.72 }}
+                >
+                  <strong>{template.name}</strong>
+                  <p>{template.description}</p>
+                  <small>{template.category} · v{template.version}{template.nodes.length === 0 ? ' · em breve' : ''}</small>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
       {selectedNode && (
         <>
           <button
