@@ -26,6 +26,7 @@ import AiSummaryNode from '@/components/flow/nodes/AiSummaryNode';
 import AiAgentNode from '@/components/flow/nodes/AiAgentNode';
 import AiSupervisorNode from '@/components/flow/nodes/AiSupervisorNode';
 import AiSpecializedAgentNode from '@/components/flow/nodes/AiSpecializedAgentNode';
+import AiSystemNode from '@/components/flow/nodes/AiSystemNode';
 import ChoiceNode from '@/components/flow/nodes/ChoiceNode';
 import ConditionNode from '@/components/flow/nodes/ConditionNode';
 import CtaUrlNode from '@/components/flow/nodes/CtaUrlNode';
@@ -64,6 +65,7 @@ const nodeTypes = {
   ai_greeting: AiSpecializedAgentNode,
   ai_calendar_agent: AiSpecializedAgentNode,
   ai_safe_fallback: AiSpecializedAgentNode,
+  ai_system: AiSystemNode,
   cta_link: CtaUrlNode,
   messageNode: MessageNode,
   choiceNode: ChoiceNode,
@@ -74,7 +76,7 @@ const nodeTypes = {
   ctaUrlNode: CtaUrlNode,
 };
 
-type FlowNodeKind = 'message' | 'choice' | 'condition' | 'delay' | 'action' | 'media' | 'cta_url' | 'ai_rag' | 'ai_response' | 'ai_classification' | 'ai_extraction' | 'ai_summary' | 'ai_agent' | 'ai_supervisor' | 'ai_dispatcher' | 'ai_greeting' | 'ai_calendar_agent' | 'ai_safe_fallback';
+type FlowNodeKind = 'message' | 'choice' | 'condition' | 'delay' | 'action' | 'media' | 'cta_url' | 'ai_rag' | 'ai_response' | 'ai_classification' | 'ai_extraction' | 'ai_summary' | 'ai_agent' | 'ai_supervisor' | 'ai_dispatcher' | 'ai_greeting' | 'ai_calendar_agent' | 'ai_safe_fallback' | 'ai_system';
 type FlowConnection = Connection & { sourceHandle?: string | null };
 type NodePaletteItem = { kind: FlowNodeKind; label: string; icon: LucideIcon; description?: string };
 type NodePaletteGroup = { id: 'communication' | 'ai' | 'logic' | 'actions'; title: string; icon: LucideIcon; nodes: NodePaletteItem[] };
@@ -107,6 +109,15 @@ const slugifyToolId = (value: string) =>
 const getFlowDisplayName = (flow?: FlowListOption | null) => flow?.name || (flow?.id ? `Fluxo ${flow.id.slice(0, 8)}` : 'Fluxo não selecionado');
 const isPublishedFlow = (flow: FlowListOption) => flow.is_published === true || flow.status === 'published' || flow.status === 'active' || flow.is_active === true;
 const getPublishedVersionId = (flow: FlowListOption) => flow.published_version_id || flow.flow_version_id || flow.version_id || null;
+
+const AI_SYSTEM_CARDS = [
+  { id: 'ai_calendar_agent_system', title: '📅 Agenda Inteligente', subtitle: 'Dispatcher, saudação, agenda e fallback seguro.' },
+  { id: 'ai_support_agent_system', title: '💬 Atendimento Inteligente', subtitle: 'Triagem e respostas de atendimento.' },
+  { id: 'ai_sales_agent_system', title: '💼 Comercial Inteligente', subtitle: 'Qualificação comercial e CRM.' },
+  { id: 'ai_rag_agent_system', title: '📚 Conhecimento (RAG)', subtitle: 'Respostas com base de conhecimento.' },
+  { id: 'ai_mcp_advanced_system', title: '🛠 MCP Automation', subtitle: 'Automação com ferramentas MCP.' },
+  { id: 'ai_custom_system', title: '➕ Sistema Personalizado', subtitle: 'Comece com um sistema IA em branco.' },
+] as const;
 
 const NODE_GROUPS: NodePaletteGroup[] = [
   {
@@ -254,6 +265,7 @@ const NODE_PRESETS: Record<FlowNodeKind, { label: string; type: string; data: Re
   ai_greeting: { label: 'IA Greeting', type: 'ai_greeting', data: { instruction: 'Você responde saudações de forma curta, humana e natural no WhatsApp.', input_template: '{{last_message}}', allow_mcp_tools: false, allowed_tools: ['responder'], fallback_message: 'Olá! 👋 Como posso ajudar?', after_agent_behavior: 'end_flow' } },
   ai_calendar_agent: { label: 'IA Calendar Agent', type: 'ai_calendar_agent', data: { instruction: 'Você é um agente especializado em agenda. Use Google Calendar apenas quando necessário. Nunca confirme evento sem retorno real da ferramenta. Use o DateResolver determinístico.', input_template: '{{last_message}}', allowed_tools: ['responder', 'chamar_mcp'], allow_mcp_tools: true, mcp_tool_ids: ['google_calendar_create_event', 'google_calendar_list_events', 'google_calendar_delete_event'], max_mcp_calls: 3, use_date_resolver: true, after_agent_behavior: 'end_flow' } },
   ai_safe_fallback: { label: 'IA Fallback Seguro', type: 'ai_safe_fallback', data: { instruction: 'Não consegui entender totalmente. Você quer agendar algo, tirar uma dúvida ou falar com um atendente?', input_template: '{{last_message}}', allow_mcp_tools: false, allowed_tools: ['responder'], fallback_message: 'Não consegui entender totalmente. Você quer agendar algo, tirar uma dúvida ou falar com um atendente?', after_agent_behavior: 'end_flow' } },
+  ai_system: { label: 'Sistema IA', type: 'ai_system', data: { name: 'Sistema IA', description: '', system_type: 'custom', collapsed: true, model_override: '', temperature: 0.2, memory_enabled: true, tools: [], integrations: [], language: 'pt-BR', timezone: 'America/Sao_Paulo', logs_enabled: true, global_prompt: '', internal_nodes: [], internal_edges: [], version: '1.0.0' } },
   ai_agent: { label: 'IA Agente', type: 'ai_agent', data: { instruction: 'Você é um agente de atendimento. Use apenas as ferramentas permitidas.', input_template: '{{last_message}}', allowed_tools: ['responder', 'definir_variavel'], allow_node_tools: false, node_tools: [], max_node_tool_calls: 3, allow_subflow_tools: false, subflow_tools: [], max_subflow_calls: 2, allow_mcp_tools: false, mcp_tool_ids: [], max_mcp_calls: 3, max_steps: 3, use_memory: true, memory_max_messages: 10, memory_max_chars: 4000, model_override: '', temperature: 0.2, max_tokens: 1200, after_agent_behavior: 'wait_same_node', after_answer_behavior: 'wait_same_node', fallback_message: 'Não consegui concluir essa ação agora. Quer que eu encaminhe para um atendente?', webhooks: [] } },
 };
 
@@ -430,6 +442,7 @@ const getBuilderNodeKind = (node?: Node | null) => {
 const getBuilderNodeTitle = (node?: Node | null) => NODE_PRESETS[getBuilderNodeKind(node) as FlowNodeKind]?.label || 'Node';
 const getMiniMapNodeColor = (type: string) => {
   const normalized = type.toLowerCase();
+  if (normalized === 'ai_system') return '#8b5cf6';
   if (normalized === 'message') return '#3b82f6';
   if (normalized === 'media') return '#06b6d4';
   if (normalized === 'cta_url' || normalized === 'cta_link') return '#7c3aed';
@@ -582,7 +595,8 @@ function FlowNodeEditorPanel({
     if (displayMode === 'buttons' && buttons.length >= 3) return;
     onDraftChange({ buttons: [...buttons, { id: `${node.id}-button-${nextIndex}`, label: `Opção ${nextIndex}`, handleId: `option_${nextIndex}` }] });
   };
-  const supportsVariables = ['message', 'choice', 'media', 'cta_url', 'condition', 'action', 'ai_rag', 'ai_response', 'ai_classification', 'ai_extraction', 'ai_summary', 'ai_agent', 'ai_supervisor'].includes(kind);
+  const supportsVariables = ['message', 'choice', 'media', 'cta_url', 'condition', 'action', 'ai_rag', 'ai_response', 'ai_classification', 'ai_extraction', 'ai_summary', 'ai_agent', 'ai_supervisor', 'ai_system'].includes(kind);
+  const isAiSystem = kind === 'ai_system';
   const publishedSubflowOptions = flows.filter((flow) => flow.id !== currentFlowId && isPublishedFlow(flow));
   const subflowTools = Array.isArray(draft.subflow_tools) ? (draft.subflow_tools as SubflowToolDraft[]) : [];
   const subflowToolIds = subflowTools.map((tool) => toText(tool.tool_id).trim());
@@ -676,7 +690,7 @@ function FlowNodeEditorPanel({
     <aside className="flow-node-editor-panel">
       <div className="flow-node-editor-header">
         <div>
-          <span className="flow-node-editor-kicker">Editar bloco</span>
+          <span className="flow-node-editor-kicker">{isAiSystem ? 'Editar AI System' : 'Editar bloco'}</span>
           <h3>{title}</h3>
         </div>
         <div className="flow-node-editor-actions">
@@ -696,7 +710,9 @@ function FlowNodeEditorPanel({
       {showVariablesHelp && supportsVariables ? <FlowVariablesHelp onClose={() => setShowVariablesHelp(false)} /> : null}
 
       <div className="flow-node-editor-content">
-        <div className="flow-editor-info-card" title="Use isto para definir o objetivo do fluxo. Ex: lead qualificado, fatura acessada, pedido criado, atendimento encaminhado.">
+        {isAiSystem ? (
+          <section className="flow-editor-tab-section"><h4>Propriedades do Sistema</h4><label className="flow-editor-field">Nome<input value={toText(draft.name || draft.label)} onChange={(event) => onDraftChange({ name: event.target.value, label: event.target.value })} /></label><label className="flow-editor-field">Descrição<textarea value={toText(draft.description)} onChange={(event) => onDraftChange({ description: event.target.value })} /></label><div className="flow-editor-row"><label className="flow-editor-field">Modelo IA<input value={toText(draft.model_override)} onChange={(event) => onDraftChange({ model_override: event.target.value })} placeholder="Configuração global" /></label><label className="flow-editor-field">Temperatura<input type="number" step="0.1" min="0" max="2" value={toText(draft.temperature ?? 0.2)} onChange={(event) => onDraftChange({ temperature: Number(event.target.value || 0.2) })} /></label></div><label className="flow-editor-radio"><input type="checkbox" checked={draft.memory_enabled !== false} onChange={(event) => onDraftChange({ memory_enabled: event.target.checked })} />Memória ativa</label><div className="flow-editor-row"><label className="flow-editor-field">Idioma<input value={toText(draft.language || 'pt-BR')} onChange={(event) => onDraftChange({ language: event.target.value })} /></label><label className="flow-editor-field">Timezone<input value={toText(draft.timezone || 'America/Sao_Paulo')} onChange={(event) => onDraftChange({ timezone: event.target.value })} /></label></div><label className="flow-editor-field">Ferramentas<input value={(Array.isArray(draft.tools) ? draft.tools : []).map(String).join(', ')} onChange={(event) => onDraftChange({ tools: event.target.value.split(',').map((item) => item.trim()).filter(Boolean) })} /></label><label className="flow-editor-field">Integrações<input value={(Array.isArray(draft.integrations) ? draft.integrations : []).map(String).join(', ')} onChange={(event) => onDraftChange({ integrations: event.target.value.split(',').map((item) => item.trim()).filter(Boolean) })} /></label><label className="flow-editor-radio"><input type="checkbox" checked={draft.logs_enabled !== false} onChange={(event) => onDraftChange({ logs_enabled: event.target.checked })} />Logs habilitados</label><label className="flow-editor-field">Prompt Global<textarea value={toText(draft.global_prompt)} onChange={(event) => onDraftChange({ global_prompt: event.target.value })} /></label></section>
+        ) : <div className="flow-editor-info-card" title="Use isto para definir o objetivo do fluxo. Ex: lead qualificado, fatura acessada, pedido criado, atendimento encaminhado.">
           <label className="flow-editor-radio">
             <input
               type="checkbox"
@@ -712,7 +728,7 @@ function FlowNodeEditorPanel({
               <input value={toText(draft.conversion_label)} onChange={(event) => onDraftChange({ conversion_label: event.target.value })} placeholder="Ex.: Lead qualificado" />
             </label>
           ) : null}
-        </div>
+        </div>}
         {kind === 'message' && (
           <>
             <label className="flow-editor-field">
@@ -1819,6 +1835,16 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
     );
   }, [setNodes]);
 
+  const toggleAiSystemCollapsed = useCallback((nodeId: string) => {
+    setNodes((prev) => prev.map((node) => {
+      if (node.id !== nodeId) return node;
+      const data = (node.data || {}) as Record<string, unknown>;
+      const collapsed = data.collapsed !== false;
+      console.info(collapsed ? 'AI_SYSTEM_EXPANDED' : 'AI_SYSTEM_COLLAPSED', { system_id: data.system_id || nodeId, system_type: data.system_type || 'custom' });
+      return { ...node, data: { ...(node.data as Record<string, unknown>), collapsed: !collapsed } } as Node;
+    }));
+  }, [setNodes]);
+
   const openNodeEditor = useCallback((node: Node, source: 'doubleClick' = 'doubleClick') => {
     const canvasWidthBefore = flowCanvasRef.current?.getBoundingClientRect().width ?? 0;
     console.info('[NODE DOUBLE CLICK]', { node_id: node.id, node_type: node.type, source });
@@ -1937,6 +1963,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
           label: node.data?.label || node.data?.content || `Node ${node.id}`,
           onChange: updateNodeData,
           onToggleStart: toggleStartNode,
+          onToggleSystem: toggleAiSystemCollapsed,
         hasValidationError: node.id === highlightedNodeId,
         },
       };
@@ -2232,6 +2259,8 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
     const playbackId = playbackIdRef.current + 1;
     playbackIdRef.current = playbackId;
     setMessages((prev) => [...prev, { type: 'user', text: userMessage }]);
+    const hasAiSystem = nodesRef.current.some((node) => node.type === 'ai_system');
+    if (hasAiSystem) console.info('AI_SYSTEM_RUNTIME_STARTED', { flow_id: selectedFlowId, session_id: simulationSessionIdRef.current });
     setIsProcessing(true);
 
     try {
@@ -2289,6 +2318,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
         setMessages((prev) => [...prev, { type: 'bot', text: 'Não foi possível iniciar o simulador' }]);
       }
     } finally {
+      if (nodesRef.current.some((node) => node.type === 'ai_system')) console.info('AI_SYSTEM_RUNTIME_FINISHED', { flow_id: selectedFlowId, session_id: simulationSessionIdRef.current });
       if (isMountedRef.current && playbackIdRef.current === playbackId) {
         setIsProcessing(false);
       }
@@ -2490,26 +2520,48 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
 
 
   const handleInsertAgentSystemTemplate = useCallback((templateId: string) => {
-    const template = AGENT_SYSTEM_TEMPLATES.find((item) => item.id === templateId);
-    if (!template || template.nodes.length === 0) {
-      toast.error('Template de sistema de agentes ainda não disponível.');
-      return;
-    }
-    console.info('AGENT_SYSTEM_TEMPLATE_SELECTED', { template_id: template.id, version: template.version });
-    const origin = rfInstance?.screenToFlowPosition({ x: 260, y: 120 }) || { x: 0, y: 0 };
-    const graph = instantiateAgentSystemTemplate(template, makeNodeId, origin);
-    const hydratedNodes = graph.nodes.map((node) => ({
-      ...node,
-      data: { ...node.data, onChange: updateNodeData, onToggleStart: toggleStartNode, hasValidationError: false },
-    }));
-    setNodes((current) => [...current, ...hydratedNodes]);
-    setEdges((current) => [...current, ...graph.edges]);
+    const template = AGENT_SYSTEM_TEMPLATES.find((item) => item.id === templateId) || AGENT_SYSTEM_TEMPLATES[0];
+    const card = AI_SYSTEM_CARDS.find((item) => item.id === templateId);
+    const origin = rfInstance?.screenToFlowPosition({ x: 360, y: 180 }) || { x: 120, y: 120 };
+    const graph = template && template.nodes.length > 0 ? instantiateAgentSystemTemplate(template, makeNodeId, { x: 0, y: 0 }) : { nodes: [], edges: [] };
+    const systemId = makeNodeId();
+    const systemName = card?.title.replace(/^[^A-Za-zÀ-ÿ0-9]+\s*/, '') || template?.name || 'Sistema Personalizado';
+    const systemNode: Node = {
+      id: systemId,
+      type: 'ai_system',
+      position: origin,
+      data: {
+        label: systemName,
+        name: systemName,
+        description: template?.description || card?.subtitle || '',
+        system_id: systemId,
+        system_type: templateId,
+        collapsed: true,
+        internal_nodes: graph.nodes.map((node) => ({ ...node, position: node.position || { x: 0, y: 0 } })),
+        internal_edges: graph.edges,
+        version: template?.version || '1.0.0',
+        model_override: '',
+        temperature: 0.2,
+        memory_enabled: true,
+        tools: template?.required_tools?.length ? template.required_tools : ['Google Calendar', 'Google Drive', 'Responder', 'DateResolver', 'Fallback'],
+        integrations: template?.required_integrations?.length ? template.required_integrations : ['google_calendar'],
+        language: 'pt-BR',
+        timezone: 'America/Sao_Paulo',
+        logs_enabled: true,
+        global_prompt: '',
+        statuses: ['Saudação', 'Agenda', 'Consulta', 'Cancelamento'],
+        onChange: updateNodeData,
+        onToggleStart: toggleStartNode,
+        hasValidationError: false,
+      },
+    };
+    setNodes((current) => [...current, systemNode]);
     setShowEmptyFlowWarning(false);
     setIsAgentSystemModalOpen(false);
-    toast.success(`Sistema de agentes inserido: ${template.name}`);
-    console.info('AGENT_SYSTEM_TEMPLATE_INSERTED', { template_id: template.id, nodes_count: graph.nodes.length, edges_count: graph.edges.length });
+    toast.success(`Sistema IA inserido: ${systemName}`);
+    console.info('AI_SYSTEM_CREATED', { system_id: systemId, system_type: templateId, internal_nodes: graph.nodes.length, internal_edges: graph.edges.length });
     setTimeout(() => rfInstance?.fitView({ padding: 0.2, duration: 500 }), 0);
-  }, [rfInstance, setEdges, setNodes, toast, toggleStartNode, updateNodeData]);
+  }, [rfInstance, setNodes, toast, toggleStartNode, updateNodeData]);
 
   const getCurrentSerializedFlow = useCallback(() => {
     const realFlow = rfInstance?.toObject?.();
@@ -2545,6 +2597,15 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
     clearSaveStatusTimer();
 
     console.info(isAutosave ? '[AUTOSAVE START]' : '[FLOW SAVE START]', { flow_id: selectedFlowId, endpoint, method: 'PUT' });
+    const aiSystemsToCompile = safeFlow.nodes.filter((node) => node.type === 'ai_system');
+    if (aiSystemsToCompile.length > 0) {
+      console.info('AI_SYSTEM_COMPILED', {
+        flow_id: selectedFlowId,
+        systems_count: aiSystemsToCompile.length,
+        internal_nodes_count: aiSystemsToCompile.reduce((total, node) => { const data = (node.data || {}) as Record<string, unknown>; return total + (Array.isArray(data.internal_nodes) ? data.internal_nodes.length : 0); }, 0),
+      });
+    }
+
     console.info('[FLOW SAVE REQUEST]', {
       flow_id: selectedFlowId,
       nodes_count: safeFlow.nodes.length,
@@ -2862,19 +2923,45 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
     return () => { active = false; };
   }, [analyticsOverlayEnabled, selectedFlowId]);
 
-  const decoratedNodes = useMemo(
-    () => nodes.map((node) => ({
+  const decoratedNodes = useMemo(() => {
+    const baseNodes = nodes.map((node) => ({
       ...node,
       data: {
         ...node.data,
         running: node.id === currentNodeId,
         onToggleStart: toggleStartNode,
+        onToggleSystem: toggleAiSystemCollapsed,
         hasValidationError: node.id === highlightedNodeId,
         analytics: analyticsOverlayEnabled ? analyticsByNode.get(node.id) ?? null : null,
       },
-    })),
-    [analyticsByNode, analyticsOverlayEnabled, currentNodeId, highlightedNodeId, nodes, toggleStartNode],
-  );
+    }));
+
+    const expandedSystemNodes = baseNodes.flatMap((systemNode) => {
+      if (systemNode.type !== 'ai_system') return [];
+      const data = (systemNode.data || {}) as Record<string, unknown>;
+      if (data.collapsed !== false) return [];
+      const internalNodes = Array.isArray(data.internal_nodes) ? data.internal_nodes as Node[] : [];
+      return internalNodes.map((internalNode) => ({
+        ...internalNode,
+        id: `${systemNode.id}__${internalNode.id}`,
+        selectable: true,
+        draggable: false,
+        position: {
+          x: systemNode.position.x + 420 + (internalNode.position?.x || 0),
+          y: systemNode.position.y - 180 + (internalNode.position?.y || 0),
+        },
+        data: {
+          ...(internalNode.data || {}),
+          ai_system_parent_id: systemNode.id,
+          onChange: updateNodeData,
+          onToggleStart: toggleStartNode,
+          hasValidationError: false,
+        },
+      }));
+    });
+
+    return [...baseNodes, ...expandedSystemNodes];
+  }, [analyticsByNode, analyticsOverlayEnabled, currentNodeId, highlightedNodeId, nodes, toggleAiSystemCollapsed, toggleStartNode, updateNodeData]);
 
   const safeNodes = useMemo(
     () => (Array.isArray(decoratedNodes) ? decoratedNodes : []).map((node) => ({
@@ -2889,15 +2976,34 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
     [edges],
   );
 
+  const visibleEdges = useMemo(() => {
+    const expandedEdges = nodes.flatMap((systemNode) => {
+      if (systemNode.type !== 'ai_system') return [];
+      const data = (systemNode.data || {}) as Record<string, unknown>;
+      if (data.collapsed !== false) return [];
+      const internalEdges = Array.isArray(data.internal_edges) ? data.internal_edges as Edge[] : [];
+      return internalEdges.map((edge) => ({
+        ...edge,
+        id: `${systemNode.id}__${edge.id}`,
+        source: `${systemNode.id}__${edge.source}`,
+        target: `${systemNode.id}__${edge.target}`,
+        animated: true,
+        style: { ...(edge.style || {}), stroke: '#8b5cf6', strokeDasharray: '5 5' },
+        data: { ...(edge.data || {}), ai_system_parent_id: systemNode.id },
+      }));
+    });
+    return [...safeEdges, ...expandedEdges];
+  }, [nodes, safeEdges]);
+
   const decoratedEdges = useMemo(
     () =>
-      safeEdges.map((edge) => ({
+      visibleEdges.map((edge) => ({
         ...edge,
         className: activeEdgeIds.includes(edge.id) ? 'flow-edge flow-edge-active' : 'flow-edge',
         label: analyticsOverlayEnabled ? (() => { const metric = analyticsByEdge.get(`${edge.source}->${edge.target}:${edge.sourceHandle || ''}`) || analyticsByEdge.get(`${edge.source}->${edge.target}:default`) || analyticsByEdge.get(`${edge.source}->${edge.target}:`); return metric ? `${metric.rate_from_source}%` : edge.label; })() : edge.label,
         style: analyticsOverlayEnabled ? { ...(edge.style || {}), strokeWidth: Math.min(6, 1 + Math.log10(((analyticsByEdge.get(`${edge.source}->${edge.target}:${edge.sourceHandle || ''}`) || analyticsByEdge.get(`${edge.source}->${edge.target}:default`) || analyticsByEdge.get(`${edge.source}->${edge.target}:`))?.count || 1)) * 2), opacity: 0.85 } : edge.style,
       })),
-    [activeEdgeIds, analyticsByEdge, analyticsOverlayEnabled, safeEdges],
+    [activeEdgeIds, analyticsByEdge, analyticsOverlayEnabled, visibleEdges],
   );
 
   // Fecha o menu de contexto ao clicar fora
@@ -2951,7 +3057,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
               <span className="flow-node-palette-item-icon" aria-hidden="true">
                 <CalendarDays size={17} strokeWidth={1.9} className="text-current" />
               </span>
-              <span className="dash-nav-label">+ Sistema de Agentes</span>
+              <span className="dash-nav-label">🤖 AI Systems</span>
             </button>
           ) : null}
           {NODE_GROUPS.map((group) => {
@@ -3378,26 +3484,26 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
           <div className="flow-modal-card" style={{ maxWidth: 920 }}>
             <div className="flow-modal-header">
               <div>
-                <h2>Sistema de Agentes</h2>
-                <p>Escolha um template pré-montado. Ele será inserido como nova camada opcional, sem alterar fluxos publicados nem remover o IA Agente atual.</p>
+                <h2>🤖 AI Systems</h2>
+                <p>Escolha um sistema premium. Ele entra como um único componente expansível no canvas, preservando Flow Builder, IA Agent e Runtime V2.</p>
               </div>
               <button type="button" onClick={() => setIsAgentSystemModalOpen(false)}>×</button>
             </div>
             <div className="flow-template-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 12 }}>
-              {AGENT_SYSTEM_TEMPLATES.map((template) => (
+              {AI_SYSTEM_CARDS.map((card) => { const template = AGENT_SYSTEM_TEMPLATES.find((item) => item.id === card.id); return (
                 <button
-                  key={template.id}
+                  key={card.id}
                   type="button"
                   className="flow-template-card"
-                  onClick={() => handleInsertAgentSystemTemplate(template.id)}
-                  disabled={template.nodes.length === 0}
-                  style={{ textAlign: 'left', border: '1px solid #e5e7eb', borderRadius: 16, padding: 16, background: template.nodes.length ? '#fff' : '#f9fafb', opacity: template.nodes.length ? 1 : 0.72 }}
+                  onClick={() => handleInsertAgentSystemTemplate(card.id)}
+                  disabled={false}
+                  style={{ textAlign: 'left', border: '1px solid #e5e7eb', borderRadius: 16, padding: 16, background: '#fff', opacity: 1 }}
                 >
-                  <strong>{template.name}</strong>
-                  <p>{template.description}</p>
-                  <small>{template.category} · v{template.version}{template.nodes.length === 0 ? ' · em breve' : ''}</small>
+                  <strong>{card.title}</strong>
+                  <p>{card.subtitle}</p>
+                  <small>{template ? `${template.category} · v${template.version}` : 'Personalizado · v1.0.0'}</small>
                 </button>
-              ))}
+              )})}
             </div>
           </div>
         </div>
