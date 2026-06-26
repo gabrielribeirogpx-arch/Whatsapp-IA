@@ -6417,3 +6417,121 @@ input {
 .flow-editor-system-panel { gap: 10px; }
 .flow-editor-system-panel h4 { padding-top: 2px; }
 .flow-editor-panel-divider { height: 1px; margin: 4px 0; background: linear-gradient(90deg, transparent, #e2e8f0, transparent); }
+
+.ai-system-node {
+  transition: width 300ms ease, min-height 300ms ease, box-shadow 300ms ease, transform 300ms ease;
+}
+.ai-system-node.is-expanded {
+  width: 560px;
+  min-height: 690px;
+  box-shadow: 0 30px 90px rgba(15, 23, 42, 0.20);
+}
+.ai-system-architecture {
+  max-height: 0;
+  opacity: 0;
+  overflow: hidden;
+  transform: translateY(-8px) scale(0.985);
+  transition: max-height 320ms ease, opacity 280ms ease, transform 320ms ease, margin 320ms ease;
+  margin: 0;
+  pointer-events: none;
+}
+.ai-system-node.is-expanded .ai-system-architecture {
+  max-height: 520px;
+  opacity: 1;
+  transform: translateY(0) scale(1);
+  margin: 14px 0 12px;
+  pointer-events: auto;
+}
+.ai-system-architecture-stage {
+  position: relative;
+  height: 430px;
+  border: 1px solid rgba(226, 232, 240, 0.95);
+  border-radius: 24px;
+  background:
+    radial-gradient(circle at 50% 8%, rgba(37, 99, 235, 0.10), transparent 28%),
+    radial-gradient(circle at 78% 56%, rgba(249, 115, 22, 0.12), transparent 24%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(248, 250, 252, 0.96));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.86), 0 18px 38px rgba(15, 23, 42, 0.08);
+  overflow: hidden;
+}
+.ai-system-architecture-lines {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 1;
+}
+.ai-system-architecture-line {
+  fill: none;
+  stroke: rgba(100, 116, 139, 0.38);
+  stroke-width: 2.4;
+  stroke-linecap: round;
+  filter: drop-shadow(0 1px 2px rgba(15, 23, 42, 0.08));
+}
+.ai-system-architecture-card {
+  position: absolute;
+  z-index: 2;
+  width: 150px;
+  min-height: 68px;
+  display: grid;
+  align-content: center;
+  gap: 6px;
+  padding: 12px 14px;
+  border: 1px solid #e2e8f0;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow: 0 14px 32px rgba(15, 23, 42, 0.10);
+  opacity: 0;
+  transform: translateY(10px);
+  transition: opacity 280ms ease, transform 300ms ease, box-shadow 220ms ease;
+}
+.ai-system-node.is-expanded .ai-system-architecture-card {
+  opacity: 1;
+  transform: translateY(0);
+}
+.ai-system-architecture-card strong {
+  color: #0f172a;
+  font-size: 13px;
+  font-weight: 950;
+  letter-spacing: -0.01em;
+}
+.ai-system-architecture-card small {
+  color: #64748b;
+  font-size: 11px;
+  font-weight: 750;
+  line-height: 1.25;
+}
+.ai-system-architecture-card.tone-blue { border-color: #bfdbfe; box-shadow: inset 0 3px 0 #3b82f6, 0 14px 32px rgba(15, 23, 42, 0.10); }
+.ai-system-architecture-card.tone-green { border-color: #bbf7d0; box-shadow: inset 0 3px 0 #22c55e, 0 14px 32px rgba(15, 23, 42, 0.10); }
+.ai-system-architecture-card.tone-orange { border-color: #fed7aa; box-shadow: inset 0 3px 0 #f97316, 0 14px 32px rgba(15, 23, 42, 0.10); }
+.ai-system-architecture-card.tone-purple { border-color: #ddd6fe; box-shadow: inset 0 3px 0 #8b5cf6, 0 14px 32px rgba(15, 23, 42, 0.10); }
+.ai-system-architecture-card.tone-amber { border-color: #fde68a; box-shadow: inset 0 3px 0 #f59e0b, 0 14px 32px rgba(15, 23, 42, 0.10); }
+.ai-system-architecture-card.tone-slate { border-color: #cbd5e1; box-shadow: inset 0 3px 0 #64748b, 0 14px 32px rgba(15, 23, 42, 0.10); }
+.ai-system-architecture-card.slot-dispatcher { top: 26px; left: 50%; margin-left: -75px; transition-delay: 30ms; }
+.ai-system-architecture-card.slot-greeting { top: 168px; left: 40px; transition-delay: 70ms; }
+.ai-system-architecture-card.slot-calendar { top: 168px; right: 40px; transition-delay: 100ms; }
+.ai-system-architecture-card.slot-integration { top: 304px; right: 40px; transition-delay: 135ms; }
+.ai-system-architecture-card.slot-fallback { bottom: 10px; left: 50%; margin-left: -75px; transition-delay: 170ms; }
+.ai-system-architecture-card.slot-unknown { bottom: 22px; left: 40px; transition-delay: 170ms; }
+.ai-system-architecture-footer {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 10px;
+}
+.ai-system-architecture-footer span,
+.ai-system-architecture-footer strong {
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  background: #ffffff;
+  color: #475569;
+  padding: 8px 9px;
+  text-align: center;
+  font-size: 11px;
+  font-weight: 900;
+}
+.ai-system-architecture-footer strong {
+  color: #047857;
+  border-color: #bbf7d0;
+  background: #ecfdf5;
+}
