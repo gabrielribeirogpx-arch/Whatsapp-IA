@@ -33,11 +33,14 @@ const SYSTEM_BADGES: Record<string, string> = {
 function AiSystemNode({ id, data, selected }: NodeProps) {
   const nodeData = (data || {}) as AiSystemNodeData;
   const internalNodes = Array.isArray(nodeData.internal_nodes) ? nodeData.internal_nodes : [];
-  const tools = Array.isArray(nodeData.tools) ? nodeData.tools : [];
   const integrations = Array.isArray(nodeData.integrations) ? nodeData.integrations : [];
-  const statuses = Array.isArray(nodeData.statuses) && nodeData.statuses.length > 0
-    ? nodeData.statuses
-    : ['Saudação', 'Agenda', 'Consulta', 'Cancelamento'];
+  const statusItems = ['Conversando', 'Agenda pronta', 'Integração ativa'];
+  const specialists = [
+    { icon: '🧠', label: 'Entendimento', tone: 'blue' },
+    { icon: '💬', label: 'Conversa', tone: 'green' },
+    { icon: '📅', label: 'Agenda', tone: 'orange' },
+    { icon: '🛡', label: 'Segurança', tone: 'purple' },
+  ];
   const systemType = nodeData.system_type || 'custom';
   const badge = SYSTEM_BADGES[systemType] || nodeData.name || 'Sistema IA';
 
@@ -45,30 +48,42 @@ function AiSystemNode({ id, data, selected }: NodeProps) {
     <div className={`ai-system-node${selected ? ' is-selected' : ''}${nodeData.running ? ' is-running' : ''}${nodeData.hasValidationError ? ' has-error' : ''}`}>
       <Handle type="target" position={Position.Left} id="default" />
       <div className="ai-system-node-header">
-        <span className="ai-system-node-kicker">🤖 Sistema IA</span>
-        <span className="ai-system-node-badge">{badge}</span>
+        <div>
+          <span className="ai-system-node-kicker">🤖 AI System</span>
+          <h3>{badge}</h3>
+          <p>Assistente especializado em Google Calendar</p>
+        </div>
+        <span className="ai-system-node-badge">🟢 Ativo</span>
       </div>
-      <h3>{nodeData.name || nodeData.label || badge}</h3>
       <div className="ai-system-node-summary">
-        <span>Dispatcher</span>
-        <span>Greeting</span>
-        <span>Calendar</span>
-        <span>Fallback</span>
+        {specialists.map((item) => (
+          <span key={item.label} className={`ai-system-node-mini-card tone-${item.tone}`}>
+            <strong>{item.icon}</strong>
+            <small>{item.label}</small>
+          </span>
+        ))}
       </div>
-      <div className="ai-system-node-tools">
-        {(tools.length ? tools : ['Google Calendar', 'Google Drive']).slice(0, 4).map((tool) => <em key={tool}>{tool}</em>)}
-      </div>
-      <div className="ai-system-node-statuses">
-        {statuses.slice(0, 4).map((status) => <small key={status}>🟢 {status}</small>)}
+      <details className="ai-system-node-integrations">
+        <summary><span>Integrações</span><strong>📅 Google Calendar</strong></summary>
+        <ul>
+          <li>✓ Criar eventos</li>
+          <li>✓ Consultar agenda</li>
+          <li>✓ Alterar eventos</li>
+          <li>✓ Cancelar eventos</li>
+        </ul>
+      </details>
+      <div className="ai-system-node-statuses" aria-label="Status">
+        <strong>Status</strong>
+        {statusItems.map((status) => <small key={status}>🟢 {status}</small>)}
       </div>
       <div className="ai-system-node-footer">
-        <span>{internalNodes.length || 4} agentes</span>
-        <span>{integrations.length || 1} integração</span>
-        <span>{tools.length || 5} ferramentas</span>
-        <span>{nodeData.average_time || 'Tempo médio'}</span>
+        <strong>Equipe IA</strong>
+        <span>{internalNodes.length || 4} Especialistas</span>
+        <span>{integrations.length || 1} Integração</span>
+        <span>Google Calendar</span>
       </div>
       <button type="button" className="ai-system-node-toggle" onClick={(event) => { event.stopPropagation(); nodeData.onToggleSystem?.(id); }}>
-        {nodeData.collapsed === false ? '▲ Recolher' : '▼ Expandir'}
+        {nodeData.collapsed === false ? '▲ Recolher arquitetura' : '▼ Ver arquitetura'}
       </button>
       <Handle type="source" position={Position.Right} id="default" />
     </div>
