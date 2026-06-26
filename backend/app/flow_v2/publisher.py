@@ -85,9 +85,12 @@ def _expand_ai_systems_for_runtime(
     graph saved by the user.
     """
 
+    logger.info("AI_SYSTEM_COMPILATION_STARTED")
     expanded_nodes: list[dict[str, Any]] = []
     expanded_edges: list[dict[str, Any]] = []
     ai_system_ids: set[str] = set()
+    system_entry_by_id: dict[str, str] = {}
+    system_exits_by_id: dict[str, list[str]] = {}
 
     for node in nodes:
         if not isinstance(node, dict):
@@ -118,6 +121,14 @@ def _expand_ai_systems_for_runtime(
             ),
             next(iter(id_map), ""),
         )
+        if internal_start and internal_start in id_map:
+            system_entry_by_id[system_id] = id_map[internal_start]
+            logger.info("AI_SYSTEM_INTERNAL_START_FOUND system_id=%s start_node_id=%s", system_id, id_map[internal_start])
+
+        internal_sources = {str(edge.get("source")) for edge in internal_edges if isinstance(edge, dict) and edge.get("source") not in (None, "")}
+        terminal_internal_ids = [internal_id for internal_id in id_map if internal_id not in internal_sources]
+        system_exits_by_id[system_id] = [id_map[internal_id] for internal_id in terminal_internal_ids] or ([id_map[internal_start]] if internal_start in id_map else [])
+
         if bool(data.get("isStart")):
             start_id = f"{system_id}__start"
             expanded_nodes.append(
@@ -170,15 +181,23 @@ def _expand_ai_systems_for_runtime(
             target = id_map.get(str(edge.get("target")))
             if not source or not target:
                 continue
+            source_handle = (
+                edge.get("sourceHandle")
+                or edge.get("source_handle")
+                or "default"
+            )
+            edge_id = edge.get("id") or f"{source}->{target}:{source_handle}"
             expanded_edges.append(
                 {
                     **edge,
-                    "id": f"{system_id}__{edge.get('id') or f'{source}->{target}:{edge.get('sourceHandle') or edge.get('source_handle') or 'default'}'}",
+                    "id": f"{system_id}__{edge_id}",
                     "source": source,
                     "target": target,
+                    "sourceHandle": source_handle,
                     "data": {**(edge.get("data") if isinstance(edge.get("data"), dict) else {}), "compiled_from_ai_system": system_id},
                 }
             )
+        logger.info("AI_SYSTEM_EXPANDED system_id=%s internal_nodes=%s internal_edges=%s", system_id, len(id_map), len(internal_edges))
 
     for edge in edges:
         if not isinstance(edge, dict):
@@ -186,12 +205,32 @@ def _expand_ai_systems_for_runtime(
             continue
         source = str(edge.get("source") or "")
         target = str(edge.get("target") or "")
-        if source in ai_system_ids or target in ai_system_ids:
+        source_handle = edge.get("sourceHandle") or edge.get("source_handle") or "default"
+        if source in ai_system_ids and target in ai_system_ids:
+            for source_exit in system_exits_by_id.get(source, []):
+                target_entry = system_entry_by_id.get(target)
+                if target_entry:
+                    expanded_edges.append({**edge, "id": f"{edge.get('id') or source_exit + '->' + target_entry}__expanded", "source": source_exit, "target": target_entry, "sourceHandle": source_handle})
+            continue
+        if target in ai_system_ids:
+            target_entry = system_entry_by_id.get(target)
+            if target_entry:
+                expanded_edges.append({**edge, "target": target_entry, "sourceHandle": source_handle})
+            continue
+        if source in ai_system_ids:
+            for index, source_exit in enumerate(system_exits_by_id.get(source, [])):
+                edge_id = str(edge.get("id") or f"{source_exit}->{target}:{source_handle}")
+                expanded_edges.append({**edge, "id": edge_id if index == 0 else f"{edge_id}:{index}", "source": source_exit, "sourceHandle": source_handle})
             continue
         expanded_edges.append(edge)
 
+    logger.info(
+        "AI_SYSTEM_RUNTIME_GRAPH_CREATED nodes_count=%s edges_count=%s",
+        len(expanded_nodes),
+        len(expanded_edges),
+    )
+    logger.info("AI_SYSTEM_COMPILATION_FINISHED")
     return expanded_nodes, expanded_edges
-
 
 def _runtime_v2_node_payload(node: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(node, dict):

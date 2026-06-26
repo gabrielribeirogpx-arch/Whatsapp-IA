@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import uuid
 import logging
+import copy
 import traceback
 import asyncio
 import hashlib
@@ -43,7 +44,7 @@ from app.services.flow_activation_service import activate_flow_exclusively, deac
 from app.services.runtime_flow_diagnostics import assert_flow_matches_whatsapp_tenant
 from app.services.delay_queue_service import clear_delays_for_runtime_reset
 from app.flow_v2.delay_contract import normalize_delay_nodes
-from app.flow_v2.publisher import FlowV2PublishError, FlowV2Publisher
+from app.flow_v2.publisher import FlowV2PublishError, FlowV2Publisher, _expand_ai_systems_for_runtime
 
 router = APIRouter()
 crud_router = APIRouter(tags=["flows-crud"])
@@ -2813,6 +2814,13 @@ def get_runtime_inspector(
         version = db.execute(select(FlowVersion).where(FlowVersion.id == session.flow_version_id, FlowVersion.tenant_id == tenant_uuid)).scalars().first()
     nodes = version.nodes_json if version and isinstance(getattr(version, "nodes_json", None), list) else version.nodes if version and isinstance(version.nodes, list) else []
     edges = version.edges_json if version and isinstance(getattr(version, "edges_json", None), list) else version.edges if version and isinstance(version.edges, list) else []
+    editor_nodes = flow.nodes_json if isinstance(getattr(flow, "nodes_json", None), list) else flow.nodes if isinstance(flow.nodes, list) else []
+    editor_edges = flow.edges_json if isinstance(getattr(flow, "edges_json", None), list) else flow.edges if isinstance(flow.edges, list) else []
+    if version and isinstance(version.snapshot, dict):
+        expanded_nodes = version.snapshot.get("nodes") if isinstance(version.snapshot.get("nodes"), list) else nodes
+        expanded_edges = version.snapshot.get("edges") if isinstance(version.snapshot.get("edges"), list) else edges
+    else:
+        expanded_nodes, expanded_edges = _expand_ai_systems_for_runtime(copy.deepcopy(editor_nodes), copy.deepcopy(editor_edges))
     current_node_id = str(session.current_node_id) if session and session.current_node_id else None
     previous_node_id = None
     next_node_id = None
@@ -2829,6 +2837,8 @@ def get_runtime_inspector(
         "current_node_id": current_node_id,
         "previous_node_id": previous_node_id,
         "next_node_id": next_node_id,
+        "editor_graph": {"nodes": editor_nodes, "edges": editor_edges},
+        "expanded_runtime_graph": {"nodes": expanded_nodes, "edges": expanded_edges},
     }
 
 @crud_router.post("/{flow_id}/publish", response_model=FlowVersionResponse)
