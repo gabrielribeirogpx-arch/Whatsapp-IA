@@ -536,7 +536,7 @@ def validate_flow_graph(nodes: list[dict[str, Any]] | None, edges: list[dict[str
                 add_issue(errors, "AI_EXTRACTION_FIELDS_INVALID", node_id, "IA Extração precisa de pelo menos 1 campo.")
 
         missing_output = outgoing.get(node_id, 0) < 1
-        if node_type in {"ai_rag", "ai_response"} and missing_output:
+        if node_type in {"ai_rag", "ai_response", "ai_greeting", "ai_calendar_agent", "ai_safe_fallback"} and missing_output:
             if _ai_allows_missing_output(data):
                 logger.info("[FLOW VALIDATION AI NO_OUTPUT OK] node_id=%s node_type=%s behavior=%s", node_id, node_type, _ai_after_answer_behavior(data))
             else:
