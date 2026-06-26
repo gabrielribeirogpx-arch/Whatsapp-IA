@@ -73,6 +73,43 @@ AI_SYSTEM_INTERNAL_TYPES = {
     "ai_safe_fallback",
 }
 
+AI_SYSTEM_TERMINAL_INTERNAL_TYPES = {
+    "ai_greeting",
+    "ai_calendar_agent",
+    "ai_safe_fallback",
+}
+
+
+def _truthy_terminal_flag(data: dict[str, Any]) -> bool:
+    return bool(
+        data.get("isEnd")
+        or data.get("end")
+        or data.get("is_final")
+        or data.get("isFinal")
+        or data.get("terminal")
+        or data.get("is_terminal")
+        or data.get("endFlow")
+    )
+
+
+def _ai_system_internal_node_is_terminal(internal: dict[str, Any]) -> bool:
+    internal_data = _node_data(internal)
+    internal_type = str(
+        internal.get("type") or internal_data.get("type") or ""
+    ).strip()
+    behavior = str(
+        internal_data.get("after_agent_behavior")
+        or internal_data.get("afterAgentBehavior")
+        or internal_data.get("after_answer_behavior")
+        or internal_data.get("afterAnswerBehavior")
+        or ""
+    ).strip().lower()
+    return (
+        _truthy_terminal_flag(internal_data)
+        or behavior in {"end_flow", "wait_same_node"}
+        or internal_type in AI_SYSTEM_TERMINAL_INTERNAL_TYPES
+    )
+
 
 def _expand_ai_systems_for_runtime(
     nodes: list[dict[str, Any]], edges: list[dict[str, Any]]
@@ -91,6 +128,17 @@ def _expand_ai_systems_for_runtime(
     ai_system_ids: set[str] = set()
     system_entry_by_id: dict[str, str] = {}
     system_exits_by_id: dict[str, list[str]] = {}
+    incoming_by_id: dict[str, int] = {}
+    outgoing_by_id: dict[str, int] = {}
+    for edge in edges:
+        if not isinstance(edge, dict):
+            continue
+        source = str(edge.get("source") or "")
+        target = str(edge.get("target") or "")
+        if source:
+            outgoing_by_id[source] = outgoing_by_id.get(source, 0) + 1
+        if target:
+            incoming_by_id[target] = incoming_by_id.get(target, 0) + 1
 
     for node in nodes:
         if not isinstance(node, dict):
@@ -126,10 +174,33 @@ def _expand_ai_systems_for_runtime(
             logger.info("AI_SYSTEM_INTERNAL_START_FOUND system_id=%s start_node_id=%s", system_id, id_map[internal_start])
 
         internal_sources = {str(edge.get("source")) for edge in internal_edges if isinstance(edge, dict) and edge.get("source") not in (None, "")}
+        has_external_output = outgoing_by_id.get(system_id, 0) > 0
         terminal_internal_ids = [internal_id for internal_id in id_map if internal_id not in internal_sources]
+        if not has_external_output:
+            terminal_internal_ids = list(
+                dict.fromkeys(
+                    terminal_internal_ids
+                    + [
+                        internal_id
+                        for internal_id in id_map
+                        if _ai_system_internal_node_is_terminal(
+                            next(
+                                (
+                                    item
+                                    for item in internal_nodes
+                                    if isinstance(item, dict)
+                                    and str(item.get("id")) == internal_id
+                                ),
+                                {},
+                            )
+                        )
+                    ]
+                )
+            )
         system_exits_by_id[system_id] = [id_map[internal_id] for internal_id in terminal_internal_ids] or ([id_map[internal_start]] if internal_start in id_map else [])
+        is_canvas_entry = bool(data.get("isStart")) or incoming_by_id.get(system_id, 0) == 0
 
-        if bool(data.get("isStart")):
+        if is_canvas_entry:
             start_id = f"{system_id}__start"
             expanded_nodes.append(
                 {
@@ -157,6 +228,17 @@ def _expand_ai_systems_for_runtime(
                 continue
             internal_data = dict(_node_data(internal))
             internal_type = str(internal.get("type") or internal_data.get("type") or "ai_agent")
+            if not has_external_output and str(internal.get("id")) in terminal_internal_ids:
+                internal_data.update(
+                    {
+                        "isEnd": True,
+                        "end": True,
+                        "is_final": True,
+                        "terminal": True,
+                        "is_terminal": True,
+                    }
+                )
+                internal_data.setdefault("after_agent_behavior", "end_flow")
             internal_data.update(
                 {
                     "compiled_from_ai_system": system_id,

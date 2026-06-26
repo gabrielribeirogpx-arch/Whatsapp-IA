@@ -414,6 +414,64 @@ def _is_terminal_message_node(data: dict[str, Any]) -> bool:
     )
 
 
+def _ai_system_has_terminal_internal_node(data: dict[str, Any]) -> bool:
+    internal_nodes = (
+        data.get("internal_nodes")
+        if isinstance(data.get("internal_nodes"), list)
+        else []
+    )
+    for internal in internal_nodes:
+        if not isinstance(internal, dict):
+            continue
+        internal_data = (
+            internal.get("data") if isinstance(internal.get("data"), dict) else {}
+        )
+        internal_type = (
+            str(internal.get("type") or internal_data.get("type") or "")
+            .strip()
+            .lower()
+        )
+        behavior = str(
+            internal_data.get("after_agent_behavior")
+            or internal_data.get("afterAgentBehavior")
+            or internal_data.get("after_answer_behavior")
+            or internal_data.get("afterAnswerBehavior")
+            or ""
+        ).strip().lower()
+        if internal_type in {
+            "ai_safe_fallback",
+            "ai_greeting",
+            "ai_calendar_agent",
+        } and behavior in {"", "end_flow", "wait_same_node"}:
+            return True
+        if any(
+            internal_data.get(flag)
+            for flag in (
+                "isEnd",
+                "end",
+                "is_final",
+                "isFinal",
+                "terminal",
+                "is_terminal",
+                "endFlow",
+            )
+        ):
+            return True
+    return False
+
+
+def _is_terminal_ai_system_node(data: dict[str, Any]) -> bool:
+    return (
+        _is_terminal_message_node(data)
+        or bool(
+            data.get("end")
+            or data.get("is_final")
+            or data.get("isFinal")
+            or data.get("terminal")
+        )
+        or _ai_system_has_terminal_internal_node(data)
+    )
+
 def _ai_after_answer_behavior(data: dict[str, Any]) -> str:
     behavior = str(data.get("after_answer_behavior") or data.get("afterAnswerBehavior") or "end_flow").strip().lower()
     return behavior if behavior in {"end_flow", "continue_to_next", "wait_same_node"} else "end_flow"
@@ -543,6 +601,8 @@ def validate_flow_graph(nodes: list[dict[str, Any]] | None, edges: list[dict[str
                 add_issue(errors if strict_mode else warnings, "NODE_WITHOUT_OUTPUT", node_id, "Este node não tem saída. Conecte a outro node ou marque como final.")
         elif node_type == "message" and missing_output and is_terminal:
             logger.info("[FLOW VALIDATION TERMINAL MESSAGE OK] node_id=%s", node_id)
+        elif node_type == "ai_system" and missing_output and _is_terminal_ai_system_node(data):
+            logger.info("[FLOW VALIDATION TERMINAL AI_SYSTEM OK] node_id=%s", node_id)
         elif not is_terminal and missing_output:
             add_issue(errors if strict_mode else warnings, "NODE_WITHOUT_OUTPUT", node_id, "Este node não tem saída. Conecte a outro node ou marque como final.")
 

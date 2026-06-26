@@ -323,7 +323,7 @@ const NODE_PRESETS: Record<FlowNodeKind, { label: string; type: string; data: Re
   ai_greeting: { label: 'IA Greeting', type: 'ai_greeting', data: { instruction: 'Você responde saudações de forma curta, humana e natural no WhatsApp.', input_template: '{{last_message}}', allow_mcp_tools: false, allowed_tools: ['responder'], fallback_message: 'Olá! 👋 Como posso ajudar?', after_agent_behavior: 'end_flow' } },
   ai_calendar_agent: { label: 'IA Calendar Agent', type: 'ai_calendar_agent', data: { instruction: 'Você é um agente especializado em agenda. Use Google Calendar apenas quando necessário. Nunca confirme evento sem retorno real da ferramenta. Use o DateResolver determinístico.', input_template: '{{last_message}}', allowed_tools: ['responder', 'chamar_mcp'], allow_mcp_tools: true, mcp_tool_ids: ['google_calendar_create_event', 'google_calendar_list_events', 'google_calendar_delete_event'], max_mcp_calls: 3, use_date_resolver: true, after_agent_behavior: 'end_flow' } },
   ai_safe_fallback: { label: 'IA Fallback Seguro', type: 'ai_safe_fallback', data: { instruction: 'Não consegui entender totalmente. Você quer agendar algo, tirar uma dúvida ou falar com um atendente?', input_template: '{{last_message}}', allow_mcp_tools: false, allowed_tools: ['responder'], fallback_message: 'Não consegui entender totalmente. Você quer agendar algo, tirar uma dúvida ou falar com um atendente?', after_agent_behavior: 'end_flow' } },
-  ai_system: { label: 'Sistema IA', type: 'ai_system', data: { name: 'Sistema IA', description: '', system_type: 'custom', collapsed: true, model_override: '', temperature: 0.2, memory_enabled: true, tools: [], integrations: [], language: 'pt-BR', timezone: 'America/Sao_Paulo', logs_enabled: true, global_prompt: '', internal_nodes: [], internal_edges: [], version: '1.0.0' } },
+  ai_system: { label: 'Sistema IA', type: 'ai_system', data: { name: 'Sistema IA', description: '', system_type: 'custom', collapsed: true, model_override: '', temperature: 0.2, memory_enabled: true, tools: [], integrations: [], language: 'pt-BR', timezone: 'America/Sao_Paulo', logs_enabled: true, global_prompt: '', internal_nodes: [], internal_edges: [], version: '1.0.0', isEnd: true, end: true, terminal: true } },
   ai_agent: { label: 'IA Agente', type: 'ai_agent', data: { instruction: 'Você é um agente de atendimento. Use apenas as ferramentas permitidas.', input_template: '{{last_message}}', allowed_tools: ['responder', 'definir_variavel'], allow_node_tools: false, node_tools: [], max_node_tool_calls: 3, allow_subflow_tools: false, subflow_tools: [], max_subflow_calls: 2, allow_mcp_tools: false, mcp_tool_ids: [], max_mcp_calls: 3, max_steps: 3, use_memory: true, memory_max_messages: 10, memory_max_chars: 4000, model_override: '', temperature: 0.2, max_tokens: 1200, after_agent_behavior: 'wait_same_node', after_answer_behavior: 'wait_same_node', fallback_message: 'Não consegui concluir essa ação agora. Quer que eu encaminhe para um atendente?', webhooks: [] } },
 };
 
@@ -1402,6 +1402,17 @@ function FlowNodeEditorPanel({
             </>
           );
         })()}
+
+        {isAiSystem ? (
+          <label className="flow-editor-checkbox">
+            <input
+              type="checkbox"
+              checked={!!(draft.isEnd || draft.end || draft.is_final || draft.terminal)}
+              onChange={(event) => onDraftChange({ isEnd: event.target.checked, end: event.target.checked, is_final: event.target.checked, terminal: event.target.checked })}
+            />
+            Este sistema encerra o fluxo
+          </label>
+        ) : null}
 
         <label className="flow-editor-checkbox">
           <input type="checkbox" checked={!!draft.is_terminal} onChange={(event) => onDraftChange({ is_terminal: event.target.checked })} />
@@ -2627,6 +2638,10 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
         timezone: 'America/Sao_Paulo',
         logs_enabled: true,
         global_prompt: '',
+        isEnd: true,
+        end: true,
+        terminal: true,
+        is_final: true,
         statuses: ['Saudação', 'Agenda', 'Consulta', 'Cancelamento'],
         onChange: updateNodeData,
         onToggleStart: toggleStartNode,
