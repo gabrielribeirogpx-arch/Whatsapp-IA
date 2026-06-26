@@ -43,10 +43,11 @@ def canonicalize_graph(
 
 
 def v2_snapshot_hash(nodes: list[dict[str, Any]], edges: list[dict[str, Any]]) -> str:
-    nodes_payload = _runtime_v2_nodes_payload(copy.deepcopy(nodes))
+    expanded_nodes, expanded_edges = _expand_ai_systems_for_runtime(copy.deepcopy(nodes), copy.deepcopy(edges))
+    nodes_payload = _runtime_v2_nodes_payload(expanded_nodes)
     snapshot = _snapshot_payload(
         nodes=nodes_payload,
-        edges=edges,
+        edges=expanded_edges,
         start_node_id=_derive_start_node_id(nodes_payload),
     )
     return canonical_hash(snapshot)
@@ -61,7 +62,135 @@ def _runtime_v2_nodes_payload(nodes: list[dict[str, Any]]) -> list[dict[str, Any
     ``data.options`` when a choice node only has builder buttons.
     """
 
-    return [_runtime_v2_node_payload(node) for node in nodes]
+    expanded_nodes, _ = _expand_ai_systems_for_runtime(nodes, [])
+    return [_runtime_v2_node_payload(node) for node in expanded_nodes]
+
+
+AI_SYSTEM_INTERNAL_TYPES = {
+    "ai_dispatcher",
+    "ai_greeting",
+    "ai_calendar_agent",
+    "ai_safe_fallback",
+}
+
+
+def _expand_ai_systems_for_runtime(
+    nodes: list[dict[str, Any]], edges: list[dict[str, Any]]
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Compile editor-only ai_system nodes into executable Runtime V2 nodes.
+
+    The builder persists ai_system as one canvas node and stores its agents in
+    data.internal_nodes/internal_edges. Runtime V2 snapshots must execute those
+    internal agents, so publication expands them without changing the editor
+    graph saved by the user.
+    """
+
+    expanded_nodes: list[dict[str, Any]] = []
+    expanded_edges: list[dict[str, Any]] = []
+    ai_system_ids: set[str] = set()
+
+    for node in nodes:
+        if not isinstance(node, dict):
+            expanded_nodes.append(node)
+            continue
+        node_type = str(node.get("type") or _node_data(node).get("type") or "").strip()
+        if node_type != "ai_system":
+            expanded_nodes.append(node)
+            continue
+
+        system_id = str(node.get("id") or "").strip()
+        if not system_id:
+            continue
+        ai_system_ids.add(system_id)
+        data = _node_data(node)
+        internal_nodes = data.get("internal_nodes") if isinstance(data.get("internal_nodes"), list) else []
+        internal_edges = data.get("internal_edges") if isinstance(data.get("internal_edges"), list) else []
+        id_map = {
+            str(internal.get("id")): f"{system_id}__{internal.get('id')}"
+            for internal in internal_nodes
+            if isinstance(internal, dict) and internal.get("id") not in (None, "")
+        }
+        internal_start = next(
+            (
+                str(internal.get("id"))
+                for internal in internal_nodes
+                if isinstance(internal, dict) and bool(_node_data(internal).get("isStart"))
+            ),
+            next(iter(id_map), ""),
+        )
+        if bool(data.get("isStart")):
+            start_id = f"{system_id}__start"
+            expanded_nodes.append(
+                {
+                    "id": start_id,
+                    "type": "start",
+                    "position": node.get("position") or {"x": 0, "y": 0},
+                    "data": {"isStart": True, "label": f"Start {data.get('label') or data.get('name') or 'AI System'}"},
+                }
+            )
+            if internal_start and internal_start in id_map:
+                expanded_edges.append(
+                    {
+                        "id": f"{start_id}->{id_map[internal_start]}",
+                        "source": start_id,
+                        "target": id_map[internal_start],
+                        "sourceHandle": "default",
+                        "targetHandle": "default",
+                        "type": "default",
+                        "label": "",
+                        "data": {"sourceHandle": "default", "compiled_from_ai_system": system_id},
+                    }
+                )
+        for internal in internal_nodes:
+            if not isinstance(internal, dict) or str(internal.get("id")) not in id_map:
+                continue
+            internal_data = dict(_node_data(internal))
+            internal_type = str(internal.get("type") or internal_data.get("type") or "ai_agent")
+            internal_data.update(
+                {
+                    "compiled_from_ai_system": system_id,
+                    "ai_system_internal_type": internal_type,
+                    "isStart": False,
+                    "allowed_tools": internal_data.get("allowed_tools") or ["responder"],
+                    "max_steps": internal_data.get("max_steps") or 3,
+                }
+            )
+            expanded_nodes.append(
+                {
+                    **internal,
+                    "id": id_map[str(internal.get("id"))],
+                    "type": "ai_agent" if internal_type in AI_SYSTEM_INTERNAL_TYPES else internal_type,
+                    "data": internal_data,
+                }
+            )
+        for edge in internal_edges:
+            if not isinstance(edge, dict):
+                continue
+            source = id_map.get(str(edge.get("source")))
+            target = id_map.get(str(edge.get("target")))
+            if not source or not target:
+                continue
+            expanded_edges.append(
+                {
+                    **edge,
+                    "id": f"{system_id}__{edge.get('id') or f'{source}->{target}:{edge.get('sourceHandle') or edge.get('source_handle') or 'default'}'}",
+                    "source": source,
+                    "target": target,
+                    "data": {**(edge.get("data") if isinstance(edge.get("data"), dict) else {}), "compiled_from_ai_system": system_id},
+                }
+            )
+
+    for edge in edges:
+        if not isinstance(edge, dict):
+            expanded_edges.append(edge)
+            continue
+        source = str(edge.get("source") or "")
+        target = str(edge.get("target") or "")
+        if source in ai_system_ids or target in ai_system_ids:
+            continue
+        expanded_edges.append(edge)
+
+    return expanded_nodes, expanded_edges
 
 
 def _runtime_v2_node_payload(node: dict[str, Any]) -> dict[str, Any]:
@@ -236,10 +365,14 @@ class FlowV2Publisher:
     def publish(
         self, *, nodes: list[dict[str, Any]] | None, edges: list[dict[str, Any]] | None
     ) -> FlowV2PublishResult:
-        nodes_payload = _runtime_v2_nodes_payload(
-            copy.deepcopy(nodes if isinstance(nodes, list) else [])
+        expanded_nodes, expanded_edges = _expand_ai_systems_for_runtime(
+            copy.deepcopy(nodes if isinstance(nodes, list) else []),
+            copy.deepcopy(edges if isinstance(edges, list) else []),
         )
-        edges_payload = copy.deepcopy(edges if isinstance(edges, list) else [])
+        nodes_payload = _runtime_v2_nodes_payload(
+            expanded_nodes
+        )
+        edges_payload = expanded_edges
         validation = self.validator.validate(nodes=nodes_payload, edges=edges_payload)
         if not validation.is_valid:
             raise FlowV2PublishError(validation.errors)

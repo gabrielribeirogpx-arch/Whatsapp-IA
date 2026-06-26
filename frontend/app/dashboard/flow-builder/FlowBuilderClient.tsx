@@ -119,6 +119,64 @@ const AI_SYSTEM_CARDS = [
   { id: 'ai_custom_system', title: '➕ Sistema Personalizado', subtitle: 'Comece com um sistema IA em branco.' },
 ] as const;
 
+const AI_SYSTEM_INTERNAL_NODE_TYPES = new Set(['ai_dispatcher', 'ai_greeting', 'ai_calendar_agent', 'ai_safe_fallback']);
+
+const isAiSystemInternalNode = (node: Pick<Node, 'type' | 'data'> | FlowNodePayload) => {
+  const data = (node.data || {}) as Record<string, unknown>;
+  return AI_SYSTEM_INTERNAL_NODE_TYPES.has(String(node.type || ''))
+    && (!!data.parent_system_id || !!data.system_id || !!data.ai_system_parent_id);
+};
+
+const sanitizeAiSystemCanvasGraph = <TNode extends Node | FlowNodePayload, TEdge extends Edge | FlowEdgePayload>(
+  nodes: TNode[],
+  edges: TEdge[],
+) => {
+  const systemNodes = nodes.filter((node) => node.type === 'ai_system');
+  const systemById = new Map(systemNodes.map((node) => [String(node.id), node]));
+  const migratedBySystem = new Map<string, TNode[]>();
+  const removedIds = new Set<string>();
+
+  for (const node of nodes) {
+    if (!isAiSystemInternalNode(node)) continue;
+    const data = (node.data || {}) as Record<string, unknown>;
+    const parentId = String(data.parent_system_id || data.system_id || data.ai_system_parent_id || '');
+    if (!parentId || !systemById.has(parentId)) continue;
+    removedIds.add(String(node.id));
+    migratedBySystem.set(parentId, [...(migratedBySystem.get(parentId) || []), node]);
+  }
+
+  if (removedIds.size === 0) {
+    return { nodes, edges, removedIds };
+  }
+
+  const sanitizedNodes = nodes
+    .filter((node) => !removedIds.has(String(node.id)))
+    .map((node) => {
+      if (node.type !== 'ai_system') return node;
+      const migrated = migratedBySystem.get(String(node.id)) || [];
+      if (!migrated.length) return node;
+      const data = (node.data || {}) as Record<string, unknown>;
+      const currentInternalNodes = Array.isArray(data.internal_nodes) ? data.internal_nodes : [];
+      const currentIds = new Set(currentInternalNodes.map((internalNode) => String((internalNode as { id?: unknown }).id || '')));
+      const nextInternalNodes = [
+        ...currentInternalNodes,
+        ...migrated
+          .filter((internalNode) => !currentIds.has(String(internalNode.id)))
+          .map((internalNode) => ({
+            ...internalNode,
+            data: {
+              ...((internalNode.data || {}) as Record<string, unknown>),
+              parent_system_id: String(node.id),
+            },
+          })),
+      ];
+      return { ...node, data: { ...data, internal_nodes: nextInternalNodes } };
+    });
+
+  const sanitizedEdges = edges.filter((edge) => !removedIds.has(String(edge.source)) && !removedIds.has(String(edge.target)));
+  return { nodes: sanitizedNodes, edges: sanitizedEdges, removedIds };
+};
+
 const NODE_GROUPS: NodePaletteGroup[] = [
   {
     id: 'communication',
@@ -357,7 +415,10 @@ const normalizeDelayNodePayload = (node: FlowNodePayload): FlowNodePayload => {
 };
 
 const serializeFlowGraph = (nodes: Node[], edges: Edge[]) => {
-  const payloadNodes: FlowNodePayload[] = nodes.map((node) => {
+  const sanitizedGraph = sanitizeAiSystemCanvasGraph(nodes, edges);
+  const cleanCanvasNodes = sanitizedGraph.nodes;
+  const cleanCanvasEdges = sanitizedGraph.edges;
+  const payloadNodes: FlowNodePayload[] = cleanCanvasNodes.map((node) => {
     const nodeData = node.data || {};
     const { onChange, onToggleStart, running, hasValidationError, ...cleanData } = nodeData as Record<string, unknown>;
 
@@ -372,9 +433,9 @@ const serializeFlowGraph = (nodes: Node[], edges: Edge[]) => {
     });
   });
 
-  const nodeIds = new Set(nodes.map((node) => node.id));
-  const nodeTypeById = new Map(nodes.map((node) => [node.id, node.type]));
-  const cleanEdges: FlowEdgePayload[] = edges
+  const nodeIds = new Set(cleanCanvasNodes.map((node) => node.id));
+  const nodeTypeById = new Map(cleanCanvasNodes.map((node) => [node.id, node.type]));
+  const cleanEdges: FlowEdgePayload[] = cleanCanvasEdges
     .filter((edge) => edge.source && edge.target && nodeIds.has(edge.source) && nodeIds.has(edge.target))
     .map((edge) => {
       const sourceNodeType = nodeTypeById.get(edge.source);
@@ -1571,6 +1632,16 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
   }, [selectedFlowId]);
 
   useEffect(() => {
+    const sanitizedGraph = sanitizeAiSystemCanvasGraph(nodes, edges);
+    if (sanitizedGraph.removedIds.size === 0) return;
+    console.info('AI_SYSTEM_INTERNAL_NODES_REMOVED_FROM_CANVAS', {
+      removed_canvas_nodes: Array.from(sanitizedGraph.removedIds),
+    });
+    setNodes(sanitizedGraph.nodes as Node[]);
+    setEdges(sanitizedGraph.edges as Edge[]);
+  }, [edges, nodes, setEdges, setNodes]);
+
+  useEffect(() => {
     nodesRef.current = nodes;
   }, [nodes]);
   useEffect(() => {
@@ -2091,8 +2162,15 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
         }),
       }));
 
-      const nodesToRender = formattedNodes;
-      let edgesToRender = formattedEdges;
+      const sanitizedLoadedGraph = sanitizeAiSystemCanvasGraph(formattedNodes, formattedEdges);
+      if (sanitizedLoadedGraph.removedIds.size > 0) {
+        console.info('AI_SYSTEM_INTERNAL_NODES_MIGRATED', {
+          flow_id: flowId,
+          removed_canvas_nodes: Array.from(sanitizedLoadedGraph.removedIds),
+        });
+      }
+      const nodesToRender = sanitizedLoadedGraph.nodes as Node[];
+      let edgesToRender = sanitizedLoadedGraph.edges as Edge[];
       if (nodesToRender.length === 0) {
         console.info('[BUILDER EMPTY FLOW]', { flow_id: flowId, nodes_count: 0, edges_count: edgesToRender.length });
         setNodes([]);
@@ -2936,32 +3014,8 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
       },
     }));
 
-    const expandedSystemNodes = baseNodes.flatMap((systemNode) => {
-      if (systemNode.type !== 'ai_system') return [];
-      const data = (systemNode.data || {}) as Record<string, unknown>;
-      if (data.collapsed !== false) return [];
-      const internalNodes = Array.isArray(data.internal_nodes) ? data.internal_nodes as Node[] : [];
-      return internalNodes.map((internalNode) => ({
-        ...internalNode,
-        id: `${systemNode.id}__${internalNode.id}`,
-        selectable: true,
-        draggable: false,
-        position: {
-          x: systemNode.position.x + 420 + (internalNode.position?.x || 0),
-          y: systemNode.position.y - 180 + (internalNode.position?.y || 0),
-        },
-        data: {
-          ...(internalNode.data || {}),
-          ai_system_parent_id: systemNode.id,
-          onChange: updateNodeData,
-          onToggleStart: toggleStartNode,
-          hasValidationError: false,
-        },
-      }));
-    });
-
-    return [...baseNodes, ...expandedSystemNodes];
-  }, [analyticsByNode, analyticsOverlayEnabled, currentNodeId, highlightedNodeId, nodes, toggleAiSystemCollapsed, toggleStartNode, updateNodeData]);
+    return baseNodes;
+  }, [analyticsByNode, analyticsOverlayEnabled, currentNodeId, highlightedNodeId, nodes, toggleAiSystemCollapsed, toggleStartNode]);
 
   const safeNodes = useMemo(
     () => (Array.isArray(decoratedNodes) ? decoratedNodes : []).map((node) => ({
@@ -2976,24 +3030,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
     [edges],
   );
 
-  const visibleEdges = useMemo(() => {
-    const expandedEdges = nodes.flatMap((systemNode) => {
-      if (systemNode.type !== 'ai_system') return [];
-      const data = (systemNode.data || {}) as Record<string, unknown>;
-      if (data.collapsed !== false) return [];
-      const internalEdges = Array.isArray(data.internal_edges) ? data.internal_edges as Edge[] : [];
-      return internalEdges.map((edge) => ({
-        ...edge,
-        id: `${systemNode.id}__${edge.id}`,
-        source: `${systemNode.id}__${edge.source}`,
-        target: `${systemNode.id}__${edge.target}`,
-        animated: true,
-        style: { ...(edge.style || {}), stroke: '#8b5cf6', strokeDasharray: '5 5' },
-        data: { ...(edge.data || {}), ai_system_parent_id: systemNode.id },
-      }));
-    });
-    return [...safeEdges, ...expandedEdges];
-  }, [nodes, safeEdges]);
+  const visibleEdges = safeEdges;
 
   const decoratedEdges = useMemo(
     () =>
