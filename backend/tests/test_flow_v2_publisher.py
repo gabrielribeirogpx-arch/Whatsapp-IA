@@ -605,6 +605,21 @@ def test_ai_system_as_canvas_start_creates_one_runtime_start() -> None:
     assert not any(node["type"] == "ai_system" for node in result.snapshot["nodes"])
 
 
+def test_ai_system_only_terminal_template_publishes_expanded_runtime_graph() -> None:
+    system = _ai_system_node()
+    system["data"].update({"isEnd": True, "end": True, "terminal": True})
+
+    result = FlowV2Publisher().publish(nodes=[system], edges=[])
+
+    node_ids = {node["id"] for node in result.snapshot["nodes"]}
+    assert result.validation.status == GraphValidationStatus.VALID
+    assert result.snapshot["start_node_id"] == "system__start"
+    assert "ai_system" not in {node["type"] for node in result.snapshot["nodes"]}
+    assert {"system__dispatcher", "system__greeting", "system__calendar", "system__fallback"}.issubset(node_ids)
+    terminal_nodes = [node for node in result.snapshot["nodes"] if node["id"] in {"system__greeting", "system__calendar", "system__fallback"}]
+    assert terminal_nodes
+    assert all(node["data"].get("isEnd") is True and node["data"].get("is_final") is True for node in terminal_nodes)
+
 def test_legacy_start_to_ai_agent_still_publishes() -> None:
     result = FlowV2Publisher().publish(
         nodes=[
