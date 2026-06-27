@@ -90,7 +90,7 @@ export default function ConditionNode({ id, data, selected }: NodeProps) {
       badge="IF"
       badgeTone={{ background: '#fef3c7', color: '#92400e' }}
       accent="linear-gradient(90deg, #d97706, #f59e0b)"
-      summary={`${uniqueRules.length || branches.length} regras`}
+      summary={`${branches.length} saídas disponíveis${uniqueRules.length ? ` · ${uniqueRules.length} regra${uniqueRules.length > 1 ? 's' : ''}` : ''}`}
       chips={uniqueRules.length ? uniqueRules.slice(0, 3) : branches.map((branch) => branch.label || branch.handleId || 'Saída')}
       isStart={nodeData.isStart}
       hasValidationError={nodeData.hasValidationError}

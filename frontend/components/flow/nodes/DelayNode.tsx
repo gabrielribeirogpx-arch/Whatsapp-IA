@@ -30,7 +30,7 @@ export default function DelayNode({ id, data, selected }: NodeProps) {
       badge="WAIT"
       badgeTone={{ background: '#ecfeff', color: '#0e7490' }}
       accent="linear-gradient(90deg, #0891b2, #06b6d4)"
-      summary={`Aguardar ${value}s`}
+      summary={`Pausa programada por ${value}s`}
       meta={nodeData.show_typing ? 'Pausa + digitando no WhatsApp' : 'Pausa no fluxo'}
       chips={nodeData.show_typing && nodeData.typing_duration_mode === 'auto' ? ['Digitando automático'] : []}
       isStart={nodeData.isStart}

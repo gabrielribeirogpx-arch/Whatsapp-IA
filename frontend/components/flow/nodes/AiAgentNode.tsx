@@ -42,7 +42,7 @@ export default function AiAgentNode({ id, data, selected }: NodeProps) {
       badgeTitle="Usa IA para decidir e executar ferramentas permitidas"
       badgeTone={{ background: '#f4f0ff', color: '#6d28d9' }}
       accent="linear-gradient(135deg, #7c3aed, #4f46e5 52%, #06b6d4)"
-      summary="Orquestra ações inteligentes usando IA, memória e ferramentas do fluxo."
+      summary="Responde com IA, memória e ferramentas permitidas."
       meta={isActive ? 'Ativo' : 'Inativo'}
       metrics={[
         { label: 'Modelo de IA', value: model, icon: '✦', tone: '#4f46e5' },

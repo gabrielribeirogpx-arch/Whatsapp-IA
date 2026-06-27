@@ -26,7 +26,7 @@ export default function MessageNode({ id, data, selected }: NodeProps) {
       badge="MSG"
       badgeTone={{ background: '#ecfdf5', color: '#047857' }}
       accent="linear-gradient(135deg, #10b981, #22c55e)"
-      summary={`${nodeData.wait_for_reply ? '⏸ ' : ''}"${truncateText(nodeData.content || nodeData.label, 50, 'Mensagem vazia')}"`}
+      summary={nodeData.content || nodeData.label ? `Envia: “${truncateText(nodeData.content || nodeData.label, 44, 'mensagem')}”` : 'Envia uma mensagem ao contato'}
       isStart={nodeData.isStart}
       hasValidationError={nodeData.hasValidationError}
       onToggleStart={nodeData.onToggleStart}

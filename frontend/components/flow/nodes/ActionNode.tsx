@@ -75,8 +75,8 @@ export default function ActionNode({ id, data, selected }: NodeProps) {
       title="Ação"
       emoji="⚡"
       badge="LOGIC"
-      badgeTone={{ background: '#ccfbf1', color: '#0f766e' }}
-      accent="linear-gradient(135deg, #14b8a6, #2563eb)"
+      badgeTone={{ background: '#fff7ed', color: '#c2410c' }}
+      accent="linear-gradient(135deg, #f97316, #ef4444)"
       summary={truncateText(actionType === 'notify_team' ? notifySummary : actionType === 'create_task' ? taskSummary : actionLabel, 100, 'Ação não configurada')}
       meta={actionType === 'notify_team' ? `Prioridade: ${notificationPriorityLabel}` : actionType === 'create_task' ? `Prioridade: ${taskPriorityLabel}` : 'Automação interna'}
       isStart={nodeData.isStart}
