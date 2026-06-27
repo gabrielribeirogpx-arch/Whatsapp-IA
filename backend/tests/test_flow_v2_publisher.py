@@ -681,6 +681,32 @@ def test_legacy_start_to_ai_agent_still_publishes() -> None:
     assert any(node["id"] == "agent" and node["type"] == "ai_agent" for node in result.snapshot["nodes"])
 
 
+
+def test_ai_system_publish_rewrites_prefixed_internal_edges_from_camel_case_payload() -> None:
+    system = _ai_system_node()
+    system["data"]["internalNodes"] = system["data"].pop("internal_nodes")
+    system["data"]["internalEdges"] = [
+        {"id": "i1", "source": "system__dispatcher", "target": "system__greeting", "sourceHandle": "default"},
+        {"id": "i2", "source": "system__dispatcher", "target": "system__calendar", "sourceHandle": "calendar"},
+        {"id": "i3", "source": "system__dispatcher", "target": "system__fallback", "sourceHandle": "fallback"},
+    ]
+    system["data"].pop("internal_edges")
+
+    result = FlowV2Publisher().publish(nodes=[system], edges=[])
+
+    node_ids = {node["id"] for node in result.snapshot["nodes"]}
+    assert {"system__dispatcher", "system__greeting", "system__calendar", "system__fallback"}.issubset(node_ids)
+    assert result.snapshot["start_node_id"] == "system__dispatcher"
+    assert {
+        (edge["source"], edge["target"])
+        for edge in result.snapshot["edges"]
+    } >= {
+        ("system__dispatcher", "system__greeting"),
+        ("system__dispatcher", "system__calendar"),
+        ("system__dispatcher", "system__fallback"),
+    }
+    assert result.validation.status == GraphValidationStatus.VALID
+
 def test_ai_system_internal_changes_affect_published_hash() -> None:
     system = _ai_system_node()
     first = FlowV2Publisher().publish(nodes=[{"id": "start", "type": "start"}, system], edges=[{"id": "e1", "source": "start", "target": "system"}])
