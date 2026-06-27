@@ -301,3 +301,77 @@ def test_snapshot_audit_report_identifies_requested_missing_transition():
     ]
     assert report["requested_transition"]["missing"] is True
     assert report["requested_transition"]["outgoing_transitions"] == []
+
+
+def test_activate_uses_published_runtime_snapshot_not_editor_graph(monkeypatch):
+    from types import SimpleNamespace
+    from uuid import uuid4
+
+    from app.routers import flows
+
+    tenant_id = uuid4()
+    flow_id = uuid4()
+    version_id = uuid4()
+    runtime_nodes = [
+        {"id": "start", "type": "message", "data": {"isStart": True, "text": "Oi"}},
+        {"id": "end", "type": "message", "data": {"text": "Fim", "isTerminal": True}},
+    ]
+    runtime_edges = [{"id": "edge-runtime", "source": "start", "target": "end"}]
+    editor_nodes = [{"id": "ai_system", "type": "ai_system", "data": {"isStart": True}}]
+    editor_edges = [{"id": "edge-editor-stale", "source": "ai_system", "target": "missing"}]
+    flow = SimpleNamespace(
+        id=flow_id,
+        tenant_id=tenant_id,
+        published_version_id=version_id,
+        current_version_id=None,
+        version=1,
+        status="published",
+        nodes_json=editor_nodes,
+        edges_json=editor_edges,
+        nodes=editor_nodes,
+        edges=editor_edges,
+        current_version=None,
+    )
+    version = SimpleNamespace(
+        id=version_id,
+        flow_id=flow_id,
+        tenant_id=tenant_id,
+        version=7,
+        is_published=True,
+        snapshot={"nodes": runtime_nodes, "edges": runtime_edges, "snapshot_schema_version": 2},
+        nodes=runtime_nodes,
+        edges=runtime_edges,
+    )
+
+    class _ScalarResult:
+        def first(self):
+            return version
+
+    class _ExecuteResult:
+        def scalars(self):
+            return _ScalarResult()
+
+    class _DB:
+        def __init__(self):
+            self.added = []
+
+        def execute(self, *_args, **_kwargs):
+            return _ExecuteResult()
+
+        def add(self, obj):
+            self.added.append(obj)
+
+    def fail_publish(**_kwargs):
+        raise AssertionError("activate must not republish when a published snapshot exists")
+
+    validated = []
+    monkeypatch.setattr(flows, "_publish_fresh_snapshot", fail_publish)
+    monkeypatch.setattr(flows, "invalidate_flow_runtime_cache", lambda _flow_id: None)
+    monkeypatch.setattr(flows, "validate_flow_graph", lambda nodes, edges, mode="publish": validated.append((nodes, edges, mode)) or {"errors": [], "warnings": []})
+
+    flows._ensure_published_snapshot_on_activate(db=_DB(), flow=flow)
+
+    assert validated == [(runtime_nodes, runtime_edges, "publish")]
+    assert flow.published_version_id == version_id
+    assert flow.current_version_id == version_id
+    assert flow.version == 7
