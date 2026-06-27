@@ -43,8 +43,16 @@ def canonicalize_graph(
 
 
 def v2_snapshot_hash(nodes: list[dict[str, Any]], edges: list[dict[str, Any]]) -> str:
-    expanded_nodes, expanded_edges = _expand_ai_systems_for_runtime(copy.deepcopy(nodes), copy.deepcopy(edges))
+    source_nodes = copy.deepcopy(nodes)
+    source_edges = copy.deepcopy(edges)
+    expanded_nodes, expanded_edges = _expand_ai_systems_for_runtime(source_nodes, source_edges)
     nodes_payload = _runtime_v2_nodes_payload(expanded_nodes)
+    nodes_payload, expanded_edges = _sanitize_expanded_ai_system_graph(
+        nodes=nodes_payload,
+        edges=expanded_edges,
+        nodes_before=len(nodes if isinstance(nodes, list) else []),
+        edges_before=len(edges if isinstance(edges, list) else []),
+    )
     snapshot = _snapshot_payload(
         nodes=nodes_payload,
         edges=expanded_edges,
@@ -314,6 +322,113 @@ def _expand_ai_systems_for_runtime(
     logger.info("AI_SYSTEM_COMPILATION_FINISHED")
     return expanded_nodes, expanded_edges
 
+
+def _node_id(node: dict[str, Any]) -> str:
+    return str(node.get("id") or "").strip()
+
+
+def _edge_id(edge: dict[str, Any], index: int) -> str:
+    value = edge.get("id")
+    return str(value if value not in (None, "") else index)
+
+
+def _mark_node_as_terminal(node: dict[str, Any]) -> None:
+    data = dict(_node_data(node))
+    data.update({"isEnd": True, "end": True, "is_final": True, "terminal": True, "is_terminal": True})
+    data.setdefault("after_agent_behavior", "end_flow")
+    node["data"] = data
+
+
+def _node_is_terminal(node: dict[str, Any]) -> bool:
+    data = _node_data(node)
+    return _truthy_terminal_flag(data) or _truthy_terminal_flag(node)
+
+
+def _sanitize_expanded_ai_system_graph(
+    *, nodes: list[dict[str, Any]], edges: list[dict[str, Any]], nodes_before: int, edges_before: int
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Make the AI System expanded runtime graph internally consistent before validation.
+
+    Publication validation expects every edge endpoint to exist and every
+    non-terminal node to have an outgoing transition. AI System compilation can
+    receive stale editor internal_edges, so clean broken references and promote
+    explicit terminal nodes before the generic validator runs.
+    """
+
+    node_ids = {_node_id(node) for node in nodes if isinstance(node, dict) and _node_id(node)}
+    cleaned_edges: list[dict[str, Any]] = []
+    removed_edges: list[dict[str, Any]] = []
+    for index, edge in enumerate(edges):
+        if not isinstance(edge, dict):
+            cleaned_edges.append(edge)
+            continue
+        source = str(edge.get("source") or "").strip()
+        target = str(edge.get("target") or "").strip()
+        missing: list[str] = []
+        if not source or source not in node_ids:
+            missing.append("source")
+        if not target or target not in node_ids:
+            missing.append("target")
+        if missing:
+            payload = {
+                "id": _edge_id(edge, index),
+                "source": source,
+                "target": target,
+                "missing": missing,
+            }
+            removed_edges.append(payload)
+            logger.warning(
+                "EDGE_REFERENCE_NOT_FOUND edge_id=%s source=%s target=%s missing=%s",
+                payload["id"],
+                source,
+                target,
+                ",".join(missing),
+            )
+            continue
+        cleaned_edges.append(edge)
+
+    outgoing: dict[str, int] = {node_id: 0 for node_id in node_ids}
+    for edge in cleaned_edges:
+        if not isinstance(edge, dict):
+            continue
+        source = str(edge.get("source") or "").strip()
+        if source in outgoing:
+            outgoing[source] += 1
+
+    invalid_nodes: list[str] = []
+    for node in nodes:
+        if not isinstance(node, dict):
+            continue
+        node_id = _node_id(node)
+        data = _node_data(node)
+        if not node_id or outgoing.get(node_id, 0) > 0:
+            continue
+        if not data.get("compiled_from_ai_system"):
+            continue
+        if _node_is_terminal(node):
+            _mark_node_as_terminal(node)
+            continue
+        invalid_nodes.append(node_id)
+
+    logger.info(
+        "AI_SYSTEM_EXPANSION nodes_before=%s nodes_after=%s edges_before=%s edges_after=%s removed_edges=%s removed_nodes=%s",
+        nodes_before,
+        len(nodes),
+        edges_before,
+        len(cleaned_edges),
+        removed_edges,
+        [],
+    )
+    logger.info(
+        "AI_SYSTEM_EXPANDED_SNAPSHOT_BEFORE_VALIDATION %s",
+        json.dumps({"nodes": nodes, "edges": cleaned_edges}, ensure_ascii=False, sort_keys=True, default=str),
+    )
+
+    if invalid_nodes:
+        raise FlowV2PublishError(tuple(f"AI_SYSTEM_INTERNAL_NODE_WITHOUT_OUTPUT:{node_id}" for node_id in invalid_nodes))
+
+    return nodes, cleaned_edges
+
 def _runtime_v2_node_payload(node: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(node, dict):
         return node
@@ -486,14 +601,19 @@ class FlowV2Publisher:
     def publish(
         self, *, nodes: list[dict[str, Any]] | None, edges: list[dict[str, Any]] | None
     ) -> FlowV2PublishResult:
+        source_nodes = copy.deepcopy(nodes if isinstance(nodes, list) else [])
+        source_edges = copy.deepcopy(edges if isinstance(edges, list) else [])
         expanded_nodes, expanded_edges = _expand_ai_systems_for_runtime(
-            copy.deepcopy(nodes if isinstance(nodes, list) else []),
-            copy.deepcopy(edges if isinstance(edges, list) else []),
+            source_nodes,
+            source_edges,
         )
-        nodes_payload = _runtime_v2_nodes_payload(
-            expanded_nodes
+        nodes_payload = _runtime_v2_nodes_payload(expanded_nodes)
+        nodes_payload, edges_payload = _sanitize_expanded_ai_system_graph(
+            nodes=nodes_payload,
+            edges=expanded_edges,
+            nodes_before=len(source_nodes),
+            edges_before=len(source_edges),
         )
-        edges_payload = expanded_edges
         validation = self.validator.validate(nodes=nodes_payload, edges=edges_payload)
         if not validation.is_valid:
             raise FlowV2PublishError(validation.errors)
