@@ -595,14 +595,16 @@ def test_ai_system_publish_between_start_and_message_reconnects_exits() -> None:
     assert len([node for node in result.snapshot["nodes"] if FlowV2GraphValidator._is_start_node(node)]) == 1
 
 
-def test_ai_system_as_canvas_start_creates_one_runtime_start() -> None:
+def test_ai_system_as_canvas_start_promotes_dispatcher_as_runtime_start() -> None:
     system = _ai_system_node()
     system["data"]["isStart"] = True
     result = FlowV2Publisher().publish(nodes=[system], edges=[])
 
-    assert result.snapshot["start_node_id"] == "system__start"
-    assert len([node for node in result.snapshot["nodes"] if FlowV2GraphValidator._is_start_node(node)]) == 1
+    assert result.snapshot["start_node_id"] == "system__dispatcher"
+    start_nodes = [node for node in result.snapshot["nodes"] if FlowV2GraphValidator._is_start_node(node)]
+    assert [node["id"] for node in start_nodes] == ["system__dispatcher"]
     assert not any(node["type"] == "ai_system" for node in result.snapshot["nodes"])
+    assert not any(node["id"] == "system__start" for node in result.snapshot["nodes"])
 
 
 def test_ai_system_only_terminal_template_publishes_expanded_runtime_graph() -> None:
@@ -613,12 +615,58 @@ def test_ai_system_only_terminal_template_publishes_expanded_runtime_graph() -> 
 
     node_ids = {node["id"] for node in result.snapshot["nodes"]}
     assert result.validation.status == GraphValidationStatus.VALID
-    assert result.snapshot["start_node_id"] == "system__start"
+    assert result.snapshot["start_node_id"] == "system__dispatcher"
     assert "ai_system" not in {node["type"] for node in result.snapshot["nodes"]}
     assert {"system__dispatcher", "system__greeting", "system__calendar", "system__fallback"}.issubset(node_ids)
     terminal_nodes = [node for node in result.snapshot["nodes"] if node["id"] in {"system__greeting", "system__calendar", "system__fallback"}]
     assert terminal_nodes
     assert all(node["data"].get("isEnd") is True and node["data"].get("is_final") is True for node in terminal_nodes)
+
+
+def test_ai_system_connected_to_other_nodes_does_not_create_duplicate_start() -> None:
+    result = FlowV2Publisher().publish(
+        nodes=[{"id": "start", "type": "start"}, _ai_system_node(), {"id": "done", "type": "message", "data": {"content": "Fim"}}],
+        edges=[
+            {"id": "e1", "source": "start", "target": "system"},
+            {"id": "e2", "source": "system", "target": "done"},
+        ],
+    )
+
+    start_ids = FlowV2GraphValidator._start_node_ids(result.snapshot["nodes"])
+    assert start_ids == ["start"]
+    assert result.snapshot["start_node_id"] == "start"
+    assert not any(node["type"] == "ai_system" for node in result.snapshot["nodes"])
+    assert not any(node["id"].endswith("__start") for node in result.snapshot["nodes"])
+
+
+def test_ai_system_as_first_node_of_flow_uses_dispatcher_as_only_runtime_start() -> None:
+    result = FlowV2Publisher().publish(
+        nodes=[_ai_system_node(), {"id": "done", "type": "message", "data": {"content": "Fim"}}],
+        edges=[{"id": "e1", "source": "system", "target": "done"}],
+    )
+
+    assert result.snapshot["start_node_id"] == "system__dispatcher"
+    assert FlowV2GraphValidator._start_node_ids(result.snapshot["nodes"]) == ["system__dispatcher"]
+    assert any(edge["source"] == "system__fallback" and edge["target"] == "done" for edge in result.snapshot["edges"])
+
+
+def test_multiple_independent_ai_systems_fail_exactly_one_start_validation_without_synthetic_starts() -> None:
+    system_a = _ai_system_node("system_a")
+    system_b = _ai_system_node("system_b")
+
+    with pytest.raises(FlowV2PublishError) as exc:
+        FlowV2Publisher().publish(nodes=[system_a, system_b], edges=[])
+
+    assert "FLOW_V2_REQUIRES_EXACTLY_ONE_START_NODE" in exc.value.errors
+
+
+def test_final_snapshot_contains_exactly_one_start_node_after_ai_system_expansion() -> None:
+    result = FlowV2Publisher().publish(nodes=[_ai_system_node()], edges=[])
+
+    start_ids = FlowV2GraphValidator._start_node_ids(result.snapshot["nodes"])
+    assert start_ids == [result.snapshot["start_node_id"]]
+    assert start_ids == ["system__dispatcher"]
+
 
 def test_legacy_start_to_ai_agent_still_publishes() -> None:
     result = FlowV2Publisher().publish(

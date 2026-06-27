@@ -148,6 +148,21 @@ def _expand_ai_systems_for_runtime(
         if target:
             incoming_by_id[target] = incoming_by_id.get(target, 0) + 1
 
+    explicit_start_ids = {
+        str(node.get("id"))
+        for node in nodes
+        if isinstance(node, dict)
+        and node.get("id") not in (None, "")
+        and FlowV2GraphValidator._is_start_node(node)
+    }
+    root_node_ids = [
+        str(node.get("id"))
+        for node in nodes
+        if isinstance(node, dict)
+        and node.get("id") not in (None, "")
+        and incoming_by_id.get(str(node.get("id")), 0) == 0
+    ]
+
     for node in nodes:
         if not isinstance(node, dict):
             expanded_nodes.append(node)
@@ -206,31 +221,12 @@ def _expand_ai_systems_for_runtime(
                 )
             )
         system_exits_by_id[system_id] = [id_map[internal_id] for internal_id in terminal_internal_ids] or ([id_map[internal_start]] if internal_start in id_map else [])
-        is_canvas_entry = bool(data.get("isStart")) or incoming_by_id.get(system_id, 0) == 0
+        is_runtime_start = system_id in explicit_start_ids or (
+            not explicit_start_ids
+            and incoming_by_id.get(system_id, 0) == 0
+            and root_node_ids == [system_id]
+        )
 
-        if is_canvas_entry:
-            start_id = f"{system_id}__start"
-            expanded_nodes.append(
-                {
-                    "id": start_id,
-                    "type": "start",
-                    "position": node.get("position") or {"x": 0, "y": 0},
-                    "data": {"isStart": True, "label": f"Start {data.get('label') or data.get('name') or 'AI System'}"},
-                }
-            )
-            if internal_start and internal_start in id_map:
-                expanded_edges.append(
-                    {
-                        "id": f"{start_id}->{id_map[internal_start]}",
-                        "source": start_id,
-                        "target": id_map[internal_start],
-                        "sourceHandle": "default",
-                        "targetHandle": "default",
-                        "type": "default",
-                        "label": "",
-                        "data": {"sourceHandle": "default", "compiled_from_ai_system": system_id},
-                    }
-                )
         for internal in internal_nodes:
             if not isinstance(internal, dict) or str(internal.get("id")) not in id_map:
                 continue
@@ -247,11 +243,17 @@ def _expand_ai_systems_for_runtime(
                     }
                 )
                 internal_data.setdefault("after_agent_behavior", "end_flow")
+            promoted_runtime_start = bool(
+                is_runtime_start
+                and internal_start in id_map
+                and str(internal.get("id")) == internal_start
+            )
             internal_data.update(
                 {
                     "compiled_from_ai_system": system_id,
                     "ai_system_internal_type": internal_type,
-                    "isStart": False,
+                    "isStart": promoted_runtime_start,
+                    "is_start": promoted_runtime_start,
                     "allowed_tools": internal_data.get("allowed_tools") or ["responder"],
                     "max_steps": internal_data.get("max_steps") or 3,
                 }
@@ -318,6 +320,25 @@ def _expand_ai_systems_for_runtime(
         "AI_SYSTEM_RUNTIME_GRAPH_CREATED nodes_count=%s edges_count=%s",
         len(expanded_nodes),
         len(expanded_edges),
+    )
+    logger.info(
+        "AI_SYSTEM_EXPANDED_RUNTIME_NODES %s",
+        json.dumps(
+            [
+                {
+                    "id": node.get("id"),
+                    "type": node.get("type") or _node_data(node).get("type"),
+                    "parent": node.get("parent") or node.get("parentNode") or _node_data(node).get("parent"),
+                    "is_start": FlowV2GraphValidator._is_start_node(node),
+                    "terminal": _node_is_terminal(node),
+                }
+                for node in expanded_nodes
+                if isinstance(node, dict)
+            ],
+            ensure_ascii=False,
+            sort_keys=True,
+            default=str,
+        ),
     )
     logger.info("AI_SYSTEM_COMPILATION_FINISHED")
     return expanded_nodes, expanded_edges
@@ -613,6 +634,12 @@ class FlowV2Publisher:
             edges=expanded_edges,
             nodes_before=len(source_nodes),
             edges_before=len(source_edges),
+        )
+        start_node_ids = self.validator._start_node_ids(nodes_payload)
+        logger.info(
+            "FLOW_V2_START_NODES_BEFORE_VALIDATION count=%s ids=%s",
+            len(start_node_ids),
+            start_node_ids,
         )
         validation = self.validator.validate(nodes=nodes_payload, edges=edges_payload)
         if not validation.is_valid:
