@@ -119,7 +119,7 @@ const AI_SYSTEM_CARDS = [
   { id: 'ai_custom_system', title: '➕ Sistema Personalizado', subtitle: 'Comece com um sistema IA em branco.' },
 ] as const;
 
-const AI_SYSTEM_INTERNAL_NODE_TYPES = new Set(['ai_dispatcher', 'ai_greeting', 'ai_calendar_agent', 'ai_safe_fallback']);
+const AI_SYSTEM_INTERNAL_NODE_TYPES = new Set(['ai_dispatcher', 'ai_greeting', 'ai_calendar_agent', 'ai_safe_fallback', 'ai_agent']);
 
 const isAiSystemInternalNode = (node: Pick<Node, 'type' | 'data'> | FlowNodePayload) => {
   const data = (node.data || {}) as Record<string, unknown>;
@@ -175,6 +175,37 @@ const sanitizeAiSystemCanvasGraph = <TNode extends Node | FlowNodePayload, TEdge
 
   const sanitizedEdges = edges.filter((edge) => !removedIds.has(String(edge.source)) && !removedIds.has(String(edge.target)));
   return { nodes: sanitizedNodes, edges: sanitizedEdges, removedIds };
+};
+
+
+type FlowHydrationSource = 'editor' | 'runtime' | 'published_snapshot' | 'none' | 'unknown';
+
+const getFlowHydrationStats = (nodes: Array<Pick<Node, 'type' | 'data'> | FlowNodePayload>) => ({
+  nodes_count: nodes.length,
+  contains_ai_system: nodes.some((node) => node.type === 'ai_system'),
+  contains_runtime_expanded_agents: nodes.some(isAiSystemInternalNode),
+});
+
+const logFlowEditorHydrationSource = (
+  source: FlowHydrationSource,
+  nodes: Array<Pick<Node, 'type' | 'data'> | FlowNodePayload>,
+) => {
+  console.info('FLOW_EDITOR_HYDRATE_SOURCE', {
+    source,
+    ...getFlowHydrationStats(nodes),
+  });
+};
+
+const shouldBlockEditorHydrationSource = (source?: string | null) => source === 'runtime' || source === 'published_snapshot';
+
+const logBlockedRuntimeGraphEditorHydration = (
+  source: FlowHydrationSource,
+  nodes: Array<Pick<Node, 'type' | 'data'> | FlowNodePayload>,
+) => {
+  console.warn('BLOCKED_RUNTIME_GRAPH_EDITOR_HYDRATION', {
+    source,
+    ...getFlowHydrationStats(nodes),
+  });
 };
 
 const NODE_GROUPS: NodePaletteGroup[] = [
@@ -2137,7 +2168,10 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
 
       const safeNodes = normalizedFlow.nodes;
       const safeEdges = normalizedFlow.edges;
-      const resolvedSource = payload?.source || 'unknown';
+      const resolvedSource = payload?.source || 'editor';
+      const hydrationSource: FlowHydrationSource = shouldBlockEditorHydrationSource(resolvedSource)
+        ? (resolvedSource as FlowHydrationSource)
+        : 'editor';
       setFlowSource(resolvedSource);
       setShowEmptyFlowWarning(!safeNodes || safeNodes.length === 0);
       console.info('[BUILDER LOAD]', {
@@ -2173,6 +2207,14 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
         }),
       }));
 
+      logFlowEditorHydrationSource(hydrationSource, formattedNodes);
+      if (shouldBlockEditorHydrationSource(hydrationSource)) {
+        logBlockedRuntimeGraphEditorHydration(hydrationSource, formattedNodes);
+        setOperationError('O Builder bloqueou a hidratação do canvas a partir de um grafo runtime/publicado. Recarregue o editor graph salvo.');
+        lastPersistedFlowSignatureRef.current = getFlowGraphSignature(serializeFlowGraph([], []));
+        return;
+      }
+
       const sanitizedLoadedGraph = sanitizeAiSystemCanvasGraph(formattedNodes, formattedEdges);
       if (sanitizedLoadedGraph.removedIds.size > 0) {
         console.info('AI_SYSTEM_INTERNAL_NODES_MIGRATED', {
@@ -2184,6 +2226,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
       let edgesToRender = sanitizedLoadedGraph.edges as Edge[];
       if (nodesToRender.length === 0) {
         console.info('[BUILDER EMPTY FLOW]', { flow_id: flowId, nodes_count: 0, edges_count: edgesToRender.length });
+        logFlowEditorHydrationSource('editor', []);
         setNodes([]);
         setEdges([]);
         setOperationError(null);
@@ -2884,8 +2927,10 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
       await parseApiResponse(activateResponse);
 
       setActiveFlowId(selectedFlowId);
-      setFlows((prev) => prev.map((flow) => ({ ...flow, is_active: flow.id === selectedFlowId })));
-      await loadFlow(selectedFlowId);
+      setFlows((prev) => prev.map((flow) => ({ ...flow, is_active: flow.id === selectedFlowId, is_published: flow.id === selectedFlowId ? true : flow.is_published })));
+      lastPersistedFlowSignatureRef.current = getFlowGraphSignature(getCurrentSerializedFlow());
+      setFlowDirty(false);
+      setFlowSaveStatus('success');
       await loadRuntimeObservability();
     } catch (error) {
       console.error('[PUBLISH ERROR]', { flowId: selectedFlowId, error });
