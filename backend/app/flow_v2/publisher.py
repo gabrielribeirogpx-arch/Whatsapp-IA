@@ -53,6 +53,11 @@ def v2_snapshot_hash(nodes: list[dict[str, Any]], edges: list[dict[str, Any]]) -
         nodes_before=len(nodes if isinstance(nodes, list) else []),
         edges_before=len(edges if isinstance(edges, list) else []),
     )
+    _log_graph_bfs_before_validation(
+        nodes=nodes_payload,
+        edges=expanded_edges,
+        start_node_ids=FlowV2GraphValidator._start_node_ids(nodes_payload),
+    )
     snapshot = _snapshot_payload(
         nodes=nodes_payload,
         edges=expanded_edges,
@@ -177,8 +182,37 @@ def _expand_ai_systems_for_runtime(
             continue
         ai_system_ids.add(system_id)
         data = _node_data(node)
-        internal_nodes = data.get("internal_nodes") if isinstance(data.get("internal_nodes"), list) else []
-        internal_edges = data.get("internal_edges") if isinstance(data.get("internal_edges"), list) else []
+        internal_nodes = _internal_items(data, "internal_nodes", "internalNodes")
+        internal_edges = _internal_items(data, "internal_edges", "internalEdges")
+        logger.info(
+            "AI_SYSTEM_PRE_EXPANSION %s",
+            _compact_json(
+                {
+                    "system_id": system_id,
+                    "internal_nodes": [
+                        {
+                            "id": item.get("id"),
+                            "type": item.get("type") or _node_data(item).get("type"),
+                            "is_start": FlowV2GraphValidator._is_start_node(item),
+                            "terminal": _node_is_terminal(item),
+                        }
+                        for item in internal_nodes
+                        if isinstance(item, dict)
+                    ],
+                    "internal_edges": [
+                        {
+                            "id": item.get("id"),
+                            "source": item.get("source"),
+                            "target": item.get("target"),
+                            "sourceHandle": item.get("sourceHandle") or item.get("source_handle"),
+                            "targetHandle": item.get("targetHandle") or item.get("target_handle"),
+                        }
+                        for item in internal_edges
+                        if isinstance(item, dict)
+                    ],
+                }
+            ),
+        )
         id_map = {
             str(internal.get("id")): f"{system_id}__{internal.get('id')}"
             for internal in internal_nodes
@@ -269,9 +303,13 @@ def _expand_ai_systems_for_runtime(
         for edge in internal_edges:
             if not isinstance(edge, dict):
                 continue
-            source = id_map.get(str(edge.get("source")))
-            target = id_map.get(str(edge.get("target")))
+            source = _internal_endpoint_runtime_id(edge.get("source"), id_map=id_map)
+            target = _internal_endpoint_runtime_id(edge.get("target"), id_map=id_map)
             if not source or not target:
+                logger.error(
+                    "EDGE_WITH_INVALID_REFERENCE %s",
+                    _compact_json({"system_id": system_id, "edge": edge, "resolved_source": source, "resolved_target": target, "id_map": id_map}),
+                )
                 continue
             source_handle = (
                 edge.get("sourceHandle")
@@ -286,6 +324,7 @@ def _expand_ai_systems_for_runtime(
                     "source": source,
                     "target": target,
                     "sourceHandle": source_handle,
+                    "targetHandle": edge.get("targetHandle") or edge.get("target_handle"),
                     "data": {**(edge.get("data") if isinstance(edge.get("data"), dict) else {}), "compiled_from_ai_system": system_id},
                 }
             )
@@ -298,6 +337,8 @@ def _expand_ai_systems_for_runtime(
         source = str(edge.get("source") or "")
         target = str(edge.get("target") or "")
         source_handle = edge.get("sourceHandle") or edge.get("source_handle") or "default"
+        if source in ai_system_ids or target in ai_system_ids:
+            logger.info("AI_SYSTEM_EDGE_REMAP_REQUIRED %s", _compact_json({"edge": edge, "source_is_ai_system": source in ai_system_ids, "target_is_ai_system": target in ai_system_ids}))
         if source in ai_system_ids and target in ai_system_ids:
             for source_exit in system_exits_by_id.get(source, []):
                 target_entry = system_entry_by_id.get(target)
@@ -316,33 +357,112 @@ def _expand_ai_systems_for_runtime(
             continue
         expanded_edges.append(edge)
 
+    runtime_node_ids = {_node_id(node) for node in expanded_nodes if isinstance(node, dict) and _node_id(node)}
+    for index, edge in enumerate(expanded_edges):
+        if not isinstance(edge, dict):
+            continue
+        source = str(edge.get("source") or "").strip()
+        target = str(edge.get("target") or "").strip()
+        if source not in runtime_node_ids or target not in runtime_node_ids:
+            logger.error(
+                "EDGE_WITH_INVALID_REFERENCE %s",
+                _compact_json({"index": index, "edge": edge, "source_exists": source in runtime_node_ids, "target_exists": target in runtime_node_ids}),
+            )
     logger.info(
         "AI_SYSTEM_RUNTIME_GRAPH_CREATED nodes_count=%s edges_count=%s",
         len(expanded_nodes),
         len(expanded_edges),
     )
     logger.info(
-        "AI_SYSTEM_EXPANDED_RUNTIME_NODES %s",
-        json.dumps(
-            [
-                {
-                    "id": node.get("id"),
-                    "type": node.get("type") or _node_data(node).get("type"),
-                    "parent": node.get("parent") or node.get("parentNode") or _node_data(node).get("parent"),
-                    "is_start": FlowV2GraphValidator._is_start_node(node),
-                    "terminal": _node_is_terminal(node),
-                }
-                for node in expanded_nodes
-                if isinstance(node, dict)
-            ],
-            ensure_ascii=False,
-            sort_keys=True,
-            default=str,
+        "AI_SYSTEM_POST_EXPANSION %s",
+        _compact_json(
+            {
+                "runtime_nodes": [
+                    {
+                        "id": node.get("id"),
+                        "type": node.get("type") or _node_data(node).get("type"),
+                        "parent": node.get("parent") or node.get("parentNode") or _node_data(node).get("parent"),
+                        "is_start": FlowV2GraphValidator._is_start_node(node),
+                    }
+                    for node in expanded_nodes
+                    if isinstance(node, dict)
+                ],
+                "runtime_edges": [
+                    {
+                        "source": edge.get("source"),
+                        "target": edge.get("target"),
+                        "sourceHandle": edge.get("sourceHandle") or edge.get("source_handle"),
+                        "targetHandle": edge.get("targetHandle") or edge.get("target_handle"),
+                    }
+                    for edge in expanded_edges
+                    if isinstance(edge, dict)
+                ],
+            }
         ),
     )
+    for system_id, dispatcher_id in system_entry_by_id.items():
+        dispatcher_edges = [edge for edge in expanded_edges if isinstance(edge, dict) and edge.get("source") == dispatcher_id]
+        logger.info("DISPATCHER OUTGOING %s", _compact_json({"system_id": system_id, "dispatcher_id": dispatcher_id, "edges": dispatcher_edges}))
     logger.info("AI_SYSTEM_COMPILATION_FINISHED")
     return expanded_nodes, expanded_edges
 
+
+
+def _compact_json(value: Any) -> str:
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)
+
+
+def _internal_items(data: dict[str, Any], snake_key: str, camel_key: str) -> list[Any]:
+    value = data.get(snake_key)
+    if not isinstance(value, list):
+        value = data.get(camel_key)
+    return value if isinstance(value, list) else []
+
+
+def _internal_endpoint_runtime_id(endpoint: Any, *, id_map: dict[str, str]) -> str:
+    raw = str(endpoint or "").strip()
+    if not raw:
+        return ""
+    if raw in id_map:
+        return id_map[raw]
+    runtime_ids = set(id_map.values())
+    if raw in runtime_ids:
+        return raw
+    suffix_matches = [runtime_id for internal_id, runtime_id in id_map.items() if raw.endswith(f"__{internal_id}")]
+    return suffix_matches[0] if len(suffix_matches) == 1 else ""
+
+
+def _log_graph_bfs_before_validation(*, nodes: list[dict[str, Any]], edges: list[dict[str, Any]], start_node_ids: list[str]) -> None:
+    node_ids = [_node_id(node) for node in nodes if isinstance(node, dict) and _node_id(node)]
+    node_id_set = set(node_ids)
+    adjacency: dict[str, list[str]] = {node_id: [] for node_id in node_ids}
+    incoming: dict[str, int] = {node_id: 0 for node_id in node_ids}
+    outgoing: dict[str, int] = {node_id: 0 for node_id in node_ids}
+    for edge in edges:
+        if not isinstance(edge, dict):
+            continue
+        source = str(edge.get("source") or "").strip()
+        target = str(edge.get("target") or "").strip()
+        if source in node_id_set and target in node_id_set:
+            adjacency[source].append(target)
+            outgoing[source] += 1
+            incoming[target] += 1
+    start = start_node_ids[0] if len(start_node_ids) == 1 else ""
+    visited: list[str] = []
+    seen: set[str] = set()
+    pending = [start] if start else []
+    while pending:
+        current = pending.pop(0)
+        if current in seen:
+            continue
+        seen.add(current)
+        visited.append(current)
+        pending.extend(target for target in adjacency.get(current, []) if target not in seen)
+    unvisited = [node_id for node_id in node_ids if node_id not in seen]
+    roots = [node_id for node_id in node_ids if incoming.get(node_id, 0) == 0]
+    terminals = [node_id for node_id in node_ids if outgoing.get(node_id, 0) == 0 or any(_node_id(node) == node_id and _node_is_terminal(node) for node in nodes if isinstance(node, dict))]
+    logger.info("FLOW_V2_PRE_VALIDATION_BFS START NODE: %s VISITED: %s UNVISITED: %s", start, visited, unvisited)
+    logger.info("FLOW_V2_PRE_VALIDATION_CONSISTENCY NODES=%s EDGES=%s ROOTS=%s STARTS=%s TERMINALS=%s OUTGOING=%s INCOMING=%s", _compact_json(nodes), _compact_json(edges), roots, start_node_ids, terminals, outgoing, incoming)
 
 def _node_id(node: dict[str, Any]) -> str:
     return str(node.get("id") or "").strip()
@@ -641,6 +761,7 @@ class FlowV2Publisher:
             len(start_node_ids),
             start_node_ids,
         )
+        _log_graph_bfs_before_validation(nodes=nodes_payload, edges=edges_payload, start_node_ids=start_node_ids)
         validation = self.validator.validate(nodes=nodes_payload, edges=edges_payload)
         if not validation.is_valid:
             raise FlowV2PublishError(validation.errors)
