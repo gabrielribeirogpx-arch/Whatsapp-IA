@@ -22,8 +22,6 @@ export function NodeStatus({ active = true, label }: { active?: boolean; label: 
   return (
     <>
       <span className={`flow-node-status-dot ${active ? 'is-on' : 'is-off'}`} />
-      <strong>{active ? 'ON' : 'OFF'}</strong>
-      <span>·</span>
       <span>{label}</span>
     </>
   );
@@ -81,8 +79,8 @@ function CompactFlowNode({
   statusActive = true,
 }: CompactFlowNodeProps) {
   const handles = useMemo(() => (sourceHandles?.length ? sourceHandles : [{ id: undefined, color: accent }]), [accent, sourceHandles]);
-  const handleStep = handles.length > 1 ? 24 : 0;
-  const firstHandleTop = handles.length > 1 ? 68 - ((handles.length - 1) * handleStep) / 2 : 55;
+  const handleStep = handles.length > 1 ? 30 : 0;
+  const firstHandleTop = handles.length > 1 ? 80 - ((handles.length - 1) * handleStep) / 2 : 64;
 
   useEffect(() => {
     console.debug('[NODE RERENDER]', { node_id: id, title, selected, handle_count: handles.length, isConnectable });
@@ -169,31 +167,40 @@ function CompactFlowNode({
       {footer || statusLabel ? <div className="flow-node-footer">{footer || <NodeStatus active={statusActive} label={statusLabel || 'Pronto'} />}</div> : null}
 
       {handles.map((handle, index) => (
-        <Handle
-          key={handle.id || 'default'}
-          id={handle.id}
-          type="source"
-          position={Position.Right}
-          title={handle.label}
-          className="flow-node-handle flow-node-source-handle nodrag nopan"
-          isConnectable={isConnectable}
-          data-option-value={handle.optionValue}
+        <div
+          key={`${handle.id || 'default'}-wrap`}
+          className="flow-node-source-slot nodrag nopan"
           style={{
             top: firstHandleTop + index * handleStep,
-            right: -8,
-            width: 14,
-            height: 14,
-            background: '#fff',
-            border: `2px solid ${handle.color || accent}`,
-            boxShadow: '0 4px 10px rgba(15, 23, 42, 0.18), 0 0 0 2px rgba(255, 255, 255, 0.9)',
-            transition: 'transform 120ms ease, box-shadow 120ms ease, border-color 120ms ease',
-            '--flow-handle-transform': 'translate(0, -50%)',
-            borderRadius: '50%',
-            cursor: 'crosshair',
-            pointerEvents: isConnectable ? 'auto' : 'none',
-            zIndex: 30,
+            '--flow-handle-color': handle.color || accent,
           } as CSSProperties}
-        />
+        >
+          {handle.label ? <span className="flow-node-source-label">{handle.label}</span> : null}
+          <Handle
+            key={handle.id || 'default'}
+            id={handle.id}
+            type="source"
+            position={Position.Right}
+            title={handle.label}
+            className="flow-node-handle flow-node-source-handle nodrag nopan"
+            isConnectable={isConnectable}
+            data-option-value={handle.optionValue}
+            style={{
+              right: -8,
+              width: 14,
+              height: 14,
+              background: '#fff',
+              border: `2px solid ${handle.color || accent}`,
+              boxShadow: '0 4px 10px rgba(15, 23, 42, 0.18), 0 0 0 2px rgba(255, 255, 255, 0.9)',
+              transition: 'transform 120ms ease, box-shadow 120ms ease, border-color 120ms ease',
+              '--flow-handle-transform': 'translate(0, -50%)',
+              borderRadius: '50%',
+              cursor: 'crosshair',
+              pointerEvents: isConnectable ? 'auto' : 'none',
+              zIndex: 30,
+            } as CSSProperties}
+          />
+        </div>
       ))}
     </div>
   );

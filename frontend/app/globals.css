@@ -6536,3 +6536,182 @@ input {
   border-color: #bbf7d0;
   background: #ecfdf5;
 }
+
+/* ── FLOW BUILDER PREMIUM NODE FINISH ─────────────── */
+.flow-node-compact {
+  width: 248px;
+  min-width: 248px;
+  min-height: 118px;
+  border-radius: 20px;
+  background: linear-gradient(180deg, #ffffff 0%, #fbfdff 100%);
+  border: 1px solid rgba(203, 213, 225, 0.86);
+  box-shadow: 0 16px 38px rgba(15, 23, 42, 0.09), 0 1px 0 rgba(255, 255, 255, 0.92) inset;
+  transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease;
+}
+
+.flow-node-compact:hover {
+  transform: translateY(-2px) translateZ(0);
+  border-color: rgba(99, 102, 241, 0.34);
+  box-shadow: 0 22px 54px rgba(15, 23, 42, 0.13), 0 0 0 5px rgba(99, 102, 241, 0.045);
+}
+
+.flow-node-compact.is-selected::after {
+  box-shadow: inset 0 0 0 2px rgba(99, 102, 241, 0.72), 0 18px 44px rgba(79, 70, 229, 0.16);
+}
+
+.flow-node-header-bar {
+  height: 5px;
+  border-radius: 20px 20px 0 0;
+}
+
+.flow-node-compact-header {
+  padding: 13px 13px 9px;
+  gap: 9px;
+  border-radius: 20px 20px 0 0;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.94), rgba(248, 250, 252, 0.88));
+}
+
+.flow-node-header-glow {
+  background: radial-gradient(circle at 0% 0%, rgba(99, 102, 241, 0.10), transparent 42%), radial-gradient(circle at 100% 0%, rgba(14, 165, 233, 0.08), transparent 38%);
+}
+
+.flow-node-emoji {
+  width: 34px;
+  height: 34px;
+  border-radius: 13px;
+  font-size: 18px;
+  color: #0f172a;
+}
+
+.flow-node-title {
+  font-size: 14px;
+  font-weight: 750;
+  line-height: 1.15;
+  white-space: normal;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.flow-node-badge,
+.flow-node-start-button {
+  border-radius: 999px;
+}
+
+.flow-node-badge {
+  padding: 3px 7px;
+  font-size: 9px;
+  font-weight: 800;
+  max-width: 86px;
+}
+
+.flow-node-start-button {
+  padding: 3px 7px;
+  font-size: 9px;
+  background: rgba(255, 255, 255, 0.88);
+}
+
+.flow-node-compact-body {
+  padding: 10px 13px 10px;
+}
+
+.flow-node-summary {
+  color: #64748b;
+  font-size: 12.2px;
+  line-height: 1.45;
+  -webkit-line-clamp: 2;
+}
+
+.flow-node-chip-row {
+  margin-top: 8px;
+}
+
+.flow-node-chip {
+  border-radius: 999px;
+  background: #f8fafc;
+  border: 1px solid rgba(226, 232, 240, 0.92);
+  color: #475569;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 3px 7px;
+}
+
+.flow-node-footer {
+  min-height: 32px;
+  padding: 8px 13px 10px;
+  gap: 7px;
+  border-radius: 0 0 20px 20px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #64748b;
+}
+
+.flow-node-status-dot {
+  width: 7px;
+  height: 7px;
+  box-shadow: 0 0 0 4px rgba(148, 163, 184, 0.12);
+}
+
+.flow-node-status-dot.is-on {
+  box-shadow: 0 0 0 4px rgba(16, 185, 129, 0.13);
+}
+
+.flow-node-source-slot {
+  position: absolute;
+  right: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  min-width: 86px;
+  height: 18px;
+  transform: translateY(-50%);
+  pointer-events: none;
+  z-index: 32;
+}
+
+.flow-node-source-label {
+  max-width: 74px;
+  margin-right: 11px;
+  padding: 2px 6px;
+  border: 1px solid rgba(226, 232, 240, 0.9);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.94);
+  color: #475569;
+  font-size: 9.5px;
+  font-weight: 800;
+  line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  box-shadow: 0 6px 16px rgba(15, 23, 42, 0.08);
+}
+
+.flow-node-handle.react-flow__handle,
+.flow-node-handle {
+  width: 12px !important;
+  height: 12px !important;
+  min-width: 12px;
+  min-height: 12px;
+  border-width: 2px !important;
+}
+
+.flow-node-target-handle {
+  left: -7px !important;
+}
+
+.flow-node-source-handle {
+  right: -7px !important;
+  pointer-events: auto;
+}
+
+.flow-node-source-handle::before,
+.flow-node-target-handle::before {
+  height: 20px;
+}
+
+.flow-node-premium,
+.flow-node-premium.flow-node-compact {
+  width: 300px;
+  min-width: 300px;
+  border-radius: 22px;
+}
