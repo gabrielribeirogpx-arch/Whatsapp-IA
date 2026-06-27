@@ -488,8 +488,140 @@ def _publish_fresh_snapshot(db: Session, flow: Flow, *, reason: str) -> FlowVers
     return fresh_version
 
 
+def _activate_graph_validation_nodes(nodes: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    validation_nodes: list[dict[str, Any]] = []
+    for node in nodes or []:
+        if not isinstance(node, dict):
+            continue
+        data = node.get("data") if isinstance(node.get("data"), dict) else {}
+        validation_nodes.append({
+            "id": str(node.get("id") or ""),
+            "type": node.get("type") or data.get("type"),
+            "is_start": bool(data.get("isStart") or data.get("is_start")),
+            "terminal": bool(data.get("terminal") or data.get("is_terminal") or data.get("isTerminal") or data.get("endFlow") or data.get("isEnd")),
+        })
+    return validation_nodes
+
+
+def _activate_graph_validation_edges(edges: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    validation_edges: list[dict[str, Any]] = []
+    for edge in edges or []:
+        if not isinstance(edge, dict):
+            continue
+        validation_edges.append({
+            "id": str(edge.get("id") or ""),
+            "source": str(edge.get("source") or ""),
+            "target": str(edge.get("target") or ""),
+            "sourceHandle": edge.get("sourceHandle"),
+            "targetHandle": edge.get("targetHandle"),
+        })
+    return validation_edges
+
+
+def _log_activate_graph_validation_input(nodes: list[dict[str, Any]], edges: list[dict[str, Any]]) -> None:
+    logger.info(
+        "[ACTIVATE_GRAPH_VALIDATION_INPUT] nodes=%s edges=%s",
+        json.dumps(_activate_graph_validation_nodes(nodes), ensure_ascii=False, sort_keys=True),
+        json.dumps(_activate_graph_validation_edges(edges), ensure_ascii=False, sort_keys=True),
+    )
+
+
+def _log_activate_edge_reference_not_found(nodes: list[dict[str, Any]], edges: list[dict[str, Any]]) -> None:
+    available_node_ids = {str(node.get("id")) for node in nodes or [] if isinstance(node, dict) and node.get("id") is not None}
+    for edge in edges or []:
+        if not isinstance(edge, dict):
+            continue
+        source = str(edge.get("source") or "")
+        target = str(edge.get("target") or "")
+        source_exists = source in available_node_ids
+        target_exists = target in available_node_ids
+        if source_exists and target_exists:
+            continue
+        logger.error(
+            "[ACTIVATE_EDGE_REFERENCE_NOT_FOUND] edge_id=%s source=%s target=%s source_exists=%s target_exists=%s available_node_ids=%s",
+            edge.get("id"),
+            source,
+            target,
+            source_exists,
+            target_exists,
+            sorted(available_node_ids),
+        )
+
+
+def _published_runtime_graph_from_version(version: FlowVersion | None) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    if version is None:
+        return [], []
+    snapshot = version.snapshot if isinstance(version.snapshot, dict) else {}
+    snapshot_nodes = snapshot.get("nodes") if isinstance(snapshot.get("nodes"), list) else None
+    snapshot_edges = snapshot.get("edges") if isinstance(snapshot.get("edges"), list) else None
+    nodes = snapshot_nodes if snapshot_nodes is not None else version.nodes if isinstance(version.nodes, list) else []
+    edges = snapshot_edges if snapshot_edges is not None else version.edges if isinstance(version.edges, list) else []
+    return nodes if isinstance(nodes, list) else [], edges if isinstance(edges, list) else []
+
+
+def _get_published_snapshot_for_activate(db: Session, flow: Flow) -> FlowVersion | None:
+    published_version_id = getattr(flow, "published_version_id", None)
+    if published_version_id:
+        version = db.execute(
+            select(FlowVersion).where(
+                FlowVersion.id == published_version_id,
+                FlowVersion.flow_id == flow.id,
+                or_(FlowVersion.tenant_id == flow.tenant_id, FlowVersion.tenant_id.is_(None)),
+                FlowVersion.is_published.is_(True),
+            )
+        ).scalars().first()
+        if version is not None:
+            return version
+    return db.execute(
+        select(FlowVersion)
+        .where(
+            FlowVersion.flow_id == flow.id,
+            or_(FlowVersion.tenant_id == flow.tenant_id, FlowVersion.tenant_id.is_(None)),
+            FlowVersion.is_published.is_(True),
+        )
+        .order_by(FlowVersion.version.desc(), FlowVersion.created_at.desc())
+        .limit(1)
+    ).scalars().first()
+
+
 def _ensure_published_snapshot_on_activate(db: Session, flow: Flow) -> None:
-    _publish_fresh_snapshot(db=db, flow=flow, reason="activate")
+    # Activation must consume the immutable runtime snapshot produced by /publish.
+    # Keep the legacy behavior only for flows that have never been published.
+    version = _get_published_snapshot_for_activate(db=db, flow=flow)
+    if version is None:
+        version = _publish_fresh_snapshot(db=db, flow=flow, reason="activate_missing_published_snapshot")
+    if version is None:
+        raise HTTPException(status_code=422, detail="Flow sem snapshot publicado para ativar")
+
+    runtime_nodes, runtime_edges = _published_runtime_graph_from_version(version)
+    editor_nodes, editor_edges = _builder_graph_from_flow(flow)
+    logger.info(
+        "[FLOW_ACTIVATE_STARTED] flow_id=%s published_snapshot_exists=%s published_snapshot_version=%s runtime_node_ids=%s runtime_edge_ids=%s editor_node_ids=%s editor_edge_ids=%s",
+        flow.id,
+        True,
+        getattr(version, "version", None),
+        _graph_node_ids(runtime_nodes),
+        [str(edge.get("id")) for edge in runtime_edges if isinstance(edge, dict) and edge.get("id") is not None],
+        _graph_node_ids(editor_nodes),
+        [str(edge.get("id")) for edge in editor_edges if isinstance(edge, dict) and edge.get("id") is not None],
+    )
+    _log_activate_graph_validation_input(runtime_nodes, runtime_edges)
+    _log_activate_edge_reference_not_found(runtime_nodes, runtime_edges)
+
+    validate_flow_payload_or_400(runtime_nodes, runtime_edges)
+    validation = validate_flow_graph(runtime_nodes, runtime_edges, mode="publish")
+    edge_errors = [issue for issue in validation.get("errors", []) if isinstance(issue, dict) and issue.get("code") == "EDGE_REFERENCE_NOT_FOUND"]
+    if edge_errors:
+        _log_activate_edge_reference_not_found(runtime_nodes, runtime_edges)
+    if validation.get("errors"):
+        raise HTTPException(status_code=400, detail={"error": "VALIDATION_ERROR", "issues": validation})
+
+    flow.published_version_id = version.id
+    flow.current_version_id = version.id
+    flow.version = version.version
+    flow.status = "published"
+    db.add(flow)
+    invalidate_flow_runtime_cache(flow.id)
 
 
 def _ensure_published_snapshot_callback(db: Session, flow: Flow) -> None:
