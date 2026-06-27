@@ -641,3 +641,34 @@ def test_ai_system_internal_changes_affect_published_hash() -> None:
     second = FlowV2Publisher().publish(nodes=[{"id": "start", "type": "start"}, changed], edges=[{"id": "e1", "source": "start", "target": "system"}])
 
     assert first.v2_snapshot_hash != second.v2_snapshot_hash
+
+
+def test_ai_system_expansion_removes_orphan_internal_edges_before_validation(caplog) -> None:
+    caplog.set_level("INFO")
+    system = _ai_system_node()
+    system["data"]["internal_edges"].append(
+        {"id": "stale-target", "source": "fallback", "target": "deleted-node", "sourceHandle": "default"}
+    )
+    system["data"]["internal_edges"].append(
+        {"id": "stale-source", "source": "deleted-node", "target": "fallback", "sourceHandle": "default"}
+    )
+
+    result = FlowV2Publisher().publish(nodes=[system], edges=[])
+
+    node_ids = {node["id"] for node in result.snapshot["nodes"]}
+    assert result.validation.status == GraphValidationStatus.VALID
+    assert all(edge["source"] in node_ids and edge["target"] in node_ids for edge in result.snapshot["edges"])
+    assert not any("deleted-node" in str(edge) for edge in result.snapshot["edges"])
+    assert "EDGE_REFERENCE_NOT_FOUND" in caplog.text
+    assert "AI_SYSTEM_EXPANSION" in caplog.text
+    assert "AI_SYSTEM_EXPANDED_SNAPSHOT_BEFORE_VALIDATION" in caplog.text
+
+
+def test_ai_system_expansion_reports_internal_node_without_output() -> None:
+    system = _ai_system_node()
+    system["data"]["internal_nodes"].append({"id": "worker", "type": "ai_agent", "data": {}})
+
+    with pytest.raises(FlowV2PublishError) as exc:
+        FlowV2Publisher().publish(nodes=[system], edges=[])
+
+    assert "AI_SYSTEM_INTERNAL_NODE_WITHOUT_OUTPUT:system__worker" in exc.value.errors
