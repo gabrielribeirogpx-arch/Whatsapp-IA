@@ -120,11 +120,13 @@ const AI_SYSTEM_CARDS = [
 ] as const;
 
 const AI_SYSTEM_INTERNAL_NODE_TYPES = new Set(['ai_dispatcher', 'ai_greeting', 'ai_calendar_agent', 'ai_safe_fallback', 'ai_agent']);
+const AI_SYSTEM_EXPANDED_AGENT_ORIGINAL_TYPES = new Set(['ai_dispatcher', 'ai_greeting', 'ai_calendar_agent', 'ai_safe_fallback']);
 
 const isAiSystemInternalNode = (node: Pick<Node, 'type' | 'data'> | FlowNodePayload) => {
   const data = (node.data || {}) as Record<string, unknown>;
-  return AI_SYSTEM_INTERNAL_NODE_TYPES.has(String(node.type || ''))
-    && (!!data.parent_system_id || !!data.system_id || !!data.ai_system_parent_id);
+  const hasRuntimeParent = !!data.parent_system_id || !!data.system_id || !!data.ai_system_parent_id || !!data.parentSystemId || data.runtime_generated === true;
+  const isExpandedAgent = String(node.type || '') === 'ai_agent' && AI_SYSTEM_EXPANDED_AGENT_ORIGINAL_TYPES.has(String(data.original_type || ''));
+  return (AI_SYSTEM_INTERNAL_NODE_TYPES.has(String(node.type || '')) && hasRuntimeParent) || isExpandedAgent;
 };
 
 const sanitizeAiSystemCanvasGraph = <TNode extends Node | FlowNodePayload, TEdge extends Edge | FlowEdgePayload>(
@@ -178,12 +180,28 @@ const sanitizeAiSystemCanvasGraph = <TNode extends Node | FlowNodePayload, TEdge
 };
 
 
+const sanitizeEditorSaveGraph = (nodes: FlowNodePayload[], edges: FlowEdgePayload[]) => {
+  const migratedGraph = sanitizeAiSystemCanvasGraph(nodes, edges);
+  const blockedIds = new Set<string>(Array.from(migratedGraph.removedIds));
+  const editorNodes = (migratedGraph.nodes as FlowNodePayload[]).filter((node) => {
+    if (!isAiSystemInternalNode(node)) return true;
+    blockedIds.add(String(node.id));
+    return false;
+  });
+  const editorNodeIds = new Set(editorNodes.map((node) => String(node.id)));
+  const editorEdges = (migratedGraph.edges as FlowEdgePayload[]).filter(
+    (edge) => !blockedIds.has(String(edge.source)) && !blockedIds.has(String(edge.target)) && editorNodeIds.has(String(edge.source)) && editorNodeIds.has(String(edge.target)),
+  );
+  return { nodes: editorNodes, edges: editorEdges, removedIds: blockedIds };
+};
+
+
 type FlowHydrationSource = 'editor' | 'runtime' | 'published_snapshot' | 'none' | 'unknown';
 
 const getFlowHydrationStats = (nodes: Array<Pick<Node, 'type' | 'data'> | FlowNodePayload>) => ({
   nodes_count: nodes.length,
   contains_ai_system: nodes.some((node) => node.type === 'ai_system'),
-  contains_runtime_expanded_agents: nodes.some(isAiSystemInternalNode),
+  contains_expanded_ai_agents: nodes.some(isAiSystemInternalNode),
 });
 
 const logFlowEditorHydrationSource = (
@@ -196,7 +214,19 @@ const logFlowEditorHydrationSource = (
   });
 };
 
-const shouldBlockEditorHydrationSource = (source?: string | null) => source === 'runtime' || source === 'published_snapshot';
+const logFlowEditorSetGraph = (
+  source: string,
+  nodes: Array<Pick<Node, 'type' | 'data'> | FlowNodePayload>,
+  edges: Array<Edge | FlowEdgePayload>,
+) => {
+  console.info('FLOW_EDITOR_SET_GRAPH', {
+    source,
+    ...getFlowHydrationStats(nodes),
+    edges_count: edges.length,
+  });
+};
+
+const shouldBlockEditorHydrationSource = (source?: string | null) => ['runtime', 'published_snapshot', 'published-snapshot', 'runtime-inspector', 'runtime_snapshot', 'compiled_graph'].includes(String(source || ''));
 
 const logBlockedRuntimeGraphEditorHydration = (
   source: FlowHydrationSource,
@@ -1463,7 +1493,7 @@ type FlowBuilderClientProps = {
 type FlowSaveStatus = 'idle' | 'saving' | 'success' | 'error';
 
 type PublishedSnapshot = { version_id?: string | null; version?: number | null; nodes?: unknown[]; edges?: unknown[]; nodes_count?: number; edges_count?: number; graph_hash?: string | null };
-type RuntimeInspector = { flow_version_id?: string | null; session_id?: string | null; status?: string | null; current_node_id?: string | null; previous_node_id?: string | null; next_node_id?: string | null };
+type RuntimeInspector = { flow_version_id?: string | null; session_id?: string | null; status?: string | null; current_node_id?: string | null; previous_node_id?: string | null; next_node_id?: string | null; nodes?: unknown[]; edges?: unknown[] };
 
 const UNSAVED_CHANGES_MESSAGE = 'Você possui alterações não salvas. Deseja sair mesmo assim?';
 const AUTOSAVE_DELAY_MS = 5000;
@@ -1489,8 +1519,16 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
   console.log('FLOW SELECIONADO:', selectedFlowId);
   console.log('FLOW ATIVO:', activeFlowId);
   console.log('FLOWS DISPONÍVEIS:', flows);
-  const [nodes, setNodes, onNodesChange] = useNodesState<Node>(initialNodes);
-  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>(initialEdges);
+  const [editorNodes, setEditorNodes, onNodesChange] = useNodesState<Node>(initialNodes);
+  const [editorEdges, setEditorEdges, onEdgesChange] = useEdgesState<Edge>(initialEdges);
+  const nodes = editorNodes;
+  const edges = editorEdges;
+  const setNodes = setEditorNodes;
+  const setEdges = setEditorEdges;
+  const [runtimeNodes, setRuntimeNodes] = useState<Node[]>([]);
+  const [runtimeEdges, setRuntimeEdges] = useState<Edge[]>([]);
+  const [publishedSnapshotNodes, setPublishedSnapshotNodes] = useState<Node[]>([]);
+  const [publishedSnapshotEdges, setPublishedSnapshotEdges] = useState<Edge[]>([]);
   const [rfInstance, setRfInstance] = useState<ReactFlowInstance | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isLoadingFlow, setIsLoadingFlow] = useState(false);
@@ -1551,6 +1589,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
   const choiceConnectDebugRef = useRef<ChoiceConnectDebug | null>(null);
   const isSavingRef = useRef(false);
   const lastPersistedFlowSignatureRef = useRef<string | null>(null);
+  const lastEditorHadAiSystemRef = useRef(false);
   const saveStatusTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const playbackIdRef = useRef(0);
   const isMountedRef = useRef(true);
@@ -1685,9 +1724,11 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
 
   useEffect(() => {
     nodesRef.current = nodes;
+    logFlowEditorSetGraph('react_flow_editor_nodes_state', nodes, edgesRef.current);
   }, [nodes]);
   useEffect(() => {
     edgesRef.current = edges;
+    logFlowEditorSetGraph('react_flow_editor_edges_state', nodesRef.current, edges);
   }, [edges]);
 
   useEffect(() => {
@@ -2212,6 +2253,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
         logBlockedRuntimeGraphEditorHydration(hydrationSource, formattedNodes);
         setOperationError('O Builder bloqueou a hidratação do canvas a partir de um grafo runtime/publicado. Recarregue o editor graph salvo.');
         lastPersistedFlowSignatureRef.current = getFlowGraphSignature(serializeFlowGraph([], []));
+        lastEditorHadAiSystemRef.current = false;
         return;
       }
 
@@ -2234,6 +2276,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
         setValidationWarnings([]);
         setValidationErrors([]);
         lastPersistedFlowSignatureRef.current = getFlowGraphSignature(serializeFlowGraph([], []));
+        lastEditorHadAiSystemRef.current = false;
         return;
       }
 
@@ -2243,10 +2286,12 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
         setNodes(nodesToRender);
         setEdges(orderedEdges);
         lastPersistedFlowSignatureRef.current = getFlowGraphSignature(serializeFlowGraph(nodesToRender, orderedEdges));
+        lastEditorHadAiSystemRef.current = nodesToRender.some((node) => node.type === 'ai_system');
         requestAnimationFrame(() => { rfInstance?.fitView(); });
       } else {
         const layoutedFlow = applyLayoutAndSetFlow(nodesToRender, edgesToRender);
         lastPersistedFlowSignatureRef.current = getFlowGraphSignature(serializeFlowGraph(layoutedFlow.nodes, layoutedFlow.edges));
+        lastEditorHadAiSystemRef.current = layoutedFlow.nodes.some((node) => node.type === 'ai_system');
       }
     } catch (err) {
       console.error('Erro ao carregar flow', err);
@@ -2716,8 +2761,29 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
       return;
     }
 
-    const safeFlow = getCurrentSerializedFlow();
+    const rawFlow = getCurrentSerializedFlow();
+    const sanitizedSaveGraph = sanitizeEditorSaveGraph(rawFlow.nodes as FlowNodePayload[], rawFlow.edges as FlowEdgePayload[]);
+    const safeFlow = { nodes: sanitizedSaveGraph.nodes as FlowNodePayload[], edges: sanitizedSaveGraph.edges as FlowEdgePayload[] };
     const endpoint = `/api/flows/${selectedFlowId}`;
+
+    if (sanitizedSaveGraph.removedIds.size > 0) {
+      console.info('AI_SYSTEM_INTERNAL_NODES_REMOVED_FROM_SAVE_PAYLOAD', {
+        flow_id: selectedFlowId,
+        removed_canvas_nodes: Array.from(sanitizedSaveGraph.removedIds),
+      });
+    }
+
+    const saveContainsAiSystem = safeFlow.nodes.some((node) => node.type === 'ai_system');
+    const rawContainsExpandedAiAgents = rawFlow.nodes.some(isAiSystemInternalNode);
+    if (lastEditorHadAiSystemRef.current && !saveContainsAiSystem && rawContainsExpandedAiAgents) {
+      console.warn('BLOCKED_AI_SYSTEM_REPLACEMENT_BY_RUNTIME_GRAPH', {
+        flow_id: selectedFlowId,
+        raw_nodes_count: rawFlow.nodes.length,
+        sanitized_nodes_count: safeFlow.nodes.length,
+      });
+      setFlowSaveStatus('error');
+      return;
+    }
 
     if (flowContainsTemporaryIds(safeFlow.nodes, safeFlow.edges)) {
       setFlowSaveStatus('error');
@@ -2778,6 +2844,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
         dirty,
       });
       lastPersistedFlowSignatureRef.current = savedSignature;
+      lastEditorHadAiSystemRef.current = safeFlow.nodes.some((node) => node.type === 'ai_system');
       setFlowDirty(dirty);
       setFlowSaveStatus('success');
       console.info('[FLOW SAVE SUCCESS]', { flow_id: selectedFlowId, endpoint, method: 'PUT' });
@@ -2844,11 +2911,35 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
         apiFetch(`/api/flows/${selectedFlowId}/published-snapshot`),
         apiFetch(`/api/flows/${selectedFlowId}/runtime-inspector`),
       ]);
-      if (snapshotResponse.ok) setPublishedSnapshot(await parseApiResponse(snapshotResponse));
-      if (inspectorResponse.ok) setRuntimeInspector(await parseApiResponse(inspectorResponse));
+      if (snapshotResponse.ok) {
+        const snapshot = await parseApiResponse<PublishedSnapshot>(snapshotResponse);
+        setPublishedSnapshot(snapshot);
+        const snapshotNodes = Array.isArray(snapshot?.nodes) ? snapshot.nodes.map((node) => buildFlowNode(node as FlowNodePayload)) : [];
+        const snapshotEdges = Array.isArray(snapshot?.edges) ? snapshot.edges.map((edge) => buildFlowEdge(edge as FlowEdgePayload)) : [];
+        setPublishedSnapshotNodes(snapshotNodes);
+        setPublishedSnapshotEdges(snapshotEdges);
+        if (snapshotNodes.length || snapshotEdges.length) {
+          console.warn('BLOCKED_RUNTIME_GRAPH_EDITOR_HYDRATION', { source: 'published-snapshot', ...getFlowHydrationStats(snapshotNodes), edges_count: snapshotEdges.length });
+        }
+      }
+      if (inspectorResponse.ok) {
+        const inspector = await parseApiResponse<RuntimeInspector>(inspectorResponse);
+        setRuntimeInspector(inspector);
+        const inspectorNodes = Array.isArray(inspector?.nodes) ? inspector.nodes.map((node) => buildFlowNode(node as FlowNodePayload)) : [];
+        const inspectorEdges = Array.isArray(inspector?.edges) ? inspector.edges.map((edge) => buildFlowEdge(edge as FlowEdgePayload)) : [];
+        setRuntimeNodes(inspectorNodes);
+        setRuntimeEdges(inspectorEdges);
+        if (inspectorNodes.length || inspectorEdges.length) {
+          console.warn('BLOCKED_RUNTIME_GRAPH_EDITOR_HYDRATION', { source: 'runtime-inspector', ...getFlowHydrationStats(inspectorNodes), edges_count: inspectorEdges.length });
+        }
+      }
     } catch {
       setPublishedSnapshot(null);
       setRuntimeInspector(null);
+      setPublishedSnapshotNodes([]);
+      setPublishedSnapshotEdges([]);
+      setRuntimeNodes([]);
+      setRuntimeEdges([]);
     }
   }, [selectedFlowId]);
 
