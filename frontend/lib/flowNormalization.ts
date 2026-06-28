@@ -6,6 +6,18 @@ type FlowLike = {
   edges?: unknown;
   raw_nodes?: unknown;
   raw_edges?: unknown;
+  editor_graph?: {
+    nodes?: unknown;
+    edges?: unknown;
+  } | null;
+  runtime_graph?: {
+    nodes?: unknown;
+    edges?: unknown;
+  } | null;
+  published_snapshot_graph?: {
+    nodes?: unknown;
+    edges?: unknown;
+  } | null;
   current_version?: {
     nodes?: unknown;
     edges?: unknown;
@@ -113,6 +125,8 @@ const normalizeNode = (node: unknown): FlowNodePayload => {
 };
 
 export function normalizeFlow(flow: FlowLike): NormalizedFlowGraph {
+  const editorNodes = Array.isArray(flow?.editor_graph?.nodes) ? (flow.editor_graph.nodes as unknown[]) : [];
+  const editorEdges = Array.isArray(flow?.editor_graph?.edges) ? (flow.editor_graph.edges as FlowEdgePayload[]) : [];
   const directNodes = Array.isArray(flow?.nodes) ? (flow.nodes as unknown[]) : [];
   const directEdges = Array.isArray(flow?.edges) ? (flow.edges as FlowEdgePayload[]) : [];
   const versionNodes = Array.isArray(flow?.current_version?.nodes) ? (flow.current_version?.nodes as unknown[]) : [];
@@ -121,18 +135,22 @@ export function normalizeFlow(flow: FlowLike): NormalizedFlowGraph {
   const persistedEdges = Array.isArray(flow?.raw_edges) ? (flow.raw_edges as FlowEdgePayload[]) : [];
 
   const selectedNodes =
-    versionNodes.length > 0
-      ? versionNodes
+    editorNodes.length > 0
+      ? editorNodes
+      : persistedNodes.length > 0
+      ? persistedNodes
       : directNodes.length > 0
       ? directNodes
-      : persistedNodes;
+      : versionNodes;
 
   const selectedEdges =
-    versionEdges.length > 0
-      ? versionEdges
+    editorNodes.length > 0
+      ? editorEdges
+      : persistedEdges.length > 0
+      ? persistedEdges
       : directEdges.length > 0
       ? directEdges
-      : persistedEdges;
+      : versionEdges;
 
   return {
     id: typeof flow?.id === 'string' ? flow.id : null,
