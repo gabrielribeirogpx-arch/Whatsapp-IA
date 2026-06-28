@@ -885,6 +885,9 @@ class CanonicalFlowVersionResponse(BaseModel):
     version_id: str | None = None
     nodes: list[dict[str, Any]] = Field(default_factory=list)
     edges: list[dict[str, Any]] = Field(default_factory=list)
+    editor_graph: dict[str, Any] = Field(default_factory=dict)
+    runtime_graph: dict[str, Any] = Field(default_factory=dict)
+    published_snapshot_graph: dict[str, Any] = Field(default_factory=dict)
     version: int | None = None
     nodes_count: int = 0
     edges_count: int = 0
@@ -1800,11 +1803,23 @@ def _serialize_flow_version_response(
     normalized_edges = edges if isinstance(edges, list) else []
     version_value = version if version is not None else flow.version
     serialized_version_id = str(version_id) if version_id else None
+    published = getattr(flow, "published_version", None)
+    runtime_nodes = published.nodes if published and isinstance(published.nodes, list) else []
+    runtime_edges = published.edges if published and isinstance(published.edges, list) else []
+    if published and isinstance(getattr(published, "snapshot", None), dict):
+        snapshot_nodes = published.snapshot.get("nodes") if isinstance(published.snapshot.get("nodes"), list) else runtime_nodes
+        snapshot_edges = published.snapshot.get("edges") if isinstance(published.snapshot.get("edges"), list) else runtime_edges
+    else:
+        snapshot_nodes = runtime_nodes
+        snapshot_edges = runtime_edges
     canonical = {
         "flow_id": str(flow.id),
         "version_id": serialized_version_id,
         "nodes": normalized_nodes,
         "edges": normalized_edges,
+        "editor_graph": {"nodes": normalized_nodes, "edges": normalized_edges},
+        "runtime_graph": {"nodes": runtime_nodes, "edges": runtime_edges},
+        "published_snapshot_graph": {"nodes": snapshot_nodes, "edges": snapshot_edges},
         "version": version_value,
         "nodes_count": len(normalized_nodes),
         "edges_count": len(normalized_edges),

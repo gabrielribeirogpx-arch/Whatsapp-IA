@@ -198,8 +198,9 @@ const sanitizeEditorSaveGraph = (nodes: FlowNodePayload[], edges: FlowEdgePayloa
 
 type FlowHydrationSource = 'editor' | 'runtime' | 'published_snapshot' | 'none' | 'unknown';
 
-const getFlowHydrationStats = (nodes: Array<Pick<Node, 'type' | 'data'> | FlowNodePayload>) => ({
-  nodes_count: nodes.length,
+const getFlowHydrationStats = (nodes: Array<Pick<Node, 'type' | 'data'> | FlowNodePayload>, edges: Array<Edge | FlowEdgePayload> = []) => ({
+  node_count: nodes.length,
+  edge_count: edges.length,
   contains_ai_system: nodes.some((node) => node.type === 'ai_system'),
   contains_expanded_ai_agents: nodes.some(isAiSystemInternalNode),
 });
@@ -207,10 +208,13 @@ const getFlowHydrationStats = (nodes: Array<Pick<Node, 'type' | 'data'> | FlowNo
 const logFlowEditorHydrationSource = (
   source: FlowHydrationSource,
   nodes: Array<Pick<Node, 'type' | 'data'> | FlowNodePayload>,
+  edges: Array<Edge | FlowEdgePayload>,
+  flowId?: string | null,
 ) => {
   console.info('FLOW_EDITOR_HYDRATE_SOURCE', {
     source,
-    ...getFlowHydrationStats(nodes),
+    flow_id: flowId || null,
+    ...getFlowHydrationStats(nodes, edges),
   });
 };
 
@@ -218,23 +222,27 @@ const logFlowEditorSetGraph = (
   source: string,
   nodes: Array<Pick<Node, 'type' | 'data'> | FlowNodePayload>,
   edges: Array<Edge | FlowEdgePayload>,
+  flowId?: string | null,
 ) => {
   console.info('FLOW_EDITOR_SET_GRAPH', {
     source,
-    ...getFlowHydrationStats(nodes),
-    edges_count: edges.length,
+    flow_id: flowId || null,
+    ...getFlowHydrationStats(nodes, edges),
   });
 };
 
 const shouldBlockEditorHydrationSource = (source?: string | null) => ['runtime', 'published_snapshot', 'published-snapshot', 'runtime-inspector', 'runtime_snapshot', 'compiled_graph'].includes(String(source || ''));
 
 const logBlockedRuntimeGraphEditorHydration = (
-  source: FlowHydrationSource,
+  source: FlowHydrationSource | string,
   nodes: Array<Pick<Node, 'type' | 'data'> | FlowNodePayload>,
+  edges: Array<Edge | FlowEdgePayload>,
+  flowId?: string | null,
 ) => {
-  console.warn('BLOCKED_RUNTIME_GRAPH_EDITOR_HYDRATION', {
+  console.warn('FLOW_EDITOR_HYDRATE_BLOCKED_RUNTIME_GRAPH', {
     source,
-    ...getFlowHydrationStats(nodes),
+    flow_id: flowId || null,
+    ...getFlowHydrationStats(nodes, edges),
   });
 };
 
@@ -1724,12 +1732,12 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
 
   useEffect(() => {
     nodesRef.current = nodes;
-    logFlowEditorSetGraph('react_flow_editor_nodes_state', nodes, edgesRef.current);
-  }, [nodes]);
+    logFlowEditorSetGraph('react_flow_editor_nodes_state', nodes, edgesRef.current, selectedFlowId);
+  }, [nodes, selectedFlowId]);
   useEffect(() => {
     edgesRef.current = edges;
-    logFlowEditorSetGraph('react_flow_editor_edges_state', nodesRef.current, edges);
-  }, [edges]);
+    logFlowEditorSetGraph('react_flow_editor_edges_state', nodesRef.current, edges, selectedFlowId);
+  }, [edges, selectedFlowId]);
 
   useEffect(() => {
     if (!isFlowHydrated) return;
@@ -2164,8 +2172,6 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
       setIsLoadingFlow(true);
       setIsFlowHydrated(false);
       setOperationError(null);
-      setNodes([]);
-      setEdges([]);
       lastLoadedFlowIdRef.current = flowId;
 
       const timeoutPromise = new Promise<never>((_, reject) => {
@@ -2197,6 +2203,9 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
         published_version_id?: string | null;
         current_version?: { nodes?: unknown[] | null } | null;
         raw_nodes?: unknown[] | null;
+        editor_graph?: { nodes?: unknown[] | null; edges?: unknown[] | null } | null;
+        runtime_graph?: { nodes?: unknown[] | null; edges?: unknown[] | null } | null;
+        published_snapshot_graph?: { nodes?: unknown[] | null; edges?: unknown[] | null } | null;
       };
       console.log('FLOW DEBUG:', {
         id: payload?.id,
@@ -2248,19 +2257,20 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
         }),
       }));
 
-      logFlowEditorHydrationSource(hydrationSource, formattedNodes);
+      logFlowEditorHydrationSource(hydrationSource, formattedNodes, formattedEdges, flowId);
       if (shouldBlockEditorHydrationSource(hydrationSource)) {
-        logBlockedRuntimeGraphEditorHydration(hydrationSource, formattedNodes);
-        setOperationError('O Builder bloqueou a hidratação do canvas a partir de um grafo runtime/publicado. Recarregue o editor graph salvo.');
-        lastPersistedFlowSignatureRef.current = getFlowGraphSignature(serializeFlowGraph([], []));
-        lastEditorHadAiSystemRef.current = false;
+        logBlockedRuntimeGraphEditorHydration(hydrationSource, formattedNodes, formattedEdges, flowId);
+        toast.error('Snapshot de runtime bloqueado. Mantendo grafo visual original.');
+        setOperationError('O Builder bloqueou a hidratação do canvas a partir de um grafo runtime/publicado. Mantendo o grafo visual original.');
         return;
       }
 
       const sanitizedLoadedGraph = sanitizeAiSystemCanvasGraph(formattedNodes, formattedEdges);
       if (sanitizedLoadedGraph.removedIds.size > 0) {
-        console.info('AI_SYSTEM_INTERNAL_NODES_MIGRATED', {
+        console.info('FLOW_EDITOR_RUNTIME_NODES_FILTERED', {
+          source: 'editor_graph_sanitizer',
           flow_id: flowId,
+          ...getFlowHydrationStats(formattedNodes, formattedEdges),
           removed_canvas_nodes: Array.from(sanitizedLoadedGraph.removedIds),
         });
       }
@@ -2268,7 +2278,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
       let edgesToRender = sanitizedLoadedGraph.edges as Edge[];
       if (nodesToRender.length === 0) {
         console.info('[BUILDER EMPTY FLOW]', { flow_id: flowId, nodes_count: 0, edges_count: edgesToRender.length });
-        logFlowEditorHydrationSource('editor', []);
+        logFlowEditorHydrationSource('editor', [], [], flowId);
         setNodes([]);
         setEdges([]);
         setOperationError(null);
@@ -2283,6 +2293,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
       const hasStoredPositions = nodesToRender.some((n) => n.position && (n.position.x !== 0 || n.position.y !== 0));
       if (hasStoredPositions) {
         const orderedEdges = orderChoiceChildrenEdges(nodesToRender, edgesToRender);
+        logFlowEditorSetGraph('editor_graph', nodesToRender, orderedEdges, flowId);
         setNodes(nodesToRender);
         setEdges(orderedEdges);
         lastPersistedFlowSignatureRef.current = getFlowGraphSignature(serializeFlowGraph(nodesToRender, orderedEdges));
@@ -2310,7 +2321,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
       setIsLoadingFlow(false);
       setIsLoading(false);
     }
-  }, [applyLayoutAndSetFlow, buildFlowEdge, buildFlowNode, rfInstance, setEdges, setNodes]);
+  }, [applyLayoutAndSetFlow, buildFlowEdge, buildFlowNode, rfInstance, setEdges, setNodes, toast]);
 
   const shouldRenderEmptyState = !isLoadingFlow && isFlowHydrated && nodes.length === 0;
 
@@ -2767,8 +2778,10 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
     const endpoint = `/api/flows/${selectedFlowId}`;
 
     if (sanitizedSaveGraph.removedIds.size > 0) {
-      console.info('AI_SYSTEM_INTERNAL_NODES_REMOVED_FROM_SAVE_PAYLOAD', {
+      console.info('FLOW_EDITOR_RUNTIME_NODES_FILTERED', {
+        source: 'save_payload_sanitizer',
         flow_id: selectedFlowId,
+        ...getFlowHydrationStats(rawFlow.nodes, rawFlow.edges),
         removed_canvas_nodes: Array.from(sanitizedSaveGraph.removedIds),
       });
     }
@@ -2776,10 +2789,11 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
     const saveContainsAiSystem = safeFlow.nodes.some((node) => node.type === 'ai_system');
     const rawContainsExpandedAiAgents = rawFlow.nodes.some(isAiSystemInternalNode);
     if (lastEditorHadAiSystemRef.current && !saveContainsAiSystem && rawContainsExpandedAiAgents) {
-      console.warn('BLOCKED_AI_SYSTEM_REPLACEMENT_BY_RUNTIME_GRAPH', {
+      console.warn('FLOW_EDITOR_SAVE_BLOCKED_RUNTIME_EXPANSION', {
+        source: 'save_payload_guard',
         flow_id: selectedFlowId,
-        raw_nodes_count: rawFlow.nodes.length,
-        sanitized_nodes_count: safeFlow.nodes.length,
+        ...getFlowHydrationStats(rawFlow.nodes, rawFlow.edges),
+        sanitized_node_count: safeFlow.nodes.length,
       });
       setFlowSaveStatus('error');
       return;
@@ -2919,7 +2933,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
         setPublishedSnapshotNodes(snapshotNodes);
         setPublishedSnapshotEdges(snapshotEdges);
         if (snapshotNodes.length || snapshotEdges.length) {
-          console.warn('BLOCKED_RUNTIME_GRAPH_EDITOR_HYDRATION', { source: 'published-snapshot', ...getFlowHydrationStats(snapshotNodes), edges_count: snapshotEdges.length });
+          logBlockedRuntimeGraphEditorHydration('published_snapshot', snapshotNodes, snapshotEdges, selectedFlowId);
         }
       }
       if (inspectorResponse.ok) {
@@ -2930,7 +2944,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
         setRuntimeNodes(inspectorNodes);
         setRuntimeEdges(inspectorEdges);
         if (inspectorNodes.length || inspectorEdges.length) {
-          console.warn('BLOCKED_RUNTIME_GRAPH_EDITOR_HYDRATION', { source: 'runtime-inspector', ...getFlowHydrationStats(inspectorNodes), edges_count: inspectorEdges.length });
+          logBlockedRuntimeGraphEditorHydration('runtime-inspector', inspectorNodes, inspectorEdges, selectedFlowId);
         }
       }
     } catch {
