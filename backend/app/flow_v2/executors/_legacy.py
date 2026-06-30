@@ -4,6 +4,7 @@ import json
 import os
 import logging
 import re
+import unicodedata
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -2003,6 +2004,37 @@ AI_DISPATCHER_VALID_INTENTS = {
     "unknown",
 }
 
+AI_DISPATCHER_INTENT_ALIASES = {
+    "calendar": "calendar_create",
+    "schedule": "calendar_create",
+    "createevent": "calendar_create",
+    "create_event": "calendar_create",
+    "createcalendarevent": "calendar_create",
+    "create_calendar_event": "calendar_create",
+    "calendarcreate": "calendar_create",
+    "scheduleevent": "calendar_create",
+    "schedule_event": "calendar_create",
+    "agendamento": "calendar_create",
+    "agendar": "calendar_create",
+    "agende": "calendar_create",
+}
+
+
+def _strip_accents(value: str) -> str:
+    return "".join(ch for ch in unicodedata.normalize("NFKD", value) if not unicodedata.combining(ch))
+
+
+def _normalize_dispatcher_text(value: str) -> str:
+    return _strip_accents(value or "").strip().lower()
+
+
+def _matched_terms(text: str, patterns: tuple[str, ...]) -> list[str]:
+    matches: list[str] = []
+    for pattern in patterns:
+        if re.search(pattern, text, flags=re.IGNORECASE):
+            matches.append(pattern)
+    return matches
+
 
 def _normalize_ai_dispatcher_intent(value: Any) -> str:
     """Normalize dispatcher LLM/tool outputs into a supported source handle."""
@@ -2035,33 +2067,75 @@ def _normalize_ai_dispatcher_intent(value: Any) -> str:
             candidate = candidate.get("text")
         elif candidate.get("mensagem") is not None:
             candidate = candidate.get("mensagem")
-    normalized = str(candidate or "").strip().lower()
+    normalized = _normalize_dispatcher_text(str(candidate or ""))
     normalized = re.sub(r"[^a-z0-9_]+", "", normalized)
+    normalized = AI_DISPATCHER_INTENT_ALIASES.get(normalized, normalized)
     return normalized if normalized in AI_DISPATCHER_VALID_INTENTS else "unknown"
 
 
+def _agent_system_message_intent_details(message: str) -> dict[str, Any]:
+    text = _normalize_dispatcher_text(message)
+    calendar_keywords = (
+        r"\bmarque\b", r"\bmarcar\b", r"\bagenda\b", r"\bagende\b", r"\bagendar\b",
+        r"\breservar\b", r"\bcriar\s+reuniao\b", r"\bcall\b", r"\breuniao\b",
+        r"\bcompromisso\b", r"\bhorario\b", r"\bdisponibilidade\b",
+    )
+    time_signals = (
+        r"\bamanha\b", r"\bhoje\b", r"\bdepois\s+de\s+amanha\b", r"\bdia\b",
+        r"\bas\b", r"\bàs\b", r"\b\d{1,2}:\d{2}\b", r"\b\d{1,2}h(?:\d{2})?\b",
+        r"\b\d{1,2}\s+horas\b", r"\bmanha\b", r"\btarde\b", r"\bnoite\b",
+    )
+    availability_patterns = (
+        r"\btem\s+horario\b", r"\btenho\s+horario\b", r"\bqual\s+(?:a\s+)?disponibilidade\b",
+        r"\bhorarios\s+livres\b", r"\blivre\s+amanha\b", r"\bhorario\s+livre\b",
+    )
+    delete_patterns = (r"\bcancel", r"\bdesmarc", r"\bexcluir\s+evento\b", r"\bremover\s+evento\b")
+
+    matched_keywords = _matched_terms(text, calendar_keywords)
+    matched_time_signals = _matched_terms(text, time_signals)
+    matched_availability = _matched_terms(text, availability_patterns)
+    matched_delete = _matched_terms(text, delete_patterns)
+    intent = "unknown"
+    confidence = 0.0
+
+    if matched_delete and (matched_time_signals or matched_keywords or "reuniao" in text):
+        intent = "calendar_delete"
+        confidence = 0.95
+    elif matched_availability:
+        intent = "calendar_list"
+        confidence = 0.9
+    elif matched_keywords and matched_time_signals:
+        intent = "calendar_create"
+        confidence = 0.95
+    elif re.fullmatch(r"(oi+|ola|bom dia|boa tarde|boa noite|hey|hello|hi)[!?.\s]*", text):
+        intent = "greeting"
+        confidence = 0.9
+    elif any(term in text for term in ("atendente", "humano", "pessoa")):
+        intent = "human_handoff"
+        confidence = 0.8
+    elif any(term in text for term in ("preco", "plano", "comprar", "orcamento", "vendas")):
+        intent = "sales_lead"
+        confidence = 0.8
+    elif any(term in text for term in ("suporte", "ajuda", "problema", "duvida")):
+        intent = "support_question"
+        confidence = 0.8
+
+    logger.info(
+        "event=AI_DISPATCHER_DETERMINISTIC_INTENT text=%s matched_keywords=%s matched_time_signals=%s intent=%s confidence=%s",
+        (message or "")[:500], matched_keywords + matched_availability + matched_delete, matched_time_signals, intent, confidence,
+    )
+    return {"intent": intent, "text": (message or "")[:500], "matched_keywords": matched_keywords + matched_availability + matched_delete, "matched_time_signals": matched_time_signals, "confidence": confidence}
+
+
 def _agent_system_message_intent(message: str) -> str:
-    text = (message or "").strip().lower()
-    if re.fullmatch(r"(oi+|ol[aá]|bom dia|boa tarde|boa noite|hey|hello|hi)[!?.\s]*", text):
-        return "greeting"
-    if any(term in text for term in ("cancel", "desmarc", "excluir evento", "remover evento")):
-        return "calendar_delete"
-    if any(term in text for term in ("agenda", "agende", "marque", "reunião", "reuniao", "evento", "compromisso", "disponibilidade", "horário", "horario")):
-        if any(term in text for term in ("listar", "liste", "consult", "ver", "tenho", "disponibilidade")):
-            return "calendar_list"
-        return "calendar_create"
-    if any(term in text for term in ("atendente", "humano", "pessoa")):
-        return "human_handoff"
-    if any(term in text for term in ("preço", "preco", "plano", "comprar", "orçamento", "orcamento", "vendas")):
-        return "sales_lead"
-    if any(term in text for term in ("suporte", "ajuda", "problema", "dúvida", "duvida")):
-        return "support_question"
-    return "unknown"
+    return str(_agent_system_message_intent_details(message).get("intent") or "unknown")
 
 
 def _execute_ai_dispatcher(executor: BaseNodeExecutor, db, *, snapshot, session, node, runtime_input) -> NodeExecutionResult:
     node_id = str(node["id"])
-    raw_intent = _agent_system_message_intent(runtime_input.message_text or "")
+    deterministic = _agent_system_message_intent_details(runtime_input.message_text or "")
+    executor.event_store.append(db, session=session, event_type=FlowV2EventType.OUTPUT_EMITTED, node_id=node_id, payload={"analytics_event": "AI_DISPATCHER_DETERMINISTIC_INTENT", **deterministic})
+    raw_intent = deterministic.get("intent") or "unknown"
     intent = _normalize_ai_dispatcher_intent(raw_intent)
     logger.info("event=AI_DISPATCHER_INTENT_DETECTED node_id=%s intent=%s raw_intent=%s", node_id, intent, raw_intent)
     executor.event_store.append(db, session=session, event_type=FlowV2EventType.OUTPUT_EMITTED, node_id=node_id, payload={"analytics_event": "AI_DISPATCHER_INTENT_DETECTED", "intent": intent, "raw_intent": raw_intent})
