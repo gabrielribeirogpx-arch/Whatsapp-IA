@@ -2265,3 +2265,78 @@ def test_ai_agent_terminal_wait_same_node_processes_follow_up_without_restart_bl
     assert sent_texts == []
     assert "SESSION RESTART BLOCKED" not in caplog.text
     assert "ignore_future_message_auto_restart_disabled" not in caplog.text
+
+
+def test_ai_system_continuous_terminal_nodes_wait_at_dispatcher_and_reprocess_next_message(caplog) -> None:
+    raw_snapshot = {
+        "schema_version": 1,
+        "start_node_id": "dispatcher",
+        "nodes": [
+            {"id": "dispatcher", "type": "ai_dispatcher", "data": {"compiled_from_ai_system": "sys", "ai_system_internal_type": "ai_dispatcher"}},
+            {"id": "greeting", "type": "ai_greeting", "is_terminal": True, "data": {"compiled_from_ai_system": "sys", "ai_system_internal_type": "ai_greeting", "endFlow": True}},
+            {"id": "calendar", "type": "ai_safe_fallback", "is_terminal": True, "data": {"compiled_from_ai_system": "sys", "ai_system_internal_type": "ai_calendar_agent", "fallback_message": "calendar called", "endFlow": True}},
+            {"id": "fallback", "type": "ai_safe_fallback", "is_terminal": True, "data": {"compiled_from_ai_system": "sys", "ai_system_internal_type": "ai_safe_fallback", "endFlow": True}},
+        ],
+        "edges": [
+            {"id": "e-greeting", "source": "dispatcher", "target": "greeting", "sourceHandle": "greeting"},
+            {"id": "e-calendar", "source": "dispatcher", "target": "calendar", "sourceHandle": "calendar_create"},
+            {"id": "e-unknown", "source": "dispatcher", "target": "fallback", "sourceHandle": "unknown"},
+        ],
+    }
+    executor, snapshot, event_store, _session, db = _executor(raw_snapshot)
+
+    with caplog.at_level("INFO"):
+        first = executor.handle_input(db, _input_with_text(snapshot, "wamid.ai_system.1", "oi"))
+        second = executor.handle_input(db, _input_with_text(snapshot, "wamid.ai_system.2", "Marque uma Call Online com o Gustavo amanhã as 13:30"))
+
+    assert first.status == FlowV2SessionStatus.WAITING
+    assert first.current_node_id == "dispatcher"
+    assert second.status == FlowV2SessionStatus.WAITING
+    assert second.current_node_id == "dispatcher"
+    assert [action.as_effect()["text"] for action in first.actions] == ["Olá! 👋 Como posso ajudar?"]
+    assert [action.as_effect()["text"] for action in second.actions] == ["calendar called"]
+    routed_events = [event for event in event_store.events if event["payload"].get("analytics_event") == "AI_DISPATCHER_ROUTED"]
+    assert [event["payload"].get("intent") for event in routed_events] == ["greeting", "calendar_create"]
+    assert "AI_SYSTEM_SESSION_WAITING_AT_DISPATCHER" in caplog.text
+    assert "AI_SYSTEM_RESUME_AT_DISPATCHER" not in caplog.text
+
+
+def test_ai_system_pending_slot_context_keeps_calendar_agent_node(caplog, monkeypatch) -> None:
+    from app.flow_v2.executors import _legacy as legacy_executors
+    from app.services.ai_agent_service import AgentRunResult, AgentToolAction
+
+    def fake_run_agent(*_args, **_kwargs):
+        return AgentRunResult(
+            message="Qual data?",
+            actions=[AgentToolAction(type="message", data={"message": "Qual data?"})],
+            tools_used=[],
+            steps_count=1,
+            final_tool="responder",
+            status="success",
+            fallback_used=False,
+            metadata={},
+        )
+
+    monkeypatch.setattr(legacy_executors, "run_agent_for_tenant", fake_run_agent)
+    raw_snapshot = {
+        "schema_version": 1,
+        "start_node_id": "dispatcher",
+        "nodes": [
+            {"id": "dispatcher", "type": "ai_dispatcher", "data": {"compiled_from_ai_system": "sys", "ai_system_internal_type": "ai_dispatcher"}},
+            {"id": "calendar", "type": "ai_agent", "is_terminal": True, "data": {"compiled_from_ai_system": "sys", "ai_system_internal_type": "ai_calendar_agent", "after_agent_behavior": "wait_same_node", "endFlow": True}},
+        ],
+        "edges": [{"id": "e-calendar", "source": "dispatcher", "target": "calendar", "sourceHandle": "calendar_create"}],
+    }
+    executor, snapshot, _event_store, session, db = _executor(raw_snapshot)
+    session.current_node_id = "calendar"
+    session.status = FlowV2SessionStatus.WAITING
+    session.variables = {"pending_slot": "date"}
+
+    with caplog.at_level("INFO"):
+        result = executor.handle_input(db, _input_with_text(snapshot, "wamid.ai_system.slot.1", "amanhã"))
+
+    assert result.status == FlowV2SessionStatus.WAITING
+    assert result.current_node_id == "calendar"
+    assert [action.as_effect()["text"] for action in result.actions] == ["Qual data?"]
+    assert "AI_SYSTEM_KEEP_SLOT_CONTEXT" in caplog.text
+    assert "AI_SYSTEM_RESUME_AT_DISPATCHER" not in caplog.text
