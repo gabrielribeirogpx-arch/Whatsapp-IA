@@ -196,11 +196,11 @@ const sanitizeEditorSaveGraph = (nodes: FlowNodePayload[], edges: FlowEdgePayloa
 };
 
 
-type FlowHydrationSource = 'editor' | 'runtime' | 'published_snapshot' | 'none' | 'unknown';
+type FlowHydrationSource = 'editor' | 'runtime' | 'published_snapshot' | 'published-snapshot' | 'runtime-inspector' | 'runtime_snapshot' | 'compiled_graph' | 'none' | 'unknown';
 
 const getFlowHydrationStats = (nodes: Array<Pick<Node, 'type' | 'data'> | FlowNodePayload>, edges: Array<Edge | FlowEdgePayload> = []) => ({
-  node_count: nodes.length,
-  edge_count: edges.length,
+  nodes_count: nodes.length,
+  edges_count: edges.length,
   contains_ai_system: nodes.some((node) => node.type === 'ai_system'),
   contains_expanded_ai_agents: nodes.some(isAiSystemInternalNode),
 });
@@ -239,7 +239,7 @@ const logBlockedRuntimeGraphEditorHydration = (
   edges: Array<Edge | FlowEdgePayload>,
   flowId?: string | null,
 ) => {
-  console.warn('FLOW_EDITOR_HYDRATE_BLOCKED_RUNTIME_GRAPH', {
+  console.warn('BLOCKED_RUNTIME_GRAPH_EDITOR_HYDRATION', {
     source,
     flow_id: flowId || null,
     ...getFlowHydrationStats(nodes, edges),
@@ -2789,7 +2789,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
     const saveContainsAiSystem = safeFlow.nodes.some((node) => node.type === 'ai_system');
     const rawContainsExpandedAiAgents = rawFlow.nodes.some(isAiSystemInternalNode);
     if (lastEditorHadAiSystemRef.current && !saveContainsAiSystem && rawContainsExpandedAiAgents) {
-      console.warn('FLOW_EDITOR_SAVE_BLOCKED_RUNTIME_EXPANSION', {
+      console.warn('BLOCKED_AI_SYSTEM_REPLACEMENT_BY_RUNTIME_GRAPH', {
         source: 'save_payload_guard',
         flow_id: selectedFlowId,
         ...getFlowHydrationStats(rawFlow.nodes, rawFlow.edges),
