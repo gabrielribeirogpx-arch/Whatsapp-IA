@@ -61,6 +61,8 @@ class NodeExecutionResult:
     actions: tuple[RuntimeAction, ...] = ()
     next_node_id: str | None = None
     status: str = "continue"
+    next_source_handle: str | None = None
+    intent: str | None = None
 
     @property
     def effects(self) -> tuple[dict[str, Any], ...]:
@@ -1855,8 +1857,17 @@ class AiAgentNodeExecutor(AiResponseNodeExecutor):
 
     def execute(self, db, *, snapshot, session, node, runtime_input) -> NodeExecutionResult:
         node_id = str(node["id"])
-        budget = get_or_create_budget(runtime_input.metadata, session.tenant_id)
         data = self._node_data(node)
+        if str(data.get("ai_system_internal_type") or "").strip().lower() == "ai_dispatcher":
+            return _execute_ai_dispatcher(
+                self,
+                db,
+                snapshot=snapshot,
+                session=session,
+                node=node,
+                runtime_input=runtime_input,
+            )
+        budget = get_or_create_budget(runtime_input.metadata, session.tenant_id)
         ai_started_at = datetime.now(UTC)
         ai_config = resolve_ai_config(db, session.tenant_id, {"chat_model": data.get("chat_model_override") or data.get("chat_model") or data.get("model_override") or data.get("model")})
         instruction = self._render_rag_public_template(data.get("instruction"), "Você é um agente de atendimento. Use apenas as ferramentas permitidas.", db, snapshot=snapshot, session=session, runtime_input=runtime_input)
@@ -1980,6 +1991,55 @@ class AiAgentNodeExecutor(AiResponseNodeExecutor):
         return NodeExecutionResult(actions=tuple(actions), next_node_id=next_node_id, status="continue" if next_node_id else "complete")
 
 
+AI_DISPATCHER_VALID_INTENTS = {
+    "greeting",
+    "calendar_create",
+    "calendar_list",
+    "calendar_delete",
+    "support_question",
+    "sales_lead",
+    "rag_question",
+    "human_handoff",
+    "unknown",
+}
+
+
+def _normalize_ai_dispatcher_intent(value: Any) -> str:
+    """Normalize dispatcher LLM/tool outputs into a supported source handle."""
+
+    candidate: Any = value
+    if isinstance(candidate, str):
+        stripped = candidate.strip()
+        if stripped.startswith("{") and stripped.endswith("}"):
+            try:
+                candidate = json.loads(stripped)
+            except json.JSONDecodeError:
+                candidate = stripped
+        else:
+            candidate = stripped
+    if isinstance(candidate, dict):
+        arguments = candidate.get("arguments")
+        if isinstance(arguments, str):
+            try:
+                arguments = json.loads(arguments)
+            except json.JSONDecodeError:
+                arguments = {"text": arguments}
+        if isinstance(arguments, dict):
+            for key in ("intent", "text", "mensagem"):
+                if arguments.get(key) is not None:
+                    candidate = arguments.get(key)
+                    break
+        elif candidate.get("intent") is not None:
+            candidate = candidate.get("intent")
+        elif candidate.get("text") is not None:
+            candidate = candidate.get("text")
+        elif candidate.get("mensagem") is not None:
+            candidate = candidate.get("mensagem")
+    normalized = str(candidate or "").strip().lower()
+    normalized = re.sub(r"[^a-z0-9_]+", "", normalized)
+    return normalized if normalized in AI_DISPATCHER_VALID_INTENTS else "unknown"
+
+
 def _agent_system_message_intent(message: str) -> str:
     text = (message or "").strip().lower()
     if re.fullmatch(r"(oi+|ol[aá]|bom dia|boa tarde|boa noite|hey|hello|hi)[!?.\s]*", text):
@@ -1999,22 +2059,35 @@ def _agent_system_message_intent(message: str) -> str:
     return "unknown"
 
 
+def _execute_ai_dispatcher(executor: BaseNodeExecutor, db, *, snapshot, session, node, runtime_input) -> NodeExecutionResult:
+    node_id = str(node["id"])
+    raw_intent = _agent_system_message_intent(runtime_input.message_text or "")
+    intent = _normalize_ai_dispatcher_intent(raw_intent)
+    logger.info("event=AI_DISPATCHER_INTENT_DETECTED node_id=%s intent=%s raw_intent=%s", node_id, intent, raw_intent)
+    executor.event_store.append(db, session=session, event_type=FlowV2EventType.OUTPUT_EMITTED, node_id=node_id, payload={"analytics_event": "AI_DISPATCHER_INTENT_DETECTED", "intent": intent, "raw_intent": raw_intent})
+    logger.info("event=AI_DISPATCHER_SOURCE_HANDLE_SELECTED node_id=%s source_handle=%s", node_id, intent)
+    executor.event_store.append(db, session=session, event_type=FlowV2EventType.OUTPUT_EMITTED, node_id=node_id, payload={"analytics_event": "AI_DISPATCHER_SOURCE_HANDLE_SELECTED", "intent": intent, "source_handle": intent})
+
+    selected_handle = intent
+    transitions = executor.transition_resolver._snapshot_transitions(snapshot)
+    intent_matches = executor.transition_resolver._matches(transitions=transitions, source_node_id=node_id, source_handle=intent)
+    if not intent_matches and intent != "unknown":
+        unknown_matches = executor.transition_resolver._matches(transitions=transitions, source_node_id=node_id, source_handle="unknown")
+        if unknown_matches:
+            selected_handle = "unknown"
+            logger.info("event=AI_DISPATCHER_UNKNOWN_FALLBACK node_id=%s intent=%s fallback_source_handle=unknown", node_id, intent)
+    resolution = executor.transition_resolver.resolve(db, snapshot=snapshot, session=session, source_node_id=node_id, source_handle=selected_handle)
+    next_node_id = resolution.target_node_id
+    logger.info("event=AI_DISPATCHER_ROUTED node_id=%s intent=%s source_handle=%s next_node_id=%s", node_id, intent, selected_handle, next_node_id)
+    executor.event_store.append(db, session=session, event_type=FlowV2EventType.OUTPUT_EMITTED, node_id=node_id, payload={"analytics_event": "AI_DISPATCHER_ROUTED", "intent": intent, "source_handle": selected_handle, "next_node_id": next_node_id})
+    return NodeExecutionResult(next_node_id=next_node_id, status="continue" if next_node_id else "complete", next_source_handle=selected_handle, intent=intent)
+
+
 class AiDispatcherNodeExecutor(BaseNodeExecutor):
     """Deterministic first-pass intent router for agent system templates."""
 
     def execute(self, db, *, snapshot, session, node, runtime_input) -> NodeExecutionResult:
-        node_id = str(node["id"])
-        intent = _agent_system_message_intent(runtime_input.message_text or "")
-        logger.info("event=AI_DISPATCHER_INTENT_DETECTED node_id=%s intent=%s", node_id, intent)
-        self.event_store.append(db, session=session, event_type=FlowV2EventType.OUTPUT_EMITTED, node_id=node_id, payload={"analytics_event": "AI_DISPATCHER_INTENT_DETECTED", "intent": intent})
-        resolution = self.transition_resolver.resolve(db, snapshot=snapshot, session=session, source_node_id=node_id, source_handle=intent)
-        next_node_id = resolution.target_node_id
-        if not next_node_id and intent != "unknown":
-            resolution = self.transition_resolver.resolve(db, snapshot=snapshot, session=session, source_node_id=node_id, source_handle="unknown")
-            next_node_id = resolution.target_node_id
-        logger.info("event=AI_DISPATCHER_ROUTED node_id=%s intent=%s next_node_id=%s", node_id, intent, next_node_id)
-        self.event_store.append(db, session=session, event_type=FlowV2EventType.OUTPUT_EMITTED, node_id=node_id, payload={"analytics_event": "AI_DISPATCHER_ROUTED", "intent": intent, "next_node_id": next_node_id})
-        return NodeExecutionResult(next_node_id=next_node_id, status="continue" if next_node_id else "complete")
+        return _execute_ai_dispatcher(self, db, snapshot=snapshot, session=session, node=node, runtime_input=runtime_input)
 
 
 class AiGreetingNodeExecutor(BaseNodeExecutor):
