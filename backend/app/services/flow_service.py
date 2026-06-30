@@ -199,8 +199,10 @@ class FlowService:
 
     def get_flow_with_version(self, flow: Flow) -> dict[str, Any]:
         active_version = flow.current_version
-        nodes = active_version.nodes if active_version and isinstance(active_version.nodes, list) else []
-        edges = active_version.edges if active_version and isinstance(active_version.edges, list) else []
+        editor_nodes = flow.nodes_json if isinstance(flow.nodes_json, list) else flow.nodes if isinstance(flow.nodes, list) else []
+        editor_edges = flow.edges_json if isinstance(flow.edges_json, list) else flow.edges if isinstance(flow.edges, list) else []
+        nodes = editor_nodes if editor_nodes else active_version.nodes if active_version and isinstance(active_version.nodes, list) else []
+        edges = editor_edges if editor_edges else active_version.edges if active_version and isinstance(active_version.edges, list) else []
         version = active_version.version if active_version else (flow.version or 1)
         return {"flow": flow, "nodes": nodes, "edges": edges, "version": version}
 
