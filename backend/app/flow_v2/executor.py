@@ -24,6 +24,82 @@ from app.services.execution_budget_service import ExecutionBudgetExceeded, get_o
 logger = logging.getLogger(__name__)
 
 
+AI_SYSTEM_TERMINAL_INTERNAL_TYPES = {"ai_greeting", "ai_safe_fallback", "ai_calendar_agent"}
+AI_SYSTEM_PENDING_CONTEXT_KEYS = {"pending_slot", "pending_confirmation", "pending_tool_action"}
+
+
+def _node_internal_type(node: dict[str, Any] | None) -> str:
+    if not isinstance(node, dict):
+        return ""
+    data = FlowV2Executor._node_data(node)
+    return str(data.get("ai_system_internal_type") or node.get("type") or data.get("type") or "").strip().lower()
+
+
+def _is_ai_system_snapshot(snapshot: FlowV2Snapshot | None) -> bool:
+    if snapshot is None:
+        return False
+    for node in snapshot.nodes:
+        data = FlowV2Executor._node_data(node)
+        if data.get("compiled_from_ai_system") or data.get("agent_system_template_id") or data.get("ai_system_internal_type"):
+            return True
+    return False
+
+
+def _dispatcher_node_id(snapshot: FlowV2Snapshot | None) -> str | None:
+    if snapshot is None:
+        return None
+    for node in snapshot.nodes:
+        data = FlowV2Executor._node_data(node)
+        if str(data.get("ai_system_internal_type") or "").strip().lower() == "ai_dispatcher":
+            return str(node.get("id"))
+    start = snapshot.node_by_id.get(str(snapshot.start_node_id or ""))
+    if _node_internal_type(start) == "ai_dispatcher":
+        return str(snapshot.start_node_id)
+    return None
+
+
+def _has_pending_ai_system_context(session: Any) -> bool:
+    containers = [
+        getattr(session, "variables", None),
+        getattr(session, "context", None),
+        getattr(session, "metadata", None),
+    ]
+    for container in containers:
+        if not isinstance(container, dict):
+            continue
+        for key in AI_SYSTEM_PENDING_CONTEXT_KEYS:
+            if container.get(key):
+                return True
+    return False
+
+
+def _is_user_text_message(message: Any) -> bool:
+    text = str(getattr(message, "message_text", "") or "").strip()
+    if not text:
+        return False
+    metadata = getattr(message, "metadata", None)
+    if isinstance(metadata, dict):
+        direction = str(metadata.get("direction") or metadata.get("message_direction") or "").strip().lower()
+        if direction and direction not in {"inbound", "user", "incoming"}:
+            return False
+        message_type = str(metadata.get("message_type") or metadata.get("type") or "text").strip().lower()
+        if message_type not in {"", "text", "conversation"}:
+            return False
+    return True
+
+
+def should_restart_at_dispatcher_for_ai_system(session: Any, message: Any, snapshot: FlowV2Snapshot | None = None) -> bool:
+    if not _is_ai_system_snapshot(snapshot):
+        return False
+    if not _is_user_text_message(message):
+        return False
+    if _has_pending_ai_system_context(session):
+        return False
+    current_node_id = str(getattr(session, "current_node_id", "") or "")
+    node = snapshot.node_by_id.get(current_node_id) if snapshot is not None and current_node_id else None
+    return _node_internal_type(node) in AI_SYSTEM_TERMINAL_INTERNAL_TYPES
+
+
 class FlowV2ExecutionError(RuntimeError):
     pass
 
@@ -95,6 +171,29 @@ class FlowV2Executor:
         )
         session = self.session_manager.get_or_create(db, runtime_input=runtime_input, snapshot=snapshot)
         self._bind_numeric_choice_if_waiting(snapshot=snapshot, session=session, runtime_input=runtime_input)
+        if _is_ai_system_snapshot(snapshot):
+            logger.info(
+                "event=AI_SYSTEM_CONTINUOUS_ROUTING_DETECTED session_id=%s current_node_id=%s dispatcher_node_id=%s",
+                getattr(session, "id", None),
+                getattr(session, "current_node_id", None),
+                _dispatcher_node_id(snapshot),
+            )
+        if should_restart_at_dispatcher_for_ai_system(session, runtime_input, snapshot):
+            dispatcher_node_id = _dispatcher_node_id(snapshot)
+            if dispatcher_node_id and dispatcher_node_id != getattr(session, "current_node_id", None):
+                logger.info(
+                    "event=AI_SYSTEM_RESUME_AT_DISPATCHER session_id=%s from_node_id=%s dispatcher_node_id=%s",
+                    getattr(session, "id", None),
+                    getattr(session, "current_node_id", None),
+                    dispatcher_node_id,
+                )
+                self.session_manager.move_to(db, session=session, node_id=dispatcher_node_id, status=FlowV2SessionStatus.RUNNING)
+        elif _is_ai_system_snapshot(snapshot) and _has_pending_ai_system_context(session):
+            logger.info(
+                "event=AI_SYSTEM_KEEP_SLOT_CONTEXT session_id=%s current_node_id=%s",
+                getattr(session, "id", None),
+                getattr(session, "current_node_id", None),
+            )
         flow_id = self._flow_id_for_version(db, tenant_id=runtime_input.tenant_id, flow_version_id=runtime_input.flow_version_id)
         if str(getattr(session, "status", "")) == str(FlowV2SessionStatus.COMPLETED):
             logger.info(
@@ -343,6 +442,26 @@ class FlowV2Executor:
                 if isinstance(action, SendMessageAction):
                     self._track_analytics(db, session=session, flow_id=flow_id, event_type="message_sent", node_id=node_id, node_type=node_type, metadata={"text": action.text})
 
+            dispatcher_wait_node_id = self._ai_system_dispatcher_wait_node_id(snapshot=snapshot, session=session, node=node, result=result)
+            if dispatcher_wait_node_id:
+                logger.info(
+                    "event=AI_SYSTEM_LAST_NODE_COMPLETED session_id=%s node_id=%s node_type=%s dispatcher_node_id=%s status=%s",
+                    getattr(session, "id", None),
+                    node_id,
+                    node_type,
+                    dispatcher_wait_node_id,
+                    result.status,
+                )
+                self.event_store.append(db, session=session, event_type=FlowV2EventType.SESSION_WAITING, node_id=dispatcher_wait_node_id)
+                self.session_manager.move_to(db, session=session, node_id=dispatcher_wait_node_id, status=FlowV2SessionStatus.WAITING)
+                logger.info(
+                    "event=AI_SYSTEM_SESSION_WAITING_AT_DISPATCHER session_id=%s current_node_id=%s waiting_node_id=%s",
+                    getattr(session, "id", None),
+                    getattr(session, "current_node_id", None),
+                    dispatcher_wait_node_id,
+                )
+                return actions
+
             if self._is_terminal_node(node) and not self._result_keeps_terminal_node_waiting(node=node, node_type=node_type, result=result):
                 logger.info(
                     "[SESSION FINISHED] node_id=%s node_type=%s reason=terminal_node_marked_end_flow actions_count=%s",
@@ -456,6 +575,26 @@ class FlowV2Executor:
         self.session_manager.move_to(db, session=session, node_id=current_node_id, status=FlowV2SessionStatus.FAILED)
         raise FlowV2ExecutionError(f"Runtime V2 exceeded max_steps={MAX_RUNTIME_STEPS}")
 
+
+    @staticmethod
+    def _ai_system_dispatcher_wait_node_id(*, snapshot: FlowV2Snapshot, session: Any, node: dict[str, Any], result: Any) -> str | None:
+        if not _is_ai_system_snapshot(snapshot):
+            return None
+        if str(getattr(result, "status", "") or "") != "complete":
+            return None
+        if _has_pending_ai_system_context(session):
+            logger.info(
+                "event=AI_SYSTEM_KEEP_SLOT_CONTEXT session_id=%s current_node_id=%s",
+                getattr(session, "id", None),
+                getattr(session, "current_node_id", None),
+            )
+            return None
+        if _node_internal_type(node) not in AI_SYSTEM_TERMINAL_INTERNAL_TYPES:
+            return None
+        dispatcher_node_id = _dispatcher_node_id(snapshot)
+        if not dispatcher_node_id:
+            return None
+        return dispatcher_node_id
 
     @staticmethod
     def _flow_id_for_version(db: Session, *, tenant_id: uuid.UUID, flow_version_id: uuid.UUID) -> uuid.UUID | None:
