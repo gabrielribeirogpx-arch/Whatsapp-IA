@@ -4,7 +4,7 @@ import uuid
 from types import SimpleNamespace
 
 from app.flow_v2.contracts import RuntimeInput
-from app.flow_v2.executors._legacy import _normalize_ai_dispatcher_intent
+from app.flow_v2.executors._legacy import _agent_system_message_intent, _normalize_ai_dispatcher_intent
 from app.flow_v2.node_executors import AiAgentNodeExecutor
 from app.flow_v2.snapshot import FlowV2Snapshot
 from app.flow_v2.transition_resolver import TransitionResolver
@@ -93,6 +93,24 @@ def test_ai_agent_internal_dispatcher_falls_back_to_unknown_transition():
     assert result.next_source_handle == "unknown"
     assert result.next_node_id == "fallback"
 
+
+
+def test_agent_system_message_intent_acceptance_examples():
+    assert _agent_system_message_intent("oi") == "greeting"
+    assert _agent_system_message_intent("Marque uma Call Online com Gustavo amanhã às 13:30") == "calendar_create"
+    assert _agent_system_message_intent("Olá, agende uma reunião amanhã às 15h") == "calendar_create"
+    assert _agent_system_message_intent("Tenho horário livre amanhã?") == "calendar_list"
+    assert _agent_system_message_intent("Cancelar reunião de amanhã") == "calendar_delete"
+    assert _agent_system_message_intent("texto desconhecido") == "unknown"
+
+
+def test_normalize_ai_dispatcher_intent_calendar_aliases():
+    assert _normalize_ai_dispatcher_intent("calendar") == "calendar_create"
+    assert _normalize_ai_dispatcher_intent("schedule") == "calendar_create"
+    assert _normalize_ai_dispatcher_intent("create_event") == "calendar_create"
+    assert _normalize_ai_dispatcher_intent("create_calendar_event") == "calendar_create"
+    assert _normalize_ai_dispatcher_intent("agendamento") == "calendar_create"
+    assert _normalize_ai_dispatcher_intent("agendar") == "calendar_create"
 
 def test_normalize_ai_dispatcher_intent_accepts_supported_llm_shapes():
     assert _normalize_ai_dispatcher_intent("greeting") == "greeting"
