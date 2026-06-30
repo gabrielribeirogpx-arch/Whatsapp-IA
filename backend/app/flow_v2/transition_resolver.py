@@ -38,6 +38,13 @@ class TransitionResolver:
     ) -> TransitionResolution:
         transitions = self._snapshot_transitions(snapshot)
         matches = self._matches(transitions=transitions, source_node_id=source_node_id, source_handle=source_handle)
+        outgoing = [transition for transition in transitions if str(transition.get("source_node_id")) == source_node_id]
+        logger.info(
+            "event=TRANSITION_RESOLUTION_INPUT source_node_id=%s source_handle=%s outgoing_transitions=%s",
+            source_node_id,
+            source_handle,
+            outgoing,
+        )
         logger.info(
             "[V2 TRANSITION RESOLVER] source_node_id=%s source_handle=%s transitions_count=%s matches_count=%s transitions=%s",
             source_node_id,
@@ -47,7 +54,6 @@ class TransitionResolver:
             transitions,
         )
         if not matches:
-            outgoing = [transition for transition in transitions if str(transition.get("source_node_id")) == source_node_id]
             logger.error(
                 "[CHOICE TRANSITION NOT FOUND] source_node_id=%s source_handle=%s transitions_count=%s outgoing_count=%s reason=no_matching_transition",
                 source_node_id,
@@ -124,6 +130,13 @@ class TransitionResolver:
             )
         logger.info(
             "[CHOICE TRANSITION FOUND] source_node_id=%s source_handle=%s target_node_id=%s transition=%s",
+            source_node_id,
+            source_handle,
+            target,
+            transition,
+        )
+        logger.info(
+            "event=TRANSITION_RESOLUTION_MATCHED source_node_id=%s source_handle=%s target_node_id=%s transition=%s",
             source_node_id,
             source_handle,
             target,
