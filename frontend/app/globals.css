@@ -6715,3 +6715,222 @@ input {
   min-width: 300px;
   border-radius: 22px;
 }
+
+/* ── FLOW BUILDER CLEAN PREMIUM NODE SURFACE ─────────
+   Visual-only overrides for Flow Builder nodes. Keep node ids, handles,
+   validation, payloads and publication behavior untouched.
+*/
+.flow-builder-page .react-flow__node,
+.react-flow__node:has(.flow-node-compact) {
+  border-radius: 18px !important;
+  overflow: visible !important;
+}
+
+.flow-builder-page .react-flow__node.selected,
+.react-flow__node.selected:has(.flow-node-compact),
+.react-flow__node:focus,
+.react-flow__node:focus-visible {
+  outline: none !important;
+  box-shadow: none !important;
+}
+
+.flow-builder-page .flow-node,
+.flow-builder-page .flow-node-compact {
+  border: 1px solid rgba(15, 23, 42, 0.08) !important;
+  border-radius: 18px !important;
+  background: #ffffff !important;
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.08) !important;
+  overflow: hidden !important;
+  transform: translateZ(0);
+  transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease !important;
+}
+
+.flow-builder-page .flow-node-compact:hover {
+  border-color: rgba(15, 23, 42, 0.12) !important;
+  box-shadow: 0 14px 34px rgba(15, 23, 42, 0.10) !important;
+  transform: translateY(-1px) translateZ(0) !important;
+}
+
+.flow-builder-page .flow-node-compact.is-selected {
+  border: 1px solid rgba(59, 130, 246, 0.35) !important;
+  box-shadow: 0 16px 40px rgba(59, 130, 246, 0.16) !important;
+  outline: none !important;
+}
+
+.flow-builder-page .flow-node-compact.is-selected::after,
+.flow-builder-page .flow-node-compact.running::after,
+.flow-builder-page .flow-node-compact::before {
+  content: none !important;
+  display: none !important;
+}
+
+.flow-builder-page .flow-node-header-bar {
+  height: 4px !important;
+  border-radius: 18px 18px 0 0 !important;
+  opacity: 0.78 !important;
+}
+
+.flow-builder-page .flow-node-compact-header {
+  gap: 9px !important;
+  padding: 12px 13px 9px !important;
+  border-bottom: 1px solid rgba(226, 232, 240, 0.72) !important;
+  border-radius: 0 !important;
+  background: #ffffff !important;
+  overflow: visible !important;
+}
+
+.flow-builder-page .flow-node-header-glow {
+  display: none !important;
+}
+
+.flow-builder-page .flow-node-emoji {
+  width: 32px !important;
+  height: 32px !important;
+  border-radius: 12px !important;
+  background: #f8fafc !important;
+  border: 1px solid rgba(226, 232, 240, 0.88) !important;
+  box-shadow: none !important;
+  font-size: 17px !important;
+}
+
+.flow-builder-page .flow-node-emoji span {
+  filter: none !important;
+}
+
+.flow-builder-page .flow-node-title {
+  color: #0f172a !important;
+  font-size: 14px !important;
+  font-weight: 700 !important;
+  letter-spacing: -0.015em !important;
+  line-height: 1.18 !important;
+}
+
+.flow-builder-page .flow-node-badge {
+  max-width: 76px !important;
+  padding: 2px 6px !important;
+  border: 1px solid rgba(15, 23, 42, 0.08) !important;
+  border-radius: 999px !important;
+  box-shadow: none !important;
+  font-size: 8.5px !important;
+  font-weight: 800 !important;
+  letter-spacing: 0.035em !important;
+}
+
+.flow-builder-page .flow-node-start-button {
+  padding: 2px 6px !important;
+  border: 1px solid rgba(203, 213, 225, 0.95) !important;
+  border-radius: 999px !important;
+  background: #ffffff !important;
+  color: #64748b !important;
+  box-shadow: none !important;
+  font-size: 9px !important;
+}
+
+.flow-builder-page .flow-node-start-button:hover,
+.flow-builder-page .flow-node-start-button:focus-visible {
+  border-color: rgba(59, 130, 246, 0.42) !important;
+  color: #2563eb !important;
+  outline: none !important;
+}
+
+.flow-builder-page .flow-node-start-button.is-start {
+  border-color: rgba(22, 163, 74, 0.22) !important;
+  background: #f0fdf4 !important;
+  color: #15803d !important;
+}
+
+.flow-builder-page .flow-node-compact-body {
+  padding: 10px 13px !important;
+}
+
+.flow-builder-page .flow-node-summary {
+  color: #475569 !important;
+  font-size: 12px !important;
+  line-height: 1.45 !important;
+  display: -webkit-box !important;
+  -webkit-line-clamp: 2 !important;
+  -webkit-box-orient: vertical !important;
+  overflow: hidden !important;
+}
+
+.flow-builder-page .flow-node-chip,
+.flow-builder-page .flow-node-metric {
+  border-color: rgba(226, 232, 240, 0.82) !important;
+  background: #f8fafc !important;
+  box-shadow: none !important;
+}
+
+.flow-builder-page .flow-node-footer {
+  min-height: 31px !important;
+  padding: 8px 13px 10px !important;
+  border-top: 1px solid rgba(226, 232, 240, 0.72) !important;
+  border-radius: 0 0 18px 18px !important;
+  background: #f8fafc !important;
+  color: #64748b !important;
+  font-size: 11px !important;
+  font-weight: 700 !important;
+}
+
+.flow-builder-page .flow-node-status-dot {
+  width: 6px !important;
+  height: 6px !important;
+  box-shadow: none !important;
+}
+
+.flow-builder-page .flow-node-handle.react-flow__handle,
+.flow-builder-page .flow-node-handle {
+  width: 12px !important;
+  height: 12px !important;
+  min-width: 12px !important;
+  min-height: 12px !important;
+  background: #ffffff !important;
+  border: 2px solid #cbd5e1 !important;
+  border-radius: 999px !important;
+  box-shadow: 0 2px 6px rgba(15, 23, 42, 0.10) !important;
+  transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease !important;
+}
+
+.flow-builder-page .flow-node-target-handle {
+  left: -6px !important;
+}
+
+.flow-builder-page .flow-node-source-handle {
+  right: -6px !important;
+}
+
+.flow-builder-page .flow-node-source-handle::before,
+.flow-builder-page .flow-node-target-handle::before {
+  display: none !important;
+}
+
+.flow-builder-page .flow-node-handle:hover,
+.flow-builder-page .flow-node-compact.is-selected .flow-node-handle {
+  border-color: #3b82f6 !important;
+  box-shadow: 0 3px 8px rgba(59, 130, 246, 0.16) !important;
+  transform: var(--flow-handle-transform, translate(0, -50%)) scale(1.04) !important;
+}
+
+.flow-builder-page .flow-node-source-label {
+  padding: 2px 6px !important;
+  border: 1px solid rgba(226, 232, 240, 0.9) !important;
+  border-radius: 999px !important;
+  background: #ffffff !important;
+  color: #64748b !important;
+  box-shadow: 0 4px 10px rgba(15, 23, 42, 0.06) !important;
+  font-size: 10px !important;
+}
+
+.flow-builder-page .react-flow__edge-text,
+.flow-builder-page .react-flow__edge-textwrapper text {
+  fill: #64748b !important;
+  font-size: 10px !important;
+  font-weight: 700 !important;
+}
+
+.flow-builder-page .react-flow__edge-textbg {
+  fill: #ffffff !important;
+  stroke: rgba(226, 232, 240, 0.95) !important;
+  stroke-width: 1px !important;
+  rx: 999px !important;
+  ry: 999px !important;
+}
