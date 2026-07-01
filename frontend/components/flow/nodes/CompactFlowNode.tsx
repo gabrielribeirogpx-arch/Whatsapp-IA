@@ -92,7 +92,7 @@ function CompactFlowNode({
       style={{
         '--flow-node-accent': accent,
         border: hasValidationError ? '2px solid #dc2626' : undefined,
-        boxShadow: hasValidationError ? '0 0 0 4px rgba(220,38,38,0.15)' : analytics ? `0 0 0 ${Math.min(12, 3 + Math.log10(Number(analytics.entered || 1)) * 4)}px ${Number(analytics.dropoff_rate || 0) > 30 ? 'rgba(245,158,11,0.22)' : 'rgba(34,197,94,0.18)'}` : undefined,
+        boxShadow: hasValidationError ? '0 12px 30px rgba(220, 38, 38, 0.12)' : undefined,
       } as CSSProperties}
     >
       <div className="flow-node-header-bar" style={{ background: accent }} />
@@ -186,13 +186,13 @@ function CompactFlowNode({
             isConnectable={isConnectable}
             data-option-value={handle.optionValue}
             style={{
-              right: -8,
-              width: 14,
-              height: 14,
+              right: -6,
+              width: 12,
+              height: 12,
               background: '#fff',
-              border: `2px solid ${handle.color || accent}`,
-              boxShadow: '0 4px 10px rgba(15, 23, 42, 0.18), 0 0 0 2px rgba(255, 255, 255, 0.9)',
-              transition: 'transform 120ms ease, box-shadow 120ms ease, border-color 120ms ease',
+              border: '2px solid #cbd5e1',
+              boxShadow: '0 2px 6px rgba(15, 23, 42, 0.10)',
+              transition: 'transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease',
               '--flow-handle-transform': 'translate(0, -50%)',
               borderRadius: '50%',
               cursor: 'crosshair',
