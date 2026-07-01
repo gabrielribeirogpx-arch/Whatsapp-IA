@@ -4,7 +4,7 @@ from datetime import datetime
 import logging
 from uuid import UUID
 
-from sqlalchemy import select, text
+from sqlalchemy import case, select, text
 from sqlalchemy.orm import Session
 
 from app.flow_v2.contracts import FlowV2EventType, FlowV2SessionStatus, RuntimeInput
@@ -45,15 +45,51 @@ class FlowV2SessionManager:
         self._lock_active_session_identity(db, runtime_input=runtime_input)
         auto_restart = _metadata_allows_auto_restart(runtime_input.metadata)
         restart_requested = _metadata_requests_restart(runtime_input.metadata)
-        session = db.execute(
+        session_filters = {
+            "tenant_id": str(runtime_input.tenant_id),
+            "flow_version_id": str(runtime_input.flow_version_id),
+            "external_user_id": runtime_input.external_user_id,
+            "conversation_id": str(runtime_input.conversation_id) if runtime_input.conversation_id else None,
+            "contact_id": str(runtime_input.contact_id) if runtime_input.contact_id else None,
+            "statuses": "all",
+        }
+        logger.info(
+            "event=flow_v2_session_lookup tenant_id=%s conversation_id=%s contact_id=%s phone=%s flow_version_id=%s filters=%s",
+            runtime_input.tenant_id,
+            runtime_input.conversation_id,
+            runtime_input.contact_id,
+            runtime_input.external_user_id,
+            runtime_input.flow_version_id,
+            session_filters,
+        )
+        session_query = (
             select(FlowV2Session)
             .where(
                 FlowV2Session.tenant_id == runtime_input.tenant_id,
                 FlowV2Session.flow_version_id == runtime_input.flow_version_id,
                 FlowV2Session.external_user_id == runtime_input.external_user_id,
             )
-            .order_by(FlowV2Session.started_at.desc())
-        ).scalar_one_or_none()
+            .order_by(
+                case((FlowV2Session.status.in_([str(FlowV2SessionStatus.RUNNING), str(FlowV2SessionStatus.WAITING)]), 0), else_=1),
+                FlowV2Session.updated_at.desc(),
+                FlowV2Session.started_at.desc(),
+            )
+            .limit(2)
+        )
+        matched_sessions = db.execute(session_query).scalars().all()
+        if len(matched_sessions) > 1:
+            logger.warning(
+                "MESSAGE_WORKER_MULTIPLE_RESULTS_DETECTED entity=flow_v2_sessions selected_session_id=%s duplicate_session_id=%s tenant_id=%s conversation_id=%s contact_id=%s phone=%s flow_version_id=%s filters=%s",
+                matched_sessions[0].id,
+                matched_sessions[1].id,
+                runtime_input.tenant_id,
+                runtime_input.conversation_id,
+                runtime_input.contact_id,
+                runtime_input.external_user_id,
+                runtime_input.flow_version_id,
+                session_filters,
+            )
+        session = matched_sessions[0] if matched_sessions else None
         previous_session_id = getattr(session, "id", None) if session is not None else None
         if session is not None and restart_requested and str(session.status) in {str(FlowV2SessionStatus.RUNNING), str(FlowV2SessionStatus.WAITING)}:
             session.status = str(FlowV2SessionStatus.COMPLETED)
