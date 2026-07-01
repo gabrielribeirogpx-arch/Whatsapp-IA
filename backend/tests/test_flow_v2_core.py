@@ -76,6 +76,11 @@ class _FakeResult:
     def scalar(self):
         return self.scalar_value
 
+    def all(self):
+        if self.values:
+            return self.values
+        return [self.scalar_one_value] if self.scalar_one_value is not None else []
+
     def first(self):
         return self.values[0] if self.values else None
 

@@ -489,6 +489,25 @@ def process_incoming_message(payload: dict[str, Any]) -> None:
                 )
             if selected_flow and resolve_flow_runtime(selected_flow) == "v2":
                 bind_conversation_to_flow(db, conversation=persisted_conversation, flow=selected_flow)
+                flow_v2_session_filters = {
+                    "tenant_id": str(tenant.id),
+                    "flow_version_id": str(selected_flow.published_version_id),
+                    "external_user_id": contact.phone if contact else phone,
+                    "conversation_id": str(persisted_conversation.id),
+                    "contact_id": str(contact.id) if contact else None,
+                    "order_by": "active status first, updated_at desc, started_at desc",
+                    "limit": 2,
+                }
+                logger.info(
+                    "event=message_worker_before_flow_v2_session_lookup tenant_id=%s conversation_id=%s contact_id=%s phone=%s flow_id=%s provider_id=%s filters=%s",
+                    tenant.id,
+                    persisted_conversation.id,
+                    contact.id if contact else None,
+                    contact.phone if contact else phone,
+                    selected_flow.id,
+                    provider_id,
+                    flow_v2_session_filters,
+                )
                 FlowRuntimeSelector().dispatch(
                     db=db,
                     flow=selected_flow,
