@@ -7,6 +7,7 @@ import traceback
 import asyncio
 import hashlib
 import json
+import re
 from contextlib import nullcontext
 from datetime import datetime
 from typing import Any
@@ -1379,6 +1380,47 @@ def _log_flow_version_blocked(flow_id: uuid.UUID, nodes_count: int) -> None:
     logger.error("[FLOW VERSION BLOCKED] flow_id=%s nodes=%s", str(flow_id), nodes_count)
 
 
+def _normalize_flow_handle(value: Any) -> str:
+    return str(value or "").strip().lower()
+
+
+def _builder_flow_handle_id(value: Any, fallback: str) -> str:
+    normalized = re.sub(r"[^a-z0-9_]", "", re.sub(r"\s+", "_", str(value or "").strip().lower()))
+    return normalized or fallback
+
+
+def _available_flow_handles_by_node(nodes: list[dict[str, Any]]) -> dict[str, dict[str, list[str]]]:
+    handles: dict[str, dict[str, list[str]]] = {}
+    for node in nodes:
+        if not isinstance(node, dict) or node.get("id") is None:
+            continue
+        node_id = str(node.get("id"))
+        node_type = str(node.get("type") or "message").strip().lower()
+        data = node.get("data") if isinstance(node.get("data"), dict) else {}
+        source_handles: set[str] = {"", "default"}
+        target_handles: set[str] = {"", "default"}
+        if node_type == "condition":
+            source_handles.update({"true", "false"})
+        elif node_type == "choice":
+            options = data.get("buttons") or data.get("options") or node.get("options") or []
+            if isinstance(options, list):
+                for index, option in enumerate(options):
+                    if not isinstance(option, dict):
+                        continue
+                    handle = option.get("handleId") or option.get("handle_id") or option.get("value") or option.get("id") or option.get("label")
+                    source_handles.add(_builder_flow_handle_id(handle, f"option_{index + 1}"))
+        handles[node_id] = {
+            "source": sorted(handle for handle in source_handles if handle is not None),
+            "target": sorted(handle for handle in target_handles if handle is not None),
+        }
+    return handles
+
+
+def _flow_handle_exists(available_handles: list[str], handle: str | None) -> bool:
+    normalized = _normalize_flow_handle(handle)
+    return normalized in {_normalize_flow_handle(item) for item in available_handles}
+
+
 def validate_flow_payload_or_400(
     nodes: list[dict[str, Any]],
     edges: list[dict[str, Any]],
@@ -1412,17 +1454,44 @@ def validate_flow_payload_or_400(
     outgoing_count: dict[str, int] = {node_id: 0 for node_id in node_ids}
     incoming_count: dict[str, int] = {node_id: 0 for node_id in node_ids}
     outgoing_by_handle: dict[str, set[str]] = {node_id: set() for node_id in node_ids}
+    node_handle_map = _available_flow_handles_by_node(nodes)
 
-    for edge in edges or []:
+    for index, edge in enumerate(edges or []):
+        edge_data = edge.get("data") if isinstance(edge.get("data"), dict) else {}
         source = str(edge.get("source") or "")
         target = str(edge.get("target") or "")
-        if source not in node_ids or target not in node_ids:
-            raise HTTPException(status_code=400, detail="VALIDATION_ERROR: EDGE_REFERENCE_NOT_FOUND")
+        source_handle = str(edge.get("sourceHandle") or edge_data.get("sourceHandle") or "").strip()
+        target_handle = str(edge.get("targetHandle") or edge_data.get("targetHandle") or "").strip()
+        invalid_reasons: list[str] = []
+        if source not in node_ids:
+            invalid_reasons.append("source_node_not_found")
+        if target not in node_ids:
+            invalid_reasons.append("target_node_not_found")
+        if source in node_ids and not _flow_handle_exists(node_handle_map[source]["source"], source_handle):
+            invalid_reasons.append("source_handle_not_found")
+        if target in node_ids and not _flow_handle_exists(node_handle_map[target]["target"], target_handle):
+            invalid_reasons.append("target_handle_not_found")
+        if invalid_reasons:
+            detail = {
+                "code": "VALIDATION_ERROR",
+                "error": "EDGE_REFERENCE_NOT_FOUND",
+                "message": "Edge references a missing node or handle.",
+                "edge_index": index,
+                "edge_id": edge.get("id"),
+                "source": source or None,
+                "target": target or None,
+                "sourceHandle": source_handle or None,
+                "targetHandle": target_handle or None,
+                "reasons": invalid_reasons,
+                "node_ids": sorted(node_ids),
+                "handles_by_node": node_handle_map,
+            }
+            logger.warning("[FLOW VALIDATION EDGE_REFERENCE_NOT_FOUND] %s", detail)
+            raise HTTPException(status_code=400, detail=detail)
         outgoing_count[source] = outgoing_count.get(source, 0) + 1
         incoming_count[target] = incoming_count.get(target, 0) + 1
-        source_handle = str(edge.get("sourceHandle") or (edge.get("data") or {}).get("sourceHandle") or "").lower()
         if source_handle:
-            outgoing_by_handle[source].add(source_handle)
+            outgoing_by_handle[source].add(source_handle.lower())
 
     unconnected_nodes = [
         node_id

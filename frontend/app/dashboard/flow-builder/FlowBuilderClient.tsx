@@ -119,6 +119,34 @@ const AI_SYSTEM_CARDS = [
   { id: 'ai_custom_system', title: '➕ Sistema Personalizado', subtitle: 'Comece com um sistema IA em branco.' },
 ] as const;
 
+const normalizeFlowHandleId = (value: unknown) => String(value ?? '').trim().toLowerCase();
+
+const toBuilderHandleId = (value: unknown, fallback: string) => {
+  const normalized = String(value ?? '').toLowerCase().trim().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
+  return normalized || fallback;
+};
+
+const getNodeAvailableHandles = (node: Pick<Node, 'type' | 'data'> | FlowNodePayload) => {
+  const data = (node.data || {}) as Record<string, any>;
+  const nodeType = String(node.type || 'message');
+  const source = new Set(['', 'default']);
+  const target = new Set(['', 'default']);
+
+  if (nodeType === 'condition') {
+    source.add('true');
+    source.add('false');
+  } else if (nodeType === 'choice') {
+    const choices = Array.isArray(data.buttons) ? data.buttons : Array.isArray(data.options) ? data.options : [];
+    choices.forEach((choice: Record<string, unknown>, index: number) => {
+      source.add(toBuilderHandleId(choice?.handleId || choice?.handle_id || choice?.value || choice?.id || choice?.label, `option_${index + 1}`));
+    });
+  }
+
+  return { source, target };
+};
+
+const flowHandleExists = (available: Set<string>, handle: unknown) => available.has(normalizeFlowHandleId(handle));
+
 const AI_SYSTEM_INTERNAL_NODE_TYPES = new Set(['ai_dispatcher', 'ai_greeting', 'ai_calendar_agent', 'ai_safe_fallback', 'ai_agent']);
 const AI_SYSTEM_EXPANDED_AGENT_ORIGINAL_TYPES = new Set(['ai_dispatcher', 'ai_greeting', 'ai_calendar_agent', 'ai_safe_fallback']);
 
@@ -147,11 +175,7 @@ const sanitizeAiSystemCanvasGraph = <TNode extends Node | FlowNodePayload, TEdge
     migratedBySystem.set(parentId, [...(migratedBySystem.get(parentId) || []), node]);
   }
 
-  if (removedIds.size === 0) {
-    return { nodes, edges, removedIds };
-  }
-
-  const sanitizedNodes = nodes
+  const sanitizedNodes = (removedIds.size === 0 ? nodes : nodes
     .filter((node) => !removedIds.has(String(node.id)))
     .map((node) => {
       if (node.type !== 'ai_system') return node;
@@ -173,9 +197,29 @@ const sanitizeAiSystemCanvasGraph = <TNode extends Node | FlowNodePayload, TEdge
           })),
       ];
       return { ...node, data: { ...data, internal_nodes: nextInternalNodes } };
-    });
+    }));
 
-  const sanitizedEdges = edges.filter((edge) => !removedIds.has(String(edge.source)) && !removedIds.has(String(edge.target)));
+  const nodeById = new Map(sanitizedNodes.map((node) => [String(node.id), node]));
+  const sanitizedEdges = edges.filter((edge) => {
+    if (removedIds.has(String(edge.source)) || removedIds.has(String(edge.target))) return false;
+    const sourceNode = nodeById.get(String(edge.source));
+    const targetNode = nodeById.get(String(edge.target));
+    if (!sourceNode || !targetNode) {
+      console.warn('FLOW_EDGE_SANITIZED_ORPHAN_NODE', { edge_id: edge.id, source: edge.source, target: edge.target, node_ids: Array.from(nodeById.keys()) });
+      return false;
+    }
+    const sourceHandles = getNodeAvailableHandles(sourceNode).source;
+    const targetHandles = getNodeAvailableHandles(targetNode).target;
+    if (!flowHandleExists(sourceHandles, edge.sourceHandle ?? (edge.data as any)?.sourceHandle)) {
+      console.warn('FLOW_EDGE_SANITIZED_SOURCE_HANDLE', { edge_id: edge.id, source: edge.source, sourceHandle: edge.sourceHandle ?? (edge.data as any)?.sourceHandle, available: Array.from(sourceHandles) });
+      return false;
+    }
+    if (!flowHandleExists(targetHandles, edge.targetHandle ?? (edge.data as any)?.targetHandle)) {
+      console.warn('FLOW_EDGE_SANITIZED_TARGET_HANDLE', { edge_id: edge.id, target: edge.target, targetHandle: edge.targetHandle ?? (edge.data as any)?.targetHandle, available: Array.from(targetHandles) });
+      return false;
+    }
+    return true;
+  });
   return { nodes: sanitizedNodes, edges: sanitizedEdges, removedIds };
 };
 
@@ -3023,7 +3067,17 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
       if (!response.ok) {
         const body = await response.text();
         console.error('[PUBLISH ERROR BODY]', body);
-        throw new Error(`HTTP ${response.status}: ${body}`);
+        let detailedMessage = body;
+        try {
+          const parsed = JSON.parse(body);
+          const detail = parsed?.detail;
+          if (detail && typeof detail === 'object') {
+            detailedMessage = `${detail.code || 'VALIDATION_ERROR'}: ${detail.error || 'FLOW_INVALID'} edge=${detail.edge_id ?? detail.edge_index ?? 'n/a'} source=${detail.source ?? 'n/a'} sourceHandle=${detail.sourceHandle ?? 'n/a'} target=${detail.target ?? 'n/a'} targetHandle=${detail.targetHandle ?? 'n/a'} reasons=${Array.isArray(detail.reasons) ? detail.reasons.join(',') : 'n/a'}`;
+          }
+        } catch {
+          detailedMessage = body;
+        }
+        throw new Error(`HTTP ${response.status}: ${detailedMessage}`);
       }
       const publishData = await parseApiResponse(response);
       console.log('[PUBLISH RESPONSE]', { flowId: selectedFlowId, status: response.status, payload: publishData });
