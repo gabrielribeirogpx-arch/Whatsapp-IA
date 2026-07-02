@@ -83,6 +83,46 @@ def _publish_internal_edge_ids_preview(edges: list[dict[str, Any]] | None, limit
             break
     return previews
 
+
+def _publish_edge_endpoint_preview(edges: list[dict[str, Any]] | None, limit: int = 10) -> list[dict[str, Any]]:
+    previews: list[dict[str, Any]] = []
+    for edge in edges if isinstance(edges, list) else []:
+        if not isinstance(edge, dict):
+            continue
+        previews.append({
+            "id": str(edge.get("id")) if edge.get("id") is not None else None,
+            "source": str(edge.get("source")) if edge.get("source") is not None else None,
+            "target": str(edge.get("target")) if edge.get("target") is not None else None,
+        })
+        if len(previews) >= limit:
+            break
+    return previews
+
+
+def _log_publish_internal_edge_found(*, flow_id: Any, reason: str, stage: str, edges: list[dict[str, Any]] | None) -> None:
+    internal_edges = []
+    for index, edge in enumerate(edges if isinstance(edges, list) else []):
+        if not isinstance(edge, dict):
+            continue
+        edge_id = str(edge.get("id") or "")
+        source = str(edge.get("source") or "")
+        target = str(edge.get("target") or "")
+        if "__" not in edge_id and "__" not in source and "__" not in target:
+            continue
+        internal_edges.append({"index": index, "id": edge_id, "source": source, "target": target})
+        if len(internal_edges) >= 10:
+            break
+    if not internal_edges:
+        return
+    logger.error(
+        "AI_SYSTEM_INTERNAL_EDGE_FOUND flow_id=%s reason=%s stage=%s internal_edges=%s stacktrace=%s",
+        flow_id,
+        reason,
+        stage,
+        internal_edges,
+        "".join(traceback.format_stack(limit=12)),
+    )
+
 def _graph_checksum(nodes: list[dict[str, Any]], edges: list[dict[str, Any]]) -> str:
     payload = {"nodes": nodes if isinstance(nodes, list) else [], "edges": edges if isinstance(edges, list) else []}
     return hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")).hexdigest()
@@ -419,19 +459,73 @@ def _select_publish_builder_graph(
     return safe_flow_nodes, safe_flow_edges, "flow_json_empty_edges"
 
 def _publish_fresh_snapshot(db: Session, flow: Flow, *, reason: str) -> FlowVersion | None:
+    logger.info(
+        "[PUBLISH FRESH SNAPSHOT ENTER] flow_id=%s reason=%s",
+        getattr(flow, "id", None),
+        reason,
+    )
     transaction = db.begin_nested() if hasattr(db, "begin_nested") else nullcontext()
     with transaction:
         db.execute(select(Flow.id).where(Flow.id == flow.id).with_for_update())
         flow_nodes, flow_edges = _builder_graph_from_flow(flow)
+        _log_publish_internal_edge_found(
+            flow_id=flow.id,
+            reason=reason,
+            stage="after_builder_graph_from_flow",
+            edges=flow_edges,
+        )
         try:
             record_nodes, record_edges = _builder_graph_from_records(db, flow)
         except AttributeError:
             record_nodes, record_edges = [], []
+        _log_publish_internal_edge_found(
+            flow_id=flow.id,
+            reason=reason,
+            stage="after_builder_graph_from_records",
+            edges=record_edges,
+        )
+        logger.info(
+            "[PUBLISH SNAPSHOT DATA_ORIGIN] flow_id=%s reason=%s payload=%s db=%s serializer=%s "
+            "snapshot=%s flow_data=%s flow_nodes_json=%s flow_edges_json=%s flow_nodes=%s flow_edges=%s "
+            "current_version_nodes=%s current_version_edges=%s record_nodes=%s record_edges=%s",
+            flow.id,
+            reason,
+            False,
+            bool(record_nodes or record_edges),
+            False,
+            bool(getattr(getattr(flow, "current_version", None), "snapshot", None)),
+            bool(getattr(flow, "data", None)),
+            isinstance(getattr(flow, "nodes_json", None), list),
+            isinstance(getattr(flow, "edges_json", None), list),
+            isinstance(getattr(flow, "nodes", None), list),
+            isinstance(getattr(flow, "edges", None), list),
+            isinstance(getattr(getattr(flow, "current_version", None), "nodes", None), list),
+            isinstance(getattr(getattr(flow, "current_version", None), "edges", None), list),
+            bool(record_nodes),
+            bool(record_edges),
+        )
         nodes, edges, graph_source = _select_publish_builder_graph(
             flow_nodes=flow_nodes,
             flow_edges=flow_edges,
             record_nodes=record_nodes,
             record_edges=record_edges,
+        )
+        logger.info(
+            "[PUBLISH SNAPSHOT GRAPH_OBTAINED] flow_id=%s reason=%s source=%s nodes_count=%s edges_count=%s "
+            "node_ids_preview=%s edge_ids_preview=%s",
+            flow.id,
+            reason,
+            graph_source,
+            len(nodes if isinstance(nodes, list) else []),
+            len(edges if isinstance(edges, list) else []),
+            _graph_node_ids(nodes if isinstance(nodes, list) else [])[:10],
+            _publish_edge_ids_preview(edges),
+        )
+        _log_publish_internal_edge_found(
+            flow_id=flow.id,
+            reason=reason,
+            stage=f"after_select_publish_builder_graph:{graph_source}",
+            edges=edges,
         )
         logger.info(
             "[V2 SNAPSHOT] publish_graph_source flow_id=%s reason=%s source=%s "
@@ -457,13 +551,21 @@ def _publish_fresh_snapshot(db: Session, flow: Flow, *, reason: str) -> FlowVers
 
     logger.info(
         "[PUBLISH PRE_VALIDATE] flow_id=%s reason=%s nodes_count=%s edges_count=%s "
-        "edge_ids_preview=%s internal_edge_ids_preview=%s edge_origin=selected_builder_graph",
+        "node_ids=%s edge_endpoints=%s edge_ids_preview=%s internal_edge_ids_preview=%s edge_origin=selected_builder_graph",
         flow.id,
         reason,
         len(nodes),
         len(edges),
+        _graph_node_ids(nodes),
+        _publish_edge_endpoint_preview(edges, limit=50),
         _publish_edge_ids_preview(edges),
         _publish_internal_edge_ids_preview(edges),
+    )
+    _log_publish_internal_edge_found(
+        flow_id=flow.id,
+        reason=reason,
+        stage="before_validate_flow_payload_or_400",
+        edges=edges,
     )
     validate_flow_payload_or_400(nodes, edges)
     _validate_no_template_ids(nodes, edges)
@@ -522,10 +624,48 @@ def _publish_fresh_snapshot(db: Session, flow: Flow, *, reason: str) -> FlowVers
         is_published=True,
     )
     if is_runtime_v2:
+        logger.info(
+            "[PUBLISH SERIALIZER BEFORE] flow_id=%s reason=%s serializer=_apply_flow_v2_snapshot_metadata nodes_count=%s edges_count=%s edge_endpoints=%s",
+            flow.id,
+            reason,
+            len(nodes),
+            len(edges),
+            _publish_edge_endpoint_preview(edges, limit=50),
+        )
+        _log_publish_internal_edge_found(flow_id=flow.id, reason=reason, stage="before_flow_v2_serializer", edges=edges)
         _apply_flow_v2_snapshot_metadata(fresh_version, nodes, edges)
+        serialized_edges = fresh_version.edges if isinstance(fresh_version.edges, list) else []
+        logger.info(
+            "[PUBLISH SERIALIZER AFTER] flow_id=%s reason=%s serializer=_apply_flow_v2_snapshot_metadata nodes_count=%s edges_count=%s edge_endpoints=%s",
+            flow.id,
+            reason,
+            len(fresh_version.nodes if isinstance(fresh_version.nodes, list) else []),
+            len(serialized_edges),
+            _publish_edge_endpoint_preview(serialized_edges, limit=50),
+        )
+        _log_publish_internal_edge_found(flow_id=flow.id, reason=reason, stage="after_flow_v2_serializer", edges=serialized_edges)
         checksum = fresh_version.v2_snapshot_hash or checksum
     else:
+        logger.info(
+            "[PUBLISH SERIALIZER BEFORE] flow_id=%s reason=%s serializer=apply_flow_version_snapshot_metadata nodes_count=%s edges_count=%s edge_endpoints=%s",
+            flow.id,
+            reason,
+            len(nodes),
+            len(edges),
+            _publish_edge_endpoint_preview(edges, limit=50),
+        )
+        _log_publish_internal_edge_found(flow_id=flow.id, reason=reason, stage="before_legacy_serializer", edges=edges)
         apply_flow_version_snapshot_metadata(fresh_version, nodes, edges)
+        serialized_edges = fresh_version.edges if isinstance(fresh_version.edges, list) else []
+        logger.info(
+            "[PUBLISH SERIALIZER AFTER] flow_id=%s reason=%s serializer=apply_flow_version_snapshot_metadata nodes_count=%s edges_count=%s edge_endpoints=%s",
+            flow.id,
+            reason,
+            len(fresh_version.nodes if isinstance(fresh_version.nodes, list) else []),
+            len(serialized_edges),
+            _publish_edge_endpoint_preview(serialized_edges, limit=50),
+        )
+        _log_publish_internal_edge_found(flow_id=flow.id, reason=reason, stage="after_legacy_serializer", edges=serialized_edges)
     db.add(fresh_version)
     db.flush()
     flow.current_version_id = fresh_version.id
@@ -850,6 +990,12 @@ def _builder_graph_from_records(db: Session, flow: Flow) -> tuple[list[dict[str,
         _publish_edge_ids_preview(edges),
         _publish_internal_edge_ids_preview(edges),
     )
+    _log_publish_internal_edge_found(
+        flow_id=getattr(flow, "id", None),
+        reason="builder_graph_from_records",
+        stage="_builder_graph_from_records:return",
+        edges=edges,
+    )
     if nodes:
         return nodes, edges
     return _builder_graph_from_flow(flow)
@@ -885,6 +1031,12 @@ def _builder_graph_from_flow(flow: Flow) -> tuple[list[dict[str, Any]], list[dic
         len(safe_edges),
         _publish_edge_ids_preview(safe_edges),
         _publish_internal_edge_ids_preview(safe_edges),
+    )
+    _log_publish_internal_edge_found(
+        flow_id=getattr(flow, "id", None),
+        reason="builder_graph_from_flow",
+        stage=f"_builder_graph_from_flow:return:{edge_origin}",
+        edges=safe_edges,
     )
     return safe_nodes, safe_edges
 
