@@ -164,7 +164,20 @@ const sanitizeAiSystemCanvasGraph = <TNode extends Node | FlowNodePayload, TEdge
   const systemNodes = nodes.filter((node) => node.type === 'ai_system');
   const systemById = new Map(systemNodes.map((node) => [String(node.id), node]));
   const migratedBySystem = new Map<string, TNode[]>();
+  const internalNodeToSystemId = new Map<string, string>();
+  const migratedEdgesBySystem = new Map<string, TEdge[]>();
   const removedIds = new Set<string>();
+
+  for (const systemNode of systemNodes) {
+    const systemId = String(systemNode.id);
+    const data = (systemNode.data || {}) as Record<string, unknown>;
+    const internalNodes = Array.isArray(data.internal_nodes) ? data.internal_nodes : [];
+    internalNodes.forEach((internalNode) => {
+      if (!internalNode || typeof internalNode !== 'object') return;
+      const internalId = String((internalNode as { id?: unknown }).id || '');
+      if (internalId) internalNodeToSystemId.set(internalId, systemId);
+    });
+  }
 
   for (const node of nodes) {
     if (!isAiSystemInternalNode(node)) continue;
@@ -172,18 +185,50 @@ const sanitizeAiSystemCanvasGraph = <TNode extends Node | FlowNodePayload, TEdge
     const parentId = String(data.parent_system_id || data.system_id || data.ai_system_parent_id || '');
     if (!parentId || !systemById.has(parentId)) continue;
     removedIds.add(String(node.id));
+    internalNodeToSystemId.set(String(node.id), parentId);
     migratedBySystem.set(parentId, [...(migratedBySystem.get(parentId) || []), node]);
   }
 
-  const sanitizedNodes = (removedIds.size === 0 ? nodes : nodes
+  const resolveInternalSystemId = (nodeId: unknown) => {
+    const id = String(nodeId || '');
+    if (!id) return null;
+    if (removedIds.has(id) || internalNodeToSystemId.has(id)) return internalNodeToSystemId.get(id) || null;
+    const prefixMatch = Array.from(systemById.keys()).find((systemId) => id.startsWith(`${systemId}__`));
+    return prefixMatch || null;
+  };
+
+  const sanitizedEdges: TEdge[] = [];
+  let removedEdgesCount = 0;
+
+  for (const edge of edges) {
+    const sourceSystemId = resolveInternalSystemId(edge.source);
+    const targetSystemId = resolveInternalSystemId(edge.target);
+    const hasInternalEndpoint = !!sourceSystemId || !!targetSystemId;
+    const hasExpandedInternalId = String(edge.source || '').includes('__') || String(edge.target || '').includes('__');
+
+    if (hasInternalEndpoint || hasExpandedInternalId) {
+      removedEdgesCount += 1;
+      const systemId = sourceSystemId || targetSystemId || Array.from(systemById.keys()).find((id) => String(edge.source || '').startsWith(`${id}__`) || String(edge.target || '').startsWith(`${id}__`));
+      if (systemId) migratedEdgesBySystem.set(systemId, [...(migratedEdgesBySystem.get(systemId) || []), edge]);
+      continue;
+    }
+
+    sanitizedEdges.push(edge);
+  }
+
+  const shouldRewriteSystemData = removedIds.size > 0 || migratedEdgesBySystem.size > 0;
+  const sanitizedNodes = (!shouldRewriteSystemData ? nodes : nodes
     .filter((node) => !removedIds.has(String(node.id)))
     .map((node) => {
       if (node.type !== 'ai_system') return node;
       const migrated = migratedBySystem.get(String(node.id)) || [];
-      if (!migrated.length) return node;
+      const migratedEdges = migratedEdgesBySystem.get(String(node.id)) || [];
+      if (!migrated.length && !migratedEdges.length) return node;
       const data = (node.data || {}) as Record<string, unknown>;
       const currentInternalNodes = Array.isArray(data.internal_nodes) ? data.internal_nodes : [];
       const currentIds = new Set(currentInternalNodes.map((internalNode) => String((internalNode as { id?: unknown }).id || '')));
+      const currentInternalEdges = Array.isArray(data.internal_edges) ? data.internal_edges : [];
+      const currentEdgeIds = new Set(currentInternalEdges.map((internalEdge) => String((internalEdge as { id?: unknown }).id || '')));
       const nextInternalNodes = [
         ...currentInternalNodes,
         ...migrated
@@ -196,11 +241,15 @@ const sanitizeAiSystemCanvasGraph = <TNode extends Node | FlowNodePayload, TEdge
             },
           })),
       ];
-      return { ...node, data: { ...data, internal_nodes: nextInternalNodes } };
+      const nextInternalEdges = [
+        ...currentInternalEdges,
+        ...migratedEdges.filter((internalEdge) => !currentEdgeIds.has(String(internalEdge.id || `${internalEdge.source}->${internalEdge.target}:${internalEdge.sourceHandle || ''}`))),
+      ];
+      return { ...node, data: { ...data, internal_nodes: nextInternalNodes, internal_edges: nextInternalEdges } };
     }));
 
   const nodeById = new Map(sanitizedNodes.map((node) => [String(node.id), node]));
-  const sanitizedEdges = edges.filter((edge) => {
+  const validatedEdges = sanitizedEdges.filter((edge) => {
     if (removedIds.has(String(edge.source)) || removedIds.has(String(edge.target))) return false;
     const sourceNode = nodeById.get(String(edge.source));
     const targetNode = nodeById.get(String(edge.target));
@@ -220,7 +269,7 @@ const sanitizeAiSystemCanvasGraph = <TNode extends Node | FlowNodePayload, TEdge
     }
     return true;
   });
-  return { nodes: sanitizedNodes, edges: sanitizedEdges, removedIds };
+  return { nodes: sanitizedNodes, edges: validatedEdges, removedIds, removedEdgesCount };
 };
 
 
@@ -3061,7 +3110,26 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
       }
 
       const publishSnapshot = getCurrentSerializedFlow();
+      const publishInternalNodesCount = publishSnapshot.nodes.reduce((total, node) => {
+        const data = (node.data || {}) as Record<string, unknown>;
+        return total + (Array.isArray(data.internal_nodes) ? data.internal_nodes.length : 0);
+      }, 0);
+      const publishInternalEdgesCount = publishSnapshot.nodes.reduce((total, node) => {
+        const data = (node.data || {}) as Record<string, unknown>;
+        return total + (Array.isArray(data.internal_edges) ? data.internal_edges.length : 0);
+      }, 0);
+      const publishRawNodes = rfInstance?.getNodes?.() || [];
+      const publishRawEdges = rfInstance?.getEdges?.() || [];
+      const publishSanitizationStats = sanitizeAiSystemCanvasGraph(publishRawNodes, publishRawEdges);
       console.log('[PUBLISH REQUEST]', { flowId: selectedFlowId });
+      console.info('AI_SYSTEM_PUBLISH_SANITIZATION', {
+        flow_id: selectedFlowId,
+        total_nodes: publishSnapshot.nodes.length,
+        total_edges: publishSnapshot.edges.length,
+        total_internal_nodes: publishInternalNodesCount,
+        total_internal_edges: publishInternalEdgesCount,
+        removed_edges_by_sanitization: publishSanitizationStats.removedEdgesCount,
+      });
       console.info('[FLOW PUBLISH NODE IDS]', { flow_id: selectedFlowId, node_ids: publishSnapshot.nodes.map((node) => node.id) });
       const response = await apiFetch(`/api/flows/${selectedFlowId}/publish`, { method: 'POST', body: JSON.stringify({}) });
       if (!response.ok) {
