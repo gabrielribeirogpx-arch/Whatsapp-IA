@@ -43,24 +43,19 @@ def canonicalize_graph(
 
 
 def v2_snapshot_hash(nodes: list[dict[str, Any]], edges: list[dict[str, Any]]) -> str:
-    source_nodes = copy.deepcopy(nodes)
-    source_edges = copy.deepcopy(edges)
-    expanded_nodes, expanded_edges = _expand_ai_systems_for_runtime(source_nodes, source_edges)
-    nodes_payload = _runtime_v2_nodes_payload(expanded_nodes)
-    nodes_payload, expanded_edges = _sanitize_expanded_ai_system_graph(
-        nodes=nodes_payload,
-        edges=expanded_edges,
-        nodes_before=len(nodes if isinstance(nodes, list) else []),
-        edges_before=len(edges if isinstance(edges, list) else []),
-    )
+    source_nodes = copy.deepcopy(nodes if isinstance(nodes, list) else [])
+    source_edges = copy.deepcopy(edges if isinstance(edges, list) else [])
+    nodes_payload = _runtime_v2_nodes_payload(source_nodes)
+    nodes_payload = _promote_single_root_ai_system_start(nodes_payload, source_edges)
+    _assert_no_ai_system_internal_edges_in_canvas_edges(source_edges, ai_system_ids=_ai_system_ids(nodes_payload))
     _log_graph_bfs_before_validation(
         nodes=nodes_payload,
-        edges=expanded_edges,
+        edges=source_edges,
         start_node_ids=FlowV2GraphValidator._start_node_ids(nodes_payload),
     )
     snapshot = _snapshot_payload(
         nodes=nodes_payload,
-        edges=expanded_edges,
+        edges=source_edges,
         start_node_id=_derive_start_node_id(nodes_payload),
     )
     return canonical_hash(snapshot)
@@ -73,10 +68,13 @@ def _runtime_v2_nodes_payload(nodes: list[dict[str, Any]]) -> list[dict[str, Any
     existing UI model.  Runtime V2 consumes ``options``.  During publication we
     keep the original builder fields for backward compatibility and add
     ``data.options`` when a choice node only has builder buttons.
+
+    AI System nodes are intentionally kept as canvas nodes. Their
+    data.internal_nodes/data.internal_edges describe a private graph owned by
+    that node and must not be promoted into snapshot.nodes/snapshot.edges.
     """
 
-    expanded_nodes, _ = _expand_ai_systems_for_runtime(nodes, [])
-    return [_runtime_v2_node_payload(node) for node in expanded_nodes]
+    return [_runtime_v2_node_payload(node) for node in nodes]
 
 
 AI_SYSTEM_INTERNAL_TYPES = {
@@ -750,23 +748,10 @@ class FlowV2Publisher:
             len(source_edges),
             [str(edge.get("id")) if isinstance(edge, dict) and edge.get("id") is not None else None for edge in source_edges[:10]],
         )
-        expanded_nodes, expanded_edges = _expand_ai_systems_for_runtime(
-            source_nodes,
-            source_edges,
-        )
-        logger.info(
-            "[FLOW_V2 PUBLISH EXPANDED] expanded_nodes_count=%s expanded_edges_count=%s expanded_edge_ids_preview=%s edge_origin=ai_system_expansion",
-            len(expanded_nodes),
-            len(expanded_edges),
-            [str(edge.get("id")) if isinstance(edge, dict) and edge.get("id") is not None else None for edge in expanded_edges[:10]],
-        )
-        nodes_payload = _runtime_v2_nodes_payload(expanded_nodes)
-        nodes_payload, edges_payload = _sanitize_expanded_ai_system_graph(
-            nodes=nodes_payload,
-            edges=expanded_edges,
-            nodes_before=len(source_nodes),
-            edges_before=len(source_edges),
-        )
+        nodes_payload = _runtime_v2_nodes_payload(source_nodes)
+        nodes_payload = _promote_single_root_ai_system_start(nodes_payload, source_edges)
+        edges_payload = source_edges
+        _assert_no_ai_system_internal_edges_in_canvas_edges(edges_payload, ai_system_ids=_ai_system_ids(nodes_payload))
         logger.info(
             "[FLOW_V2 PUBLISH PRE_VALIDATE] payload_nodes_count=%s payload_edges_count=%s payload_edge_ids_preview=%s edge_origin=runtime_payload",
             len(nodes_payload),
@@ -794,6 +779,63 @@ class FlowV2Publisher:
             snapshot=snapshot, v2_snapshot_hash=snapshot_hash, validation=validation
         )
 
+
+
+def _promote_single_root_ai_system_start(
+    nodes: list[dict[str, Any]], edges: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Make a single AI System canvas root publishable without expanding internals."""
+
+    if FlowV2GraphValidator._start_node_ids(nodes):
+        return nodes
+    incoming = {str(edge.get("target")) for edge in edges if isinstance(edge, dict) and edge.get("target") not in (None, "")}
+    root_nodes = [node for node in nodes if isinstance(node, dict) and _node_id(node) and _node_id(node) not in incoming]
+    if len(root_nodes) != 1:
+        return nodes
+    root = root_nodes[0]
+    if str(root.get("type") or _node_data(root).get("type") or "").strip() != "ai_system":
+        return nodes
+    promoted: list[dict[str, Any]] = []
+    for node in nodes:
+        if node is not root:
+            promoted.append(node)
+            continue
+        next_node = dict(node)
+        next_data = dict(_node_data(next_node))
+        next_data.setdefault("isStart", True)
+        next_data.setdefault("is_start", True)
+        next_node["data"] = next_data
+        promoted.append(next_node)
+    return promoted
+
+
+def _ai_system_ids(nodes: list[dict[str, Any]]) -> set[str]:
+    return {
+        _node_id(node)
+        for node in nodes
+        if isinstance(node, dict)
+        and _node_id(node)
+        and str(node.get("type") or _node_data(node).get("type") or "").strip() == "ai_system"
+    }
+
+
+def _assert_no_ai_system_internal_edges_in_canvas_edges(
+    edges: list[dict[str, Any]], *, ai_system_ids: set[str]
+) -> None:
+    """Fail fast if AI System private edge endpoints leak into canvas edges."""
+
+    leaked: list[str] = []
+    for index, edge in enumerate(edges):
+        if not isinstance(edge, dict):
+            continue
+        edge_id = str(edge.get("id") or index)
+        source = str(edge.get("source") or "")
+        target = str(edge.get("target") or "")
+        id_is_internal = any(edge_id.startswith(f"{system_id}__") for system_id in ai_system_ids)
+        if "__" in source or "__" in target or id_is_internal:
+            leaked.append(edge_id)
+    if leaked:
+        raise FlowV2PublishError(tuple(f"AI_SYSTEM_INTERNAL_EDGE_IN_CANVAS:{edge_id}" for edge_id in leaked))
 
 def _snapshot_payload(
     *, nodes: list[dict[str, Any]], edges: list[dict[str, Any]], start_node_id: str
