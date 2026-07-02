@@ -53,7 +53,7 @@ export default function ChoiceNode({ id, data, selected, isConnectable }: NodePr
       accent="linear-gradient(90deg, #f97316, #fb923c)"
       summary={truncateText(nodeData.content, 50, 'Escolha uma opção')}
       meta={displayMode === 'list' ? 'Lista WhatsApp' : 'Botões WhatsApp'}
-      chips={buttons.map((button) => button.label || '')}
+      choiceLayout
       isStart={nodeData.isStart}
       hasValidationError={nodeData.hasValidationError}
       onToggleStart={nodeData.onToggleStart}
