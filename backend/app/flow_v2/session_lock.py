@@ -26,16 +26,20 @@ class FlowV2SessionLock:
     def acquire(self, db: Session, *, tenant_id: UUID, session_id: UUID):
         key = f"{tenant_id}:{session_id}"
         if hasattr(db, "execute"):
+            acquired_postgres_lock = False
             try:
                 result = db.execute(text("SELECT pg_try_advisory_xact_lock(hashtext(:lock_key))"), {"lock_key": key})
                 if not bool(result.scalar()):
                     raise FlowV2SessionLockError("Runtime V2 session is already executing")
-                yield
-                return
+                acquired_postgres_lock = True
             except FlowV2SessionLockError:
                 raise
             except Exception:
-                pass
+                acquired_postgres_lock = False
+
+            if acquired_postgres_lock:
+                yield
+                return
 
         with self._guard:
             lock = self._locks.setdefault(key, threading.Lock())

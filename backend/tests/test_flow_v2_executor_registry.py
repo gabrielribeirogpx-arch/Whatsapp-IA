@@ -28,6 +28,10 @@ EXPECTED_NODE_TYPES = {
     "ai_classification",
     "ai_extraction",
     "ai_summary",
+    "ai_system",
+    "aisystem",
+    "ai_agent_system",
+    "intelligent_calendar",
 }
 
 

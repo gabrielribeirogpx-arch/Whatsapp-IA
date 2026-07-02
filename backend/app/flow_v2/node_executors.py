@@ -19,6 +19,7 @@ from app.flow_v2.executors import (
     AiDispatcherNodeExecutor,
     AiGreetingNodeExecutor,
     AiSafeFallbackNodeExecutor,
+    AiSystemNodeExecutor,
     AiClassificationNodeExecutor,
     AiExtractionNodeExecutor,
     AiRagNodeExecutor,
@@ -71,6 +72,10 @@ for _node_type, _executor in {
     "ai_classification": AiClassificationNodeExecutor,
     "ai_extraction": AiExtractionNodeExecutor,
     "ai_summary": AiSummaryNodeExecutor,
+    "ai_system": AiSystemNodeExecutor,
+    "aisystem": AiSystemNodeExecutor,
+    "ai_agent_system": AiSystemNodeExecutor,
+    "intelligent_calendar": AiSystemNodeExecutor,
 }.items():
     register_executor(_node_type, _executor)
 
@@ -86,8 +91,9 @@ class NodeExecutorRegistry:
         }
 
     def get(self, node_type: str) -> NodeExecutor:
+        normalized_type = str(node_type or "").strip().lower()
         try:
-            return self._executors[node_type]
+            return self._executors[normalized_type]
         except KeyError as exc:
             raise RuntimeError(
                 f"Unsupported Runtime V2 node type: {node_type}"
@@ -129,6 +135,7 @@ __all__ = [
     "AiGreetingNodeExecutor",
     "AiCalendarAgentNodeExecutor",
     "AiSafeFallbackNodeExecutor",
+    "AiSystemNodeExecutor",
     "AiSupervisorNodeExecutor",
     "AiSummaryNodeExecutor",
     "AiStructuredNodeExecutor",
