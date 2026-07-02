@@ -297,6 +297,8 @@ class FlowV2Executor:
                 or ""
             ).strip().lower()
             return behavior == "wait_same_node" and (getattr(result, "next_node_id", None) in (None, str(node.get("id"))))
+        if normalized_node_type == "ai_system":
+            return getattr(result, "next_node_id", None) in (None, str(node.get("id")))
         if normalized_node_type in {"ai_rag", "ai_response"}:
             behavior = str(data.get("after_answer_behavior") or data.get("afterAnswerBehavior") or "").strip().lower()
             return behavior == "wait_same_node" and (getattr(result, "next_node_id", None) in (None, str(node.get("id"))))
@@ -634,7 +636,31 @@ class FlowV2Executor:
     @staticmethod
     def _is_terminal_node(node: dict[str, Any]) -> bool:
         data = FlowV2Executor._node_data(node)
-        value = node.get("is_terminal", node.get("isTerminal", node.get("endFlow", data.get("is_terminal", data.get("isTerminal", data.get("endFlow"))))))
+        value = node.get(
+            "is_terminal",
+            node.get(
+                "isTerminal",
+                node.get(
+                    "endFlow",
+                    node.get(
+                        "end",
+                        node.get(
+                            "isEnd",
+                            node.get(
+                                "terminal",
+                                data.get(
+                                    "is_terminal",
+                                    data.get(
+                                        "isTerminal",
+                                        data.get("endFlow", data.get("end", data.get("isEnd", data.get("terminal")))),
+                                    ),
+                                ),
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+        )
         if isinstance(value, bool):
             return value
         if isinstance(value, (int, float)):
