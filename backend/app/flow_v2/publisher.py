@@ -744,9 +744,21 @@ class FlowV2Publisher:
     ) -> FlowV2PublishResult:
         source_nodes = copy.deepcopy(nodes if isinstance(nodes, list) else [])
         source_edges = copy.deepcopy(edges if isinstance(edges, list) else [])
+        logger.info(
+            "[FLOW_V2 PUBLISH INPUT] source_nodes_count=%s source_edges_count=%s source_edge_ids_preview=%s edge_origin=publisher_input",
+            len(source_nodes),
+            len(source_edges),
+            [str(edge.get("id")) if isinstance(edge, dict) and edge.get("id") is not None else None for edge in source_edges[:10]],
+        )
         expanded_nodes, expanded_edges = _expand_ai_systems_for_runtime(
             source_nodes,
             source_edges,
+        )
+        logger.info(
+            "[FLOW_V2 PUBLISH EXPANDED] expanded_nodes_count=%s expanded_edges_count=%s expanded_edge_ids_preview=%s edge_origin=ai_system_expansion",
+            len(expanded_nodes),
+            len(expanded_edges),
+            [str(edge.get("id")) if isinstance(edge, dict) and edge.get("id") is not None else None for edge in expanded_edges[:10]],
         )
         nodes_payload = _runtime_v2_nodes_payload(expanded_nodes)
         nodes_payload, edges_payload = _sanitize_expanded_ai_system_graph(
@@ -754,6 +766,12 @@ class FlowV2Publisher:
             edges=expanded_edges,
             nodes_before=len(source_nodes),
             edges_before=len(source_edges),
+        )
+        logger.info(
+            "[FLOW_V2 PUBLISH PRE_VALIDATE] payload_nodes_count=%s payload_edges_count=%s payload_edge_ids_preview=%s edge_origin=runtime_payload",
+            len(nodes_payload),
+            len(edges_payload),
+            [str(edge.get("id")) if isinstance(edge, dict) and edge.get("id") is not None else None for edge in edges_payload[:10]],
         )
         start_node_ids = self.validator._start_node_ids(nodes_payload)
         logger.info(
