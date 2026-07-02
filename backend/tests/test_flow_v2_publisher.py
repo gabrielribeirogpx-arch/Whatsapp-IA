@@ -566,22 +566,23 @@ def _ai_system_node(system_id: str = "system") -> dict:
     }
 
 
-def test_ai_system_publish_expands_compile_time_node_from_external_start() -> None:
+def test_ai_system_publish_preserves_canvas_node_from_external_start() -> None:
     result = FlowV2Publisher().publish(
         nodes=[{"id": "start", "type": "start"}, _ai_system_node()],
         edges=[{"id": "e1", "source": "start", "target": "system"}],
     )
 
-    node_types = {node["type"] for node in result.snapshot["nodes"]}
-    node_ids = {node["id"] for node in result.snapshot["nodes"]}
-    assert "ai_system" not in node_types
-    assert "system__dispatcher" in node_ids
-    assert any(edge["source"] == "start" and edge["target"] == "system__dispatcher" for edge in result.snapshot["edges"])
+    assert [node["id"] for node in result.snapshot["nodes"]] == ["start", "system"]
+    system = next(node for node in result.snapshot["nodes"] if node["id"] == "system")
+    assert system["type"] == "ai_system"
+    assert len(system["data"]["internal_nodes"]) == 4
+    assert len(system["data"]["internal_edges"]) == 3
+    assert result.snapshot["edges"] == [{"id": "e1", "source": "start", "target": "system"}]
     assert result.snapshot["start_node_id"] == "start"
     assert result.validation.status == GraphValidationStatus.VALID
 
 
-def test_ai_system_publish_between_start_and_message_reconnects_exits() -> None:
+def test_ai_system_publish_between_start_and_message_keeps_canvas_edges() -> None:
     result = FlowV2Publisher().publish(
         nodes=[{"id": "start", "type": "start"}, _ai_system_node(), {"id": "done", "type": "message", "data": {"content": "Fim"}}],
         edges=[
@@ -590,37 +591,37 @@ def test_ai_system_publish_between_start_and_message_reconnects_exits() -> None:
         ],
     )
 
-    assert not any(node["type"] == "ai_system" for node in result.snapshot["nodes"])
-    assert any(edge["source"] == "system__fallback" and edge["target"] == "done" for edge in result.snapshot["edges"])
+    assert [edge["source"] for edge in result.snapshot["edges"]] == ["start", "system"]
+    assert [edge["target"] for edge in result.snapshot["edges"]] == ["system", "done"]
+    assert any(node["type"] == "ai_system" for node in result.snapshot["nodes"])
     assert len([node for node in result.snapshot["nodes"] if FlowV2GraphValidator._is_start_node(node)]) == 1
 
 
-def test_ai_system_as_canvas_start_promotes_dispatcher_as_runtime_start() -> None:
+def test_ai_system_as_canvas_start_keeps_internal_graph_nested() -> None:
     system = _ai_system_node()
     system["data"]["isStart"] = True
     result = FlowV2Publisher().publish(nodes=[system], edges=[])
 
-    assert result.snapshot["start_node_id"] == "system__dispatcher"
-    start_nodes = [node for node in result.snapshot["nodes"] if FlowV2GraphValidator._is_start_node(node)]
-    assert [node["id"] for node in start_nodes] == ["system__dispatcher"]
-    assert not any(node["type"] == "ai_system" for node in result.snapshot["nodes"])
-    assert not any(node["id"] == "system__start" for node in result.snapshot["nodes"])
+    assert result.snapshot["start_node_id"] == "system"
+    assert len(result.snapshot["nodes"]) == 1
+    assert result.snapshot["edges"] == []
+    snapshot_system = result.snapshot["nodes"][0]
+    assert snapshot_system["type"] == "ai_system"
+    assert len(snapshot_system["data"]["internal_nodes"]) == 4
+    assert len(snapshot_system["data"]["internal_edges"]) == 3
 
 
-def test_ai_system_only_terminal_template_publishes_expanded_runtime_graph() -> None:
+def test_ai_system_only_template_promotes_canvas_node_as_start_without_expanding() -> None:
     system = _ai_system_node()
-    system["data"].update({"isEnd": True, "end": True, "terminal": True})
 
     result = FlowV2Publisher().publish(nodes=[system], edges=[])
 
-    node_ids = {node["id"] for node in result.snapshot["nodes"]}
     assert result.validation.status == GraphValidationStatus.VALID
-    assert result.snapshot["start_node_id"] == "system__dispatcher"
-    assert "ai_system" not in {node["type"] for node in result.snapshot["nodes"]}
-    assert {"system__dispatcher", "system__greeting", "system__calendar", "system__fallback"}.issubset(node_ids)
-    terminal_nodes = [node for node in result.snapshot["nodes"] if node["id"] in {"system__greeting", "system__calendar", "system__fallback"}]
-    assert terminal_nodes
-    assert all(node["data"].get("isEnd") is True and node["data"].get("is_final") is True for node in terminal_nodes)
+    assert result.snapshot["start_node_id"] == "system"
+    assert len(result.snapshot["nodes"]) == 1
+    assert result.snapshot["nodes"][0]["id"] == "system"
+    assert result.snapshot["nodes"][0]["type"] == "ai_system"
+    assert result.snapshot["edges"] == []
 
 
 def test_ai_system_connected_to_other_nodes_does_not_create_duplicate_start() -> None:
@@ -635,19 +636,18 @@ def test_ai_system_connected_to_other_nodes_does_not_create_duplicate_start() ->
     start_ids = FlowV2GraphValidator._start_node_ids(result.snapshot["nodes"])
     assert start_ids == ["start"]
     assert result.snapshot["start_node_id"] == "start"
-    assert not any(node["type"] == "ai_system" for node in result.snapshot["nodes"])
     assert not any(node["id"].endswith("__start") for node in result.snapshot["nodes"])
 
 
-def test_ai_system_as_first_node_of_flow_uses_dispatcher_as_only_runtime_start() -> None:
+def test_ai_system_as_first_node_of_flow_uses_canvas_node_as_runtime_start() -> None:
     result = FlowV2Publisher().publish(
         nodes=[_ai_system_node(), {"id": "done", "type": "message", "data": {"content": "Fim"}}],
         edges=[{"id": "e1", "source": "system", "target": "done"}],
     )
 
-    assert result.snapshot["start_node_id"] == "system__dispatcher"
-    assert FlowV2GraphValidator._start_node_ids(result.snapshot["nodes"]) == ["system__dispatcher"]
-    assert any(edge["source"] == "system__fallback" and edge["target"] == "done" for edge in result.snapshot["edges"])
+    assert result.snapshot["start_node_id"] == "system"
+    assert FlowV2GraphValidator._start_node_ids(result.snapshot["nodes"]) == ["system"]
+    assert result.snapshot["edges"] == [{"id": "e1", "source": "system", "target": "done"}]
 
 
 def test_multiple_independent_ai_systems_fail_exactly_one_start_validation_without_synthetic_starts() -> None:
@@ -660,12 +660,28 @@ def test_multiple_independent_ai_systems_fail_exactly_one_start_validation_witho
     assert "FLOW_V2_REQUIRES_EXACTLY_ONE_START_NODE" in exc.value.errors
 
 
-def test_final_snapshot_contains_exactly_one_start_node_after_ai_system_expansion() -> None:
+def test_final_snapshot_contains_exactly_one_start_node_after_ai_system_preservation() -> None:
     result = FlowV2Publisher().publish(nodes=[_ai_system_node()], edges=[])
 
     start_ids = FlowV2GraphValidator._start_node_ids(result.snapshot["nodes"])
     assert start_ids == [result.snapshot["start_node_id"]]
-    assert start_ids == ["system__dispatcher"]
+    assert start_ids == ["system"]
+
+
+def test_ai_system_serializer_keeps_ten_internal_edges_nested() -> None:
+    system = _ai_system_node()
+    system["data"]["internal_edges"] = [
+        {"id": f"i{index}", "source": "dispatcher", "target": "greeting", "sourceHandle": f"h{index}"}
+        for index in range(10)
+    ]
+
+    result = FlowV2Publisher().publish(nodes=[system], edges=[])
+
+    assert len(result.snapshot["nodes"]) == 1
+    assert len(result.snapshot["edges"]) == 0
+    assert len(result.snapshot["nodes"][0]["data"]["internal_nodes"]) == 4
+    assert len(result.snapshot["nodes"][0]["data"]["internal_edges"]) == 10
+    assert not any("__" in str(edge.get("source")) or "__" in str(edge.get("target")) or str(edge.get("id", "")).startswith("system__") for edge in result.snapshot["edges"] if isinstance(edge, dict))
 
 
 def test_legacy_start_to_ai_agent_still_publishes() -> None:
@@ -682,7 +698,7 @@ def test_legacy_start_to_ai_agent_still_publishes() -> None:
 
 
 
-def test_ai_system_publish_rewrites_prefixed_internal_edges_from_camel_case_payload() -> None:
+def test_ai_system_publish_preserves_prefixed_internal_edges_from_camel_case_payload() -> None:
     system = _ai_system_node()
     system["data"]["internalNodes"] = system["data"].pop("internal_nodes")
     system["data"]["internalEdges"] = [
@@ -694,18 +710,13 @@ def test_ai_system_publish_rewrites_prefixed_internal_edges_from_camel_case_payl
 
     result = FlowV2Publisher().publish(nodes=[system], edges=[])
 
-    node_ids = {node["id"] for node in result.snapshot["nodes"]}
-    assert {"system__dispatcher", "system__greeting", "system__calendar", "system__fallback"}.issubset(node_ids)
-    assert result.snapshot["start_node_id"] == "system__dispatcher"
-    assert {
-        (edge["source"], edge["target"])
-        for edge in result.snapshot["edges"]
-    } >= {
-        ("system__dispatcher", "system__greeting"),
-        ("system__dispatcher", "system__calendar"),
-        ("system__dispatcher", "system__fallback"),
-    }
+    assert len(result.snapshot["nodes"]) == 1
+    assert result.snapshot["nodes"][0]["type"] == "ai_system"
+    assert result.snapshot["edges"] == []
+    assert len(result.snapshot["nodes"][0]["data"]["internalNodes"]) == 4
+    assert len(result.snapshot["nodes"][0]["data"]["internalEdges"]) == 3
     assert result.validation.status == GraphValidationStatus.VALID
+
 
 def test_ai_system_internal_changes_affect_published_hash() -> None:
     system = _ai_system_node()
@@ -717,8 +728,7 @@ def test_ai_system_internal_changes_affect_published_hash() -> None:
     assert first.v2_snapshot_hash != second.v2_snapshot_hash
 
 
-def test_ai_system_expansion_removes_orphan_internal_edges_before_validation(caplog) -> None:
-    caplog.set_level("INFO")
+def test_ai_system_internal_edges_with_orphans_stay_nested_and_do_not_hit_canvas_validation() -> None:
     system = _ai_system_node()
     system["data"]["internal_edges"].append(
         {"id": "stale-target", "source": "fallback", "target": "deleted-node", "sourceHandle": "default"}
@@ -729,20 +739,18 @@ def test_ai_system_expansion_removes_orphan_internal_edges_before_validation(cap
 
     result = FlowV2Publisher().publish(nodes=[system], edges=[])
 
-    node_ids = {node["id"] for node in result.snapshot["nodes"]}
     assert result.validation.status == GraphValidationStatus.VALID
-    assert all(edge["source"] in node_ids and edge["target"] in node_ids for edge in result.snapshot["edges"])
-    assert not any("deleted-node" in str(edge) for edge in result.snapshot["edges"])
-    assert "EDGE_REFERENCE_NOT_FOUND" in caplog.text
-    assert "AI_SYSTEM_EXPANSION" in caplog.text
-    assert "AI_SYSTEM_EXPANDED_SNAPSHOT_BEFORE_VALIDATION" in caplog.text
+    assert result.snapshot["edges"] == []
+    assert len(result.snapshot["nodes"][0]["data"]["internal_edges"]) == 5
 
 
-def test_ai_system_expansion_reports_internal_node_without_output() -> None:
+def test_ai_system_rejects_internal_edge_leaked_to_canvas_edges() -> None:
     system = _ai_system_node()
-    system["data"]["internal_nodes"].append({"id": "worker", "type": "ai_agent", "data": {}})
 
     with pytest.raises(FlowV2PublishError) as exc:
-        FlowV2Publisher().publish(nodes=[system], edges=[])
+        FlowV2Publisher().publish(
+            nodes=[system],
+            edges=[{"id": "system__i1", "source": "system__dispatcher", "target": "system__greeting"}],
+        )
 
-    assert "AI_SYSTEM_INTERNAL_NODE_WITHOUT_OUTPUT:system__worker" in exc.value.errors
+    assert "AI_SYSTEM_INTERNAL_EDGE_IN_CANVAS:system__i1" in exc.value.errors
