@@ -23,7 +23,7 @@ class _EventStore:
         )
 
 
-def test_ai_system_single_node_returns_message_and_waits():
+def test_ai_system_dispatches_private_runtime_and_waits():
     tenant_id = uuid4()
     flow_version_id = uuid4()
     session_id = uuid4()
@@ -38,7 +38,7 @@ def test_ai_system_single_node_returns_message_and_waits():
                 "type": "ai_system",
                 "data": {
                     "system_type": "ai_calendar_agent_system",
-                    "internal_nodes": [{"id": "dispatcher", "type": "ai_dispatcher"}],
+                    "internal_nodes": [{"id": "internal-response", "type": "message", "isStart": True, "data": {"text": "Evento encaminhado ao calendário."}}],
                     "internal_edges": [],
                     "tools": ["google_calendar_list_events", "google_calendar_create_event"],
                     "isEnd": True,
@@ -53,7 +53,7 @@ def test_ai_system_single_node_returns_message_and_waits():
         event_store=event_store,
         transition_resolver=TransitionResolver(event_store),
     )
-    session = SimpleNamespace(id=session_id, tenant_id=tenant_id)
+    session = SimpleNamespace(id=session_id, tenant_id=tenant_id, flow_version_id=flow_version_id, context={}, current_node_id=node_id, status="running")
     runtime_input = RuntimeInput(
         tenant_id=tenant_id,
         flow_version_id=flow_version_id,
@@ -66,9 +66,11 @@ def test_ai_system_single_node_returns_message_and_waits():
     assert result.status == "wait"
     assert result.next_node_id == node_id
     assert len(result.actions) == 1
-    assert "consultar disponibilidade" in result.actions[0].text
-    assert result.actions[0].metadata["system_type"] == "ai_calendar_agent_system"
-    assert event_store.events[-1]["payload"]["analytics_event"] == "AI_SYSTEM_EXECUTOR_RESPONSE"
+    assert result.actions[0].text == "Evento encaminhado ao calendário."
+    assert result.actions[0].metadata["node_id"] == "internal-response"
+    assert session.context["ai_system_internal_runtime"][node_id]["current_node_id"] == "internal-response"
+    assert any(event["payload"].get("analytics_event") == "AI_SYSTEM_INTERNAL_NODE_EXECUTED" for event in event_store.events)
+    assert any(event["payload"].get("analytics_event") == "AI_SYSTEM_INTERNAL_RESPONSE" for event in event_store.events)
 
 
 def test_ai_system_aliases_are_registered_and_normalized():

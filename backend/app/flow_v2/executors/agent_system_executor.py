@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+from types import SimpleNamespace
 from typing import Any
 
 from app.flow_v2.actions import SendMessageAction
@@ -14,6 +15,7 @@ from app.flow_v2.executors._legacy import (
     FlowV2EventType,
     NodeExecutionResult,
 )
+from app.flow_v2.snapshot import FlowV2Snapshot, build_transitions_from_edges, canonical_hash
 
 logger = logging.getLogger(__name__)
 
@@ -33,89 +35,145 @@ def _first_present_list(*values: Any) -> list[Any]:
 
 
 class AiSystemNodeExecutor(BaseNodeExecutor):
-    """Executor for the composed AI System / Agenda Inteligente node.
+    """Dispatcher for the private runtime graph stored inside an AI System node."""
 
-    The node is intentionally self-contained: it can run when the published
-    snapshot contains only the composed node and no top-level Runtime V2 edges.
-    """
-
-    CALENDAR_SYSTEM_TYPES = {"ai_calendar_agent_system", "intelligent_calendar"}
-    CALENDAR_GREETING = "Olá! Posso te ajudar a consultar disponibilidade, agendar ou cancelar um evento."
+    FALLBACK_MESSAGE = "Não consegui iniciar o sistema de IA. Tente novamente em instantes."
+    INTERNAL_CONTEXT_KEY = "ai_system_internal_runtime"
 
     def execute(self, db, *, snapshot, session, node, runtime_input) -> NodeExecutionResult:
         node_id = str(node["id"])
         data = self._node_data(node)
-        system_type = str(
-            data.get("system_type")
-            or data.get("systemType")
-            or data.get("agent_system_template_id")
-            or "ai_system"
-        ).strip()
-        input_text = str(getattr(runtime_input, "message_text", None) or runtime_input.metadata.get("message_text") or "").strip()
+        system_type = str(data.get("system_type") or data.get("systemType") or data.get("agent_system_template_id") or "ai_system").strip()
         internal_nodes = _first_present_list(data.get("internal_nodes"), data.get("internalNodes"), data.get("nodes"))
         internal_edges = _first_present_list(data.get("internal_edges"), data.get("internalEdges"), data.get("edges"))
-        tools = _first_present_list(data.get("tools"), data.get("tool_ids"), data.get("toolIds"), data.get("mcp_tool_ids"), data.get("mcpToolIds"))
-        integrations = _first_present_mapping(data.get("integrations"), data.get("integration_config"), data.get("integrationConfig"))
-
         logger.info(
-            "event=AI_SYSTEM_EXECUTOR_START node_id=%s system_type=%s internal_nodes_count=%s internal_edges_count=%s tools_count=%s integrations_count=%s",
-            node_id, system_type, len(internal_nodes), len(internal_edges), len(tools), len(integrations),
+            "event=AI_SYSTEM_INTERNAL_RUNTIME_START node_id=%s system_type=%s internal_nodes_count=%s internal_edges_count=%s",
+            node_id,
+            system_type,
+            len(internal_nodes),
+            len(internal_edges),
         )
-        logger.info("event=AI_SYSTEM_EXECUTOR_INPUT node_id=%s text=%s", node_id, input_text[:500])
+        if not internal_nodes:
+            return self._fallback(db, session=session, node_id=node_id, runtime_input=runtime_input, reason="missing_internal_nodes")
 
         try:
-            normalized_system_type = system_type.lower()
-            response_text = self.CALENDAR_GREETING
-            tool_decision = "none"
-            if normalized_system_type in self.CALENDAR_SYSTEM_TYPES:
-                tool_decision = self._calendar_tool_decision(input_text)
-                logger.info(
-                    "event=AI_SYSTEM_EXECUTOR_TOOL_DECISION node_id=%s system_type=%s decision=%s tools=%s",
-                    node_id, system_type, tool_decision, tools,
-                )
-            logger.info("event=AI_SYSTEM_EXECUTOR_RESPONSE node_id=%s response=%s", node_id, response_text[:500])
-            self.event_store.append(
-                db,
-                session=session,
-                event_type=FlowV2EventType.OUTPUT_EMITTED,
-                node_id=node_id,
-                payload={
-                    "analytics_event": "AI_SYSTEM_EXECUTOR_RESPONSE",
-                    "system_type": system_type,
-                    "tool_decision": tool_decision,
-                    "text": response_text,
-                },
-            )
-            action = SendMessageAction(
-                tenant_id=session.tenant_id,
-                session_id=session.id,
-                external_user_id=runtime_input.external_user_id,
-                conversation_id=runtime_input.conversation_id,
-                contact_id=runtime_input.contact_id,
-                text=response_text,
-                metadata={
-                    **runtime_input.metadata,
-                    "node_id": node_id,
-                    "intent": "ai_system",
-                    "system_type": system_type,
-                    "tool_decision": tool_decision,
-                },
-            )
-            return NodeExecutionResult(actions=(action,), next_node_id=node_id, status="wait")
+            internal_snapshot = self._build_internal_snapshot(snapshot, node_id=node_id, system_type=system_type, internal_nodes=internal_nodes, internal_edges=internal_edges)
+            start_node_id = self._resume_or_start_node_id(session=session, system_node_id=node_id, internal_snapshot=internal_snapshot)
+            internal_session = self._internal_session(session=session, current_node_id=start_node_id)
+            actions = self._execute_internal_runtime(db, snapshot=internal_snapshot, session=internal_session, runtime_input=runtime_input, system_node_id=node_id)
+            self._persist_internal_pointer(session=session, system_node_id=node_id, current_node_id=getattr(internal_session, "current_node_id", None))
+            logger.info("event=AI_SYSTEM_INTERNAL_FINISHED node_id=%s current_internal_node_id=%s actions_count=%s", node_id, getattr(internal_session, "current_node_id", None), len(actions))
+            return NodeExecutionResult(actions=tuple(actions), next_node_id=node_id, status="wait")
         except Exception as exc:
-            logger.exception("event=AI_SYSTEM_EXECUTOR_ERROR node_id=%s system_type=%s error=%s", node_id, system_type, exc)
-            raise
+            logger.exception("event=AI_SYSTEM_INTERNAL_RUNTIME_ERROR node_id=%s error=%s", node_id, exc)
+            return self._fallback(db, session=session, node_id=node_id, runtime_input=runtime_input, reason=type(exc).__name__)
+
+    def _execute_internal_runtime(self, db, *, snapshot: FlowV2Snapshot, session: Any, runtime_input, system_node_id: str) -> list[Any]:
+        from app.flow_v2.executor import FlowV2Executor, FlowV2SessionStatus, MAX_RUNTIME_STEPS
+        from app.flow_v2.node_executors import NodeExecutorRegistry
+
+        registry = NodeExecutorRegistry(event_store=self.event_store, transition_resolver=self.transition_resolver)
+        actions: list[Any] = []
+        for step in range(MAX_RUNTIME_STEPS):
+            current_node_id = str(getattr(session, "current_node_id", "") or "")
+            node = snapshot.node_by_id.get(current_node_id)
+            if node is None:
+                raise RuntimeError(f"AI System internal current node is absent: {current_node_id}")
+            node_id = str(node["id"])
+            node_type = str(node.get("type") or FlowV2Executor._node_data(node).get("type") or "message")
+            self.event_store.append(db, session=session, event_type=FlowV2EventType.NODE_ENTERED, node_id=node_id, payload={"ai_system_node_id": system_node_id, "internal": True})
+            result = registry.get(node_type).execute(db, snapshot=snapshot, session=session, node=node, runtime_input=runtime_input)
+            self.event_store.append(db, session=session, event_type=FlowV2EventType.NODE_EXECUTED, node_id=node_id, payload={"analytics_event": "AI_SYSTEM_INTERNAL_NODE_EXECUTED", "ai_system_node_id": system_node_id, "node_type": node_type, "status": result.status})
+            logger.info("event=AI_SYSTEM_INTERNAL_NODE_EXECUTED system_node_id=%s node_id=%s node_type=%s status=%s step=%s", system_node_id, node_id, node_type, result.status, step + 1)
+            actions.extend(result.actions)
+            for action in result.actions:
+                if isinstance(action, SendMessageAction):
+                    logger.info("event=AI_SYSTEM_INTERNAL_RESPONSE system_node_id=%s node_id=%s text=%s", system_node_id, node_id, action.text[:500])
+                    self.event_store.append(db, session=session, event_type=FlowV2EventType.OUTPUT_EMITTED, node_id=node_id, payload={"analytics_event": "AI_SYSTEM_INTERNAL_RESPONSE", "ai_system_node_id": system_node_id, "text": action.text})
+            if self._looks_like_tool_node(node_type, node, result):
+                logger.info("event=AI_SYSTEM_INTERNAL_TOOL_CALLED system_node_id=%s node_id=%s node_type=%s", system_node_id, node_id, node_type)
+                self.event_store.append(db, session=session, event_type=FlowV2EventType.OUTPUT_EMITTED, node_id=node_id, payload={"analytics_event": "AI_SYSTEM_INTERNAL_TOOL_CALLED", "ai_system_node_id": system_node_id, "node_type": node_type})
+            self.event_store.append(db, session=session, event_type=FlowV2EventType.NODE_COMPLETED, node_id=node_id, payload={"ai_system_node_id": system_node_id, "internal": True})
+
+            if result.status in {"wait", "scheduled"}:
+                session.current_node_id = result.next_node_id or node_id
+                session.status = str(FlowV2SessionStatus.WAITING)
+                return actions
+            if result.status == "complete" or FlowV2Executor._is_terminal_node(node):
+                session.current_node_id = snapshot.start_node_id
+                session.status = str(FlowV2SessionStatus.WAITING)
+                return actions
+            if not result.next_node_id:
+                raise RuntimeError(f"AI System internal node {node_id} continued without next_node_id")
+            session.current_node_id = result.next_node_id
+            session.status = str(FlowV2SessionStatus.RUNNING)
+        raise RuntimeError(f"AI System internal runtime exceeded max_steps={MAX_RUNTIME_STEPS}")
+
+    @classmethod
+    def _build_internal_snapshot(cls, outer_snapshot, *, node_id: str, system_type: str, internal_nodes: list[Any], internal_edges: list[Any]) -> FlowV2Snapshot:
+        nodes = [cls._normalize_internal_node(item, system_node_id=node_id, system_type=system_type) for item in internal_nodes if isinstance(item, dict) and item.get("id") not in (None, "")]
+        if not nodes:
+            raise RuntimeError("AI System has no executable internal nodes")
+        edges = [dict(edge) for edge in internal_edges if isinstance(edge, dict)]
+        start_node_id = cls._find_start_node_id(nodes, edges)
+        payload = {"nodes": nodes, "edges": edges, "start_node_id": start_node_id, "transitions": build_transitions_from_edges(edges)}
+        return FlowV2Snapshot(flow_version_id=outer_snapshot.flow_version_id, tenant_id=outer_snapshot.tenant_id, hash=canonical_hash(payload), nodes=tuple(nodes), edges=tuple(edges), transitions=tuple(payload["transitions"]), start_node_id=start_node_id, snapshot_schema_version=outer_snapshot.snapshot_schema_version)
 
     @staticmethod
-    def _calendar_tool_decision(input_text: str) -> str:
-        normalized = input_text.casefold()
-        if any(term in normalized for term in ("cancel", "desmarc", "excluir", "remover")):
-            return "calendar_delete"
-        if any(term in normalized for term in ("dispon", "horário", "horario", "livre")):
-            return "calendar_list"
-        if any(term in normalized for term in ("agenda", "agendar", "marcar", "reunião", "reuniao", "evento")):
-            return "calendar_create"
-        return "respond"
+    def _normalize_internal_node(node: dict[str, Any], *, system_node_id: str, system_type: str) -> dict[str, Any]:
+        normalized = dict(node)
+        data = dict(normalized.get("data") if isinstance(normalized.get("data"), dict) else {})
+        node_type = str(normalized.get("type") or data.get("type") or "message").strip()
+        normalized["type"] = node_type
+        data.setdefault("type", node_type)
+        data.setdefault("compiled_from_ai_system", system_node_id)
+        data.setdefault("agent_system_template_id", system_type)
+        data.setdefault("ai_system_internal_type", node_type)
+        normalized["data"] = data
+        return normalized
+
+    @staticmethod
+    def _find_start_node_id(nodes: list[dict[str, Any]], edges: list[dict[str, Any]]) -> str:
+        for node in nodes:
+            data = node.get("data") if isinstance(node.get("data"), dict) else {}
+            if node.get("isStart") or node.get("is_start") or data.get("isStart") or data.get("is_start") or node.get("type") == "start" or str(node.get("id")) == "start":
+                return str(node["id"])
+        targets = {str(edge.get("target") or edge.get("to") or edge.get("target_node_id")) for edge in edges if isinstance(edge, dict) and (edge.get("target") or edge.get("to") or edge.get("target_node_id")) not in (None, "")}
+        for node in nodes:
+            if str(node["id"]) not in targets:
+                return str(node["id"])
+        return str(nodes[0]["id"])
+
+    def _resume_or_start_node_id(self, *, session: Any, system_node_id: str, internal_snapshot: FlowV2Snapshot) -> str:
+        context = getattr(session, "context", None)
+        state = context.get(self.INTERNAL_CONTEXT_KEY, {}).get(system_node_id, {}) if isinstance(context, dict) else {}
+        current = str(state.get("current_node_id") or "") if isinstance(state, dict) else ""
+        return current if current in internal_snapshot.node_by_id else internal_snapshot.start_node_id
+
+    def _persist_internal_pointer(self, *, session: Any, system_node_id: str, current_node_id: str | None) -> None:
+        context = getattr(session, "context", None)
+        if not isinstance(context, dict):
+            return
+        runtime_state = dict(context.get(self.INTERNAL_CONTEXT_KEY) or {})
+        runtime_state[system_node_id] = {"current_node_id": current_node_id}
+        context[self.INTERNAL_CONTEXT_KEY] = runtime_state
+        session.context = context
+
+    @staticmethod
+    def _internal_session(*, session: Any, current_node_id: str) -> Any:
+        return SimpleNamespace(**{**getattr(session, "__dict__", {}), "id": session.id, "tenant_id": session.tenant_id, "flow_version_id": getattr(session, "flow_version_id", None), "contact_id": getattr(session, "contact_id", None), "conversation_id": getattr(session, "conversation_id", None), "external_user_id": getattr(session, "external_user_id", None), "context": getattr(session, "context", {}), "current_node_id": current_node_id, "status": "running"})
+
+    @staticmethod
+    def _looks_like_tool_node(node_type: str, node: dict[str, Any], result: NodeExecutionResult) -> bool:
+        data = node.get("data") if isinstance(node.get("data"), dict) else {}
+        lowered = node_type.strip().lower()
+        return lowered in {"tool", "mcp", "google_calendar", "calendar", "action"} or "calendar" in lowered or bool(data.get("tool_id") or data.get("toolId") or data.get("mcp_tool_ids") or data.get("mcpToolIds") or getattr(result, "intent", None) in {"calendar_create", "calendar_list", "calendar_delete"})
+
+    def _fallback(self, db, *, session: Any, node_id: str, runtime_input, reason: str) -> NodeExecutionResult:
+        logger.info("event=AI_SYSTEM_INTERNAL_RESPONSE node_id=%s fallback=true reason=%s", node_id, reason)
+        action = SendMessageAction(tenant_id=session.tenant_id, session_id=session.id, external_user_id=runtime_input.external_user_id, conversation_id=runtime_input.conversation_id, contact_id=runtime_input.contact_id, text=self.FALLBACK_MESSAGE, metadata={**runtime_input.metadata, "node_id": node_id, "intent": "ai_system_fallback", "fallback_reason": reason})
+        self.event_store.append(db, session=session, event_type=FlowV2EventType.OUTPUT_EMITTED, node_id=node_id, payload={"analytics_event": "AI_SYSTEM_INTERNAL_RESPONSE", "fallback": True, "reason": reason, "text": self.FALLBACK_MESSAGE})
+        return NodeExecutionResult(actions=(action,), next_node_id=node_id, status="wait")
 
 
 __all__ = [
