@@ -51,6 +51,7 @@ type CompactFlowNodeProps = {
   analytics?: { entered?: number; conversions?: number; dropoff?: number; dropoff_rate?: number } | null;
   statusLabel?: string;
   statusActive?: boolean;
+  choiceLayout?: boolean;
 };
 
 function CompactFlowNode({
@@ -77,6 +78,7 @@ function CompactFlowNode({
   analytics,
   statusLabel,
   statusActive = true,
+  choiceLayout = false,
 }: CompactFlowNodeProps) {
   const handles = useMemo(() => (sourceHandles?.length ? sourceHandles : [{ id: undefined, color: accent }]), [accent, sourceHandles]);
   const handleStep = handles.length > 1 ? 30 : 0;
@@ -88,7 +90,7 @@ function CompactFlowNode({
 
   return (
     <div
-      className={`flow-node flow-node-compact ${premium ? 'flow-node-premium' : ''} ${selected ? 'is-selected' : ''} ${running ? 'running' : ''}`}
+      className={`flow-node flow-node-compact ${choiceLayout ? 'choice-node' : ''} ${premium ? 'flow-node-premium' : ''} ${selected ? 'is-selected' : ''} ${running ? 'running' : ''}`}
       style={{
         '--flow-node-accent': accent,
         border: hasValidationError ? '2px solid #dc2626' : undefined,
@@ -154,7 +156,44 @@ function CompactFlowNode({
             ))}
           </div>
         ) : null}
-        {chips.length > 0 ? (
+        {choiceLayout && handles.length > 0 ? (
+          <div className="choice-option-list" aria-label="Opções de saída">
+            {handles.map((handle) => (
+              <div
+                key={`${handle.id || 'default'}-choice-row`}
+                className="choice-option-row nodrag nopan"
+                style={{ '--flow-handle-color': handle.color || accent } as CSSProperties}
+              >
+                <span className="choice-option-content" title={handle.label}>{handle.label || 'Opção'}</span>
+                <span className="choice-option-handle-slot">
+                  <Handle
+                    id={handle.id}
+                    type="source"
+                    position={Position.Right}
+                    title={handle.label}
+                    className="flow-node-handle flow-node-source-handle choice-option-handle nodrag nopan"
+                    isConnectable={isConnectable}
+                    data-option-value={handle.optionValue}
+                    style={{
+                      right: -7,
+                      width: 12,
+                      height: 12,
+                      background: '#fff',
+                      border: '2px solid #cbd5e1',
+                      boxShadow: '0 2px 6px rgba(15, 23, 42, 0.10)',
+                      transition: 'transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease',
+                      '--flow-handle-transform': 'translate(0, -50%)',
+                      borderRadius: '50%',
+                      cursor: 'crosshair',
+                      pointerEvents: isConnectable ? 'auto' : 'none',
+                      zIndex: 30,
+                    } as CSSProperties}
+                  />
+                </span>
+              </div>
+            ))}
+          </div>
+        ) : chips.length > 0 ? (
           <div className="flow-node-chip-row">
             {chips.slice(0, 3).map((chip) => (
               <span key={chip} className="flow-node-chip">{chip}</span>
@@ -166,7 +205,7 @@ function CompactFlowNode({
 
       {footer || statusLabel ? <div className="flow-node-footer">{footer || <NodeStatus active={statusActive} label={statusLabel || 'Pronto'} />}</div> : null}
 
-      {handles.map((handle, index) => (
+      {!choiceLayout && handles.map((handle, index) => (
         <div
           key={`${handle.id || 'default'}-wrap`}
           className="flow-node-source-slot nodrag nopan"
