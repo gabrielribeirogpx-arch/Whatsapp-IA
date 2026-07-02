@@ -61,6 +61,28 @@ AUDIT_TEXT_MARKERS = [
 
 
 
+
+def _publish_edge_ids_preview(edges: list[dict[str, Any]] | None, limit: int = 10) -> list[str | None]:
+    return [
+        str(edge.get("id")) if isinstance(edge, dict) and edge.get("id") is not None else None
+        for edge in (edges if isinstance(edges, list) else [])[:limit]
+    ]
+
+
+def _publish_internal_edge_ids_preview(edges: list[dict[str, Any]] | None, limit: int = 10) -> list[str]:
+    previews: list[str] = []
+    for edge in edges if isinstance(edges, list) else []:
+        if not isinstance(edge, dict):
+            continue
+        edge_id = str(edge.get("id") or "")
+        source = str(edge.get("source") or "")
+        target = str(edge.get("target") or "")
+        if "__" in edge_id or "__" in source or "__" in target:
+            previews.append(edge_id or f"{source}->{target}")
+        if len(previews) >= limit:
+            break
+    return previews
+
 def _graph_checksum(nodes: list[dict[str, Any]], edges: list[dict[str, Any]]) -> str:
     payload = {"nodes": nodes if isinstance(nodes, list) else [], "edges": edges if isinstance(edges, list) else []}
     return hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")).hexdigest()
@@ -329,12 +351,32 @@ def _is_flow_runtime_v2(flow: Flow) -> bool:
 
 
 def _apply_flow_v2_snapshot_metadata(flow_version: FlowVersion, nodes: list[dict[str, Any]], edges: list[dict[str, Any]]) -> None:
+    logger.info(
+        "[PUBLISH FLOW_V2 INPUT] flow_version_id=%s payload_nodes_count=%s payload_edges_count=%s "
+        "payload_edge_ids_preview=%s payload_internal_edge_ids_preview=%s edge_origin=selected_builder_graph",
+        getattr(flow_version, "id", None),
+        len(nodes if isinstance(nodes, list) else []),
+        len(edges if isinstance(edges, list) else []),
+        _publish_edge_ids_preview(edges),
+        _publish_internal_edge_ids_preview(edges),
+    )
     try:
         published = FlowV2Publisher().publish(nodes=nodes, edges=edges)
     except FlowV2PublishError as exc:
         raise ValueError("; ".join(exc.errors)) from exc
 
     snapshot = published.snapshot
+    snapshot_nodes = snapshot.get("nodes") if isinstance(snapshot, dict) else []
+    snapshot_edges = snapshot.get("edges") if isinstance(snapshot, dict) else []
+    logger.info(
+        "[PUBLISH FLOW_V2 SNAPSHOT] flow_version_id=%s snapshot_nodes_count=%s snapshot_edges_count=%s "
+        "snapshot_edge_ids_preview=%s snapshot_internal_edge_ids_preview=%s edge_origin=FlowV2Publisher.publish",
+        getattr(flow_version, "id", None),
+        len(snapshot_nodes if isinstance(snapshot_nodes, list) else []),
+        len(snapshot_edges if isinstance(snapshot_edges, list) else []),
+        _publish_edge_ids_preview(snapshot_edges),
+        _publish_internal_edge_ids_preview(snapshot_edges),
+    )
     flow_version.nodes_json = snapshot["nodes"]
     flow_version.edges_json = snapshot["edges"]
     flow_version.nodes = snapshot["nodes"]
@@ -394,7 +436,8 @@ def _publish_fresh_snapshot(db: Session, flow: Flow, *, reason: str) -> FlowVers
         logger.info(
             "[V2 SNAPSHOT] publish_graph_source flow_id=%s reason=%s source=%s "
             "flow_nodes_count=%s flow_edges_count=%s record_nodes_count=%s record_edges_count=%s "
-            "selected_nodes_count=%s selected_edges_count=%s",
+            "selected_nodes_count=%s selected_edges_count=%s selected_edge_ids_preview=%s "
+            "selected_internal_edge_ids_preview=%s edge_origin=%s",
             flow.id,
             reason,
             graph_source,
@@ -404,11 +447,24 @@ def _publish_fresh_snapshot(db: Session, flow: Flow, *, reason: str) -> FlowVers
             len(record_edges),
             len(nodes),
             len(edges),
+            _publish_edge_ids_preview(edges),
+            _publish_internal_edge_ids_preview(edges),
+            graph_source,
         )
     if not nodes:
         logger.warning("[FLOW PUBLISH] flow_id=%s reason=%s sem nodes no builder", flow.id, reason)
         return None
 
+    logger.info(
+        "[PUBLISH PRE_VALIDATE] flow_id=%s reason=%s nodes_count=%s edges_count=%s "
+        "edge_ids_preview=%s internal_edge_ids_preview=%s edge_origin=selected_builder_graph",
+        flow.id,
+        reason,
+        len(nodes),
+        len(edges),
+        _publish_edge_ids_preview(edges),
+        _publish_internal_edge_ids_preview(edges),
+    )
     validate_flow_payload_or_400(nodes, edges)
     _validate_no_template_ids(nodes, edges)
     logger.info(
@@ -785,18 +841,52 @@ def _builder_graph_from_records(db: Session, flow: Flow) -> tuple[list[dict[str,
             "label": condition,
             "data": {"condition": condition, "sourceHandle": condition or "default"},
         })
+    logger.info(
+        "[PUBLISH BUILDER GRAPH FROM RECORDS] flow_id=%s record_nodes_count=%s record_edges_count=%s "
+        "record_edge_ids_preview=%s record_internal_edge_ids_preview=%s edge_origin=database_records",
+        getattr(flow, "id", None),
+        len(nodes),
+        len(edges),
+        _publish_edge_ids_preview(edges),
+        _publish_internal_edge_ids_preview(edges),
+    )
     if nodes:
         return nodes, edges
     return _builder_graph_from_flow(flow)
 
 def _builder_graph_from_flow(flow: Flow) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    node_origin = "flow.nodes_json" if isinstance(flow.nodes_json, list) else "flow.nodes" if isinstance(flow.nodes, list) else "empty"
+    edge_origin = "flow.edges_json" if isinstance(flow.edges_json, list) else "flow.edges" if isinstance(flow.edges, list) else "empty"
     nodes = flow.nodes_json if isinstance(flow.nodes_json, list) else flow.nodes if isinstance(flow.nodes, list) else []
     edges = flow.edges_json if isinstance(flow.edges_json, list) else flow.edges if isinstance(flow.edges, list) else []
     if not nodes and flow.current_version and isinstance(flow.current_version.nodes, list):
         nodes = flow.current_version.nodes
+        node_origin = "flow.current_version.nodes"
     if not edges and flow.current_version and isinstance(flow.current_version.edges, list):
         edges = flow.current_version.edges
-    return (nodes if isinstance(nodes, list) else []), (edges if isinstance(edges, list) else [])
+        edge_origin = "flow.current_version.edges"
+    safe_nodes = nodes if isinstance(nodes, list) else []
+    safe_edges = edges if isinstance(edges, list) else []
+    logger.info(
+        "[PUBLISH BUILDER GRAPH FROM FLOW] flow_id=%s node_origin=%s edge_origin=%s "
+        "flow_nodes_json_count=%s flow_edges_json_count=%s flow_nodes_count=%s flow_edges_count=%s "
+        "current_version_nodes_count=%s current_version_edges_count=%s selected_nodes_count=%s selected_edges_count=%s "
+        "selected_edge_ids_preview=%s selected_internal_edge_ids_preview=%s",
+        getattr(flow, "id", None),
+        node_origin,
+        edge_origin,
+        len(flow.nodes_json if isinstance(flow.nodes_json, list) else []),
+        len(flow.edges_json if isinstance(flow.edges_json, list) else []),
+        len(flow.nodes if isinstance(flow.nodes, list) else []),
+        len(flow.edges if isinstance(flow.edges, list) else []),
+        len(flow.current_version.nodes if getattr(flow, "current_version", None) and isinstance(flow.current_version.nodes, list) else []),
+        len(flow.current_version.edges if getattr(flow, "current_version", None) and isinstance(flow.current_version.edges, list) else []),
+        len(safe_nodes),
+        len(safe_edges),
+        _publish_edge_ids_preview(safe_edges),
+        _publish_internal_edge_ids_preview(safe_edges),
+    )
+    return safe_nodes, safe_edges
 
 
 def _request_client_host(request: Request | None) -> str | None:
@@ -1425,6 +1515,13 @@ def validate_flow_payload_or_400(
     nodes: list[dict[str, Any]],
     edges: list[dict[str, Any]],
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    logger.info(
+        "[FLOW VALIDATION INPUT] nodes_count=%s edges_count=%s edge_ids_preview=%s internal_edge_ids_preview=%s",
+        len(nodes if isinstance(nodes, list) else []),
+        len(edges if isinstance(edges, list) else []),
+        _publish_edge_ids_preview(edges),
+        _publish_internal_edge_ids_preview(edges),
+    )
     if not isinstance(nodes, list):
         raise HTTPException(status_code=400, detail="VALIDATION_ERROR: NODES_REQUIRED")
     if not isinstance(edges, list):
@@ -3095,8 +3192,25 @@ def publish_tenant_flow_version(
             [(str(edge.get("source")), str(edge.get("target"))) for edge in edges if isinstance(edge, dict)],
             list((getattr(flow, "graph", {}) or {}).keys()) if isinstance(getattr(flow, "graph", {}), dict) else [],
         )
-        logger.info("[PUBLISH FLOW VALIDATION] flow_id=%s nodes_count=%s edges_count=%s", flow_id, len(nodes), len(edges))
+        logger.info(
+            "[PUBLISH FLOW VALIDATION] flow_id=%s nodes_count=%s edges_count=%s "
+            "edge_ids_preview=%s internal_edge_ids_preview=%s edge_origin=fresh_version_snapshot",
+            flow_id,
+            len(nodes),
+            len(edges),
+            _publish_edge_ids_preview(edges),
+            _publish_internal_edge_ids_preview(edges),
+        )
         _validate_publish_graph_or_raise(nodes, edges)
+        logger.info(
+            "[PUBLISH FLOW PRE_VALIDATE] flow_id=%s nodes_count=%s edges_count=%s "
+            "edge_ids_preview=%s internal_edge_ids_preview=%s edge_origin=fresh_version_snapshot",
+            flow_id,
+            len(nodes),
+            len(edges),
+            _publish_edge_ids_preview(edges),
+            _publish_internal_edge_ids_preview(edges),
+        )
         validate_flow_payload_or_400(nodes, edges)
         validation = validate_flow_graph(nodes, edges, mode="publish")
         if "TESTE FINAL 12345" in _extract_start_preview(_builder_graph_from_flow(flow)[0]) and "TESTE FINAL 12345" not in _extract_start_preview(nodes):
