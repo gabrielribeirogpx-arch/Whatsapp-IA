@@ -7,6 +7,7 @@ import hashlib
 import logging
 import re
 import time
+import traceback
 import unicodedata
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -682,7 +683,7 @@ def _calendar_event_data(normalized_result: dict[str, Any]) -> dict[str, Any]:
 def _format_calendar_create_result_for_user(normalized_result: dict[str, Any], registry_result: Any | None = None) -> tuple[str, str]:
     event = _calendar_event_data(normalized_result)
     if normalized_result.get("ok") is not True or not event.get("event_id"):
-        return "Não consegui criar o evento na agenda. Deseja tentar novamente?", "error"
+        return "Não consegui acessar sua conexão com Google Calendar", "error"
     if not event.get("start") or not event.get("end"):
         return "Não consegui criar o evento na agenda. Deseja tentar novamente?", "incomplete"
     title = _safe_user_text(event.get("title") or "Evento", limit=120)
@@ -2063,6 +2064,18 @@ def run_agent_for_tenant(db: Session, tenant_id, input_text: str, instruction: s
                 _json_log("AI_AGENT_TOOL_CALL_RESULT", ok=tool_result.get("ok"), raw_result=tool_result.get("result"), error=tool_result.get("error"))
             except ExecutionBudgetExceeded:
                 return AgentRunResult(message=fallback, status="budget_exceeded", fallback_used=True, steps_count=step + 1, final_tool=tool, tools_used=result.tools_used, metadata={**(budget.safe_metadata() if budget else {}), "budget_exceeded": True})
+            except Exception as exc:
+                _json_log("AI_AGENT_TOOL_EXCEPTION", tool_id=tool_id, exception_class=type(exc).__name__, exception_message=str(exc), traceback="".join(traceback.format_exception(type(exc), exc, exc.__traceback__)))
+                if tool_id == "google_calendar_create_event":
+                    msg = "Não consegui acessar sua conexão com Google Calendar"
+                    result.message = msg
+                    result.actions.append(AgentToolAction("message", {"message": msg}))
+                    result.status = "error"
+                    result.fallback_used = False
+                    result.final_tool = "chamar_mcp"
+                    mcp_tool_calls.append({"tool_id": tool_id, "status": "error", "tool_type": "google_calendar", "error": type(exc).__name__})
+                    break
+                raise
             if result.message and result.final_tool == "responder" and tool_id == "google_calendar_create_event":
                 break
             normalized = registry_result.normalized_result.to_dict() if registry_result.normalized_result else (registry_result.output if isinstance(registry_result.output, dict) else {})

@@ -95,8 +95,8 @@ def _connection_log_context(db: Session | None, tenant_id: Any) -> dict[str, Any
     try:
         from app.services.integration_connection_service import IntegrationConnectionService
 
-        payload.update(_connection_lookup_diagnostics(tenant_id, PROVIDER))
-        conn = IntegrationConnectionService(db).get_connection(tenant_id, PROVIDER)
+        payload.update(_connection_lookup_diagnostics(tenant_id, PROVIDER, active_only=True))
+        conn = IntegrationConnectionService(db).get_active_connection(tenant_id, PROVIDER)
         metadata = conn.metadata_json if conn and isinstance(conn.metadata_json, dict) else {}
         payload.update({
             "connection_id": str(conn.id) if conn else None,

@@ -2,7 +2,10 @@
 from __future__ import annotations
 
 import logging
+import traceback
 from typing import Any
+
+from app.tools.context import sanitize_metadata
 
 from app.flow_v2.actions import SendMessageAction
 from app.flow_v2.executors._legacy import (
@@ -67,6 +70,7 @@ class AiSystemNodeExecutor(BaseNodeExecutor):
     """Dispatcher for the private runtime graph stored inside an AI System node."""
 
     FALLBACK_MESSAGE = "Não consegui iniciar o sistema de IA. Tente novamente em instantes."
+    GOOGLE_CALENDAR_CONNECTION_ERROR_MESSAGE = "Não consegui acessar sua conexão com Google Calendar"
     INTERNAL_CONTEXT_KEY = "ai_system_internal_runtime"
 
     def execute(self, db, *, snapshot, session, node, runtime_input) -> NodeExecutionResult:
@@ -94,8 +98,10 @@ class AiSystemNodeExecutor(BaseNodeExecutor):
             logger.info("event=AI_SYSTEM_INTERNAL_FINISHED node_id=%s current_internal_node_id=%s actions_count=%s", node_id, getattr(internal_session, "current_node_id", None), len(actions))
             return NodeExecutionResult(actions=tuple(actions), next_node_id=node_id, status="wait")
         except Exception as exc:
-            logger.exception("event=AI_SYSTEM_INTERNAL_RUNTIME_ERROR node_id=%s error=%s", node_id, exc)
-            return self._fallback(db, session=session, node_id=node_id, runtime_input=runtime_input, reason=type(exc).__name__)
+            payload = {"event": "AI_SYSTEM_EXECUTOR_ERROR", "node_id": node_id, "tenant_id": str(getattr(session, "tenant_id", "")), "exception_class": type(exc).__name__, "exception_message": str(exc), "traceback": "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))}
+            logger.exception("AI_SYSTEM_EXECUTOR_ERROR %s", sanitize_metadata(payload))
+            message = self.GOOGLE_CALENDAR_CONNECTION_ERROR_MESSAGE if self._is_google_calendar_failure(exc) else self.FALLBACK_MESSAGE
+            return self._fallback(db, session=session, node_id=node_id, runtime_input=runtime_input, reason=type(exc).__name__, message=message)
 
     def _execute_internal_runtime(self, db, *, snapshot: FlowV2Snapshot, session: Any, runtime_input, system_node_id: str) -> list[Any]:
         from app.flow_v2.executor import FlowV2Executor, FlowV2SessionStatus, MAX_RUNTIME_STEPS
@@ -120,8 +126,8 @@ class AiSystemNodeExecutor(BaseNodeExecutor):
                     logger.info("event=AI_SYSTEM_INTERNAL_RESPONSE system_node_id=%s node_id=%s text=%s", system_node_id, node_id, action.text[:500])
                     self.event_store.append(db, session=session, event_type=FlowV2EventType.OUTPUT_EMITTED, node_id=node_id, payload={"analytics_event": "AI_SYSTEM_INTERNAL_RESPONSE", "ai_system_node_id": system_node_id, "text": action.text})
             if self._looks_like_tool_node(node_type, node, result):
-                logger.info("event=AI_SYSTEM_INTERNAL_TOOL_CALLED system_node_id=%s node_id=%s node_type=%s", system_node_id, node_id, node_type)
-                self.event_store.append(db, session=session, event_type=FlowV2EventType.OUTPUT_EMITTED, node_id=node_id, payload={"analytics_event": "AI_SYSTEM_INTERNAL_TOOL_CALLED", "ai_system_node_id": system_node_id, "node_type": node_type})
+                logger.info("event=AI_SYSTEM_INTERNAL_TOOL_CALLED system_node_id=%s node_id=%s node_type=%s tenant_id=%s", system_node_id, node_id, node_type, getattr(session, "tenant_id", None))
+                self.event_store.append(db, session=session, event_type=FlowV2EventType.OUTPUT_EMITTED, node_id=node_id, payload={"analytics_event": "AI_SYSTEM_INTERNAL_TOOL_CALLED", "ai_system_node_id": system_node_id, "node_type": node_type, "tenant_id": str(getattr(session, "tenant_id", ""))})
             self.event_store.append(db, session=session, event_type=FlowV2EventType.NODE_COMPLETED, node_id=node_id, payload={"ai_system_node_id": system_node_id, "internal": True})
 
             if result.status in {"wait", "scheduled"}:
@@ -198,10 +204,21 @@ class AiSystemNodeExecutor(BaseNodeExecutor):
         lowered = node_type.strip().lower()
         return lowered in {"tool", "mcp", "google_calendar", "calendar", "action"} or "calendar" in lowered or bool(data.get("tool_id") or data.get("toolId") or data.get("mcp_tool_ids") or data.get("mcpToolIds") or getattr(result, "intent", None) in {"calendar_create", "calendar_list", "calendar_delete"})
 
-    def _fallback(self, db, *, session: Any, node_id: str, runtime_input, reason: str) -> NodeExecutionResult:
-        logger.info("event=AI_SYSTEM_INTERNAL_RESPONSE node_id=%s fallback=true reason=%s", node_id, reason)
-        action = SendMessageAction(tenant_id=session.tenant_id, session_id=session.id, external_user_id=runtime_input.external_user_id, conversation_id=runtime_input.conversation_id, contact_id=runtime_input.contact_id, text=self.FALLBACK_MESSAGE, metadata={**runtime_input.metadata, "node_id": node_id, "intent": "ai_system_fallback", "fallback_reason": reason})
-        self.event_store.append(db, session=session, event_type=FlowV2EventType.OUTPUT_EMITTED, node_id=node_id, payload={"analytics_event": "AI_SYSTEM_INTERNAL_RESPONSE", "fallback": True, "reason": reason, "text": self.FALLBACK_MESSAGE})
+    @staticmethod
+    def _is_google_calendar_failure(exc: BaseException) -> bool:
+        cursor: BaseException | None = exc
+        while cursor is not None:
+            text = f"{type(cursor).__name__} {cursor}".lower()
+            if "google_calendar" in text or "google calendar" in text:
+                return True
+            cursor = cursor.__cause__ or cursor.__context__
+        return False
+
+    def _fallback(self, db, *, session: Any, node_id: str, runtime_input, reason: str, message: str | None = None) -> NodeExecutionResult:
+        text = message or self.FALLBACK_MESSAGE
+        logger.info("event=AI_SYSTEM_INTERNAL_RESPONSE node_id=%s fallback=true reason=%s text=%s", node_id, reason, text)
+        action = SendMessageAction(tenant_id=session.tenant_id, session_id=session.id, external_user_id=runtime_input.external_user_id, conversation_id=runtime_input.conversation_id, contact_id=runtime_input.contact_id, text=text, metadata={**runtime_input.metadata, "node_id": node_id, "intent": "ai_system_fallback", "fallback_reason": reason})
+        self.event_store.append(db, session=session, event_type=FlowV2EventType.OUTPUT_EMITTED, node_id=node_id, payload={"analytics_event": "AI_SYSTEM_INTERNAL_RESPONSE", "fallback": True, "reason": reason, "text": text})
         return NodeExecutionResult(actions=(action,), next_node_id=node_id, status="wait")
 
 
