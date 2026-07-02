@@ -12,6 +12,7 @@ from app.flow_v2.executors.agent_system_executor import (
     AiDispatcherNodeExecutor,
     AiGreetingNodeExecutor,
     AiSafeFallbackNodeExecutor,
+    AiSystemNodeExecutor,
 )
 from app.flow_v2.executors.base_executor import BaseNodeExecutor, NodeExecutionResult, NodeExecutor
 from app.flow_v2.executors.condition_executor import ConditionNodeExecutor
@@ -32,6 +33,6 @@ __all__ = [
     "MessageNodeExecutor", "ChoiceNodeExecutor", "CtaUrlNodeExecutor", "MediaNodeExecutor",
     "DelayNodeExecutor", "ConditionNodeExecutor", "ActionNodeExecutor", "AiRagNodeExecutor",
     "AiResponseNodeExecutor", "AiAgentNodeExecutor", "AiDispatcherNodeExecutor", "AiGreetingNodeExecutor", "AiCalendarAgentNodeExecutor", "AiSafeFallbackNodeExecutor", "AiSupervisorNodeExecutor",
-    "AiSummaryNodeExecutor", "AiStructuredNodeExecutor", "AiClassificationNodeExecutor", "AiExtractionNodeExecutor",
+    "AiSummaryNodeExecutor", "AiStructuredNodeExecutor", "AiClassificationNodeExecutor", "AiExtractionNodeExecutor", "AiSystemNodeExecutor",
     "extract_message_text_from_node", "calculate_typing_delay_seconds",
 ]
