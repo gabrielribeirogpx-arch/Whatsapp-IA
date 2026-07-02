@@ -83,6 +83,8 @@ const secondaryButtonClass =
   "inline-flex h-10 items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 text-sm font-bold text-slate-700 transition hover:border-emerald-200 hover:bg-emerald-50 hover:text-emerald-700 focus:outline-none focus:ring-4 focus:ring-emerald-100 disabled:cursor-not-allowed disabled:opacity-50";
 const dangerButtonClass =
   "inline-flex h-10 items-center justify-center gap-2 rounded-2xl border border-red-100 bg-white px-4 text-sm font-bold text-red-600 transition hover:bg-red-50 focus:outline-none focus:ring-4 focus:ring-red-100 disabled:cursor-not-allowed disabled:opacity-50";
+const subtleDangerTextClass =
+  "inline-flex items-center justify-center gap-1 self-center px-2 py-1 text-xs font-bold text-slate-500 transition hover:text-red-600 focus:outline-none focus:ring-2 focus:ring-red-100 disabled:cursor-not-allowed disabled:opacity-50";
 
 const googleCalendarToolNames: Record<string, string> = {
   google_calendar_create_event: "Criar evento",
@@ -948,16 +950,10 @@ export default function MCPDashboardClient() {
                 {isCalendarConnected ? (
                   <button
                     type="button"
-                    disabled={calendarActionLoading || loadingCalendar}
-                    onClick={() => disconnectCalendar()}
-                    className={dangerButtonClass}
+                    disabled
+                    className={secondaryButtonClass}
                   >
-                    {calendarActionLoading ? (
-                      <Loader2 size={16} className="animate-spin" />
-                    ) : (
-                      <XCircle size={16} />
-                    )}{" "}
-                    Desconectar
+                    <CheckCircle2 size={16} /> Google Calendar conectado
                   </button>
                 ) : (
                   <button
@@ -977,19 +973,19 @@ export default function MCPDashboardClient() {
                 >
                   Atualizar status
                 </button>
-                <button
-                  type="button"
-                  disabled={
-                    calendarActionLoading ||
-                    gmailActionLoading ||
-                    driveActionLoading ||
-                    sheetsActionLoading
-                  }
-                  onClick={() => disconnectGoogleAccount()}
-                  className={dangerButtonClass}
-                >
-                  <XCircle size={16} /> Desconectar Google
-                </button>
+                {isCalendarConnected ? (
+                  <button
+                    type="button"
+                    disabled={calendarActionLoading || loadingCalendar}
+                    onClick={() => disconnectCalendar()}
+                    className={subtleDangerTextClass}
+                  >
+                    {calendarActionLoading ? (
+                      <Loader2 size={12} className="animate-spin" />
+                    ) : null}
+                    Desconectar calendário
+                  </button>
+                ) : null}
               </div>
             </div>
             <div className="mt-5 border-t border-emerald-100 pt-5">
@@ -1229,18 +1225,8 @@ export default function MCPDashboardClient() {
               </div>
               <div className="flex w-full flex-col gap-2 sm:w-auto sm:min-w-56">
                 {isDriveConnected ? (
-                  <button
-                    type="button"
-                    disabled={driveActionLoading || loadingDrive}
-                    onClick={() => disconnectDriveAccount()}
-                    className={dangerButtonClass}
-                  >
-                    {driveActionLoading ? (
-                      <Loader2 size={16} className="animate-spin" />
-                    ) : (
-                      <XCircle size={16} />
-                    )}{" "}
-                    Desconectar
+                  <button type="button" disabled className={secondaryButtonClass}>
+                    <CheckCircle2 size={16} /> Google Drive conectado
                   </button>
                 ) : (
                   <button
@@ -1260,6 +1246,19 @@ export default function MCPDashboardClient() {
                 >
                   Atualizar status
                 </button>
+                {isDriveConnected ? (
+                  <button
+                    type="button"
+                    disabled={driveActionLoading || loadingDrive}
+                    onClick={() => disconnectDriveAccount()}
+                    className={subtleDangerTextClass}
+                  >
+                    {driveActionLoading ? (
+                      <Loader2 size={12} className="animate-spin" />
+                    ) : null}
+                    Desconectar drive
+                  </button>
+                ) : null}
               </div>
             </div>
             <div className="mt-5 border-t border-blue-100 pt-5">
