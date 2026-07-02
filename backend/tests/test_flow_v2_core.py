@@ -96,6 +96,7 @@ class _FakeSession:
         self.conversation_id = None
         self.status = FlowV2SessionStatus.RUNNING
         self.last_event_index = 0
+        self.context = {}
 
 
 class _FakeSnapshotRepository:
@@ -2345,3 +2346,43 @@ def test_ai_system_pending_slot_context_keeps_calendar_agent_node(caplog, monkey
     assert [action.as_effect()["text"] for action in result.actions] == ["Qual data?"]
     assert "AI_SYSTEM_KEEP_SLOT_CONTEXT" in caplog.text
     assert "AI_SYSTEM_RESUME_AT_DISPATCHER" not in caplog.text
+
+
+def test_ai_system_terminal_canvas_node_waits_and_internal_events_use_unique_indexes(caplog) -> None:
+    raw_snapshot = {
+        "nodes": [
+            {
+                "id": "system",
+                "type": "ai_system",
+                "is_terminal": True,
+                "data": {
+                    "end": True,
+                    "isEnd": True,
+                    "terminal": True,
+                    "internal_nodes": [
+                        {"id": "greeting", "type": "message", "isStart": True, "is_terminal": True, "data": {"text": "Olá! 👋 Como posso ajudar?", "endFlow": True}}
+                    ],
+                    "internal_edges": [],
+                },
+            }
+        ],
+        "edges": [],
+        "start_node_id": "system",
+    }
+    executor, snapshot, event_store, session, db = _executor(raw_snapshot)
+
+    with caplog.at_level("INFO"):
+        first = executor.handle_input(db, _input_with_text(snapshot, "wamid.ai_system.outer.1", "OI"))
+        second = executor.handle_input(db, _input_with_text(snapshot, "wamid.ai_system.outer.2", "Marque uma call amanhã às 13:30"))
+
+    assert [action.text for action in first.actions] == ["Olá! 👋 Como posso ajudar?"]
+    assert [action.text for action in second.actions] == ["Olá! 👋 Como posso ajudar?"]
+    assert first.status == FlowV2SessionStatus.WAITING
+    assert first.current_node_id == "system"
+    assert second.status == FlowV2SessionStatus.WAITING
+    assert second.current_node_id == "system"
+    assert session.context["ai_system_internal_runtime"]["system"]["current_node_id"] == "greeting"
+    event_indexes = [event["event_index"] for event in event_store.events]
+    assert len(event_indexes) == len(set(event_indexes))
+    assert event_indexes == list(range(1, len(event_indexes) + 1))
+    assert "terminal_node_marked_end_flow" not in caplog.text

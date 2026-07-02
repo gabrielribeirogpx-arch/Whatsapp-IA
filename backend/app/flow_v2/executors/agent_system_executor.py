@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import logging
-from types import SimpleNamespace
 from typing import Any
 
 from app.flow_v2.actions import SendMessageAction
@@ -32,6 +31,36 @@ def _first_present_list(*values: Any) -> list[Any]:
         if isinstance(value, list):
             return value
     return []
+
+
+class _InternalRuntimeSession:
+    """Isolated internal cursor that shares the parent event stream cursor.
+
+    Internal AI System nodes execute against a private current_node_id, but their
+    runtime events are still appended to the outer Flow V2 session stream.
+    Forwarding last_event_index to the parent prevents internal append calls from
+    reusing indexes that the outer executor will append later in the same turn.
+    """
+
+    def __init__(self, *, parent: Any, current_node_id: str) -> None:
+        self._parent = parent
+        self.id = parent.id
+        self.tenant_id = parent.tenant_id
+        self.flow_version_id = getattr(parent, "flow_version_id", None)
+        self.contact_id = getattr(parent, "contact_id", None)
+        self.conversation_id = getattr(parent, "conversation_id", None)
+        self.external_user_id = getattr(parent, "external_user_id", None)
+        self.context = getattr(parent, "context", {})
+        self.current_node_id = current_node_id
+        self.status = "running"
+
+    @property
+    def last_event_index(self) -> int:
+        return int(getattr(self._parent, "last_event_index", 0) or 0)
+
+    @last_event_index.setter
+    def last_event_index(self, value: int) -> None:
+        setattr(self._parent, "last_event_index", value)
 
 
 class AiSystemNodeExecutor(BaseNodeExecutor):
@@ -161,7 +190,7 @@ class AiSystemNodeExecutor(BaseNodeExecutor):
 
     @staticmethod
     def _internal_session(*, session: Any, current_node_id: str) -> Any:
-        return SimpleNamespace(**{**getattr(session, "__dict__", {}), "id": session.id, "tenant_id": session.tenant_id, "flow_version_id": getattr(session, "flow_version_id", None), "contact_id": getattr(session, "contact_id", None), "conversation_id": getattr(session, "conversation_id", None), "external_user_id": getattr(session, "external_user_id", None), "context": getattr(session, "context", {}), "current_node_id": current_node_id, "status": "running"})
+        return _InternalRuntimeSession(parent=session, current_node_id=current_node_id)
 
     @staticmethod
     def _looks_like_tool_node(node_type: str, node: dict[str, Any], result: NodeExecutionResult) -> bool:

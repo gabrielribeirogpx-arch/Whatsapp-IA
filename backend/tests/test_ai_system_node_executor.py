@@ -13,8 +13,10 @@ class _EventStore:
         self.events = []
 
     def append(self, db, *, session, event_type, node_id=None, payload=None, input_message_id=None):
+        session.last_event_index += 1
         self.events.append(
             {
+                "event_index": session.last_event_index,
                 "event_type": event_type,
                 "node_id": node_id,
                 "payload": payload or {},
@@ -53,7 +55,7 @@ def test_ai_system_dispatches_private_runtime_and_waits():
         event_store=event_store,
         transition_resolver=TransitionResolver(event_store),
     )
-    session = SimpleNamespace(id=session_id, tenant_id=tenant_id, flow_version_id=flow_version_id, context={}, current_node_id=node_id, status="running")
+    session = SimpleNamespace(id=session_id, tenant_id=tenant_id, flow_version_id=flow_version_id, context={}, current_node_id=node_id, status="running", last_event_index=0)
     runtime_input = RuntimeInput(
         tenant_id=tenant_id,
         flow_version_id=flow_version_id,
@@ -71,6 +73,9 @@ def test_ai_system_dispatches_private_runtime_and_waits():
     assert session.context["ai_system_internal_runtime"][node_id]["current_node_id"] == "internal-response"
     assert any(event["payload"].get("analytics_event") == "AI_SYSTEM_INTERNAL_NODE_EXECUTED" for event in event_store.events)
     assert any(event["payload"].get("analytics_event") == "AI_SYSTEM_INTERNAL_RESPONSE" for event in event_store.events)
+    event_indexes = [event["event_index"] for event in event_store.events]
+    assert event_indexes == list(range(1, len(event_indexes) + 1))
+    assert session.last_event_index == len(event_store.events)
 
 
 def test_ai_system_aliases_are_registered_and_normalized():
