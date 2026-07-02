@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any, Protocol
 
-from sqlalchemy import or_, select
+from sqlalchemy import inspect as sqlalchemy_inspect, or_, select
 
 from app.flow_v2.actions import (
     RuntimeAction,
@@ -1977,7 +1977,7 @@ class AiAgentNodeExecutor(AiResponseNodeExecutor):
             elif agent_action.type == "message":
                 actions.append(SendMessageAction(tenant_id=session.tenant_id, session_id=session.id, external_user_id=runtime_input.external_user_id, conversation_id=runtime_input.conversation_id, contact_id=runtime_input.contact_id, text=str(agent_action.data.get("message") or ""), metadata={**runtime_input.metadata, "node_id": node_id, "intent": "ai_agent"}))
         session.context = context
-        if hasattr(db, "add"):
+        if hasattr(db, "add") and sqlalchemy_inspect(session, raiseerr=False) is not None:
             db.add(session)
         metadata = {"tools_allowed": [str(t) for t in allowed_tools], "node_tools_allowed": [{"tool_id": str(t.get("tool_id")), "node_id": str(t.get("node_id")), "label": str(t.get("label", ""))[:80]} for t in node_tools if isinstance(t, dict)], "tools_used": result.tools_used, "mcp_tools_allowed": mcp_tools, "mcp_tools_used": result.metadata.get("mcp_tools_used", []), "mcp_call_count": result.metadata.get("mcp_call_count", 0), "mcp_latency_ms": result.metadata.get("mcp_latency_ms", 0), "mcp_status": result.metadata.get("mcp_status", "not_used"), "mcp_error_sanitized": result.metadata.get("mcp_error_sanitized"), "node_tools_used": result.metadata.get("node_tools_used", []), "subflow_tools_allowed": [{"tool_id": str(t.get("tool_id")), "flow_id": str(t.get("flow_id")), "label": str(t.get("label", ""))[:80]} for t in subflow_tools if isinstance(t, dict)], "subflow_tools_used": result.metadata.get("subflow_tools_used", []), "subflow_calls_count": result.metadata.get("subflow_calls_count", 0), "subflow_results_summary": result.metadata.get("subflow_results_summary", []), "subflow_errors": result.metadata.get("subflow_errors", []), "timeout_count": result.metadata.get("timeout_count", 0), "parent_session_id": str(session.id), "subflow_session_ids": [], "node_tool_calls_count": result.metadata.get("node_tool_calls_count", 0), "node_tool_results_summary": result.metadata.get("node_tools_used", []), "blocked_tool_calls": result.metadata.get("blocked_tool_calls", []), "max_steps_reached": result.metadata.get("max_steps_reached", False), "steps_count": result.steps_count, "final_tool": result.final_tool, "status": result.status, "webhook_count": len(data.get("webhooks") or []), "latency_ms": result.metadata.get("latency_ms"), **context_builder_meta, "auto_memory_saved_count": result.metadata.get("memory_saved_count", 0), **budget.safe_metadata()}
         record_ai_execution(db, tenant_id=session.tenant_id, conversation_id=runtime_input.conversation_id, session_id=session.id, flow_id=flow_id, flow_version_id=session.flow_version_id, node_id=node_id, node_type="ai_agent", provider=ai_config.get("provider"), model=ai_config.get("model"), started_at=ai_started_at, status=result.status, input_text=input_text, output_text=result.message, fallback_used=result.fallback_used, metadata=metadata)
@@ -2275,14 +2275,14 @@ class AiSummaryNodeExecutor(BaseNodeExecutor):
         _set_nested_value(context, "ai.summary", text)
         _set_nested_value(context, output_variable, text)
         session.context = context
-        if hasattr(db, "add"):
+        if hasattr(db, "add") and sqlalchemy_inspect(session, raiseerr=False) is not None:
             db.add(session)
 
     def _save_error(self, db, *, session, node_id: str, error: str) -> None:
         context = dict(session.context or {}) if isinstance(getattr(session, "context", None), dict) else {}
         _set_nested_value(context, "ai.error", {"node_id": node_id, "error": error})
         session.context = context
-        if hasattr(db, "add"):
+        if hasattr(db, "add") and sqlalchemy_inspect(session, raiseerr=False) is not None:
             db.add(session)
 
     def execute(self, db, *, snapshot, session, node, runtime_input) -> NodeExecutionResult:
@@ -2368,14 +2368,14 @@ class AiStructuredNodeExecutor(BaseNodeExecutor):
             _set_nested_value(context, "ai.extraction.missing_fields", result.get("missing_fields"))
             _set_nested_value(context, "ai.extraction.confidence", result.get("confidence"))
         session.context = context
-        if hasattr(db, "add"):
+        if hasattr(db, "add") and sqlalchemy_inspect(session, raiseerr=False) is not None:
             db.add(session)
 
     def _fail(self, db, *, snapshot, session, node_id: str, error: str) -> NodeExecutionResult:
         context = dict(session.context or {}) if isinstance(getattr(session, "context", None), dict) else {}
         _set_nested_value(context, "ai.error", {"node_id": node_id, "error": error})
         session.context = context
-        if hasattr(db, "add"):
+        if hasattr(db, "add") and sqlalchemy_inspect(session, raiseerr=False) is not None:
             db.add(session)
         self.event_store.append(db, session=session, event_type=FlowV2EventType.OUTPUT_EMITTED, node_id=node_id, payload={"analytics_event": "ai_structured_failed", "error": error})
         return NodeExecutionResult(next_node_id=self._default_next_or_terminal(db, snapshot=snapshot, session=session, node_id=node_id), status="continue")
