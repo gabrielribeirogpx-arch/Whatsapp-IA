@@ -6941,41 +6941,41 @@ input {
 */
 .flow-builder-page .choice-node,
 .flow-builder-page .choice-node.flow-node-compact {
-  width: 340px !important;
-  min-width: 340px !important;
-  max-width: 360px !important;
+  width: 270px !important;
+  min-width: 270px !important;
+  max-width: 300px !important;
   overflow: visible !important;
 }
 
 .flow-builder-page .choice-node .flow-node-compact-header {
-  padding-right: 14px !important;
+  padding: 10px 11px 8px !important;
 }
 
 .flow-builder-page .choice-node .flow-node-compact-body {
-  padding: 12px 14px 13px !important;
+  padding: 9px 11px 10px !important;
 }
 
 .flow-builder-page .choice-node .flow-node-summary {
-  -webkit-line-clamp: 3 !important;
-  margin-bottom: 10px;
+  -webkit-line-clamp: 2 !important;
+  margin-bottom: 8px;
 }
 
 .choice-option-list {
   display: grid;
-  gap: 8px;
+  gap: 5px;
   width: 100%;
 }
 
 .choice-option-row {
   position: relative;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 38px;
+  grid-template-columns: minmax(0, 1fr) 26px;
   align-items: stretch;
-  min-height: 46px;
+  min-height: 36px;
   border: 1px solid rgba(226, 232, 240, 0.96);
-  border-radius: 13px;
+  border-radius: 11px;
   background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
-  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.95) inset, 0 6px 16px rgba(15, 23, 42, 0.045);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.95) inset, 0 5px 12px rgba(15, 23, 42, 0.04);
   transition: border-color 160ms ease, box-shadow 160ms ease, background 160ms ease;
 }
 
@@ -6987,11 +6987,11 @@ input {
 
 .choice-option-content {
   min-width: 0;
-  display: flex;
-  align-items: center;
-  padding: 11px 16px;
+  display: block;
+  align-self: center;
+  padding: 8px 10px 8px 12px;
   color: #0f172a;
-  font-size: 12.5px;
+  font-size: 12px;
   font-weight: 750;
   line-height: 1.25;
   overflow: hidden;
@@ -7004,20 +7004,20 @@ input {
   display: flex;
   align-items: center;
   justify-content: center;
-  min-width: 38px;
+  min-width: 26px;
   border-left: 1px solid rgba(226, 232, 240, 0.9);
-  border-radius: 0 12px 12px 0;
+  border-radius: 0 10px 10px 0;
   background: rgba(248, 250, 252, 0.92);
 }
 
 .flow-builder-page .choice-node .choice-option-handle.react-flow__handle,
 .flow-builder-page .choice-node .choice-option-handle {
   top: 50% !important;
-  right: -7px !important;
-  width: 13px !important;
-  height: 13px !important;
-  min-width: 13px !important;
-  min-height: 13px !important;
+  right: -6px !important;
+  width: 12px !important;
+  height: 12px !important;
+  min-width: 12px !important;
+  min-height: 12px !important;
   border-color: var(--flow-handle-color, #f97316) !important;
   box-shadow: 0 0 0 6px rgba(255, 255, 255, 0.98), 0 4px 12px rgba(15, 23, 42, 0.14) !important;
 }
@@ -7025,7 +7025,7 @@ input {
 .flow-builder-page .choice-node .choice-option-handle::after {
   content: '';
   position: absolute;
-  inset: -11px;
+  inset: -9px;
   border-radius: 999px;
 }
 
@@ -7036,6 +7036,6 @@ input {
 }
 
 .flow-builder-page .choice-node .flow-node-footer {
-  padding-left: 14px !important;
-  padding-right: 14px !important;
+  min-height: 28px !important;
+  padding: 6px 11px 8px !important;
 }
