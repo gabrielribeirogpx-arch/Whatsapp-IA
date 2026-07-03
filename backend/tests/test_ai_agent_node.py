@@ -829,6 +829,50 @@ def test_ai_agent_google_calendar_pending_yes_creates(monkeypatch):
     assert result.message == "Pronto! Agendei Call online para 2026-06-22 às 09:00."
 
 
+def test_ai_agent_google_calendar_pending_time_update_reuses_previous_args(monkeypatch, caplog):
+    from app.tools.base import NormalizedToolResult, ToolResult
+
+    calls = []
+    session_state = {
+        "pending_google_calendar_create_event": {
+            "summary": "Call online",
+            "start_time": "2026-06-22T09:00:00-03:00",
+            "end_time": "2026-06-22T10:00:00-03:00",
+            "timezone": "America/Sao_Paulo",
+            "conflicting_events": [{"title": "Reunião Online"}],
+        }
+    }
+
+    def fake_execute(self, tool_type, tool_id, input, context, config=None):
+        calls.append((tool_id, dict(input)))
+        if tool_id == "google_calendar_check_availability":
+            return ToolResult(True, "google_calendar", tool_id=tool_id, output={"ok": True, "busy": []}, normalized_result=NormalizedToolResult(True, tool_id, type="google_calendar.check_availability", data={}))
+        return ToolResult(True, "google_calendar", tool_id=tool_id, output={"ok": True}, normalized_result=NormalizedToolResult(True, tool_id, type="google_calendar.create_event", summary="Evento criado", data=input))
+
+    monkeypatch.setattr(svc.ToolRegistry, "execute", fake_execute)
+
+    with caplog.at_level("INFO"):
+        result = svc.run_agent_for_tenant(
+            object(),
+            uuid.uuid4(),
+            "Marque para 15:30",
+            "instr",
+            ["chamar_mcp", "responder"],
+            {"mcp_tools": [{"tool_id": "google_calendar_create_event"}], "session_state": session_state},
+            memory_context="user: Crie um compromisso amanhã às 09:00 chamado Call online\nassistant: horário ocupado",
+            options={"timezone": "America/Sao_Paulo"},
+        )
+
+    assert [call[0] for call in calls] == ["google_calendar_check_availability", "google_calendar_create_event"]
+    assert calls[1][1]["summary"] == "Call online"
+    assert calls[1][1]["start"] == "2026-06-22T15:30:00-03:00"
+    assert calls[1][1]["end"] == "2026-06-22T16:30:00-03:00"
+    assert "pending_google_calendar_create_event" not in session_state
+    assert "AI_SYSTEM_TOOL_INPUT" in caplog.text
+    assert "horário ocupado" in caplog.text
+    assert result.message == "Pronto! Agendei Call online para 2026-06-22 às 15:30."
+
+
 def test_ai_agent_google_calendar_pending_no_cancels(monkeypatch):
     session_state = {"pending_google_calendar_create_event": {"summary": "Call online", "start_time": "2026-06-22T09:00:00-03:00", "end_time": "2026-06-22T10:00:00-03:00", "timezone": "America/Sao_Paulo", "conflicting_events": []}}
     monkeypatch.setattr(svc.ToolRegistry, "execute", lambda *a, **k: (_ for _ in ()).throw(AssertionError("Tool should not be called")))
