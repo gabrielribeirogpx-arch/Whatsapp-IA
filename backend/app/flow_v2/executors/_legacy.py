@@ -2078,7 +2078,7 @@ def _agent_system_message_intent_details(message: str) -> dict[str, Any]:
     calendar_keywords = (
         r"\bmarque\b", r"\bmarcar\b", r"\bagenda\b", r"\bagende\b", r"\bagendar\b",
         r"\breservar\b", r"\bcriar\s+reuniao\b", r"\bcall\b", r"\breuniao\b",
-        r"\bcompromisso\b", r"\bhorario\b", r"\bdisponibilidade\b",
+        r"\bcompromisso\b", r"\bconsultoria\b", r"\bhorario\b", r"\bdisponibilidade\b",
     )
     time_signals = (
         r"\bamanha\b", r"\bhoje\b", r"\bdepois\s+de\s+amanha\b", r"\bdia\b",
@@ -2094,6 +2094,13 @@ def _agent_system_message_intent_details(message: str) -> dict[str, Any]:
     matched_keywords = _matched_terms(text, calendar_keywords)
     matched_time_signals = _matched_terms(text, time_signals)
     matched_availability = _matched_terms(text, availability_patterns)
+    partial_create_patterns = (
+        r"\b(?:gostaria|quero|preciso)\s+de\s+marcar\s+(?:uma\s+)?consultoria\b",
+        r"\bmarcar\s+(?:uma\s+)?consultoria\b",
+        r"\bagendar\s+(?:uma\s+)?consultoria\b",
+        r"\bconsultoria\s+com\s+\w+",
+    )
+    matched_partial_create = _matched_terms(text, partial_create_patterns)
     matched_delete = _matched_terms(text, delete_patterns)
     intent = "unknown"
     confidence = 0.0
@@ -2107,6 +2114,9 @@ def _agent_system_message_intent_details(message: str) -> dict[str, Any]:
     elif matched_keywords and matched_time_signals:
         intent = "calendar_create"
         confidence = 0.95
+    elif matched_partial_create:
+        intent = "calendar_create"
+        confidence = 0.88
     elif re.fullmatch(r"(oi+|ola|bom dia|boa tarde|boa noite|hey|hello|hi)[!?.\s]*", text):
         intent = "greeting"
         confidence = 0.9
@@ -2122,9 +2132,9 @@ def _agent_system_message_intent_details(message: str) -> dict[str, Any]:
 
     logger.info(
         "event=AI_DISPATCHER_DETERMINISTIC_INTENT text=%s matched_keywords=%s matched_time_signals=%s intent=%s confidence=%s",
-        (message or "")[:500], matched_keywords + matched_availability + matched_delete, matched_time_signals, intent, confidence,
+        (message or "")[:500], matched_keywords + matched_availability + matched_delete + matched_partial_create, matched_time_signals, intent, confidence,
     )
-    return {"intent": intent, "text": (message or "")[:500], "matched_keywords": matched_keywords + matched_availability + matched_delete, "matched_time_signals": matched_time_signals, "confidence": confidence}
+    return {"intent": intent, "text": (message or "")[:500], "matched_keywords": matched_keywords + matched_availability + matched_delete + matched_partial_create, "matched_time_signals": matched_time_signals, "confidence": confidence}
 
 
 def _agent_system_message_intent(message: str) -> str:

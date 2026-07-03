@@ -1251,3 +1251,36 @@ def test_ai_agent_google_calendar_partial_consultoria_intent_saves_context_and_r
     assert calls[1][1]["start"].endswith("18:30:00-03:00")
     assert "pending_google_calendar_create_event" not in session_state
     assert second.message.startswith("Pronto! Agendei")
+
+
+def test_calendar_partial_consultoria_payload_saves_title_participant_and_type():
+    payload, missing = svc._calendar_create_partial_payload("Gostaria de marcar uma consultoria com Gabriel")
+
+    assert missing == ["date", "time"]
+    assert payload["title"] == "Consultoria com Gabriel"
+    assert payload["summary"] == "Consultoria com Gabriel"
+    assert payload["participant"] == "Gabriel"
+    assert payload["participants"] == ["Gabriel"]
+    assert payload["event_type"] == "consultoria"
+    assert svc._calendar_missing_question(missing[0], "Gostaria de marcar uma consultoria com Gabriel") == "Claro! Em qual dia e horário você gostaria de marcar consultoria com Gabriel?"
+
+
+def test_calendar_pending_consultoria_uses_saved_title_for_followup_time():
+    pending = {
+        "title": "Consultoria com Gabriel",
+        "summary": "Consultoria com Gabriel",
+        "participant": "Gabriel",
+        "event_type": "consultoria",
+        "missing_fields": ["date", "time"],
+        "partial_intent": "create_calendar_event",
+    }
+
+    payload, missing = svc._calendar_complete_pending_partial(pending, "Amanhã às 18:30", timezone="America/Sao_Paulo")
+
+    assert missing == []
+    assert payload is not None
+    assert payload["title"] == "Consultoria com Gabriel"
+    assert payload["summary"] == "Consultoria com Gabriel"
+    assert payload["participant"] == "Gabriel"
+    assert payload["event_type"] == "consultoria"
+    assert payload["start"].endswith("18:30:00-03:00") or "T18:30:00" in payload["start"]
