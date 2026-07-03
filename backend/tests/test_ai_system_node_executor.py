@@ -88,3 +88,13 @@ def test_ai_system_aliases_are_registered_and_normalized():
     for node_type in ("ai_system", "aiSystem", "ai_agent_system", "intelligent_calendar"):
         assert node_type.strip().lower() in EXECUTOR_REGISTRY
         assert isinstance(registry.get(node_type), AiSystemNodeExecutor)
+
+
+def test_ai_system_dispatcher_routes_partial_consultoria_to_calendar_create():
+    from app.flow_v2.executors import _legacy
+
+    details = _legacy._agent_system_message_intent_details("Gostaria de marcar uma consultoria com Gabriel")
+
+    assert details["intent"] == "calendar_create"
+    assert details["confidence"] >= 0.88
+    assert any("consultoria" in term for term in details["matched_keywords"])

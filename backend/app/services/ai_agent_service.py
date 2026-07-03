@@ -609,7 +609,7 @@ def _calendar_create_partial_payload(text: str, *, now: datetime | None = None, 
         partial["participant"] = participant.group(1).strip()
         partial["participants"] = [partial["participant"]]
     if re.search(r"\bconsultoria\b", _strip_accents(raw).lower()):
-        partial["type"] = "consultoria"
+        partial["event_type"] = "consultoria"
     if day is not None and parsed_time is not None:
         hour, minute = parsed_time
         start = datetime(day.year, day.month, day.day, hour, minute, tzinfo=resolver.tz)

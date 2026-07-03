@@ -1565,21 +1565,12 @@ function FlowNodeEditorPanel({
           );
         })()}
 
-        {isAiSystem ? (
+        {!isAiSystem ? (
           <label className="flow-editor-checkbox">
-            <input
-              type="checkbox"
-              checked={!!(draft.isEnd || draft.end || draft.is_final || draft.terminal)}
-              onChange={(event) => onDraftChange({ isEnd: event.target.checked, end: event.target.checked, is_final: event.target.checked, terminal: event.target.checked })}
-            />
-            Este sistema encerra o fluxo
+            <input type="checkbox" checked={!!draft.is_terminal} onChange={(event) => onDraftChange({ is_terminal: event.target.checked })} />
+            Este é o fim do fluxo
           </label>
         ) : null}
-
-        <label className="flow-editor-checkbox">
-          <input type="checkbox" checked={!!draft.is_terminal} onChange={(event) => onDraftChange({ is_terminal: event.target.checked })} />
-          Este é o fim do fluxo
-        </label>
         {uploadError ? <div className="flow-editor-error">{uploadError}</div> : null}
         {isUploading ? <div className="flow-editor-muted">Enviando arquivo...</div> : null}
       </div>
