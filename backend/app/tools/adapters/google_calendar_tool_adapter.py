@@ -150,6 +150,7 @@ class GoogleCalendarToolAdapter:
             if tool_id == "google_calendar_create_event":
                 create_context = {**_calendar_create_start_context(args), **connection_context}
                 _log_tool("AI_AGENT_CALENDAR_CREATE_START", tenant_id=context.tenant_id, tool_name=tool_id, input=args, db=db, **create_context)
+                _log_tool("GOOGLE_CALENDAR_CREATE_EVENT_INPUT", tenant_id=context.tenant_id, tool_name=tool_id, input=args, db=db, **create_context)
                 result = service.create_event(**args)
                 action = "create_event"
             elif tool_id == "google_calendar_list_events":

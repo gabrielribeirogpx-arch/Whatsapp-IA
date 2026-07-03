@@ -750,6 +750,71 @@ def _build_calendar_pending_payload(payload: dict[str, Any], conflicting_events:
     pending["conflicting_events"] = [normalize_calendar_conflicting_event(event) for event in conflicting_events if isinstance(event, dict)]
     return pending
 
+def _calendar_create_diagnostics_payload(
+    *,
+    tool_input: Any,
+    previous_tool_result: Any = None,
+    conversation_history: Any = None,
+    intent: str = "create_event",
+) -> dict[str, Any]:
+    payload = tool_input if isinstance(tool_input, dict) else {}
+    return {
+        "intent": intent,
+        "title": payload.get("title") or payload.get("summary") or payload.get("name"),
+        "date": payload.get("date") or payload.get("date_label"),
+        "time": payload.get("time") or payload.get("start_time") or payload.get("start"),
+        "attendees": payload.get("attendees") or payload.get("guests") or payload.get("participants"),
+        "previous_tool_result": previous_tool_result,
+        "conversation_history": conversation_history,
+        "input": payload,
+    }
+
+
+def _log_ai_system_calendar_tool_input(*, tool_input: Any, previous_tool_result: Any = None, conversation_history: Any = None, intent: str = "create_event") -> None:
+    _json_log(
+        "AI_SYSTEM_TOOL_INPUT",
+        **_calendar_create_diagnostics_payload(
+            tool_input=tool_input,
+            previous_tool_result=previous_tool_result,
+            conversation_history=conversation_history,
+            intent=intent,
+        ),
+    )
+
+
+def _calendar_pending_payload_with_new_time(pending_payload: dict[str, Any], user_message: str) -> dict[str, Any] | None:
+    parsed_time, _ = _parse_calendar_target_time(user_message)
+    if parsed_time is None:
+        return None
+    start_raw = pending_payload.get("start") or pending_payload.get("start_time")
+    end_raw = pending_payload.get("end") or pending_payload.get("end_time")
+    if not start_raw:
+        return None
+    try:
+        start_dt = datetime.fromisoformat(str(start_raw).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    try:
+        end_dt = datetime.fromisoformat(str(end_raw).replace("Z", "+00:00")) if end_raw else start_dt + timedelta(hours=1)
+    except ValueError:
+        end_dt = start_dt + timedelta(hours=1)
+    duration = end_dt - start_dt
+    if duration.total_seconds() <= 0:
+        duration = timedelta(hours=1)
+    new_start = start_dt.replace(hour=parsed_time.hour, minute=parsed_time.minute, second=0, microsecond=0)
+    new_end = new_start + duration
+    updated = dict(pending_payload)
+    updated["start"] = new_start.isoformat()
+    updated["end"] = new_end.isoformat()
+    if "start_time" in updated:
+        updated["start_time"] = updated["start"]
+    if "end_time" in updated:
+        updated["end_time"] = updated["end"]
+    updated.pop("conflicting_events", None)
+    updated.pop("force_create", None)
+    updated.pop("ignore_conflicts", None)
+    return updated
+
 def _set_pending_google_calendar_create_event(session_state: dict[str, Any], payload: dict[str, Any], conflicting_events: list[dict[str, Any]], opts: dict[str, Any]) -> None:
     session_state["pending_google_calendar_create_event"] = _build_calendar_pending_payload(payload, conflicting_events, opts)
 
@@ -1530,6 +1595,54 @@ def run_agent_for_tenant(db: Session, tenant_id, input_text: str, instruction: s
     session_pending_payload = session_state.get("pending_google_calendar_create_event") if isinstance(session_state, dict) else None
     pending_action = db_pending if db_pending is not None else (_SessionPendingAction(CALENDAR_CREATE_CONFIRMATION, session_pending_payload) if isinstance(session_pending_payload, dict) else None)
     if pending_action is not None:
+        pending_payload_for_time_update = getattr(pending_action, "payload", None)
+        if (
+            str(getattr(pending_action, "action_type", "") or "") == CALENDAR_CREATE_CONFIRMATION
+            and isinstance(pending_payload_for_time_update, dict)
+        ):
+            rescheduled_payload = _calendar_pending_payload_with_new_time(pending_payload_for_time_update, str(input_text or ""))
+            if rescheduled_payload is not None:
+                _log_ai_system_calendar_tool_input(
+                    tool_input=rescheduled_payload,
+                    previous_tool_result=pending_payload_for_time_update,
+                    conversation_history=memory_context,
+                    intent="create_event",
+                )
+                try:
+                    precheck_state, _, conflicts = _precheck_google_calendar_create(tool_registry=tool_registry, tool_context=tool_context, db=db, mcp_tools=mcp_tools, payload=rescheduled_payload, opts=opts, session_state=session_state, budget=budget, pending_action_service=pending_action_service, tenant_id=tenant_id, conversation_id=conversation_id, session_id=session_id, external_user_id=external_user_id)
+                    if precheck_state == "busy":
+                        msg = _format_calendar_conflict_prompt(rescheduled_payload, conflicts)
+                        result.message = msg[:4000]
+                        result.actions.append(AgentToolAction("message", {"message": result.message}))
+                        result.status = "success"
+                        result.final_tool = "responder"
+                        result.metadata = {"mcp_tools_used": [{"tool_id": "google_calendar_check_availability", "status": "success", "tool_type": "google_calendar"}], "mcp_call_count": 1, **(budget.safe_metadata() if budget else {})}
+                        return result
+                    if precheck_state == "past_blocked":
+                        msg = _calendar_past_date_block_message(_calendar_parse_start_local(rescheduled_payload, opts))
+                        result.message = msg[:4000]
+                        result.actions.append(AgentToolAction("message", {"message": result.message}))
+                        result.status = "success"
+                        result.final_tool = "responder"
+                        result.metadata = {"blocked_tool_calls": [{"tool_id": "google_calendar_create_event", "reason": "past_date"}], **(budget.safe_metadata() if budget else {})}
+                        return result
+                    if budget is not None:
+                        budget.consume_node_tool_call()
+                    registry_result = tool_registry.execute("google_calendar", "google_calendar_create_event", rescheduled_payload, tool_context, {"mcp_tools": mcp_tools, "db": db})
+                except ExecutionBudgetExceeded:
+                    return AgentRunResult(message=fallback, status="budget_exceeded", fallback_used=True, steps_count=0, final_tool="chamar_mcp", metadata={**(budget.safe_metadata() if budget else {}), "budget_exceeded": True})
+                if db_pending is not None and conversation_id is not None:
+                    pending_action_service.consume_pending_action(tenant_id=tenant_id, conversation_id=conversation_id, pending_id=db_pending.id)
+                session_state.pop("pending_google_calendar_create_event", None)
+                normalized = registry_result.normalized_result.to_dict() if registry_result.normalized_result else (registry_result.output if isinstance(registry_result.output, dict) else {})
+                msg, calendar_status = _format_calendar_create_result_for_user(normalized, registry_result)
+                result.message = msg[:4000]
+                result.actions.append(AgentToolAction("message", {"message": result.message}))
+                result.status = "success" if calendar_status == "confirmed" else "error"
+                result.final_tool = "chamar_mcp"
+                result.tools_used.append("chamar_mcp")
+                result.metadata = {"mcp_tools_used": [{"tool_id": "google_calendar_create_event", "status": result.status, "tool_type": "google_calendar"}], "mcp_call_count": 1, **(budget.safe_metadata() if budget else {})}
+                return result
         decision = detect_pending_action_decision(str(input_text or ""))
         pending_action_type = str(getattr(pending_action, "action_type", "") or "")
         pending_id = getattr(pending_action, "id", None)
@@ -1766,6 +1879,7 @@ def run_agent_for_tenant(db: Session, tenant_id, input_text: str, instruction: s
                 return result
             if budget is not None:
                 budget.consume_node_tool_call()
+            _log_ai_system_calendar_tool_input(tool_input=deterministic_input, previous_tool_result=None, conversation_history=memory_context)
             registry_result = tool_registry.execute("google_calendar", "google_calendar_create_event", deterministic_input, tool_context, {"mcp_tools": mcp_tools, "db": db})
         except ExecutionBudgetExceeded:
             return AgentRunResult(message=fallback, status="budget_exceeded", fallback_used=True, steps_count=0, final_tool="chamar_mcp", metadata={**(budget.safe_metadata() if budget else {}), "budget_exceeded": True})
@@ -2059,6 +2173,8 @@ def run_agent_for_tenant(db: Session, tenant_id, input_text: str, instruction: s
                         break
                 if budget is not None and is_internal_tool:
                     budget.consume_node_tool_call()
+                if tool_id == "google_calendar_create_event":
+                    _log_ai_system_calendar_tool_input(tool_input=tool_input, previous_tool_result=_latest_valid_tool_result(state), conversation_history=memory_context)
                 registry_result = tool_registry.execute(routed_tool_type, tool_id, tool_input, tool_context, {"mcp_tools": mcp_tools, "db": db})
                 tool_result = {"ok": registry_result.ok, "status": "success" if registry_result.ok else "error", "result": registry_result.output, "structured_content": registry_result.structured_content, "error": registry_result.error_code, **(registry_result.metadata or {})}
                 _json_log("AI_AGENT_TOOL_CALL_RESULT", ok=tool_result.get("ok"), raw_result=tool_result.get("result"), error=tool_result.get("error"))
@@ -2173,6 +2289,7 @@ def run_agent_for_tenant(db: Session, tenant_id, input_text: str, instruction: s
             else:
                 if budget is not None:
                     budget.consume_node_tool_call()
+                _log_ai_system_calendar_tool_input(tool_input=deterministic_input, previous_tool_result=None, conversation_history=memory_context)
                 registry_result = tool_registry.execute("google_calendar", "google_calendar_create_event", deterministic_input, tool_context, {"mcp_tools": mcp_tools, "db": db})
             if registry_result is not None:
                 normalized = registry_result.normalized_result.to_dict() if registry_result.normalized_result else (registry_result.output if isinstance(registry_result.output, dict) else {})
