@@ -45,6 +45,7 @@ from app.services.llm_service import generate_answer_for_tenant
 from app.services.ai_structured_service import classify_for_tenant, extract_for_tenant
 from app.services.ai_summary_service import summarize_for_tenant
 from app.services.ai_agent_service import run_agent_for_tenant
+from app.services.ai_system_pending_event import message_has_date_or_time, pending_event_lookup
 from app.services.supervisor_service import FALLBACK_MESSAGE as SUPERVISOR_FALLBACK_MESSAGE, MAX_SUPERVISOR_DEPTH, build_available_agents, decide_supervisor_agent, get_supervisor_context
 from app.services.context_builder_service import build_context, context_builder_enabled
 from app.services.long_term_memory_service import store_fact
@@ -1957,6 +1958,7 @@ class AiAgentNodeExecutor(AiResponseNodeExecutor):
             "max_mcp_calls": max_mcp_calls,
             "node_id": node_id,
             "selected_tool_ids": mcp_tool_ids,
+            "session_state": session.context if isinstance(getattr(session, "context", None), dict) else {},
         }
         def _execute_agent_node_tool(tool_config, tool_input, reason):
             from app.services.ai_agent_node_tool_service import execute_node_tool
@@ -2143,7 +2145,18 @@ def _agent_system_message_intent(message: str) -> str:
 
 def _execute_ai_dispatcher(executor: BaseNodeExecutor, db, *, snapshot, session, node, runtime_input) -> NodeExecutionResult:
     node_id = str(node["id"])
-    deterministic = _agent_system_message_intent_details(runtime_input.message_text or "")
+    context = session.context if isinstance(getattr(session, "context", None), dict) else {}
+    logger.info("event=AI_SYSTEM_PENDING_EVENT_LOOKUP node_id=%s context_keys=%s", node_id, sorted(context.keys()))
+    pending_key, pending_payload = pending_event_lookup(context)
+    if pending_payload is not None:
+        logger.info("event=AI_SYSTEM_PENDING_EVENT_FOUND node_id=%s key=%s", node_id, pending_key)
+        if message_has_date_or_time(runtime_input.message_text or ""):
+            deterministic = {"intent": "calendar_create", "text": (runtime_input.message_text or "")[:500], "matched_keywords": ["pending_event"], "matched_time_signals": ["pending_event_continuation"], "confidence": 1.0}
+        else:
+            deterministic = _agent_system_message_intent_details(runtime_input.message_text or "")
+    else:
+        logger.info("event=AI_SYSTEM_PENDING_EVENT_NOT_FOUND node_id=%s context_keys=%s", node_id, sorted(context.keys()))
+        deterministic = _agent_system_message_intent_details(runtime_input.message_text or "")
     executor.event_store.append(db, session=session, event_type=FlowV2EventType.OUTPUT_EMITTED, node_id=node_id, payload={"analytics_event": "AI_DISPATCHER_DETERMINISTIC_INTENT", **deterministic})
     raw_intent = deterministic.get("intent") or "unknown"
     intent = _normalize_ai_dispatcher_intent(raw_intent)
@@ -2188,6 +2201,10 @@ class AiSafeFallbackNodeExecutor(BaseNodeExecutor):
         node_id = str(node["id"])
         data = self._node_data(node)
         text = str(data.get("fallback_message") or data.get("instruction") or "Não consegui entender totalmente. Você quer agendar algo, tirar uma dúvida ou falar com um atendente?")
+        context = session.context if isinstance(getattr(session, "context", None), dict) else {}
+        _, pending_payload = pending_event_lookup(context)
+        logger.info("event=AI_SYSTEM_FALLBACK_CONTEXT_KEYS node_id=%s context_keys=%s", node_id, sorted(context.keys()))
+        logger.info("event=AI_SYSTEM_FALLBACK_PENDING_EVENT_PRESENT node_id=%s present=%s", node_id, pending_payload is not None)
         logger.info("event=AI_SAFE_FALLBACK_USED node_id=%s", node_id)
         action = SendMessageAction(tenant_id=session.tenant_id, session_id=session.id, external_user_id=runtime_input.external_user_id, conversation_id=runtime_input.conversation_id, contact_id=runtime_input.contact_id, text=text, metadata={**runtime_input.metadata, "node_id": node_id, "intent": "ai_safe_fallback"})
         return NodeExecutionResult(actions=(action,), next_node_id=self._default_next_or_terminal(db, snapshot=snapshot, session=session, node_id=node_id), status="complete")

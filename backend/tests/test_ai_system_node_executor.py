@@ -98,3 +98,43 @@ def test_ai_system_dispatcher_routes_partial_consultoria_to_calendar_create():
     assert details["intent"] == "calendar_create"
     assert details["confidence"] >= 0.88
     assert any("consultoria" in term for term in details["matched_keywords"])
+
+
+
+def test_ai_system_dispatcher_routes_pending_datetime_followup_to_calendar_create():
+    from app.flow_v2.executors import _legacy
+
+    tenant_id = uuid4()
+    snapshot = FlowV2Snapshot(
+        flow_version_id=uuid4(),
+        tenant_id=tenant_id,
+        hash="h",
+        nodes=(
+            {"id": "dispatcher", "type": "ai_dispatcher", "data": {}},
+            {"id": "calendar", "type": "ai_calendar_agent", "data": {}},
+            {"id": "fallback", "type": "ai_safe_fallback", "data": {}},
+        ),
+        edges=(
+            {"id": "e-calendar", "source": "dispatcher", "target": "calendar", "sourceHandle": "calendar_create"},
+            {"id": "e-unknown", "source": "dispatcher", "target": "fallback", "sourceHandle": "unknown"},
+        ),
+        start_node_id="dispatcher",
+    )
+    event_store = _EventStore()
+    executor = _legacy.AiDispatcherNodeExecutor(event_store=event_store, transition_resolver=TransitionResolver(event_store))
+    session = SimpleNamespace(
+        id=uuid4(),
+        tenant_id=tenant_id,
+        flow_version_id=snapshot.flow_version_id,
+        context={"pending_event": {"title": "Consultoria com Gabriel", "missing_fields": ["date", "time"]}},
+        current_node_id="dispatcher",
+        status="running",
+        last_event_index=0,
+    )
+    runtime_input = RuntimeInput(tenant_id=tenant_id, flow_version_id=snapshot.flow_version_id, external_user_id="whatsapp:+5511999999999", message_text="amanhã às 20:30")
+
+    result = executor.execute(None, snapshot=snapshot, session=session, node=snapshot.nodes[0], runtime_input=runtime_input)
+
+    assert result.intent == "calendar_create"
+    assert result.next_source_handle == "calendar_create"
+    assert result.next_node_id == "calendar"
