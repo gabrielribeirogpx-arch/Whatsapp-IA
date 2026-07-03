@@ -1228,7 +1228,10 @@ def test_ai_agent_google_calendar_partial_consultoria_intent_saves_context_and_r
     assert first.fallback_used is False
     assert "dia" in first.message.lower()
     assert "horário" in first.message.lower()
-    pending = session_state["pending_google_calendar_create_event"]
+    pending = session_state["pending_event"]
+    assert pending is session_state["pending_google_calendar_create_event"]
+    assert pending is session_state["pending_calendar_event"]
+    assert pending is session_state["partial_calendar_event"]
     assert pending["partial_intent"] == "create_calendar_event"
     assert pending["title"] == "Consultoria com Gabriel"
     assert pending["participant"] == "Gabriel"
@@ -1250,7 +1253,11 @@ def test_ai_agent_google_calendar_partial_consultoria_intent_saves_context_and_r
     assert calls[1][1]["title"] == "Consultoria com Gabriel"
     assert calls[1][1]["start"].endswith("18:30:00-03:00")
     assert "pending_google_calendar_create_event" not in session_state
-    assert second.message.startswith("Pronto! Agendei")
+    assert "pending_event" not in session_state
+    assert "pending_calendar_event" not in session_state
+    assert "partial_calendar_event" not in session_state
+    assert "Não consegui entender totalmente" not in second.message
+    assert "Consultoria com Gabriel" in second.message
 
 
 def test_calendar_partial_consultoria_payload_saves_title_participant_and_type():

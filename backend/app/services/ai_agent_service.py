@@ -24,6 +24,7 @@ from app.context_engine import UnifiedContextEngine
 from app.services.circuit_breaker_service import CircuitBreakerOpen, check_circuit, record_failure, record_success
 from app.services.execution_budget_service import ExecutionBudgetExceeded, ExecutionBudget
 from app.services.long_term_memory_service import ALLOWED_FACT_TYPES, SECRET_RE, store_fact
+from app.services.ai_system_pending_event import clear_pending_event, pending_event_lookup, set_pending_event
 from app.services.pending_action_service import CALENDAR_CREATE_CONFIRMATION, EMAIL_SEND_CONFIRMATION, GOOGLE_SHEETS_APPEND_ROW_CONFIRMATION, GOOGLE_SHEETS_UPDATE_ROW_CONFIRMATION, SUITABLE_CREATE_ORDER_CONFIRMATION, PendingActionHandlerRegistry, PendingActionService, detect_pending_action_decision, format_pending_calendar_create_conflict_message, normalize_calendar_conflicting_event
 from app.tools import ToolContext, ToolRegistry
 from app.tools.adapters.google_calendar_tool_adapter import GOOGLE_CALENDAR_TOOL_IDS, GoogleCalendarToolAdapter, google_calendar_tool_definitions
@@ -1469,7 +1470,8 @@ def _handle_calendar_create_confirmation(*, tenant_id: Any, conversation_id: Any
     if calendar_status == "confirmed":
         if pending_action_service is not None and db_pending is not None and conversation_id is not None:
             pending_action_service.consume_pending_action(tenant_id=tenant_id, conversation_id=conversation_id, pending_id=getattr(db_pending, "id", None))
-        session_state.pop("pending_google_calendar_create_event", None)
+        clear_pending_event(session_state)
+        _json_log("AI_SYSTEM_PENDING_EVENT_CLEARED")
     _json_log("AI_AGENT_CALENDAR_CREATE_CONFIRMED" if calendar_status == "confirmed" else "AI_AGENT_CALENDAR_CREATE_INCOMPLETE", status=calendar_status, event_id=_calendar_event_data(normalized).get("event_id"))
     return message
 
@@ -1666,10 +1668,16 @@ def run_agent_for_tenant(db: Session, tenant_id, input_text: str, instruction: s
     conversation_id, session_id, external_user_id = _pending_context(tool_configs, opts)
     pending_action_service = PendingActionService(db)
     db_pending = pending_action_service.get_pending_action(tenant_id=tenant_id, conversation_id=conversation_id) if conversation_id is not None else None
-    session_pending_payload = session_state.get("pending_google_calendar_create_event") if isinstance(session_state, dict) else None
+    _json_log("AI_SYSTEM_PENDING_EVENT_LOOKUP", context_keys=sorted(session_state.keys()) if isinstance(session_state, dict) else [])
+    pending_key, aliased_pending_payload = pending_event_lookup(session_state if isinstance(session_state, dict) else {})
+    if aliased_pending_payload is not None:
+        _json_log("AI_SYSTEM_PENDING_EVENT_FOUND", key=pending_key)
+    else:
+        _json_log("AI_SYSTEM_PENDING_EVENT_NOT_FOUND", context_keys=sorted(session_state.keys()) if isinstance(session_state, dict) else [])
+    session_pending_payload = aliased_pending_payload if isinstance(aliased_pending_payload, dict) else (session_state.get("pending_google_calendar_create_event") if isinstance(session_state, dict) else None)
     pending_action = db_pending if db_pending is not None else (_SessionPendingAction(CALENDAR_CREATE_CONFIRMATION, session_pending_payload) if isinstance(session_pending_payload, dict) else None)
     if pending_action is not None:
-        pending_payload_for_time_update = getattr(pending_action, "payload", None)
+        pending_payload_for_time_update = getattr(pending_action, "payload", None) or getattr(pending_action, "payload_json", None)
         if (
             str(getattr(pending_action, "action_type", "") or "") == CALENDAR_CREATE_CONFIRMATION
             and isinstance(pending_payload_for_time_update, dict)
@@ -1726,7 +1734,9 @@ def run_agent_for_tenant(db: Session, tenant_id, input_text: str, instruction: s
                     return AgentRunResult(message=fallback, status="budget_exceeded", fallback_used=True, steps_count=0, final_tool="chamar_mcp", metadata={**(budget.safe_metadata() if budget else {}), "budget_exceeded": True})
                 if db_pending is not None and conversation_id is not None:
                     pending_action_service.consume_pending_action(tenant_id=tenant_id, conversation_id=conversation_id, pending_id=db_pending.id)
-                session_state.pop("pending_google_calendar_create_event", None)
+                clear_pending_event(session_state)
+                _json_log("AI_SYSTEM_PENDING_EVENT_COMPLETED", title=rescheduled_payload.get("summary") or rescheduled_payload.get("title"), start=rescheduled_payload.get("start_time") or rescheduled_payload.get("start"))
+                _json_log("AI_SYSTEM_PENDING_EVENT_CLEARED")
                 normalized = registry_result.normalized_result.to_dict() if registry_result.normalized_result else (registry_result.output if isinstance(registry_result.output, dict) else {})
                 msg, calendar_status = _format_calendar_create_result_for_user(normalized, registry_result)
                 result.message = msg[:4000]
@@ -1743,7 +1753,8 @@ def run_agent_for_tenant(db: Session, tenant_id, input_text: str, instruction: s
         if decision == "cancel":
             if db_pending is not None and conversation_id is not None:
                 pending_action_service.cancel_pending_action(tenant_id=tenant_id, conversation_id=conversation_id, pending_id=db_pending.id)
-            session_state.pop("pending_google_calendar_create_event", None)
+            clear_pending_event(session_state)
+            _json_log("AI_SYSTEM_PENDING_EVENT_CLEARED")
             msg = "Tudo bem, operação cancelada."
             result.message = msg
             result.actions.append(AgentToolAction("message", {"message": msg}))
@@ -1945,7 +1956,7 @@ def run_agent_for_tenant(db: Session, tenant_id, input_text: str, instruction: s
         _json_log("AI_AGENT_DETERMINISTIC_CALENDAR_MATCH", node_id=str(opts.get("node_id") or opts.get("agent_node_id") or ""), missing=deterministic_missing, tool_id="google_calendar_create_event", matched=deterministic_input is not None)
         if deterministic_missing:
             pending_payload = {**(deterministic_input or {}), "partial_intent": "create_calendar_event", "missing_fields": partial_missing_fields}
-            session_state["pending_google_calendar_create_event"] = pending_payload
+            set_pending_event(session_state, pending_payload)
             if conversation_id is not None:
                 pending_action_service.save_pending_action(tenant_id=tenant_id, conversation_id=conversation_id, session_id=session_id, external_user_id=external_user_id, action_type=CALENDAR_CREATE_CONFIRMATION, payload=pending_payload, metadata={"source": "ai_agent", "tool_id": "google_calendar_create_event", "partial_intent": True})
             _json_log("AI_SYSTEM_PARTIAL_INTENT_DETECTED", intent="create_calendar_event", payload=pending_payload)
