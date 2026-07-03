@@ -517,6 +517,8 @@ def _calendar_create_intent_missing(text: str, *, now: datetime | None = None, t
         r"\breserve\s+hor[aá]rio\b",
         r"\bcriar?\s+(?:uma\s+)?consulta\b",
         r"\bcrie\s+(?:uma\s+)?consulta\b",
+        r"\bmarcar?\s+(?:uma\s+)?consultoria\b",
+        r"\bagendar?\s+(?:uma\s+)?consultoria\b",
     ))
     if not clear_intent:
         return None, None
@@ -551,6 +553,7 @@ def _infer_calendar_event_title(text: str) -> str:
     raw_title = str(text or "").strip()
     value = raw_title
     value = re.sub(r"\b(?:ol[aá]|oi|por favor)\b", " ", value, flags=re.I)
+    value = re.sub(r"\b(?:gostaria|quero|preciso)\s+de\b", " ", value, flags=re.I)
     value = re.sub(r"\b(?:agende|agenda|agendar|marque|marcar|crie|criar)\b", " ", value, flags=re.I)
     value = re.sub(r"\b(?:um|uma|o|a)\b", " ", value, flags=re.I)
     value = re.sub(r"\bpara\s+(?:hoje|amanh[aã]|depois\s+de\s+amanh[aã])\b", " ", value, flags=re.I)
@@ -582,6 +585,74 @@ def _calendar_title_case(value: str) -> str:
         else:
             titled.append(clean[:1].upper() + clean[1:])
     return " ".join(titled)
+
+
+def _calendar_create_partial_payload(text: str, *, now: datetime | None = None, timezone: str = "America/Sao_Paulo") -> tuple[dict[str, Any] | None, list[str]]:
+    raw = str(text or "").strip()
+    payload, missing = _calendar_create_intent_missing(raw, now=now, timezone=timezone)
+    if payload is not None:
+        return payload, []
+    if missing not in {"date", "time", "title"}:
+        return None, []
+    title = _infer_calendar_event_title(raw)
+    if not title and missing != "title":
+        return None, []
+    resolver = _calendar_resolver(now=now, timezone=timezone)
+    day, date_label = _parse_calendar_target_date(raw, now=resolver.now, timezone=timezone)
+    parsed_time, time_label = _parse_calendar_target_time(raw)
+    partial: dict[str, Any] = {"timezone": resolver.timezone}
+    if title:
+        partial["title"] = _calendar_title_case(title)
+        partial["summary"] = partial["title"]
+    participant = re.search(r"\bcom\s+([A-ZÁÉÍÓÚÂÊÔÃÕÇ][\wÁÉÍÓÚÂÊÔÃÕÇáéíóúâêôãõç'-]+(?:\s+[A-ZÁÉÍÓÚÂÊÔÃÕÇ][\wÁÉÍÓÚÂÊÔÃÕÇáéíóúâêôãõç'-]+){0,2})", raw)
+    if participant:
+        partial["participant"] = participant.group(1).strip()
+        partial["participants"] = [partial["participant"]]
+    if re.search(r"\bconsultoria\b", _strip_accents(raw).lower()):
+        partial["type"] = "consultoria"
+    if day is not None and parsed_time is not None:
+        hour, minute = parsed_time
+        start = datetime(day.year, day.month, day.day, hour, minute, tzinfo=resolver.tz)
+        partial.update({"start": start.isoformat(), "end": (start + timedelta(hours=1)).isoformat(), "date_label": date_label, "time_label": time_label})
+    missing_fields = []
+    if day is None:
+        missing_fields.append("date")
+    if parsed_time is None:
+        missing_fields.append("time")
+    if not title:
+        missing_fields.append("title")
+    return partial, missing_fields
+
+def _calendar_complete_pending_partial(pending_payload: dict[str, Any], user_message: str, *, timezone: str) -> tuple[dict[str, Any] | None, list[str]]:
+    resolver = _calendar_resolver(timezone=timezone)
+    day, date_label = _parse_calendar_target_date(user_message, now=resolver.now, timezone=timezone)
+    parsed_time, time_label = _parse_calendar_target_time(user_message)
+    start_raw = pending_payload.get("start") or pending_payload.get("start_time")
+    if (day is None or parsed_time is None) and start_raw:
+        try:
+            existing = datetime.fromisoformat(str(start_raw).replace("Z", "+00:00"))
+            day = day or existing.date()
+            parsed_time = parsed_time or (existing.hour, existing.minute)
+        except ValueError:
+            pass
+    missing = []
+    if day is None:
+        missing.append("date")
+    if parsed_time is None:
+        missing.append("time")
+    title = str(pending_payload.get("title") or pending_payload.get("summary") or "").strip()
+    if not title:
+        title = _infer_calendar_event_title(user_message)
+    if not title:
+        missing.append("title")
+    if missing:
+        return None, missing
+    hour, minute = parsed_time
+    start = datetime(day.year, day.month, day.day, hour, minute, tzinfo=resolver.tz)
+    payload = dict(pending_payload)
+    payload.update({"title": _calendar_title_case(title), "summary": _calendar_title_case(title), "start": start.isoformat(), "end": (start + timedelta(hours=1)).isoformat(), "timezone": resolver.timezone, "date_label": date_label or start.date().isoformat(), "time_label": time_label or start.strftime("%H:%M")})
+    payload.pop("missing_fields", None); payload.pop("partial_intent", None); payload.pop("conflicting_events", None)
+    return payload, []
 
 def _extract_calendar_create_event_input(text: str, *, now: datetime | None = None, timezone: str = "America/Sao_Paulo") -> dict[str, Any] | None:
     payload, missing = _calendar_create_intent_missing(text, now=now, timezone=timezone)
@@ -637,6 +708,9 @@ def _calendar_missing_question(missing: str, text: str) -> str:
     if missing == "date" and title and parsed_time:
         return "📅 Será hoje ou amanhã?"
     if missing in {"date", "time"}:
+        if title:
+            subject = title[:1].lower() + title[1:]
+            return f"Claro! Em qual dia e horário você gostaria de marcar {subject}?"
         return "Para qual dia e horário você deseja agendar?"
     return "Qual nome do compromisso?"
 
@@ -1600,7 +1674,23 @@ def run_agent_for_tenant(db: Session, tenant_id, input_text: str, instruction: s
             str(getattr(pending_action, "action_type", "") or "") == CALENDAR_CREATE_CONFIRMATION
             and isinstance(pending_payload_for_time_update, dict)
         ):
-            rescheduled_payload = _calendar_pending_payload_with_new_time(pending_payload_for_time_update, str(input_text or ""))
+            resumed_partial_event = False
+            if pending_payload_for_time_update.get("partial_intent") == "create_calendar_event":
+                resumed_payload, still_missing = _calendar_complete_pending_partial(pending_payload_for_time_update, str(input_text or ""), timezone=calendar_timezone)
+                _json_log("AI_SYSTEM_PENDING_EVENT_RESUMED", pending=pending_payload_for_time_update, missing_fields=still_missing, completed=resumed_payload is not None)
+                if resumed_payload is None:
+                    _json_log("AI_SYSTEM_MISSING_FIELDS", missing_fields=still_missing, intent="create_calendar_event")
+                    question = _calendar_missing_question(still_missing[0] if still_missing else "date", str(input_text or ""))
+                    result.message = question
+                    result.actions.append(AgentToolAction("message", {"message": question}))
+                    result.status = "success"
+                    result.final_tool = "responder"
+                    result.metadata = {**(budget.safe_metadata() if budget else {}), "deterministic_calendar_missing": still_missing}
+                    return result
+                rescheduled_payload = resumed_payload
+                resumed_partial_event = True
+            else:
+                rescheduled_payload = _calendar_pending_payload_with_new_time(pending_payload_for_time_update, str(input_text or ""))
             if rescheduled_payload is not None:
                 _log_ai_system_calendar_tool_input(
                     tool_input=rescheduled_payload,
@@ -1626,6 +1716,9 @@ def run_agent_for_tenant(db: Session, tenant_id, input_text: str, instruction: s
                         result.final_tool = "responder"
                         result.metadata = {"blocked_tool_calls": [{"tool_id": "google_calendar_create_event", "reason": "past_date"}], **(budget.safe_metadata() if budget else {})}
                         return result
+                    if resumed_partial_event:
+                        rescheduled_payload.pop("ignore_conflicts", None)
+                        rescheduled_payload.pop("force_create", None)
                     if budget is not None:
                         budget.consume_node_tool_call()
                     registry_result = tool_registry.execute("google_calendar", "google_calendar_create_event", rescheduled_payload, tool_context, {"mcp_tools": mcp_tools, "db": db})
@@ -1846,16 +1939,24 @@ def run_agent_for_tenant(db: Session, tenant_id, input_text: str, instruction: s
         record_event(db, trace, TraceEventType.AI_AGENT_FINISHED, duration_ms=total_latency_ms, metadata={"status": result.status, "final_tool": result.final_tool, "tools_used": result.tools_used, "deterministic": True})
         return result
     create_match = next((t for t in mcp_tools if str(t.get("tool_id") or t.get("id")) == "google_calendar_create_event"), None)
-    deterministic_input, deterministic_missing = _calendar_create_intent_missing(str(input_text or ""), timezone=str(opts.get("timezone") or "America/Sao_Paulo"))
+    deterministic_input, partial_missing_fields = _calendar_create_partial_payload(str(input_text or ""), timezone=str(opts.get("timezone") or "America/Sao_Paulo"))
+    deterministic_missing = partial_missing_fields[0] if partial_missing_fields else None
     if create_match is not None and (deterministic_input is not None or deterministic_missing is not None):
         _json_log("AI_AGENT_DETERMINISTIC_CALENDAR_MATCH", node_id=str(opts.get("node_id") or opts.get("agent_node_id") or ""), missing=deterministic_missing, tool_id="google_calendar_create_event", matched=deterministic_input is not None)
         if deterministic_missing:
-            question = "Qual horário você deseja agendar?" if deterministic_missing in {"date", "time"} else "Qual nome do compromisso?"
+            pending_payload = {**(deterministic_input or {}), "partial_intent": "create_calendar_event", "missing_fields": partial_missing_fields}
+            session_state["pending_google_calendar_create_event"] = pending_payload
+            if conversation_id is not None:
+                pending_action_service.save_pending_action(tenant_id=tenant_id, conversation_id=conversation_id, session_id=session_id, external_user_id=external_user_id, action_type=CALENDAR_CREATE_CONFIRMATION, payload=pending_payload, metadata={"source": "ai_agent", "tool_id": "google_calendar_create_event", "partial_intent": True})
+            _json_log("AI_SYSTEM_PARTIAL_INTENT_DETECTED", intent="create_calendar_event", payload=pending_payload)
+            _json_log("AI_SYSTEM_MISSING_FIELDS", missing_fields=partial_missing_fields, intent="create_calendar_event")
+            _json_log("AI_SYSTEM_PENDING_EVENT_SAVED", pending=pending_payload)
+            question = _calendar_missing_question(deterministic_missing, str(input_text or ""))
             result.message = question
             result.actions.append(AgentToolAction("message", {"message": question}))
             result.status = "success"
             result.final_tool = "responder"
-            result.metadata = {**(budget.safe_metadata() if budget else {}), "deterministic_calendar_missing": deterministic_missing}
+            result.metadata = {**(budget.safe_metadata() if budget else {}), "deterministic_calendar_missing": partial_missing_fields, "partial_intent": "create_calendar_event"}
             _json_log("AI_AGENT_FINAL_RESPONSE", response=question, fallback=False, deterministic=True)
             return result
         _json_log("AI_AGENT_DETERMINISTIC_CALENDAR_EXECUTE", tool_id="google_calendar_create_event", input=deterministic_input)

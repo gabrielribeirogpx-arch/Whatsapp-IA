@@ -1192,3 +1192,62 @@ def test_calendar_formatter_accepts_google_calendar_variations():
     assert "Operação do Google Calendar concluída" not in msg
     assert "Reunião de Negócios com Vitor" in msg
     assert "14:00" in msg
+
+
+def test_ai_agent_google_calendar_partial_consultoria_intent_saves_context_and_resumes(monkeypatch):
+    from app.tools.base import NormalizedToolResult, ToolResult
+
+    calls = []
+    session_state = {}
+
+    def fake_execute(self, tool_type, tool_id, input, context, config=None):
+        calls.append((tool_id, dict(input)))
+        if tool_id == "google_calendar_check_availability":
+            return ToolResult(True, "google_calendar", tool_id=tool_id, output={"ok": True, "busy": []}, normalized_result=NormalizedToolResult(True, tool_id, type="google_calendar.check_availability", data={}))
+        assert tool_id == "google_calendar_create_event"
+        return ToolResult(
+            True,
+            "google_calendar",
+            tool_id=tool_id,
+            output={"ok": True, "event_id": "evt_123", "title": input.get("title"), "start": input.get("start"), "end": input.get("end")},
+            normalized_result=NormalizedToolResult(True, tool_id, type="google_calendar.create_event", summary="Evento criado", data={"event_id": "evt_123", "title": input.get("title"), "start": input.get("start"), "end": input.get("end")}),
+        )
+
+    monkeypatch.setattr(svc.ToolRegistry, "execute", fake_execute)
+
+    first = svc.run_agent_for_tenant(
+        object(),
+        uuid.uuid4(),
+        "Gostaria de marcar uma consultoria com Gabriel",
+        "instr",
+        ["chamar_mcp", "responder"],
+        {"mcp_tools": [{"tool_id": "google_calendar_create_event"}], "session_state": session_state},
+        options={"timezone": "America/Sao_Paulo"},
+    )
+
+    assert first.fallback_used is False
+    assert "dia" in first.message.lower()
+    assert "horário" in first.message.lower()
+    pending = session_state["pending_google_calendar_create_event"]
+    assert pending["partial_intent"] == "create_calendar_event"
+    assert pending["title"] == "Consultoria com Gabriel"
+    assert pending["participant"] == "Gabriel"
+    assert pending["type"] == "consultoria"
+    assert pending["missing_fields"] == ["date", "time"]
+    assert calls == []
+
+    second = svc.run_agent_for_tenant(
+        object(),
+        uuid.uuid4(),
+        "Amanhã às 18:30",
+        "instr",
+        ["chamar_mcp", "responder"],
+        {"mcp_tools": [{"tool_id": "google_calendar_create_event"}], "session_state": session_state},
+        options={"timezone": "America/Sao_Paulo"},
+    )
+
+    assert [call[0] for call in calls] == ["google_calendar_check_availability", "google_calendar_create_event"]
+    assert calls[1][1]["title"] == "Consultoria com Gabriel"
+    assert calls[1][1]["start"].endswith("18:30:00-03:00")
+    assert "pending_google_calendar_create_event" not in session_state
+    assert second.message.startswith("Pronto! Agendei")
