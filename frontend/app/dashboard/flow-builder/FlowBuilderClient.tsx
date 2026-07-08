@@ -110,13 +110,93 @@ const getFlowDisplayName = (flow?: FlowListOption | null) => flow?.name || (flow
 const isPublishedFlow = (flow: FlowListOption) => flow.is_published === true || flow.status === 'published' || flow.status === 'active' || flow.is_active === true;
 const getPublishedVersionId = (flow: FlowListOption) => flow.published_version_id || flow.flow_version_id || flow.version_id || null;
 
+const AI_STORE_CATEGORIES = ['Recomendados', 'Atendimento', 'Vendas', 'Produtividade', 'Conhecimento', 'Automação', 'Personalizados'] as const;
+
 const AI_SYSTEM_CARDS = [
-  { id: 'ai_calendar_agent_system', title: '📅 Agenda Inteligente', subtitle: 'Dispatcher, saudação, agenda e fallback seguro.' },
-  { id: 'ai_support_agent_system', title: '💬 Atendimento Inteligente', subtitle: 'Triagem e respostas de atendimento.' },
-  { id: 'ai_sales_agent_system', title: '💼 Comercial Inteligente', subtitle: 'Qualificação comercial e CRM.' },
-  { id: 'ai_rag_agent_system', title: '📚 Conhecimento (RAG)', subtitle: 'Respostas com base de conhecimento.' },
-  { id: 'ai_mcp_advanced_system', title: '🛠 MCP Automation', subtitle: 'Automação com ferramentas MCP.' },
-  { id: 'ai_custom_system', title: '➕ Sistema Personalizado', subtitle: 'Comece com um sistema IA em branco.' },
+  {
+    id: 'ai_calendar_agent_system',
+    icon: '📅',
+    title: 'Agenda Inteligente',
+    subtitle: 'Atenda pedidos de agenda, consulte disponibilidade e crie compromissos com uma experiência natural no WhatsApp.',
+    category: 'Produtividade',
+    setupTime: '2 min',
+    difficulty: 'Fácil',
+    integrations: ['Google Calendar', 'WhatsApp'],
+    capabilities: ['Criar eventos', 'Consultar agenda', 'Cancelar compromissos', 'Responder saudações'],
+    recommended: true,
+    productionReady: true,
+    details: 'Sistema com roteamento de intenção, saudação, agente de agenda e resposta segura para casos não reconhecidos.',
+  },
+  {
+    id: 'ai_support_agent_system',
+    icon: '💬',
+    title: 'Atendimento Inteligente',
+    subtitle: 'Organize a primeira resposta, resolva dúvidas frequentes e encaminhe conversas importantes para o time humano.',
+    category: 'Atendimento',
+    setupTime: '3 min',
+    difficulty: 'Fácil',
+    integrations: ['WhatsApp', 'Atendimento humano'],
+    capabilities: ['Triagem inicial', 'Respostas rápidas', 'Handoff humano', 'Padronização de atendimento'],
+    recommended: true,
+    productionReady: false,
+    details: 'Template inicial para fluxos de suporte e relacionamento com clientes.',
+  },
+  {
+    id: 'ai_sales_agent_system',
+    icon: '💼',
+    title: 'Comercial Inteligente',
+    subtitle: 'Capture oportunidades, qualifique leads e mantenha seu CRM atualizado durante a conversa.',
+    category: 'Vendas',
+    setupTime: '4 min',
+    difficulty: 'Intermediário',
+    integrations: ['CRM', 'WhatsApp'],
+    capabilities: ['Qualificar leads', 'Registrar interesse', 'Atualizar CRM', 'Priorizar oportunidades'],
+    recommended: true,
+    productionReady: false,
+    details: 'Template comercial preparado para jornadas de prospecção e qualificação.',
+  },
+  {
+    id: 'ai_rag_agent_system',
+    icon: '📚',
+    title: 'Conhecimento (RAG)',
+    subtitle: 'Responda perguntas usando documentos, políticas, conteúdos internos e bases de conhecimento.',
+    category: 'Conhecimento',
+    setupTime: '5 min',
+    difficulty: 'Intermediário',
+    integrations: ['Documentos', 'Base de conhecimento'],
+    capabilities: ['Buscar respostas', 'Usar documentos', 'Reduzir retrabalho', 'Apoiar suporte'],
+    recommended: false,
+    productionReady: false,
+    details: 'Template inicial para atendimento orientado por conteúdo e consultas a conhecimento.',
+  },
+  {
+    id: 'ai_mcp_advanced_system',
+    icon: '🛠',
+    title: 'MCP Automation',
+    subtitle: 'Conecte ferramentas externas e acione automações para processos operacionais sob demanda.',
+    category: 'Automação',
+    setupTime: '6 min',
+    difficulty: 'Avançado',
+    integrations: ['MCP', 'Ferramentas externas'],
+    capabilities: ['Executar ferramentas', 'Orquestrar tarefas', 'Conectar sistemas', 'Automatizar rotinas'],
+    recommended: false,
+    productionReady: false,
+    details: 'Template para automações com ferramentas MCP conectadas ao sistema.',
+  },
+  {
+    id: 'ai_custom_system',
+    icon: '➕',
+    title: 'Sistema Personalizado',
+    subtitle: 'Comece com uma estrutura em branco e adapte seu próprio sistema inteligente para o negócio.',
+    category: 'Personalizados',
+    setupTime: '1 min',
+    difficulty: 'Flexível',
+    integrations: ['Personalizável'],
+    capabilities: ['Partida rápida', 'Arquitetura livre', 'Ajuste por caso de uso', 'Expansão gradual'],
+    recommended: false,
+    productionReady: false,
+    details: 'Opção para criar uma experiência personalizada mantendo o mesmo fluxo de inserção no canvas.',
+  },
 ] as const;
 
 const normalizeFlowHandleId = (value: unknown) => String(value ?? '').trim().toLowerCase();
@@ -1608,6 +1688,8 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
   const [activeFlowId, setActiveFlowId] = useState<string | null>(null);
   const [isFlowSelectOpen, setIsFlowSelectOpen] = useState(false);
   const [isAgentSystemModalOpen, setIsAgentSystemModalOpen] = useState(false);
+  const [aiStoreSearch, setAiStoreSearch] = useState('');
+  const [aiStoreCategory, setAiStoreCategory] = useState<(typeof AI_STORE_CATEGORIES)[number]>('Recomendados');
   console.log('FLOW SELECIONADO:', selectedFlowId);
   console.log('FLOW ATIVO:', activeFlowId);
   console.log('FLOWS DISPONÍVEIS:', flows);
@@ -2791,6 +2873,15 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
   }, [rfInstance, setEdges, setNodes, toast, toggleStartNode, updateNodeData]);
 
 
+  const filteredAiStoreCards = useMemo(() => {
+    const normalizedSearch = aiStoreSearch.trim().toLowerCase();
+    return AI_SYSTEM_CARDS.filter((card) => {
+      const matchesCategory = aiStoreCategory === 'Recomendados' ? card.recommended : card.category === aiStoreCategory;
+      const haystack = [card.title, card.subtitle, card.category, ...card.integrations, ...card.capabilities].join(' ').toLowerCase();
+      return matchesCategory && (!normalizedSearch || haystack.includes(normalizedSearch));
+    });
+  }, [aiStoreCategory, aiStoreSearch]);
+
   const handleInsertAgentSystemTemplate = useCallback((templateId: string) => {
     const template = AGENT_SYSTEM_TEMPLATES.find((item) => item.id === templateId) || AGENT_SYSTEM_TEMPLATES[0];
     const card = AI_SYSTEM_CARDS.find((item) => item.id === templateId);
@@ -3795,31 +3886,82 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
       </main>
 
       {isAgentSystemModalOpen && (
-        <div className="flow-modal-backdrop" role="dialog" aria-modal="true" aria-label="Selecionar Sistema de Agentes">
-          <div className="flow-modal-card" style={{ maxWidth: 920 }}>
-            <div className="flow-modal-header">
+        <div className="flow-modal-backdrop ai-store-backdrop" role="dialog" aria-modal="true" aria-label="AI Store">
+          <div className="flow-modal-card ai-store-modal">
+            <div className="flow-modal-header ai-store-header">
               <div>
-                <h2>🤖 AI Systems</h2>
-                <p>Escolha um sistema premium. Ele entra como um único componente expansível no canvas, preservando Flow Builder, IA Agent e Runtime V2.</p>
+                <span className="ai-store-eyebrow">Marketplace de sistemas inteligentes</span>
+                <h2>AI Store</h2>
+                <p>Instale sistemas inteligentes prontos para atendimento, vendas, agenda, conhecimento e automações.</p>
               </div>
-              <button type="button" onClick={() => setIsAgentSystemModalOpen(false)}>×</button>
+              <button type="button" onClick={() => setIsAgentSystemModalOpen(false)} aria-label="Fechar AI Store">×</button>
             </div>
-            <div className="flow-template-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 12 }}>
-              {AI_SYSTEM_CARDS.map((card) => { const template = AGENT_SYSTEM_TEMPLATES.find((item) => item.id === card.id); return (
-                <button
-                  key={card.id}
-                  type="button"
-                  className="flow-template-card"
-                  onClick={() => handleInsertAgentSystemTemplate(card.id)}
-                  disabled={false}
-                  style={{ textAlign: 'left', border: '1px solid #e5e7eb', borderRadius: 16, padding: 16, background: '#fff', opacity: 1 }}
-                >
-                  <strong>{card.title}</strong>
-                  <p>{card.subtitle}</p>
-                  <small>{template ? `${template.category} · v${template.version}` : 'Personalizado · v1.0.0'}</small>
-                </button>
-              )})}
+
+            <div className="ai-store-toolbar">
+              <label className="ai-store-search" aria-label="Buscar sistemas inteligentes">
+                <span>🔎</span>
+                <input
+                  value={aiStoreSearch}
+                  onChange={(event) => setAiStoreSearch(event.target.value)}
+                  placeholder="Buscar por nome, descrição, integração ou capacidade..."
+                />
+              </label>
+              <div className="ai-store-category-list" aria-label="Categorias da AI Store">
+                {AI_STORE_CATEGORIES.map((category) => (
+                  <button
+                    key={category}
+                    type="button"
+                    className={category === aiStoreCategory ? 'active' : ''}
+                    onClick={() => setAiStoreCategory(category)}
+                  >
+                    {category}
+                  </button>
+                ))}
+              </div>
             </div>
+
+            <div className="ai-store-grid">
+              {filteredAiStoreCards.map((card) => {
+                const template = AGENT_SYSTEM_TEMPLATES.find((item) => item.id === card.id);
+                return (
+                  <article key={card.id} className="ai-store-card">
+                    <div className="ai-store-card-topline">
+                      <div className="ai-store-icon" aria-hidden="true">{card.icon}</div>
+                      <div className="ai-store-badges">
+                        <span>Oficial</span>
+                        {card.productionReady && <span>Pronto para produção</span>}
+                      </div>
+                    </div>
+                    <div className="ai-store-card-heading">
+                      <p>{card.category}</p>
+                      <h3>{card.title}</h3>
+                      <span>{card.subtitle}</span>
+                    </div>
+                    <div className="ai-store-meta">
+                      <span>⏱ {card.setupTime}</span>
+                      <span>✨ {card.difficulty}</span>
+                    </div>
+                    <div className="ai-store-integrations">
+                      {card.integrations.map((integration) => <span key={integration}>{integration}</span>)}
+                    </div>
+                    <ul className="ai-store-capabilities">
+                      {card.capabilities.slice(0, 4).map((capability) => <li key={capability}>{capability}</li>)}
+                    </ul>
+                    <details className="ai-store-details">
+                      <summary>Ver detalhes</summary>
+                      <p>{card.details}</p>
+                      <small>{template ? `${template.name} · ${template.category} · v${template.version}` : 'Sistema personalizado · v1.0.0'}</small>
+                    </details>
+                    <button type="button" className="ai-store-install" onClick={() => handleInsertAgentSystemTemplate(card.id)}>
+                      Instalar
+                    </button>
+                  </article>
+                );
+              })}
+            </div>
+            {filteredAiStoreCards.length === 0 && (
+              <div className="ai-store-empty">Nenhum sistema encontrado para a busca atual.</div>
+            )}
           </div>
         </div>
       )}
