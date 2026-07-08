@@ -1947,6 +1947,8 @@ class AiAgentNodeExecutor(AiResponseNodeExecutor):
         if allow_mcp_tools and mcp_tools and "chamar_mcp" not in [str(t) for t in allowed_tools]:
             allowed_tools = [*allowed_tools, "chamar_mcp"]
         logger.info("event=NODE_ALLOWED_TOOLS %s", json.dumps({"node_id": str(node_id), "mcp_tool_ids": mcp_tool_ids, "internal_google_tools": [str(t.get("tool_id") or t.get("id")) for t in mcp_tools if str(t.get("tool_id") or t.get("id") or "").startswith("google_calendar_")], "final_allowed_tools": [str(t) for t in allowed_tools], "available_mcp_tools": [str(t.get("tool_id") or t.get("id")) for t in mcp_tools]}, ensure_ascii=False, default=str))
+        session_state = session.context if isinstance(getattr(session, "context", None), dict) else {}
+        session_state.setdefault("session_id", str(session.id))
         options = {
             "chat_model": data.get("chat_model_override") or data.get("chat_model") or data.get("model_override") or data.get("model"),
             "temperature": self._coerce_float_config(data.get("temperature"), default=0.2, field_name="temperature", node_id=node_id),
@@ -1958,7 +1960,7 @@ class AiAgentNodeExecutor(AiResponseNodeExecutor):
             "max_mcp_calls": max_mcp_calls,
             "node_id": node_id,
             "selected_tool_ids": mcp_tool_ids,
-            "session_state": session.context if isinstance(getattr(session, "context", None), dict) else {},
+            "session_state": session_state,
         }
         def _execute_agent_node_tool(tool_config, tool_input, reason):
             from app.services.ai_agent_node_tool_service import execute_node_tool

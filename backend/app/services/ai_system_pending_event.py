@@ -27,13 +27,26 @@ def set_pending_event(context: dict[str, Any], payload: dict[str, Any]) -> None:
     context["pending_calendar_event"] = payload
     context["partial_calendar_event"] = payload
     context["pending_google_calendar_create_event"] = payload
+    context["partial_calendar_request"] = payload
+    context["active_specialist"] = "calendar"
+    context["waiting_specialist"] = "calendar"
+    context["conversation_state"] = "calendar_slot_filling"
+    missing = payload.get("missing_fields") if isinstance(payload.get("missing_fields"), list) else []
+    context["pending_slots"] = [str(item) for item in missing if item]
 
 
 def clear_pending_event(context: dict[str, Any] | None) -> None:
     if not isinstance(context, dict):
         return
-    for key in PENDING_EVENT_KEYS:
+    for key in (*PENDING_EVENT_KEYS, "partial_calendar_request"):
         context.pop(key, None)
+    context.pop("pending_slots", None)
+    if context.get("waiting_specialist") == "calendar":
+        context.pop("waiting_specialist", None)
+    if context.get("active_specialist") == "calendar":
+        context.pop("active_specialist", None)
+    if context.get("conversation_state") == "calendar_slot_filling":
+        context.pop("conversation_state", None)
 
 
 def message_has_date_or_time(message: str) -> bool:

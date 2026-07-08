@@ -573,6 +573,20 @@ def _infer_calendar_event_title(text: str) -> str:
     return cleaned_title
 
 
+
+def _ai_system_slot_log(event: str, session_state: dict[str, Any] | None, incoming_message: str, *, previous_node_id: Any = None, selected_node_id: Any = None) -> None:
+    state = session_state if isinstance(session_state, dict) else {}
+    _json_log(
+        event,
+        session_id=state.get("session_id"),
+        previous_node_id=previous_node_id,
+        waiting_specialist=state.get("waiting_specialist"),
+        pending_slots=state.get("pending_slots"),
+        partial_calendar_request=state.get("partial_calendar_request"),
+        incoming_message=str(incoming_message or "")[:500],
+        selected_node_id=selected_node_id,
+    )
+
 def _calendar_title_case(value: str) -> str:
     words = str(value or "").strip().split()
     if not words:
@@ -609,8 +623,16 @@ def _calendar_create_partial_payload(text: str, *, now: datetime | None = None, 
     if participant:
         partial["participant"] = participant.group(1).strip()
         partial["participants"] = [partial["participant"]]
+        partial["person"] = partial["participant"]
     if re.search(r"\bconsultoria\b", _strip_accents(raw).lower()):
         partial["event_type"] = "consultoria"
+    if parsed_time is not None:
+        partial["time"] = f"{parsed_time[0]:02d}:{parsed_time[1]:02d}"
+        partial["time_label"] = time_label
+    if day is not None:
+        partial["date"] = day.isoformat()
+        partial["date_label"] = date_label
+    partial.setdefault("duration", 60)
     if day is not None and parsed_time is not None:
         hour, minute = parsed_time
         start = datetime(day.year, day.month, day.day, hour, minute, tzinfo=resolver.tz)
@@ -636,6 +658,21 @@ def _calendar_complete_pending_partial(pending_payload: dict[str, Any], user_mes
             parsed_time = parsed_time or (existing.hour, existing.minute)
         except ValueError:
             pass
+    if day is None and pending_payload.get("date"):
+        try:
+            day = datetime.fromisoformat(str(pending_payload.get("date"))).date()
+        except ValueError:
+            pass
+    if parsed_time is None and pending_payload.get("time"):
+        match = re.match(r"^(\d{1,2}):(\d{2})$", str(pending_payload.get("time")))
+        if match:
+            parsed_time = (int(match.group(1)), int(match.group(2)))
+    if day is not None:
+        pending_payload["date"] = day.isoformat()
+        pending_payload["date_label"] = date_label or pending_payload.get("date_label") or day.isoformat()
+    if parsed_time is not None:
+        pending_payload["time"] = f"{parsed_time[0]:02d}:{parsed_time[1]:02d}"
+        pending_payload["time_label"] = time_label or pending_payload.get("time_label") or pending_payload["time"]
     missing = []
     if day is None:
         missing.append("date")
@@ -647,6 +684,7 @@ def _calendar_complete_pending_partial(pending_payload: dict[str, Any], user_mes
     if not title:
         missing.append("title")
     if missing:
+        pending_payload["missing_fields"] = missing
         return None, missing
     hour, minute = parsed_time
     start = datetime(day.year, day.month, day.day, hour, minute, tzinfo=resolver.tz)
@@ -1672,6 +1710,7 @@ def run_agent_for_tenant(db: Session, tenant_id, input_text: str, instruction: s
     pending_key, aliased_pending_payload = pending_event_lookup(session_state if isinstance(session_state, dict) else {})
     if aliased_pending_payload is not None:
         _json_log("AI_SYSTEM_PENDING_EVENT_FOUND", key=pending_key)
+        _ai_system_slot_log("AI_SYSTEM_SLOT_CONTEXT_LOADED", session_state, str(input_text or ""), previous_node_id=opts.get("node_id"), selected_node_id=opts.get("node_id"))
     else:
         _json_log("AI_SYSTEM_PENDING_EVENT_NOT_FOUND", context_keys=sorted(session_state.keys()) if isinstance(session_state, dict) else [])
     session_pending_payload = aliased_pending_payload if isinstance(aliased_pending_payload, dict) else (session_state.get("pending_google_calendar_create_event") if isinstance(session_state, dict) else None)
@@ -1687,8 +1726,12 @@ def run_agent_for_tenant(db: Session, tenant_id, input_text: str, instruction: s
                 resumed_payload, still_missing = _calendar_complete_pending_partial(pending_payload_for_time_update, str(input_text or ""), timezone=calendar_timezone)
                 _json_log("AI_SYSTEM_PENDING_EVENT_RESUMED", pending=pending_payload_for_time_update, missing_fields=still_missing, completed=resumed_payload is not None)
                 if resumed_payload is None:
+                    pending_payload_for_time_update["missing_fields"] = still_missing
+                    set_pending_event(session_state, pending_payload_for_time_update)
                     _json_log("AI_SYSTEM_MISSING_FIELDS", missing_fields=still_missing, intent="create_calendar_event")
-                    question = _calendar_missing_question(still_missing[0] if still_missing else "date", str(input_text or ""))
+                    _ai_system_slot_log("AI_SYSTEM_SLOT_MERGE", session_state, str(input_text or ""), previous_node_id=opts.get("node_id"), selected_node_id=opts.get("node_id"))
+                    _ai_system_slot_log("AI_SYSTEM_SLOT_PENDING", session_state, str(input_text or ""), previous_node_id=opts.get("node_id"), selected_node_id=opts.get("node_id"))
+                    question = "Perfeito. Para qual dia?" if still_missing == ["date"] else _calendar_missing_question(still_missing[0] if still_missing else "date", str(input_text or ""))
                     result.message = question
                     result.actions.append(AgentToolAction("message", {"message": question}))
                     result.status = "success"
@@ -1734,8 +1777,9 @@ def run_agent_for_tenant(db: Session, tenant_id, input_text: str, instruction: s
                     return AgentRunResult(message=fallback, status="budget_exceeded", fallback_used=True, steps_count=0, final_tool="chamar_mcp", metadata={**(budget.safe_metadata() if budget else {}), "budget_exceeded": True})
                 if db_pending is not None and conversation_id is not None:
                     pending_action_service.consume_pending_action(tenant_id=tenant_id, conversation_id=conversation_id, pending_id=db_pending.id)
-                clear_pending_event(session_state)
                 _json_log("AI_SYSTEM_PENDING_EVENT_COMPLETED", title=rescheduled_payload.get("summary") or rescheduled_payload.get("title"), start=rescheduled_payload.get("start_time") or rescheduled_payload.get("start"))
+                _ai_system_slot_log("AI_SYSTEM_SLOT_COMPLETED", session_state, str(input_text or ""), previous_node_id=opts.get("node_id"), selected_node_id=opts.get("node_id"))
+                clear_pending_event(session_state)
                 _json_log("AI_SYSTEM_PENDING_EVENT_CLEARED")
                 normalized = registry_result.normalized_result.to_dict() if registry_result.normalized_result else (registry_result.output if isinstance(registry_result.output, dict) else {})
                 msg, calendar_status = _format_calendar_create_result_for_user(normalized, registry_result)
@@ -1957,6 +2001,8 @@ def run_agent_for_tenant(db: Session, tenant_id, input_text: str, instruction: s
         if deterministic_missing:
             pending_payload = {**(deterministic_input or {}), "partial_intent": "create_calendar_event", "missing_fields": partial_missing_fields}
             set_pending_event(session_state, pending_payload)
+            _ai_system_slot_log("AI_SYSTEM_SLOT_CONTEXT_SAVED", session_state, str(input_text or ""), previous_node_id=opts.get("node_id"), selected_node_id=opts.get("node_id"))
+            _ai_system_slot_log("AI_SYSTEM_SLOT_PENDING", session_state, str(input_text or ""), previous_node_id=opts.get("node_id"), selected_node_id=opts.get("node_id"))
             if conversation_id is not None:
                 pending_action_service.save_pending_action(tenant_id=tenant_id, conversation_id=conversation_id, session_id=session_id, external_user_id=external_user_id, action_type=CALENDAR_CREATE_CONFIRMATION, payload=pending_payload, metadata={"source": "ai_agent", "tool_id": "google_calendar_create_event", "partial_intent": True})
             _json_log("AI_SYSTEM_PARTIAL_INTENT_DETECTED", intent="create_calendar_event", payload=pending_payload)
@@ -1997,6 +2043,8 @@ def run_agent_for_tenant(db: Session, tenant_id, input_text: str, instruction: s
             return AgentRunResult(message=fallback, status="budget_exceeded", fallback_used=True, steps_count=0, final_tool="chamar_mcp", metadata={**(budget.safe_metadata() if budget else {}), "budget_exceeded": True})
         normalized = registry_result.normalized_result.to_dict() if registry_result.normalized_result else (registry_result.output if isinstance(registry_result.output, dict) else {})
         reason = None if registry_result.ok else _calendar_error_reason(registry_result, normalized)
+        _ai_system_slot_log("AI_SYSTEM_SLOT_COMPLETED", session_state, str(input_text or ""), previous_node_id=opts.get("node_id"), selected_node_id=opts.get("node_id"))
+        clear_pending_event(session_state)
         _json_log("AI_AGENT_DETERMINISTIC_CALENDAR_RESULT", ok=registry_result.ok, error=reason, raw_result=registry_result.output)
         _json_log("AI_AGENT_CALENDAR_CREATE_RESULT", ok=normalized.get("ok"), data=_calendar_event_data(normalized), error=normalized.get("error"))
         msg, calendar_status = _format_calendar_create_result_for_user(normalized, registry_result)
