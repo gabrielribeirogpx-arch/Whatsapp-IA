@@ -34,6 +34,7 @@ import DelayNode from '@/components/flow/nodes/DelayNode';
 import MessageNode from '@/components/flow/nodes/MessageNode';
 import MediaNode from '@/components/flow/nodes/MediaNode';
 import CreateFlowModal from '@/components/flows/CreateFlowModal';
+import AIStoreModal from '@/components/ai-store/AIStoreModal';
 import { apiFetch, getFlowAnalytics, getFlowGraph, getTenantSessionFromStorage, listFlowVersions, parseApiResponse, restoreFlowVersion, listFlows } from '@/lib/api';
 import { getLayoutedElements } from '@/lib/autoLayout';
 import { orderChoiceChildrenEdges } from '@/lib/flowChoiceOrdering';
@@ -109,8 +110,6 @@ const slugifyToolId = (value: string) =>
 const getFlowDisplayName = (flow?: FlowListOption | null) => flow?.name || (flow?.id ? `Fluxo ${flow.id.slice(0, 8)}` : 'Fluxo não selecionado');
 const isPublishedFlow = (flow: FlowListOption) => flow.is_published === true || flow.status === 'published' || flow.status === 'active' || flow.is_active === true;
 const getPublishedVersionId = (flow: FlowListOption) => flow.published_version_id || flow.flow_version_id || flow.version_id || null;
-
-const AI_STORE_CATEGORIES = ['Recomendados', 'Atendimento', 'Vendas', 'Produtividade', 'Conhecimento', 'Automação', 'Personalizados'] as const;
 
 const AI_SYSTEM_CARDS = [
   {
@@ -1688,8 +1687,6 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
   const [activeFlowId, setActiveFlowId] = useState<string | null>(null);
   const [isFlowSelectOpen, setIsFlowSelectOpen] = useState(false);
   const [isAgentSystemModalOpen, setIsAgentSystemModalOpen] = useState(false);
-  const [aiStoreSearch, setAiStoreSearch] = useState('');
-  const [aiStoreCategory, setAiStoreCategory] = useState<(typeof AI_STORE_CATEGORIES)[number]>('Recomendados');
   console.log('FLOW SELECIONADO:', selectedFlowId);
   console.log('FLOW ATIVO:', activeFlowId);
   console.log('FLOWS DISPONÍVEIS:', flows);
@@ -2873,15 +2870,6 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
   }, [rfInstance, setEdges, setNodes, toast, toggleStartNode, updateNodeData]);
 
 
-  const filteredAiStoreCards = useMemo(() => {
-    const normalizedSearch = aiStoreSearch.trim().toLowerCase();
-    return AI_SYSTEM_CARDS.filter((card) => {
-      const matchesCategory = aiStoreCategory === 'Recomendados' ? card.recommended : card.category === aiStoreCategory;
-      const haystack = [card.title, card.subtitle, card.category, ...card.integrations, ...card.capabilities].join(' ').toLowerCase();
-      return matchesCategory && (!normalizedSearch || haystack.includes(normalizedSearch));
-    });
-  }, [aiStoreCategory, aiStoreSearch]);
-
   const handleInsertAgentSystemTemplate = useCallback((templateId: string) => {
     const template = AGENT_SYSTEM_TEMPLATES.find((item) => item.id === templateId) || AGENT_SYSTEM_TEMPLATES[0];
     const card = AI_SYSTEM_CARDS.find((item) => item.id === templateId);
@@ -3886,84 +3874,12 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
       </main>
 
       {isAgentSystemModalOpen && (
-        <div className="flow-modal-backdrop ai-store-backdrop" role="dialog" aria-modal="true" aria-label="AI Store">
-          <div className="flow-modal-card ai-store-modal">
-            <div className="flow-modal-header ai-store-header">
-              <div>
-                <span className="ai-store-eyebrow">Marketplace de sistemas inteligentes</span>
-                <h2>AI Store</h2>
-                <p>Instale sistemas inteligentes prontos para atendimento, vendas, agenda, conhecimento e automações.</p>
-              </div>
-              <button type="button" onClick={() => setIsAgentSystemModalOpen(false)} aria-label="Fechar AI Store">×</button>
-            </div>
-
-            <div className="ai-store-toolbar">
-              <label className="ai-store-search" aria-label="Buscar sistemas inteligentes">
-                <span>🔎</span>
-                <input
-                  value={aiStoreSearch}
-                  onChange={(event) => setAiStoreSearch(event.target.value)}
-                  placeholder="Buscar por nome, descrição, integração ou capacidade..."
-                />
-              </label>
-              <div className="ai-store-category-list" aria-label="Categorias da AI Store">
-                {AI_STORE_CATEGORIES.map((category) => (
-                  <button
-                    key={category}
-                    type="button"
-                    className={category === aiStoreCategory ? 'active' : ''}
-                    onClick={() => setAiStoreCategory(category)}
-                  >
-                    {category}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div className="ai-store-grid">
-              {filteredAiStoreCards.map((card) => {
-                const template = AGENT_SYSTEM_TEMPLATES.find((item) => item.id === card.id);
-                return (
-                  <article key={card.id} className="ai-store-card">
-                    <div className="ai-store-card-topline">
-                      <div className="ai-store-icon" aria-hidden="true">{card.icon}</div>
-                      <div className="ai-store-badges">
-                        <span>Oficial</span>
-                        {card.productionReady && <span>Pronto para produção</span>}
-                      </div>
-                    </div>
-                    <div className="ai-store-card-heading">
-                      <p>{card.category}</p>
-                      <h3>{card.title}</h3>
-                      <span>{card.subtitle}</span>
-                    </div>
-                    <div className="ai-store-meta">
-                      <span>⏱ {card.setupTime}</span>
-                      <span>✨ {card.difficulty}</span>
-                    </div>
-                    <div className="ai-store-integrations">
-                      {card.integrations.map((integration) => <span key={integration}>{integration}</span>)}
-                    </div>
-                    <ul className="ai-store-capabilities">
-                      {card.capabilities.slice(0, 4).map((capability) => <li key={capability}>{capability}</li>)}
-                    </ul>
-                    <details className="ai-store-details">
-                      <summary>Ver detalhes</summary>
-                      <p>{card.details}</p>
-                      <small>{template ? `${template.name} · ${template.category} · v${template.version}` : 'Sistema personalizado · v1.0.0'}</small>
-                    </details>
-                    <button type="button" className="ai-store-install" onClick={() => handleInsertAgentSystemTemplate(card.id)}>
-                      Instalar
-                    </button>
-                  </article>
-                );
-              })}
-            </div>
-            {filteredAiStoreCards.length === 0 && (
-              <div className="ai-store-empty">Nenhum sistema encontrado para a busca atual.</div>
-            )}
-          </div>
-        </div>
+        <AIStoreModal
+          cards={AI_SYSTEM_CARDS}
+          templates={AGENT_SYSTEM_TEMPLATES}
+          onClose={() => setIsAgentSystemModalOpen(false)}
+          onInstall={handleInsertAgentSystemTemplate}
+        />
       )}
 
       {selectedNode && (
