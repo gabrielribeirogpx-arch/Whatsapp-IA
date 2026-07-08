@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 
 
 AI_SYSTEM_TERMINAL_INTERNAL_TYPES = {"ai_greeting", "ai_safe_fallback", "ai_calendar_agent"}
-AI_SYSTEM_PENDING_CONTEXT_KEYS = {"pending_slot", "pending_confirmation", "pending_tool_action"}
+AI_SYSTEM_PENDING_CONTEXT_KEYS = {"pending_slot", "pending_confirmation", "pending_tool_action", "pending_slots", "partial_calendar_request", "pending_event", "pending_calendar_event", "partial_calendar_event", "pending_google_calendar_create_event"}
 
 
 def _node_internal_type(node: dict[str, Any] | None) -> str:
@@ -58,7 +58,23 @@ def _dispatcher_node_id(snapshot: FlowV2Snapshot | None) -> str | None:
     return None
 
 
+def _has_active_calendar_slot_filling(session: Any) -> bool:
+    for container in (getattr(session, "variables", None), getattr(session, "context", None), getattr(session, "metadata", None)):
+        if not isinstance(container, dict):
+            continue
+        if (
+            container.get("conversation_state") == "calendar_slot_filling"
+            and container.get("waiting_specialist") == "calendar"
+            and isinstance(container.get("pending_slots"), list)
+            and len(container.get("pending_slots") or []) > 0
+        ):
+            return True
+    return False
+
+
 def _has_pending_ai_system_context(session: Any) -> bool:
+    if _has_active_calendar_slot_filling(session):
+        return True
     containers = [
         getattr(session, "variables", None),
         getattr(session, "context", None),
@@ -92,6 +108,8 @@ def should_restart_at_dispatcher_for_ai_system(session: Any, message: Any, snaps
     if not _is_ai_system_snapshot(snapshot):
         return False
     if not _is_user_text_message(message):
+        return False
+    if _has_active_calendar_slot_filling(session):
         return False
     if _has_pending_ai_system_context(session):
         return False
@@ -189,11 +207,22 @@ class FlowV2Executor:
                 )
                 self.session_manager.move_to(db, session=session, node_id=dispatcher_node_id, status=FlowV2SessionStatus.RUNNING)
         elif _is_ai_system_snapshot(snapshot) and _has_pending_ai_system_context(session):
+            ctx = getattr(session, "context", None) if isinstance(getattr(session, "context", None), dict) else {}
             logger.info(
-                "event=AI_SYSTEM_KEEP_SLOT_CONTEXT session_id=%s current_node_id=%s",
+                "event=AI_SYSTEM_KEEP_SLOT_CONTEXT session_id=%s previous_node_id=%s waiting_specialist=%s pending_slots=%s partial_calendar_request=%s incoming_message=%s selected_node_id=%s",
                 getattr(session, "id", None),
                 getattr(session, "current_node_id", None),
+                ctx.get("waiting_specialist"),
+                ctx.get("pending_slots"),
+                ctx.get("partial_calendar_request"),
+                getattr(runtime_input, "message_text", None),
+                getattr(session, "current_node_id", None),
             )
+            if _has_active_calendar_slot_filling(session):
+                logger.info(
+                    "event=AI_SYSTEM_RESUME_SPECIALIST_DIRECTLY session_id=%s previous_node_id=%s waiting_specialist=%s pending_slots=%s partial_calendar_request=%s incoming_message=%s selected_node_id=%s",
+                    getattr(session, "id", None), getattr(session, "current_node_id", None), ctx.get("waiting_specialist"), ctx.get("pending_slots"), ctx.get("partial_calendar_request"), getattr(runtime_input, "message_text", None), getattr(session, "current_node_id", None),
+                )
         flow_id = self._flow_id_for_version(db, tenant_id=runtime_input.tenant_id, flow_version_id=runtime_input.flow_version_id)
         if str(getattr(session, "status", "")) == str(FlowV2SessionStatus.COMPLETED):
             logger.info(
