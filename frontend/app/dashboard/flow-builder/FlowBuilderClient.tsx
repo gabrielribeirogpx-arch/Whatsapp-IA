@@ -35,6 +35,7 @@ import MessageNode from '@/components/flow/nodes/MessageNode';
 import MediaNode from '@/components/flow/nodes/MediaNode';
 import CreateFlowModal from '@/components/flows/CreateFlowModal';
 import AIStoreModal from '@/components/ai-store/AIStoreModal';
+import AISystemModal from '@/components/flow/AISystemModal';
 import { apiFetch, getFlowAnalytics, getFlowGraph, getTenantSessionFromStorage, listFlowVersions, parseApiResponse, restoreFlowVersion, listFlows } from '@/lib/api';
 import { getLayoutedElements } from '@/lib/autoLayout';
 import { orderChoiceChildrenEdges } from '@/lib/flowChoiceOrdering';
@@ -1687,6 +1688,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
   const [activeFlowId, setActiveFlowId] = useState<string | null>(null);
   const [isFlowSelectOpen, setIsFlowSelectOpen] = useState(false);
   const [isAgentSystemModalOpen, setIsAgentSystemModalOpen] = useState(false);
+  const [activeAiSystemNodeId, setActiveAiSystemNodeId] = useState<string | null>(null);
   console.log('FLOW SELECIONADO:', selectedFlowId);
   console.log('FLOW ATIVO:', activeFlowId);
   console.log('FLOWS DISPONÍVEIS:', flows);
@@ -2160,15 +2162,12 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
     );
   }, [setNodes]);
 
-  const toggleAiSystemCollapsed = useCallback((nodeId: string) => {
-    setNodes((prev) => prev.map((node) => {
-      if (node.id !== nodeId) return node;
-      const data = (node.data || {}) as Record<string, unknown>;
-      const collapsed = data.collapsed !== false;
-      console.info(collapsed ? 'AI_SYSTEM_EXPANDED' : 'AI_SYSTEM_COLLAPSED', { system_id: data.system_id || nodeId, system_type: data.system_type || 'custom' });
-      return { ...node, data: { ...(node.data as Record<string, unknown>), collapsed: !collapsed } } as Node;
-    }));
-  }, [setNodes]);
+  const openAiSystemModal = useCallback((nodeId: string) => {
+    const node = nodes.find((item) => item.id === nodeId);
+    const data = (node?.data || {}) as Record<string, unknown>;
+    console.info('AI_SYSTEM_MODAL_OPENED', { system_id: data.system_id || nodeId, system_type: data.system_type || 'custom' });
+    setActiveAiSystemNodeId(nodeId);
+  }, [nodes]);
 
   const openNodeEditor = useCallback((node: Node, source: 'doubleClick' = 'doubleClick') => {
     const canvasWidthBefore = flowCanvasRef.current?.getBoundingClientRect().width ?? 0;
@@ -2288,12 +2287,12 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
           label: node.data?.label || node.data?.content || `Node ${node.id}`,
           onChange: updateNodeData,
           onToggleStart: toggleStartNode,
-          onToggleSystem: toggleAiSystemCollapsed,
+          onOpenSystem: openAiSystemModal,
         hasValidationError: node.id === highlightedNodeId,
         },
       };
     },
-    [toggleStartNode, updateNodeData],
+    [openAiSystemModal, toggleStartNode, updateNodeData],
   );
 
   const applyLayoutAndSetFlow = useCallback((nextNodes: Node[], nextEdges: Edge[]) => {
@@ -3365,14 +3364,14 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
         ...node.data,
         running: node.id === currentNodeId,
         onToggleStart: toggleStartNode,
-        onToggleSystem: toggleAiSystemCollapsed,
+        onOpenSystem: openAiSystemModal,
         hasValidationError: node.id === highlightedNodeId,
         analytics: analyticsOverlayEnabled ? analyticsByNode.get(node.id) ?? null : null,
       },
     }));
 
     return baseNodes;
-  }, [analyticsByNode, analyticsOverlayEnabled, currentNodeId, highlightedNodeId, nodes, toggleAiSystemCollapsed, toggleStartNode]);
+  }, [analyticsByNode, analyticsOverlayEnabled, currentNodeId, highlightedNodeId, nodes, openAiSystemModal, toggleStartNode]);
 
   const safeNodes = useMemo(
     () => (Array.isArray(decoratedNodes) ? decoratedNodes : []).map((node) => ({
@@ -3399,6 +3398,13 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
       })),
     [activeEdgeIds, analyticsByEdge, analyticsOverlayEnabled, visibleEdges],
   );
+
+  const activeAiSystemNode = useMemo(() => nodes.find((node) => node.id === activeAiSystemNodeId) || null, [activeAiSystemNodeId, nodes]);
+  const activeAiSystemTemplate = useMemo(() => {
+    const data = (activeAiSystemNode?.data || {}) as Record<string, unknown>;
+    const templateId = typeof data.system_type === 'string' ? data.system_type : typeof data.agent_system_template_id === 'string' ? data.agent_system_template_id : '';
+    return AGENT_SYSTEM_TEMPLATES.find((template) => template.id === templateId);
+  }, [activeAiSystemNode]);
 
   // Fecha o menu de contexto ao clicar fora
   useEffect(() => {
@@ -4183,6 +4189,13 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
             </div>
           </form>
         </div>
+      )}
+      {activeAiSystemNode && (
+        <AISystemModal
+          systemTemplate={activeAiSystemTemplate}
+          systemData={(activeAiSystemNode.data || {}) as Record<string, unknown>}
+          onClose={() => setActiveAiSystemNodeId(null)}
+        />
       )}
       {isVersionsModalOpen && (
         <div className="flow-versions-backdrop" onClick={() => setIsVersionsModalOpen(false)}>
