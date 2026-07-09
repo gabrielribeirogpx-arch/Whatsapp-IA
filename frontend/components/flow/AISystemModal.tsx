@@ -2,7 +2,8 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import type { AgentSystemTemplate } from '@/lib/agentSystemTemplates';
-import { AISystemArchitectureGraph, SYSTEM_BADGES } from '@/components/flow/nodes/AiSystemNode';
+import { SYSTEM_BADGES } from '@/components/flow/nodes/AiSystemNode';
+import AISystemArchitectureOverview from '@/components/flow/AISystemArchitectureOverview';
 
 type AISystemModalProps = {
   systemTemplate?: AgentSystemTemplate;
@@ -54,8 +55,6 @@ export default function AISystemModal({ systemTemplate, systemData, onClose }: A
     return Array.from(new Set(items.length ? items : ['google_calendar', 'whatsapp', 'crm', 'mcp', 'rag']));
   }, [systemData, systemTemplate]);
 
-  const internalNodes = Array.isArray(systemData.internal_nodes) ? systemData.internal_nodes : systemTemplate?.nodes ?? [];
-  const rawEdges = Array.isArray(systemData.internal_edges) ? systemData.internal_edges : systemTemplate?.edges ?? [];
   const systemType = asString(systemData.system_type) || systemTemplate?.id || 'custom';
   const title = asString(systemData.name) || asString(systemData.label) || systemTemplate?.name || SYSTEM_BADGES[systemType] || 'Sistema IA';
   const description = asString(systemData.description) || systemTemplate?.description || 'Sistema operacional de agentes IA com arquitetura modular e integrações prontas para produção.';
@@ -109,7 +108,7 @@ export default function AISystemModal({ systemTemplate, systemData, onClose }: A
           </div>
         )}
 
-        {activeTab === 'architecture' && <AISystemArchitectureGraph internalNodes={internalNodes} rawEdges={rawEdges} integrations={integrations} />}
+        {activeTab === 'architecture' && <AISystemArchitectureOverview />}
 
         {activeTab === 'integrations' && (
           <div className="ai-system-runtime-list"><article className="ai-system-integration-card"><strong>📅 Google Calendar</strong><span>Status: Disponível / Conectado</span><small>Ferramentas disponíveis:</small><ul>{calendarTools.map((item) => <li key={item}>{item}</li>)}</ul></article></div>
