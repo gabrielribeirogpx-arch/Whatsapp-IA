@@ -1407,12 +1407,40 @@ input {
   padding: 8px 6px;
   gap: 2px;
   flex-shrink: 0;
-  height: 100vh;
+  height: 100dvh;
   position: sticky;
   top: 0;
   overflow: hidden;
   transition: width 0.22s cubic-bezier(0.4, 0, 0.2, 1);
   z-index: 100;
+}
+
+.dash-sidebar-scroll-area {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  touch-action: pan-y;
+}
+
+.dash-sidebar-scroll-area::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none;
+}
+
+.dash-sidebar-footer {
+  flex-shrink: 0;
+}
+
+.dash-sidebar-footer .sidebar-user-profile {
+  margin-top: 0;
 }
 
 .dash-sidebar.is-expanded {
