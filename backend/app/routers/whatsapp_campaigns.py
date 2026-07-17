@@ -1,7 +1,10 @@
 from datetime import datetime
 import re
+import csv
+import io
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import StreamingResponse
 from sqlalchemy import select, func
 from sqlalchemy.orm import Session
 
@@ -91,6 +94,167 @@ def create_campaign(payload: dict, db: Session = Depends(get_db), tenant: Tenant
     if campaign.status == "scheduled" and campaign.scheduled_at:
         get_queue("normal").enqueue_at(campaign.scheduled_at, "app.workers.campaign_worker.process_campaign", str(campaign.id), str(tenant.id), job_timeout=600)
     return _serialize_campaign(campaign)
+
+# --- Campaign analytics helpers/endpoints ---
+def _parse_dt(value: str | None, fallback: datetime) -> datetime:
+    if not value:
+        return fallback
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00")).replace(tzinfo=None)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Período inválido")
+
+
+def _analytics_bounds(start: str | None, end: str | None) -> tuple[datetime, datetime]:
+    now = datetime.utcnow()
+    start_dt = _parse_dt(start, now.replace(hour=0, minute=0, second=0, microsecond=0))
+    end_dt = _parse_dt(end, now)
+    if start_dt > end_dt:
+        raise HTTPException(status_code=400, detail="Data inicial deve ser anterior à data final")
+    if (end_dt - start_dt).days > 370:
+        raise HTTPException(status_code=400, detail="Intervalo máximo: 370 dias")
+    return start_dt, end_dt
+
+
+def _campaign_filters(query, tenant_id, start_dt, end_dt, campaign_id=None, template_id=None, provider_id=None, status=None, template_category=None, template_language=None, search=None):
+    query = query.join(WhatsAppMessageTemplate, WhatsAppMessageTemplate.id == WhatsAppCampaign.template_id).where(
+        WhatsAppCampaign.tenant_id == tenant_id,
+        WhatsAppCampaign.created_at >= start_dt,
+        WhatsAppCampaign.created_at <= end_dt,
+    )
+    if campaign_id:
+        query = query.where(WhatsAppCampaign.id == campaign_id)
+    if template_id:
+        query = query.where(WhatsAppCampaign.template_id == template_id)
+    if provider_id:
+        query = query.where(WhatsAppCampaign.provider_id == provider_id)
+    if status:
+        query = query.where(WhatsAppCampaign.status == status)
+    if template_category:
+        query = query.where(WhatsAppMessageTemplate.category == template_category)
+    if template_language:
+        query = query.where(WhatsAppMessageTemplate.language == template_language)
+    if search:
+        query = query.where(WhatsAppCampaign.name.ilike(f"%{search}%"))
+    return query
+
+
+def _rate(num, den):
+    return None if not den else round((float(num or 0) / float(den)) * 100, 1)
+
+
+def _campaign_row(c, t):
+    duration = None
+    if c.started_at and c.completed_at:
+        duration = int((c.completed_at - c.started_at).total_seconds())
+    return {**_serialize_campaign(c), "template_name": t.name if t else None, "template_category": t.category if t else None, "template_language": t.language if t else None, "delivery_rate": _rate(c.total_delivered, c.total_sent), "read_rate": _rate(c.total_read, c.total_delivered), "failure_rate": _rate(c.total_failed, c.total_recipients), "duration_seconds": duration}
+
+
+def normalize_campaign_failure(error_code: str | None, error_message: str | None) -> dict:
+    text = f"{error_code or ''} {error_message or ''}".lower()
+    rules = [
+        ("Telefone inválido", ["phone", "telefone", "invalid recipient", "131026"], "Revise a formatação e o código do país dos destinatários."),
+        ("Destinatário indisponível", ["unavailable", "not reachable", "131047"], "Tente novamente mais tarde ou remova contatos indisponíveis recorrentes."),
+        ("Template inválido", ["template", "132000", "132001"], "Verifique aprovação, idioma e conteúdo do template na Meta."),
+        ("Variável ausente ou inválida", ["variable", "parameter", "missing", "failed_missing_variable"], "Complete as variáveis obrigatórias antes do envio."),
+        ("Limite da Meta", ["rate", "limit", "throttle"], "Reduza a cadência de envio ou aguarde a liberação do limite."),
+        ("Qualidade ou política", ["policy", "quality", "integrity"], "Revise políticas da Meta e qualidade da conta/template."),
+        ("Bloqueio do destinatário", ["blocked", "block"], "Não reenvie para destinatários que bloquearam o remetente."),
+        ("Erro temporário da Meta", ["temporary", "timeout", "try again", "500", "503"], "Tente reenviar após estabilização da Meta."),
+        ("Autenticação/conexão", ["auth", "token", "permission", "401", "403"], "Reconecte o provider e valide permissões do WhatsApp Business."),
+    ]
+    for category, needles, action in rules:
+        if any(n in text for n in needles):
+            return {"category": category, "message": category, "recommendation": action}
+    return {"category": "Erro desconhecido", "message": "Falha não categorizada", "recommendation": "Analise os códigos técnicos preservados e tente reenviar quando aplicável."}
+
+
+@router.get("/analytics/summary")
+def analytics_summary(start: str | None = None, end: str | None = None, campaign_id: str | None = None, template_id: str | None = None, provider_id: str | None = None, status: str | None = None, template_category: str | None = None, template_language: str | None = None, db: Session = Depends(get_db), tenant: Tenant = Depends(get_current_tenant)):
+    start_dt, end_dt = _analytics_bounds(start, end)
+    rows = db.execute(_campaign_filters(select(WhatsAppCampaign), tenant.id, start_dt, end_dt, campaign_id, template_id, provider_id, status, template_category, template_language)).scalars().all()
+    totals = {"campaigns_created": len(rows), "campaigns_completed": sum(1 for c in rows if c.status == "completed"), "total_recipients": sum(c.total_recipients or 0 for c in rows), "total_sent": sum(c.total_sent or 0 for c in rows), "total_delivered": sum(c.total_delivered or 0 for c in rows), "total_read": sum(c.total_read or 0 for c in rows), "total_failed": sum(c.total_failed or 0 for c in rows)}
+    totals.update({"delivery_rate": _rate(totals["total_delivered"], totals["total_sent"]), "read_rate": _rate(totals["total_read"], totals["total_delivered"]), "failure_rate": _rate(totals["total_failed"], totals["total_recipients"]), "timestamp_basis": {"campaigns": "created_at", "events": "sent_at/delivered_at/read_at/failed_at"}})
+    return totals
+
+
+@router.get("/analytics/by-campaign")
+def analytics_by_campaign(start: str | None = None, end: str | None = None, campaign_id: str | None = None, template_id: str | None = None, provider_id: str | None = None, status: str | None = None, template_category: str | None = None, template_language: str | None = None, search: str | None = None, sort: str = "recent", page: int = 1, page_size: int = 20, db: Session = Depends(get_db), tenant: Tenant = Depends(get_current_tenant)):
+    start_dt, end_dt = _analytics_bounds(start, end); page=max(page,1); page_size=min(max(page_size,1),100)
+    base = _campaign_filters(select(WhatsAppCampaign, WhatsAppMessageTemplate), tenant.id, start_dt, end_dt, campaign_id, template_id, provider_id, status, template_category, template_language, search)
+    order = {"sent": WhatsAppCampaign.total_sent.desc(), "delivery_rate": (WhatsAppCampaign.total_delivered / func.nullif(WhatsAppCampaign.total_sent, 0)).desc(), "read_rate": (WhatsAppCampaign.total_read / func.nullif(WhatsAppCampaign.total_delivered, 0)).desc(), "failures": WhatsAppCampaign.total_failed.desc()}.get(sort, WhatsAppCampaign.created_at.desc())
+    total = db.execute(select(func.count()).select_from(_campaign_filters(select(WhatsAppCampaign), tenant.id, start_dt, end_dt, campaign_id, template_id, provider_id, status, template_category, template_language, search).subquery())).scalar() or 0
+    rows = db.execute(base.order_by(order).offset((page-1)*page_size).limit(page_size)).all()
+    return {"items": [_campaign_row(c, t) for c, t in rows], "page": page, "page_size": page_size, "total": total}
+
+
+
+@router.get("/analytics/by-template")
+def analytics_by_template(start: str | None = None, end: str | None = None, campaign_id: str | None = None, template_id: str | None = None, provider_id: str | None = None, status: str | None = None, template_category: str | None = None, template_language: str | None = None, sort: str = "used", db: Session = Depends(get_db), tenant: Tenant = Depends(get_current_tenant)):
+    start_dt, end_dt = _analytics_bounds(start, end)
+    rows = db.execute(_campaign_filters(select(WhatsAppCampaign, WhatsAppMessageTemplate), tenant.id, start_dt, end_dt, campaign_id, template_id, provider_id, status, template_category, template_language)).all()
+    grouped = {}
+    for c, t in rows:
+        key = str(c.template_id)
+        g = grouped.setdefault(key, {"template_id": key, "template_name": t.name if t else key, "category": t.category if t else None, "language": t.language if t else None, "campaigns": 0, "total_recipients": 0, "total_sent": 0, "total_delivered": 0, "total_read": 0, "total_failed": 0})
+        g["campaigns"] += 1
+        for field in ["total_recipients", "total_sent", "total_delivered", "total_read", "total_failed"]:
+            g[field] += int(getattr(c, field) or 0)
+    items = list(grouped.values())
+    for item in items:
+        item["delivery_rate"] = _rate(item["total_delivered"], item["total_sent"]); item["read_rate"] = _rate(item["total_read"], item["total_delivered"])
+    key = {"delivery_rate": lambda x: x["delivery_rate"] or -1, "read_rate": lambda x: x["read_rate"] or -1, "failures": lambda x: x["total_failed"]}.get(sort, lambda x: x["campaigns"])
+    return sorted(items, key=key, reverse=True)
+
+@router.get("/analytics/timeline")
+def analytics_timeline(start: str | None = None, end: str | None = None, campaign_id: str | None = None, template_id: str | None = None, provider_id: str | None = None, status: str | None = None, db: Session = Depends(get_db), tenant: Tenant = Depends(get_current_tenant)):
+    start_dt, end_dt = _analytics_bounds(start, end)
+    days = (end_dt - start_dt).total_seconds() / 86400
+    grain = "hour" if days <= 2 else "day" if days <= 90 else "month"
+    campaigns = _campaign_filters(select(WhatsAppCampaign.id), tenant.id, start_dt, end_dt, campaign_id, template_id, provider_id, status).subquery()
+    def bucket(col):
+        return func.date_trunc(grain, col)
+    data = {}
+    for label, col in [("sent", WhatsAppCampaignRecipient.sent_at), ("delivered", WhatsAppCampaignRecipient.delivered_at), ("read", WhatsAppCampaignRecipient.read_at), ("failed", WhatsAppCampaignRecipient.failed_at)]:
+        for b, count in db.execute(select(bucket(col), func.count(WhatsAppCampaignRecipient.id)).where(WhatsAppCampaignRecipient.campaign_id.in_(select(campaigns.c.id)), col >= start_dt, col <= end_dt).group_by(bucket(col))).all():
+            if b:
+                data.setdefault(b.isoformat(), {"bucket": b.isoformat(), "sent": 0, "delivered": 0, "read": 0, "failed": 0})[label] = count
+    return {"grain": grain, "items": [data[k] for k in sorted(data)]}
+
+@router.get("/analytics/failures")
+def analytics_failures(start: str | None = None, end: str | None = None, campaign_id: str | None = None, template_id: str | None = None, provider_id: str | None = None, status: str | None = None, db: Session = Depends(get_db), tenant: Tenant = Depends(get_current_tenant)):
+    start_dt, end_dt = _analytics_bounds(start, end)
+    campaigns = _campaign_filters(select(WhatsAppCampaign.id), tenant.id, start_dt, end_dt, campaign_id, template_id, provider_id, status).subquery()
+    rows = db.execute(select(WhatsAppCampaignRecipient.status, WhatsAppCampaignRecipient.error_message, func.count(WhatsAppCampaignRecipient.id)).where(WhatsAppCampaignRecipient.campaign_id.in_(select(campaigns.c.id)), WhatsAppCampaignRecipient.status.in_(["failed", "failed_missing_variable"])).group_by(WhatsAppCampaignRecipient.status, WhatsAppCampaignRecipient.error_message)).all()
+    total = sum(count for _, _, count in rows) or 0; grouped = {}
+    for code, message, count in rows:
+        norm = normalize_campaign_failure(code, message); g = grouped.setdefault(norm["category"], {**norm, "count": 0, "percent": 0, "codes": set()})
+        g["count"] += count; g["codes"].add(str(code or "—"))
+    return [{**v, "codes": sorted(v["codes"]), "percent": _rate(v["count"], total) or 0} for v in sorted(grouped.values(), key=lambda x: x["count"], reverse=True)]
+
+@router.get("/analytics/heatmap")
+def analytics_heatmap(start: str | None = None, end: str | None = None, metric: str = "read", db: Session = Depends(get_db), tenant: Tenant = Depends(get_current_tenant)):
+    start_dt, end_dt = _analytics_bounds(start, end)
+    col = {"sent": WhatsAppCampaignRecipient.sent_at, "delivered": WhatsAppCampaignRecipient.delivered_at, "failed": WhatsAppCampaignRecipient.failed_at}.get(metric, WhatsAppCampaignRecipient.read_at)
+    rows = db.execute(select(func.extract("dow", col), func.extract("hour", col), func.count(WhatsAppCampaignRecipient.id)).join(WhatsAppCampaign, WhatsAppCampaign.id == WhatsAppCampaignRecipient.campaign_id).where(WhatsAppCampaign.tenant_id == tenant.id, col >= start_dt, col <= end_dt).group_by(func.extract("dow", col), func.extract("hour", col))).all()
+    if sum(c for _, _, c in rows) < 10: return {"sufficient_data": False, "items": []}
+    return {"sufficient_data": True, "items": [{"weekday": int(d), "hour": int(h), "count": c} for d, h, c in rows]}
+
+@router.get("/analytics/export")
+def analytics_export(type: str = "campaigns", start: str | None = None, end: str | None = None, db: Session = Depends(get_db), tenant: Tenant = Depends(get_current_tenant)):
+    start_dt, end_dt = _analytics_bounds(start, end)
+    out = io.StringIO(); writer = csv.writer(out); out.write("\ufeff")
+    if type == "templates":
+        writer.writerow(["Template", "Categoria", "Idioma", "Campanhas", "Destinatários", "Enviadas", "Entregues", "Lidas", "Falhas"])
+        for item in analytics_by_template(start, end, db=db, tenant=tenant): writer.writerow([item["template_name"], item["category"], item["language"], item["campaigns"], item["total_recipients"], item["total_sent"], item["total_delivered"], item["total_read"], item["total_failed"]])
+    elif type == "failures":
+        writer.writerow(["Categoria", "Quantidade", "Percentual", "Códigos", "Recomendação"])
+        for item in analytics_failures(start, end, db=db, tenant=tenant): writer.writerow([item["category"], item["count"], item["percent"], "; ".join(item["codes"]), item["recommendation"]])
+    else:
+        writer.writerow(["Campanha", "Status", "Destinatários", "Enviadas", "Entregues", "Lidas", "Falhas", "Criada em"])
+        rows = db.execute(_campaign_filters(select(WhatsAppCampaign), tenant.id, start_dt, end_dt).order_by(WhatsAppCampaign.created_at.desc())).scalars().yield_per(500)
+        for c in rows: writer.writerow([c.name, c.status, c.total_recipients, c.total_sent, c.total_delivered, c.total_read, c.total_failed, c.created_at.isoformat() if c.created_at else ""])
+    return StreamingResponse(iter([out.getvalue()]), media_type="text/csv; charset=utf-8", headers={"Content-Disposition": f"attachment; filename=relatorios-campanhas-{type}.csv"})
 
 
 @router.get("/{campaign_id}")
