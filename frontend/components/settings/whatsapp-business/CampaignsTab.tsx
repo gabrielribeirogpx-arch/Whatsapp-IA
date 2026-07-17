@@ -22,6 +22,7 @@ import {
 } from 'lucide-react';
 import CampaignCard from './campaigns/CampaignCard';
 import CampaignCreateModal from './campaigns/CampaignCreateModal';
+import CampaignWizard from './campaigns/CampaignWizard';
 import CampaignStats from './campaigns/CampaignStats';
 import {
   apiFetch,
@@ -756,122 +757,6 @@ export default function CampaignsTab({ standalone = false }: CampaignsTabProps) 
 
     {previewTemplate ? <TemplatePreview template={previewTemplate} onClose={() => setPreviewTemplate(null)} /> : null}
 
-    {showCreate && <CampaignCreateModal><div className='space-y-3'>
-      <h4 className='font-semibold'>Nova campanha</h4>
-      <div className='flex flex-wrap gap-1'>{[1,2,3,4,5,6].map((step) => <button key={step} type='button' onClick={() => setWizardStep(step)} className={`rounded-full border px-2 py-1 text-xs ${wizardStep === step ? 'border-emerald-600 bg-emerald-600 text-white' : 'border-slate-200 bg-white text-slate-600'}`}>Etapa {step}</button>)}</div>
-      <div className='rounded-xl border border-slate-200 bg-slate-50 p-3'>
-        <p className='mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500'>Etapa 1 — Objetivo</p>
-        <select value={campaignObjective} onChange={(e) => setCampaignObjective(e.target.value)} className='premium-input w-full'>{['Promoção','Cobrança','Pós-venda','Lembrete','Pesquisa','Recuperação','Personalizada'].map((objective) => <option key={objective} value={objective}>{objective}</option>)}</select>
-      </div>
-      <input value={name} onChange={(e) => setName(e.target.value)} placeholder='Nome da campanha' className='premium-input w-full' />
-      {assetsLoading ? <div className='space-y-2'><div className='h-11 animate-pulse rounded-xl bg-slate-100'/><div className='h-11 animate-pulse rounded-xl bg-slate-100'/></div> : <>
-        <select value={providerId} onChange={(e) => setProviderId(e.target.value)} className='premium-input w-full'>
-          <option value=''>Selecione um provider conectado</option>
-          {providers.map((p) => <option key={p.id} value={p.id}>{p.display_name || p.provider_type} • {p.status}</option>)}
-        </select>
-        <select value={templateId} onChange={(e) => setTemplateId(e.target.value)} disabled={!providerId || approvedTemplates.length === 0} className='premium-input w-full'>
-          <option value=''>{approvedTemplates.length ? 'Selecione um template aprovado' : 'Nenhum template aprovado disponível'}</option>
-          {approvedTemplates.map((t) => <option key={t.id} value={t.id}>{t.name} • {t.category || 'utility'} • approved</option>)}
-        </select>
-      </>}
-      <div className='flex flex-wrap items-center gap-2'>
-        <span className={`rounded-full border px-3 py-1 text-xs ${badgeClass(providers.find((p) => p.id === providerId)?.status === 'connected')}`}>Provider {providers.find((p) => p.id === providerId)?.status || 'não selecionado'}</span>
-        <span className={`rounded-full border px-3 py-1 text-xs ${badgeClass(!!selectedTemplate)}`}>Template {selectedTemplate ? 'approved' : 'pendente'}</span>
-      </div>
-
-      {!!templateVariables.length && <div className='rounded-xl border border-slate-200 bg-white p-3'>
-        <p className='mb-3 text-sm font-semibold text-slate-900'>Mapeamento de variáveis</p>
-        <div className='space-y-3'>
-          {templateVariables.map((key) => (
-            <div key={key} className='rounded-xl border border-slate-200 bg-slate-50 p-3'>
-              <div className='mb-2 flex items-center gap-2'>
-                <span className='rounded-full bg-slate-900 px-2 py-0.5 text-xs font-semibold text-white'>Variável {key}</span>
-                <span className='rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-700'>Obrigatória</span>
-              </div>
-              <select value={variableMapping[key] || 'first_name'} onChange={(e) => setVariableMapping((prev) => ({ ...prev, [key]: e.target.value }))} className='premium-input w-full'>
-                {VARIABLE_FIELD_OPTIONS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
-              </select>
-              {variableMapping[key] === FIXED_VALUE_FIELD && <input value={manualVariableValues[key] || ''} onChange={(e) => setManualVariableValues((prev) => ({ ...prev, [key]: e.target.value }))} placeholder='Exemplo: #4821' className='premium-input mt-2 w-full' />}
-            </div>
-          ))}
-        </div>
-      </div>}
-
-      {selectedTemplate && <div className='rounded-xl border border-emerald-100 bg-emerald-50/40 p-3 text-sm text-slate-700'><p className='mb-1 font-semibold text-slate-900'>Preview do template</p><p className='whitespace-pre-wrap'>{renderPreview()}</p><p className='mt-2 text-xs text-slate-500'>Categoria: {selectedTemplate.category || 'utility'} • Idioma: {selectedTemplate.language}</p></div>}
-
-      <div className='rounded-xl border border-slate-200 bg-slate-50 p-3'>
-        <p className='mb-2 text-sm font-semibold'>Teste rápido</p>
-        <div className='space-y-2'>
-          <input value={testPhone} onChange={(e) => setTestPhone(e.target.value)} placeholder='Telefone' className='premium-input w-full' />
-          {templateVariables.length > 0 && (
-            <>
-              <div className='space-y-1'>
-                <label className='text-xs font-medium text-slate-600'>Variável 1</label>
-                <input value={testVariableValues['1'] || ''} onChange={(e) => setTestVariableValues((prev) => ({ ...prev, ['1']: e.target.value }))} placeholder='Gabriel' className='premium-input w-full' />
-              </div>
-              <div className='space-y-1'>
-                <label className='text-xs font-medium text-slate-600'>Variável 2</label>
-                <input value={testVariableValues['2'] || ''} onChange={(e) => setTestVariableValues((prev) => ({ ...prev, ['2']: e.target.value }))} placeholder='#4821' className='premium-input w-full' />
-              </div>
-            </>
-          )}
-          {templateVariables.filter((key) => key !== '1' && key !== '2').map((key) => (
-            <div key={`test-${key}`} className='space-y-1'>
-              <label className='text-xs font-medium text-slate-600'>Variável {key}: valor de teste</label>
-              <input value={testVariableValues[key] || ''} onChange={(e) => setTestVariableValues((prev) => ({ ...prev, [key]: e.target.value }))} placeholder={`Valor de teste da variável ${key}`} className='premium-input w-full' />
-            </div>
-          ))}
-        </div>
-        <button onClick={() => void onQuickTest()} disabled={!testPhone || !selectedTemplate || !providerId || hasVariableErrors || testSending} className='secondary-button mt-3 inline-flex items-center gap-2'>{testSending ? <Loader2 size={14} className='animate-spin'/> : <Send size={14}/> }Enviar teste</button>
-        {testStatus && <p className={`mt-2 text-xs ${testStatus.type === 'success' ? 'text-emerald-600' : 'text-rose-600'}`}>{testStatus.message}</p>}
-      </div>
-
-      <div className='rounded-xl border border-slate-200 p-3'>
-        <p className='mb-2 text-sm font-semibold'>Destinatários</p>
-        <div className='mb-2 flex gap-2 text-xs'>
-          <button type='button' onClick={() => setRecipientMode('csv')} className={`rounded border px-2 py-1 ${recipientMode === 'csv' ? 'bg-slate-900 text-white' : 'bg-white'}`}>CSV</button>
-          <button type='button' onClick={() => { setRecipientMode('saved'); void reloadContacts(); }} className={`rounded border px-2 py-1 ${recipientMode === 'saved' ? 'bg-slate-900 text-white' : 'bg-white'}`}>Selecionar contatos salvos</button>
-        </div>
-        {recipientMode === 'csv' && <><p className='mb-2 text-xs text-slate-500'>CSV esperado: {csvHeaders.join(',')}</p>
-        <textarea value={leadsText} onChange={(e) => setLeadsText(e.target.value)} rows={5} className='premium-input w-full' placeholder={`${csvHeaders.join(',')}
-5516999999999,Gabriel,#4821`} />
-        <label className='mt-2 block text-xs text-slate-500'>Upload CSV
-          <input type='file' accept='.csv,text/csv' onChange={(e) => void onCsvUpload(e)} className='mt-1 block text-xs' />
-        </label></>}
-
-        {recipientMode === 'saved' && <div className='space-y-2'>
-          <div className='flex gap-2'>
-            <button type='button' onClick={() => void reloadContacts()} className='secondary-button whitespace-nowrap'>Recarregar contatos</button>
-          </div>
-          {contactsLoadError ? <p className='text-xs text-amber-600'>{contactsLoadError}</p> : null}
-          <div className='text-xs text-gray-500'>
-            contatos carregados: {savedContacts.length}
-          </div>
-          <div className='max-h-40 space-y-1 overflow-auto rounded border p-2'>
-            {savedContacts.length === 0 ? <p className='text-xs text-slate-500'>Nenhum contato salvo ainda. Envie uma mensagem para o WhatsApp conectado ou importe via CSV.</p> : savedContacts.map((c) => (
-              <label key={c.id} className='flex items-center gap-2 text-xs'>
-                <input type='checkbox' checked={selectedContactIds.includes(c.id)} onChange={(e) => setSelectedContactIds((prev) => e.target.checked ? [...prev, c.id] : prev.filter((id) => id !== c.id))} />
-                <span>{c.name || c.phone} • {c.phone} • {c.source || 'whatsapp'}</span>
-              </label>
-            ))}
-          </div>
-        </div>}
-      </div>
-
-      <div className='rounded-xl border border-slate-200 bg-white p-3'>
-        <p className='mb-2 text-sm font-semibold'>Etapa 6 — Envio</p>
-        <div className='flex flex-wrap gap-2 text-xs'>{(['draft','now','schedule'] as const).map((mode) => <button key={mode} type='button' onClick={() => setSendMode(mode)} className={`rounded border px-3 py-1.5 ${sendMode === mode ? 'bg-slate-900 text-white' : 'bg-white text-slate-700'}`}>{mode === 'draft' ? 'Salvar rascunho' : mode === 'now' ? 'Enviar agora' : 'Agendar'}</button>)}</div>
-        {sendMode === 'schedule' && <input type='datetime-local' value={scheduledAt} onChange={(e) => setScheduledAt(e.target.value)} className='premium-input mt-2 w-full' />}
-        <p className='mt-2 text-xs text-slate-500'>Revisão: {name || 'Sem nome'} • {selectedTemplate?.name || 'Sem template'} • audiência estimada {recipientMode === 'csv' ? parseLeads().length : selectedContactIds.length} • variáveis {templateVariables.join(', ') || 'nenhuma'}.</p>
-      </div>
-
-      {(hasCreateErrors || hasVariableErrors || hasRecipientVariableErrors) && <p className='text-xs text-amber-600'>Preencha nome, provider/template e todos os mapeamentos obrigatórios para continuar. Edite o contato em Contatos ou use valor fixo.</p>}
-      <div className='flex justify-end gap-2'>
-        <button onClick={() => setShowCreate(false)} className='secondary-button'>Cancelar</button>
-        <button onClick={() => void onCreate()} disabled={hasCreateErrors || hasVariableErrors || hasRecipientVariableErrors || creatingCampaign} className='primary-button inline-flex items-center gap-2'>
-          {creatingCampaign ? <Loader2 size={14} className='animate-spin'/> : null}{sendMode === 'draft' ? 'Salvar rascunho' : sendMode === 'schedule' ? 'Agendar' : 'Enviar agora'}
-        </button>
-      </div>
-    </div></CampaignCreateModal>}
+    {showCreate && <CampaignWizard open={showCreate} initialTemplateId={templateId} initialProviderId={providerId} onClose={() => setShowCreate(false)} setToast={setToast} onSuccess={async () => { setTemplateId(''); setProviderId(''); await refresh(); }} />}
   </div>;
 }
