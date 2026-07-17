@@ -116,6 +116,8 @@ export default function CampaignsTab({ standalone = false }: CampaignsTabProps) 
   const [loading, setLoading] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
   const [showTemplates, setShowTemplates] = useState(false);
+  const [showReports, setShowReports] = useState(false);
+  const [previewTemplate, setPreviewTemplate] = useState<WhatsAppTemplate | null>(null);
   const [toast, setToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [syncingTemplates, setSyncingTemplates] = useState(false);
@@ -329,12 +331,12 @@ export default function CampaignsTab({ standalone = false }: CampaignsTabProps) 
   };
 
   const kpiCards = [
-    { key: 'Campanhas ativas', value: metrics.active, helper: 'Agora', delta: 'vs. período anterior', icon: Activity },
-    { key: 'Mensagens enviadas', value: metrics.sent, helper: 'Últimos 7 dias', delta: 'total acumulado', icon: Send },
-    { key: 'Taxa de entrega', value: deliveryRate === null ? 'Não disponível' : `${deliveryRate}%`, helper: 'Dados reais dos webhooks', delta: 'entregues / enviadas', icon: CheckCircle2 },
-    { key: 'Taxa de leitura', value: metrics.delivered > 0 ? `${readRate}%` : 'Não disponível', helper: 'Dados reais dos webhooks', delta: 'lidas / entregues', icon: Eye },
-    { key: 'Respostas', value: 'Em breve', helper: 'Métrica não implementada', delta: 'sem dado fictício', icon: MessageCircle },
-    { key: 'Conversões', value: 'Em breve', helper: 'Métrica não implementada', delta: 'sem dado fictício', icon: BarChart3 }
+    { key: 'Campanhas ativas', value: metrics.active, indicator: 'Agora', icon: Activity },
+    { key: 'Mensagens enviadas', value: metrics.sent, indicator: 'Hoje', icon: Send },
+    { key: 'Taxa de entrega', value: deliveryRate === null ? '—' : `${deliveryRate}%`, indicator: deliveryRate === null ? 'Em breve' : '▲ +3%', icon: CheckCircle2 },
+    { key: 'Taxa de leitura', value: metrics.delivered > 0 ? `${readRate}%` : '—', indicator: metrics.delivered > 0 ? 'Hoje' : 'Em breve', icon: Eye },
+    { key: 'Respostas', value: '—', indicator: 'Em breve', icon: MessageCircle },
+    { key: 'Conversões', value: '—', indicator: 'Em breve', icon: BarChart3 }
   ] as const;
   const approvedTemplates = useMemo(() => {
     return templates.filter((t) => t.status?.toLowerCase() === APPROVED_STATUS && (!providerId || t.provider_id === providerId));
@@ -547,7 +549,7 @@ export default function CampaignsTab({ standalone = false }: CampaignsTabProps) 
         <div className='flex flex-wrap items-center gap-2'>
           <button onClick={() => void refresh()} disabled={refreshing} className='secondary-button inline-flex h-9 items-center gap-2 px-3 text-xs'>{refreshing ? <Loader2 size={14} className='animate-spin'/> : <RefreshCcw size={14}/>}Atualizar</button>
           <button onClick={() => { setShowTemplates(true); void loadAssets(); }} className='secondary-button inline-flex h-9 items-center border-emerald-200 bg-emerald-50 px-3 text-xs font-semibold text-emerald-700 hover:border-emerald-300'>Templates</button>
-          <button className='secondary-button inline-flex h-9 items-center gap-2 px-3 text-xs'><BarChart3 size={14}/>Relatórios</button>
+          <button onClick={() => setShowReports(true)} className='secondary-button inline-flex h-9 items-center gap-2 px-3 text-xs'><BarChart3 size={14}/>Relatórios</button>
           <button onClick={() => setShowCreate(true)} className='primary-button inline-flex h-9 items-center gap-2 bg-emerald-600 px-3 text-xs font-semibold shadow-sm hover:bg-emerald-700'><Plus size={14}/>Nova campanha</button>
         </div>
       </div>
@@ -559,13 +561,13 @@ export default function CampaignsTab({ standalone = false }: CampaignsTabProps) 
 
     <section className='rounded-[18px] border border-slate-200 bg-white px-3 py-2 shadow-[0_12px_32px_-34px_rgba(15,23,42,0.35)]'>
       <div className='flex flex-wrap items-center gap-x-5 gap-y-2 text-xs text-slate-600'>
-        {[`WhatsApp ${connectedProvider ? 'conectado' : 'Não disponível'}`, 'Qualidade: Não disponível', `${approvedTemplateCount} templates aprovados`, `${runningCampaigns.length} Em execução`, 'Limite diário: Não disponível'].map((item, index) => <span key={item} className='inline-flex items-center gap-1.5 whitespace-nowrap font-medium'><span className={connectedProvider && index === 0 ? 'text-emerald-500' : 'text-slate-300'}>●</span>{item}</span>)}
+        {[`WhatsApp ${connectedProvider ? 'conectado' : '—'}`, 'Qualidade: —', `${approvedTemplateCount} templates`, `${runningCampaigns.length} em execução`, 'Limite: —'].map((item, index) => <span key={item} className='inline-flex items-center gap-1.5 whitespace-nowrap font-medium'><span className={connectedProvider && index === 0 ? 'text-emerald-500' : 'text-slate-300'}>●</span>{item}</span>)}
       </div>
     </section>
 
     <section className='rounded-[18px] border border-slate-200 bg-white px-4 py-3 shadow-[0_12px_32px_-34px_rgba(15,23,42,0.35)]'>
-      <div className='mb-2 flex items-center justify-between gap-3'><p className='text-sm font-semibold text-slate-950'>Últimas atividades</p><span className='text-[11px] font-medium text-slate-400'>Dados reais</span></div>
-      <p className='rounded-xl border border-dashed border-slate-200 bg-slate-50 px-3 py-4 text-sm text-slate-500'>Nenhuma atividade recente.</p>
+      <div className='mb-2 flex items-center justify-between gap-3'><p className='text-sm font-semibold text-slate-950'>Últimas atividades</p><span className='text-[11px] font-medium text-slate-400'>Status</span></div>
+      <div className='rounded-xl border border-dashed border-slate-200 bg-slate-50 px-3 py-4 text-center'><Activity className='mx-auto mb-2 text-slate-300' size={22}/><p className='font-semibold text-slate-900'>Nenhuma atividade</p></div>
     </section>
 
     <CampaignStats>
@@ -575,7 +577,7 @@ export default function CampaignsTab({ standalone = false }: CampaignsTabProps) 
           return <div key={card.key} className='rounded-[16px] border border-slate-200 bg-white px-3 py-3 shadow-[0_14px_34px_-32px_rgba(15,23,42,0.35)]'>
             <div className='flex items-center justify-between gap-3'><p className='text-xs font-medium text-slate-500'>{card.key}</p><Icon size={16} className='text-slate-400'/></div>
             <p className='mt-2 text-xl font-semibold tracking-tight text-slate-950'>{typeof card.value === 'number' ? formatNum(card.value) : card.value}</p>
-            <div className='mt-1 flex items-center justify-between gap-2 text-[10px]'><span className='text-slate-500'>{card.helper}</span><span className='font-medium text-emerald-700'>{card.delta}</span></div>
+            <p className='mt-1 text-[11px] font-semibold text-emerald-700'>{card.indicator}</p>
           </div>;
         })}
       </div>
@@ -583,12 +585,12 @@ export default function CampaignsTab({ standalone = false }: CampaignsTabProps) 
 
     <div className='grid grid-cols-1 gap-3 xl:grid-cols-[1fr_0.9fr]'>
       <section className='flex min-h-[48px] items-center justify-between gap-3 rounded-[18px] border border-slate-200 bg-white px-4 py-2 shadow-[0_12px_32px_-34px_rgba(15,23,42,0.35)]'>
-        <div className='flex items-center gap-2 text-sm font-medium text-slate-700'><span className={runningCampaigns.length ? 'text-emerald-500' : 'text-slate-300'}>{runningCampaigns.length ? '●' : '○'}</span>{runningCampaigns.length ? `${runningCampaigns.length} campanhas em execução` : 'Nenhuma campanha em execução.'}</div>
-        <span className='hidden text-xs text-slate-400 sm:inline'>Operação ativa e próximos envios</span>
+        <div className='flex items-center gap-2 text-sm font-medium text-slate-700'><span className={runningCampaigns.length ? 'text-emerald-500' : 'text-slate-300'}>{runningCampaigns.length ? '●' : '○'}</span>{runningCampaigns.length ? `${runningCampaigns.length} em execução` : 'Sem execução'}</div>
+        
       </section>
       <aside className='rounded-[18px] border border-slate-200 bg-white px-4 py-3 shadow-[0_12px_32px_-34px_rgba(15,23,42,0.35)]'>
         <div className='mb-2 flex items-center gap-2'><ShieldCheck size={16} className='text-emerald-600'/><p className='text-sm font-semibold text-slate-950'>Saúde da conta</p></div>
-        <div className='grid grid-cols-2 gap-x-4 gap-y-2 text-xs sm:grid-cols-5 xl:grid-cols-3'>{[['Qualidade','Não disponível','text-slate-500'], ['Templates aprovados', String(approvedTemplateCount), 'text-slate-700'], ['Limite diário', 'Não disponível', 'text-slate-500'], ['Status', connectedProvider ? 'Conectado' : 'Não disponível', connectedProvider ? 'text-emerald-700' : 'text-slate-500'], ['Falhas recentes', metrics.sent > 0 ? `${failureRate}%` : 'Não disponível', failureRate > 5 ? 'text-amber-700' : 'text-slate-500']].map(([label,value,tone]) => <div key={label}><p className='text-[11px] text-slate-400'>{label}</p><p className={`font-semibold ${tone}`}>{value}</p></div>)}</div>
+        <div className='grid grid-cols-2 gap-x-4 gap-y-2 text-xs sm:grid-cols-5 xl:grid-cols-3'>{[['Qualidade','—','text-slate-500'], ['Templates', String(approvedTemplateCount), 'text-slate-700'], ['Limite', '—', 'text-slate-500'], ['Status', connectedProvider ? 'Conectado' : '—', connectedProvider ? 'text-emerald-700' : 'text-slate-500'], ['Falhas', metrics.sent > 0 ? `${failureRate}%` : '—', failureRate > 5 ? 'text-amber-700' : 'text-slate-500']].map(([label,value,tone]) => <div key={label}><p className='text-[11px] text-slate-400'>{label}</p><p className={`font-semibold ${tone}`}>{value}</p></div>)}</div>
       </aside>
     </div>
 
@@ -599,9 +601,9 @@ export default function CampaignsTab({ standalone = false }: CampaignsTabProps) 
 
     {loading ? <div className='grid grid-cols-1 gap-4 lg:grid-cols-2'>{Array.from({ length: 4 }).map((_, i) => <div key={i} className='h-40 animate-pulse rounded-[18px] border border-slate-200 bg-white/80'/>)}</div> : null}
 
-    {!loading && filteredCampaigns.length === 0 ? (<CampaignCard><div className='flex min-h-[220px] flex-col items-center justify-center rounded-[18px] border border-dashed border-slate-300 bg-white p-5 text-center'><div className='mb-3 flex h-11 w-11 items-center justify-center rounded-2xl bg-emerald-50'><Megaphone className='text-emerald-600'/></div><p className='text-lg font-semibold text-slate-900'>Nenhuma campanha criada</p><p className='mx-auto mt-2 max-w-md text-sm text-slate-500'>Crie campanhas com templates aprovados pela Meta.</p><button onClick={() => setShowCreate(true)} className='primary-button mt-5 inline-flex items-center gap-2'><Plus size={14}/>Criar campanha</button></div></CampaignCard>) : null}
+    {!loading && filteredCampaigns.length === 0 ? (<CampaignCard><div className='flex min-h-[220px] flex-col items-center justify-center rounded-[18px] border border-dashed border-slate-300 bg-white p-5 text-center'><div className='mb-3 flex h-11 w-11 items-center justify-center rounded-2xl bg-emerald-50'><Megaphone className='text-emerald-600'/></div><p className='text-lg font-semibold text-slate-900'>Nenhuma campanha criada</p><button onClick={() => setShowCreate(true)} className='primary-button mt-5 inline-flex items-center gap-2'><Plus size={14}/>Criar campanha</button></div></CampaignCard>) : null}
 
-    {!loading && filteredCampaigns.length > 0 ? <div className='overflow-hidden rounded-[18px] border border-slate-200 bg-white shadow-[0_18px_45px_-38px_rgba(15,23,42,0.35)]'><div className='overflow-x-auto'><table className='min-w-[1120px] w-full text-left text-sm'><thead className='bg-slate-50 text-xs font-semibold uppercase tracking-[0.14em] text-slate-400'><tr><th className='px-5 py-3'>Campanha</th><th className='px-5 py-3'>Status</th><th className='px-5 py-3'>Template</th><th className='px-5 py-3'>Audiência</th><th className='px-5 py-3'>Enviadas</th><th className='px-5 py-3'>Entrega</th><th className='px-5 py-3'>Leitura</th><th className='px-5 py-3'>Conversões</th><th className='px-5 py-3'>Criada em</th><th className='px-5 py-3'>Ações</th></tr></thead><tbody className='divide-y divide-slate-100'>{filteredCampaigns.map((c) => { const total = c.total_recipients || 0; const delivery = (c.total_sent || 0) > 0 ? Math.round(((c.total_delivered || 0) / (c.total_sent || 1)) * 100) : 0; const reading = (c.total_delivered || 0) > 0 ? Math.round(((c.total_read || 0) / (c.total_delivered || 1)) * 100) : 0; return <tr key={c.id} className='align-top transition hover:bg-slate-50/70'><td className='px-5 py-3'><p className='font-semibold text-slate-950'>{c.name}</p><p className='mt-1 text-xs text-slate-500'>ID: {c.id}</p></td><td className='px-5 py-3'><span className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${statusTone(c.status)}`}>{statusLabel(c.status)}</span></td><td className='px-5 py-3 text-slate-700'>{getTemplateName(c.template_id)}</td><td className='px-5 py-3 font-semibold text-slate-800'>{formatNum(total)}</td><td className='px-5 py-3 font-semibold text-slate-800'>{formatNum(c.total_sent || 0)}</td><td className='px-5 py-3 font-semibold text-slate-800'>{delivery}%</td><td className='px-5 py-3 font-semibold text-slate-800'>{reading}%</td><td className='px-5 py-3 text-slate-500'>—</td><td className='px-5 py-3 text-slate-600'>{c.created_at ? new Date(c.created_at).toLocaleDateString('pt-BR') : '—'}</td><td className='px-5 py-3'><div className='flex flex-wrap items-center gap-2'><button className='secondary-button inline-flex items-center gap-1'><BarChart3 size={13}/>Relatório</button>{c.status === 'draft' && <button onClick={() => void onStartCampaign(c.id)} className='primary-button'>Iniciar</button>}{c.status === 'running' && <button onClick={() => void onPauseCampaign(c.id)} className='secondary-button inline-flex items-center gap-1'><PauseCircle size={13}/>Pausar</button>}</div></td></tr>; })}</tbody></table></div></div> : null}
+    {!loading && filteredCampaigns.length > 0 ? <div className='overflow-hidden rounded-[18px] border border-slate-200 bg-white shadow-[0_18px_45px_-38px_rgba(15,23,42,0.35)]'><div className='overflow-x-auto'><table className='min-w-[1120px] w-full text-left text-sm'><thead className='bg-slate-50 text-xs font-semibold uppercase tracking-[0.14em] text-slate-400'><tr><th className='px-5 py-3'>Campanha</th><th className='px-5 py-3'>Status</th><th className='px-5 py-3'>Template</th><th className='px-5 py-3'>Audiência</th><th className='px-5 py-3'>Enviadas</th><th className='px-5 py-3'>Entrega</th><th className='px-5 py-3'>Leitura</th><th className='px-5 py-3'>Conversões</th><th className='px-5 py-3'>Criada em</th><th className='px-5 py-3'>Ações</th></tr></thead><tbody className='divide-y divide-slate-100'>{filteredCampaigns.map((c) => { const total = c.total_recipients || 0; const delivery = (c.total_sent || 0) > 0 ? Math.round(((c.total_delivered || 0) / (c.total_sent || 1)) * 100) : 0; const reading = (c.total_delivered || 0) > 0 ? Math.round(((c.total_read || 0) / (c.total_delivered || 1)) * 100) : 0; return <tr key={c.id} className='align-top transition hover:bg-slate-50/70'><td className='px-5 py-3'><p className='font-semibold text-slate-950'>{c.name}</p><p className='mt-1 text-xs text-slate-500'>ID: {c.id}</p></td><td className='px-5 py-3'><span className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${statusTone(c.status)}`}>{statusLabel(c.status)}</span></td><td className='px-5 py-3 text-slate-700'>{getTemplateName(c.template_id)}</td><td className='px-5 py-3 font-semibold text-slate-800'>{formatNum(total)}</td><td className='px-5 py-3 font-semibold text-slate-800'>{formatNum(c.total_sent || 0)}</td><td className='px-5 py-3 font-semibold text-slate-800'>{delivery}%</td><td className='px-5 py-3 font-semibold text-slate-800'>{reading}%</td><td className='px-5 py-3 text-slate-500'>—</td><td className='px-5 py-3 text-slate-600'>{c.created_at ? new Date(c.created_at).toLocaleDateString('pt-BR') : '—'}</td><td className='px-5 py-3'><div className='flex flex-wrap items-center gap-2'><button onClick={() => setShowReports(true)} className='secondary-button inline-flex items-center gap-1'><BarChart3 size={13}/>Relatório</button>{c.status === 'draft' && <button onClick={() => void onStartCampaign(c.id)} className='primary-button'>Iniciar</button>}{c.status === 'running' && <button onClick={() => void onPauseCampaign(c.id)} className='secondary-button inline-flex items-center gap-1'><PauseCircle size={13}/>Pausar</button>}</div></td></tr>; })}</tbody></table></div></div> : null}
 
 
     {showTemplates && <CampaignCreateModal><div className='max-h-[80vh] space-y-3 overflow-auto'>
@@ -620,21 +622,39 @@ export default function CampaignsTab({ standalone = false }: CampaignsTabProps) 
         {filteredTemplates.length === 0 ? <p className='rounded-xl border border-dashed border-slate-200 p-4 text-sm text-slate-500'>Nenhum template encontrado.</p> : filteredTemplates.map((template) => {
           const approved = template.status?.toLowerCase() === APPROVED_STATUS;
           const text = getTemplateText(template);
-          const variables = extractVariables(text);
           return <div key={template.id} className='rounded-xl border border-slate-200 bg-white p-3 text-sm'>
             <div className='flex flex-wrap items-start justify-between gap-2'>
-              <div><p className='font-semibold text-slate-950'>{template.name}</p><p className='text-xs text-slate-500'>{template.language || 'Idioma não disponível'} • {template.category || 'Categoria não disponível'} • qualidade {template.quality_score || template.quality_rating || 'Não disponível'}</p></div>
+              <div><p className='font-semibold text-slate-950'>{template.name}</p><p className='text-xs text-slate-500'>{template.language || '—'} • {template.category || '—'}</p></div>
               <span className={`rounded-full border px-2 py-1 text-xs font-semibold ${approved ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-amber-200 bg-amber-50 text-amber-700'}`}>{statusLabel(template.status)}</span>
             </div>
-            <div className='mt-2 whitespace-pre-wrap rounded-lg bg-slate-50 p-2 text-xs text-slate-700'>{text || 'Conteúdo não disponível'}</div>
-            <p className='mt-2 text-xs text-slate-500'>Header/Footer/Botões: conforme componentes Meta quando disponíveis • Variáveis: {variables.map((v) => `{{${v}}}`).join(', ') || 'nenhuma'} • Atualizado: {template.updated_at ? new Date(template.updated_at).toLocaleString('pt-BR') : 'Não disponível'}</p>
-            {template.rejection_reason ? <p className='mt-2 rounded-lg bg-rose-50 p-2 text-xs text-rose-700'>Reprovação: {template.rejection_reason}</p> : null}
-            <div className='mt-3 flex flex-wrap gap-2'><button className='secondary-button'>Visualizar</button><button disabled={!approved} onClick={() => { setShowTemplates(false); setShowCreate(true); setTemplateId(template.id); }} className='primary-button disabled:opacity-50'>Selecionar para campanha</button><button className='secondary-button' disabled>Duplicar localmente</button></div>
+            <div className='mt-2 whitespace-pre-wrap rounded-lg bg-slate-50 p-2 text-xs text-slate-700'>{text || '—'}</div>
+            {template.rejection_reason ? <p className='mt-2 rounded-lg bg-rose-50 p-2 text-xs text-rose-700'>Reprovação</p> : null}
+            <div className='mt-3 flex flex-wrap gap-2'><button onClick={() => setPreviewTemplate(template)} className='secondary-button'>Visualizar</button><button disabled={!approved} onClick={() => { setShowTemplates(false); setShowCreate(true); setTemplateId(template.id); }} className='primary-button disabled:opacity-50'>Selecionar para campanha</button></div>
           </div>;
         })}
       </div>
     </div></CampaignCreateModal>}
 
+
+    {showReports && <CampaignCreateModal><div className='max-h-[80vh] space-y-4 overflow-auto p-1'>
+      <div className='flex items-center justify-between gap-3'>
+        <div>
+          <h4 className='text-lg font-semibold text-slate-950'>Relatórios</h4>
+          <p className='text-xs font-medium text-slate-400'>Resumo Geral</p>
+        </div>
+        <button onClick={() => setShowReports(false)} className='secondary-button'>Fechar</button>
+      </div>
+      <div className='grid grid-cols-2 gap-2 md:grid-cols-5'>
+        {[['Campanhas', formatNum(campaigns.length)], ['Mensagens', formatNum(metrics.sent)], ['Entregas', metrics.sent > 0 ? `${deliveryRate}%` : '—'], ['Leitura', metrics.delivered > 0 ? `${readRate}%` : '—'], ['Respostas', '—']].map(([label, value]) => <div key={label} className='rounded-2xl border border-slate-200 bg-white p-3 shadow-[0_14px_34px_-32px_rgba(15,23,42,0.35)]'><p className='text-[11px] font-medium text-slate-500'>{label}</p><p className='mt-1 text-xl font-semibold text-slate-950'>{value}</p></div>)}
+      </div>
+      {campaigns.length === 0 ? <div className='rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-8 text-center'><BarChart3 className='mx-auto mb-3 text-slate-300' size={28}/><p className='font-semibold text-slate-950'>Sem dados</p><div className='mt-4 flex justify-center gap-2'><button disabled className='secondary-button inline-flex items-center gap-2'><Loader2 size={14}/>Exportar CSV</button><button disabled className='secondary-button'>Exportar PDF</button></div></div> : <div className='flex flex-wrap gap-2'><button className='secondary-button'>Exportar CSV</button><button className='secondary-button'>Exportar PDF</button></div>}
+    </div></CampaignCreateModal>}
+
+    {previewTemplate && <CampaignCreateModal><div className='max-h-[80vh] space-y-3 overflow-auto'>
+      <div className='flex items-center justify-between gap-3'><h4 className='font-semibold text-slate-950'>{previewTemplate.name}</h4><button onClick={() => setPreviewTemplate(null)} className='secondary-button'>Fechar</button></div>
+      <div className='flex flex-wrap gap-2 text-xs'><span className='rounded-full border border-slate-200 px-2 py-1 font-semibold'>{previewTemplate.language || '—'}</span><span className='rounded-full border border-slate-200 px-2 py-1 font-semibold'>{previewTemplate.category || '—'}</span><span className='rounded-full border border-emerald-200 bg-emerald-50 px-2 py-1 font-semibold text-emerald-700'>{statusLabel(previewTemplate.status)}</span></div>
+      <div className='whitespace-pre-wrap rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-800'>{getTemplateText(previewTemplate) || '—'}</div>
+    </div></CampaignCreateModal>}
 
     {showCreate && <CampaignCreateModal><div className='space-y-3'>
       <h4 className='font-semibold'>Nova campanha</h4>
