@@ -24,6 +24,10 @@ import CampaignCard from './campaigns/CampaignCard';
 import CampaignCreateModal from './campaigns/CampaignCreateModal';
 import CampaignWizard from './campaigns/CampaignWizard';
 import CampaignStats from './campaigns/CampaignStats';
+import CampaignDetailsDrawer from './campaigns/CampaignDetailsDrawer';
+import CampaignProgressBar from './campaigns/CampaignProgressBar';
+import CampaignStatusBadge from './campaigns/CampaignStatusBadge';
+import { useCampaignRealtime } from './campaigns/realtime/CampaignRealtimeProvider';
 import {
   apiFetch,
   createWhatsAppCampaign,
@@ -34,6 +38,8 @@ import {
   listWhatsAppProviders,
   syncTemplates,
   pauseWhatsAppCampaign,
+  resumeWhatsAppCampaign,
+  cancelWhatsAppCampaign,
   startWhatsAppCampaign,
   testSendWhatsAppTemplate
 } from '@/lib/api';
@@ -235,6 +241,8 @@ export default function CampaignsTab({ standalone = false }: CampaignsTabProps) 
   const [testStatus, setTestStatus] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const [testSending, setTestSending] = useState(false);
   const [campaignActionError, setCampaignActionError] = useState<string | null>(null);
+  const [selectedCampaign, setSelectedCampaign] = useState<WhatsAppCampaign | null>(null);
+  const [actionLoadingId, setActionLoadingId] = useState<string | null>(null);
 
   const [searchTerm, setSearchTerm] = useState('');
   const [periodFilter, setPeriodFilter] = useState('all');
@@ -264,15 +272,6 @@ export default function CampaignsTab({ standalone = false }: CampaignsTabProps) 
       return matchesSearch && matchesStatus && matchesTemplate;
     });
   }, [campaigns, searchTerm, statusFilter, templateFilter, templates]);
-
-  const statusTone = (status: string) => ({
-    running: 'bg-emerald-50 text-emerald-700 border-emerald-200',
-    scheduled: 'bg-sky-50 text-sky-700 border-sky-200',
-    paused: 'bg-amber-50 text-amber-700 border-amber-200',
-    draft: 'bg-slate-100 text-slate-700 border-slate-200',
-    completed: 'bg-violet-50 text-violet-700 border-violet-200',
-    failed: 'bg-rose-50 text-rose-700 border-rose-200'
-  }[status] || 'bg-slate-100 text-slate-700 border-slate-200');
 
   const formatNum = (value: number) => new Intl.NumberFormat('pt-BR').format(value || 0);
 
@@ -358,6 +357,8 @@ export default function CampaignsTab({ standalone = false }: CampaignsTabProps) 
     void refresh();
   }, []);
 
+  const realtimeState = useCampaignRealtime(campaigns, setCampaigns);
+
   useEffect(() => {
     if (!toast) return undefined;
 
@@ -393,7 +394,8 @@ export default function CampaignsTab({ standalone = false }: CampaignsTabProps) 
     { label: 'Falhas', value: 'failed' }
   ];
 
-  const runningCampaigns = campaigns.filter((campaign) => ['running', 'scheduled'].includes(campaign.status)).slice(0, 3);
+  const runningCampaigns = campaigns.filter((campaign) => ['running'].includes(campaign.status)).slice(0, 3);
+  const queuedCampaigns = campaigns.filter((campaign) => ['scheduled', 'paused'].includes(campaign.status)).slice(0, 5);
   const approvedTemplateCount = templates.filter((t) => t.status?.toLowerCase() === APPROVED_STATUS).length;
   const connectedProvider = providers.find((p) => p.status === 'connected' || p.connection_status === 'connected');
   const deliveryRate = metrics.sent > 0 ? Math.round((metrics.delivered / metrics.sent) * 100) : null;
@@ -611,19 +613,25 @@ export default function CampaignsTab({ standalone = false }: CampaignsTabProps) 
       setCreatingCampaign(false);
     }
   };
-  const onStartCampaign = async (campaignId: string) => {
+  const runCampaignAction = async (campaignId: string, action: 'start' | 'pause' | 'resume' | 'cancel') => {
+    const labels = { start: 'iniciar', pause: 'pausar', resume: 'retomar', cancel: 'cancelar' };
+    if (['pause', 'resume', 'cancel'].includes(action) && !window.confirm(action === 'cancel' ? 'Cancelar campanha? Mensagens já enviadas não serão canceladas.' : `${labels[action][0].toUpperCase()}${labels[action].slice(1)} campanha?`)) return;
+    setActionLoadingId(campaignId);
     try {
       setCampaignActionError(null);
-      await startWhatsAppCampaign(campaignId);
+      if (action === 'start') await startWhatsAppCampaign(campaignId);
+      if (action === 'pause') await pauseWhatsAppCampaign(campaignId);
+      if (action === 'resume') await resumeWhatsAppCampaign(campaignId);
+      if (action === 'cancel') await cancelWhatsAppCampaign(campaignId);
+      setToast({ type: 'success', message: `Campanha atualizada: ${labels[action]}.` });
       await refresh();
     } catch (error) {
-      setCampaignActionError((error as Error).message || 'Falha ao iniciar campanha.');
+      setCampaignActionError((error as Error).message || `Falha ao ${labels[action]} campanha.`);
+    } finally {
+      setActionLoadingId(null);
     }
   };
-  const onPauseCampaign = async (campaignId: string) => {
-    await pauseWhatsAppCampaign(campaignId);
-    await refresh();
-  };
+  const onPauseCampaign = async (campaignId: string) => runCampaignAction(campaignId, 'pause');
 
   const hasCreateErrors = !name || !providerId || !templateId || (sendMode === 'schedule' && (!scheduledAt || new Date(scheduledAt) <= new Date()));
   const hasVariableErrors = templateVariables.some((key) => !variableMapping[key] || (variableMapping[key] === FIXED_VALUE_FIELD && !manualVariableValues[key]));
@@ -670,7 +678,7 @@ export default function CampaignsTab({ standalone = false }: CampaignsTabProps) 
 
     <section className='rounded-[18px] border border-slate-200 bg-white px-3 py-2 shadow-[0_12px_32px_-34px_rgba(15,23,42,0.35)]'>
       <div className='flex flex-wrap items-center gap-x-5 gap-y-2 text-xs text-slate-600'>
-        {[`WhatsApp ${connectedProvider ? 'conectado' : '—'}`, 'Qualidade: —', `${approvedTemplateCount} templates`, `${runningCampaigns.length} em execução`, 'Limite: —'].map((item, index) => <span key={item} className='inline-flex items-center gap-1.5 whitespace-nowrap font-medium'><span className={connectedProvider && index === 0 ? 'text-emerald-500' : 'text-slate-300'}>●</span>{item}</span>)}
+        {[`WhatsApp ${connectedProvider ? 'conectado' : '—'}`, 'Qualidade: —', `${approvedTemplateCount} templates`, `${runningCampaigns.length} em execução`, realtimeState === 'polling' ? 'Realtime: polling 5s' : realtimeState === 'stale' ? 'Realtime: desatualizado' : 'Realtime: —', 'Limite: —'].map((item, index) => <span key={item} className='inline-flex items-center gap-1.5 whitespace-nowrap font-medium'><span className={connectedProvider && index === 0 ? 'text-emerald-500' : 'text-slate-300'}>●</span>{item}</span>)}
       </div>
     </section>
 
@@ -696,13 +704,7 @@ export default function CampaignsTab({ standalone = false }: CampaignsTabProps) 
       <section className='rounded-[18px] border border-slate-200 bg-white px-4 py-3 shadow-[0_12px_32px_-34px_rgba(15,23,42,0.35)] transition duration-200 hover:-translate-y-0.5 hover:shadow-[0_18px_40px_-30px_rgba(15,23,42,0.35)]'>
         <p className='text-sm font-semibold text-slate-950'>Fila de campanhas</p>
         <div className='my-3 h-px bg-slate-100'/>
-        <div className='flex items-start gap-2'>
-          <CheckCircle2 size={16} className={runningCampaigns.length ? 'mt-0.5 text-emerald-600' : 'mt-0.5 text-slate-400'}/>
-          <div>
-            <p className='text-sm font-semibold text-slate-800'>{runningCampaigns.length ? `${runningCampaigns.length} campanha${runningCampaigns.length > 1 ? 's' : ''} em execução` : 'Nenhuma campanha em execução'}</p>
-            <p className='mt-0.5 text-xs font-normal text-slate-500'>{runningCampaigns.length ? 'Envios em andamento.' : 'Operação aguardando novos envios.'}</p>
-          </div>
-        </div>
+<div className='space-y-2'>{[...runningCampaigns, ...queuedCampaigns].length ? [...runningCampaigns, ...queuedCampaigns].map((campaign) => <div key={campaign.id} className='flex items-start gap-2 rounded-xl bg-slate-50 p-2'><CheckCircle2 size={16} className={campaign.status === 'running' ? 'mt-0.5 text-emerald-600' : 'mt-0.5 text-slate-400'}/><div className='min-w-0 flex-1'><p className='truncate text-sm font-semibold text-slate-800'>{campaign.name}</p><p className='mt-0.5 text-xs font-normal text-slate-500'>{campaign.status === 'running' ? 'Em execução agora' : campaign.scheduled_at ? `Prevista: ${new Date(campaign.scheduled_at).toLocaleString('pt-BR')}` : 'Na fila pausada'}</p></div><CampaignStatusBadge status={campaign.status} /></div>) : <div className='flex items-start gap-2'><CheckCircle2 size={16} className='mt-0.5 text-slate-400'/><div><p className='text-sm font-semibold text-slate-800'>Nenhuma campanha em execução.</p><p className='mt-0.5 text-xs font-normal text-slate-500'>Operação aguardando novos envios.</p></div></div>}</div>
       </section>
       <aside className='rounded-[18px] border border-slate-200 bg-white px-4 py-3 shadow-[0_12px_32px_-34px_rgba(15,23,42,0.35)] transition duration-200 hover:-translate-y-0.5 hover:shadow-[0_18px_40px_-30px_rgba(15,23,42,0.35)]'>
         <div className='mb-3 flex items-center gap-2'><ShieldCheck size={16} className='text-emerald-600'/><p className='text-sm font-semibold text-slate-950'>Saúde da conta</p></div>
@@ -719,7 +721,7 @@ export default function CampaignsTab({ standalone = false }: CampaignsTabProps) 
 
     {!loading && filteredCampaigns.length === 0 ? (<CampaignCard><div className='flex min-h-[220px] flex-col items-center justify-center rounded-[18px] border border-dashed border-slate-300 bg-white p-6 text-center'><div className='mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-emerald-50'><Megaphone size={28} className='text-emerald-600'/></div><p className='text-lg font-semibold text-slate-900'>Nenhuma campanha criada</p><p className='mt-1 max-w-md text-sm font-normal text-slate-500'>Crie sua primeira campanha utilizando templates aprovados pela Meta.</p><button onClick={() => setShowCreate(true)} className='primary-button mt-5 inline-flex h-9 items-center gap-2 px-4 text-xs font-semibold'><Plus size={14}/>Criar campanha</button></div></CampaignCard>) : null}
 
-    {!loading && filteredCampaigns.length > 0 ? <div className='overflow-hidden rounded-[18px] border border-slate-200 bg-white shadow-[0_18px_45px_-38px_rgba(15,23,42,0.35)]'><div className='overflow-x-auto'><table className='min-w-[1120px] w-full text-left text-sm'><thead className='bg-slate-50 text-xs font-semibold uppercase tracking-[0.14em] text-slate-400'><tr><th className='px-5 py-3'>Campanha</th><th className='px-5 py-3'>Status</th><th className='px-5 py-3'>Template</th><th className='px-5 py-3'>Audiência</th><th className='px-5 py-3'>Enviadas</th><th className='px-5 py-3'>Entrega</th><th className='px-5 py-3'>Leitura</th><th className='px-5 py-3'>Conversões</th><th className='px-5 py-3'>Criada em</th><th className='px-5 py-3'>Ações</th></tr></thead><tbody className='divide-y divide-slate-100'>{filteredCampaigns.map((c) => { const total = c.total_recipients || 0; const delivery = (c.total_sent || 0) > 0 ? Math.round(((c.total_delivered || 0) / (c.total_sent || 1)) * 100) : 0; const reading = (c.total_delivered || 0) > 0 ? Math.round(((c.total_read || 0) / (c.total_delivered || 1)) * 100) : 0; return <tr key={c.id} className='align-top transition hover:bg-slate-50/70'><td className='px-5 py-3'><p className='font-semibold text-slate-950'>{c.name}</p><p className='mt-1 text-xs text-slate-500'>ID: {c.id}</p></td><td className='px-5 py-3'><span className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${statusTone(c.status)}`}>{statusLabel(c.status)}</span></td><td className='px-5 py-3 text-slate-700'>{getTemplateName(c.template_id)}</td><td className='px-5 py-3 font-semibold text-slate-800'>{formatNum(total)}</td><td className='px-5 py-3 font-semibold text-slate-800'>{formatNum(c.total_sent || 0)}</td><td className='px-5 py-3 font-semibold text-slate-800'>{delivery}%</td><td className='px-5 py-3 font-semibold text-slate-800'>{reading}%</td><td className='px-5 py-3 text-slate-500'>—</td><td className='px-5 py-3 text-slate-600'>{c.created_at ? new Date(c.created_at).toLocaleDateString('pt-BR') : '—'}</td><td className='px-5 py-3'><div className='flex flex-wrap items-center gap-2'><button onClick={() => setShowReports(true)} className='secondary-button inline-flex items-center gap-1'><BarChart3 size={13}/>Relatório</button>{c.status === 'draft' && <button onClick={() => void onStartCampaign(c.id)} className='primary-button'>Iniciar</button>}{c.status === 'running' && <button onClick={() => void onPauseCampaign(c.id)} className='secondary-button inline-flex items-center gap-1'><PauseCircle size={13}/>Pausar</button>}</div></td></tr>; })}</tbody></table></div></div> : null}
+    {!loading && filteredCampaigns.length > 0 ? <div className='overflow-hidden rounded-[18px] border border-slate-200 bg-white shadow-[0_18px_45px_-38px_rgba(15,23,42,0.35)]'><div className='overflow-x-auto'><table className='min-w-[1120px] w-full text-left text-sm'><thead className='bg-slate-50 text-xs font-semibold uppercase tracking-[0.14em] text-slate-400'><tr><th className='px-5 py-3'>Campanha</th><th className='px-5 py-3'>Status</th><th className='px-5 py-3'>Progresso</th><th className='px-5 py-3'>Audiência</th><th className='px-5 py-3'>Enviadas</th><th className='px-5 py-3'>Entregues</th><th className='px-5 py-3'>Lidas</th><th className='px-5 py-3'>Falhas</th><th className='px-5 py-3'>Agendada/Iniciada</th><th className='px-5 py-3'>Ações</th></tr></thead><tbody className='divide-y divide-slate-100'>{filteredCampaigns.map((c) => { const total = c.total_recipients || 0; return <tr key={c.id} className='align-top transition hover:bg-slate-50/70'><td className='px-5 py-3'><p className='font-semibold text-slate-950'>{c.name}</p><p className='mt-1 text-xs text-slate-500'>ID: {c.id}</p></td><td className='px-5 py-3'><CampaignStatusBadge status={c.status} /></td><td className='px-5 py-3'><CampaignProgressBar campaign={c} compact /></td><td className='px-5 py-3 font-semibold text-slate-800'>{formatNum(total)}</td><td className='px-5 py-3 font-semibold text-slate-800'>{formatNum(c.total_sent || 0)}</td><td className='px-5 py-3 font-semibold text-slate-800'>{formatNum(c.total_delivered || 0)}</td><td className='px-5 py-3 font-semibold text-slate-800'>{formatNum(c.total_read || 0)}</td><td className='px-5 py-3 font-semibold text-slate-800'>{formatNum(c.total_failed || 0)}</td><td className='px-5 py-3 text-slate-600'>{c.scheduled_at ? new Date(c.scheduled_at).toLocaleString('pt-BR') : c.started_at ? new Date(c.started_at).toLocaleString('pt-BR') : '—'}</td><td className='px-5 py-3'><div className='flex flex-wrap items-center gap-2'><button onClick={() => setSelectedCampaign(c)} className='secondary-button inline-flex items-center gap-1'><Eye size={13}/>Visualizar</button><button onClick={() => setShowReports(true)} className='secondary-button inline-flex items-center gap-1'><BarChart3 size={13}/>Relatório</button>{c.status === 'draft' && <button disabled={actionLoadingId === c.id} onClick={() => void runCampaignAction(c.id, 'start')} className='primary-button'>Iniciar</button>}{c.status === 'running' && <button disabled={actionLoadingId === c.id} onClick={() => void onPauseCampaign(c.id)} className='secondary-button inline-flex items-center gap-1'><PauseCircle size={13}/>Pausar</button>}{c.status === 'paused' && <button disabled={actionLoadingId === c.id} onClick={() => void runCampaignAction(c.id, 'resume')} className='primary-button'>Retomar</button>}{['scheduled','running','paused'].includes(c.status) && <button disabled={actionLoadingId === c.id} onClick={() => void runCampaignAction(c.id, 'cancel')} className='secondary-button'>Cancelar</button>}</div></td></tr>; })}</tbody></table></div></div> : null}
 
 
     {showTemplates && <CampaignCreateModal><div className='max-h-[82vh] space-y-4 overflow-auto p-1'>
@@ -756,6 +758,8 @@ export default function CampaignsTab({ standalone = false }: CampaignsTabProps) 
     </div></CampaignCreateModal>}
 
     {previewTemplate ? <TemplatePreview template={previewTemplate} onClose={() => setPreviewTemplate(null)} /> : null}
+
+    {selectedCampaign ? <CampaignDetailsDrawer campaign={selectedCampaign} template={templates.find((template) => template.id === selectedCampaign.template_id)} onClose={() => setSelectedCampaign(null)} actions={<>{selectedCampaign.status === 'running' && <button disabled={actionLoadingId === selectedCampaign.id} onClick={() => void runCampaignAction(selectedCampaign.id, 'pause')} className='secondary-button'>Pausar</button>}{selectedCampaign.status === 'paused' && <button disabled={actionLoadingId === selectedCampaign.id} onClick={() => void runCampaignAction(selectedCampaign.id, 'resume')} className='primary-button'>Retomar</button>}{['scheduled','running','paused'].includes(selectedCampaign.status) && <button disabled={actionLoadingId === selectedCampaign.id} onClick={() => void runCampaignAction(selectedCampaign.id, 'cancel')} className='secondary-button'>Cancelar</button>}</>} /> : null}
 
     {showCreate && <CampaignWizard open={showCreate} initialTemplateId={templateId} initialProviderId={providerId} onClose={() => setShowCreate(false)} setToast={setToast} onSuccess={async () => { setTemplateId(''); setProviderId(''); await refresh(); }} />}
   </div>;
