@@ -1,6 +1,6 @@
 'use client';
 
-import { ChangeEvent, useEffect, useMemo, useState } from 'react';
+import { ChangeEvent, Fragment, useEffect, useMemo, useState } from 'react';
 import {
   Activity,
   BarChart3,
@@ -333,7 +333,7 @@ export default function CampaignsTab({ standalone = false }: CampaignsTabProps) 
   const kpiCards = [
     { key: 'Campanhas ativas', value: metrics.active, indicator: 'Agora', icon: Activity },
     { key: 'Mensagens enviadas', value: metrics.sent, indicator: 'Hoje', icon: Send },
-    { key: 'Taxa de entrega', value: deliveryRate === null ? '—' : `${deliveryRate}%`, indicator: deliveryRate === null ? 'Em breve' : '▲ +3%', icon: CheckCircle2 },
+    { key: 'Taxa de entrega', value: deliveryRate === null ? '—' : `${deliveryRate}%`, indicator: deliveryRate === null ? 'Em breve' : 'Hoje', icon: CheckCircle2 },
     { key: 'Taxa de leitura', value: metrics.delivered > 0 ? `${readRate}%` : '—', indicator: metrics.delivered > 0 ? 'Hoje' : 'Em breve', icon: Eye },
     { key: 'Respostas', value: '—', indicator: 'Em breve', icon: MessageCircle },
     { key: 'Conversões', value: '—', indicator: 'Em breve', icon: BarChart3 }
@@ -555,7 +555,7 @@ export default function CampaignsTab({ standalone = false }: CampaignsTabProps) 
       </div>
     </header>
 
-    {toast ? <div className={`rounded-[18px] border p-3 text-xs ${toast.type === 'success' ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-rose-200 bg-rose-50 text-rose-700'}`}>{toast.message}</div> : null}
+    {toast ? <div className={`fixed right-5 top-5 z-50 rounded-[14px] border px-4 py-3 text-xs font-medium shadow-[0_18px_45px_-28px_rgba(15,23,42,0.45)] ${toast.type === 'success' ? 'border-emerald-200 bg-white text-emerald-700' : 'border-rose-200 bg-white text-rose-700'}`}>{toast.message}</div> : null}
 
     {campaignActionError ? <p className='rounded-[18px] border border-rose-200 bg-rose-50 p-3 text-xs text-rose-700'>{campaignActionError}</p> : null}
 
@@ -571,37 +571,44 @@ export default function CampaignsTab({ standalone = false }: CampaignsTabProps) 
     </section>
 
     <CampaignStats>
-      <div className='grid grid-cols-2 gap-2 lg:grid-cols-3 xl:grid-cols-6'>
+      <div className='grid grid-cols-2 gap-3 lg:grid-cols-3 xl:grid-cols-6'>
         {kpiCards.map((card) => {
           const Icon = card.icon;
-          return <div key={card.key} className='rounded-[16px] border border-slate-200 bg-white px-3 py-3 shadow-[0_14px_34px_-32px_rgba(15,23,42,0.35)]'>
+          return <div key={card.key} className='rounded-[16px] border border-slate-200 bg-white px-3 py-3 shadow-[0_14px_34px_-32px_rgba(15,23,42,0.35)] transition duration-200 hover:-translate-y-0.5 hover:shadow-[0_18px_40px_-28px_rgba(15,23,42,0.35)]'>
             <div className='flex items-center justify-between gap-3'><p className='text-xs font-medium text-slate-500'>{card.key}</p><Icon size={16} className='text-slate-400'/></div>
-            <p className='mt-2 text-xl font-semibold tracking-tight text-slate-950'>{typeof card.value === 'number' ? formatNum(card.value) : card.value}</p>
-            <p className='mt-1 text-[11px] font-semibold text-emerald-700'>{card.indicator}</p>
+            <p className='mt-2 text-xl font-bold tracking-tight text-slate-950'>{typeof card.value === 'number' ? formatNum(card.value) : card.value}</p>
+            <p className={`mt-1 flex items-center gap-1 text-[11px] font-normal ${card.indicator === 'Em breve' ? 'text-slate-400' : 'text-emerald-700'}`}>{card.indicator === 'Em breve' ? null : <span className='text-[10px] leading-none'>●</span>}{card.indicator}</p>
           </div>;
         })}
       </div>
     </CampaignStats>
 
     <div className='grid grid-cols-1 gap-3 xl:grid-cols-[1fr_0.9fr]'>
-      <section className='flex min-h-[48px] items-center justify-between gap-3 rounded-[18px] border border-slate-200 bg-white px-4 py-2 shadow-[0_12px_32px_-34px_rgba(15,23,42,0.35)]'>
-        <div className='flex items-center gap-2 text-sm font-medium text-slate-700'><span className={runningCampaigns.length ? 'text-emerald-500' : 'text-slate-300'}>{runningCampaigns.length ? '●' : '○'}</span>{runningCampaigns.length ? `${runningCampaigns.length} em execução` : 'Sem execução'}</div>
-        
+      <section className='rounded-[18px] border border-slate-200 bg-white px-4 py-3 shadow-[0_12px_32px_-34px_rgba(15,23,42,0.35)] transition duration-200 hover:-translate-y-0.5 hover:shadow-[0_18px_40px_-30px_rgba(15,23,42,0.35)]'>
+        <p className='text-sm font-semibold text-slate-950'>Fila de campanhas</p>
+        <div className='my-3 h-px bg-slate-100'/>
+        <div className='flex items-start gap-2'>
+          <CheckCircle2 size={16} className={runningCampaigns.length ? 'mt-0.5 text-emerald-600' : 'mt-0.5 text-slate-400'}/>
+          <div>
+            <p className='text-sm font-semibold text-slate-800'>{runningCampaigns.length ? `${runningCampaigns.length} campanha${runningCampaigns.length > 1 ? 's' : ''} em execução` : 'Nenhuma campanha em execução'}</p>
+            <p className='mt-0.5 text-xs font-normal text-slate-500'>{runningCampaigns.length ? 'Envios em andamento.' : 'Operação aguardando novos envios.'}</p>
+          </div>
+        </div>
       </section>
-      <aside className='rounded-[18px] border border-slate-200 bg-white px-4 py-3 shadow-[0_12px_32px_-34px_rgba(15,23,42,0.35)]'>
-        <div className='mb-2 flex items-center gap-2'><ShieldCheck size={16} className='text-emerald-600'/><p className='text-sm font-semibold text-slate-950'>Saúde da conta</p></div>
-        <div className='grid grid-cols-2 gap-x-4 gap-y-2 text-xs sm:grid-cols-5 xl:grid-cols-3'>{[['Qualidade','—','text-slate-500'], ['Templates', String(approvedTemplateCount), 'text-slate-700'], ['Limite', '—', 'text-slate-500'], ['Status', connectedProvider ? 'Conectado' : '—', connectedProvider ? 'text-emerald-700' : 'text-slate-500'], ['Falhas', metrics.sent > 0 ? `${failureRate}%` : '—', failureRate > 5 ? 'text-amber-700' : 'text-slate-500']].map(([label,value,tone]) => <div key={label}><p className='text-[11px] text-slate-400'>{label}</p><p className={`font-semibold ${tone}`}>{value}</p></div>)}</div>
+      <aside className='rounded-[18px] border border-slate-200 bg-white px-4 py-3 shadow-[0_12px_32px_-34px_rgba(15,23,42,0.35)] transition duration-200 hover:-translate-y-0.5 hover:shadow-[0_18px_40px_-30px_rgba(15,23,42,0.35)]'>
+        <div className='mb-3 flex items-center gap-2'><ShieldCheck size={16} className='text-emerald-600'/><p className='text-sm font-semibold text-slate-950'>Saúde da conta</p></div>
+        <div className='grid grid-cols-[minmax(92px,1fr)_auto] gap-x-4 gap-y-2 text-xs'>{[['Qualidade','—','text-slate-500'], ['Status', connectedProvider ? 'Conectado' : '—', connectedProvider ? 'text-emerald-700' : 'text-slate-500'], ['Templates', String(approvedTemplateCount), 'text-slate-700'], ['Falhas', metrics.sent > 0 ? `${failureRate}%` : '—', failureRate > 5 ? 'text-amber-700' : 'text-slate-500'], ['Limite', '—', 'text-slate-500']].map(([label,value,tone]) => <Fragment key={label}><p className='text-slate-500'>{label}</p><p className={`text-right font-bold ${tone}`}>{value}</p></Fragment>)}</div>
       </aside>
     </div>
 
     <div className='rounded-[18px] border border-slate-200 bg-white p-3 shadow-[0_18px_45px_-38px_rgba(15,23,42,0.35)]'>
-      <div className='grid grid-cols-1 gap-3 xl:grid-cols-[1fr_auto] xl:items-center'><label className='flex items-center gap-3 h-10 rounded-full border border-slate-200 bg-white px-3 text-sm text-slate-500'><Search size={16}/> <input value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} placeholder='Buscar por campanha, template, responsável ou tag...' className='w-full bg-transparent outline-none'/></label><div className='grid grid-cols-2 gap-2 sm:flex sm:flex-wrap'><select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className='premium-input h-9 text-xs'><option value='all'>Status</option>{statusFilters.slice(1).map((filter) => <option key={filter.value} value={filter.value}>{filter.label}</option>)}</select><select value={templateFilter} onChange={(e) => setTemplateFilter(e.target.value)} className='premium-input h-9 text-xs'><option value='all'>Template</option>{templates.map((template) => <option key={template.id} value={template.id}>{template.name}</option>)}</select><select value={periodFilter} onChange={(e) => setPeriodFilter(e.target.value)} className='premium-input h-9 text-xs'><option value='all'>Período</option><option value='7'>Últimos 7 dias</option><option value='30'>Últimos 30 dias</option></select><select value={tagFilter} onChange={(e) => setTagFilter(e.target.value)} className='premium-input h-9 text-xs'><option value='all'>Tag</option></select><button className='secondary-button inline-flex items-center gap-1 text-xs'><Filter size={13}/>Mais filtros</button></div></div>
+      <div className='grid grid-cols-1 gap-3 xl:grid-cols-[minmax(320px,0.78fr)_auto] xl:items-center'><label className='flex h-10 items-center gap-3 rounded-full border border-slate-200 bg-white px-3 text-sm text-slate-500 transition duration-200 focus-within:border-emerald-300 focus-within:shadow-[0_0_0_4px_rgba(16,185,129,0.10)]'><Search size={16}/> <input value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} placeholder='Buscar campanhas...' className='w-full bg-transparent outline-none'/></label><div className='grid grid-cols-2 gap-2 sm:flex sm:flex-wrap'><select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className='premium-input h-9 text-xs'><option value='all'>Status</option>{statusFilters.slice(1).map((filter) => <option key={filter.value} value={filter.value}>{filter.label}</option>)}</select><select value={templateFilter} onChange={(e) => setTemplateFilter(e.target.value)} className='premium-input h-9 text-xs'><option value='all'>Template</option>{templates.map((template) => <option key={template.id} value={template.id}>{template.name}</option>)}</select><select value={periodFilter} onChange={(e) => setPeriodFilter(e.target.value)} className='premium-input h-9 text-xs'><option value='all'>Período</option><option value='7'>Últimos 7 dias</option><option value='30'>Últimos 30 dias</option></select><select value={tagFilter} onChange={(e) => setTagFilter(e.target.value)} className='premium-input h-9 text-xs'><option value='all'>Tag</option></select><button className='secondary-button inline-flex h-9 items-center gap-1 px-3 text-xs font-semibold'><Filter size={13}/>Mais filtros</button></div></div>
       <div className='mt-3 flex flex-wrap gap-2'>{statusFilters.map((filter) => <button key={filter.value} onClick={() => setStatusFilter(filter.value)} className={`rounded-full border px-3 py-1.5 text-xs font-medium transition ${statusFilter === filter.value ? 'border-emerald-600 bg-emerald-600 text-white' : 'border-slate-200 bg-slate-50 text-slate-600 hover:border-emerald-200 hover:text-emerald-700'}`}>{filter.label}</button>)}</div>
     </div>
 
     {loading ? <div className='grid grid-cols-1 gap-4 lg:grid-cols-2'>{Array.from({ length: 4 }).map((_, i) => <div key={i} className='h-40 animate-pulse rounded-[18px] border border-slate-200 bg-white/80'/>)}</div> : null}
 
-    {!loading && filteredCampaigns.length === 0 ? (<CampaignCard><div className='flex min-h-[220px] flex-col items-center justify-center rounded-[18px] border border-dashed border-slate-300 bg-white p-5 text-center'><div className='mb-3 flex h-11 w-11 items-center justify-center rounded-2xl bg-emerald-50'><Megaphone className='text-emerald-600'/></div><p className='text-lg font-semibold text-slate-900'>Nenhuma campanha criada</p><button onClick={() => setShowCreate(true)} className='primary-button mt-5 inline-flex items-center gap-2'><Plus size={14}/>Criar campanha</button></div></CampaignCard>) : null}
+    {!loading && filteredCampaigns.length === 0 ? (<CampaignCard><div className='flex min-h-[220px] flex-col items-center justify-center rounded-[18px] border border-dashed border-slate-300 bg-white p-6 text-center'><div className='mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-emerald-50'><Megaphone size={28} className='text-emerald-600'/></div><p className='text-lg font-semibold text-slate-900'>Nenhuma campanha criada</p><p className='mt-1 max-w-md text-sm font-normal text-slate-500'>Crie sua primeira campanha utilizando templates aprovados pela Meta.</p><button onClick={() => setShowCreate(true)} className='primary-button mt-5 inline-flex h-9 items-center gap-2 px-4 text-xs font-semibold'><Plus size={14}/>Criar campanha</button></div></CampaignCard>) : null}
 
     {!loading && filteredCampaigns.length > 0 ? <div className='overflow-hidden rounded-[18px] border border-slate-200 bg-white shadow-[0_18px_45px_-38px_rgba(15,23,42,0.35)]'><div className='overflow-x-auto'><table className='min-w-[1120px] w-full text-left text-sm'><thead className='bg-slate-50 text-xs font-semibold uppercase tracking-[0.14em] text-slate-400'><tr><th className='px-5 py-3'>Campanha</th><th className='px-5 py-3'>Status</th><th className='px-5 py-3'>Template</th><th className='px-5 py-3'>Audiência</th><th className='px-5 py-3'>Enviadas</th><th className='px-5 py-3'>Entrega</th><th className='px-5 py-3'>Leitura</th><th className='px-5 py-3'>Conversões</th><th className='px-5 py-3'>Criada em</th><th className='px-5 py-3'>Ações</th></tr></thead><tbody className='divide-y divide-slate-100'>{filteredCampaigns.map((c) => { const total = c.total_recipients || 0; const delivery = (c.total_sent || 0) > 0 ? Math.round(((c.total_delivered || 0) / (c.total_sent || 1)) * 100) : 0; const reading = (c.total_delivered || 0) > 0 ? Math.round(((c.total_read || 0) / (c.total_delivered || 1)) * 100) : 0; return <tr key={c.id} className='align-top transition hover:bg-slate-50/70'><td className='px-5 py-3'><p className='font-semibold text-slate-950'>{c.name}</p><p className='mt-1 text-xs text-slate-500'>ID: {c.id}</p></td><td className='px-5 py-3'><span className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${statusTone(c.status)}`}>{statusLabel(c.status)}</span></td><td className='px-5 py-3 text-slate-700'>{getTemplateName(c.template_id)}</td><td className='px-5 py-3 font-semibold text-slate-800'>{formatNum(total)}</td><td className='px-5 py-3 font-semibold text-slate-800'>{formatNum(c.total_sent || 0)}</td><td className='px-5 py-3 font-semibold text-slate-800'>{delivery}%</td><td className='px-5 py-3 font-semibold text-slate-800'>{reading}%</td><td className='px-5 py-3 text-slate-500'>—</td><td className='px-5 py-3 text-slate-600'>{c.created_at ? new Date(c.created_at).toLocaleDateString('pt-BR') : '—'}</td><td className='px-5 py-3'><div className='flex flex-wrap items-center gap-2'><button onClick={() => setShowReports(true)} className='secondary-button inline-flex items-center gap-1'><BarChart3 size={13}/>Relatório</button>{c.status === 'draft' && <button onClick={() => void onStartCampaign(c.id)} className='primary-button'>Iniciar</button>}{c.status === 'running' && <button onClick={() => void onPauseCampaign(c.id)} className='secondary-button inline-flex items-center gap-1'><PauseCircle size={13}/>Pausar</button>}</div></td></tr>; })}</tbody></table></div></div> : null}
 
