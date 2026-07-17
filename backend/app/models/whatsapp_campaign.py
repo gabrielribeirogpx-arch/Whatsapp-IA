@@ -13,6 +13,8 @@ class WhatsAppCampaign(Base):
     __table_args__ = (
         Index("ix_whatsapp_campaigns_tenant_status", "tenant_id", "status"),
         Index("ix_whatsapp_campaigns_tenant_scheduled", "tenant_id", "scheduled_at"),
+        Index("ix_whatsapp_campaigns_tenant_created", "tenant_id", "created_at"),
+        Index("ix_whatsapp_campaigns_tenant_template", "tenant_id", "template_id"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -44,6 +46,10 @@ class WhatsAppCampaignRecipient(Base):
     __table_args__ = (
         Index("ix_whatsapp_campaign_recipients_campaign_status", "campaign_id", "status"),
         Index("ix_whatsapp_campaign_recipients_provider_message", "provider_message_id"),
+        Index("ix_whatsapp_campaign_recipients_campaign_sent", "campaign_id", "sent_at"),
+        Index("ix_whatsapp_campaign_recipients_campaign_delivered", "campaign_id", "delivered_at"),
+        Index("ix_whatsapp_campaign_recipients_campaign_read", "campaign_id", "read_at"),
+        Index("ix_whatsapp_campaign_recipients_campaign_failed", "campaign_id", "failed_at"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
