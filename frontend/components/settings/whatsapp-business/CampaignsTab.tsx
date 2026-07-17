@@ -1,15 +1,17 @@
 'use client';
 
-import { ChangeEvent, Fragment, useEffect, useMemo, useState } from 'react';
+import { ChangeEvent, Fragment, memo, useEffect, useMemo, useState } from 'react';
 import {
   Activity,
   BarChart3,
   CheckCircle2,
+  Copy,
   Eye,
   Filter,
   Loader2,
   Megaphone,
   MessageCircle,
+  FileText,
   PauseCircle,
   Plus,
   RefreshCcw,
@@ -96,17 +98,104 @@ function getTemplateText(template?: WhatsAppTemplate | null): string {
 }
 
 function extractVariables(text: string): string[] {
-  const regex = /\{\{(\d+)\}\}/g;
+  const regex = /\{\{\s*([^}]+?)\s*\}\}/g;
   const variables = new Set<string>();
   let match = regex.exec(text);
 
   while (match) {
-    variables.add(match[1]);
+    variables.add(match[1].trim());
     match = regex.exec(text);
   }
 
   return Array.from(variables).sort((a, b) => Number(a) - Number(b));
 }
+
+
+function normalizeTemplateStatus(status?: string | null) {
+  return String(status || 'unknown').toLowerCase();
+}
+
+function statusLabel(status: string) {
+  return ({
+    approved: 'Approved',
+    pending: 'Pending',
+    rejected: 'Rejected',
+    paused: 'Paused',
+    disabled: 'Disabled',
+    running: 'Executando',
+    scheduled: 'Agendada',
+    draft: 'Rascunho',
+    completed: 'Concluída',
+    failed: 'Falha'
+  } as Record<string, string>)[String(status || '').toLowerCase()] || status || '—';
+}
+
+const TemplateStatusBadge = memo(function TemplateStatusBadge({ status }: { status?: string | null }) {
+  const tone = ({
+    approved: 'border-emerald-200 bg-emerald-50 text-emerald-700',
+    pending: 'border-orange-200 bg-orange-50 text-orange-700',
+    rejected: 'border-rose-200 bg-rose-50 text-rose-700',
+    paused: 'border-slate-200 bg-slate-100 text-slate-600',
+    disabled: 'border-slate-300 bg-slate-200 text-slate-800'
+  } as Record<string, string>)[normalizeTemplateStatus(status)] || 'border-slate-200 bg-slate-50 text-slate-600';
+  return <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold ${tone}`}>{statusLabel(status || '')}</span>;
+});
+
+const TemplateQualityBadge = memo(function TemplateQualityBadge({ value }: { value?: string | null }) {
+  const normalized = String(value || 'unknown').toLowerCase();
+  const label = normalized.includes('high') || normalized.includes('alta') ? 'Alta' : normalized.includes('medium') || normalized.includes('média') || normalized.includes('media') ? 'Média' : normalized.includes('low') || normalized.includes('baixa') ? 'Baixa' : 'Desconhecida';
+  const dot = label === 'Alta' ? 'bg-emerald-500' : label === 'Média' ? 'bg-amber-500' : label === 'Baixa' ? 'bg-rose-500' : 'bg-slate-300';
+  return <span className='inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700'><span className={`h-2 w-2 rounded-full ${dot}`} />{label}</span>;
+});
+
+function getTemplateComponents(template?: WhatsAppTemplate | null): Array<Record<string, any>> {
+  if (!template) return [];
+  const direct = Array.isArray(template.components) ? template.components : [];
+  const raw = template.metadata_json;
+  const metadata = typeof raw === 'string' ? (() => { try { return JSON.parse(raw); } catch { return {}; } })() : raw && typeof raw === 'object' ? raw : {};
+  const nested = Array.isArray((metadata as any).components) ? (metadata as any).components : [];
+  return direct.length ? direct : nested;
+}
+
+function renderWithVariables(text: string, values: Record<string, string>) {
+  const parts = text.split(/(\{\{\s*[^}]+\s*\}\})/g);
+  return parts.map((part, index) => {
+    const match = part.match(/\{\{\s*([^}]+?)\s*\}\}/);
+    if (!match) return <Fragment key={index}>{part}</Fragment>;
+    const key = match[1].trim();
+    return <mark key={index} className='rounded-md bg-emerald-100 px-1 font-semibold text-emerald-800'>{values[key] || part}</mark>;
+  });
+}
+
+function getAllTemplateText(template: WhatsAppTemplate) {
+  const components = getTemplateComponents(template);
+  return [template.name, template.category, template.language, getTemplateText(template), ...components.map((c) => `${c.type || ''} ${c.text || ''} ${JSON.stringify(c.buttons || c.example || '')}`)].join(' ');
+}
+
+const TemplatePreview = memo(function TemplatePreview({ template, onClose }: { template: WhatsAppTemplate; onClose: () => void }) {
+  const components = getTemplateComponents(template);
+  const text = getTemplateText(template);
+  const variables = useMemo(() => Array.from(new Set([...extractVariables(text), ...Array.from(text.matchAll(/\{\{\s*([^}\d][^}]*)\s*\}\}/g)).map((m) => m[1].trim())])), [text]);
+  const [values, setValues] = useState<Record<string, string>>({});
+  const byType = (type: string) => components.filter((c) => String(c.type || '').toUpperCase() === type);
+  const header = byType('HEADER')[0];
+  const body = byType('BODY')[0];
+  const footer = byType('FOOTER')[0];
+  const buttons = byType('BUTTONS').flatMap((c) => Array.isArray(c.buttons) ? c.buttons : []);
+  const headerFormat = String(header?.format || '').toUpperCase();
+  return <aside className='fixed inset-y-0 right-0 z-[70] flex w-full max-w-2xl flex-col border-l border-slate-200 bg-white shadow-2xl'>
+    <div className='flex items-center justify-between border-b border-slate-100 px-6 py-4'><div><p className='text-lg font-semibold text-slate-950'>{template.name}</p><p className='text-xs text-slate-500'>{template.category || '—'} • {template.language || '—'}</p></div><button onClick={onClose} className='secondary-button'>Fechar</button></div>
+    <div className='grid flex-1 gap-4 overflow-auto p-6 lg:grid-cols-[1fr_220px]'>
+      <div className='rounded-[28px] bg-[#efeae2] p-4 shadow-inner'><div className='rounded-2xl bg-[#dcf8c6] p-4 text-sm leading-relaxed text-slate-800 shadow-sm'>
+        {header ? <div className='mb-3 font-bold'>{headerFormat === 'IMAGE' ? <span>Imagem: {String(header.example?.header_handle?.[0] || header.example || '')}</span> : headerFormat === 'VIDEO' ? <span>Vídeo: {String(header.example?.header_handle?.[0] || header.example || '')}</span> : headerFormat === 'DOCUMENT' ? <span>Documento: {String(header.example?.header_handle?.[0] || header.example || '')}</span> : renderWithVariables(String(header.text || ''), values)}</div> : null}
+        <div className='whitespace-pre-wrap'>{renderWithVariables(String(body?.text || text || ''), values)}</div>
+        {footer?.text ? <div className='mt-3 text-xs text-slate-500'>{renderWithVariables(String(footer.text), values)}</div> : null}
+        {buttons.length ? <div className='mt-3 space-y-2 border-t border-emerald-200 pt-2'>{buttons.map((button, index) => <div key={index} className='rounded-lg bg-white/80 px-3 py-2 text-center text-xs font-semibold text-sky-700'>{String(button.type || '').replace('_', ' ')} · {button.text || button.url || button.phone_number}</div>)}</div> : null}
+      </div></div>
+      <div className='space-y-3'><p className='text-sm font-semibold text-slate-950'>Simulação de variáveis</p>{variables.length ? variables.map((key) => <label key={key} className='block text-xs font-medium text-slate-600'><span>{`{{${key}}}`}</span><input value={values[key] || ''} onChange={(e) => setValues((prev) => ({ ...prev, [key]: e.target.value }))} className='premium-input mt-1 w-full' placeholder={key === '1' ? 'Gabriel' : key === '2' ? '#4521' : key} /></label>) : <p className='text-xs text-slate-500'>Este template não possui variáveis.</p>}</div>
+    </div>
+  </aside>;
+});
 
 type CampaignsTabProps = {
   standalone?: boolean;
@@ -154,7 +243,9 @@ export default function CampaignsTab({ standalone = false }: CampaignsTabProps) 
   const [templateStatusFilter, setTemplateStatusFilter] = useState('all');
   const [templateCategoryFilter, setTemplateCategoryFilter] = useState('all');
   const [templateLanguageFilter, setTemplateLanguageFilter] = useState('all');
+  const [templateQualityFilter, setTemplateQualityFilter] = useState('all');
   const [templateSearchTerm, setTemplateSearchTerm] = useState('');
+  const [lastTemplateSyncAt, setLastTemplateSyncAt] = useState<string | null>(null);
 
   function getTemplateName(templateIdValue: string) {
     return templates.find((template) => template.id === templateIdValue)?.name || 'Template não carregado';
@@ -304,14 +395,6 @@ export default function CampaignsTab({ standalone = false }: CampaignsTabProps) 
   const runningCampaigns = campaigns.filter((campaign) => ['running', 'scheduled'].includes(campaign.status)).slice(0, 3);
   const approvedTemplateCount = templates.filter((t) => t.status?.toLowerCase() === APPROVED_STATUS).length;
   const connectedProvider = providers.find((p) => p.status === 'connected' || p.connection_status === 'connected');
-  const statusLabel = (status: string) => ({
-    running: 'Executando',
-    scheduled: 'Agendada',
-    paused: 'Pausada',
-    draft: 'Rascunho',
-    completed: 'Concluída',
-    failed: 'Falha'
-  }[status] || status);
   const deliveryRate = metrics.sent > 0 ? Math.round((metrics.delivered / metrics.sent) * 100) : null;
   const readRate = metrics.delivered > 0 ? Math.round((metrics.read / metrics.delivered) * 100) : 0;
   const failureRate = metrics.sent > 0 ? Math.round((metrics.failed / metrics.sent) * 100) : 0;
@@ -319,23 +402,28 @@ export default function CampaignsTab({ standalone = false }: CampaignsTabProps) 
   const templateStatuses = ['all', ...Array.from(new Set(templates.map((t) => String(t.status || '').toLowerCase()).filter(Boolean)))];
   const templateCategories = ['all', ...Array.from(new Set(templates.map((t) => String(t.category || '').toLowerCase()).filter(Boolean)))];
   const templateLanguages = ['all', ...Array.from(new Set(templates.map((t) => String(t.language || '')).filter(Boolean)))];
-  const filteredTemplates = templates.filter((template) => {
+  const filteredTemplates = useMemo(() => templates.filter((template) => {
     const needle = templateSearchTerm.trim().toLowerCase();
-    const matchesSearch = !needle || template.name.toLowerCase().includes(needle);
+    const quality = String(template.quality_rating || template.quality_score || 'unknown').toLowerCase();
+    const matchesSearch = !needle || getAllTemplateText(template).toLowerCase().includes(needle);
     const matchesStatus = templateStatusFilter === 'all' || String(template.status || '').toLowerCase() === templateStatusFilter;
     const matchesCategory = templateCategoryFilter === 'all' || String(template.category || '').toLowerCase() === templateCategoryFilter;
     const matchesLanguage = templateLanguageFilter === 'all' || String(template.language || '') === templateLanguageFilter;
-    return matchesSearch && matchesStatus && matchesCategory && matchesLanguage;
-  });
+    const matchesQuality = templateQualityFilter === 'all' || quality.includes(templateQualityFilter);
+    return matchesSearch && matchesStatus && matchesCategory && matchesLanguage && matchesQuality;
+  }), [templates, templateSearchTerm, templateStatusFilter, templateCategoryFilter, templateLanguageFilter, templateQualityFilter]);
 
   const onSyncTemplates = async () => {
     if (syncingTemplates) return;
     setSyncingTemplates(true);
     try {
+      const before = new Set(templates.map((template) => template.id));
       await syncTemplates();
       const templateData = await listTemplates();
+      const updatedCount = templateData.filter((template) => !before.has(template.id)).length;
       setTemplates(templateData);
-      setToast({ type: 'success', message: 'Templates sincronizados com a Meta.' });
+      setLastTemplateSyncAt(new Date().toISOString());
+      setToast({ type: 'success', message: updatedCount > 0 ? `${updatedCount} template${updatedCount > 1 ? 's' : ''} atualizado${updatedCount > 1 ? 's' : ''}.` : 'Nenhum template novo encontrado.' });
     } catch (error) {
       setToast({ type: 'error', message: (error as Error).message || 'Falha ao sincronizar templates.' });
     } finally {
@@ -633,33 +721,22 @@ export default function CampaignsTab({ standalone = false }: CampaignsTabProps) 
     {!loading && filteredCampaigns.length > 0 ? <div className='overflow-hidden rounded-[18px] border border-slate-200 bg-white shadow-[0_18px_45px_-38px_rgba(15,23,42,0.35)]'><div className='overflow-x-auto'><table className='min-w-[1120px] w-full text-left text-sm'><thead className='bg-slate-50 text-xs font-semibold uppercase tracking-[0.14em] text-slate-400'><tr><th className='px-5 py-3'>Campanha</th><th className='px-5 py-3'>Status</th><th className='px-5 py-3'>Template</th><th className='px-5 py-3'>Audiência</th><th className='px-5 py-3'>Enviadas</th><th className='px-5 py-3'>Entrega</th><th className='px-5 py-3'>Leitura</th><th className='px-5 py-3'>Conversões</th><th className='px-5 py-3'>Criada em</th><th className='px-5 py-3'>Ações</th></tr></thead><tbody className='divide-y divide-slate-100'>{filteredCampaigns.map((c) => { const total = c.total_recipients || 0; const delivery = (c.total_sent || 0) > 0 ? Math.round(((c.total_delivered || 0) / (c.total_sent || 1)) * 100) : 0; const reading = (c.total_delivered || 0) > 0 ? Math.round(((c.total_read || 0) / (c.total_delivered || 1)) * 100) : 0; return <tr key={c.id} className='align-top transition hover:bg-slate-50/70'><td className='px-5 py-3'><p className='font-semibold text-slate-950'>{c.name}</p><p className='mt-1 text-xs text-slate-500'>ID: {c.id}</p></td><td className='px-5 py-3'><span className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${statusTone(c.status)}`}>{statusLabel(c.status)}</span></td><td className='px-5 py-3 text-slate-700'>{getTemplateName(c.template_id)}</td><td className='px-5 py-3 font-semibold text-slate-800'>{formatNum(total)}</td><td className='px-5 py-3 font-semibold text-slate-800'>{formatNum(c.total_sent || 0)}</td><td className='px-5 py-3 font-semibold text-slate-800'>{delivery}%</td><td className='px-5 py-3 font-semibold text-slate-800'>{reading}%</td><td className='px-5 py-3 text-slate-500'>—</td><td className='px-5 py-3 text-slate-600'>{c.created_at ? new Date(c.created_at).toLocaleDateString('pt-BR') : '—'}</td><td className='px-5 py-3'><div className='flex flex-wrap items-center gap-2'><button onClick={() => setShowReports(true)} className='secondary-button inline-flex items-center gap-1'><BarChart3 size={13}/>Relatório</button>{c.status === 'draft' && <button onClick={() => void onStartCampaign(c.id)} className='primary-button'>Iniciar</button>}{c.status === 'running' && <button onClick={() => void onPauseCampaign(c.id)} className='secondary-button inline-flex items-center gap-1'><PauseCircle size={13}/>Pausar</button>}</div></td></tr>; })}</tbody></table></div></div> : null}
 
 
-    {showTemplates && <CampaignCreateModal><div className='max-h-[80vh] space-y-3 overflow-auto'>
-      <div className='flex items-center justify-between gap-3'>
-        <h4 className='font-semibold'>Templates Meta</h4>
+    {showTemplates && <CampaignCreateModal><div className='max-h-[82vh] space-y-4 overflow-auto p-1'>
+      <div className='flex items-start justify-between gap-3'>
+        <div><h4 className='text-lg font-semibold text-slate-950'>Templates Meta</h4><p className='text-xs text-slate-500'>Centro de templates aprovados e sincronizados pela integração Meta.</p></div>
         <button onClick={() => setShowTemplates(false)} className='secondary-button'>Fechar</button>
       </div>
-      <div className='grid gap-2 md:grid-cols-5'>
-        <input value={templateSearchTerm} onChange={(e) => setTemplateSearchTerm(e.target.value)} placeholder='Buscar por nome' className='premium-input md:col-span-2' />
-        <select value={templateStatusFilter} onChange={(e) => setTemplateStatusFilter(e.target.value)} className='premium-input'>{templateStatuses.map((status) => <option key={status} value={status}>{status === 'all' ? 'Status' : status}</option>)}</select>
-        <select value={templateCategoryFilter} onChange={(e) => setTemplateCategoryFilter(e.target.value)} className='premium-input'>{templateCategories.map((category) => <option key={category} value={category}>{category === 'all' ? 'Categoria' : category}</option>)}</select>
-        <select value={templateLanguageFilter} onChange={(e) => setTemplateLanguageFilter(e.target.value)} className='premium-input'>{templateLanguages.map((language) => <option key={language} value={language}>{language === 'all' ? 'Idioma' : language}</option>)}</select>
+      <div className='rounded-[18px] border border-slate-200 bg-white p-3 shadow-[0_18px_45px_-38px_rgba(15,23,42,0.35)]'>
+        <div className='grid gap-2 lg:grid-cols-[minmax(260px,1fr)_repeat(4,minmax(130px,160px))]'>
+          <label className='flex h-10 items-center gap-2 rounded-full border border-slate-200 px-3 text-sm text-slate-500 focus-within:border-emerald-300'><Search size={15}/><input value={templateSearchTerm} onChange={(e) => setTemplateSearchTerm(e.target.value)} placeholder='Buscar template...' className='w-full bg-transparent outline-none' /></label>
+          <select value={templateCategoryFilter} onChange={(e) => setTemplateCategoryFilter(e.target.value)} className='premium-input h-10'><option value='all'>Categoria</option><option value='marketing'>Marketing</option><option value='utility'>Utility</option><option value='authentication'>Authentication</option>{templateCategories.filter((c) => !['all','marketing','utility','authentication'].includes(c)).map((c) => <option key={c} value={c}>{c}</option>)}</select>
+          <select value={templateLanguageFilter} onChange={(e) => setTemplateLanguageFilter(e.target.value)} className='premium-input h-10'><option value='all'>Idioma</option>{['pt_BR','en_US','es_ES'].map((l) => <option key={l} value={l}>{l}</option>)}{templateLanguages.filter((l) => !['all','pt_BR','en_US','es_ES'].includes(l)).map((l) => <option key={l} value={l}>{l}</option>)}</select>
+          <select value={templateStatusFilter} onChange={(e) => setTemplateStatusFilter(e.target.value)} className='premium-input h-10'><option value='all'>Status</option>{['approved','pending','rejected'].map((st) => <option key={st} value={st}>{statusLabel(st)}</option>)}{templateStatuses.filter((st) => !['all','approved','pending','rejected'].includes(st)).map((st) => <option key={st} value={st}>{statusLabel(st)}</option>)}</select>
+          <select value={templateQualityFilter} onChange={(e) => setTemplateQualityFilter(e.target.value)} className='premium-input h-10'><option value='all'>Qualidade</option><option value='high'>Alta</option><option value='medium'>Média</option><option value='low'>Baixa</option></select>
+        </div>
+        <div className='mt-3 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500'><span>{filteredTemplates.length} de {templates.length} templates {lastTemplateSyncAt ? `• última sincronização ${new Date(lastTemplateSyncAt).toLocaleString('pt-BR')}` : ''}</span><button onClick={() => void onSyncTemplates()} disabled={syncingTemplates} className='secondary-button inline-flex items-center gap-2'>{syncingTemplates ? <Loader2 size={14} className='animate-spin'/> : <RefreshCcw size={14}/>}Sincronizar com a Meta</button></div>
       </div>
-      <button onClick={() => void onSyncTemplates()} disabled={syncingTemplates} className='secondary-button inline-flex items-center gap-2'>{syncingTemplates ? <Loader2 size={14} className='animate-spin'/> : <RefreshCcw size={14}/>}Sincronizar com a Meta</button>
-      <div className='space-y-2'>
-        {filteredTemplates.length === 0 ? <p className='rounded-xl border border-dashed border-slate-200 p-4 text-sm text-slate-500'>Nenhum template encontrado.</p> : filteredTemplates.map((template) => {
-          const approved = template.status?.toLowerCase() === APPROVED_STATUS;
-          const text = getTemplateText(template);
-          return <div key={template.id} className='rounded-xl border border-slate-200 bg-white p-3 text-sm'>
-            <div className='flex flex-wrap items-start justify-between gap-2'>
-              <div><p className='font-semibold text-slate-950'>{template.name}</p><p className='text-xs text-slate-500'>{template.language || '—'} • {template.category || '—'}</p></div>
-              <span className={`rounded-full border px-2 py-1 text-xs font-semibold ${approved ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-amber-200 bg-amber-50 text-amber-700'}`}>{statusLabel(template.status)}</span>
-            </div>
-            <div className='mt-2 whitespace-pre-wrap rounded-lg bg-slate-50 p-2 text-xs text-slate-700'>{text || '—'}</div>
-            {template.rejection_reason ? <p className='mt-2 rounded-lg bg-rose-50 p-2 text-xs text-rose-700'>Reprovação</p> : null}
-            <div className='mt-3 flex flex-wrap gap-2'><button onClick={() => setPreviewTemplate(template)} className='secondary-button'>Visualizar</button><button disabled={!approved} onClick={() => { setShowTemplates(false); setShowCreate(true); setTemplateId(template.id); }} className='primary-button disabled:opacity-50'>Selecionar para campanha</button></div>
-          </div>;
-        })}
-      </div>
+      {filteredTemplates.length === 0 ? <div className='flex min-h-[260px] flex-col items-center justify-center rounded-[22px] border border-dashed border-slate-300 bg-white p-8 text-center'><div className='mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-emerald-50'><FileText className='text-emerald-600' size={30}/></div><p className='text-lg font-semibold text-slate-950'>Nenhum template encontrado.</p><p className='mt-1 max-w-md text-sm text-slate-500'>Crie ou aprove templates no Meta Business Manager e sincronize novamente.</p><button onClick={() => void onSyncTemplates()} disabled={syncingTemplates} className='primary-button mt-5 inline-flex items-center gap-2'>{syncingTemplates ? <Loader2 size={14} className='animate-spin'/> : <RefreshCcw size={14}/>}Sincronizar com a Meta</button></div> : <div className='overflow-hidden rounded-[22px] border border-slate-200 bg-white shadow-[0_18px_45px_-38px_rgba(15,23,42,0.35)]'><div className='overflow-x-auto'><table className='w-full min-w-[1040px] text-left text-sm'><thead className='bg-slate-50 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400'><tr><th className='px-5 py-3'>Nome</th><th className='px-5 py-3'>Categoria</th><th className='px-5 py-3'>Idioma</th><th className='px-5 py-3'>Status</th><th className='px-5 py-3'>Qualidade</th><th className='px-5 py-3'>Última sincronização</th><th className='px-5 py-3'>Ações</th></tr></thead><tbody className='divide-y divide-slate-100'>{filteredTemplates.map((template) => { const approved = normalizeTemplateStatus(template.status) === APPROVED_STATUS; return <tr key={template.id} className='align-middle transition hover:bg-slate-50/70'><td className='px-5 py-4'><p className='font-semibold text-slate-950'>{template.name}</p><p className='mt-1 line-clamp-1 max-w-md text-xs text-slate-500'>{getTemplateText(template) || '—'}</p></td><td className='px-5 py-4 text-slate-700'>{template.category || '—'}</td><td className='px-5 py-4 text-slate-700'>{template.language || '—'}</td><td className='px-5 py-4'><TemplateStatusBadge status={template.status}/></td><td className='px-5 py-4'><TemplateQualityBadge value={template.quality_rating || template.quality_score}/></td><td className='px-5 py-4 text-slate-600'>{template.updated_at ? new Date(template.updated_at).toLocaleString('pt-BR') : lastTemplateSyncAt ? new Date(lastTemplateSyncAt).toLocaleString('pt-BR') : '—'}</td><td className='px-5 py-4'><div className='flex flex-wrap gap-2'><button onClick={() => setPreviewTemplate(template)} className='secondary-button inline-flex items-center gap-1'><Eye size={13}/>Visualizar</button><button disabled={!approved} onClick={() => { setShowTemplates(false); setShowCreate(true); setTemplateId(template.id); if (template.provider_id) setProviderId(template.provider_id); }} className='primary-button disabled:opacity-50'>Selecionar para campanha</button><button type='button' className='secondary-button inline-flex items-center gap-1' disabled><Copy size={13}/>Duplicar localmente</button><button onClick={() => void onSyncTemplates()} disabled={syncingTemplates} className='secondary-button inline-flex items-center gap-1'><RefreshCcw size={13}/>Sincronizar</button></div></td></tr>; })}</tbody></table></div></div>}
     </div></CampaignCreateModal>}
 
 
@@ -677,11 +754,7 @@ export default function CampaignsTab({ standalone = false }: CampaignsTabProps) 
       {campaigns.length === 0 ? <div className='rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-8 text-center'><BarChart3 className='mx-auto mb-3 text-slate-300' size={28}/><p className='font-semibold text-slate-950'>Sem dados</p><div className='mt-4 flex justify-center gap-2'><button disabled className='secondary-button inline-flex items-center gap-2'><Loader2 size={14}/>Exportar CSV</button><button disabled className='secondary-button'>Exportar PDF</button></div></div> : <div className='flex flex-wrap gap-2'><button className='secondary-button'>Exportar CSV</button><button className='secondary-button'>Exportar PDF</button></div>}
     </div></CampaignCreateModal>}
 
-    {previewTemplate && <CampaignCreateModal><div className='max-h-[80vh] space-y-3 overflow-auto'>
-      <div className='flex items-center justify-between gap-3'><h4 className='font-semibold text-slate-950'>{previewTemplate.name}</h4><button onClick={() => setPreviewTemplate(null)} className='secondary-button'>Fechar</button></div>
-      <div className='flex flex-wrap gap-2 text-xs'><span className='rounded-full border border-slate-200 px-2 py-1 font-semibold'>{previewTemplate.language || '—'}</span><span className='rounded-full border border-slate-200 px-2 py-1 font-semibold'>{previewTemplate.category || '—'}</span><span className='rounded-full border border-emerald-200 bg-emerald-50 px-2 py-1 font-semibold text-emerald-700'>{statusLabel(previewTemplate.status)}</span></div>
-      <div className='whitespace-pre-wrap rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-800'>{getTemplateText(previewTemplate) || '—'}</div>
-    </div></CampaignCreateModal>}
+    {previewTemplate ? <TemplatePreview template={previewTemplate} onClose={() => setPreviewTemplate(null)} /> : null}
 
     {showCreate && <CampaignCreateModal><div className='space-y-3'>
       <h4 className='font-semibold'>Nova campanha</h4>
