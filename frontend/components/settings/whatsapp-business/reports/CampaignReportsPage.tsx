@@ -27,6 +27,7 @@ import {
 } from "lucide-react";
 import {
   campaignAnalyticsExportUrl,
+  getAccountMe,
   getCampaignAnalyticsByCampaign,
   getCampaignAnalyticsByTemplate,
   getCampaignAnalyticsFailures,
@@ -56,11 +57,7 @@ import {
   formatInteger,
   formatPercent,
 } from "./formatters";
-import {
-  PREVIEW_SCENARIOS,
-  buildCampaignReportPreview,
-} from "./previewFixtures";
-import type { CampaignReportPreviewScenario } from "./previewFixtures";
+import type { CampaignReportPreviewScenario } from "./campaignAnalyticsPreviewData";
 
 const iso = (d: Date) => d.toISOString();
 const defaultStart = (days = 30) => {
@@ -70,10 +67,20 @@ const defaultStart = (days = 30) => {
 };
 const rate = (a?: number | null, b?: number | null) =>
   b ? (Number(a || 0) / b) * 100 : null;
-const previewAllowed =
-  process.env.NODE_ENV !== "production" &&
-  (process.env.NODE_ENV === "development" ||
-    process.env.NEXT_PUBLIC_ENABLE_ANALYTICS_PREVIEW === "true");
+const previewFeatureEnabled =
+  process.env.NEXT_PUBLIC_ENABLE_CAMPAIGN_ANALYTICS_PREVIEW === "true";
+const authorizedPreviewRoles = new Set(["owner", "admin"]);
+const previewScenarioLabels: Record<CampaignReportPreviewScenario, string> = {
+  low: "Volume baixo",
+  medium: "Volume médio",
+  high: "Volume alto",
+  failures: "Muitas falhas",
+};
+const previewScenarioValues = Object.keys(
+  previewScenarioLabels,
+) as CampaignReportPreviewScenario[];
+const isPreviewScenario = (value: string): value is CampaignReportPreviewScenario =>
+  previewScenarioValues.includes(value as CampaignReportPreviewScenario);
 const colors = {
   sent: "#64748b",
   delivered: "#059669",
@@ -173,9 +180,11 @@ function SelectShell({
 function ReportsHeader({
   onReload,
   exportHref,
+  previewActive = false,
 }: {
   onReload: () => void;
   exportHref: string;
+  previewActive?: boolean;
 }) {
   return (
     <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
@@ -195,13 +204,25 @@ function ReportsHeader({
           <RefreshCw size={15} />
           Atualizar
         </button>
-        <a
-          className="inline-flex h-10 items-center gap-2 rounded-xl bg-slate-950 px-4 text-sm font-semibold text-white shadow-sm hover:bg-slate-800"
-          href={exportHref}
-        >
-          <Download size={15} />
-          Exportar CSV
-        </a>
+        {previewActive ? (
+          <button
+            type="button"
+            disabled
+            title="Indisponível no modo demonstração."
+            className="inline-flex h-10 cursor-not-allowed items-center gap-2 rounded-xl bg-slate-300 px-4 text-sm font-semibold text-white shadow-sm"
+          >
+            <Download size={15} />
+            Exportar CSV
+          </button>
+        ) : (
+          <a
+            className="inline-flex h-10 items-center gap-2 rounded-xl bg-slate-950 px-4 text-sm font-semibold text-white shadow-sm hover:bg-slate-800"
+            href={exportHref}
+          >
+            <Download size={15} />
+            Exportar CSV
+          </a>
+        )}
       </div>
     </div>
   );
@@ -960,13 +981,17 @@ export default function CampaignReportsPage() {
     "",
   );
   const [previewPickerOpen, setPreviewPickerOpen] = useState(false);
+  const [previewAuthorized, setPreviewAuthorized] = useState(false);
   const params = useMemo(
     () => ({ start, end, ...filters }),
     [start, end, filters],
   );
+  const previewAllowed = previewFeatureEnabled && previewAuthorized;
+  const previewActive = previewAllowed && !!preview;
   const applyPreview = useCallback(
-    (scenario: CampaignReportPreviewScenario) => {
+    async (scenario: CampaignReportPreviewScenario) => {
       if (!previewAllowed) return;
+      const { buildCampaignReportPreview } = await import("./campaignAnalyticsPreviewData");
       const data = buildCampaignReportPreview(scenario);
       setSummary(data.summary);
       setCampaigns(data.campaigns);
@@ -983,11 +1008,11 @@ export default function CampaignReportsPage() {
       setError("");
       setLoading(false);
     },
-    [],
+    [previewAllowed],
   );
   const reload = useCallback(async () => {
     if (previewAllowed && preview) {
-      applyPreview(preview);
+      await applyPreview(preview);
       return;
     }
     setLoading(true);
@@ -1013,9 +1038,9 @@ export default function CampaignReportsPage() {
     } finally {
       setLoading(false);
     }
-  }, [params, preview, applyPreview]);
+  }, [params, preview, applyPreview, previewAllowed]);
   useEffect(() => {
-    if (previewAllowed && preview) return;
+    if (previewActive) return;
     void Promise.all([
       listWhatsAppCampaigns(),
       listTemplates(),
@@ -1025,7 +1050,24 @@ export default function CampaignReportsPage() {
       setAllTemplates(t);
       setProviders(p);
     });
-  }, [preview]);
+  }, [previewActive]);
+  useEffect(() => {
+    if (!previewFeatureEnabled) return;
+    void getAccountMe()
+      .then((account) => {
+        const role = String(account.profile?.role || "").toLowerCase();
+        setPreviewAuthorized(authorizedPreviewRoles.has(role));
+      })
+      .catch(() => setPreviewAuthorized(false));
+  }, []);
+  useEffect(() => {
+    if (!previewAllowed) {
+      setPreview("");
+      return;
+    }
+    const raw = new URLSearchParams(window.location.search).get("preview") || "";
+    if (isPreviewScenario(raw)) setPreview(raw);
+  }, [previewAllowed]);
   useEffect(() => {
     void reload();
   }, [reload]);
@@ -1039,10 +1081,34 @@ export default function CampaignReportsPage() {
     setStart(iso(s));
     setEnd(iso(now));
   }
-  const compared = (campaigns?.items || []).filter((c) =>
+  const filteredCampaigns = useMemo(() => {
+    if (!previewActive || !campaigns) return campaigns;
+    const startMs = new Date(start).getTime();
+    const endMs = new Date(end).getTime();
+    const items = campaigns.items.filter((c: any) => {
+      const started = c.started_at ? new Date(c.started_at).getTime() : 0;
+      return (
+        (!filters.campaign_id || c.id === filters.campaign_id) &&
+        (!filters.template_id || c.template_id === filters.template_id) &&
+        (!filters.provider_id || c.provider_id === filters.provider_id) &&
+        (!filters.status || c.status === filters.status) &&
+        (!filters.search || c.name.toLowerCase().includes(filters.search.toLowerCase())) &&
+        (!started || (started >= startMs && started <= endMs))
+      );
+    });
+    return { ...campaigns, items, total: items.length };
+  }, [campaigns, end, filters, previewActive, start]);
+  const displayAnalyticsData = {
+    summary,
+    campaigns: filteredCampaigns,
+    templates,
+    timeline,
+    failures,
+    heatmap,
+  };
+  const compared = (displayAnalyticsData.campaigns?.items || []).filter((c) =>
     compare.includes(c.id),
   );
-  const timelineData = useMemo(() => timeline?.items || [], [timeline]);
   return (
     <div className="min-h-screen bg-[#F7F8FA] px-4 py-6 text-slate-950 sm:px-6 lg:px-8">
       <div className="mx-auto max-w-[1440px] space-y-7">
@@ -1053,6 +1119,7 @@ export default function CampaignReportsPage() {
               ...params,
               type: "campaigns",
             })}
+            previewActive={previewActive}
           />
           <ReportsFilterBar
             period={period}
@@ -1067,6 +1134,23 @@ export default function CampaignReportsPage() {
             allCampaigns={allCampaigns}
             allTemplates={allTemplates}
           />
+          {previewActive && (
+            <div className="sticky top-2 z-30 flex flex-wrap items-center gap-2 rounded-2xl border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-950 shadow-sm">
+              <span className="font-bold">Modo demonstração — estes dados não são reais.</span>
+              <button type="button" onClick={() => setPreviewPickerOpen(true)} className="font-semibold underline">Trocar cenário</button>
+              <button
+                type="button"
+                onClick={() => {
+                  setPreview("");
+                  setPreviewPickerOpen(false);
+                  window.history.replaceState(null, "", window.location.pathname);
+                }}
+                className="font-semibold underline"
+              >
+                Sair da demonstração
+              </button>
+            </div>
+          )}
           {previewAllowed && (
             <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
               <button
@@ -1074,29 +1158,33 @@ export default function CampaignReportsPage() {
                 onClick={() => setPreviewPickerOpen(!previewPickerOpen)}
                 className="rounded-xl bg-amber-500 px-3 py-2 font-semibold text-white shadow-sm hover:bg-amber-600"
               >
-                Preview Analytics
+                Visualizar demonstração
               </button>
               {preview && (
                 <span className="font-semibold">
                   Ativo:{" "}
-                  {PREVIEW_SCENARIOS.find((s) => s.value === preview)?.label}
+                  {preview ? previewScenarioLabels[preview] : ""}
                 </span>
               )}
               {previewPickerOpen && (
                 <div className="flex flex-wrap items-center gap-2">
-                  {PREVIEW_SCENARIOS.map((s) => (
+                  {previewScenarioValues.map((s) => (
                     <button
-                      key={s.value}
-                      onClick={() => setPreview(s.value)}
-                      className={`rounded-full px-2.5 py-1 font-semibold ${preview === s.value ? "bg-amber-200" : "bg-white"}`}
+                      key={s}
+                      onClick={() => {
+                        setPreview(s);
+                        window.history.replaceState(null, "", `?preview=${s}`);
+                      }}
+                      className={`rounded-full px-2.5 py-1 font-semibold ${preview === s ? "bg-amber-200" : "bg-white"}`}
                     >
-                      {s.label}
+                      {previewScenarioLabels[s]}
                     </button>
                   ))}
                   <button
                     onClick={() => {
                       setPreview("");
                       setPreviewPickerOpen(false);
+                      window.history.replaceState(null, "", window.location.pathname);
                     }}
                     className="underline"
                   >
@@ -1105,8 +1193,7 @@ export default function CampaignReportsPage() {
                 </div>
               )}
               <span className="text-amber-700">
-                Disponível apenas fora de produção: NODE_ENV=development ou flag
-                NEXT_PUBLIC_ENABLE_ANALYTICS_PREVIEW=true.
+                Disponível somente com NEXT_PUBLIC_ENABLE_CAMPAIGN_ANALYTICS_PREVIEW=true e perfil administrativo.
               </span>
             </div>
           )}
@@ -1120,12 +1207,12 @@ export default function CampaignReportsPage() {
           </div>
         )}
         <div className="space-y-3">
-          <ExecutiveMetrics summary={summary} />
-          <SecondaryMetricsStrip summary={summary} />
+          <ExecutiveMetrics summary={displayAnalyticsData.summary} />
+          <SecondaryMetricsStrip summary={displayAnalyticsData.summary} />
         </div>
         <section className="grid gap-5 xl:grid-cols-[minmax(0,1.85fr)_minmax(320px,1fr)]">
-          <CampaignTrendChart data={timelineData} />
-          <CampaignFunnel summary={summary} />
+          <CampaignTrendChart data={displayAnalyticsData.timeline?.items || []} />
+          <CampaignFunnel summary={displayAnalyticsData.summary} />
         </section>
         <div className="space-y-5">
           <div className="flex justify-end">
@@ -1138,18 +1225,18 @@ export default function CampaignReportsPage() {
             </button>
           </div>
           <CampaignTable
-            campaigns={campaigns}
+            campaigns={displayAnalyticsData.campaigns}
             filters={filters}
             setFilters={setFilters}
             compare={compare}
             setCompare={setCompare}
-            setSelected={setSelected}
+            setSelected={previewActive ? () => undefined : setSelected}
           />
           <section className="grid gap-5 xl:grid-cols-2">
-            <TemplateRanking templates={templates} />
-            <FailureSummary failures={failures} />
+            <TemplateRanking templates={displayAnalyticsData.templates} />
+            <FailureSummary failures={displayAnalyticsData.failures} />
           </section>
-          <CampaignHeatmap heatmap={heatmap} />
+          <CampaignHeatmap heatmap={displayAnalyticsData.heatmap} />
         </div>
         <p className="text-xs text-slate-500">
           {updated
