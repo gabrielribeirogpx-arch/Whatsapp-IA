@@ -1,12 +1,12 @@
 """campaign analytics indexes
 
-Revision ID: 20260717_campaign_analytics_indexes
+Revision ID: 20260717_cmp_idx
 Revises: 20260622_meta_coexistence_phase1
 Create Date: 2026-07-17
 """
 from alembic import op
 
-revision = "20260717_campaign_analytics_indexes"
+revision = "20260717_cmp_idx"
 down_revision = "20260622_meta_coex_phase1"
 branch_labels = None
 depends_on = None
