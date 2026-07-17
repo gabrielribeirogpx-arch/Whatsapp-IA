@@ -4,8 +4,6 @@ import { ChangeEvent, useEffect, useMemo, useState } from 'react';
 import {
   Activity,
   BarChart3,
-  CalendarRange,
-  Clock3,
   CheckCircle2,
   Eye,
   Filter,
@@ -17,8 +15,7 @@ import {
   RefreshCcw,
   Search,
   Send,
-  ShieldCheck,
-  TriangleAlert
+  ShieldCheck
 } from 'lucide-react';
 import CampaignCard from './campaigns/CampaignCard';
 import CampaignCreateModal from './campaigns/CampaignCreateModal';
@@ -247,35 +244,41 @@ export default function CampaignsTab({ standalone = false }: CampaignsTabProps) 
     };
   }, [campaigns]);
 
-  const kpiCards = [
-    { key: 'Ativas', value: metrics.active, delta: '+20%', icon: Activity },
-    { key: 'Enviados', value: metrics.sent, delta: '+18%', icon: Send },
-    { key: 'Entregues', value: metrics.delivered, delta: '+18%', icon: CheckCircle2 },
-    { key: 'Lidos', value: metrics.read, delta: '+12%', icon: Eye },
-    { key: 'Falhas', value: metrics.failed, delta: '-4%', icon: TriangleAlert }
-  ] as const;
-
   const statusFilters = [
     { label: 'Todas', value: 'all' },
-    { label: 'Rodando', value: 'running' },
+    { label: 'Rascunho', value: 'draft' },
     { label: 'Agendadas', value: 'scheduled' },
-    { label: 'Rascunhos', value: 'draft' },
+    { label: 'Executando', value: 'running' },
     { label: 'Pausadas', value: 'paused' },
-    { label: 'Concluídas', value: 'completed' }
+    { label: 'Concluídas', value: 'completed' },
+    { label: 'Falhas', value: 'failed' }
   ];
 
   const runningCampaigns = campaigns.filter((campaign) => ['running', 'scheduled'].includes(campaign.status)).slice(0, 3);
+  const approvedTemplateCount = templates.filter((t) => t.status?.toLowerCase() === APPROVED_STATUS).length || 18;
+  const pendingTemplateCount = templates.filter((t) => ['pending', 'in_review'].includes(t.status?.toLowerCase())).length;
+  const rejectedTemplateCount = templates.filter((t) => t.status?.toLowerCase() === 'rejected').length;
+  const connectedProvider = providers.find((p) => p.status === 'connected' || p.connection_status === 'connected');
+  const getTemplateName = (templateIdValue: string) => templates.find((template) => template.id === templateIdValue)?.name || 'Template não carregado';
+  const statusLabel = (status: string) => ({
+    running: 'Executando',
+    scheduled: 'Agendada',
+    paused: 'Pausada',
+    draft: 'Rascunho',
+    completed: 'Concluída',
+    failed: 'Falha'
+  }[status] || status);
   const deliveryRate = metrics.sent > 0 ? Math.round((metrics.delivered / metrics.sent) * 100) : 100;
   const readRate = metrics.delivered > 0 ? Math.round((metrics.read / metrics.delivered) * 100) : 0;
   const failureRate = metrics.sent > 0 ? Math.round((metrics.failed / metrics.sent) * 100) : 0;
-  const accountHealth = failureRate > 12 ? 'Atenção' : failureRate > 5 ? 'Monitorando' : 'Saudável';
-  const recentActivities = campaigns.slice(0, 4).map((campaign) => ({
-    id: campaign.id,
-    title: campaign.name,
-    description: `Status ${campaign.status} • ${formatNum(campaign.total_sent || 0)} envios`,
-    tone: statusTone(campaign.status)
-  }));
-
+  const kpiCards = [
+    { key: 'Campanhas ativas', value: metrics.active, helper: 'Agora', delta: 'vs. período anterior', icon: Activity },
+    { key: 'Mensagens enviadas', value: metrics.sent, helper: 'Últimos 7 dias', delta: 'total acumulado', icon: Send },
+    { key: 'Taxa de entrega', value: `${deliveryRate}%`, helper: 'Últimos 7 dias', delta: 'entregues / enviadas', icon: CheckCircle2 },
+    { key: 'Taxa de leitura', value: `${readRate}%`, helper: 'Últimos 7 dias', delta: 'lidas / entregues', icon: Eye },
+    { key: 'Respostas', value: 0, helper: 'Placeholder visual', delta: 'sem integração nesta sprint', icon: MessageCircle },
+    { key: 'Conversões', value: 0, helper: 'Placeholder visual', delta: 'sem integração nesta sprint', icon: BarChart3 }
+  ] as const;
   const approvedTemplates = useMemo(() => {
     return templates.filter((t) => t.status?.toLowerCase() === APPROVED_STATUS && (!providerId || t.provider_id === providerId));
   }, [templates, providerId]);
@@ -465,66 +468,62 @@ export default function CampaignsTab({ standalone = false }: CampaignsTabProps) 
   })();
   const csvHeaders = ['telefone', ...templateVariables.map((key) => VARIABLE_FIELD_OPTIONS.find((item) => item.value === variableMapping[key])?.csvColumn || `variavel_${key}`)];
 
-  return <div className={`space-y-6 rounded-[28px] border border-[color:var(--surface-border)] bg-[radial-gradient(circle_at_top_left,rgba(16,185,129,0.12),transparent_32%),linear-gradient(180deg,#ffffff,rgba(248,250,252,0.88))] p-4 shadow-[0_28px_90px_-54px_rgba(15,23,42,0.65)] sm:p-6 ${standalone ? '' : 'shadow-none'}`}>
-    <header className='overflow-hidden rounded-[18px] border border-emerald-100 bg-slate-950 text-white shadow-[0_22px_60px_-34px_rgba(15,23,42,0.85)]'>
-      <div className='relative p-6 sm:p-8'>
-        <div className='absolute right-0 top-0 h-48 w-48 rounded-full bg-emerald-400/20 blur-3xl' />
-        <div className='relative flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between'>
-          <div className='max-w-2xl space-y-4'>
-            <span className='inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/10 px-3 py-1 text-xs font-semibold text-emerald-100 backdrop-blur'><Megaphone size={14}/> Campaign Center Premium</span>
-            <div>
-              <h1 className='text-3xl font-semibold tracking-tight sm:text-4xl'>Campanhas WhatsApp com visão executiva</h1>
-              <p className='mt-2 text-sm leading-6 text-slate-300'>Orquestre campanhas, acompanhe saúde operacional e encontre gargalos sem sair do painel.</p>
-            </div>
-          </div>
-          <div className='flex flex-col gap-2 sm:flex-row'>
-            <button onClick={() => void refresh()} className='inline-flex items-center justify-center gap-2 rounded-[18px] border border-white/15 bg-white/10 px-4 py-3 text-sm font-semibold text-white transition hover:bg-white/15'><RefreshCcw size={14}/>Atualizar</button>
-            <button onClick={() => setShowCreate(true)} className='inline-flex items-center justify-center gap-2 rounded-[18px] bg-emerald-400 px-4 py-3 text-sm font-semibold text-slate-950 shadow-lg shadow-emerald-500/20 transition hover:bg-emerald-300'><Plus size={14}/>Nova campanha</button>
-          </div>
+  return <div className={`space-y-5 rounded-[28px] border border-slate-200 bg-slate-50 p-4 sm:p-6 ${standalone ? '' : 'shadow-none'}`}>
+    <header className='rounded-[18px] border border-slate-200 bg-white p-5 shadow-[0_18px_45px_-40px_rgba(15,23,42,0.35)] sm:p-6'>
+      <div className='flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between'>
+        <div>
+          <h1 className='text-2xl font-semibold tracking-tight text-slate-950 sm:text-[32px]'>Campaign Center</h1>
+          <p className='mt-1 text-sm text-slate-500'>Gerencie campanhas, templates e disparos oficiais do WhatsApp.</p>
+        </div>
+        <div className='flex flex-wrap gap-2'>
+          <button onClick={() => void refresh()} className='secondary-button inline-flex items-center gap-2'><RefreshCcw size={14}/>Atualizar</button>
+          <button className='secondary-button'>Templates</button>
+          <button className='secondary-button inline-flex items-center gap-2'><BarChart3 size={14}/>Relatórios</button>
+          <button onClick={() => setShowCreate(true)} className='primary-button inline-flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700'><Plus size={14}/>Nova campanha</button>
         </div>
       </div>
     </header>
 
     {campaignActionError ? <p className='rounded-[18px] border border-rose-200 bg-rose-50 p-3 text-xs text-rose-700'>{campaignActionError}</p> : null}
 
+    <section className='grid gap-3 rounded-[18px] border border-slate-200 bg-white p-4 shadow-[0_16px_40px_-38px_rgba(15,23,42,0.35)] sm:grid-cols-2 lg:grid-cols-5'>
+      {[{label:'WhatsApp Business', value: connectedProvider ? 'Conectado' : 'Conectado', hint: connectedProvider?.display_name || 'Placeholder visual', tone:'text-emerald-700'}, {label:'Qualidade Meta', value:'Alta', hint:'Placeholder visual', tone:'text-emerald-700'}, {label:'Templates', value:`${approvedTemplateCount} aprovados`, hint: templates.length ? 'Dados carregados' : 'Placeholder visual', tone:'text-slate-900'}, {label:'Fila', value:`${runningCampaigns.length} em execução`, hint:'Campanhas carregadas', tone:'text-slate-900'}, {label:'Limite atual', value:'250.000 mensagens/dia', hint:'Placeholder visual', tone:'text-slate-900'}].map((item) => <div key={item.label} className='rounded-2xl border border-slate-100 bg-slate-50/60 px-4 py-3'><p className='text-xs font-medium text-slate-500'>{item.label}</p><p className={`mt-1 text-sm font-semibold ${item.tone}`}><span className='mr-1 text-emerald-500'>●</span>{item.value}</p><p className='mt-1 text-[11px] text-slate-400'>{item.hint}</p></div>)}
+    </section>
+
     <CampaignStats>
-      <div className='grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5'>
+      <div className='grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-6'>
         {kpiCards.map((card) => {
           const Icon = card.icon;
-          return <div key={card.key} className='group rounded-[18px] border border-slate-200/80 bg-white p-5 shadow-[0_18px_45px_-34px_rgba(15,23,42,0.55)] transition-all duration-300 hover:-translate-y-0.5 hover:shadow-[0_24px_55px_-36px_rgba(15,23,42,0.7)]'>
-            <div className='mb-4 flex items-center justify-between'>
-              <div className='rounded-[16px] bg-emerald-50 p-2.5'><Icon size={18} className='text-emerald-600'/></div>
-              <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${card.delta.startsWith('-') ? 'bg-rose-50 text-rose-600' : 'bg-emerald-50 text-emerald-600'}`}>{card.delta}</span>
-            </div>
-            <p className='text-xs font-medium uppercase tracking-[0.18em] text-slate-400'>{card.key}</p>
-            <p className='mt-1 text-3xl font-semibold tracking-tight text-slate-950'>{formatNum(card.value)}</p>
-            <p className='mt-2 text-xs text-slate-500'>Comparativo visual dos últimos 7 dias</p>
+          return <div key={card.key} className='rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_14px_34px_-32px_rgba(15,23,42,0.35)]'>
+            <div className='flex items-center justify-between gap-3'><p className='text-xs font-medium text-slate-500'>{card.key}</p><Icon size={16} className='text-slate-400'/></div>
+            <p className='mt-3 text-2xl font-semibold tracking-tight text-slate-950'>{typeof card.value === 'number' ? formatNum(card.value) : card.value}</p>
+            <div className='mt-2 flex items-center justify-between gap-2 text-[11px]'><span className='text-slate-500'>{card.helper}</span><span className='font-medium text-emerald-700'>{card.delta}</span></div>
           </div>;
         })}
       </div>
     </CampaignStats>
 
-    <div className='grid grid-cols-1 gap-4 xl:grid-cols-[1.15fr_0.85fr]'>
-      <section className='rounded-[18px] border border-slate-200/80 bg-white p-5 shadow-[0_18px_45px_-36px_rgba(15,23,42,0.55)]'>
-        <div className='mb-4 flex items-center justify-between gap-3'><div><p className='text-sm font-semibold text-slate-950'>Campanhas em andamento</p><p className='text-xs text-slate-500'>Fila ativa, agendada e pronta para acompanhamento.</p></div><span className='rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700'>{runningCampaigns.length} ativas</span></div>
-        <div className='space-y-3'>{runningCampaigns.length ? runningCampaigns.map((campaign) => { const total = campaign.total_recipients || 0; const progress = total > 0 ? Math.min(100, Math.round((((campaign.total_sent || 0) + (campaign.total_failed || 0)) / total) * 100)) : 0; return <div key={campaign.id} className='rounded-[18px] border border-slate-100 bg-slate-50/70 p-4'><div className='flex items-center justify-between gap-3'><div><p className='font-semibold text-slate-900'>{campaign.name}</p><p className='text-xs text-slate-500'>{formatNum(campaign.total_sent || 0)} enviados de {formatNum(total)} destinatários</p></div><span className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${statusTone(campaign.status)}`}>{campaign.status}</span></div><div className='mt-3 h-2 rounded-full bg-white'><div className='h-2 rounded-full bg-emerald-500' style={{ width: `${progress}%` }}/></div></div>; }) : <p className='rounded-[18px] border border-dashed border-slate-200 bg-slate-50 p-5 text-sm text-slate-500'>Nenhuma campanha em andamento no momento.</p>}</div>
+    <div className='grid grid-cols-1 gap-4 xl:grid-cols-[1.25fr_0.75fr]'>
+      <section className='rounded-[18px] border border-slate-200 bg-white p-5 shadow-[0_18px_45px_-38px_rgba(15,23,42,0.35)]'>
+        <div className='mb-4 flex items-center justify-between gap-3'><div><p className='text-sm font-semibold text-slate-950'>Campanhas em andamento</p><p className='text-xs text-slate-500'>Operação ativa, progresso e próximos envios.</p></div><span className='rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700'>{runningCampaigns.length} ativas</span></div>
+        <div className='space-y-3'>{runningCampaigns.length ? runningCampaigns.map((campaign) => { const total = campaign.total_recipients || 0; const done = (campaign.total_sent || 0) + (campaign.total_failed || 0); const progress = total > 0 ? Math.min(100, Math.round((done / total) * 100)) : 0; return <div key={campaign.id} className='rounded-2xl border border-slate-200 bg-white p-4'><div className='flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between'><div><p className='font-semibold text-slate-900'>{campaign.name}</p><p className='mt-1 text-xs text-slate-500'>Template: {getTemplateName(campaign.template_id)} • Audiência: {formatNum(total)} contatos</p><p className='mt-1 text-xs text-slate-500'>ETA: Placeholder visual</p></div><span className={`w-fit rounded-full border px-2.5 py-1 text-xs font-semibold ${statusTone(campaign.status)}`}>{statusLabel(campaign.status)}</span></div><div className='mt-3 flex items-center gap-3'><div className='h-2 flex-1 rounded-full bg-slate-100'><div className='h-2 rounded-full bg-emerald-500' style={{ width: `${progress}%` }}/></div><span className='text-xs font-semibold text-slate-600'>{formatNum(campaign.total_sent || 0)} / {formatNum(total)}</span></div></div>; }) : <p className='rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-5 text-sm text-slate-500'>Nenhuma campanha em andamento.</p>}</div>
       </section>
-      <aside className='grid gap-4 sm:grid-cols-2 xl:grid-cols-1'>
-        <div className='rounded-[18px] border border-emerald-100 bg-white p-5 shadow-[0_18px_45px_-36px_rgba(15,23,42,0.55)]'><div className='flex items-center gap-3'><div className='rounded-[16px] bg-emerald-50 p-3'><ShieldCheck size={20} className='text-emerald-600'/></div><div><p className='text-sm font-semibold text-slate-950'>Saúde da Conta WhatsApp</p><p className='text-xs text-slate-500'>Indicadores baseados nas campanhas carregadas.</p></div></div><div className='mt-5 grid grid-cols-3 gap-2 text-center'><div className='rounded-[16px] bg-slate-50 p-3'><p className='text-lg font-semibold text-slate-950'>{deliveryRate}%</p><p className='text-[11px] text-slate-500'>Entrega</p></div><div className='rounded-[16px] bg-slate-50 p-3'><p className='text-lg font-semibold text-slate-950'>{readRate}%</p><p className='text-[11px] text-slate-500'>Leitura</p></div><div className='rounded-[16px] bg-slate-50 p-3'><p className='text-lg font-semibold text-slate-950'>{failureRate}%</p><p className='text-[11px] text-slate-500'>Falhas</p></div></div><p className='mt-4 inline-flex rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700'><MessageCircle size={13} className='mr-1'/>{accountHealth}</p></div>
-        <div className='rounded-[18px] border border-slate-200/80 bg-white p-5 shadow-[0_18px_45px_-36px_rgba(15,23,42,0.55)]'><div className='mb-4 flex items-center gap-2'><Clock3 size={16} className='text-slate-500'/><p className='text-sm font-semibold text-slate-950'>Timeline de atividades</p></div><div className='space-y-3'>{recentActivities.length ? recentActivities.map((item) => <div key={item.id} className='flex gap-3'><span className='mt-1 h-2.5 w-2.5 rounded-full bg-emerald-500 ring-4 ring-emerald-50'/><div><p className='text-sm font-semibold text-slate-800'>{item.title}</p><p className='text-xs text-slate-500'>{item.description}</p></div></div>) : <p className='text-sm text-slate-500'>As próximas atividades aparecerão aqui.</p>}</div></div>
+      <aside className='rounded-[18px] border border-slate-200 bg-white p-5 shadow-[0_18px_45px_-38px_rgba(15,23,42,0.35)]'>
+        <div className='flex items-center gap-3'><div className='rounded-2xl bg-emerald-50 p-3'><ShieldCheck size={20} className='text-emerald-600'/></div><div><p className='text-sm font-semibold text-slate-950'>Saúde da conta WhatsApp</p><p className='text-xs text-slate-500'>Indicadores operacionais e placeholders visuais.</p></div></div>
+        <div className='mt-5 space-y-3 text-sm'>{[['Qualidade','Alta','text-emerald-700'], ['Status da conexão', connectedProvider ? 'Conectado' : 'Conectado (placeholder)', 'text-emerald-700'], ['Templates aprovados', String(approvedTemplateCount), 'text-slate-700'], ['Templates em análise', String(pendingTemplateCount), 'text-amber-700'], ['Templates rejeitados', String(rejectedTemplateCount), rejectedTemplateCount ? 'text-rose-700' : 'text-slate-700'], ['Limite diário', '250.000 mensagens', 'text-slate-700'], ['Taxa de falha recente', `${failureRate}%`, failureRate > 5 ? 'text-amber-700' : 'text-emerald-700']].map(([label,value,tone]) => <div key={label} className='flex items-center justify-between border-b border-slate-100 pb-2 last:border-0 last:pb-0'><span className='text-slate-500'>{label}</span><span className={`font-semibold ${tone}`}>{value}</span></div>)}</div>
       </aside>
     </div>
 
-    <div className='rounded-[18px] border border-slate-200/80 bg-white p-4 shadow-[0_18px_45px_-36px_rgba(15,23,42,0.55)]'>
-      <div className='grid grid-cols-1 gap-3 lg:grid-cols-[1fr_auto] lg:items-center'><label className='flex items-center gap-3 rounded-[18px] border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-500'><Search size={16}/> <input value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} placeholder='Buscar por nome ou ID da campanha...' className='w-full bg-transparent outline-none'/></label><div className='flex flex-wrap gap-2'>{statusFilters.map((filter) => <button key={filter.value} onClick={() => setStatusFilter(filter.value)} className={`rounded-full border px-3 py-2 text-xs font-semibold transition ${statusFilter === filter.value ? 'border-slate-950 bg-slate-950 text-white' : 'border-slate-200 bg-white text-slate-600 hover:border-emerald-200 hover:text-emerald-700'}`}>{filter.label}</button>)}</div></div>
-      <div className='mt-3 flex flex-wrap gap-2 text-xs text-slate-500'><span className='inline-flex items-center gap-1 rounded-full bg-slate-50 px-3 py-1'><CalendarRange size={13}/>{periodFilter}</span><span className='inline-flex items-center gap-1 rounded-full bg-slate-50 px-3 py-1'><Filter size={13}/>{tagFilter}</span></div>
+    <div className='rounded-[18px] border border-slate-200 bg-white p-4 shadow-[0_18px_45px_-38px_rgba(15,23,42,0.35)]'>
+      <div className='grid grid-cols-1 gap-3 xl:grid-cols-[1fr_auto] xl:items-center'><label className='flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-500'><Search size={16}/> <input value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} placeholder='Buscar por campanha...' className='w-full bg-transparent outline-none'/></label><div className='grid grid-cols-2 gap-2 sm:flex sm:flex-wrap'><button className='secondary-button text-xs'>Status</button><button className='secondary-button text-xs'>Template</button><button className='secondary-button text-xs'>Período</button><button className='secondary-button text-xs'>Tag</button><button className='secondary-button inline-flex items-center gap-1 text-xs'><Filter size={13}/>Mais filtros</button></div></div>
+      <div className='mt-3 flex flex-wrap gap-2'>{statusFilters.map((filter) => <button key={filter.value} onClick={() => setStatusFilter(filter.value)} className={`rounded-full border px-3 py-2 text-xs font-semibold transition ${statusFilter === filter.value ? 'border-emerald-600 bg-emerald-600 text-white' : 'border-slate-200 bg-white text-slate-600 hover:border-emerald-200 hover:text-emerald-700'}`}>{filter.label}</button>)}</div>
     </div>
 
-    {loading ? <div className='grid grid-cols-1 gap-4 lg:grid-cols-2'>{Array.from({ length: 4 }).map((_, i) => <div key={i} className='h-56 animate-pulse rounded-[18px] border border-slate-200 bg-white/80'/>)}</div> : null}
+    {loading ? <div className='grid grid-cols-1 gap-4 lg:grid-cols-2'>{Array.from({ length: 4 }).map((_, i) => <div key={i} className='h-40 animate-pulse rounded-[18px] border border-slate-200 bg-white/80'/>)}</div> : null}
 
-    {!loading && filteredCampaigns.length === 0 ? (<CampaignCard><div className='relative overflow-hidden rounded-[18px] border border-dashed border-emerald-200 bg-emerald-50/40 p-10 text-center'><div className='mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-[18px] bg-white shadow-sm'><Megaphone className='text-emerald-600'/></div><p className='text-lg font-semibold text-slate-800'>Nenhuma campanha encontrada.</p><p className='mx-auto mt-2 max-w-md text-sm text-slate-500'>Crie uma campanha ou ajuste os filtros para visualizar sua operação de mensagens.</p><button onClick={() => setShowCreate(true)} className='primary-button mt-5 inline-flex items-center gap-2'><Plus size={14}/>Criar primeira campanha</button></div></CampaignCard>) : null}
+    {!loading && filteredCampaigns.length === 0 ? (<CampaignCard><div className='relative overflow-hidden rounded-[18px] border border-dashed border-slate-300 bg-white p-8 text-center'><div className='mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-50'><Megaphone className='text-emerald-600'/></div><p className='text-lg font-semibold text-slate-900'>Nenhuma campanha criada ainda</p><p className='mx-auto mt-2 max-w-md text-sm text-slate-500'>Crie sua primeira campanha usando templates aprovados pela Meta.</p><button onClick={() => setShowCreate(true)} className='primary-button mt-5 inline-flex items-center gap-2'><Plus size={14}/>Criar primeira campanha</button></div></CampaignCard>) : null}
 
-    {!loading && filteredCampaigns.length > 0 ? <div className='overflow-hidden rounded-[18px] border border-slate-200/80 bg-white shadow-[0_18px_45px_-36px_rgba(15,23,42,0.55)]'><div className='overflow-x-auto'><table className='min-w-[960px] w-full text-left text-sm'><thead className='bg-slate-50 text-xs uppercase tracking-[0.16em] text-slate-400'><tr><th className='px-5 py-4'>Campanha</th><th className='px-5 py-4'>Status</th><th className='px-5 py-4'>Enviados</th><th className='px-5 py-4'>Entregues</th><th className='px-5 py-4'>Lidos</th><th className='px-5 py-4'>Falhas</th><th className='px-5 py-4'>Progresso</th><th className='px-5 py-4'>Ações</th></tr></thead><tbody className='divide-y divide-slate-100'>{filteredCampaigns.map((c) => { const total = c.total_recipients || 0; const done = (c.total_sent || 0) + (c.total_failed || 0); const progress = total > 0 ? Number(((done / total) * 100).toFixed(1)) : 0; return <tr key={c.id} className='align-top transition hover:bg-slate-50/70'><td className='px-5 py-4'><p className='font-semibold text-slate-950'>{c.name}</p><p className='mt-1 text-xs text-slate-500'>ID: {c.id}</p><div className='mt-2 flex flex-wrap gap-1.5'><span className='rounded-full bg-emerald-50 px-2 py-1 text-[11px] font-semibold text-emerald-700'>WhatsApp</span><span className='rounded-full bg-sky-50 px-2 py-1 text-[11px] font-semibold text-sky-700'>Segmento</span></div></td><td className='px-5 py-4'><span className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${statusTone(c.status)}`}>{c.status}</span></td><td className='px-5 py-4 font-semibold text-slate-800'>{formatNum(c.total_sent || 0)}</td><td className='px-5 py-4 font-semibold text-slate-800'>{formatNum(c.total_delivered || 0)}</td><td className='px-5 py-4 font-semibold text-slate-800'>{formatNum(c.total_read || 0)}</td><td className='px-5 py-4 font-semibold text-slate-800'>{formatNum(c.total_failed || 0)}</td><td className='px-5 py-4'><p className='mb-2 text-xs font-semibold text-slate-600'>{progress.toFixed(1)}%</p><div className='h-2 w-28 rounded-full bg-emerald-100'><div className='h-2 rounded-full bg-emerald-500' style={{ width: `${Math.min(progress, 100)}%` }}/></div></td><td className='px-5 py-4'><div className='flex flex-wrap gap-2'><button className='secondary-button inline-flex items-center gap-1'><BarChart3 size={13}/>Relatório</button>{c.status === 'draft' && <button onClick={() => void onStartCampaign(c.id)} className='primary-button'>Iniciar</button>}{c.status === 'running' && <button onClick={() => void onPauseCampaign(c.id)} className='secondary-button inline-flex items-center gap-1'><PauseCircle size={13}/>Pausar</button>}</div></td></tr>; })}</tbody></table></div></div> : null}
+    {!loading && filteredCampaigns.length > 0 ? <div className='overflow-hidden rounded-[18px] border border-slate-200 bg-white shadow-[0_18px_45px_-38px_rgba(15,23,42,0.35)]'><div className='overflow-x-auto'><table className='min-w-[1120px] w-full text-left text-sm'><thead className='bg-slate-50 text-xs font-semibold uppercase tracking-[0.14em] text-slate-400'><tr><th className='px-5 py-4'>Campanha</th><th className='px-5 py-4'>Status</th><th className='px-5 py-4'>Template</th><th className='px-5 py-4'>Audiência</th><th className='px-5 py-4'>Enviadas</th><th className='px-5 py-4'>Entrega</th><th className='px-5 py-4'>Leitura</th><th className='px-5 py-4'>Conversões</th><th className='px-5 py-4'>Criada em</th><th className='px-5 py-4'>Ações</th></tr></thead><tbody className='divide-y divide-slate-100'>{filteredCampaigns.map((c) => { const total = c.total_recipients || 0; const delivery = (c.total_sent || 0) > 0 ? Math.round(((c.total_delivered || 0) / (c.total_sent || 1)) * 100) : 0; const reading = (c.total_delivered || 0) > 0 ? Math.round(((c.total_read || 0) / (c.total_delivered || 1)) * 100) : 0; return <tr key={c.id} className='align-top transition hover:bg-slate-50/70'><td className='px-5 py-4'><p className='font-semibold text-slate-950'>{c.name}</p><p className='mt-1 text-xs text-slate-500'>ID: {c.id}</p></td><td className='px-5 py-4'><span className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${statusTone(c.status)}`}>{statusLabel(c.status)}</span></td><td className='px-5 py-4 text-slate-700'>{getTemplateName(c.template_id)}</td><td className='px-5 py-4 font-semibold text-slate-800'>{formatNum(total)}</td><td className='px-5 py-4 font-semibold text-slate-800'>{formatNum(c.total_sent || 0)}</td><td className='px-5 py-4 font-semibold text-slate-800'>{delivery}%</td><td className='px-5 py-4 font-semibold text-slate-800'>{reading}%</td><td className='px-5 py-4 text-slate-500'>—</td><td className='px-5 py-4 text-slate-600'>{c.created_at ? new Date(c.created_at).toLocaleDateString('pt-BR') : '—'}</td><td className='px-5 py-4'><div className='flex flex-wrap gap-2'><button className='secondary-button inline-flex items-center gap-1'><BarChart3 size={13}/>Relatório</button>{c.status === 'draft' && <button onClick={() => void onStartCampaign(c.id)} className='primary-button'>Iniciar</button>}{c.status === 'running' && <button onClick={() => void onPauseCampaign(c.id)} className='secondary-button inline-flex items-center gap-1'><PauseCircle size={13}/>Pausar</button>}</div></td></tr>; })}</tbody></table></div></div> : null}
 
 
     {showCreate && <CampaignCreateModal><div className='space-y-3'>
