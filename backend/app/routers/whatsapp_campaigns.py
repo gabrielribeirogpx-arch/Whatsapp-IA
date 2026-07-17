@@ -2,7 +2,7 @@ from datetime import datetime
 import re
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -27,8 +27,20 @@ def _extract_template_variables(template: WhatsAppMessageTemplate) -> list[str]:
 
 def _serialize_campaign(c: WhatsAppCampaign) -> dict:
     return {
-        "id": str(c.id), "name": c.name, "status": c.status, "provider_id": str(c.provider_id), "template_id": str(c.template_id),
-        "total_recipients": c.total_recipients, "total_sent": c.total_sent, "total_delivered": c.total_delivered, "total_read": c.total_read, "total_failed": c.total_failed,
+        "id": str(c.id),
+        "name": c.name,
+        "status": c.status,
+        "provider_id": str(c.provider_id),
+        "template_id": str(c.template_id),
+        "scheduled_at": c.scheduled_at.isoformat() if c.scheduled_at else None,
+        "started_at": c.started_at.isoformat() if c.started_at else None,
+        "completed_at": c.completed_at.isoformat() if c.completed_at else None,
+        "total_recipients": c.total_recipients,
+        "total_sent": c.total_sent,
+        "total_delivered": c.total_delivered,
+        "total_read": c.total_read,
+        "total_failed": c.total_failed,
+        "metadata_json": c.metadata_json or {},
         "created_at": c.created_at.isoformat() if c.created_at else None,
     }
 
@@ -41,15 +53,42 @@ def list_campaigns(db: Session = Depends(get_db), tenant: Tenant = Depends(get_c
 
 @router.post("")
 def create_campaign(payload: dict, db: Session = Depends(get_db), tenant: Tenant = Depends(get_current_tenant)):
+    provider_id = payload.get("provider_id")
+    template_id = payload.get("template_id")
+    name = str(payload.get("name") or "Campanha").strip() or "Campanha"
+    requested_status = str(payload.get("status") or "draft").strip().lower()
+    scheduled_at = None
+    if payload.get("scheduled_at"):
+        scheduled_at = datetime.fromisoformat(str(payload.get("scheduled_at")).replace("Z", "+00:00")).replace(tzinfo=None)
+        if scheduled_at <= datetime.utcnow():
+            raise HTTPException(status_code=400, detail="Agendamento deve estar no futuro")
+        requested_status = "scheduled"
+    if requested_status not in {"draft", "scheduled"}:
+        requested_status = "draft"
+
+    provider = db.execute(select(TenantWhatsAppProvider).where(TenantWhatsAppProvider.id == provider_id, TenantWhatsAppProvider.tenant_id == tenant.id)).scalars().first()
+    if not provider or provider.status != "connected":
+        raise HTTPException(status_code=400, detail="Provider is not connected/active")
+    template = db.execute(select(WhatsAppMessageTemplate).where(WhatsAppMessageTemplate.id == template_id, WhatsAppMessageTemplate.tenant_id == tenant.id)).scalars().first()
+    if not template or str(template.status or "").lower() != "approved":
+        raise HTTPException(status_code=400, detail="Template is not approved")
+    duplicate = db.execute(select(WhatsAppCampaign).where(WhatsAppCampaign.tenant_id == tenant.id, func.lower(WhatsAppCampaign.name) == name.lower(), WhatsAppCampaign.status.in_(["draft", "scheduled", "running", "paused"]))).scalars().first()
+    if duplicate:
+        raise HTTPException(status_code=409, detail="Já existe campanha ativa ou rascunho com este nome")
+
     campaign = WhatsAppCampaign(
         tenant_id=tenant.id,
-        provider_id=payload.get("provider_id"),
-        template_id=payload.get("template_id"),
-        name=payload.get("name") or "Campanha",
-        status="draft",
+        provider_id=provider_id,
+        template_id=template_id,
+        name=name,
+        status=requested_status,
+        scheduled_at=scheduled_at,
+        metadata_json=payload.get("metadata_json") if isinstance(payload.get("metadata_json"), dict) else {},
         created_by="console",
     )
     db.add(campaign); db.commit(); db.refresh(campaign)
+    if campaign.status == "scheduled" and campaign.scheduled_at:
+        get_queue("normal").enqueue_at(campaign.scheduled_at, "app.workers.campaign_worker.process_campaign", str(campaign.id), str(tenant.id), job_timeout=600)
     return _serialize_campaign(campaign)
 
 
@@ -246,6 +285,12 @@ def start_campaign(campaign_id: str, db: Session = Depends(get_db), tenant: Tena
                     status_code=400,
                     detail=f"Faltou preencher {', '.join(missing)}.",
                 )
+    if c.scheduled_at and c.scheduled_at > datetime.utcnow():
+        c.status = "scheduled"
+        db.commit()
+        get_queue("normal").enqueue_at(c.scheduled_at, "app.workers.campaign_worker.process_campaign", str(c.id), str(tenant.id), job_timeout=600)
+        db.refresh(c)
+        return _serialize_campaign(c)
     c.status = "running"
     c.started_at = c.started_at or datetime.utcnow()
     db.commit()

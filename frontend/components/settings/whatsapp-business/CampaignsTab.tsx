@@ -28,6 +28,7 @@ import {
   listTemplates,
   listWhatsAppCampaigns,
   listWhatsAppProviders,
+  syncTemplates,
   pauseWhatsAppCampaign,
   startWhatsAppCampaign,
   testSendWhatsAppTemplate
@@ -114,6 +115,15 @@ export default function CampaignsTab({ standalone = false }: CampaignsTabProps) 
   const [campaigns, setCampaigns] = useState<WhatsAppCampaign[]>([]);
   const [loading, setLoading] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
+  const [showTemplates, setShowTemplates] = useState(false);
+  const [toast, setToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const [syncingTemplates, setSyncingTemplates] = useState(false);
+  const [creatingCampaign, setCreatingCampaign] = useState(false);
+  const [wizardStep, setWizardStep] = useState(1);
+  const [campaignObjective, setCampaignObjective] = useState('Promoção');
+  const [sendMode, setSendMode] = useState<'draft' | 'now' | 'schedule'>('draft');
+  const [scheduledAt, setScheduledAt] = useState('');
   const [savedContacts, setSavedContacts] = useState<CRMContact[]>([]);
   const [contactsLoadError, setContactsLoadError] = useState<string | null>(null);
   const [selectedContactIds, setSelectedContactIds] = useState<string[]>([]);
@@ -134,18 +144,31 @@ export default function CampaignsTab({ standalone = false }: CampaignsTabProps) 
   const [campaignActionError, setCampaignActionError] = useState<string | null>(null);
 
   const [searchTerm, setSearchTerm] = useState('');
-  const [periodFilter] = useState('Últimos 7 dias');
-  const [tagFilter] = useState('Todas as tags');
+  const [periodFilter, setPeriodFilter] = useState('all');
+  const [tagFilter, setTagFilter] = useState('all');
+  const [templateFilter, setTemplateFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState('all');
+  const [templateStatusFilter, setTemplateStatusFilter] = useState('all');
+  const [templateCategoryFilter, setTemplateCategoryFilter] = useState('all');
+  const [templateLanguageFilter, setTemplateLanguageFilter] = useState('all');
+  const [templateSearchTerm, setTemplateSearchTerm] = useState('');
+
+  function getTemplateName(templateIdValue: string) {
+    return templates.find((template) => template.id === templateIdValue)?.name || 'Template não carregado';
+  }
 
   const filteredCampaigns = useMemo(() => {
     const needle = searchTerm.trim().toLowerCase();
     return campaigns.filter((c) => {
-      const matchesSearch = !needle || `${c.name} ${c.id}`.toLowerCase().includes(needle);
+      const templateName = getTemplateName(c.template_id);
+      const tags = Array.isArray(c.metadata_json?.tags) ? c.metadata_json.tags.join(' ') : '';
+      const responsible = String(c.metadata_json?.responsible || '');
+      const matchesSearch = !needle || `${c.name} ${c.id} ${templateName} ${tags} ${responsible}`.toLowerCase().includes(needle);
       const matchesStatus = statusFilter === 'all' || c.status === statusFilter;
-      return matchesSearch && matchesStatus;
+      const matchesTemplate = templateFilter === 'all' || c.template_id === templateFilter;
+      return matchesSearch && matchesStatus && matchesTemplate;
     });
-  }, [campaigns, searchTerm, statusFilter]);
+  }, [campaigns, searchTerm, statusFilter, templateFilter, templates]);
 
   const statusTone = (status: string) => ({
     running: 'bg-emerald-50 text-emerald-700 border-emerald-200',
@@ -187,9 +210,14 @@ export default function CampaignsTab({ standalone = false }: CampaignsTabProps) 
     setContactsLoadError(null);
   };
   const refresh = async () => {
+    if (refreshing) return;
+    setRefreshing(true);
     setLoading(true);
     try {
-      setCampaigns(await listWhatsAppCampaigns());
+      const [campaignData, providerData, templateData] = await Promise.all([listWhatsAppCampaigns(), listWhatsAppProviders(), listTemplates()]);
+      setCampaigns(campaignData);
+      setProviders(providerData);
+      setTemplates(templateData);
       try {
         await fetchContacts();
       } catch (error) {
@@ -197,8 +225,12 @@ export default function CampaignsTab({ standalone = false }: CampaignsTabProps) 
         setSavedContacts([]);
         setContactsLoadError('Não foi possível carregar contatos');
       }
+      setToast({ type: 'success', message: 'Campaign Center atualizado.' });
+    } catch (error) {
+      setToast({ type: 'error', message: (error as Error).message || 'Falha ao atualizar campanhas.' });
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   };
 
@@ -255,9 +287,8 @@ export default function CampaignsTab({ standalone = false }: CampaignsTabProps) 
   ];
 
   const runningCampaigns = campaigns.filter((campaign) => ['running', 'scheduled'].includes(campaign.status)).slice(0, 3);
-  const approvedTemplateCount = templates.filter((t) => t.status?.toLowerCase() === APPROVED_STATUS).length || 18;
+  const approvedTemplateCount = templates.filter((t) => t.status?.toLowerCase() === APPROVED_STATUS).length;
   const connectedProvider = providers.find((p) => p.status === 'connected' || p.connection_status === 'connected');
-  const getTemplateName = (templateIdValue: string) => templates.find((template) => template.id === templateIdValue)?.name || 'Template não carregado';
   const statusLabel = (status: string) => ({
     running: 'Executando',
     scheduled: 'Agendada',
@@ -266,24 +297,44 @@ export default function CampaignsTab({ standalone = false }: CampaignsTabProps) 
     completed: 'Concluída',
     failed: 'Falha'
   }[status] || status);
-  const deliveryRate = metrics.sent > 0 ? Math.round((metrics.delivered / metrics.sent) * 100) : 100;
+  const deliveryRate = metrics.sent > 0 ? Math.round((metrics.delivered / metrics.sent) * 100) : null;
   const readRate = metrics.delivered > 0 ? Math.round((metrics.read / metrics.delivered) * 100) : 0;
   const failureRate = metrics.sent > 0 ? Math.round((metrics.failed / metrics.sent) * 100) : 0;
-  const recentActivities = [
-    { time: '09:42', label: 'Template aprovado' },
-    { time: '09:45', label: 'Campanha criada' },
-    { time: '09:48', label: 'Disparo iniciado' },
-    { time: '09:51', label: '245 mensagens enviadas' },
-    { time: '09:54', label: '12 respostas recebidas' }
-  ];
+
+  const templateStatuses = ['all', ...Array.from(new Set(templates.map((t) => String(t.status || '').toLowerCase()).filter(Boolean)))];
+  const templateCategories = ['all', ...Array.from(new Set(templates.map((t) => String(t.category || '').toLowerCase()).filter(Boolean)))];
+  const templateLanguages = ['all', ...Array.from(new Set(templates.map((t) => String(t.language || '')).filter(Boolean)))];
+  const filteredTemplates = templates.filter((template) => {
+    const needle = templateSearchTerm.trim().toLowerCase();
+    const matchesSearch = !needle || template.name.toLowerCase().includes(needle);
+    const matchesStatus = templateStatusFilter === 'all' || String(template.status || '').toLowerCase() === templateStatusFilter;
+    const matchesCategory = templateCategoryFilter === 'all' || String(template.category || '').toLowerCase() === templateCategoryFilter;
+    const matchesLanguage = templateLanguageFilter === 'all' || String(template.language || '') === templateLanguageFilter;
+    return matchesSearch && matchesStatus && matchesCategory && matchesLanguage;
+  });
+
+  const onSyncTemplates = async () => {
+    if (syncingTemplates) return;
+    setSyncingTemplates(true);
+    try {
+      await syncTemplates();
+      const templateData = await listTemplates();
+      setTemplates(templateData);
+      setToast({ type: 'success', message: 'Templates sincronizados com a Meta.' });
+    } catch (error) {
+      setToast({ type: 'error', message: (error as Error).message || 'Falha ao sincronizar templates.' });
+    } finally {
+      setSyncingTemplates(false);
+    }
+  };
 
   const kpiCards = [
     { key: 'Campanhas ativas', value: metrics.active, helper: 'Agora', delta: 'vs. período anterior', icon: Activity },
     { key: 'Mensagens enviadas', value: metrics.sent, helper: 'Últimos 7 dias', delta: 'total acumulado', icon: Send },
-    { key: 'Taxa de entrega', value: `${deliveryRate}%`, helper: 'Últimos 7 dias', delta: 'entregues / enviadas', icon: CheckCircle2 },
-    { key: 'Taxa de leitura', value: `${readRate}%`, helper: 'Últimos 7 dias', delta: 'lidas / entregues', icon: Eye },
-    { key: 'Respostas', value: 0, helper: 'Placeholder visual', delta: 'sem integração nesta sprint', icon: MessageCircle },
-    { key: 'Conversões', value: 0, helper: 'Placeholder visual', delta: 'sem integração nesta sprint', icon: BarChart3 }
+    { key: 'Taxa de entrega', value: deliveryRate === null ? 'Não disponível' : `${deliveryRate}%`, helper: 'Dados reais dos webhooks', delta: 'entregues / enviadas', icon: CheckCircle2 },
+    { key: 'Taxa de leitura', value: metrics.delivered > 0 ? `${readRate}%` : 'Não disponível', helper: 'Dados reais dos webhooks', delta: 'lidas / entregues', icon: Eye },
+    { key: 'Respostas', value: 'Em breve', helper: 'Métrica não implementada', delta: 'sem dado fictício', icon: MessageCircle },
+    { key: 'Conversões', value: 'Em breve', helper: 'Métrica não implementada', delta: 'sem dado fictício', icon: BarChart3 }
   ] as const;
   const approvedTemplates = useMemo(() => {
     return templates.filter((t) => t.status?.toLowerCase() === APPROVED_STATUS && (!providerId || t.provider_id === providerId));
@@ -410,8 +461,13 @@ export default function CampaignsTab({ standalone = false }: CampaignsTabProps) 
   };
 
   const onCreate = async () => {
-    if (!name || !providerId || !templateId || hasRecipientVariableErrors) return;
-    const created = await createWhatsAppCampaign({ name, provider_id: providerId, template_id: templateId });
+    if (!name || !providerId || !templateId || hasRecipientVariableErrors || creatingCampaign) return;
+    if (sendMode === 'schedule' && (!scheduledAt || new Date(scheduledAt) <= new Date())) { setToast({ type: 'error', message: 'Escolha um horário futuro para agendar.' }); return; }
+    const recipientsCount = recipientMode === 'csv' ? parseLeads().length : selectedContactIds.length;
+    if (sendMode !== 'draft' && recipientsCount === 0) { setToast({ type: 'error', message: 'Audiência vazia. Adicione destinatários antes do envio.' }); return; }
+    setCreatingCampaign(true);
+    try {
+    const created = await createWhatsAppCampaign({ name, provider_id: providerId, template_id: templateId, status: sendMode === 'schedule' ? 'scheduled' : 'draft', scheduled_at: sendMode === 'schedule' ? scheduledAt : null, metadata_json: { objective: campaignObjective } });
     const leads = parseLeads();
     if (recipientMode === 'csv' && leads.length) {
       await importWhatsAppCampaignRecipients(
@@ -442,7 +498,14 @@ export default function CampaignsTab({ standalone = false }: CampaignsTabProps) 
     setTemplateId('');
     setLeadsText('');
     setShowCreate(false);
+    if (sendMode === 'now') await startWhatsAppCampaign(created.id);
+    setToast({ type: 'success', message: sendMode === 'draft' ? 'Rascunho criado.' : sendMode === 'schedule' ? 'Campanha agendada.' : 'Campanha criada e iniciada.' });
     await refresh();
+    } catch (error) {
+      setToast({ type: 'error', message: (error as Error).message || 'Falha ao criar campanha.' });
+    } finally {
+      setCreatingCampaign(false);
+    }
   };
   const onStartCampaign = async (campaignId: string) => {
     try {
@@ -458,7 +521,7 @@ export default function CampaignsTab({ standalone = false }: CampaignsTabProps) 
     await refresh();
   };
 
-  const hasCreateErrors = !name || !providerId || !templateId;
+  const hasCreateErrors = !name || !providerId || !templateId || (sendMode === 'schedule' && (!scheduledAt || new Date(scheduledAt) <= new Date()));
   const hasVariableErrors = templateVariables.some((key) => !variableMapping[key] || (variableMapping[key] === FIXED_VALUE_FIELD && !manualVariableValues[key]));
   const hasRecipientVariableErrors = (() => {
     if (!templateVariables.length) return false;
@@ -482,27 +545,27 @@ export default function CampaignsTab({ standalone = false }: CampaignsTabProps) 
           <p className='mt-0.5 text-xs text-slate-500 sm:text-sm'>Gerencie campanhas, templates e disparos oficiais do WhatsApp.</p>
         </div>
         <div className='flex flex-wrap items-center gap-2'>
-          <button onClick={() => void refresh()} className='secondary-button inline-flex h-9 items-center gap-2 px-3 text-xs'><RefreshCcw size={14}/>Atualizar</button>
-          <button className='secondary-button inline-flex h-9 items-center border-emerald-200 bg-emerald-50 px-3 text-xs font-semibold text-emerald-700 hover:border-emerald-300'>Templates</button>
+          <button onClick={() => void refresh()} disabled={refreshing} className='secondary-button inline-flex h-9 items-center gap-2 px-3 text-xs'>{refreshing ? <Loader2 size={14} className='animate-spin'/> : <RefreshCcw size={14}/>}Atualizar</button>
+          <button onClick={() => { setShowTemplates(true); void loadAssets(); }} className='secondary-button inline-flex h-9 items-center border-emerald-200 bg-emerald-50 px-3 text-xs font-semibold text-emerald-700 hover:border-emerald-300'>Templates</button>
           <button className='secondary-button inline-flex h-9 items-center gap-2 px-3 text-xs'><BarChart3 size={14}/>Relatórios</button>
           <button onClick={() => setShowCreate(true)} className='primary-button inline-flex h-9 items-center gap-2 bg-emerald-600 px-3 text-xs font-semibold shadow-sm hover:bg-emerald-700'><Plus size={14}/>Nova campanha</button>
         </div>
       </div>
     </header>
 
+    {toast ? <div className={`rounded-[18px] border p-3 text-xs ${toast.type === 'success' ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-rose-200 bg-rose-50 text-rose-700'}`}>{toast.message}</div> : null}
+
     {campaignActionError ? <p className='rounded-[18px] border border-rose-200 bg-rose-50 p-3 text-xs text-rose-700'>{campaignActionError}</p> : null}
 
     <section className='rounded-[18px] border border-slate-200 bg-white px-3 py-2 shadow-[0_12px_32px_-34px_rgba(15,23,42,0.35)]'>
       <div className='flex flex-wrap items-center gap-x-5 gap-y-2 text-xs text-slate-600'>
-        {[`WhatsApp ${connectedProvider ? 'conectado' : 'conectado'}`, 'Qualidade Alta', `${approvedTemplateCount} Templates`, `${runningCampaigns.length} Em execução`, '250.000 mensagens/dia'].map((item, index) => <span key={item} className='inline-flex items-center gap-1.5 whitespace-nowrap font-medium'><span className={index < 2 ? 'text-emerald-500' : 'text-slate-300'}>●</span>{item}</span>)}
+        {[`WhatsApp ${connectedProvider ? 'conectado' : 'Não disponível'}`, 'Qualidade: Não disponível', `${approvedTemplateCount} templates aprovados`, `${runningCampaigns.length} Em execução`, 'Limite diário: Não disponível'].map((item, index) => <span key={item} className='inline-flex items-center gap-1.5 whitespace-nowrap font-medium'><span className={connectedProvider && index === 0 ? 'text-emerald-500' : 'text-slate-300'}>●</span>{item}</span>)}
       </div>
     </section>
 
     <section className='rounded-[18px] border border-slate-200 bg-white px-4 py-3 shadow-[0_12px_32px_-34px_rgba(15,23,42,0.35)]'>
-      <div className='mb-2 flex items-center justify-between gap-3'><p className='text-sm font-semibold text-slate-950'>Últimas atividades</p><span className='text-[11px] font-medium text-slate-400'>Mock visual</span></div>
-      <div className='grid gap-2 sm:grid-cols-2 lg:grid-cols-5'>
-        {recentActivities.map((activity) => <div key={`${activity.time}-${activity.label}`} className='flex items-center gap-2 rounded-xl border border-slate-100 bg-slate-50/60 px-3 py-2'><span className='text-xs font-semibold tabular-nums text-slate-400'>{activity.time}</span><span className='h-1.5 w-1.5 rounded-full bg-emerald-500'/><span className='truncate text-xs font-medium text-slate-700'>{activity.label}</span></div>)}
-      </div>
+      <div className='mb-2 flex items-center justify-between gap-3'><p className='text-sm font-semibold text-slate-950'>Últimas atividades</p><span className='text-[11px] font-medium text-slate-400'>Dados reais</span></div>
+      <p className='rounded-xl border border-dashed border-slate-200 bg-slate-50 px-3 py-4 text-sm text-slate-500'>Nenhuma atividade recente.</p>
     </section>
 
     <CampaignStats>
@@ -525,12 +588,12 @@ export default function CampaignsTab({ standalone = false }: CampaignsTabProps) 
       </section>
       <aside className='rounded-[18px] border border-slate-200 bg-white px-4 py-3 shadow-[0_12px_32px_-34px_rgba(15,23,42,0.35)]'>
         <div className='mb-2 flex items-center gap-2'><ShieldCheck size={16} className='text-emerald-600'/><p className='text-sm font-semibold text-slate-950'>Saúde da conta</p></div>
-        <div className='grid grid-cols-2 gap-x-4 gap-y-2 text-xs sm:grid-cols-5 xl:grid-cols-3'>{[['Qualidade','Alta','text-emerald-700'], ['Templates aprovados', String(approvedTemplateCount), 'text-slate-700'], ['Limite diário', '250.000', 'text-slate-700'], ['Status', connectedProvider ? 'Conectado' : 'Conectado', 'text-emerald-700'], ['Falhas recentes', `${failureRate}%`, failureRate > 5 ? 'text-amber-700' : 'text-emerald-700']].map(([label,value,tone]) => <div key={label}><p className='text-[11px] text-slate-400'>{label}</p><p className={`font-semibold ${tone}`}>{value}</p></div>)}</div>
+        <div className='grid grid-cols-2 gap-x-4 gap-y-2 text-xs sm:grid-cols-5 xl:grid-cols-3'>{[['Qualidade','Não disponível','text-slate-500'], ['Templates aprovados', String(approvedTemplateCount), 'text-slate-700'], ['Limite diário', 'Não disponível', 'text-slate-500'], ['Status', connectedProvider ? 'Conectado' : 'Não disponível', connectedProvider ? 'text-emerald-700' : 'text-slate-500'], ['Falhas recentes', metrics.sent > 0 ? `${failureRate}%` : 'Não disponível', failureRate > 5 ? 'text-amber-700' : 'text-slate-500']].map(([label,value,tone]) => <div key={label}><p className='text-[11px] text-slate-400'>{label}</p><p className={`font-semibold ${tone}`}>{value}</p></div>)}</div>
       </aside>
     </div>
 
     <div className='rounded-[18px] border border-slate-200 bg-white p-3 shadow-[0_18px_45px_-38px_rgba(15,23,42,0.35)]'>
-      <div className='grid grid-cols-1 gap-3 xl:grid-cols-[1fr_auto] xl:items-center'><label className='flex items-center gap-3 h-10 rounded-full border border-slate-200 bg-white px-3 text-sm text-slate-500'><Search size={16}/> <input value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} placeholder='Buscar por campanha...' className='w-full bg-transparent outline-none'/></label><div className='grid grid-cols-2 gap-2 sm:flex sm:flex-wrap'><button className='secondary-button text-xs'>Status</button><button className='secondary-button text-xs'>Template</button><button className='secondary-button text-xs'>Período</button><button className='secondary-button text-xs'>Tag</button><button className='secondary-button inline-flex items-center gap-1 text-xs'><Filter size={13}/>Mais filtros</button></div></div>
+      <div className='grid grid-cols-1 gap-3 xl:grid-cols-[1fr_auto] xl:items-center'><label className='flex items-center gap-3 h-10 rounded-full border border-slate-200 bg-white px-3 text-sm text-slate-500'><Search size={16}/> <input value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} placeholder='Buscar por campanha, template, responsável ou tag...' className='w-full bg-transparent outline-none'/></label><div className='grid grid-cols-2 gap-2 sm:flex sm:flex-wrap'><select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className='premium-input h-9 text-xs'><option value='all'>Status</option>{statusFilters.slice(1).map((filter) => <option key={filter.value} value={filter.value}>{filter.label}</option>)}</select><select value={templateFilter} onChange={(e) => setTemplateFilter(e.target.value)} className='premium-input h-9 text-xs'><option value='all'>Template</option>{templates.map((template) => <option key={template.id} value={template.id}>{template.name}</option>)}</select><select value={periodFilter} onChange={(e) => setPeriodFilter(e.target.value)} className='premium-input h-9 text-xs'><option value='all'>Período</option><option value='7'>Últimos 7 dias</option><option value='30'>Últimos 30 dias</option></select><select value={tagFilter} onChange={(e) => setTagFilter(e.target.value)} className='premium-input h-9 text-xs'><option value='all'>Tag</option></select><button className='secondary-button inline-flex items-center gap-1 text-xs'><Filter size={13}/>Mais filtros</button></div></div>
       <div className='mt-3 flex flex-wrap gap-2'>{statusFilters.map((filter) => <button key={filter.value} onClick={() => setStatusFilter(filter.value)} className={`rounded-full border px-3 py-1.5 text-xs font-medium transition ${statusFilter === filter.value ? 'border-emerald-600 bg-emerald-600 text-white' : 'border-slate-200 bg-slate-50 text-slate-600 hover:border-emerald-200 hover:text-emerald-700'}`}>{filter.label}</button>)}</div>
     </div>
 
@@ -541,8 +604,45 @@ export default function CampaignsTab({ standalone = false }: CampaignsTabProps) 
     {!loading && filteredCampaigns.length > 0 ? <div className='overflow-hidden rounded-[18px] border border-slate-200 bg-white shadow-[0_18px_45px_-38px_rgba(15,23,42,0.35)]'><div className='overflow-x-auto'><table className='min-w-[1120px] w-full text-left text-sm'><thead className='bg-slate-50 text-xs font-semibold uppercase tracking-[0.14em] text-slate-400'><tr><th className='px-5 py-3'>Campanha</th><th className='px-5 py-3'>Status</th><th className='px-5 py-3'>Template</th><th className='px-5 py-3'>Audiência</th><th className='px-5 py-3'>Enviadas</th><th className='px-5 py-3'>Entrega</th><th className='px-5 py-3'>Leitura</th><th className='px-5 py-3'>Conversões</th><th className='px-5 py-3'>Criada em</th><th className='px-5 py-3'>Ações</th></tr></thead><tbody className='divide-y divide-slate-100'>{filteredCampaigns.map((c) => { const total = c.total_recipients || 0; const delivery = (c.total_sent || 0) > 0 ? Math.round(((c.total_delivered || 0) / (c.total_sent || 1)) * 100) : 0; const reading = (c.total_delivered || 0) > 0 ? Math.round(((c.total_read || 0) / (c.total_delivered || 1)) * 100) : 0; return <tr key={c.id} className='align-top transition hover:bg-slate-50/70'><td className='px-5 py-3'><p className='font-semibold text-slate-950'>{c.name}</p><p className='mt-1 text-xs text-slate-500'>ID: {c.id}</p></td><td className='px-5 py-3'><span className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${statusTone(c.status)}`}>{statusLabel(c.status)}</span></td><td className='px-5 py-3 text-slate-700'>{getTemplateName(c.template_id)}</td><td className='px-5 py-3 font-semibold text-slate-800'>{formatNum(total)}</td><td className='px-5 py-3 font-semibold text-slate-800'>{formatNum(c.total_sent || 0)}</td><td className='px-5 py-3 font-semibold text-slate-800'>{delivery}%</td><td className='px-5 py-3 font-semibold text-slate-800'>{reading}%</td><td className='px-5 py-3 text-slate-500'>—</td><td className='px-5 py-3 text-slate-600'>{c.created_at ? new Date(c.created_at).toLocaleDateString('pt-BR') : '—'}</td><td className='px-5 py-3'><div className='flex flex-wrap items-center gap-2'><button className='secondary-button inline-flex items-center gap-1'><BarChart3 size={13}/>Relatório</button>{c.status === 'draft' && <button onClick={() => void onStartCampaign(c.id)} className='primary-button'>Iniciar</button>}{c.status === 'running' && <button onClick={() => void onPauseCampaign(c.id)} className='secondary-button inline-flex items-center gap-1'><PauseCircle size={13}/>Pausar</button>}</div></td></tr>; })}</tbody></table></div></div> : null}
 
 
+    {showTemplates && <CampaignCreateModal><div className='max-h-[80vh] space-y-3 overflow-auto'>
+      <div className='flex items-center justify-between gap-3'>
+        <h4 className='font-semibold'>Templates Meta</h4>
+        <button onClick={() => setShowTemplates(false)} className='secondary-button'>Fechar</button>
+      </div>
+      <div className='grid gap-2 md:grid-cols-5'>
+        <input value={templateSearchTerm} onChange={(e) => setTemplateSearchTerm(e.target.value)} placeholder='Buscar por nome' className='premium-input md:col-span-2' />
+        <select value={templateStatusFilter} onChange={(e) => setTemplateStatusFilter(e.target.value)} className='premium-input'>{templateStatuses.map((status) => <option key={status} value={status}>{status === 'all' ? 'Status' : status}</option>)}</select>
+        <select value={templateCategoryFilter} onChange={(e) => setTemplateCategoryFilter(e.target.value)} className='premium-input'>{templateCategories.map((category) => <option key={category} value={category}>{category === 'all' ? 'Categoria' : category}</option>)}</select>
+        <select value={templateLanguageFilter} onChange={(e) => setTemplateLanguageFilter(e.target.value)} className='premium-input'>{templateLanguages.map((language) => <option key={language} value={language}>{language === 'all' ? 'Idioma' : language}</option>)}</select>
+      </div>
+      <button onClick={() => void onSyncTemplates()} disabled={syncingTemplates} className='secondary-button inline-flex items-center gap-2'>{syncingTemplates ? <Loader2 size={14} className='animate-spin'/> : <RefreshCcw size={14}/>}Sincronizar com a Meta</button>
+      <div className='space-y-2'>
+        {filteredTemplates.length === 0 ? <p className='rounded-xl border border-dashed border-slate-200 p-4 text-sm text-slate-500'>Nenhum template encontrado.</p> : filteredTemplates.map((template) => {
+          const approved = template.status?.toLowerCase() === APPROVED_STATUS;
+          const text = getTemplateText(template);
+          const variables = extractVariables(text);
+          return <div key={template.id} className='rounded-xl border border-slate-200 bg-white p-3 text-sm'>
+            <div className='flex flex-wrap items-start justify-between gap-2'>
+              <div><p className='font-semibold text-slate-950'>{template.name}</p><p className='text-xs text-slate-500'>{template.language || 'Idioma não disponível'} • {template.category || 'Categoria não disponível'} • qualidade {template.quality_score || template.quality_rating || 'Não disponível'}</p></div>
+              <span className={`rounded-full border px-2 py-1 text-xs font-semibold ${approved ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-amber-200 bg-amber-50 text-amber-700'}`}>{statusLabel(template.status)}</span>
+            </div>
+            <div className='mt-2 whitespace-pre-wrap rounded-lg bg-slate-50 p-2 text-xs text-slate-700'>{text || 'Conteúdo não disponível'}</div>
+            <p className='mt-2 text-xs text-slate-500'>Header/Footer/Botões: conforme componentes Meta quando disponíveis • Variáveis: {variables.map((v) => `{{${v}}}`).join(', ') || 'nenhuma'} • Atualizado: {template.updated_at ? new Date(template.updated_at).toLocaleString('pt-BR') : 'Não disponível'}</p>
+            {template.rejection_reason ? <p className='mt-2 rounded-lg bg-rose-50 p-2 text-xs text-rose-700'>Reprovação: {template.rejection_reason}</p> : null}
+            <div className='mt-3 flex flex-wrap gap-2'><button className='secondary-button'>Visualizar</button><button disabled={!approved} onClick={() => { setShowTemplates(false); setShowCreate(true); setTemplateId(template.id); }} className='primary-button disabled:opacity-50'>Selecionar para campanha</button><button className='secondary-button' disabled>Duplicar localmente</button></div>
+          </div>;
+        })}
+      </div>
+    </div></CampaignCreateModal>}
+
+
     {showCreate && <CampaignCreateModal><div className='space-y-3'>
       <h4 className='font-semibold'>Nova campanha</h4>
+      <div className='flex flex-wrap gap-1'>{[1,2,3,4,5,6].map((step) => <button key={step} type='button' onClick={() => setWizardStep(step)} className={`rounded-full border px-2 py-1 text-xs ${wizardStep === step ? 'border-emerald-600 bg-emerald-600 text-white' : 'border-slate-200 bg-white text-slate-600'}`}>Etapa {step}</button>)}</div>
+      <div className='rounded-xl border border-slate-200 bg-slate-50 p-3'>
+        <p className='mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500'>Etapa 1 — Objetivo</p>
+        <select value={campaignObjective} onChange={(e) => setCampaignObjective(e.target.value)} className='premium-input w-full'>{['Promoção','Cobrança','Pós-venda','Lembrete','Pesquisa','Recuperação','Personalizada'].map((objective) => <option key={objective} value={objective}>{objective}</option>)}</select>
+      </div>
       <input value={name} onChange={(e) => setName(e.target.value)} placeholder='Nome da campanha' className='premium-input w-full' />
       {assetsLoading ? <div className='space-y-2'><div className='h-11 animate-pulse rounded-xl bg-slate-100'/><div className='h-11 animate-pulse rounded-xl bg-slate-100'/></div> : <>
         <select value={providerId} onChange={(e) => setProviderId(e.target.value)} className='premium-input w-full'>
@@ -638,11 +738,18 @@ export default function CampaignsTab({ standalone = false }: CampaignsTabProps) 
         </div>}
       </div>
 
+      <div className='rounded-xl border border-slate-200 bg-white p-3'>
+        <p className='mb-2 text-sm font-semibold'>Etapa 6 — Envio</p>
+        <div className='flex flex-wrap gap-2 text-xs'>{(['draft','now','schedule'] as const).map((mode) => <button key={mode} type='button' onClick={() => setSendMode(mode)} className={`rounded border px-3 py-1.5 ${sendMode === mode ? 'bg-slate-900 text-white' : 'bg-white text-slate-700'}`}>{mode === 'draft' ? 'Salvar rascunho' : mode === 'now' ? 'Enviar agora' : 'Agendar'}</button>)}</div>
+        {sendMode === 'schedule' && <input type='datetime-local' value={scheduledAt} onChange={(e) => setScheduledAt(e.target.value)} className='premium-input mt-2 w-full' />}
+        <p className='mt-2 text-xs text-slate-500'>Revisão: {name || 'Sem nome'} • {selectedTemplate?.name || 'Sem template'} • audiência estimada {recipientMode === 'csv' ? parseLeads().length : selectedContactIds.length} • variáveis {templateVariables.join(', ') || 'nenhuma'}.</p>
+      </div>
+
       {(hasCreateErrors || hasVariableErrors || hasRecipientVariableErrors) && <p className='text-xs text-amber-600'>Preencha nome, provider/template e todos os mapeamentos obrigatórios para continuar. Edite o contato em Contatos ou use valor fixo.</p>}
       <div className='flex justify-end gap-2'>
         <button onClick={() => setShowCreate(false)} className='secondary-button'>Cancelar</button>
-        <button onClick={() => void onCreate()} disabled={hasCreateErrors || hasVariableErrors || hasRecipientVariableErrors || loading} className='primary-button inline-flex items-center gap-2'>
-          {loading ? <Loader2 size={14} className='animate-spin'/> : null}Criar
+        <button onClick={() => void onCreate()} disabled={hasCreateErrors || hasVariableErrors || hasRecipientVariableErrors || creatingCampaign} className='primary-button inline-flex items-center gap-2'>
+          {creatingCampaign ? <Loader2 size={14} className='animate-spin'/> : null}{sendMode === 'draft' ? 'Salvar rascunho' : sendMode === 'schedule' ? 'Agendar' : 'Enviar agora'}
         </button>
       </div>
     </div></CampaignCreateModal>}
