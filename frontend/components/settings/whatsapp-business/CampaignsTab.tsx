@@ -15,7 +15,8 @@ import {
   RefreshCcw,
   Search,
   Send,
-  ShieldCheck
+  ShieldCheck,
+  X
 } from 'lucide-react';
 import CampaignCard from './campaigns/CampaignCard';
 import CampaignCreateModal from './campaigns/CampaignCreateModal';
@@ -211,7 +212,7 @@ export default function CampaignsTab({ standalone = false }: CampaignsTabProps) 
     setSavedContacts(contactsArray);
     setContactsLoadError(null);
   };
-  const refresh = async () => {
+  const refresh = async (showFeedback = false) => {
     if (refreshing) return;
     setRefreshing(true);
     setLoading(true);
@@ -227,7 +228,9 @@ export default function CampaignsTab({ standalone = false }: CampaignsTabProps) 
         setSavedContacts([]);
         setContactsLoadError('Não foi possível carregar contatos');
       }
-      setToast({ type: 'success', message: 'Campaign Center atualizado.' });
+      if (showFeedback) {
+        setToast({ type: 'success', message: 'Campaign Center atualizado.' });
+      }
     } catch (error) {
       setToast({ type: 'error', message: (error as Error).message || 'Falha ao atualizar campanhas.' });
     } finally {
@@ -262,6 +265,16 @@ export default function CampaignsTab({ standalone = false }: CampaignsTabProps) 
   useEffect(() => {
     void refresh();
   }, []);
+
+  useEffect(() => {
+    if (!toast) return undefined;
+
+    const timeout = window.setTimeout(() => {
+      setToast(null);
+    }, 3500);
+
+    return () => window.clearTimeout(timeout);
+  }, [toast]);
 
   useEffect(() => {
     if (showCreate) void loadAssets();
@@ -547,7 +560,7 @@ export default function CampaignsTab({ standalone = false }: CampaignsTabProps) 
           <p className='mt-0.5 text-xs text-slate-500 sm:text-sm'>Gerencie campanhas, templates e disparos oficiais do WhatsApp.</p>
         </div>
         <div className='flex flex-wrap items-center gap-2'>
-          <button onClick={() => void refresh()} disabled={refreshing} className='secondary-button inline-flex h-9 items-center gap-2 px-3 text-xs'>{refreshing ? <Loader2 size={14} className='animate-spin'/> : <RefreshCcw size={14}/>}Atualizar</button>
+          <button onClick={() => void refresh(true)} disabled={refreshing} className='secondary-button inline-flex h-9 items-center gap-2 px-3 text-xs'>{refreshing ? <Loader2 size={14} className='animate-spin'/> : <RefreshCcw size={14}/>}Atualizar</button>
           <button onClick={() => { setShowTemplates(true); void loadAssets(); }} className='secondary-button inline-flex h-9 items-center border-emerald-200 bg-emerald-50 px-3 text-xs font-semibold text-emerald-700 hover:border-emerald-300'>Templates</button>
           <button onClick={() => setShowReports(true)} className='secondary-button inline-flex h-9 items-center gap-2 px-3 text-xs'><BarChart3 size={14}/>Relatórios</button>
           <button onClick={() => setShowCreate(true)} className='primary-button inline-flex h-9 items-center gap-2 bg-emerald-600 px-3 text-xs font-semibold shadow-sm hover:bg-emerald-700'><Plus size={14}/>Nova campanha</button>
@@ -555,7 +568,14 @@ export default function CampaignsTab({ standalone = false }: CampaignsTabProps) 
       </div>
     </header>
 
-    {toast ? <div className={`fixed right-5 top-5 z-50 rounded-[14px] border px-4 py-3 text-xs font-medium shadow-[0_18px_45px_-28px_rgba(15,23,42,0.45)] ${toast.type === 'success' ? 'border-emerald-200 bg-white text-emerald-700' : 'border-rose-200 bg-white text-rose-700'}`}>{toast.message}</div> : null}
+    {toast ? <div className='pointer-events-none fixed right-5 top-5 z-50'>
+      <div className={`pointer-events-auto flex max-w-sm items-start gap-3 rounded-[14px] border bg-white px-4 py-3 text-xs font-medium shadow-[0_18px_45px_-28px_rgba(15,23,42,0.45)] ${toast.type === 'success' ? 'border-emerald-200 text-emerald-700' : 'border-rose-200 text-rose-700'}`}>
+        <span>{toast.message}</span>
+        <button type='button' onClick={() => setToast(null)} className='-mr-1 rounded-full p-0.5 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600' aria-label='Fechar aviso'>
+          <X size={12} />
+        </button>
+      </div>
+    </div> : null}
 
     {campaignActionError ? <p className='rounded-[18px] border border-rose-200 bg-rose-50 p-3 text-xs text-rose-700'>{campaignActionError}</p> : null}
 
