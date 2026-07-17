@@ -159,7 +159,7 @@ export default function Sidebar({
               className={`wa-contact-item ${isActive ? 'active' : ''}`}
               onClick={() => {
                 onSelectContact(contact.id);
-                if (window.innerWidth <= 900) {
+                if (window.innerWidth < 1024) {
                   onToggleSidebar();
                 }
               }}

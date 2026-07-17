@@ -619,7 +619,7 @@ input {
 
 .wa-layout {
   display: grid;
-  grid-template-columns: minmax(280px, 360px) minmax(520px, 1fr) minmax(320px, 380px);
+  grid-template-columns: clamp(280px, 25vw, 360px) minmax(0, 1fr) clamp(300px, 27vw, 380px);
   height: 100vh;
   background: var(--background);
   gap: 12px;
@@ -903,8 +903,7 @@ input {
   overflow: hidden;
 }
 .wa-crm-sidebar:not(.open) { display: block; }
-@media (max-width: 1200px) {
-  .wa-layout { grid-template-columns: minmax(300px, 380px) 1fr; }
+@media (max-width: 1023px) {
   .wa-crm-sidebar { position: absolute; right: 0; top: 0; bottom: 0; width: min(92vw, 420px); transform: translateX(100%); transition: transform .28s ease; z-index: 4; border-radius: 0; }
   .wa-crm-sidebar.open { transform: translateX(0); }
   .wa-crm-mobile-header { display: flex; }
@@ -1101,7 +1100,7 @@ input {
   box-shadow: 0 0 0 3px rgba(134, 239, 172, 0.35);
 }
 
-@media (max-width: 900px) {
+@media (max-width: 1023px) {
   .dashboard-grid {
     grid-template-columns: 1fr;
   }
@@ -4414,9 +4413,9 @@ input {
 }
 
 /* Inbox desktop visual refresh — WhatsApp Web inspired, visual-only overrides. */
-@media (min-width: 901px) {
+@media (min-width: 1024px) {
   .wa-layout {
-    grid-template-columns: minmax(320px, 390px) minmax(540px, 1fr) minmax(320px, 380px);
+    grid-template-columns: clamp(280px, 25vw, 360px) minmax(0, 1fr) clamp(300px, 27vw, 380px);
     gap: 0;
     padding: 0;
     background: #f0f2f5;
