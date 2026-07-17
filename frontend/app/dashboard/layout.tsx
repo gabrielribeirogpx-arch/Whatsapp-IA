@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { ReactNode, useEffect, useState } from 'react';
+import { ReactNode, useEffect, useLayoutEffect, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { deleteFlow, duplicateFlow, listFlows, updateFlowStatus } from '@/lib/api';
 import SidebarUserProfile from '@/components/SidebarUserProfile';
@@ -135,14 +135,34 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
   const isFlowBuilder = pathname.startsWith('/dashboard/flow-builder');
   const isFlowAnalytics = pathname.includes('/dashboard/flows/') && pathname.endsWith('/analytics');
   const [sidebarExpanded, setSidebarExpanded] = useState(false);
+  const [campaignWizardFullscreen, setCampaignWizardFullscreen] = useState(false);
+
+  useLayoutEffect(() => {
+    const syncCampaignWizardState = () => {
+      setCampaignWizardFullscreen(document.body.classList.contains('campaign-wizard-fullscreen-open'));
+    };
+    const handleCampaignWizardState = (event: Event) => {
+      const detail = (event as CustomEvent<{ open?: boolean }>).detail;
+      setCampaignWizardFullscreen(Boolean(detail?.open));
+    };
+
+    syncCampaignWizardState();
+    window.addEventListener('campaign-wizard-fullscreen', handleCampaignWizardState);
+    return () => {
+      window.removeEventListener('campaign-wizard-fullscreen', handleCampaignWizardState);
+    };
+  }, []);
 
   const pathnameSegments = pathname.split('/');
   const flowsIndex = pathnameSegments.indexOf('flows');
   const flowId = flowsIndex !== -1 ? pathnameSegments[flowsIndex + 1] : undefined;
 
   return (
-    <div className="flex min-h-screen bg-[#F8FAFC]" style={{ fontFamily: 'Inter, -apple-system, sans-serif' }}>
-      {!isFlowBuilder && !isFlowAnalytics && (
+    <div
+      className={`flex min-h-screen bg-[#F8FAFC] transition-[padding,margin] duration-300 ease-out ${campaignWizardFullscreen ? 'dashboard-layout--campaign-fullscreen' : ''}`}
+      style={{ fontFamily: 'Inter, -apple-system, sans-serif' }}
+    >
+      {!campaignWizardFullscreen && !isFlowBuilder && !isFlowAnalytics && (
         <aside
           className={`flex-shrink-0 transition-all duration-300 ease-out ${sidebarExpanded ? 'w-[200px]' : 'w-[56px]'}`}
           onMouseEnter={() => setSidebarExpanded(true)}
@@ -152,7 +172,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
         </aside>
       )}
 
-      {isFlowAnalytics && !isFlowBuilder && (
+      {!campaignWizardFullscreen && isFlowAnalytics && !isFlowBuilder && (
         <aside
           className={`flex-shrink-0 transition-all duration-300 ease-out ${sidebarExpanded ? 'w-[200px]' : 'w-[56px]'}`}
           onMouseEnter={() => setSidebarExpanded(true)}
@@ -162,7 +182,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
         </aside>
       )}
 
-      <main className="min-w-0 flex-1 overflow-y-auto">
+      <main className={`min-w-0 flex-1 overflow-y-auto transition-all duration-300 ease-out ${campaignWizardFullscreen ? 'w-screen max-w-none basis-full' : ''}`}>
         {children}
       </main>
     </div>

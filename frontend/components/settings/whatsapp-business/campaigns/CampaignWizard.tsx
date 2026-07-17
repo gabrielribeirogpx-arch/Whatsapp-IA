@@ -1,6 +1,6 @@
 "use client";
 
-import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
+import { ChangeEvent, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
   CheckCircle2,
@@ -173,8 +173,10 @@ export default function CampaignWizard({
     [sendMode, setSendMode] = useState<SendMode>("draft"),
     [scheduledAt, setScheduledAt] = useState("");
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!open) return;
+
+    window.dispatchEvent(new CustomEvent("campaign-wizard-fullscreen", { detail: { open: true } }));
 
     const body = document.body;
     const previous = {
@@ -190,12 +192,15 @@ export default function CampaignWizard({
     body.style.position = "fixed";
     body.style.top = `-${scrollY}px`;
     body.style.width = "100%";
+    body.classList.add("campaign-wizard-fullscreen-open");
 
     return () => {
       body.style.overflow = previous.overflow;
       body.style.position = previous.position;
       body.style.top = previous.top;
       body.style.width = previous.width;
+      body.classList.remove("campaign-wizard-fullscreen-open");
+      window.dispatchEvent(new CustomEvent("campaign-wizard-fullscreen", { detail: { open: false } }));
       window.scrollTo(0, scrollPositionRef.current);
     };
   }, [open]);
