@@ -8067,3 +8067,19 @@ input {
   .ai-system-architecture-overview-layers { grid-template-columns: 1fr; }
   .ai-system-architecture-overview-card { min-height: auto; }
 }
+
+.primary-button:focus-visible,
+.secondary-button:focus-visible {
+  outline: 0;
+  box-shadow: 0 0 0 4px rgba(16, 185, 129, 0.16), 0 10px 24px -16px rgba(15, 23, 42, 0.45);
+}
+
+.secondary-button:active,
+.primary-button:active {
+  transform: translateY(1px) scale(0.99);
+}
+
+.secondary-button:disabled:hover,
+.primary-button:disabled:hover {
+  transform: none;
+}
