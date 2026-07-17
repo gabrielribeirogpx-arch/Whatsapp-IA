@@ -42,6 +42,7 @@ def _serialize_campaign(c: WhatsAppCampaign) -> dict:
         "total_failed": c.total_failed,
         "metadata_json": c.metadata_json or {},
         "created_at": c.created_at.isoformat() if c.created_at else None,
+        "updated_at": c.updated_at.isoformat() if c.updated_at else None,
     }
 
 
@@ -304,7 +305,44 @@ def pause_campaign(campaign_id: str, db: Session = Depends(get_db), tenant: Tena
     c = db.execute(select(WhatsAppCampaign).where(WhatsAppCampaign.id == campaign_id, WhatsAppCampaign.tenant_id == tenant.id)).scalars().first()
     if not c:
         raise HTTPException(status_code=404, detail="Campaign not found")
-    c.status = "paused"; db.commit(); db.refresh(c)
+    if c.status not in {"running", "scheduled"}:
+        raise HTTPException(status_code=409, detail="Apenas campanhas agendadas ou em execução podem ser pausadas")
+    c.status = "paused"
+    c.updated_at = datetime.utcnow()
+    db.commit(); db.refresh(c)
+    return _serialize_campaign(c)
+
+
+@router.post("/{campaign_id}/resume")
+def resume_campaign(campaign_id: str, db: Session = Depends(get_db), tenant: Tenant = Depends(get_current_tenant)):
+    c = db.execute(select(WhatsAppCampaign).where(WhatsAppCampaign.id == campaign_id, WhatsAppCampaign.tenant_id == tenant.id)).scalars().first()
+    if not c:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+    if c.status != "paused":
+        raise HTTPException(status_code=409, detail="Apenas campanhas pausadas podem ser retomadas")
+    c.status = "running"
+    c.started_at = c.started_at or datetime.utcnow()
+    c.updated_at = datetime.utcnow()
+    db.commit()
+    get_queue("normal").enqueue("app.workers.campaign_worker.process_campaign", str(c.id), str(tenant.id), job_timeout=600)
+    db.refresh(c)
+    return _serialize_campaign(c)
+
+
+@router.post("/{campaign_id}/cancel")
+def cancel_campaign(campaign_id: str, db: Session = Depends(get_db), tenant: Tenant = Depends(get_current_tenant)):
+    c = db.execute(select(WhatsAppCampaign).where(WhatsAppCampaign.id == campaign_id, WhatsAppCampaign.tenant_id == tenant.id)).scalars().first()
+    if not c:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+    if c.status not in {"scheduled", "running", "paused"}:
+        raise HTTPException(status_code=409, detail="Campanha não pode ser cancelada neste status")
+    c.status = "cancelled"
+    c.completed_at = c.completed_at or datetime.utcnow()
+    metadata = c.metadata_json if isinstance(c.metadata_json, dict) else {}
+    metadata.update({"cancelled_by": "console", "cancelled_at": datetime.utcnow().isoformat()})
+    c.metadata_json = metadata
+    c.updated_at = datetime.utcnow()
+    db.commit(); db.refresh(c)
     return _serialize_campaign(c)
 
 
@@ -319,4 +357,4 @@ def list_recipients(campaign_id: str, db: Session = Depends(get_db), tenant: Ten
         .where(WhatsAppCampaign.tenant_id == tenant.id, WhatsAppCampaignRecipient.campaign_id == c.id)
         .order_by(WhatsAppCampaignRecipient.created_at.desc())
     ).scalars().all()
-    return [{"id": str(r.id), "campaign_id": str(r.campaign_id), "phone": r.phone, "first_name": r.first_name, "status": r.status, "provider_message_id": r.provider_message_id, "error_message": r.error_message} for r in rows]
+    return [{"id": str(r.id), "campaign_id": str(r.campaign_id), "phone": r.phone, "first_name": r.first_name, "status": r.status, "provider_message_id": r.provider_message_id, "error_message": r.error_message, "sent_at": r.sent_at.isoformat() if r.sent_at else None, "delivered_at": r.delivered_at.isoformat() if r.delivered_at else None, "read_at": r.read_at.isoformat() if r.read_at else None, "failed_at": r.failed_at.isoformat() if r.failed_at else None} for r in rows]

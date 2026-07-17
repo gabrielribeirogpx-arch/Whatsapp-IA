@@ -47,10 +47,12 @@ def process_campaign(campaign_id: str, tenant_id: str) -> None:
             campaign = db.execute(select(WhatsAppCampaign).where(WhatsAppCampaign.id == campaign_id, WhatsAppCampaign.tenant_id == tenant_id)).scalars().first()
             if not campaign:
                 return
+            if campaign.status == "cancelled":
+                return
             campaign.status = "running"
             campaign.started_at = campaign.started_at or datetime.utcnow()
             pending = db.execute(
-                select(WhatsAppCampaignRecipient).where(WhatsAppCampaignRecipient.campaign_id == campaign.id, WhatsAppCampaignRecipient.status.in_(["pending", "failed"])).limit(CHUNK_SIZE)
+                select(WhatsAppCampaignRecipient).where(WhatsAppCampaignRecipient.campaign_id == campaign.id, WhatsAppCampaignRecipient.status == "pending").limit(CHUNK_SIZE)
             ).scalars().all()
             queue = get_queue("normal")
             for rec in pending:
@@ -69,7 +71,7 @@ def process_campaign_recipient(recipient_id: str) -> None:
         if not recipient:
             return
         campaign = db.execute(select(WhatsAppCampaign).where(WhatsAppCampaign.id == recipient.campaign_id)).scalars().first()
-        if not campaign or campaign.status == "paused":
+        if not campaign or campaign.status in {"paused", "cancelled"}:
             return
         try:
             contact = db.execute(

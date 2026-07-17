@@ -477,6 +477,7 @@ export type WhatsAppCampaign = {
   completed_at?: string | null;
   metadata_json?: Record<string, any>;
   created_at?: string;
+  updated_at?: string;
 };
 
 export type WhatsAppCampaignRecipient = {
@@ -487,6 +488,10 @@ export type WhatsAppCampaignRecipient = {
   status: string;
   provider_message_id?: string | null;
   error_message?: string | null;
+  sent_at?: string | null;
+  delivered_at?: string | null;
+  read_at?: string | null;
+  failed_at?: string | null;
 };
 
 export type TaskItem = {
