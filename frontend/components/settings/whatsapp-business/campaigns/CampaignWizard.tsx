@@ -1,6 +1,6 @@
 "use client";
 
-import { ChangeEvent, useEffect, useMemo, useState } from "react";
+import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
   CheckCircle2,
@@ -167,10 +167,38 @@ export default function CampaignWizard({
   const [recipientMode, setRecipientMode] = useState<RecipientMode>("saved"),
     [selectedContactIds, setSelectedContactIds] = useState<string[]>([]),
     [csvText, setCsvText] = useState("");
+  const scrollPositionRef = useRef(0);
   const [mapping, setMapping] = useState<Record<string, string>>({}),
     [manual, setManual] = useState<Record<string, string>>({}),
     [sendMode, setSendMode] = useState<SendMode>("draft"),
     [scheduledAt, setScheduledAt] = useState("");
+
+  useEffect(() => {
+    if (!open) return;
+
+    const body = document.body;
+    const previous = {
+      overflow: body.style.overflow,
+      position: body.style.position,
+      top: body.style.top,
+      width: body.style.width,
+    };
+    const scrollY = window.scrollY;
+    scrollPositionRef.current = scrollY;
+
+    body.style.overflow = "hidden";
+    body.style.position = "fixed";
+    body.style.top = `-${scrollY}px`;
+    body.style.width = "100%";
+
+    return () => {
+      body.style.overflow = previous.overflow;
+      body.style.position = previous.position;
+      body.style.top = previous.top;
+      body.style.width = previous.width;
+      window.scrollTo(0, scrollPositionRef.current);
+    };
+  }, [open]);
   useEffect(() => {
     if (!open) return;
     setLoading(true);
@@ -394,25 +422,16 @@ export default function CampaignWizard({
   if (!open) return null;
   return (
     <div
-      className="fixed inset-0 z-[80] bg-slate-950/50 p-3 backdrop-blur-sm"
+      className="fixed inset-0 z-[9999] h-screen w-screen overflow-hidden bg-slate-50"
       role="dialog"
       aria-modal="true"
     >
-      <div className="mx-auto flex h-full max-w-7xl flex-col overflow-hidden rounded-[28px] border border-white/40 bg-white shadow-2xl">
-        <header className="border-b border-slate-200 px-5 py-4">
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <p className="text-xs font-bold uppercase tracking-[0.2em] text-emerald-600">
-                Wizard Enterprise
-              </p>
-              <h2 className="text-2xl font-semibold text-slate-950">
-                Nova campanha
-              </h2>
-              <p className="text-sm text-slate-500">
-                Fluxo seguro por etapas, reutilizando templates Meta e endpoints
-                atuais.
-              </p>
-            </div>
+      <div className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-white">
+        <header className="shrink-0 border-b border-slate-200 bg-white/95 px-4 py-4 backdrop-blur sm:px-6 lg:px-8">
+          <div className="mx-auto flex max-w-6xl items-center justify-between gap-3">
+            <h2 className="text-2xl font-semibold text-slate-950">
+              Nova campanha
+            </h2>
             <button
               onClick={close}
               className="secondary-button inline-flex items-center gap-2"
@@ -421,7 +440,7 @@ export default function CampaignWizard({
               Fechar
             </button>
           </div>
-          <div className="mt-4 grid gap-2 md:grid-cols-6">
+          <div className="mx-auto mt-4 grid max-w-6xl gap-2 sm:grid-cols-2 lg:grid-cols-6">
             {STEPS.map((label, i) => (
               <button
                 key={label}
@@ -435,11 +454,11 @@ export default function CampaignWizard({
             ))}
           </div>
         </header>
-        <main className="flex-1 overflow-auto bg-slate-50 p-5">
+        <main className="min-h-0 flex-1 overflow-auto bg-slate-50 px-4 py-6 sm:px-6 lg:px-8">
           {loading ? (
-            <div className="h-96 animate-pulse rounded-3xl bg-white" />
+            <div className="mx-auto h-96 max-w-6xl animate-pulse rounded-3xl bg-white" />
           ) : (
-            <div className="grid gap-4 lg:grid-cols-[1fr_360px]">
+            <div className="mx-auto grid max-w-6xl gap-4 xl:grid-cols-[minmax(0,1fr)_340px]">
               <section className="rounded-[24px] border border-slate-200 bg-white p-5 shadow-sm">
                 {step === 0 && (
                   <div>
@@ -853,46 +872,48 @@ export default function CampaignWizard({
             {error}
           </p>
         ) : null}
-        <footer className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 p-4">
-          <button
-            onClick={() => setStep((s) => Math.max(0, s - 1))}
-            disabled={step === 0}
-            className="secondary-button"
-          >
-            Voltar
-          </button>
-          <div className="flex flex-wrap gap-2">
-            {step < 5 ? (
-              <button onClick={next} className="primary-button">
-                Continuar
-              </button>
-            ) : (
-              <>
-                {(["draft", "schedule", "now"] as SendMode[]).map((m) => (
-                  <button
-                    key={m}
-                    onClick={() => submit(m)}
-                    disabled={
-                      submitting ||
-                      !canFinish ||
-                      (m === "schedule" && !validSchedule)
-                    }
-                    className="primary-button inline-flex items-center gap-2"
-                  >
-                    {submitting ? (
-                      <Loader2 size={14} className="animate-spin" />
-                    ) : m === "now" ? (
-                      <Send size={14} />
-                    ) : null}
-                    {m === "draft"
-                      ? "Salvar rascunho"
-                      : m === "schedule"
-                        ? "Agendar campanha"
-                        : "Enviar agora"}
-                  </button>
-                ))}
-              </>
-            )}
+        <footer className="shrink-0 border-t border-slate-200 bg-white px-4 py-4 sm:px-6 lg:px-8">
+          <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3">
+            <button
+              onClick={() => setStep((s) => Math.max(0, s - 1))}
+              disabled={step === 0}
+              className="secondary-button"
+            >
+              Voltar
+            </button>
+            <div className="flex flex-wrap gap-2">
+              {step < 5 ? (
+                <button onClick={next} className="primary-button">
+                  Continuar
+                </button>
+              ) : (
+                <>
+                  {(["draft", "schedule", "now"] as SendMode[]).map((m) => (
+                    <button
+                      key={m}
+                      onClick={() => submit(m)}
+                      disabled={
+                        submitting ||
+                        !canFinish ||
+                        (m === "schedule" && !validSchedule)
+                      }
+                      className="primary-button inline-flex items-center gap-2"
+                    >
+                      {submitting ? (
+                        <Loader2 size={14} className="animate-spin" />
+                      ) : m === "now" ? (
+                        <Send size={14} />
+                      ) : null}
+                      {m === "draft"
+                        ? "Salvar rascunho"
+                        : m === "schedule"
+                          ? "Agendar campanha"
+                          : "Enviar agora"}
+                    </button>
+                  ))}
+                </>
+              )}
+            </div>
           </div>
         </footer>
       </div>
