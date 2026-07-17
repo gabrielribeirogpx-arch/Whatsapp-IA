@@ -16,7 +16,7 @@ export type CampaignReportPreviewScenario =
   | "low"
   | "medium"
   | "high"
-  | "failure_heavy";
+  | "failures";
 
 export const PREVIEW_SCENARIOS: Array<{
   value: CampaignReportPreviewScenario;
@@ -25,7 +25,7 @@ export const PREVIEW_SCENARIOS: Array<{
   { value: "low", label: "Volume baixo" },
   { value: "medium", label: "Volume médio" },
   { value: "high", label: "Volume alto" },
-  { value: "failure_heavy", label: "Muitas falhas" },
+  { value: "failures", label: "Muitas falhas" },
 ];
 
 type ScenarioSeed = {
@@ -51,11 +51,11 @@ const SCENARIOS: Record<CampaignReportPreviewScenario, ScenarioSeed> = {
     heatmapScale: 7,
   },
   medium: {
-    recipients: 47600,
-    sent: 43820,
-    delivered: 41170,
-    read: 26740,
-    failed: 1680,
+    recipients: 132400,
+    sent: 128960,
+    delivered: 122780,
+    read: 84630,
+    failed: 3440,
     campaignCount: 12,
     timelineDays: 30,
     heatmapScale: 140,
@@ -70,7 +70,7 @@ const SCENARIOS: Record<CampaignReportPreviewScenario, ScenarioSeed> = {
     timelineDays: 45,
     heatmapScale: 430,
   },
-  failure_heavy: {
+  failures: {
     recipients: 38500,
     sent: 36420,
     delivered: 28610,
@@ -257,7 +257,7 @@ function buildCampaigns(
     seed.delivered,
     weights.map(
       (weight, index) =>
-        weight * (scenario === "failure_heavy" && index % 4 === 0 ? 0.58 : 1),
+        weight * (scenario === "failures" && index % 4 === 0 ? 0.58 : 1),
     ),
   );
   const read = distribute(
@@ -268,21 +268,21 @@ function buildCampaigns(
     seed.failed,
     weights.map(
       (weight, index) =>
-        weight * (scenario === "failure_heavy" && index % 4 === 0 ? 2.4 : 0.8),
+        weight * (scenario === "failures" && index % 4 === 0 ? 2.4 : 0.8),
     ),
   );
 
   const items = recipients.map((totalRecipients, index) => {
     const template = templates[index % templates.length];
     const status =
-      scenario === "failure_heavy" && index % 4 === 0
+      scenario === "failures" && index % 4 === 0
         ? "failed"
         : statuses[index % statuses.length];
     return {
-      id: `preview-${scenario}-${index + 1}`,
+      id: `preview_${scenario}_${index + 1}`,
       name: campaignNames[index % campaignNames.length],
       status,
-      provider_id: index % 2 ? "preview-provider-sp" : "preview-provider-rj",
+      provider_id: index % 2 ? "preview_provider_sp" : "preview_provider_rj",
       template_id: template.id,
       template_name: template.name,
       template_category: template.category,
@@ -361,7 +361,7 @@ function buildFailures(
   scenario: CampaignReportPreviewScenario,
 ): FailureAnalyticsRow[] {
   const weights =
-    scenario === "failure_heavy"
+    scenario === "failures"
       ? [3.3, 2.4, 2.1, 1.45, 1.2]
       : [2.6, 1.8, 1.15, 0.8, 0.95];
   const counts = distribute(seed.failed, weights);
@@ -421,7 +421,7 @@ export function buildCampaignReportPreview(
     delivery_rate: pct(seed.delivered, seed.sent),
     read_rate: pct(seed.read, seed.delivered),
     failure_rate: pct(seed.failed, seed.recipients),
-    timestamp_basis: { preview: "development-only" },
+    timestamp_basis: { preview: "demo-mode" },
   };
 
   return {
@@ -440,14 +440,14 @@ export function buildCampaignReportPreview(
 export function buildPreviewProviders(): WhatsAppProvider[] {
   return [
     {
-      id: "preview-provider-sp",
+      id: "preview_provider_sp",
       display_name: "Preview São Paulo",
       phone_number_id: "5511999990001",
       provider: "meta",
       is_active: true,
     } as any,
     {
-      id: "preview-provider-rj",
+      id: "preview_provider_rj",
       display_name: "Preview Rio de Janeiro",
       phone_number_id: "5521999990002",
       provider: "meta",
