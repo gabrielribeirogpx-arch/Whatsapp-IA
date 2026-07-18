@@ -8103,3 +8103,50 @@ input {
 .primary-button:disabled:hover {
   transform: none;
 }
+
+/* Motion system: a deliberately small set of durations and a shared deceleration curve. */
+:root {
+  --motion-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --motion-hover: 140ms;
+  --motion-enter: 200ms;
+  --motion-dropdown: 180ms;
+  --motion-drawer: 300ms;
+  --motion-page: 240ms;
+}
+
+html { scroll-behavior: smooth; }
+
+button, [role="button"], input, select, textarea {
+  transition: border-color var(--motion-hover) var(--motion-ease), background-color var(--motion-hover) var(--motion-ease), color var(--motion-hover) var(--motion-ease), box-shadow var(--motion-hover) var(--motion-ease), opacity var(--motion-hover) var(--motion-ease), transform var(--motion-hover) var(--motion-ease);
+}
+
+button:not(:disabled):active, [role="button"]:not(:disabled):active { transform: scale(.98); }
+button:disabled, input:disabled, select:disabled, textarea:disabled { transition: opacity var(--motion-hover) var(--motion-ease); }
+:where(button, [role="button"], input, select, textarea):focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(16, 185, 129, .16); }
+
+@keyframes motion-enter { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes motion-page { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes motion-drawer-in { from { opacity: 0; transform: translateX(28px); filter: blur(2px); } to { opacity: 1; transform: translateX(0); filter: blur(0); } }
+@keyframes motion-backdrop-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes motion-legend-in { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes motion-shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+
+.motion-page { animation: motion-page var(--motion-page) var(--motion-ease) both; }
+.motion-enter { animation: motion-enter var(--motion-enter) var(--motion-ease) both; }
+.motion-card { transition: transform var(--motion-hover) var(--motion-ease), box-shadow var(--motion-hover) var(--motion-ease), border-color var(--motion-hover) var(--motion-ease), background-color var(--motion-hover) var(--motion-ease); }
+.motion-card:hover { transform: translateY(-1px); border-color: rgba(148, 163, 184, .35); box-shadow: 0 16px 34px rgba(15, 23, 42, .09); }
+.motion-drawer-backdrop { animation: motion-backdrop-in var(--motion-drawer) var(--motion-ease) both; }
+.motion-drawer { animation: motion-drawer-in var(--motion-drawer) var(--motion-ease) both; will-change: transform, opacity; }
+.motion-drawer-header { animation: motion-enter var(--motion-enter) var(--motion-ease) 45ms both; }
+.motion-drawer-kpis { animation: motion-enter var(--motion-enter) var(--motion-ease) 90ms both; }
+.motion-drawer-tabs { animation: motion-enter var(--motion-enter) var(--motion-ease) 135ms both; }
+.motion-chart .recharts-surface { animation: motion-enter var(--motion-enter) var(--motion-ease) both; }
+.motion-chart-legend { animation: motion-legend-in var(--motion-enter) var(--motion-ease) 100ms both; }
+.motion-tooltip { animation: motion-enter 120ms var(--motion-ease) both; transform-origin: center bottom; }
+.animate-pulse { animation: motion-shimmer 1.6s var(--motion-ease) infinite; background-size: 200% 100% !important; }
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  *, *::before, *::after { animation-duration: 1ms !important; animation-iteration-count: 1 !important; scroll-behavior: auto !important; transition-duration: 1ms !important; }
+  .motion-card:hover, button:not(:disabled):active, [role="button"]:not(:disabled):active { transform: none; }
+}

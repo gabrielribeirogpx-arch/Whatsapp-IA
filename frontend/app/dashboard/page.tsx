@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { AlertTriangle, CheckCircle2, Clock3, MessageSquare, RadioTower, Star, TrendingUp, Zap } from "lucide-react";
 
 import DashboardChart from '../../components/DashboardChart';
+import AnimatedNumber from '../../components/motion/AnimatedNumber';
 import DashboardInsightPanel from '@/components/dashboard/DashboardInsightPanel';
 import CreateFlowModal from '@/components/flows/CreateFlowModal';
 import { getConversations, listFlows } from '../../lib/api';
@@ -474,7 +475,7 @@ export default function DashboardPage() {
   }
 
   return (
-    <section className="w-full min-w-0 px-5 py-6 lg:px-6">
+    <section className="motion-page w-full min-w-0 px-5 py-6 lg:px-6">
       {showWelcomeToast ? (
         <div className="fixed right-6 top-6 z-[120] rounded-xl border border-emerald-200 bg-white/95 px-4 py-3 text-sm font-medium text-emerald-700 shadow-[0_12px_30px_rgba(16,185,129,0.18)] backdrop-blur">
           ✅ Conta criada com sucesso. Seu workspace está pronto!
@@ -518,6 +519,7 @@ export default function DashboardPage() {
     if (!item) return null;
     const rawValue = viewModel?.[item.key as keyof typeof viewModel];
     const value = typeof rawValue === 'number' || typeof rawValue === 'string' ? rawValue : 0;
+    const numericValue = Number(value) || 0;
     const series = getKpiSeries(item.key, timeseries);
     const sparklineSeries = series.length ? series : [0, 0, 0, 0, 0, 0, 0];
     const delta = getDeltaPercent(sparklineSeries);
@@ -527,7 +529,8 @@ export default function DashboardPage() {
     return (
       <div
         key={item.key}
-        className="relative overflow-hidden rounded-2xl border border-slate-100 bg-white p-5 min-h-[110px] shadow-[0_10px_30px_rgba(15,23,42,0.06)] transition hover:shadow-[0_18px_40px_rgba(15,23,42,0.10)]"
+        className="motion-card motion-enter relative min-h-[110px] overflow-hidden rounded-2xl border border-slate-100 bg-white p-5 shadow-[0_10px_30px_rgba(15,23,42,0.06)]"
+        style={{ animationDelay: `${safeKpis.indexOf(item) * 35}ms` }}
       >
         <div className="absolute inset-0 opacity-[0.03] bg-[radial-gradient(circle_at_top_left,#22c55e,transparent)] pointer-events-none" />
 
@@ -546,7 +549,7 @@ export default function DashboardPage() {
             <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">{item.label}</span>
 
             <span className="mt-1 block text-2xl font-bold text-slate-900">
-              {value}
+              <AnimatedNumber value={numericValue} />
               {item.suffix ?? ''}
             </span>
           </div>
