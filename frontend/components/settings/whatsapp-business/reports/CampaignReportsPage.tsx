@@ -46,7 +46,10 @@ import {
   formatInteger,
   formatPercent,
 } from "./formatters";
-import type { CampaignReportPreviewScenario } from "./campaignAnalyticsPreviewData";
+import {
+  buildCampaignReportPreview,
+  type CampaignReportPreviewScenario,
+} from "./campaignAnalyticsPreviewData";
 
 const traceCampaignReportsBuild = (moduleName: string) => {
   if (process.env.NEXT_BUILD_TRACE_CAMPAIGN_REPORTS === "true") {
@@ -116,6 +119,21 @@ const metricOptions = [
   ["delivery_rate", "Taxa entrega"],
   ["read_rate", "Taxa leitura"],
 ] as const;
+
+type AnalyticsDisplayData = {
+  summary: CampaignAnalyticsSummary | null;
+  campaigns: CampaignAnalyticsPage | null;
+  templates: TemplateAnalyticsRow[];
+  timeline: TimelineAnalytics | null;
+  failures: FailureAnalyticsRow[];
+  heatmap: HeatmapAnalytics | null;
+};
+
+type PreviewAnalyticsData = AnalyticsDisplayData & {
+  providers: WhatsAppProvider[];
+  allCampaigns: WhatsAppCampaign[];
+  allTemplates: WhatsAppTemplate[];
+};
 
 type Filters = {
   campaign_id: string;
@@ -1008,32 +1026,27 @@ export default function CampaignReportsPage() {
   );
   const previewAllowed = previewFeatureEnabled && previewAuthorized;
   const previewActive = previewAllowed && !!preview;
-  const applyPreview = useCallback(
-    async (scenario: CampaignReportPreviewScenario) => {
-      if (!previewAllowed) return;
-      traceCampaignReportsBuild("campaignAnalyticsPreviewData");
-      const { buildCampaignReportPreview } = await import("./campaignAnalyticsPreviewData");
-      const data = buildCampaignReportPreview(scenario);
-      setSummary(data.summary);
-      setCampaigns(data.campaigns);
-      setTemplates(data.templates);
-      setTimeline(data.timeline);
-      setFailures(data.failures);
-      setHeatmap(data.heatmap);
-      setAllCampaigns(data.allCampaigns);
-      setAllTemplates(data.allTemplates);
-      setProviders(data.providers);
-      setCompare([]);
-      setSelected(null);
-      setUpdated(new Date());
+  const realAnalyticsData = useMemo<AnalyticsDisplayData>(
+    () => ({
+      summary,
+      campaigns,
+      templates,
+      timeline,
+      failures,
+      heatmap,
+    }),
+    [campaigns, failures, heatmap, summary, templates, timeline],
+  );
+  const previewAnalyticsData = useMemo<PreviewAnalyticsData | null>(() => {
+    if (!previewActive || !preview) return null;
+    traceCampaignReportsBuild("campaignAnalyticsPreviewData");
+    return buildCampaignReportPreview(preview);
+  }, [preview, previewActive]);
+  const reload = useCallback(async () => {
+    if (previewActive) {
       setError("");
       setLoading(false);
-    },
-    [previewAllowed],
-  );
-  const reload = useCallback(async () => {
-    if (previewAllowed && preview) {
-      await applyPreview(preview);
+      setUpdated(new Date());
       return;
     }
     setLoading(true);
@@ -1059,9 +1072,16 @@ export default function CampaignReportsPage() {
     } finally {
       setLoading(false);
     }
-  }, [params, preview, applyPreview, previewAllowed]);
+  }, [params, previewActive]);
   useEffect(() => {
-    if (previewActive) return;
+    if (previewAnalyticsData) {
+      setAllCampaigns(previewAnalyticsData.allCampaigns);
+      setAllTemplates(previewAnalyticsData.allTemplates);
+      setProviders(previewAnalyticsData.providers);
+      setCompare([]);
+      setSelected(null);
+      return;
+    }
     void Promise.all([
       listWhatsAppCampaigns(),
       listTemplates(),
@@ -1071,7 +1091,7 @@ export default function CampaignReportsPage() {
       setAllTemplates(t);
       setProviders(p);
     });
-  }, [previewActive]);
+  }, [previewAnalyticsData]);
   useEffect(() => {
     if (!previewFeatureEnabled) return;
     void getAccountMe()
@@ -1102,11 +1122,12 @@ export default function CampaignReportsPage() {
     setStart(iso(s));
     setEnd(iso(now));
   }
-  const filteredCampaigns = useMemo(() => {
-    if (!previewActive || !campaigns) return campaigns;
+  const filteredPreviewCampaigns = useMemo(() => {
+    const previewCampaigns = previewAnalyticsData?.campaigns;
+    if (!previewActive || !previewCampaigns) return previewCampaigns || null;
     const startMs = new Date(start).getTime();
     const endMs = new Date(end).getTime();
-    const items = campaigns.items.filter((c: any) => {
+    const items = previewCampaigns.items.filter((c: any) => {
       const started = c.started_at ? new Date(c.started_at).getTime() : 0;
       return (
         (!filters.campaign_id || c.id === filters.campaign_id) &&
@@ -1117,16 +1138,22 @@ export default function CampaignReportsPage() {
         (!started || (started >= startMs && started <= endMs))
       );
     });
-    return { ...campaigns, items, total: items.length };
-  }, [campaigns, end, filters, previewActive, start]);
-  const displayAnalyticsData = {
-    summary,
-    campaigns: filteredCampaigns,
-    templates,
-    timeline,
-    failures,
-    heatmap,
-  };
+    return { ...previewCampaigns, items, total: items.length };
+  }, [end, filters, previewActive, previewAnalyticsData, start]);
+  const displayAnalyticsData = useMemo<AnalyticsDisplayData>(
+    () =>
+      previewAnalyticsData
+        ? {
+            summary: previewAnalyticsData.summary,
+            campaigns: filteredPreviewCampaigns,
+            templates: previewAnalyticsData.templates,
+            timeline: previewAnalyticsData.timeline,
+            failures: previewAnalyticsData.failures,
+            heatmap: previewAnalyticsData.heatmap,
+          }
+        : realAnalyticsData,
+    [filteredPreviewCampaigns, previewAnalyticsData, realAnalyticsData],
+  );
   const compared = (displayAnalyticsData.campaigns?.items || []).filter((c) =>
     compare.includes(c.id),
   );
