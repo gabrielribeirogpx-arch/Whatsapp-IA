@@ -1,6 +1,6 @@
 "use client";
 import dynamic from "next/dynamic";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Component, useCallback, useEffect, useMemo, useState } from "react";
 import {
   BarChart3,
   CheckCircle2,
@@ -75,12 +75,24 @@ const loadRechartsComponent = (name: string) =>
 const Bar = dynamic(() => loadRechartsComponent("Bar"), { ssr: false });
 const BarChart = dynamic(() => loadRechartsComponent("BarChart"), { ssr: false });
 const CartesianGrid = dynamic(() => loadRechartsComponent("CartesianGrid"), { ssr: false });
-const Line = dynamic(() => loadRechartsComponent("Line"), { ssr: false });
-const LineChart = dynamic(() => loadRechartsComponent("LineChart"), { ssr: false });
 const ResponsiveContainer = dynamic(() => loadRechartsComponent("ResponsiveContainer"), { ssr: false });
 const Tooltip = dynamic(() => loadRechartsComponent("Tooltip"), { ssr: false });
 const XAxis = dynamic(() => loadRechartsComponent("XAxis"), { ssr: false });
 const YAxis = dynamic(() => loadRechartsComponent("YAxis"), { ssr: false });
+
+function CampaignChartSkeleton() {
+  return (
+    <div className="h-[320px] w-full min-w-0 animate-pulse rounded-2xl bg-slate-50" />
+  );
+}
+
+const CampaignTimelineChartClient = dynamic(
+  () => import("./CampaignTimelineChartClient"),
+  {
+    ssr: false,
+    loading: () => <CampaignChartSkeleton />,
+  },
+);
 
 const iso = (d: Date) => d.toISOString();
 const defaultStart = (days = 30) => {
@@ -472,8 +484,12 @@ function SecondaryMetricsStrip({
     </Shell>
   );
 }
-const toTimelineMetric = (row: any, key: string) =>
-  Number(row?.[key] ?? row?.[`total_${key}`] ?? row?.[`${key}_count`] ?? 0);
+const toTimelineMetric = (row: any, key: string) => {
+  const value = Number(
+    row?.[key] ?? row?.[`total_${key}`] ?? row?.[`${key}_count`] ?? 0,
+  );
+  return Number.isFinite(value) ? value : 0;
+};
 
 const normalizeTimelineData = (data: any[] = []) =>
   data
@@ -485,6 +501,57 @@ const normalizeTimelineData = (data: any[] = []) =>
       failed: toTimelineMetric(row, "failed"),
     }))
     .filter((row) => row.bucket);
+
+type CampaignTimelineChartErrorBoundaryProps = {
+  children: React.ReactNode;
+};
+
+type CampaignTimelineChartErrorBoundaryState = {
+  error: Error | null;
+  retryKey: number;
+};
+
+class CampaignTimelineChartErrorBoundary extends Component<
+  CampaignTimelineChartErrorBoundaryProps,
+  CampaignTimelineChartErrorBoundaryState
+> {
+  state: CampaignTimelineChartErrorBoundaryState = { error: null, retryKey: 0 };
+
+  static getDerivedStateFromError(error: Error) {
+    return { error };
+  }
+
+  componentDidCatch(error: Error) {
+    if (process.env.NODE_ENV === "development") {
+      console.error("[CampaignTimelineChart]", error);
+    }
+  }
+
+  retry = () => {
+    this.setState(({ retryKey }) => ({ error: null, retryKey: retryKey + 1 }));
+  };
+
+  render() {
+    if (this.state.error) {
+      return (
+        <div className="flex h-[320px] flex-col items-center justify-center rounded-2xl bg-slate-50/80 px-5 py-8 text-center">
+          <p className="text-sm font-semibold text-slate-700">
+            Não foi possível carregar o gráfico.
+          </p>
+          <button
+            type="button"
+            onClick={this.retry}
+            className="mt-3 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700"
+          >
+            Tentar novamente
+          </button>
+        </div>
+      );
+    }
+
+    return <div key={this.state.retryKey}>{this.props.children}</div>;
+  }
+}
 
 function CampaignTrendChart({ data }: { data: any[] }) {
   const timelineData = useMemo(() => normalizeTimelineData(data), [data]);
@@ -500,84 +567,11 @@ function CampaignTrendChart({ data }: { data: any[] }) {
             Entregas, leituras e falhas ao longo do período.
           </p>
         </div>
-        <div className="flex gap-3 text-xs font-medium">
-          {Object.entries(colors).map(([k, c]) => (
-            <span key={k} className="inline-flex items-center gap-1.5">
-              <i
-                className="h-2 w-2 rounded-full"
-                style={{ backgroundColor: c }}
-              />
-              {
-                (
-                  {
-                    sent: "Enviadas",
-                    delivered: "Entregues",
-                    read: "Lidas",
-                    failed: "Falhas",
-                  } as any
-                )[k]
-              }
-            </span>
-          ))}
-        </div>
       </div>
       {has ? (
-        <ResponsiveContainer width="100%" height={330}>
-          <LineChart
-            data={timelineData}
-            margin={{ top: 18, right: 20, bottom: 0, left: 0 }}
-          >
-            <CartesianGrid vertical={false} stroke="#edf0f4" />
-            <XAxis
-              dataKey="bucket"
-              minTickGap={34}
-              tickLine={false}
-              axisLine={false}
-              tickFormatter={(v) =>
-                new Date(v).toLocaleDateString("pt-BR", {
-                  day: "2-digit",
-                  month: "2-digit",
-                })
-              }
-            />
-            <YAxis
-              tickFormatter={formatCompact}
-              width={52}
-              tickLine={false}
-              axisLine={false}
-            />
-            <Tooltip
-              contentStyle={{
-                borderRadius: 14,
-                border: "1px solid #E7EAF0",
-                boxShadow: "0 18px 40px -28px rgba(15,23,42,.5)",
-              }}
-              labelFormatter={(v) => formatDateTime(String(v))}
-              formatter={(v: any, n) => [formatInteger(Number(v)), n]}
-            />
-            {Object.entries(colors).map(([k, c]) => (
-              <Line
-                key={k}
-                dot={false}
-                activeDot={{ r: 4 }}
-                strokeWidth={2.5}
-                type="monotone"
-                dataKey={k}
-                name={
-                  (
-                    {
-                      sent: "Enviadas",
-                      delivered: "Entregues",
-                      read: "Lidas",
-                      failed: "Falhas",
-                    } as any
-                  )[k]
-                }
-                stroke={c}
-              />
-            ))}
-          </LineChart>
-        </ResponsiveContainer>
+        <CampaignTimelineChartErrorBoundary>
+          <CampaignTimelineChartClient data={timelineData} />
+        </CampaignTimelineChartErrorBoundary>
       ) : (
         <ReportsEmptyState
           title="Nenhum evento no período"
@@ -587,6 +581,7 @@ function CampaignTrendChart({ data }: { data: any[] }) {
     </Shell>
   );
 }
+
 function CampaignFunnel({
   summary,
 }: {
