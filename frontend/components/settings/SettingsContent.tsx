@@ -5,6 +5,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertCircle,
+  BarChart3,
   Bell,
   Building2,
   CalendarDays,
@@ -25,8 +26,10 @@ import {
   Save,
   ShieldCheck,
   Smartphone,
+  Sparkles,
   User,
   UsersRound,
+  Workflow,
   XCircle,
 } from "lucide-react";
 import ProvidersTab from "@/components/settings/whatsapp-business/ProvidersTab";
@@ -965,43 +968,105 @@ function PermissionsTab() {
   );
 }
 function BillingTab() {
-  const limits = [
-    "1.000 mensagens/mês",
-    "1 workspace",
-    "Até 5 usuários",
-    "WhatsApp Business básico",
+  const usage = [
+    {
+      label: "Mensagens",
+      current: 640,
+      limit: 1000,
+      suffix: "mensagens",
+      hint: "360 restantes neste ciclo",
+      icon: MessageSquareText,
+    },
+    {
+      label: "Usuários",
+      current: 3,
+      limit: 5,
+      suffix: "usuários",
+      hint: "2 assentos disponíveis",
+      icon: UsersRound,
+    },
+    {
+      label: "Workspaces",
+      current: 1,
+      limit: 1,
+      suffix: "workspace",
+      hint: "Limite do plano atual",
+      icon: Building2,
+    },
   ];
+  const planFeatures = ["IA", "Flux Builder", "Inbox", "CRM", "WhatsApp", "Analytics"];
+  const enabledFeatures = [
+    "IA",
+    "MCP",
+    "Base de Conhecimento",
+    "Fluxos",
+    "Inbox",
+    "API",
+    "Analytics",
+    "CRM",
+    "WhatsApp Business",
+  ];
+  const roadmap = [
+    "PIX",
+    "Cartão",
+    "NF-e",
+    "Histórico financeiro",
+    "Upgrade automático",
+    "Cobrança recorrente",
+  ];
+  const activity = [38, 52, 43, 68, 57, 74, 62, 81, 69, 88, 78, 94];
+
   return (
-    <Card>
-      <HubHeader
-        icon={CreditCard}
-        eyebrow="Revenue Operations"
-        title="Billing"
-        description="Resumo financeiro sem integração de cobrança: plano atual, status e limites operacionais da POC."
-      />
-      <div className="grid gap-5 p-5 md:grid-cols-[320px_1fr] md:p-6">
-        <div className="rounded-3xl bg-slate-950 p-6 text-white">
-          <p className="text-sm text-emerald-200">Plano atual</p>
-          <h3 className="mt-2 text-3xl font-bold">Starter POC</h3>
-          <p className="mt-4 inline-flex rounded-full bg-emerald-400/15 px-3 py-1 text-sm font-semibold text-emerald-200">
-            Status: Ativo
-          </p>
-        </div>
-        <div className="grid gap-3 md:grid-cols-2">
-          {limits.map((limit) => (
-            <div
-              key={limit}
-              className="flex items-center gap-3 rounded-2xl border border-slate-200 p-4"
-            >
-              <CheckCircle2 className="text-emerald-500" size={18} />
-              <span className="text-sm font-semibold text-slate-700">
-                {limit}
-              </span>
+    <div className="space-y-5">
+      <Card className="overflow-hidden">
+        <div className="relative flex flex-col gap-5 bg-gradient-to-br from-white via-slate-50 to-emerald-50/60 px-5 py-5 sm:px-6 md:flex-row md:items-center md:justify-between">
+          <div className="pointer-events-none absolute right-8 top-0 h-24 w-24 rounded-full bg-emerald-300/20 blur-2xl" />
+          <div className="relative">
+            <p className="inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.14em] text-emerald-700"><CreditCard size={14} /> Revenue Operations</p>
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <h2 className="text-2xl font-semibold tracking-tight text-slate-950">Billing</h2>
+              <span className="rounded-full border border-slate-200 bg-white/80 px-2.5 py-1 text-xs font-semibold text-slate-600">Plano atual</span>
+              <span className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700"><CheckCircle2 size={13} /> Ativo</span>
             </div>
-          ))}
+            <p className="mt-1.5 max-w-2xl text-sm text-slate-600">Acompanhe o plano, a capacidade do workspace e a evolução do uso em um só lugar.</p>
+          </div>
+          <div className="relative flex items-center gap-4 rounded-2xl border border-white/80 bg-white/75 px-4 py-3 shadow-sm">
+            <CalendarDays className="text-emerald-600" size={19} />
+            <div><p className="text-xs font-medium text-slate-500">Próxima renovação</p><p className="text-sm font-semibold text-slate-900">Em breve</p></div>
+            <button disabled className="rounded-xl bg-slate-900 px-3.5 py-2 text-xs font-semibold text-white opacity-45 transition duration-200 disabled:cursor-not-allowed">Upgrade</button>
+          </div>
         </div>
+      </Card>
+
+      <div className="grid gap-5 xl:grid-cols-[minmax(0,1.05fr)_minmax(380px,0.95fr)]">
+        <Card className="billing-card overflow-hidden">
+          <div className="flex items-start justify-between border-b border-slate-100 p-5">
+            <div><p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Plano</p><h3 className="mt-1 text-xl font-semibold text-slate-950">Starter</h3></div>
+            <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700">Ativo</span>
+          </div>
+          <div className="p-5"><p className="text-sm leading-relaxed text-slate-600">Essenciais para centralizar conversas, automações e a operação comercial do seu time.</p>
+            <div className="mt-5 grid gap-2 sm:grid-cols-2">{planFeatures.map((feature) => <span key={feature} className="inline-flex items-center gap-2 text-sm font-medium text-slate-700"><CheckCircle2 size={16} className="text-emerald-500" />{feature}</span>)}</div>
+            <button disabled className="mt-6 w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-500 transition duration-200 disabled:cursor-not-allowed">Upgrade em breve</button>
+          </div>
+        </Card>
+
+        <Card className="billing-card p-5"><div className="flex items-center justify-between"><div><p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Uso dos últimos 30 dias</p><h3 className="mt-1 text-lg font-semibold text-slate-950">Atividade do workspace</h3></div><BarChart3 size={19} className="text-emerald-600" /></div>
+          <div className="mt-6 flex h-28 items-end gap-1.5">{activity.map((height, index) => <div key={index} className="group flex h-full flex-1 items-end"><span style={{ height: `${height}%` }} className="w-full rounded-t-md bg-gradient-to-t from-emerald-500 to-emerald-300/70 transition-all duration-200 group-hover:from-emerald-600 group-hover:to-emerald-400" /></div>)}</div>
+          <div className="mt-3 flex justify-between text-xs text-slate-500"><span>Há 30 dias</span><span>Hoje</span></div><p className="mt-4 rounded-xl bg-slate-50 px-3 py-2 text-xs text-slate-500">Visualização indicativa enquanto métricas históricas detalhadas não estão disponíveis.</p>
+        </Card>
       </div>
-    </Card>
+
+      <section><div className="mb-3 flex items-center justify-between"><div><p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Capacidade</p><h3 className="mt-1 text-lg font-semibold text-slate-950">Uso do plano</h3></div><span className="text-xs font-medium text-slate-500">Ciclo atual</span></div>
+        <div className="grid gap-4 md:grid-cols-3">{usage.map(({ label, current, limit, suffix, hint, icon: Icon }) => { const percentage = Math.round((current / limit) * 100); return <Card key={label} className="billing-card p-5"><div className="flex items-center justify-between"><span className="flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-50 text-emerald-600"><Icon size={18} /></span><span className="text-sm font-semibold text-emerald-700">{percentage}%</span></div><p className="mt-4 text-sm font-medium text-slate-600">{label}</p><p className="mt-1 text-xl font-semibold tracking-tight text-slate-950">{current.toLocaleString("pt-BR")} <span className="text-sm font-medium text-slate-400">/ {limit.toLocaleString("pt-BR")} {suffix}</span></p><div className="mt-4 h-2 overflow-hidden rounded-full bg-slate-100"><div style={{ width: `${percentage}%` }} className="h-full rounded-full bg-emerald-500 transition-all duration-500" /></div><p className="mt-3 text-xs text-slate-500">{hint}</p></Card>; })}</div>
+      </section>
+
+      <div className="grid gap-5 xl:grid-cols-2">
+        <Card className="billing-card p-5"><div className="flex items-center gap-2"><Sparkles size={18} className="text-emerald-600" /><div><p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Plano Starter</p><h3 className="mt-1 text-lg font-semibold text-slate-950">Recursos habilitados</h3></div></div><div className="mt-5 grid grid-cols-2 gap-2 sm:grid-cols-3">{enabledFeatures.map((feature) => <span key={feature} className="inline-flex items-center gap-2 rounded-xl border border-slate-100 bg-slate-50 px-3 py-2.5 text-xs font-semibold text-slate-700"><CheckCircle2 size={15} className="shrink-0 text-emerald-500" />{feature}</span>)}</div></Card>
+        <Card className="billing-card p-5"><div className="flex items-center gap-2"><Building2 size={18} className="text-emerald-600" /><div><p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Visão geral</p><h3 className="mt-1 text-lg font-semibold text-slate-950">Resumo operacional</h3></div></div><dl className="mt-5 grid grid-cols-2 gap-x-5 gap-y-4 text-sm"><div><dt className="text-slate-500">Workspace</dt><dd className="mt-1 font-semibold text-slate-900">Principal</dd></div><div><dt className="text-slate-500">Usuários</dt><dd className="mt-1 font-semibold text-slate-900">3 de 5</dd></div><div><dt className="text-slate-500">Mensagens</dt><dd className="mt-1 font-semibold text-slate-900">640 de 1.000</dd></div><div><dt className="text-slate-500">Status</dt><dd className="mt-1 inline-flex items-center gap-1 font-semibold text-emerald-700"><span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />Ativo</dd></div><div><dt className="text-slate-500">Criado em</dt><dd className="mt-1 font-semibold text-slate-900">—</dd></div><div><dt className="text-slate-500">Última atualização</dt><dd className="mt-1 font-semibold text-slate-900">Agora</dd></div></dl></Card>
+      </div>
+
+      <Card className="billing-card p-5"><div className="flex items-center gap-2"><Workflow size={18} className="text-emerald-600" /><div><p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Roadmap</p><h3 className="mt-1 text-lg font-semibold text-slate-950">Próximas funcionalidades</h3></div></div><div className="mt-5 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">{roadmap.map((item) => <div key={item} className="flex items-center justify-between rounded-xl border border-slate-100 bg-slate-50 px-3 py-2.5"><span className="text-sm font-medium text-slate-700">{item}</span><span className="rounded-full bg-slate-200/70 px-2 py-1 text-[11px] font-semibold text-slate-600">Em desenvolvimento</span></div>)}</div></Card>
+    </div>
   );
 }
 function IntegrationsTab() {
