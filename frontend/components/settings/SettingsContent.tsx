@@ -6,7 +6,6 @@ import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertCircle,
   BarChart3,
-  Bell,
   Building2,
   CalendarDays,
   CheckCircle2,
@@ -27,7 +26,6 @@ import {
   ShieldCheck,
   Smartphone,
   Sparkles,
-  User,
   UsersRound,
   Workflow,
   XCircle,
@@ -90,6 +88,7 @@ import {
 } from "@/lib/templateVariableMapper";
 import { SettingsTabId } from "./SettingsSidebar";
 import { AccountTabId } from "@/components/account/AccountSidebar";
+import AccountPageHeader from "@/components/account/AccountPageHeader";
 
 const INITIAL_FORM: SystemSettingsPayload = {
   token: "",
@@ -165,33 +164,6 @@ function Card({
       className={`rounded-3xl border border-[color:var(--surface-border)] bg-white/95 shadow-[0_18px_44px_-34px_rgba(15,23,42,0.75)] ${className}`}
     >
       {children}
-    </div>
-  );
-}
-
-function HubHeader({
-  icon: Icon,
-  eyebrow,
-  title,
-  description,
-}: {
-  icon: any;
-  eyebrow: string;
-  title: string;
-  description: string;
-}) {
-  return (
-    <div className="relative border-b border-slate-100 bg-gradient-to-br from-white via-slate-50 to-emerald-50/50 p-6 md:p-8">
-      <div className="pointer-events-none absolute right-8 top-6 h-24 w-24 rounded-full bg-emerald-300/20 blur-2xl" />
-      <p className="inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-white/80 px-3 py-1 text-xs font-semibold text-emerald-700 shadow-sm">
-        <Icon size={14} /> {eyebrow}
-      </p>
-      <h2 className="mt-4 text-2xl font-semibold tracking-tight text-slate-950">
-        {title}
-      </h2>
-      <p className="mt-2 max-w-3xl text-sm leading-relaxed text-slate-600">
-        {description}
-      </p>
     </div>
   );
 }
@@ -289,9 +261,7 @@ function ProfileTab() {
   };
   return (
     <Card>
-      <HubHeader
-        icon={User}
-        eyebrow="Identity Center"
+      <AccountPageHeader
         title="Meu Perfil"
         description="Atualize os dados que aparecem para o time, auditoria e atendimento do workspace."
       />
@@ -398,9 +368,7 @@ function PreferencesTab() {
   };
   return (
     <Card>
-      <HubHeader
-        icon={Bell}
-        eyebrow="Personalização"
+      <AccountPageHeader
         title="Preferências"
         description="Configure idioma, timezone e canais de notificação para sua operação diária."
       />
@@ -602,9 +570,7 @@ function SecurityTab() {
   ];
   return (
     <Card>
-      <HubHeader
-        icon={LockKeyhole}
-        eyebrow="Trust & Security"
+      <AccountPageHeader
         title="Segurança"
         description="Recursos enterprise reais: política forte de senha, sessões ativas revogáveis, Turnstile e trilha operacional."
       />
@@ -821,9 +787,7 @@ function UsersTab() {
   };
   return (
     <Card>
-      <HubHeader
-        icon={UsersRound}
-        eyebrow="Admin Console"
+      <AccountPageHeader
         title="Usuários"
         description="Tabela real do workspace com administrador atual, convites e ações de edição/desativação."
       />
@@ -948,9 +912,7 @@ function PermissionsTab() {
   ];
   return (
     <Card>
-      <HubHeader
-        icon={ShieldCheck}
-        eyebrow="Governança"
+      <AccountPageHeader
         title="Permissões"
         description="RBAC permanece no roadmap, mas a política alvo já está clara: papéis por módulo, ações críticas e escopos de workspace."
       />
@@ -981,21 +943,23 @@ function BillingTab() {
 
   return (
     <div className="billing-page space-y-4">
-      <header className="billing-header flex flex-col gap-4 border-b border-slate-200/80 pb-4 lg:flex-row lg:items-center lg:justify-between">
-        <div>
-          <div className="flex flex-wrap items-center gap-2">
-            <h2 className="text-2xl font-semibold tracking-tight text-slate-950">Billing</h2>
+      <AccountPageHeader
+        title="Billing"
+        description="Gerencie plano, capacidade, uso e faturamento do workspace."
+        badges={
+          <>
             <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700">Starter</span>
             <span className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700"><CheckCircle2 size={13} /> Ativo</span>
-          </div>
-          <p className="mt-1 text-sm text-slate-600">Gerencie plano, capacidade, uso e faturamento do workspace.</p>
-        </div>
-        <div className="flex items-center gap-3 self-start lg:self-auto">
+          </>
+        }
+        actions={
+          <>
           <CalendarDays className="hidden text-slate-400 sm:block" size={18} />
           <div className="border-l border-slate-200 pl-3"><p className="text-xs font-medium text-slate-500">Próxima renovação</p><p className="mt-0.5 text-sm font-semibold text-slate-900">Em breve</p></div>
           <button disabled className="billing-button billing-button-primary">Upgrade</button>
-        </div>
-      </header>
+          </>
+        }
+      />
 
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1.05fr)_minmax(360px,0.95fr)]">
         <Card className="billing-card overflow-hidden">
@@ -1239,9 +1203,7 @@ function IntegrationsTab() {
 
   return (
     <Card>
-      <HubHeader
-        icon={Layers3}
-        eyebrow="Integration Catalog"
+      <AccountPageHeader
         title="Integrações"
         description="Visão executiva dos conectores essenciais do workspace com status visual."
       />
