@@ -1290,7 +1290,7 @@ export default function CampaignReportsPage() {
             setFilters={setFilters}
             compare={compare}
             setCompare={setCompare}
-            setSelected={previewActive ? () => undefined : setSelected}
+            setSelected={setSelected}
           />
           <section className="grid gap-5 xl:grid-cols-2">
             <TemplateRanking templates={displayAnalyticsData.templates} />
@@ -1309,6 +1309,7 @@ export default function CampaignReportsPage() {
             template={allTemplates.find((t) => t.id === selected.template_id)}
             onClose={() => setSelected(null)}
             actions={null}
+            preview={previewActive}
           />
         )}
         <CampaignComparisonDrawer
