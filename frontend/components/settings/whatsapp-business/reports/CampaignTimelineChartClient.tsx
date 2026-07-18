@@ -85,7 +85,7 @@ function TimelineTooltip({ active, label, payload }: TimelineTooltipProps) {
   );
 
   return (
-    <div className="min-w-[210px] rounded-2xl border border-slate-200 bg-white px-3.5 py-3 text-xs text-slate-600 shadow-[0_18px_45px_-30px_rgba(15,23,42,0.65)]">
+    <div className="min-w-[210px] rounded-xl border border-slate-200/90 bg-white/95 px-3.5 py-3 text-xs text-slate-600 shadow-[0_18px_45px_-30px_rgba(15,23,42,.38)] backdrop-blur-sm">
       <div className="mb-2 border-b border-slate-100 pb-2 text-sm font-semibold text-slate-950">
         {formatDateTime(String(label ?? ""))}
       </div>
@@ -164,10 +164,10 @@ export default function CampaignTimelineChartClient({ data }: Props) {
                 [key]: !current[key],
               }))
             }
-            className={`flex items-center gap-2 rounded-full border px-2.5 py-1 transition ${
+            className={`flex items-center gap-2 rounded-full border px-2.5 py-1 transition duration-200 ${
               visibleSeries[key]
-                ? "border-slate-200 bg-white text-slate-600"
-                : "border-slate-100 bg-slate-50 text-slate-400"
+                ? "border-slate-200 bg-white text-slate-700 shadow-[0_1px_2px_rgba(15,23,42,.04)]"
+                : "border-slate-100 bg-slate-50 text-slate-400 opacity-70"
             }`}
           >
             <span
@@ -178,7 +178,7 @@ export default function CampaignTimelineChartClient({ data }: Props) {
           </button>
         ))}
       </div>
-      <div className="h-[320px] w-full min-w-0 rounded-2xl bg-gradient-to-b from-white to-slate-50/40">
+      <div className="h-[320px] w-full min-w-0 rounded-xl border border-slate-100/80 bg-gradient-to-b from-white via-white to-slate-50/50 px-1 pt-1">
         <ResponsiveContainer width="100%" height="100%">
           <ComposedChart
             data={normalizedData}
@@ -192,7 +192,7 @@ export default function CampaignTimelineChartClient({ data }: Props) {
                 </linearGradient>
               ))}
             </defs>
-            <CartesianGrid strokeDasharray="4 4" vertical={false} stroke="#eef2f7" />
+            <CartesianGrid strokeDasharray="3 5" vertical={false} stroke="#eef2f7" />
             <XAxis
               dataKey="bucket"
               minTickGap={34}
@@ -225,7 +225,8 @@ export default function CampaignTimelineChartClient({ data }: Props) {
                   dataKey={key}
                   fill={`url(#${seriesConfig[key].gradient})`}
                   stroke="none"
-                  isAnimationActive={false}
+                  isAnimationActive
+                  animationDuration={500}
                 />
               ) : null,
             )}
@@ -240,7 +241,8 @@ export default function CampaignTimelineChartClient({ data }: Props) {
                   dataKey={key}
                   name={seriesConfig[key].label}
                   stroke={seriesConfig[key].color}
-                  isAnimationActive={false}
+                  isAnimationActive
+                  animationDuration={650}
                 />
               ) : null,
             )}
