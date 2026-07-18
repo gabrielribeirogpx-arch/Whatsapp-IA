@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertCircle,
   Bell,
@@ -495,13 +495,29 @@ function Toggle({
 
 function SecurityTab() {
   const [security, setSecurity] = useState<AccountSecurity | null>(null);
+  const [isLoadingSecurity, setIsLoadingSecurity] = useState(true);
+  const [securityError, setSecurityError] = useState("");
+  const [visibleSessions, setVisibleSessions] = useState(5);
+  const [revokingSessionIds, setRevokingSessionIds] = useState<string[]>([]);
+  const [isRevokingOthers, setIsRevokingOthers] = useState(false);
+  const sessionsCardRef = useRef<HTMLDivElement>(null);
   const [toast, setToast] = useState("");
   const [password, setPassword] = useState({
     current_password: "",
     new_password: "",
     confirm_password: "",
   });
-  const refresh = async () => setSecurity(await getAccountSecurity());
+  const refresh = async () => {
+    setIsLoadingSecurity(true);
+    setSecurityError("");
+    try {
+      setSecurity(await getAccountSecurity());
+    } catch {
+      setSecurityError("Não foi possível carregar as sessões ativas.");
+    } finally {
+      setIsLoadingSecurity(false);
+    }
+  };
   useEffect(() => {
     refresh();
   }, []);
@@ -518,16 +534,52 @@ function SecurityTab() {
     setTimeout(() => setToast(""), 3000);
   };
   const revoke = async (sessionId: string) => {
-    await revokeAccountSession(sessionId);
-    await refresh();
-    setToast("Sessão encerrada.");
-    setTimeout(() => setToast(""), 3000);
+    setRevokingSessionIds((ids) => [...ids, sessionId]);
+    try {
+      await revokeAccountSession(sessionId);
+      // Keep the already-loaded list local: no second request is necessary here.
+      window.setTimeout(() => {
+        setSecurity((current) => current && {
+          ...current,
+          active_sessions: current.active_sessions.filter((session) => session.id !== sessionId),
+          active_sessions_count: Math.max(0, current.active_sessions_count - 1),
+        });
+        setRevokingSessionIds((ids) => ids.filter((id) => id !== sessionId));
+      }, 180);
+      setToast("Sessão encerrada.");
+      setTimeout(() => setToast(""), 3000);
+    } catch {
+      setRevokingSessionIds((ids) => ids.filter((id) => id !== sessionId));
+      setToast("Não foi possível encerrar a sessão. Tente novamente.");
+    }
   };
   const revokeOthers = async () => {
-    const result = await revokeOtherAccountSessions();
-    await refresh();
-    setToast(`${result.revoked_count} sessão(ões) encerrada(s).`);
-    setTimeout(() => setToast(""), 3000);
+    setIsRevokingOthers(true);
+    try {
+      const result = await revokeOtherAccountSessions();
+      setSecurity((current) => current && {
+        ...current,
+        active_sessions: current.active_sessions.filter((session) => session.is_current),
+        active_sessions_count: current.active_sessions.filter((session) => session.is_current).length,
+      });
+      setVisibleSessions(5);
+      setToast(`${result.revoked_count} sessão(ões) encerrada(s).`);
+      setTimeout(() => setToast(""), 3000);
+    } catch {
+      setToast("Não foi possível encerrar as outras sessões. Tente novamente.");
+    } finally {
+      setIsRevokingOthers(false);
+    }
+  };
+  const sortedSessions = useMemo(() => [...(security?.active_sessions ?? [])].sort((a, b) => {
+    if (a.is_current !== b.is_current) return a.is_current ? -1 : 1;
+    return new Date(b.last_seen_at ?? b.created_at ?? 0).getTime() - new Date(a.last_seen_at ?? a.created_at ?? 0).getTime();
+  }), [security?.active_sessions]);
+  const displayedSessions = sortedSessions.slice(0, visibleSessions);
+  const activeSessionsCount = sortedSessions.length;
+  const collapseSessions = () => {
+    setVisibleSessions(5);
+    sessionsCardRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
   const metrics = [
     ["Último login", fmtDate(security?.last_login_at), Clock3],
@@ -642,27 +694,40 @@ function SecurityTab() {
               </button>
             </div>
           </form>
-          <div className="rounded-3xl border border-slate-200 p-5">
+          <div ref={sessionsCardRef} className="rounded-3xl border border-slate-200 p-5">
             <div className="flex items-center justify-between gap-3">
               <div>
                 <p className="font-semibold text-slate-950">Sessões ativas</p>
                 <p className="text-sm text-slate-500">
-                  Encerre remotamente dispositivos que não reconhece.
+                  {isLoadingSecurity ? "Carregando sessões..." : `${activeSessionsCount} ${activeSessionsCount === 1 ? "sessão ativa" : "sessões ativas"} · ${displayedSessions.length} ${displayedSessions.length === 1 ? "exibida" : "exibidas"}`}
                 </p>
               </div>
               <button
                 type="button"
                 onClick={revokeOthers}
-                className="rounded-2xl border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                disabled={isLoadingSecurity || isRevokingOthers || activeSessionsCount <= 1}
+                className="rounded-2xl border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
               >
-                Encerrar outras
+                {isRevokingOthers ? "Encerrando..." : "Encerrar outras"}
               </button>
             </div>
-            <div className="mt-4 space-y-3">
-              {security?.active_sessions.map((s) => (
-                <div key={s.id} className="rounded-2xl bg-slate-50 p-4 text-sm">
+            <div id="active-sessions-list" className="mt-4 space-y-3" aria-live="polite">
+              {isLoadingSecurity && Array.from({ length: 3 }).map((_, index) => (
+                <div key={index} className="animate-pulse rounded-2xl bg-slate-50 p-4">
+                  <div className="h-4 w-2/5 rounded bg-slate-200" />
+                  <div className="mt-3 h-3 w-3/4 rounded bg-slate-200" />
+                </div>
+              ))}
+              {!isLoadingSecurity && securityError && (
+                <div className="rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">
+                  <p>{securityError}</p>
+                  <button type="button" onClick={refresh} className="mt-2 font-semibold underline underline-offset-2">Tentar novamente</button>
+                </div>
+              )}
+              {!isLoadingSecurity && !securityError && displayedSessions.map((s) => (
+                <div key={s.id} className={`rounded-2xl bg-slate-50 p-4 text-sm transition-all duration-200 ${revokingSessionIds.includes(s.id) ? "translate-x-2 opacity-0" : "translate-x-0 opacity-100"}`}>
                   <div className="flex items-start justify-between gap-3">
-                    <div>
+                    <div className="min-w-0">
                       <b className="text-slate-950">{s.device}</b>
                       {s.is_current && (
                         <span className="ml-2 rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-semibold text-emerald-700">
@@ -676,21 +741,32 @@ function SecurityTab() {
                     </div>
                     <button
                       type="button"
-                      disabled={s.is_current}
+                      disabled={s.is_current || revokingSessionIds.includes(s.id)}
                       onClick={() => revoke(s.id)}
-                      className="inline-flex items-center gap-1 rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
+                      className="inline-flex shrink-0 items-center gap-1 rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
                     >
-                      <LogOut size={13} /> Encerrar
+                      <LogOut size={13} /> {revokingSessionIds.includes(s.id) ? "Encerrando..." : "Encerrar"}
                     </button>
                   </div>
                 </div>
               ))}
-              {!security?.active_sessions.length && (
+              {!isLoadingSecurity && !securityError && !activeSessionsCount && (
                 <p className="rounded-2xl bg-slate-50 p-4 text-sm text-slate-500">
                   Nenhuma sessão ativa encontrada.
                 </p>
               )}
             </div>
+            {!isLoadingSecurity && !securityError && activeSessionsCount > 5 && (
+              <button
+                type="button"
+                onClick={() => visibleSessions >= activeSessionsCount ? collapseSessions() : setVisibleSessions((count) => Math.min(count + 5, activeSessionsCount))}
+                aria-expanded={visibleSessions >= activeSessionsCount}
+                aria-controls="active-sessions-list"
+                className="mt-4 w-full rounded-2xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-950"
+              >
+                {visibleSessions >= activeSessionsCount ? "Recolher sessões" : "Ver mais 5 sessões"}
+              </button>
+            )}
           </div>
         </div>
         <div className="rounded-3xl border border-slate-200 p-5">
