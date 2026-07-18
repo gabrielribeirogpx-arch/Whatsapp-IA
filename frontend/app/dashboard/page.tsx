@@ -3,7 +3,8 @@
 import { useEffect, useId, useMemo, useState } from 'react';
 import { Cell, Pie, PieChart } from 'recharts';
 import { useRouter } from 'next/navigation';
-import { AlertTriangle, CheckCircle2, Clock3, MessageSquare, RadioTower, Star, TrendingUp, Zap } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Clock3, Gauge, MessageSquare, RadioTower, Send, Star, TrendingUp, UsersRound, Zap } from "lucide-react";
+import type { LucideIcon } from 'lucide-react';
 
 import DashboardChart from '../../components/DashboardChart';
 import AnimatedNumber from '../../components/motion/AnimatedNumber';
@@ -229,13 +230,18 @@ function getDeltaPercent(series: number[]): number {
   const delta = ((secondSum - firstSum) / firstSum) * 100;
   return Number.isFinite(delta) ? Math.round(delta) : 0;
 }
-const kpiMeta = [
-  { key: 'activeConversations', label: 'Conversas ativas', icon: '/icons/dashboard/conversas.svg', suffix: '' },
-  { key: 'activeLeads', label: 'Leads ativos', icon: '/icons/dashboard/leads.svg', suffix: '' },
-  { key: 'messagesToday', label: 'Mensagens hoje', icon: '/icons/dashboard/mensagens.svg', suffix: '' },
-  { key: 'responseRate', label: 'Taxa de resposta', icon: '/icons/dashboard/resposta.svg', suffix: '%' },
-  { key: 'conversions', label: 'Conversões', icon: '/icons/dashboard/conversoes.svg', suffix: '' },
-] as const;
+const kpiMeta: Array<{
+  key: keyof Pick<DashboardViewModel, 'activeConversations' | 'activeLeads' | 'messagesToday' | 'responseRate' | 'conversions'>;
+  label: string;
+  icon: LucideIcon;
+  suffix: string;
+}> = [
+  { key: 'activeConversations', label: 'Conversas ativas', icon: MessageSquare, suffix: '' },
+  { key: 'activeLeads', label: 'Leads ativos', icon: UsersRound, suffix: '' },
+  { key: 'messagesToday', label: 'Mensagens hoje', icon: Send, suffix: '' },
+  { key: 'responseRate', label: 'Taxa de resposta', icon: Gauge, suffix: '%' },
+  { key: 'conversions', label: 'Conversões', icon: CheckCircle2, suffix: '' },
+];
 
 const getConversationFlowLabel = (conversation: Conversation) => {
   const raw = conversation as Conversation & {
@@ -525,6 +531,7 @@ export default function DashboardPage() {
     const delta = getDeltaPercent(sparklineSeries);
     const trendText = period === '7d' ? 'vs últimos 7 dias' : 'vs período anterior';
     const trendPrefix = delta >= 0 ? '↑' : '↓';
+    const Icon = item.icon;
 
     return (
       <div
@@ -535,14 +542,8 @@ export default function DashboardPage() {
         <div className="absolute inset-0 opacity-[0.03] bg-[radial-gradient(circle_at_top_left,#22c55e,transparent)] pointer-events-none" />
 
         <div className="relative z-10 flex items-start gap-3">
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-50">
-            {item.key === 'messagesToday' ? (
-              <MessageSquare className="h-5 w-5 text-emerald-600" />
-            ) : item.icon ? (
-              <img src={item.icon} alt={item.label} className="h-5 w-5" />
-            ) : (
-              <div className="h-5 w-5 rounded bg-slate-300" />
-            )}
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-emerald-100 bg-emerald-50">
+            <Icon aria-hidden="true" className="h-5 w-5 text-slate-700" strokeWidth={2} />
           </div>
 
           <div className="min-w-0 flex-1">
