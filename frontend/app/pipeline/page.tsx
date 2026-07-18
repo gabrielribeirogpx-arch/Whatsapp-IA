@@ -22,6 +22,7 @@ import {
 
 import { getPipeline, listWorkspaceUsers, moveLeadToStage } from '../../lib/api';
 import { PipelineLead, PipelineStage, WorkspaceUser } from '../../lib/types';
+import { getUserDisplayName } from '../../lib/userDisplayName';
 import { canMoveLeadToStage } from './dropGuards';
 
 const CHANNELS = ['Todos', 'WhatsApp', 'Instagram', 'Web'] as const;
@@ -58,13 +59,13 @@ function getLeadOwnerLabel(lead: PipelineLead, users: WorkspaceUser[]) {
   const ownerId = getLeadOwnerId(lead);
   if (ownerId) {
     const user = users.find((item) => item.id === ownerId);
-    return user?.name || user?.email || null;
+    return getUserDisplayName(user) || user?.email || null;
   }
 
   const ownerEmail = lead.responsible_user_email || lead.assigned_user_email || lead.owner_email || null;
   if (ownerEmail) {
     const user = users.find((item) => item.email === ownerEmail);
-    return user?.name || user?.email || null;
+    return getUserDisplayName(user) || user?.email || null;
   }
 
   const ownerName = lead.responsible_user_name || lead.assigned_user_name || lead.owner_name || null;
@@ -345,7 +346,7 @@ export default function PipelinePage() {
             {!isLoadingUsers && !usersError && users.length > 0 ? (
               <>
                 <option value={ALL_OWNERS_FILTER}>Todos os responsáveis</option>
-                {users.map((user) => <option key={user.id} value={user.id}>{user.name || user.email}</option>)}
+                {users.map((user) => <option key={user.id} value={user.id}>{getUserDisplayName(user) || user.email}</option>)}
               </>
             ) : null}
           </select>

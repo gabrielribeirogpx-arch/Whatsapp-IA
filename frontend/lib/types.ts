@@ -36,6 +36,11 @@ export type Message = {
 export type AccountProfile = {
   id: string;
   name: string;
+  full_name?: string | null;
+  first_name?: string | null;
+  last_name?: string | null;
+  display_name?: string | null;
+  username?: string | null;
   email: string;
   avatar_url?: string | null;
   company?: string | null;
@@ -86,6 +91,11 @@ export type AccountMe = {
 export type WorkspaceUser = {
   id: string;
   name: string;
+  full_name?: string | null;
+  first_name?: string | null;
+  last_name?: string | null;
+  display_name?: string | null;
+  username?: string | null;
   email: string;
   role: string;
   status: string;
