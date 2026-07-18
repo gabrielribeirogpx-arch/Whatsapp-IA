@@ -44,6 +44,27 @@ input {
   font: inherit;
 }
 
+@keyframes campaign-details-drawer-in {
+  from {
+    opacity: 0;
+    transform: translateX(2rem);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.campaign-details-drawer {
+  animation: campaign-details-drawer-in 240ms ease-out both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .campaign-details-drawer {
+    animation: none;
+  }
+}
+
 .primary-button,
 .secondary-button,
 .ghost-button {
