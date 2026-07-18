@@ -174,10 +174,10 @@ function ReportsEmptyState({
   text?: string;
 }) {
   return (
-    <div className="flex min-h-[180px] flex-col items-center justify-center rounded-2xl bg-slate-50/80 px-5 py-8 text-center">
-      <Inbox size={22} className="text-slate-400" />
-      <p className="mt-3 text-sm font-semibold text-slate-700">{title}</p>
-      <p className="mt-1 max-w-sm text-sm text-slate-500">{text}</p>
+    <div className="flex min-h-[180px] flex-col items-center justify-center rounded-2xl border border-dashed border-slate-200/80 bg-gradient-to-b from-slate-50/80 to-white px-5 py-8 text-center">
+      <span className="grid h-10 w-10 place-items-center rounded-xl border border-slate-200/80 bg-white text-slate-400 shadow-[0_8px_20px_-16px_rgba(15,23,42,.45)]"><Inbox size={18} strokeWidth={1.75} /></span>
+      <p className="mt-3 text-sm font-semibold tracking-[-.01em] text-slate-700">{title}</p>
+      <p className="mt-1 max-w-sm text-xs leading-5 text-slate-500">{text}</p>
     </div>
   );
 }
@@ -190,7 +190,7 @@ function Shell({
 }) {
   return (
     <section
-      className={`rounded-[18px] bg-white shadow-[0_18px_50px_-45px_rgba(15,23,42,.5)] ring-1 ring-[#E7EAF0] ${className}`}
+      className={`rounded-2xl border border-slate-200/80 bg-white shadow-[0_16px_36px_-30px_rgba(15,23,42,.28)] transition-shadow duration-200 ${className}`}
     >
       {children}
     </section>
@@ -214,7 +214,7 @@ function SelectShell({
       <span className="sr-only">{label}</span>
       <select
         aria-label={label}
-        className="h-10 w-full appearance-none rounded-xl border border-slate-200 bg-white py-2 pl-3 pr-9 text-sm font-medium text-slate-700 shadow-sm outline-none transition focus:border-emerald-300 focus:ring-4 focus:ring-emerald-100"
+        className="h-10 w-full appearance-none rounded-xl border border-slate-200/90 bg-white py-2 pl-3 pr-9 text-sm font-medium text-slate-700 shadow-[0_1px_2px_rgba(15,23,42,.03)] outline-none transition duration-200 hover:border-slate-300 focus:border-emerald-400 focus:ring-4 focus:ring-emerald-500/10"
         value={value}
         onChange={(e) => onChange(e.target.value)}
       >
@@ -239,17 +239,17 @@ function ReportsHeader({
   return (
     <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
       <div>
-        <h1 className="text-[30px] font-semibold tracking-[-.03em] text-slate-950">
+        <h1 className="text-[30px] font-bold tracking-[-.04em] text-slate-950">
           Relatórios
         </h1>
-        <p className="mt-1 text-sm text-slate-600">
+        <p className="mt-1 text-sm leading-6 text-slate-500">
           Desempenho das campanhas de WhatsApp.
         </p>
       </div>
       <div className="flex gap-2">
         <button
           onClick={onReload}
-          className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50"
+          className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 shadow-[0_1px_2px_rgba(15,23,42,.03)] transition duration-200 hover:-translate-y-px hover:border-slate-300 hover:bg-slate-50 focus:outline-none focus:ring-4 focus:ring-slate-200/70"
         >
           <RefreshCw size={15} />
           Atualizar
@@ -266,7 +266,7 @@ function ReportsHeader({
           </button>
         ) : (
           <a
-            className="inline-flex h-10 items-center gap-2 rounded-xl bg-slate-950 px-4 text-sm font-semibold text-white shadow-sm hover:bg-slate-800"
+            className="inline-flex h-10 items-center gap-2 rounded-xl bg-slate-950 px-4 text-sm font-semibold text-white shadow-[0_8px_18px_-12px_rgba(15,23,42,.6)] transition duration-200 hover:-translate-y-px hover:bg-slate-800 focus:outline-none focus:ring-4 focus:ring-slate-300"
             href={exportHref}
           >
             <Download size={15} />
@@ -298,14 +298,14 @@ function ReportsFilterBar({
     ["custom", "Personalizado"],
   ];
   return (
-    <Shell className="p-3">
+    <Shell className="p-3 shadow-[0_10px_26px_-24px_rgba(15,23,42,.3)]">
       <div className="flex flex-wrap items-center gap-2">
-        <div className="flex h-10 rounded-xl bg-slate-100 p-1">
+        <div className="flex h-10 rounded-xl border border-slate-200/70 bg-slate-50 p-1">
           {presets.map(([v, l]) => (
             <button
               key={v}
               onClick={() => quick(v)}
-              className={`rounded-lg px-3 text-xs font-semibold transition ${period === v ? "bg-white text-emerald-700 shadow-sm" : "text-slate-600 hover:text-slate-900"}`}
+              className={`rounded-lg px-3 text-xs font-semibold transition duration-200 ${period === v ? "bg-white text-emerald-700 shadow-[0_1px_3px_rgba(15,23,42,.1)]" : "text-slate-500 hover:text-slate-900"}`}
             >
               {l}
             </button>
@@ -314,7 +314,7 @@ function ReportsFilterBar({
         <input
           aria-label="Período inicial"
           type="datetime-local"
-          className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 shadow-sm outline-none focus:border-emerald-300 focus:ring-4 focus:ring-emerald-100"
+          className="h-10 rounded-xl border border-slate-200/90 bg-white px-3 text-sm font-medium text-slate-700 shadow-[0_1px_2px_rgba(15,23,42,.03)] outline-none transition duration-200 hover:border-slate-300 focus:border-emerald-400 focus:ring-4 focus:ring-emerald-500/10"
           value={start.slice(0, 16)}
           onChange={(e) => setStart(new Date(e.target.value).toISOString())}
         />
@@ -322,7 +322,7 @@ function ReportsFilterBar({
         <input
           aria-label="Período final"
           type="datetime-local"
-          className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 shadow-sm outline-none focus:border-emerald-300 focus:ring-4 focus:ring-emerald-100"
+          className="h-10 rounded-xl border border-slate-200/90 bg-white px-3 text-sm font-medium text-slate-700 shadow-[0_1px_2px_rgba(15,23,42,.03)] outline-none transition duration-200 hover:border-slate-300 focus:border-emerald-400 focus:ring-4 focus:ring-emerald-500/10"
           value={end.slice(0, 16)}
           onChange={(e) => setEnd(new Date(e.target.value).toISOString())}
         />
@@ -397,6 +397,12 @@ function ExecutiveMetrics({
 }: {
   summary: CampaignAnalyticsSummary | null;
 }) {
+  const [entered, setEntered] = useState(false);
+  const [displayedValues, setDisplayedValues] = useState<number[]>([0, 0, 0, 0]);
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => setEntered(true));
+    return () => cancelAnimationFrame(frame);
+  }, [summary]);
   const items = [
     ["Enviadas", summary?.total_sent, "Eventos processados", Send, colors.sent],
     [
@@ -421,33 +427,46 @@ function ExecutiveMetrics({
       colors.failed,
     ],
   ] as const;
+  useEffect(() => {
+    const targets = items.map(([, value]) => Number(value || 0));
+    const startedAt = performance.now();
+    let frame = 0;
+    const tick = (now: number) => {
+      const progress = Math.min((now - startedAt) / 420, 1);
+      const eased = 1 - Math.pow(1 - progress, 3);
+      setDisplayedValues(targets.map((target) => Math.round(target * eased)));
+      if (progress < 1) frame = requestAnimationFrame(tick);
+    };
+    frame = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frame);
+  }, [summary]);
   return (
-    <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-      {items.map(([label, value, hint, Icon, color]) => (
-        <Shell key={label} className="p-5">
+    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+      {items.map(([label, value, hint, Icon, color], index) => (
+        <Shell key={label} className="group p-5 transition duration-200 hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-[0_18px_35px_-28px_rgba(15,23,42,.3)]">
           <div className="flex items-start justify-between">
-            <p className="text-[11px] font-semibold uppercase tracking-[.12em] text-slate-500">
+            <p className="text-[11px] font-medium uppercase tracking-[.12em] text-slate-500">
               {label}
             </p>
-            <Icon size={18} style={{ color }} />
+            <span className="grid h-7 w-7 place-items-center rounded-lg bg-slate-50 transition duration-200 group-hover:bg-slate-100"><Icon size={15} strokeWidth={1.8} style={{ color }} /></span>
           </div>
           <p
             title={formatInteger(value)}
-            className="mt-4 text-4xl font-semibold tracking-[-.04em] tabular-nums"
+            className={`mt-4 text-4xl font-extrabold tracking-[-.05em] tabular-nums transition-all duration-500 ${entered ? "translate-y-0 opacity-100" : "translate-y-1 opacity-0"}`}
             style={{ color }}
           >
-            {formatCompact(value)}
+            {formatCompact(displayedValues[index] ?? 0)}
           </p>
-          <p className="mt-2 text-sm text-slate-600">{hint}</p>
-          <div className="mt-4 flex h-8 items-end gap-1">
+          <p className="mt-2 text-xs font-medium text-slate-500">{hint}</p>
+          <div className="mt-4 flex h-8 items-end gap-1.5">
             {[35, 52, 44, 64, 58, 76, 68].map((h, i) => (
-              <span key={i} className="flex-1 rounded-full bg-slate-100">
+              <span key={i} className="flex-1 rounded-full bg-slate-100/90">
                 <span
                   className="block rounded-full"
                   style={{
                     height: `${h}%`,
                     backgroundColor: color,
-                    opacity: 0.22,
+                    opacity: 0.3,
                   }}
                 />
               </span>
@@ -472,11 +491,11 @@ function SecondaryMetricsStrip({
     ["Falha", formatPercent(summary?.failure_rate)],
   ];
   return (
-    <Shell className="grid grid-cols-2 divide-x divide-y divide-slate-100 overflow-hidden sm:grid-cols-3 xl:grid-cols-6 xl:divide-y-0">
+    <Shell className="grid grid-cols-2 divide-x divide-y divide-slate-100/90 overflow-hidden sm:grid-cols-3 xl:grid-cols-6 xl:divide-y-0">
       {items.map(([l, v]) => (
-        <div key={l} className="px-5 py-4">
+        <div key={l} className="px-5 py-4 transition-colors duration-200 hover:bg-slate-50/70">
           <p className="text-xs font-medium text-slate-500">{l}</p>
-          <p className="mt-1 text-lg font-semibold tabular-nums text-slate-900">
+          <p className="mt-1 text-lg font-bold tracking-[-.025em] tabular-nums text-slate-900">
             {typeof v === "number" ? formatCompact(v) : (v ?? "—")}
           </p>
         </div>
@@ -559,11 +578,11 @@ function CampaignTrendChart({ data }: { data: any[] }) {
     (d) => d.sent || d.delivered || d.read || d.failed,
   );
   return (
-    <Shell className="p-5">
+    <Shell className="p-6 shadow-[0_20px_42px_-34px_rgba(15,23,42,.3)]">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-lg font-semibold">Evolução temporal</h2>
-          <p className="text-sm text-slate-500">
+          <h2 className="text-lg font-bold tracking-[-.025em] text-slate-900">Evolução temporal</h2>
+          <p className="mt-1 text-sm text-slate-500">
             Entregas, leituras e falhas ao longo do período.
           </p>
         </div>
@@ -594,9 +613,10 @@ function CampaignFunnel({
     ["Lidas", summary?.total_read],
   ] as const;
   return (
-    <Shell className="p-5">
-      <h2 className="text-lg font-semibold">Funil de desempenho</h2>
-      <div className="mt-5 space-y-5">
+    <Shell className="p-6">
+      <h2 className="text-lg font-bold tracking-[-.025em] text-slate-900">Funil de desempenho</h2>
+      <p className="mt-1 text-sm text-slate-500">Conversão em cada etapa da jornada.</p>
+      <div className="mt-6 space-y-6">
         {f.map(([label, val], i) => {
           const prev = i ? f[i - 1][1] : val;
           const pct = i ? rate(val, prev) : 100;
@@ -615,7 +635,7 @@ function CampaignFunnel({
                   </p>
                 </div>
                 <div className="text-right">
-                  <p className="font-semibold tabular-nums">
+                  <p className="font-bold tracking-[-.02em] tabular-nums text-slate-900">
                     {formatInteger(val)}
                   </p>
                   <p className="text-xs text-slate-500">
@@ -623,9 +643,9 @@ function CampaignFunnel({
                   </p>
                 </div>
               </div>
-              <div className="mt-2 h-2.5 rounded-full bg-slate-100">
+              <div className="mt-2.5 h-2.5 overflow-hidden rounded-full bg-slate-100">
                 <div
-                  className="h-2.5 rounded-full bg-emerald-600"
+                  className="h-2.5 rounded-full bg-gradient-to-r from-emerald-600 to-emerald-400 transition-all duration-500 ease-out"
                   style={{
                     width: `${Math.max(2, Math.min(rate(val, summary?.total_recipients) || 0, 100))}%`,
                   }}
@@ -648,15 +668,15 @@ function CampaignTable({
 }: any) {
   return (
     <Shell className="overflow-hidden">
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 p-5">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 p-6">
         <div>
-          <h2 className="text-lg font-semibold">Campanhas</h2>
-          <p className="text-sm text-slate-500">
+          <h2 className="text-lg font-bold tracking-[-.025em] text-slate-900">Campanhas</h2>
+          <p className="mt-1 text-sm text-slate-500">
             Selecione de 2 a 5 campanhas para comparar.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <button className="h-10 rounded-xl border border-slate-200 px-3 text-sm font-semibold text-slate-700">
+          <button className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 transition duration-200 hover:border-slate-300 hover:bg-slate-50">
             <SlidersHorizontal size={15} className="mr-2 inline" />
             Ordenar
           </button>
@@ -666,7 +686,7 @@ function CampaignTable({
               className="absolute left-3 top-3 text-slate-400"
             />
             <input
-              className="h-10 rounded-xl border border-slate-200 pl-9 pr-3 text-sm outline-none focus:border-emerald-300 focus:ring-4 focus:ring-emerald-100"
+              className="h-10 rounded-xl border border-slate-200 bg-white pl-9 pr-3 text-sm outline-none transition duration-200 hover:border-slate-300 focus:border-emerald-400 focus:ring-4 focus:ring-emerald-500/10"
               placeholder="Buscar"
               value={filters.search}
               onChange={(e) =>
@@ -678,7 +698,7 @@ function CampaignTable({
       </div>
       <div className="overflow-x-auto">
         <table className="w-full min-w-[980px] text-[13px]">
-          <thead className="bg-slate-50 text-left text-xs font-semibold text-slate-500">
+          <thead className="bg-slate-50/80 text-left text-[11px] font-semibold uppercase tracking-[.08em] text-slate-400">
             <tr>
               {[
                 "",
@@ -693,7 +713,7 @@ function CampaignTable({
                 "Ações",
               ].map((h, i) => (
                 <th
-                  className={`px-4 py-3 ${i > 2 && i < 8 ? "text-right" : ""}`}
+                  className={`px-4 py-3.5 ${i > 2 && i < 8 ? "text-right" : ""}`}
                   key={i}
                 >
                   {h}
@@ -701,13 +721,14 @@ function CampaignTable({
               ))}
             </tr>
           </thead>
-          <tbody className="divide-y divide-slate-100">
+          <tbody className="divide-y divide-slate-100/90">
             {campaigns?.items.map((c: WhatsAppCampaign & any) => (
-              <tr key={c.id} className="hover:bg-slate-50/70">
-                <td className="px-4 py-4">
+              <tr key={c.id} className="group transition-colors duration-200 hover:bg-slate-50/80 has-[:checked]:bg-emerald-50/40">
+                <td className="px-4 py-5">
                   <input
                     aria-label={`Comparar ${c.name}`}
                     type="checkbox"
+                    className="h-4 w-4 rounded border-slate-300 text-emerald-600 accent-emerald-600 transition focus:ring-4 focus:ring-emerald-500/15"
                     checked={compare.includes(c.id)}
                     disabled={!compare.includes(c.id) && compare.length >= 5}
                     onChange={(e) =>
@@ -719,21 +740,21 @@ function CampaignTable({
                     }
                   />
                 </td>
-                <td className="max-w-[290px] px-4 py-4">
+                <td className="max-w-[290px] px-4 py-5">
                   <button
                     title={c.name}
-                    className="block truncate text-left font-semibold text-slate-900 hover:text-emerald-700"
+                    className="block truncate text-left font-semibold text-slate-900 transition-colors duration-200 hover:text-emerald-700"
                     onClick={() => setSelected(c)}
                   >
                     {c.name}
                   </button>
-                  <p className="truncate text-xs text-slate-500">
+                  <p className="mt-1 truncate text-xs text-slate-500">
                     {c.template_name ||
                       c.template_id ||
                       "Template não informado"}
                   </p>
                 </td>
-                <td className="px-4 py-4">
+                <td className="px-4 py-5">
                   <CampaignStatusBadge status={c.status} />
                 </td>
                 {[
@@ -742,12 +763,12 @@ function CampaignTable({
                   c.total_read,
                   c.total_failed,
                 ].map((v, i) => (
-                  <td key={i} className="px-4 py-4 text-right tabular-nums">
+                  <td key={i} className="px-4 py-5 text-right font-medium tabular-nums text-slate-700">
                     {formatInteger(v)}
                   </td>
                 ))}
-                <td className="px-4 py-4 text-right">
-                  <span className="font-semibold">
+                <td className="px-4 py-5 text-right">
+                  <span className="font-semibold tabular-nums text-slate-800">
                     {formatPercent(c.read_rate)}
                   </span>
                   <div className="mt-1 h-1.5 rounded-full bg-slate-100">
@@ -757,13 +778,13 @@ function CampaignTable({
                     />
                   </div>
                 </td>
-                <td className="px-4 py-4 text-slate-600">
+                <td className="px-4 py-5 text-slate-500">
                   {formatDateTime(c.started_at)}
                 </td>
-                <td className="px-4 py-4">
+                <td className="px-4 py-5">
                   <button
                     onClick={() => setSelected(c)}
-                    className="font-semibold text-emerald-700"
+                    className="rounded-lg px-2.5 py-1.5 text-xs font-semibold text-emerald-700 transition duration-200 hover:bg-emerald-50 hover:text-emerald-800 focus:outline-none focus:ring-4 focus:ring-emerald-500/10"
                   >
                     Detalhes
                   </button>
@@ -784,26 +805,26 @@ function CampaignTable({
 function TemplateRanking({ templates }: { templates: TemplateAnalyticsRow[] }) {
   const maxRead = Math.max(...templates.map((t) => t.read_rate || 0), 1);
   return (
-    <Shell className="p-5">
-      <h2 className="text-lg font-semibold">Templates com melhor desempenho</h2>
+    <Shell className="p-6">
+      <h2 className="text-lg font-bold tracking-[-.025em] text-slate-900">Templates com melhor desempenho</h2>
       {templates.length ? (
-        <div className="mt-4 space-y-3">
+        <div className="mt-5 space-y-2">
           {templates.map((t, i) => (
             <div
               key={t.template_id}
-              className="flex items-center gap-3 rounded-2xl bg-slate-50 p-3"
+              className="group flex items-center gap-3 rounded-xl border border-transparent bg-slate-50/80 p-3 transition duration-200 hover:-translate-y-px hover:border-slate-200 hover:bg-white hover:shadow-[0_10px_22px_-18px_rgba(15,23,42,.35)]"
             >
-              <span className="grid h-8 w-8 place-items-center rounded-full bg-white text-sm font-bold text-slate-500">
+              <span className="grid h-8 w-8 place-items-center rounded-lg border border-slate-200/80 bg-white text-xs font-bold text-slate-500">
                 {i + 1}
               </span>
               <div className="min-w-0 flex-1">
-                <p className="truncate font-semibold">{t.template_name}</p>
-                <p className="text-sm text-slate-500">
+                <div className="flex items-center justify-between gap-3"><p className="truncate font-semibold text-slate-800">{t.template_name}</p><span className="text-sm font-bold tabular-nums text-slate-900">{formatPercent(t.read_rate)}</span></div>
+                <p className="mt-0.5 text-xs text-slate-500">
                   {formatPercent(t.read_rate)} leitura · {t.campaigns} campanhas
                 </p>
-                <div className="mt-2 h-1.5 rounded-full bg-white">
+                <div className="mt-2.5 h-1.5 overflow-hidden rounded-full bg-white">
                   <div
-                    className="h-1.5 rounded-full bg-indigo-500"
+                    className="h-1.5 rounded-full bg-gradient-to-r from-indigo-600 to-indigo-400 transition-all duration-500"
                     style={{
                       width: `${Math.max(2, ((t.read_rate || 0) / maxRead) * 100)}%`,
                     }}
@@ -822,14 +843,14 @@ function TemplateRanking({ templates }: { templates: TemplateAnalyticsRow[] }) {
 function FailureSummary({ failures }: { failures: FailureAnalyticsRow[] }) {
   const maxFailure = Math.max(...failures.map((f) => f.count), 1);
   return (
-    <Shell className="p-5">
-      <h2 className="text-lg font-semibold">Principais falhas</h2>
+    <Shell className="p-6">
+      <h2 className="text-lg font-bold tracking-[-.025em] text-slate-900">Principais falhas</h2>
       {failures.length ? (
-        <div className="mt-4 space-y-3">
+        <div className="mt-5 space-y-2">
           {failures
             .sort((a, b) => b.count - a.count)
             .map((f) => (
-              <div key={f.category} className="rounded-2xl bg-slate-50 p-3">
+              <div key={f.category} className="rounded-xl border border-transparent bg-slate-50/80 p-3.5 transition duration-200 hover:border-slate-200 hover:bg-white">
                 <div className="flex items-center justify-between gap-3">
                   <div>
                     <p className="font-semibold">{f.category}</p>
@@ -838,9 +859,9 @@ function FailureSummary({ failures }: { failures: FailureAnalyticsRow[] }) {
                       {formatPercent(f.percent)}
                     </p>
                   </div>
-                  <span className="h-2 w-24 rounded-full bg-white">
+                  <span className="h-1.5 w-24 overflow-hidden rounded-full bg-white">
                     <span
-                      className="block h-2 rounded-full bg-rose-500"
+                      className="block h-1.5 rounded-full bg-rose-500 transition-all duration-500"
                       style={{ width: `${(f.count / maxFailure) * 100}%` }}
                     />
                   </span>
@@ -860,11 +881,11 @@ function FailureSummary({ failures }: { failures: FailureAnalyticsRow[] }) {
 function CampaignHeatmap({ heatmap }: { heatmap: HeatmapAnalytics | null }) {
   const maxHeat = Math.max(...(heatmap?.items || []).map((h) => h.count), 1);
   return (
-    <Shell className="p-5">
+    <Shell className="p-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-lg font-semibold">Atividade por dia e horário</h2>
-          <p className="text-sm text-slate-500">
+          <h2 className="text-lg font-bold tracking-[-.025em] text-slate-900">Atividade por dia e horário</h2>
+          <p className="mt-1 text-sm text-slate-500">
             Distribuição de envios, entregas e leituras no timezone do tenant.
           </p>
         </div>
@@ -878,7 +899,7 @@ function CampaignHeatmap({ heatmap }: { heatmap: HeatmapAnalytics | null }) {
       </div>
       {heatmap?.sufficient_data ? (
         <div className="mt-5 overflow-x-auto">
-          <div className="grid min-w-[760px] grid-cols-[72px_repeat(24,1fr)] gap-1 text-[10px]">
+          <div className="grid min-w-[760px] grid-cols-[72px_repeat(24,1fr)] gap-1.5 text-[10px]">
             <span />
             {Array.from({ length: 24 }, (_, h) => (
               <span key={h} className="text-center text-slate-400">
@@ -897,7 +918,7 @@ function CampaignHeatmap({ heatmap }: { heatmap: HeatmapAnalytics | null }) {
                     <span
                       key={`${wd}-${h}`}
                       title={`${d}, ${h}h: ${formatInteger(cell?.count || 0)}`}
-                      className="h-6 rounded"
+                      className="h-6 rounded-md outline-none transition duration-200 hover:scale-110 hover:shadow-[0_3px_8px_rgba(15,23,42,.18)] focus:scale-110"
                       style={{ backgroundColor: `rgba(16,185,129,${opacity})` }}
                     />
                   );
