@@ -472,8 +472,25 @@ function SecondaryMetricsStrip({
     </Shell>
   );
 }
+const toTimelineMetric = (row: any, key: string) =>
+  Number(row?.[key] ?? row?.[`total_${key}`] ?? row?.[`${key}_count`] ?? 0);
+
+const normalizeTimelineData = (data: any[] = []) =>
+  data
+    .map((row) => ({
+      bucket: row?.bucket || row?.date || row?.day || row?.timestamp,
+      sent: toTimelineMetric(row, "sent"),
+      delivered: toTimelineMetric(row, "delivered"),
+      read: toTimelineMetric(row, "read"),
+      failed: toTimelineMetric(row, "failed"),
+    }))
+    .filter((row) => row.bucket);
+
 function CampaignTrendChart({ data }: { data: any[] }) {
-  const has = data.some((d) => d.sent || d.delivered || d.read || d.failed);
+  const timelineData = useMemo(() => normalizeTimelineData(data), [data]);
+  const has = timelineData.some(
+    (d) => d.sent || d.delivered || d.read || d.failed,
+  );
   return (
     <Shell className="p-5">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
@@ -507,7 +524,7 @@ function CampaignTrendChart({ data }: { data: any[] }) {
       {has ? (
         <ResponsiveContainer width="100%" height={330}>
           <LineChart
-            data={data}
+            data={timelineData}
             margin={{ top: 18, right: 20, bottom: 0, left: 0 }}
           >
             <CartesianGrid vertical={false} stroke="#edf0f4" />

@@ -47,7 +47,7 @@ const SCENARIOS: Record<CampaignReportPreviewScenario, ScenarioSeed> = {
     read: 742,
     failed: 76,
     campaignCount: 6,
-    timelineDays: 14,
+    timelineDays: 30,
     heatmapScale: 7,
   },
   medium: {
