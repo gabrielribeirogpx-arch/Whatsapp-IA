@@ -19,7 +19,7 @@ function CustomTooltip({ active, payload, label }: TooltipProps) {
   const received = payload.find((entry) => entry.dataKey === 'received')?.value ?? 0;
 
   return (
-    <div className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700 shadow-lg">
+    <div className="motion-tooltip rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700 shadow-lg">
       <div className="mb-1 font-semibold text-slate-900">{label}</div>
       <div className="flex items-center justify-between gap-4">
         <span className="text-blue-500">Recebidas</span>
@@ -38,9 +38,9 @@ export default function DashboardChart({ data = [], title = 'Mensagens — últi
   const chartData = normalizedData.length ? normalizedData : Array.from({ length: 7 }, (_, index) => { const date = new Date(); date.setDate(date.getDate() - (6 - index)); return { date: formatDateLabel(date.toISOString()), sent: 0, received: 0 }; });
 
   return (
-    <article className="h-full overflow-visible">
+    <article className="motion-chart h-full overflow-visible">
       <div className="mb-4 flex items-center justify-between"><h2 className="text-lg font-semibold text-slate-900">{title}</h2><button type="button" className="rounded-lg border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-600 hover:bg-slate-50">Diário</button></div>
-      <div className="mb-3 flex items-center gap-4 text-xs">
+      <div className="motion-chart-legend mb-3 flex items-center gap-4 text-xs">
         <div className="flex items-center gap-2">
           <span className="h-2 w-2 rounded-full bg-blue-500"></span>
           <span className="text-slate-600">Recebidas</span>
