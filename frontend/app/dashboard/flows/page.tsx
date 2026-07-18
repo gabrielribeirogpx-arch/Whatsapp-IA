@@ -221,8 +221,8 @@ export default function FlowsPage() {
 
 
   return (
-    <main className="flex-1 bg-slate-50 py-6">
-      <div className="mx-auto max-w-7xl space-y-6 px-6 font-sans">
+    <main className="w-full min-w-0 bg-slate-50 px-5 py-6 lg:px-6">
+      <div className="w-full min-w-0 space-y-6 font-sans">
       {/* Header */}
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
