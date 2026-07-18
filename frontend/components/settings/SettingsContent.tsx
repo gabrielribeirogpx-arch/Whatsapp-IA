@@ -68,6 +68,7 @@ import {
   updateWorkspaceUser,
 } from "@/lib/api";
 import { ENABLE_GOOGLE_SHEETS_INTEGRATION } from "@/lib/features";
+import { getUserDisplayName } from "@/lib/userDisplayName";
 import {
   AccountMe,
   AccountPreferences,
@@ -308,7 +309,7 @@ function ProfileTab() {
             )}
           </div>
           <p className="mt-4 text-sm font-semibold text-slate-950">
-            {form.name || "Carregando..."}
+            {getUserDisplayName(form) || "Carregando..."}
           </p>
           <p className="text-xs text-slate-500">
             {roleLabels[form.role || "owner"] || form.role}
@@ -797,7 +798,7 @@ function UsersTab() {
               {users.map((user) => (
                 <tr key={user.id} className="bg-white">
                   <td className="p-4 font-semibold text-slate-950">
-                    {user.name}
+                    {getUserDisplayName(user)}
                   </td>
                   <td className="text-slate-600">{user.email}</td>
                   <td>

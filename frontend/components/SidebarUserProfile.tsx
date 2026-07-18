@@ -16,7 +16,8 @@ import {
   UsersRound,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { getTenantSessionFromStorage } from "@/lib/api";
+import { getAccountMe, getTenantSessionFromStorage } from "@/lib/api";
+import { getUserDisplayName } from "@/lib/userDisplayName";
 
 type SidebarUserProfileProps = {
   expanded: boolean;
@@ -121,6 +122,28 @@ export default function SidebarUserProfile({
 
   useEffect(() => {
     setSession(getSessionSnapshot());
+
+    let active = true;
+    getAccountMe()
+      .then(({ profile }) => {
+        if (!active) return;
+        const name = getUserDisplayName(profile);
+        if (!name) return;
+        setSession((current) => ({
+          ...current,
+          email: profile.email || current.email,
+          name,
+          initials: getInitials(name),
+          role: profile.role || current.role,
+        }));
+      })
+      .catch(() => {
+        // Preserve the existing session-based fallback when the profile is unavailable.
+      });
+
+    return () => {
+      active = false;
+    };
   }, []);
 
   useEffect(() => {
