@@ -1,16 +1,6 @@
 "use client";
+import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import {
-  Bar,
-  BarChart,
-  CartesianGrid,
-  Line,
-  LineChart,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
 import {
   BarChart3,
   CheckCircle2,
@@ -49,7 +39,6 @@ import {
   WhatsAppProvider,
   WhatsAppTemplate,
 } from "@/lib/types";
-import CampaignDetailsDrawer from "../campaigns/CampaignDetailsDrawer";
 import CampaignStatusBadge from "../campaigns/CampaignStatusBadge";
 import {
   formatCompact,
@@ -58,6 +47,37 @@ import {
   formatPercent,
 } from "./formatters";
 import type { CampaignReportPreviewScenario } from "./campaignAnalyticsPreviewData";
+
+const traceCampaignReportsBuild = (moduleName: string) => {
+  if (process.env.NEXT_BUILD_TRACE_CAMPAIGN_REPORTS === "true") {
+    console.info(`[campaign-reports-build] loaded ${moduleName}`);
+  }
+};
+
+traceCampaignReportsBuild("CampaignReportsPage");
+
+const CampaignDetailsDrawer = dynamic(
+  () => {
+    traceCampaignReportsBuild("CampaignDetailsDrawer");
+    return import("../campaigns/CampaignDetailsDrawer");
+  },
+  { ssr: false },
+);
+
+const loadRechartsComponent = (name: string) =>
+  import("recharts").then(
+    (mod) => (mod as unknown as Record<string, React.ComponentType<any>>)[name],
+  );
+
+const Bar = dynamic(() => loadRechartsComponent("Bar"), { ssr: false });
+const BarChart = dynamic(() => loadRechartsComponent("BarChart"), { ssr: false });
+const CartesianGrid = dynamic(() => loadRechartsComponent("CartesianGrid"), { ssr: false });
+const Line = dynamic(() => loadRechartsComponent("Line"), { ssr: false });
+const LineChart = dynamic(() => loadRechartsComponent("LineChart"), { ssr: false });
+const ResponsiveContainer = dynamic(() => loadRechartsComponent("ResponsiveContainer"), { ssr: false });
+const Tooltip = dynamic(() => loadRechartsComponent("Tooltip"), { ssr: false });
+const XAxis = dynamic(() => loadRechartsComponent("XAxis"), { ssr: false });
+const YAxis = dynamic(() => loadRechartsComponent("YAxis"), { ssr: false });
 
 const iso = (d: Date) => d.toISOString();
 const defaultStart = (days = 30) => {
@@ -991,6 +1011,7 @@ export default function CampaignReportsPage() {
   const applyPreview = useCallback(
     async (scenario: CampaignReportPreviewScenario) => {
       if (!previewAllowed) return;
+      traceCampaignReportsBuild("campaignAnalyticsPreviewData");
       const { buildCampaignReportPreview } = await import("./campaignAnalyticsPreviewData");
       const data = buildCampaignReportPreview(scenario);
       setSummary(data.summary);
