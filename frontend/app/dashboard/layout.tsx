@@ -70,12 +70,12 @@ function FlowAnalyticsSidebar({ flowId, expanded }: { flowId?: string; expanded:
 
         <button type="button" className="dash-nav-item" onClick={handleToggle}>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2v10"/><path d="M18.4 5.6a9 9 0 1 1-12.8 0"/></svg>
-          <span className="dash-nav-label" style={{ color: '#16a34a' }}>{isActive ? 'Desativar fluxo' : 'Ativar fluxo'}</span>
+          <span className="dash-nav-label">{isActive ? 'Desativar fluxo' : 'Ativar fluxo'}</span>
         </button>
 
         <button type="button" className="dash-nav-item" onClick={handleDelete}>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>
-          <span className="dash-nav-label" style={{ color: '#dc2626' }}>Excluir</span>
+          <span className="dash-nav-label">Excluir</span>
         </button>
       </nav>
 
