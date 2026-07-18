@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { FormEvent, useEffect, useMemo, useState } from 'react';
-import { Bot, Box, Check, Ellipsis, LoaderCircle, Pencil, Plus, Sparkles, Trash2 } from 'lucide-react';
+import { Bot, Box, BrainCircuit, Check, Ellipsis, LoaderCircle, Pencil, Plus, Sparkles, Trash2 } from 'lucide-react';
 
 import { createProduct, deleteProduct, getProducts, updateProduct } from '../../lib/api';
 import { Product, ProductPayload } from '../../lib/types';
@@ -37,6 +37,18 @@ export default function ProductsPage() {
   }, []);
 
   const submitLabel = useMemo(() => (editingId ? 'Salvar alterações' : 'Adicionar produto'), [editingId]);
+  const updatedToday = useMemo(() => {
+    const today = new Date();
+
+    return products.filter((product) => {
+      const updatedAt = new Date(product.updated_at);
+
+      return !Number.isNaN(updatedAt.getTime())
+        && updatedAt.getFullYear() === today.getFullYear()
+        && updatedAt.getMonth() === today.getMonth()
+        && updatedAt.getDate() === today.getDate();
+    }).length;
+  }, [products]);
 
   const formatUpdatedAt = (value: string) => {
     const date = new Date(value);
@@ -136,9 +148,23 @@ export default function ProductsPage() {
           <div className="products-panel-heading">
             <div>
               <span className="products-panel-kicker">Base de conhecimento</span>
-              <h2>Produtos</h2>
+              <h2>Navegador de produtos</h2>
             </div>
-            {!isLoading && products.length ? <span className="products-count">{products.length}</span> : null}
+            <span className="products-count" aria-label={`${products.length} produtos cadastrados`}>{isLoading ? '—' : products.length}</span>
+          </div>
+
+          <div className="products-summary" aria-label="Resumo da base de conhecimento">
+            <span className="products-summary-label">Resumo</span>
+            <dl>
+              <div><dt>Produtos cadastrados</dt><dd>{isLoading ? '—' : products.length}</dd></div>
+              <div><dt>Categorias</dt><dd>0</dd></div>
+              <div><dt>Atualizados hoje</dt><dd>{isLoading ? '—' : updatedToday}</dd></div>
+            </dl>
+          </div>
+
+          <div className="products-list-section-heading">
+            <span>Produtos</span>
+            {!isLoading ? <span>{products.length}</span> : null}
           </div>
           <div className="products-list">
             {isLoading ? (
@@ -175,10 +201,10 @@ export default function ProductsPage() {
 
             {!isLoading && !products.length ? (
               <div className="products-empty-state" role="status">
-                <span className="products-empty-icon"><Sparkles size={20} /></span>
+                <span className="products-empty-icon"><BrainCircuit size={25} /></span>
                 <span className="products-empty-eyebrow">Treinamento da IA</span>
-                <h3>A IA ainda não possui conhecimento sobre seus produtos.</h3>
-                <p>O primeiro produto melhora significativamente as respostas automáticas.</p>
+                <h3>Sua IA ainda não conhece seus produtos</h3>
+                <p>Cadastre o primeiro produto para que a IA consiga responder dúvidas de clientes automaticamente.</p>
                 <button type="button" className="products-empty-cta" onClick={() => document.getElementById('name')?.focus()}>
                   <Plus size={15} /> Cadastrar primeiro produto
                 </button>
@@ -192,35 +218,35 @@ export default function ProductsPage() {
             <div>
               <span className="products-panel-kicker">{editingId ? 'Modo de edição' : 'Novo conhecimento'}</span>
               <h2>{editingId ? 'Editar produto' : 'Adicionar produto'}</h2>
-              <p>Estruture as informações que ajudam a IA a vender com segurança.</p>
+              <p>Estruture o conhecimento que ajuda a IA a vender com clareza e segurança.</p>
             </div>
             <span className="products-ai-badge"><Bot size={16} /> IA de vendas</span>
           </div>
-          <div className="products-ai-note"><Sparkles size={16} /><span>Essas informações serão utilizadas pela IA para responder clientes automaticamente.</span></div>
+          <div className="products-ai-note"><Sparkles size={16} /><span>As informações cadastradas serão utilizadas automaticamente pela IA nas conversas.</span></div>
           <form onSubmit={handleSubmit} className="products-form">
             <fieldset className="products-form-group">
               <legend>Informações básicas</legend>
               <div className="products-form-grid">
-                <div className="products-field"><label htmlFor="name">Nome <span aria-hidden="true">*</span></label><input id="name" placeholder="Ex.: Consultoria Premium" value={form.name || ''} onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))} required /></div>
+                <div className="products-field"><label htmlFor="name">Nome <span aria-hidden="true">*</span></label><input id="name" placeholder="Plano Enterprise WhatsApp" value={form.name || ''} onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))} required /></div>
                 <div className="products-field"><label htmlFor="price">Preço</label><input id="price" placeholder="Ex.: R$ 1.490,00" value={form.price || ''} onChange={(event) => setForm((current) => ({ ...current, price: event.target.value }))} /></div>
               </div>
             </fieldset>
 
             <fieldset className="products-form-group">
               <legend>Descrição comercial</legend>
-              <div className="products-field"><label htmlFor="description">Descrição</label><textarea id="description" placeholder="Apresente o produto de forma clara e convincente." value={form.description || ''} onChange={(event) => setForm((current) => ({ ...current, description: event.target.value }))} /><small>Explique o produto como faria para um cliente.</small></div>
+              <div className="products-field"><label htmlFor="description">Descrição</label><textarea id="description" placeholder="Automatize atendimento, vendas e suporte utilizando IA integrada ao WhatsApp." value={form.description || ''} onChange={(event) => setForm((current) => ({ ...current, description: event.target.value }))} /><small>Explique o produto como faria para um cliente.</small></div>
             </fieldset>
 
             <fieldset className="products-form-group products-form-group-insights">
               <legend>Inteligência de vendas</legend>
-              <div className="products-field"><label htmlFor="benefits">Benefícios</label><textarea id="benefits" placeholder="Ex.: economiza tempo, reduz custos, inclui suporte." value={form.benefits || ''} onChange={(event) => setForm((current) => ({ ...current, benefits: event.target.value }))} /><small>Liste vantagens reais percebidas pelo cliente.</small></div>
+              <div className="products-field"><label htmlFor="benefits">Benefícios</label><textarea id="benefits" placeholder={'Reduz tempo de resposta.\nAumenta conversão.\nAtendimento 24 horas.'} value={form.benefits || ''} onChange={(event) => setForm((current) => ({ ...current, benefits: event.target.value }))} /><small>Liste vantagens reais percebidas pelo cliente.</small></div>
               <div className="products-field"><label htmlFor="objections">Objeções comuns</label><textarea id="objections" placeholder="Ex.: prazo, investimento, adequação ao negócio." value={form.objections || ''} onChange={(event) => setForm((current) => ({ ...current, objections: event.target.value }))} /><small>Quais dúvidas ou resistências costumam surgir?</small></div>
-              <div className="products-field"><label htmlFor="target_customer">Cliente ideal</label><textarea id="target_customer" placeholder="Ex.: empresas que precisam acelerar o atendimento." value={form.target_customer || ''} onChange={(event) => setForm((current) => ({ ...current, target_customer: event.target.value }))} /><small>Quem normalmente compra este produto?</small></div>
+              <div className="products-field"><label htmlFor="target_customer">Cliente ideal</label><textarea id="target_customer" placeholder="Empresas que recebem alto volume de mensagens diariamente." value={form.target_customer || ''} onChange={(event) => setForm((current) => ({ ...current, target_customer: event.target.value }))} /><small>Quem normalmente compra este produto?</small></div>
             </fieldset>
 
             <div className="products-form-actions">
               <button type="submit" className="primary-button products-save-button" disabled={saving}>
-                {saving ? <><LoaderCircle size={16} className="products-spinner" /> Salvando...</> : <><Plus size={16} /> {submitLabel}</>}
+                {saving ? <><LoaderCircle size={16} className="products-spinner" /> Salvando...</> : <><Plus size={17} /> {editingId ? submitLabel : 'Adicionar à Base de Conhecimento'}</>}
               </button>
 
               {editingId ? (
