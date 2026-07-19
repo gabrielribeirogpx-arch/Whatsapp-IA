@@ -221,8 +221,8 @@ export default function FlowsPage() {
 
 
   return (
-    <main className="w-full min-w-0 bg-slate-50 px-5 py-6 lg:px-6">
-      <div className="w-full min-w-0 space-y-6 font-sans">
+    <main className="w-full min-w-0 bg-slate-50 px-5 py-3 lg:px-6 lg:py-6">
+      <div className="w-full min-w-0 space-y-4 font-sans lg:space-y-6">
       {/* Header */}
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
@@ -237,8 +237,8 @@ export default function FlowsPage() {
         </button>
       </div>
 
-      {/* Stats */}
-      <div className="grid gap-4 border-b border-gray-200 pb-4 [grid-template-columns:repeat(auto-fit,minmax(280px,1fr))]">
+      {/* Stats stay available on desktop; mobile prioritizes the flow list. */}
+      <div className="hidden gap-4 border-b border-gray-200 pb-4 lg:grid [grid-template-columns:repeat(auto-fit,minmax(280px,1fr))]">
         <div className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
           <div className="flex items-start justify-between">
             <div className="flex items-start gap-4">
@@ -292,18 +292,18 @@ export default function FlowsPage() {
         </div>
       </div>
 
-      <div className="rounded-2xl border border-gray-100 bg-white p-4 shadow-sm">
-        <div className="flex items-center gap-4">
+      <div className="rounded-2xl border border-gray-100 bg-white p-3 shadow-sm lg:p-4">
+        <div className="grid grid-cols-2 gap-2 lg:flex lg:items-center lg:gap-4">
           <input
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             placeholder="Buscar fluxos..."
-            className="flex-1 rounded-xl border border-gray-100 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none"
+            className="col-span-2 min-w-0 rounded-xl border border-gray-100 bg-white px-3 py-2 text-sm text-slate-900 outline-none lg:flex-1 lg:py-2.5"
           />
           <select
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value as 'all' | 'active' | 'inactive' | 'draft' | 'published')}
-            className="w-52 rounded-xl border border-gray-100 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none"
+            className="min-w-0 rounded-xl border border-gray-100 bg-white px-3 py-2 text-xs text-slate-900 outline-none lg:w-52 lg:py-2.5 lg:text-sm"
           >
             <option value="all">Todos os status</option>
             <option value="active">Ativo</option>
@@ -314,7 +314,7 @@ export default function FlowsPage() {
           <select
             value={sortBy}
             onChange={(e) => setSortBy(e.target.value as 'recent' | 'name' | 'active_first')}
-            className="w-56 rounded-xl border border-gray-100 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none"
+            className="min-w-0 rounded-xl border border-gray-100 bg-white px-3 py-2 text-xs text-slate-900 outline-none lg:w-56 lg:py-2.5 lg:text-sm"
           >
             <option value="recent">Ordenar: Mais recentes</option>
             <option value="name">Ordenar: Nome</option>
@@ -324,8 +324,8 @@ export default function FlowsPage() {
       </div>
 
       {/* Flow list */}
-      <div className="overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-sm">
-        <div className="border-b border-gray-100 px-5 py-4">
+      <div className="overflow-visible rounded-2xl border border-gray-100 bg-white shadow-sm lg:overflow-hidden">
+        <div className="border-b border-gray-100 px-4 py-3 lg:px-5 lg:py-4">
           <span className="text-xs font-semibold uppercase tracking-[0.05em] text-slate-500">Seus fluxos</span>
         </div>
 
@@ -344,88 +344,67 @@ export default function FlowsPage() {
             </button>
           </div>
         ) : (
-          <div className="space-y-3 p-4 sm:space-y-4 sm:p-5">
+          <div className="space-y-2 p-2.5 lg:space-y-3 lg:p-5">
             {filteredFlows.map((flow) => {
               return (
                 <div
                   key={flow.id}
-                  className="flex flex-col gap-4 rounded-2xl bg-white transition hover:shadow-md lg:flex-row lg:items-center lg:justify-between"
-                  style={{ display: 'flex', alignItems: 'center', gap: '1rem', padding: '1.5rem', border: '0.5px solid #E5E7EB' }}
+                  className="relative flex flex-col gap-2 rounded-xl border border-slate-200 bg-white p-3 transition hover:shadow-md lg:flex-row lg:items-center lg:justify-between lg:gap-4 lg:rounded-2xl lg:p-6"
                 >
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      toggleFlowStatus(flow.id);
-                    }}
-                    aria-label={flow.is_active ? 'Desativar fluxo' : 'Ativar fluxo'}
-                    className="relative h-6 w-11 rounded-full border-0 p-0 transition-colors"
-                    style={{ backgroundColor: flow.is_active ? '#10b981' : '#d1d5db' }}
-                  >
-                    <span
-                      className="absolute top-0.5 h-5 w-5 rounded-full bg-white shadow-sm transition-transform"
-                      style={{ left: flow.is_active ? 22 : 2 }}
-                    />
-                  </button>
+                  <div className="flex min-w-0 items-start gap-2.5 lg:items-center lg:gap-4">
+                    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[#E8F5F3] lg:h-12 lg:w-12 lg:rounded-xl">
+                      <FlowNodeIcon />
+                    </div>
 
-                  <div className="flex h-12 w-12 items-center justify-center rounded-xl" style={{ background: '#E8F5F3' }}>
-                    <FlowNodeIcon />
-                  </div>
-
-                  <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="truncate text-sm font-semibold text-slate-900 sm:text-base">{flow.name}</span>
-                      <span
-                        className="inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold"
-                        style={{
-                          background: flow.is_active ? '#D1FAE5' : '#F3F4F6',
-                          color: flow.is_active ? '#065F46' : '#6B7280',
-                        }}
-                      >
-                        {flow.is_active ? 'Ativo' : flow.status === 'draft' ? 'Rascunho' : 'Inativo'}
+                    <div className="min-w-0 flex-1 pr-16 lg:pr-0">
+                      <div className="flex min-w-0 flex-nowrap items-center gap-1.5 lg:flex-wrap lg:gap-2">
+                        <span className="min-w-0 flex-1 truncate text-[15px] font-semibold leading-5 text-slate-900 lg:flex-none lg:text-base">{flow.name}</span>
+                        <span
+                          className="inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-[10px] font-semibold leading-4 lg:px-2.5 lg:py-1 lg:text-xs"
+                          style={{
+                            background: flow.is_active ? '#D1FAE5' : flow.published || flow.is_published ? '#DBEAFE' : '#F3F4F6',
+                            color: flow.is_active ? '#065F46' : flow.published || flow.is_published ? '#1D4ED8' : '#6B7280',
+                          }}
+                        >
+                          {flow.is_active ? 'Ativo' : flow.published || flow.is_published ? 'Publicado' : flow.status === 'draft' || flow.draft ? 'Rascunho' : 'Inativo'}
+                        </span>
+                      </div>
+                      <span className="mt-0.5 block truncate text-[11px] leading-4 text-slate-500 lg:mt-1 lg:text-xs">
+                        Gatilho: {flow.trigger_type || 'default'}{flow.trigger_value ? ` · ${flow.trigger_value}` : ''}<span className="hidden lg:inline"> · {getUpdatedLabel(flow.updated_at)}</span>
                       </span>
                     </div>
-                    <span className="mt-1 block text-xs text-slate-500">
-                      Gatilho: {flow.trigger_type || 'default'}
-                      {flow.trigger_value ? ` · ${flow.trigger_value}` : ''} · {getUpdatedLabel(flow.updated_at)}
-                    </span>
                   </div>
 
-                  <div className="flex items-center gap-4">
-                    <div className="inline-flex items-center gap-2">
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                        <path d="M3 12L21 4L15 21L11 13L3 12Z" stroke="#64748B" strokeWidth="1.7" strokeLinejoin="round" />
-                      </svg>
-                      <div>
-                        <div className="text-[16px] font-semibold leading-none text-slate-900">{flow.total_entries}</div>
-                        <div className="text-[10px] uppercase tracking-[0.04em] text-slate-500">Execuções</div>
-                      </div>
+                  <div className="grid grid-cols-2 divide-x divide-slate-100 rounded-lg bg-slate-50 px-1 py-1.5 lg:flex lg:items-center lg:gap-4 lg:divide-x-0 lg:bg-transparent lg:p-0">
+                    <div className="flex items-center gap-1.5 px-2 lg:px-0 lg:gap-2">
+                      <svg className="hidden lg:block" width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M3 12L21 4L15 21L11 13L3 12Z" stroke="#64748B" strokeWidth="1.7" strokeLinejoin="round" /></svg>
+                      <div><div className="text-sm font-semibold leading-none text-slate-900 lg:text-[16px]">{flow.total_entries}</div><div className="mt-1 text-[9px] uppercase tracking-[0.04em] text-slate-500 lg:text-[10px]">Execuções</div></div>
                     </div>
-                    <div className="inline-flex items-center gap-2">
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                        <path d="M12 4L20 19H4L12 4Z" stroke="#64748B" strokeWidth="1.7" strokeLinejoin="round" />
-                      </svg>
-                      <div>
-                        <div className="text-[16px] font-semibold leading-none text-slate-900">{Number(flow.conversion_rate || 0).toFixed(2)}%</div>
-                        <div className="text-[10px] uppercase tracking-[0.04em] text-slate-500">Conversão</div>
-                      </div>
+                    <div className="flex items-center gap-1.5 px-2 lg:px-0 lg:gap-2">
+                      <svg className="hidden lg:block" width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 4L20 19H4L12 4Z" stroke="#64748B" strokeWidth="1.7" strokeLinejoin="round" /></svg>
+                      <div><div className="text-sm font-semibold leading-none text-slate-900 lg:text-[16px]">{Number(flow.conversion_rate || 0).toFixed(2)}%</div><div className="mt-1 text-[9px] uppercase tracking-[0.04em] text-slate-500 lg:text-[10px]">Conversão</div></div>
                     </div>
                   </div>
 
-                  <div className="relative flex w-full flex-wrap items-center gap-2 sm:justify-end lg:w-auto">
-                    <button onClick={(e) => { e.stopPropagation(); openEdit(flow); }} className="whitespace-nowrap rounded-xl border border-gray-100 bg-transparent px-3 py-1.5 text-xs font-semibold text-slate-600 transition hover:shadow-sm">Editar</button>
-                    <Link href={`/dashboard/flows/${flow.id}/analytics`} onClick={(e) => e.stopPropagation()} className="whitespace-nowrap rounded-xl border border-gray-100 bg-transparent px-3 py-1.5 text-xs font-semibold text-slate-600 no-underline transition hover:shadow-sm">Analytics</Link>
-                    <Link href={`/dashboard/flow-builder?flow_id=${flow.id}`} onClick={(e) => e.stopPropagation()} className="whitespace-nowrap rounded-xl bg-emerald-600 px-3.5 py-1.5 text-xs font-semibold text-white no-underline transition hover:bg-emerald-700">Abrir builder</Link>
-                    <div className="relative">
-                      <button onClick={(e) => { e.stopPropagation(); setOpenDropdown(openDropdown === flow.id ? null : flow.id); }} className="rounded-xl border border-gray-100 bg-transparent px-2.5 py-1.5 text-sm leading-none text-slate-600 transition hover:shadow-sm">⋯</button>
+                  <div className="contents lg:static lg:flex lg:w-auto lg:flex-wrap lg:items-center lg:justify-end lg:gap-2">
+                    <button type="button" onClick={(e) => { e.stopPropagation(); toggleFlowStatus(flow.id); }} aria-label={flow.is_active ? 'Desativar fluxo' : 'Ativar fluxo'} className="absolute right-10 top-3 h-5 w-9 rounded-full border-0 p-0 transition-colors lg:static lg:h-6 lg:w-11" style={{ backgroundColor: flow.is_active ? '#10b981' : '#d1d5db' }}>
+                      <span className={`absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white shadow-sm transition-transform lg:h-5 lg:w-5 ${flow.is_active ? 'translate-x-4 lg:translate-x-5' : ''}`} />
+                    </button>
+                    <button onClick={(e) => { e.stopPropagation(); openEdit(flow); }} className="hidden whitespace-nowrap rounded-xl border border-gray-100 bg-transparent px-3 py-1.5 text-xs font-semibold text-slate-600 transition hover:shadow-sm lg:block">Editar</button>
+                    <Link href={`/dashboard/flows/${flow.id}/analytics`} onClick={(e) => e.stopPropagation()} className="absolute bottom-3 left-3 whitespace-nowrap text-[11px] font-medium text-slate-500 no-underline transition hover:text-slate-900 lg:static lg:rounded-xl lg:border lg:border-gray-100 lg:bg-transparent lg:px-3 lg:py-1.5 lg:text-xs lg:font-semibold lg:text-slate-600 lg:hover:shadow-sm">Analytics</Link>
+                    <Link href={`/dashboard/flow-builder?flow_id=${flow.id}`} onClick={(e) => e.stopPropagation()} className="absolute bottom-2.5 right-10 rounded-lg bg-emerald-600 px-4 py-1.5 text-xs font-semibold text-white no-underline transition hover:bg-emerald-700 lg:static lg:rounded-xl lg:px-3.5">Abrir<span className="hidden lg:inline"> builder</span></Link>
+                    <div className="absolute right-3 top-3 lg:static lg:relative">
+                      <button aria-label={`Mais ações para ${flow.name}`} onClick={(e) => { e.stopPropagation(); setOpenDropdown(openDropdown === flow.id ? null : flow.id); }} className="rounded-lg border border-gray-100 bg-transparent px-2 py-1 text-base leading-none text-slate-600 transition hover:shadow-sm lg:rounded-xl lg:px-2.5 lg:py-1.5">⋮</button>
                       {openDropdown === flow.id && (
-                        <div className="absolute right-0 top-[calc(100%+4px)] z-10 min-w-[140px] overflow-hidden rounded-xl border border-gray-100 bg-white shadow-md">
+                        <div className="absolute right-0 top-[calc(100%+4px)] z-10 min-w-[150px] overflow-hidden rounded-xl border border-gray-100 bg-white shadow-md">
+                          <button onClick={(e) => { e.stopPropagation(); openEdit(flow); setOpenDropdown(null); }} className="w-full bg-transparent px-3.5 py-2 text-left text-sm text-slate-700 transition hover:bg-slate-50 lg:hidden">Editar</button>
                           <button onClick={(e) => { e.stopPropagation(); onDuplicate(flow.id); setOpenDropdown(null); }} className="w-full bg-transparent px-3.5 py-2 text-left text-sm text-slate-700 transition hover:bg-slate-50">Duplicar</button>
                           <button onClick={(e) => { e.stopPropagation(); onDelete(flow.id); setOpenDropdown(null); }} className="w-full bg-transparent px-3.5 py-2 text-left text-sm text-red-600 transition hover:bg-red-50">Deletar</button>
                         </div>
                       )}
                     </div>
                   </div>
+                  <div className="h-6 lg:hidden" aria-hidden="true" />
                 </div>
               );
             })}
@@ -434,7 +413,7 @@ export default function FlowsPage() {
       </div>
 
       <div
-        className="rounded-2xl p-5 shadow-sm"
+        className="hidden rounded-2xl p-5 shadow-sm lg:block"
         style={{ background: 'linear-gradient(135deg, #E8F5F3 0%, #D1FAE5 100%)', border: '0.5px solid #A7F3D0' }}
       >
         <div className="flex flex-col items-start gap-4 md:flex-row md:items-center md:justify-between">
