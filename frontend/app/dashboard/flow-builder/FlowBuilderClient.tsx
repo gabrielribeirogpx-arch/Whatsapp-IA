@@ -1,6 +1,8 @@
 'use client';
 
 import { FlowBuilderSkeleton } from '@/components/ui/loading';
+import { MobileBottomSheet } from '@/components/layout/MobileBottomSheet';
+import { buildMobileFlowSequence } from '@/lib/mobileFlowSequence';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
@@ -16,7 +18,7 @@ import ReactFlow, {
 } from 'reactflow';
 import type { Connection, Edge, EdgeChange, Node, NodeChange, ReactFlowInstance } from 'reactflow';
 import 'reactflow/dist/style.css';
-import { BookOpen, CalendarDays, ChevronDown, Clock, ExternalLink, FileDown, FileImage, FileText, GitBranch, HelpCircle, History, ListChecks, MessageSquare, RotateCcw, Sparkles, Tags, Zap } from 'lucide-react';
+import { BookOpen, CalendarDays, ChevronDown, Clock, ExternalLink, FileDown, FileImage, FileText, GitBranch, HelpCircle, History, ListChecks, MessageSquare, RotateCcw, Sparkles, Tags, Zap, AlertTriangle, ChevronRight, Plus, Save, MoreHorizontal, Play, GitFork } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 
 import ActionNode from '@/components/flow/nodes/ActionNode';
@@ -1722,6 +1724,12 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
   const [isSimulatorOpen, setIsSimulatorOpen] = useState(false);
   const [isSidebarExpanded, setIsSidebarExpanded] = useState(false);
   const [openNodeGroups, setOpenNodeGroups] = useState<Record<NodePaletteGroup['id'], boolean>>(NODE_GROUPS_DEFAULT_OPEN);
+  const [isMobileViewport, setIsMobileViewport] = useState(false);
+  const [mobileView, setMobileView] = useState<'list' | 'map'>('list');
+  const [isMobileAddOpen, setIsMobileAddOpen] = useState(false);
+  const [isMobileValidationOpen, setIsMobileValidationOpen] = useState(false);
+  const [mobileConnectSource, setMobileConnectSource] = useState<Node | null>(null);
+  const [mobileConnectHandle, setMobileConnectHandle] = useState<string>('');
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
   const [isTyping, setIsTyping] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -1789,6 +1797,26 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
   useEffect(() => {
     selectedNodeIdRef.current = selectedNodeId;
   }, [selectedNodeId]);
+
+  useEffect(() => {
+    const media = window.matchMedia('(max-width: 1023px)');
+    const update = () => setIsMobileViewport(media.matches);
+    update();
+    media.addEventListener('change', update);
+    return () => media.removeEventListener('change', update);
+  }, []);
+
+  useEffect(() => {
+    const view = searchParams.get('view');
+    if (view === 'map' || view === 'list') setMobileView(view);
+    const nodeId = searchParams.get('node');
+    if (nodeId && nodesRef.current.length) {
+      const node = nodesRef.current.find((item) => item.id === nodeId);
+      if (node) openNodeEditor(node);
+    }
+  // Selection hydration intentionally follows URL changes only.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
 
   const getFlowBadge = useCallback((flow: { is_active?: boolean }) => (
     flow.is_active
@@ -2772,13 +2800,12 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
         sourceHandle: sourceHandle || undefined,
       },
     }, eds));
-  }, [getChoiceHandleDebug, setEdges]);
+    markFlowDirty('edge_added', { source, target, source_handle: sourceHandle });
+  }, [getChoiceHandleDebug, markFlowDirty, setEdges]);
 
 
   const addNode = useCallback(
     (kind: FlowNodeKind) => {
-      if (!rfInstance) return;
-
       const preset = NODE_PRESETS[kind];
 
       // Usa o centro visível atual do viewport do ReactFlow
@@ -2790,10 +2817,10 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
       const canvasCenterScreenX = (canvasLeft + canvasRight) / 2;
       const canvasCenterScreenY = window.innerHeight / 2;
 
-      const flowPosition = rfInstance.screenToFlowPosition({
+      const flowPosition = rfInstance?.screenToFlowPosition({
         x: canvasCenterScreenX,
         y: canvasCenterScreenY,
-      });
+      }) || randomPosition();
 
       const newNode: Node = {
         id: makeNodeId(),
@@ -2812,8 +2839,10 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
       };
 
       setNodes((prev) => [...prev, newNode]);
+      markFlowDirty('node_added', { node_id: newNode.id, node_type: newNode.type });
+      return newNode;
     },
-    [rfInstance, isSimulatorOpen, setNodes, toggleStartNode, updateNodeData],
+    [markFlowDirty, rfInstance, isSimulatorOpen, setNodes, toggleStartNode, updateNodeData],
   );
 
   const handleCreateInitialMessage = useCallback(() => {
@@ -3415,8 +3444,50 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
     return () => document.removeEventListener('click', handleClick);
   }, []);
 
+  const mobileSequence = useMemo(() => buildMobileFlowSequence(nodes, edges), [nodes, edges]);
+  const selectMobileNode = (node: Node) => {
+    openNodeEditor(node);
+    const params = new URLSearchParams(searchParams.toString());
+    params.set('node', node.id);
+    params.set('view', mobileView);
+    router.push(`/dashboard/flow-builder?${params.toString()}`);
+  };
+  const closeMobileNodeEditor = () => {
+    closeNodeEditor();
+    const params = new URLSearchParams(searchParams.toString());
+    params.delete('node');
+    router.replace(`/dashboard/flow-builder?${params.toString()}`);
+  };
+  const setMobileFlowView = (view: 'list' | 'map') => {
+    setMobileView(view);
+    const params = new URLSearchParams(searchParams.toString());
+    params.set('view', view);
+    router.replace(`/dashboard/flow-builder?${params.toString()}`);
+  };
   if (isLoading) {
     return <FlowBuilderSkeleton />;
+  }
+  if (isMobileViewport) {
+    return (
+      <main className="flow-mobile-builder">
+        <section className="flow-mobile-summary" aria-label="Resumo do fluxo">
+          <div><h1>{selectedFlow?.name || 'Fluxo não selecionado'}</h1><button type="button" aria-label="Abrir validação do fluxo" onClick={() => setIsMobileValidationOpen(true)}><MoreHorizontal size={20} /></button></div>
+          <div><span>{getFlowBadge(selectedFlow || {}).label}</span><small>{flowSaveStatus === 'saving' ? 'Salvando…' : flowDirty ? 'Alterações pendentes' : flowSaveStatus === 'error' ? 'Erro ao salvar' : 'Salvo'}</small></div>
+          <dl><div><dt>Nodes</dt><dd>{nodes.length}</dd></div><div><dt>Conexões</dt><dd>{edges.length}</dd></div><div><dt>Problemas</dt><dd>{validationErrors.length + validationWarnings.length}</dd></div></dl>
+          <div className="flow-mobile-summary__actions"><button type="button" onClick={() => void handleSaveFlow(false, { showToast: true })} disabled={isSaving || !selectedFlowId}><Save size={16}/>{saveButtonLabel}</button><button type="button" onClick={() => setIsSimulatorOpen(true)} disabled={!nodes.length}><Play size={16}/>Testar</button><button type="button" onClick={handleActivateFlow} disabled={!selectedFlowId || validationErrors.length > 0}>Publicar</button></div>
+        </section>
+        <div className="flow-mobile-tabs" role="tablist"><button type="button" role="tab" aria-selected={mobileView === 'list'} onClick={() => setMobileFlowView('list')}>Lista</button><button type="button" role="tab" aria-selected={mobileView === 'map'} onClick={() => setMobileFlowView('map')}>Mapa</button></div>
+        {mobileView === 'map' ? <section className="flow-mobile-map"><GitFork size={24}/><strong>Mapa disponível no editor completo</strong><p>Use a lista para editar o fluxo sem comprimir o canvas.</p><span>{nodes.length} nodes · {edges.length} conexões</span></section> : <section className="flow-mobile-list" aria-label="Sequência lógica dos nodes">
+          {mobileSequence.connected.map((item, index) => { const data = item.node.data as Record<string, unknown>; const outputs = edges.filter((edge) => edge.source === item.node.id); return <div role="button" tabIndex={0} key={`${item.node.id}-${index}`} className="flow-mobile-node" style={{ marginLeft: Math.min(item.depth, 3) * 12 }} onClick={() => selectMobileNode(item.node)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); selectMobileNode(item.node); } }}><span className="flow-mobile-node__type">{getBuilderNodeTitle(item.node)}</span><strong>{String(data.label || data.content || getBuilderNodeTitle(item.node))}</strong><small>{data.isStart ? 'Início · ' : ''}{data.is_terminal ? 'Fim · ' : ''}{item.incomingLabel ? `${item.incomingLabel} → ` : ''}{outputs.length ? `${outputs.length} saída${outputs.length > 1 ? 's' : ''}` : 'Sem saída'}</small>{item.isCycle && <em><AlertTriangle size={14}/> Ciclo detectado</em>}<ChevronRight size={18}/><span role="button" tabIndex={0} className="flow-mobile-node__connect" aria-label={`Definir próximo node para ${getBuilderNodeTitle(item.node)}`} onClick={(event) => { event.stopPropagation(); setMobileConnectSource(item.node); setMobileConnectHandle(''); }} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); setMobileConnectSource(item.node); setMobileConnectHandle(''); } }}>Conectar</span></div>; })}
+          {mobileSequence.disconnected.length > 0 && <><h2>Não conectados</h2>{mobileSequence.disconnected.map((node) => <button type="button" key={node.id} className="flow-mobile-node flow-mobile-node--orphan" onClick={() => selectMobileNode(node)}><span className="flow-mobile-node__type">{getBuilderNodeTitle(node)}</span><strong>{String((node.data as Record<string, unknown>).label || (node.data as Record<string, unknown>).content || getBuilderNodeTitle(node))}</strong><small>Node desconectado</small><ChevronRight size={18}/></button>)}</>}
+        </section>}
+        <button type="button" className="flow-mobile-add" onClick={() => setIsMobileAddOpen(true)}><Plus size={20}/>Adicionar node</button>
+        <MobileBottomSheet open={isMobileAddOpen} onClose={() => setIsMobileAddOpen(false)} title="Adicionar node">{NODE_GROUPS.map((group) => <section className="flow-mobile-palette" key={group.id}><h2>{group.title}</h2>{group.nodes.map(({ kind, label, icon: Icon }) => <button type="button" key={kind} onClick={() => { const node = addNode(kind); setIsMobileAddOpen(false); if (node) selectMobileNode(node); }}><Icon size={18}/>{label}</button>)}</section>)}</MobileBottomSheet>
+        <MobileBottomSheet open={Boolean(mobileConnectSource)} onClose={() => setMobileConnectSource(null)} title="Definir próximo node">{mobileConnectSource && <div className="flow-mobile-connect"><p>Escolha o destino para <strong>{getBuilderNodeTitle(mobileConnectSource)}</strong>. As conexões existentes desse node serão preservadas.</p>{(() => { const data = mobileConnectSource.data as Record<string, unknown>; const handles = mobileConnectSource.type === 'condition' ? [{ id: 'true', label: 'Sim' }, { id: 'false', label: 'Não' }] : mobileConnectSource.type === 'choice' ? (Array.isArray(data.buttons) ? data.buttons : []).map((item: Record<string, unknown>, index: number) => ({ id: String(item.handleId || item.id || `option_${index + 1}`), label: String(item.label || item.value || `Opção ${index + 1}`) })) : []; return handles.length ? <label>Saída<select value={mobileConnectHandle} onChange={(event) => setMobileConnectHandle(event.target.value)}>{handles.map((handle) => <option key={handle.id} value={handle.id}>{handle.label}</option>)}</select></label> : null; })()}{nodes.filter((node) => node.id !== mobileConnectSource.id).map((target) => <button type="button" key={target.id} onClick={() => { onConnect({ source: mobileConnectSource.id, target: target.id, sourceHandle: mobileConnectHandle || null, targetHandle: null }); setMobileConnectSource(null); }}><span>{getBuilderNodeTitle(target)}</span><strong>{String((target.data as Record<string, unknown>).label || getBuilderNodeTitle(target))}</strong></button>)}</div>}</MobileBottomSheet>
+        <MobileBottomSheet open={isMobileValidationOpen} onClose={() => setIsMobileValidationOpen(false)} title="Validação do fluxo"><p className="flow-mobile-validation-count">{validationErrors.length} erros · {validationWarnings.length} avisos</p>{[...validationErrors, ...validationWarnings].map((issue, index) => <button type="button" className="flow-mobile-validation-item" key={`${issue.code}-${index}`} onClick={() => { const node = nodes.find((item) => item.id === issue.node_id); if (node) selectMobileNode(node); setIsMobileValidationOpen(false); }}><AlertTriangle size={16}/><span>{issue.message}</span></button>)}</MobileBottomSheet>
+        <MobileBottomSheet open={Boolean(selectedNode)} onClose={closeMobileNodeEditor} title={selectedNode ? getBuilderNodeTitle(selectedNode) : 'Editar node'} fullScreen closeOnBackdrop={!isMediaUploading}><div className="flow-mobile-editor">{selectedNode && <FlowNodeEditorPanel node={selectedNode} draft={nodeEditorDraft} onDraftChange={handleNodeEditorDraftChange} onClose={closeMobileNodeEditor} onUpload={(file, mediaType) => { void uploadEditorMedia(file, mediaType); }} isUploading={isMediaUploading} uploadError={mediaUploadError} flows={normalizedFlows} currentFlowId={selectedFlowId} allNodes={nodes} mcpTools={mcpTools} />}</div></MobileBottomSheet>
+      </main>
+    );
   }
   return (
     <div className="flow-builder-page" style={{ width: '100%', height: '100vh', display: 'flex' }}>
