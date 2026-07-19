@@ -6,7 +6,7 @@ import ProviderForm from './ProviderForm';
 export default function ProvidersTab(props: any) {
   const { providers, ...rest } = props;
   const [editingProvider, setEditingProvider] = useState<any | null>(null);
-  const [editForm, setEditForm] = useState({ display_name: '', waba_id: '', phone_number_id: '', business_id: '', access_token: '' });
+  const [editForm, setEditForm] = useState({ provider_type: 'meta_cloud', connection_type: 'cloud_api', display_name: '', waba_id: '', phone_number_id: '', business_id: '', access_token: '' });
   const [error, setError] = useState('');
 
   const statusBadges = useMemo(() => {
@@ -17,6 +17,8 @@ export default function ProvidersTab(props: any) {
   const openEditor = (provider: any) => {
     setEditingProvider(provider);
     setEditForm({
+      provider_type: provider.provider_type || 'meta_cloud',
+      connection_type: provider.connection_type || 'cloud_api',
       display_name: provider.display_name || '',
       waba_id: provider.waba_id || '',
       phone_number_id: provider.phone_number_id || '',
@@ -48,9 +50,12 @@ export default function ProvidersTab(props: any) {
         <div>
           <h3 className='text-xl font-semibold text-slate-900'>Editar conexão WhatsApp</h3>
           <p className='text-sm text-slate-600'>{(editingProvider.connection_status || editingProvider.status) === 'token_expired' ? 'Cole um novo token para restaurar a conexão sem remover o provider.' : 'Atualize credenciais sem interromper o runtime'}</p>
+          <p className='mt-1 text-xs text-slate-500'>Método: {editingProvider.auth_type === 'embedded_signup' ? 'Conexão rápida com a Meta' : 'Configuração manual'}. As conexões manuais permanecem manuais.</p>
           <div className='mt-2 flex gap-2'>{statusBadges.map((badge: string) => <span key={badge} className='rounded-full border border-slate-200 bg-slate-50 px-2 py-1 text-xs font-medium text-slate-700'>{badge}</span>)}</div>
         </div>
         <div className='grid gap-3 sm:grid-cols-2'>
+          <select className='premium-input' value={editForm.provider_type} onChange={(e) => setEditForm(prev => ({ ...prev, provider_type: e.target.value }))}><option value='meta_cloud'>meta_cloud</option><option value='bsp_360dialog'>bsp_360dialog</option></select>
+          <select className='premium-input' value={editForm.connection_type} onChange={(e) => setEditForm(prev => ({ ...prev, connection_type: e.target.value }))}><option value='cloud_api'>Conectar WhatsApp Cloud API</option><option value='cloud_api_coexistence'>Conectar WhatsApp com Coexistence</option></select>
           <input className='premium-input' value={editForm.display_name} onChange={(e) => setEditForm(prev => ({ ...prev, display_name: e.target.value }))} placeholder='Nome da conexão' />
           <input className='premium-input' value={editForm.waba_id} onChange={(e) => setEditForm(prev => ({ ...prev, waba_id: e.target.value }))} placeholder='WABA ID (WhatsApp Business Account)' />
           <input className='premium-input' value={editForm.phone_number_id} onChange={(e) => setEditForm(prev => ({ ...prev, phone_number_id: e.target.value }))} placeholder='Phone Number ID' />

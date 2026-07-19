@@ -24,6 +24,11 @@ class TenantWhatsAppProvider(Base):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     tenant_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
     provider_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    # Keep the onboarding method explicit.  In particular, a Meta callback must
+    # never turn an existing manually configured provider into an OAuth one.
+    auth_type: Mapped[str] = mapped_column(
+        String(40), nullable=False, default="manual", server_default="manual"
+    )
     display_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
     waba_id: Mapped[str | None] = mapped_column(String(120), nullable=True)
     phone_number_id: Mapped[str | None] = mapped_column(String(120), nullable=True)

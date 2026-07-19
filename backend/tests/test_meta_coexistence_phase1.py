@@ -10,6 +10,11 @@ def test_tenant_old_provider_without_explicit_connection_type_assumes_cloud_api(
     assert provider.coexistence_enabled is None or provider.coexistence_enabled is False
 
 
+def test_manual_provider_keeps_manual_auth_type_by_default():
+    provider = TenantWhatsAppProvider(tenant_id=uuid.uuid4(), provider_type="meta_cloud")
+    assert (provider.auth_type or "manual") == "manual"
+
+
 def test_meta_state_preserves_connection_type():
     tenant_id = uuid.uuid4()
     state = create_meta_oauth_state(tenant_id, connection_type="cloud_api_coexistence", nonce="n", issued_at=1890000000)

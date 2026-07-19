@@ -188,6 +188,7 @@ def test_callback_updates_existing_provider(monkeypatch):
         id=uuid.uuid4(),
         tenant_id=tenant_id,
         provider_type="meta_cloud",
+        auth_type="embedded_signup",
         phone_number_id="old",
     )
     meta._META_NONCES.clear()
@@ -223,6 +224,29 @@ def test_callback_updates_existing_provider(monkeypatch):
     assert existing.phone_number_id == "phone-2"
     assert existing.waba_id == "waba-2"
     assert existing.coexistence_enabled is True
+
+
+def test_callback_does_not_replace_manual_provider(monkeypatch):
+    tenant_id = uuid.uuid4()
+    manual = TenantWhatsAppProvider(
+        id=uuid.uuid4(), tenant_id=tenant_id, provider_type="meta_cloud",
+        auth_type="manual", phone_number_id="manual-phone", access_token_encrypted="manual-token",
+    )
+    meta._META_NONCES.clear()
+    monkeypatch.setattr(meta.time, "time", lambda: 1890000000)
+    state = meta.create_meta_oauth_state(tenant_id, nonce="manual-preserved")
+    monkeypatch.setattr(meta, "_exchange_code_for_token", lambda *_: "token")
+    monkeypatch.setattr(meta, "_discover_meta_business", lambda _: {
+        "business_id": "bm", "business_name": "Biz", "waba_id": "waba",
+        "waba_name": "WABA", "phone": {"id": "embedded-phone"},
+    })
+    monkeypatch.setattr(meta, "encrypt_secret", lambda value: f"encrypted:{value}")
+    db = _Db(existing=manual)
+    meta.meta_callback(type("Request", (), {"url": "https://api.example.com"})(), code="code", state=state, db=db)
+    assert manual.phone_number_id == "manual-phone"
+    assert manual.auth_type == "manual"
+    assert db.added is not None
+    assert db.added.auth_type == "embedded_signup"
 
 
 def test_status_api_payload_includes_phase2_fields():
