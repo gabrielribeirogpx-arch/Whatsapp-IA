@@ -1,8 +1,9 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
+import { useRouter } from 'next/navigation';
 import {
   CircleDollarSign,
   Clock3,
@@ -24,6 +25,9 @@ import { getPipeline, listWorkspaceUsers, moveLeadToStage } from '../../lib/api'
 import { PipelineLead, PipelineStage, WorkspaceUser } from '../../lib/types';
 import { getUserDisplayName } from '../../lib/userDisplayName';
 import { canMoveLeadToStage } from './dropGuards';
+import { MobileBottomSheet } from '../../components/layout/MobileBottomSheet';
+import { MobileListCard } from '../../components/layout/MobileListCard';
+import { ResponsiveFilterToolbar } from '../../components/layout/ResponsiveFilterToolbar';
 
 const CHANNELS = ['Todos', 'WhatsApp', 'Instagram', 'Web'] as const;
 const ALL_OWNERS_FILTER = 'Todos';
@@ -119,6 +123,7 @@ function pipelineContainsLeadInStage(stages: PipelineStage[], leadId: string, st
 }
 
 export default function PipelinePage() {
+  const router = useRouter();
   const [stages, setStages] = useState<PipelineStage[]>([]);
   const [draggingLead, setDraggingLead] = useState<PipelineLead | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -129,6 +134,11 @@ export default function PipelinePage() {
   const [searchTerm, setSearchTerm] = useState('');
   const [channelFilter, setChannelFilter] = useState<Channel>('Todos');
   const [ownerFilter, setOwnerFilter] = useState<Owner>(ALL_OWNERS_FILTER);
+  const [selectedStageId, setSelectedStageId] = useState<string>('');
+  const [selectedLead, setSelectedLead] = useState<PipelineLead | null>(null);
+  const [moveLead, setMoveLead] = useState<PipelineLead | null>(null);
+  const [moveTargetStageId, setMoveTargetStageId] = useState('');
+  const [isMoving, setIsMoving] = useState(false);
   const pendingMoveLeadIds = useRef<Set<string>>(new Set());
   const activeDragRef = useRef<{ lead: PipelineLead; dropHandled: boolean } | null>(null);
 
@@ -193,6 +203,16 @@ export default function PipelinePage() {
     return [...stages].sort((a, b) => a.position - b.position);
   }, [stages]);
 
+  // The stage query is intentionally optional: old pipeline links remain valid.
+  useEffect(() => {
+    const requestedStage = new URLSearchParams(window.location.search).get('stage');
+    if (requestedStage && boardStages.some((stage) => stage.id === requestedStage)) {
+      setSelectedStageId(requestedStage);
+    } else if (!selectedStageId && boardStages[0]) {
+      setSelectedStageId(boardStages[0].id);
+    }
+  }, [boardStages, selectedStageId]);
+
   const allBoardLeads = useMemo(() => boardStages.flatMap((stage) => stage.leads), [boardStages]);
 
   const filteredStages = useMemo(() => {
@@ -223,6 +243,13 @@ export default function PipelinePage() {
     .sort((a, b) => a - b)[0];
   const maxStageAgeDays = oldestStageEntry ? Math.max(1, Math.floor((Date.now() - oldestStageEntry) / 86400000)) : 0;
   const visibleLeads = filteredStages.reduce((total, stage) => total + stage.leads.length, 0);
+
+  const selectStage = useCallback((stageId: string) => {
+    setSelectedStageId(stageId);
+    const params = new URLSearchParams(window.location.search);
+    params.set('stage', stageId);
+    router.replace(`/pipeline?${params.toString()}`, { scroll: false });
+  }, [router]);
 
   const handleDrop = async (stage: PipelineBoardStage) => {
     const dragSession = activeDragRef.current;
@@ -274,9 +301,71 @@ export default function PipelinePage() {
     }
   };
 
+  const handleMobileMove = async () => {
+    if (!moveLead || !moveTargetStageId || isMoving) return;
+    const targetStage = boardStages.find((stage) => stage.id === moveTargetStageId);
+    if (!targetStage || !canMoveLeadToStage(moveLead, targetStage.id, pendingMoveLeadIds.current)) return;
+
+    pendingMoveLeadIds.current.add(moveLead.id);
+    const previousStages = stages;
+    setIsMoving(true);
+    setError('');
+    setStages((current) => moveLeadBetweenStages(current, moveLead, targetStage.id));
+    try {
+      await moveLeadToStage(moveLead.id, targetStage.id);
+      setMoveLead(null);
+      setSelectedLead((current) => current?.id === moveLead.id ? { ...current, stage_id: targetStage.id } : current);
+    } catch (moveErr) {
+      setStages(previousStages);
+      const message = moveErr instanceof Error ? moveErr.message : 'Erro desconhecido';
+      setError(`Falha real ao mover o contato: ${message}`);
+    } finally {
+      pendingMoveLeadIds.current.delete(moveLead.id);
+      setIsMoving(false);
+    }
+  };
+
+  const activeFilters = Number(channelFilter !== 'Todos') + Number(ownerFilter !== ALL_OWNERS_FILTER);
+  const clearFilters = () => { setChannelFilter('Todos'); setOwnerFilter(ALL_OWNERS_FILTER); setSearchTerm(''); };
+  const mobileStage = filteredStages.find((stage) => stage.id === selectedStageId) || filteredStages[0];
+
   return (
     <main className="dashboard-page pipeline-crm-page">
-      <section className="dashboard-hero pipeline-hero-premium">
+      <section className="pipeline-mobile-view" aria-label="Pipeline de vendas">
+        <header className="pipeline-mobile-header">
+          <div><span className="pipeline-eyebrow"><Sparkles size={15} /> CRM</span><h1>Pipeline</h1></div>
+          <Link href="/chat" className="pipeline-mobile-create" aria-label="Abrir conversa para criar lead"><Plus size={20} /></Link>
+        </header>
+        <ResponsiveFilterToolbar
+          activeCount={activeFilters}
+          onClear={clearFilters}
+          search={<input value={searchTerm} onChange={(event) => setSearchTerm(event.target.value)} placeholder="Buscar lead" aria-label="Buscar lead por nome, telefone ou interação" />}
+          filters={<>
+            <label className="pipeline-mobile-filter-label">Canal<select value={channelFilter} onChange={(event) => setChannelFilter(event.target.value as Channel)} aria-label="Filtrar por canal">{CHANNELS.map((channel) => <option key={channel} value={channel}>{channel === 'Todos' ? 'Todos os canais' : channel}</option>)}</select></label>
+            <label className="pipeline-mobile-filter-label">Responsável<select value={ownerFilter} onChange={(event) => setOwnerFilter(event.target.value)} disabled={isLoadingUsers || Boolean(usersError) || users.length === 0} aria-label="Filtrar por responsável"><option value={ALL_OWNERS_FILTER}>Todos os responsáveis</option>{users.map((user) => <option key={user.id} value={user.id}>{getUserDisplayName(user) || user.email}</option>)}</select></label>
+          </>}
+        />
+        {error ? <p className="error-text" role="alert">{error}</p> : null}
+        <nav className="pipeline-stage-tabs" aria-label="Etapas do pipeline">
+          {filteredStages.map((stage) => <button key={stage.id} type="button" className={stage.id === mobileStage?.id ? 'is-active' : ''} onClick={() => selectStage(stage.id)} aria-pressed={stage.id === mobileStage?.id}><span>{stage.name}</span><small>{stage.leads.length}</small></button>)}
+        </nav>
+        {isLoading ? <div className="pipeline-mobile-skeleton" role="status">Carregando etapa…</div> : null}
+        {!isLoading && mobileStage ? <section className="pipeline-mobile-stage" aria-live="polite">
+          <header><div><h2>{mobileStage.name}</h2><p>{mobileStage.leads.length} {mobileStage.leads.length === 1 ? 'lead' : 'leads'}</p></div><KanbanSquare size={19} /></header>
+          <div className="pipeline-mobile-leads">
+            {mobileStage.leads.map((lead) => {
+              const owner = getLeadOwnerLabel(lead, users);
+              const ChannelIcon = channelIcons[getLeadChannel(lead)];
+              return <MobileListCard key={lead.id} title={<button type="button" className="pipeline-mobile-lead-title" onClick={() => setSelectedLead(lead)}>{lead.name || 'Lead sem nome'}</button>} subtitle={lead.phone} status={<span className={`lead-temp temp-${lead.temperature}`}>{temperatureLabel[lead.temperature] || 'Frio'}</span>} meta={<span className="pipeline-mobile-card-meta"><ChannelIcon size={14} /> {owner || 'Sem responsável'} · {formatRelativeDate(lead.last_interaction)}</span>} action={<button type="button" className="pipeline-mobile-move" onClick={() => { setMoveLead(lead); setMoveTargetStageId(lead.stage_id || ''); }}>Mover</button>}>
+                <p className="pipeline-mobile-last-message">{lead.last_message || 'Sem interação recente.'}</p>
+              </MobileListCard>;
+            })}
+            {!mobileStage.leads.length ? <div className="pipeline-empty-stage" role="status"><div className="pipeline-empty-icon"><KanbanSquare size={22} /></div><h3>{searchTerm || activeFilters ? 'Nenhum resultado nesta etapa' : 'Nenhum lead nesta etapa'}</h3><p>{searchTerm || activeFilters ? 'Ajuste a busca ou os filtros para ver outros leads.' : 'Os contatos aparecerão automaticamente quando iniciarem uma conversa.'}</p></div> : null}
+          </div>
+        </section> : null}
+      </section>
+
+      <section className="dashboard-hero pipeline-hero-premium pipeline-desktop-only">
         <div>
           <span className="pipeline-eyebrow"><Sparkles size={16} /> CRM Pipeline</span>
           <h1>Pipeline de Vendas</h1>
@@ -292,7 +381,7 @@ export default function PipelinePage() {
         </div>
       </section>
 
-      <section className="pipeline-metrics-grid" aria-label="Resumo do pipeline">
+      <section className="pipeline-metrics-grid pipeline-desktop-only" aria-label="Resumo do pipeline">
         <article className="pipeline-metric-card">
           <div className="pipeline-metric-icon"><Users size={20} /></div>
           <span>Leads Ativos</span>
@@ -319,7 +408,7 @@ export default function PipelinePage() {
         </article>
       </section>
 
-      <section className="pipeline-toolbar" aria-label="Controles do pipeline">
+      <section className="pipeline-toolbar pipeline-desktop-only" aria-label="Controles do pipeline">
         <label className="pipeline-search-field">
           <Search size={18} />
           <input
@@ -353,19 +442,19 @@ export default function PipelinePage() {
         </div>
       </section>
 
-      {error ? <p className="error-text">{error}</p> : null}
+      <div className="pipeline-desktop-only">{error ? <p className="error-text">{error}</p> : null}
       {usersError ? <p className="error-text">Falha real ao carregar responsáveis: {usersError}</p> : null}
-      {isLoading ? <p className="pipeline-loading">Carregando pipeline...</p> : null}
+      {isLoading ? <p className="pipeline-loading">Carregando pipeline...</p> : null}</div>
 
       {!isLoading && stages.length === 0 ? (
-        <div className="products-empty-state" role="status">
+        <div className="products-empty-state pipeline-desktop-only" role="status">
           <span className="products-empty-eyebrow">Configuração inicial</span>
           <h3>Nenhum item criado ainda</h3>
           <p>Crie etapas do pipeline para organizar leads por qualificação, proposta e fechamento.</p>
         </div>
       ) : null}
 
-      <section className="pipeline-board" aria-label="Kanban de vendas">
+      <section className="pipeline-board pipeline-desktop-only" aria-label="Kanban de vendas">
         {filteredStages.map((stage) => {
           const stageValue = stage.leads.length;
 
@@ -447,6 +536,13 @@ export default function PipelinePage() {
           );
         })}
       </section>
+
+      <MobileBottomSheet open={Boolean(selectedLead)} onClose={() => setSelectedLead(null)} title={selectedLead?.name || 'Detalhes do lead'} footer={selectedLead ? <button type="button" className="primary-button w-full" onClick={() => { setMoveLead(selectedLead); setMoveTargetStageId(selectedLead.stage_id || ''); setSelectedLead(null); }}>Mover de etapa</button> : null}>
+        {selectedLead ? <div className="pipeline-lead-details"><section><h3>Contato</h3><p>{selectedLead.phone}</p>{selectedLead.email ? <p>{selectedLead.email}</p> : null}</section><section><h3>Etapa</h3><p>{boardStages.find((stage) => stage.id === selectedLead.stage_id)?.name || 'Sem etapa'}</p></section><section><h3>Responsável</h3><p>{getLeadOwnerLabel(selectedLead, users) || 'Sem responsável'}</p></section>{selectedLead.last_message ? <section><h3>Última interação</h3><p>{selectedLead.last_message}</p></section> : null}</div> : null}
+      </MobileBottomSheet>
+      <MobileBottomSheet open={Boolean(moveLead)} onClose={() => !isMoving && setMoveLead(null)} title="Mover lead" closeOnBackdrop={!isMoving} footer={<button type="button" className="primary-button w-full" disabled={!moveTargetStageId || isMoving || moveTargetStageId === moveLead?.stage_id} onClick={() => void handleMobileMove()}>{isMoving ? 'Movendo…' : 'Confirmar movimentação'}</button>}>
+        <div className="pipeline-move-options" role="radiogroup" aria-label="Etapa de destino">{boardStages.map((stage) => <label key={stage.id}><input type="radio" name="target-stage" value={stage.id} checked={moveTargetStageId === stage.id} onChange={() => setMoveTargetStageId(stage.id)} disabled={isMoving} />{stage.name}<small>{stage.leads.length} leads</small></label>)}</div>
+      </MobileBottomSheet>
     </main>
   );
 }
