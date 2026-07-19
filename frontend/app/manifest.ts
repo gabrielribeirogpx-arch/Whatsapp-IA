@@ -2,16 +2,15 @@ import type { MetadataRoute } from 'next';
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    id: '/mobile',
+    id: '/',
     name: 'Wazza API',
     short_name: 'Wazza API',
     description: 'Plataforma Wazza API para automação, atendimento e gestão de conversas com IA e operação humana.',
-    start_url: '/mobile',
-    scope: '/mobile',
+    start_url: '/dashboard',
+    scope: '/',
     display: 'standalone',
-    orientation: 'portrait',
-    background_color: '#FFFFFF',
-    theme_color: '#FFFFFF',
+        background_color: '#F8FAFC',
+    theme_color: '#15803D',
     categories: ['business', 'productivity', 'communication'],
     lang: 'pt-BR',
     icons: [
@@ -45,7 +44,7 @@ export default function manifest(): MetadataRoute.Manifest {
        name: 'Abrir Inbox',
        short_name: 'Inbox',
        description: 'Abrir conversas',
-       url: '/mobile',
+       url: '/dashboard/inbox',
        icons: [
         {
           src: '/icons/icon-192x192.png',
