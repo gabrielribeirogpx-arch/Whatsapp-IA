@@ -31,8 +31,6 @@ export default function Sidebar({
   error = false,
   onRetry,
 }: SidebarProps) {
-  console.log("[SIDEBAR RECEIVED]", contacts.length);
-  console.log("[SIDEBAR FIRST ITEM]", contacts[0]?.id);
   const [searchTerm, setSearchTerm] = useState('');
   const [activeFilter, setActiveFilter] = useState<ConversationFilterId>('all');
   const [filtersOpen, setFiltersOpen] = useState(false);

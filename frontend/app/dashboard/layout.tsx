@@ -184,7 +184,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
         </aside>
       )}
 
-      <main className={`min-w-0 flex-1 overflow-y-auto transition-all duration-300 ease-out ${campaignWizardFullscreen ? 'w-screen max-w-none basis-full' : ''}`}>
+      <main className={`wazza-desktop-main min-w-0 flex-1 overflow-y-auto transition-all duration-300 ease-out ${campaignWizardFullscreen ? 'w-screen max-w-none basis-full' : ''}`}>
         {children}
       </main>
     </div>
