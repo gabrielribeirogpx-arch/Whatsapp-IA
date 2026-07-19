@@ -8558,7 +8558,9 @@ button:disabled, input:disabled, select:disabled, textarea:disabled { transition
   .mobile-page-container :where(img, svg, canvas) { max-width: 100%; }
   .mobile-page-container :where(input, select, textarea) { min-height: var(--mobile-control-height); border-radius: 12px; }
   .mobile-page-container textarea { min-height: 96px; resize: vertical; }
-  .mobile-page-container :where(button, [role='button']) { min-height: var(--mobile-control-height); }
+  /* Switch tracks keep their intrinsic dimensions; their parent control already
+     provides the interactive target size. This also preserves Radix switches. */
+  .mobile-page-container :where(button, [role='button']):not([role='switch']) { min-height: var(--mobile-control-height); }
   .mobile-page-container :where(pre, code) { overflow-wrap: anywhere; }
 
   .primary-button, .secondary-button, .ghost-button {
