@@ -1,6 +1,6 @@
 'use client';
 
-import { ReactNode, useEffect, useState } from 'react';
+import { Fragment, ReactNode, useEffect, useState } from 'react';
 
 type Props<T> = {
   data: T[];
@@ -44,6 +44,6 @@ export function ResponsiveDataView<T>({
   if (!data.length) return <>{emptyState ?? <p className="text-sm text-slate-500">Nenhum resultado encontrado.</p>}</>;
 
   // During SSR use the desktop table; after hydration only one costly view exists.
-  const content = isCompact ? <div className="responsive-data-mobile">{data.map(mobileView)}</div> : desktopView;
+  const content = isCompact ? <div className="responsive-data-mobile">{data.map((item, index) => <Fragment key={index}>{mobileView(item, index)}</Fragment>)}</div> : desktopView;
   return <div className={`min-w-0 ${className}`}>{content}{pagination ? <div className="responsive-data-pagination">{pagination}</div> : null}</div>;
 }
