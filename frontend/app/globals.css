@@ -3510,13 +3510,16 @@ input {
   font-weight: 700;
 }
 
+.pipeline-kanban-scroll {
+  overflow-x: auto;
+  padding-bottom: 0.35rem;
+}
+
 .pipeline-board {
   display: grid;
   grid-template-columns: repeat(4, minmax(250px, 1fr));
   gap: 1rem;
   align-items: stretch;
-  overflow-x: auto;
-  padding-bottom: 0.35rem;
 }
 
 .pipeline-column {
@@ -7852,23 +7855,28 @@ input {
     font-weight: 650;
   }
 
-  .pipeline-board {
-    /*
-     * Keep stages on a single horizontal track. The previous grid definition
-     * could create additional rows when its auto-fit sizing ran out of room,
-     * which made the desktop board read like a vertical list instead of a
-     * Kanban. Columns grow to use available desktop width and overflow only
-     * this board when there are more stages than fit.
-     */
-    display: flex;
-    align-items: flex-start;
-    gap: 12px;
+  .pipeline-kanban-scroll {
     overflow-x: auto;
     overflow-y: visible;
     padding-bottom: 8px;
     scroll-behavior: smooth;
     scrollbar-color: #cbd5e1 transparent;
     scrollbar-width: thin;
+  }
+
+  .pipeline-board {
+    /*
+     * Keep stages on a single horizontal track. The previous grid definition
+     * could create additional rows when its auto-fit sizing ran out of room,
+     * which made the desktop board read like a vertical list instead of a
+     * Kanban. Columns grow to use available desktop width and overflow only
+     * the dedicated Kanban viewport when there are more stages than fit.
+     */
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    width: max-content;
+    min-width: 100%;
   }
 
   .pipeline-column {

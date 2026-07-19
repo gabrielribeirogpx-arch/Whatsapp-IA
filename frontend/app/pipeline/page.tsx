@@ -381,31 +381,33 @@ export default function PipelinePage() {
         </div>
       </section>
 
-      <section className="pipeline-metrics-grid pipeline-desktop-only" aria-label="Resumo do pipeline">
-        <article className="pipeline-metric-card">
-          <div className="pipeline-metric-icon"><Users size={20} /></div>
-          <span>Leads Ativos</span>
-          <strong>{totalLeads}</strong>
-          <small>{visibleLeads} visíveis nos filtros</small>
-        </article>
-        <article className="pipeline-metric-card">
-          <div className="pipeline-metric-icon"><CircleDollarSign size={20} /></div>
-          <span>Leads no Pipeline</span>
-          <strong>{totalLeads}</strong>
-          <small>Dados reais do banco</small>
-        </article>
-        <article className="pipeline-metric-card">
-          <div className="pipeline-metric-icon"><Target size={20} /></div>
-          <span>Taxa de Conversão</span>
-          <strong>{conversionRate}%</strong>
-          <small>Leads em fechamento</small>
-        </article>
-        <article className="pipeline-metric-card">
-          <div className="pipeline-metric-icon"><Clock3 size={20} /></div>
-          <span>SLA na Etapa</span>
-          <strong>{maxStageAgeDays ? `${maxStageAgeDays} dias` : '—'}</strong>
-          <small>Ciclo comercial previsto</small>
-        </article>
+      <section className="pipeline-metrics-section pipeline-desktop-only" aria-label="Resumo do pipeline">
+        <div className="pipeline-metrics-grid">
+          <article className="pipeline-metric-card">
+            <div className="pipeline-metric-icon"><Users size={20} /></div>
+            <span>Leads Ativos</span>
+            <strong>{totalLeads}</strong>
+            <small>{visibleLeads} visíveis nos filtros</small>
+          </article>
+          <article className="pipeline-metric-card">
+            <div className="pipeline-metric-icon"><CircleDollarSign size={20} /></div>
+            <span>Leads no Pipeline</span>
+            <strong>{totalLeads}</strong>
+            <small>Dados reais do banco</small>
+          </article>
+          <article className="pipeline-metric-card">
+            <div className="pipeline-metric-icon"><Target size={20} /></div>
+            <span>Taxa de Conversão</span>
+            <strong>{conversionRate}%</strong>
+            <small>Leads em fechamento</small>
+          </article>
+          <article className="pipeline-metric-card">
+            <div className="pipeline-metric-icon"><Clock3 size={20} /></div>
+            <span>SLA na Etapa</span>
+            <strong>{maxStageAgeDays ? `${maxStageAgeDays} dias` : '—'}</strong>
+            <small>Ciclo comercial previsto</small>
+          </article>
+        </div>
       </section>
 
       <section className="pipeline-toolbar pipeline-desktop-only" aria-label="Controles do pipeline">
@@ -454,8 +456,10 @@ export default function PipelinePage() {
         </div>
       ) : null}
 
-      <section className="pipeline-board pipeline-desktop-only" aria-label="Kanban de vendas">
-        {filteredStages.map((stage) => {
+      <section className="pipeline-kanban-section pipeline-desktop-only" aria-label="Kanban de vendas">
+        <div className="pipeline-kanban-scroll">
+          <div className="pipeline-board">
+            {filteredStages.map((stage) => {
           const stageValue = stage.leads.length;
 
           return (
@@ -534,7 +538,9 @@ export default function PipelinePage() {
               </div>
             </article>
           );
-        })}
+            })}
+          </div>
+        </div>
       </section>
 
       <MobileBottomSheet open={Boolean(selectedLead)} onClose={() => setSelectedLead(null)} title={selectedLead?.name || 'Detalhes do lead'} footer={selectedLead ? <button type="button" className="primary-button w-full" onClick={() => { setMoveLead(selectedLead); setMoveTargetStageId(selectedLead.stage_id || ''); setSelectedLead(null); }}>Mover de etapa</button> : null}>
