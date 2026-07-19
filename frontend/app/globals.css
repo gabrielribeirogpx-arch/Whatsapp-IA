@@ -8341,3 +8341,51 @@ button:disabled, input:disabled, select:disabled, textarea:disabled { transition
   .responsive-data-card { display: grid; gap: 8px; padding: 14px; border: 1px solid #e2e8f0; border-radius: 16px; background: #fff; box-shadow: 0 3px 10px rgba(15,23,42,.03); }
   .responsive-data-card > div { display: flex; justify-content: space-between; gap: 8px; }.responsive-data-card strong { color: #0f172a; font-size: 15px; }.responsive-data-card p, .responsive-data-card small { margin: 0; color: #64748b; font-size: 13px; }.responsive-data-card > span { width: fit-content; padding: 3px 8px; border-radius: 999px; background: #ecfdf5; color: #166534; font-size: 12px; font-weight: 600; }
 }
+
+/* Inbox mobile native navigation: list, chat and CRM are exclusive below desktop. */
+.wa-mobile-inbox-title, .wa-desktop-menu { display: none; }
+.wa-chat-contact { border: 0; background: transparent; padding: 0; text-align: left; color: inherit; cursor: pointer; }
+@media (max-width: 1023px) {
+  .wa-layout { position: fixed; inset: 0; z-index: 30; display: block; height: 100dvh; min-height: 100svh; background: #fff; overflow: hidden; }
+  .wa-layout .wa-sidebar, .wa-layout .wa-chat-window, .wa-layout .wa-crm-sidebar { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; box-shadow: none; }
+  .wa-layout .wa-sidebar { display: block; transform: none; z-index: 2; overflow: hidden; }
+  .wa-layout .wa-chat-window { display: none; z-index: 3; min-height: 0; height: 100dvh; grid-template-rows: auto minmax(0, 1fr) auto; }
+  .wa-layout.wa-mobile-chat-active .wa-sidebar { display: none; }
+  .wa-layout.wa-mobile-chat-active .wa-chat-window { display: grid; }
+  .wa-layout .wa-crm-sidebar { display: none; z-index: 5; transform: none; background: #f7f8fa; }
+  .wa-layout .wa-crm-sidebar.open { display: block; }
+  .wa-contact-list { height: 100%; overflow-y: auto; padding: calc(env(safe-area-inset-top) + 12px) 12px calc(env(safe-area-inset-bottom) + 90px); }
+  .wa-mobile-inbox-title { display: flex; align-items: center; justify-content: space-between; min-height: 48px; margin: 0 4px 8px; }
+  .wa-mobile-inbox-title h1 { margin: 0; color: #111b21; font-size: 1.35rem; }
+  .wa-mobile-inbox-title button { position: relative; display: grid; place-items: center; width: 44px; height: 44px; border: 0; border-radius: 50%; background: #f0f2f5; color: #54656f; }
+  .wa-mobile-inbox-title span { position: absolute; right: 3px; top: 2px; min-width: 16px; border-radius: 999px; background: #00a884; color: #fff; font-size: .65rem; font-weight: 800; }
+  .wa-filter-chips { display: none; }
+  .wa-contact-item { min-height: 72px; padding: 11px 8px; border-radius: 0; border-bottom: 1px solid #edf0f2; }
+  .wa-contact-item:active { background: #f0f2f5; }
+  .wa-contact-preview { max-width: calc(100vw - 105px); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .wa-mobile-inbox-skeleton { display: grid; gap: 12px; padding: 10px 4px; }
+  .wa-mobile-inbox-skeleton i { height: 64px; border-radius: 12px; background: linear-gradient(90deg,#f0f2f5,#fafafa,#f0f2f5); background-size: 200% 100%; animation: wa-mobile-shimmer 1.2s infinite; }
+  .wa-mobile-filter-options { display: grid; gap: 8px; padding-bottom: 10px; }
+  .wa-mobile-filter-options button { min-height: 48px; border: 1px solid #e9edef; border-radius: 12px; background: #fff; color: #334155; text-align: left; padding: 0 14px; font-size: .95rem; }
+  .wa-mobile-filter-options button.active { border-color: #00a884; background: #e7fce3; color: #087f5b; font-weight: 700; }
+  .wa-mobile-menu { display: inline-grid; flex: 0 0 44px; place-items: center; width: 44px; height: 44px; border: 0; border-radius: 50%; background: transparent; color: #54656f; }
+  .wa-chat-header { min-height: calc(64px + env(safe-area-inset-top)); padding: calc(env(safe-area-inset-top) + 8px) 10px 8px; flex-wrap: nowrap; gap: 6px; }
+  .wa-chat-contact { min-width: 0; flex: 1; gap: 9px; overflow: hidden; }
+  .wa-chat-contact > div:last-child { min-width: 0; overflow: hidden; }
+  .wa-chat-header h1, .wa-chat-header p { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .wa-chat-actions { width: auto; margin-left: 0; }
+  .wa-chat-actions-row .wa-mode-selector, .wa-mode-feedback, .wa-chat-handoff-badge { display: none; }
+  .wa-conversation-menu-trigger { width: 44px; height: 44px; }
+  .wa-conversation-menu { position: fixed; top: calc(env(safe-area-inset-top) + 60px); right: 10px; }
+  .wa-messages-panel { min-height: 0; padding: 16px 12px; overscroll-behavior: contain; scroll-padding-bottom: 20px; }
+  .wa-message-bubble { max-width: 86%; font-size: .94rem; }
+  .wa-message-composer.premium { padding: 8px 10px calc(env(safe-area-inset-bottom) + 8px); }
+  .wa-message-composer textarea { font-size: 16px; max-height: 132px; }
+  .wa-composer-icon-btn { width: 44px; height: 44px; }
+  .wa-send-btn-modern { width: 44px; height: 44px; }
+  .wa-crm-sidebar { overflow: hidden; }
+  .wa-crm-mobile-header { display: flex; padding-top: calc(env(safe-area-inset-top) + 12px); }
+  .wa-crm-content { padding-bottom: calc(env(safe-area-inset-bottom) + 24px); }
+}
+@keyframes wa-mobile-shimmer { to { background-position: -200% 0; } }
+@media (prefers-reduced-motion: reduce) { .wa-mobile-inbox-skeleton i { animation: none; } }

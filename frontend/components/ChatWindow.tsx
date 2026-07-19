@@ -1,5 +1,5 @@
 import { FormEvent, KeyboardEvent, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { MoreVertical, Paperclip, Mic, RotateCcw, SendHorizontal, Smile, X } from 'lucide-react';
+import { ArrowLeft, MoreVertical, Paperclip, Mic, RotateCcw, SendHorizontal, Smile, X } from 'lucide-react';
 import { ChatMessage, Contact, ConversationMode } from '../lib/types';
 import { IconMenu } from './icons';
 import Avatar from './Avatar';
@@ -14,6 +14,8 @@ type ChatWindowProps = {
   onInputChange: (value: string) => void;
   onSend: (event: FormEvent<HTMLFormElement>) => void;
   onToggleSidebar: () => void;
+  onBack: () => void;
+  onOpenDetails: () => void;
   mode: ConversationMode;
   presenceStatus?: string;
   typingText?: string;
@@ -49,7 +51,7 @@ const formatSize = (bytes: number) => {
 };
 
 export default function ChatWindow(props: ChatWindowProps) {
-  const { contact, messages, inputValue, onInputChange, onSend, onToggleSidebar, mode, presenceStatus, typingText, modeUpdating = false, modeNotice, modeError, emptyStateMessage, onModeChange, onResetConversation, resetInProgress = false } = props;
+  const { contact, messages, inputValue, onInputChange, onSend, onToggleSidebar, onBack, onOpenDetails, mode, presenceStatus, typingText, modeUpdating = false, modeNotice, modeError, emptyStateMessage, onModeChange, onResetConversation, resetInProgress = false } = props;
   const messagesRef = useRef<HTMLElement | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const isNearBottomRef = useRef(true);
@@ -196,12 +198,11 @@ export default function ChatWindow(props: ChatWindowProps) {
   return (
     <section className="wa-chat-window">
       <header className="wa-chat-header">
-        <button type="button" className="wa-mobile-menu" onClick={onToggleSidebar} aria-label="Abrir conversas">
-          <IconMenu width={20} />
-        </button>
+        <button type="button" className="wa-mobile-menu wa-mobile-back" onClick={onBack} aria-label="Voltar para conversas"><ArrowLeft size={22} /></button>
+        <button type="button" className="wa-desktop-menu" onClick={onToggleSidebar} aria-label="Abrir conversas"><IconMenu width={20} /></button>
         {contact ? (
           <>
-            <div className="wa-chat-contact">
+            <button type="button" className="wa-chat-contact" onClick={onOpenDetails} aria-label="Abrir detalhes do contato">
               <Avatar name={contact.name} avatarUrl={contact.avatarUrl} phone={contact.phone} />
               <div>
                 <h1>{contact.name || contact.phone}</h1>
@@ -213,7 +214,7 @@ export default function ChatWindow(props: ChatWindowProps) {
                   <div className={`wa-chat-handoff-badge ${handoffStatus.className}`}>{handoffStatus.label}</div>
                 ) : null}
               </div>
-            </div>
+            </button>
             <div className="wa-chat-actions">
               <div className="wa-chat-actions-row">
                 <ConversationModeSelector mode={mode} loading={modeUpdating} disabled={!contact} onChange={onModeChange} />

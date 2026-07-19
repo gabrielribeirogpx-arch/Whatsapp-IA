@@ -1,4 +1,6 @@
 import { useMemo, useState } from 'react';
+import { Filter, Search } from 'lucide-react';
+import { MobileBottomSheet } from './layout/MobileBottomSheet';
 import Avatar from './Avatar';
 import { Contact } from '../lib/types';
 import { CONVERSATION_FILTERS, ConversationFilterId, matchesConversationFilter } from '../lib/conversationFilters';
@@ -11,6 +13,7 @@ type SidebarProps = {
   onToggleSidebar: () => void;
   unansweredCount: number;
   humanRequestsCount: number;
+  loading?: boolean;
 };
 
 export default function Sidebar({
@@ -20,12 +23,14 @@ export default function Sidebar({
   sidebarOpen,
   onToggleSidebar,
   unansweredCount,
-  humanRequestsCount
+  humanRequestsCount,
+  loading = false
 }: SidebarProps) {
   console.log("[SIDEBAR RECEIVED]", contacts.length);
   console.log("[SIDEBAR FIRST ITEM]", contacts[0]?.id);
   const [searchTerm, setSearchTerm] = useState('');
   const [activeFilter, setActiveFilter] = useState<ConversationFilterId>('all');
+  const [filtersOpen, setFiltersOpen] = useState(false);
 
   const filterChips = CONVERSATION_FILTERS;
 
@@ -107,10 +112,9 @@ export default function Sidebar({
   return (
     <aside className={`wa-sidebar ${sidebarOpen ? 'open' : ''}`}>
       <div className="wa-contact-list">
+        <div className="wa-mobile-inbox-title"><h1>Inbox</h1><button type="button" onClick={() => setFiltersOpen(true)} aria-label="Abrir filtros"><Filter size={20} /><span>{activeFilter !== "all" ? "1" : ""}</span></button></div>
         <div className="wa-sidebar-search-wrapper">
-          <span className="wa-sidebar-search-icon" aria-hidden="true">
-            🔍
-          </span>
+          <span className="wa-sidebar-search-icon" aria-hidden="true"><Search size={17} /></span>
           <input
             type="text"
             className="wa-sidebar-search-input"
@@ -137,11 +141,12 @@ export default function Sidebar({
           })}
         </div>
 
-        {filteredContacts.length === 0 ? (
+        {loading ? <div className="wa-mobile-inbox-skeleton" aria-label="Carregando conversas"><i /><i /><i /><i /><i /></div> : null}
+        {!loading && filteredContacts.length === 0 ? (
           <p className="wa-inbox-empty">Nenhuma conversa encontrada</p>
         ) : null}
 
-        {filteredContacts.map((contact) => {
+        {!loading && filteredContacts.map((contact) => {
           const isActive = contact.id === selectedContactId;
           const displayName = contact.name || formatPhone(contact.phone);
           const assignedUserName = contact.assignedUserName?.trim() || 'Atendente';
@@ -187,6 +192,9 @@ export default function Sidebar({
           );
         })}
       </div>
+      <MobileBottomSheet open={filtersOpen} onClose={() => setFiltersOpen(false)} title="Filtrar conversas">
+        <div className="wa-mobile-filter-options" role="list">{filterChips.map((chip) => <button key={chip.id} type="button" className={activeFilter === chip.id ? "active" : ""} onClick={() => { setActiveFilter(chip.id); setFiltersOpen(false); }}>{chip.label}</button>)}</div>
+      </MobileBottomSheet>
     </aside>
   );
 }
