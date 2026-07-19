@@ -3,6 +3,7 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { AlertCircle, CheckCircle2, Loader2, Shield } from 'lucide-react';
 import { apiFetch } from '@/lib/api';
+import { FormSkeleton } from '@/components/ui/loading';
 
 type AIProvider = 'openai' | 'gemini' | 'anthropic' | 'wazza_default';
 
@@ -172,7 +173,7 @@ export default function AISettingsPage() {
     if (response.ok) { setSettings(await response.json()); setApiKey(''); setStatus('Chave removida.'); }
   }
 
-  if (loading) return <main className="px-5 py-6 text-sm text-slate-500 lg:px-6">Carregando configurações de IA...</main>;
+  if (loading) return <FormSkeleton />;
 
   return (
     <main className="min-h-screen w-full min-w-0 bg-slate-50 px-5 py-6 lg:px-6">

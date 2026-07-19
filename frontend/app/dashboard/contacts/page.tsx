@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react';
 import { apiFetch } from '@/lib/api';
 import { CRMContact } from '@/lib/types';
 import { formatDateTimeBR } from '@/lib/date';
+import { TableSkeleton } from '@/components/ui/loading';
 
 export default function ContactsPage() {
   const [contacts, setContacts] = useState<CRMContact[]>([]);
@@ -26,8 +27,8 @@ export default function ContactsPage() {
     <div className='space-y-4 p-6'>
       <h1 className='text-2xl font-semibold'>Contatos</h1>
       <input className='premium-input w-full max-w-sm' placeholder='Buscar por nome/telefone' value={search} onChange={(e) => setSearch(e.target.value)} />
-      {loading ? <p>Carregando...</p> : null}
-      <div className='overflow-auto rounded-xl border border-slate-200 bg-white'>
+      {loading ? <TableSkeleton rows={6} columns={6} showToolbar={false} /> : null}
+      {!loading ? <div className='overflow-auto rounded-xl border border-slate-200 bg-white'>
         <table className='min-w-full text-sm'>
           <thead className='bg-slate-50 text-left text-slate-700'><tr><th className='p-3 font-semibold'>Nome</th><th className='p-3 font-semibold'>Telefone</th><th className='p-3 font-semibold'>Etiquetas</th><th className='p-3 font-semibold'>Temperatura</th><th className='p-3 font-semibold'>Etapa do cliente</th><th className='p-3 font-semibold'>Último contato</th></tr></thead>
           <tbody>
@@ -43,7 +44,7 @@ export default function ContactsPage() {
             ))}
           </tbody>
         </table>
-      </div>
+      </div> : null}
     </div>
   );
 }
