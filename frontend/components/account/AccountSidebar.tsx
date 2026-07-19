@@ -88,8 +88,8 @@ export default function AccountSidebar({
   onTabChange: (tab: AccountTabId) => void;
 }) {
   return (
-    <aside className="sticky top-5 h-fit overflow-hidden rounded-3xl border border-[color:var(--surface-border)] bg-white/95 p-3 shadow-[0_18px_44px_-34px_rgba(15,23,42,0.75)] backdrop-blur">
-      <div className="border-b border-slate-100 px-3 pb-3 pt-2">
+    <aside className="sticky top-5 h-fit overflow-hidden rounded-2xl border border-slate-200 bg-white p-3">
+      <div className="border-b border-slate-200 px-3 pb-3 pt-2">
         <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
           Conta + Workspace
         </p>
@@ -111,18 +111,23 @@ export default function AccountSidebar({
                     key={id}
                     type="button"
                     onClick={() => onTabChange(id)}
-                    className={`group flex w-full items-start gap-3 rounded-2xl px-3 py-3 text-left transition-all duration-200 ${selected ? "bg-slate-950 text-white shadow-lg shadow-slate-950/15" : "text-slate-600 hover:bg-slate-100 hover:text-slate-950"}`}
+                    aria-current={selected ? "page" : undefined}
+                    className={`group relative flex w-full cursor-pointer items-center gap-3 rounded-xl border px-3 py-2.5 text-left transition-all duration-[180ms] active:scale-[0.98] ${selected ? "border-emerald-200 bg-emerald-50 text-slate-900" : "border-transparent text-slate-600 hover:translate-x-0.5 hover:bg-slate-50 hover:text-slate-900"}`}
                   >
+                    {selected && (
+                      <span
+                        className="absolute inset-y-2 left-0 w-1 rounded-full bg-emerald-500"
+                        aria-hidden="true"
+                      />
+                    )}
                     <span
-                      className={`mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border ${selected ? "border-white/10 bg-white/10 text-emerald-200" : "border-slate-200 bg-white text-slate-500 group-hover:text-emerald-600"}`}
+                      className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white transition-colors duration-[180ms] ${selected ? "text-emerald-600" : "text-slate-500 group-hover:text-slate-700"}`}
                     >
                       <Icon size={17} />
                     </span>
                     <span className="min-w-0 flex-1">
-                      <span className="text-sm font-semibold">{label}</span>
-                      <span
-                        className={`mt-0.5 block text-xs leading-snug ${selected ? "text-slate-300" : "text-slate-500"}`}
-                      >
+                      <span className="text-sm font-medium leading-5">{label}</span>
+                      <span className="mt-0.5 block text-xs leading-snug text-slate-500">
                         {description}
                       </span>
                     </span>
