@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { ReactNode, useEffect, useLayoutEffect, useState } from 'react';
+import { ReactNode, Suspense, useEffect, useLayoutEffect, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { deleteFlow, duplicateFlow, listFlows, updateFlowStatus } from '@/lib/api';
 import SidebarUserProfile from '@/components/SidebarUserProfile';
@@ -162,7 +162,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
 
   return (
     <>
-    {!campaignWizardFullscreen && <div className="dashboard-mobile-shell"><AppShell title={mobileMeta.title} backHref={mobileMeta.backHref}>{children}</AppShell></div>}
+    {!campaignWizardFullscreen && <div className="dashboard-mobile-shell"><Suspense fallback={null}><AppShell title={mobileMeta.title} backHref={mobileMeta.backHref}>{children}</AppShell></Suspense></div>}
     <div className={`dashboard-desktop-shell flex min-h-screen bg-[#F8FAFC] transition-[padding,margin] duration-300 ease-out ${campaignWizardFullscreen ? 'dashboard-layout--campaign-fullscreen' : ''}`} style={{ fontFamily: 'Inter, -apple-system, sans-serif' }}>
       {!campaignWizardFullscreen && !isFlowBuilder && !isFlowAnalytics && (
         <aside
