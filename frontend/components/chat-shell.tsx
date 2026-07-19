@@ -282,6 +282,7 @@ export default function ChatShell() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [conversationsLoading, setConversationsLoading] = useState(true);
   const [selectedContactId, setSelectedContactId] = useState("");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputValue, setInputValue] = useState("");
@@ -901,9 +902,23 @@ export default function ChatShell() {
   );
 
   useEffect(() => {
+    // URL changes are navigation state, not a reason to refetch the inbox cache.
+    if (hasLoadedConversationsRef.current) {
+      const targetContactId = searchParams.get("conversation") || searchParams.get("contact_id");
+      const targetPhone = searchParams.get("phone")?.replace(/\D/g, "") || "";
+      const match = conversations.find((conversation) =>
+        (targetContactId && String(conversation.contact_id ?? conversation.id) === targetContactId) ||
+        (targetPhone && conversation.phone.replace(/\D/g, "") === targetPhone),
+      );
+      if (match) setSelectedContactId(String(match.contact_id ?? match.id));
+      else if (!targetContactId && !targetPhone && typeof window !== "undefined" && window.innerWidth < 1024) setSelectedContactId("");
+      return;
+    }
+
+    setConversationsLoading(true);
     getConversations()
       .then((items) => {
-        const targetContactId = searchParams.get("contact_id");
+        const targetContactId = searchParams.get("conversation") || searchParams.get("contact_id");
         const targetPhone = searchParams.get("phone");
         const normalizedTargetPhone = targetPhone
           ? targetPhone.replace(/\D/g, "")
@@ -936,18 +951,34 @@ export default function ChatShell() {
           setQuerySelectionMissing(true);
         }
 
-        setSelectedContactId(
-          (current) =>
-            current ||
-            (items[0] ? String(items[0].contact_id ?? items[0].id) : ""),
-        );
+        // Desktop retains its selected conversation; mobile intentionally starts on the inbox list.
+        if (typeof window !== "undefined" && window.innerWidth >= 1024) {
+          setSelectedContactId((current) => current || (items[0] ? String(items[0].contact_id ?? items[0].id) : ""));
+        } else if (!targetContactId && !targetPhone) {
+          setSelectedContactId("");
+        }
       })
-      .catch(() => setConversations([]));
-  }, [searchParams, applyConversations]);
+      .catch(() => setConversations([]))
+      .finally(() => setConversationsLoading(false));
+  }, [searchParams, applyConversations, conversations]);
 
   function onSelectContact(contactId: string) {
     setSelectedContactId(contactId);
-    setCrmOpen(true);
+    setCrmOpen(false);
+    const params = new URLSearchParams(searchParams.toString());
+    params.set("conversation", contactId);
+    params.delete("contact_id");
+    params.delete("phone");
+    router.push(`/dashboard/inbox?${params.toString()}`);
+  }
+
+  function onBackToList() {
+    setCrmOpen(false);
+    const params = new URLSearchParams(searchParams.toString());
+    params.delete("conversation");
+    params.delete("contact_id");
+    params.delete("phone");
+    router.push(`/dashboard/inbox${params.toString() ? `?${params.toString()}` : ""}`);
   }
 
   async function onSend(event: FormEvent<HTMLFormElement>) {
@@ -1052,7 +1083,7 @@ export default function ChatShell() {
   }
 
   return (
-    <div className="wa-layout">
+    <div className={`wa-layout ${selectedContactId ? "wa-mobile-chat-active" : ""}`}>
       <Sidebar
         contacts={orderedContacts}
         selectedContactId={selectedContactId}
@@ -1061,6 +1092,7 @@ export default function ChatShell() {
         onToggleSidebar={() => setSidebarOpen((value) => !value)}
         unansweredCount={unansweredCount}
         humanRequestsCount={humanRequestsCount}
+        loading={conversationsLoading}
       />
       <ChatWindow
         contact={selectedContact}
@@ -1069,6 +1101,8 @@ export default function ChatShell() {
         onInputChange={handleInputChange}
         onSend={onSend}
         onToggleSidebar={() => setSidebarOpen((value) => !value)}
+        onBack={onBackToList}
+        onOpenDetails={() => setCrmOpen(true)}
         mode={mode}
         presenceStatus={formatPresenceStatus(
           selectedConversation
