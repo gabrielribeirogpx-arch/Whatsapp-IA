@@ -7960,7 +7960,18 @@ input {
   }
 
   .pipeline-board {
+    /*
+     * Keep stages on a single horizontal track. The previous grid definition
+     * could create additional rows when its auto-fit sizing ran out of room,
+     * which made the desktop board read like a vertical list instead of a
+     * Kanban. Columns grow to use available desktop width and overflow only
+     * this board when there are more stages than fit.
+     */
+    display: flex;
+    align-items: flex-start;
     gap: 12px;
+    overflow-x: auto;
+    overflow-y: visible;
     padding-bottom: 8px;
     scroll-behavior: smooth;
     scrollbar-color: #cbd5e1 transparent;
@@ -7968,8 +7979,9 @@ input {
   }
 
   .pipeline-column {
+    flex: 1 0 236px;
     min-width: 236px;
-    min-height: 460px;
+    min-height: 0;
     padding: 10px;
     border-radius: 14px;
     box-shadow: var(--desktop-shadow);
@@ -8042,7 +8054,7 @@ input {
   .pipeline-lead-owner > span:first-of-type { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .pipeline-stage-age { margin-left: auto; color: #94a3b8 !important; white-space: nowrap; }
 
-  .pipeline-empty-stage { min-height: 220px; padding: 16px; border-radius: 12px; }
+  .pipeline-empty-stage { min-height: 0; padding: 16px; border-radius: 12px; }
   .pipeline-empty-icon { width: 40px; height: 40px; margin-bottom: 6px; border-radius: 12px; }
   .pipeline-empty-stage h3 { font-size: 13px; }
   .pipeline-empty-stage p { margin: 3px 0 10px; font-size: 11px; }
