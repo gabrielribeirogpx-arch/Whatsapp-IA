@@ -96,11 +96,7 @@ export default function PipelineSettingsTab() {
 
   const saveProfile = async (profile: WorkspaceProfile) => {
     await run(async () => {
-      const settings = await getSystemSettings();
       await updateSystemSettings({
-        ...settings,
-        token: settings.token || null,
-        webhook_url: settings.webhook_url || null,
         workspace_profile: profile
       });
       setWorkspaceProfile(profile);
