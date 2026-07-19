@@ -7758,6 +7758,98 @@ input {
   }
 }
 
+/* ── Desktop enterprise foundation ───────────────────────────────────────
+   Shared by every dashboard route. These rules intentionally live after the
+   legacy page styles so older modules inherit the current product language
+   without changing their data flow or mobile layout. */
+@media (min-width: 1024px) {
+  :root {
+    --desktop-content-gutter: clamp(24px, 2.25vw, 40px);
+    --desktop-control-height: 38px;
+    --desktop-radius: 14px;
+    --desktop-border: rgba(226, 232, 240, .92);
+    --desktop-shadow: 0 1px 2px rgba(15, 23, 42, .025), 0 10px 30px -24px rgba(15, 23, 42, .22);
+  }
+
+  .wazza-desktop-main {
+    min-height: 100dvh;
+    background: linear-gradient(180deg, #fbfcfe 0%, #f7f9fc 100%);
+    scrollbar-gutter: stable;
+  }
+
+  .wazza-desktop-main > :not(.flow-builder-page) {
+    animation: wazza-desktop-page-in 220ms var(--motion-ease, ease-out) both;
+  }
+
+  .dashboard-page {
+    gap: 20px;
+    padding: var(--desktop-content-gutter);
+    background: transparent;
+  }
+
+  .dashboard-hero {
+    min-height: 86px;
+    padding: 20px 22px;
+    border: 1px solid var(--desktop-border);
+    border-radius: var(--desktop-radius);
+    box-shadow: var(--desktop-shadow);
+  }
+
+  .dashboard-grid { gap: 16px; }
+  .dashboard-card, .premium-card, .products-form-card, .products-list-card {
+    border: 1px solid var(--desktop-border);
+    border-radius: var(--desktop-radius);
+    box-shadow: var(--desktop-shadow);
+  }
+
+  .dashboard-card { padding: 20px; }
+  .premium-card:hover { transform: translateY(-1px); box-shadow: 0 16px 32px -25px rgba(15, 23, 42, .28); }
+
+  .responsive-page-header {
+    min-height: 92px;
+    align-items: center;
+    padding: 24px var(--desktop-content-gutter) 20px;
+    border-bottom: 1px solid rgba(226, 232, 240, .72);
+  }
+  .responsive-page-header h1 { font-size: 25px; line-height: 1.2; letter-spacing: -.025em; font-weight: 700; }
+  .responsive-page-header p { max-width: 680px; font-size: 13px; line-height: 1.5; }
+  .responsive-page-header__eyebrow { display: block; margin-bottom: 5px; color: #16a34a; font-size: 10px; font-weight: 800; letter-spacing: .09em; text-transform: uppercase; }
+  .responsive-page-header__actions { justify-content: flex-end; }
+  .responsive-page-header__actions :where(button, a) { min-height: var(--desktop-control-height); }
+
+  .crm-table-wrap, .bot-rules-table-wrap {
+    border-color: var(--desktop-border);
+    border-radius: var(--desktop-radius);
+    box-shadow: var(--desktop-shadow);
+  }
+  .crm-table th, .crm-table td { padding: 12px 16px; }
+  .crm-table th {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    background: #f8fafc;
+    color: #64748b;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+  }
+  .crm-table tbody tr { transition: background-color 140ms ease; }
+  .crm-table tbody tr:hover { background: #f8fdf9; }
+
+  .dash-sidebar { padding: 10px 7px; border-right-color: rgba(226, 232, 240, .9); background: rgba(255, 255, 255, .92); backdrop-filter: blur(16px); }
+  .dash-sidebar.is-expanded { box-shadow: 10px 0 28px -26px rgba(15, 23, 42, .3); }
+  .dash-nav-item { min-height: 36px; border-radius: 10px; }
+  .dash-nav-item.active { box-shadow: inset 2px 0 0 #10b981; }
+  .dash-nav-item:focus-visible { outline: 2px solid rgba(16, 185, 129, .52); outline-offset: 2px; }
+}
+
+@keyframes wazza-desktop-page-in { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+
+@media (prefers-reduced-motion: reduce) {
+  .wazza-desktop-main > :not(.flow-builder-page) { animation: none; }
+}
+
 @keyframes aiStoreFadeIn {
   from { opacity: 0; }
   to { opacity: 1; }
