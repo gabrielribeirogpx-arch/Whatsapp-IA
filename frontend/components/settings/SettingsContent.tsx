@@ -93,8 +93,6 @@ import AccountPageHeader from "@/components/account/AccountPageHeader";
 const INITIAL_FORM: SystemSettingsPayload = {
   token: "",
   phone_number_id: "",
-  webhook_url: "",
-  webhook_status: "inactive",
   system_name: "",
   language: "pt-BR",
   workspace_profile: "private_sales",
@@ -1549,7 +1547,10 @@ function WhatsAppBusinessConsole() {
     useState<(typeof whatsappTabs)[number]["id"]>("overview");
   const [toast, setToast] = useState("");
   const [loading, setLoading] = useState(false);
-  const [form, setForm] = useState<SystemSettingsPayload>(INITIAL_FORM);
+  const [form, setForm] = useState<SystemSettingsPayload & { has_whatsapp_token: boolean }>({
+    ...INITIAL_FORM,
+    has_whatsapp_token: false,
+  });
   const [providers, setProviders] = useState<WhatsAppProvider[]>([]);
   const [templates, setTemplates] = useState<WhatsAppTemplate[]>([]);
   const [providerForm, setProviderForm] = useState(baseProviderForm);
@@ -1649,12 +1650,17 @@ function WhatsAppBusinessConsole() {
     run(
       async () => {
         e.preventDefault();
-        await updateSystemSettings({
-          ...form,
-          token: form.token || null,
+        const payload: SystemSettingsPayload = {
           phone_number_id: form.phone_number_id || null,
-          webhook_url: form.webhook_url || null,
-        });
+          system_name: form.system_name,
+          language: form.language,
+          workspace_profile: form.workspace_profile,
+        };
+        // An empty password field means "leave the existing token unchanged".
+        // This prevents unrelated settings saves from silently disconnecting Meta.
+        if (form.token?.trim()) payload.token = form.token.trim();
+        const updated = await updateSystemSettings(payload);
+        setForm((current) => ({ ...current, ...updated, token: "" }));
       },
       ok,
       "Falha ao salvar configurações",
@@ -1943,9 +1949,9 @@ function WhatsAppBusinessConsole() {
           className="w-full min-w-0 space-y-4 rounded-2xl border border-[color:var(--surface-border)] bg-white/95 p-5 shadow-[0_14px_34px_-30px_rgba(15,23,42,0.85)]"
         >
           <div>
-            <h2 className="text-base font-semibold text-slate-950">API Keys</h2>
+            <h2 className="text-base font-semibold text-slate-950">Credenciais da Meta</h2>
             <p className="mt-1 text-sm text-slate-500">
-              Token e identificador do número usados pelo runtime.
+              O token de acesso da Meta é usado somente pelo runtime. Ele nunca é exibido novamente após ser salvo.
             </p>
           </div>
           <div className="grid gap-3 md:grid-cols-2">
@@ -1955,7 +1961,7 @@ function WhatsAppBusinessConsole() {
               onChange={(e) =>
                 setForm((p) => ({ ...p, token: e.target.value }))
               }
-              placeholder="Token atual (ENV fallback preservado)"
+              placeholder={form.has_whatsapp_token ? "Novo token (deixe em branco para manter o atual)" : "Token de acesso da Meta"}
               className="premium-input w-full"
             />
             <input
@@ -1970,46 +1976,21 @@ function WhatsAppBusinessConsole() {
           <button disabled={loading} className="primary-button">
             Salvar credenciais
           </button>
+          {form.has_whatsapp_token ? <p className="text-xs font-medium text-emerald-700">Token configurado com segurança.</p> : null}
         </form>
       )}
       {tab === "webhooks" && (
-        <form
-          onSubmit={(e: FormEvent) =>
-            saveSettings(e, "Webhook salvo com sucesso")
-          }
-          className="w-full min-w-0 space-y-4 rounded-2xl border border-[color:var(--surface-border)] bg-white/95 p-5 shadow-[0_14px_34px_-30px_rgba(15,23,42,0.85)]"
-        >
+        <section className="w-full min-w-0 space-y-4 rounded-2xl border border-[color:var(--surface-border)] bg-white/95 p-5 shadow-[0_14px_34px_-30px_rgba(15,23,42,0.85)]">
           <div>
-            <h2 className="text-base font-semibold text-slate-950">Webhooks</h2>
+            <h2 className="text-base font-semibold text-slate-950">Webhooks da Meta</h2>
             <p className="mt-1 text-sm text-slate-500">
-              Endpoint de recebimento e status operacional.
+              O Wazza recebe eventos da Meta no endpoint configurado na integração do provedor. Não há webhooks de saída configuráveis neste workspace.
             </p>
           </div>
-          <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_220px]">
-            <input
-              value={form.webhook_url ?? ""}
-              onChange={(e) =>
-                setForm((p) => ({ ...p, webhook_url: e.target.value }))
-              }
-              placeholder="URL do webhook"
-              className="premium-input w-full"
-            />
-            <select
-              value={form.webhook_status ?? "inactive"}
-              onChange={(e) =>
-                setForm((p) => ({ ...p, webhook_status: e.target.value }))
-              }
-              className="premium-input w-full"
-            >
-              <option value="active">Ativo</option>
-              <option value="inactive">Inativo</option>
-              <option value="pending">Pendente</option>
-            </select>
+          <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
+            Configure ou valide o callback da Meta em <strong>Conexões</strong>. A entrega de eventos de saída, histórico, retry e assinatura de webhooks externos não são recursos disponíveis no backend atual e, por isso, não são exibidos como ativos.
           </div>
-          <button disabled={loading} className="primary-button">
-            Salvar webhook
-          </button>
-        </form>
+        </section>
       )}
     </div>
   );

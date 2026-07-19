@@ -1,6 +1,6 @@
 """preserve manual WhatsApp providers alongside Meta Embedded Signup
 
-Revision ID: 20260719_whatsapp_provider_auth_type
+Revision ID: 20260719_wp_auth_type
 Revises: 20260717_merge_meta_campaign
 Create Date: 2026-07-19
 """
@@ -8,7 +8,7 @@ Create Date: 2026-07-19
 from alembic import op
 
 
-revision = "20260719_whatsapp_provider_auth_type"
+revision = "20260719_wp_auth_type"
 down_revision = "20260717_merge_meta_campaign"
 branch_labels = None
 depends_on = None

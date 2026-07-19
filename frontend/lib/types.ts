@@ -449,23 +449,22 @@ export type FlowAnalytics = {
 };
 
 export type SystemSettings = {
-  token: string | null;
-  phone_number_id: string;
-  webhook_url: string | null;
-  webhook_status: string;
+  has_whatsapp_token: boolean;
+  phone_number_id: string | null;
   system_name: string;
   language: string;
   workspace_profile: WorkspaceProfile;
 };
 
 export type SystemSettingsPayload = {
-  token: string | null;
-  phone_number_id: string;
-  webhook_url: string | null;
-  webhook_status: string;
-  system_name: string;
-  language: string;
-  workspace_profile: WorkspaceProfile;
+  token?: string | null;
+  whatsapp_token?: string | null;
+  phone_number_id?: string | null;
+  webhook_url?: string | null;
+  webhook_status?: string | null;
+  system_name?: string;
+  language?: string;
+  workspace_profile?: WorkspaceProfile;
 };
 
 export type WhatsAppProvider = { id:string; provider_type:string; auth_type?: 'manual' | 'embedded_signup'; display_name?:string|null; waba_id?:string|null; phone_number_id?:string|null; business_id?:string|null; is_active:boolean; status:string; connection_status:'connected'|'token_expired'|'invalid_token'|'invalid_phone_number'|'meta_error'|'disconnected'|string; last_validation_at?: string | null; last_validation_error?: string | null; metadata_json?: Record<string, any>; last_connection_check_at?: string | null; updated_at?: string; access_token_masked?:string|null; connection_type?: 'cloud_api' | 'cloud_api_coexistence' | string; coexistence_enabled?: boolean; coexistence_status?: string | null; business_phone_number_id?: string | null; phone_display_name?: string | null; phone_verified_name?: string | null; onboarding_metadata?: Record<string, any> | null };

@@ -1,3 +1,5 @@
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -8,15 +10,13 @@ from app.schemas.settings import SettingsOut, SettingsUpdateIn
 from app.services.tenant_service import get_current_tenant
 
 router = APIRouter(tags=["settings"])
+logger = logging.getLogger(__name__)
 
 
 def _serialize_settings(tenant: Tenant) -> SettingsOut:
     return SettingsOut(
-        token=tenant.whatsapp_token,
-        whatsapp_token=tenant.whatsapp_token,
+        has_whatsapp_token=bool(tenant.whatsapp_token),
         phone_number_id=tenant.phone_number_id,
-        webhook_url=tenant.webhook_url,
-        webhook_status=tenant.webhook_status or "inactive",
         system_name=tenant.name or "WhatsApp IA",
         language=tenant.language or "pt-BR",
         workspace_profile=tenant.workspace_profile or "private_sales",
@@ -25,8 +25,7 @@ def _serialize_settings(tenant: Tenant) -> SettingsOut:
 
 @router.get("/settings", response_model=SettingsOut)
 def get_settings(request: Request, tenant: Tenant = Depends(get_current_tenant)):
-    tenant_id = getattr(request.state, "tenant_id", None)
-    print("[SETTINGS GET]", tenant_id)
+    logger.info("event=settings_read tenant_id=%s", getattr(request.state, "tenant_id", None))
     return _serialize_settings(tenant)
 
 
@@ -38,8 +37,13 @@ def update_settings(
     tenant: Tenant = Depends(get_current_tenant),
 ):
     tenant_id = getattr(request.state, "tenant_id", None)
-    print("[SETTINGS SAVE]", tenant_id, payload.dict())
     provided_fields = getattr(payload, "model_fields_set", getattr(payload, "__fields_set__", set()))
+    logger.info(
+        "event=settings_update tenant_id=%s fields=%s has_whatsapp_token_update=%s",
+        tenant_id,
+        sorted(provided_fields),
+        "whatsapp_token" in provided_fields or "token" in provided_fields,
+    )
     try:
         disconnect_whatsapp = False
 
@@ -49,7 +53,7 @@ def update_settings(
             if normalized_token in (None, ""):
                 tenant.whatsapp_token = None
                 disconnect_whatsapp = True
-                print("[SETTINGS CLEAR FIELD]", "field=whatsapp_token", f"tenant_id={tenant_id}")
+                logger.info("event=whatsapp_token_cleared tenant_id=%s", tenant_id)
             else:
                 tenant.whatsapp_token = normalized_token
 
@@ -70,7 +74,7 @@ def update_settings(
 
         if disconnect_whatsapp:
             tenant.webhook_status = "inactive"
-            print("[SETTINGS WHATSAPP DISCONNECTED]", f"tenant_id={tenant_id}")
+            logger.info("event=whatsapp_disconnected tenant_id=%s", tenant_id)
 
         if payload.system_name is not None:
             tenant.name = payload.system_name.strip()
@@ -86,10 +90,10 @@ def update_settings(
         db.refresh(tenant)
 
         if disconnect_whatsapp:
-            print("[SETTINGS DISCONNECTED SUCCESS]", f"tenant_id={tenant_id}")
+            logger.info("event=settings_disconnected tenant_id=%s", tenant_id)
     except IntegrityError as error:
         db.rollback()
-        print("[SETTINGS ERROR]", error)
+        logger.warning("event=settings_update_integrity_error tenant_id=%s", tenant_id)
         constraint_name = ""
         if getattr(error, "orig", None) is not None:
             constraint_name = getattr(getattr(error.orig, "diag", None), "constraint_name", "") or ""
@@ -103,7 +107,7 @@ def update_settings(
         raise
     except Exception as error:
         db.rollback()
-        print("[SETTINGS ERROR]", error)
+        logger.exception("event=settings_update_error tenant_id=%s", tenant_id)
         raise
 
     return _serialize_settings(tenant)
