@@ -283,6 +283,8 @@ export default function ChatShell() {
   const searchParams = useSearchParams();
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [conversationsLoading, setConversationsLoading] = useState(true);
+  const [conversationsError, setConversationsError] = useState(false);
+  const [conversationLoadAttempt, setConversationLoadAttempt] = useState(0);
   const [selectedContactId, setSelectedContactId] = useState("");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputValue, setInputValue] = useState("");
@@ -916,6 +918,7 @@ export default function ChatShell() {
     }
 
     setConversationsLoading(true);
+    setConversationsError(false);
     getConversations()
       .then((items) => {
         const targetContactId = searchParams.get("conversation") || searchParams.get("contact_id");
@@ -958,9 +961,12 @@ export default function ChatShell() {
           setSelectedContactId("");
         }
       })
-      .catch(() => setConversations([]))
+      .catch(() => {
+        setConversations([]);
+        setConversationsError(true);
+      })
       .finally(() => setConversationsLoading(false));
-  }, [searchParams, applyConversations, conversations]);
+  }, [searchParams, applyConversations, conversations, conversationLoadAttempt]);
 
   function onSelectContact(contactId: string) {
     setSelectedContactId(contactId);
@@ -1093,6 +1099,11 @@ export default function ChatShell() {
         unansweredCount={unansweredCount}
         humanRequestsCount={humanRequestsCount}
         loading={conversationsLoading}
+        error={conversationsError}
+        onRetry={() => {
+          hasLoadedConversationsRef.current = false;
+          setConversationLoadAttempt((attempt) => attempt + 1);
+        }}
       />
       <ChatWindow
         contact={selectedContact}

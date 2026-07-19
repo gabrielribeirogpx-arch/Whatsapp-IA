@@ -8371,7 +8371,9 @@ button:disabled, input:disabled, select:disabled, textarea:disabled { transition
   .wa-layout .wa-crm-sidebar { display: none; z-index: 5; transform: none; background: #f7f8fa; }
   .wa-layout .wa-crm-sidebar.open { display: block; }
   .wa-contact-list { height: 100%; overflow-y: auto; padding: calc(env(safe-area-inset-top) + 12px) 12px calc(env(safe-area-inset-bottom) + 90px); }
-  .wa-mobile-inbox-title { display: flex; align-items: center; justify-content: space-between; min-height: 48px; margin: 0 4px 8px; }
+  .wa-mobile-inbox-title { display: block; min-height: 48px; margin: 0 4px 8px; }
+  .wa-mobile-inbox-title .mobile-header { display: block; position: static; min-height: 48px; padding: 0; border: 0; background: transparent; }
+  .wa-mobile-inbox-title .mobile-header-inner { min-height: 48px; padding: 0; }
   .wa-mobile-inbox-title h1 { margin: 0; color: #111b21; font-size: 1.35rem; }
   .wa-mobile-inbox-title button { position: relative; display: grid; place-items: center; width: 44px; height: 44px; border: 0; border-radius: 50%; background: #f0f2f5; color: #54656f; }
   .wa-mobile-inbox-title span { position: absolute; right: 3px; top: 2px; min-width: 16px; border-radius: 999px; background: #00a884; color: #fff; font-size: .65rem; font-weight: 800; }
@@ -8384,6 +8386,9 @@ button:disabled, input:disabled, select:disabled, textarea:disabled { transition
   .wa-mobile-filter-options { display: grid; gap: 8px; padding-bottom: 10px; }
   .wa-mobile-filter-options button { min-height: 48px; border: 1px solid #e9edef; border-radius: 12px; background: #fff; color: #334155; text-align: left; padding: 0 14px; font-size: .95rem; }
   .wa-mobile-filter-options button.active { border-color: #00a884; background: #e7fce3; color: #087f5b; font-weight: 700; }
+  .wa-inbox-retry { display: grid; justify-items: start; gap: 10px; padding: 24px 12px; color: #54656f; text-align: left; }
+  .wa-inbox-retry p { margin: 0; }
+  .wa-inbox-retry button { min-height: 44px; padding: 0 14px; border: 0; border-radius: 10px; background: #00a884; color: #fff; font-weight: 700; }
   .wa-mobile-menu { display: inline-grid; flex: 0 0 44px; place-items: center; width: 44px; height: 44px; border: 0; border-radius: 50%; background: transparent; color: #54656f; }
   .wa-chat-header { min-height: calc(64px + env(safe-area-inset-top)); padding: calc(env(safe-area-inset-top) + 8px) 10px 8px; flex-wrap: nowrap; gap: 6px; }
   .wa-chat-contact { min-width: 0; flex: 1; gap: 9px; overflow: hidden; }
