@@ -437,6 +437,8 @@ function Toggle({
   return (
     <button
       type="button"
+      role="switch"
+      aria-checked={checked}
       onClick={() => onChange(!checked)}
       className={`flex items-center justify-between gap-4 rounded-3xl border p-5 text-left ${checked ? "border-emerald-200 bg-emerald-50" : "border-slate-200 bg-white"}`}
     >

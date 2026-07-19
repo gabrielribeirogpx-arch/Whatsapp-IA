@@ -387,7 +387,7 @@ export default function FlowsPage() {
                   </div>
 
                   <div className="contents lg:static lg:flex lg:w-auto lg:flex-wrap lg:items-center lg:justify-end lg:gap-2">
-                    <button type="button" onClick={(e) => { e.stopPropagation(); toggleFlowStatus(flow.id); }} aria-label={flow.is_active ? 'Desativar fluxo' : 'Ativar fluxo'} className="absolute right-10 top-3 h-5 w-9 rounded-full border-0 p-0 transition-colors lg:static lg:h-6 lg:w-11" style={{ backgroundColor: flow.is_active ? '#10b981' : '#d1d5db' }}>
+                    <button type="button" role="switch" aria-checked={flow.is_active} onClick={(e) => { e.stopPropagation(); toggleFlowStatus(flow.id); }} aria-label={flow.is_active ? 'Desativar fluxo' : 'Ativar fluxo'} className="absolute right-10 top-3 h-5 w-9 rounded-full border-0 p-0 transition-colors lg:static lg:h-6 lg:w-11" style={{ backgroundColor: flow.is_active ? '#10b981' : '#d1d5db' }}>
                       <span className={`absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white shadow-sm transition-transform lg:h-5 lg:w-5 ${flow.is_active ? 'translate-x-4 lg:translate-x-5' : ''}`} />
                     </button>
                     <button onClick={(e) => { e.stopPropagation(); openEdit(flow); }} className="hidden whitespace-nowrap rounded-xl border border-gray-100 bg-transparent px-3 py-1.5 text-xs font-semibold text-slate-600 transition hover:shadow-sm lg:block">Editar</button>
