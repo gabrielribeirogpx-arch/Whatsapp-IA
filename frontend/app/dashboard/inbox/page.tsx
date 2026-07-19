@@ -4,6 +4,7 @@ import { Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 
 import ChatShell from '@/components/chat-shell';
+import { InboxSkeleton } from '@/components/ui/loading';
 
 function InboxPageContent() {
   useSearchParams();
@@ -12,7 +13,7 @@ function InboxPageContent() {
 
 export default function InboxPage() {
   return (
-    <Suspense fallback={<div className="p-6 text-sm text-slate-500">Carregando inbox...</div>}>
+    <Suspense fallback={<InboxSkeleton />}>
       <InboxPageContent />
     </Suspense>
   );

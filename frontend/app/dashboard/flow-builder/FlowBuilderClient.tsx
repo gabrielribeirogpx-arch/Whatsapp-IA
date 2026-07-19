@@ -1,5 +1,7 @@
 'use client';
 
+import { FlowBuilderSkeleton } from '@/components/ui/loading';
+
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
@@ -3414,7 +3416,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
   }, []);
 
   if (isLoading) {
-    return <div>Carregando fluxo...</div>;
+    return <FlowBuilderSkeleton />;
   }
   return (
     <div className="flow-builder-page" style={{ width: '100%', height: '100vh', display: 'flex' }}>

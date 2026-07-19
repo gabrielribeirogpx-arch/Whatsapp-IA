@@ -1,9 +1,10 @@
 import { Suspense } from 'react';
 import SettingsPageClient from '@/components/settings/SettingsPageClient';
+import { FormSkeleton } from '@/components/ui/loading';
 
 export default function SettingsPage() {
   return (
-    <Suspense fallback={<div className='p-8 text-sm text-slate-500'>Carregando configurações...</div>}>
+    <Suspense fallback={<FormSkeleton />}>
       <SettingsPageClient />
     </Suspense>
   );

@@ -1,4 +1,5 @@
 import { BotRule } from '../../lib/types';
+import { TableSkeleton } from '@/components/ui/loading';
 
 type BotListProps = {
   rules: BotRule[];
@@ -12,7 +13,7 @@ export default function BotList({ rules, loading, deletingId, onDelete }: BotLis
     return (
       <article className="products-list-card">
         <h2>Regras cadastradas</h2>
-        <p>Carregando...</p>
+        <TableSkeleton rows={4} columns={4} showToolbar={false} showPagination={false} />
       </article>
     );
   }

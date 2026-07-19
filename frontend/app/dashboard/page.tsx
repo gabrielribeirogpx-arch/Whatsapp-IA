@@ -13,6 +13,7 @@ import CreateFlowModal from '@/components/flows/CreateFlowModal';
 import { getConversations, listFlows } from '../../lib/api';
 import { Conversation, FlowItem } from '../../lib/types';
 import { useDashboardAnalytics } from '../../hooks/useDashboardAnalytics';
+import { DashboardSkeleton } from '@/components/ui/loading';
 
 type DashboardViewModel = {
   activeConversations: number;
@@ -475,7 +476,7 @@ export default function DashboardPage() {
   if (!mounted || !data) {
     return (
       <div className="p-6 text-sm text-gray-500">
-        Carregando dashboard...
+        <DashboardSkeleton />
       </div>
     );
   }
