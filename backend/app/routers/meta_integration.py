@@ -16,7 +16,7 @@ import requests
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import RedirectResponse
-from sqlalchemy import select, update
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -216,6 +216,7 @@ def _provider_status(provider: TenantWhatsAppProvider | None) -> dict[str, Any]:
     return {
         "connected": bool(provider and provider.connection_status == "connected"),
         "provider_id": str(provider.id) if provider else None,
+        "auth_type": getattr(provider, "auth_type", "manual") if provider else None,
         "phone_number_id": provider.phone_number_id if provider else None,
         "display_phone_number": (
             (provider.phone_display_name or meta.get("display_phone_number"))
@@ -270,6 +271,7 @@ def get_meta_status(
             .where(
                 TenantWhatsAppProvider.tenant_id == tenant.id,
                 TenantWhatsAppProvider.provider_type == "meta_cloud",
+                TenantWhatsAppProvider.auth_type == "embedded_signup",
             )
             .order_by(
                 TenantWhatsAppProvider.is_active.desc(),
@@ -432,6 +434,7 @@ def meta_callback(
             .where(
                 TenantWhatsAppProvider.tenant_id == tenant_id,
                 TenantWhatsAppProvider.provider_type == "meta_cloud",
+                TenantWhatsAppProvider.auth_type == "embedded_signup",
             )
             .order_by(
                 TenantWhatsAppProvider.is_active.desc(),
@@ -441,9 +444,16 @@ def meta_callback(
         .scalars()
         .first()
     )
+    # Keep the boundary explicit as a defence in depth measure (and for
+    # database adapters that do not enforce the SQL predicate themselves).
+    if existing and getattr(existing, "auth_type", "manual") != "embedded_signup":
+        existing = None
+    # Only reconnect a connection that was itself created by Embedded Signup.
+    # Manual connections intentionally remain separate and untouched.
     provider = existing or TenantWhatsAppProvider(
-        tenant_id=tenant_id, provider_type="meta_cloud"
+        tenant_id=tenant_id, provider_type="meta_cloud", auth_type="embedded_signup"
     )
+    provider.auth_type = "embedded_signup"
     provider.display_name = discovered.get("waba_name") or "Meta WhatsApp Coexistence"
     provider.waba_id = discovered["waba_id"]
     provider.phone_number_id = phone_number_id
@@ -482,22 +492,8 @@ def meta_callback(
     provider.status = "connected"
     provider.connection_status = "connected"
     provider.is_active = True
-    (
-        db.execute(
-            update(TenantWhatsAppProvider)
-            .where(
-                TenantWhatsAppProvider.tenant_id == tenant_id,
-                TenantWhatsAppProvider.id != provider.id,
-            )
-            .values(is_active=False)
-        )
-        if existing
-        else db.execute(
-            update(TenantWhatsAppProvider)
-            .where(TenantWhatsAppProvider.tenant_id == tenant_id)
-            .values(is_active=False)
-        )
-    )
+    # Do not deactivate a manual connection merely because Embedded Signup was
+    # completed.  Users can explicitly choose the active connection later.
     if not existing:
         db.add(provider)
     db.commit()
@@ -537,6 +533,7 @@ def disconnect_meta(
             .where(
                 TenantWhatsAppProvider.tenant_id == tenant.id,
                 TenantWhatsAppProvider.provider_type == "meta_cloud",
+                TenantWhatsAppProvider.auth_type == "embedded_signup",
             )
             .order_by(
                 TenantWhatsAppProvider.is_active.desc(),

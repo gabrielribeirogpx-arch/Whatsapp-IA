@@ -52,6 +52,7 @@ class TenantWhatsAppProviderOut(BaseModel):
     id: UUID
     tenant_id: UUID
     provider_type: ProviderTypeEnum
+    auth_type: Literal["manual", "embedded_signup"] = "manual"
     display_name: str | None = None
     waba_id: str | None = None
     phone_number_id: str | None = None
