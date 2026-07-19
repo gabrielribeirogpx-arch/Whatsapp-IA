@@ -471,10 +471,10 @@ export default function PipelinePage() {
             >
               <header className="pipeline-column-header">
                 <div>
-                  <h2>{stage.name} <span>({stage.leads.length})</span></h2>
-                  <strong>{stageValue} leads</strong>
+                  <h2>{stage.name}</h2>
+                  <strong><span>{stageValue}</span> {stageValue === 1 ? 'lead' : 'leads'}</strong>
                 </div>
-                <KanbanSquare size={19} />
+                <span className="pipeline-stage-action" aria-label="Etapa do pipeline"><KanbanSquare size={17} /></span>
               </header>
 
               <div className="pipeline-leads">
@@ -506,7 +506,7 @@ export default function PipelinePage() {
                       </div>
 
                       <div className="pipeline-lead-meta-row">
-                        <span><ChannelIcon size={14} /> {getLeadChannel(lead)}</span>
+                        <span className="pipeline-lead-channel"><ChannelIcon size={13} /> {getLeadChannel(lead)}</span>
                         <span className={`lead-temp temp-${lead.temperature}`}>
                           {temperatureLabel[lead.temperature] || 'Frio'}
                         </span>
@@ -516,9 +516,9 @@ export default function PipelinePage() {
 
                       <div className="pipeline-lead-footer">
                         <span className="pipeline-lead-value"><TrendingUp size={14} /> Score {lead.score}</span>
-                        <span><Clock3 size={14} /> {formatRelativeDate(lead.last_interaction)}</span>
+                        <span className="pipeline-lead-time"><Clock3 size={13} /> {formatRelativeDate(lead.last_interaction)}</span>
                       </div>
-                      <div className="pipeline-lead-owner"><UserRound size={14} /> {owner || 'Sem responsável'} · Tempo na etapa: {formatRelativeDate(lead.entered_stage_at)}</div>
+                      <div className="pipeline-lead-owner"><UserRound size={13} /> <span>{owner || 'Sem responsável'}</span><span className="pipeline-stage-age">· {formatRelativeDate(lead.entered_stage_at)}</span></div>
                     </div>
                   );
                 })}
