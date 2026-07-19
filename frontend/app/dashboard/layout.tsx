@@ -7,20 +7,7 @@ import { deleteFlow, duplicateFlow, listFlows, updateFlowStatus } from '@/lib/ap
 import SidebarUserProfile from '@/components/SidebarUserProfile';
 import { dashboardSidebarSections, isDashboardSidebarItemActive } from '@/components/dashboard/sidebar-items';
 import { AppShell } from '@/components/layout/AppShell';
-
-function getMobilePageMeta(pathname: string) {
-  if (pathname.startsWith('/dashboard/inbox')) return { title: 'Conversas' };
-  if (pathname.startsWith('/dashboard/pipeline')) return { title: 'CRM' };
-  if (pathname.startsWith('/dashboard/contacts/')) return { title: 'Contato', backHref: '/dashboard/contacts' };
-  if (pathname.startsWith('/dashboard/contacts')) return { title: 'Contatos' };
-  if (pathname.startsWith('/dashboard/flow-builder')) return { title: 'Editor de fluxo', backHref: '/dashboard/flows' };
-  if (pathname.startsWith('/dashboard/flows')) return { title: 'Fluxos' };
-  if (pathname.startsWith('/dashboard/campaigns')) return { title: 'Campanhas' };
-  if (pathname.startsWith('/dashboard/settings')) return { title: 'Configurações' };
-  if (pathname.startsWith('/dashboard/ai')) return { title: 'Inteligência artificial' };
-  if (pathname.startsWith('/dashboard/knowledge')) return { title: 'Base de conhecimento' };
-  return { title: 'Início' };
-}
+import { getMobilePageMeta } from '@/components/layout/mobile-navigation';
 
 function FlowAnalyticsSidebar({ flowId, expanded }: { flowId?: string; expanded: boolean }) {
   const router = useRouter();
