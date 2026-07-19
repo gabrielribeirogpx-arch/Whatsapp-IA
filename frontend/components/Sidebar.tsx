@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { Filter, Search } from 'lucide-react';
 import { MobileBottomSheet } from './layout/MobileBottomSheet';
+import { MobileHeader } from './layout/MobileHeader';
 import Avatar from './Avatar';
 import { Contact } from '../lib/types';
 import { CONVERSATION_FILTERS, ConversationFilterId, matchesConversationFilter } from '../lib/conversationFilters';
@@ -14,6 +15,8 @@ type SidebarProps = {
   unansweredCount: number;
   humanRequestsCount: number;
   loading?: boolean;
+  error?: boolean;
+  onRetry?: () => void;
 };
 
 export default function Sidebar({
@@ -24,7 +27,9 @@ export default function Sidebar({
   onToggleSidebar,
   unansweredCount,
   humanRequestsCount,
-  loading = false
+  loading = false,
+  error = false,
+  onRetry,
 }: SidebarProps) {
   console.log("[SIDEBAR RECEIVED]", contacts.length);
   console.log("[SIDEBAR FIRST ITEM]", contacts[0]?.id);
@@ -112,7 +117,13 @@ export default function Sidebar({
   return (
     <aside className={`wa-sidebar ${sidebarOpen ? 'open' : ''}`}>
       <div className="wa-contact-list">
-        <div className="wa-mobile-inbox-title"><h1>Inbox</h1><button type="button" onClick={() => setFiltersOpen(true)} aria-label="Abrir filtros"><Filter size={20} /><span>{activeFilter !== "all" ? "1" : ""}</span></button></div>
+        <div className="wa-mobile-inbox-title">
+          <MobileHeader
+            title="Inbox"
+            showLogo={false}
+            action={<button type="button" onClick={() => setFiltersOpen(true)} aria-label="Abrir filtros"><Filter size={20} /><span>{activeFilter !== "all" ? "1" : ""}</span></button>}
+          />
+        </div>
         <div className="wa-sidebar-search-wrapper">
           <span className="wa-sidebar-search-icon" aria-hidden="true"><Search size={17} /></span>
           <input
@@ -142,7 +153,13 @@ export default function Sidebar({
         </div>
 
         {loading ? <div className="wa-mobile-inbox-skeleton" aria-label="Carregando conversas"><i /><i /><i /><i /><i /></div> : null}
-        {!loading && filteredContacts.length === 0 ? (
+        {!loading && error ? (
+          <div className="wa-inbox-retry" role="alert">
+            <p>Não foi possível carregar as conversas.</p>
+            <button type="button" onClick={onRetry}>Tentar novamente</button>
+          </div>
+        ) : null}
+        {!loading && !error && filteredContacts.length === 0 ? (
           <p className="wa-inbox-empty">Nenhuma conversa encontrada</p>
         ) : null}
 
