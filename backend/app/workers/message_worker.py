@@ -191,6 +191,10 @@ DEDUP_TTL_SECONDS = 600
 FLOW_LOCK_TTL_SECONDS = 15
 
 
+class ConversationLockContendedError(RuntimeError):
+    """Retryable signal used by RQ when another worker owns a conversation."""
+
+
 def _extract_whatsapp_message_id(payload: dict[str, Any], parsed: dict[str, Any] | None) -> str:
     candidates = [
         (parsed or {}).get("message_id"),
@@ -207,9 +211,15 @@ def _extract_whatsapp_message_id(payload: dict[str, Any], parsed: dict[str, Any]
 
 def _release_session_lock(redis_client: Any, lock_key: str, lock_token: str) -> None:
     try:
-        current = redis_client.get(lock_key)
-        if current == lock_token:
-            redis_client.delete(lock_key)
+        # GET followed by DEL can delete a *new* owner's lock after our TTL
+        # expires. The comparison and deletion must be one Redis operation.
+        released = redis_client.eval(
+            "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) end return 0",
+            1,
+            lock_key,
+            lock_token,
+        )
+        logger.info("event=incoming_worker_lock_released lock_key=%s released=%s", lock_key, bool(released))
     except Exception:
         logger.warning("event=incoming_worker_lock_release_warning lock_key=%s", lock_key, exc_info=True)
 
@@ -296,12 +306,6 @@ def process_incoming_message(payload: dict[str, Any]) -> None:
     )
 
     redis_client = get_redis_client()
-    dedup_key = f"wa:processed:{whatsapp_message_id}" if whatsapp_message_id else ""
-    if dedup_key:
-        was_set = bool(redis_client.set(dedup_key, "1", ex=DEDUP_TTL_SECONDS, nx=True))
-        if not was_set:
-            logger.info("[DUPLICATE MESSAGE BLOCKED] message_id=%s", whatsapp_message_id)
-            return
 
     db = SessionLocal()
     lock_key = ""
@@ -320,12 +324,23 @@ def process_incoming_message(payload: dict[str, Any]) -> None:
             )
             return
 
-        lock_key = f"flow:lock:{tenant.id}:{str(parsed.get('phone') or '').strip()}"
+        # Before the database row exists, tenant + normalized phone is the
+        # stable identity used by the conversation lookup below. This protects
+        # the complete mutable inbound path, including conversation creation.
+        lock_key = f"wazza:inbound:conversation:{tenant.id}:{str(parsed.get('phone') or '').strip()}"
         lock_token = str(uuid.uuid4())
         acquired_lock = bool(redis_client.set(lock_key, lock_token, ex=FLOW_LOCK_TTL_SECONDS, nx=True))
         if not acquired_lock:
-            logger.info("[FLOW LOCKED SKIP] tenant_id=%s phone=%s", tenant.id, parsed.get("phone") or "n/a")
-            return
+            logger.info(
+                "event=incoming_worker_lock_contended tenant_id=%s conversation_identity=%s correlation_id=%s ttl_seconds=%s",
+                tenant.id,
+                parsed.get("phone") or "n/a",
+                correlation_id,
+                FLOW_LOCK_TTL_SECONDS,
+            )
+            # Do not acknowledge competing work as processed. RQ performs a
+            # bounded retry/backoff, preserving order without busy waiting.
+            raise ConversationLockContendedError(f"conversation lock contended tenant_id={tenant.id}")
 
         provider = None
         provider_id = None
