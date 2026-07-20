@@ -387,10 +387,8 @@ export default function FlowsPage() {
                   </div>
 
                   <div className="contents lg:static lg:flex lg:w-auto lg:flex-wrap lg:items-center lg:justify-end lg:gap-2">
-                    <button type="button" role="switch" aria-checked={flow.is_active} onClick={(e) => { e.stopPropagation(); toggleFlowStatus(flow.id); }} aria-label={flow.is_active ? 'Desativar fluxo' : 'Ativar fluxo'} className="absolute right-10 top-3 h-5 w-9 rounded-full border-0 p-0 transition-colors lg:static lg:h-6 lg:w-11" style={{ backgroundColor: flow.is_active ? '#10b981' : '#d1d5db' }}>
-                      <span className="relative block h-full w-full">
-                        <span className={`absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white shadow-sm transition-transform lg:h-5 lg:w-5 ${flow.is_active ? 'translate-x-4 lg:translate-x-5' : ''}`} />
-                      </span>
+                    <button type="button" role="switch" aria-checked={flow.is_active} onClick={(e) => { e.stopPropagation(); toggleFlowStatus(flow.id); }} aria-label={flow.is_active ? 'Desativar fluxo' : 'Ativar fluxo'} className="absolute right-10 top-3 h-5 w-9 rounded-full border-0 p-0 transition-colors lg:relative lg:h-6 lg:w-11" style={{ backgroundColor: flow.is_active ? '#10b981' : '#d1d5db' }}>
+                      <span className={`absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white shadow-sm transition-transform lg:h-5 lg:w-5 ${flow.is_active ? 'translate-x-4 lg:translate-x-5' : ''}`} />
                     </button>
                     <button onClick={(e) => { e.stopPropagation(); openEdit(flow); }} className="hidden whitespace-nowrap rounded-xl border border-gray-100 bg-transparent px-3 py-1.5 text-xs font-semibold text-slate-600 transition hover:shadow-sm lg:block">Editar</button>
                     <Link href={`/dashboard/flows/${flow.id}/analytics`} onClick={(e) => e.stopPropagation()} className="absolute bottom-3 left-3 whitespace-nowrap text-[11px] font-medium text-slate-500 no-underline transition hover:text-slate-900 lg:static lg:rounded-xl lg:border lg:border-gray-100 lg:bg-transparent lg:px-3 lg:py-1.5 lg:text-xs lg:font-semibold lg:text-slate-600 lg:hover:shadow-sm">Analytics</Link>
