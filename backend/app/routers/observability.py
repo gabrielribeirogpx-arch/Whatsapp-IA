@@ -21,7 +21,8 @@ from app.models.user import TenantUser
 from app.observability.timeline_builder import build_execution_timeline
 from app.routers.account import get_current_user
 from app.services.audit_service import write_audit_log
-from app.services.observability_export import csv_export, json_export, pdf_export, timeline, trace_records, xlsx_export
+from app.services.observability_export import csv_export, json_export, timeline, trace_records, xlsx_export
+from app.services.observability_reports import render_report
 from app.services.tenant_service import get_current_tenant
 
 router = APIRouter(prefix="/observability", tags=["observability"])
@@ -164,7 +165,7 @@ def _audit_export(db: Session, request: Request, user: TenantUser, tenant: Tenan
     db.commit()
 
 
-def _export_response(*, kind: str, fmt: str, rows: list[ExecutionTrace], tenant: Tenant, start: datetime, end: datetime, timezone_name: str, filters: dict[str, Any], trace: bool = False) -> Response:
+def _export_response(*, kind: str, fmt: str, rows: list[ExecutionTrace], tenant: Tenant, start: datetime, end: datetime, timezone_name: str, filters: dict[str, Any], trace: bool = False, report_mode: str | None = None, locale: str = "pt-BR", include_charts: bool = True, comparison: dict[str, Any] | None = None) -> Response:
     records = trace_records(rows)
     summary = _summary(rows, start, end)
     tenant_data = {"id": str(tenant.id), "slug": tenant.slug, "name": tenant.name}
@@ -174,16 +175,20 @@ def _export_response(*, kind: str, fmt: str, rows: list[ExecutionTrace], tenant:
     if fmt == "json": data_bytes = json_export(tenant=tenant_data, filters=filters, summary=summary, data=data, timezone_name=timezone_name)
     elif fmt == "csv": data_bytes = csv_export(records)
     elif fmt == "xlsx": data_bytes = xlsx_export(records, summary)
-    else: data_bytes = pdf_export(f"Wazza — {kind.replace('_', ' ').title()}", summary, records)
+    else: data_bytes = render_report(tenant=tenant_data, summary=summary, records=records, start=start, end=end, timezone_name=timezone_name, mode=report_mode or ("technical" if trace else "executive"), locale=locale, filters=filters, timeline_rows=timeline(rows) if trace else None, include_charts=include_charts, comparison=comparison, trace=trace)
     return _download(data_bytes, fmt, kind, tenant)
 
 
 @router.get("/export/overview")
-def export_overview(request: Request, format: str = Query("pdf", pattern="^(pdf|xlsx|json)$"), start_date: datetime | None = None, end_date: datetime | None = None, timezone: str = "UTC", tenant: Tenant = Depends(get_current_tenant), user: TenantUser = Depends(_authorized), db: Session = Depends(get_db)):
-    start, end = _export_range(start_date, end_date); filters = {"start_date": str(start), "end_date": str(end)}
+def export_overview(request: Request, format: str = Query("pdf", pattern="^(pdf|xlsx|json)$"), start_date: datetime | None = None, end_date: datetime | None = None, timezone: str = "UTC", report_mode: str | None = Query(None, pattern="^(executive|technical)$"), locale: str = Query("pt-BR", pattern="^(pt-BR|en-US)$"), include_charts: bool = True, include_comparison: bool = False, tenant: Tenant = Depends(get_current_tenant), user: TenantUser = Depends(_authorized), db: Session = Depends(get_db)):
+    start, end = _export_range(start_date, end_date); filters = {"start_date": str(start), "end_date": str(end), "report_mode": report_mode, "locale": locale}
     _audit_export(db, request, user, tenant, "overview", format, filters, 0, "REQUESTED")
     try:
-        rows = _export_rows(db, tenant, start, end); response = _export_response(kind="overview", fmt=format, rows=rows, tenant=tenant, start=start, end=end, timezone_name=timezone, filters=filters); _audit_export(db, request, user, tenant, "overview", format, filters, len(rows), "COMPLETED"); return response
+        rows = _export_rows(db, tenant, start, end)
+        previous = None
+        if include_comparison:
+            span = end - start; previous_rows = _export_rows(db, tenant, start - span, start); previous = _summary(previous_rows, start - span, start)
+        response = _export_response(kind="overview", fmt=format, rows=rows, tenant=tenant, start=start, end=end, timezone_name=timezone, filters=filters, report_mode=report_mode, locale=locale, include_charts=include_charts, comparison=previous); _audit_export(db, request, user, tenant, "overview", format, filters, len(rows), "COMPLETED"); return response
     except Exception:
         _audit_export(db, request, user, tenant, "overview", format, filters, 0, "FAILED"); raise
 
@@ -199,13 +204,13 @@ def export_traces(request: Request, format: str = Query("csv", pattern="^(csv|xl
 
 
 @router.get("/export/traces/{trace_id}")
-def export_trace(trace_id: str, request: Request, format: str = Query("pdf", pattern="^(pdf|json)$"), timezone: str = "UTC", tenant: Tenant = Depends(get_current_tenant), user: TenantUser = Depends(_authorized), db: Session = Depends(get_db)):
+def export_trace(trace_id: str, request: Request, format: str = Query("pdf", pattern="^(pdf|json)$"), timezone: str = "UTC", report_mode: str | None = Query(None, pattern="^(executive|technical)$"), locale: str = Query("pt-BR", pattern="^(pt-BR|en-US)$"), tenant: Tenant = Depends(get_current_tenant), user: TenantUser = Depends(_authorized), db: Session = Depends(get_db)):
     end = datetime.utcnow(); start = end - timedelta(days=MAX_EXPORT_DAYS); filters = {"trace_id": trace_id}
     rows = _export_rows(db, tenant, start, end, trace_id=trace_id)
     if not rows: raise HTTPException(404, "Trace não encontrado")
     _audit_export(db, request, user, tenant, "trace", format, filters, 1, "REQUESTED")
     try:
-        response = _export_response(kind="trace", fmt=format, rows=rows, tenant=tenant, start=start, end=end, timezone_name=timezone, filters=filters, trace=True); _audit_export(db, request, user, tenant, "trace", format, filters, 1, "COMPLETED"); return response
+        response = _export_response(kind="trace", fmt=format, rows=rows, tenant=tenant, start=start, end=end, timezone_name=timezone, filters=filters, trace=True, report_mode=report_mode, locale=locale); _audit_export(db, request, user, tenant, "trace", format, filters, 1, "COMPLETED"); return response
     except Exception:
         _audit_export(db, request, user, tenant, "trace", format, filters, 0, "FAILED"); raise
 

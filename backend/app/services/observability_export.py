@@ -109,11 +109,9 @@ def xlsx_export(records: list[dict[str, Any]], summary: dict[str, Any]) -> bytes
 
 
 def pdf_export(title: str, summary: dict[str, Any], records: list[dict[str, Any]]) -> bytes:
-    # A small, deterministic A4-compatible PDF avoids browser rendering in API workers.
-    lines = [title, "Wazza | Observabilidade Enterprise", "", *[f"{k}: {safe_value(v, limit=90)}" for k, v in summary.items()], "", "Principais traces:", *[f"{r.get('trace_id', '')[:32]} | {r.get('status', '')} | {r.get('duration_ms', '')} ms" for r in records[:20]]]
-    content = "BT /F1 11 Tf 50 790 Td " + " ".join("(%s) Tj 0 -15 Td" % str(line).replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)") for line in lines) + " ET"
-    objects = ["<< /Type /Catalog /Pages 2 0 R >>", "<< /Type /Pages /Kids [3 0 R] /Count 1 >>", "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>", "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>", f"<< /Length {len(content.encode())} >>\nstream\n{content}\nendstream"]
-    output = "%PDF-1.4\n"; offsets = [0]
-    for i, obj in enumerate(objects, 1): offsets.append(len(output.encode())); output += f"{i} 0 obj\n{obj}\nendobj\n"
-    start = len(output.encode()); output += "xref\n0 6\n0000000000 65535 f \n" + "".join(f"{x:010d} 00000 n \n" for x in offsets[1:]) + f"trailer << /Size 6 /Root 1 0 R >>\nstartxref\n{start}\n%%EOF"
-    return output.encode()
+    """Backward-compatible PDF entry point used by older callers."""
+    from datetime import datetime
+    from app.services.observability_reports import render_report
+    start = datetime.fromisoformat(summary.get("period_start", datetime.utcnow().isoformat()))
+    end = datetime.fromisoformat(summary.get("period_end", datetime.utcnow().isoformat()))
+    return render_report(tenant={"name": "Wazza"}, summary=summary, records=records, start=start, end=end, timezone_name="UTC")
