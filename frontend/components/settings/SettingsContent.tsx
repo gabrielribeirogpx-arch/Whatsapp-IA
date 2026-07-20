@@ -125,6 +125,10 @@ const whatsappTabs = [
   { id: "api-keys", label: "API Keys", icon: KeyRound },
   { id: "webhooks", label: "Webhooks", icon: Globe2 },
 ] as const;
+type WhatsAppTabId = (typeof whatsappTabs)[number]["id"];
+type WhatsAppSection = "overview" | "connections" | "templates" | "api-keys" | "webhooks";
+const sectionToWhatsAppTab: Record<WhatsAppSection, WhatsAppTabId> = { overview: "overview", connections: "connection", templates: "templates", "api-keys": "api-keys", webhooks: "webhooks" };
+const whatsAppTabToSection: Record<WhatsAppTabId, WhatsAppSection> = { overview: "overview", connection: "connections", templates: "templates", "api-keys": "api-keys", webhooks: "webhooks" };
 const roleLabels: Record<string, string> = {
   owner: "Administrador",
   admin: "Admin",
@@ -135,10 +139,14 @@ const roleLabels: Record<string, string> = {
 
 export default function SettingsContent({
   activeTab,
+  whatsAppSection = "overview",
+  onWhatsAppSectionChange,
 }: {
   activeTab: SettingsTabId | AccountTabId;
+  whatsAppSection?: WhatsAppSection;
+  onWhatsAppSectionChange?: (section: WhatsAppSection) => void;
 }) {
-  if (activeTab === "whatsapp-business") return <WhatsAppBusinessConsole />;
+  if (activeTab === "whatsapp-business") return <WhatsAppBusinessConsole section={whatsAppSection} onSectionChange={onWhatsAppSectionChange} />;
   if (activeTab === "pipeline") return <PipelineSettingsTab />;
   if (activeTab === "profile") return <ProfileTab />;
   if (activeTab === "preferences") return <PreferencesTab />;
@@ -1544,9 +1552,9 @@ function IntegrationsTab() {
   );
 }
 
-function WhatsAppBusinessConsole() {
-  const [tab, setTab] =
-    useState<(typeof whatsappTabs)[number]["id"]>("overview");
+function WhatsAppBusinessConsole({ section, onSectionChange }: { section: WhatsAppSection; onSectionChange?: (section: WhatsAppSection) => void }) {
+  const tab = sectionToWhatsAppTab[section];
+  const setTab = (nextTab: WhatsAppTabId) => onSectionChange?.(whatsAppTabToSection[nextTab]);
   const [toast, setToast] = useState("");
   const [loading, setLoading] = useState(false);
   const [form, setForm] = useState<SystemSettingsPayload & { has_whatsapp_token: boolean }>({
@@ -1742,11 +1750,13 @@ function WhatsAppBusinessConsole() {
         ))}
       </div>
 
-      <div className="flex w-full min-w-0 flex-wrap gap-2 rounded-2xl border border-[color:var(--surface-border)] bg-white/90 p-2 shadow-[0_10px_24px_-24px_rgba(15,23,42,0.8)] backdrop-blur">
+      <div role="tablist" aria-label="Configurações do WhatsApp" className="flex w-full min-w-0 flex-wrap gap-2 rounded-2xl border border-[color:var(--surface-border)] bg-white/90 p-2 shadow-[0_10px_24px_-24px_rgba(15,23,42,0.8)] backdrop-blur">
         {whatsappTabs.map(({ id, label, icon: Icon }) => (
           <button
             key={id}
             type="button"
+            role="tab"
+            aria-selected={tab === id}
             onClick={() => setTab(id)}
             className={`inline-flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-medium transition-all duration-200 ${tab === id ? "bg-slate-900 text-white shadow-md shadow-slate-900/20" : "text-slate-600 hover:bg-slate-100/90 hover:text-slate-900 active:scale-[0.99]"}`}
           >
