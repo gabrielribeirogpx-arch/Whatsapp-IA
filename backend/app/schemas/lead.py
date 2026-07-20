@@ -41,6 +41,7 @@ class LeadMoveRequest(BaseModel):
 class PipelineLeadOut(BaseModel):
     id: uuid.UUID
     name: str | None = None
+    contact_name: str | None = None
     phone: str
     last_message: str | None = None
     temperature: LeadTemperature
