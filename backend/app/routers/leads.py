@@ -9,7 +9,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import Lead, PipelineStage, Tenant
+from app.models import Contact, Lead, PipelineStage, Tenant
 from app.models.lead import LeadStage, LeadStatus
 from app.schemas.lead import (
     LeadMoveRequest,
@@ -150,6 +150,14 @@ def get_pipeline(
         .all()
     )
 
+    contact_ids = [lead.contact_id for lead in leads if lead.contact_id]
+    contact_names = {
+        contact.id: contact.name
+        for contact in db.execute(
+            select(Contact).where(Contact.tenant_id == tenant.id, Contact.id.in_(contact_ids))
+        ).scalars()
+    } if contact_ids else {}
+
     grouped: dict[uuid.UUID, list[PipelineLeadOut]] = {stage.id: [] for stage in stages}
     fallback_stage_id = stages[0].id if stages else None
 
@@ -159,7 +167,11 @@ def get_pipeline(
             continue
         if target_stage_id not in grouped:
             grouped[target_stage_id] = []
-        grouped[target_stage_id].append(PipelineLeadOut.model_validate(lead))
+        grouped[target_stage_id].append(
+            PipelineLeadOut.model_validate(lead).model_copy(
+                update={"contact_name": contact_names.get(lead.contact_id)}
+            )
+        )
 
     return [_serialize_stage(stage, grouped.get(stage.id, [])) for stage in sorted(stages, key=lambda item: item.position)]
 

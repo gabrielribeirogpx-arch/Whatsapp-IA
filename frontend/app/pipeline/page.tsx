@@ -24,6 +24,7 @@ import {
 import { getPipeline, listWorkspaceUsers, moveLeadToStage } from '../../lib/api';
 import { PipelineLead, PipelineStage, WorkspaceUser } from '../../lib/types';
 import { getUserDisplayName } from '../../lib/userDisplayName';
+import { resolveLeadDisplayName } from '../../lib/leadDisplayName';
 import { canMoveLeadToStage } from './dropGuards';
 import { MobileBottomSheet } from '../../components/layout/MobileBottomSheet';
 import { MobileListCard } from '../../components/layout/MobileListCard';
@@ -356,7 +357,8 @@ export default function PipelinePage() {
             {mobileStage.leads.map((lead) => {
               const owner = getLeadOwnerLabel(lead, users);
               const ChannelIcon = channelIcons[getLeadChannel(lead)];
-              return <MobileListCard key={lead.id} title={<button type="button" className="pipeline-mobile-lead-title" onClick={() => setSelectedLead(lead)}>{lead.name || 'Lead sem nome'}</button>} subtitle={lead.phone} status={<span className={`lead-temp temp-${lead.temperature}`}>{temperatureLabel[lead.temperature] || 'Frio'}</span>} meta={<span className="pipeline-mobile-card-meta"><ChannelIcon size={14} /> {owner || 'Sem responsável'} · {formatRelativeDate(lead.last_interaction)}</span>} action={<button type="button" className="pipeline-mobile-move" onClick={() => { setMoveLead(lead); setMoveTargetStageId(lead.stage_id || ''); }}>Mover</button>}>
+              const displayName = resolveLeadDisplayName(lead);
+              return <MobileListCard key={lead.id} title={<button type="button" className="pipeline-mobile-lead-title" onClick={() => setSelectedLead(lead)}>{displayName}</button>} subtitle={lead.phone} status={<span className={`lead-temp temp-${lead.temperature}`}>{temperatureLabel[lead.temperature] || 'Frio'}</span>} meta={<span className="pipeline-mobile-card-meta"><ChannelIcon size={14} /> {owner || 'Sem responsável'} · {formatRelativeDate(lead.last_interaction)}</span>} action={<button type="button" className="pipeline-mobile-move" onClick={() => { setMoveLead(lead); setMoveTargetStageId(lead.stage_id || ''); }}>Mover</button>}>
                 <p className="pipeline-mobile-last-message">{lead.last_message || 'Sem interação recente.'}</p>
               </MobileListCard>;
             })}
@@ -485,6 +487,7 @@ export default function PipelinePage() {
                 {stage.leads.map((lead, index) => {
                   const ChannelIcon = channelIcons[getLeadChannel(lead)];
                   const owner = getLeadOwnerLabel(lead, users);
+                  const displayName = resolveLeadDisplayName(lead);
 
                   return (
                     <div
@@ -502,9 +505,9 @@ export default function PipelinePage() {
                       style={{ '--stack-offset': `${Math.min(index, 4) * 5}px` } as CSSProperties}
                     >
                       <div className="pipeline-lead-topline">
-                        <div className="pipeline-lead-avatar">{getInitials(lead.name)}</div>
+                        <div className="pipeline-lead-avatar">{getInitials(displayName)}</div>
                         <div>
-                          <strong>{lead.name || 'Lead sem nome'}</strong>
+                          <strong>{displayName}</strong>
                           <small>{lead.phone}</small>
                         </div>
                       </div>
@@ -543,7 +546,7 @@ export default function PipelinePage() {
         </div>
       </section>
 
-      <MobileBottomSheet open={Boolean(selectedLead)} onClose={() => setSelectedLead(null)} title={selectedLead?.name || 'Detalhes do lead'} footer={selectedLead ? <button type="button" className="primary-button w-full" onClick={() => { setMoveLead(selectedLead); setMoveTargetStageId(selectedLead.stage_id || ''); setSelectedLead(null); }}>Mover de etapa</button> : null}>
+      <MobileBottomSheet open={Boolean(selectedLead)} onClose={() => setSelectedLead(null)} title={selectedLead ? resolveLeadDisplayName(selectedLead) : 'Detalhes do lead'} footer={selectedLead ? <button type="button" className="primary-button w-full" onClick={() => { setMoveLead(selectedLead); setMoveTargetStageId(selectedLead.stage_id || ''); setSelectedLead(null); }}>Mover de etapa</button> : null}>
         {selectedLead ? <div className="pipeline-lead-details"><section><h3>Contato</h3><p>{selectedLead.phone}</p>{selectedLead.email ? <p>{selectedLead.email}</p> : null}</section><section><h3>Etapa</h3><p>{boardStages.find((stage) => stage.id === selectedLead.stage_id)?.name || 'Sem etapa'}</p></section><section><h3>Responsável</h3><p>{getLeadOwnerLabel(selectedLead, users) || 'Sem responsável'}</p></section>{selectedLead.last_message ? <section><h3>Última interação</h3><p>{selectedLead.last_message}</p></section> : null}</div> : null}
       </MobileBottomSheet>
       <MobileBottomSheet open={Boolean(moveLead)} onClose={() => !isMoving && setMoveLead(null)} title="Mover lead" closeOnBackdrop={!isMoving} footer={<button type="button" className="primary-button w-full" disabled={!moveTargetStageId || isMoving || moveTargetStageId === moveLead?.stage_id} onClick={() => void handleMobileMove()}>{isMoving ? 'Movendo…' : 'Confirmar movimentação'}</button>}>

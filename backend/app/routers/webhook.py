@@ -296,21 +296,6 @@ def _has_outgoing_edges(node_id: str | None, edges: list[dict]) -> bool:
         return False
     return any(str(edge.get("source")) == str(node_id) for edge in edges)
 
-def _looks_like_name(text: str) -> bool:
-    if not text:
-        return False
-
-    cleaned = text.strip()
-    if not cleaned or len(cleaned) > 40:
-        return False
-
-    if any(char.isdigit() for char in cleaned):
-        return False
-
-    words = cleaned.split()
-    return len(words) <= 4
-
-
 def _resolve_request_tenant_id(request: Request) -> uuid.UUID | None:
     tenant_from_middleware = getattr(request.state, "tenant_id", None)
     if tenant_from_middleware:
@@ -449,10 +434,6 @@ async def _process_meta_webhook(request: Request, db: Session) -> dict[str, str]
                 conversation_created=not existed,
             )
 
-            if conversation.name is None and _looks_like_name(incoming_message):
-                conversation.name = incoming_message.strip()
-            if contact and conversation.name and (not contact.name or contact.name == "Cliente"):
-                contact.name = conversation.name
             if contact:
                 contact.last_message_at = datetime.utcnow()
 

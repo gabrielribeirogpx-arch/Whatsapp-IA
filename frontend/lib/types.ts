@@ -264,6 +264,7 @@ export type PipelineTemperature = 'hot' | 'warm' | 'cold';
 export type PipelineLead = {
   id: string;
   name: string | null;
+  contact_name?: string | null;
   phone: string;
   last_message: string | null;
   temperature: PipelineTemperature;
