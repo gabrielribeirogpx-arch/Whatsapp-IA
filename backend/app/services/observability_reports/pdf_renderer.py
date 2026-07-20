@@ -8,9 +8,10 @@ sections.  This compositor delegates geometry and preventive pagination to
 """
 from __future__ import annotations
 
-import hashlib
-import os
 from datetime import datetime
+import hashlib
+from math import ceil
+import os
 from typing import Any
 
 from . import styles as s
@@ -66,11 +67,34 @@ class ReportLayout:
         if not self.flow.begin(sec): return False
         self.gap(s.SPACE_LG); self.pdf.text(M, self.y, title, s.FONT["heading"], s.TEXT, True); self.gap(20 + s.SPACE_SM)
         return True
-    def card(self, title, value, hint, x, width, height=76, tone=s.MUTED):
-        self.pdf.rect(x, self.y - height, width, height, s.SUBTLE)
-        self.pdf.text(x + 15, self.y - 17, title, 8, s.MUTED)
-        self.pdf.text(x + 15, self.y - 41, value, s.FONT["kpi"], s.TEXT, True)
-        self.pdf.text(x + 15, self.y - 59, hint, 7, tone)
+    def draw_kpi_card(self, title, value, hint, x, y, width, height, tone=s.MUTED):
+        """Draw one KPI cell at an explicit position without moving the flow cursor."""
+        self.pdf.rect(x, y - height, width, height, s.SUBTLE)
+        self.pdf.text(x + 15, y - 17, title, 8, s.MUTED)
+        self.pdf.text(x + 15, y - 41, value, s.FONT["kpi"], s.TEXT, True)
+        self.pdf.text(x + 15, y - 59, hint, 7, tone)
+
+    def draw_kpi_grid(self, cards, *, columns=3, gap_x=s.SPACE_SM,
+                      gap_y=s.SPACE_MD, card_height=76):
+        """Render fixed-size KPI cards as a deterministic, keep-together grid."""
+        rows = ceil(len(cards) / columns)
+        card_width = (W - 2 * M - gap_x * (columns - 1)) / columns
+        grid_height = rows * card_height + max(0, rows - 1) * gap_y
+        self.block(grid_height, label="kpi-grid")
+
+        grid_top = self.y
+        for index, card in enumerate(cards):
+            row, column = divmod(index, columns)
+            x = M + column * (card_width + gap_x)
+            y = grid_top - row * (card_height + gap_y)
+            self.draw_kpi_card(
+                *card[:3], x=x, y=y, width=card_width, height=card_height,
+                tone=card[3],
+            )
+
+        # The grid is a single flow block: individual cards never affect y.
+        self.flow.move(grid_height)
+        return grid_height
     def empty_state(self, text):
         height = max(52, text_height(text, W - 2*M - 32, 9) + 28); self.block(height, label="empty-state")
         self.pdf.rect(M, self.y-height, W-2*M, height, s.SUBTLE); self.text_lines(text, M+16, W-2*M-32, 9); self.flow.move(height - text_height(text, W-2*M-32, 9))
@@ -127,15 +151,14 @@ def _header(l, *, tenant, start, end, timezone_name, mode, report_id, health, lo
 
 
 def _kpis(l, summary, health, comparison, locale):
-    l.section("kpis", "Indicadores principais", 164)
     items = [("Execuções", number(summary.get("executions"), locale), "execuções"), ("Taxa de sucesso", percent(summary.get("success_rate"), locale), "eventos concluídos"), ("Latência p95", duration(summary.get("p95"), locale), "percentil de duração"), ("Erros", number(summary.get("errors"), locale), "erros registrados"), ("Throughput", f"{number(summary.get('throughput_per_minute'), locale, 2)}/min", "eventos persistidos"), ("Alertas", number(summary.get("alerts_active"), locale), "alertas ativos")]
-    gap, cols = s.SPACE_SM, 3; width = (W-2*M-gap*(cols-1))/cols; grid_h = 76*2+s.SPACE_MD
-    l.block(grid_h, label="kpi-grid")
-    for index, item in enumerate(items):
-        row, col = divmod(index, cols)
-        x, original = M+col*(width+gap), l.y-row*(76+s.SPACE_MD)
-        l.flow.context.set_cursor(original); l.card(*item, x, width, 76, _status_color(health.tone))
-    l.flow.context.set_cursor(l.y - grid_h); l.gap(s.SPACE_SM)
+    grid_height = 2 * 76 + s.SPACE_MD
+    # Reserve the title, grid and trailing spacing together so the two grid
+    # rows cannot be separated by a page break.
+    l.section("kpis", "Indicadores principais", grid_height + s.SPACE_SM)
+    cards = [(*item, _status_color(health.tone)) for item in items]
+    l.draw_kpi_grid(cards)
+    l.gap(s.SPACE_SM)
     l.text_lines("Comparação com período anterior disponível." if comparison else "Comparação indisponível para o período selecionado.", M, W-2*M, 8); l.gap(s.SPACE_SM)
 
 
