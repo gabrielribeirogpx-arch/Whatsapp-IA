@@ -9,7 +9,8 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import Response
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -20,10 +21,13 @@ from app.models.user import TenantUser
 from app.observability.timeline_builder import build_execution_timeline
 from app.routers.account import get_current_user
 from app.services.audit_service import write_audit_log
+from app.services.observability_export import csv_export, json_export, pdf_export, timeline, trace_records, xlsx_export
 from app.services.tenant_service import get_current_tenant
 
 router = APIRouter(prefix="/observability", tags=["observability"])
 MAX_PAGE_SIZE = 100
+MAX_EXPORT_RECORDS = 10_000
+MAX_EXPORT_DAYS = 90
 ADMIN_ROLES = {"owner", "admin", "superadmin"}
 
 
@@ -119,3 +123,98 @@ def health(tenant: Tenant = Depends(get_current_tenant), user: TenantUser = Depe
 def _percentile(values: list[int], percentile: float) -> int | None:
     if not values: return None
     return values[min(len(values) - 1, int((len(values) - 1) * percentile))]
+
+
+def _export_range(start_date: datetime | None, end_date: datetime | None) -> tuple[datetime, datetime]:
+    end = end_date or datetime.utcnow()
+    start = start_date or end - timedelta(days=1)
+    if start > end or end - start > timedelta(days=MAX_EXPORT_DAYS):
+        raise HTTPException(422, f"Período máximo de exportação: {MAX_EXPORT_DAYS} dias")
+    return start, end
+
+
+def _export_rows(db: Session, tenant: Tenant, start: datetime, end: datetime, *, trace_id: str | None = None, status: str | None = None, source: str | None = None, flow_id: str | None = None, conversation_id: str | None = None) -> list[ExecutionTrace]:
+    stmt = select(ExecutionTrace).where(ExecutionTrace.tenant_id == tenant.id, ExecutionTrace.created_at >= start, ExecutionTrace.created_at <= end)
+    if trace_id: stmt = stmt.where(ExecutionTrace.trace_id == trace_id)
+    if conversation_id: stmt = stmt.where(ExecutionTrace.conversation_id == conversation_id)
+    if flow_id: stmt = stmt.where(ExecutionTrace.flow_id == flow_id)
+    if status == "failed": stmt = stmt.where(ExecutionTrace.event_type.in_(["EXECUTION_FAILED", "NODE_FAILED", "MESSAGE_FAILED"]))
+    # JSON filtering is deliberately performed after the tenant predicate, and only
+    # against persisted metadata; it is portable to the SQLite test database.
+    rows = db.execute(stmt.order_by(ExecutionTrace.timestamp, ExecutionTrace.created_at).limit(MAX_EXPORT_RECORDS + 1)).scalars().all()
+    if source: rows = [row for row in rows if (row.metadata_json or {}).get("source") == source]
+    if len(rows) > MAX_EXPORT_RECORDS: raise HTTPException(413, "Exportação grande deve ser processada na fila low_priority")
+    return rows
+
+
+def _summary(rows: list[ExecutionTrace], start: datetime, end: datetime) -> dict[str, Any]:
+    kinds = [row.event_type for row in rows]; durations = sorted(row.duration_ms for row in rows if row.duration_ms is not None)
+    traces_count = len({row.trace_id for row in rows}); errors = sum("FAILED" in kind for kind in kinds)
+    return {"period_start": start.isoformat(), "period_end": end.isoformat(), "messages_received": kinds.count("WEBHOOK_RECEIVED"), "messages_sent": kinds.count("MESSAGE_SENT"), "executions": len({row.execution_id for row in rows}), "success_rate": round((traces_count - errors) * 100 / traces_count, 2) if traces_count else 100, "error_rate": round(errors * 100 / max(1, len(rows)), 2), "retries": sum("RETRY" in kind for kind in kinds), "deduplications": kinds.count("MESSAGE_DEDUPLICATED"), "lock_contention": kinds.count("LOCK_CONTENTION"), "p50": _percentile(durations, .50), "p95": _percentile(durations, .95), "p99": _percentile(durations, .99), "throughput_per_minute": round(len(rows) / max(1, (end - start).total_seconds() / 60), 2), "errors": errors, "alerts_active": 0}
+
+
+def _download(data: bytes, fmt: str, kind: str, tenant: Tenant) -> Response:
+    types = {"csv": "text/csv; charset=utf-8", "json": "application/json", "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "pdf": "application/pdf"}
+    stamp = datetime.utcnow().strftime("%Y-%m-%d_%H-%M")
+    return Response(data, media_type=types[fmt], headers={"Content-Disposition": f'attachment; filename="wazza-observability-{tenant.slug or tenant.id}-{kind}-{stamp}.{fmt}"', "X-Content-Type-Options": "nosniff"})
+
+
+def _audit_export(db: Session, request: Request, user: TenantUser, tenant: Tenant, kind: str, fmt: str, filters: dict[str, Any], count: int, result: str) -> None:
+    write_audit_log(db, tenant_id=tenant.id, user_id=user.id, action=f"OBSERVABILITY_EXPORT_{result}", entity_type="observability_export", metadata={"type": kind, "format": fmt, "filters": filters, "row_count": count, "requested_at": datetime.utcnow().isoformat()}, request=request)
+    db.commit()
+
+
+def _export_response(*, kind: str, fmt: str, rows: list[ExecutionTrace], tenant: Tenant, start: datetime, end: datetime, timezone_name: str, filters: dict[str, Any], trace: bool = False) -> Response:
+    records = trace_records(rows)
+    summary = _summary(rows, start, end)
+    tenant_data = {"id": str(tenant.id), "slug": tenant.slug, "name": tenant.name}
+    if trace:
+        data: Any = {"trace": records[0] if records else None, "timeline": timeline(rows)}
+    else: data = records
+    if fmt == "json": data_bytes = json_export(tenant=tenant_data, filters=filters, summary=summary, data=data, timezone_name=timezone_name)
+    elif fmt == "csv": data_bytes = csv_export(records)
+    elif fmt == "xlsx": data_bytes = xlsx_export(records, summary)
+    else: data_bytes = pdf_export(f"Wazza — {kind.replace('_', ' ').title()}", summary, records)
+    return _download(data_bytes, fmt, kind, tenant)
+
+
+@router.get("/export/overview")
+def export_overview(request: Request, format: str = Query("pdf", pattern="^(pdf|xlsx|json)$"), start_date: datetime | None = None, end_date: datetime | None = None, timezone: str = "UTC", tenant: Tenant = Depends(get_current_tenant), user: TenantUser = Depends(_authorized), db: Session = Depends(get_db)):
+    start, end = _export_range(start_date, end_date); filters = {"start_date": str(start), "end_date": str(end)}
+    _audit_export(db, request, user, tenant, "overview", format, filters, 0, "REQUESTED")
+    try:
+        rows = _export_rows(db, tenant, start, end); response = _export_response(kind="overview", fmt=format, rows=rows, tenant=tenant, start=start, end=end, timezone_name=timezone, filters=filters); _audit_export(db, request, user, tenant, "overview", format, filters, len(rows), "COMPLETED"); return response
+    except Exception:
+        _audit_export(db, request, user, tenant, "overview", format, filters, 0, "FAILED"); raise
+
+
+@router.get("/export/traces")
+def export_traces(request: Request, format: str = Query("csv", pattern="^(csv|xlsx|json)$"), start_date: datetime | None = None, end_date: datetime | None = None, status: str | None = None, source: str | None = None, flow_id: str | None = None, conversation_id: str | None = None, trace_id: str | None = None, timezone: str = "UTC", tenant: Tenant = Depends(get_current_tenant), user: TenantUser = Depends(_authorized), db: Session = Depends(get_db)):
+    start, end = _export_range(start_date, end_date); filters = {"start_date": str(start), "end_date": str(end), "status": status, "source": source, "flow_id": flow_id, "conversation_id": conversation_id, "trace_id": trace_id}
+    _audit_export(db, request, user, tenant, "traces", format, filters, 0, "REQUESTED")
+    try:
+        rows = _export_rows(db, tenant, start, end, trace_id=trace_id, status=status, source=source, flow_id=flow_id, conversation_id=conversation_id); response = _export_response(kind="traces", fmt=format, rows=rows, tenant=tenant, start=start, end=end, timezone_name=timezone, filters=filters); _audit_export(db, request, user, tenant, "traces", format, filters, len(trace_records(rows)), "COMPLETED"); return response
+    except Exception:
+        _audit_export(db, request, user, tenant, "traces", format, filters, 0, "FAILED"); raise
+
+
+@router.get("/export/traces/{trace_id}")
+def export_trace(trace_id: str, request: Request, format: str = Query("pdf", pattern="^(pdf|json)$"), timezone: str = "UTC", tenant: Tenant = Depends(get_current_tenant), user: TenantUser = Depends(_authorized), db: Session = Depends(get_db)):
+    end = datetime.utcnow(); start = end - timedelta(days=MAX_EXPORT_DAYS); filters = {"trace_id": trace_id}
+    rows = _export_rows(db, tenant, start, end, trace_id=trace_id)
+    if not rows: raise HTTPException(404, "Trace não encontrado")
+    _audit_export(db, request, user, tenant, "trace", format, filters, 1, "REQUESTED")
+    try:
+        response = _export_response(kind="trace", fmt=format, rows=rows, tenant=tenant, start=start, end=end, timezone_name=timezone, filters=filters, trace=True); _audit_export(db, request, user, tenant, "trace", format, filters, 1, "COMPLETED"); return response
+    except Exception:
+        _audit_export(db, request, user, tenant, "trace", format, filters, 0, "FAILED"); raise
+
+
+@router.get("/export/load-test")
+def export_load_test(request: Request, format: str = Query("pdf", pattern="^(pdf|xlsx|json)$"), start_date: datetime | None = None, end_date: datetime | None = None, timezone: str = "UTC", tenant: Tenant = Depends(get_current_tenant), user: TenantUser = Depends(_authorized), db: Session = Depends(get_db)):
+    start, end = _export_range(start_date, end_date); rows = [row for row in _export_rows(db, tenant, start, end) if (row.metadata_json or {}).get("load_test")]
+    filters = {"start_date": str(start), "end_date": str(end), "load_test": True}; _audit_export(db, request, user, tenant, "load-test", format, filters, 0, "REQUESTED")
+    try:
+        response = _export_response(kind="load-test", fmt=format, rows=rows, tenant=tenant, start=start, end=end, timezone_name=timezone, filters=filters); _audit_export(db, request, user, tenant, "load-test", format, filters, len(rows), "COMPLETED"); return response
+    except Exception:
+        _audit_export(db, request, user, tenant, "load-test", format, filters, 0, "FAILED"); raise
