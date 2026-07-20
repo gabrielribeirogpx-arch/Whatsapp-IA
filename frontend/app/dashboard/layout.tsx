@@ -7,6 +7,7 @@ import { deleteFlow, duplicateFlow, listFlows, updateFlowStatus } from '@/lib/ap
 import SidebarUserProfile from '@/components/SidebarUserProfile';
 import { dashboardSidebarSections, isDashboardSidebarItemActive } from '@/components/dashboard/sidebar-items';
 import { AppShell } from '@/components/layout/AppShell';
+import { OnboardingProvider } from '@/components/onboarding/OnboardingProvider';
 import { getMobilePageMeta } from '@/components/layout/mobile-navigation';
 
 function FlowAnalyticsSidebar({ flowId, expanded }: { flowId?: string; expanded: boolean }) {
@@ -161,7 +162,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
   const mobileMeta = getMobilePageMeta(pathname);
 
   return (
-    <>
+    <OnboardingProvider>
     {!campaignWizardFullscreen && <div className="dashboard-mobile-shell"><Suspense fallback={null}><AppShell title={mobileMeta.title} backHref={mobileMeta.backHref}>{children}</AppShell></Suspense></div>}
     <div className={`dashboard-desktop-shell flex min-h-screen bg-[#F8FAFC] transition-[padding,margin] duration-300 ease-out ${campaignWizardFullscreen ? 'dashboard-layout--campaign-fullscreen' : ''}`} style={{ fontFamily: 'Inter, -apple-system, sans-serif' }}>
       {!campaignWizardFullscreen && !isFlowBuilder && !isFlowAnalytics && (
@@ -184,10 +185,10 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
         </aside>
       )}
 
-      <main className={`wazza-desktop-main min-w-0 flex-1 overflow-y-auto transition-all duration-300 ease-out ${campaignWizardFullscreen ? 'w-screen max-w-none basis-full' : ''}`}>
+      <main data-onboarding-target="workspace" className={`wazza-desktop-main min-w-0 flex-1 overflow-y-auto transition-all duration-300 ease-out ${campaignWizardFullscreen ? 'w-screen max-w-none basis-full' : ''}`}>
         {children}
       </main>
     </div>
-    </>
+    </OnboardingProvider>
   );
 }
