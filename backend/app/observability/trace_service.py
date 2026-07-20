@@ -17,6 +17,41 @@ SENSITIVE_KEY_RE = re.compile(r"(authorization|bearer|api[-_]?key|apikey|secret|
 MAX_STRING_LENGTH = 500
 
 
+class ObservabilityService:
+    """Best-effort façade for producers that need trace/span lifecycle calls.
+
+    All persistence errors are contained in ``record_event`` so a webhook or
+    worker continues even when the observability database path is unavailable.
+    """
+    def start_trace(self, db: "Session" | None, context: TraceContext | dict[str, Any] | None = None, **metadata: Any) -> TraceContext:
+        trace = context if isinstance(context, TraceContext) else TraceContext.from_mapping(context or {})
+        record_event(db, trace, TraceEventType.WEBHOOK_RECEIVED, metadata=metadata)
+        return trace
+
+    def finish_trace(self, db: "Session" | None, trace: TraceContext, *, duration_ms: int | None = None, **metadata: Any) -> None:
+        record_event(db, trace, TraceEventType.EXECUTION_FINISHED, duration_ms=duration_ms, metadata=metadata)
+
+    def fail_trace(self, db: "Session" | None, trace: TraceContext, *, error: Exception | str | None = None, duration_ms: int | None = None, **metadata: Any) -> None:
+        metadata["error_type"] = type(error).__name__ if isinstance(error, Exception) else "Error"
+        record_event(db, trace, TraceEventType.EXECUTION_FAILED, duration_ms=duration_ms, metadata=metadata)
+
+    def record_event(self, db: "Session" | None, trace: TraceContext, event_type: TraceEventType | str, **kwargs: Any) -> None:
+        record_event(db, trace, event_type, **kwargs)
+
+    start_span = record_event
+    finish_span = record_event
+    fail_span = record_event
+
+    def increment_metric(self, db: "Session" | None, trace: TraceContext, metric_name: str, value: int | float = 1, **dimensions: Any) -> None:
+        self.record_event(db, trace, "METRIC_INCREMENT", metadata={"metric_name": metric_name, "value": value, **dimensions})
+
+    def record_duration(self, db: "Session" | None, trace: TraceContext, metric_name: str, duration_ms: int, **dimensions: Any) -> None:
+        self.record_event(db, trace, "METRIC_DURATION", duration_ms=duration_ms, metadata={"metric_name": metric_name, **dimensions})
+
+
+observability_service = ObservabilityService()
+
+
 def sanitize_metadata(value: Any, *, depth: int = 0) -> Any:
     if depth > 5:
         return "[TRUNCATED]"

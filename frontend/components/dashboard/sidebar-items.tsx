@@ -199,6 +199,11 @@ export const dashboardSidebarSections: DashboardSidebarSection[] = [
         ),
       },
       {
+        href: "/dashboard/observability",
+        label: "Observabilidade",
+        icon: (<svg {...iconProps}><path d="M3 12h3l2-6 4 12 3-8 2 2h4" /></svg>),
+      },
+      {
         href: "/dashboard/settings?tab=whatsapp-business",
         label: "Configurações",
         activePaths: ["/dashboard/settings"],

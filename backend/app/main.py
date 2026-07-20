@@ -42,6 +42,7 @@ from app.routers import flow_media
 from app.routers import whatsapp_providers, whatsapp_templates, whatsapp_campaigns
 from app.routers import admin_investigation
 from app.routers import admin_conversation_reset
+from app.routers import observability
 from app.routers import integration_connections, google_calendar_integration, gmail_integration, google_drive_integration, google_sheets_integration, suitable_integration, meta_integration
 from app.middleware.tenant_context import TenantContextMiddleware
 from app.api.debug import router as debug_router
@@ -203,6 +204,7 @@ app.include_router(
 app.include_router(whatsapp_campaigns.router)
 app.include_router(admin_investigation.router)
 app.include_router(admin_conversation_reset.router)
+app.include_router(observability.router, prefix="/api")
 app.include_router(integration_connections.router, prefix="/api")
 app.include_router(google_calendar_integration.router, prefix="/api")
 app.include_router(gmail_integration.router, prefix="/api")
