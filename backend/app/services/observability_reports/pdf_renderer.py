@@ -1,157 +1,209 @@
-"""Small dependency-free A4 PDF compositor with vector cards, tables and charts."""
+"""Editorial, dependency-free A4 PDF reports.
+
+The former renderer used one global ``y`` value and fixed row heights.  It
+therefore wrapped neither cells nor sections before deciding page breaks,
+which caused orphan headings, footer collisions and duplicate technical
+sections.  This compositor delegates geometry and preventive pagination to
+``layout`` and records each section id once per document.
+"""
 from __future__ import annotations
 
 import hashlib
+import os
 from datetime import datetime
 from typing import Any
 
+from . import styles as s
 from .analyzer import analyse, conclusions, executive_summary
 from .formatter import date, duration, number, percent
-from . import styles as s
+from .layout import FlowLayout, Section, text_height, wrap_text
+from .layout.page_context import PageContext
 
 W, H, M = 595, 842, 42
 
 
-def _rgb(c: tuple[int, int, int]) -> str: return "%.3f %.3f %.3f" % tuple(x / 255 for x in c)
+def _rgb(c): return "%.3f %.3f %.3f" % tuple(x / 255 for x in c)
 def _esc(text: Any) -> str:
-    # WinAnsi covers pt-BR and avoids a runtime font dependency.
     return str(text).encode("cp1252", "replace").decode("latin1").replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
+def _status_color(tone): return {"success": s.SUCCESS, "warning": s.WARNING, "critical": s.CRITICAL}.get(tone, s.MUTED)
+def _status(value): return {"success": "Sucesso", "failed": "Falha", "failure": "Falha"}.get(str(value).lower(), str(value or "—"))
+def _report_id(tenant, start, end, mode): return "OBS-" + hashlib.sha256(f"{tenant.get('id')}|{start.isoformat()}|{end.isoformat()}|{mode}".encode()).hexdigest()[:10].upper()
 
 
 class PDF:
-    def __init__(self, footer: str): self.pages: list[list[str]] = [[]]; self.y = H - M; self.footer = footer
+    def __init__(self, footer: str): self.pages = [[]]; self.footer = footer
     @property
     def c(self): return self.pages[-1]
-    def page(self): self.pages.append([]); self.y = H - M
-    def text(self, x: float, y: float, value: Any, size: int = 9, color=s.TEXT, bold=False):
-        self.c.append(f"BT /F{'2' if bold else '1'} {size} Tf {_rgb(color)} rg {x:.1f} {y:.1f} Td ({_esc(value)}) Tj ET")
-    def rect(self, x, y, w, h, fill=s.WHITE, stroke=s.BORDER): self.c.append(f"q {_rgb(fill)} rg {x} {y} {w} {h} re f {_rgb(stroke)} RG .5 w {x} {y} {w} {h} re S Q")
+    def page(self): self.pages.append([])
+    def text(self, x, y, value, size=9, color=s.TEXT, bold=False): self.c.append(f"BT /F{'2' if bold else '1'} {size} Tf {_rgb(color)} rg {x:.1f} {y:.1f} Td ({_esc(value)}) Tj ET")
+    def rect(self, x, y, w, h, fill=s.WHITE, stroke=s.BORDER): self.c.append(f"q {_rgb(fill)} rg {x:.1f} {y:.1f} {w:.1f} {h:.1f} re f {_rgb(stroke)} RG .5 w {x:.1f} {y:.1f} {w:.1f} {h:.1f} re S Q")
     def line(self, x1, y1, x2, y2, color=s.BORDER, width=1): self.c.append(f"q {_rgb(color)} RG {width} w {x1} {y1} m {x2} {y2} l S Q")
-    def need(self, h):
-        if self.y - h < 64: self.page()
-    def heading(self, value): self.need(30); self.text(M, self.y, value, s.FONT['heading'], bold=True); self.y -= 23
-    def paragraph(self, value, width=92):
-        words, line = str(value).split(), ""
-        for word in words:
-            candidate = f"{line} {word}".strip()
-            if len(candidate) > width:
-                self.need(13); self.text(M, self.y, line, s.FONT['body'], s.MUTED); self.y -= 13; line = word
-            else: line = candidate
-        if line: self.need(13); self.text(M, self.y, line, s.FONT['body'], s.MUTED); self.y -= 15
-    def table(self, headers: list[str], rows: list[list[str]], widths: list[int]):
-        self.need(30); x = M
-        for h, width in zip(headers, widths): self.rect(x, self.y - 17, width, 17, s.SUBTLE); self.text(x + 5, self.y - 12, h, 7, s.MUTED, True); x += width
-        self.y -= 17
+
+
+class ReportLayout:
+    """Components built on a single safe flow cursor and spacing scale."""
+    def __init__(self, pdf):
+        self.pdf, self.flow = pdf, FlowLayout(pdf, PageContext())
+        self.debug = os.getenv("OBSERVABILITY_PDF_DEBUG_LAYOUT", "").lower() == "true"
+
+    @property
+    def y(self): return self.flow.y
+    def _debug(self, label, height):
+        if self.debug:
+            self.pdf.rect(M, self.y - height, W - 2*M, height, (255, 255, 255), s.CRITICAL)
+            self.pdf.text(M + 2, self.y - 8, label, 6, s.CRITICAL)
+    def block(self, height, *, keep=True, split=False, label="block"):
+        self.flow.ensure_space(height, keep_together=keep, allow_split=split); self._debug(label, height)
+    def gap(self, amount=s.SPACE_SM): self.flow.move(amount)
+    def text_lines(self, value, x, width, size=9, color=s.MUTED, bold=False, leading=None):
+        leading = leading or size * 1.42
+        lines = wrap_text(value, width, size)
+        for line in lines:
+            self.pdf.text(x, self.y, line, size, color, bold); self.flow.move(leading)
+        return len(lines) * leading
+    def section(self, section_id, title, min_content=28):
+        sec = Section(section_id, title, s.SPACE_LG + s.FONT["heading"] * 1.2 + s.SPACE_SM + min_content, True, False)
+        if not self.flow.begin(sec): return False
+        self.gap(s.SPACE_LG); self.pdf.text(M, self.y, title, s.FONT["heading"], s.TEXT, True); self.gap(20 + s.SPACE_SM)
+        return True
+    def card(self, title, value, hint, x, width, height=76, tone=s.MUTED):
+        self.pdf.rect(x, self.y - height, width, height, s.SUBTLE)
+        self.pdf.text(x + 15, self.y - 17, title, 8, s.MUTED)
+        self.pdf.text(x + 15, self.y - 41, value, s.FONT["kpi"], s.TEXT, True)
+        self.pdf.text(x + 15, self.y - 59, hint, 7, tone)
+    def empty_state(self, text):
+        height = max(52, text_height(text, W - 2*M - 32, 9) + 28); self.block(height, label="empty-state")
+        self.pdf.rect(M, self.y-height, W-2*M, height, s.SUBTLE); self.text_lines(text, M+16, W-2*M-32, 9); self.flow.move(height - text_height(text, W-2*M-32, 9))
+        self.gap(s.SPACE_LG)
+    def editorial(self, text, *, bullet=False):
+        x, width = (M + 28, W - 2*M - 44) if bullet else (M + 16, W - 2*M - 32)
+        height = max(58, text_height(text, width, 9) + 28)
+        self.block(height, keep=True, label="editorial-card"); self.pdf.rect(M, self.y-height, W-2*M, height, s.SUBTLE)
+        if bullet: self.pdf.text(M + 14, self.y - 17, "•", 11, s.PRIMARY, True)
+        self.text_lines(text, x, width); self.flow.move(height - text_height(text, width, 9)); self.gap(s.SPACE_SM)
+    def table(self, headers, rows, widths):
+        header_h, pad = 22, 6
+        measured = []
         for row in rows:
-            self.need(21)
+            h = max(24, max(text_height(cell, width - pad*2, 7, 9) for cell, width in zip(row, widths)) + pad*2)
+            measured.append(h)
+        self.block(header_h + measured[0] if measured else header_h, label="table-start")
+        def draw_header():
             x = M
-            for cell, width in zip(row, widths): self.rect(x, self.y - 19, width, 19); self.text(x + 5, self.y - 13, str(cell)[:max(8, width // 5)], 7); x += width
-            self.y -= 19
-        self.y -= 10
+            for name, width in zip(headers, widths): self.pdf.rect(x, self.y-header_h, width, header_h, s.SUBTLE); self.pdf.text(x+pad, self.y-14, name, 7, s.MUTED, True); x += width
+            self.flow.move(header_h)
+        draw_header()
+        for row, height in zip(rows, measured):
+            if self.flow.context.available_height() < height + FlowLayout.safety_buffer:
+                self.flow.add_page(); draw_header()
+            x = M
+            for cell, width in zip(row, widths):
+                self.pdf.rect(x, self.y-height, width, height)
+                baseline = self.y - 11
+                for line in wrap_text(cell, width-pad*2, 7): self.pdf.text(x+pad, baseline, line, 7); baseline -= 9
+                x += width
+            self.flow.move(height)
+        self.gap(s.SPACE_LG)
 
 
-def _status_color(tone: str): return {"success": s.SUCCESS, "warning": s.WARNING, "critical": s.CRITICAL}.get(tone, s.MUTED)
-def _report_id(tenant: dict[str, Any], start: datetime, end: datetime, mode: str) -> str: return "OBS-" + hashlib.sha256(f"{tenant.get('id')}|{start.isoformat()}|{end.isoformat()}|{mode}".encode()).hexdigest()[:10].upper()
-
-
-def _header(pdf: PDF, *, tenant, start, end, timezone_name, mode, report_id, health, locale):
-    pdf.rect(M, pdf.y - 137, W - 2*M, 137, s.WHITE)
-    pdf.text(M + 15, pdf.y - 27, "WAZZA", 13, s.PRIMARY, True)
-    pdf.text(M + 15, pdf.y - 56, "Relatório de Observabilidade", s.FONT['title'], s.TEXT, True)
-    pdf.text(M + 15, pdf.y - 74, "Executivo" if mode == "executive" else "Técnico", 10, s.MUTED)
-    color = _status_color(health.tone); pdf.rect(W - M - 120, pdf.y - 39, 105, 22, color, color); pdf.text(W - M - 110, pdf.y - 32, health.label, 9, s.WHITE, True)
+def _header(l, *, tenant, start, end, timezone_name, mode, report_id, health, locale):
     labels = [("Organização", tenant.get("name") or tenant.get("slug") or "Não disponível"), ("Período analisado", f"{date(start, timezone_name, locale)} até {date(end, timezone_name, locale)}"), ("Gerado em", date(end, timezone_name, locale)), ("Fuso horário", timezone_name), ("Identificador", report_id)]
-    y = pdf.y - 96
-    for label, value in labels: pdf.text(M + 15, y, label, 7, s.MUTED); pdf.text(M + 100, y, value, 7); y -= 12
-    pdf.y -= 153
+    # Metadata is a two-column grid; grow the keep-together block for long
+    # tenant names or timezone values instead of letting values overlap.
+    value_width = W-M-128
+    metadata_rows = [max(16, text_height(value, value_width, 7, 10) + 4) for _, value in labels]
+    height = 100 + sum(metadata_rows) + s.SPACE_MD
+    l.block(height, label="header")
+    l.pdf.rect(M, l.y-height, W-2*M, height, s.WHITE)
+    l.pdf.text(M+16, l.y-25, "WAZZA", 13, s.PRIMARY, True); l.pdf.text(M+16, l.y-55, "Relatório de Observabilidade", s.FONT["title"], s.TEXT, True); l.pdf.text(M+16, l.y-75, "Executivo" if mode == "executive" else "Técnico", 10, s.MUTED)
+    color = _status_color(health.tone); l.pdf.rect(W-M-130, l.y-38, 114, 23, color, color); l.pdf.text(W-M-120, l.y-31, health.label, 9, s.WHITE, True)
+    y = l.y-100
+    for (label, value), row_height in zip(labels, metadata_rows):
+        l.pdf.text(M+16, y, label, 7, s.MUTED, True)
+        for index, line in enumerate(wrap_text(value, value_width, 7)):
+            l.pdf.text(M+112, y-index*10, line, 7, s.TEXT)
+        y -= row_height
+    l.flow.move(height); l.gap(s.SPACE_XL)
 
 
-def _kpis(pdf, summary, health, comparison, locale):
-    pdf.heading("Indicadores principais")
+def _kpis(l, summary, health, comparison, locale):
+    l.section("kpis", "Indicadores principais", 164)
     items = [("Execuções", number(summary.get("executions"), locale), "execuções"), ("Taxa de sucesso", percent(summary.get("success_rate"), locale), "eventos concluídos"), ("Latência p95", duration(summary.get("p95"), locale), "percentil de duração"), ("Erros", number(summary.get("errors"), locale), "erros registrados"), ("Throughput", f"{number(summary.get('throughput_per_minute'), locale, 2)}/min", "eventos persistidos"), ("Alertas", number(summary.get("alerts_active"), locale), "alertas ativos")]
-    width, x = 82, M
-    for i, (label, value, hint) in enumerate(items):
-        if i and i % 3 == 0: pdf.y -= 70; x = M
-        pdf.rect(x, pdf.y - 58, width, 55, s.SUBTLE); pdf.text(x+7, pdf.y-15, label, 7, s.MUTED); pdf.text(x+7, pdf.y-35, value, 14, s.TEXT, True); pdf.text(x+7, pdf.y-48, hint, 6, _status_color(health.tone)); x += width + 8
-    pdf.y -= 76
-    if comparison:
-        pdf.paragraph("Comparação com período anterior: valores apresentados com base em eventos persistidos no intervalo imediatamente anterior.")
-    else: pdf.paragraph("Comparação indisponível para o período selecionado.")
+    gap, cols = s.SPACE_SM, 3; width = (W-2*M-gap*(cols-1))/cols; grid_h = 76*2+s.SPACE_MD
+    l.block(grid_h, label="kpi-grid")
+    for index, item in enumerate(items):
+        row, col = divmod(index, cols)
+        x, original = M+col*(width+gap), l.y-row*(76+s.SPACE_MD)
+        l.flow.context.set_cursor(original); l.card(*item, x, width, 76, _status_color(health.tone))
+    l.flow.context.set_cursor(l.y - grid_h); l.gap(s.SPACE_SM)
+    l.text_lines("Comparação com período anterior disponível." if comparison else "Comparação indisponível para o período selecionado.", M, W-2*M, 8); l.gap(s.SPACE_SM)
 
 
-def _chart(pdf, records):
-    pdf.heading("Execuções ao longo do tempo")
-    if len(records) < 2: pdf.paragraph("Não há volume suficiente para representar uma tendência temporal."); return
-    pdf.need(125); x, y, w, h = M, pdf.y - 105, W - 2*M, 85; pdf.rect(x, y, w, h, s.SUBTLE); pdf.line(x+20, y+15, x+20, y+h-10); pdf.line(x+20, y+15, x+w-10, y+15)
-    values = [1 if r.get("status") == "success" else 0 for r in records[:24]]; maximum = max(1, max(values)); points = []
-    for i, value in enumerate(values): points.append((x+25+i*(w-40)/max(1,len(values)-1), y+15+value*(h-30)/maximum))
-    for a, b in zip(points, points[1:]): pdf.line(*a, *b, s.PRIMARY, 1.5)
-    pdf.text(x+25, y+h-5, "Sucesso por trace (série observada)", 7, s.MUTED); pdf.y -= 120
-
-
-def _performance(pdf, summary, health, locale):
-    pdf.heading("Desempenho")
+def _performance(l, summary, health, locale):
+    l.section("performance", "Desempenho", 46)
     status = health.label if summary.get("p95") is not None else "—"
-    pdf.table(["Métrica", "Valor", "Status", "Referência"], [["Latência p50", duration(summary.get("p50"), locale), "—", "—"], ["Latência p95", duration(summary.get("p95"), locale), status, "limite configurado"], ["Latência p99", duration(summary.get("p99"), locale), "—", "—"], ["Throughput", f"{number(summary.get('throughput_per_minute'), locale, 2)}/min", "—", "eventos persistidos"], ["Retries", number(summary.get("retries"), locale), health.label, "limite configurado"], ["Lock contention", number(summary.get("lock_contention"), locale), health.label, "limite configurado"]], [125, 100, 110, 176])
+    l.table(["Métrica", "Valor", "Status", "Referência"], [["Latência p50", duration(summary.get("p50"), locale), "—", "—"], ["Latência p95", duration(summary.get("p95"), locale), status, "limite configurado"], ["Latência p99", duration(summary.get("p99"), locale), "—", "—"], ["Throughput", f"{number(summary.get('throughput_per_minute'), locale, 2)}/min", "—", "eventos persistidos"], ["Retries", number(summary.get("retries"), locale), health.label, "limite configurado"], ["Contenção de lock", number(summary.get("lock_contention"), locale), health.label, "limite configurado"]], [125, 100, 110, 176])
 
 
-def _traces(pdf, records, technical=False, locale="pt-BR"):
-    pdf.heading("Traces principais" if not technical else "Traces e eventos")
-    if not records: pdf.paragraph("Nenhuma execução foi encontrada no período selecionado."); return
-    if len(records) == 1 and not technical:
-        r = records[0]; pdf.paragraph(f"Execução observada: trace {r.get('trace_id','')[:16]}, status {r.get('status')}, duração {duration(r.get('duration_ms'), locale)}."); return
-    headers = ["Horário", "Trace", "Fluxo/Sistema", "Status", "Duração"] if not technical else ["Trace", "Execução", "Status", "Duração", "Eventos", "Retries"]
+def _traces(l, records, technical, locale):
+    l.section("traces", "Traces e eventos" if technical else "Traces principais", 70)
+    if not records: return l.empty_state("Nenhuma execução foi encontrada no período selecionado.")
+    if len(records) == 1:
+        r = records[0]; return l.editorial(f"Execução observada\nTrace: {str(r.get('trace_id', ''))[:16]}\nStatus: {_status(r.get('status'))}   •   Duração: {duration(r.get('duration_ms'), locale)}   •   Eventos: {r.get('event_count', '—')}   •   Retries: {r.get('retry_count', '—')}")
+    headers = ["Trace", "Execução", "Status", "Duração", "Eventos", "Retries"] if technical else ["Horário", "Trace", "Fluxo/Sistema", "Status", "Duração"]
     rows = []
     for r in records[:50 if technical else 8]:
-        if technical: rows.append([str(r.get("trace_id", ""))[:12], str(r.get("execution_id", ""))[:10], r.get("status", ""), duration(r.get("duration_ms"), locale), str(r.get("event_count", "")), str(r.get("retry_count", ""))])
-        else: rows.append([str(r.get("started_at", ""))[0:16].replace("T", " "), str(r.get("trace_id", ""))[:12], str(r.get("flow_id") or r.get("ai_system_id") or "—")[:15], str(r.get("status", "")), duration(r.get("duration_ms"), locale)])
-    pdf.table(headers, rows, [90, 95, 125, 75, 76] if not technical else [85, 85, 75, 80, 80, 56])
+        rows.append([str(r.get("trace_id", ""))[:12], str(r.get("execution_id", ""))[:10], _status(r.get("status")), duration(r.get("duration_ms"), locale), str(r.get("event_count", "")), str(r.get("retry_count", ""))] if technical else [str(r.get("started_at", ""))[:16].replace("T", " "), str(r.get("trace_id", ""))[:12], str(r.get("flow_id") or r.get("ai_system_id") or "—")[:18], _status(r.get("status")), duration(r.get("duration_ms"), locale)])
+    l.table(headers, rows, [85,85,75,80,80,56] if technical else [90,95,125,75,76])
 
 
-def _technical(pdf, summary, records, filters, locale):
-    pdf.heading("Filtros utilizados"); pdf.paragraph("; ".join(f"{k}: {v}" for k, v in filters.items() if v is not None) or "Sem filtros adicionais.")
-    _performance(pdf, summary, analyse(summary), locale); _traces(pdf, records, True, locale)
-    pdf.heading("Infraestrutura"); pdf.paragraph("Telemetria detalhada de infraestrutura não estava disponível neste relatório.")
-    pdf.heading("Apêndice técnico"); pdf.paragraph("IDs e metadados são exibidos somente em formato sanitizado. Segredos, prompts, respostas e payloads brutos não são incluídos.")
+def _technical(l, summary, records, filters, locale):
+    l.section("filters", "Filtros utilizados", 70)
+    items = [("Período", filters.get("period") or "Período selecionado"), ("Modo", "Técnico"), ("Idioma", "Português (Brasil)" if locale == "pt-BR" else "English (United States)"), ("Timezone", filters.get("timezone") or filters.get("timezone_name") or "Não informado")]
+    for label, value in items: l.editorial(f"{label}\n{value}")
+    l.section("infrastructure", "Infraestrutura", 58); l.empty_state("Telemetria detalhada de infraestrutura não estava disponível neste relatório.")
+    l.section("appendix", "Apêndice técnico", 58); l.editorial("IDs e metadados são exibidos somente em formato sanitizado. Segredos, prompts, respostas e payloads brutos não são incluídos.")
 
 
-def _trace(pdf, timeline_rows, record, locale):
-    pdf.heading("Identificação da execução"); pdf.paragraph(f"Trace: {record.get('trace_id')} | Execução: {record.get('execution_id') or 'Não disponível'} | Status: {record.get('status')}")
-    pdf.heading("Timeline visual")
-    for event in timeline_rows:
-        pdf.need(32); pdf.line(M+7, pdf.y-22, M+7, pdf.y+5, s.PRIMARY, 1.2); pdf.rect(M+3, pdf.y-1, 8, 8, s.PRIMARY, s.PRIMARY); pdf.text(M+22, pdf.y, str(event.get("event_type", "")).replace("_", " ").title(), 9, s.TEXT, True); pdf.text(M+22, pdf.y-12, f"{event.get('timestamp','')} | {duration(event.get('duration_ms'), locale)} | {event.get('status','')}", 7, s.MUTED); pdf.y -= 31
-    pdf.heading("Metadados sanitizados"); pdf.paragraph("Os detalhes de eventos foram sanitizados antes da composição deste relatório.")
+def _trace(l, events, record, locale):
+    l.section("identity", "Identificação da execução", 55); l.editorial(f"Trace: {record.get('trace_id')}\nExecução: {record.get('execution_id') or 'Não disponível'}\nStatus: {_status(record.get('status'))}")
+    l.section("timeline", "Timeline visual", 40)
+    for i, event in enumerate(events):
+        l.block(40, keep=True, label=f"event-{i}"); l.pdf.line(M+7, l.y-29, M+7, l.y-2, s.PRIMARY, 1.2); l.pdf.text(M+22, l.y-8, str(event.get("event_type", "")).replace("_", " ").title(), 9, s.TEXT, True); l.pdf.text(M+22, l.y-21, f"{event.get('timestamp','')} | {duration(event.get('duration_ms'), locale)} | {_status(event.get('status'))}", 7, s.MUTED); l.flow.move(40)
+    l.section("sanitized", "Metadados sanitizados", 48); l.editorial("Os detalhes de eventos foram sanitizados antes da composição deste relatório.")
 
 
-def render_report(*, tenant: dict[str, Any], summary: dict[str, Any], records: list[dict[str, Any]], start: datetime, end: datetime, timezone_name: str, mode: str = "executive", locale: str = "pt-BR", filters: dict[str, Any] | None = None, timeline_rows: list[dict[str, Any]] | None = None, include_charts: bool = True, comparison: dict[str, Any] | None = None, trace: bool = False) -> bytes:
+def render_report(*, tenant: dict[str, Any], summary: dict[str, Any], records: list[dict[str, Any]], start: datetime, end: datetime, timezone_name: str, mode="executive", locale="pt-BR", filters=None, timeline_rows=None, include_charts=True, comparison=None, trace=False) -> bytes:
     mode = "technical" if mode == "technical" else "executive"; locale = "en-US" if locale == "en-US" else "pt-BR"; health = analyse(summary); report_id = _report_id(tenant, start, end, mode)
-    pdf = PDF(f"Wazza Observabilidade Enterprise | {tenant.get('name') or tenant.get('slug') or ''} | {report_id}")
-    _header(pdf, tenant=tenant, start=start, end=end, timezone_name=timezone_name, mode=mode, report_id=report_id, health=health, locale=locale)
-    if trace: _trace(pdf, timeline_rows or [], records[0] if records else {}, locale)
+    pdf = PDF(f"Wazza | {tenant.get('name') or tenant.get('slug') or ''} | {report_id} | {'Técnico' if mode == 'technical' else 'Executivo'}")
+    l = ReportLayout(pdf); _header(l, tenant=tenant, start=start, end=end, timezone_name=timezone_name, mode=mode, report_id=report_id, health=health, locale=locale)
+    if trace: _trace(l, timeline_rows or [], records[0] if records else {}, locale)
     else:
-        _kpis(pdf, summary, health, comparison, locale); pdf.heading("Resumo executivo"); pdf.paragraph(executive_summary(summary))
-        if include_charts: _chart(pdf, records)
-        _performance(pdf, summary, health, locale); _traces(pdf, records, mode == "technical", locale)
-        if mode == "technical": _technical(pdf, summary, records, filters or {}, locale)
-        findings, recommendations = conclusions(summary, health); pdf.heading("Constatações"); [pdf.paragraph(f"• {x}") for x in findings]; pdf.heading("Recomendações"); [pdf.paragraph(f"• {x}") for x in recommendations]
-        pdf.heading("Como interpretar este relatório"); pdf.paragraph("p50, p95 e p99 mostram a duração abaixo da qual 50%, 95% e 99% das amostras ficaram. Throughput é o volume por minuto. Retry é uma nova tentativa; lock contention indica disputa por bloqueio; trace reúne os eventos de uma execução.")
-    streams = []
-    total = len(pdf.pages)
+        _kpis(l, summary, health, comparison, locale)
+        l.section("summary", "Resumo executivo", 65); l.editorial(executive_summary(summary))
+        _performance(l, summary, health, locale); _traces(l, records, mode == "technical", locale)
+        if mode == "technical": _technical(l, summary, records, filters or {}, locale)
+        findings, recommendations = conclusions(summary, health)
+        l.section("findings", "Constatações", 60)
+        for item in findings: l.editorial(item, bullet=True)
+        l.section("recommendations", "Recomendações", 60)
+        for item in recommendations: l.editorial(item, bullet=True)
+        l.section("interpretation", "Como interpretar este relatório", 60); l.editorial("p50, p95 e p99 mostram a duração abaixo da qual 50%, 95% e 99% das amostras ficaram. Throughput é o volume por minuto. Retry é uma nova tentativa; contenção de lock indica disputa por bloqueio; trace reúne os eventos de uma execução.")
+    streams, total = [], len(pdf.pages)
     for i, commands in enumerate(pdf.pages, 1):
-        commands.append(f"BT /F1 7 Tf {_rgb(s.MUTED)} rg {M} 28 Td ({_esc(pdf.footer)}) Tj ET")
-        commands.append(f"BT /F1 7 Tf {_rgb(s.MUTED)} rg {W-M-55} 28 Td (Página {i} de {total}) Tj ET")
+        commands.append(f"q {_rgb(s.BORDER)} RG .5 w {M} 48 m {W-M} 48 l S Q")
+        commands.append(f"BT /F1 8 Tf {_rgb(s.MUTED)} rg {M} 29 Td ({_esc(pdf.footer)}) Tj ET")
+        commands.append(f"BT /F1 8 Tf {_rgb(s.MUTED)} rg {W-M-56} 29 Td (Página {i} de {total}) Tj ET")
         streams.append("\n".join(commands))
     return _build(streams)
 
 
-def _build(streams: list[str]) -> bytes:
+def _build(streams):
     objects = ["<< /Type /Catalog /Pages 2 0 R >>", f"<< /Type /Pages /Kids [{' '.join(f'{i+5} 0 R' for i in range(len(streams)))}] /Count {len(streams)} >>", "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>", "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>"]
-    page_objects, content_objects = [], []
-    base = 5 + len(streams)
+    pages, content, base = [], [], 5 + len(streams)
     for i, stream in enumerate(streams):
-        page_objects.append(f"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {W} {H}] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents {base+i} 0 R >>")
-        raw = stream.encode("latin1"); content_objects.append(f"<< /Length {len(raw)} >>\nstream\n{stream}\nendstream")
-    objects += page_objects + content_objects; out = "%PDF-1.4\n%\xe2\xe3\xcf\xd3\n"; offsets = [0]
-    for i, obj in enumerate(objects, 1): offsets.append(len(out.encode("latin1"))); out += f"{i} 0 obj\n{obj}\nendobj\n"
-    start = len(out.encode("latin1")); out += f"xref\n0 {len(objects)+1}\n0000000000 65535 f \n" + "".join(f"{x:010d} 00000 n \n" for x in offsets[1:]) + f"trailer << /Size {len(objects)+1} /Root 1 0 R >>\nstartxref\n{start}\n%%EOF"
+        pages.append(f"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {W} {H}] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents {base+i} 0 R >>"); content.append(f"<< /Length {len(stream.encode('latin1'))} >>\nstream\n{stream}\nendstream")
+    out, offsets = "%PDF-1.4\n%\xe2\xe3\xcf\xd3\n", [0]
+    for i, obj in enumerate(objects + pages + content, 1): offsets.append(len(out.encode("latin1"))); out += f"{i} 0 obj\n{obj}\nendobj\n"
+    start = len(out.encode("latin1")); out += f"xref\n0 {len(offsets)}\n0000000000 65535 f \n" + "".join(f"{x:010d} 00000 n \n" for x in offsets[1:]) + f"trailer << /Size {len(offsets)} /Root 1 0 R >>\nstartxref\n{start}\n%%EOF"
     return out.encode("latin1")

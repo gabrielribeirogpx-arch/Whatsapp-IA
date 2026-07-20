@@ -34,8 +34,13 @@ def analyse(summary: dict[str, Any]) -> Health:
 def executive_summary(summary: dict[str, Any]) -> str:
     executions = int(summary.get("executions") or 0)
     if not executions: return "Nenhuma execução foi encontrada no período selecionado. Não há dados suficientes para conclusões operacionais."
-    text = f"Durante o período analisado, o Wazza processou {executions} execução(ões), com taxa de sucesso de {summary.get('success_rate', 0)}%."
-    text += " Não foram registrados erros." if not summary.get("errors") else f" Foram registrados {summary['errors']} evento(s) de erro."
+    execution_label = "execução" if executions == 1 else "execuções"
+    errors = int(summary.get("errors") or 0)
+    error_label = "evento de erro" if errors == 1 else "eventos de erro"
+    success_rate = float(summary.get("success_rate") or 0)
+    success_label = f"{success_rate:g}".replace(".", ",")
+    text = f"Durante o período analisado, o Wazza processou {executions} {execution_label}, com taxa de sucesso de {success_label}%."
+    text += " Não foram registrados erros." if not errors else f" Foram registrados {errors} {error_label}."
     if summary.get("p95") is not None: text += f" A latência p95 foi de {summary['p95']} ms."
     text += " Não foram registrados retries." if not summary.get("retries") else f" Foram registrados {summary['retries']} retries."
     if summary.get("lock_contention"): text += f" Foram registradas {summary['lock_contention']} contenções de lock."
