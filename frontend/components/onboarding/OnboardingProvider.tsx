@@ -5,8 +5,9 @@ import { ReactNode, createContext, useCallback, useContext, useEffect, useMemo, 
 import { usePathname } from 'next/navigation';
 import { Check, ChevronLeft, ChevronRight, HelpCircle, Sparkles, X } from 'lucide-react';
 import { listFlows, listWhatsAppProviders } from '@/lib/api';
+import { getMissionRoute, OnboardingMissionId } from '@/lib/onboarding/missionRoutes';
 
-export type OnboardingStep = { id: string; title: string; description: string; href: string; action: string };
+export type OnboardingStep = { id: OnboardingMissionId; title: string; description: string; action: string };
 export type MissionStatus = 'pending' | 'active' | 'completed';
 export type TutorialState = {
   /** The assistant card being displayed. This is deliberately independent from completion. */
@@ -18,15 +19,15 @@ export type TutorialState = {
 };
 const STORAGE_KEY = 'wazza:onboarding:tenant:default';
 export const onboardingSteps: OnboardingStep[] = [
-  { id: 'company', title: 'Criar empresa', description: 'Defina a operação que será atendida.', href: '/dashboard/settings', action: 'Abrir configurações' },
-  { id: 'whatsapp', title: 'Conectar WhatsApp', description: 'Conecte seu canal para receber mensagens reais.', href: '/dashboard/settings?tab=whatsapp-business&section=connections', action: 'Conectar agora' },
-  { id: 'flow', title: 'Criar primeiro fluxo', description: 'Monte a automação que orienta cada conversa.', href: '/dashboard/flows', action: 'Criar fluxo' },
-  { id: 'message', title: 'Receber primeira mensagem', description: 'Use a demonstração ou seu WhatsApp conectado.', href: '/dashboard/inbox', action: 'Abrir Inbox' },
-  { id: 'inbox', title: 'Testar Inbox', description: 'Veja, responda e encaminhe uma conversa.', href: '/dashboard/inbox', action: 'Testar Inbox' },
-  { id: 'pipeline', title: 'Criar Pipeline', description: 'Organize oportunidades em etapas comerciais.', href: '/dashboard/pipeline', action: 'Abrir Pipeline' },
-  { id: 'ai', title: 'Configurar IA', description: 'Defina como a IA ajuda sua equipe.', href: '/dashboard/ai/playground', action: 'Configurar IA' },
-  { id: 'publish', title: 'Publicar automação', description: 'Ative o fluxo para colocá-lo em operação.', href: '/dashboard/ai-settings', action: 'Publicar fluxo' },
-  { id: 'team', title: 'Convidar equipe', description: 'Traga operadores para atender juntos.', href: '/dashboard/settings', action: 'Convidar equipe' },
+  { id: 'company', title: 'Criar empresa', description: 'Defina a operação que será atendida.', action: 'Abrir configurações' },
+  { id: 'whatsapp', title: 'Conectar WhatsApp', description: 'Conecte seu canal para receber mensagens reais.', action: 'Conectar agora' },
+  { id: 'flow', title: 'Criar primeiro fluxo', description: 'Monte a automação que orienta cada conversa.', action: 'Criar fluxo' },
+  { id: 'message', title: 'Receber primeira mensagem', description: 'Use a demonstração ou seu WhatsApp conectado.', action: 'Abrir Inbox' },
+  { id: 'inbox', title: 'Testar Inbox', description: 'Veja, responda e encaminhe uma conversa.', action: 'Testar Inbox' },
+  { id: 'pipeline', title: 'Criar Pipeline', description: 'Organize oportunidades em etapas comerciais.', action: 'Abrir Pipeline' },
+  { id: 'ai', title: 'Configurar IA', description: 'Defina como a IA ajuda sua equipe.', action: 'Configurar IA' },
+  { id: 'publish', title: 'Publicar automação', description: 'Ative o fluxo para colocá-lo em operação.', action: 'Publicar fluxo' },
+  { id: 'team', title: 'Convidar equipe', description: 'Traga operadores para atender juntos.', action: 'Convidar equipe' },
 ];
 const screenHelp: Record<string, { title: string; text: string; bullets: string[] }> = {
   '/dashboard': { title: 'Dashboard', text: 'Visão geral da sua operação.', bullets: ['Acompanhe conversas e resultados', 'Encontre próximos passos sugeridos'] },
@@ -152,7 +153,7 @@ export function OnboardingProvider({ children }: { children: ReactNode }) {
   const help = screenHelp[pathname]; const next = onboardingSteps[state.currentStep];
   return <OnboardingContext.Provider value={value}>{children}
     {helpOpen && help ? <aside className="onboarding-context-help" aria-label={`Ajuda sobre ${help.title}`}><button className="onboarding-close" onClick={() => { setHelpOpen(false); setState(s => ({ ...s, dismissedScreens: Array.from(new Set([...s.dismissedScreens, pathname])) })); }} aria-label="Nunca mostrar novamente"><X size={16}/></button><span className="onboarding-eyebrow"><Sparkles size={14}/> Conheça este módulo</span><h2>{help.title}</h2><p>{help.text}</p><ul>{help.bullets.map(item => <li key={item}><Check size={15}/>{item}</li>)}</ul><small>Tempo de leitura: 30 segundos</small><div><Link href="/dashboard/academy">Ver exemplo</Link><button onClick={() => setHelpOpen(false)}>Próximo</button></div></aside> : null}
-    {ready && next ? <aside className="onboarding-assistant" aria-label="Assistente Wazza"><button className="onboarding-help-toggle" onClick={() => setHelpOpen(v => !v)} aria-label="Abrir ajuda contextual"><HelpCircle size={19}/></button><span>Assistente Wazza</span><strong>Passo {state.currentStep + 1} de {onboardingSteps.length}</strong><div className="onboarding-progress"><i style={{ width: `${progress}%` }}/></div><b>{next.title}</b><p>{next.description}</p><Link href={next.href} onClick={() => { if (next.id === 'whatsapp') activate(next.id); else if (next.id !== 'publish') complete(next.id); }}>{next.action}</Link></aside> : null}
+    {ready && next ? <aside className="onboarding-assistant" aria-label="Assistente Wazza"><button className="onboarding-help-toggle" onClick={() => setHelpOpen(v => !v)} aria-label="Abrir ajuda contextual"><HelpCircle size={19}/></button><span>Assistente Wazza</span><strong>Passo {state.currentStep + 1} de {onboardingSteps.length}</strong><div className="onboarding-progress"><i style={{ width: `${progress}%` }}/></div><b>{next.title}</b><p>{next.description}</p><Link href={getMissionRoute(next.id)} onClick={() => { if (next.id === 'whatsapp') activate(next.id); else if (next.id !== 'publish') complete(next.id); }}>{next.action}</Link></aside> : null}
     {tourOpen ? <Tour index={tourIndex} onClose={() => { setTourOpen(false); setState(s => ({ ...s, tourDismissed: true })); }} onNext={() => tourIndex === 2 ? setTourOpen(false) : setTourIndex(i => i + 1)} onBack={() => setTourIndex(i => Math.max(i - 1, 0))} /> : null}
   </OnboardingContext.Provider>;
 }
