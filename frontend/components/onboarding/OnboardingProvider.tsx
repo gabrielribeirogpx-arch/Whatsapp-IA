@@ -4,10 +4,18 @@ import Link from 'next/link';
 import { ReactNode, createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { usePathname } from 'next/navigation';
 import { Check, ChevronLeft, ChevronRight, HelpCircle, Sparkles, X } from 'lucide-react';
-import { listFlows } from '@/lib/api';
+import { listFlows, listWhatsAppProviders } from '@/lib/api';
 
 export type OnboardingStep = { id: string; title: string; description: string; href: string; action: string };
-export type TutorialState = { completed: string[]; dismissedScreens: string[]; tourDismissed: boolean };
+export type MissionStatus = 'pending' | 'active' | 'completed';
+export type TutorialState = {
+  /** The assistant card being displayed. This is deliberately independent from completion. */
+  currentStep: number;
+  missionStatus: Record<string, MissionStatus>;
+  completed: string[];
+  dismissedScreens: string[];
+  tourDismissed: boolean;
+};
 const STORAGE_KEY = 'wazza:onboarding:tenant:default';
 export const onboardingSteps: OnboardingStep[] = [
   { id: 'company', title: 'Criar empresa', description: 'Defina a operação que será atendida.', href: '/dashboard/settings', action: 'Abrir configurações' },
@@ -28,16 +36,66 @@ const screenHelp: Record<string, { title: string; text: string; bullets: string[
   '/dashboard/flows': { title: 'Fluxos', text: 'Automatiza processos e respostas.', bullets: ['Combine mensagens, condições e IA', 'Publique quando estiver pronto'] },
   '/dashboard/observability': { title: 'Observabilidade', text: 'Mostra tudo que aconteceu em cada execução.', bullets: ['Siga mensagens, fluxo, IA e resposta', 'Use traces para investigar e melhorar'] },
 };
-type ContextValue = { state: TutorialState; complete: (id: string) => void; reset: () => void; progress: number; startTour: () => void };
+type ContextValue = {
+  state: TutorialState;
+  complete: (id: string) => void;
+  activate: (id: string) => void;
+  reset: () => void;
+  progress: number;
+  startTour: () => void;
+};
 const OnboardingContext = createContext<ContextValue | null>(null);
 export const useOnboarding = () => { const value = useContext(OnboardingContext); if (!value) throw new Error('useOnboarding must be used inside OnboardingProvider'); return value; };
 
-function readState(): TutorialState { try { return { completed: [], dismissedScreens: [], tourDismissed: false, ...JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}') }; } catch { return { completed: [], dismissedScreens: [], tourDismissed: false }; } }
+const initialState: TutorialState = { currentStep: 0, missionStatus: {}, completed: [], dismissedScreens: [], tourDismissed: false };
+
+function statusFor(state: TutorialState, id: string): MissionStatus {
+  return state.missionStatus[id] || (state.completed.includes(id) ? 'completed' : 'pending');
+}
+
+function readState(): TutorialState {
+  try {
+    const stored = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}') as Partial<TutorialState>;
+    const completed = Array.isArray(stored.completed) ? stored.completed : [];
+    const missionStatus = { ...(stored.missionStatus || {}) };
+    completed.forEach((id) => { missionStatus[id] = 'completed'; });
+    const migratedCurrentStep = onboardingSteps.findIndex((step) => !completed.includes(step.id));
+    const currentStep = typeof stored.currentStep === 'number'
+      ? stored.currentStep
+      : (migratedCurrentStep === -1 ? onboardingSteps.length - 1 : migratedCurrentStep);
+    return {
+      ...initialState,
+      ...stored,
+      completed,
+      missionStatus,
+      currentStep: Math.min(Math.max(currentStep, 0), onboardingSteps.length - 1),
+    };
+  } catch {
+    return initialState;
+  }
+}
 export function OnboardingProvider({ children }: { children: ReactNode }) {
   const pathname = usePathname();
-  const [state, setState] = useState<TutorialState>({ completed: [], dismissedScreens: [], tourDismissed: false });
+  const [state, setState] = useState<TutorialState>(initialState);
   const [ready, setReady] = useState(false); const [helpOpen, setHelpOpen] = useState(false); const [tourOpen, setTourOpen] = useState(false); const [tourIndex, setTourIndex] = useState(0);
-  const complete = useCallback((id: string) => setState(old => old.completed.includes(id) ? old : { ...old, completed: [...old.completed, id] }), []);
+  const complete = useCallback((id: string) => setState(old => {
+    const stepIndex = onboardingSteps.findIndex((step) => step.id === id);
+    return {
+      ...old,
+      completed: old.completed.includes(id) ? old.completed : [...old.completed, id],
+      missionStatus: { ...old.missionStatus, [id]: 'completed' },
+      currentStep: stepIndex === old.currentStep ? Math.min(stepIndex + 1, onboardingSteps.length - 1) : old.currentStep,
+    };
+  }), []);
+  const activate = useCallback((id: string) => setState(old => {
+    const stepIndex = onboardingSteps.findIndex((step) => step.id === id);
+    return {
+      ...old,
+      missionStatus: { ...old.missionStatus, [id]: statusFor(old, id) === 'completed' ? 'completed' : 'active' },
+      // Navigating is progress through the assistant, not evidence that the mission succeeded.
+      currentStep: stepIndex >= 0 ? Math.min(stepIndex + 1, onboardingSteps.length - 1) : old.currentStep,
+    };
+  }), []);
   useEffect(() => { setState(readState()); setReady(true); }, []);
   useEffect(() => { if (ready) localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }, [state, ready]);
   useEffect(() => {
@@ -57,16 +115,44 @@ export function OnboardingProvider({ children }: { children: ReactNode }) {
     const interval = window.setInterval(() => { void checkPublishedFlow(); }, 30_000);
     return () => { cancelled = true; window.clearInterval(interval); };
   }, [complete, ready, state.completed]);
-  useEffect(() => { setHelpOpen(Boolean(ready && screenHelp[pathname] && !state.dismissedScreens.includes(pathname))); }, [pathname, ready]);
+  useEffect(() => {
+    if (!ready || statusFor(state, 'whatsapp') === 'completed') return;
+
+    let cancelled = false;
+    const checkWhatsAppConnection = async () => {
+      try {
+        const providers = await listWhatsAppProviders();
+        const hasActiveConnection = providers.some((provider) =>
+          provider.is_active ||
+          provider.connection_status === 'connected' ||
+          provider.status === 'connected' ||
+          provider.status === 'active',
+        );
+        if (!cancelled && hasActiveConnection) complete('whatsapp');
+      } catch {
+        // Keep the mission active/pending until the provider status can be verified.
+      }
+    };
+
+    void checkWhatsAppConnection();
+    const interval = window.setInterval(() => { void checkWhatsAppConnection(); }, 30_000);
+    window.addEventListener('wazza:whatsapp-connection-changed', checkWhatsAppConnection);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+      window.removeEventListener('wazza:whatsapp-connection-changed', checkWhatsAppConnection);
+    };
+  }, [complete, ready, state]);
+  useEffect(() => { setHelpOpen(Boolean(ready && screenHelp[pathname] && !state.dismissedScreens.includes(pathname))); }, [pathname, ready, state.dismissedScreens]);
   useEffect(() => { const close = (event: KeyboardEvent) => { if (event.key === 'Escape') { setTourOpen(false); setHelpOpen(false); } if (tourOpen && event.key === 'ArrowRight') setTourIndex(i => Math.min(i + 1, 2)); if (tourOpen && event.key === 'ArrowLeft') setTourIndex(i => Math.max(i - 1, 0)); }; window.addEventListener('keydown', close); return () => window.removeEventListener('keydown', close); }, [tourOpen]);
-  const reset = useCallback(() => setState({ completed: [], dismissedScreens: [], tourDismissed: false }), []);
+  const reset = useCallback(() => setState(initialState), []);
   const startTour = useCallback(() => { setTourIndex(0); setTourOpen(true); }, []);
   const progress = Math.round((state.completed.length / onboardingSteps.length) * 100);
-  const value = useMemo(() => ({ state, complete, reset, progress, startTour }), [state, complete, reset, progress, startTour]);
-  const help = screenHelp[pathname]; const next = onboardingSteps.find(step => !state.completed.includes(step.id));
+  const value = useMemo(() => ({ state, complete, activate, reset, progress, startTour }), [state, complete, activate, reset, progress, startTour]);
+  const help = screenHelp[pathname]; const next = onboardingSteps[state.currentStep];
   return <OnboardingContext.Provider value={value}>{children}
     {helpOpen && help ? <aside className="onboarding-context-help" aria-label={`Ajuda sobre ${help.title}`}><button className="onboarding-close" onClick={() => { setHelpOpen(false); setState(s => ({ ...s, dismissedScreens: Array.from(new Set([...s.dismissedScreens, pathname])) })); }} aria-label="Nunca mostrar novamente"><X size={16}/></button><span className="onboarding-eyebrow"><Sparkles size={14}/> Conheça este módulo</span><h2>{help.title}</h2><p>{help.text}</p><ul>{help.bullets.map(item => <li key={item}><Check size={15}/>{item}</li>)}</ul><small>Tempo de leitura: 30 segundos</small><div><Link href="/dashboard/academy">Ver exemplo</Link><button onClick={() => setHelpOpen(false)}>Próximo</button></div></aside> : null}
-    {ready && next ? <aside className="onboarding-assistant" aria-label="Assistente Wazza"><button className="onboarding-help-toggle" onClick={() => setHelpOpen(v => !v)} aria-label="Abrir ajuda contextual"><HelpCircle size={19}/></button><span>Assistente Wazza</span><strong>Passo {state.completed.length + 1} de {onboardingSteps.length}</strong><div className="onboarding-progress"><i style={{ width: `${progress}%` }}/></div><b>{next.title}</b><p>{next.description}</p><Link href={next.href} onClick={() => { if (next.id !== 'whatsapp' && next.id !== 'publish') complete(next.id); }}>{next.action}</Link></aside> : null}
+    {ready && next ? <aside className="onboarding-assistant" aria-label="Assistente Wazza"><button className="onboarding-help-toggle" onClick={() => setHelpOpen(v => !v)} aria-label="Abrir ajuda contextual"><HelpCircle size={19}/></button><span>Assistente Wazza</span><strong>Passo {state.currentStep + 1} de {onboardingSteps.length}</strong><div className="onboarding-progress"><i style={{ width: `${progress}%` }}/></div><b>{next.title}</b><p>{next.description}</p><Link href={next.href} onClick={() => { if (next.id === 'whatsapp') activate(next.id); else if (next.id !== 'publish') complete(next.id); }}>{next.action}</Link></aside> : null}
     {tourOpen ? <Tour index={tourIndex} onClose={() => { setTourOpen(false); setState(s => ({ ...s, tourDismissed: true })); }} onNext={() => tourIndex === 2 ? setTourOpen(false) : setTourIndex(i => i + 1)} onBack={() => setTourIndex(i => Math.max(i - 1, 0))} /> : null}
   </OnboardingContext.Provider>;
 }
