@@ -3001,6 +3001,9 @@ input {
   inset: 0;
   z-index: 130;
   background: transparent;
+  /* Outside clicks are handled by SidebarUserProfile's document listener.
+     Do not place an invisible layer over the profile trigger on desktop. */
+  pointer-events: none;
 }
 
 .sidebar-account-menu {
@@ -3216,6 +3219,7 @@ input {
   .sidebar-account-backdrop.is-mobile {
     background: rgba(15, 23, 42, 0.32);
     backdrop-filter: blur(8px);
+    pointer-events: auto;
   }
 
   .sidebar-account-menu.is-mobile {

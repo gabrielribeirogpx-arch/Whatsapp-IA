@@ -15,7 +15,8 @@ import {
   User,
   UsersRound,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { getAccountMe, getTenantSessionFromStorage } from "@/lib/api";
 import { getUserDisplayName } from "@/lib/userDisplayName";
 
@@ -115,6 +116,8 @@ export default function SidebarUserProfile({
   const router = useRouter();
   const buttonRef = useRef<HTMLButtonElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
+  const firstMenuItemRef = useRef<HTMLAnchorElement | null>(null);
+  const menuId = useId();
   const [open, setOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
   const [menuPosition, setMenuPosition] = useState({ top: 0, left: 0 });
@@ -218,6 +221,12 @@ export default function SidebarUserProfile({
   }, [open]);
 
   useEffect(() => {
+    if (!open) return;
+
+    firstMenuItemRef.current?.focus();
+  }, [open]);
+
+  useEffect(() => {
     if (!open || !isMobile) return;
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
@@ -308,6 +317,7 @@ export default function SidebarUserProfile({
           : { top: menuPosition.top, left: menuPosition.left }
       }
       role="menu"
+      id={menuId}
       aria-label="Menu de conta e workspace"
     >
       <div className="sidebar-account-menu-header">
@@ -364,6 +374,7 @@ export default function SidebarUserProfile({
                 return (
                   <Link
                     key={item.label}
+                    ref={item.label === "Meu perfil" ? firstMenuItemRef : undefined}
                     href={item.href}
                     className={className}
                     role="menuitem"
@@ -401,6 +412,7 @@ export default function SidebarUserProfile({
         onClick={handleTriggerClick}
         aria-haspopup="menu"
         aria-expanded={open}
+        aria-controls={open ? menuId : undefined}
         aria-label="Abrir menu de conta"
       >
         <span className="sidebar-account-avatar" aria-hidden="true">
@@ -418,15 +430,18 @@ export default function SidebarUserProfile({
         />
       </button>
 
-      {open ? (
-        <>
-          <div
-            className={`sidebar-account-backdrop ${isMobile ? "is-mobile" : ""}`}
-            aria-hidden="true"
-          />
-          {menu}
-        </>
-      ) : null}
+      {open && typeof document !== "undefined"
+        ? createPortal(
+            <>
+              <div
+                className={`sidebar-account-backdrop ${isMobile ? "is-mobile" : ""}`}
+                aria-hidden="true"
+              />
+              {menu}
+            </>,
+            document.body,
+          )
+        : null}
     </div>
   );
 }
