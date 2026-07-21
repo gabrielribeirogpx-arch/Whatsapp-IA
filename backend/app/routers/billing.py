@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Path, Request
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -52,7 +52,7 @@ def admin_plans(db: Session = Depends(get_db), user: TenantUser = Depends(_admin
     return [_plan(plan, db.execute(select(PlanFeature).where(PlanFeature.plan_id == plan.id)).scalars().all()) for plan in db.execute(select(Plan).order_by(Plan.sort_order)).scalars().all()]
 
 @admin_router.get("/tenants/{tenant_id}")
-def admin_tenant_billing(tenant_id: str, db: Session = Depends(get_db), user: TenantUser = Depends(_admin)):
+def admin_tenant_billing(tenant_id: str = Path(...), db: Session = Depends(get_db), user: TenantUser = Depends(_admin)):
     tenant = db.get(Tenant, tenant_id)
     if not tenant: raise HTTPException(status_code=404, detail="Tenant não encontrado")
     subscription = db.execute(select(Subscription).where(Subscription.tenant_id == tenant.id)).scalars().first()
