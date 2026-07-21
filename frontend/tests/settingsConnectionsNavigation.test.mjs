@@ -14,7 +14,7 @@ const expectedMissionRoutes = {
   message: '/dashboard/inbox',
   inbox: '/dashboard/inbox',
   pipeline: '/dashboard/pipeline',
-  ai: '/dashboard/ai/playground',
+  ai: '/dashboard/ai-settings',
   publish: '/dashboard/flow-builder',
   team: '/dashboard/account?tab=users',
 };
