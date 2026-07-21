@@ -1678,6 +1678,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
   const router = useRouter();
   const searchParams = useSearchParams();
   const flowIdFromUrl = searchParams.get('flow_id') || searchParams.get('flowId') || _initialFlowId || '';
+  const shouldOpenCreateFlow = searchParams.get('create') === 'true';
   const [flows, setFlows] = useState<FlowListOption[]>([]);
   const [mcpTools, setMcpTools] = useState<MCPToolOption[]>([]);
   const normalizedFlows = useMemo(
@@ -2148,12 +2149,26 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
     setIsCreateFlowOpen(true);
   }, []);
 
+  const handleCloseCreateFlow = useCallback(() => {
+    setIsCreateFlowOpen(false);
+    const params = new URLSearchParams(searchParams.toString());
+    params.delete('create');
+    const query = params.toString();
+    router.replace(query ? `/dashboard/flow-builder?${query}` : '/dashboard/flow-builder');
+  }, [router, searchParams]);
+
   const handleFlowCreated = useCallback((flowId: string, flowName?: string | null) => {
     console.info('[FLOW CREATED CALLBACK]', { flow_id: flowId, flow_name: flowName });
     setSelectedFlowId(flowId);
-  }, []);
+    router.replace(`/dashboard/flow-builder?flow_id=${flowId}`);
+  }, [router]);
 
   useEffect(() => {
+    if (shouldOpenCreateFlow) setIsCreateFlowOpen(true);
+  }, [shouldOpenCreateFlow]);
+
+  useEffect(() => {
+    if (shouldOpenCreateFlow) return;
     if (isLoading) return;
     if (normalizedFlows.length > 0) {
       hasTriedAutoCreateRef.current = false;
@@ -2162,7 +2177,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
     if (hasTriedAutoCreateRef.current || isCreatingFlow) return;
     hasTriedAutoCreateRef.current = true;
     void createDefaultFlow();
-  }, [createDefaultFlow, isCreatingFlow, isLoading, normalizedFlows.length]);
+  }, [createDefaultFlow, isCreatingFlow, isLoading, normalizedFlows.length, shouldOpenCreateFlow]);
 
   const formatVersionDate = useCallback((timestamp?: string | null) => {
     if (!timestamp) return 'Sem data';
@@ -3986,7 +4001,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
       )}
       <CreateFlowModal
         open={isCreateFlowOpen}
-        onClose={() => setIsCreateFlowOpen(false)}
+        onClose={handleCloseCreateFlow}
         onCreated={handleFlowCreated}
       />
       {isSimulatorOpen && (
