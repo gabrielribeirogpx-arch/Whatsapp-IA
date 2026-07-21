@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { ReactNode, createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { usePathname } from 'next/navigation';
 import { Check, ChevronLeft, ChevronRight, HelpCircle, Sparkles, X } from 'lucide-react';
+import { listFlows } from '@/lib/api';
 
 export type OnboardingStep = { id: string; title: string; description: string; href: string; action: string };
 export type TutorialState = { completed: string[]; dismissedScreens: string[]; tourDismissed: boolean };
@@ -16,7 +17,7 @@ export const onboardingSteps: OnboardingStep[] = [
   { id: 'inbox', title: 'Testar Inbox', description: 'Veja, responda e encaminhe uma conversa.', href: '/dashboard/inbox', action: 'Testar Inbox' },
   { id: 'pipeline', title: 'Criar Pipeline', description: 'Organize oportunidades em etapas comerciais.', href: '/dashboard/pipeline', action: 'Abrir Pipeline' },
   { id: 'ai', title: 'Configurar IA', description: 'Defina como a IA ajuda sua equipe.', href: '/dashboard/ai/playground', action: 'Configurar IA' },
-  { id: 'publish', title: 'Publicar automação', description: 'Ative o fluxo para colocá-lo em operação.', href: '/dashboard/flows', action: 'Publicar fluxo' },
+  { id: 'publish', title: 'Publicar automação', description: 'Ative o fluxo para colocá-lo em operação.', href: '/dashboard/flow-builder?create=true', action: 'Publicar fluxo' },
   { id: 'team', title: 'Convidar equipe', description: 'Traga operadores para atender juntos.', href: '/dashboard/settings', action: 'Convidar equipe' },
 ];
 const screenHelp: Record<string, { title: string; text: string; bullets: string[] }> = {
@@ -36,11 +37,28 @@ export function OnboardingProvider({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const [state, setState] = useState<TutorialState>({ completed: [], dismissedScreens: [], tourDismissed: false });
   const [ready, setReady] = useState(false); const [helpOpen, setHelpOpen] = useState(false); const [tourOpen, setTourOpen] = useState(false); const [tourIndex, setTourIndex] = useState(0);
+  const complete = useCallback((id: string) => setState(old => old.completed.includes(id) ? old : { ...old, completed: [...old.completed, id] }), []);
   useEffect(() => { setState(readState()); setReady(true); }, []);
   useEffect(() => { if (ready) localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }, [state, ready]);
+  useEffect(() => {
+    if (!ready || state.completed.includes('publish')) return;
+
+    let cancelled = false;
+    const checkPublishedFlow = async () => {
+      try {
+        const flows = await listFlows();
+        if (!cancelled && flows.some((flow) => flow.published || flow.is_published || flow.status === 'published')) complete('publish');
+      } catch {
+        // The mission remains pending when flows cannot be loaded.
+      }
+    };
+
+    void checkPublishedFlow();
+    const interval = window.setInterval(() => { void checkPublishedFlow(); }, 30_000);
+    return () => { cancelled = true; window.clearInterval(interval); };
+  }, [complete, ready, state.completed]);
   useEffect(() => { setHelpOpen(Boolean(ready && screenHelp[pathname] && !state.dismissedScreens.includes(pathname))); }, [pathname, ready]);
   useEffect(() => { const close = (event: KeyboardEvent) => { if (event.key === 'Escape') { setTourOpen(false); setHelpOpen(false); } if (tourOpen && event.key === 'ArrowRight') setTourIndex(i => Math.min(i + 1, 2)); if (tourOpen && event.key === 'ArrowLeft') setTourIndex(i => Math.max(i - 1, 0)); }; window.addEventListener('keydown', close); return () => window.removeEventListener('keydown', close); }, [tourOpen]);
-  const complete = useCallback((id: string) => setState(old => old.completed.includes(id) ? old : { ...old, completed: [...old.completed, id] }), []);
   const reset = useCallback(() => setState({ completed: [], dismissedScreens: [], tourDismissed: false }), []);
   const startTour = useCallback(() => { setTourIndex(0); setTourOpen(true); }, []);
   const progress = Math.round((state.completed.length / onboardingSteps.length) * 100);
@@ -48,7 +66,7 @@ export function OnboardingProvider({ children }: { children: ReactNode }) {
   const help = screenHelp[pathname]; const next = onboardingSteps.find(step => !state.completed.includes(step.id));
   return <OnboardingContext.Provider value={value}>{children}
     {helpOpen && help ? <aside className="onboarding-context-help" aria-label={`Ajuda sobre ${help.title}`}><button className="onboarding-close" onClick={() => { setHelpOpen(false); setState(s => ({ ...s, dismissedScreens: Array.from(new Set([...s.dismissedScreens, pathname])) })); }} aria-label="Nunca mostrar novamente"><X size={16}/></button><span className="onboarding-eyebrow"><Sparkles size={14}/> Conheça este módulo</span><h2>{help.title}</h2><p>{help.text}</p><ul>{help.bullets.map(item => <li key={item}><Check size={15}/>{item}</li>)}</ul><small>Tempo de leitura: 30 segundos</small><div><Link href="/dashboard/academy">Ver exemplo</Link><button onClick={() => setHelpOpen(false)}>Próximo</button></div></aside> : null}
-    {ready && next ? <aside className="onboarding-assistant" aria-label="Assistente Wazza"><button className="onboarding-help-toggle" onClick={() => setHelpOpen(v => !v)} aria-label="Abrir ajuda contextual"><HelpCircle size={19}/></button><span>Assistente Wazza</span><strong>Passo {state.completed.length + 1} de {onboardingSteps.length}</strong><div className="onboarding-progress"><i style={{ width: `${progress}%` }}/></div><b>{next.title}</b><p>{next.description}</p><Link href={next.href} onClick={() => { if (next.id !== 'whatsapp') complete(next.id); }}>{next.action}</Link></aside> : null}
+    {ready && next ? <aside className="onboarding-assistant" aria-label="Assistente Wazza"><button className="onboarding-help-toggle" onClick={() => setHelpOpen(v => !v)} aria-label="Abrir ajuda contextual"><HelpCircle size={19}/></button><span>Assistente Wazza</span><strong>Passo {state.completed.length + 1} de {onboardingSteps.length}</strong><div className="onboarding-progress"><i style={{ width: `${progress}%` }}/></div><b>{next.title}</b><p>{next.description}</p><Link href={next.href} onClick={() => { if (next.id !== 'whatsapp' && next.id !== 'publish') complete(next.id); }}>{next.action}</Link></aside> : null}
     {tourOpen ? <Tour index={tourIndex} onClose={() => { setTourOpen(false); setState(s => ({ ...s, tourDismissed: true })); }} onNext={() => tourIndex === 2 ? setTourOpen(false) : setTourIndex(i => i + 1)} onBack={() => setTourIndex(i => Math.max(i - 1, 0))} /> : null}
   </OnboardingContext.Provider>;
 }
