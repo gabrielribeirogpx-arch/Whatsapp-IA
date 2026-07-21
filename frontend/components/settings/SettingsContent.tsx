@@ -1567,8 +1567,10 @@ function WhatsAppBusinessConsole({ section, onSectionChange }: { section: WhatsA
   const [templateForm, setTemplateForm] = useState(baseTemplateForm);
   const [templateError, setTemplateError] = useState("");
   const refresh = async () => {
-    setProviders(await listWhatsAppProviders());
+    const nextProviders = await listWhatsAppProviders();
+    setProviders(nextProviders);
     setTemplates(await listTemplates());
+    window.dispatchEvent(new Event("wazza:whatsapp-connection-changed"));
   };
 
   useEffect(() => {
