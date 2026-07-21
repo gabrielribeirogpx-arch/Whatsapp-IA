@@ -24,6 +24,7 @@ from app.schemas.auth import ForgotPasswordRequest, LoginRequest, RegisterReques
 from app.security.turnstile import enforce_rate_limit, get_client_ip, validate_turnstile_or_raise
 from app.services.audit_service import write_audit_log
 from app.services.session_service import create_user_session
+from app.services.trial_service import TrialService
 
 router = APIRouter(tags=["auth"])
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
@@ -225,6 +226,7 @@ def register(payload: RegisterRequest, request: Request, db: Session = Depends(g
     tenant = Tenant(name=payload.business_name.strip(), slug=_build_unique_slug(db, payload.business_name), phone_number_id=payload.whatsapp_number.strip(), ai_mode="vendedor")
     db.add(tenant)
     db.flush()
+    TrialService(db).start_trial(tenant.id)
 
     owner = TenantUser(tenant_id=tenant.id, full_name=payload.full_name.strip(), email=email, password_hash=_hash_password(payload.password), role="owner")
     db.add(owner)

@@ -9,6 +9,7 @@ from app.routers.account import get_current_user
 from app.services.audit_service import write_audit_log
 from app.services.entitlement_service import EntitlementService
 from app.services.tenant_service import get_current_tenant
+from app.services.trial_service import TrialService
 
 router = APIRouter(prefix="/billing", tags=["billing"])
 admin_router = APIRouter(prefix="/admin/billing", tags=["admin-billing"])
@@ -23,12 +24,24 @@ def public_plans(db: Session = Depends(get_db), user: TenantUser = Depends(get_c
 
 @router.get("/current")
 def current_billing(request: Request, db: Session = Depends(get_db), tenant: Tenant = Depends(get_current_tenant), user: TenantUser = Depends(get_current_user)):
+    trial_service = TrialService(db)
+    trial_service.expire_trial(tenant.id)
     subscription = db.execute(select(Subscription).where(Subscription.tenant_id == tenant.id)).scalars().first()
     plan = db.get(Plan, subscription.plan_id) if subscription else None
     service = EntitlementService(db)
     write_audit_log(db, action="BILLING_CURRENT_VIEWED", tenant_id=tenant.id, user_id=user.id, entity_type="subscription", entity_id=subscription.id if subscription else None, request=request)
     db.commit()
-    return {"tenant_id": str(tenant.id), "plan": _plan(plan, db.execute(select(PlanFeature).where(PlanFeature.plan_id == plan.id)).scalars().all()) if plan else None, "subscription": None if not subscription else {"status": subscription.status, "provider": subscription.provider, "billing_interval": subscription.billing_interval, "trial_started_at": subscription.trial_started_at, "trial_ends_at": subscription.trial_ends_at, "current_period_end": subscription.current_period_end}, "effective_entitlements": list(service.get_effective_entitlements(tenant.id).values()), "enforcement_enabled": settings.billing_enforcement_enabled, "billing_ui_enabled": settings.billing_ui_enabled}
+    is_trial = trial_service.is_trial(tenant.id)
+    return {"tenant_id": str(tenant.id), "plan": _plan(plan, db.execute(select(PlanFeature).where(PlanFeature.plan_id == plan.id)).scalars().all()) if plan else None, "subscription": None if not subscription else {"status": subscription.status, "provider": subscription.provider, "billing_interval": subscription.billing_interval, "trial_started_at": subscription.trial_started_at, "trial_ends_at": subscription.trial_ends_at, "current_period_end": subscription.current_period_end}, "trial": is_trial, "days_remaining": trial_service.days_remaining(tenant.id), "expired": bool(subscription and subscription.status == "expired"), "effective_entitlements": list(service.get_effective_entitlements(tenant.id).values()), "enforcement_enabled": settings.billing_enforcement_enabled, "billing_ui_enabled": settings.billing_ui_enabled}
+
+@router.get("/trial")
+def trial_billing(request: Request, db: Session = Depends(get_db), tenant: Tenant = Depends(get_current_tenant), user: TenantUser = Depends(get_current_user)):
+    service = TrialService(db)
+    subscription = service.expire_trial(tenant.id)
+    plan = db.get(Plan, subscription.plan_id) if subscription else None
+    write_audit_log(db, action="TRIAL_VIEWED", tenant_id=tenant.id, user_id=user.id, entity_type="subscription", entity_id=subscription.id if subscription else None, request=request)
+    db.commit()
+    return {"status": subscription.status if subscription else "legacy", "days_remaining": service.days_remaining(tenant.id), "trial_started_at": subscription.trial_started_at if subscription else None, "trial_ends_at": subscription.trial_ends_at if subscription else None, "plan": plan.code if plan else None, "expired": bool(subscription and subscription.status == "expired")}
 
 def _admin(user: TenantUser = Depends(get_current_user)) -> TenantUser:
     if user.role not in {"owner", "admin"}: raise HTTPException(status_code=403, detail="Acesso administrativo necessário")

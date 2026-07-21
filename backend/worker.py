@@ -27,6 +27,7 @@ from app.services.delay_queue_service import DELAY_ZSET_KEY
 from app.services.flow_engine_service import process_flow_engine
 from app.services.dead_letter_service import record_dead_letter
 from app.services.job_queue_service import build_version
+from app.services.trial_service import TrialService
 
 logging.basicConfig(
     level=os.getenv("LOG_LEVEL", "INFO"),
@@ -65,6 +66,7 @@ class DelayWorker:
         self.flow_v2_delay_worker = flow_v2_delay_worker or FlowV2DelayWorker()
         self._stop_event = asyncio.Event()
         self.graceful_shutdown_seconds = int(os.getenv("WORKER_GRACEFUL_SHUTDOWN_SECONDS", "30"))
+        self._next_trial_expiration_at = 0.0
 
     @staticmethod
     def reset_db_connections() -> None:
@@ -87,6 +89,9 @@ class DelayWorker:
         try:
             while not self._stop_event.is_set():
                 await self._process_due_jobs_once()
+                if time() >= self._next_trial_expiration_at:
+                    await asyncio.to_thread(self._expire_trials_once)
+                    self._next_trial_expiration_at = time() + 86400
                 try:
                     await asyncio.wait_for(self._stop_event.wait(), timeout=self.poll_interval_seconds)
                 except asyncio.TimeoutError:
@@ -159,6 +164,20 @@ class DelayWorker:
                 )
                 db.commit()
                 return result.processed
+            except Exception:
+                db.rollback()
+                raise
+
+    @staticmethod
+    def _expire_trials_once() -> int:
+        """Daily maintenance only marks expired trials; it never blocks a tenant."""
+        with SessionLocal() as db:
+            try:
+                expired = TrialService(db).expire_due_trials()
+                db.commit()
+                if expired:
+                    logger.info("event=trial_expiration_completed expired=%s", expired)
+                return expired
             except Exception:
                 db.rollback()
                 raise
