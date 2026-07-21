@@ -13,6 +13,8 @@ class Settings:
     whatsapp_phone_id: str = os.getenv("WHATSAPP_PHONE_ID", "")
     whatsapp_verify_token: str = os.getenv("WHATSAPP_VERIFY_TOKEN", "")
     oauth_token_encryption_key: str = os.getenv("OAUTH_TOKEN_ENCRYPTION_KEY", "")
+    billing_enforcement_enabled: bool = os.getenv("BILLING_ENFORCEMENT_ENABLED", "false").lower() in {"1", "true", "yes", "on"}
+    billing_ui_enabled: bool = os.getenv("BILLING_UI_ENABLED", "true").lower() in {"1", "true", "yes", "on"}
 
 
 settings = Settings()
