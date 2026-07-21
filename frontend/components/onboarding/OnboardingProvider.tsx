@@ -25,7 +25,7 @@ export const onboardingSteps: OnboardingStep[] = [
   { id: 'inbox', title: 'Testar Inbox', description: 'Veja, responda e encaminhe uma conversa.', href: '/dashboard/inbox', action: 'Testar Inbox' },
   { id: 'pipeline', title: 'Criar Pipeline', description: 'Organize oportunidades em etapas comerciais.', href: '/dashboard/pipeline', action: 'Abrir Pipeline' },
   { id: 'ai', title: 'Configurar IA', description: 'Defina como a IA ajuda sua equipe.', href: '/dashboard/ai/playground', action: 'Configurar IA' },
-  { id: 'publish', title: 'Publicar automação', description: 'Ative o fluxo para colocá-lo em operação.', href: '/dashboard/flow-builder?create=true', action: 'Publicar fluxo' },
+  { id: 'publish', title: 'Publicar automação', description: 'Ative o fluxo para colocá-lo em operação.', href: '/dashboard/ai-settings', action: 'Publicar fluxo' },
   { id: 'team', title: 'Convidar equipe', description: 'Traga operadores para atender juntos.', href: '/dashboard/settings', action: 'Convidar equipe' },
 ];
 const screenHelp: Record<string, { title: string; text: string; bullets: string[] }> = {
