@@ -69,8 +69,8 @@ export const accountNavGroups: AccountNavGroup[] = [
       },
       {
         id: "billing",
-        label: "Billing",
-        description: "Plano, faturas, limites e add-ons",
+        label: "Plano e cobrança",
+        description: "Plano, limites e recursos do workspace",
         icon: CreditCard,
       },
     ],

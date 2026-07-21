@@ -89,6 +89,7 @@ import {
 import { SettingsTabId } from "./SettingsSidebar";
 import { AccountTabId } from "@/components/account/AccountSidebar";
 import AccountPageHeader from "@/components/account/AccountPageHeader";
+import BillingTab from "@/components/billing/BillingTab";
 
 const INITIAL_FORM: SystemSettingsPayload = {
   token: "",
@@ -937,7 +938,7 @@ function PermissionsTab() {
     </Card>
   );
 }
-function BillingTab() {
+function LegacyBillingTab() {
   const usage = [
     { label: "Mensagens", current: 640, limit: 1000, unit: "mensagens", hint: "360 restantes", icon: MessageSquareText },
     { label: "Usuários", current: 3, limit: 5, unit: "usuários", hint: "2 assentos disponíveis", icon: UsersRound },
