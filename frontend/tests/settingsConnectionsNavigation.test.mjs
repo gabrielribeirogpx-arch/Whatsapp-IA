@@ -5,8 +5,29 @@ const pageClient = readFileSync(new URL('../components/settings/SettingsPageClie
 const settingsContent = readFileSync(new URL('../components/settings/SettingsContent.tsx', import.meta.url), 'utf8');
 const onboarding = readFileSync(new URL('../components/onboarding/OnboardingProvider.tsx', import.meta.url), 'utf8');
 const academy = readFileSync(new URL('../app/dashboard/academy/page.tsx', import.meta.url), 'utf8');
+const missionRoutes = readFileSync(new URL('../lib/onboarding/missionRoutes.ts', import.meta.url), 'utf8');
 
-assert.match(onboarding, /href: '\/dashboard\/settings\?tab=whatsapp-business&section=connections'/);
+const expectedMissionRoutes = {
+  company: '/dashboard/account?tab=profile',
+  whatsapp: '/dashboard/settings?tab=whatsapp-business&section=connections',
+  flow: '/dashboard/flow-builder?create=true',
+  message: '/dashboard/inbox',
+  inbox: '/dashboard/inbox',
+  pipeline: '/dashboard/pipeline',
+  ai: '/dashboard/ai/playground',
+  publish: '/dashboard/flow-builder',
+  team: '/dashboard/account?tab=users',
+};
+
+for (const [mission, route] of Object.entries(expectedMissionRoutes)) {
+  assert.match(missionRoutes, new RegExp(`${mission}: '${route.replace(/[?]/g, '\\?')}'`));
+}
+
+assert.doesNotMatch(missionRoutes, /publish: '\/dashboard\/ai-settings'/);
+assert.match(onboarding, /href=\{getMissionRoute\(next\.id\)\}/);
+assert.match(academy, /href=\{getMissionRoute\(step\.id\)\}/);
+assert.doesNotMatch(onboarding, /href:/);
+assert.doesNotMatch(academy, /step\.href/);
 assert.match(pageClient, /const whatsappSections = \['overview', 'connections', 'templates', 'api-keys', 'webhooks'\]/);
 assert.match(pageClient, /requestedSection = searchParams\.get\('section'\)/);
 assert.match(pageClient, /nextParams\.set\('section', section\)/);
