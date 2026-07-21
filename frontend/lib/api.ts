@@ -38,7 +38,7 @@ import type {
   WorkspaceUser,
   TaskItem,
   TaskUpdatePayload,
-  GoogleCalendarConnectionStatus, BillingPlan, CurrentBillingState
+  GoogleCalendarConnectionStatus, BillingPlan, CurrentBillingState, TrialBillingState
 } from './types';
 
 export const API_URL = (process.env.NEXT_PUBLIC_API_URL || "https://api.wazzaapi.com.br").replace(/\/$/, "");
@@ -208,6 +208,7 @@ export async function parseApiResponse<T>(res: Response): Promise<T> {
 }
 
 export async function getCurrentBilling(): Promise<CurrentBillingState> { return parseApiResponse<CurrentBillingState>(await apiFetch('/api/billing/current')); }
+export async function getTrialBilling(): Promise<TrialBillingState> { return parseApiResponse<TrialBillingState>(await apiFetch('/api/billing/trial')); }
 export async function listBillingPlans(): Promise<BillingPlan[]> { return parseApiResponse<BillingPlan[]>(await apiFetch('/api/billing/plans')); }
 
 export async function registerTenant(payload: Record<string, string>, turnstileToken: string): Promise<TenantSession> {
