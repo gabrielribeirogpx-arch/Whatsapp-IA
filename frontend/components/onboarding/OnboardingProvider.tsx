@@ -1,9 +1,9 @@
 'use client';
 
 import Link from 'next/link';
-import { ReactNode, createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import { ReactNode, createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { usePathname } from 'next/navigation';
-import { Check, ChevronLeft, ChevronRight, HelpCircle, Sparkles, X } from 'lucide-react';
+import { Check, ChevronDown, ChevronLeft, ChevronRight, HelpCircle, Minimize2, Sparkles, X } from 'lucide-react';
 import { listFlows, listWhatsAppProviders } from '@/lib/api';
 import { getMissionRoute, OnboardingMissionId } from '@/lib/onboarding/missionRoutes';
 
@@ -16,6 +16,9 @@ export type TutorialState = {
   completed: string[];
   dismissedScreens: string[];
   tourDismissed: boolean;
+  assistantVisible: boolean;
+  assistantMinimized: boolean;
+  completionNoticeShown: boolean;
 };
 const STORAGE_KEY = 'wazza:onboarding:tenant:default';
 export const onboardingSteps: OnboardingStep[] = [
@@ -48,7 +51,7 @@ type ContextValue = {
 const OnboardingContext = createContext<ContextValue | null>(null);
 export const useOnboarding = () => { const value = useContext(OnboardingContext); if (!value) throw new Error('useOnboarding must be used inside OnboardingProvider'); return value; };
 
-const initialState: TutorialState = { currentStep: 0, missionStatus: {}, completed: [], dismissedScreens: [], tourDismissed: false };
+const initialState: TutorialState = { currentStep: 0, missionStatus: {}, completed: [], dismissedScreens: [], tourDismissed: false, assistantVisible: true, assistantMinimized: false, completionNoticeShown: false };
 
 function statusFor(state: TutorialState, id: string): MissionStatus {
   return state.missionStatus[id] || (state.completed.includes(id) ? 'completed' : 'pending');
@@ -78,7 +81,9 @@ function readState(): TutorialState {
 export function OnboardingProvider({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const [state, setState] = useState<TutorialState>(initialState);
-  const [ready, setReady] = useState(false); const [helpOpen, setHelpOpen] = useState(false); const [tourOpen, setTourOpen] = useState(false); const [tourIndex, setTourIndex] = useState(0);
+  const [ready, setReady] = useState(false); const [helpOpen, setHelpOpen] = useState(false); const [tourOpen, setTourOpen] = useState(false); const [tourIndex, setTourIndex] = useState(0); const [completionNoticeOpen, setCompletionNoticeOpen] = useState(false);
+  const reopenButtonRef = useRef<HTMLButtonElement>(null);
+  const completionCloseButtonRef = useRef<HTMLButtonElement>(null);
   const complete = useCallback((id: string) => setState(old => {
     const stepIndex = onboardingSteps.findIndex((step) => step.id === id);
     return {
@@ -99,6 +104,12 @@ export function OnboardingProvider({ children }: { children: ReactNode }) {
   }), []);
   useEffect(() => { setState(readState()); setReady(true); }, []);
   useEffect(() => { if (ready) localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }, [state, ready]);
+  useEffect(() => {
+    if (!ready || state.completed.length !== onboardingSteps.length || state.completionNoticeShown) return;
+    setState(old => ({ ...old, assistantVisible: false, assistantMinimized: false, completionNoticeShown: true }));
+    setCompletionNoticeOpen(true);
+  }, [ready, state.completed.length, state.completionNoticeShown]);
+  useEffect(() => { if (completionNoticeOpen) completionCloseButtonRef.current?.focus(); }, [completionNoticeOpen]);
   useEffect(() => {
     if (!ready || state.completed.includes('publish')) return;
 
@@ -145,7 +156,11 @@ export function OnboardingProvider({ children }: { children: ReactNode }) {
     };
   }, [complete, ready, state]);
   useEffect(() => { setHelpOpen(Boolean(ready && screenHelp[pathname] && !state.dismissedScreens.includes(pathname))); }, [pathname, ready, state.dismissedScreens]);
-  useEffect(() => { const close = (event: KeyboardEvent) => { if (event.key === 'Escape') { setTourOpen(false); setHelpOpen(false); } if (tourOpen && event.key === 'ArrowRight') setTourIndex(i => Math.min(i + 1, 2)); if (tourOpen && event.key === 'ArrowLeft') setTourIndex(i => Math.max(i - 1, 0)); }; window.addEventListener('keydown', close); return () => window.removeEventListener('keydown', close); }, [tourOpen]);
+  const closeAssistant = useCallback(() => {
+    setState(old => ({ ...old, assistantVisible: false, assistantMinimized: false }));
+    window.setTimeout(() => reopenButtonRef.current?.focus(), 0);
+  }, []);
+  useEffect(() => { const close = (event: KeyboardEvent) => { if (event.key === 'Escape') { if (completionNoticeOpen) { setCompletionNoticeOpen(false); closeAssistant(); } else if (state.assistantVisible) closeAssistant(); setTourOpen(false); setHelpOpen(false); } if (tourOpen && event.key === 'ArrowRight') setTourIndex(i => Math.min(i + 1, 2)); if (tourOpen && event.key === 'ArrowLeft') setTourIndex(i => Math.max(i - 1, 0)); }; window.addEventListener('keydown', close); return () => window.removeEventListener('keydown', close); }, [closeAssistant, completionNoticeOpen, state.assistantVisible, tourOpen]);
   const reset = useCallback(() => setState(initialState), []);
   const startTour = useCallback(() => { setTourIndex(0); setTourOpen(true); }, []);
   const progress = Math.round((state.completed.length / onboardingSteps.length) * 100);
@@ -153,7 +168,10 @@ export function OnboardingProvider({ children }: { children: ReactNode }) {
   const help = screenHelp[pathname]; const next = onboardingSteps[state.currentStep];
   return <OnboardingContext.Provider value={value}>{children}
     {helpOpen && help ? <aside className="onboarding-context-help" aria-label={`Ajuda sobre ${help.title}`}><button className="onboarding-close" onClick={() => { setHelpOpen(false); setState(s => ({ ...s, dismissedScreens: Array.from(new Set([...s.dismissedScreens, pathname])) })); }} aria-label="Nunca mostrar novamente"><X size={16}/></button><span className="onboarding-eyebrow"><Sparkles size={14}/> Conheça este módulo</span><h2>{help.title}</h2><p>{help.text}</p><ul>{help.bullets.map(item => <li key={item}><Check size={15}/>{item}</li>)}</ul><small>Tempo de leitura: 30 segundos</small><div><Link href="/dashboard/academy">Ver exemplo</Link><button onClick={() => setHelpOpen(false)}>Próximo</button></div></aside> : null}
-    {ready && next ? <aside className="onboarding-assistant" aria-label="Assistente Wazza"><button className="onboarding-help-toggle" onClick={() => setHelpOpen(v => !v)} aria-label="Abrir ajuda contextual"><HelpCircle size={19}/></button><span>Assistente Wazza</span><strong>Passo {state.currentStep + 1} de {onboardingSteps.length}</strong><div className="onboarding-progress"><i style={{ width: `${progress}%` }}/></div><b>{next.title}</b><p>{next.description}</p><Link href={getMissionRoute(next.id)} onClick={() => { if (next.id === 'whatsapp') activate(next.id); else if (next.id !== 'publish') complete(next.id); }}>{next.action}</Link></aside> : null}
+    {ready && !state.assistantVisible ? <button ref={reopenButtonRef} className="onboarding-assistant-reopen" onClick={() => setState(old => ({ ...old, assistantVisible: true }))} aria-label="Reabrir Assistente Wazza"><Sparkles size={17} aria-hidden="true"/> Assistente</button> : null}
+    {ready && next && state.assistantVisible ? <aside className={`onboarding-assistant${state.assistantMinimized ? ' onboarding-assistant--minimized' : ''}`} aria-label="Assistente Wazza">
+      <header><span>Assistente Wazza</span><div><button className="onboarding-assistant-icon" onClick={() => setState(old => ({ ...old, assistantMinimized: !old.assistantMinimized }))} aria-label={state.assistantMinimized ? 'Expandir assistente' : 'Minimizar assistente'}>{state.assistantMinimized ? <ChevronDown size={18}/> : <Minimize2 size={18}/>}</button><button className="onboarding-assistant-icon" onClick={closeAssistant} aria-label="Fechar assistente"><X size={18}/></button></div></header><strong>Passo {state.currentStep + 1} de {onboardingSteps.length}</strong><div className="onboarding-progress"><i style={{ width: `${progress}%` }}/></div>{!state.assistantMinimized ? <><button className="onboarding-help-toggle" onClick={() => setHelpOpen(v => !v)} aria-label="Abrir ajuda contextual"><HelpCircle size={19}/></button><b>{next.title}</b><p>{next.description}</p><Link href={getMissionRoute(next.id)} onClick={() => { if (next.id === 'whatsapp') activate(next.id); else if (next.id !== 'publish') complete(next.id); }}>{next.action}</Link></> : null}</aside> : null}
+    {completionNoticeOpen ? <section className="onboarding-completion-notice" role="dialog" aria-modal="true" aria-label="Onboarding concluído"><h2>Parabéns! Seu onboarding foi concluído.</h2><p>Você pode voltar a qualquer momento pelo botão do Assistente Wazza.</p><div><Link href="/dashboard/academy" onClick={() => { setCompletionNoticeOpen(false); closeAssistant(); }}>Ir para Academy</Link><button ref={completionCloseButtonRef} onClick={() => { setCompletionNoticeOpen(false); closeAssistant(); }}>Fechar assistente</button></div></section> : null}
     {tourOpen ? <Tour index={tourIndex} onClose={() => { setTourOpen(false); setState(s => ({ ...s, tourDismissed: true })); }} onNext={() => tourIndex === 2 ? setTourOpen(false) : setTourIndex(i => i + 1)} onBack={() => setTourIndex(i => Math.max(i - 1, 0))} /> : null}
   </OnboardingContext.Provider>;
 }
