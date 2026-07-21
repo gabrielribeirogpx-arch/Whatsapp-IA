@@ -198,7 +198,7 @@ def get_current_tenant_resolution(
     x_tenant_id: str = Header(default="", alias="X-Tenant-Id"),
     x_tenant_id_alt: str = Header(default="", alias="X-Tenant-ID"),
     tenant_slug: str = Query(default=""),
-    tenant_id: str = Query(default=""),
+    tenant_id_query: str = Query(default="", alias="tenant_id"),
     db: Session = Depends(get_db),
 ) -> TenantResolution | None:
     return resolve_current_tenant(
@@ -208,7 +208,7 @@ def get_current_tenant_resolution(
         x_tenant_id=x_tenant_id,
         x_tenant_id_alt=x_tenant_id_alt,
         tenant_slug=tenant_slug,
-        tenant_id=tenant_id,
+        tenant_id=tenant_id_query,
     )
 
 
@@ -218,7 +218,7 @@ def get_current_tenant(
     x_tenant_id: str = Header(default="", alias="X-Tenant-Id"),
     x_tenant_id_alt: str = Header(default="", alias="X-Tenant-ID"),
     tenant_slug: str = Query(default=""),
-    tenant_id: str = Query(default=""),
+    tenant_id_query: str = Query(default="", alias="tenant_id"),
     db: Session = Depends(get_db),
 ) -> Tenant:
     resolution = resolve_current_tenant(
@@ -228,10 +228,10 @@ def get_current_tenant(
         x_tenant_id=x_tenant_id,
         x_tenant_id_alt=x_tenant_id_alt,
         tenant_slug=tenant_slug,
-        tenant_id=tenant_id,
+        tenant_id=tenant_id_query,
     )
     if not resolution:
-        if (tenant_id or x_tenant_id or x_tenant_id_alt or tenant_slug or x_tenant_slug):
+        if (tenant_id_query or x_tenant_id or x_tenant_id_alt or tenant_slug or x_tenant_slug):
             raise HTTPException(status_code=401, detail="Credenciais inválidas")
         raise HTTPException(status_code=401, detail="Tenant não autenticado")
 
