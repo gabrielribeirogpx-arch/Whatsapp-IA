@@ -18,6 +18,7 @@ class BillingInterval(str, enum.Enum):
 
 class SubscriptionProvider(str, enum.Enum):
     INTERNAL = "internal"
+    STRIPE = "stripe"
 
 
 class SubscriptionStatus(str, enum.Enum):
@@ -95,6 +96,41 @@ class Subscription(Base):
     metadata_json: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class PlanPrice(Base):
+    __tablename__ = "plan_prices"
+    __table_args__ = (UniqueConstraint("provider", "external_price_id", name="uq_plan_prices_provider_external_price"), Index("ix_plan_prices_plan_provider", "plan_id", "provider"))
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    plan_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("plans.id", ondelete="CASCADE"), nullable=False)
+    provider: Mapped[str] = mapped_column(String(32), nullable=False)
+    billing_interval: Mapped[str] = mapped_column(String(16), nullable=False)
+    currency: Mapped[str] = mapped_column(String(3), nullable=False, default="BRL")
+    external_product_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    external_price_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    amount_cents: Mapped[int] = mapped_column(Integer, nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    metadata_json: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class BillingEvent(Base):
+    __tablename__ = "billing_events"
+    __table_args__ = (UniqueConstraint("provider", "external_event_id", name="uq_billing_events_provider_external_event"),)
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    provider: Mapped[str] = mapped_column(String(32), nullable=False)
+    external_event_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    event_type: Mapped[str] = mapped_column(String(100), nullable=False)
+    payload_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="received")
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    received_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    processing_started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    processed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    error_code: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    error_message: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    metadata_json: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
 
 
 class TenantEntitlement(Base):

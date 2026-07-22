@@ -123,7 +123,7 @@ export type BillingPlan = { code: string; name: string; description: string | nu
 export type Subscription = { status: string; provider: string; billing_interval: string | null; trial_started_at: string | null; trial_ends_at: string | null; current_period_end: string | null };
 export type TrialBillingState = { status: string; days_remaining: number; trial_started_at: string | null; trial_ends_at: string | null; plan: string | null; expired: boolean };
 export type EffectiveEntitlement = PlanFeature & { source: string };
-export type CurrentBillingState = { tenant_id: string; plan: BillingPlan | null; subscription: Subscription | null; trial: boolean; days_remaining: number; expired: boolean; effective_entitlements: EffectiveEntitlement[]; enforcement_enabled: boolean; billing_ui_enabled: boolean };
+export type CurrentBillingState = { tenant_id: string; plan: BillingPlan | null; subscription: Subscription | null; trial: boolean; days_remaining: number; expired: boolean; effective_entitlements: EffectiveEntitlement[]; enforcement_enabled: boolean; billing_ui_enabled: boolean; stripe_enabled?: boolean };
 
 
 export type BotMatchType = 'contains' | 'exact';
