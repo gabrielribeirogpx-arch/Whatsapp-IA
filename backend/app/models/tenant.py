@@ -38,6 +38,9 @@ class Tenant(Base):
     admin_password: Mapped[str] = mapped_column(String(255), default="admin123")
     ai_mode: Mapped[str] = mapped_column(String(32), default="atendente", server_default="atendente")
     workspace_profile: Mapped[str] = mapped_column(String(32), default="private_sales", server_default="private_sales")
+    # Derived billing state, never a replacement for authorization/roles.
+    workspace_access_mode: Mapped[str] = mapped_column(String(32), default="full", server_default="full", nullable=False)
+    workspace_grace_period_ends_at: Mapped[datetime | None] = mapped_column(nullable=True)
 
     ai_config: Mapped["AIConfig | None"] = relationship(back_populates="tenant", uselist=False, cascade="all, delete-orphan")
     products: Mapped[list[Product]] = relationship(Product, back_populates="tenant", cascade="all, delete-orphan")

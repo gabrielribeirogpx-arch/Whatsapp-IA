@@ -13,6 +13,7 @@ from app.models import BillingEvent, Plan, PlanFeature, PlanPrice, Subscription,
 from app.routers.account import get_current_user
 from app.services.audit_service import write_audit_log
 from app.services.entitlement_service import EntitlementService
+from app.services.billing_enforcement_service import BillingEnforcementService
 from app.services.tenant_service import get_current_tenant
 from app.services.trial_service import TrialService
 from app.services.usage_service import UsageService
@@ -52,7 +53,9 @@ def current_billing(request: Request, db: Session = Depends(get_db), tenant: Ten
     write_audit_log(db, action="BILLING_CURRENT_VIEWED", tenant_id=tenant.id, user_id=user.id, entity_type="subscription", entity_id=subscription.id if subscription else None, request=request)
     db.commit()
     is_trial = trial_service.is_trial(tenant.id)
-    return {"tenant_id": str(tenant.id), "plan": _plan(plan, db.execute(select(PlanFeature).where(PlanFeature.plan_id == plan.id)).scalars().all()) if plan else None, "subscription": None if not subscription else {"status": subscription.status, "provider": subscription.provider, "billing_interval": subscription.billing_interval, "trial_started_at": subscription.trial_started_at, "trial_ends_at": subscription.trial_ends_at, "current_period_end": subscription.current_period_end, "cancel_at_period_end": subscription.cancel_at_period_end}, "trial": is_trial, "days_remaining": trial_service.days_remaining(tenant.id), "expired": bool(subscription and subscription.status == "expired"), "effective_entitlements": list(service.get_effective_entitlements(tenant.id).values()), "enforcement_enabled": settings.billing_enforcement_enabled, "billing_ui_enabled": settings.billing_ui_enabled, "stripe_enabled": settings.stripe_enabled, "usage_snapshot": UsageService(db).current_snapshot(tenant.id), "current_period": UsageService(db).usage_view(tenant.id, service.get_effective_entitlements(tenant.id))["current_period"], "top_metrics": UsageService(db).usage_view(tenant.id, service.get_effective_entitlements(tenant.id))["metrics"][:5]}
+    enforcement = BillingEnforcementService(db)
+    access_mode, grace_ends_at = enforcement.workspace_access_mode(tenant.id)
+    return {"tenant_id": str(tenant.id), "plan": _plan(plan, db.execute(select(PlanFeature).where(PlanFeature.plan_id == plan.id)).scalars().all()) if plan else None, "subscription": None if not subscription else {"status": subscription.status, "provider": subscription.provider, "billing_interval": subscription.billing_interval, "trial_started_at": subscription.trial_started_at, "trial_ends_at": subscription.trial_ends_at, "current_period_end": subscription.current_period_end, "cancel_at_period_end": subscription.cancel_at_period_end}, "trial": is_trial, "days_remaining": trial_service.days_remaining(tenant.id), "expired": bool(subscription and subscription.status == "expired"), "effective_entitlements": list(service.get_effective_entitlements(tenant.id).values()), "enforcement_enabled": settings.billing_enforcement_enabled, "enforcement_mode": enforcement.mode.value, "workspace_access_mode": access_mode.value, "grace_period_ends_at": grace_ends_at, "billing_ui_enabled": settings.billing_ui_enabled, "stripe_enabled": settings.stripe_enabled, "usage_snapshot": UsageService(db).current_snapshot(tenant.id), "current_period": UsageService(db).usage_view(tenant.id, service.get_effective_entitlements(tenant.id))["current_period"], "top_metrics": UsageService(db).usage_view(tenant.id, service.get_effective_entitlements(tenant.id))["metrics"][:5]}
 
 @router.get("/trial")
 def trial_billing(request: Request, db: Session = Depends(get_db), tenant: Tenant = Depends(get_current_tenant), user: TenantUser = Depends(get_current_user)):
@@ -136,7 +139,9 @@ def admin_tenant_billing(tenant_id: str = Path(...), db: Session = Depends(get_d
     tenant = db.get(Tenant, tenant_id)
     if not tenant: raise HTTPException(status_code=404, detail="Tenant não encontrado")
     subscription = db.execute(select(Subscription).where(Subscription.tenant_id == tenant.id)).scalars().first()
-    return {"tenant_id": str(tenant.id), "subscription_status": subscription.status if subscription else None, "effective_entitlements": list(EntitlementService(db).get_effective_entitlements(tenant.id).values())}
+    enforcement = BillingEnforcementService(db)
+    access_mode, grace_ends_at = enforcement.workspace_access_mode(tenant.id)
+    return {"tenant_id": str(tenant.id), "subscription_status": subscription.status if subscription else "legacy", "enforcement_mode": enforcement.mode.value, "workspace_access_mode": access_mode.value, "grace_period_ends_at": grace_ends_at, "effective_entitlements": list(EntitlementService(db).get_effective_entitlements(tenant.id).values())}
 
 
 @admin_router.get("/tenants/{tenant_id}/usage")
