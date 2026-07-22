@@ -210,6 +210,8 @@ export async function parseApiResponse<T>(res: Response): Promise<T> {
 export async function getCurrentBilling(): Promise<CurrentBillingState> { return parseApiResponse<CurrentBillingState>(await apiFetch('/api/billing/current')); }
 export async function getTrialBilling(): Promise<TrialBillingState> { return parseApiResponse<TrialBillingState>(await apiFetch('/api/billing/trial')); }
 export async function listBillingPlans(): Promise<BillingPlan[]> { return parseApiResponse<BillingPlan[]>(await apiFetch('/api/billing/plans')); }
+export async function createBillingCheckout(plan_code: string, billing_interval: "monthly" | "annual"): Promise<{ checkout_url: string }> { return parseApiResponse(await apiFetch('/api/billing/checkout', { method: 'POST', body: JSON.stringify({ plan_code, billing_interval, success_path: '/dashboard/settings?section=billing&checkout=success', cancel_path: '/dashboard/settings?section=billing&checkout=cancel' }) })); }
+export async function openBillingPortal(): Promise<{ portal_url: string }> { return parseApiResponse(await apiFetch('/api/billing/portal', { method: 'POST' })); }
 
 export async function registerTenant(payload: Record<string, string>, turnstileToken: string): Promise<TenantSession> {
   const requestPayload = { ...payload, turnstile_token: turnstileToken };
