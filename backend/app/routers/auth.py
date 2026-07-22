@@ -223,19 +223,23 @@ def register(payload: RegisterRequest, request: Request, db: Session = Depends(g
     if existing_email is not None:
         raise HTTPException(status_code=409, detail="Não foi possível criar a conta com estes dados")
 
-    tenant = Tenant(name=payload.business_name.strip(), slug=_build_unique_slug(db, payload.business_name), phone_number_id=payload.whatsapp_number.strip(), ai_mode="vendedor")
-    db.add(tenant)
-    db.flush()
-    TrialService(db).start_trial(tenant.id)
+    try:
+        tenant = Tenant(name=payload.business_name.strip(), slug=_build_unique_slug(db, payload.business_name), phone_number_id=payload.whatsapp_number.strip(), ai_mode="vendedor")
+        db.add(tenant)
+        db.flush()
+        TrialService(db).start_trial(tenant.id)
 
-    owner = TenantUser(tenant_id=tenant.id, full_name=payload.full_name.strip(), email=email, password_hash=_hash_password(payload.password), role="owner")
-    db.add(owner)
-    db.flush()
-    write_audit_log(db, action="USER_CREATED", tenant_id=tenant.id, user_id=owner.id, entity_type="tenant_user", entity_id=owner.id, metadata={"source": "register"}, request=request)
-    token = _create_token(str(tenant.id), owner.email, session_id=str(owner.id))
-    create_user_session(db, tenant_id=tenant.id, user_id=owner.id, token=token, request=request)
-    db.commit()
-    db.refresh(tenant)
+        owner = TenantUser(tenant_id=tenant.id, full_name=payload.full_name.strip(), email=email, password_hash=_hash_password(payload.password), role="owner")
+        db.add(owner)
+        db.flush()
+        write_audit_log(db, action="USER_CREATED", tenant_id=tenant.id, user_id=owner.id, entity_type="tenant_user", entity_id=owner.id, metadata={"source": "register"}, request=request)
+        token = _create_token(str(tenant.id), owner.email, session_id=str(owner.id))
+        create_user_session(db, tenant_id=tenant.id, user_id=owner.id, token=token, request=request)
+        db.commit()
+        db.refresh(tenant)
+    except Exception:
+        db.rollback()
+        raise
 
     return TenantAuthResponse(tenant_id=tenant.id, slug=tenant.slug, token=token)
 

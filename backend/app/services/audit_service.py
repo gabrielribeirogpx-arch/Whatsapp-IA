@@ -1,7 +1,9 @@
 from __future__ import annotations
 
-import json
-from datetime import datetime
+from dataclasses import asdict, is_dataclass
+from datetime import date, datetime
+from decimal import Decimal
+from enum import Enum
 from typing import Any
 from uuid import UUID
 
@@ -13,14 +15,35 @@ from app.models.user import TenantUser
 from app.security.turnstile import get_client_ip
 
 
+def to_json_safe(value: Any) -> Any:
+    """Convert known domain values to JSON-compatible values for audit metadata.
+
+    Unsupported values deliberately raise ``TypeError`` instead of being silently
+    stringified, so unexpected objects cannot be hidden in the audit trail.
+    """
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, (datetime, date)):
+        return value.isoformat()
+    if isinstance(value, UUID):
+        return str(value)
+    if isinstance(value, Decimal):
+        return str(value)
+    if isinstance(value, Enum):
+        return to_json_safe(value.value)
+    if hasattr(value, "model_dump") and callable(value.model_dump):
+        return to_json_safe(value.model_dump(mode="json"))
+    if is_dataclass(value) and not isinstance(value, type):
+        return to_json_safe(asdict(value))
+    if isinstance(value, dict):
+        return {str(key): to_json_safe(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [to_json_safe(item) for item in value]
+    raise TypeError(f"Unsupported audit metadata type: {type(value).__name__}")
+
+
 def _safe_metadata(metadata: dict[str, Any] | None) -> dict[str, Any] | None:
-    if not metadata:
-        return None
-    try:
-        json.dumps(metadata, default=str)
-        return metadata
-    except TypeError:
-        return {key: str(value) for key, value in metadata.items()}
+    return to_json_safe(metadata) if metadata is not None else None
 
 
 def write_audit_log(
