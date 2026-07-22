@@ -39,7 +39,7 @@ class TrialService:
         self.db.flush()
         self.renew_entitlements(subscription)
         write_audit_log(self.db, action="TRIAL_STARTED", tenant_id=tenant_id, entity_type="subscription", entity_id=subscription.id,
-                        metadata={"trial_ends_at": subscription.trial_ends_at, "days": TRIAL_DURATION_DAYS})
+                        metadata={"trial_ends_at": subscription.trial_ends_at.isoformat() if subscription.trial_ends_at else None, "days": TRIAL_DURATION_DAYS})
         return subscription
 
     def renew_entitlements(self, subscription: Subscription) -> None:

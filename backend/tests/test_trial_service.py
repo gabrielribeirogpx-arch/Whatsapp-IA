@@ -63,7 +63,8 @@ def test_start_trial_creates_fourteen_day_growth_subscription_and_entitlements(d
     assert trial.trial_ends_at == started + timedelta(days=14)
     assert TrialService(db).days_remaining(tenant.id, now=started) == 14
     assert db.query(TenantEntitlement).filter_by(tenant_id=tenant.id, source="trial").count() == 1
-    assert db.query(AuditLog).filter_by(tenant_id=tenant.id, action="TRIAL_STARTED").count() == 1
+    audit = db.query(AuditLog).filter_by(tenant_id=tenant.id, action="TRIAL_STARTED").one()
+    assert audit.metadata_json == {"trial_ends_at": (started + timedelta(days=14)).isoformat(), "days": 14}
 
 
 def test_extend_and_expire_trial_are_isolated_per_tenant(db: Session):
