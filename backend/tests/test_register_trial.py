@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
@@ -93,3 +94,56 @@ def test_register_rolls_back_all_records_when_audit_persistence_fails(register_c
         assert session.query(Subscription).count() == 0
         assert session.query(TenantEntitlement).count() == 0
         assert session.query(AuditLog).count() == 0
+
+
+def test_register_returns_conflict_for_duplicate_whatsapp_number(register_client):
+    client, _engine = register_client
+
+    assert client.post("/api/register", json=_payload()).status_code == 200
+    duplicate_phone_payload = {
+        **_payload(),
+        "email": "outro@example.com",
+        "business_name": "Outra Empresa",
+    }
+
+    response = client.post("/api/register", json=duplicate_phone_payload)
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "Este número de WhatsApp já está cadastrado."
+
+
+def test_register_returns_conflict_for_duplicate_slug(register_client, monkeypatch):
+    client, _engine = register_client
+
+    assert client.post("/api/register", json=_payload()).status_code == 200
+    monkeypatch.setattr(auth, "_build_unique_slug", lambda *_args: "empresa-nova")
+    duplicate_slug_payload = {
+        **_payload(),
+        "email": "outro@example.com",
+        "whatsapp_number": "5511888888888",
+    }
+
+    response = client.post("/api/register", json=duplicate_slug_payload)
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "Este identificador de empresa já está em uso."
+
+
+def test_register_rolls_back_and_returns_conflict_for_integrity_error(register_client, monkeypatch):
+    client, engine = register_client
+
+    def raise_duplicate_phone_error(*_args, **_kwargs):
+        raise IntegrityError(
+            "INSERT INTO tenants",
+            {},
+            Exception("UNIQUE constraint failed: tenants.phone_number_id"),
+        )
+
+    monkeypatch.setattr(auth.TrialService, "start_trial", raise_duplicate_phone_error)
+
+    response = client.post("/api/register", json=_payload())
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "Este número de WhatsApp já está cadastrado."
+    with Session(engine) as session:
+        assert session.query(Tenant).count() == 0
