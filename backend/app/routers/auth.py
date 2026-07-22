@@ -15,6 +15,7 @@ from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.public_urls import frontend_url
@@ -50,6 +51,18 @@ def _build_unique_slug(db: Session, name: str) -> str:
         suffix += 1
         slug = f"{base_slug}-{suffix}"
     return slug
+
+
+def _registration_integrity_error_detail(error: IntegrityError) -> str:
+    """Return a frontend-safe message for uniqueness conflicts during signup."""
+    error_text = str(getattr(error, "orig", error)).lower()
+    if "phone_number_id" in error_text or "tenants.phone_number_id" in error_text:
+        return "Este número de WhatsApp já está cadastrado."
+    if "slug" in error_text or "tenants.slug" in error_text:
+        return "Este identificador de empresa já está em uso."
+    if "tenant_users.email" in error_text or "uq_tenant_users_email" in error_text:
+        return "Este email já está cadastrado."
+    return "Não foi possível criar a conta porque um dos dados já está em uso."
 
 
 def _hash_password(password: str) -> str:
@@ -219,12 +232,25 @@ def register(payload: RegisterRequest, request: Request, db: Session = Depends(g
         raise HTTPException(status_code=400, detail="Email inválido")
 
     email = payload.email.strip().lower()
+    business_name = payload.business_name.strip()
+    phone_number_id = payload.whatsapp_number.strip()
     existing_email = db.execute(select(TenantUser.id).where(TenantUser.email == email)).scalars().first()
     if existing_email is not None:
-        raise HTTPException(status_code=409, detail="Não foi possível criar a conta com estes dados")
+        raise HTTPException(status_code=409, detail="Este email já está cadastrado.")
+
+    existing_phone_number = db.execute(
+        select(Tenant.id).where(Tenant.phone_number_id == phone_number_id)
+    ).scalars().first()
+    if existing_phone_number is not None:
+        raise HTTPException(status_code=409, detail="Este número de WhatsApp já está cadastrado.")
+
+    slug = _build_unique_slug(db, business_name)
+    existing_slug = db.execute(select(Tenant.id).where(Tenant.slug == slug)).scalars().first()
+    if existing_slug is not None:
+        raise HTTPException(status_code=409, detail="Este identificador de empresa já está em uso.")
 
     try:
-        tenant = Tenant(name=payload.business_name.strip(), slug=_build_unique_slug(db, payload.business_name), phone_number_id=payload.whatsapp_number.strip(), ai_mode="vendedor")
+        tenant = Tenant(name=business_name, slug=slug, phone_number_id=phone_number_id, ai_mode="vendedor")
         db.add(tenant)
         db.flush()
         TrialService(db).start_trial(tenant.id)
@@ -237,6 +263,9 @@ def register(payload: RegisterRequest, request: Request, db: Session = Depends(g
         create_user_session(db, tenant_id=tenant.id, user_id=owner.id, token=token, request=request)
         db.commit()
         db.refresh(tenant)
+    except IntegrityError as error:
+        db.rollback()
+        raise HTTPException(status_code=409, detail=_registration_integrity_error_detail(error)) from error
     except Exception:
         db.rollback()
         raise
