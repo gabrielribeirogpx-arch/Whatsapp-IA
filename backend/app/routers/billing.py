@@ -1,5 +1,5 @@
 import hashlib
-from datetime import datetime
+from datetime import datetime, timedelta
 from fastapi import APIRouter, Depends, HTTPException, Path, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import select
@@ -9,7 +9,7 @@ from app.core.config import settings
 from app.database import get_db
 from app.billing.stripe_provider import StripeBillingProvider
 from app.billing.stripe_webhook_service import StripeWebhookService
-from app.models import BillingEvent, Plan, PlanFeature, PlanPrice, Subscription, Tenant, TenantUser
+from app.models import AuditLog, BillingEvent, Plan, PlanFeature, PlanPrice, Subscription, Tenant, TenantUser
 from app.routers.account import get_current_user
 from app.services.audit_service import write_audit_log
 from app.services.entitlement_service import EntitlementService
@@ -17,6 +17,7 @@ from app.services.billing_enforcement_service import BillingEnforcementService
 from app.services.tenant_service import get_current_tenant
 from app.services.trial_service import TrialService
 from app.services.usage_service import UsageService
+from app.services.billing_consistency_service import BillingConsistencyService
 
 router = APIRouter(prefix="/billing", tags=["billing"])
 admin_router = APIRouter(prefix="/admin/billing", tags=["admin-billing"])
@@ -55,7 +56,7 @@ def current_billing(request: Request, db: Session = Depends(get_db), tenant: Ten
     is_trial = trial_service.is_trial(tenant.id)
     enforcement = BillingEnforcementService(db)
     access_mode, grace_ends_at = enforcement.workspace_access_mode(tenant.id)
-    return {"tenant_id": str(tenant.id), "plan": _plan(plan, db.execute(select(PlanFeature).where(PlanFeature.plan_id == plan.id)).scalars().all()) if plan else None, "subscription": None if not subscription else {"status": subscription.status, "provider": subscription.provider, "billing_interval": subscription.billing_interval, "trial_started_at": subscription.trial_started_at, "trial_ends_at": subscription.trial_ends_at, "current_period_end": subscription.current_period_end, "cancel_at_period_end": subscription.cancel_at_period_end}, "trial": is_trial, "days_remaining": trial_service.days_remaining(tenant.id), "expired": bool(subscription and subscription.status == "expired"), "effective_entitlements": list(service.get_effective_entitlements(tenant.id).values()), "enforcement_enabled": settings.billing_enforcement_enabled, "enforcement_mode": enforcement.mode.value, "workspace_access_mode": access_mode.value, "grace_period_ends_at": grace_ends_at, "billing_ui_enabled": settings.billing_ui_enabled, "stripe_enabled": settings.stripe_enabled, "usage_snapshot": UsageService(db).current_snapshot(tenant.id), "current_period": UsageService(db).usage_view(tenant.id, service.get_effective_entitlements(tenant.id))["current_period"], "top_metrics": UsageService(db).usage_view(tenant.id, service.get_effective_entitlements(tenant.id))["metrics"][:5]}
+    return {"tenant_id": str(tenant.id), "plan": _plan(plan, db.execute(select(PlanFeature).where(PlanFeature.plan_id == plan.id)).scalars().all()) if plan else None, "subscription": None if not subscription else {"status": subscription.status, "provider": subscription.provider, "billing_interval": subscription.billing_interval, "trial_started_at": subscription.trial_started_at, "trial_ends_at": subscription.trial_ends_at, "current_period_end": subscription.current_period_end, "cancel_at_period_end": subscription.cancel_at_period_end}, "trial": is_trial, "days_remaining": trial_service.days_remaining(tenant.id), "expired": bool(subscription and subscription.status == "expired"), "effective_entitlements": list(service.get_effective_entitlements(tenant.id).values()), "enforcement_enabled": settings.billing_enforcement_enabled, "enforcement_mode": enforcement.mode.value, "workspace_access_mode": access_mode.value, "grace_period_ends_at": grace_ends_at, "billing_ui_enabled": settings.billing_ui_enabled, "stripe_enabled": settings.stripe_configured, "usage_snapshot": UsageService(db).current_snapshot(tenant.id), "current_period": UsageService(db).usage_view(tenant.id, service.get_effective_entitlements(tenant.id))["current_period"], "top_metrics": UsageService(db).usage_view(tenant.id, service.get_effective_entitlements(tenant.id))["metrics"][:5]}
 
 @router.get("/trial")
 def trial_billing(request: Request, db: Session = Depends(get_db), tenant: Tenant = Depends(get_current_tenant), user: TenantUser = Depends(get_current_user)):
@@ -75,7 +76,7 @@ def _billing_manager(user: TenantUser = Depends(get_current_user)) -> TenantUser
 
 @router.post("/checkout")
 def checkout(payload: CheckoutRequest, request: Request, db: Session = Depends(get_db), tenant: Tenant = Depends(get_current_tenant), user: TenantUser = Depends(_billing_manager)):
-    if not settings.stripe_enabled:
+    if not settings.stripe_configured:
         raise HTTPException(503, "Cobrança online temporariamente indisponível.")
     plan = db.execute(select(Plan).where(Plan.code == payload.plan_code, Plan.is_active.is_(True), Plan.is_public.is_(True))).scalars().first()
     if not plan: raise HTTPException(422, "Plano indisponível")
@@ -103,7 +104,7 @@ def checkout(payload: CheckoutRequest, request: Request, db: Session = Depends(g
 
 @router.post("/portal")
 def portal(request: Request, db: Session = Depends(get_db), tenant: Tenant = Depends(get_current_tenant), user: TenantUser = Depends(_billing_manager)):
-    if not settings.stripe_enabled: raise HTTPException(503, "Cobrança online temporariamente indisponível.")
+    if not settings.stripe_configured: raise HTTPException(503, "Cobrança online temporariamente indisponível.")
     subscription = db.execute(select(Subscription).where(Subscription.tenant_id == tenant.id)).scalars().first()
     if not subscription or not subscription.external_customer_id: raise HTTPException(409, "Nenhum cliente Stripe associado ao workspace")
     try: session = StripeBillingProvider().create_portal_session(customer=subscription.external_customer_id, return_url=settings.stripe_portal_return_url)
@@ -113,6 +114,8 @@ def portal(request: Request, db: Session = Depends(get_db), tenant: Tenant = Dep
 
 @router.post("/webhooks/stripe")
 async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
+    if not settings.stripe_configured:
+        raise HTTPException(503, "Cobrança online temporariamente indisponível.")
     raw = await request.body(); signature = request.headers.get("stripe-signature", "")
     try: event = StripeBillingProvider().validate_webhook(raw, signature)
     except Exception as exc: raise HTTPException(400, "Assinatura Stripe inválida") from exc
@@ -133,6 +136,27 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
 @admin_router.get("/plans")
 def admin_plans(db: Session = Depends(get_db), user: TenantUser = Depends(_admin)):
     return [_plan(plan, db.execute(select(PlanFeature).where(PlanFeature.plan_id == plan.id)).scalars().all()) for plan in db.execute(select(Plan).order_by(Plan.sort_order)).scalars().all()]
+
+@admin_router.get("/health")
+def billing_health(db: Session = Depends(get_db), user: TenantUser = Depends(_admin)):
+    """Pre-launch health: a disabled Stripe integration is informational, not failed."""
+    return {"stripe": {"enabled": settings.stripe_enabled, "configured": settings.stripe_configured, "status": "ok" if settings.stripe_configured else "not_configured"}, "trial": {"configured": db.execute(select(Plan.id).where(Plan.code == "growth_trial")).scalar_one_or_none() is not None}, "usage": {"configured": True}, "enforcement": {"mode": BillingEnforcementService(db).mode.value}}
+
+@admin_router.get("/consistency")
+def billing_consistency(db: Session = Depends(get_db), user: TenantUser = Depends(_admin)):
+    return BillingConsistencyService(db).check()
+
+@admin_router.get("/operations")
+def billing_operations(db: Session = Depends(get_db), user: TenantUser = Depends(_admin)):
+    """Internal operational overview; this router is never exposed to normal members."""
+    now, soon = datetime.utcnow(), datetime.utcnow() + timedelta(days=3)
+    tenants = db.execute(select(Tenant)).scalars().all()
+    subscriptions = db.execute(select(Subscription)).scalars().all()
+    enforcement, usage = BillingEnforcementService(db), UsageService(db)
+    tenant_details = [{"tenant_id": str(tenant.id), "usage": usage.current_snapshot(tenant.id), "observe_decision": enforcement.evaluate_subscription_access(tenant.id).as_dict()} for tenant in tenants]
+    conflicts = db.execute(select(AuditLog).where(AuditLog.action.like("%REGISTER%CONFLICT%"), AuditLog.created_at >= now - timedelta(days=7))).scalars().all()
+    errors = db.execute(select(AuditLog).where(AuditLog.action.like("%500%"), AuditLog.created_at >= now - timedelta(days=7))).scalars().all()
+    return {"stripe": {"status": "ok" if settings.stripe_configured else "not_configured"}, "tenants": {"legacy": sum(item.status == "legacy" for item in subscriptions), "active_trials": sum(item.status == "trialing" and item.trial_ends_at and item.trial_ends_at > now for item in subscriptions), "trials_expiring": sum(item.status == "trialing" and item.trial_ends_at and now < item.trial_ends_at <= soon for item in subscriptions), "trials_expired": sum(item.status == "expired" for item in subscriptions), "without_subscription": len(tenants) - len({item.tenant_id for item in subscriptions})}, "recent_registration_conflicts": len(conflicts), "recent_500_errors": len(errors), "tenant_details": tenant_details, "enforcement": {"mode": enforcement.mode.value, "blocking": False}}
 
 @admin_router.get("/tenants/{tenant_id}")
 def admin_tenant_billing(tenant_id: str = Path(...), db: Session = Depends(get_db), user: TenantUser = Depends(_admin)):
