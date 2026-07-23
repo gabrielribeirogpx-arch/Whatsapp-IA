@@ -14,6 +14,7 @@ from argon2.exceptions import InvalidHashError, VerifyMismatchError, Verificatio
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import JSONResponse
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -26,6 +27,7 @@ from app.security.turnstile import enforce_rate_limit, get_client_ip, validate_t
 from app.services.audit_service import write_audit_log
 from app.services.session_service import create_user_session
 from app.services.trial_service import TrialService
+from app.services.register_metrics import increment as increment_register_metric
 
 router = APIRouter(tags=["auth"])
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
@@ -53,16 +55,64 @@ def _build_unique_slug(db: Session, name: str) -> str:
     return slug
 
 
-def _registration_integrity_error_detail(error: IntegrityError) -> str:
-    """Return a frontend-safe message for uniqueness conflicts during signup."""
+def _register_error(code: str, message: str, *, field: str | None = None, status_code: int = 400) -> JSONResponse:
+    """Return the stable public API contract used exclusively by registration."""
+    error: dict[str, str] = {"code": code, "message": message}
+    if field:
+        error["field"] = field
+    return JSONResponse(status_code=status_code, content={"success": False, "error": error})
+
+
+def _log_register_conflict(*, tenant_slug: str, email: str, phone: str, conflict_type: str) -> None:
+    # Do not add password or token data to this event.
+    print(
+        "[REGISTER_CONFLICT]",
+        f"tenant_slug={tenant_slug}",
+        f"email={email}",
+        f"phone={phone}",
+        f"conflict_type={conflict_type}",
+    )
+    increment_register_metric("register_conflict_total")
+
+
+def _registration_integrity_error(error: IntegrityError) -> tuple[str, str, str]:
+    """Map database uniqueness races to the same contract as preflight checks."""
     error_text = str(getattr(error, "orig", error)).lower()
     if "phone_number_id" in error_text or "tenants.phone_number_id" in error_text:
-        return "Este número de WhatsApp já está cadastrado."
+        return "PHONE_ALREADY_REGISTERED", "whatsapp_number", "Este telefone já possui um workspace."
+    if "tenant_users.email" in error_text or "uq_tenant_users_email" in error_text or "email" in error_text:
+        return "EMAIL_ALREADY_REGISTERED", "email", "Já existe uma conta utilizando este e-mail."
     if "slug" in error_text or "tenants.slug" in error_text:
-        return "Este identificador de empresa já está em uso."
-    if "tenant_users.email" in error_text or "uq_tenant_users_email" in error_text:
-        return "Este email já está cadastrado."
-    return "Não foi possível criar a conta porque um dos dados já está em uso."
+        return "SLUG_ALREADY_EXISTS", "business_name", "Este endereço já está reservado."
+    return "WORKSPACE_ALREADY_EXISTS", "business_name", "Esse nome já está sendo utilizado."
+
+
+def _validate_registration(payload: RegisterRequest) -> tuple[str, str, str] | JSONResponse:
+    email = payload.email.strip().lower()
+    business_name = payload.business_name.strip()
+    phone = payload.whatsapp_number.strip()
+    required = (("full_name", payload.full_name.strip()), ("business_name", business_name), ("business_segment", payload.business_segment.strip()), ("intended_use", payload.intended_use.strip()), ("whatsapp_number", phone))
+    for field, value in required:
+        if len(value) < 2:
+            increment_register_metric("register_validation_total")
+            code = "INVALID_WORKSPACE_NAME" if field == "business_name" else "VALIDATION_ERROR"
+            message = "Informe um nome de workspace válido." if field == "business_name" else "Preencha este campo com pelo menos 2 caracteres."
+            return _register_error(code, message, field=field)
+    if not EMAIL_RE.match(email):
+        increment_register_metric("register_validation_total")
+        return _register_error("INVALID_EMAIL", "Informe um e-mail válido.", field="email")
+    if len(re.sub(r"\D", "", phone)) < 8:
+        increment_register_metric("register_validation_total")
+        return _register_error("INVALID_PHONE", "Informe um telefone válido com DDD.", field="whatsapp_number")
+    if payload.password != payload.confirm_password:
+        increment_register_metric("register_validation_total")
+        return _register_error("INVALID_PASSWORD", "As senhas não coincidem.", field="confirm_password")
+    try:
+        validate_password_policy(payload.password)
+    except HTTPException:
+        increment_register_metric("register_validation_total")
+        return _register_error("INVALID_PASSWORD", "Sua senha precisa conter ao menos 8 caracteres, maiúscula, minúscula, número e caractere especial.", field="password")
+    return email, business_name, phone
 
 
 def _hash_password(password: str) -> str:
@@ -217,44 +267,66 @@ def reset_password(payload: ResetPasswordRequest, request: Request, db: Session 
     return {"message": "Senha redefinida com sucesso."}
 
 
+@router.get("/register/availability")
+def registration_availability(field: str, value: str, db: Session = Depends(get_db)):
+    """Lightweight availability probe for the debounced public signup form."""
+    normalized = value.strip().lower() if field == "email" else value.strip()
+    if field == "email":
+        available = bool(EMAIL_RE.match(normalized)) and db.execute(select(TenantUser.id).where(TenantUser.email == normalized)).scalars().first() is None
+    elif field == "phone":
+        available = len(re.sub(r"\D", "", normalized)) >= 8 and db.execute(select(Tenant.id).where(Tenant.phone_number_id == normalized)).scalars().first() is None
+    elif field == "workspace":
+        available = len(normalized) >= 2 and db.execute(select(Tenant.id).where(Tenant.name == normalized)).scalars().first() is None
+    else:
+        return _register_error("VALIDATION_ERROR", "Campo de disponibilidade inválido.", status_code=400)
+    return {"success": True, "available": available}
+
+
 @router.post("/register", response_model=TenantAuthResponse)
 def register(payload: RegisterRequest, request: Request, db: Session = Depends(get_db)):
-    client_ip = get_client_ip(request)
-    email_hash = _rate_identity(payload.email)
-    enforce_rate_limit(key=f"register:ip:{client_ip}", limit=8, window_seconds=3600)
-    enforce_rate_limit(key=f"register:email:{email_hash}", limit=3, window_seconds=3600)
-    validate_turnstile_or_raise(token=payload.turnstile_token, request=request, action="register")
+    try:
+        client_ip = get_client_ip(request)
+        email_hash = _rate_identity(payload.email)
+        enforce_rate_limit(key=f"register:ip:{client_ip}", limit=8, window_seconds=3600)
+        enforce_rate_limit(key=f"register:email:{email_hash}", limit=3, window_seconds=3600)
+    except HTTPException:
+        increment_register_metric("register_validation_total")
+        return _register_error("RATE_LIMIT", "Muitas tentativas. Aguarde alguns minutos e tente novamente.", status_code=429)
+    try:
+        validate_turnstile_or_raise(token=payload.turnstile_token, request=request, action="register")
+    except HTTPException:
+        increment_register_metric("register_turnstile_failed_total")
+        return _register_error("TURNSTILE_FAILED", "Não foi possível validar a proteção anti-bot. Tente novamente.", field="turnstile_token", status_code=403)
 
-    if payload.password != payload.confirm_password:
-        raise HTTPException(status_code=400, detail="As senhas não coincidem")
-    validate_password_policy(payload.password)
-    if not EMAIL_RE.match(payload.email.strip().lower()):
-        raise HTTPException(status_code=400, detail="Email inválido")
+    validated = _validate_registration(payload)
+    if isinstance(validated, JSONResponse):
+        return validated
+    email, business_name, phone_number_id = validated
+    slug = _slugify(business_name)
 
-    email = payload.email.strip().lower()
-    business_name = payload.business_name.strip()
-    phone_number_id = payload.whatsapp_number.strip()
-    existing_email = db.execute(select(TenantUser.id).where(TenantUser.email == email)).scalars().first()
-    if existing_email is not None:
-        raise HTTPException(status_code=409, detail="Este email já está cadastrado.")
-
-    existing_phone_number = db.execute(
-        select(Tenant.id).where(Tenant.phone_number_id == phone_number_id)
-    ).scalars().first()
-    if existing_phone_number is not None:
-        raise HTTPException(status_code=409, detail="Este número de WhatsApp já está cadastrado.")
-
-    slug = _build_unique_slug(db, business_name)
-    existing_slug = db.execute(select(Tenant.id).where(Tenant.slug == slug)).scalars().first()
-    if existing_slug is not None:
-        raise HTTPException(status_code=409, detail="Este identificador de empresa já está em uso.")
+    if db.execute(select(TenantUser.id).where(TenantUser.email == email)).scalars().first() is not None:
+        _log_register_conflict(tenant_slug=slug, email=email, phone=phone_number_id, conflict_type="email")
+        return _register_error("EMAIL_ALREADY_REGISTERED", "Já existe uma conta utilizando este e-mail.", field="email", status_code=409)
+    if db.execute(select(Tenant.id).where(Tenant.phone_number_id == phone_number_id)).scalars().first() is not None:
+        _log_register_conflict(tenant_slug=slug, email=email, phone=phone_number_id, conflict_type="phone")
+        return _register_error("PHONE_ALREADY_REGISTERED", "Este telefone já possui um workspace.", field="whatsapp_number", status_code=409)
+    if db.execute(select(Tenant.id).where(Tenant.name == business_name)).scalars().first() is not None:
+        _log_register_conflict(tenant_slug=slug, email=email, phone=phone_number_id, conflict_type="workspace")
+        return _register_error("WORKSPACE_ALREADY_EXISTS", "Esse nome já está sendo utilizado.", field="business_name", status_code=409)
+    if db.execute(select(Tenant.id).where(Tenant.slug == slug)).scalars().first() is not None:
+        _log_register_conflict(tenant_slug=slug, email=email, phone=phone_number_id, conflict_type="slug")
+        return _register_error("SLUG_ALREADY_EXISTS", "Este endereço já está reservado.", field="business_name", status_code=409)
 
     try:
         tenant = Tenant(name=business_name, slug=slug, phone_number_id=phone_number_id, ai_mode="vendedor")
         db.add(tenant)
         db.flush()
-        TrialService(db).start_trial(tenant.id)
-
+        try:
+            TrialService(db).start_trial(tenant.id)
+        except RuntimeError as error:
+            db.rollback()
+            increment_register_metric("register_internal_error_total")
+            return _register_error("TRIAL_UNAVAILABLE", "O trial está indisponível no momento. Tente novamente em instantes.", status_code=503)
         owner = TenantUser(tenant_id=tenant.id, full_name=payload.full_name.strip(), email=email, password_hash=_hash_password(payload.password), role="owner")
         db.add(owner)
         db.flush()
@@ -265,11 +337,15 @@ def register(payload: RegisterRequest, request: Request, db: Session = Depends(g
         db.refresh(tenant)
     except IntegrityError as error:
         db.rollback()
-        raise HTTPException(status_code=409, detail=_registration_integrity_error_detail(error)) from error
+        code, field, message = _registration_integrity_error(error)
+        _log_register_conflict(tenant_slug=slug, email=email, phone=phone_number_id, conflict_type=code)
+        return _register_error(code, message, field=field, status_code=409)
     except Exception:
         db.rollback()
-        raise
+        increment_register_metric("register_internal_error_total")
+        return _register_error("INTERNAL_ERROR", "Não foi possível criar sua conta agora. Tente novamente em instantes.", status_code=500)
 
+    increment_register_metric("register_success_total")
     return TenantAuthResponse(tenant_id=tenant.id, slug=tenant.slug, token=token)
 
 

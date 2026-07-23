@@ -1,11 +1,11 @@
 'use client';
 
-import { FormEvent, useMemo, useState } from 'react';
+import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import Image from 'next/image';
 import { ArrowRight, CheckCircle2, LockKeyhole, MessageCircle, ShieldCheck, Sparkles } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import TurnstileWidget from '../../components/TurnstileWidget';
-import { registerTenant } from '../../lib/api';
+import { checkRegistrationAvailability, RegisterApiError, registerTenant } from '../../lib/api';
 
 type RegisterForm = {
   full_name: string;
@@ -42,6 +42,8 @@ export default function RegisterPage() {
   const [form, setForm] = useState<RegisterForm>(INITIAL_FORM);
   const [turnstileToken, setTurnstileToken] = useState('');
   const [turnstileKey, setTurnstileKey] = useState(0);
+  const [availability, setAvailability] = useState<Partial<Record<'email' | 'whatsapp_number' | 'business_name', boolean>>>({});
+  const inputRefs = useRef<Partial<Record<keyof RegisterForm, HTMLInputElement | null>>>({});
 
   const passwordRules = useMemo(() => ([
     ['Mínimo 8 caracteres', form.password.length >= 8],
@@ -57,6 +59,31 @@ export default function RegisterPage() {
     setForm((prev) => ({ ...prev, [field]: value }));
     setFieldErrors((prev) => ({ ...prev, [field]: undefined }));
   };
+
+  useEffect(() => {
+    const probes: Array<['email' | 'phone' | 'workspace', keyof RegisterForm, string]> = [
+      ['email', 'email', form.email.trim()],
+      ['phone', 'whatsapp_number', form.whatsapp_number.trim()],
+      ['workspace', 'business_name', form.business_name.trim()]
+    ];
+    const timer = window.setTimeout(() => {
+      probes.forEach(async ([apiField, formField, value]) => {
+        if (value.length < 2 || (apiField === 'email' && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(value))) return;
+        try {
+          const available = await checkRegistrationAvailability(apiField, value);
+          setAvailability((current) => ({ ...current, [formField]: available }));
+          if (!available) setFieldErrors((current) => ({ ...current, [formField]: apiField === 'email' ? 'Já existe uma conta utilizando este e-mail.' : apiField === 'phone' ? 'Este telefone já possui um workspace.' : 'Esse nome já está sendo utilizado.' }));
+        } catch { /* Signup remains usable if the optional availability probe is unavailable. */ }
+      });
+    }, 500);
+    return () => window.clearTimeout(timer);
+  }, [form.email, form.whatsapp_number, form.business_name]);
+
+  useEffect(() => {
+    const firstField = Object.keys(fieldErrors).find((field) => fieldErrors[field as keyof RegisterForm]);
+    if (firstField) inputRefs.current[firstField as keyof RegisterForm]?.focus({ preventScroll: true });
+    inputRefs.current[firstField as keyof RegisterForm]?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }, [fieldErrors, step]);
 
   const validateStep = (targetStep: number): boolean => {
     const nextErrors: Partial<Record<keyof RegisterForm, string>> = {};
@@ -129,17 +156,15 @@ export default function RegisterPage() {
       localStorage.setItem('tenant_id', tenant.tenant_id);
       router.replace('/dashboard?welcome=1');
     } catch (e) {
-      const message = e instanceof Error ? e.message : '';
-      setTurnstileToken('');
-      setTurnstileKey((value) => value + 1);
-      if (message.includes('409')) {
-        setError('Não foi possível criar a conta com estes dados.');
-      } else if (message.includes('intended_use')) {
-        setFieldErrors((prev) => ({ ...prev, intended_use: 'Uso pretendido é obrigatório e deve ter ao menos 2 caracteres.' }));
-        setStep(3);
-        setError('Campo "Uso pretendido" inválido. Preencha com pelo menos 2 caracteres.');
+      if (e instanceof RegisterApiError) {
+        const field = e.field as keyof RegisterForm | undefined;
+        const stepForField: Partial<Record<keyof RegisterForm, number>> = { email: 1, password: 1, confirm_password: 1, business_name: 2, whatsapp_number: 3, intended_use: 3 };
+        if (field) setFieldErrors((prev) => ({ ...prev, [field]: e.message }));
+        if (field && stepForField[field]) setStep(stepForField[field]!);
+        setError(field ? '' : e.message);
+        if (e.code === 'TURNSTILE_FAILED') { setTurnstileToken(''); setTurnstileKey((value) => value + 1); }
       } else {
-        setError('Não foi possível criar a conta. Revise os campos obrigatórios e tente novamente.');
+        setError('Não foi possível concluir seu cadastro. Tente novamente em instantes.');
       }
     } finally {
       setIsLoading(false);
@@ -207,9 +232,9 @@ export default function RegisterPage() {
           </div>
 
           <div className="onboarding-fields">
-            {step===1 && <><label className="onboarding-label">Nome completo</label><input className={`onboarding-input ${hasError('full_name') ? 'onboarding-input--error' : ''}`} placeholder="Seu nome completo" value={form.full_name} onChange={e=>updateField('full_name', e.target.value)} required />{fieldErrors.full_name && <p className="error-text">{fieldErrors.full_name}</p>}<label className="onboarding-label">Email</label><input className={`onboarding-input ${hasError('email') ? 'onboarding-input--error' : ''}`} placeholder="voce@empresa.com" type="email" value={form.email} onChange={e=>updateField('email', e.target.value)} required />{fieldErrors.email && <p className="error-text">{fieldErrors.email}</p>}<label className="onboarding-label">Senha</label><input className={`onboarding-input ${hasError('password') ? 'onboarding-input--error' : ''}`} placeholder="Crie uma senha forte" type="password" minLength={8} value={form.password} onChange={e=>updateField('password', e.target.value)} required /><div className="onboarding-password-rules">{passwordRules.map(([label, ok]) => <span key={label} className={ok ? 'is-valid' : ''}>{ok ? <CheckCircle2 size={15} /> : <span className="rule-dot" />} {label}</span>)}</div><label className="onboarding-label">Confirmar senha</label><input className={`onboarding-input ${hasError('confirm_password') ? 'onboarding-input--error' : ''}`} placeholder="Repita sua senha" type="password" minLength={8} value={form.confirm_password} onChange={e=>updateField('confirm_password', e.target.value)} required />{fieldErrors.confirm_password && <p className="error-text">{fieldErrors.confirm_password}</p>}</>}
-            {step===2 && <><label className="onboarding-label">Nome do negócio</label><input className={`onboarding-input ${hasError('business_name') ? 'onboarding-input--error' : ''}`} placeholder="Nome da sua empresa" value={form.business_name} onChange={e=>updateField('business_name', e.target.value)} required />{fieldErrors.business_name && <p className="error-text">{fieldErrors.business_name}</p>}<label className="onboarding-label">Segmento</label><input className={`onboarding-input ${hasError('business_segment') ? 'onboarding-input--error' : ''}`} placeholder="Ex.: Clínica, imobiliária, ecommerce" value={form.business_segment} onChange={e=>updateField('business_segment', e.target.value)} required />{fieldErrors.business_segment && <p className="error-text">{fieldErrors.business_segment}</p>}<label className="onboarding-label">Tamanho do time (opcional)</label><input className="onboarding-input" placeholder="Ex.: 2-5 pessoas" value={form.team_size} onChange={e=>updateField('team_size', e.target.value)} /></>}
-            {step===3 && <><label className="onboarding-label">Número WhatsApp</label><input className={`onboarding-input ${hasError('whatsapp_number') ? 'onboarding-input--error' : ''}`} placeholder="Ex.: +55 11 99999-9999" value={form.whatsapp_number} onChange={e=>updateField('whatsapp_number', e.target.value)} required />{fieldErrors.whatsapp_number && <p className="error-text">{fieldErrors.whatsapp_number}</p>}<label className="onboarding-label">Volume mensal (opcional)</label><input className="onboarding-input" placeholder="Ex.: 1.000 mensagens/mês" value={form.monthly_message_volume} onChange={e=>updateField('monthly_message_volume', e.target.value)} /><label className="onboarding-label">Uso pretendido</label><input className={`onboarding-input ${hasError('intended_use') ? 'onboarding-input--error' : ''}`} placeholder="Ex.: Atendimento, vendas e pós-venda" value={form.intended_use} onChange={e=>updateField('intended_use', e.target.value)} required />{fieldErrors.intended_use && <p className="error-text">{fieldErrors.intended_use}</p>}</>}
+            {step===1 && <><label className="onboarding-label">Nome completo</label><input className={`onboarding-input ${hasError('full_name') ? 'onboarding-input--error' : ''}`} placeholder="Seu nome completo" value={form.full_name} onChange={e=>updateField('full_name', e.target.value)} required />{fieldErrors.full_name && <p className="error-text">{fieldErrors.full_name}</p>}<label className="onboarding-label">Email</label><input className={`onboarding-input ${hasError('email') ? 'onboarding-input--error' : ''}`} ref={el => { inputRefs.current.email = el; }} placeholder="voce@empresa.com" type="email" value={form.email} onChange={e=>updateField('email', e.target.value)} required />{fieldErrors.email && <p className="error-text">{fieldErrors.email}</p>}{availability.email === true && <p className="text-sm text-emerald-600">✓ E-mail disponível</p>}<label className="onboarding-label">Senha</label><input className={`onboarding-input ${hasError('password') ? 'onboarding-input--error' : ''}`} ref={el => { inputRefs.current.password = el; }} placeholder="Crie uma senha forte" type="password" minLength={8} value={form.password} onChange={e=>updateField('password', e.target.value)} required /><div className="onboarding-password-rules">{passwordRules.map(([label, ok]) => <span key={label} className={ok ? 'is-valid' : ''}>{ok ? <CheckCircle2 size={15} /> : <span className="rule-dot" />} {label}</span>)}</div><label className="onboarding-label">Confirmar senha</label><input className={`onboarding-input ${hasError('confirm_password') ? 'onboarding-input--error' : ''}`} ref={el => { inputRefs.current.confirm_password = el; }} placeholder="Repita sua senha" type="password" minLength={8} value={form.confirm_password} onChange={e=>updateField('confirm_password', e.target.value)} required />{fieldErrors.confirm_password && <p className="error-text">{fieldErrors.confirm_password}</p>}</>}
+            {step===2 && <><label className="onboarding-label">Nome do negócio</label><input className={`onboarding-input ${hasError('business_name') ? 'onboarding-input--error' : ''}`} ref={el => { inputRefs.current.business_name = el; }} placeholder="Nome da sua empresa" value={form.business_name} onChange={e=>updateField('business_name', e.target.value)} required />{fieldErrors.business_name && <p className="error-text">{fieldErrors.business_name}</p>}{availability.business_name === true && <p className="text-sm text-emerald-600">✓ Nome disponível</p>}<label className="onboarding-label">Segmento</label><input className={`onboarding-input ${hasError('business_segment') ? 'onboarding-input--error' : ''}`} placeholder="Ex.: Clínica, imobiliária, ecommerce" value={form.business_segment} onChange={e=>updateField('business_segment', e.target.value)} required />{fieldErrors.business_segment && <p className="error-text">{fieldErrors.business_segment}</p>}<label className="onboarding-label">Tamanho do time (opcional)</label><input className="onboarding-input" placeholder="Ex.: 2-5 pessoas" value={form.team_size} onChange={e=>updateField('team_size', e.target.value)} /></>}
+            {step===3 && <><label className="onboarding-label">Número WhatsApp</label><input className={`onboarding-input ${hasError('whatsapp_number') ? 'onboarding-input--error' : ''}`} ref={el => { inputRefs.current.whatsapp_number = el; }} placeholder="Ex.: +55 11 99999-9999" value={form.whatsapp_number} onChange={e=>updateField('whatsapp_number', e.target.value)} required />{fieldErrors.whatsapp_number && <p className="error-text">{fieldErrors.whatsapp_number}</p>}{availability.whatsapp_number === true && <p className="text-sm text-emerald-600">✓ Telefone disponível</p>}<label className="onboarding-label">Volume mensal (opcional)</label><input className="onboarding-input" placeholder="Ex.: 1.000 mensagens/mês" value={form.monthly_message_volume} onChange={e=>updateField('monthly_message_volume', e.target.value)} /><label className="onboarding-label">Uso pretendido</label><input className={`onboarding-input ${hasError('intended_use') ? 'onboarding-input--error' : ''}`} placeholder="Ex.: Atendimento, vendas e pós-venda" value={form.intended_use} onChange={e=>updateField('intended_use', e.target.value)} required />{fieldErrors.intended_use && <p className="error-text">{fieldErrors.intended_use}</p>}</>}
             {step===4 && <><div className="onboarding-review-card"><CheckCircle2 size={18} /><div><strong>Quase lá</strong><p>Valide a segurança e finalize a criação do workspace Wazza API.</p></div></div><TurnstileWidget key={turnstileKey} action="register" token={turnstileToken} onToken={setTurnstileToken} onError={setError} /></>}
           </div>
 
