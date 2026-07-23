@@ -213,6 +213,26 @@ export async function listBillingPlans(): Promise<BillingPlan[]> { return parseA
 export async function createBillingCheckout(plan_code: string, billing_interval: "monthly" | "annual"): Promise<{ checkout_url: string }> { return parseApiResponse(await apiFetch('/api/billing/checkout', { method: 'POST', body: JSON.stringify({ plan_code, billing_interval, success_path: '/dashboard/settings?section=billing&checkout=success', cancel_path: '/dashboard/settings?section=billing&checkout=cancel' }) })); }
 export async function openBillingPortal(): Promise<{ portal_url: string }> { return parseApiResponse(await apiFetch('/api/billing/portal', { method: 'POST' })); }
 
+export type RegisterApiErrorCode =
+  | 'PHONE_ALREADY_REGISTERED' | 'EMAIL_ALREADY_REGISTERED' | 'WORKSPACE_ALREADY_EXISTS'
+  | 'SLUG_ALREADY_EXISTS' | 'INVALID_PASSWORD' | 'INVALID_EMAIL' | 'INVALID_PHONE'
+  | 'INVALID_WORKSPACE_NAME' | 'TURNSTILE_FAILED' | 'RATE_LIMIT' | 'TRIAL_UNAVAILABLE'
+  | 'INTERNAL_ERROR' | 'VALIDATION_ERROR';
+
+export class RegisterApiError extends Error {
+  constructor(public readonly code: RegisterApiErrorCode, public readonly field?: string, message = 'Não foi possível concluir seu cadastro.') {
+    super(message);
+    this.name = 'RegisterApiError';
+  }
+}
+
+export async function checkRegistrationAvailability(field: 'email' | 'phone' | 'workspace', value: string): Promise<boolean> {
+  const params = new URLSearchParams({ field, value });
+  const response = await apiFetch(`/api/register/availability?${params.toString()}`);
+  const body = await parseApiResponse<{ success: boolean; available: boolean }>(response);
+  return body.available;
+}
+
 export async function registerTenant(payload: Record<string, string>, turnstileToken: string): Promise<TenantSession> {
   const requestPayload = { ...payload, turnstile_token: turnstileToken };
   const sanitizedPayload = {
@@ -228,7 +248,15 @@ export async function registerTenant(payload: Record<string, string>, turnstileT
     body: JSON.stringify(requestPayload)
   });
 
-  return parseApiResponse<TenantSession>(res);
+  if (res.ok) return parseApiResponse<TenantSession>(res);
+
+  try {
+    const body = await res.json() as { error?: { code?: RegisterApiErrorCode; field?: string; message?: string } };
+    if (body.error?.code) throw new RegisterApiError(body.error.code, body.error.field, body.error.message);
+  } catch (error) {
+    if (error instanceof RegisterApiError) throw error;
+  }
+  throw new RegisterApiError('INTERNAL_ERROR', undefined, 'Não foi possível concluir seu cadastro. Tente novamente.');
 }
 
 export async function tenantLogin(email: string, password: string, turnstileToken: string): Promise<TenantSession> {

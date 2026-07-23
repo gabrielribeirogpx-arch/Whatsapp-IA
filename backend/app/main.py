@@ -147,10 +147,15 @@ app.add_middleware(
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
     logger.info("event=request_validation_failed path=%s", request.url.path)
-    return JSONResponse(
-        status_code=422,
-        content={"detail": exc.errors()},
-    )
+    if request.url.path == "/api/register":
+        first_error = exc.errors()[0] if exc.errors() else {}
+        location = first_error.get("loc", [])
+        field = location[-1] if location and isinstance(location[-1], str) else None
+        return JSONResponse(
+            status_code=422,
+            content={"success": False, "error": {"code": "VALIDATION_ERROR", "field": field, "message": "Revise o campo informado e tente novamente."}},
+        )
+    return JSONResponse(status_code=422, content={"detail": exc.errors()})
 
 
 # ✅ STARTUP (CORRETO)

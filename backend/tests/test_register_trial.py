@@ -109,24 +109,24 @@ def test_register_returns_conflict_for_duplicate_whatsapp_number(register_client
     response = client.post("/api/register", json=duplicate_phone_payload)
 
     assert response.status_code == 409
-    assert response.json()["detail"] == "Este número de WhatsApp já está cadastrado."
+    assert response.json()["error"] == {"code": "PHONE_ALREADY_REGISTERED", "field": "whatsapp_number", "message": "Este telefone já possui um workspace."}
 
 
 def test_register_returns_conflict_for_duplicate_slug(register_client, monkeypatch):
     client, _engine = register_client
 
     assert client.post("/api/register", json=_payload()).status_code == 200
-    monkeypatch.setattr(auth, "_build_unique_slug", lambda *_args: "empresa-nova")
     duplicate_slug_payload = {
         **_payload(),
         "email": "outro@example.com",
+        "business_name": "Empresa! Nova",
         "whatsapp_number": "5511888888888",
     }
 
     response = client.post("/api/register", json=duplicate_slug_payload)
 
     assert response.status_code == 409
-    assert response.json()["detail"] == "Este identificador de empresa já está em uso."
+    assert response.json()["error"] == {"code": "SLUG_ALREADY_EXISTS", "field": "business_name", "message": "Este endereço já está reservado."}
 
 
 def test_register_rolls_back_and_returns_conflict_for_integrity_error(register_client, monkeypatch):
@@ -144,6 +144,36 @@ def test_register_rolls_back_and_returns_conflict_for_integrity_error(register_c
     response = client.post("/api/register", json=_payload())
 
     assert response.status_code == 409
-    assert response.json()["detail"] == "Este número de WhatsApp já está cadastrado."
+    assert response.json()["error"] == {"code": "PHONE_ALREADY_REGISTERED", "field": "whatsapp_number", "message": "Este telefone já possui um workspace."}
     with Session(engine) as session:
         assert session.query(Tenant).count() == 0
+
+
+def test_register_returns_structured_email_and_workspace_conflicts(register_client):
+    client, _engine = register_client
+    assert client.post("/api/register", json=_payload()).status_code == 200
+
+    email = client.post("/api/register", json={**_payload(), "whatsapp_number": "5511888888888"})
+    assert email.status_code == 409
+    assert email.json()["error"]["code"] == "EMAIL_ALREADY_REGISTERED"
+    assert email.json()["error"]["field"] == "email"
+
+    workspace = client.post("/api/register", json={**_payload(), "email": "workspace@example.com", "whatsapp_number": "5511777777777"})
+    assert workspace.status_code == 409
+    assert workspace.json()["error"]["code"] == "WORKSPACE_ALREADY_EXISTS"
+
+
+def test_register_returns_structured_validation_error(register_client):
+    client, _engine = register_client
+    response = client.post("/api/register", json={**_payload(), "password": "fraca", "confirm_password": "fraca"})
+    assert response.status_code == 400
+    assert response.json()["error"]["code"] == "INVALID_PASSWORD"
+    assert response.json()["error"]["field"] == "password"
+
+
+def test_register_returns_structured_turnstile_error(register_client, monkeypatch):
+    client, _engine = register_client
+    monkeypatch.setattr(auth, "validate_turnstile_or_raise", lambda **_kwargs: (_ for _ in ()).throw(auth.HTTPException(status_code=403)))
+    response = client.post("/api/register", json=_payload())
+    assert response.status_code == 403
+    assert response.json()["error"]["code"] == "TURNSTILE_FAILED"
