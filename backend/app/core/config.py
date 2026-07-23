@@ -33,5 +33,15 @@ class Settings:
     stripe_cancel_url: str = os.getenv("STRIPE_CANCEL_URL", "")
     stripe_portal_return_url: str = os.getenv("STRIPE_PORTAL_RETURN_URL", "")
 
+    @property
+    def stripe_configured(self) -> bool:
+        """Whether online billing can actually be used, not merely requested.
+
+        Keeping this separate from ``stripe_enabled`` makes an accidental
+        deployment with only the feature flag fail closed without making the
+        rest of the application unavailable.
+        """
+        return bool(self.stripe_enabled and self.stripe_secret_key and self.stripe_webhook_secret)
+
 
 settings = Settings()
