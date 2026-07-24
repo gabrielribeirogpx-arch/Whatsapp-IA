@@ -1,82 +1,85 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ArrowRight, Check, CheckCircle2, CreditCard, Loader2, RefreshCw, ShieldCheck, Sparkles, Users, Workflow } from "lucide-react";
+import { Check, CheckCircle2, ChevronDown, CreditCard, Loader2, RefreshCw } from "lucide-react";
 import { createBillingCheckout, getCurrentBilling, listBillingPlans, openBillingPortal } from "@/lib/api";
 import type { BillingPlan, CurrentBillingState, EffectiveEntitlement, PlanFeature } from "@/lib/types";
 
-const PLAN_COPY: Record<string, { description: string; benefits: string[] }> = {
-  starter: { description: "O essencial para colocar sua operação no ar.", benefits: ["Automação de atendimento", "1 número de WhatsApp", "Fluxos prontos para usar"] },
-  growth: { description: "Mais escala e inteligência para equipes em crescimento.", benefits: ["IA para conversas", "20 fluxos publicados", "Métricas de operação"] },
-  business: { description: "Controle avançado para uma operação de alta performance.", benefits: ["Até 3 números de WhatsApp", "Automação em escala", "Retenção ampliada de dados"] },
-  enterprise: { description: "Estrutura sob medida para organizações complexas.", benefits: ["Segurança e SSO", "Suporte prioritário", "Solução personalizada"] },
-};
-
-const FEATURE_ROWS = [
-  ["users", "Usuários incluídos", Users],
-  ["whatsapp_numbers", "Números de WhatsApp", CreditCard],
-  ["published_flows", "Fluxos publicados", Workflow],
-  ["observability_retention_days", "Histórico e observabilidade", ShieldCheck],
+const COMPARISON_ROWS = [
+  ["users", "Usuários"], ["whatsapp_numbers", "WhatsApp"], ["published_flows", "Fluxos"], ["messages", "Mensagens"],
+  ["crm", "CRM"], ["inbox", "Inbox"], ["ai", "IA"], ["mcp", "MCP"], ["academy", "Academy"], ["api", "API"],
 ] as const;
 
-function formatPrice(amount: number | null, interval: "monthly" | "annual") {
-  if (amount === null) return "Sob consulta";
-  return `R$ ${(amount / 100).toLocaleString("pt-BR", { minimumFractionDigits: 2 })}`;
+const RESOURCE_LABELS: Record<string, string> = {
+  inbox: "Inbox", crm: "CRM", ai: "IA", mcp: "MCP", academy: "Academy", observability: "Observabilidade", api: "API", knowledge_base: "Base de conhecimento",
+};
+
+const USAGE_METRICS = [
+  ["messages", "Conversas", "Ilimitado"], ["users", "Usuários", "—"], ["published_flows", "Fluxos", "—"],
+  ["whatsapp_numbers", "WhatsApp", "—"], ["integrations", "Integrações", "—"], ["ai", "IA", "Desativada"],
+] as const;
+
+function formatPrice(amount: number | null) {
+  return amount === null ? "Sob consulta" : `R$ ${(amount / 100).toLocaleString("pt-BR", { maximumFractionDigits: 0 })}`;
 }
 
 function featureValue(feature?: PlanFeature) {
   if (!feature?.enabled) return "—";
   if (feature.limit_value === null) return "Ilimitado";
-  return `${feature.limit_value} ${feature.limit_unit || ""}`.trim();
+  return `${feature.limit_value}${feature.limit_unit ? ` ${feature.limit_unit}` : ""}`;
+}
+
+function getFeature(features: PlanFeature[], key: string) {
+  const aliases: Record<string, string[]> = { messages: ["messages", "monthly_messages", "conversations"], integrations: ["integrations", "integration_connections"] };
+  return features.find((feature) => (aliases[key] || [key]).includes(feature.feature_key));
+}
+
+function dateLabel(value?: string | null) {
+  return value ? new Intl.DateTimeFormat("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric" }).format(new Date(value)) : "—";
 }
 
 export function PlanBadge({ status }: { status?: string | null }) {
-  const legacy = status === "legacy";
   const trial = status === "trialing";
-  return <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${legacy ? "bg-blue-50 text-blue-700" : trial ? "bg-violet-50 text-violet-700" : "bg-emerald-50 text-emerald-700"}`}>{legacy ? "Acesso legado" : trial ? "Trial" : status || "Sem assinatura"}</span>;
+  return <span className="billing-status">{trial ? "Trial" : status === "legacy" ? "Acesso legado" : status || "Sem assinatura"}</span>;
 }
 
 export function SubscriptionStatusBadge({ status }: { status?: string | null }) { return <PlanBadge status={status} />; }
-export function LimitDisplay({ entitlement }: { entitlement: EffectiveEntitlement }) { return <li className="flex justify-between gap-3 text-sm text-slate-600"><span>{entitlement.feature_key.replaceAll("_", " ")}</span><span className="font-medium text-slate-900">{entitlement.limit_value === null ? "Ilimitado" : `${entitlement.limit_value} ${entitlement.limit_unit || ""}`}</span></li>; }
-export function EntitlementList({ entitlements }: { entitlements: EffectiveEntitlement[] }) { return <ul className="mt-4 grid gap-2 sm:grid-cols-2">{entitlements.filter(item => item.enabled).slice(0, 12).map(item => <LimitDisplay key={item.feature_key} entitlement={item} />)}</ul>; }
+export function LimitDisplay({ entitlement }: { entitlement: EffectiveEntitlement }) { return <li><span>{RESOURCE_LABELS[entitlement.feature_key] || entitlement.feature_key.replaceAll("_", " ")}</span><strong>{featureValue(entitlement)}</strong></li>; }
+export function EntitlementList({ entitlements }: { entitlements: EffectiveEntitlement[] }) {
+  const features = entitlements.filter((item) => item.enabled).slice(0, 8);
+  return <ul className="billing-features">{features.map((item) => <li key={item.feature_key}><Check size={16} />{RESOURCE_LABELS[item.feature_key] || item.feature_key.replaceAll("_", " ")}</li>)}</ul>;
+}
 
-export function CurrentPlanCard({ state, portal }: { state: CurrentBillingState; portal: () => void }) {
-  const legacy = state.subscription?.status === "legacy";
+export function CurrentPlanCard({ state, portal, changePlan }: { state: CurrentBillingState; portal: () => void; changePlan: () => void }) {
   const trial = state.trial;
-  return <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><div className="flex items-start justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Plano atual</p><h2 className="mt-1 text-xl font-bold text-slate-950">{trial ? "Trial Growth" : state.plan?.name || "Sem assinatura"}</h2></div><SubscriptionStatusBadge status={state.subscription?.status} /></div>{trial && <p className="mt-4 rounded-xl border border-violet-200 bg-violet-50 p-3 text-sm text-violet-900">Trial de 14 dias · {state.days_remaining} dias restantes.</p>}<p className="mt-3 text-sm leading-6 text-slate-600">{legacy ? "Seu workspace mantém acesso integral até uma assinatura Stripe ser confirmada." : state.plan?.description || "Aguardando informações da assinatura."}</p>{state.subscription?.provider === "stripe" && <button onClick={portal} className="mt-5 rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold">Gerenciar cobrança</button>}</section>;
+  const expiresAt = state.subscription?.trial_ends_at || state.subscription?.current_period_end;
+  const progress = trial ? Math.max(4, Math.min(100, ((14 - state.days_remaining) / 14) * 100)) : 100;
+  return <section className="billing-card billing-current-card" aria-labelledby="current-plan-title">
+    <div className="billing-current-card__top"><div><p className="billing-eyebrow">Plano atual</p><div className="billing-plan-name"><h2 id="current-plan-title">{trial ? "Growth Trial" : state.plan?.name || "Sem assinatura"}</h2>{trial && <PlanBadge status="trialing" />}</div></div><span className="billing-active-status"><i />Ativo</span></div>
+    <div className="billing-plan-details"><div><span>{trial ? "Período de avaliação" : "Ciclo de cobrança"}</span><strong>{trial ? `${state.days_remaining} dias restantes` : state.subscription?.billing_interval === "annual" ? "Anual" : "Mensal"}</strong></div><div><span>{trial ? "Expira em" : "Próxima renovação"}</span><strong>{dateLabel(expiresAt)}</strong></div><div><span>Workspace</span><strong>Workspace atual</strong></div></div>
+    <div className="billing-progress" aria-label={trial ? `${state.days_remaining} dias restantes no trial` : "Assinatura ativa"}><span style={{ width: `${progress}%` }} /></div>
+    <div className="billing-card-actions"><button type="button" className="billing-button billing-button--primary" onClick={changePlan}>Alterar plano</button>{state.subscription?.provider === "stripe" && <button type="button" className="billing-button" onClick={portal}>Ver detalhes</button>}</div>
+  </section>;
+}
+
+function UsageGrid({ state }: { state: CurrentBillingState }) {
+  return <section aria-labelledby="usage-title"><div className="billing-section-heading"><div><h2 id="usage-title">Uso atual</h2><p>Limites e recursos disponíveis neste workspace.</p></div></div><div className="billing-usage-grid">{USAGE_METRICS.map(([key, label, fallback]) => {
+    const feature = getFeature(state.effective_entitlements, key);
+    const value = key === "ai" ? (feature?.enabled ? "Ativada" : fallback) : featureValue(feature);
+    return <article className="billing-card billing-metric" key={key}><span>{label}</span><strong>{value === "—" ? fallback : value}</strong>{key === "users" || key === "published_flows" ? <small>do limite do plano</small> : null}</article>;
+  })}</div></section>;
 }
 
 export function PlanComparison({ plans, enabled, currentPlanCode, isTrial, checkout }: { plans: BillingPlan[]; enabled: boolean; currentPlanCode?: string; isTrial: boolean; checkout: (code: string, interval: "monthly" | "annual") => void }) {
+  const [open, setOpen] = useState(false);
   const [interval, setInterval] = useState<"monthly" | "annual">("monthly");
+  const publicPlans = plans.filter((plan) => plan.code !== "growth_trial" && plan.code !== "legacy");
   const currentCode = isTrial ? "growth" : currentPlanCode;
-  const publicPlans = plans.filter(plan => plan.code !== "growth_trial" && plan.code !== "legacy");
-  const planByCode = useMemo(() => new Map(publicPlans.map(plan => [plan.code, plan])), [publicPlans]);
-  return <section className="plan-comparison" aria-labelledby="plan-comparison-title">
-    <div className="plan-comparison__header">
-      <div><p className="plan-comparison__eyebrow">Planos Wazza</p><h2 id="plan-comparison-title">Comparar planos</h2><p>Escolha a estrutura ideal para o ritmo da sua operação.</p></div>
-      <div className="plan-comparison__interval" aria-label="Periodicidade"><button type="button" onClick={() => setInterval("monthly")} className={interval === "monthly" ? "is-active" : ""}>Mensal</button><button type="button" onClick={() => setInterval("annual")} className={interval === "annual" ? "is-active" : ""}>Anual <span>melhor valor</span></button></div>
-    </div>
-    <div className="plan-comparison__rail">
-      <div className="plan-comparison__grid">
-        {publicPlans.map(plan => {
-          const copy = PLAN_COPY[plan.code] || { description: plan.description || "Plano flexível para sua operação.", benefits: ["Recursos essenciais", "Evolução contínua", "Suporte Wazza"] };
-          const amount = interval === "monthly" ? plan.monthly_price_cents : plan.annual_price_cents;
-          const recommended = plan.code === "growth";
-          const current = plan.code === currentCode;
-          const Icon = recommended ? Sparkles : plan.code === "enterprise" ? ShieldCheck : plan.code === "business" ? Workflow : Users;
-          return <article key={plan.code} className={`plan-card ${recommended ? "plan-card--recommended" : ""} ${current ? "plan-card--current" : ""}`}>
-            <div className="plan-card__topline">{recommended && <span className="plan-card__badge plan-card__badge--popular"><Sparkles size={13} /> Mais popular</span>}{current && <span className="plan-card__badge plan-card__badge--current">{isTrial ? "Trial" : "Atual"}</span>}{!recommended && !current && plan.code === "enterprise" && <span className="plan-card__badge">Enterprise</span>}{!recommended && !current && plan.code !== "enterprise" && <span className="plan-card__badge">Plano</span>}</div>
-            <div className="plan-card__icon"><Icon size={20} /></div><h3>{plan.name}</h3><p className="plan-card__description">{copy.description}</p>
-            <div className="plan-card__price"><strong>{formatPrice(amount, interval)}</strong>{amount !== null && <span>por {interval === "monthly" ? "mês" : "ano"}</span>}</div>
-            <div className="plan-card__divider" /><p className="plan-card__includes">Tudo que você precisa:</p><ul>{copy.benefits.map(benefit => <li key={benefit}><Check size={16} />{benefit}</li>)}</ul>
-            <button type="button" disabled={!enabled || amount === null || current} onClick={() => checkout(plan.code, interval)} className="plan-card__cta">{current ? "Plano atual" : amount === null ? "Fale com a gente" : "Escolher plano"}{!current && amount !== null && <ArrowRight size={16} />}</button>
-          </article>;
-        })}
-      </div>
-    </div>
-    <div className="plan-table-wrap"><div className="plan-table-heading"><div><p className="plan-comparison__eyebrow">Visão detalhada</p><h3>Compare recursos lado a lado</h3></div><span>Incluso em cada plano</span></div><div className="plan-table-scroll"><table className="plan-table"><thead><tr><th>Recursos</th>{publicPlans.map(plan => <th key={plan.code} className={plan.code === "growth" ? "is-recommended" : ""}>{plan.name}</th>)}</tr></thead><tbody>{FEATURE_ROWS.map(([key, label, Icon]) => <tr key={key}><th><span className="plan-table__feature-icon"><Icon size={15} /></span>{label}</th>{publicPlans.map(plan => <td key={plan.code} className={plan.code === "growth" ? "is-recommended" : ""}>{featureValue(planByCode.get(plan.code)?.features.find(feature => feature.feature_key === key))}</td>)}</tr>)}</tbody></table></div></div>
-  </section>;
+  const planByCode = useMemo(() => new Map(publicPlans.map((plan) => [plan.code, plan])), [publicPlans]);
+  return <section className="billing-comparison" aria-labelledby="plan-comparison-title"><button type="button" className="billing-comparison__trigger" aria-expanded={open} onClick={() => setOpen((value) => !value)}><span><strong id="plan-comparison-title">Comparar planos</strong><small>Consulte limites, recursos e preços por plano.</small></span><ChevronDown size={18} className={open ? "is-open" : ""} /></button>{open && <div className="billing-comparison__content"><div className="billing-interval" aria-label="Periodicidade"><button type="button" className={interval === "monthly" ? "is-active" : ""} onClick={() => setInterval("monthly")}>Mensal</button><button type="button" className={interval === "annual" ? "is-active" : ""} onClick={() => setInterval("annual")}>Anual</button></div><div className="billing-table-scroll"><table className="billing-table"><thead><tr><th>Recurso</th>{publicPlans.map((plan) => <th key={plan.code}>{plan.name}{plan.code === currentCode && <span>Plano atual</span>}</th>)}</tr></thead><tbody>{COMPARISON_ROWS.map(([key, label]) => <tr key={key}><th>{label}</th>{publicPlans.map((plan) => <td key={plan.code}>{featureValue(getFeature(planByCode.get(plan.code)?.features || [], key))}</td>)}</tr>)}<tr className="billing-table__price"><th>Preço</th>{publicPlans.map((plan) => <td key={plan.code}>{formatPrice(interval === "monthly" ? plan.monthly_price_cents : plan.annual_price_cents)}</td>)}</tr><tr className="billing-table__actions"><th><span className="sr-only">Ação</span></th>{publicPlans.map((plan) => { const current = plan.code === currentCode; const enterprise = plan.monthly_price_cents === null; return <td key={plan.code}><button type="button" className="billing-button" disabled={!enabled || current} onClick={() => !enterprise && checkout(plan.code, interval)}>{current ? "Plano atual" : enterprise ? "Falar com vendas" : "Selecionar plano"}</button></td>; })}</tr></tbody></table></div></div>}</section>;
 }
+
+function BillingHistory() { return <section className="billing-card billing-history"><div><h2>Histórico de cobrança</h2><p>Faturas, recibos e pagamentos aparecerão aqui quando disponíveis.</p></div><span>Em breve</span></section>; }
 
 export default function BillingTab() {
   const [state, setState] = useState<CurrentBillingState | null>(null); const [plans, setPlans] = useState<BillingPlan[]>([]); const [error, setError] = useState<string | null>(null); const [loading, setLoading] = useState(true); const [busy, setBusy] = useState(false);
@@ -88,5 +91,5 @@ export default function BillingTab() {
   const checkout = async (code: string, interval: "monthly" | "annual") => { setBusy(true); try { const result = await createBillingCheckout(code, interval); window.location.assign(result.checkout_url); } catch { setError("Não foi possível iniciar o Checkout."); } finally { setBusy(false); } };
   const portal = async () => { setBusy(true); try { const result = await openBillingPortal(); window.location.assign(result.portal_url); } catch { setError("Não foi possível abrir o portal de cobrança."); } finally { setBusy(false); } };
   const pending = new URLSearchParams(typeof window === "undefined" ? "" : window.location.search).get("checkout") === "success";
-  return <div className="space-y-4"><header className="flex items-center gap-3"><span className="rounded-xl bg-emerald-50 p-2 text-emerald-700"><CreditCard size={20} /></span><div><h1 className="text-2xl font-bold text-slate-950">Plano e cobrança</h1><p className="text-sm text-slate-600">{state.stripe_enabled ? "Escolha um plano ou gerencie sua assinatura." : "Cobrança online temporariamente indisponível."}</p></div></header>{!state.stripe_enabled && <p className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">Os pagamentos online ainda não estão disponíveis. Você pode continuar utilizando seu período de teste normalmente.</p>}{pending && <p className="rounded-xl bg-blue-50 p-3 text-sm text-blue-900">Pagamento recebido. Estamos confirmando sua assinatura.</p>}{busy && <p className="text-sm text-slate-500">Redirecionando para a cobrança segura…</p>}<CurrentPlanCard state={state} portal={() => void portal()} /><section className="rounded-2xl border border-slate-200 bg-white p-5"><h2 className="text-lg font-bold text-slate-950">Recursos e limites</h2><EntitlementList entitlements={state.effective_entitlements} /></section><PlanComparison plans={plans} enabled={Boolean(state.stripe_enabled)} currentPlanCode={state.plan?.code} isTrial={state.trial} checkout={(code, interval) => void checkout(code, interval)} /><p className="flex items-center gap-2 text-xs text-slate-500"><CheckCircle2 size={14} className="text-emerald-600" /> Nenhum recurso é bloqueado nesta fase.</p></div>;
+  return <div className="billing-page"><header className="billing-page__header"><div><h1>Plano e cobrança</h1><p>Gerencie a assinatura e os limites do seu workspace.</p></div></header>{!state.stripe_enabled && <p className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">Os pagamentos online ainda não estão disponíveis. Você pode continuar utilizando seu período de teste normalmente.</p>}{pending && <p className="rounded-xl bg-blue-50 p-3 text-sm text-blue-900">Pagamento recebido. Estamos confirmando sua assinatura.</p>}{busy && <p className="text-sm text-slate-500">Redirecionando para a cobrança segura…</p>}<CurrentPlanCard state={state} portal={() => void portal()} changePlan={() => document.getElementById("plan-comparison-title")?.closest("section")?.scrollIntoView({ behavior: "smooth" })} /><UsageGrid state={state} /><section className="billing-card billing-resources"><div className="billing-section-heading"><div><h2>Recursos inclusos</h2><p>Recursos atualmente habilitados no seu plano.</p></div></div><EntitlementList entitlements={state.effective_entitlements} /></section><PlanComparison plans={plans} enabled={Boolean(state.stripe_enabled)} currentPlanCode={state.plan?.code} isTrial={state.trial} checkout={(code, interval) => void checkout(code, interval)} /><BillingHistory /><p className="billing-note"><CheckCircle2 size={14} /> Nenhum recurso é bloqueado nesta fase.</p></div>;
 }
