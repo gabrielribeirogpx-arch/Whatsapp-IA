@@ -31,7 +31,7 @@ from app.models.execution_trace import ExecutionTrace
 from app.models.pending_action import PendingAction
 from app.models.billing import BillingEvent, Plan, PlanFeature, PlanPrice, Subscription, TenantEntitlement, UsageCounter, UsageEvent
 
-__all__ = ["Tenant", "AIConfig", "Conversation", "Contact", "Message", "Product", "KnowledgeBase", "KnowledgeSource", "KnowledgeChunk", "Lead", "PipelineStage", "BotRule", "ConversationLog", "Flow", "FlowStep", "FlowNode", "FlowEdge", "FlowVersion", "FlowExecution", "FlowExecutionEvent", "ProcessedMessage", "FlowEvent", "FlowAnalyticsEvent", "FailedMessage", "WorkerDeadLetter", "FlowAIConversationMessage", "FlowAIExecution", "FlowAILongTermMemory", "FlowV2Event", "FlowV2Session", "FlowV2ScheduledJob", "FlowV2IdempotencyKey", "FlowV2DeadLetter", "TenantUser", "PasswordResetToken", "AuditLog", "UserSession", "Task", "TenantAISetting", "TenantMCPServer", "TenantMCPTool", "ExecutionTrace", "IntegrationConnection", "PendingAction", "TenantWhatsAppProvider", "WhatsAppMessageTemplate", "WhatsAppCampaign", "WhatsAppCampaignRecipient", "Plan", "PlanFeature", "PlanPrice", "BillingEvent", "Subscription", "TenantEntitlement", "UsageCounter", "UsageEvent"]
+__all__ = ["Tenant", "AIConfig", "Conversation", "Contact", "Message", "Product", "KnowledgeBase", "KnowledgeSource", "KnowledgeChunk", "Lead", "PipelineStage", "BotRule", "ConversationLog", "Flow", "FlowStep", "FlowNode", "FlowEdge", "FlowVersion", "FlowExecution", "FlowExecutionEvent", "ProcessedMessage", "FlowEvent", "FlowAnalyticsEvent", "FailedMessage", "WorkerDeadLetter", "FlowAIConversationMessage", "FlowAIExecution", "FlowAILongTermMemory", "FlowV2Event", "FlowV2Session", "FlowV2ScheduledJob", "FlowV2IdempotencyKey", "FlowV2DeadLetter", "TenantUser", "PasswordResetToken", "AuditLog", "UserSession", "Task", "TenantAISetting", "TenantMCPServer", "TenantMCPTool", "ExecutionTrace", "IntegrationConnection", "PendingAction", "TenantWhatsAppProvider", "WhatsAppMessageTemplate", "WhatsAppCampaign", "WhatsAppCampaignRecipient", "Plan", "PlanFeature", "PlanPrice", "BillingEvent", "Subscription", "TenantEntitlement", "UsageCounter", "UsageEvent", "ProductEvent", "ProductMetricDaily", "TenantActivationState"]
 
 from app.models.tenant_ai_setting import TenantAISetting
 from app.models.tenant_whatsapp_provider import TenantWhatsAppProvider
@@ -42,3 +42,5 @@ from app.models.whatsapp_campaign import WhatsAppCampaign, WhatsAppCampaignRecip
 from app.models.contact_event import ContactEvent
 
 from app.models.password_reset_token import PasswordResetToken
+
+from app.models.product_analytics import ProductEvent, ProductMetricDaily, TenantActivationState
