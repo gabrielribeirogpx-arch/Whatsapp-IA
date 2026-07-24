@@ -24,7 +24,7 @@ import app.models  # noqa: F401
 
 from app.routers import webhook
 from app.routers import chat as conversations
-from app.routers import auth
+from app.routers import auth, product_analytics
 from app.routers import products
 from app.routers import knowledge
 from app.routers import leads
@@ -184,6 +184,8 @@ preflight_handler = options_handler
 
 # ✅ ROUTES
 app.include_router(auth.router, prefix="/api")
+app.include_router(product_analytics.router, prefix="/api")
+app.include_router(product_analytics.admin_router, prefix="/api")
 app.include_router(conversations.router, prefix="/api")
 app.include_router(conversations.router, prefix="/api/api")
 app.include_router(products.router, prefix="/api")

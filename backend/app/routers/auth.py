@@ -28,6 +28,7 @@ from app.services.audit_service import write_audit_log
 from app.services.session_service import create_user_session
 from app.services.trial_service import TrialService
 from app.services.register_metrics import increment as increment_register_metric
+from app.analytics.service import ProductAnalyticsService
 
 router = APIRouter(tags=["auth"])
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
@@ -346,6 +347,14 @@ def register(payload: RegisterRequest, request: Request, db: Session = Depends(g
         return _register_error("INTERNAL_ERROR", "Não foi possível criar sua conta agora. Tente novamente em instantes.", status_code=500)
 
     increment_register_metric("register_success_total")
+    # Analytics is intentionally best-effort and is never part of registration success.
+    try:
+        analytics = ProductAnalyticsService(db)
+        analytics.track("registration_completed", tenant.id, owner.id, properties={"plan_code": tenant.plan}, idempotency_key=f"registration:{tenant.id}")
+        analytics.track("trial_started", tenant.id, owner.id, idempotency_key=f"trial:{tenant.id}")
+        db.commit()
+    except Exception:
+        db.rollback()
     return TenantAuthResponse(tenant_id=tenant.id, slug=tenant.slug, token=token)
 
 

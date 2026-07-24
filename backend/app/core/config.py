@@ -32,6 +32,11 @@ class Settings:
     stripe_success_url: str = os.getenv("STRIPE_SUCCESS_URL", "")
     stripe_cancel_url: str = os.getenv("STRIPE_CANCEL_URL", "")
     stripe_portal_return_url: str = os.getenv("STRIPE_PORTAL_RETURN_URL", "")
+    product_analytics_enabled: bool = os.getenv("PRODUCT_ANALYTICS_ENABLED", "true").lower() in {"1", "true", "yes", "on"}
+    product_analytics_ui_enabled: bool = os.getenv("PRODUCT_ANALYTICS_UI_ENABLED", "true").lower() in {"1", "true", "yes", "on"}
+    product_analytics_capture_enabled: bool = os.getenv("PRODUCT_ANALYTICS_CAPTURE_ENABLED", "true").lower() in {"1", "true", "yes", "on"}
+    product_analytics_aggregation_enabled: bool = os.getenv("PRODUCT_ANALYTICS_AGGREGATION_ENABLED", "true").lower() in {"1", "true", "yes", "on"}
+    product_analytics_raw_retention_days: int = int(os.getenv("PRODUCT_ANALYTICS_RAW_RETENTION_DAYS", "180"))
 
     @property
     def stripe_configured(self) -> bool:
