@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "test:marketplace": "node tests/marketplaceModal.test.mjs"
   },
   "dependencies": {
     "dagre": "^0.8.5",
