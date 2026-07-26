@@ -1,24 +1,44 @@
-export type AIStoreCategoryValue = 'Recomendados' | 'Produtividade' | 'Atendimento' | 'Vendas' | 'Conhecimento' | 'Automação' | 'Personalizados';
+export type AIStoreCategoryValue = 'Todos' | 'Fluxos' | 'Híbridos' | 'AI Systems' | 'Business Kits' | 'Aprender';
+export type AutomationLevel = 'Sem IA' | 'Híbrido' | 'IA Completa' | 'Sistema Completo';
+export type MarketplaceType = 'Template de Fluxo' | 'Fluxo Híbrido' | 'AI System' | 'Kit de Negócio';
+
+export type NodeEducation = {
+  summary: string;
+  purpose: string;
+  inputs: readonly string[];
+  outputs: readonly string[];
+  why_here: string;
+  common_mistakes: readonly string[];
+  customization_tips: readonly string[];
+  alternative_nodes: readonly string[];
+  ai_usage: string;
+  difficulty: 'beginner' | 'intermediate' | 'advanced';
+};
 
 export type AIStoreCardData = {
   id: string;
   icon: string;
   title: string;
   subtitle: string;
-  category: Exclude<AIStoreCategoryValue, 'Recomendados'>;
+  category: string;
+  marketplaceType: MarketplaceType;
+  automationLevel: AutomationLevel;
+  segment: string;
   setupTime: string;
+  setupMinutes: number;
   difficulty: string;
   integrations: readonly string[];
   capabilities: readonly string[];
+  nodes: readonly string[];
+  nodeEducation: Readonly<Record<string, NodeEducation>>;
   recommended: boolean;
   productionReady: boolean;
+  official: boolean;
+  free: boolean;
+  compatible: boolean;
   details: string;
+  version: string;
+  installManifest: Readonly<Record<string, readonly unknown[]>>;
 };
 
-export type AIStoreTemplateMeta = {
-  id: string;
-  name: string;
-  category: string;
-  version: string;
-  description?: string;
-};
+export type AIStoreTemplateMeta = { id: string; name: string; category: string; version: string; description?: string };
