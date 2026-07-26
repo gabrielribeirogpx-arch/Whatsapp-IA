@@ -39,6 +39,24 @@ export type AIStoreCardData = {
   details: string;
   version: string;
   installManifest: Readonly<Record<string, readonly unknown[]>>;
+  businessKit?: BusinessKit;
 };
 
 export type AIStoreTemplateMeta = { id: string; name: string; category: string; version: string; description?: string };
+
+export type KitVersion = 'Sem IA' | 'Híbrida' | 'IA Completa';
+export type Methodology = {
+  id: string; name: string; version: string; purpose: string;
+  variants: Readonly<Record<KitVersion, string>>;
+};
+export type StrategyStage = { name: string; objective: string; rationale: string; outcome: string; indicators: readonly string[] };
+export type CopySample = { category: string; text: string };
+export type BusinessKit = {
+  problem: string; expectedOutcome: string; implementationTime: string; complexity: string;
+  versions: Readonly<Record<KitVersion, readonly string[]>>;
+  methodologies: readonly Methodology[]; strategy: readonly StrategyStage[];
+  consultantRationale: readonly string[]; copies: readonly CopySample[];
+  crmFields: readonly string[]; pipeline: readonly string[]; tags: readonly string[];
+  knowledgeBase: readonly string[]; dashboards: readonly string[]; kpis: readonly string[];
+  documentation: readonly string[]; academy: readonly string[]; checklist: readonly string[];
+};
