@@ -1,79 +1,21 @@
-import { useEffect } from 'react';
+import { useState } from 'react';
+import { automationShare } from './catalog';
 import type { AIStoreCardData, AIStoreTemplateMeta } from './types';
-
-type AISystemDetailsModalProps = {
-  card: AIStoreCardData;
-  template?: AIStoreTemplateMeta;
-  onBack: () => void;
-  onClose: () => void;
-  onInstall: (id: string) => void;
-};
-
-export default function AISystemDetailsModal({ card, template, onBack, onClose, onInstall }: AISystemDetailsModalProps) {
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose();
-    };
-    document.addEventListener('keydown', onKeyDown);
-    return () => document.removeEventListener('keydown', onKeyDown);
-  }, [onClose]);
-
-  return (
-    <div className="ai-store-details-backdrop" role="presentation" onMouseDown={onClose}>
-      <section className="ai-system-details-modal" role="dialog" aria-modal="true" aria-label={`Detalhes de ${card.title}`} onMouseDown={(event) => event.stopPropagation()}>
-        <header className="ai-system-details-header">
-          <button type="button" className="ai-store-back-button" onClick={onBack}>← Voltar</button>
-          <button type="button" className="ai-store-close-button" onClick={onClose} aria-label="Fechar detalhes">×</button>
-        </header>
-
-        <div className="ai-system-details-hero">
-          <div className="ai-system-details-icon" aria-hidden="true">{card.icon}</div>
-          <div>
-            <span className="ai-store-eyebrow">{card.category === 'Vendas' ? 'Comercial' : card.category}</span>
-            <h3>{card.title}</h3>
-            <p>{card.subtitle}</p>
-          </div>
-        </div>
-
-        <div className="ai-system-architecture" aria-label="Preview estático da arquitetura">
-          <div className="architecture-node architecture-node-main">Dispatcher</div>
-          <svg viewBox="0 0 460 130" aria-hidden="true" preserveAspectRatio="none">
-            <path d="M230 12 C140 42 115 62 95 91" />
-            <path d="M230 12 C315 42 340 62 365 91" />
-            <path d="M365 100 L365 126" />
-          </svg>
-          <div className="architecture-row">
-            <div className="architecture-node">Atendimento</div>
-            <div className="architecture-node">Agenda</div>
-          </div>
-          <div className="architecture-node architecture-node-tool">Google Calendar</div>
-        </div>
-
-        <div className="ai-system-details-grid">
-          <section>
-            <h4>Descrição</h4>
-            <p>{card.details}</p>
-          </section>
-          <section>
-            <h4>Integrações</h4>
-            <div className="ai-store-integrations">{card.integrations.map((item) => <span key={item}>{item}</span>)}</div>
-          </section>
-          <section>
-            <h4>Capacidades</h4>
-            <ul className="ai-store-capabilities">{card.capabilities.map((item) => <li key={item}>{item}</li>)}</ul>
-          </section>
-          <section className="ai-system-details-facts">
-            <span>Tempo configuração <strong>{card.setupTime}</strong></span>
-            <span>Complexidade <strong>{card.difficulty}</strong></span>
-            <span>Versão <strong>v{template?.version || '1.0.0'}</strong></span>
-          </section>
-        </div>
-
-        <footer className="ai-system-details-footer">
-          <button type="button" className="ai-store-back-button" onClick={onBack}>Voltar</button>
-          <button type="button" className="ai-store-install" onClick={() => onInstall(card.id)}>Instalar</button>
-        </footer>
-      </section>
-    </div>
-  );
+const tabs = ['Visão geral','Arquitetura','Nodes','Instalação','Aprender','Versões','Dependências'] as const;
+export default function AISystemDetailsModal({ card, template, onBack, onClose, onInstall }: { card: AIStoreCardData; template?: AIStoreTemplateMeta; onBack: () => void; onClose: () => void; onInstall: (id: string) => void }) {
+  const [tab,setTab] = useState<(typeof tabs)[number]>('Visão geral'); const [selectedNode,setSelectedNode] = useState(card.nodes[0]); const share = automationShare(card); const education = card.nodeEducation[selectedNode];
+  return <div className="ai-store-details-backdrop" role="presentation" onMouseDown={onClose}><section className="ai-system-details-modal" role="dialog" aria-modal="true" aria-label={`Detalhes de ${card.title}`} onMouseDown={(e) => e.stopPropagation()}>
+    <header className="ai-system-details-header"><button type="button" className="ai-store-back-button" onClick={onBack}>← Catálogo</button><button type="button" className="ai-store-close-button" onClick={onClose} aria-label="Fechar detalhes">×</button></header>
+    <div className="ai-system-details-hero"><div className="ai-system-details-icon">{card.icon}</div><div><span className="ai-store-eyebrow">{card.marketplaceType} · {card.automationLevel}</span><h3>{card.title}</h3><p>{card.subtitle}</p></div></div>
+    <nav className="ai-store-detail-tabs" aria-label="Detalhes do item">{tabs.map((value) => <button type="button" key={value} className={tab === value ? 'active' : ''} onClick={() => setTab(value)}>{value}</button>)}</nav>
+    <div className="ai-store-detail-content">
+      {tab === 'Visão geral' && <div className="ai-system-details-grid"><section><h4>Objetivo</h4><p>{card.details}</p></section><section><h4>Resumo técnico</h4><p>{card.nodes.length} nodes · {card.setupTime} · {card.difficulty} · versão {template?.version || card.version}</p><p>Automação tradicional {share.traditional}% · IA {share.ai}%</p></section></div>}
+      {tab === 'Arquitetura' && <div className="ai-store-graph" aria-label="Grafo somente leitura">{card.nodes.map((node,index) => <button type="button" key={`${node}-${index}`} className={/AI|RAG/.test(node) ? 'uses-ai' : ''} onClick={() => setSelectedNode(node)}><span>{index + 1}</span>{node}</button>)}</div>}
+      {tab === 'Nodes' && <div className="ai-store-node-layout"><div className="ai-store-node-list">{card.nodes.map((node,index) => <button type="button" key={`${node}-${index}`} className={selectedNode === node ? 'active' : ''} onClick={() => setSelectedNode(node)}>{node}</button>)}</div><section><h4>{selectedNode}</h4><p>{education?.summary}</p><strong>Propósito</strong><p>{education?.purpose}</p><strong>Por que existe aqui</strong><p>{education?.why_here}</p><strong>Uso de IA</strong><p>{education?.ai_usage}</p><strong>Erros comuns</strong><ul>{education?.common_mistakes.map((item) => <li key={item}>{item}</li>)}</ul></section></div>}
+      {tab === 'Instalação' && <section><h4>O que será criado</h4><pre>{JSON.stringify(card.installManifest,null,2)}</pre><p><strong>Confirmação obrigatória:</strong> nenhuma integração externa será conectada silenciosamente.</p></section>}
+      {tab === 'Aprender' && <section><h4>Engenharia reversa</h4><p>Objetivo: compreender a composição antes de duplicar. Entradas: mensagem e contexto. Saídas: resposta, atualização de contexto e eventual handoff.</p><p>Pré-requisitos: revisar integrações e variáveis. Pontos de decisão: nodes Condition e AI Agent. Caminho alternativo: transferência humana. Os metadados desta área não alteram a execução.</p><button type="button" className="ai-store-back-button" onClick={() => setTab('Nodes')}>Estudar cada node</button></section>}
+      {tab === 'Versões' && <section><h4>Versões disponíveis</h4><p><strong>{card.version}</strong> · {card.automationLevel} · instalação cria uma cópia editável e não sobrescreve alterações.</p></section>}
+      {tab === 'Dependências' && <section><h4>Integrações e dependências</h4><div className="ai-store-integrations">{(card.integrations.length ? card.integrations : ['Nenhuma']).map((item) => <span key={item}>{item}</span>)}</div><p>As dependências são validadas antes da confirmação.</p></section>}
+    </div><footer className="ai-system-details-footer"><button type="button" className="ai-store-back-button" onClick={() => setTab('Aprender')}>Aprender</button><button type="button" className="ai-store-install" onClick={() => onInstall(card.id)}>Confirmar instalação</button></footer>
+  </section></div>;
 }

@@ -39,6 +39,7 @@ import MessageNode from '@/components/flow/nodes/MessageNode';
 import MediaNode from '@/components/flow/nodes/MediaNode';
 import CreateFlowModal from '@/components/flows/CreateFlowModal';
 import AIStoreModal from '@/components/ai-store/AIStoreModal';
+import { MARKETPLACE_CATALOG } from '@/components/ai-store/catalog';
 import AISystemModal from '@/components/flow/AISystemModal';
 import { apiFetch, getFlowAnalytics, getFlowGraph, getTenantSessionFromStorage, listFlowVersions, parseApiResponse, restoreFlowVersion, listFlows } from '@/lib/api';
 import { getLayoutedElements } from '@/lib/autoLayout';
@@ -116,92 +117,7 @@ const getFlowDisplayName = (flow?: FlowListOption | null) => flow?.name || (flow
 const isPublishedFlow = (flow: FlowListOption) => flow.is_published === true || flow.status === 'published' || flow.status === 'active' || flow.is_active === true;
 const getPublishedVersionId = (flow: FlowListOption) => flow.published_version_id || flow.flow_version_id || flow.version_id || null;
 
-const AI_SYSTEM_CARDS = [
-  {
-    id: 'ai_calendar_agent_system',
-    icon: '📅',
-    title: 'Agenda Inteligente',
-    subtitle: 'Atenda pedidos de agenda, consulte disponibilidade e crie compromissos com uma experiência natural no WhatsApp.',
-    category: 'Produtividade',
-    setupTime: '2 min',
-    difficulty: 'Fácil',
-    integrations: ['Google Calendar', 'WhatsApp'],
-    capabilities: ['Criar eventos', 'Consultar agenda', 'Cancelar compromissos', 'Responder saudações'],
-    recommended: true,
-    productionReady: true,
-    details: 'Sistema com roteamento de intenção, saudação, agente de agenda e resposta segura para casos não reconhecidos.',
-  },
-  {
-    id: 'ai_support_agent_system',
-    icon: '💬',
-    title: 'Atendimento Inteligente',
-    subtitle: 'Organize a primeira resposta, resolva dúvidas frequentes e encaminhe conversas importantes para o time humano.',
-    category: 'Atendimento',
-    setupTime: '3 min',
-    difficulty: 'Fácil',
-    integrations: ['WhatsApp', 'Atendimento humano'],
-    capabilities: ['Triagem inicial', 'Respostas rápidas', 'Handoff humano', 'Padronização de atendimento'],
-    recommended: true,
-    productionReady: false,
-    details: 'Template inicial para fluxos de suporte e relacionamento com clientes.',
-  },
-  {
-    id: 'ai_sales_agent_system',
-    icon: '💼',
-    title: 'Comercial Inteligente',
-    subtitle: 'Capture oportunidades, qualifique leads e mantenha seu CRM atualizado durante a conversa.',
-    category: 'Vendas',
-    setupTime: '4 min',
-    difficulty: 'Intermediário',
-    integrations: ['CRM', 'WhatsApp'],
-    capabilities: ['Qualificar leads', 'Registrar interesse', 'Atualizar CRM', 'Priorizar oportunidades'],
-    recommended: true,
-    productionReady: false,
-    details: 'Template comercial preparado para jornadas de prospecção e qualificação.',
-  },
-  {
-    id: 'ai_rag_agent_system',
-    icon: '📚',
-    title: 'Conhecimento (RAG)',
-    subtitle: 'Responda perguntas usando documentos, políticas, conteúdos internos e bases de conhecimento.',
-    category: 'Conhecimento',
-    setupTime: '5 min',
-    difficulty: 'Intermediário',
-    integrations: ['Documentos', 'Base de conhecimento'],
-    capabilities: ['Buscar respostas', 'Usar documentos', 'Reduzir retrabalho', 'Apoiar suporte'],
-    recommended: false,
-    productionReady: false,
-    details: 'Template inicial para atendimento orientado por conteúdo e consultas a conhecimento.',
-  },
-  {
-    id: 'ai_mcp_advanced_system',
-    icon: '🛠',
-    title: 'MCP Automation',
-    subtitle: 'Conecte ferramentas externas e acione automações para processos operacionais sob demanda.',
-    category: 'Automação',
-    setupTime: '6 min',
-    difficulty: 'Avançado',
-    integrations: ['MCP', 'Ferramentas externas'],
-    capabilities: ['Executar ferramentas', 'Orquestrar tarefas', 'Conectar sistemas', 'Automatizar rotinas'],
-    recommended: false,
-    productionReady: false,
-    details: 'Template para automações com ferramentas MCP conectadas ao sistema.',
-  },
-  {
-    id: 'ai_custom_system',
-    icon: '➕',
-    title: 'Sistema Personalizado',
-    subtitle: 'Comece com uma estrutura em branco e adapte seu próprio sistema inteligente para o negócio.',
-    category: 'Personalizados',
-    setupTime: '1 min',
-    difficulty: 'Flexível',
-    integrations: ['Personalizável'],
-    capabilities: ['Partida rápida', 'Arquitetura livre', 'Ajuste por caso de uso', 'Expansão gradual'],
-    recommended: false,
-    productionReady: false,
-    details: 'Opção para criar uma experiência personalizada mantendo o mesmo fluxo de inserção no canvas.',
-  },
-] as const;
+const AI_SYSTEM_CARDS = MARKETPLACE_CATALOG;
 
 const normalizeFlowHandleId = (value: unknown) => String(value ?? '').trim().toLowerCase();
 

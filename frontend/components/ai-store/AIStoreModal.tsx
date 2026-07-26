@@ -1,79 +1,19 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import AIStoreCard from './AIStoreCard';
 import AIStoreCategoryBar from './AIStoreCategoryBar';
 import AIStoreSearch from './AIStoreSearch';
 import AISystemDetailsModal from './AISystemDetailsModal';
-import type { AIStoreCardData, AIStoreCategoryValue, AIStoreTemplateMeta } from './types';
+import type { AIStoreCardData, AIStoreCategoryValue, AIStoreTemplateMeta, AutomationLevel } from './types';
 
-type AIStoreModalProps = {
-  cards: readonly AIStoreCardData[];
-  templates: readonly AIStoreTemplateMeta[];
-  onClose: () => void;
-  onInstall: (id: string) => void;
-};
-
-export default function AIStoreModal({ cards, templates, onClose, onInstall }: AIStoreModalProps) {
-  const [search, setSearch] = useState('');
-  const [category, setCategory] = useState<AIStoreCategoryValue>('Recomendados');
-  const [detailsCard, setDetailsCard] = useState<AIStoreCardData | null>(null);
-
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose();
-    };
-    document.addEventListener('keydown', onKeyDown);
-    return () => document.removeEventListener('keydown', onKeyDown);
-  }, [onClose]);
-
-  const filteredCards = useMemo(() => {
-    const normalizedSearch = search.trim().toLowerCase();
-    return cards.filter((card) => {
-      const matchesCategory = category === 'Recomendados' ? card.recommended : card.category === category;
-      const haystack = [card.title, card.subtitle, card.category, ...card.integrations, ...card.capabilities].join(' ').toLowerCase();
-      return matchesCategory && (!normalizedSearch || haystack.includes(normalizedSearch));
-    });
-  }, [cards, category, search]);
-
-  const selectedTemplate = detailsCard ? templates.find((template) => template.id === detailsCard.id) : undefined;
-
-  return (
-    <div className="flow-modal-backdrop ai-store-backdrop" role="presentation" onMouseDown={onClose}>
-      <section className="flow-modal-card ai-store-modal" role="dialog" aria-modal="true" aria-label="AI Store" onMouseDown={(event) => event.stopPropagation()}>
-        <header className="flow-modal-header ai-store-header">
-          <div>
-            <span className="ai-store-eyebrow">Marketplace de sistemas inteligentes</span>
-            <h2>AI Store</h2>
-            <p>Instale sistemas inteligentes prontos para sua empresa.</p>
-          </div>
-          <button type="button" className="ai-store-close-button" onClick={onClose} aria-label="Fechar AI Store">×</button>
-        </header>
-
-        <div className="ai-store-modal-body">
-          <div className="ai-store-toolbar">
-            <AIStoreSearch value={search} onChange={setSearch} />
-            <AIStoreCategoryBar selected={category} onSelect={setCategory} />
-          </div>
-
-          <div className="ai-store-grid">
-            {filteredCards.map((card) => (
-              <AIStoreCard key={card.id} card={card} onInstall={onInstall} onDetails={setDetailsCard} />
-            ))}
-          </div>
-          {filteredCards.length === 0 && (
-            <div className="ai-store-empty">Nenhum sistema encontrado para a busca atual.</div>
-          )}
-        </div>
-      </section>
-
-      {detailsCard && (
-        <AISystemDetailsModal
-          card={detailsCard}
-          template={selectedTemplate}
-          onBack={() => setDetailsCard(null)}
-          onClose={onClose}
-          onInstall={onInstall}
-        />
-      )}
-    </div>
-  );
+export default function AIStoreModal({ cards, templates, onClose, onInstall }: { cards: readonly AIStoreCardData[]; templates: readonly AIStoreTemplateMeta[]; onClose: () => void; onInstall: (id: string) => void }) {
+  const [search, setSearch] = useState(''); const [category, setCategory] = useState<AIStoreCategoryValue>('Todos'); const [level, setLevel] = useState<AutomationLevel | 'Todos'>('Todos'); const [detailsCard, setDetailsCard] = useState<AIStoreCardData | null>(null); const dialogRef = useRef<HTMLElement>(null);
+  useEffect(() => { const previous = document.activeElement as HTMLElement | null; const oldOverflow = document.body.style.overflow; document.body.style.overflow = 'hidden'; dialogRef.current?.querySelector<HTMLInputElement>('input')?.focus();
+    const keydown = (event: KeyboardEvent) => { if (event.key === 'Escape') onClose(); if (event.key === 'Tab' && dialogRef.current) { const items = Array.from(dialogRef.current.querySelectorAll<HTMLElement>('button,input,[tabindex]:not([tabindex="-1"])')); if (!items.length) return; const first = items[0], last = items[items.length - 1]; if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); } else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); } } };
+    document.addEventListener('keydown', keydown); return () => { document.removeEventListener('keydown', keydown); document.body.style.overflow = oldOverflow; previous?.focus(); }; }, [onClose]);
+  const filtered = useMemo(() => cards.filter((card) => { const byType = category === 'Todos' || category === 'Aprender' || (category === 'Fluxos' && card.marketplaceType === 'Template de Fluxo') || (category === 'Híbridos' && card.marketplaceType === 'Fluxo Híbrido') || category === `${card.marketplaceType}s` || (category === 'AI Systems' && card.marketplaceType === 'AI System'); const haystack = [card.title,card.subtitle,card.segment,card.details,card.automationLevel,...card.integrations,...card.capabilities,...card.nodes].join(' ').toLowerCase(); return byType && (level === 'Todos' || card.automationLevel === level) && haystack.includes(search.trim().toLowerCase()); }), [cards, category, level, search]);
+  return <div className="flow-modal-backdrop ai-store-backdrop" role="presentation" onMouseDown={onClose}><section ref={dialogRef} className="flow-modal-card ai-store-modal" role="dialog" aria-modal="true" aria-label="Marketplace de Automações" onMouseDown={(e) => e.stopPropagation()}>
+    <header className="flow-modal-header ai-store-header"><div><span className="ai-store-eyebrow">Automações reutilizáveis</span><h2>Marketplace</h2><p>Visualize, aprenda, duplique e instale composições feitas com nodes existentes.</p></div><button type="button" className="ai-store-close-button" onClick={onClose} aria-label="Fechar Marketplace">×</button></header>
+    <div className="ai-store-toolbar"><AIStoreSearch value={search} onChange={setSearch}/><AIStoreCategoryBar selected={category} onSelect={setCategory}/><div className="ai-store-levels" aria-label="Nível de automação">{(['Todos','Sem IA','Híbrido','IA Completa','Sistema Completo'] as const).map((value) => <button type="button" className={level === value ? 'active' : ''} key={value} onClick={() => setLevel(value)}>{value}</button>)}</div></div>
+    <div className="ai-store-modal-body"><div className="ai-store-results"><strong>{filtered.length}</strong> itens compatíveis</div><div className="ai-store-grid">{filtered.map((card) => <AIStoreCard key={card.id} card={card} onInstall={onInstall} onDetails={setDetailsCard}/>)}</div>{!filtered.length && <div className="ai-store-empty">Nenhum item encontrado.</div>}</div>
+  </section>{detailsCard && <AISystemDetailsModal card={detailsCard} template={templates.find((item) => item.id === detailsCard.id)} onBack={() => setDetailsCard(null)} onClose={onClose} onInstall={onInstall}/>}</div>;
 }
