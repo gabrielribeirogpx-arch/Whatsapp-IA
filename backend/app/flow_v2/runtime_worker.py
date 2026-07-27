@@ -91,6 +91,12 @@ class FlowV2RuntimeWorker:
                 type(exc).__name__,
                 exc,
             )
+            logger.exception(
+                "event=runtime_v2_choice_trace stage=worker status=failed reason=executor_exception "
+                "flow_version_id=%s runtime_choice_key=%s error_type=%s error=%s",
+                runtime_input.flow_version_id, runtime_input.metadata.get("runtime_choice_key"),
+                type(exc).__name__, exc,
+            )
             self.dead_letter_queue.record(
                 db,
                 tenant_id=runtime_input.tenant_id,
@@ -130,7 +136,16 @@ class FlowV2RuntimeWorker:
             )
         deliveries: list[dict[str, Any]] = []
         if self.channel_adapter is not None:
-            deliveries = [self.channel_adapter.dispatch(action) for action in actions]
+            try:
+                deliveries = [self.channel_adapter.dispatch(action) for action in actions]
+            except Exception as exc:
+                logger.exception(
+                    "event=runtime_v2_choice_trace stage=delivery status=failed reason=send_message_exception "
+                    "session_id=%s current_node_id=%s runtime_choice_key=%s error_type=%s error=%s",
+                    runtime_output.session_id, runtime_output.current_node_id,
+                    runtime_input.metadata.get("runtime_choice_key"), type(exc).__name__, exc,
+                )
+                raise
         logger.info(
             "[V2 NODE EXECUTION] worker_done session_id=%s status=%s current_node_id=%s actions_count=%s deliveries_count=%s",
             runtime_output.session_id,

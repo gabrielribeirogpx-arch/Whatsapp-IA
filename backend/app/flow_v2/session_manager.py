@@ -77,6 +77,17 @@ class FlowV2SessionManager:
             .limit(2)
         )
         matched_sessions = db.execute(session_query).scalars().all()
+        if not matched_sessions and runtime_input.metadata.get("runtime_choice_key"):
+            logger.error(
+                "event=runtime_v2_choice_trace stage=session_lookup status=failed reason=session_not_found "
+                "session_id=%s current_node_id=%s waiting_for_choice=%s flow_version_id=%s external_user_id=%s runtime_choice_key=%s",
+                None,
+                None,
+                False,
+                runtime_input.flow_version_id,
+                runtime_input.external_user_id,
+                runtime_input.metadata.get("runtime_choice_key"),
+            )
         if len(matched_sessions) > 1:
             logger.warning(
                 "MESSAGE_WORKER_MULTIPLE_RESULTS_DETECTED entity=flow_v2_sessions selected_session_id=%s duplicate_session_id=%s tenant_id=%s conversation_id=%s contact_id=%s phone=%s flow_version_id=%s filters=%s",
@@ -104,6 +115,16 @@ class FlowV2SessionManager:
             session = None
 
         if session is not None and str(session.status) in {str(FlowV2SessionStatus.RUNNING), str(FlowV2SessionStatus.WAITING)}:
+            waiting_for_choice = str(session.status) == str(FlowV2SessionStatus.WAITING)
+            logger.info(
+                "event=runtime_v2_choice_trace stage=session_lookup status=found reason=active_session "
+                "session_id=%s current_node_id=%s waiting_for_choice=%s session_status=%s runtime_choice_key=%s",
+                session.id,
+                session.current_node_id,
+                waiting_for_choice,
+                session.status,
+                runtime_input.metadata.get("runtime_choice_key"),
+            )
             if str(session.status) == str(FlowV2SessionStatus.WAITING):
                 logger.info(
                     "[FLOW SESSION CONTINUE] session_id=%s node_id=%s reason=incoming_message_waiting_session",

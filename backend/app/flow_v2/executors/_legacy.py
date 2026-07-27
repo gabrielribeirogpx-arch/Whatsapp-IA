@@ -487,6 +487,12 @@ class ChoiceNodeExecutor(BaseNodeExecutor):
         )
         row_id = resolve_runtime_choice_key(runtime_input.metadata)
         logger.info(
+            "event=runtime_v2_choice_trace stage=choice_node_lookup status=found reason=choice_node_located "
+            "session_id=%s node_id=%s current_node_id=%s waiting_for_choice=%s runtime_choice_key=%s",
+            session.id, node_id, getattr(session, "current_node_id", None),
+            str(getattr(session, "status", "")) == "waiting", row_id,
+        )
+        logger.info(
             "event=meta_webhook_interactive_pipeline stage=runtime_v2_choice_resolver input_message_id=%s "
             "message.type=%s interactive.type=%s button_reply.id=%s interactive_reply_id=%s "
             "selected_row_id=%s row_id=%s runtime_choice_key=%s message_text=%s current_node_id=%s next_node_id=%s",
@@ -606,12 +612,28 @@ class ChoiceNodeExecutor(BaseNodeExecutor):
                 payload={"source_handle": row_id, "allowed_option_ids": option_ids},
             )
             raise RuntimeError("Runtime V2 choice option not found")
+        matched_option = next(
+            option for option in options
+            if isinstance(option, dict) and str(option.get("id")) == row_id
+        )
+        option_source_handle = str(
+            matched_option.get("source_handle")
+            or matched_option.get("sourceHandle")
+            or matched_option.get("handleId")
+            or matched_option.get("handle_id")
+            or row_id
+        )
         logger.info(
             "[CHOICE OPTION MATCHED] node_id=%s session_id=%s received_row_id=%s allowed_option_ids=%s",
             node_id,
             session.id,
             row_id,
             option_ids,
+        )
+        logger.info(
+            "event=runtime_v2_choice_trace stage=choice_option_lookup status=found reason=matching_option_found "
+            "session_id=%s node_id=%s runtime_choice_key=%s option_id=%s source_handle=%s",
+            session.id, node_id, row_id, matched_option.get("id"), option_source_handle,
         )
         self.event_store.append(
             db,
@@ -620,13 +642,20 @@ class ChoiceNodeExecutor(BaseNodeExecutor):
             node_id=node_id,
             payload={"node_id": node_id, "row_id": row_id},
         )
-        next_node_id = self.transition_resolver.resolve(
+        transition_resolution = self.transition_resolver.resolve(
             db,
             snapshot=snapshot,
             session=session,
             source_node_id=node_id,
             source_handle=row_id,
-        ).target_node_id
+        )
+        next_node_id = transition_resolution.target_node_id
+        logger.info(
+            "event=runtime_v2_choice_trace stage=transition_lookup status=found reason=matching_transition_found "
+            "session_id=%s node_id=%s runtime_choice_key=%s option_id=%s source_handle=%s transition=%s next_node_id=%s",
+            session.id, node_id, row_id, matched_option.get("id"), option_source_handle,
+            transition_resolution.edge, next_node_id,
+        )
         logger.info(
             "[CHOICE RESOLVED] option_id=%s source_handle=%s next_node_id=%s",
             row_id,

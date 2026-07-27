@@ -173,6 +173,11 @@ def _enqueue_whatsapp_text(
         "flow_send_source": "flow_runtime_selector:v2",
     }
     logger.info(
+        "event=runtime_v2_choice_trace stage=send_message status=called reason=enqueue_send_message_invoked "
+        "session_id=%s node_id=%s runtime_choice_key=%s recipient_id=%s",
+        resolved_session_id, payload.get("node_id"), metadata.get("runtime_choice_key"), recipient_id,
+    )
+    logger.info(
         "[V2 ENQUEUE] tenant_id=%s provider_id=%s session_id=%s conversation_id=%s contact_id=%s node_id=%s phone=%s metadata_keys=%s",
         payload.get("tenant_id") or "",
         payload.get("provider_id"),
@@ -183,7 +188,14 @@ def _enqueue_whatsapp_text(
         recipient_id,
         sorted(metadata.keys()),
     )
-    enqueue_send_message(payload)
+    job_id = enqueue_send_message(payload)
+    logger.info(
+        "event=runtime_v2_choice_trace stage=send_message status=%s reason=%s "
+        "session_id=%s node_id=%s runtime_choice_key=%s job_id=%s",
+        "success" if job_id else "failed",
+        "message_enqueued" if job_id else "enqueue_returned_no_job_id",
+        resolved_session_id, payload.get("node_id"), metadata.get("runtime_choice_key"), job_id,
+    )
     return {"status": "queued", "channel": "whatsapp", "type": "text", "recipient_id": recipient_id, "tenant_id": payload.get("tenant_id")}
 
 

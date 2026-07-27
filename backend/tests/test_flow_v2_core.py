@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+import logging
 from contextlib import contextmanager
 from types import SimpleNamespace
 from datetime import UTC, datetime, timedelta
@@ -1137,7 +1138,8 @@ def test_loop_protection_fails_after_max_steps() -> None:
         ("list", "list", {"interactive_reply_id": "next", "interactive_type": "list_reply"}),
     ],
 )
-def test_message_choice_display_mode_sends_clicks_transitions_and_completes(display_mode, expected_interactive_type, reply_metadata) -> None:
+def test_message_choice_display_mode_sends_clicks_transitions_and_completes(display_mode, expected_interactive_type, reply_metadata, caplog) -> None:
+    caplog.set_level(logging.INFO)
     raw_snapshot = {
         "schema_version": 1,
         "start_node_id": "start",
@@ -1187,6 +1189,18 @@ def test_message_choice_display_mode_sends_clicks_transitions_and_completes(disp
     assert session.current_node_id is None
     assert any(event["payload"] == {"node_id": "choice", "row_id": "next"} for event in event_store.events)
     assert not any(isinstance(action, SendChoiceButtonsAction) for action in selected.actions)
+    trace = caplog.text
+    assert "stage=session_loaded status=found" in trace
+    assert "current_node_id=choice waiting_for_choice=True" in trace
+    assert "stage=choice_node_lookup status=found" in trace
+    assert "runtime_choice_key=next" in trace
+    assert "stage=choice_option_lookup status=found" in trace
+    assert "option_id=next source_handle=next" in trace
+    assert "stage=transition_lookup status=found" in trace
+    assert "next_node_id=end" in trace
+    assert "stage=next_node_selected status=success" in trace
+    assert "stage=node_entered status=success reason=executor_entered_node session_id=" in trace
+    assert "node_id=end node_type=message" in trace
 
 
 @pytest.mark.parametrize("action_type", ["create_lead", "add_tag", "notify_team", "transfer_human", "create_task"])
