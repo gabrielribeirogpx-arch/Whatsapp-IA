@@ -5,6 +5,7 @@ import pytest
 from app.flow_v2.graph_validator import FlowV2GraphValidator, GraphValidationStatus
 from app.flow_v2.publisher import FlowV2PublishError, FlowV2Publisher, v2_snapshot_hash
 from app.flow_v2.snapshot_viewer import FlowV2SnapshotViewer
+from app.flow_v2.node_executors import ConditionNodeExecutor
 
 
 def _valid_nodes() -> list[dict]:
@@ -105,7 +106,7 @@ def test_delay_seconds_must_be_positive(seconds) -> None:
     assert "FLOW_V2_DELAY_SECONDS_MUST_BE_POSITIVE:delay" in result.errors
 
 
-def test_flow_builder_condition_keywords_match_type_is_valid() -> None:
+def test_visual_only_legacy_condition_is_invalid() -> None:
     nodes = _valid_nodes()
     nodes[3] = {
         "id": "condition",
@@ -115,7 +116,44 @@ def test_flow_builder_condition_keywords_match_type_is_valid() -> None:
 
     result = FlowV2GraphValidator().validate(nodes=nodes, edges=_valid_edges())
 
-    assert result.status == GraphValidationStatus.VALID
+    assert result.status == GraphValidationStatus.INVALID
+    assert "FLOW_V2_CONDITION_CONFIG_INVALID:condition" in result.errors
+
+
+@pytest.mark.parametrize(
+    "rule",
+    [
+        {},
+        {"operator": "equals", "value": "outro"},
+        {"field": "intent_category", "value": "outro"},
+        {"field": "intent_category", "operator": "equals"},
+        {"field": "intent_category", "operator": "contains", "value": "outro"},
+    ],
+)
+def test_condition_requires_runtime_v2_variable_operator_and_value(rule) -> None:
+    nodes = _valid_nodes()
+    nodes[3] = {"id": "condition", "type": "condition", "conditions": [rule]}
+
+    result = FlowV2GraphValidator().validate(nodes=nodes, edges=_valid_edges())
+
+    assert result.status == GraphValidationStatus.INVALID
+
+
+@pytest.mark.parametrize(
+    ("intent_category", "expected"),
+    [
+        ("financeiro", False),
+        ("vendas", False),
+        ("suporte", False),
+        ("outro", True),
+        (None, False),
+    ],
+)
+def test_marketplace_condition_evaluates_intent_category(intent_category, expected) -> None:
+    rule = {"field": "intent_category", "operator": "equals", "value": "outro"}
+    metadata = {} if intent_category is None else {"intent_category": intent_category}
+
+    assert ConditionNodeExecutor._evaluate(rule, metadata) is expected
 
 
 def test_invalid_condition_config_is_invalid() -> None:

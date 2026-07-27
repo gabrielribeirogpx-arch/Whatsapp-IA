@@ -246,8 +246,6 @@ class FlowV2GraphValidator:
                 errors.append(f"FLOW_V2_CTA_URL_HTTPS_REQUIRED:{node_id}")
         elif node_type == "condition":
             conditions = node.get("conditions") or data.get("conditions")
-            if self._has_valid_builder_condition(data):
-                return
             if not isinstance(conditions, list) or not conditions:
                 errors.append(f"FLOW_V2_CONDITION_CONFIG_INVALID:{node_id}")
                 return
@@ -503,11 +501,13 @@ class FlowV2GraphValidator:
         if not isinstance(condition, dict):
             return False
         left = condition.get("left") or condition.get("field") or condition.get("path")
-        operator = condition.get("operator") or condition.get("op") or "=="
+        operator = condition.get("operator") or condition.get("op")
         has_expected = "right" in condition or "value" in condition
         return (
-            bool(left)
+            bool(str(left or "").strip())
             and has_expected
+            and condition.get("right", condition.get("value")) not in (None, "")
+            and bool(str(operator or "").strip())
             and operator in self.SUPPORTED_CONDITION_OPERATORS
         )
 
