@@ -261,6 +261,22 @@ class FlowRuntimeSelector:
             runtime_metadata.get("row_id"),
             runtime_metadata.get("sourceHandle"),
         )
+        logger.info(
+            "event=meta_webhook_interactive_pipeline stage=flow_runtime_selector input_message_id=%s "
+            "message.type=%s interactive.type=%s button_reply.id=%s interactive_reply_id=%s "
+            "selected_row_id=%s row_id=%s runtime_choice_key=%s message_text=%s current_node_id=%s next_node_id=%s",
+            input_message_id or "n/a",
+            runtime_metadata.get("message_type") or "n/a",
+            runtime_metadata.get("interactive_type") or "n/a",
+            runtime_metadata.get("interactive_reply_id") or "n/a",
+            runtime_metadata.get("interactive_reply_id") or "n/a",
+            runtime_metadata.get("selected_row_id") or "n/a",
+            runtime_metadata.get("row_id") or "n/a",
+            runtime_metadata.get("runtime_choice_key") or "n/a",
+            message_text or "n/a",
+            runtime_metadata.get("current_node_id") or "n/a",
+            runtime_metadata.get("next_node_id") or "n/a",
+        )
         worker = self.runtime_worker or FlowV2RuntimeWorker(
             channel_adapter=WhatsAppAdapter(client=_enqueue_whatsapp_text),
         )

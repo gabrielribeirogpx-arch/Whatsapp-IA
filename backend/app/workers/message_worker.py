@@ -304,6 +304,21 @@ def process_incoming_message(payload: dict[str, Any]) -> None:
         parsed.get("selected_row_id") or parsed.get("interactive_reply_id") or "n/a",
         parsed.get("selected_title") or parsed.get("interactive_reply_title") or "n/a",
     )
+    logger.info(
+        "event=meta_webhook_interactive_pipeline stage=message_worker correlation_id=%s "
+        "message.type=%s interactive.type=%s button_reply.id=%s interactive_reply_id=%s "
+        "selected_row_id=%s row_id=%s runtime_choice_key=%s message_text=%s current_node_id=%s next_node_id=%s",
+        correlation_id,
+        parsed.get("type") or "n/a",
+        parsed.get("interactive_type") or "n/a",
+        parsed.get("interactive_reply_id") or "n/a",
+        parsed.get("interactive_reply_id") or "n/a",
+        parsed.get("selected_row_id") or "n/a",
+        parsed.get("selected_row_id") or parsed.get("interactive_reply_id") or "n/a",
+        "n/a",
+        parsed.get("text") or "n/a",
+        "n/a", "n/a",
+    )
 
     redis_client = get_redis_client()
 

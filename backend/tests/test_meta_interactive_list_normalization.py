@@ -251,6 +251,10 @@ def test_enqueue_webhook_payload_logs_complete_meta_payload(caplog, monkeypatch)
     assert correlation_id == "wamid.raw"
     assert "[META WEBHOOK PAYLOAD]" in log_text
     assert '"id": "opcao_raw"' in log_text
+    assert "stage=webhook_received" in log_text
+    assert "message.type=interactive" in log_text
+    assert "interactive.type=list_reply" in log_text
+    assert "raw_payload=" in log_text
 
 
 def test_enqueue_webhook_payload_resolves_known_provider_before_enqueue(caplog, monkeypatch):
