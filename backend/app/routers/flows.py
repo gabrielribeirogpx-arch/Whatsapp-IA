@@ -1759,9 +1759,24 @@ def validate_flow_payload_or_400(
         node_type = str(node.get("type") or "").lower()
         data = node.get("data") or {}
         if node_type == "condition":
-            condition = str(data.get("condition") or "").strip()
-            if not condition:
+            conditions = node.get("conditions") or data.get("conditions")
+            if not isinstance(conditions, list) or not conditions:
                 raise HTTPException(status_code=400, detail="VALIDATION_ERROR: CONDITION_EMPTY")
+            for rule in conditions:
+                if not isinstance(rule, dict):
+                    raise HTTPException(status_code=400, detail="VALIDATION_ERROR: CONDITION_RULE_INVALID")
+                variable = rule.get("field") or rule.get("left") or rule.get("path")
+                operator = rule.get("operator") or rule.get("op")
+                has_value = "value" in rule or "right" in rule
+                value = rule.get("value") if "value" in rule else rule.get("right")
+                if not str(variable or "").strip():
+                    raise HTTPException(status_code=400, detail="VALIDATION_ERROR: CONDITION_VARIABLE_REQUIRED")
+                if not str(operator or "").strip():
+                    raise HTTPException(status_code=400, detail="VALIDATION_ERROR: CONDITION_OPERATOR_REQUIRED")
+                if not has_value or value in (None, ""):
+                    raise HTTPException(status_code=400, detail="VALIDATION_ERROR: CONDITION_VALUE_REQUIRED")
+                if operator not in {"==", "eq", "equals"}:
+                    raise HTTPException(status_code=400, detail="VALIDATION_ERROR: CONDITION_OPERATOR_UNSUPPORTED")
             if outgoing_count.get(node_id, 0) < 2:
                 raise HTTPException(status_code=400, detail="VALIDATION_ERROR: CONDITION_REQUIRES_TWO_OUTPUTS")
             handles = outgoing_by_handle.get(node_id, set())

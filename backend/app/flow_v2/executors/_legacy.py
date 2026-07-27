@@ -2386,7 +2386,14 @@ class AiStructuredNodeExecutor(BaseNodeExecutor):
 
     def _save_result(self, db, *, session, output_variable: str, result: dict[str, Any]) -> None:
         context = dict(session.context or {}) if isinstance(getattr(session, "context", None), dict) else {}
-        _set_nested_value(context, output_variable, result)
+        # The named output of a classifier is its category.  Keep the historical
+        # ai.classification object for existing flows, while making custom output
+        # variables directly consumable by Runtime V2 conditions.
+        _set_nested_value(
+            context,
+            output_variable,
+            result if output_variable == "ai.classification" else result.get("category"),
+        )
         if output_variable == "ai.classification":
             _set_nested_value(context, "ai.classification.category", result.get("category"))
             _set_nested_value(context, "ai.classification.confidence", result.get("confidence"))
@@ -2419,8 +2426,17 @@ class AiClassificationNodeExecutor(AiStructuredNodeExecutor):
         try:
             input_text = str(self._render(data.get("input_template") or data.get("inputTemplate") or "{{last_message}}", db, snapshot=snapshot, session=session, runtime_input=runtime_input) or "")
             result = classify_for_tenant(db, session.tenant_id, input_text, data.get("categories") or [], instruction=data.get("instruction"), options={"allow_other": data.get("allow_other", data.get("allowOther", True)), "confidence_threshold": data.get("confidence_threshold", data.get("confidenceThreshold", 0.6))})
+            categories = {str(item) for item in (data.get("categories") or [])}
+            threshold = float(data.get("confidence_threshold", data.get("confidenceThreshold", 0.6)) or 0.6)
+            category = str(result.get("category") or "").strip()
+            confidence = float(result.get("confidence") or 0)
+            if not category or category not in categories or confidence < threshold:
+                result = {
+                    **result,
+                    "category": str(data.get("fallback") or "outro"),
+                    "reason": result.get("reason") or "classification_fallback",
+                }
             self._save_result(db, session=session, output_variable=str(data.get("output_variable") or data.get("outputVariable") or "ai.classification"), result=result)
-            threshold = data.get("confidence_threshold", data.get("confidenceThreshold", 0.6))
             record_ai_execution(db, tenant_id=session.tenant_id, conversation_id=runtime_input.conversation_id, session_id=session.id, flow_id=get_flow_id(db, snapshot, session), flow_version_id=session.flow_version_id, node_id=node_id, node_type="ai_classification", provider=ai_config.get("provider"), model=ai_config.get("model"), started_at=ai_started_at, status="success", input_text=input_text, output_text=result.get("category"), confidence=result.get("confidence"), fallback_used=str(result.get("category")) == "outro" or float(result.get("confidence") or 0) < float(threshold or 0), metadata={"category": result.get("category"), "threshold": threshold})
             self.event_store.append(db, session=session, event_type=FlowV2EventType.OUTPUT_EMITTED, node_id=node_id, payload={"analytics_event": "ai_classification_completed", "category": result.get("category"), "confidence": result.get("confidence")})
             actions = ()
@@ -2430,6 +2446,12 @@ class AiClassificationNodeExecutor(AiStructuredNodeExecutor):
         except Exception as exc:
             logger.warning("[AI STRUCTURED NODE] classification failed node_id=%s error=%s", node_id, exc)
             record_ai_execution(db, tenant_id=session.tenant_id, conversation_id=runtime_input.conversation_id, session_id=session.id, flow_id=get_flow_id(db, snapshot, session), flow_version_id=session.flow_version_id, node_id=node_id, node_type="ai_classification", provider=ai_config.get("provider"), model=ai_config.get("model"), started_at=ai_started_at, status="error", fallback_used=True, metadata={"error": "ai_classification_failed"})
+            self._save_result(
+                db,
+                session=session,
+                output_variable=str(data.get("output_variable") or data.get("outputVariable") or "ai.classification"),
+                result={"category": str(data.get("error_fallback") or data.get("fallback") or "outro"), "confidence": 0.0, "reason": "ai_classification_failed"},
+            )
             return self._fail(db, snapshot=snapshot, session=session, node_id=node_id, error="ai_classification_failed")
 
 

@@ -194,7 +194,7 @@ def test_hybrid_service_fallback_is_an_explicit_runtime_v2_composition():
         ("sim", "hybrid_closed"),
         ("nao", "hybrid_ai"),
     ]
-    assert any(edge["source"] == "hybrid_ai_condition" and edge["source_handle"] == "false" and edge["target"] == "hybrid_handoff" for edge in edges)
+    assert any(edge["source"] == "hybrid_ai_condition" and edge["source_handle"] == "true" and edge["target"] == "hybrid_handoff" for edge in edges)
 
 
 def test_hybrid_service_fallback_classifier_has_safe_production_configuration():
@@ -214,7 +214,7 @@ def test_hybrid_service_fallback_classifier_has_safe_production_configuration():
     assert classifier["allow_other"] is True
     assert classifier["fallback"] == classifier["error_fallback"] == "outro"
     assert condition["conditions"] == [
-        {"left": "intent_category.category", "operator": "!=", "right": "outro"}
+        {"field": "intent_category", "operator": "equals", "value": "outro"}
     ]
 
     outgoing = {
@@ -222,7 +222,7 @@ def test_hybrid_service_fallback_classifier_has_safe_production_configuration():
         for edge in asset["graph"]["edges"]
         if edge["source"] == "hybrid_ai_condition"
     }
-    assert outgoing == {"true": "hybrid_specific", "false": "hybrid_handoff"}
+    assert outgoing == {"false": "hybrid_specific", "true": "hybrid_handoff"}
     assert "ai_identified" not in json.dumps(asset, ensure_ascii=False)
 
     materialized_nodes, materialized_edges = MarketplaceInstallationService._materialize(asset)
@@ -233,8 +233,23 @@ def test_hybrid_service_fallback_classifier_has_safe_production_configuration():
     assert persisted_classifier["data"]["categories"] == classifier["categories"]
     assert persisted_classifier["data"]["confidence_threshold"] == 0.75
     assert persisted_condition["data"]["conditions"] == condition["conditions"]
+    assert not any(
+        key in persisted_condition["data"]
+        for key in ("condition", "keywords", "positive", "question", "text")
+    )
     assert len(persisted["nodes"]) == len(asset["graph"]["nodes"]) == 14
     assert len(persisted["edges"]) == len(asset["graph"]["edges"]) == 15
+
+    from app.flow_v2.publisher import FlowV2Publisher
+
+    publication = FlowV2Publisher().publish(
+        nodes=persisted["nodes"], edges=persisted["edges"]
+    )
+    snapshot_condition = next(
+        node for node in publication.snapshot["nodes"] if node["type"] == "condition"
+    )
+    assert snapshot_condition["data"]["conditions"] == condition["conditions"]
+    assert len(publication.snapshot["edges"]) == len(persisted["edges"])
 
 
 def test_hybrid_service_fallback_asset_has_complete_visual_graph_integrity():
@@ -276,8 +291,8 @@ def test_hybrid_service_fallback_asset_has_complete_visual_graph_integrity():
     ]
     assert [edge["target"] for edge in outgoing["hybrid_ai"]] == ["hybrid_ai_condition"]
     assert [(edge["source_handle"], edge["target"]) for edge in outgoing["hybrid_ai_condition"]] == [
-        ("true", "hybrid_specific"),
-        ("false", "hybrid_handoff"),
+        ("false", "hybrid_specific"),
+        ("true", "hybrid_handoff"),
     ]
     assert [edge["target"] for edge in outgoing["hybrid_handoff"]] == ["hybrid_wait"]
 
@@ -304,8 +319,8 @@ def test_hybrid_service_fallback_asset_has_complete_visual_graph_integrity():
         ("hybrid_resolved_question", "hybrid_closed"): "sim",
         ("hybrid_resolved_question", "hybrid_ai"): "nao",
         ("hybrid_ai", "hybrid_ai_condition"): "default",
-        ("hybrid_ai_condition", "hybrid_specific"): "true",
-        ("hybrid_ai_condition", "hybrid_handoff"): "false",
+        ("hybrid_ai_condition", "hybrid_specific"): "false",
+        ("hybrid_ai_condition", "hybrid_handoff"): "true",
         ("hybrid_handoff", "hybrid_wait"): "default",
     }
     assert {

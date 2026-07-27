@@ -1035,11 +1035,13 @@ function FlowNodeEditorPanel({
         })()}
 
         {kind === 'condition' && (
-          <label className="flow-editor-field">
-            Regras / palavras-chave
-            <textarea value={toText(draft.condition)} onChange={(event) => onDraftChange({ condition: event.target.value })} placeholder="sim, suporte, ajuda" />
-            <small>Separe múltiplas palavras por vírgula. Saídas: Sim e Não.</small>
-          </label>
+          <>
+            <div className="flow-editor-info-card"><strong>Tipo:</strong> Condição por variável</div>
+            <label className="flow-editor-field">Variável<input value={toText(((draft.conditions as any[]) || [])[0]?.field)} onChange={(event) => onDraftChange({ conditions: [{ ...(((draft.conditions as any[]) || [])[0] || {}), field: event.target.value, operator: ((draft.conditions as any[]) || [])[0]?.operator || 'equals', value: ((draft.conditions as any[]) || [])[0]?.value ?? '' }] })} placeholder="intent_category" /></label>
+            <label className="flow-editor-field">Operador<select value={toText(((draft.conditions as any[]) || [])[0]?.operator || 'equals')} onChange={(event) => onDraftChange({ conditions: [{ ...(((draft.conditions as any[]) || [])[0] || {}), operator: event.target.value }] })}><option value="equals">igual a</option></select></label>
+            <label className="flow-editor-field">Valor<input value={toText(((draft.conditions as any[]) || [])[0]?.value)} onChange={(event) => onDraftChange({ conditions: [{ ...(((draft.conditions as any[]) || [])[0] || {}), value: event.target.value }] })} placeholder="outro" /></label>
+            <small>Saída Sim quando a regra for verdadeira; saída Não caso contrário.</small>
+          </>
         )}
 
         {kind === 'ai_classification' && (

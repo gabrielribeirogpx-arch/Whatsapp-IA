@@ -208,8 +208,8 @@ def _hybrid_service_fallback_graph() -> dict[str, Any]:
             fallback="outro",
             error_fallback="outro",
         ),
-        _node("hybrid_ai_condition", "condition", "Condição: intenção reconhecida?", conditions=[
-            {"left": "intent_category.category", "operator": "!=", "right": "outro"},
+        _node("hybrid_ai_condition", "condition", "Condição: fallback humano?", conditions=[
+            {"field": "intent_category", "operator": "equals", "value": "outro"},
         ], branches=[
             {"id": "true", "label": "Sim", "handleId": "true"},
             {"id": "false", "label": "Não", "handleId": "false"},
@@ -231,8 +231,8 @@ def _hybrid_service_fallback_graph() -> dict[str, Any]:
         ("hybrid_resolved_question", "hybrid_closed", "sim"),
         ("hybrid_resolved_question", "hybrid_ai", "nao"),
         ("hybrid_ai", "hybrid_ai_condition", "default"),
-        ("hybrid_ai_condition", "hybrid_specific", "true"),
-        ("hybrid_ai_condition", "hybrid_handoff", "false"),
+        ("hybrid_ai_condition", "hybrid_specific", "false"),
+        ("hybrid_ai_condition", "hybrid_handoff", "true"),
         ("hybrid_handoff", "hybrid_wait", "default"),
     ]
     asset = _asset("atendimento_com_fallback_para_ia", "Atendimento com fallback para IA", "hybrid", nodes, edges)
