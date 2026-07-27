@@ -154,6 +154,79 @@ def _initial_menu_graph() -> dict[str, Any]:
     return asset
 
 
+def _hybrid_service_fallback_graph() -> dict[str, Any]:
+    """Reference hybrid service flow, authored as a strict left-to-right diagram.
+
+    The AI classifier is deliberately an ordinary Runtime V2 node.  The graph
+    keeps every operational decision visible and always provides a deterministic
+    human route when the classifier cannot identify the request.
+    """
+    buttons = [
+        {"id": key, "value": key, "label": label, "handleId": key, "next": ""}
+        for key, label in (
+            ("atendimento", "Atendimento"),
+            ("comercial", "Comercial"),
+            ("financeiro", "Financeiro"),
+        )
+    ]
+    nodes = [
+        _node("start", "start", "Entrada"),
+        _node("hybrid_welcome", "message", "Boas-vindas", content="Olá {{contact.name}}!"),
+        _node("hybrid_register", "action", "Registrar contato", action="update_contact", fields={"name": "{{contact.name}}", "service_origin": "hybrid_fallback"}),
+        _node("hybrid_menu", "choice", "Escolha", content="Como podemos ajudar?", display_mode="buttons", buttons=buttons, variable="service_route"),
+        _node("hybrid_atendimento", "message", "Mensagem Atendimento", content="Certo! Vamos cuidar da sua solicitação de atendimento."),
+        _node("hybrid_comercial", "message", "Mensagem Comercial", content="Ótimo! Vamos ajudar você com nossa área comercial."),
+        _node("hybrid_financeiro", "message", "Mensagem Financeiro", content="Entendi! Vamos orientar você sobre sua solicitação financeira."),
+        _node("hybrid_resolved_question", "choice", "Pergunta de resolução", content="Você conseguiu resolver sua necessidade?", display_mode="buttons", buttons=[
+            {"id": "sim", "value": "sim", "label": "Sim", "handleId": "sim", "next": ""},
+            {"id": "nao", "value": "nao", "label": "Não", "handleId": "nao", "next": ""},
+        ], variable="need_resolved"),
+        _node("hybrid_resolved_condition", "condition", "Condição: necessidade resolvida?", condition="{{need_resolved}}", branches=["sim", "nao"]),
+        _node("hybrid_closed", "message", "Encerramento", content="Que bom que conseguimos ajudar! Até a próxima."),
+        _node("hybrid_ai", "ai_classification", "Classificação Inteligente", classes=["identificado", "nao_identificado"], input="{{last_user_message}}", output_variable="ai_identified", fallback="nao_identificado"),
+        _node("hybrid_ai_condition", "condition", "Condição: IA identificou?", condition="{{ai_identified}}", branches=["sim", "nao"]),
+        _node("hybrid_specific", "message", "Resposta específica", content="Identificamos sua necessidade. Veja a orientação específica para {{ai_classification}}."),
+        _node("hybrid_handoff", "action", "Transferência Humana", action="human_handoff", queue="atendimento", include_context=True),
+        _node("hybrid_wait", "message", "Aguardar atendente", content="Aguarde um atendente."),
+    ]
+    edges = [
+        ("start", "hybrid_welcome", None),
+        ("hybrid_welcome", "hybrid_register", None),
+        ("hybrid_register", "hybrid_menu", None),
+        ("hybrid_menu", "hybrid_atendimento", "atendimento"),
+        ("hybrid_menu", "hybrid_comercial", "comercial"),
+        ("hybrid_menu", "hybrid_financeiro", "financeiro"),
+        ("hybrid_atendimento", "hybrid_resolved_question", None),
+        ("hybrid_comercial", "hybrid_resolved_question", None),
+        ("hybrid_financeiro", "hybrid_resolved_question", None),
+        ("hybrid_resolved_question", "hybrid_resolved_condition", "sim"),
+        ("hybrid_resolved_question", "hybrid_resolved_condition", "nao"),
+        ("hybrid_resolved_condition", "hybrid_closed", "sim"),
+        ("hybrid_resolved_condition", "hybrid_ai", "nao"),
+        ("hybrid_ai", "hybrid_ai_condition", None),
+        ("hybrid_ai_condition", "hybrid_specific", "sim"),
+        ("hybrid_ai_condition", "hybrid_handoff", "nao"),
+        ("hybrid_handoff", "hybrid_wait", None),
+    ]
+    asset = _asset("atendimento_com_fallback_para_ia", "Atendimento com fallback para IA", "hybrid", nodes, edges)
+
+    # One X coordinate per stage; Y only separates parallel outcomes.  Keeping
+    # each route on its own horizontal lane makes the authored edges inspectable.
+    positions = {
+        "start": (0, 360), "hybrid_welcome": (320, 360), "hybrid_register": (640, 360), "hybrid_menu": (960, 360),
+        "hybrid_atendimento": (1280, 40), "hybrid_comercial": (1280, 360), "hybrid_financeiro": (1280, 680),
+        "hybrid_resolved_question": (1600, 360), "hybrid_resolved_condition": (1920, 360),
+        "hybrid_closed": (2240, 40), "hybrid_ai": (2240, 520), "hybrid_ai_condition": (2560, 520),
+        "hybrid_specific": (2880, 360), "hybrid_handoff": (2880, 680), "hybrid_wait": (3200, 680),
+    }
+    for node in asset["graph"]["nodes"]:
+        x, y = positions[node["key"]]
+        node["position"] = {"x": x, "y": y}
+    asset["description"] = "Atendimento híbrido didático: três setores convergem para validação, IA classificadora e fallback humano explícito."
+    asset["metadata"].update({"architecture": "horizontal_hybrid_fallback_v1", "layout": "manual", "layout_direction": "LR", "column_count": 11, "branch_count": 3, "ai_role": "classification_only"})
+    return asset
+
+
 NO_AI = {
     "menu_inicial": ("Menu inicial", "Escolha Atendimento, Comercial, Financeiro, Agendamento ou FAQ."),
     "atendimento_por_setor": ("Atendimento por setor", "Identifique seu setor e informe o assunto."),
@@ -172,6 +245,7 @@ ASSETS = {key: _operational_graph(key, name, objective) for key, (name, objectiv
 ASSETS["menu_inicial"] = _initial_menu_graph()
 for key, name in HYBRID.items():
     ASSETS[key] = _operational_graph(key, name, "A IA classifica apenas a intenção; regras e pessoas controlam a operação.", ai="ai_rag" if key == "faq_com_rag" else "ai_classification")
+ASSETS["atendimento_com_fallback_para_ia"] = _hybrid_service_fallback_graph()
 for key, name, focus, integration in [("agenda_inteligente", "Agenda Inteligente", "agendamento", "google_calendar"), ("atendimento_inteligente", "Atendimento Inteligente", "atendimento", None), ("comercial_inteligente", "Comercial Inteligente", "comercial", None)]:
     ASSETS[key] = _operational_graph(key, name, f"Contextualize e classifique {focus} com segurança.", ai="ai_rag", integration=integration)
     ASSETS[key]["metadata"]["automation_level"] = "full_ai"; ASSETS[key]["supported_variants"] = ["full_ai"]
