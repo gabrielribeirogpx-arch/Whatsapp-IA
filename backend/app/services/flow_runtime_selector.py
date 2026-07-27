@@ -10,6 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.flow_v2.channel_adapter import WhatsAppAdapter
+from app.flow_v2.contracts import resolve_runtime_choice_key
 from app.flow_v2.runtime_worker import FlowV2InputEvent, FlowV2RuntimeWorker, FlowV2WorkerResult
 from app.models import Conversation
 from app.models.flow import Flow
@@ -229,6 +230,12 @@ class FlowRuntimeSelector:
         runtime_metadata.setdefault("conversation_id", str(conversation.id) if conversation else None)
         runtime_metadata.setdefault("contact_id", str(contact_id) if contact_id else None)
         runtime_metadata.setdefault("flow_runtime_selector", FLOW_RUNTIME_SELECTOR)
+        runtime_choice_key = resolve_runtime_choice_key(runtime_metadata)
+        if runtime_choice_key:
+            # Materialize the canonical provider-independent key before the
+            # RuntimeInput boundary so every diagnostic stage reports the same
+            # value (including WhatsApp button_reply.id).
+            runtime_metadata.setdefault("runtime_choice_key", runtime_choice_key)
         # Interactive IDs may happen to equal a restart word.  They are Choice
         # selections, not typed restart commands.
         is_interactive_reply = bool(
@@ -272,7 +279,7 @@ class FlowRuntimeSelector:
             runtime_metadata.get("interactive_reply_id") or "n/a",
             runtime_metadata.get("selected_row_id") or "n/a",
             runtime_metadata.get("row_id") or "n/a",
-            runtime_metadata.get("runtime_choice_key") or "n/a",
+            runtime_choice_key or "n/a",
             message_text or "n/a",
             runtime_metadata.get("current_node_id") or "n/a",
             runtime_metadata.get("next_node_id") or "n/a",
