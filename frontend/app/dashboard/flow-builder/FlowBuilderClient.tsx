@@ -2831,7 +2831,33 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
   }, [rfInstance, setEdges, setNodes, toast, toggleStartNode, updateNodeData]);
 
 
-  const handleInsertAgentSystemTemplate = useCallback((templateId: string) => {
+  const handleInsertAgentSystemTemplate = useCallback(async (templateId: string, selectedVariant?: string) => {
+    const marketplaceCard = AI_SYSTEM_CARDS.find((item) => item.id === templateId);
+    if (!marketplaceCard || marketplaceCard.availability !== 'installable_real') {
+      toast.error('Template ainda não disponível para instalação');
+      return;
+    }
+    try {
+      const variant = selectedVariant || (marketplaceCard.marketplaceType === 'Kit de Negócio' ? 'Sem IA' : marketplaceCard.automationLevel === 'Híbrido' ? 'Híbrida' : marketplaceCard.automationLevel);
+      const response = await apiFetch(`/api/marketplace/items/${templateId}/install`, { method: 'POST', headers: { 'Idempotency-Key': crypto.randomUUID() }, body: JSON.stringify({ variant }) });
+      const installed = await parseApiResponse<{ created_resources?: { flows?: string[]; post_install_route?: string } }>(response);
+      const flowId = installed.created_resources?.flows?.[0];
+      setIsAgentSystemModalOpen(false);
+      if (marketplaceCard.marketplaceType === 'Kit de Negócio') {
+        router.push(installed.created_resources?.post_install_route || '/dashboard/business-builder');
+      } else if (flowId) {
+        setSelectedFlowId(flowId);
+        router.replace(`/dashboard/flow-builder?flow_id=${flowId}`);
+        await loadFlow(flowId);
+      }
+      toast.success(`${marketplaceCard.title} instalado com flows reais`);
+    } catch (error) {
+      console.error('MARKETPLACE_INSTALLATION_FAILED', { template_id: templateId, error });
+      toast.error('Não foi possível instalar este template');
+    }
+    return;
+    /* Compatibility reference: the legacy callback below remains unreachable so
+       old AI System editing/runtime support is not removed from existing flows. */
     const template = AGENT_SYSTEM_TEMPLATES.find((item) => item.id === templateId) || AGENT_SYSTEM_TEMPLATES[0];
     const card = AI_SYSTEM_CARDS.find((item) => item.id === templateId);
     const origin = rfInstance?.screenToFlowPosition({ x: 360, y: 180 }) || { x: 120, y: 120 };
@@ -2877,7 +2903,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
     toast.success(`Sistema IA inserido: ${systemName}`);
     console.info('AI_SYSTEM_CREATED', { system_id: systemId, system_type: templateId, internal_nodes: graph.nodes.length, internal_edges: graph.edges.length });
     setTimeout(() => rfInstance?.fitView({ padding: 0.2, duration: 500 }), 0);
-  }, [rfInstance, setNodes, toast, toggleStartNode, updateNodeData]);
+  }, [loadFlow, rfInstance, router, setNodes, toast, toggleStartNode, updateNodeData]);
 
   const getCurrentSerializedFlow = useCallback(() => {
     const realFlow = rfInstance?.toObject?.();

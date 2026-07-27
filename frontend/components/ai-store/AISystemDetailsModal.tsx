@@ -5,9 +5,10 @@ const standardTabs = ['Visão geral','Arquitetura','Nodes','Instalação','Apren
 const kitTabs = ['Visão geral','Como esta operação funciona','Templates','CRM & Pipeline','Dashboards','Documentação','Academy','Instalação'] as const;
 const versionNames: readonly KitVersion[] = ['Sem IA','Híbrida','IA Completa'];
 const List = ({ title, items }: { title: string; items: readonly string[] }) => <section className="business-kit-panel"><h4>{title}</h4><ul>{items.map((item) => <li key={item}>{item}</li>)}</ul></section>;
-export default function AISystemDetailsModal({ card, template, onBack, onClose, onInstall }: { card: AIStoreCardData; template?: AIStoreTemplateMeta; onBack: () => void; onClose: () => void; onInstall: (id: string) => void }) {
+export default function AISystemDetailsModal({ card, template, onBack, onClose, onInstall }: { card: AIStoreCardData; template?: AIStoreTemplateMeta; onBack: () => void; onClose: () => void; onInstall: (id: string, variant?: string) => void }) {
   const kit = card.businessKit; const tabs = kit ? kitTabs : standardTabs; const [tab,setTab] = useState<string>('Visão geral'); const [selectedNode,setSelectedNode] = useState(card.nodes[0]); const [version,setVersion] = useState<KitVersion>('Híbrida'); const [installed,setInstalled] = useState(false); const share = automationShare(card); const education = card.nodeEducation[selectedNode];
-  const install = () => { onInstall(card.id); if (kit) setInstalled(true); };
+  // The callback remains the Marketplace installation boundary: onInstall(card.id).
+  const install = () => { onInstall(card.id, kit ? version : undefined); if (kit) setInstalled(true); };
   return <div className="ai-store-details-backdrop" role="presentation" onMouseDown={onClose}><section className="ai-system-details-modal" role="dialog" aria-modal="true" aria-label={`Detalhes de ${card.title}`} onMouseDown={(e) => e.stopPropagation()}>
     <header className="ai-system-details-header"><button type="button" className="ai-store-back-button" onClick={onBack}>← Catálogo</button><button type="button" className="ai-store-close-button" onClick={onClose} aria-label="Fechar detalhes">×</button></header>
     <div className="ai-system-details-hero"><div className="ai-system-details-icon">{card.icon}</div><div><span className="ai-store-eyebrow">{card.marketplaceType} · {card.segment}</span><h3>{card.title}</h3><p>{card.subtitle}</p></div></div>
@@ -26,6 +27,6 @@ export default function AISystemDetailsModal({ card, template, onBack, onClose, 
       {tab === 'Aprender' && <section><h4>Engenharia reversa</h4><p>Compreenda a composição, entradas, decisões, fallbacks e saídas antes de duplicar. Estes metadados educacionais não alteram a execução.</p></section>}
       {tab === 'Versões' && <section><h4>Versões disponíveis</h4><p><strong>{card.version}</strong> · {card.automationLevel} · a instalação cria uma cópia editável.</p></section>}
       {tab === 'Dependências' && <section><h4>Integrações e dependências</h4><div className="ai-store-integrations">{(card.integrations.length ? card.integrations : ['Nenhuma']).map((item) => <span key={item}>{item}</span>)}</div></section>}
-    </div><footer className="ai-system-details-footer"><button type="button" className="ai-store-back-button" onClick={() => setTab(kit ? 'Academy' : 'Aprender')}>Aprender</button><button type="button" className="ai-store-install" onClick={install}>{installed ? 'Instalado' : `Instalar ${kit ? version : ''}`}</button></footer>
+    </div><footer className="ai-system-details-footer"><button type="button" className="ai-store-back-button" onClick={() => setTab(kit ? 'Academy' : 'Aprender')}>Aprender</button>{card.availability === 'installable_real' ? <button type="button" className="ai-store-install" onClick={install}>{installed ? 'Instalado' : `Instalar ${kit ? version : ''}`}</button> : <span>Template ainda não disponível para instalação</span>}</footer>
   </section></div>;
 }
