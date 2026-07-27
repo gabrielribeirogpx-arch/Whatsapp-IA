@@ -118,16 +118,16 @@ def test_initial_menu_layout_is_a_left_to_right_layered_graph():
 
     main = ("start", "menu_welcome", "menu_identification", "menu_main")
     assert [nodes[key]["position"] for key in main] == [
-        {"x": 0, "y": 420}, {"x": 280, "y": 420},
-        {"x": 560, "y": 420}, {"x": 840, "y": 420},
+        {"x": 0, "y": 415}, {"x": 300, "y": 415},
+        {"x": 600, "y": 415}, {"x": 900, "y": 415},
     ]
     assert [nodes[key]["position"]["x"] for key in main] == sorted(
         nodes[key]["position"]["x"] for key in main
     )
     assert len({nodes[key]["position"]["y"] for key in main}) == 1
-    assert [nodes[f"menu_{key}"]["position"]["x"] for key in branch_keys] == [1160] * 6
-    assert [nodes[f"menu_{key}"]["position"]["y"] for key in branch_keys] == [0, 170, 340, 510, 680, 850]
-    assert nodes["menu_end"]["position"] == {"x": 1460, "y": 420}
+    assert [nodes[f"menu_{key}"]["position"]["x"] for key in branch_keys] == [1280] * 6
+    assert [nodes[f"menu_{key}"]["position"]["y"] for key in branch_keys] == [40, 190, 340, 490, 640, 790]
+    assert nodes["menu_end"]["position"] == {"x": 1600, "y": 415}
     assert asset["metadata"]["layout_direction"] == "LR"
 
     # Every transition progresses horizontally; all nodes remain connected and

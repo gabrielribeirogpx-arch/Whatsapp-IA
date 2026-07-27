@@ -139,22 +139,22 @@ def _initial_menu_graph() -> dict[str, Any]:
     # This template intentionally keeps its authored coordinates.  Depth belongs
     # on X; Y is reserved exclusively for the six parallel menu routes.
     positions = {
-        "start": (0, 420),
-        "menu_welcome": (280, 420),
-        "menu_identification": (560, 420),
-        "menu_main": (840, 420),
-        "menu_end": (1460, 420),
+        "start": (0, 415),
+        "menu_welcome": (300, 415),
+        "menu_identification": (600, 415),
+        "menu_main": (900, 415),
+        "menu_end": (1600, 415),
     }
     branch_y = {
-        "atendimento": 0,
-        "comercial": 170,
+        "atendimento": 40,
+        "comercial": 190,
         "financeiro": 340,
-        "agendamento": 510,
-        "faq": 680,
-        "humano": 850,
+        "agendamento": 490,
+        "faq": 640,
+        "humano": 790,
     }
     for key, y in branch_y.items():
-        positions[f"menu_{key}"] = (1160, y)
+        positions[f"menu_{key}"] = (1280, y)
     for node in asset["graph"]["nodes"]:
         x, y = positions[node["key"]]
         node["position"] = {"x": x, "y": y}
