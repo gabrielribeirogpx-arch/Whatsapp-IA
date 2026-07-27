@@ -170,8 +170,7 @@ def _hybrid_service_fallback_graph() -> dict[str, Any]:
         )
     ]
     nodes = [
-        _node("start", "start", "Entrada"),
-        _node("hybrid_welcome", "message", "Boas-vindas", content="Olá {{contact.name}}!"),
+        _node("hybrid_welcome", "message", "Boas-vindas", content="Olá {{contact.name}}!", isStart=True),
         _node("hybrid_register", "action", "Registrar contato", action="update_contact", fields={"name": "{{contact.name}}", "service_origin": "hybrid_fallback"}),
         _node("hybrid_menu", "choice", "Escolha", content="Como podemos ajudar?", display_mode="buttons", buttons=buttons, variable="service_route"),
         _node("hybrid_atendimento", "message", "Mensagem Atendimento", content="Certo! Vamos cuidar da sua solicitação de atendimento."),
@@ -219,7 +218,6 @@ def _hybrid_service_fallback_graph() -> dict[str, Any]:
         _node("hybrid_wait", "message", "Aguardar atendente", content="Aguarde um atendente."),
     ]
     edges = [
-        ("start", "hybrid_welcome", None),
         ("hybrid_welcome", "hybrid_register", None),
         ("hybrid_register", "hybrid_menu", None),
         ("hybrid_menu", "hybrid_atendimento", "atendimento"),
@@ -240,7 +238,7 @@ def _hybrid_service_fallback_graph() -> dict[str, Any]:
     # One X coordinate per stage; Y only separates parallel outcomes.  Keeping
     # each route on its own horizontal lane makes the authored edges inspectable.
     positions = {
-        "start": (0, 360), "hybrid_welcome": (320, 360), "hybrid_register": (640, 360), "hybrid_menu": (960, 360),
+        "hybrid_welcome": (0, 360), "hybrid_register": (320, 360), "hybrid_menu": (640, 360),
         "hybrid_atendimento": (1500, 40), "hybrid_comercial": (1500, 360), "hybrid_financeiro": (1500, 680),
         "hybrid_resolved_question": (1820, 360),
         "hybrid_closed": (2140, 40), "hybrid_ai": (2140, 520), "hybrid_ai_condition": (2460, 520),
@@ -250,7 +248,7 @@ def _hybrid_service_fallback_graph() -> dict[str, Any]:
         x, y = positions[node["key"]]
         node["position"] = {"x": x, "y": y}
     asset["description"] = "Atendimento híbrido didático: três setores convergem para validação, IA classificadora e fallback humano explícito."
-    asset["metadata"].update({"architecture": "horizontal_hybrid_fallback_v2", "layout": "manual", "layout_direction": "LR", "column_count": 10, "branch_count": 3, "ai_role": "classification_only", "validate_editor_handles": True})
+    asset["metadata"].update({"architecture": "horizontal_hybrid_fallback_v2", "layout": "manual", "layout_direction": "LR", "column_count": 9, "branch_count": 3, "ai_role": "classification_only", "validate_editor_handles": True})
     asset["educational_metadata"]["hybrid_ai"] = {
         "purpose": "Classificar a intenção do utilizador antes de decidir se a automação consegue continuar ou se deve transferir para uma pessoa.",
         "when_to_use": "Quando existirem poucas categorias bem definidas e for necessário interpretar linguagem natural.",
