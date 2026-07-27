@@ -36,6 +36,7 @@ export type AIStoreCardData = {
   official: boolean;
   free: boolean;
   compatible: boolean;
+  availability: 'installable_real' | 'preview_only' | 'legacy_ai_system' | 'unsupported';
   details: string;
   version: string;
   installManifest: Readonly<Record<string, readonly unknown[]>>;

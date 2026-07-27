@@ -5,7 +5,7 @@ import AIStoreSearch from './AIStoreSearch';
 import AISystemDetailsModal from './AISystemDetailsModal';
 import type { AIStoreCardData, AIStoreCategoryValue, AIStoreTemplateMeta, AutomationLevel } from './types';
 
-export default function AIStoreModal({ cards, templates, onClose, onInstall }: { cards: readonly AIStoreCardData[]; templates: readonly AIStoreTemplateMeta[]; onClose: () => void; onInstall: (id: string) => void }) {
+export default function AIStoreModal({ cards, templates, onClose, onInstall }: { cards: readonly AIStoreCardData[]; templates: readonly AIStoreTemplateMeta[]; onClose: () => void; onInstall: (id: string, variant?: string) => void }) {
   const [search, setSearch] = useState(''); const [category, setCategory] = useState<AIStoreCategoryValue>('Todos'); const [level, setLevel] = useState<AutomationLevel | 'Todos'>('Todos'); const [detailsCard, setDetailsCard] = useState<AIStoreCardData | null>(null); const dialogRef = useRef<HTMLElement>(null);
   useEffect(() => { const previous = document.activeElement as HTMLElement | null; const oldOverflow = document.body.style.overflow; document.body.style.overflow = 'hidden'; dialogRef.current?.querySelector<HTMLInputElement>('input')?.focus();
     const keydown = (event: KeyboardEvent) => { if (event.key === 'Escape') onClose(); if (event.key === 'Tab' && dialogRef.current) { const items = Array.from(dialogRef.current.querySelectorAll<HTMLElement>('button,input,[tabindex]:not([tabindex="-1"])')); if (!items.length) return; const first = items[0], last = items[items.length - 1]; if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); } else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); } } };
