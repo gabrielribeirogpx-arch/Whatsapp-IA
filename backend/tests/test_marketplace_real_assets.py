@@ -361,18 +361,27 @@ def test_hybrid_service_fallback_uses_authored_left_to_right_columns():
 
     assert asset["metadata"]["layout_direction"] == "LR"
     assert asset["metadata"]["column_count"] == 10
-    assert {nodes[f"hybrid_{route}"]["position"]["x"] for route in ("atendimento", "comercial", "financeiro")} == {1280}
+    assert [nodes[key]["position"] for key in ("start", "hybrid_welcome", "hybrid_register", "hybrid_menu")] == [
+        {"x": 0, "y": 360},
+        {"x": 320, "y": 360},
+        {"x": 640, "y": 360},
+        {"x": 960, "y": 360},
+    ]
+    assert {nodes[f"hybrid_{route}"]["position"]["x"] for route in ("atendimento", "comercial", "financeiro")} == {1500}
     assert [nodes[f"hybrid_{route}"]["position"]["y"] for route in ("atendimento", "comercial", "financeiro")] == [40, 360, 680]
+    assert nodes["hybrid_resolved_question"]["position"] == {"x": 1820, "y": 360}
+    assert nodes["hybrid_closed"]["position"] == {"x": 2140, "y": 40}
+    assert nodes["hybrid_ai"]["position"] == {"x": 2140, "y": 520}
     assert all(nodes[edge["target"]]["position"]["x"] > nodes[edge["source"]]["position"]["x"] for edge in asset["graph"]["edges"])
     condition = nodes["hybrid_ai_condition"]
-    assert condition["position"] == {"x": 2240, "y": 520}
+    assert condition["position"] == {"x": 2460, "y": 520}
     assert condition["config"]["branches"] == [
         {"id": "false", "label": "Não", "handleId": "false"},
         {"id": "true", "label": "Sim", "handleId": "true"},
     ]
-    assert nodes["hybrid_specific"]["position"] == {"x": 2560, "y": 400}
-    assert nodes["hybrid_handoff"]["position"] == {"x": 2560, "y": 640}
-    assert nodes["hybrid_wait"]["position"] == {"x": 2880, "y": 640}
+    assert nodes["hybrid_specific"]["position"] == {"x": 2780, "y": 400}
+    assert nodes["hybrid_handoff"]["position"] == {"x": 2780, "y": 640}
+    assert nodes["hybrid_wait"]["position"] == {"x": 3100, "y": 640}
     assert nodes["hybrid_specific"]["position"]["y"] < condition["position"]["y"]
     assert nodes["hybrid_handoff"]["position"]["y"] > condition["position"]["y"]
     assert nodes["hybrid_wait"]["position"]["y"] == nodes["hybrid_handoff"]["position"]["y"]
