@@ -128,19 +128,30 @@ def _initial_menu_graph() -> dict[str, Any]:
         ])
 
     asset = _asset("menu_inicial", "Menu inicial", "no_ai", nodes, edges)
+    # This template intentionally keeps its authored coordinates.  Depth belongs
+    # on X; Y is reserved exclusively for the six parallel menu routes.
     positions = {
-        "start": (900, 40), "menu_welcome": (900, 220),
-        "menu_identification": (900, 400), "menu_main": (900, 580),
-        "menu_end": (900, 980),
+        "start": (0, 420),
+        "menu_welcome": (280, 420),
+        "menu_identification": (560, 420),
+        "menu_main": (840, 420),
+        "menu_end": (1460, 420),
     }
-    branch_x = {key: index * 360 for index, (key, *_rest) in enumerate(branches)}
-    for key, x in branch_x.items():
-        positions[f"menu_{key}"] = (x, 780)
+    branch_y = {
+        "atendimento": 0,
+        "comercial": 170,
+        "financeiro": 340,
+        "agendamento": 510,
+        "faq": 680,
+        "humano": 850,
+    }
+    for key, y in branch_y.items():
+        positions[f"menu_{key}"] = (1160, y)
     for node in asset["graph"]["nodes"]:
         x, y = positions[node["key"]]
         node["position"] = {"x": x, "y": y}
     asset["description"] = "Boas-vindas e identificação seguidas por um menu com seis rotas e encerramento único."
-    asset["metadata"].update({"architecture": "concise_initial_menu_v2", "layout": "manual", "branch_count": len(branches)})
+    asset["metadata"].update({"architecture": "horizontal_initial_menu_v3", "layout": "manual", "layout_direction": "LR", "branch_count": len(branches)})
     return asset
 
 

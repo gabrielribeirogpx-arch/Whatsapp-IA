@@ -54,6 +54,8 @@ const INVALID_UPLOAD_PUBLIC_URL_MESSAGE = 'Upload concluído, mas a URL pública
 
 
 const nodeTypes = {
+  // Start is a first-class canvas card (rather than React Flow's tiny fallback).
+  start: MessageNode,
   message: MessageNode,
   choice: ChoiceNode,
   condition: ConditionNode,
@@ -2421,7 +2423,12 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
         setEdges(orderedEdges);
         lastPersistedFlowSignatureRef.current = getFlowGraphSignature(serializeFlowGraph(nodesToRender, orderedEdges));
         lastEditorHadAiSystemRef.current = nodesToRender.some((node) => node.type === 'ai_system');
-        requestAnimationFrame(() => { rfInstance?.fitView(); });
+        const isInitialMenu = nodesToRender.every((node) => (node.data as { marketplace_asset_key?: string }).marketplace_asset_key === 'menu_inicial');
+        requestAnimationFrame(() => {
+          rfInstance?.fitView(isInitialMenu
+            ? { padding: 0.16, minZoom: 0.5, maxZoom: 1, duration: 400 }
+            : undefined);
+        });
       } else {
         const layoutedFlow = applyLayoutAndSetFlow(nodesToRender, edgesToRender);
         lastPersistedFlowSignatureRef.current = getFlowGraphSignature(serializeFlowGraph(layoutedFlow.nodes, layoutedFlow.edges));
