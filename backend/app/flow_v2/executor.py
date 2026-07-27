@@ -188,6 +188,35 @@ class FlowV2Executor:
             snapshot.hash,
         )
         session = self.session_manager.get_or_create(db, runtime_input=runtime_input, snapshot=snapshot)
+        session_node = snapshot.node_by_id.get(str(getattr(session, "current_node_id", "") or ""))
+        session_node_type = str(
+            (session_node or {}).get("type") or self._node_data(session_node or {}).get("type") or ""
+        ).strip().lower()
+        waiting_for_choice = (
+            str(getattr(session, "status", "")) == str(FlowV2SessionStatus.WAITING)
+            and session_node_type == "choice"
+        )
+        logger.info(
+            "event=runtime_v2_choice_trace stage=session_loaded status=found reason=session_ready "
+            "session_id=%s current_node_id=%s waiting_for_choice=%s session_status=%s node_type=%s runtime_choice_key=%s",
+            getattr(session, "id", None),
+            getattr(session, "current_node_id", None),
+            waiting_for_choice,
+            getattr(session, "status", None),
+            session_node_type or None,
+            runtime_input.metadata.get("runtime_choice_key"),
+        )
+        if runtime_input.metadata.get("runtime_choice_key") and not waiting_for_choice:
+            logger.error(
+                "event=runtime_v2_choice_trace stage=session_validation status=failed reason=waiting_for_choice_false "
+                "session_id=%s current_node_id=%s waiting_for_choice=%s session_status=%s node_type=%s runtime_choice_key=%s",
+                getattr(session, "id", None),
+                getattr(session, "current_node_id", None),
+                waiting_for_choice,
+                getattr(session, "status", None),
+                session_node_type or None,
+                runtime_input.metadata.get("runtime_choice_key"),
+            )
         self._bind_numeric_choice_if_waiting(snapshot=snapshot, session=session, runtime_input=runtime_input)
         if _is_ai_system_snapshot(snapshot):
             logger.info(
@@ -382,15 +411,31 @@ class FlowV2Executor:
 
         for step in range(MAX_RUNTIME_STEPS):
             if not session.current_node_id:
+                logger.error(
+                    "event=runtime_v2_choice_trace stage=executor status=failed reason=current_node_id_missing "
+                    "session_id=%s current_node_id=%s runtime_choice_key=%s",
+                    session.id, session.current_node_id, runtime_input.metadata.get("runtime_choice_key"),
+                )
                 raise FlowV2ExecutionError("Session has no current node")
             node = snapshot.node_by_id.get(session.current_node_id)
             if node is None:
+                logger.error(
+                    "event=runtime_v2_choice_trace stage=node_lookup status=failed reason=next_node_not_found "
+                    "session_id=%s current_node_id=%s runtime_choice_key=%s",
+                    session.id, session.current_node_id, runtime_input.metadata.get("runtime_choice_key"),
+                )
                 raise FlowV2ExecutionError("Current node is absent from immutable snapshot")
 
             node_id = str(node["id"])
             self.event_store.append(db, session=session, event_type=FlowV2EventType.NODE_ENTERED, node_id=node_id)
             flow_id = self._flow_id_for_version(db, tenant_id=session.tenant_id, flow_version_id=session.flow_version_id)
             node_type = str(node.get("type") or self._node_data(node).get("type") or "message")
+            logger.info(
+                "event=runtime_v2_choice_trace stage=node_entered status=success reason=executor_entered_node "
+                "session_id=%s current_node_id=%s node_id=%s node_type=%s runtime_choice_key=%s step=%s",
+                session.id, session.current_node_id, node_id, node_type,
+                runtime_input.metadata.get("runtime_choice_key"), step + 1,
+            )
             self._track_analytics(db, session=session, flow_id=flow_id, event_type="node_entered", node_id=node_id, node_type=node_type, metadata={"node_label": self._node_data(node).get("label")})
             if self._node_data(node).get("is_conversion") is True:
                 self._track_analytics(db, session=session, flow_id=flow_id, event_type="conversion_reached", node_id=node_id, node_type=node_type, event_key=str(self._node_data(node).get("conversion_label") or node_id), metadata={"conversion_label": self._node_data(node).get("conversion_label")})
@@ -455,7 +500,13 @@ class FlowV2Executor:
                 self.event_store.append(db, session=session, event_type=FlowV2EventType.SESSION_FAILED, node_id=node_id)
                 self.session_manager.move_to(db, session=session, node_id=node_id, status=FlowV2SessionStatus.FAILED)
                 raise
-            except RuntimeError:
+            except RuntimeError as exc:
+                logger.exception(
+                    "event=runtime_v2_choice_trace stage=node_execution status=failed reason=exception "
+                    "session_id=%s node_id=%s node_type=%s runtime_choice_key=%s error_type=%s error=%s",
+                    session.id, node_id, node_type, runtime_input.metadata.get("runtime_choice_key"),
+                    type(exc).__name__, exc,
+                )
                 self.event_store.append(
                     db,
                     session=session,
@@ -583,6 +634,11 @@ class FlowV2Executor:
                 return actions
 
             if not result.next_node_id:
+                logger.error(
+                    "event=runtime_v2_choice_trace stage=executor status=failed reason=continued_without_next_node "
+                    "session_id=%s node_id=%s node_type=%s runtime_choice_key=%s",
+                    session.id, node_id, node_type, runtime_input.metadata.get("runtime_choice_key"),
+                )
                 raise FlowV2ExecutionError(f"Node {node_id} continued without next_node_id")
             self.event_store.append(
                 db,
@@ -594,6 +650,12 @@ class FlowV2Executor:
             self._track_analytics(db, session=session, flow_id=flow_id, event_type="choice_selected", node_id=node_id, node_type=node_type, event_key=str(result.next_node_id), metadata={"target_node_id": result.next_node_id})
             self._track_analytics(db, session=session, flow_id=flow_id, event_type="transition_taken", node_id=node_id, node_type=node_type, event_key=str(result.next_node_id), metadata={"source_handle": "default", "target_node_id": result.next_node_id, "target_node_type": None})
             self.session_manager.move_to(db, session=session, node_id=result.next_node_id, status=FlowV2SessionStatus.RUNNING)
+            logger.info(
+                "event=runtime_v2_choice_trace stage=next_node_selected status=success reason=session_pointer_advanced "
+                "session_id=%s from_node_id=%s next_node_id=%s next_node_exists=%s runtime_choice_key=%s",
+                session.id, node_id, result.next_node_id, result.next_node_id in snapshot.node_by_id,
+                runtime_input.metadata.get("runtime_choice_key"),
+            )
 
         current_node_id = session.current_node_id
         self.event_store.append(
@@ -604,6 +666,11 @@ class FlowV2Executor:
             payload={"reason": "max_steps_exceeded", "max_steps": MAX_RUNTIME_STEPS},
         )
         self.session_manager.move_to(db, session=session, node_id=current_node_id, status=FlowV2SessionStatus.FAILED)
+        logger.error(
+            "event=runtime_v2_choice_trace stage=executor status=failed reason=executor_interrupted_max_steps "
+            "session_id=%s current_node_id=%s max_steps=%s runtime_choice_key=%s",
+            session.id, current_node_id, MAX_RUNTIME_STEPS, runtime_input.metadata.get("runtime_choice_key"),
+        )
         raise FlowV2ExecutionError(f"Runtime V2 exceeded max_steps={MAX_RUNTIME_STEPS}")
 
 

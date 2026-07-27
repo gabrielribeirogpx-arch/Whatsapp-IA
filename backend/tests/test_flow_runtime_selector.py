@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import logging
 import uuid
 from types import SimpleNamespace
 
@@ -77,7 +78,8 @@ def test_v2_runtime_dispatches_to_flow_v2_worker() -> None:
 
 
 
-def test_enqueue_whatsapp_text_prefers_structured_tenant_id(monkeypatch) -> None:
+def test_enqueue_whatsapp_text_prefers_structured_tenant_id(monkeypatch, caplog) -> None:
+    caplog.set_level(logging.INFO)
     tenant_id = uuid.uuid4()
     session_id = uuid.uuid4()
     conversation_id = uuid.uuid4()
@@ -94,7 +96,7 @@ def test_enqueue_whatsapp_text_prefers_structured_tenant_id(monkeypatch) -> None
         session_id=session_id,
         conversation_id=conversation_id,
         contact_id=contact_id,
-        metadata={"provider_id": provider_id, "node_id": "start"},
+        metadata={"provider_id": provider_id, "node_id": "start", "runtime_choice_key": "next"},
     )
 
     payload = enqueued[0]
@@ -106,7 +108,10 @@ def test_enqueue_whatsapp_text_prefers_structured_tenant_id(monkeypatch) -> None
     assert payload["conversation_id"] == str(conversation_id)
     assert payload["contact_id"] == str(contact_id)
     assert payload["node_id"] == "start"
-    assert payload["metadata"] == {"provider_id": provider_id, "node_id": "start"}
+    assert payload["metadata"] == {"provider_id": provider_id, "node_id": "start", "runtime_choice_key": "next"}
+    assert "stage=send_message status=called reason=enqueue_send_message_invoked" in caplog.text
+    assert "runtime_choice_key=next" in caplog.text
+    assert "stage=send_message status=success reason=message_enqueued" in caplog.text
 
 def test_v1_runtime_does_not_call_flow_v2_worker() -> None:
     worker = _FakeWorker()

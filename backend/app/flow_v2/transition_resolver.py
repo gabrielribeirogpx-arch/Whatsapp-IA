@@ -55,6 +55,11 @@ class TransitionResolver:
         )
         if not matches:
             logger.error(
+                "event=runtime_v2_choice_trace stage=transition_lookup status=failed reason=transition_not_found "
+                "session_id=%s source_node_id=%s source_handle=%s next_node_id=%s outgoing_count=%s",
+                getattr(session, "id", None), source_node_id, source_handle, None, len(outgoing),
+            )
+            logger.error(
                 "[CHOICE TRANSITION NOT FOUND] source_node_id=%s source_handle=%s transitions_count=%s outgoing_count=%s reason=no_matching_transition",
                 source_node_id,
                 source_handle,
@@ -109,6 +114,11 @@ class TransitionResolver:
         transition = matches[0]
         target = transition.get("target_node_id") or transition.get("target") or transition.get("to")
         if not target or str(target) not in snapshot.node_by_id:
+            logger.error(
+                "event=runtime_v2_choice_trace stage=next_node_lookup status=failed reason=next_node_not_found "
+                "session_id=%s source_node_id=%s source_handle=%s next_node_id=%s transition=%s",
+                getattr(session, "id", None), source_node_id, source_handle, target, transition,
+            )
             logger.error(
                 "[CHOICE TRANSITION NOT FOUND] source_node_id=%s source_handle=%s target_node_id=%s reason=invalid_target",
                 source_node_id,
