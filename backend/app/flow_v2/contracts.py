@@ -4,10 +4,12 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
 from uuid import UUID
+import logging
 
 from app.flow_v2.actions import RuntimeAction
 
 FLOW_V2_EVENT_VERSION = 1
+logger = logging.getLogger(__name__)
 
 
 def resolve_runtime_choice_key(metadata: dict[str, Any] | None) -> str | None:
@@ -85,6 +87,22 @@ class RuntimeInput:
             metadata.setdefault("selected_row_id", choice_id)
             metadata.setdefault("row_id", choice_id)
             metadata.setdefault("sourceHandle", choice_id)
+        logger.info(
+            "event=meta_webhook_interactive_pipeline stage=runtime_input input_message_id=%s "
+            "message.type=%s interactive.type=%s button_reply.id=%s interactive_reply_id=%s "
+            "selected_row_id=%s row_id=%s runtime_choice_key=%s message_text=%s current_node_id=%s next_node_id=%s",
+            self.input_message_id or "n/a",
+            metadata.get("message_type") or "n/a",
+            metadata.get("interactive_type") or "n/a",
+            metadata.get("interactive_reply_id") or "n/a",
+            metadata.get("interactive_reply_id") or "n/a",
+            metadata.get("selected_row_id") or "n/a",
+            metadata.get("row_id") or "n/a",
+            metadata.get("runtime_choice_key") or "n/a",
+            self.message_text or "n/a",
+            metadata.get("current_node_id") or "n/a",
+            metadata.get("next_node_id") or "n/a",
+        )
         object.__setattr__(self, "metadata", metadata)
 
 

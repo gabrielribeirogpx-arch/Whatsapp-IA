@@ -101,6 +101,27 @@ def _safe_webhook_log_payload(payload: dict[str, Any]) -> str:
     return _json_log_payload(_redact_message_content(payload))
 
 
+def _log_interactive_ingress(payload: dict[str, Any], *, correlation_id: str) -> None:
+    """Log the Meta envelope before it crosses the API/worker boundary."""
+    value = _extract_first_meta_value(payload)
+    for message in value.get("messages", []) if isinstance(value.get("messages"), list) else []:
+        if not isinstance(message, dict):
+            continue
+        interactive = message.get("interactive") if isinstance(message.get("interactive"), dict) else {}
+        button_reply = interactive.get("button_reply") if isinstance(interactive.get("button_reply"), dict) else {}
+        logger.info(
+            "event=meta_webhook_interactive_pipeline stage=webhook_received correlation_id=%s "
+            "message.type=%s interactive.type=%s button_reply.id=%s interactive_reply_id=%s "
+            "selected_row_id=%s row_id=%s runtime_choice_key=%s current_node_id=%s next_node_id=%s raw_payload=%s",
+            correlation_id,
+            message.get("type") or "n/a",
+            interactive.get("type") or "n/a",
+            button_reply.get("id") or "n/a",
+            "n/a", "n/a", "n/a", "n/a", "n/a", "n/a",
+            _json_log_payload(payload),
+        )
+
+
 def _log_media_delivery_statuses(payload: dict) -> None:
     try:
         entry = (payload.get("entry") or [None])[0] or {}
@@ -224,6 +245,8 @@ async def enqueue_webhook_payload(request: Request) -> tuple[bool, str | None]:
             payload["message_id"] = message_id
     except Exception:
         logger.exception("event=webhook_correlation_parse_error correlation_id=%s stage=webhook_parse", correlation_id)
+
+    _log_interactive_ingress(payload, correlation_id=correlation_id)
 
     _log_media_delivery_statuses(payload)
     _update_campaign_status_from_meta(payload)

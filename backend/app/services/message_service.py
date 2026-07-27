@@ -163,6 +163,19 @@ def normalize_meta_message(payload: dict[str, Any]) -> list[dict[str, str | None
                     "selected_row_id": interactive_reply_id or None,
                     "selected_title": interactive_reply_title or None,
                 }
+                logger.info(
+                    "event=meta_webhook_interactive_pipeline stage=normalize_meta_message correlation_id=%s "
+                    "message.type=%s interactive.type=%s button_reply.id=%s interactive_reply_id=%s "
+                    "selected_row_id=%s row_id=%s runtime_choice_key=%s current_node_id=%s next_node_id=%s",
+                    normalized_message["message_id"] or "n/a",
+                    message_type or "n/a",
+                    interactive_type or "n/a",
+                    _interactive_debug_fields(message)["interactive_button_reply_id"] or "n/a",
+                    interactive_reply_id or "n/a",
+                    normalized_message["selected_row_id"] or "n/a",
+                    normalized_message["selected_row_id"] or "n/a",
+                    "n/a", "n/a", "n/a",
+                )
                 if message_type == "interactive":
                     _log_meta_message_marker("[CHOICE PARSED]", message=message, payload=normalized_message)
                 _log_meta_message_marker("[MESSAGE NORMALIZED]", message=message, payload=normalized_message)

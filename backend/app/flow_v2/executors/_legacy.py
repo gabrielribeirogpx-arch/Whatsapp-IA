@@ -487,6 +487,22 @@ class ChoiceNodeExecutor(BaseNodeExecutor):
         )
         row_id = resolve_runtime_choice_key(runtime_input.metadata)
         logger.info(
+            "event=meta_webhook_interactive_pipeline stage=runtime_v2_choice_resolver input_message_id=%s "
+            "message.type=%s interactive.type=%s button_reply.id=%s interactive_reply_id=%s "
+            "selected_row_id=%s row_id=%s runtime_choice_key=%s message_text=%s current_node_id=%s next_node_id=%s",
+            runtime_input.input_message_id or "n/a",
+            runtime_input.metadata.get("message_type") or "n/a",
+            runtime_input.metadata.get("interactive_type") or "n/a",
+            runtime_input.metadata.get("interactive_reply_id") or "n/a",
+            runtime_input.metadata.get("interactive_reply_id") or "n/a",
+            runtime_input.metadata.get("selected_row_id") or "n/a",
+            runtime_input.metadata.get("row_id") or "n/a",
+            runtime_input.metadata.get("runtime_choice_key") or "n/a",
+            runtime_input.message_text or "n/a",
+            node_id,
+            "n/a",
+        )
+        logger.info(
             "[CHOICE PARSED] source=RuntimeV2ChoiceResolver node_id=%s session_id=%s message_text=%s row_id=%s sourceHandle=%s selected_row_id=%s interactive_reply_id=%s expected_runtime_choice_key=row_id_or_sourceHandle option_ids=%s",
             node_id,
             session.id,
@@ -616,6 +632,22 @@ class ChoiceNodeExecutor(BaseNodeExecutor):
             row_id,
             row_id,
             next_node_id,
+        )
+        logger.info(
+            "event=meta_webhook_interactive_pipeline stage=runtime_v2_choice_resolved input_message_id=%s "
+            "message.type=%s interactive.type=%s button_reply.id=%s interactive_reply_id=%s "
+            "selected_row_id=%s row_id=%s runtime_choice_key=%s message_text=%s current_node_id=%s next_node_id=%s",
+            runtime_input.input_message_id or "n/a",
+            runtime_input.metadata.get("message_type") or "n/a",
+            runtime_input.metadata.get("interactive_type") or "n/a",
+            runtime_input.metadata.get("interactive_reply_id") or "n/a",
+            runtime_input.metadata.get("interactive_reply_id") or "n/a",
+            runtime_input.metadata.get("selected_row_id") or "n/a",
+            row_id,
+            runtime_input.metadata.get("runtime_choice_key") or "n/a",
+            runtime_input.message_text or "n/a",
+            node_id,
+            next_node_id or "n/a",
         )
         logger.info(
             "[CHOICE NEXT NODE] node_id=%s session_id=%s source_handle=%s next_node_id=%s next_node_exists=%s",
