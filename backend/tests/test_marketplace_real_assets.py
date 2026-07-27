@@ -110,14 +110,37 @@ def test_initial_menu_is_a_complete_acyclic_six_branch_reference_flow():
     assert all(outgoing[edge["target"]] for edge in router_edges)
 
 
-def test_initial_menu_layout_has_aligned_rows_and_complete_learning_metadata():
+def test_initial_menu_layout_is_a_left_to_right_layered_graph():
     asset = ASSETS["menu_inicial"]
     nodes = {node["key"]: node for node in asset["graph"]["nodes"]}
     branch_keys = ["atendimento", "comercial", "financeiro", "agendamento", "faq", "humano"]
 
-    assert [nodes[key]["position"]["x"] for key in ("start", "menu_welcome", "menu_identification", "menu_main", "menu_end")] == [900] * 5
-    assert [nodes[f"menu_{key}"]["position"]["y"] for key in branch_keys] == [780] * 6
-    assert [nodes[f"menu_{key}"]["position"]["x"] for key in branch_keys] == sorted(nodes[f"menu_{key}"]["position"]["x"] for key in branch_keys)
+    main = ("start", "menu_welcome", "menu_identification", "menu_main")
+    assert [nodes[key]["position"] for key in main] == [
+        {"x": 0, "y": 420}, {"x": 280, "y": 420},
+        {"x": 560, "y": 420}, {"x": 840, "y": 420},
+    ]
+    assert [nodes[key]["position"]["x"] for key in main] == sorted(
+        nodes[key]["position"]["x"] for key in main
+    )
+    assert len({nodes[key]["position"]["y"] for key in main}) == 1
+    assert [nodes[f"menu_{key}"]["position"]["x"] for key in branch_keys] == [1160] * 6
+    assert [nodes[f"menu_{key}"]["position"]["y"] for key in branch_keys] == [0, 170, 340, 510, 680, 850]
+    assert nodes["menu_end"]["position"] == {"x": 1460, "y": 420}
+    assert asset["metadata"]["layout_direction"] == "LR"
+
+    # Every transition progresses horizontally; all nodes remain connected and
+    # the 260x140 cards have positive separation in their shared layers.
+    for edge in asset["graph"]["edges"]:
+        assert nodes[edge["target"]]["position"]["x"] > nodes[edge["source"]]["position"]["x"]
+    assert len({node["position"]["x"] for node in nodes.values()}) == 6
+    assert all(
+        right["position"]["y"] - left["position"]["y"] >= 140
+        for left, right in zip(
+            [nodes[f"menu_{key}"] for key in branch_keys],
+            [nodes[f"menu_{key}"] for key in branch_keys[1:]],
+        )
+    )
     for key in branch_keys:
         targets = [edge["target"] for edge in asset["graph"]["edges"] if edge["source"] == f"menu_{key}"]
         assert targets == ["menu_end"]
@@ -125,3 +148,16 @@ def test_initial_menu_layout_has_aligned_rows_and_complete_learning_metadata():
     required_learning_fields = {"purpose", "when_to_use", "best_practices", "common_mistakes", "input", "output"}
     assert set(asset["educational_metadata"]) == set(nodes)
     assert all(required_learning_fields <= metadata.keys() for metadata in asset["educational_metadata"].values())
+
+
+def test_initial_menu_uses_distinct_menu_handles_without_changing_graph_logic():
+    asset = ASSETS["menu_inicial"]
+    branch_keys = ["atendimento", "comercial", "financeiro", "agendamento", "faq", "humano"]
+    menu_edges = [edge for edge in asset["graph"]["edges"] if edge["source"] == "menu_main"]
+
+    assert [edge["source_handle"] for edge in menu_edges] == branch_keys
+    assert [edge["target"] for edge in menu_edges] == [f"menu_{key}" for key in branch_keys]
+    # The shared renderer's target and source handles are Left and Right; the
+    # asset itself must never request a vertical/TB layout.
+    assert asset["metadata"]["layout"] == "manual"
+    assert asset["metadata"]["layout_direction"] != "TB"
