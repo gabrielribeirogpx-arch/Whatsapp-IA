@@ -8,6 +8,7 @@ from app.models.knowledge_chunk import KnowledgeChunk
 from app.models.knowledge_source import KnowledgeSource
 from app.models.lead import Lead
 from app.models.pipeline_stage import PipelineStage
+from app.models.marketplace_installation import MarketplaceInstallation, MarketplaceInstallationResource
 from app.models.bot_rule import BotRule
 from app.models.conversation_log import ConversationLog
 from app.models.flow import Flow, FlowStep, FlowNode, FlowEdge, FlowVersion, FlowExecution, FlowExecutionEvent
@@ -31,7 +32,7 @@ from app.models.execution_trace import ExecutionTrace
 from app.models.pending_action import PendingAction
 from app.models.billing import BillingEvent, Plan, PlanFeature, PlanPrice, Subscription, TenantEntitlement, UsageCounter, UsageEvent
 
-__all__ = ["Tenant", "AIConfig", "Conversation", "Contact", "Message", "Product", "KnowledgeBase", "KnowledgeSource", "KnowledgeChunk", "Lead", "PipelineStage", "BotRule", "ConversationLog", "Flow", "FlowStep", "FlowNode", "FlowEdge", "FlowVersion", "FlowExecution", "FlowExecutionEvent", "ProcessedMessage", "FlowEvent", "FlowAnalyticsEvent", "FailedMessage", "WorkerDeadLetter", "FlowAIConversationMessage", "FlowAIExecution", "FlowAILongTermMemory", "FlowV2Event", "FlowV2Session", "FlowV2ScheduledJob", "FlowV2IdempotencyKey", "FlowV2DeadLetter", "TenantUser", "PasswordResetToken", "AuditLog", "UserSession", "Task", "TenantAISetting", "TenantMCPServer", "TenantMCPTool", "ExecutionTrace", "IntegrationConnection", "PendingAction", "TenantWhatsAppProvider", "WhatsAppMessageTemplate", "WhatsAppCampaign", "WhatsAppCampaignRecipient", "Plan", "PlanFeature", "PlanPrice", "BillingEvent", "Subscription", "TenantEntitlement", "UsageCounter", "UsageEvent", "ProductEvent", "ProductMetricDaily", "TenantActivationState"]
+__all__ = ["MarketplaceInstallation", "MarketplaceInstallationResource", "Tenant", "AIConfig", "Conversation", "Contact", "Message", "Product", "KnowledgeBase", "KnowledgeSource", "KnowledgeChunk", "Lead", "PipelineStage", "BotRule", "ConversationLog", "Flow", "FlowStep", "FlowNode", "FlowEdge", "FlowVersion", "FlowExecution", "FlowExecutionEvent", "ProcessedMessage", "FlowEvent", "FlowAnalyticsEvent", "FailedMessage", "WorkerDeadLetter", "FlowAIConversationMessage", "FlowAIExecution", "FlowAILongTermMemory", "FlowV2Event", "FlowV2Session", "FlowV2ScheduledJob", "FlowV2IdempotencyKey", "FlowV2DeadLetter", "TenantUser", "PasswordResetToken", "AuditLog", "UserSession", "Task", "TenantAISetting", "TenantMCPServer", "TenantMCPTool", "ExecutionTrace", "IntegrationConnection", "PendingAction", "TenantWhatsAppProvider", "WhatsAppMessageTemplate", "WhatsAppCampaign", "WhatsAppCampaignRecipient", "Plan", "PlanFeature", "PlanPrice", "BillingEvent", "Subscription", "TenantEntitlement", "UsageCounter", "UsageEvent", "ProductEvent", "ProductMetricDaily", "TenantActivationState"]
 
 from app.models.tenant_ai_setting import TenantAISetting
 from app.models.tenant_whatsapp_provider import TenantWhatsAppProvider

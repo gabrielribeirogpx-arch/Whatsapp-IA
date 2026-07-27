@@ -45,6 +45,7 @@ from app.routers import admin_conversation_reset
 from app.routers import observability
 from app.routers import integration_connections, google_calendar_integration, gmail_integration, google_drive_integration, google_sheets_integration, suitable_integration, meta_integration
 from app.routers import billing
+from app.routers import marketplace
 from app.middleware.tenant_context import TenantContextMiddleware
 from app.api.debug import router as debug_router
 from app.api.flow_runtime import router as flow_runtime_router
@@ -222,6 +223,7 @@ app.include_router(suitable_integration.router)
 app.include_router(meta_integration.router, prefix="/api")
 app.include_router(billing.router, prefix="/api")
 app.include_router(billing.admin_router, prefix="/api")
+app.include_router(marketplace.router, prefix="/api")
 # Webhooks ativos:
 # - Canônico (Meta): /webhook (sem prefixo), via app.routers.webhook
 # - Compatibilidade legada: /api/webhook/whatsapp, via app.api.whatsapp_webhook
