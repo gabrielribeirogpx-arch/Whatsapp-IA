@@ -211,8 +211,8 @@ def _hybrid_service_fallback_graph() -> dict[str, Any]:
         _node("hybrid_ai_condition", "condition", "Condição: fallback humano?", conditions=[
             {"field": "intent_category", "operator": "equals", "value": "outro"},
         ], branches=[
-            {"id": "true", "label": "Sim", "handleId": "true"},
             {"id": "false", "label": "Não", "handleId": "false"},
+            {"id": "true", "label": "Sim", "handleId": "true"},
         ]),
         _node("hybrid_specific", "message", "Resposta específica", content="Identificamos sua necessidade. Vamos continuar com o atendimento."),
         _node("hybrid_handoff", "action", "Transferência Humana", action="human_handoff", queue="atendimento", include_context=True),
@@ -244,7 +244,7 @@ def _hybrid_service_fallback_graph() -> dict[str, Any]:
         "hybrid_atendimento": (1280, 40), "hybrid_comercial": (1280, 360), "hybrid_financeiro": (1280, 680),
         "hybrid_resolved_question": (1600, 360),
         "hybrid_closed": (1920, 40), "hybrid_ai": (1920, 520), "hybrid_ai_condition": (2240, 520),
-        "hybrid_specific": (2560, 360), "hybrid_handoff": (2560, 680), "hybrid_wait": (2880, 680),
+        "hybrid_specific": (2560, 400), "hybrid_handoff": (2560, 640), "hybrid_wait": (2880, 640),
     }
     for node in asset["graph"]["nodes"]:
         x, y = positions[node["key"]]

@@ -364,6 +364,18 @@ def test_hybrid_service_fallback_uses_authored_left_to_right_columns():
     assert {nodes[f"hybrid_{route}"]["position"]["x"] for route in ("atendimento", "comercial", "financeiro")} == {1280}
     assert [nodes[f"hybrid_{route}"]["position"]["y"] for route in ("atendimento", "comercial", "financeiro")] == [40, 360, 680]
     assert all(nodes[edge["target"]]["position"]["x"] > nodes[edge["source"]]["position"]["x"] for edge in asset["graph"]["edges"])
+    condition = nodes["hybrid_ai_condition"]
+    assert condition["position"] == {"x": 2240, "y": 520}
+    assert condition["config"]["branches"] == [
+        {"id": "false", "label": "Não", "handleId": "false"},
+        {"id": "true", "label": "Sim", "handleId": "true"},
+    ]
+    assert nodes["hybrid_specific"]["position"] == {"x": 2560, "y": 400}
+    assert nodes["hybrid_handoff"]["position"] == {"x": 2560, "y": 640}
+    assert nodes["hybrid_wait"]["position"] == {"x": 2880, "y": 640}
+    assert nodes["hybrid_specific"]["position"]["y"] < condition["position"]["y"]
+    assert nodes["hybrid_handoff"]["position"]["y"] > condition["position"]["y"]
+    assert nodes["hybrid_wait"]["position"]["y"] == nodes["hybrid_handoff"]["position"]["y"]
     required_learning_fields = {"purpose", "when_to_use", "best_practices", "common_mistakes", "alternatives"}
     assert all(required_learning_fields <= set(asset["educational_metadata"][key]) for key in nodes)
 
