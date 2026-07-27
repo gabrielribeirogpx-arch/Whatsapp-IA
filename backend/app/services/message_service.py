@@ -158,8 +158,10 @@ def normalize_meta_message(payload: dict[str, Any]) -> list[dict[str, str | None
                     "interactive_type": interactive_type or None,
                     "interactive_reply_id": interactive_reply_id or None,
                     "interactive_reply_title": interactive_reply_title or None,
-                    "selected_row_id": interactive_reply_id if interactive_type == "list_reply" else None,
-                    "selected_title": interactive_reply_title if interactive_type == "list_reply" else None,
+                    # Both WhatsApp reply kinds carry stable IDs.  Keep one
+                    # provider-neutral alias all the way to Runtime V2.
+                    "selected_row_id": interactive_reply_id or None,
+                    "selected_title": interactive_reply_title or None,
                 }
                 if message_type == "interactive":
                     _log_meta_message_marker("[CHOICE PARSED]", message=message, payload=normalized_message)

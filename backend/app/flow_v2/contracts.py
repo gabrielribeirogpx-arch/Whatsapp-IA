@@ -10,6 +10,20 @@ from app.flow_v2.actions import RuntimeAction
 FLOW_V2_EVENT_VERSION = 1
 
 
+def resolve_runtime_choice_key(metadata: dict[str, Any] | None) -> str | None:
+    """Return the canonical, provider-independent identifier for a Choice reply.
+
+    IDs are deliberately preferred over labels. In particular, WhatsApp button
+    titles are presentation text and must never replace ``button_reply.id``.
+    """
+    values = metadata or {}
+    for field_name in ("selected_row_id", "interactive_reply_id", "row_id", "sourceHandle"):
+        value = values.get(field_name)
+        if value is not None and str(value).strip():
+            return str(value).strip()
+    return None
+
+
 class FlowV2EventType(StrEnum):
     SESSION_STARTED = "session.started"
     INPUT_RECEIVED = "input.received"
@@ -65,12 +79,12 @@ class RuntimeInput:
         metadata = dict(self.metadata or {})
         if self.message_text is not None and not metadata.get("message_text"):
             metadata["message_text"] = str(self.message_text)
-        choice_id = metadata.get("selected_row_id") or metadata.get("interactive_reply_id")
+        choice_id = resolve_runtime_choice_key(metadata)
         if choice_id:
-            if not metadata.get("row_id"):
-                metadata["row_id"] = choice_id
-            if not metadata.get("sourceHandle"):
-                metadata["sourceHandle"] = choice_id
+            metadata.setdefault("runtime_choice_key", choice_id)
+            metadata.setdefault("selected_row_id", choice_id)
+            metadata.setdefault("row_id", choice_id)
+            metadata.setdefault("sourceHandle", choice_id)
         object.__setattr__(self, "metadata", metadata)
 
 

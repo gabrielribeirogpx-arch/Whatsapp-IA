@@ -70,6 +70,7 @@ def resolve_runtime_flow_for_conversation(
     tenant_id: UUID,
     conversation: Conversation,
     message_text: str,
+    is_interactive_reply: bool = False,
 ) -> Flow | None:
     """Find the flow whose runtime should handle this inbound WhatsApp message."""
 
@@ -81,7 +82,7 @@ def resolve_runtime_flow_for_conversation(
         )
         return None
 
-    restart_requested = is_restart_keyword(message_text)
+    restart_requested = not is_interactive_reply and is_restart_keyword(message_text)
     if restart_requested:
         logger.info(
             "event=flow_restart_keyword_detected tenant_id=%s conversation_id=%s reason=restart_keyword",
@@ -228,7 +229,14 @@ class FlowRuntimeSelector:
         runtime_metadata.setdefault("conversation_id", str(conversation.id) if conversation else None)
         runtime_metadata.setdefault("contact_id", str(contact_id) if contact_id else None)
         runtime_metadata.setdefault("flow_runtime_selector", FLOW_RUNTIME_SELECTOR)
-        if is_restart_keyword(message_text):
+        # Interactive IDs may happen to equal a restart word.  They are Choice
+        # selections, not typed restart commands.
+        is_interactive_reply = bool(
+            runtime_metadata.get("interactive_type")
+            or runtime_metadata.get("interactive_reply_id")
+            or runtime_metadata.get("selected_row_id")
+        )
+        if not is_interactive_reply and is_restart_keyword(message_text):
             runtime_metadata["restart_keyword"] = normalize_restart_keyword(message_text)
             runtime_metadata["auto_restart_flow"] = True
         selection_reason = runtime_metadata.get("selected_flow_reason") or (

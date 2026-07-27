@@ -493,6 +493,7 @@ def process_incoming_message(payload: dict[str, Any]) -> None:
                 tenant_id=tenant.id,
                 conversation=persisted_conversation,
                 message_text=text,
+                is_interactive_reply=bool(parsed.get("interactive_type")),
             )
             if selected_flow:
                 selected_runtime = resolve_flow_runtime(selected_flow)
@@ -540,6 +541,11 @@ def process_incoming_message(payload: dict[str, Any]) -> None:
                         "provider_id": provider_id,
                         "interactive_type": parsed.get("interactive_type"),
                         "selected_row_id": parsed.get("selected_row_id") or parsed.get("interactive_reply_id"),
+                        "interactive_reply_id": parsed.get("interactive_reply_id"),
+                        "interactive_reply_title": parsed.get("interactive_reply_title"),
+                        "selected_title": parsed.get("selected_title") or parsed.get("interactive_reply_title"),
+                        "row_id": parsed.get("selected_row_id") or parsed.get("interactive_reply_id"),
+                        "message_text": text,
                     },
                 )
                 logger.info(

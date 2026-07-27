@@ -10,6 +10,31 @@ os.environ.setdefault("DATABASE_URL", "sqlite:///./test.db")
 from app.services.message_service import normalize_meta_message
 
 
+def _interactive_payload(reply_type, reply_id, title):
+    return {
+        "entry": [{"changes": [{"value": {
+            "metadata": {"phone_number_id": "123"},
+            "contacts": [{"wa_id": "5511999990000", "profile": {"name": "Cliente"}}],
+            "messages": [{
+                "id": f"wamid.{reply_id}", "from": "5511999990000", "type": "interactive",
+                "interactive": {"type": reply_type, reply_type: {"id": reply_id, "title": title}},
+            }],
+        }}]}],
+    }
+
+
+def test_button_reply_preserves_stable_id_as_runtime_selection():
+    [message] = normalize_meta_message(_interactive_payload("button_reply", "comercial", "Comercial"))
+
+    assert message == {
+        "phone": "5511999990000", "text": "comercial", "type": "interactive",
+        "tenant_id": None, "phone_number_id": "123", "name": "Cliente",
+        "message_id": "wamid.comercial", "interactive_type": "button_reply",
+        "interactive_reply_id": "comercial", "interactive_reply_title": "Comercial",
+        "selected_row_id": "comercial", "selected_title": "Comercial",
+    }
+
+
 def test_normalize_meta_message_preserves_interactive_list_reply_metadata():
     payload = {
         "entry": [
