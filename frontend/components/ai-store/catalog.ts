@@ -24,6 +24,7 @@ const hybrid = ['Atendimento com fallback para IA','Qualificação inteligente',
 const systems: Array<[string,string?]> = [['Agenda Inteligente','agenda_inteligente'],['Atendimento Inteligente','atendimento_inteligente'],['Comercial Inteligente','comercial_inteligente']];
 const kitSegments = ['Clínica Odontológica','Clínica Médica','Veterinária','Imobiliária','Advocacia','Restaurante','Pet Shop','Academia','Escola','Hotel','Contabilidade','Oficina','E-commerce','Estética','Salão'];
 const operationalNodes = ['Start','Contextualização','Identificação','Captura de variáveis','Router','Qualificação','Score','Tag','CRM','Pipeline','Confirmação','Espera','Follow-up','Fallback','Transferência humana','Encerramento'];
+const initialMenuNodes = ['Início','Boas-vindas','Contexto do contato','Menu principal','Router principal','Mensagem Atendimento','Rota Atendimento','Mensagem Comercial','Rota Comercial','Mensagem Financeiro','Rota Financeiro','Mensagem Agendamento','Rota Agendamento','Mensagem FAQ','Rota FAQ','Mensagem Humano','Rota Humano','Transferência humana','Encerramento'];
 const hybridNodes = [...operationalNodes.slice(0, 5),'Classificação IA',...operationalNodes.slice(5)];
 const intelligentNodes = ['Start','Contexto','RAG','Classificação IA','Condição','Captura de variáveis','CRM','Pipeline','Integração','Confirmação','Espera','Follow-up','Fallback','Transferência humana','Encerramento'];
 
@@ -66,7 +67,7 @@ const makeBusinessKit = (segment: string): BusinessKit => {
 };
 
 export const MARKETPLACE_CATALOG: readonly AIStoreCardData[] = [
-  ...noAi.map((name) => make(name, 'Template de Fluxo', 'Sem IA', 'Geral', operationalNodes)),
+  ...noAi.map((name) => make(name, 'Template de Fluxo', 'Sem IA', 'Geral', name === 'Menu inicial' ? initialMenuNodes : operationalNodes)),
   ...hybrid.map((name) => make(name, 'Fluxo Híbrido', 'Híbrido', 'Geral', hybridNodes, name.includes('RAG') ? ['Base de Conhecimento'] : [])),
   ...systems.map(([name,id]) => make(name, 'AI System', 'IA Completa', 'Geral', intelligentNodes, ['WhatsApp'], id)),
   ...kitSegments.map((name) => ({ ...make(name, 'Kit de Negócio', 'Sistema Completo', name, hybridNodes), availability: ['Clínica Odontológica','Imobiliária','Restaurante','Advocacia'].includes(name) ? 'installable_real' as const : 'preview_only' as const, productionReady: ['Clínica Odontológica','Imobiliária','Restaurante','Advocacia'].includes(name), subtitle: `Operação completa e mensurável para ${name}, pronta para adaptar.`, businessKit: makeBusinessKit(name), installManifest: { flows: [{ methodologies: makeBusinessKit(name).methodologies.map((item) => ({ id: item.id, version: item.version })) }], ai_agents: ['Agente especializado opcional'], knowledge_bases: makeBusinessKit(name).knowledgeBase, pipelines: makeBusinessKit(name).pipeline, tags: makeBusinessKit(name).tags, custom_fields: makeBusinessKit(name).crmFields, dashboards: makeBusinessKit(name).dashboards, academy: makeBusinessKit(name).academy, documentation: makeBusinessKit(name).documentation, settings: [], dependencies: [], post_install_steps: makeBusinessKit(name).checklist } })),

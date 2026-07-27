@@ -1,3 +1,5 @@
+from collections import defaultdict, deque
+
 import pytest
 from app.marketplace_assets import ASSETS, ITEMS, MarketplaceGraphValidator
 from app.marketplace_assets.validator import MarketplaceGraphValidationError
@@ -56,3 +58,67 @@ def test_validator_rejects_invalid_edge_or_orphan():
     asset = dict(ASSETS["menu_inicial"])
     asset["graph"] = {"nodes": list(asset["graph"]["nodes"]), "edges": [{"source": "start", "target": "missing"}]}
     with pytest.raises(MarketplaceGraphValidationError): MarketplaceGraphValidator().validate(asset)
+
+
+def test_initial_menu_is_a_complete_acyclic_six_branch_reference_flow():
+    asset = ASSETS["menu_inicial"]
+    graph = asset["graph"]
+    nodes = {node["key"]: node for node in graph["nodes"]}
+    outgoing = defaultdict(list)
+    incoming = defaultdict(list)
+    for edge in graph["edges"]:
+        outgoing[edge["source"]].append(edge["target"])
+        incoming[edge["target"]].append(edge["source"])
+
+    assert len(nodes) == 19
+    assert len(graph["edges"]) == 23
+    assert asset["metadata"]["branch_count"] == 6
+    assert asset["metadata"]["layout"] == "manual"
+    assert not [node for node in nodes.values() if node["type"] == "condition"]
+
+    reached = set()
+    queue = deque(["start"])
+    while queue:
+        key = queue.popleft()
+        if key in reached:
+            continue
+        reached.add(key)
+        queue.extend(outgoing[key])
+    assert reached == set(nodes)
+    assert all(incoming[key] for key in nodes if key != "start")
+    assert outgoing["menu_end"] == []
+    assert all(outgoing[key] for key in nodes if key != "menu_end")
+
+    # Kahn's algorithm proves there is no cycle (and therefore no infinite loop).
+    remaining_incoming = {key: len(incoming[key]) for key in nodes}
+    roots = deque(key for key, count in remaining_incoming.items() if count == 0)
+    ordered = []
+    while roots:
+        key = roots.popleft()
+        ordered.append(key)
+        for target in outgoing[key]:
+            remaining_incoming[target] -= 1
+            if remaining_incoming[target] == 0:
+                roots.append(target)
+    assert len(ordered) == len(nodes)
+
+    router_edges = [edge for edge in graph["edges"] if edge["source"] == "menu_router"]
+    option_ids = {option["id"] for option in nodes["menu_router"]["config"]["options"]}
+    assert {edge["source_handle"] for edge in router_edges} == option_ids
+    assert len(router_edges) == len(option_ids) == 6
+    assert all(outgoing[edge["target"]] for edge in router_edges)
+
+
+def test_initial_menu_layout_has_aligned_rows_and_complete_learning_metadata():
+    asset = ASSETS["menu_inicial"]
+    nodes = {node["key"]: node for node in asset["graph"]["nodes"]}
+    branch_keys = ["atendimento", "comercial", "financeiro", "agendamento", "faq", "humano"]
+
+    assert [nodes[key]["position"]["x"] for key in ("start", "menu_welcome", "menu_context", "menu_prompt", "menu_router", "menu_handoff", "menu_end")] == [900] * 7
+    assert [nodes[f"menu_{key}_message"]["position"]["y"] for key in branch_keys] == [980] * 6
+    assert [nodes[f"menu_{key}_route"]["position"]["y"] for key in branch_keys] == [1160] * 6
+    assert [nodes[f"menu_{key}_message"]["position"]["x"] for key in branch_keys] == sorted(nodes[f"menu_{key}_message"]["position"]["x"] for key in branch_keys)
+
+    required_learning_fields = {"purpose", "when_to_use", "best_practices", "common_mistakes", "input", "output"}
+    assert set(asset["educational_metadata"]) == set(nodes)
+    assert all(required_learning_fields <= metadata.keys() for metadata in asset["educational_metadata"].values())

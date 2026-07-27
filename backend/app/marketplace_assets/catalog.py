@@ -88,6 +88,73 @@ def _operational_graph(key: str, name: str, objective: str, *, segment: str = "g
     return _asset(key, name, "hybrid" if ai else "no_ai", nodes, edges, segment=segment, integrations=(integration,) if integration else ())
 
 
+def _initial_menu_graph() -> dict[str, Any]:
+    """Reference contact-centre flow, positioned by hand for the Flow Builder."""
+    options = [
+        {"id": "atendimento", "label": "Atendimento"},
+        {"id": "comercial", "label": "Comercial"},
+        {"id": "financeiro", "label": "Financeiro"},
+        {"id": "agendamento", "label": "Agendamento"},
+        {"id": "faq", "label": "Perguntas frequentes"},
+        {"id": "humano", "label": "Falar com uma pessoa"},
+    ]
+    nodes = [
+        _node("start", "start", "Início do atendimento"),
+        _node("menu_welcome", "message", "Mensagem de boas-vindas", content="Olá, {{contact.name}}! Boas-vindas à nossa central de atendimento."),
+        _node("menu_context", "action", "Preparar contexto do contato", action="set_variables", fields={"customer_name": "{{contact.name}}", "service_origin": "menu_inicial"}),
+        _node("menu_prompt", "message", "Menu principal", content="Como podemos ajudar? Escolha uma das opções abaixo."),
+        _node("menu_router", "choice", "Router principal", options=options, variable="service_route"),
+    ]
+    branches = [
+        ("atendimento", "Atendimento", "Entendi. Vou encaminhar sua solicitação para a equipe de atendimento.", "atendimento"),
+        ("comercial", "Comercial", "Ótimo! Nossa equipe comercial vai continuar com você.", "comercial"),
+        ("financeiro", "Financeiro", "Certo. Vou direcionar sua solicitação para o financeiro.", "financeiro"),
+        ("agendamento", "Agendamento", "Vamos cuidar do seu agendamento com uma pessoa da equipe.", "agendamento"),
+        ("faq", "FAQ", "Vou encaminhar sua dúvida para que você receba uma resposta confiável.", "faq"),
+        ("humano", "Atendimento humano", "Claro. Vou chamar uma pessoa para continuar o atendimento.", "atendimento_humano"),
+    ]
+    for key, label, content, queue in branches:
+        nodes.extend([
+            _node(f"menu_{key}_message", "message", f"Orientação · {label}", content=content),
+            _node(f"menu_{key}_route", "action", f"Registrar rota · {label}", action="set_variables", fields={"service_route": key, "service_queue": queue}),
+        ])
+    nodes.extend([
+        _node("menu_handoff", "action", "Transferência humana", action="human_handoff", queue="{{service_queue}}", include_context=True),
+        _node("menu_end", "message", "Encerramento", content="Pronto! Seu atendimento foi encaminhado. Nossa equipe continuará por aqui."),
+    ])
+
+    edges = [
+        ("start", "menu_welcome", None),
+        ("menu_welcome", "menu_context", None),
+        ("menu_context", "menu_prompt", None),
+        ("menu_prompt", "menu_router", None),
+    ]
+    for key, *_ in branches:
+        edges.extend([
+            ("menu_router", f"menu_{key}_message", key),
+            (f"menu_{key}_message", f"menu_{key}_route", None),
+            (f"menu_{key}_route", "menu_handoff", None),
+        ])
+    edges.append(("menu_handoff", "menu_end", None))
+
+    asset = _asset("menu_inicial", "Menu inicial", "no_ai", nodes, edges)
+    positions = {
+        "start": (900, 40), "menu_welcome": (900, 220), "menu_context": (900, 400),
+        "menu_prompt": (900, 580), "menu_router": (900, 760),
+        "menu_handoff": (900, 1340), "menu_end": (900, 1520),
+    }
+    branch_x = {key: index * 360 for index, (key, *_rest) in enumerate(branches)}
+    for key, x in branch_x.items():
+        positions[f"menu_{key}_message"] = (x, 980)
+        positions[f"menu_{key}_route"] = (x, 1160)
+    for node in asset["graph"]["nodes"]:
+        x, y = positions[node["key"]]
+        node["position"] = {"x": x, "y": y}
+    asset["description"] = "Central de atendimento com seis rotas explícitas, handoff contextual e encerramento único."
+    asset["metadata"].update({"architecture": "reference_contact_centre_v2", "layout": "manual", "branch_count": len(branches)})
+    return asset
+
+
 NO_AI = {
     "menu_inicial": ("Menu inicial", "Escolha Atendimento, Comercial, Financeiro, Agendamento ou FAQ."),
     "atendimento_por_setor": ("Atendimento por setor", "Identifique seu setor e informe o assunto."),
@@ -103,6 +170,7 @@ NO_AI = {
 HYBRID = {"atendimento_com_fallback_para_ia": "Atendimento com fallback para IA", "qualificacao_inteligente": "Qualificação inteligente", "agendamento_hibrido": "Agendamento híbrido", "faq_com_rag": "FAQ com RAG", "crm_assistido_por_ia": "CRM assistido por IA", "comercial_com_handoff": "Comercial com handoff", "recuperacao_de_lead_com_ia": "Recuperação de lead com IA"}
 
 ASSETS = {key: _operational_graph(key, name, objective) for key, (name, objective) in NO_AI.items()}
+ASSETS["menu_inicial"] = _initial_menu_graph()
 for key, name in HYBRID.items():
     ASSETS[key] = _operational_graph(key, name, "A IA classifica apenas a intenção; regras e pessoas controlam a operação.", ai="ai_rag" if key == "faq_com_rag" else "ai_classification")
 for key, name, focus, integration in [("agenda_inteligente", "Agenda Inteligente", "agendamento", "google_calendar"), ("atendimento_inteligente", "Atendimento Inteligente", "atendimento", None), ("comercial_inteligente", "Comercial Inteligente", "comercial", None)]:
