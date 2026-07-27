@@ -154,10 +154,16 @@ def test_initial_menu_layout_is_a_left_to_right_layered_graph():
 def test_initial_menu_uses_distinct_menu_handles_without_changing_graph_logic():
     asset = ASSETS["menu_inicial"]
     branch_keys = ["atendimento", "comercial", "financeiro", "agendamento", "faq", "humano"]
+    option_handles = ["atendimento", "comercial", "financeiro", "agendamento", "duvidas_frequentes", "falar_com_atendente"]
     menu_edges = [edge for edge in asset["graph"]["edges"] if edge["source"] == "menu_main"]
 
-    assert [edge["source_handle"] for edge in menu_edges] == [f"choice-{key}" for key in branch_keys]
+    assert [edge["source_handle"] for edge in menu_edges] == option_handles
     assert [edge["target"] for edge in menu_edges] == [f"menu_{key}" for key in branch_keys]
+    buttons = next(node for node in asset["graph"]["nodes"] if node["key"] == "menu_main")["config"]["buttons"]
+    assert [button["id"] for button in buttons] == option_handles
+    assert [button["value"] for button in buttons] == option_handles
+    assert [button["handleId"] for button in buttons] == option_handles
+    assert asset["educational_metadata"]["menu_main"]["option_ids"] == option_handles
     # The shared renderer's target and source handles are Left and Right; the
     # asset itself must never request a vertical/TB layout.
     assert asset["metadata"]["layout"] == "manual"
@@ -183,10 +189,11 @@ def test_initial_menu_choice_contract_survives_installation_round_trip():
 
     option_handles = [button["handleId"] for button in buttons]
     assert option_handles == [
-        "choice-atendimento", "choice-comercial", "choice-financeiro",
-        "choice-agendamento", "choice-faq", "choice-humano",
+        "atendimento", "comercial", "financeiro", "agendamento",
+        "duvidas_frequentes", "falar_com_atendente",
     ]
     assert [button["id"] for button in buttons] == option_handles
+    assert [button["value"] for button in buttons] == option_handles
 
     choice_edges = [edge for edge in loaded["edges"] if edge["source"] == choice["id"]]
     assert len(choice_edges) == 6
@@ -208,3 +215,34 @@ def test_initial_menu_choice_contract_survives_installation_round_trip():
         reached.add(node_id)
         queue.extend(outgoing[node_id])
     assert reached == set(nodes)
+
+
+def test_materialization_preserves_all_react_flow_edge_handle_fields():
+    from copy import deepcopy
+    from app.services.marketplace_installation_service import MarketplaceInstallationService
+
+    asset = deepcopy(ASSETS["menu_inicial"])
+    first_edge = asset["graph"]["edges"][0]
+    first_edge.update({"sourceHandle": "default", "targetHandle": "default", "type": "smoothstep", "animated": True})
+
+    _, edges = MarketplaceInstallationService._materialize(asset)
+
+    assert edges[0]["sourceHandle"] == "default"
+    assert edges[0]["targetHandle"] == "default"
+    assert edges[0]["type"] == "smoothstep"
+    assert edges[0]["animated"] is True
+
+
+def test_validator_blocks_menu_choice_with_a_missing_or_unknown_connection():
+    from copy import deepcopy
+
+    for mutation in ("missing", "unknown"):
+        asset = deepcopy(ASSETS["menu_inicial"])
+        if mutation == "missing":
+            asset["graph"]["edges"] = [edge for edge in asset["graph"]["edges"] if edge.get("source_handle") != "financeiro"]
+        else:
+            edge = next(edge for edge in asset["graph"]["edges"] if edge.get("source_handle") == "financeiro")
+            edge["source_handle"] = "handle_inexistente"
+
+        with pytest.raises(MarketplaceGraphValidationError, match="choice_"):
+            MarketplaceGraphValidator().validate(asset)

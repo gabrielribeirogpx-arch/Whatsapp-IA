@@ -39,6 +39,19 @@ class MarketplaceGraphValidator:
         for node in nodes:
             key = node.get("key")
             if node.get("type") == "condition" and not outgoing.get(key): errors.append(f"condition_without_output:{key}")
+            if node.get("type") == "choice":
+                config = node.get("config") or {}
+                options = config.get("buttons") if isinstance(config.get("buttons"), list) else config.get("options")
+                structured_options = [option for option in (options or []) if isinstance(option, dict)]
+                if structured_options:
+                    handles = [str(option.get("handleId") or option.get("handle_id") or option.get("value") or option.get("id") or "").strip() for option in structured_options]
+                    choice_edges = [edge for edge in edges if edge.get("source") == key]
+                    edge_handles = [str(edge.get("sourceHandle", edge.get("source_handle")) or "").strip() for edge in choice_edges]
+                    if any(not handle for handle in handles): errors.append(f"choice_option_without_handle:{key}")
+                    if len(handles) != len(set(handles)): errors.append(f"duplicate_choice_handle:{key}")
+                    for handle in handles:
+                        if edge_handles.count(handle) != 1: errors.append(f"choice_handle_requires_one_edge:{key}:{handle}")
+                    for handle in set(edge_handles) - set(handles): errors.append(f"invalid_choice_edge_handle:{key}:{handle}")
             if key not in {s.get("key") for s in starts} and incoming.get(key, 0) == 0: errors.append(f"orphan_node:{key}")
         level = (asset.get("metadata") or {}).get("automation_level")
         if level == "no_ai" and any(n.get("type") in AI_TYPES for n in nodes): errors.append("ai_node_forbidden_in_no_ai")
