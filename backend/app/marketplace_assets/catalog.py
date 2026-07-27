@@ -90,19 +90,19 @@ def _operational_graph(key: str, name: str, objective: str, *, segment: str = "g
 
 def _initial_menu_graph() -> dict[str, Any]:
     """Concise contact-centre menu, positioned by hand for the Flow Builder."""
-    options = [
-        {"id": "atendimento", "label": "Atendimento"},
-        {"id": "comercial", "label": "Comercial"},
-        {"id": "financeiro", "label": "Financeiro"},
-        {"id": "agendamento", "label": "Agendamento"},
-        {"id": "faq", "label": "Perguntas frequentes"},
-        {"id": "humano", "label": "Falar com uma pessoa"},
+    buttons = [
+        {"id": "choice-atendimento", "label": "Atendimento", "handleId": "choice-atendimento", "next": ""},
+        {"id": "choice-comercial", "label": "Comercial", "handleId": "choice-comercial", "next": ""},
+        {"id": "choice-financeiro", "label": "Financeiro", "handleId": "choice-financeiro", "next": ""},
+        {"id": "choice-agendamento", "label": "Agendamento", "handleId": "choice-agendamento", "next": ""},
+        {"id": "choice-faq", "label": "Dúvidas frequentes", "handleId": "choice-faq", "next": ""},
+        {"id": "choice-humano", "label": "Falar com atendente", "handleId": "choice-humano", "next": ""},
     ]
     nodes = [
         _node("start", "start", "Início"),
         _node("menu_welcome", "message", "Boas-vindas", content="Olá, {{contact.name}}! Boas-vindas à nossa central de atendimento."),
         _node("menu_identification", "action", "Identificação", action="set_variables", fields={"customer_name": "{{contact.name}}", "service_origin": "menu_inicial"}),
-        _node("menu_main", "choice", "Menu principal", content="Como podemos ajudar? Escolha uma das opções abaixo.", options=options, variable="service_route"),
+        _node("menu_main", "choice", "Menu principal", content="Como podemos ajudar? Escolha uma das opções abaixo.", display_mode="buttons", buttons=buttons, variable="service_route"),
     ]
     branches = [
         ("atendimento", "Atendimento", "Entendi. Sua solicitação foi direcionada para Atendimento."),
@@ -123,7 +123,7 @@ def _initial_menu_graph() -> dict[str, Any]:
     ]
     for key, *_ in branches:
         edges.extend([
-            ("menu_main", f"menu_{key}", key),
+            ("menu_main", f"menu_{key}", f"choice-{key}"),
             (f"menu_{key}", "menu_end", None),
         ])
 
