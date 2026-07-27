@@ -174,7 +174,9 @@ def test_hybrid_service_fallback_is_an_explicit_runtime_v2_composition():
     nodes = {node["key"]: node for node in asset["graph"]["nodes"]}
     edges = asset["graph"]["edges"]
 
-    assert len(nodes) == 14
+    assert len(nodes) == 13
+    assert "start" not in nodes
+    assert nodes["hybrid_welcome"]["config"]["isStart"] is True
     assert "hybrid_resolved_condition" not in nodes
     assert "ai_system" not in {node["type"] for node in nodes.values()}
     assert nodes["hybrid_ai"]["type"] == "ai_classification"
@@ -237,8 +239,8 @@ def test_hybrid_service_fallback_classifier_has_safe_production_configuration():
         key in persisted_condition["data"]
         for key in ("condition", "keywords", "positive", "question", "text")
     )
-    assert len(persisted["nodes"]) == len(asset["graph"]["nodes"]) == 14
-    assert len(persisted["edges"]) == len(asset["graph"]["edges"]) == 15
+    assert len(persisted["nodes"]) == len(asset["graph"]["nodes"]) == 13
+    assert len(persisted["edges"]) == len(asset["graph"]["edges"]) == 14
 
     from app.flow_v2.publisher import FlowV2Publisher
 
@@ -268,10 +270,12 @@ def test_hybrid_service_fallback_asset_has_complete_visual_graph_integrity():
 
     terminal = {key for key, node in nodes.items() if node["config"].get("isEnd")}
     assert terminal == {"hybrid_closed", "hybrid_specific", "hybrid_wait"}
-    assert all(incoming[key] for key in nodes if key != "start")
+    starts = [key for key, node in nodes.items() if node["config"].get("isStart")]
+    assert starts == ["hybrid_welcome"]
+    assert all(incoming[key] for key in nodes if key != "hybrid_welcome")
     assert all(outgoing[key] for key in nodes if key not in terminal)
 
-    reached, queue = set(), deque(["start"])
+    reached, queue = set(), deque(starts)
     while queue:
         key = queue.popleft()
         if key in reached:
@@ -360,12 +364,11 @@ def test_hybrid_service_fallback_uses_authored_left_to_right_columns():
     nodes = {node["key"]: node for node in asset["graph"]["nodes"]}
 
     assert asset["metadata"]["layout_direction"] == "LR"
-    assert asset["metadata"]["column_count"] == 10
-    assert [nodes[key]["position"] for key in ("start", "hybrid_welcome", "hybrid_register", "hybrid_menu")] == [
+    assert asset["metadata"]["column_count"] == 9
+    assert [nodes[key]["position"] for key in ("hybrid_welcome", "hybrid_register", "hybrid_menu")] == [
         {"x": 0, "y": 360},
         {"x": 320, "y": 360},
         {"x": 640, "y": 360},
-        {"x": 960, "y": 360},
     ]
     assert {nodes[f"hybrid_{route}"]["position"]["x"] for route in ("atendimento", "comercial", "financeiro")} == {1500}
     assert [nodes[f"hybrid_{route}"]["position"]["y"] for route in ("atendimento", "comercial", "financeiro")] == [40, 360, 680]
