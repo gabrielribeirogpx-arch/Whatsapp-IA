@@ -192,6 +192,56 @@ def test_hybrid_service_fallback_is_an_explicit_runtime_v2_composition():
     assert any(edge["source"] == "hybrid_ai_condition" and edge["source_handle"] == "nao" and edge["target"] == "hybrid_handoff" for edge in edges)
 
 
+def test_hybrid_service_fallback_asset_has_complete_visual_graph_integrity():
+    """Automatically guard every authored and materialized connection in this asset."""
+    from app.services.marketplace_installation_service import MarketplaceInstallationService
+
+    graph = ASSETS["atendimento_com_fallback_para_ia"]["graph"]
+    nodes = {node["key"]: node for node in graph["nodes"]}
+    outgoing = defaultdict(list)
+    incoming = defaultdict(list)
+    for edge in graph["edges"]:
+        assert edge["source"] in nodes
+        assert edge["target"] in nodes
+        outgoing[edge["source"]].append(edge)
+        incoming[edge["target"]].append(edge)
+
+    terminal = {key for key, node in nodes.items() if node["config"].get("isEnd")}
+    assert terminal == {"hybrid_closed", "hybrid_wait"}
+    assert all(incoming[key] for key in nodes if key != "start")
+    assert all(outgoing[key] for key in nodes if key not in terminal)
+
+    reached, queue = set(), deque(["start"])
+    while queue:
+        key = queue.popleft()
+        if key in reached:
+            continue
+        reached.add(key)
+        queue.extend(edge["target"] for edge in outgoing[key])
+    assert reached == set(nodes)
+
+    for key, node in nodes.items():
+        if node["type"] == "condition":
+            assert len(outgoing[key]) == 2
+            assert {edge["source_handle"] for edge in outgoing[key]} == {"sim", "nao"}
+
+    assert [edge["target"] for edge in outgoing["hybrid_ai"]] == ["hybrid_ai_condition"]
+    assert [(edge["source_handle"], edge["target"]) for edge in outgoing["hybrid_ai_condition"]] == [
+        ("sim", "hybrid_specific"),
+        ("nao", "hybrid_handoff"),
+    ]
+    assert [edge["target"] for edge in outgoing["hybrid_specific"]] == ["hybrid_wait"]
+    assert [edge["target"] for edge in outgoing["hybrid_handoff"]] == ["hybrid_wait"]
+
+    materialized_nodes, materialized_edges = MarketplaceInstallationService._materialize(
+        ASSETS["atendimento_com_fallback_para_ia"]
+    )
+    materialized_ids = {node["id"] for node in materialized_nodes}
+    assert len(materialized_edges) == len(graph["edges"])
+    assert all(edge["source"] in materialized_ids and edge["target"] in materialized_ids for edge in materialized_edges)
+    assert all(edge.get("id") and edge.get("type") for edge in materialized_edges)
+
+
 def test_hybrid_service_fallback_uses_authored_left_to_right_columns():
     asset = ASSETS["atendimento_com_fallback_para_ia"]
     nodes = {node["key"]: node for node in asset["graph"]["nodes"]}
