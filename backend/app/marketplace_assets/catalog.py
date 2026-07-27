@@ -181,10 +181,6 @@ def _hybrid_service_fallback_graph() -> dict[str, Any]:
             {"id": "sim", "value": "sim", "label": "Sim", "handleId": "sim", "next": ""},
             {"id": "nao", "value": "nao", "label": "Não", "handleId": "nao", "next": ""},
         ], variable="need_resolved"),
-        _node("hybrid_resolved_condition", "condition", "Condição: necessidade resolvida?", condition="{{need_resolved}}", branches=[
-            {"id": "true", "label": "Sim", "handleId": "true"},
-            {"id": "false", "label": "Não", "handleId": "false"},
-        ]),
         _node("hybrid_closed", "message", "Encerramento", content="Que bom que conseguimos ajudar! Até a próxima."),
         _node("hybrid_ai", "ai_classification", "Classificação Inteligente", classes=["identificado", "nao_identificado"], input="{{last_user_message}}", output_variable="ai_identified", fallback="nao_identificado"),
         _node("hybrid_ai_condition", "condition", "Condição: IA identificou?", condition="{{ai_identified}}", branches=[
@@ -205,14 +201,11 @@ def _hybrid_service_fallback_graph() -> dict[str, Any]:
         ("hybrid_atendimento", "hybrid_resolved_question", None),
         ("hybrid_comercial", "hybrid_resolved_question", None),
         ("hybrid_financeiro", "hybrid_resolved_question", None),
-        ("hybrid_resolved_question", "hybrid_resolved_condition", "sim"),
-        ("hybrid_resolved_question", "hybrid_resolved_condition", "nao"),
-        ("hybrid_resolved_condition", "hybrid_closed", "true"),
-        ("hybrid_resolved_condition", "hybrid_ai", "false"),
+        ("hybrid_resolved_question", "hybrid_closed", "sim"),
+        ("hybrid_resolved_question", "hybrid_ai", "nao"),
         ("hybrid_ai", "hybrid_ai_condition", "default"),
         ("hybrid_ai_condition", "hybrid_specific", "true"),
         ("hybrid_ai_condition", "hybrid_handoff", "false"),
-        ("hybrid_specific", "hybrid_wait", "default"),
         ("hybrid_handoff", "hybrid_wait", "default"),
     ]
     asset = _asset("atendimento_com_fallback_para_ia", "Atendimento com fallback para IA", "hybrid", nodes, edges)
@@ -222,15 +215,15 @@ def _hybrid_service_fallback_graph() -> dict[str, Any]:
     positions = {
         "start": (0, 360), "hybrid_welcome": (320, 360), "hybrid_register": (640, 360), "hybrid_menu": (960, 360),
         "hybrid_atendimento": (1280, 40), "hybrid_comercial": (1280, 360), "hybrid_financeiro": (1280, 680),
-        "hybrid_resolved_question": (1600, 360), "hybrid_resolved_condition": (1920, 360),
-        "hybrid_closed": (2240, 40), "hybrid_ai": (2240, 520), "hybrid_ai_condition": (2560, 520),
-        "hybrid_specific": (2880, 360), "hybrid_handoff": (2880, 680), "hybrid_wait": (3200, 680),
+        "hybrid_resolved_question": (1600, 360),
+        "hybrid_closed": (1920, 40), "hybrid_ai": (1920, 520), "hybrid_ai_condition": (2240, 520),
+        "hybrid_specific": (2560, 360), "hybrid_handoff": (2560, 680), "hybrid_wait": (2880, 680),
     }
     for node in asset["graph"]["nodes"]:
         x, y = positions[node["key"]]
         node["position"] = {"x": x, "y": y}
     asset["description"] = "Atendimento híbrido didático: três setores convergem para validação, IA classificadora e fallback humano explícito."
-    asset["metadata"].update({"architecture": "horizontal_hybrid_fallback_v1", "layout": "manual", "layout_direction": "LR", "column_count": 11, "branch_count": 3, "ai_role": "classification_only", "validate_editor_handles": True})
+    asset["metadata"].update({"architecture": "horizontal_hybrid_fallback_v2", "layout": "manual", "layout_direction": "LR", "column_count": 10, "branch_count": 3, "ai_role": "classification_only", "validate_editor_handles": True})
     return asset
 
 

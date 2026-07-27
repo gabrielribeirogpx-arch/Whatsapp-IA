@@ -174,7 +174,8 @@ def test_hybrid_service_fallback_is_an_explicit_runtime_v2_composition():
     nodes = {node["key"]: node for node in asset["graph"]["nodes"]}
     edges = asset["graph"]["edges"]
 
-    assert len(nodes) == 15
+    assert len(nodes) == 14
+    assert "hybrid_resolved_condition" not in nodes
     assert "ai_system" not in {node["type"] for node in nodes.values()}
     assert nodes["hybrid_ai"]["type"] == "ai_classification"
     assert nodes["hybrid_handoff"]["config"]["action"] == "human_handoff"
@@ -188,7 +189,11 @@ def test_hybrid_service_fallback_is_an_explicit_runtime_v2_composition():
         ("financeiro", "hybrid_financeiro"),
     ]
     assert all(any(edge["source"] == f"hybrid_{route}" and edge["target"] == "hybrid_resolved_question" for edge in edges) for route in ("atendimento", "comercial", "financeiro"))
-    assert any(edge["source"] == "hybrid_resolved_condition" and edge["source_handle"] == "false" and edge["target"] == "hybrid_ai" for edge in edges)
+    resolved_edges = [edge for edge in edges if edge["source"] == "hybrid_resolved_question"]
+    assert [(edge["source_handle"], edge["target"]) for edge in resolved_edges] == [
+        ("sim", "hybrid_closed"),
+        ("nao", "hybrid_ai"),
+    ]
     assert any(edge["source"] == "hybrid_ai_condition" and edge["source_handle"] == "false" and edge["target"] == "hybrid_handoff" for edge in edges)
 
 
@@ -207,7 +212,7 @@ def test_hybrid_service_fallback_asset_has_complete_visual_graph_integrity():
         incoming[edge["target"]].append(edge)
 
     terminal = {key for key, node in nodes.items() if node["config"].get("isEnd")}
-    assert terminal == {"hybrid_closed", "hybrid_wait"}
+    assert terminal == {"hybrid_closed", "hybrid_specific", "hybrid_wait"}
     assert all(incoming[key] for key in nodes if key != "start")
     assert all(outgoing[key] for key in nodes if key not in terminal)
 
@@ -225,12 +230,15 @@ def test_hybrid_service_fallback_asset_has_complete_visual_graph_integrity():
             assert len(outgoing[key]) == 2
             assert {edge["source_handle"] for edge in outgoing[key]} == {"true", "false"}
 
+    assert [(edge["source_handle"], edge["target"]) for edge in outgoing["hybrid_resolved_question"]] == [
+        ("sim", "hybrid_closed"),
+        ("nao", "hybrid_ai"),
+    ]
     assert [edge["target"] for edge in outgoing["hybrid_ai"]] == ["hybrid_ai_condition"]
     assert [(edge["source_handle"], edge["target"]) for edge in outgoing["hybrid_ai_condition"]] == [
         ("true", "hybrid_specific"),
         ("false", "hybrid_handoff"),
     ]
-    assert [edge["target"] for edge in outgoing["hybrid_specific"]] == ["hybrid_wait"]
     assert [edge["target"] for edge in outgoing["hybrid_handoff"]] == ["hybrid_wait"]
 
     materialized_nodes, materialized_edges = MarketplaceInstallationService._materialize(
@@ -253,8 +261,8 @@ def test_hybrid_service_fallback_asset_has_complete_visual_graph_integrity():
         for edge in persisted_edges
     }
     expected_handles = {
-        ("hybrid_resolved_condition", "hybrid_closed"): "true",
-        ("hybrid_resolved_condition", "hybrid_ai"): "false",
+        ("hybrid_resolved_question", "hybrid_closed"): "sim",
+        ("hybrid_resolved_question", "hybrid_ai"): "nao",
         ("hybrid_ai", "hybrid_ai_condition"): "default",
         ("hybrid_ai_condition", "hybrid_specific"): "true",
         ("hybrid_ai_condition", "hybrid_handoff"): "false",
@@ -285,7 +293,7 @@ def test_hybrid_validator_rejects_a_handle_that_react_flow_does_not_render():
     from copy import deepcopy
 
     asset = deepcopy(ASSETS["atendimento_com_fallback_para_ia"])
-    edge = next(edge for edge in asset["graph"]["edges"] if edge["source"] == "hybrid_resolved_condition")
+    edge = next(edge for edge in asset["graph"]["edges"] if edge["source"] == "hybrid_ai_condition")
     edge["source_handle"] = "sim"
 
     with pytest.raises(MarketplaceGraphValidationError, match="condition_handle_requires_one_edge|invalid_condition_edge_handle"):
@@ -297,7 +305,7 @@ def test_hybrid_service_fallback_uses_authored_left_to_right_columns():
     nodes = {node["key"]: node for node in asset["graph"]["nodes"]}
 
     assert asset["metadata"]["layout_direction"] == "LR"
-    assert asset["metadata"]["column_count"] == 11
+    assert asset["metadata"]["column_count"] == 10
     assert {nodes[f"hybrid_{route}"]["position"]["x"] for route in ("atendimento", "comercial", "financeiro")} == {1280}
     assert [nodes[f"hybrid_{route}"]["position"]["y"] for route in ("atendimento", "comercial", "financeiro")] == [40, 360, 680]
     assert all(nodes[edge["target"]]["position"]["x"] > nodes[edge["source"]]["position"]["x"] for edge in asset["graph"]["edges"])
