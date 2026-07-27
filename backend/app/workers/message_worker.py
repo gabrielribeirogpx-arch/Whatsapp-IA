@@ -315,7 +315,7 @@ def process_incoming_message(payload: dict[str, Any]) -> None:
         parsed.get("interactive_reply_id") or "n/a",
         parsed.get("selected_row_id") or "n/a",
         parsed.get("selected_row_id") or parsed.get("interactive_reply_id") or "n/a",
-        "n/a",
+        parsed.get("selected_row_id") or parsed.get("interactive_reply_id") or "n/a",
         parsed.get("text") or "n/a",
         "n/a", "n/a",
     )

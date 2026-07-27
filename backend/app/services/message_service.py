@@ -174,7 +174,8 @@ def normalize_meta_message(payload: dict[str, Any]) -> list[dict[str, str | None
                     interactive_reply_id or "n/a",
                     normalized_message["selected_row_id"] or "n/a",
                     normalized_message["selected_row_id"] or "n/a",
-                    "n/a", "n/a", "n/a",
+                    normalized_message["selected_row_id"] or "n/a",
+                    "n/a", "n/a",
                 )
                 if message_type == "interactive":
                     _log_meta_message_marker("[CHOICE PARSED]", message=message, payload=normalized_message)

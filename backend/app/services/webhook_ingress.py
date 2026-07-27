@@ -109,6 +109,8 @@ def _log_interactive_ingress(payload: dict[str, Any], *, correlation_id: str) ->
             continue
         interactive = message.get("interactive") if isinstance(message.get("interactive"), dict) else {}
         button_reply = interactive.get("button_reply") if isinstance(interactive.get("button_reply"), dict) else {}
+        list_reply = interactive.get("list_reply") if isinstance(interactive.get("list_reply"), dict) else {}
+        interactive_reply_id = str(button_reply.get("id") or list_reply.get("id") or "").strip()
         logger.info(
             "event=meta_webhook_interactive_pipeline stage=webhook_received correlation_id=%s "
             "message.type=%s interactive.type=%s button_reply.id=%s interactive_reply_id=%s "
@@ -117,8 +119,12 @@ def _log_interactive_ingress(payload: dict[str, Any], *, correlation_id: str) ->
             message.get("type") or "n/a",
             interactive.get("type") or "n/a",
             button_reply.get("id") or "n/a",
-            "n/a", "n/a", "n/a", "n/a", "n/a", "n/a",
-            _json_log_payload(payload),
+            interactive_reply_id or "n/a",
+            interactive_reply_id or "n/a",
+            interactive_reply_id or "n/a",
+            interactive_reply_id or "n/a",
+            "n/a", "n/a",
+            _safe_webhook_log_payload(payload),
         )
 
 

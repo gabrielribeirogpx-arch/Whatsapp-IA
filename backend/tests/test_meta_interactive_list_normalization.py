@@ -8,6 +8,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 os.environ.setdefault("DATABASE_URL", "sqlite:///./test.db")
 
 from app.services.message_service import normalize_meta_message
+from app.services.webhook_ingress import _log_interactive_ingress
 
 
 def _interactive_payload(reply_type, reply_id, title):
@@ -33,6 +34,48 @@ def test_button_reply_preserves_stable_id_as_runtime_selection():
         "interactive_reply_id": "comercial", "interactive_reply_title": "Comercial",
         "selected_row_id": "comercial", "selected_title": "Comercial",
     }
+
+
+def test_button_reply_pipeline_log_exposes_canonical_choice_key(caplog):
+    with caplog.at_level("INFO"):
+        normalize_meta_message(_interactive_payload("button_reply", "comercial", "Comercial"))
+
+    pipeline_log = next(
+        record.getMessage()
+        for record in caplog.records
+        if "stage=normalize_meta_message" in record.getMessage()
+    )
+    assert "message.type=interactive" in pipeline_log
+    assert "interactive.type=button_reply" in pipeline_log
+    assert "button_reply.id=comercial" in pipeline_log
+    assert "interactive_reply_id=comercial" in pipeline_log
+    assert "selected_row_id=comercial" in pipeline_log
+    assert "row_id=comercial" in pipeline_log
+    assert "runtime_choice_key=comercial" in pipeline_log
+
+
+def test_webhook_ingress_logs_button_reply_identity_without_message_body(caplog):
+    payload = _interactive_payload("button_reply", "comercial", "Comercial")
+    payload["entry"][0]["changes"][0]["value"]["messages"][0]["text"] = {
+        "body": "conteudo privado"
+    }
+
+    with caplog.at_level("INFO"):
+        _log_interactive_ingress(payload, correlation_id="wamid.comercial")
+
+    ingress_log = next(
+        record.getMessage()
+        for record in caplog.records
+        if "stage=webhook_received" in record.getMessage()
+    )
+    assert "message.type=interactive" in ingress_log
+    assert "interactive.type=button_reply" in ingress_log
+    assert "button_reply.id=comercial" in ingress_log
+    assert "interactive_reply_id=comercial" in ingress_log
+    assert "selected_row_id=comercial" in ingress_log
+    assert "row_id=comercial" in ingress_log
+    assert "runtime_choice_key=comercial" in ingress_log
+    assert "conteudo privado" not in ingress_log
 
 
 def test_normalize_meta_message_preserves_interactive_list_reply_metadata():
