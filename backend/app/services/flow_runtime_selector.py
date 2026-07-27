@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.flow_v2.channel_adapter import WhatsAppAdapter
 from app.flow_v2.contracts import resolve_runtime_choice_key
+from app.observability.runtime_choice_trace import runtime_exit, runtime_trace
 from app.flow_v2.runtime_worker import FlowV2InputEvent, FlowV2RuntimeWorker, FlowV2WorkerResult
 from app.models import Conversation
 from app.models.flow import Flow
@@ -189,6 +190,11 @@ def _enqueue_whatsapp_text(
         sorted(metadata.keys()),
     )
     job_id = enqueue_send_message(payload)
+    runtime_trace(logger, "send_enqueue", metadata=metadata,
+                  correlation_id=payload.get("correlation_id"), conversation_id=resolved_conversation_id,
+                  session_id=resolved_session_id, flow_id=payload.get("flow_id"),
+                  flow_version_id=payload.get("flow_version_id"), current_node_id=payload.get("node_id"),
+                  node_executed=True, message_sent=bool(job_id))
     logger.info(
         "event=runtime_v2_choice_trace stage=send_message status=%s reason=%s "
         "session_id=%s node_id=%s runtime_choice_key=%s job_id=%s",
@@ -280,6 +286,9 @@ class FlowRuntimeSelector:
             runtime_metadata.get("row_id"),
             runtime_metadata.get("sourceHandle"),
         )
+        runtime_trace(logger, "flow_runtime_selector", metadata=runtime_metadata,
+                      correlation_id=input_message_id, conversation_id=getattr(conversation, "id", None),
+                      flow_id=getattr(flow, "id", None), flow_version_id=flow.published_version_id)
         logger.info(
             "event=meta_webhook_interactive_pipeline stage=flow_runtime_selector input_message_id=%s "
             "message.type=%s interactive.type=%s button_reply.id=%s interactive_reply_id=%s "

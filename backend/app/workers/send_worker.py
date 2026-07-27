@@ -793,6 +793,9 @@ def send_whatsapp_message(*, message_data: dict[str, Any]) -> None:
         getattr(current_job, "origin", None),
     )
     logger.info("event=send_worker_start correlation_id=%s tenant_id=%s phone=%s job_id=%s stage=send_worker_start", correlation_id, tenant_id or "n/a", phone or "n/a", job_id)
+    runtime_trace(logger, "send_worker", metadata=message_data, correlation_id=correlation_id,
+                  conversation_id=conversation_id, session_id=session_id, flow_id=flow_id,
+                  flow_version_id=flow_version_id, current_node_id=node_id, message_sent=False)
 
     lock_key = f"wa:send-lock:{tenant_id}:{phone}"
     last_sent_key = f"wa:last-sent-seq:{tenant_id}:{phone}"
@@ -1179,6 +1182,10 @@ def send_whatsapp_message(*, message_data: dict[str, Any]) -> None:
             len(text),
             bool(buttons),
         )
+        runtime_trace(logger, "send_worker.complete", metadata=message_data, correlation_id=correlation_id,
+                      conversation_id=conversation_id, session_id=session_id, flow_id=flow_id,
+                      flow_version_id=flow_version_id, current_node_id=node_id,
+                      node_executed=True, message_sent=True)
         if sequence_number is not None:
             redis_client.set(last_sent_key, sequence_number)
 
@@ -1224,3 +1231,4 @@ def send_whatsapp_message(*, message_data: dict[str, Any]) -> None:
             sequence_number=sequence_number_raw,
         )
         logger.info("[OUTBOUND SEND LOCK RELEASED] tenant_id=%s phone=%s", tenant_id, phone)
+from app.observability.runtime_choice_trace import runtime_trace

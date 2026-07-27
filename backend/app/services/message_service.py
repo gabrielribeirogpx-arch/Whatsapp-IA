@@ -4,6 +4,7 @@ import re
 from typing import Any
 
 from app.utils.phone import normalize_phone
+from app.observability.runtime_choice_trace import runtime_exit, runtime_trace
 
 logger = logging.getLogger(__name__)
 
@@ -145,6 +146,11 @@ def normalize_meta_message(payload: dict[str, Any]) -> list[dict[str, str | None
 
                 phone = sanitize_phone(message.get("from", "") or fallback_phone)
                 if not phone:
+                    runtime_exit(logger, "normalize_meta_message", reason="missing_phone",
+                                 correlation_id=sanitize_text(str(message.get("id", ""))),
+                                 **{"message.type": message_type, "interactive.type": interactive_type,
+                                    "button_reply.id": interactive_reply_id,
+                                    "button_reply.title": interactive_reply_title})
                     continue
 
                 normalized_message = {
@@ -181,6 +187,13 @@ def normalize_meta_message(payload: dict[str, Any]) -> list[dict[str, str | None
                     _log_meta_message_marker("[CHOICE PARSED]", message=message, payload=normalized_message)
                 _log_meta_message_marker("[MESSAGE NORMALIZED]", message=message, payload=normalized_message)
                 normalized.append(normalized_message)
+                runtime_trace(logger, "normalize_meta_message", metadata=normalized_message,
+                              correlation_id=normalized_message["message_id"],
+                              **{"message.type": message_type, "interactive.type": interactive_type,
+                                 "button_reply.id": interactive_reply_id,
+                                 "button_reply.title": interactive_reply_title,
+                                 "row_id": interactive_reply_id or None,
+                                 "runtime_choice_key": interactive_reply_id or None})
 
     logger.info("[NORMALIZE_META_MESSAGE COMPLETE] count=%s normalized=%s", len(normalized), _json_log_payload(normalized))
     return normalized
