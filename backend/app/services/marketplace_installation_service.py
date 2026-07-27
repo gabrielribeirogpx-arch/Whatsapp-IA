@@ -11,7 +11,7 @@ from app.models.product_analytics import ProductEvent
 
 VARIANTS = {"Sem IA", "Híbrida", "IA Completa"}
 VARIANT_KEYS = {"Sem IA": "no_ai", "Híbrida": "hybrid", "IA Completa": "full_ai", "Híbrido": "hybrid"}
-FLOWS = ["Recepção inicial", "Qualificação do paciente", "Agendamento", "Confirmação", "Reagendamento", "Cancelamento", "Lembrete", "Pós-consulta", "Pesquisa de satisfação", "Recuperação de paciente inativo", "Transferência humana"]
+FLOWS = ["Menu Principal", "Primeira Consulta", "Emergência", "Avaliação", "Orçamento", "Confirmação", "Reagendamento", "Cancelamento", "Pós Consulta", "Pesquisa", "Recuperação", "Financeiro"]
 PIPELINE = ["Novo paciente", "Triagem realizada", "Consulta solicitada", "Consulta agendada", "Confirmado", "Compareceu", "Tratamento em andamento", "Retorno previsto", "Concluído", "Não compareceu", "Recuperação"]
 TAGS = ["primeira_consulta", "retorno", "urgencia", "particular", "convenio", "implante", "ortodontia", "avaliacao_pendente", "paciente_inativo", "handoff_humano"]
 FIELDS = ["tipo de atendimento", "especialidade", "convênio", "primeira consulta", "urgência", "profissional responsável", "data da última consulta", "retorno previsto", "origem do lead"]
@@ -46,7 +46,7 @@ class MarketplaceInstallationService:
                 graph["nodes"].insert(2, {"key": ai_key, "type": "ai_classification", "position": {"x": 420, "y": 180}, "config": {"label": "Interpretação odontológica", "classes": ["consulta", "especialidade", "urgência", "convênio", "retorno"], "fallback": "human_handoff"}})
                 graph["edges"] = [edge for edge in graph["edges"] if not (edge["source"] == previous and edge["target"] == target)] + [{"source": previous, "target": ai_key}, {"source": ai_key, "target": target}]
                 asset["required_node_types"] = sorted(set(asset["required_node_types"]) | {"ai_classification"})
-                asset["educational_metadata"][ai_key] = {"purpose": "Interpretar intenção odontológica", "input": "mensagem do paciente", "output": "intenção classificada", "why_here": "Apoia a rota determinística sem substituir regras e handoff."}
+                asset["educational_metadata"][ai_key] = {"purpose": "Interpretar intenção odontológica sem tomar a decisão operacional", "when_to_use": "Use depois da contextualização e antes da regra determinística.", "best_practices": ["Defina classes fechadas", "Mantenha fallback humano", "Monitore confiança"], "alternatives": ["choice", "condition"], "common_mistakes": ["Permitir classes livres", "Remover o fallback"], "input": "mensagem do paciente", "output": "intenção classificada", "why_here": "Apoia a rota determinística sem substituir regras e handoff."}
         validator = MarketplaceGraphValidator()
         for asset in assets: validator.validate(asset)
         return item, variant_key, assets

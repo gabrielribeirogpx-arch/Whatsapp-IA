@@ -12,7 +12,7 @@ def test_dentistry_variants_only_declare_compatible_ai_resources(variant, knowle
 
 
 def test_dentistry_production_inventory_is_complete():
-    assert len(FLOWS) == 11
+    assert len(FLOWS) == 12
     assert len(PIPELINE) == 11
     assert len(TAGS) == 10
     assert len(FIELDS) == 9
