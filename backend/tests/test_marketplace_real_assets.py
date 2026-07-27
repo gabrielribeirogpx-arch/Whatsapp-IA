@@ -1,4 +1,5 @@
 from collections import defaultdict, deque
+import json
 
 import pytest
 from app.marketplace_assets import ASSETS, ITEMS, MarketplaceGraphValidator
@@ -104,7 +105,7 @@ def test_initial_menu_is_a_complete_acyclic_six_branch_reference_flow():
     assert len(ordered) == len(nodes)
 
     router_edges = [edge for edge in graph["edges"] if edge["source"] == "menu_main"]
-    option_ids = {option["id"] for option in nodes["menu_main"]["config"]["options"]}
+    option_ids = {option["handleId"] for option in nodes["menu_main"]["config"]["buttons"]}
     assert {edge["source_handle"] for edge in router_edges} == option_ids
     assert len(router_edges) == len(option_ids) == 6
     assert all(outgoing[edge["target"]] for edge in router_edges)
@@ -155,9 +156,55 @@ def test_initial_menu_uses_distinct_menu_handles_without_changing_graph_logic():
     branch_keys = ["atendimento", "comercial", "financeiro", "agendamento", "faq", "humano"]
     menu_edges = [edge for edge in asset["graph"]["edges"] if edge["source"] == "menu_main"]
 
-    assert [edge["source_handle"] for edge in menu_edges] == branch_keys
+    assert [edge["source_handle"] for edge in menu_edges] == [f"choice-{key}" for key in branch_keys]
     assert [edge["target"] for edge in menu_edges] == [f"menu_{key}" for key in branch_keys]
     # The shared renderer's target and source handles are Left and Right; the
     # asset itself must never request a vertical/TB layout.
     assert asset["metadata"]["layout"] == "manual"
     assert asset["metadata"]["layout_direction"] != "TB"
+
+
+def test_initial_menu_choice_contract_survives_installation_round_trip():
+    """Mirror the persisted shape produced by a manually authored Choice node."""
+    from app.services.marketplace_installation_service import MarketplaceInstallationService
+
+    asset = ASSETS["menu_inicial"]
+    persisted_nodes, persisted_edges = MarketplaceInstallationService._materialize(asset)
+    loaded = json.loads(json.dumps({"nodes": persisted_nodes, "edges": persisted_edges}))
+    nodes = {node["id"]: node for node in loaded["nodes"]}
+    choice_nodes = [node for node in nodes.values() if node["type"] == "choice"]
+
+    assert len(choice_nodes) == 1
+    choice = choice_nodes[0]
+    buttons = choice["data"]["buttons"]
+    assert choice["data"]["display_mode"] == "buttons"
+    assert len(buttons) == 6
+    assert "options" not in choice["data"]
+
+    option_handles = [button["handleId"] for button in buttons]
+    assert option_handles == [
+        "choice-atendimento", "choice-comercial", "choice-financeiro",
+        "choice-agendamento", "choice-faq", "choice-humano",
+    ]
+    assert [button["id"] for button in buttons] == option_handles
+
+    choice_edges = [edge for edge in loaded["edges"] if edge["source"] == choice["id"]]
+    assert len(choice_edges) == 6
+    assert [edge["sourceHandle"] for edge in choice_edges] == option_handles
+    assert len({edge["target"] for edge in choice_edges}) == 6
+    assert all(edge["target"] in nodes for edge in choice_edges)
+
+    outgoing = defaultdict(list)
+    for edge in loaded["edges"]:
+        assert edge["source"] in nodes
+        assert edge["target"] in nodes
+        outgoing[edge["source"]].append(edge["target"])
+    start = next(node["id"] for node in nodes.values() if node["type"] == "start")
+    reached, queue = set(), deque([start])
+    while queue:
+        node_id = queue.popleft()
+        if node_id in reached:
+            continue
+        reached.add(node_id)
+        queue.extend(outgoing[node_id])
+    assert reached == set(nodes)
