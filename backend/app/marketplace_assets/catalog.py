@@ -91,12 +91,12 @@ def _operational_graph(key: str, name: str, objective: str, *, segment: str = "g
 def _initial_menu_graph() -> dict[str, Any]:
     """Concise contact-centre menu, positioned by hand for the Flow Builder."""
     buttons = [
-        {"id": "choice-atendimento", "label": "Atendimento", "handleId": "choice-atendimento", "next": ""},
-        {"id": "choice-comercial", "label": "Comercial", "handleId": "choice-comercial", "next": ""},
-        {"id": "choice-financeiro", "label": "Financeiro", "handleId": "choice-financeiro", "next": ""},
-        {"id": "choice-agendamento", "label": "Agendamento", "handleId": "choice-agendamento", "next": ""},
-        {"id": "choice-faq", "label": "Dúvidas frequentes", "handleId": "choice-faq", "next": ""},
-        {"id": "choice-humano", "label": "Falar com atendente", "handleId": "choice-humano", "next": ""},
+        {"id": "atendimento", "value": "atendimento", "label": "Atendimento", "handleId": "atendimento", "next": ""},
+        {"id": "comercial", "value": "comercial", "label": "Comercial", "handleId": "comercial", "next": ""},
+        {"id": "financeiro", "value": "financeiro", "label": "Financeiro", "handleId": "financeiro", "next": ""},
+        {"id": "agendamento", "value": "agendamento", "label": "Agendamento", "handleId": "agendamento", "next": ""},
+        {"id": "duvidas_frequentes", "value": "duvidas_frequentes", "label": "Dúvidas frequentes", "handleId": "duvidas_frequentes", "next": ""},
+        {"id": "falar_com_atendente", "value": "falar_com_atendente", "label": "Falar com atendente", "handleId": "falar_com_atendente", "next": ""},
     ]
     nodes = [
         _node("start", "start", "Início"),
@@ -121,9 +121,17 @@ def _initial_menu_graph() -> dict[str, Any]:
         ("menu_welcome", "menu_identification", None),
         ("menu_identification", "menu_main", None),
     ]
+    branch_handles = {
+        "atendimento": "atendimento",
+        "comercial": "comercial",
+        "financeiro": "financeiro",
+        "agendamento": "agendamento",
+        "faq": "duvidas_frequentes",
+        "humano": "falar_com_atendente",
+    }
     for key, *_ in branches:
         edges.extend([
-            ("menu_main", f"menu_{key}", f"choice-{key}"),
+            ("menu_main", f"menu_{key}", branch_handles[key]),
             (f"menu_{key}", "menu_end", None),
         ])
 
@@ -152,6 +160,7 @@ def _initial_menu_graph() -> dict[str, Any]:
         node["position"] = {"x": x, "y": y}
     asset["description"] = "Boas-vindas e identificação seguidas por um menu com seis rotas e encerramento único."
     asset["metadata"].update({"architecture": "horizontal_initial_menu_v3", "layout": "manual", "layout_direction": "LR", "branch_count": len(branches)})
+    asset["educational_metadata"]["menu_main"]["option_ids"] = list(branch_handles.values())
     return asset
 
 

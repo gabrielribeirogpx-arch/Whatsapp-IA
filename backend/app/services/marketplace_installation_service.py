@@ -65,7 +65,22 @@ class MarketplaceInstallationService:
     def _materialize(asset):
         ids = {node["key"]: str(uuid.uuid4()) for node in asset["graph"]["nodes"]}
         nodes = [{"id": ids[node["key"]], "type": node["type"], "position": node["position"], "data": {**node["config"], "marketplace_asset_key": asset["key"], "educational_metadata": asset["educational_metadata"].get(node["key"], {})}} for node in asset["graph"]["nodes"]]
-        edges = [{"id": str(uuid.uuid4()), "source": ids[edge["source"]], "target": ids[edge["target"]], **({"sourceHandle": edge["source_handle"]} if edge.get("source_handle") else {})} for edge in asset["graph"]["edges"]]
+        edges = []
+        for edge in asset["graph"]["edges"]:
+            source_handle = edge.get("sourceHandle", edge.get("source_handle"))
+            target_handle = edge.get("targetHandle", edge.get("target_handle"))
+            materialized = {
+                **{key: value for key, value in edge.items() if key not in {"id", "source", "target", "source_handle", "target_handle", "sourceHandle", "targetHandle"}},
+                "id": str(uuid.uuid4()),
+                "source": ids[edge["source"]],
+                "target": ids[edge["target"]],
+                "type": edge.get("type", "default"),
+            }
+            if source_handle is not None:
+                materialized["sourceHandle"] = source_handle
+            if target_handle is not None:
+                materialized["targetHandle"] = target_handle
+            edges.append(materialized)
         return nodes, edges
     def install(self, slug: str, variant: str, key: str):
         self._assert_access()
