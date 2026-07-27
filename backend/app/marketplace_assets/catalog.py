@@ -206,6 +206,7 @@ def _hybrid_service_fallback_graph() -> dict[str, Any]:
         ("hybrid_ai", "hybrid_ai_condition", None),
         ("hybrid_ai_condition", "hybrid_specific", "sim"),
         ("hybrid_ai_condition", "hybrid_handoff", "nao"),
+        ("hybrid_specific", "hybrid_wait", None),
         ("hybrid_handoff", "hybrid_wait", None),
     ]
     asset = _asset("atendimento_com_fallback_para_ia", "Atendimento com fallback para IA", "hybrid", nodes, edges)
