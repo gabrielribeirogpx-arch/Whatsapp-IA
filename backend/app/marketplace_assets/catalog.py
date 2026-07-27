@@ -241,10 +241,10 @@ def _hybrid_service_fallback_graph() -> dict[str, Any]:
     # each route on its own horizontal lane makes the authored edges inspectable.
     positions = {
         "start": (0, 360), "hybrid_welcome": (320, 360), "hybrid_register": (640, 360), "hybrid_menu": (960, 360),
-        "hybrid_atendimento": (1280, 40), "hybrid_comercial": (1280, 360), "hybrid_financeiro": (1280, 680),
-        "hybrid_resolved_question": (1600, 360),
-        "hybrid_closed": (1920, 40), "hybrid_ai": (1920, 520), "hybrid_ai_condition": (2240, 520),
-        "hybrid_specific": (2560, 400), "hybrid_handoff": (2560, 640), "hybrid_wait": (2880, 640),
+        "hybrid_atendimento": (1500, 40), "hybrid_comercial": (1500, 360), "hybrid_financeiro": (1500, 680),
+        "hybrid_resolved_question": (1820, 360),
+        "hybrid_closed": (2140, 40), "hybrid_ai": (2140, 520), "hybrid_ai_condition": (2460, 520),
+        "hybrid_specific": (2780, 400), "hybrid_handoff": (2780, 640), "hybrid_wait": (3100, 640),
     }
     for node in asset["graph"]["nodes"]:
         x, y = positions[node["key"]]
