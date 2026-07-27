@@ -591,6 +591,8 @@ async def _process_meta_webhook(request: Request, db: Session) -> dict[str, str]
                         "interactive_reply_title": incoming.get("interactive_reply_title"),
                         "selected_row_id": incoming.get("selected_row_id") or incoming.get("interactive_reply_id"),
                         "selected_title": incoming.get("selected_title") or incoming.get("interactive_reply_title"),
+                        "row_id": incoming.get("selected_row_id") or incoming.get("interactive_reply_id"),
+                        "message_text": incoming_message,
                         "selected_flow_reason": selected_flow_reason or "webhook_selected_flow",
                     },
                 )

@@ -20,7 +20,7 @@ from app.flow_v2.actions import (
     SendMediaAction,
     SendMessageAction,
 )
-from app.flow_v2.contracts import AiRagAfterAnswerBehavior, FlowV2EventType, RuntimeInput
+from app.flow_v2.contracts import AiRagAfterAnswerBehavior, FlowV2EventType, RuntimeInput, resolve_runtime_choice_key
 from app.flow_v2.models import FlowV2ScheduledJob
 from app.models.contact import Contact
 from app.models.conversation import Conversation
@@ -485,9 +485,7 @@ class ChoiceNodeExecutor(BaseNodeExecutor):
             node_id=node_id,
             payload={"node_id": node_id, "option_ids": option_ids},
         )
-        row_id = runtime_input.metadata.get("row_id") or runtime_input.metadata.get(
-            "sourceHandle"
-        )
+        row_id = resolve_runtime_choice_key(runtime_input.metadata)
         logger.info(
             "[CHOICE PARSED] source=RuntimeV2ChoiceResolver node_id=%s session_id=%s message_text=%s row_id=%s sourceHandle=%s selected_row_id=%s interactive_reply_id=%s expected_runtime_choice_key=row_id_or_sourceHandle option_ids=%s",
             node_id,
@@ -569,6 +567,12 @@ class ChoiceNodeExecutor(BaseNodeExecutor):
             return result
         row_id = str(row_id)
         if row_id not in option_ids:
+            # Preserve exact-ID semantics first; case folding is only a
+            # compatibility fallback for manually authored option IDs.
+            folded_matches = [option_id for option_id in option_ids if option_id.lower() == row_id.lower()]
+            if len(folded_matches) == 1:
+                row_id = folded_matches[0]
+        if row_id not in option_ids:
             logger.error(
                 "[CHOICE OPTION NOT FOUND] node_id=%s session_id=%s received_row_id=%s allowed_option_ids=%s selected_row_id=%s interactive_reply_id=%s reason=row_id_not_in_option_ids",
                 node_id,
@@ -607,6 +611,12 @@ class ChoiceNodeExecutor(BaseNodeExecutor):
             source_node_id=node_id,
             source_handle=row_id,
         ).target_node_id
+        logger.info(
+            "[CHOICE RESOLVED] option_id=%s source_handle=%s next_node_id=%s",
+            row_id,
+            row_id,
+            next_node_id,
+        )
         logger.info(
             "[CHOICE NEXT NODE] node_id=%s session_id=%s source_handle=%s next_node_id=%s next_node_exists=%s",
             node_id,

@@ -7,6 +7,7 @@ from types import SimpleNamespace
 os.environ.setdefault("DATABASE_URL", "sqlite+pysqlite:///:memory:")
 
 from app.flow_v2.contracts import FlowV2SessionStatus, RuntimeOutput
+from app.flow_v2.contracts import RuntimeInput, resolve_runtime_choice_key
 from app.flow_v2.runtime_worker import FlowV2WorkerResult
 from app.services import flow_runtime_selector
 from app.services.flow_runtime_selector import (
@@ -248,6 +249,64 @@ def test_numeric_choice_does_not_set_restart_metadata() -> None:
 
     assert "restart_keyword" not in worker.calls[0]["input_event"].metadata
     assert "auto_restart_flow" not in worker.calls[0]["input_event"].metadata
+
+
+def test_interactive_reply_pipeline_keeps_all_runtime_choice_aliases() -> None:
+    worker = _FakeWorker()
+    flow = SimpleNamespace(id=uuid.uuid4(), runtime="v2", published_version_id=uuid.uuid4())
+
+    FlowRuntimeSelector(runtime_worker=worker).dispatch(
+        db=object(), flow=flow, tenant_id=uuid.uuid4(), phone="5511999999999",
+        message_text="comercial", conversation=SimpleNamespace(id=uuid.uuid4(), current_flow_id=flow.id),
+        metadata={
+            "message_type": "interactive", "interactive_type": "button_reply",
+            "interactive_reply_id": "comercial", "interactive_reply_title": "Comercial",
+            "selected_row_id": "comercial", "selected_title": "Comercial",
+        },
+    )
+
+    event = worker.calls[0]["input_event"]
+    runtime_input = event.to_runtime_input()
+    assert resolve_runtime_choice_key(runtime_input.metadata) == "comercial"
+    assert runtime_input.metadata["runtime_choice_key"] == "comercial"
+    assert runtime_input.metadata["row_id"] == "comercial"
+    assert runtime_input.metadata["sourceHandle"] == "comercial"
+    assert runtime_input.metadata["message_text"] == "comercial"
+
+
+def test_interactive_reply_never_triggers_restart_keyword() -> None:
+    worker = _FakeWorker()
+    flow = SimpleNamespace(id=uuid.uuid4(), runtime="v2", published_version_id=uuid.uuid4())
+    FlowRuntimeSelector(runtime_worker=worker).dispatch(
+        db=object(), flow=flow, tenant_id=uuid.uuid4(), phone="5511999999999",
+        message_text="menu", conversation=SimpleNamespace(id=uuid.uuid4(), current_flow_id=flow.id),
+        metadata={"interactive_type": "button_reply", "interactive_reply_id": "menu"},
+    )
+    assert "restart_keyword" not in worker.calls[0]["input_event"].metadata
+
+
+def test_interactive_restart_word_keeps_conversation_current_flow() -> None:
+    current = SimpleNamespace(id=uuid.uuid4())
+
+    class _Scalars:
+        def first(self): return current
+    class _Result:
+        def scalars(self): return _Scalars()
+    class _Db:
+        def execute(self, _query): return _Result()
+
+    conversation = SimpleNamespace(id=uuid.uuid4(), current_flow_id=current.id, mode="flow")
+    resolved = resolve_runtime_flow_for_conversation(
+        db=_Db(), tenant_id=uuid.uuid4(), conversation=conversation,
+        message_text="menu", is_interactive_reply=True,
+    )
+    assert resolved is current
+
+
+def test_runtime_choice_key_priority_and_typed_text_behavior() -> None:
+    assert resolve_runtime_choice_key({"selected_row_id": "financeiro", "interactive_reply_id": "comercial", "row_id": "other"}) == "financeiro"
+    typed = RuntimeInput(tenant_id=uuid.uuid4(), flow_version_id=uuid.uuid4(), external_user_id="1", message_text="Comercial")
+    assert resolve_runtime_choice_key(typed.metadata) is None
 
 
 def test_restart_keyword_archives_active_v2_session_and_starts_at_snapshot_start() -> None:
