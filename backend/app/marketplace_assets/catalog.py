@@ -89,7 +89,7 @@ def _operational_graph(key: str, name: str, objective: str, *, segment: str = "g
 
 
 def _initial_menu_graph() -> dict[str, Any]:
-    """Reference contact-centre flow, positioned by hand for the Flow Builder."""
+    """Concise contact-centre menu, positioned by hand for the Flow Builder."""
     options = [
         {"id": "atendimento", "label": "Atendimento"},
         {"id": "comercial", "label": "Comercial"},
@@ -99,59 +99,48 @@ def _initial_menu_graph() -> dict[str, Any]:
         {"id": "humano", "label": "Falar com uma pessoa"},
     ]
     nodes = [
-        _node("start", "start", "Início do atendimento"),
-        _node("menu_welcome", "message", "Mensagem de boas-vindas", content="Olá, {{contact.name}}! Boas-vindas à nossa central de atendimento."),
-        _node("menu_context", "action", "Preparar contexto do contato", action="set_variables", fields={"customer_name": "{{contact.name}}", "service_origin": "menu_inicial"}),
-        _node("menu_prompt", "message", "Menu principal", content="Como podemos ajudar? Escolha uma das opções abaixo."),
-        _node("menu_router", "choice", "Router principal", options=options, variable="service_route"),
+        _node("start", "start", "Início"),
+        _node("menu_welcome", "message", "Boas-vindas", content="Olá, {{contact.name}}! Boas-vindas à nossa central de atendimento."),
+        _node("menu_identification", "action", "Identificação", action="set_variables", fields={"customer_name": "{{contact.name}}", "service_origin": "menu_inicial"}),
+        _node("menu_main", "choice", "Menu principal", content="Como podemos ajudar? Escolha uma das opções abaixo.", options=options, variable="service_route"),
     ]
     branches = [
-        ("atendimento", "Atendimento", "Entendi. Vou encaminhar sua solicitação para a equipe de atendimento.", "atendimento"),
-        ("comercial", "Comercial", "Ótimo! Nossa equipe comercial vai continuar com você.", "comercial"),
-        ("financeiro", "Financeiro", "Certo. Vou direcionar sua solicitação para o financeiro.", "financeiro"),
-        ("agendamento", "Agendamento", "Vamos cuidar do seu agendamento com uma pessoa da equipe.", "agendamento"),
-        ("faq", "FAQ", "Vou encaminhar sua dúvida para que você receba uma resposta confiável.", "faq"),
-        ("humano", "Atendimento humano", "Claro. Vou chamar uma pessoa para continuar o atendimento.", "atendimento_humano"),
+        ("atendimento", "Atendimento", "Entendi. Sua solicitação foi direcionada para Atendimento."),
+        ("comercial", "Comercial", "Ótimo! Sua solicitação foi direcionada para Comercial."),
+        ("financeiro", "Financeiro", "Certo. Sua solicitação foi direcionada para Financeiro."),
+        ("agendamento", "Agendamento", "Vamos cuidar do seu agendamento."),
+        ("faq", "FAQ", "Vamos ajudar você com sua dúvida frequente."),
+        ("humano", "Humano", "Claro. Seu atendimento seguirá com uma pessoa da equipe."),
     ]
-    for key, label, content, queue in branches:
-        nodes.extend([
-            _node(f"menu_{key}_message", "message", f"Orientação · {label}", content=content),
-            _node(f"menu_{key}_route", "action", f"Registrar rota · {label}", action="set_variables", fields={"service_route": key, "service_queue": queue}),
-        ])
-    nodes.extend([
-        _node("menu_handoff", "action", "Transferência humana", action="human_handoff", queue="{{service_queue}}", include_context=True),
-        _node("menu_end", "message", "Encerramento", content="Pronto! Seu atendimento foi encaminhado. Nossa equipe continuará por aqui."),
-    ])
+    for key, label, content in branches:
+        nodes.append(_node(f"menu_{key}", "message", label, content=content))
+    nodes.append(_node("menu_end", "message", "Encerramento", content="Pronto! Encerramos esta etapa do atendimento. Conte conosco."))
 
     edges = [
         ("start", "menu_welcome", None),
-        ("menu_welcome", "menu_context", None),
-        ("menu_context", "menu_prompt", None),
-        ("menu_prompt", "menu_router", None),
+        ("menu_welcome", "menu_identification", None),
+        ("menu_identification", "menu_main", None),
     ]
     for key, *_ in branches:
         edges.extend([
-            ("menu_router", f"menu_{key}_message", key),
-            (f"menu_{key}_message", f"menu_{key}_route", None),
-            (f"menu_{key}_route", "menu_handoff", None),
+            ("menu_main", f"menu_{key}", key),
+            (f"menu_{key}", "menu_end", None),
         ])
-    edges.append(("menu_handoff", "menu_end", None))
 
     asset = _asset("menu_inicial", "Menu inicial", "no_ai", nodes, edges)
     positions = {
-        "start": (900, 40), "menu_welcome": (900, 220), "menu_context": (900, 400),
-        "menu_prompt": (900, 580), "menu_router": (900, 760),
-        "menu_handoff": (900, 1340), "menu_end": (900, 1520),
+        "start": (900, 40), "menu_welcome": (900, 220),
+        "menu_identification": (900, 400), "menu_main": (900, 580),
+        "menu_end": (900, 980),
     }
     branch_x = {key: index * 360 for index, (key, *_rest) in enumerate(branches)}
     for key, x in branch_x.items():
-        positions[f"menu_{key}_message"] = (x, 980)
-        positions[f"menu_{key}_route"] = (x, 1160)
+        positions[f"menu_{key}"] = (x, 780)
     for node in asset["graph"]["nodes"]:
         x, y = positions[node["key"]]
         node["position"] = {"x": x, "y": y}
-    asset["description"] = "Central de atendimento com seis rotas explícitas, handoff contextual e encerramento único."
-    asset["metadata"].update({"architecture": "reference_contact_centre_v2", "layout": "manual", "branch_count": len(branches)})
+    asset["description"] = "Boas-vindas e identificação seguidas por um menu com seis rotas e encerramento único."
+    asset["metadata"].update({"architecture": "concise_initial_menu_v2", "layout": "manual", "branch_count": len(branches)})
     return asset
 
 

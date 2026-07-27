@@ -24,7 +24,7 @@ const hybrid = ['Atendimento com fallback para IA','Qualificação inteligente',
 const systems: Array<[string,string?]> = [['Agenda Inteligente','agenda_inteligente'],['Atendimento Inteligente','atendimento_inteligente'],['Comercial Inteligente','comercial_inteligente']];
 const kitSegments = ['Clínica Odontológica','Clínica Médica','Veterinária','Imobiliária','Advocacia','Restaurante','Pet Shop','Academia','Escola','Hotel','Contabilidade','Oficina','E-commerce','Estética','Salão'];
 const operationalNodes = ['Start','Contextualização','Identificação','Captura de variáveis','Router','Qualificação','Score','Tag','CRM','Pipeline','Confirmação','Espera','Follow-up','Fallback','Transferência humana','Encerramento'];
-const initialMenuNodes = ['Início','Boas-vindas','Contexto do contato','Menu principal','Router principal','Mensagem Atendimento','Rota Atendimento','Mensagem Comercial','Rota Comercial','Mensagem Financeiro','Rota Financeiro','Mensagem Agendamento','Rota Agendamento','Mensagem FAQ','Rota FAQ','Mensagem Humano','Rota Humano','Transferência humana','Encerramento'];
+const initialMenuNodes = ['Início','Boas-vindas','Identificação','Menu principal','Atendimento','Comercial','Financeiro','Agendamento','FAQ','Humano','Encerramento'];
 const hybridNodes = [...operationalNodes.slice(0, 5),'Classificação IA',...operationalNodes.slice(5)];
 const intelligentNodes = ['Start','Contexto','RAG','Classificação IA','Condição','Captura de variáveis','CRM','Pipeline','Integração','Confirmação','Espera','Follow-up','Fallback','Transferência humana','Encerramento'];
 
