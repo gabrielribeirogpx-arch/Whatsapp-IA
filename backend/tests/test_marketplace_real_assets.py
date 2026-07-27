@@ -366,9 +366,9 @@ def test_hybrid_service_fallback_uses_authored_left_to_right_columns():
     assert asset["metadata"]["layout_direction"] == "LR"
     assert asset["metadata"]["column_count"] == 9
     assert [nodes[key]["position"] for key in ("hybrid_welcome", "hybrid_register", "hybrid_menu")] == [
-        {"x": 0, "y": 360},
-        {"x": 320, "y": 360},
-        {"x": 640, "y": 360},
+        {"x": 280, "y": 360},
+        {"x": 600, "y": 360},
+        {"x": 920, "y": 360},
     ]
     assert {nodes[f"hybrid_{route}"]["position"]["x"] for route in ("atendimento", "comercial", "financeiro")} == {1500}
     assert [nodes[f"hybrid_{route}"]["position"]["y"] for route in ("atendimento", "comercial", "financeiro")] == [40, 360, 680]

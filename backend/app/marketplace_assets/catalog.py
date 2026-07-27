@@ -238,7 +238,7 @@ def _hybrid_service_fallback_graph() -> dict[str, Any]:
     # One X coordinate per stage; Y only separates parallel outcomes.  Keeping
     # each route on its own horizontal lane makes the authored edges inspectable.
     positions = {
-        "hybrid_welcome": (0, 360), "hybrid_register": (320, 360), "hybrid_menu": (640, 360),
+        "hybrid_welcome": (280, 360), "hybrid_register": (600, 360), "hybrid_menu": (920, 360),
         "hybrid_atendimento": (1500, 40), "hybrid_comercial": (1500, 360), "hybrid_financeiro": (1500, 680),
         "hybrid_resolved_question": (1820, 360),
         "hybrid_closed": (2140, 40), "hybrid_ai": (2140, 520), "hybrid_ai_condition": (2460, 520),
