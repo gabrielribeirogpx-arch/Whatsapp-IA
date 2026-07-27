@@ -169,6 +169,42 @@ def test_initial_menu_choice_contract_survives_installation_round_trip():
     assert reached == set(nodes)
 
 
+def test_hybrid_service_fallback_is_an_explicit_runtime_v2_composition():
+    asset = ASSETS["atendimento_com_fallback_para_ia"]
+    nodes = {node["key"]: node for node in asset["graph"]["nodes"]}
+    edges = asset["graph"]["edges"]
+
+    assert len(nodes) == 15
+    assert "ai_system" not in {node["type"] for node in nodes.values()}
+    assert nodes["hybrid_ai"]["type"] == "ai_classification"
+    assert nodes["hybrid_handoff"]["config"]["action"] == "human_handoff"
+    assert nodes["hybrid_wait"]["config"]["content"] == "Aguarde um atendente."
+    assert nodes["hybrid_welcome"]["config"]["content"] == "Olá {{contact.name}}!"
+
+    menu_edges = [edge for edge in edges if edge["source"] == "hybrid_menu"]
+    assert [(edge["source_handle"], edge["target"]) for edge in menu_edges] == [
+        ("atendimento", "hybrid_atendimento"),
+        ("comercial", "hybrid_comercial"),
+        ("financeiro", "hybrid_financeiro"),
+    ]
+    assert all(any(edge["source"] == f"hybrid_{route}" and edge["target"] == "hybrid_resolved_question" for edge in edges) for route in ("atendimento", "comercial", "financeiro"))
+    assert any(edge["source"] == "hybrid_resolved_condition" and edge["source_handle"] == "nao" and edge["target"] == "hybrid_ai" for edge in edges)
+    assert any(edge["source"] == "hybrid_ai_condition" and edge["source_handle"] == "nao" and edge["target"] == "hybrid_handoff" for edge in edges)
+
+
+def test_hybrid_service_fallback_uses_authored_left_to_right_columns():
+    asset = ASSETS["atendimento_com_fallback_para_ia"]
+    nodes = {node["key"]: node for node in asset["graph"]["nodes"]}
+
+    assert asset["metadata"]["layout_direction"] == "LR"
+    assert asset["metadata"]["column_count"] == 11
+    assert {nodes[f"hybrid_{route}"]["position"]["x"] for route in ("atendimento", "comercial", "financeiro")} == {1280}
+    assert [nodes[f"hybrid_{route}"]["position"]["y"] for route in ("atendimento", "comercial", "financeiro")] == [40, 360, 680]
+    assert all(nodes[edge["target"]]["position"]["x"] > nodes[edge["source"]]["position"]["x"] for edge in asset["graph"]["edges"])
+    required_learning_fields = {"purpose", "when_to_use", "best_practices", "common_mistakes", "alternatives"}
+    assert all(required_learning_fields <= set(asset["educational_metadata"][key]) for key in nodes)
+
+
 def test_materialization_preserves_all_react_flow_edge_handle_fields():
     from copy import deepcopy
     from app.services.marketplace_installation_service import MarketplaceInstallationService
