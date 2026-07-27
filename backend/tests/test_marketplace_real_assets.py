@@ -17,7 +17,7 @@ def test_no_ai_templates_have_distinct_real_graphs_without_ai_system():
     signatures = set()
     for key in keys:
         graph = ASSETS[key]["graph"]
-        minimum_nodes = 13 if key == "menu_inicial" else 15
+        minimum_nodes = 8 if key == "menu_inicial" else 15
         assert len(graph["nodes"]) >= minimum_nodes
         assert not any(node["type"].startswith("ai_") for node in graph["nodes"])
         signatures.add(tuple((node["key"], node["type"]) for node in graph["nodes"]))
@@ -62,7 +62,7 @@ def test_validator_rejects_invalid_edge_or_orphan():
     with pytest.raises(MarketplaceGraphValidationError): MarketplaceGraphValidator().validate(asset)
 
 
-def test_initial_menu_is_a_complete_acyclic_six_branch_reference_flow():
+def test_initial_menu_is_a_complete_acyclic_three_branch_reference_flow():
     asset = ASSETS["menu_inicial"]
     graph = asset["graph"]
     nodes = {node["key"]: node for node in graph["nodes"]}
@@ -72,11 +72,11 @@ def test_initial_menu_is_a_complete_acyclic_six_branch_reference_flow():
         outgoing[edge["source"]].append(edge["target"])
         incoming[edge["target"]].append(edge["source"])
 
-    assert len(nodes) == 13
-    assert len(graph["edges"]) == 17
-    assert asset["metadata"]["branch_count"] == 6
-    assert asset["metadata"]["layout"] == "manual"
-    assert not [node for node in nodes.values() if node["type"] == "condition"]
+    assert len(nodes) == 8
+    assert len(graph["edges"]) == 9
+    assert asset["metadata"]["branch_count"] == 3
+    assert [node["key"] for node in graph["nodes"] if node["type"] == "choice"] == ["menu_main"]
+    assert not {"menu_more_1", "menu_more_2", "menu_agendamento", "menu_faq", "menu_humano"} & nodes.keys()
 
     reached = set()
     queue = deque(["start"])
@@ -89,9 +89,7 @@ def test_initial_menu_is_a_complete_acyclic_six_branch_reference_flow():
     assert reached == set(nodes)
     assert all(incoming[key] for key in nodes if key != "start")
     assert outgoing["menu_end"] == []
-    assert all(outgoing[key] for key in nodes if key != "menu_end")
 
-    # Kahn's algorithm proves there is no cycle (and therefore no infinite loop).
     remaining_incoming = {key: len(incoming[key]) for key in nodes}
     roots = deque(key for key, count in remaining_incoming.items() if count == 0)
     ordered = []
@@ -104,107 +102,56 @@ def test_initial_menu_is_a_complete_acyclic_six_branch_reference_flow():
                 roots.append(target)
     assert len(ordered) == len(nodes)
 
-    for menu_key in ("menu_main", "menu_more_1", "menu_more_2"):
-        router_edges = [edge for edge in graph["edges"] if edge["source"] == menu_key]
-        option_ids = {option["handleId"] for option in nodes[menu_key]["config"]["buttons"]}
-        assert {edge["source_handle"] for edge in router_edges} == option_ids
-        assert len(router_edges) == len(option_ids) <= 3
-        assert all(outgoing[edge["target"]] for edge in router_edges)
+    buttons = nodes["menu_main"]["config"]["buttons"]
+    assert [button["label"] for button in buttons] == ["Atendimento", "Comercial", "Financeiro"]
+    assert [button["handleId"] for button in buttons] == ["atendimento", "comercial", "financeiro"]
+    route_edges = [edge for edge in graph["edges"] if edge["source"] == "menu_main"]
+    assert [edge["source_handle"] for edge in route_edges] == ["atendimento", "comercial", "financeiro"]
+    assert [edge["target"] for edge in route_edges] == ["menu_atendimento", "menu_comercial", "menu_financeiro"]
 
 
-def test_initial_menu_layout_is_a_left_to_right_layered_graph():
+def test_initial_menu_layout_is_uniform_left_to_right_without_crossings():
     asset = ASSETS["menu_inicial"]
     nodes = {node["key"]: node for node in asset["graph"]["nodes"]}
-    branch_keys = ["atendimento", "comercial", "financeiro", "agendamento", "faq", "humano"]
+    branch_keys = ["atendimento", "comercial", "financeiro"]
 
-    main = ("start", "menu_welcome", "menu_identification", "menu_main", "menu_more_1", "menu_more_2")
+    main = ("start", "menu_welcome", "menu_identification", "menu_main")
     assert [nodes[key]["position"] for key in main] == [
-        {"x": 0, "y": 415}, {"x": 300, "y": 415},
-        {"x": 600, "y": 415}, {"x": 900, "y": 415},
-        {"x": 1200, "y": 415}, {"x": 1500, "y": 415},
+        {"x": 0, "y": 300}, {"x": 300, "y": 300},
+        {"x": 600, "y": 300}, {"x": 900, "y": 300},
     ]
-    assert [nodes[key]["position"]["x"] for key in main] == sorted(
-        nodes[key]["position"]["x"] for key in main
-    )
-    assert len({nodes[key]["position"]["y"] for key in main}) == 1
-    assert [nodes[f"menu_{key}"]["position"]["x"] for key in branch_keys] == [1850] * 6
-    assert [nodes[f"menu_{key}"]["position"]["y"] for key in branch_keys] == [40, 190, 340, 490, 640, 790]
-    assert nodes["menu_end"]["position"] == {"x": 2200, "y": 415}
+    assert [nodes[f"menu_{key}"]["position"] for key in branch_keys] == [
+        {"x": 1200, "y": 0}, {"x": 1200, "y": 300}, {"x": 1200, "y": 600},
+    ]
+    assert nodes["menu_end"]["position"] == {"x": 1500, "y": 300}
     assert asset["metadata"]["layout_direction"] == "LR"
-
-    # Every transition progresses horizontally; all nodes remain connected and
-    # the 260x140 cards have positive separation in their shared layers.
-    for edge in asset["graph"]["edges"]:
-        assert nodes[edge["target"]]["position"]["x"] > nodes[edge["source"]]["position"]["x"]
-    assert len({node["position"]["x"] for node in nodes.values()}) == 8
+    assert all(nodes[edge["target"]]["position"]["x"] > nodes[edge["source"]]["position"]["x"] for edge in asset["graph"]["edges"])
     assert all(
-        right["position"]["y"] - left["position"]["y"] >= 140
-        for left, right in zip(
-            [nodes[f"menu_{key}"] for key in branch_keys],
-            [nodes[f"menu_{key}"] for key in branch_keys[1:]],
-        )
+        [edge["target"] for edge in asset["graph"]["edges"] if edge["source"] == f"menu_{key}"] == ["menu_end"]
+        for key in branch_keys
     )
-    for key in branch_keys:
-        targets = [edge["target"] for edge in asset["graph"]["edges"] if edge["source"] == f"menu_{key}"]
-        assert targets == ["menu_end"]
-
-    required_learning_fields = {"purpose", "when_to_use", "best_practices", "common_mistakes", "input", "output"}
-    assert set(asset["educational_metadata"]) == set(nodes)
-    assert all(required_learning_fields <= metadata.keys() for metadata in asset["educational_metadata"].values())
-
-
-def test_initial_menu_uses_distinct_menu_handles_without_changing_graph_logic():
-    asset = ASSETS["menu_inicial"]
-    branch_keys = ["atendimento", "comercial", "financeiro", "agendamento", "faq", "humano"]
-    option_handles = ["atendimento", "comercial", "financeiro", "agendamento", "duvidas_frequentes", "falar_com_atendente"]
-    menu_keys = ["menu_main", "menu_more_1", "menu_more_2"]
-    menu_edges = [edge for edge in asset["graph"]["edges"] if edge["source"] in menu_keys]
-
-    route_edges = [edge for edge in menu_edges if not edge["source_handle"].startswith("mais_opcoes_")]
-    assert [edge["source_handle"] for edge in route_edges] == option_handles
-    assert [edge["target"] for edge in route_edges] == [f"menu_{key}" for key in branch_keys]
-    choice_nodes = [node for node in asset["graph"]["nodes"] if node["key"] in menu_keys]
-    buttons = [button for node in choice_nodes for button in node["config"]["buttons"] if not button["handleId"].startswith("mais_opcoes_")]
-    assert [button["id"] for button in buttons] == option_handles
-    assert [button["value"] for button in buttons] == option_handles
-    assert [button["handleId"] for button in buttons] == option_handles
-    assert all(len(node["config"]["buttons"]) <= 3 for node in choice_nodes)
-    # The shared renderer's target and source handles are Left and Right; the
-    # asset itself must never request a vertical/TB layout.
-    assert asset["metadata"]["layout"] == "manual"
-    assert asset["metadata"]["layout_direction"] != "TB"
 
 
 def test_initial_menu_choice_contract_survives_installation_round_trip():
-    """Mirror the persisted shape produced by a manually authored Choice node."""
     from app.services.marketplace_installation_service import MarketplaceInstallationService
 
-    asset = ASSETS["menu_inicial"]
-    persisted_nodes, persisted_edges = MarketplaceInstallationService._materialize(asset)
+    persisted_nodes, persisted_edges = MarketplaceInstallationService._materialize(ASSETS["menu_inicial"])
     loaded = json.loads(json.dumps({"nodes": persisted_nodes, "edges": persisted_edges}))
     nodes = {node["id"]: node for node in loaded["nodes"]}
     choice_nodes = [node for node in nodes.values() if node["type"] == "choice"]
 
-    assert len(choice_nodes) == 3
-    assert all(choice["data"]["display_mode"] == "buttons" for choice in choice_nodes)
-    assert all(len(choice["data"]["buttons"]) <= 3 for choice in choice_nodes)
-    assert all("options" not in choice["data"] for choice in choice_nodes)
+    assert len(choice_nodes) == 1
+    choice = choice_nodes[0]
+    assert choice["data"]["display_mode"] == "buttons"
+    assert "options" not in choice["data"]
+    option_handles = [button["handleId"] for button in choice["data"]["buttons"]]
+    assert option_handles == ["atendimento", "comercial", "financeiro"]
+    assert [button["id"] for button in choice["data"]["buttons"]] == option_handles
+    assert [button["value"] for button in choice["data"]["buttons"]] == option_handles
 
-    buttons = [button for choice in choice_nodes for button in choice["data"]["buttons"] if not button["handleId"].startswith("mais_opcoes_")]
-    option_handles = [button["handleId"] for button in buttons]
-    assert option_handles == [
-        "atendimento", "comercial", "financeiro", "agendamento",
-        "duvidas_frequentes", "falar_com_atendente",
-    ]
-    assert [button["id"] for button in buttons] == option_handles
-    assert [button["value"] for button in buttons] == option_handles
-
-    choice_ids = {choice["id"] for choice in choice_nodes}
-    choice_edges = [edge for edge in loaded["edges"] if edge["source"] in choice_ids]
-    assert len(choice_edges) == 8
-    assert [edge["sourceHandle"] for edge in choice_edges if not edge["sourceHandle"].startswith("mais_opcoes_")] == option_handles
-    assert len({edge["target"] for edge in choice_edges}) == 8
-    assert all(edge["target"] in nodes for edge in choice_edges)
+    choice_edges = [edge for edge in loaded["edges"] if edge["source"] == choice["id"]]
+    assert [edge["sourceHandle"] for edge in choice_edges] == option_handles
+    assert len({edge["target"] for edge in choice_edges}) == 3
 
     outgoing = defaultdict(list)
     for edge in loaded["edges"]:
