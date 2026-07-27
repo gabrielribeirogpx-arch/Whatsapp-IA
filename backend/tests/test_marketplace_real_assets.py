@@ -188,8 +188,8 @@ def test_hybrid_service_fallback_is_an_explicit_runtime_v2_composition():
         ("financeiro", "hybrid_financeiro"),
     ]
     assert all(any(edge["source"] == f"hybrid_{route}" and edge["target"] == "hybrid_resolved_question" for edge in edges) for route in ("atendimento", "comercial", "financeiro"))
-    assert any(edge["source"] == "hybrid_resolved_condition" and edge["source_handle"] == "nao" and edge["target"] == "hybrid_ai" for edge in edges)
-    assert any(edge["source"] == "hybrid_ai_condition" and edge["source_handle"] == "nao" and edge["target"] == "hybrid_handoff" for edge in edges)
+    assert any(edge["source"] == "hybrid_resolved_condition" and edge["source_handle"] == "false" and edge["target"] == "hybrid_ai" for edge in edges)
+    assert any(edge["source"] == "hybrid_ai_condition" and edge["source_handle"] == "false" and edge["target"] == "hybrid_handoff" for edge in edges)
 
 
 def test_hybrid_service_fallback_asset_has_complete_visual_graph_integrity():
@@ -223,12 +223,12 @@ def test_hybrid_service_fallback_asset_has_complete_visual_graph_integrity():
     for key, node in nodes.items():
         if node["type"] == "condition":
             assert len(outgoing[key]) == 2
-            assert {edge["source_handle"] for edge in outgoing[key]} == {"sim", "nao"}
+            assert {edge["source_handle"] for edge in outgoing[key]} == {"true", "false"}
 
     assert [edge["target"] for edge in outgoing["hybrid_ai"]] == ["hybrid_ai_condition"]
     assert [(edge["source_handle"], edge["target"]) for edge in outgoing["hybrid_ai_condition"]] == [
-        ("sim", "hybrid_specific"),
-        ("nao", "hybrid_handoff"),
+        ("true", "hybrid_specific"),
+        ("false", "hybrid_handoff"),
     ]
     assert [edge["target"] for edge in outgoing["hybrid_specific"]] == ["hybrid_wait"]
     assert [edge["target"] for edge in outgoing["hybrid_handoff"]] == ["hybrid_wait"]
@@ -240,6 +240,56 @@ def test_hybrid_service_fallback_asset_has_complete_visual_graph_integrity():
     assert len(materialized_edges) == len(graph["edges"])
     assert all(edge["source"] in materialized_ids and edge["target"] in materialized_ids for edge in materialized_edges)
     assert all(edge.get("id") and edge.get("type") for edge in materialized_edges)
+
+    # JSON is the same storage boundary used by Flow.edges_json. Handles must
+    # remain byte-for-byte stable through materialization and serialization.
+    persisted_edges = json.loads(json.dumps(materialized_edges))
+    key_by_id = {
+        node["id"]: original["key"]
+        for node, original in zip(materialized_nodes, graph["nodes"])
+    }
+    persisted_by_pair = {
+        (key_by_id[edge["source"]], key_by_id[edge["target"]]): edge
+        for edge in persisted_edges
+    }
+    expected_handles = {
+        ("hybrid_resolved_condition", "hybrid_closed"): "true",
+        ("hybrid_resolved_condition", "hybrid_ai"): "false",
+        ("hybrid_ai", "hybrid_ai_condition"): "default",
+        ("hybrid_ai_condition", "hybrid_specific"): "true",
+        ("hybrid_ai_condition", "hybrid_handoff"): "false",
+        ("hybrid_handoff", "hybrid_wait"): "default",
+    }
+    assert {
+        pair: persisted_by_pair[pair]["sourceHandle"]
+        for pair in expected_handles
+    } == expected_handles
+
+    # Runtime V2 consumes the very same materialized handles when it builds
+    # transitions. Exercise both condition branches and each default output.
+    from app.flow_v2.snapshot import build_transitions_from_edges
+    from app.flow_v2.transition_resolver import TransitionResolver
+
+    transitions = build_transitions_from_edges(persisted_edges)
+    ids_by_key = {original["key"]: node["id"] for node, original in zip(materialized_nodes, graph["nodes"])}
+    for (source_key, target_key), handle in expected_handles.items():
+        matches = TransitionResolver._matches(
+            transitions=transitions,
+            source_node_id=ids_by_key[source_key],
+            source_handle=None if handle == "default" else handle,
+        )
+        assert [match["target_node_id"] for match in matches] == [ids_by_key[target_key]]
+
+
+def test_hybrid_validator_rejects_a_handle_that_react_flow_does_not_render():
+    from copy import deepcopy
+
+    asset = deepcopy(ASSETS["atendimento_com_fallback_para_ia"])
+    edge = next(edge for edge in asset["graph"]["edges"] if edge["source"] == "hybrid_resolved_condition")
+    edge["source_handle"] = "sim"
+
+    with pytest.raises(MarketplaceGraphValidationError, match="condition_handle_requires_one_edge|invalid_condition_edge_handle"):
+        MarketplaceGraphValidator().validate(asset)
 
 
 def test_hybrid_service_fallback_uses_authored_left_to_right_columns():
