@@ -135,7 +135,7 @@ def _initial_menu_graph() -> dict[str, Any]:
         "menu_welcome": (300, 300),
         "menu_identification": (600, 300),
         "menu_main": (900, 300),
-        "menu_end": (1500, 300),
+        "menu_end": (1750, 300),
     }
     branch_y = {
         "atendimento": 0,
@@ -143,7 +143,7 @@ def _initial_menu_graph() -> dict[str, Any]:
         "financeiro": 600,
     }
     for key, y in branch_y.items():
-        positions[f"menu_{key}"] = (1200, y)
+        positions[f"menu_{key}"] = (1450, y)
     for node in asset["graph"]["nodes"]:
         x, y = positions[node["key"]]
         node["position"] = {"x": x, "y": y}

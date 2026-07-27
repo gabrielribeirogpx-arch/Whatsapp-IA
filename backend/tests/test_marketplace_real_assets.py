@@ -121,9 +121,9 @@ def test_initial_menu_layout_is_uniform_left_to_right_without_crossings():
         {"x": 600, "y": 300}, {"x": 900, "y": 300},
     ]
     assert [nodes[f"menu_{key}"]["position"] for key in branch_keys] == [
-        {"x": 1200, "y": 0}, {"x": 1200, "y": 300}, {"x": 1200, "y": 600},
+        {"x": 1450, "y": 0}, {"x": 1450, "y": 300}, {"x": 1450, "y": 600},
     ]
-    assert nodes["menu_end"]["position"] == {"x": 1500, "y": 300}
+    assert nodes["menu_end"]["position"] == {"x": 1750, "y": 300}
     assert asset["metadata"]["layout_direction"] == "LR"
     assert all(nodes[edge["target"]]["position"]["x"] > nodes[edge["source"]]["position"]["x"] for edge in asset["graph"]["edges"])
     assert all(
