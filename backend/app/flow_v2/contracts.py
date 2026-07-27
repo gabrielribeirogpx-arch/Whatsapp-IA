@@ -7,6 +7,7 @@ from uuid import UUID
 import logging
 
 from app.flow_v2.actions import RuntimeAction
+from app.observability.runtime_choice_trace import runtime_trace
 
 FLOW_V2_EVENT_VERSION = 1
 logger = logging.getLogger(__name__)
@@ -104,6 +105,11 @@ class RuntimeInput:
             metadata.get("next_node_id") or "n/a",
         )
         object.__setattr__(self, "metadata", metadata)
+        runtime_trace(
+            logger, "RuntimeInput", metadata=metadata,
+            correlation_id=self.input_message_id or self.message_id or self.webhook_id,
+            conversation_id=self.conversation_id, flow_version_id=self.flow_version_id,
+        )
 
 
 @dataclass(frozen=True)

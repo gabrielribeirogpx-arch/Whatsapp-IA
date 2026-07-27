@@ -11,6 +11,7 @@ from app.flow_v2.contracts import FlowV2EventType, FlowV2SessionStatus, RuntimeI
 from app.flow_v2.event_store import FlowV2EventStore
 from app.flow_v2.models import FlowV2Session
 from app.flow_v2.snapshot import FlowV2Snapshot
+from app.observability.runtime_choice_trace import runtime_exit, runtime_trace
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +41,11 @@ class FlowV2SessionManager:
                 )
             ).scalar_one_or_none()
             if session is not None:
+                runtime_trace(logger, "v2_session_recovery", metadata=runtime_input.metadata,
+                              correlation_id=runtime_input.input_message_id, conversation_id=runtime_input.conversation_id,
+                              session_id=session.id, flow_version_id=runtime_input.flow_version_id,
+                              current_node_id=session.current_node_id, waiting_for_choice=str(session.status) == str(FlowV2SessionStatus.WAITING),
+                              current_wait_node=session.current_node_id if str(session.status) == str(FlowV2SessionStatus.WAITING) else None)
                 return session
 
         self._lock_active_session_identity(db, runtime_input=runtime_input)
@@ -78,6 +84,9 @@ class FlowV2SessionManager:
         )
         matched_sessions = db.execute(session_query).scalars().all()
         if not matched_sessions and runtime_input.metadata.get("runtime_choice_key"):
+            runtime_exit(logger, "v2_session_recovery", reason="session_not_found", metadata=runtime_input.metadata,
+                         correlation_id=runtime_input.input_message_id, conversation_id=runtime_input.conversation_id,
+                         flow_version_id=runtime_input.flow_version_id, waiting_for_choice=False)
             logger.error(
                 "event=runtime_v2_choice_trace stage=session_lookup status=failed reason=session_not_found "
                 "session_id=%s current_node_id=%s waiting_for_choice=%s flow_version_id=%s external_user_id=%s runtime_choice_key=%s",
@@ -125,6 +134,11 @@ class FlowV2SessionManager:
                 session.status,
                 runtime_input.metadata.get("runtime_choice_key"),
             )
+            runtime_trace(logger, "v2_session_recovery", metadata=runtime_input.metadata,
+                          correlation_id=runtime_input.input_message_id, conversation_id=runtime_input.conversation_id,
+                          session_id=session.id, flow_version_id=runtime_input.flow_version_id,
+                          current_node_id=session.current_node_id, waiting_for_choice=waiting_for_choice,
+                          current_wait_node=session.current_node_id if waiting_for_choice else None)
             if str(session.status) == str(FlowV2SessionStatus.WAITING):
                 logger.info(
                     "[FLOW SESSION CONTINUE] session_id=%s node_id=%s reason=incoming_message_waiting_session",

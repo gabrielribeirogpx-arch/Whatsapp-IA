@@ -12,6 +12,7 @@ from app.models import Tenant
 from app.models.tenant_whatsapp_provider import TenantWhatsAppProvider
 from app.models.whatsapp_campaign import WhatsAppCampaign, WhatsAppCampaignRecipient
 from sqlalchemy import select
+from app.observability.runtime_choice_trace import runtime_trace
 
 logger = logging.getLogger(__name__)
 
@@ -126,6 +127,15 @@ def _log_interactive_ingress(payload: dict[str, Any], *, correlation_id: str) ->
             "n/a", "n/a",
             _safe_webhook_log_payload(payload),
         )
+        runtime_trace(logger, "webhook_ingress", correlation_id=correlation_id,
+                      metadata=payload, **{"message.type": message.get("type"),
+                      "interactive.type": interactive.get("type"),
+                      "button_reply.id": button_reply.get("id"),
+                      "button_reply.title": button_reply.get("title"),
+                      "interactive_reply_id": interactive_reply_id or None,
+                      "selected_row_id": interactive_reply_id or None,
+                      "row_id": interactive_reply_id or None,
+                      "runtime_choice_key": interactive_reply_id or None})
 
 
 def _log_media_delivery_statuses(payload: dict) -> None:

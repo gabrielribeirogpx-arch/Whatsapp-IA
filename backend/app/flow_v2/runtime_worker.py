@@ -12,6 +12,7 @@ from app.flow_v2.channel_adapter import ChannelAdapter
 from app.flow_v2.contracts import RuntimeInput, RuntimeOutput
 from app.flow_v2.dead_letter import FlowV2DeadLetterQueue
 from app.flow_v2.executor import FlowV2Executor
+from app.observability.runtime_choice_trace import runtime_trace
 
 logger = logging.getLogger(__name__)
 
@@ -154,4 +155,9 @@ class FlowV2RuntimeWorker:
             len(actions),
             len(deliveries),
         )
+        runtime_trace(logger, "enqueue_next_node", metadata=runtime_input.metadata,
+                      correlation_id=runtime_input.input_message_id, conversation_id=runtime_input.conversation_id,
+                      session_id=runtime_output.session_id, flow_version_id=runtime_input.flow_version_id,
+                      current_node_id=runtime_output.current_node_id, node_executed=bool(actions),
+                      message_sent=bool(deliveries))
         return FlowV2WorkerResult(runtime_output=runtime_output, actions=tuple(actions), deliveries=tuple(deliveries))

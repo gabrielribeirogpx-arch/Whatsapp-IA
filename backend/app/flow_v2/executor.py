@@ -12,6 +12,7 @@ from app.services.flow_analytics_service import track_flow_event
 
 from app.flow_v2.actions import RuntimeAction, SendMessageAction
 from app.flow_v2.contracts import FlowV2EventType, FlowV2SessionStatus, RuntimeInput, RuntimeOutput
+from app.observability.runtime_choice_trace import runtime_exit, runtime_trace
 from app.flow_v2.event_store import FlowV2EventStore
 from app.flow_v2.idempotency import FlowV2IdempotencyStore, resolve_event_kind, resolve_idempotency_key
 from app.flow_v2.node_executors import NodeExecutorRegistry
@@ -206,6 +207,11 @@ class FlowV2Executor:
             session_node_type or None,
             runtime_input.metadata.get("runtime_choice_key"),
         )
+        runtime_trace(logger, "RuntimeV2Executor.session_loaded", metadata=runtime_input.metadata,
+                      correlation_id=runtime_input.input_message_id, conversation_id=runtime_input.conversation_id,
+                      session_id=session.id, flow_id=getattr(snapshot, "flow_id", None), flow_version_id=runtime_input.flow_version_id,
+                      current_node_id=session.current_node_id, waiting_for_choice=waiting_for_choice,
+                      current_wait_node=session.current_node_id if waiting_for_choice else None)
         if runtime_input.metadata.get("runtime_choice_key") and not waiting_for_choice:
             logger.error(
                 "event=runtime_v2_choice_trace stage=session_validation status=failed reason=waiting_for_choice_false "
@@ -254,6 +260,11 @@ class FlowV2Executor:
                 )
         flow_id = self._flow_id_for_version(db, tenant_id=runtime_input.tenant_id, flow_version_id=runtime_input.flow_version_id)
         if str(getattr(session, "status", "")) == str(FlowV2SessionStatus.COMPLETED):
+            runtime_exit(logger, "RuntimeV2Executor", reason="completed_session_auto_restart_disabled",
+                         metadata=runtime_input.metadata, correlation_id=runtime_input.input_message_id,
+                         conversation_id=runtime_input.conversation_id, session_id=session.id,
+                         flow_id=flow_id, flow_version_id=runtime_input.flow_version_id,
+                         current_node_id=session.current_node_id, waiting_for_choice=False)
             logger.info(
                 "[SESSION FINISHED] session_id=%s status=%s current_node_id=%s reason=ignore_future_message_auto_restart_disabled",
                 session.id,
@@ -285,6 +296,10 @@ class FlowV2Executor:
             metadata=idempotency_metadata,
         )
         if decision.is_duplicate:
+            runtime_exit(logger, "RuntimeV2Executor", reason="duplicate_input", metadata=runtime_input.metadata,
+                         correlation_id=runtime_input.input_message_id, conversation_id=runtime_input.conversation_id,
+                         session_id=session.id, flow_id=flow_id, flow_version_id=runtime_input.flow_version_id,
+                         current_node_id=session.current_node_id)
             return RuntimeOutput(
                 session_id=session.id,
                 status=FlowV2SessionStatus(session.status),
@@ -410,6 +425,10 @@ class FlowV2Executor:
         actions: list[RuntimeAction] = []
 
         for step in range(MAX_RUNTIME_STEPS):
+            runtime_trace(logger, "RuntimeV2Executor.step", metadata=runtime_input.metadata,
+                          correlation_id=runtime_input.input_message_id, conversation_id=runtime_input.conversation_id,
+                          session_id=session.id, flow_version_id=runtime_input.flow_version_id,
+                          current_node_id=session.current_node_id, executor_step=step + 1, node_executed=False)
             if not session.current_node_id:
                 logger.error(
                     "event=runtime_v2_choice_trace stage=executor status=failed reason=current_node_id_missing "
@@ -656,6 +675,11 @@ class FlowV2Executor:
                 session.id, node_id, result.next_node_id, result.next_node_id in snapshot.node_by_id,
                 runtime_input.metadata.get("runtime_choice_key"),
             )
+            runtime_trace(logger, "next_node_execution", metadata=runtime_input.metadata,
+                          correlation_id=runtime_input.input_message_id, conversation_id=runtime_input.conversation_id,
+                          session_id=session.id, flow_version_id=runtime_input.flow_version_id,
+                          current_node_id=node_id, next_node_id=result.next_node_id,
+                          executor_step=step + 1, transition_found=True, node_executed=True)
 
         current_node_id = session.current_node_id
         self.event_store.append(

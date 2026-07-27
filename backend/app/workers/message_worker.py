@@ -28,6 +28,7 @@ from app.services.flow_runtime_selector import (
     resolve_runtime_flow_for_conversation,
 )
 from app.services.message_service import normalize_meta_message
+from app.observability.runtime_choice_trace import runtime_exit, runtime_trace
 from app.core.redis_client import get_redis_client
 from app.services.tenant_service import resolve_tenant_by_phone_number_id
 from app.services.realtime_service import sse_broker
@@ -288,6 +289,8 @@ def process_incoming_message(payload: dict[str, Any]) -> None:
 
     parsed = _pick_message(payload)
     if not parsed:
+        runtime_exit(logger, "message_worker", reason="no_supported_message",
+                     correlation_id=correlation_id, metadata=payload)
         logger.warning("event=incoming_worker_skip correlation_id=%s tenant_id=%s phone=%s job_id=%s stage=incoming_worker_parse reason=no_supported_message", correlation_id, "n/a", payload.get("phone") or "n/a", payload.get("job_id") or "n/a")
         return
 
@@ -319,6 +322,12 @@ def process_incoming_message(payload: dict[str, Any]) -> None:
         parsed.get("text") or "n/a",
         "n/a", "n/a",
     )
+    runtime_trace(logger, "message_worker", metadata=parsed, correlation_id=correlation_id,
+                  **{"message.type": parsed.get("type"), "interactive.type": parsed.get("interactive_type"),
+                     "button_reply.id": parsed.get("interactive_reply_id"),
+                     "button_reply.title": parsed.get("interactive_reply_title"),
+                     "row_id": parsed.get("selected_row_id") or parsed.get("interactive_reply_id"),
+                     "runtime_choice_key": parsed.get("selected_row_id") or parsed.get("interactive_reply_id")})
 
     redis_client = get_redis_client()
 

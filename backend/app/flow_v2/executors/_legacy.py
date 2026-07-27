@@ -21,6 +21,7 @@ from app.flow_v2.actions import (
     SendMessageAction,
 )
 from app.flow_v2.contracts import AiRagAfterAnswerBehavior, FlowV2EventType, RuntimeInput, resolve_runtime_choice_key
+from app.observability.runtime_choice_trace import runtime_exit, runtime_trace
 from app.flow_v2.models import FlowV2ScheduledJob
 from app.models.contact import Contact
 from app.models.conversation import Conversation
@@ -520,6 +521,11 @@ class ChoiceNodeExecutor(BaseNodeExecutor):
             option_ids,
         )
         if row_id is None:
+            runtime_exit(logger, "RuntimeV2ChoiceResolver", reason="missing_runtime_choice_key",
+                         metadata=runtime_input.metadata, correlation_id=runtime_input.input_message_id,
+                         conversation_id=runtime_input.conversation_id, session_id=session.id,
+                         flow_version_id=runtime_input.flow_version_id, current_node_id=node_id,
+                         waiting_for_choice=True, current_wait_node=node_id)
             buttons = _choice_buttons_from_options(options)
             sections = _choice_sections_from_options(options)
             action_metadata = {
@@ -595,6 +601,11 @@ class ChoiceNodeExecutor(BaseNodeExecutor):
             if len(folded_matches) == 1:
                 row_id = folded_matches[0]
         if row_id not in option_ids:
+            runtime_exit(logger, "RuntimeV2ChoiceResolver", reason="row_id_not_in_option_ids",
+                         metadata=runtime_input.metadata, correlation_id=runtime_input.input_message_id,
+                         conversation_id=runtime_input.conversation_id, session_id=session.id,
+                         flow_version_id=runtime_input.flow_version_id, current_node_id=node_id,
+                         waiting_for_choice=True, current_wait_node=node_id)
             logger.error(
                 "[CHOICE OPTION NOT FOUND] node_id=%s session_id=%s received_row_id=%s allowed_option_ids=%s selected_row_id=%s interactive_reply_id=%s reason=row_id_not_in_option_ids",
                 node_id,
@@ -650,6 +661,12 @@ class ChoiceNodeExecutor(BaseNodeExecutor):
             source_handle=row_id,
         )
         next_node_id = transition_resolution.target_node_id
+        runtime_trace(logger, "transition_resolution", metadata=runtime_input.metadata,
+                      correlation_id=runtime_input.input_message_id, conversation_id=runtime_input.conversation_id,
+                      session_id=session.id, flow_version_id=runtime_input.flow_version_id,
+                      current_node_id=node_id, matched_option_id=matched_option.get("id"),
+                      matched_source_handle=option_source_handle, next_node_id=next_node_id,
+                      transition_found=bool(next_node_id))
         logger.info(
             "event=runtime_v2_choice_trace stage=transition_lookup status=found reason=matching_transition_found "
             "session_id=%s node_id=%s runtime_choice_key=%s option_id=%s source_handle=%s transition=%s next_node_id=%s",
