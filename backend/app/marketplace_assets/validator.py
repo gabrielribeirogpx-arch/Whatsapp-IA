@@ -4,6 +4,23 @@ from typing import Any
 from .catalog import NODE_TYPES
 
 AI_TYPES = {"ai_rag", "ai_response", "ai_classification", "ai_extraction", "ai_summary", "ai_agent", "ai_supervisor", "ai_system"}
+SINGLE_OUTPUT_TYPES = {"message", "action", "ai_classification"}
+
+def _edge_handle(edge: dict[str, Any], side: str) -> str:
+    return str(edge.get(f"{side}Handle", edge.get(f"{side}_handle")) or "").strip()
+
+def _condition_handles(node: dict[str, Any]) -> list[str]:
+    """Mirror the handles rendered by ConditionNode, including its true/false defaults."""
+    branches = (node.get("config") or {}).get("branches")
+    if not isinstance(branches, list) or not branches:
+        return ["true", "false"]
+    handles = []
+    for branch in branches:
+        if isinstance(branch, str):
+            handles.append(branch)
+        elif isinstance(branch, dict):
+            handles.append(str(branch.get("handleId") or branch.get("id") or branch.get("key") or branch.get("label") or "").strip())
+    return handles
 
 class MarketplaceGraphValidationError(ValueError):
     def __init__(self, errors: list[str]):
@@ -38,7 +55,15 @@ class MarketplaceGraphValidator:
             for key in set(keys) - reached: errors.append(f"unreachable_node:{key}")
         for node in nodes:
             key = node.get("key")
-            if node.get("type") == "condition" and not outgoing.get(key): errors.append(f"condition_without_output:{key}")
+            if node.get("type") == "condition":
+                handles = _condition_handles(node)
+                condition_edges = [edge for edge in edges if edge.get("source") == key]
+                edge_handles = [_edge_handle(edge, "source") for edge in condition_edges]
+                if any(not handle for handle in handles): errors.append(f"condition_branch_without_handle:{key}")
+                if len(handles) != len(set(handles)): errors.append(f"duplicate_condition_handle:{key}")
+                for handle in handles:
+                    if edge_handles.count(handle) != 1: errors.append(f"condition_handle_requires_one_edge:{key}:{handle}")
+                for handle in set(edge_handles) - set(handles): errors.append(f"invalid_condition_edge_handle:{key}:{handle}")
             if node.get("type") == "choice":
                 config = node.get("config") or {}
                 options = config.get("buttons") if isinstance(config.get("buttons"), list) else config.get("options")
@@ -53,6 +78,28 @@ class MarketplaceGraphValidator:
                         if edge_handles.count(handle) != 1: errors.append(f"choice_handle_requires_one_edge:{key}:{handle}")
                     for handle in set(edge_handles) - set(handles): errors.append(f"invalid_choice_edge_handle:{key}:{handle}")
             if key not in {s.get("key") for s in starts} and incoming.get(key, 0) == 0: errors.append(f"orphan_node:{key}")
+        # This opt-in contract is used by assets whose React Flow handles have
+        # been captured from a graph authored in the editor. It prevents a
+        # marketplace install from silently producing renderer-discarded edges.
+        if (asset.get("metadata") or {}).get("validate_editor_handles"):
+            for edge in edges:
+                source_node = by_key.get(edge.get("source"))
+                target_node = by_key.get(edge.get("target"))
+                if not source_node or not target_node: continue
+                source_handle = _edge_handle(edge, "source")
+                source_type = source_node.get("type")
+                if source_type in SINGLE_OUTPUT_TYPES and source_handle not in {"", "default"}:
+                    errors.append(f"invalid_single_output_handle:{edge.get('source')}:{source_handle}")
+                if source_type == "condition" and source_handle not in _condition_handles(source_node):
+                    errors.append(f"renderer_discards_source_handle:{edge.get('source')}:{source_handle}")
+            for node in nodes:
+                key, node_type = node.get("key"), node.get("type")
+                node_incoming = incoming.get(key, 0)
+                node_outgoing = len(outgoing.get(key, []))
+                if node_type == "ai_classification" and (node_incoming == 0 or node_outgoing == 0):
+                    errors.append(f"ai_classification_requires_input_output:{key}")
+                if node_type == "action" and (node.get("config") or {}).get("action") == "human_handoff" and (node_incoming == 0 or node_outgoing == 0):
+                    errors.append(f"human_handoff_requires_input_output:{key}")
         level = (asset.get("metadata") or {}).get("automation_level")
         if level == "no_ai" and any(n.get("type") in AI_TYPES for n in nodes): errors.append("ai_node_forbidden_in_no_ai")
         declared = set(asset.get("required_integrations") or [])
