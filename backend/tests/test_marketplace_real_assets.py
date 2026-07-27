@@ -16,7 +16,8 @@ def test_no_ai_templates_have_distinct_real_graphs_without_ai_system():
     signatures = set()
     for key in keys:
         graph = ASSETS[key]["graph"]
-        assert len(graph["nodes"]) >= 15
+        minimum_nodes = 11 if key == "menu_inicial" else 15
+        assert len(graph["nodes"]) >= minimum_nodes
         assert not any(node["type"].startswith("ai_") for node in graph["nodes"])
         signatures.add(tuple((node["key"], node["type"]) for node in graph["nodes"]))
     assert len(signatures) == len(keys)
@@ -70,8 +71,8 @@ def test_initial_menu_is_a_complete_acyclic_six_branch_reference_flow():
         outgoing[edge["source"]].append(edge["target"])
         incoming[edge["target"]].append(edge["source"])
 
-    assert len(nodes) == 19
-    assert len(graph["edges"]) == 23
+    assert len(nodes) == 11
+    assert len(graph["edges"]) == 15
     assert asset["metadata"]["branch_count"] == 6
     assert asset["metadata"]["layout"] == "manual"
     assert not [node for node in nodes.values() if node["type"] == "condition"]
@@ -102,8 +103,8 @@ def test_initial_menu_is_a_complete_acyclic_six_branch_reference_flow():
                 roots.append(target)
     assert len(ordered) == len(nodes)
 
-    router_edges = [edge for edge in graph["edges"] if edge["source"] == "menu_router"]
-    option_ids = {option["id"] for option in nodes["menu_router"]["config"]["options"]}
+    router_edges = [edge for edge in graph["edges"] if edge["source"] == "menu_main"]
+    option_ids = {option["id"] for option in nodes["menu_main"]["config"]["options"]}
     assert {edge["source_handle"] for edge in router_edges} == option_ids
     assert len(router_edges) == len(option_ids) == 6
     assert all(outgoing[edge["target"]] for edge in router_edges)
@@ -114,10 +115,12 @@ def test_initial_menu_layout_has_aligned_rows_and_complete_learning_metadata():
     nodes = {node["key"]: node for node in asset["graph"]["nodes"]}
     branch_keys = ["atendimento", "comercial", "financeiro", "agendamento", "faq", "humano"]
 
-    assert [nodes[key]["position"]["x"] for key in ("start", "menu_welcome", "menu_context", "menu_prompt", "menu_router", "menu_handoff", "menu_end")] == [900] * 7
-    assert [nodes[f"menu_{key}_message"]["position"]["y"] for key in branch_keys] == [980] * 6
-    assert [nodes[f"menu_{key}_route"]["position"]["y"] for key in branch_keys] == [1160] * 6
-    assert [nodes[f"menu_{key}_message"]["position"]["x"] for key in branch_keys] == sorted(nodes[f"menu_{key}_message"]["position"]["x"] for key in branch_keys)
+    assert [nodes[key]["position"]["x"] for key in ("start", "menu_welcome", "menu_identification", "menu_main", "menu_end")] == [900] * 5
+    assert [nodes[f"menu_{key}"]["position"]["y"] for key in branch_keys] == [780] * 6
+    assert [nodes[f"menu_{key}"]["position"]["x"] for key in branch_keys] == sorted(nodes[f"menu_{key}"]["position"]["x"] for key in branch_keys)
+    for key in branch_keys:
+        targets = [edge["target"] for edge in asset["graph"]["edges"] if edge["source"] == f"menu_{key}"]
+        assert targets == ["menu_end"]
 
     required_learning_fields = {"purpose", "when_to_use", "best_practices", "common_mistakes", "input", "output"}
     assert set(asset["educational_metadata"]) == set(nodes)
