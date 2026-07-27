@@ -2258,6 +2258,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
 
   const applyLayoutAndSetFlow = useCallback((nextNodes: Node[], nextEdges: Edge[]) => {
     if (nextNodes.length === 0) {
+      console.info('[MARKETPLACE TRACE] FlowBuilder applyLayout empty graph before setNodes');
       setNodes(nextNodes);
       setEdges(nextEdges);
       return { nodes: nextNodes, edges: nextEdges };
@@ -2265,6 +2266,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
 
     const orderedEdges = orderChoiceChildrenEdges(nextNodes, nextEdges);
     const { nodes: layoutedNodes, edges: layoutedEdges } = getLayoutedElements(nextNodes, orderedEdges);
+    console.info(`[MARKETPLACE TRACE] FlowBuilder applyLayout graph before setNodes nodes=${layoutedNodes.length}`);
     setNodes(layoutedNodes);
     setEdges(layoutedEdges);
     requestAnimationFrame(() => { rfInstance?.fitView(); });
@@ -2274,6 +2276,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
   const loadFlow = useCallback(async (flowId: string | null) => {
     try {
       if (!flowId) {
+        console.info('[MARKETPLACE TRACE] FlowBuilder loadFlow no flow before setNodes');
         setNodes([]);
         setEdges([]);
         setIsFlowHydrated(true);
@@ -2402,6 +2405,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
       if (nodesToRender.length === 0) {
         console.info('[BUILDER EMPTY FLOW]', { flow_id: flowId, nodes_count: 0, edges_count: edgesToRender.length });
         logFlowEditorHydrationSource('editor', [], [], flowId);
+        console.info(`[MARKETPLACE TRACE] FlowBuilder loadFlow empty server graph before setNodes flow_id=${flowId}`);
         setNodes([]);
         setEdges([]);
         setOperationError(null);
@@ -2417,6 +2421,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
       if (hasStoredPositions) {
         const orderedEdges = orderChoiceChildrenEdges(nodesToRender, edgesToRender);
         logFlowEditorSetGraph('editor_graph', nodesToRender, orderedEdges, flowId);
+        console.info(`[MARKETPLACE TRACE] FlowBuilder loadFlow server graph before setNodes flow_id=${flowId} nodes=${nodesToRender.length}`);
         setNodes(nodesToRender);
         setEdges(orderedEdges);
         lastPersistedFlowSignatureRef.current = getFlowGraphSignature(serializeFlowGraph(nodesToRender, orderedEdges));
@@ -2430,6 +2435,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
     } catch (err) {
       console.error('Erro ao carregar flow', err);
       setSelectedFlowId(null);
+      console.info(`[MARKETPLACE TRACE] FlowBuilder loadFlow catch before setNodes flow_id=${flowId}`, err);
       setNodes([]);
       setEdges([]);
       setFlowSource('error');
@@ -2832,28 +2838,41 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
 
 
   const handleInsertAgentSystemTemplate = useCallback(async (templateId: string, selectedVariant?: string) => {
+    console.info(`[MARKETPLACE TRACE] FlowBuilder handleInsert start template=${templateId}${selectedVariant ? ` variant=${selectedVariant}` : ''}`);
     const marketplaceCard = AI_SYSTEM_CARDS.find((item) => item.id === templateId);
     if (!marketplaceCard || marketplaceCard.availability !== 'installable_real') {
+      console.info(`[MARKETPLACE TRACE] FlowBuilder handleInsert rejected template=${templateId}`);
       toast.error('Template ainda não disponível para instalação');
+      console.info(`[MARKETPLACE TRACE] FlowBuilder handleInsert end template=${templateId} result=rejected`);
       return;
     }
     try {
       const variant = selectedVariant || (marketplaceCard.marketplaceType === 'Kit de Negócio' ? 'Sem IA' : marketplaceCard.automationLevel === 'Híbrido' ? 'Híbrida' : marketplaceCard.automationLevel);
+      console.info(`[MARKETPLACE TRACE] Calling POST /api/marketplace/items/${templateId}/install variant=${variant}`);
       const response = await apiFetch(`/api/marketplace/items/${templateId}/install`, { method: 'POST', headers: { 'Idempotency-Key': crypto.randomUUID() }, body: JSON.stringify({ variant }) });
+      console.info(`[MARKETPLACE TRACE] POST finished status=${response.status} template=${templateId}`);
       const installed = await parseApiResponse<{ created_resources?: { flows?: string[]; post_install_route?: string } }>(response);
       const flowId = installed.created_resources?.flows?.[0];
       setIsAgentSystemModalOpen(false);
       if (marketplaceCard.marketplaceType === 'Kit de Negócio') {
-        router.push(installed.created_resources?.post_install_route || '/dashboard/business-builder');
+        const postInstallRoute = installed.created_resources?.post_install_route || '/dashboard/business-builder';
+        console.info(`[MARKETPLACE TRACE] FlowBuilder before router.push route=${postInstallRoute}`);
+        router.push(postInstallRoute);
       } else if (flowId) {
         setSelectedFlowId(flowId);
+        console.info(`[MARKETPLACE TRACE] FlowBuilder before router.replace route=/dashboard/flow-builder?flow_id=${flowId}`);
         router.replace(`/dashboard/flow-builder?flow_id=${flowId}`);
+        console.info(`[MARKETPLACE TRACE] Creating flow from server flow_id=${flowId}`);
         await loadFlow(flowId);
       }
+      console.info(`[MARKETPLACE TRACE] FlowBuilder before toast.success installed template=${templateId}`);
       toast.success(`${marketplaceCard.title} instalado com flows reais`);
     } catch (error) {
+      console.info(`[MARKETPLACE TRACE] FlowBuilder handleInsert catch template=${templateId}`, error);
       console.error('MARKETPLACE_INSTALLATION_FAILED', { template_id: templateId, error });
       toast.error('Não foi possível instalar este template');
+    } finally {
+      console.info(`[MARKETPLACE TRACE] FlowBuilder handleInsert end template=${templateId}`);
     }
     return;
     /* Compatibility reference: the legacy callback below remains unreachable so
@@ -2897,9 +2916,11 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
         hasValidationError: false,
       },
     };
+    console.info(`[MARKETPLACE TRACE] Creating ai_system node template=${templateId} before setNodes`);
     setNodes((current) => [...current, systemNode]);
     setShowEmptyFlowWarning(false);
     setIsAgentSystemModalOpen(false);
+    console.info(`[MARKETPLACE TRACE] FlowBuilder before legacy toast.success system=${systemName}`);
     toast.success(`Sistema IA inserido: ${systemName}`);
     console.info('AI_SYSTEM_CREATED', { system_id: systemId, system_type: templateId, internal_nodes: graph.nodes.length, internal_edges: graph.edges.length });
     setTimeout(() => rfInstance?.fitView({ padding: 0.2, duration: 500 }), 0);
