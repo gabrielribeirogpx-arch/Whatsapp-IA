@@ -197,6 +197,46 @@ def test_hybrid_service_fallback_is_an_explicit_runtime_v2_composition():
     assert any(edge["source"] == "hybrid_ai_condition" and edge["source_handle"] == "false" and edge["target"] == "hybrid_handoff" for edge in edges)
 
 
+def test_hybrid_service_fallback_classifier_has_safe_production_configuration():
+    """Keep the Marketplace learning example explicit across its storage boundary."""
+    from app.services.marketplace_installation_service import MarketplaceInstallationService
+
+    asset = ASSETS["atendimento_com_fallback_para_ia"]
+    nodes = {node["key"]: node for node in asset["graph"]["nodes"]}
+    classifier = nodes["hybrid_ai"]["config"]
+    condition = nodes["hybrid_ai_condition"]["config"]
+
+    assert classifier["instruction"].strip()
+    assert classifier["input_template"] == "{{last_message}}"
+    assert classifier["categories"] == ["financeiro", "vendas", "suporte", "outro"]
+    assert classifier["confidence_threshold"] == 0.75
+    assert classifier["output_variable"] == "intent_category"
+    assert classifier["allow_other"] is True
+    assert classifier["fallback"] == classifier["error_fallback"] == "outro"
+    assert condition["conditions"] == [
+        {"left": "intent_category.category", "operator": "!=", "right": "outro"}
+    ]
+
+    outgoing = {
+        edge["source_handle"]: edge["target"]
+        for edge in asset["graph"]["edges"]
+        if edge["source"] == "hybrid_ai_condition"
+    }
+    assert outgoing == {"true": "hybrid_specific", "false": "hybrid_handoff"}
+    assert "ai_identified" not in json.dumps(asset, ensure_ascii=False)
+
+    materialized_nodes, materialized_edges = MarketplaceInstallationService._materialize(asset)
+    persisted = json.loads(json.dumps({"nodes": materialized_nodes, "edges": materialized_edges}))
+    persisted_classifier = next(node for node in persisted["nodes"] if node["type"] == "ai_classification")
+    persisted_condition = next(node for node in persisted["nodes"] if node["type"] == "condition")
+    assert persisted_classifier["data"]["output_variable"] == "intent_category"
+    assert persisted_classifier["data"]["categories"] == classifier["categories"]
+    assert persisted_classifier["data"]["confidence_threshold"] == 0.75
+    assert persisted_condition["data"]["conditions"] == condition["conditions"]
+    assert len(persisted["nodes"]) == len(asset["graph"]["nodes"]) == 14
+    assert len(persisted["edges"]) == len(asset["graph"]["edges"]) == 15
+
+
 def test_hybrid_service_fallback_asset_has_complete_visual_graph_integrity():
     """Automatically guard every authored and materialized connection in this asset."""
     from app.services.marketplace_installation_service import MarketplaceInstallationService
