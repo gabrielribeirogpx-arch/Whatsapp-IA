@@ -89,99 +89,68 @@ def _operational_graph(key: str, name: str, objective: str, *, segment: str = "g
 
 
 def _initial_menu_graph() -> dict[str, Any]:
-    """Concise contact-centre menu, positioned by hand for the Flow Builder."""
+    """Minimal three-route contact-centre menu for the Flow Builder."""
     route_buttons = [
         {"id": "atendimento", "value": "atendimento", "label": "Atendimento", "handleId": "atendimento", "next": ""},
         {"id": "comercial", "value": "comercial", "label": "Comercial", "handleId": "comercial", "next": ""},
         {"id": "financeiro", "value": "financeiro", "label": "Financeiro", "handleId": "financeiro", "next": ""},
-        {"id": "agendamento", "value": "agendamento", "label": "Agendamento", "handleId": "agendamento", "next": ""},
-        {"id": "duvidas_frequentes", "value": "duvidas_frequentes", "label": "Dúvidas frequentes", "handleId": "duvidas_frequentes", "next": ""},
-        {"id": "falar_com_atendente", "value": "falar_com_atendente", "label": "Falar com atendente", "handleId": "falar_com_atendente", "next": ""},
-    ]
-    more_buttons = [
-        {"id": "mais_opcoes_1", "value": "mais_opcoes_1", "label": "Mais opções", "handleId": "mais_opcoes_1", "next": ""},
-        {"id": "mais_opcoes_2", "value": "mais_opcoes_2", "label": "Mais opções", "handleId": "mais_opcoes_2", "next": ""},
     ]
     menu_content = "Como podemos ajudar? Escolha uma das opções abaixo."
     nodes = [
         _node("start", "start", "Início"),
-        _node("menu_welcome", "message", "Boas-vindas", content="Olá, {{contact.name}}! Boas-vindas à nossa central de atendimento."),
-        _node("menu_identification", "action", "Identificação", action="set_variables", fields={"customer_name": "{{contact.name}}", "service_origin": "menu_inicial"}),
-        _node("menu_main", "choice", "Menu principal", content=menu_content, display_mode="buttons", buttons=[*route_buttons[:2], more_buttons[0]], variable="service_route"),
-        _node("menu_more_1", "choice", "Mais opções", content=menu_content, display_mode="buttons", buttons=[*route_buttons[2:4], more_buttons[1]], variable="service_route"),
-        _node("menu_more_2", "choice", "Mais opções", content=menu_content, display_mode="buttons", buttons=route_buttons[4:], variable="service_route"),
+        _node("menu_welcome", "message", "Mensagem de Boas-vindas", content="Olá, {{contact.name}}! Boas-vindas à nossa central de atendimento."),
+        _node("menu_identification", "action", "Identificação do contato", action="set_variables", fields={"customer_name": "{{contact.name}}", "service_origin": "menu_inicial"}),
+        _node("menu_main", "choice", "Escolha", content=menu_content, display_mode="buttons", buttons=route_buttons, variable="service_route"),
     ]
     branches = [
-        ("atendimento", "Atendimento", "Entendi. Sua solicitação foi direcionada para Atendimento."),
-        ("comercial", "Comercial", "Ótimo! Sua solicitação foi direcionada para Comercial."),
-        ("financeiro", "Financeiro", "Certo. Sua solicitação foi direcionada para Financeiro."),
-        ("agendamento", "Agendamento", "Vamos cuidar do seu agendamento."),
-        ("faq", "FAQ", "Vamos ajudar você com sua dúvida frequente."),
-        ("humano", "Humano", "Claro. Seu atendimento seguirá com uma pessoa da equipe."),
+        ("atendimento", "Mensagem Atendimento", "Entendi. Sua solicitação foi direcionada para Atendimento."),
+        ("comercial", "Mensagem Comercial", "Ótimo! Sua solicitação foi direcionada para Comercial."),
+        ("financeiro", "Mensagem Financeiro", "Certo. Sua solicitação foi direcionada para Financeiro."),
     ]
     for key, label, content in branches:
         nodes.append(_node(f"menu_{key}", "message", label, content=content))
-    nodes.append(_node("menu_end", "message", "Encerramento", content="Pronto! Encerramos esta etapa do atendimento. Conte conosco."))
+    nodes.append(_node("menu_end", "message", "Mensagem Final", content="Pronto! Encerramos esta etapa do atendimento. Conte conosco."))
 
     edges = [
         ("start", "menu_welcome", None),
         ("menu_welcome", "menu_identification", None),
         ("menu_identification", "menu_main", None),
-        ("menu_main", "menu_more_1", "mais_opcoes_1"),
-        ("menu_more_1", "menu_more_2", "mais_opcoes_2"),
     ]
     branch_handles = {
         "atendimento": "atendimento",
         "comercial": "comercial",
         "financeiro": "financeiro",
-        "agendamento": "agendamento",
-        "faq": "duvidas_frequentes",
-        "humano": "falar_com_atendente",
-    }
-    menu_sources = {
-        "atendimento": "menu_main",
-        "comercial": "menu_main",
-        "financeiro": "menu_more_1",
-        "agendamento": "menu_more_1",
-        "faq": "menu_more_2",
-        "humano": "menu_more_2",
     }
     for key, *_ in branches:
         edges.extend([
-            (menu_sources[key], f"menu_{key}", branch_handles[key]),
+            ("menu_main", f"menu_{key}", branch_handles[key]),
             (f"menu_{key}", "menu_end", None),
         ])
 
     asset = _asset("menu_inicial", "Menu inicial", "no_ai", nodes, edges)
     # This template intentionally keeps its authored coordinates.  Depth belongs
-    # on X; Y is reserved exclusively for the six parallel menu routes.
+    # on X; Y is reserved exclusively for the three parallel menu routes.
     positions = {
-        "start": (0, 415),
-        "menu_welcome": (300, 415),
-        "menu_identification": (600, 415),
-        "menu_main": (900, 415),
-        "menu_more_1": (1200, 415),
-        "menu_more_2": (1500, 415),
-        "menu_end": (2200, 415),
+        "start": (0, 300),
+        "menu_welcome": (300, 300),
+        "menu_identification": (600, 300),
+        "menu_main": (900, 300),
+        "menu_end": (1500, 300),
     }
     branch_y = {
-        "atendimento": 40,
-        "comercial": 190,
-        "financeiro": 340,
-        "agendamento": 490,
-        "faq": 640,
-        "humano": 790,
+        "atendimento": 0,
+        "comercial": 300,
+        "financeiro": 600,
     }
     for key, y in branch_y.items():
-        positions[f"menu_{key}"] = (1850, y)
+        positions[f"menu_{key}"] = (1200, y)
     for node in asset["graph"]["nodes"]:
         x, y = positions[node["key"]]
         node["position"] = {"x": x, "y": y}
-    asset["description"] = "Boas-vindas e identificação seguidas por um menu com seis rotas e encerramento único."
-    asset["metadata"].update({"architecture": "horizontal_initial_menu_v4", "layout": "manual", "layout_direction": "LR", "branch_count": len(branches)})
-    for menu_key in ("menu_main", "menu_more_1", "menu_more_2"):
-        menu_node = next(node for node in asset["graph"]["nodes"] if node["key"] == menu_key)
-        asset["educational_metadata"][menu_key]["option_ids"] = [button["handleId"] for button in menu_node["config"]["buttons"]]
+    asset["description"] = "Boas-vindas e identificação seguidas por um menu com três rotas e encerramento único."
+    asset["metadata"].update({"architecture": "horizontal_initial_menu_v5", "layout": "manual", "layout_direction": "LR", "branch_count": len(branches)})
+    menu_node = next(node for node in asset["graph"]["nodes"] if node["key"] == "menu_main")
+    asset["educational_metadata"]["menu_main"]["option_ids"] = [button["handleId"] for button in menu_node["config"]["buttons"]]
     return asset
 
 
