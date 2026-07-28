@@ -432,6 +432,81 @@ def test_waiting_choice_with_row_id_transitions_to_target_node() -> None:
     assert any(event["payload"] == {"node_id": "choice", "row_id": "quero_planos"} for event in event_store.events)
 
 
+@pytest.mark.parametrize("middle_type", ["message", "condition", "action", None])
+def test_choice_reply_is_consumed_before_a_later_choice(middle_type) -> None:
+    """A reply to Choice #1 must never be reused as the reply to Choice #2."""
+    nodes = [
+        {
+            "id": "choice-1",
+            "type": "choice",
+            "data": {
+                "content": "Primeira escolha",
+                "options": [{"id": "yes", "label": "Sim"}],
+            },
+        },
+        {
+            "id": "choice-2",
+            "type": "choice",
+            "data": {
+                "content": "Segunda escolha",
+                "options": [{"id": "yes", "label": "Sim"}],
+            },
+        },
+        {"id": "done", "type": "message", "data": {"text": "Não deve ser enviada"}},
+    ]
+    edges = [
+        {"id": "choice-2-yes", "source": "choice-2", "sourceHandle": "yes", "target": "done"},
+    ]
+    target_after_first = "choice-2"
+    if middle_type == "message":
+        nodes.append({"id": "middle", "type": "message", "data": {"text": "Entre escolhas"}})
+        edges.append({"id": "middle-next", "source": "middle", "target": "choice-2"})
+        target_after_first = "middle"
+    elif middle_type == "condition":
+        nodes.append({"id": "middle", "type": "condition", "data": {"conditions": []}})
+        edges.append({"id": "middle-next", "source": "middle", "sourceHandle": "false", "target": "choice-2"})
+        target_after_first = "middle"
+    elif middle_type == "action":
+        nodes.append({"id": "middle", "type": "action", "data": {"action_type": "test_noop"}})
+        edges.append({"id": "middle-next", "source": "middle", "target": "choice-2"})
+        target_after_first = "middle"
+    edges.append(
+        {"id": "choice-1-yes", "source": "choice-1", "sourceHandle": "yes", "target": target_after_first}
+    )
+    executor, snapshot, event_store, session, db = _executor(
+        {
+            "schema_version": 1,
+            "start_node_id": "choice-1",
+            "nodes": nodes,
+            "edges": edges,
+        }
+    )
+    session.current_node_id = "choice-1"
+
+    first = executor.handle_input(db, _input_with_id(snapshot, "wamid.initial"))
+    assert first.status == FlowV2SessionStatus.WAITING
+    assert first.current_node_id == "choice-1"
+
+    reply = _input_with_id(
+        snapshot,
+        "wamid.reply",
+        {"interactive_reply_id": "yes", "selected_row_id": "yes"},
+    )
+    second = executor.handle_input(db, reply)
+
+    assert second.status == FlowV2SessionStatus.WAITING
+    assert second.current_node_id == "choice-2"
+    assert session.status == FlowV2SessionStatus.WAITING
+    assert session.current_node_id == "choice-2"
+    assert isinstance(second.actions[-1], SendChoiceButtonsAction)
+    assert second.actions[-1].node_id == "choice-2"
+    assert all(action.as_effect().get("text") != "Não deve ser enviada" for action in second.actions)
+    assert [event["node_id"] for event in event_store.events if event["event_type"] == "CHOICE_SELECTED"] == ["choice-1"]
+    # The original input remains intact for audit/event payloads; only the
+    # traversal copy has its already-consumed selection removed.
+    assert reply.metadata["runtime_choice_key"] == "yes"
+
+
 def test_waiting_choice_with_button_reply_id_maps_row_id_and_transitions_to_target_node() -> None:
     raw_snapshot = {
         "schema_version": 1,
