@@ -27,6 +27,7 @@ from app.flow_v2.executors.message_executor import (
     extract_message_text_from_node,
 )
 from app.flow_v2.executors.rag_executor import AiRagNodeExecutor
+from app.flow_v2.executors.data_collection_executor import RuntimeV2DataCollectionExecutor
 
 __all__ = [
     "NodeExecutionResult", "NodeExecutor", "BaseNodeExecutor",
@@ -34,5 +35,5 @@ __all__ = [
     "DelayNodeExecutor", "ConditionNodeExecutor", "ActionNodeExecutor", "AiRagNodeExecutor",
     "AiResponseNodeExecutor", "AiAgentNodeExecutor", "AiDispatcherNodeExecutor", "AiGreetingNodeExecutor", "AiCalendarAgentNodeExecutor", "AiSafeFallbackNodeExecutor", "AiSupervisorNodeExecutor",
     "AiSummaryNodeExecutor", "AiStructuredNodeExecutor", "AiClassificationNodeExecutor", "AiExtractionNodeExecutor", "AiSystemNodeExecutor",
-    "extract_message_text_from_node", "calculate_typing_delay_seconds",
+    "extract_message_text_from_node", "calculate_typing_delay_seconds", "RuntimeV2DataCollectionExecutor",
 ]
