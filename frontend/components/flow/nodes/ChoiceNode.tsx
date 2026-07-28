@@ -1,7 +1,7 @@
 'use client';
 
-import { useEffect } from 'react';
-import { NodeProps } from 'reactflow';
+import { useEffect, useMemo } from 'react';
+import { NodeProps, useUpdateNodeInternals } from 'reactflow';
 import CompactFlowNode, { truncateText } from './CompactFlowNode';
 
 type ChoiceButton = { id?: string; label?: string; value?: string; handleId?: string; next?: string };
@@ -20,13 +20,23 @@ type ChoiceNodeData = {
 const toHandleId = (value: string, fallback: string) => value.toLowerCase().trim().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '') || fallback;
 
 export default function ChoiceNode({ id, data, selected, isConnectable }: NodeProps) {
+  const updateNodeInternals = useUpdateNodeInternals();
   const nodeData = (data || {}) as ChoiceNodeData;
   const displayMode = nodeData.display_mode || nodeData.displayMode || 'buttons';
-  const buttons = (nodeData.buttons || []).map((button, index) => {
+  const buttons = useMemo(() => (nodeData.buttons || []).map((button, index) => {
     const optionValue = button.value || button.label || button.id || `option_${index + 1}`;
     const label = button.label || button.value || `Opção ${index + 1}`;
     return { ...button, label, value: optionValue, handleId: button.handleId || toHandleId(optionValue, `option_${index + 1}`) };
-  });
+  }), [nodeData.buttons]);
+
+  const handleSignature = buttons.map((button) => button.handleId).join('|');
+
+  useEffect(() => {
+    // React Flow measures handles separately from React's render. Re-measure only
+    // after the new option row and its real <Handle> have reached the DOM.
+    const frame = requestAnimationFrame(() => updateNodeInternals(id));
+    return () => cancelAnimationFrame(frame);
+  }, [handleSignature, id, updateNodeInternals]);
 
 
   useEffect(() => {

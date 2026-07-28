@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "next lint",
     "test:marketplace": "node tests/marketplaceModal.test.mjs",
-    "test:business-kits": "node tests/businessKits.test.mjs"
+    "test:business-kits": "node tests/businessKits.test.mjs",
+    "test:choice-handles": "node tests/choiceDynamicHandlesRegression.test.mjs"
   },
   "dependencies": {
     "dagre": "^0.8.5",

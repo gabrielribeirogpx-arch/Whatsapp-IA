@@ -660,7 +660,15 @@ type FlowValidationIssue = { code: string; node_id?: string | null; message: str
 
 type EditorButton = { id?: string; label?: string; handleId?: string; next?: string };
 const toText = (value: unknown) => (typeof value === 'string' ? value : value == null ? '' : String(value));
-const fieldHandleId = (value: string, fallback: string) => value.toLowerCase().trim().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '') || fallback;
+const createChoiceButton = (nodeId: string, ordinal: number): Required<Pick<EditorButton, 'id' | 'label' | 'handleId'>> => {
+  const identity = makeNodeId();
+  const stableToken = identity.toLowerCase().replace(/[^a-z0-9]/g, '');
+  return {
+    id: `${nodeId}-button-${identity}`,
+    label: `Opção ${ordinal}`,
+    handleId: `choice_${stableToken}`,
+  };
+};
 const getBuilderNodeKind = (node?: Node | null) => {
   const normalized = String(node?.type || 'message').toLowerCase();
   return normalized === 'cta_link' ? 'cta_url' : normalized;
@@ -813,13 +821,15 @@ function FlowNodeEditorPanel({
   const buttons = ((draft.buttons as EditorButton[] | undefined) || []).slice(0, displayMode === 'buttons' ? 3 : undefined);
   const updateButton = (index: number, label: string) => {
     const next = [...buttons];
-    next[index] = { ...next[index], label, handleId: fieldHandleId(label, `option_${index + 1}`) };
+    // A label is editable presentation data. The connection identity must not
+    // change when an option is renamed or moved.
+    next[index] = { ...next[index], label };
     onDraftChange({ buttons: next });
   };
   const addButton = () => {
     const nextIndex = buttons.length + 1;
     if (displayMode === 'buttons' && buttons.length >= 3) return;
-    onDraftChange({ buttons: [...buttons, { id: `${node.id}-button-${nextIndex}`, label: `Opção ${nextIndex}`, handleId: `option_${nextIndex}` }] });
+    onDraftChange({ buttons: [...buttons, createChoiceButton(node.id, nextIndex)] });
   };
   const supportsVariables = ['message', 'choice', 'media', 'cta_url', 'condition', 'action', 'ai_rag', 'ai_response', 'ai_classification', 'ai_extraction', 'ai_summary', 'ai_agent', 'ai_supervisor', 'ai_system'].includes(kind);
   const isAiSystem = kind === 'ai_system';
@@ -995,7 +1005,7 @@ function FlowNodeEditorPanel({
             <div className="flow-editor-repeatable">
               <strong>Opções {displayMode === 'buttons' ? `(${buttons.length}/3)` : `(${buttons.length})`}</strong>
               {buttons.map((button, index) => (
-                <div key={button.id || index} className="flow-editor-row">
+                <div key={button.id || button.handleId} className="flow-editor-row">
                   <input value={button.label || ''} onChange={(event) => updateButton(index, event.target.value)} placeholder={`Opção ${index + 1}`} />
                   <button type="button" onClick={() => onDraftChange({ buttons: buttons.filter((_, buttonIndex) => buttonIndex !== index) })}>Remover</button>
                 </div>
