@@ -207,6 +207,42 @@ export async function parseApiResponse<T>(res: Response): Promise<T> {
   return JSON.parse(body) as T;
 }
 
+export type MarketplaceTemplatePublishPayload = {
+  name: string;
+  description: string;
+  category: string;
+  modality: string;
+  tags: string[];
+  version: string;
+};
+
+export type MarketplaceTemplateVersion = {
+  id: string;
+  template_id: string;
+  slug: string;
+  name: string;
+  version: string;
+  status: string;
+};
+
+/** Publishes the currently published snapshot of an existing Flow to the Marketplace. */
+export async function publishFlowAsMarketplaceTemplate(
+  flowId: string,
+  payload: MarketplaceTemplatePublishPayload,
+): Promise<MarketplaceTemplateVersion> {
+  const response = await apiFetch(`/api/marketplace/official-templates/from-flow/${flowId}`, {
+    method: 'POST',
+    body: JSON.stringify({
+      ...payload,
+      segment: 'Geral',
+      level: payload.modality === 'Sem IA' ? 'Determinístico' : payload.modality,
+      estimated_time: '5 min',
+      status: 'published',
+    }),
+  });
+  return parseApiResponse<MarketplaceTemplateVersion>(response);
+}
+
 export async function getCurrentBilling(): Promise<CurrentBillingState> { return parseApiResponse<CurrentBillingState>(await apiFetch('/api/billing/current')); }
 export async function getTrialBilling(): Promise<TrialBillingState> { return parseApiResponse<TrialBillingState>(await apiFetch('/api/billing/trial')); }
 export async function listBillingPlans(): Promise<BillingPlan[]> { return parseApiResponse<BillingPlan[]>(await apiFetch('/api/billing/plans')); }

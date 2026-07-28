@@ -6,6 +6,34 @@
   box-sizing: border-box;
 }
 
+/* Flow Builder: publish an existing flow as an official Marketplace template. */
+.marketplace-publish-backdrop { position: fixed; inset: 0; z-index: 1200; display: grid; place-items: center; padding: 20px; background: rgba(15, 23, 42, .58); backdrop-filter: blur(4px); }
+.marketplace-publish-modal { width: min(620px, 100%); max-height: calc(100vh - 40px); overflow: auto; border: 1px solid #e2e8f0; border-radius: 22px; background: #fff; box-shadow: 0 30px 80px rgba(15, 23, 42, .25); color: #0f172a; }
+.marketplace-publish-modal header { display: grid; grid-template-columns: auto 1fr auto; gap: 14px; align-items: start; padding: 24px 26px 20px; border-bottom: 1px solid #eef2f7; }
+.marketplace-publish-icon { display: grid; place-items: center; width: 44px; height: 44px; border-radius: 13px; background: #ecfdf5; color: #047857; }
+.marketplace-publish-modal header span { color: #059669; font-size: 11px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
+.marketplace-publish-modal header h2 { margin: 2px 0 4px; font-size: 21px; letter-spacing: -.025em; }
+.marketplace-publish-modal header p { margin: 0; color: #64748b; font-size: 13px; }
+.marketplace-publish-modal header > button { display: grid; place-items: center; width: 34px; height: 34px; border: 0; border-radius: 9px; background: transparent; color: #64748b; cursor: pointer; }
+.marketplace-publish-modal header > button:hover { background: #f1f5f9; color: #0f172a; }
+.marketplace-publish-body { display: grid; gap: 17px; padding: 22px 26px; }
+.marketplace-publish-body label { display: grid; gap: 7px; color: #334155; font-size: 12px; font-weight: 700; }
+.marketplace-publish-body input, .marketplace-publish-body textarea, .marketplace-publish-body select { width: 100%; border: 1px solid #cbd5e1; border-radius: 10px; background: #fff; padding: 10px 12px; color: #0f172a; font: inherit; font-size: 14px; font-weight: 400; outline: none; transition: border-color .15s, box-shadow .15s; }
+.marketplace-publish-body textarea { resize: vertical; line-height: 1.5; }
+.marketplace-publish-body input:focus, .marketplace-publish-body textarea:focus, .marketplace-publish-body select:focus { border-color: #10b981; box-shadow: 0 0 0 3px rgba(16, 185, 129, .12); }
+.marketplace-publish-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.marketplace-tag-input { display: grid; grid-template-columns: 1fr auto; gap: 8px; }
+.marketplace-tag-input button { display: flex; align-items: center; gap: 5px; border: 1px solid #cbd5e1; border-radius: 10px; padding: 0 13px; background: #f8fafc; color: #334155; font-size: 12px; font-weight: 700; cursor: pointer; }
+.marketplace-tag-input button:disabled { cursor: not-allowed; opacity: .5; }
+.marketplace-tags { display: flex; flex-wrap: wrap; gap: 7px; margin-top: -9px; }
+.marketplace-tags button { display: inline-flex; align-items: center; gap: 5px; border: 0; border-radius: 999px; padding: 5px 9px; background: #ecfdf5; color: #047857; font-size: 12px; font-weight: 700; cursor: pointer; }
+.marketplace-version { max-width: 220px; }
+.marketplace-version small { color: #94a3b8; font-weight: 400; line-height: 1.35; }
+.marketplace-publish-error { border: 1px solid #fecaca; border-radius: 10px; padding: 10px 12px; background: #fff1f2; color: #b91c1c; font-size: 13px; }
+.marketplace-publish-modal footer { display: flex; justify-content: flex-end; gap: 10px; padding: 17px 26px; border-top: 1px solid #eef2f7; background: #f8fafc; border-radius: 0 0 22px 22px; }
+.marketplace-publish-modal footer button { display: inline-flex; align-items: center; gap: 6px; }
+@media (max-width: 640px) { .marketplace-publish-backdrop { padding: 0; align-items: end; } .marketplace-publish-modal { max-height: 94vh; border-radius: 22px 22px 0 0; } .marketplace-publish-modal header, .marketplace-publish-body { padding-left: 18px; padding-right: 18px; } .marketplace-publish-grid { grid-template-columns: 1fr; } .marketplace-publish-modal footer { position: sticky; bottom: 0; padding: 14px 18px; } }
+
 :root {
   color-scheme: light;
   --primary: #16a34a;
