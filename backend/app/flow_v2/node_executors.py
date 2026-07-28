@@ -38,6 +38,7 @@ from app.flow_v2.executors import (
     NodeExecutor,
     calculate_typing_delay_seconds,
     extract_message_text_from_node,
+    RuntimeV2DataCollectionExecutor,
 )
 from app.flow_v2.executors import _legacy as _legacy_executors
 
@@ -54,6 +55,7 @@ def register_executor(node_type: str, executor: Type[NodeExecutor]) -> None:
 
 for _node_type, _executor in {
     "message": MessageNodeExecutor,
+    "data_collection": RuntimeV2DataCollectionExecutor,
     "choice": ChoiceNodeExecutor,
     "delay": DelayNodeExecutor,
     "condition": ConditionNodeExecutor,
@@ -141,6 +143,7 @@ __all__ = [
     "AiStructuredNodeExecutor",
     "AiClassificationNodeExecutor",
     "AiExtractionNodeExecutor",
+    "RuntimeV2DataCollectionExecutor",
     "NodeExecutorRegistry",
     "EXECUTOR_REGISTRY",
     "register_executor",

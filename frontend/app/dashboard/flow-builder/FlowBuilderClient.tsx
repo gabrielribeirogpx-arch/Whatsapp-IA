@@ -32,6 +32,7 @@ import AiSupervisorNode from '@/components/flow/nodes/AiSupervisorNode';
 import AiSpecializedAgentNode from '@/components/flow/nodes/AiSpecializedAgentNode';
 import AiSystemNode from '@/components/flow/nodes/AiSystemNode';
 import ChoiceNode from '@/components/flow/nodes/ChoiceNode';
+import DataCollectionNode from '@/components/flow/nodes/DataCollectionNode';
 import ConditionNode from '@/components/flow/nodes/ConditionNode';
 import CtaUrlNode from '@/components/flow/nodes/CtaUrlNode';
 import DelayNode from '@/components/flow/nodes/DelayNode';
@@ -61,6 +62,7 @@ const nodeTypes = {
   start: MessageNode,
   message: MessageNode,
   choice: ChoiceNode,
+  data_collection: DataCollectionNode,
   condition: ConditionNode,
   delay: DelayNode,
   action: ActionNode,
@@ -88,7 +90,7 @@ const nodeTypes = {
   ctaUrlNode: CtaUrlNode,
 };
 
-type FlowNodeKind = 'message' | 'choice' | 'condition' | 'delay' | 'action' | 'media' | 'cta_url' | 'ai_rag' | 'ai_response' | 'ai_classification' | 'ai_extraction' | 'ai_summary' | 'ai_agent' | 'ai_supervisor' | 'ai_dispatcher' | 'ai_greeting' | 'ai_calendar_agent' | 'ai_safe_fallback' | 'ai_system';
+type FlowNodeKind = 'message' | 'data_collection' | 'choice' | 'condition' | 'delay' | 'action' | 'media' | 'cta_url' | 'ai_rag' | 'ai_response' | 'ai_classification' | 'ai_extraction' | 'ai_summary' | 'ai_agent' | 'ai_supervisor' | 'ai_dispatcher' | 'ai_greeting' | 'ai_calendar_agent' | 'ai_safe_fallback' | 'ai_system';
 type FlowConnection = Connection & { sourceHandle?: string | null };
 type NodePaletteItem = { kind: FlowNodeKind; label: string; icon: LucideIcon; description?: string };
 type NodePaletteGroup = { id: 'communication' | 'ai' | 'logic' | 'actions'; title: string; icon: LucideIcon; nodes: NodePaletteItem[] };
@@ -400,6 +402,7 @@ const NODE_GROUPS: NodePaletteGroup[] = [
     icon: GitBranch,
     nodes: [
       { kind: 'choice', label: 'Escolha', icon: ListChecks },
+      { kind: 'data_collection', label: 'Coleta de Dados', icon: FileDown, description: 'Coleta e valida uma resposta do utilizador.' },
       { kind: 'condition', label: 'Condição', icon: GitBranch },
       { kind: 'delay', label: 'Delay', icon: Clock },
     ],
@@ -463,6 +466,7 @@ const isActionType = (value: string): value is ActionType => ACTION_TYPE_OPTIONS
 
 const NODE_PRESETS: Record<FlowNodeKind, { label: string; type: string; data: Record<string, unknown> }> = {
   message: { label: 'Mensagem', type: 'message', data: { content: '', wait_for_reply: false } },
+  data_collection: { label: 'Coleta de Dados', type: 'data_collection', data: { variable_name: '', data_type: 'text', required: true, normalize_value: true, max_attempts: 3, invalid_message: 'Valor inválido. Tente novamente.', timeout_seconds: 1800, cancel_keywords: ['cancelar', 'sair'], save_to_contact: false, save_to_lead: false, display_mode: 'buttons', allow_custom_value: false, options: [] } },
   choice: {
     label: 'Escolha',
     type: 'choice',
@@ -852,7 +856,7 @@ function FlowNodeEditorPanel({
     if (displayMode === 'buttons' && buttons.length >= 3) return;
     onDraftChange({ buttons: [...buttons, createChoiceButton(node.id, nextIndex)] });
   };
-  const supportsVariables = ['message', 'choice', 'media', 'cta_url', 'condition', 'action', 'ai_rag', 'ai_response', 'ai_classification', 'ai_extraction', 'ai_summary', 'ai_agent', 'ai_supervisor', 'ai_system'].includes(kind);
+  const supportsVariables = ['message', 'data_collection', 'choice', 'media', 'cta_url', 'condition', 'action', 'ai_rag', 'ai_response', 'ai_classification', 'ai_extraction', 'ai_summary', 'ai_agent', 'ai_supervisor', 'ai_system'].includes(kind);
   const isAiSystem = kind === 'ai_system';
   const publishedSubflowOptions = flows.filter((flow) => flow.id !== currentFlowId && isPublishedFlow(flow));
   const subflowTools = Array.isArray(draft.subflow_tools) ? (draft.subflow_tools as SubflowToolDraft[]) : [];
@@ -1004,6 +1008,24 @@ function FlowNodeEditorPanel({
             <small>Quando marcado, o fluxo envia esta mensagem e só avança para o próximo bloco após a próxima resposta do usuário.</small>
           </>
         )}
+
+        {kind === 'data_collection' && (() => {
+          const options = Array.isArray(draft.options) ? draft.options as Array<Record<string, unknown>> : [];
+          const updateOption = (index:number, patch:Record<string,unknown>) => onDraftChange({ options: options.map((option,i)=>i===index?{...option,...patch}:option) });
+          return <>
+            <div className="flow-editor-info-card"><strong>Propósito:</strong> Coletar e validar uma resposta do utilizador.</div>
+            <label className="flow-editor-field">Nome da variável<input value={toText(draft.variable_name)} onChange={e=>onDraftChange({variable_name:e.target.value})} placeholder="preferred_period" /></label>
+            <label className="flow-editor-field">Tipo do dado<select value={toText(draft.data_type||'text')} onChange={e=>onDraftChange({data_type:e.target.value})}>{['text','number','email','phone','date','time','cpf','cnpj','url','currency','boolean','choice'].map(type=><option key={type}>{type}</option>)}</select></label>
+            <label className="flow-editor-radio"><input type="checkbox" checked={draft.required!==false} onChange={e=>onDraftChange({required:e.target.checked})}/>Obrigatório</label>
+            <label className="flow-editor-radio"><input type="checkbox" checked={draft.normalize_value!==false} onChange={e=>onDraftChange({normalize_value:e.target.checked})}/>Normalizar valor</label>
+            <div className="flow-editor-row"><label className="flow-editor-field">Máximo de tentativas<input type="number" min="1" value={Number(draft.max_attempts||3)} onChange={e=>onDraftChange({max_attempts:Number(e.target.value)})}/></label><label className="flow-editor-field">Timeout (segundos)<input type="number" min="0" value={Number(draft.timeout_seconds||0)} onChange={e=>onDraftChange({timeout_seconds:Number(e.target.value)})}/></label></div>
+            <label className="flow-editor-field">Mensagem de erro<textarea value={toText(draft.invalid_message)} onChange={e=>onDraftChange({invalid_message:e.target.value})}/></label>
+            <label className="flow-editor-field">Palavras de cancelamento<input value={(Array.isArray(draft.cancel_keywords)?draft.cancel_keywords:[]).join(', ')} onChange={e=>onDraftChange({cancel_keywords:e.target.value.split(',').map(v=>v.trim()).filter(Boolean)})}/></label>
+            <label className="flow-editor-radio"><input type="checkbox" checked={draft.save_to_contact===true} onChange={e=>onDraftChange({save_to_contact:e.target.checked})}/>Salvar em contato</label>
+            <label className="flow-editor-radio"><input type="checkbox" checked={draft.save_to_lead===true} onChange={e=>onDraftChange({save_to_lead:e.target.checked})}/>Salvar em lead</label>
+            {draft.data_type==='choice' && <section className="flow-editor-tab-section"><h4>Opções</h4><label className="flow-editor-field">Exibição<select value={toText(draft.display_mode||'buttons')} onChange={e=>onDraftChange({display_mode:e.target.value})}><option value="buttons">Botões</option><option value="list">Lista</option><option value="text">Texto</option></select></label><label className="flow-editor-radio"><input type="checkbox" checked={draft.allow_custom_value===true} onChange={e=>onDraftChange({allow_custom_value:e.target.checked})}/>Permitir texto controlado</label>{options.map((option,index)=><article key={toText(option.id)} className="flow-editor-subflow-card"><input value={toText(option.label)} placeholder="Rótulo" onChange={e=>updateOption(index,{label:e.target.value})}/><input value={toText(option.value)} placeholder="Valor" onChange={e=>updateOption(index,{value:e.target.value})}/><code>{toText(option.id)}</code><button type="button" onClick={()=>onDraftChange({options:options.filter((_,i)=>i!==index)})}>Remover</button></article>)}<button type="button" className="flow-editor-secondary-btn" onClick={()=>onDraftChange({options:[...options,{id:crypto.randomUUID(),label:'Nova opção',value:'nova_opcao'}]})}>+ Adicionar opção</button></section>}
+          </>;
+        })()}
 
         {kind === 'choice' && (
           <>

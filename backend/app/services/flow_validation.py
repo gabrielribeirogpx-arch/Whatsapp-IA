@@ -27,6 +27,7 @@ MESSAGES = {
     "ACTION_CONFIG_INCOMPLETE": ("Complete os parâmetros obrigatórios da ação.", "Preencha os campos obrigatórios destacados."),
     "NODE_ORPHAN": ("Este node não está conectado ao caminho iniciado pelo Start.", "Conecte o node ao caminho iniciado pelo Start."),
     "EDGE_INVALID": ("Existe uma conexão inválida entre nodes.", "Remova a conexão inválida e conecte os nodes novamente."),
+    "DATA_COLLECTION_INVALID": ("Revise a configuração da Coleta de Dados.", "Preencha os campos destacados e conecte as saídas necessárias."),
 }
 
 
@@ -92,4 +93,21 @@ def validate_builder_graph(nodes: list[dict[str, Any]], edges: list[dict[str, An
                 if handle not in edge_handles: issues.append(_issue("CHOICE_OPTION_WITHOUT_TARGET", node, field=f"options.{index}", message=f"A opção ‘{label or index + 1}’ não está conectada a nenhum node."))
                 handles.append(handle)
             if len(handles) != len(set(handles)): issues.append(_issue("CHOICE_DUPLICATE_HANDLE", node, field="options"))
+        elif kind == "data_collection":
+            variable = str(data.get("variable_name") or "")
+            if not variable: issues.append(_issue("DATA_COLLECTION_INVALID", node, field="variable_name", message="Defina o nome da variável."))
+            elif not __import__("re").fullmatch(r"[a-zA-Z_][a-zA-Z0-9_]*", variable): issues.append(_issue("DATA_COLLECTION_INVALID", node, field="variable_name", message="Use letras, números e underscore; não comece com número."))
+            if str(data.get("data_type") or "") not in {"text", "number", "email", "phone", "date", "time", "cpf", "cnpj", "url", "currency", "boolean", "choice"}: issues.append(_issue("DATA_COLLECTION_INVALID", node, field="data_type", message="Selecione um tipo de dado válido."))
+            if int(data.get("max_attempts") or 0) < 1: issues.append(_issue("DATA_COLLECTION_INVALID", node, field="max_attempts", message="O máximo de tentativas deve ser maior que zero."))
+            if int(data.get("timeout_seconds") or 0) < 0: issues.append(_issue("DATA_COLLECTION_INVALID", node, field="timeout_seconds", message="O timeout não pode ser negativo."))
+            options = data.get("options") or []
+            if data.get("data_type") == "choice" and not options: issues.append(_issue("DATA_COLLECTION_INVALID", node, field="options", message="Adicione pelo menos uma opção."))
+            ids = [str(option.get("id") or "") for option in options if isinstance(option, dict)]; values = [str(option.get("value") or "") for option in options if isinstance(option, dict)]
+            if any(not value for value in ids): issues.append(_issue("DATA_COLLECTION_INVALID", node, field="options", message="Todas as opções precisam de um identificador."))
+            if len(ids) != len(set(ids)) or len(values) != len(set(values)): issues.append(_issue("DATA_COLLECTION_INVALID", node, field="options", message="IDs e valores das opções devem ser únicos."))
+            handles = {str(edge.get("sourceHandle") or "") for edge in outgoing[node_id]}
+            if "success" not in handles: issues.append(_issue("DATA_COLLECTION_INVALID", node, field="connections", message="A saída Sucesso precisa estar conectada."))
+            if int(data.get("timeout_seconds") or 0) > 0 and "timeout" not in handles: issues.append(_issue("DATA_COLLECTION_INVALID", node, field="connections", message="Conecte a saída Timeout."))
+            if data.get("cancel_keywords") and "cancel" not in handles: issues.append(_issue("DATA_COLLECTION_INVALID", node, field="connections", message="Conecte a saída Cancelar."))
+            if int(data.get("max_attempts") or 1) > 0 and "invalid" not in handles: issues.append(_issue("DATA_COLLECTION_INVALID", node, field="connections", message="Conecte a saída Inválido."))
     return issues

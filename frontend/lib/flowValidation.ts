@@ -24,6 +24,19 @@ export function validateFlowLocally(nodes: Node[], edges: Edge[]): FlowValidatio
       const handles = new Set(next.map((edge) => String(edge.sourceHandle || edge.data?.sourceHandle || '').toLowerCase()));
       if (!handles.has('true') || !handles.has('false')) issues.push(issue('CONDITION_NEEDS_BOTH_BRANCHES', 'Conecte as saídas Sim e Não.', node, 'connections'));
     }
+    if (type === 'data_collection') {
+      const variable = String(data.variable_name || '');
+      if (!variable) issues.push(issue('DATA_COLLECTION_VARIABLE_REQUIRED', 'Defina o nome da variável.', node, 'variable_name'));
+      else if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(variable)) issues.push(issue('DATA_COLLECTION_VARIABLE_INVALID', 'Use letras, números e underscore; não comece com número.', node, 'variable_name'));
+      if (Number(data.max_attempts || 0) < 1) issues.push(issue('DATA_COLLECTION_ATTEMPTS_INVALID', 'O máximo de tentativas deve ser maior que zero.', node, 'max_attempts'));
+      const options = Array.isArray(data.options) ? data.options as Array<Record<string, unknown>> : [];
+      if (data.data_type === 'choice' && !options.length) issues.push(issue('DATA_COLLECTION_OPTIONS_REQUIRED', 'Adicione pelo menos uma opção.', node, 'options'));
+      const handles = new Set(next.map((edge) => String(edge.sourceHandle || '')));
+      if (!handles.has('success')) issues.push(issue('DATA_COLLECTION_SUCCESS_REQUIRED', 'A saída Sucesso precisa estar conectada.', node, 'connections'));
+      if (Number(data.timeout_seconds || 0) > 0 && !handles.has('timeout')) issues.push(issue('DATA_COLLECTION_TIMEOUT_REQUIRED', 'Conecte a saída Timeout.', node, 'connections'));
+      if (Array.isArray(data.cancel_keywords) && data.cancel_keywords.length && !handles.has('cancel')) issues.push(issue('DATA_COLLECTION_CANCEL_REQUIRED', 'Conecte a saída Cancelar.', node, 'connections'));
+      if (!handles.has('invalid')) issues.push(issue('DATA_COLLECTION_INVALID_REQUIRED', 'Conecte a saída Inválido.', node, 'connections'));
+    }
   }); return issues;
 }
 
