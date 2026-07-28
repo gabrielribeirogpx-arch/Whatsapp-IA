@@ -38,6 +38,7 @@ import DelayNode from '@/components/flow/nodes/DelayNode';
 import MessageNode from '@/components/flow/nodes/MessageNode';
 import MediaNode from '@/components/flow/nodes/MediaNode';
 import CreateFlowModal from '@/components/flows/CreateFlowModal';
+import PublishMarketplaceTemplateModal from '@/components/flows/PublishMarketplaceTemplateModal';
 import AIStoreModal from '@/components/ai-store/AIStoreModal';
 import { MARKETPLACE_CATALOG } from '@/components/ai-store/catalog';
 import AISystemModal from '@/components/flow/AISystemModal';
@@ -1661,6 +1662,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
   const [isCreatingFlow, setIsCreatingFlow] = useState(false);
   const [isCreateFlowOpen, setIsCreateFlowOpen] = useState(false);
   const [isRenameFlowOpen, setIsRenameFlowOpen] = useState(false);
+  const [isPublishTemplateOpen, setIsPublishTemplateOpen] = useState(false);
   const [renameFlowName, setRenameFlowName] = useState('');
   const [flowVersions, setFlowVersions] = useState<FlowVersionItem[]>([]);
   const [analyticsOverlayEnabled, setAnalyticsOverlayEnabled] = useState(false);
@@ -3440,7 +3442,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
           <div><h1>{selectedFlow?.name || 'Fluxo não selecionado'}</h1><button type="button" aria-label="Abrir validação do fluxo" onClick={() => setIsMobileValidationOpen(true)}><MoreHorizontal size={20} /></button></div>
           <div><span>{getFlowBadge(selectedFlow || {}).label}</span><small>{flowSaveStatus === 'saving' ? 'Salvando…' : flowDirty ? 'Alterações pendentes' : flowSaveStatus === 'error' ? 'Erro ao salvar' : 'Salvo'}</small></div>
           <dl><div><dt>Nodes</dt><dd>{nodes.length}</dd></div><div><dt>Conexões</dt><dd>{edges.length}</dd></div><div><dt>Problemas</dt><dd>{validationErrors.length + validationWarnings.length}</dd></div></dl>
-          <div className="flow-mobile-summary__actions"><button type="button" onClick={() => void handleSaveFlow(false, { showToast: true })} disabled={isSaving || !selectedFlowId}><Save size={16}/>{saveButtonLabel}</button><button type="button" onClick={() => setIsSimulatorOpen(true)} disabled={!nodes.length}><Play size={16}/>Testar</button><button type="button" onClick={handleActivateFlow} disabled={!selectedFlowId || validationErrors.length > 0}>Publicar</button></div>
+          <div className="flow-mobile-summary__actions"><button type="button" onClick={() => void handleSaveFlow(false, { showToast: true })} disabled={isSaving || !selectedFlowId}><Save size={16}/>{saveButtonLabel}</button><button type="button" onClick={() => setIsSimulatorOpen(true)} disabled={!nodes.length}><Play size={16}/>Testar</button><button type="button" onClick={handleActivateFlow} disabled={!selectedFlowId || validationErrors.length > 0}>Ativar</button><button type="button" onClick={() => setIsPublishTemplateOpen(true)} disabled={!selectedFlowId}>Template</button></div>
         </section>
         <div className="flow-mobile-tabs" role="tablist"><button type="button" role="tab" aria-selected={mobileView === 'list'} onClick={() => setMobileFlowView('list')}>Lista</button><button type="button" role="tab" aria-selected={mobileView === 'map'} onClick={() => setMobileFlowView('map')}>Mapa</button></div>
         {mobileView === 'map' ? <section className="flow-mobile-map"><GitFork size={24}/><strong>Mapa disponível no editor completo</strong><p>Use a lista para editar o fluxo sem comprimir o canvas.</p><span>{nodes.length} nodes · {edges.length} conexões</span></section> : <section className="flow-mobile-list" aria-label="Sequência lógica dos nodes">
@@ -3723,6 +3725,15 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
                     disabled={!selectedFlowId}
                   >
                     Snapshot
+                  </button>
+                  <button
+                    type="button"
+                    className="flow-top-btn flow-top-btn-neutral"
+                    onClick={() => setIsPublishTemplateOpen(true)}
+                    disabled={!selectedFlowId}
+                    title="Publicar o fluxo ativo como template instalável"
+                  >
+                    Publicar como Template
                   </button>
                 </div>
                 <div className="flow-toolbar-group flow-toolbar-group-primary-actions">
@@ -4228,6 +4239,14 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
             </div>
           </form>
         </div>
+      )}
+      {isPublishTemplateOpen && selectedFlowId && (
+        <PublishMarketplaceTemplateModal
+          flowId={selectedFlowId}
+          flowName={selectedFlow?.name || 'Novo template'}
+          onClose={() => setIsPublishTemplateOpen(false)}
+          onPublished={toast.success}
+        />
       )}
       {activeAiSystemNode && (
         <AISystemModal
