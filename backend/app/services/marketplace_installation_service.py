@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 from app.marketplace_assets import MarketplaceGraphValidator, get_asset, get_item
+from app.flow_builder_contract import create_choice_node, create_edge
 from app.models import Flow, KnowledgeBase, PipelineStage
 from app.models.audit_log import AuditLog
 from app.models.marketplace_installation import MarketplaceInstallation, MarketplaceInstallationResource
@@ -64,23 +65,22 @@ class MarketplaceInstallationService:
     @staticmethod
     def _materialize(asset):
         ids = {node["key"]: str(uuid.uuid4()) for node in asset["graph"]["nodes"]}
-        nodes = [{"id": ids[node["key"]], "type": node["type"], "position": node["position"], "data": {**node["config"], "marketplace_asset_key": asset["key"], "educational_metadata": asset["educational_metadata"].get(node["key"], {})}} for node in asset["graph"]["nodes"]]
+        nodes = []
+        for node in asset["graph"]["nodes"]:
+            data = {**node["config"], "marketplace_asset_key": asset["key"], "educational_metadata": asset["educational_metadata"].get(node["key"], {})}
+            if asset["key"] == "atendimento_com_fallback_para_ia" and node["type"] == "choice":
+                nodes.append(create_choice_node(node_id=ids[node["key"]], position=node["position"], data=data))
+            else:
+                nodes.append({"id": ids[node["key"]], "type": node["type"], "position": node["position"], "data": data})
         edges = []
         for edge in asset["graph"]["edges"]:
             source_handle = edge.get("sourceHandle", edge.get("source_handle"))
             target_handle = edge.get("targetHandle", edge.get("target_handle"))
-            materialized = {
-                **{key: value for key, value in edge.items() if key not in {"id", "source", "target", "source_handle", "target_handle", "sourceHandle", "targetHandle"}},
-                "id": str(uuid.uuid4()),
-                "source": ids[edge["source"]],
-                "target": ids[edge["target"]],
-                "type": edge.get("type", "default"),
-            }
-            if source_handle is not None:
-                materialized["sourceHandle"] = source_handle
-            if target_handle is not None:
-                materialized["targetHandle"] = target_handle
-            edges.append(materialized)
+            extra = {key: value for key, value in edge.items() if key not in {"id", "source", "target", "source_handle", "target_handle", "sourceHandle", "targetHandle", "type"}}
+            edges.append(create_edge(source=ids[edge["source"]], target=ids[edge["target"]], source_handle=source_handle,
+                                     target_handle=target_handle, edge_type=edge.get("type", "default"), extra=extra))
+        if asset["key"] == "atendimento_com_fallback_para_ia":
+            MarketplaceGraphValidator().validate_materialized(nodes, edges)
         return nodes, edges
     def install(self, slug: str, variant: str, key: str):
         self._assert_access()

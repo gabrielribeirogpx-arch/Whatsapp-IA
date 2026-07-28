@@ -107,3 +107,40 @@ class MarketplaceGraphValidator:
             for integration in declared - configured_integrations: errors.append(f"integration_not_configured:{integration}")
         if (asset.get("compatibility") or {}).get("runtime") != "v2": errors.append("runtime_not_supported")
         if errors: raise MarketplaceGraphValidationError(errors)
+
+    def validate_materialized(self, nodes: list[dict[str, Any]], edges: list[dict[str, Any]]) -> None:
+        """Reject persisted choice graphs that differ from the builder contract."""
+        errors: list[str] = []
+        outgoing: dict[str, list[dict[str, Any]]] = {}
+        for edge in edges:
+            outgoing.setdefault(str(edge.get("source")), []).append(edge)
+        for node in nodes:
+            if node.get("type") != "choice":
+                continue
+            options = (node.get("data") or {}).get("buttons")
+            if not isinstance(options, list) or not options:
+                errors.append(f"choice_buttons_required:{node.get('id')}")
+                continue
+            ids, handles = [], []
+            for option in options:
+                if not isinstance(option, dict) or not all(key in option for key in ("id", "label", "value", "handleId", "next")):
+                    errors.append(f"choice_option_contract_invalid:{node.get('id')}")
+                    continue
+                ids.append(str(option["id"]).strip()); handles.append(str(option["handleId"]).strip())
+            if any(not value for value in ids): errors.append(f"choice_option_id_required:{node.get('id')}")
+            if any(not value for value in handles): errors.append(f"choice_handle_required:{node.get('id')}")
+            if len(ids) != len(set(ids)): errors.append(f"duplicate_choice_option_id:{node.get('id')}")
+            if len(handles) != len(set(handles)): errors.append(f"duplicate_choice_handle:{node.get('id')}")
+            node_edges = outgoing.get(str(node.get("id")), [])
+            for handle in handles:
+                matching = [edge for edge in node_edges if edge.get("sourceHandle") == handle]
+                if len(matching) != 1: errors.append(f"choice_handle_requires_one_edge:{node.get('id')}:{handle}")
+                for edge in matching:
+                    data = edge.get("data") or {}
+                    if (edge.get("targetHandle") != "default" or edge.get("type") != "default"
+                            or data.get("sourceHandle") != handle):
+                        errors.append(f"choice_edge_contract_invalid:{edge.get('id')}")
+            for edge in node_edges:
+                if edge.get("sourceHandle") not in handles:
+                    errors.append(f"invalid_choice_edge_handle:{node.get('id')}:{edge.get('sourceHandle')}")
+        if errors: raise MarketplaceGraphValidationError(errors)
