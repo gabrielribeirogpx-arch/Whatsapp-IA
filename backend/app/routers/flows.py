@@ -42,6 +42,7 @@ from app.services.flow_runtime_service import execute_node_chain_until_reply
 from app.services.flow_session_service import FlowSessionService
 from app.services.flow_service import FlowService, create_flow, delete_flow, duplicate_flow, get_flow, get_flows, update_flow
 from app.services.flow_activation_service import activate_flow_exclusively, deactivate_tenant_flows_exclusively
+from app.services.flow_validation import validate_builder_graph
 from app.services.runtime_flow_diagnostics import assert_flow_matches_whatsapp_tenant
 from app.services.delay_queue_service import clear_delays_for_runtime_reset
 from app.flow_v2.delay_contract import normalize_delay_nodes
@@ -1687,6 +1688,11 @@ def validate_flow_payload_or_400(
             len(normalized_edges),
         )
         return normalized_nodes, normalized_edges
+
+    canonical_issues = validate_builder_graph(nodes, edges)
+    if canonical_issues:
+        logger.warning("event=flow_validation_failed error_count=%s codes=%s node_ids=%s", len(canonical_issues), [i["code"] for i in canonical_issues], [i["node_id"] for i in canonical_issues if i["node_id"]])
+        raise HTTPException(status_code=400, detail={"success": False, "error": canonical_issues[0], "errors": canonical_issues, "legacy_detail": f'VALIDATION_ERROR: {canonical_issues[0]["code"]}'})
 
     start_nodes = [
         node
@@ -3401,8 +3407,12 @@ def publish_tenant_flow_version(
             version=flow.version,
             snapshot_hash=getattr(fresh_version, "v2_snapshot_hash", None),
         )
-    except HTTPException:
+    except HTTPException as exc:
         logger.exception("[PUBLISH FLOW FAILED] flow_id=%s", flow_id)
+        if isinstance(exc.detail, dict) and exc.detail.get("success") is False and exc.detail.get("errors"):
+            # Publish exposes the canonical contract at the response root. The
+            # legacy marker remains available during the client migration.
+            return JSONResponse(status_code=exc.status_code, content=exc.detail)
         raise
     except ValueError as exc:
         db.rollback()

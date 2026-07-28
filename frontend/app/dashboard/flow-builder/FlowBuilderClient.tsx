@@ -49,6 +49,8 @@ import { normalizeFlow } from '@/lib/flowNormalization';
 import { filterGoogleSheetsTools } from '@/lib/features';
 import { FlowAnalytics, FlowEdgePayload, FlowNodePayload, FlowVersionItem } from '@/lib/types';
 import { AGENT_SYSTEM_TEMPLATES, ENABLE_AGENT_SYSTEM_TEMPLATES, instantiateAgentSystemTemplate } from '@/lib/agentSystemTemplates';
+import { extractValidationIssues, validateFlowLocally } from '@/lib/flowValidation';
+import type { FlowValidationIssue } from '@/lib/flowValidation';
 
 const FETCH_TIMEOUT_MS = 8000;
 const INVALID_UPLOAD_PUBLIC_URL_MESSAGE = 'Upload concluído, mas a URL pública gerada é inválida.';
@@ -676,9 +678,6 @@ function flowContainsTemporaryIds(nodes: Array<{ id: string }>, edges: Array<{ i
   return nodes.some((node) => hasTempId(node.id))
     || edges.some((edge) => hasTempId(edge.id || '') || hasTempId(edge.source) || hasTempId(edge.target));
 }
-
-type FlowValidationIssue = { code: string; node_id?: string | null; message: string };
-
 
 type EditorButton = { id?: string; label?: string; value?: string; handleId?: string; next?: string };
 const toText = (value: unknown) => (typeof value === 'string' ? value : value == null ? '' : String(value));
@@ -3169,10 +3168,15 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
 
   const handleActivateFlow = useCallback(async () => {
     if (!selectedFlowId) return;
-    if (validationErrors.length > 0) return;
 
     const currentNodes = rfInstance?.getNodes?.() || [];
     const currentEdges = rfInstance?.getEdges?.() || [];
+    const localIssues = validateFlowLocally(currentNodes, currentEdges);
+    if (localIssues.length > 0) {
+      setValidationErrors(localIssues);
+      setHighlightedNodeId(localIssues.find((item) => item.node_id)?.node_id || null);
+      return;
+    }
     const invalidMediaNode = currentNodes.find((node) => {
       const data = node.data as Record<string, unknown> | undefined;
       if (node.type !== 'media' && data?.type !== 'media') return false;
@@ -3246,6 +3250,12 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
         let detailedMessage = body;
         try {
           const parsed = JSON.parse(body);
+          const structuredIssues = extractValidationIssues(parsed);
+          if (structuredIssues.length) {
+            setValidationErrors(structuredIssues);
+            setHighlightedNodeId(structuredIssues.find((item) => item.node_id)?.node_id || null);
+            return;
+          }
           const detail = parsed?.detail;
           if (detail && typeof detail === 'object') {
             detailedMessage = `${detail.code || 'VALIDATION_ERROR'}: ${detail.error || 'FLOW_INVALID'} edge=${detail.edge_id ?? detail.edge_index ?? 'n/a'} source=${detail.source ?? 'n/a'} sourceHandle=${detail.sourceHandle ?? 'n/a'} target=${detail.target ?? 'n/a'} targetHandle=${detail.targetHandle ?? 'n/a'} reasons=${Array.isArray(detail.reasons) ? detail.reasons.join(',') : 'n/a'}`;
@@ -3272,7 +3282,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
       const message = error instanceof Error && error.message ? error.message : 'Não foi possível publicar o fluxo.';
       toast.error(`Falha ao publicar: ${message}`);
     }
-  }, [flowDirty, getCurrentSerializedFlow, handleSaveFlow, loadFlow, loadRuntimeObservability, rfInstance, selectedFlowId, toast, validationErrors.length]);
+  }, [flowDirty, getCurrentSerializedFlow, handleSaveFlow, loadFlow, loadRuntimeObservability, rfInstance, selectedFlowId, toast]);
 
   const handleDeactivateFlow = useCallback(async () => {
     const response = await apiFetch('/api/flows/deactivate', {
@@ -3371,15 +3381,31 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
     setHighlightedNodeId(nodeId);
     const target = nodesRef.current.find((n) => n.id === nodeId);
     if (target) {
-      rfInstance?.setCenter(target.position.x, target.position.y, { zoom: 1.2, duration: 300 });
+      rfInstance?.setCenter(target.position.x + ((target.width || 240) / 2), target.position.y + ((target.height || 120) / 2), { zoom: 1.2, duration: 300 });
+      openNodeEditor(target);
       console.info('[INVALID NODE HIGHLIGHTED]', nodeId);
     }
-  }, [rfInstance]);
+  }, [openNodeEditor, rfInstance]);
+
+  const focusValidationIssue = useCallback((issue: FlowValidationIssue) => {
+    focusNodeIssue(issue.node_id);
+    requestAnimationFrame(() => {
+      const field = issue.focus_field || issue.field;
+      if (!field) return;
+      document.querySelector<HTMLElement>(`[data-validation-field="${field.split('.')[0]}"] input, [data-validation-field="${field.split('.')[0]}"] textarea, [data-validation-field="${field.split('.')[0]}"] select`)?.focus();
+    });
+  }, [focusNodeIssue]);
 
   useEffect(() => {
     const first = validationErrors.find((e) => e.node_id);
     if (first?.node_id) focusNodeIssue(first.node_id);
   }, [focusNodeIssue, validationErrors]);
+
+  useEffect(() => {
+    if (!validationErrors.length) return;
+    const currentCodes = new Set(validateFlowLocally(nodes, edges).map((issue) => `${issue.code}:${issue.node_id || ''}`));
+    setValidationErrors((previous) => previous.filter((issue) => currentCodes.has(`${issue.code}:${issue.node_id || ''}`)));
+  }, [edges, nodes]); // Repaint invalid nodes immediately as their configuration is corrected.
 
   const analyticsByNode = useMemo(() => new Map((analyticsData?.node_metrics ?? []).map((item) => [item.node_id, item])), [analyticsData]);
   const analyticsByEdge = useMemo(() => new Map((analyticsData?.transition_metrics ?? []).map((item) => [`${item.source_node_id}->${item.target_node_id}:${item.source_handle || ''}`, item])), [analyticsData]);
@@ -3404,13 +3430,14 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
         running: node.id === currentNodeId,
         onToggleStart: toggleStartNode,
         onOpenSystem: openAiSystemModal,
-        hasValidationError: node.id === highlightedNodeId,
+        hasValidationError: validationErrors.some((issue) => issue.node_id === node.id),
+        validationIssues: validationErrors.filter((issue) => issue.node_id === node.id),
         analytics: analyticsOverlayEnabled ? analyticsByNode.get(node.id) ?? null : null,
       },
     }));
 
     return baseNodes;
-  }, [analyticsByNode, analyticsOverlayEnabled, currentNodeId, highlightedNodeId, nodes, openAiSystemModal, toggleStartNode]);
+  }, [analyticsByNode, analyticsOverlayEnabled, currentNodeId, nodes, openAiSystemModal, toggleStartNode, validationErrors]);
 
   const safeNodes = useMemo(
     () => (Array.isArray(decoratedNodes) ? decoratedNodes : []).map((node) => ({
@@ -3844,12 +3871,13 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
           </div>
         )}
         {validationErrors.length > 0 && (
-          <div style={{ margin: '8px 0', padding: 10, border: '1px solid #fecaca', borderRadius: 8, background: '#fff1f2', maxWidth: 420 }}>
-            <strong style={{ fontSize: 12 }}>Problemas do fluxo</strong>
+          <div role="dialog" aria-label="Não foi possível ativar o fluxo" style={{ margin: '8px 0', padding: 12, border: '1px solid #fecaca', borderRadius: 8, background: '#fff1f2', maxWidth: 460 }}>
+            <strong>Não foi possível ativar o fluxo</strong>
+            <p style={{ fontSize: 12 }}>Foram encontrados {validationErrors.length} problema{validationErrors.length === 1 ? '' : 's'}:</p>
             {validationErrors.map((issue, idx) => (
               <div key={`${issue.code}-${idx}`} style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 12, marginTop: 6 }}>
-                <span>⚠️ {issue.message}</span>
-                <button type="button" onClick={() => focusNodeIssue(issue.node_id)} style={{ color: '#b91c1c' }}>Ir para bloco</button>
+                <span><b>⚠️ {issue.node_label || issue.node_type || 'Fluxo'}</b><br />{issue.message}</span>
+                <button type="button" onClick={() => focusValidationIssue(issue)} style={{ color: '#b91c1c' }}>{issue.code === 'CONDITION_EMPTY' ? 'Adicionar regra' : 'Ir para o node'}</button>
               </div>
             ))}
           </div>

@@ -118,6 +118,7 @@ function CompactFlowNode({
           {meta ? <span className="flow-node-compact-meta">{meta}</span> : null}
         </div>
         <div className="flow-node-header-actions">
+          {hasValidationError ? <span role="img" aria-label="Node com configuração inválida" title="Configuração incompleta. Abra o node para corrigir." style={{ color: '#dc2626' }}>⚠</span> : null}
           <span className="flow-node-badge" style={badgeTone} title={badgeTitle}>{badge}</span>
           <button
             type="button"
