@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import uuid
+from dataclasses import replace
 from typing import Any
 
 from sqlalchemy import select
@@ -124,6 +125,13 @@ class FlowV2ExecutionError(RuntimeError):
 
 
 MAX_RUNTIME_STEPS = 50
+
+# A provider reply belongs only to the Choice at which the session was waiting.
+# One RuntimeInput may traverse several synchronous nodes, so these fields must
+# not leak into a later Choice during the same execution.
+CHOICE_REPLY_METADATA_KEYS = frozenset(
+    {"selected_row_id", "interactive_reply_id", "row_id", "sourceHandle", "runtime_choice_key"}
+)
 
 
 class FlowV2Executor:
@@ -539,6 +547,8 @@ class FlowV2Executor:
                 raise
 
             actions.extend(result.actions)
+            if node_type.strip().lower() == "choice" and result.status == "continue":
+                runtime_input = self._without_choice_reply(runtime_input)
             for action in result.actions:
                 if isinstance(action, SendMessageAction):
                     self._track_analytics(db, session=session, flow_id=flow_id, event_type="message_sent", node_id=node_id, node_type=node_type, metadata={"text": action.text})
@@ -696,6 +706,22 @@ class FlowV2Executor:
             session.id, current_node_id, MAX_RUNTIME_STEPS, runtime_input.metadata.get("runtime_choice_key"),
         )
         raise FlowV2ExecutionError(f"Runtime V2 exceeded max_steps={MAX_RUNTIME_STEPS}")
+
+    @staticmethod
+    def _without_choice_reply(runtime_input: RuntimeInput) -> RuntimeInput:
+        """Prevent one inbound selection from resolving multiple Choice nodes."""
+        consumed_keys = [key for key in CHOICE_REPLY_METADATA_KEYS if key in runtime_input.metadata]
+        if consumed_keys:
+            logger.info(
+                "event=runtime_v2_choice_reply_consumed metadata_keys=%s",
+                sorted(consumed_keys),
+            )
+        metadata = {
+            key: value
+            for key, value in runtime_input.metadata.items()
+            if key not in CHOICE_REPLY_METADATA_KEYS
+        }
+        return replace(runtime_input, metadata=metadata)
 
 
     @staticmethod
