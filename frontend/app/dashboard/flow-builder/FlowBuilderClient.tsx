@@ -521,6 +521,28 @@ const normalizeChoiceButtons = (nodeId: string, buttons: Array<{ id?: string; la
     };
   });
 
+export const syncChoiceEdgeLabels = (choiceNodes: Node[], edges: Edge[]): Edge[] => {
+  const labelsBySourceAndHandle = new Map<string, string>();
+
+  choiceNodes.forEach((node) => {
+    if (node.type !== 'choice') return;
+    const buttons = Array.isArray((node.data as { buttons?: unknown })?.buttons)
+      ? ((node.data as { buttons: Array<{ handleId?: string; id?: string; label?: string; value?: string }> }).buttons)
+      : [];
+    buttons.forEach((button) => {
+      const handleId = safeString(button.handleId || button.id);
+      const label = safeString(button.label || button.value).trim();
+      if (handleId && label) labelsBySourceAndHandle.set(`${node.id}\u0000${handleId}`, label);
+    });
+  });
+
+  return edges.map((edge) => {
+    const sourceHandle = edge.sourceHandle ?? (edge.data as { sourceHandle?: string } | undefined)?.sourceHandle;
+    const label = sourceHandle ? labelsBySourceAndHandle.get(`${edge.source}\u0000${sourceHandle}`) : undefined;
+    return label && edge.label !== label ? { ...edge, label } : edge;
+  });
+};
+
 const buildFlowEdge = (edge: any): Edge => {
   const inferredHandle =
     edge.sourceHandle ??
@@ -580,7 +602,7 @@ const normalizeDelayNodePayload = (node: FlowNodePayload): FlowNodePayload => {
 };
 
 const serializeFlowGraph = (nodes: Node[], edges: Edge[]) => {
-  const sanitizedGraph = sanitizeAiSystemCanvasGraph(nodes, edges);
+  const sanitizedGraph = sanitizeAiSystemCanvasGraph(nodes, syncChoiceEdgeLabels(nodes, edges));
   const cleanCanvasNodes = sanitizedGraph.nodes;
   const cleanCanvasEdges = sanitizedGraph.edges;
   const payloadNodes: FlowNodePayload[] = cleanCanvasNodes.map((node) => {
@@ -658,7 +680,7 @@ function flowContainsTemporaryIds(nodes: Array<{ id: string }>, edges: Array<{ i
 type FlowValidationIssue = { code: string; node_id?: string | null; message: string };
 
 
-type EditorButton = { id?: string; label?: string; handleId?: string; next?: string };
+type EditorButton = { id?: string; label?: string; value?: string; handleId?: string; next?: string };
 const toText = (value: unknown) => (typeof value === 'string' ? value : value == null ? '' : String(value));
 const createChoiceButton = (nodeId: string, ordinal: number): Required<Pick<EditorButton, 'id' | 'label' | 'handleId'>> => {
   const identity = makeNodeId();
@@ -666,7 +688,7 @@ const createChoiceButton = (nodeId: string, ordinal: number): Required<Pick<Edit
   return {
     id: `${nodeId}-button-${identity}`,
     label: `Opção ${ordinal}`,
-    handleId: `choice_${stableToken}`,
+    handleId: `option_${stableToken.slice(0, 8)}`,
   };
 };
 const getBuilderNodeKind = (node?: Node | null) => {
@@ -823,7 +845,7 @@ function FlowNodeEditorPanel({
     const next = [...buttons];
     // A label is editable presentation data. The connection identity must not
     // change when an option is renamed or moved.
-    next[index] = { ...next[index], label };
+    next[index] = { ...next[index], label, value: label };
     onDraftChange({ buttons: next });
   };
   const addButton = () => {
@@ -2125,6 +2147,13 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
   }, []);
 
   const updateNodeData = useCallback((nodeId: string, patch: Record<string, unknown>) => {
+    if (Array.isArray(patch.buttons)) {
+      const currentNode = nodesRef.current.find((node) => node.id === nodeId);
+      if (currentNode) {
+        const updatedChoiceNode = { ...currentNode, data: { ...currentNode.data, ...patch } };
+        setEdges((currentEdges) => syncChoiceEdgeLabels([updatedChoiceNode], currentEdges));
+      }
+    }
     setNodes((prev: Node[]) =>
       prev.map((node) => {
         if (node.id !== nodeId) return node;
@@ -2137,7 +2166,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
         };
       }),
     );
-  }, [setNodes]);
+  }, [setEdges, setNodes]);
 
   const openAiSystemModal = useCallback((nodeId: string) => {
     const node = nodes.find((item) => item.id === nodeId);
@@ -2414,7 +2443,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
         });
       }
       const nodesToRender = sanitizedLoadedGraph.nodes as Node[];
-      let edgesToRender = sanitizedLoadedGraph.edges as Edge[];
+      let edgesToRender = syncChoiceEdgeLabels(nodesToRender, sanitizedLoadedGraph.edges as Edge[]);
       if (nodesToRender.length === 0) {
         console.info('[BUILDER EMPTY FLOW]', { flow_id: flowId, nodes_count: 0, edges_count: edgesToRender.length });
         logFlowEditorHydrationSource('editor', [], [], flowId);
@@ -2681,8 +2710,8 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
       id: handleId || null,
       type: handleType || null,
       isConnectable: node.connectable ?? true,
-      optionValue: option?.value || option?.label || option?.id || handleId || undefined,
-      option_value: option?.value || option?.label || option?.id || handleId || undefined,
+      optionValue: option?.label || option?.value || option?.id || handleId || undefined,
+      option_value: option?.label || option?.value || option?.id || handleId || undefined,
     };
   }, []);
 
@@ -2722,6 +2751,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
     const target = safeString(params.target);
     const targetHandle = safeString(params.targetHandle);
     const choiceDebug = getChoiceHandleDebug(source, sourceHandle, 'source');
+    const visibleLabel = choiceDebug?.optionValue || safeString(sourceHandle);
     if (choiceDebug) {
       choiceConnectDebugRef.current = {
         nodeId: choiceDebug.nodeId,
@@ -2746,7 +2776,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
       target,
       sourceHandle,
       targetHandle,
-      label: safeString(sourceHandle),
+      label: visibleLabel,
       type: 'default',
       data: {
         sourceHandle: sourceHandle || undefined,
