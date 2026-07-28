@@ -1,11 +1,7 @@
 from fastapi import APIRouter, Request
 
 from app.core.whatsapp_config import WHATSAPP_VERIFY_TOKEN
-from app.services.flow_engine import run_flow_from_message
-from app.services.intent_service import classify_intent, route_intent
-from app.services.whatsapp_service import send_whatsapp_message_simple
-from app.database import SessionLocal
-from app.services.tenant_service import resolve_tenant_by_phone_number_id
+from app.services.webhook_ingress import enqueue_webhook_payload
 
 router = APIRouter()
 
@@ -22,48 +18,9 @@ async def verify_webhook(request: Request):
 
 @router.post("/webhook")
 async def receive_message(request: Request):
-    data = await request.json()
-
-    print("INCOMING WEBHOOK:", data)
-
-    try:
-        entry = data["entry"][0]
-        changes = entry["changes"][0]
-        value = changes["value"]
-
-        if "messages" not in value:
-            return {"status": "no message"}
-
-        message = value["messages"][0]
-        phone = message["from"]
-        if message.get("type") == "text":
-            text = message.get("text", {}).get("body", "")
-        else:
-            text = ""
-
-        print("USER:", phone)
-        print("[USER INPUT]:", text)
-        intent = classify_intent(text)
-        print("[INTENT]:", intent)
-
-        response = run_flow_from_message(phone, text)
-        phone_number_id = value.get("metadata", {}).get("phone_number_id")
-        with SessionLocal() as db:
-            tenant = resolve_tenant_by_phone_number_id(db, phone_number_id)
-
-        if not tenant:
-            print(f"[WHATSAPP NOT CONFIGURED] tenant_id= metadata_phone_number_id={phone_number_id}")
-            return {"status": "ignored", "message": "Configure sua integração WhatsApp nas configurações."}
-        print("FLOW RESPONSE:", response)
-
-        messages = response.get("messages") if isinstance(response, dict) else None
-        if messages:
-            for msg in messages:
-                send_whatsapp_message_simple(phone, msg["content"], tenant_id=str(tenant.id))
-        else:
-            send_whatsapp_message_simple(phone, route_intent(intent), tenant_id=str(tenant.id))
-
-    except Exception as e:
-        print("ERROR:", str(e))
-
-    return {"status": "ok"}
+    # Compatibility endpoint retained for provider registrations that still use
+    # /api/webhook.  It must share the canonical ingress: the former handler
+    # extracted only `text` messages and silently replaced every interactive
+    # reply with an empty string before it could reach the worker.
+    enqueued, _ = await enqueue_webhook_payload(request)
+    return {"status": "queued" if enqueued else "accepted"}
