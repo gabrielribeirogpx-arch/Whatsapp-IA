@@ -313,6 +313,7 @@ export type WorkspaceProfile = 'private_sales' | 'government';
 export type FlowChoiceButton = {
   id: string;
   label: string;
+  value?: string;
   handleId: string;
   next?: string;
 };

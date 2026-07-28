@@ -13,8 +13,14 @@ const createChoiceButton = (nodeId, ordinal) => {
   return {
     id: `${nodeId}-button-${identity}`,
     label: `Opção ${ordinal}`,
-    handleId: `choice_${identity.replace(/[^a-z0-9]/g, '')}`,
+    handleId: `option_${identity.replace(/[^a-z0-9]/g, '').slice(0, 8)}`,
   };
+};
+
+const syncChoiceEdgeLabels = (nodes, edges) => {
+  const labels = new Map(nodes.flatMap((node) =>
+    (node.data.buttons || []).map((button) => [`${node.id}:${button.handleId}`, button.label])));
+  return edges.map((item) => ({ ...item, label: labels.get(`${item.source}:${item.sourceHandle}`) || item.label }));
 };
 
 const initial = [
@@ -36,10 +42,40 @@ const edge = {
   target: 'message-3',
   targetHandle: 'default',
   data: { sourceHandle: option3.handleId },
+  label: option3.label,
 };
 assert.equal(edge.sourceHandle, option3.handleId);
 assert.equal(edge.data.sourceHandle, option3.handleId);
 assert.equal(edge.target, 'message-3');
+assert.equal(edge.label, 'Opção 3');
+assert.doesNotMatch(edge.label, /stable|choice_|[0-9a-f]{16,}/i);
+
+const namedButtons = [
+  { id: 'choice-1', handleId: 'atendimento', label: 'Atendimento', value: 'Atendimento' },
+  { id: 'choice-2', handleId: 'comercial', label: 'Comercial', value: 'Comercial' },
+  { id: 'choice-3', handleId: 'financeiro', label: 'Financeiro', value: 'Financeiro' },
+];
+const namedEdges = namedButtons.map((button, index) => ({
+  id: `edge-${index}`,
+  source: 'choice-node',
+  sourceHandle: button.handleId,
+  target: `message-${index}`,
+  targetHandle: 'default',
+  label: `choice_${index}_legacy_hash`,
+  data: { sourceHandle: button.handleId },
+}));
+const migrated = syncChoiceEdgeLabels([{ id: 'choice-node', data: { buttons: namedButtons } }], namedEdges);
+assert.deepEqual(migrated.map((item) => item.label), ['Atendimento', 'Comercial', 'Financeiro']);
+
+const renamedButtons = namedButtons.map((button) => button.handleId === 'comercial'
+  ? { ...button, label: 'Vendas', value: 'Vendas' }
+  : button);
+const renamed = syncChoiceEdgeLabels([{ id: 'choice-node', data: { buttons: renamedButtons } }], migrated);
+assert.equal(renamed[1].label, 'Vendas');
+assert.equal(renamed[1].sourceHandle, 'comercial');
+assert.equal(renamed[1].data.sourceHandle, 'comercial');
+assert.equal(renamed[1].target, 'message-1');
+assert.equal(renamed[1].targetHandle, 'default');
 
 const afterRemoval = buttons.filter((button) => button.id !== 'choice-2');
 assert.equal(afterRemoval.find((button) => button.id === option3.id)?.handleId, option3.handleId);
@@ -53,9 +89,12 @@ assert.equal(snapshot.edges[0].data.sourceHandle, option3.handleId);
 assert.equal(snapshot.edges.find((item) => item.sourceHandle === option3.handleId)?.target, 'message-3');
 
 assert.match(editorSource, /createChoiceButton\(node\.id, nextIndex\)/);
-assert.match(editorSource, /next\[index\] = \{ \.\.\.next\[index\], label \}/);
+assert.match(editorSource, /next\[index\] = \{ \.\.\.next\[index\], label, value: label \}/);
 assert.match(editorSource, /key=\{button\.id \|\| button\.handleId\}/);
 assert.match(editorSource, /data:\s*\{\s*sourceHandle: sourceHandle \|\| undefined,/s);
+assert.match(editorSource, /setEdges\(\(currentEdges\) => syncChoiceEdgeLabels\(\[updatedChoiceNode\], currentEdges\)\)/);
+assert.match(editorSource, /sanitizeAiSystemCanvasGraph\(nodes, syncChoiceEdgeLabels\(nodes, edges\)\)/);
+assert.match(editorSource, /label: visibleLabel/);
 assert.match(choiceNodeSource, /useUpdateNodeInternals/);
 assert.match(choiceNodeSource, /requestAnimationFrame\(\(\) => updateNodeInternals\(id\)\)/);
 assert.match(choiceNodeSource, /sourceHandles=\{buttons\.map/);
