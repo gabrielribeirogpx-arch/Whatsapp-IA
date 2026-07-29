@@ -7126,6 +7126,49 @@ input {
   border-radius: 999px;
 }
 
+/* Data collection reuses the shared choice rows so labels and canonical
+   handles participate in the card's natural height instead of overlapping. */
+.flow-builder-page .choice-node .flow-node-metric-row {
+  grid-template-columns: minmax(0, 1.45fr) minmax(0, 0.75fr);
+}
+
+.flow-builder-page .choice-node .flow-node-metric,
+.flow-builder-page .choice-node .flow-node-metric-copy,
+.flow-builder-page .choice-node .flow-node-metric strong {
+  min-width: 0;
+}
+
+.flow-builder-page .choice-node .flow-node-metric strong {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.data-collection-editor {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.data-collection-editor .flow-editor-tab-section {
+  min-width: 0;
+  margin-top: 0;
+  box-shadow: none;
+}
+
+.data-collection-editor .data-collection-number-row {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.data-collection-editor input,
+.data-collection-editor select,
+.data-collection-editor textarea {
+  min-width: 0;
+  max-width: 100%;
+}
+
 .flow-builder-page .choice-node .choice-option-handle:hover {
   border-color: var(--flow-handle-color, #f97316) !important;
   box-shadow: 0 0 0 7px rgba(255, 255, 255, 1), 0 6px 16px rgba(249, 115, 22, 0.22) !important;
