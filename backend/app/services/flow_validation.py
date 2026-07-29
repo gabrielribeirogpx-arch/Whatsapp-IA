@@ -109,5 +109,6 @@ def validate_builder_graph(nodes: list[dict[str, Any]], edges: list[dict[str, An
             if "success" not in handles: issues.append(_issue("DATA_COLLECTION_INVALID", node, field="connections", message="A saída Sucesso precisa estar conectada."))
             if int(data.get("timeout_seconds") or 0) > 0 and "timeout" not in handles: issues.append(_issue("DATA_COLLECTION_INVALID", node, field="connections", message="Conecte a saída Timeout."))
             if data.get("cancel_keywords") and "cancel" not in handles: issues.append(_issue("DATA_COLLECTION_INVALID", node, field="connections", message="Conecte a saída Cancelar."))
-            if int(data.get("max_attempts") or 1) > 0 and "invalid" not in handles: issues.append(_issue("DATA_COLLECTION_INVALID", node, field="connections", message="Conecte a saída Inválido."))
+            follows_invalid = data.get("auto_retry_invalid") is not True or data.get("attempts_exceeded_behavior", "invalid") == "invalid"
+            if follows_invalid and "invalid" not in handles: issues.append(_issue("DATA_COLLECTION_INVALID", node, field="connections", message="Conecte a saída Inválido ou selecione Encerrar após exceder tentativas."))
     return issues

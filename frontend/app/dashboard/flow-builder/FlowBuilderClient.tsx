@@ -33,6 +33,7 @@ import AiSpecializedAgentNode from '@/components/flow/nodes/AiSpecializedAgentNo
 import AiSystemNode from '@/components/flow/nodes/AiSystemNode';
 import ChoiceNode from '@/components/flow/nodes/ChoiceNode';
 import DataCollectionNode from '@/components/flow/nodes/DataCollectionNode';
+import SmartOrthogonalEdge from '@/components/flow/SmartOrthogonalEdge';
 import ConditionNode from '@/components/flow/nodes/ConditionNode';
 import CtaUrlNode from '@/components/flow/nodes/CtaUrlNode';
 import DelayNode from '@/components/flow/nodes/DelayNode';
@@ -52,6 +53,7 @@ import { FlowAnalytics, FlowEdgePayload, FlowNodePayload, FlowVersionItem } from
 import { AGENT_SYSTEM_TEMPLATES, ENABLE_AGENT_SYSTEM_TEMPLATES, instantiateAgentSystemTemplate } from '@/lib/agentSystemTemplates';
 import { extractValidationIssues, validateFlowLocally } from '@/lib/flowValidation';
 import type { FlowValidationIssue } from '@/lib/flowValidation';
+import type { EdgeRoutingPreference } from '@/lib/edgeRouting';
 
 const FETCH_TIMEOUT_MS = 8000;
 const INVALID_UPLOAD_PUBLIC_URL_MESSAGE = 'Upload concluído, mas a URL pública gerada é inválida.';
@@ -89,6 +91,8 @@ const nodeTypes = {
   mediaNode: MediaNode,
   ctaUrlNode: CtaUrlNode,
 };
+
+const edgeTypes = { smart: SmartOrthogonalEdge };
 
 type FlowNodeKind = 'message' | 'data_collection' | 'choice' | 'condition' | 'delay' | 'action' | 'media' | 'cta_url' | 'ai_rag' | 'ai_response' | 'ai_classification' | 'ai_extraction' | 'ai_summary' | 'ai_agent' | 'ai_supervisor' | 'ai_dispatcher' | 'ai_greeting' | 'ai_calendar_agent' | 'ai_safe_fallback' | 'ai_system';
 type FlowConnection = Connection & { sourceHandle?: string | null };
@@ -466,7 +470,7 @@ const isActionType = (value: string): value is ActionType => ACTION_TYPE_OPTIONS
 
 const NODE_PRESETS: Record<FlowNodeKind, { label: string; type: string; data: Record<string, unknown> }> = {
   message: { label: 'Mensagem', type: 'message', data: { content: '', wait_for_reply: false } },
-  data_collection: { label: 'Coleta de Dados', type: 'data_collection', data: { variable_name: '', data_type: 'text', required: true, normalize_value: true, max_attempts: 3, invalid_message: 'Valor inválido. Tente novamente.', timeout_seconds: 1800, cancel_keywords: ['cancelar', 'sair'], save_to_contact: false, save_to_lead: false, display_mode: 'buttons', allow_custom_value: false, options: [] } },
+  data_collection: { label: 'Coleta de Dados', type: 'data_collection', data: { variable_name: '', data_type: 'text', required: true, normalize_value: true, auto_retry_invalid: true, max_attempts: 3, invalid_message: 'Valor inválido.\nTente novamente.', attempts_exceeded_behavior: 'invalid', timeout_seconds: 1800, cancel_keywords: ['cancelar', 'sair'], save_to_contact: false, save_to_lead: false, display_mode: 'buttons', allow_custom_value: false, options: [] } },
   choice: {
     label: 'Escolha',
     type: 'choice',
@@ -1015,8 +1019,8 @@ function FlowNodeEditorPanel({
           return <div className="data-collection-editor">
             <section className="flow-editor-tab-section"><h4>1. Variável</h4><p>Nome usado para acessar a resposta no fluxo.</p><label className="flow-editor-field">Nome da variável<input value={toText(draft.variable_name)} onChange={e=>onDraftChange({variable_name:e.target.value})} placeholder="preferred_period" /></label></section>
             <section className="flow-editor-tab-section"><h4>2. Tipo de dado</h4><label className="flow-editor-field">Tipo<select value={toText(draft.data_type||'text')} onChange={e=>onDraftChange({data_type:e.target.value})}>{['text','number','email','phone','date','time','cpf','cnpj','url','currency','boolean','choice'].map(type=><option key={type}>{type}</option>)}</select></label></section>
-            <section className="flow-editor-tab-section"><h4>3. Validação</h4><label className="flow-editor-radio"><input type="checkbox" checked={draft.required!==false} onChange={e=>onDraftChange({required:e.target.checked})}/>Obrigatório</label><label className="flow-editor-radio"><input type="checkbox" checked={draft.normalize_value!==false} onChange={e=>onDraftChange({normalize_value:e.target.checked})}/>Normalizar valor</label><label className="flow-editor-field">Mensagem de erro<textarea value={toText(draft.invalid_message)} onChange={e=>onDraftChange({invalid_message:e.target.value})} /></label></section>
-            <section className="flow-editor-tab-section"><h4>4. Tentativas e timeout</h4><div className="flow-editor-row data-collection-number-row"><label className="flow-editor-field">Máximo de tentativas<input type="number" min="1" value={Number(draft.max_attempts||3)} onChange={e=>onDraftChange({max_attempts:Number(e.target.value)})}/></label><label className="flow-editor-field">Timeout (segundos)<input type="number" min="0" value={Number(draft.timeout_seconds||0)} onChange={e=>onDraftChange({timeout_seconds:Number(e.target.value)})}/></label></div><label className="flow-editor-field">Palavras de cancelamento<input value={(Array.isArray(draft.cancel_keywords)?draft.cancel_keywords:[]).join(', ')} onChange={e=>onDraftChange({cancel_keywords:e.target.value.split(',').map(v=>v.trim()).filter(Boolean)})}/><small>Separe palavras por vírgulas.</small></label></section>
+            <section className="flow-editor-tab-section"><h4>3. Validação</h4><label className="flow-editor-radio"><input type="checkbox" checked={draft.required!==false} onChange={e=>onDraftChange({required:e.target.checked})}/>Obrigatório</label><label className="flow-editor-radio"><input type="checkbox" checked={draft.normalize_value!==false} onChange={e=>onDraftChange({normalize_value:e.target.checked})}/>Normalizar valor</label></section>
+            <section className="flow-editor-tab-section"><h4>4. Tentativas e timeout</h4><h5>Tratamento de erro</h5><label className="flow-editor-radio"><input type="checkbox" checked={draft.auto_retry_invalid===true} onChange={e=>onDraftChange({auto_retry_invalid:e.target.checked})}/>Repetir automaticamente quando inválido</label><label className="flow-editor-field">Máximo de tentativas<input type="number" min="1" value={Number(draft.max_attempts||3)} onChange={e=>onDraftChange({max_attempts:Math.max(1,Number(e.target.value)||1)})}/></label><label className="flow-editor-field">Mensagem de erro<textarea value={toText(draft.invalid_message)} onChange={e=>onDraftChange({invalid_message:e.target.value})} /></label><fieldset className="flow-editor-field"><legend>Após exceder tentativas</legend><label className="flow-editor-radio"><input type="radio" name="attempts-exceeded" value="end" checked={draft.attempts_exceeded_behavior==='end'} onChange={()=>onDraftChange({attempts_exceeded_behavior:'end'})}/>Encerrar</label><label className="flow-editor-radio"><input type="radio" name="attempts-exceeded" value="invalid" checked={draft.attempts_exceeded_behavior!=='end'} onChange={()=>onDraftChange({attempts_exceeded_behavior:'invalid'})}/>Seguir pela saída Inválido</label></fieldset><div className="flow-editor-row data-collection-number-row"><label className="flow-editor-field">Timeout (segundos)<input type="number" min="0" value={Number(draft.timeout_seconds||0)} onChange={e=>onDraftChange({timeout_seconds:Number(e.target.value)})}/></label></div><label className="flow-editor-field">Palavras de cancelamento<input value={(Array.isArray(draft.cancel_keywords)?draft.cancel_keywords:[]).join(', ')} onChange={e=>onDraftChange({cancel_keywords:e.target.value.split(',').map(v=>v.trim()).filter(Boolean)})}/><small>Separe palavras por vírgulas.</small></label></section>
             <section className="flow-editor-tab-section"><h4>5. Persistência</h4><label className="flow-editor-radio"><input type="checkbox" checked={draft.save_to_contact===true} onChange={e=>onDraftChange({save_to_contact:e.target.checked})}/>Salvar em contato</label><label className="flow-editor-radio"><input type="checkbox" checked={draft.save_to_lead===true} onChange={e=>onDraftChange({save_to_lead:e.target.checked})}/>Salvar em lead</label></section>
             <section className="flow-editor-tab-section"><h4>6. Saídas</h4><p>Sucesso, Inválido, Cancelar e Timeout são conectados diretamente no card.</p>{draft.data_type==='choice' && <><label className="flow-editor-field">Exibição<select value={toText(draft.display_mode||'buttons')} onChange={e=>onDraftChange({display_mode:e.target.value})}><option value="buttons">Botões</option><option value="list">Lista</option><option value="text">Texto</option></select></label><label className="flow-editor-radio"><input type="checkbox" checked={draft.allow_custom_value===true} onChange={e=>onDraftChange({allow_custom_value:e.target.checked})}/>Permitir texto controlado</label>{options.map((option,index)=><article key={toText(option.id)} className="flow-editor-subflow-card"><input value={toText(option.label)} placeholder="Rótulo" onChange={e=>updateOption(index,{label:e.target.value})}/><input value={toText(option.value)} placeholder="Valor" onChange={e=>updateOption(index,{value:e.target.value})}/><code>{toText(option.id)}</code><button type="button" onClick={()=>onDraftChange({options:options.filter((_,i)=>i!==index)})}>Remover</button></article>)}<button type="button" className="flow-editor-secondary-btn" onClick={()=>onDraftChange({options:[...options,{id:crypto.randomUUID(),label:'Nova opção',value:'nova_opcao'}]})}>+ Adicionar opção</button></>}</section>
           </div>;
@@ -1692,6 +1696,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
   const [mediaUploadError, setMediaUploadError] = useState<string | null>(null);
   const [activeEdgeIds, setActiveEdgeIds] = useState<string[]>([]);
   const [isSimulatorOpen, setIsSimulatorOpen] = useState(false);
+  const [edgeRoutingPreference, setEdgeRoutingPreference] = useState<EdgeRoutingPreference>('automatic');
   const [isSidebarExpanded, setIsSidebarExpanded] = useState(false);
   const [openNodeGroups, setOpenNodeGroups] = useState<Record<NodePaletteGroup['id'], boolean>>(NODE_GROUPS_DEFAULT_OPEN);
   const [isMobileViewport, setIsMobileViewport] = useState(false);
@@ -2793,6 +2798,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
       sourceHandle,
       targetHandle,
       label: visibleLabel,
+      // Routing is a render-only concern; keep the persisted edge contract unchanged.
       type: 'default',
       data: {
         sourceHandle: sourceHandle || undefined,
@@ -3475,11 +3481,12 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
     () =>
       visibleEdges.map((edge) => ({
         ...edge,
+        data: { ...(edge.data || {}), __routingPreference: edgeRoutingPreference },
         className: activeEdgeIds.includes(edge.id) ? 'flow-edge flow-edge-active' : 'flow-edge',
         label: analyticsOverlayEnabled ? (() => { const metric = analyticsByEdge.get(`${edge.source}->${edge.target}:${edge.sourceHandle || ''}`) || analyticsByEdge.get(`${edge.source}->${edge.target}:default`) || analyticsByEdge.get(`${edge.source}->${edge.target}:`); return metric ? `${metric.rate_from_source}%` : edge.label; })() : edge.label,
         style: analyticsOverlayEnabled ? { ...(edge.style || {}), strokeWidth: Math.min(6, 1 + Math.log10(((analyticsByEdge.get(`${edge.source}->${edge.target}:${edge.sourceHandle || ''}`) || analyticsByEdge.get(`${edge.source}->${edge.target}:default`) || analyticsByEdge.get(`${edge.source}->${edge.target}:`))?.count || 1)) * 2), opacity: 0.85 } : edge.style,
       })),
-    [activeEdgeIds, analyticsByEdge, analyticsOverlayEnabled, visibleEdges],
+    [activeEdgeIds, analyticsByEdge, analyticsOverlayEnabled, edgeRoutingPreference, visibleEdges],
   );
 
   const activeAiSystemNode = useMemo(() => nodes.find((node) => node.id === activeAiSystemNodeId) || null, [activeAiSystemNodeId, nodes]);
@@ -3764,6 +3771,14 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
 
               <div className="flow-toolbar-section flow-toolbar-center" aria-label="Ações do flow">
                 <div className="flow-toolbar-group flow-toolbar-group-secondary-actions">
+                  <label className="flow-editor-field" title="Define apenas a geometria visual; não altera a execução ou a persistência das conexões.">
+                    Edge routing
+                    <select aria-label="Edge routing" value={edgeRoutingPreference} onChange={(event) => setEdgeRoutingPreference(event.target.value as EdgeRoutingPreference)}>
+                      <option value="automatic">Automático</option>
+                      <option value="curved">Curvo</option>
+                      <option value="orthogonal">Ortogonal</option>
+                    </select>
+                  </label>
                   <button
                     type="button"
                     className="flow-top-btn flow-top-btn-secondary"
@@ -3967,7 +3982,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
           key={flow?.id || 'no-flow'}
           onInit={setRfInstance}
           nodes={safeNodes}
-          edges={decoratedEdges}
+          edges={decoratedEdges.map((edge) => ({ ...edge, type: 'smart' }))}
           onNodesChange={handleNodesChange}
           onEdgesChange={handleEdgesChange}
           onConnect={onConnect}
@@ -3990,6 +4005,8 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
             markFlowDirty('node_delete_commit', { deleted_node_ids: Array.from(deletedIds) });
           }}
           nodeTypes={nodeTypes}
+          edgeTypes={edgeTypes}
+          defaultEdgeOptions={{ type: 'smart' }}
           nodesDraggable={true}
           nodesConnectable
           elementsSelectable
