@@ -14,6 +14,7 @@ type SourceHandle = {
 type NodeMetric = {
   label: string;
   value: string | number;
+  title?: string;
   icon?: ReactNode;
   tone?: string;
 };
@@ -147,7 +148,7 @@ function CompactFlowNode({
         {metrics.length > 0 ? (
           <div className="flow-node-metric-row">
             {metrics.slice(0, 4).map((metric) => (
-              <span key={`${metric.label}-${metric.value}`} className="flow-node-metric">
+              <span key={`${metric.label}-${metric.value}`} className="flow-node-metric" title={metric.title}>
                 {metric.icon ? <span className="flow-node-metric-icon" aria-hidden="true">{metric.icon}</span> : null}
                 <span className="flow-node-metric-copy">
                   <span className="flow-node-metric-label">{metric.label}</span>
