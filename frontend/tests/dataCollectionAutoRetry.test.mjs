@@ -9,5 +9,7 @@ for (const contract of ['auto_retry_invalid', 'attempts_exceeded_behavior', 'Rep
 }
 assert.match(builder, /type: 'smart'/);
 assert.match(builder, /defaultEdgeOptions=\{\{ type: 'smart' \}\}/);
-assert.match(edge, /getSmoothStepPath/);
-assert.match(edge, /const isReturn/);
+assert.match(builder, /type: 'default',[\s\S]{0,160}data: \{[\s\S]{0,80}sourceHandle/, 'new edges keep their persisted type and handles');
+assert.match(builder, /__routingPreference: edgeRoutingPreference/, 'routing preference is injected only into decorated render data');
+assert.match(edge, /selectEdgeRoutingMode/);
+assert.match(edge, /getBezierPath/);

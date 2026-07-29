@@ -53,6 +53,7 @@ import { FlowAnalytics, FlowEdgePayload, FlowNodePayload, FlowVersionItem } from
 import { AGENT_SYSTEM_TEMPLATES, ENABLE_AGENT_SYSTEM_TEMPLATES, instantiateAgentSystemTemplate } from '@/lib/agentSystemTemplates';
 import { extractValidationIssues, validateFlowLocally } from '@/lib/flowValidation';
 import type { FlowValidationIssue } from '@/lib/flowValidation';
+import type { EdgeRoutingPreference } from '@/lib/edgeRouting';
 
 const FETCH_TIMEOUT_MS = 8000;
 const INVALID_UPLOAD_PUBLIC_URL_MESSAGE = 'Upload concluído, mas a URL pública gerada é inválida.';
@@ -1695,6 +1696,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
   const [mediaUploadError, setMediaUploadError] = useState<string | null>(null);
   const [activeEdgeIds, setActiveEdgeIds] = useState<string[]>([]);
   const [isSimulatorOpen, setIsSimulatorOpen] = useState(false);
+  const [edgeRoutingPreference, setEdgeRoutingPreference] = useState<EdgeRoutingPreference>('automatic');
   const [isSidebarExpanded, setIsSidebarExpanded] = useState(false);
   const [openNodeGroups, setOpenNodeGroups] = useState<Record<NodePaletteGroup['id'], boolean>>(NODE_GROUPS_DEFAULT_OPEN);
   const [isMobileViewport, setIsMobileViewport] = useState(false);
@@ -2796,7 +2798,8 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
       sourceHandle,
       targetHandle,
       label: visibleLabel,
-      type: 'smart',
+      // Routing is a render-only concern; keep the persisted edge contract unchanged.
+      type: 'default',
       data: {
         sourceHandle: sourceHandle || undefined,
       },
@@ -3478,11 +3481,12 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
     () =>
       visibleEdges.map((edge) => ({
         ...edge,
+        data: { ...(edge.data || {}), __routingPreference: edgeRoutingPreference },
         className: activeEdgeIds.includes(edge.id) ? 'flow-edge flow-edge-active' : 'flow-edge',
         label: analyticsOverlayEnabled ? (() => { const metric = analyticsByEdge.get(`${edge.source}->${edge.target}:${edge.sourceHandle || ''}`) || analyticsByEdge.get(`${edge.source}->${edge.target}:default`) || analyticsByEdge.get(`${edge.source}->${edge.target}:`); return metric ? `${metric.rate_from_source}%` : edge.label; })() : edge.label,
         style: analyticsOverlayEnabled ? { ...(edge.style || {}), strokeWidth: Math.min(6, 1 + Math.log10(((analyticsByEdge.get(`${edge.source}->${edge.target}:${edge.sourceHandle || ''}`) || analyticsByEdge.get(`${edge.source}->${edge.target}:default`) || analyticsByEdge.get(`${edge.source}->${edge.target}:`))?.count || 1)) * 2), opacity: 0.85 } : edge.style,
       })),
-    [activeEdgeIds, analyticsByEdge, analyticsOverlayEnabled, visibleEdges],
+    [activeEdgeIds, analyticsByEdge, analyticsOverlayEnabled, edgeRoutingPreference, visibleEdges],
   );
 
   const activeAiSystemNode = useMemo(() => nodes.find((node) => node.id === activeAiSystemNodeId) || null, [activeAiSystemNodeId, nodes]);
@@ -3767,6 +3771,14 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
 
               <div className="flow-toolbar-section flow-toolbar-center" aria-label="Ações do flow">
                 <div className="flow-toolbar-group flow-toolbar-group-secondary-actions">
+                  <label className="flow-editor-field" title="Define apenas a geometria visual; não altera a execução ou a persistência das conexões.">
+                    Edge routing
+                    <select aria-label="Edge routing" value={edgeRoutingPreference} onChange={(event) => setEdgeRoutingPreference(event.target.value as EdgeRoutingPreference)}>
+                      <option value="automatic">Automático</option>
+                      <option value="curved">Curvo</option>
+                      <option value="orthogonal">Ortogonal</option>
+                    </select>
+                  </label>
                   <button
                     type="button"
                     className="flow-top-btn flow-top-btn-secondary"
