@@ -22,6 +22,7 @@ type DataCollectionNodeData = {
   data_type?: string;
   required?: boolean;
   max_attempts?: number;
+  auto_retry_invalid?: boolean;
   timeout_seconds?: number;
   running?: boolean;
   isStart?: boolean;
@@ -51,7 +52,7 @@ export default function DataCollectionNode({ id, data, selected, isConnectable }
 
   const summaryParts = [
     nodeData.required === false ? 'Opcional' : 'Obrigatório',
-    `${attempts} tentativa${attempts === 1 ? '' : 's'}`,
+    nodeData.auto_retry_invalid === true ? `${attempts} tentativa${attempts === 1 ? '' : 's'} automáticas` : 'Retry manual',
     formatTimeout(timeout),
   ].filter(Boolean);
 

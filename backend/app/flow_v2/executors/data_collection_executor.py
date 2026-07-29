@@ -20,8 +20,9 @@ class RuntimeV2DataCollectionExecutor(BaseNodeExecutor):
         now = datetime.now(timezone.utc)
         if not isinstance(waiting, dict):
             seconds = max(0, int(data.get('timeout_seconds') or 0)); timeout_at = now + timedelta(seconds=seconds) if seconds else None
-            waiting = {'variable_name': data.get('variable_name'), 'data_type': data.get('data_type'), 'attempts': 0, 'max_attempts': max(1, int(data.get('max_attempts') or 1)), 'timeout_at': timeout_at.isoformat() if timeout_at else None, 'node_id': node_id, 'processed_message_ids': []}
-            context.update({'waiting_for': 'data_collection', 'waiting_node_id': node_id, 'data_collection': waiting}); session.context = context
+            retry_mode = data.get('auto_retry_invalid') is True
+            waiting = {'variable_name': data.get('variable_name'), 'data_type': data.get('data_type'), 'attempts': 0, 'max_attempts': max(1, int(data.get('max_attempts') or 1)), 'timeout_at': timeout_at.isoformat() if timeout_at else None, 'node_id': node_id, 'processed_message_ids': [], 'retry_mode': retry_mode, 'state': 'waiting_input'}
+            context.update({'waiting_for': 'data_collection', 'waiting_node_id': node_id, 'data_collection': waiting, 'attempts': 0, 'waiting_for_input': True, 'current_node': node_id, 'variable_name': data.get('variable_name'), 'retry_mode': retry_mode, 'state': 'waiting_input'}); session.context = context
             actions = []
             options = [o for o in data.get('options', []) if isinstance(o, dict) and o.get('id') and o.get('label')]
             if data.get('data_type') == 'choice' and options and data.get('display_mode', 'buttons') != 'text':
@@ -48,10 +49,16 @@ class RuntimeV2DataCollectionExecutor(BaseNodeExecutor):
             return self._finish(db, snapshot, session, context, node_id, data, 'cancel', 'data_collection_cancelled')
         result = validate_data_collection(data, raw, runtime_input.metadata)
         if not result.valid:
-            waiting['attempts'] = int(waiting.get('attempts') or 0) + 1; context['data_collection'] = waiting; session.context = context
+            waiting['attempts'] = int(waiting.get('attempts') or 0) + 1
+            auto_retry = waiting.get('retry_mode') is True
+            waiting['state'] = 'waiting_retry' if auto_retry else 'invalid'
+            context.update({'data_collection': waiting, 'attempts': waiting['attempts'], 'waiting_for_input': auto_retry, 'current_node': node_id, 'variable_name': data.get('variable_name'), 'retry_mode': auto_retry, 'state': waiting['state']}); session.context = context
             logger.info('event=data_collection_validation_failed session_id=%s node_id=%s attempt=%s result=invalid', session.id, node_id, waiting['attempts'])
-            action = SendMessageAction(tenant_id=session.tenant_id, session_id=session.id, external_user_id=runtime_input.external_user_id, conversation_id=runtime_input.conversation_id, contact_id=runtime_input.contact_id, text=str(data.get('invalid_message') or 'Valor inválido. Tente novamente.'), metadata={'node_type': 'data_collection', 'attempt': waiting['attempts']})
-            if waiting['attempts'] < int(waiting['max_attempts']): return NodeExecutionResult(actions=(action,), status='wait', next_node_id=node_id)
+            action = SendMessageAction(tenant_id=session.tenant_id, session_id=session.id, external_user_id=runtime_input.external_user_id, conversation_id=runtime_input.conversation_id, contact_id=runtime_input.contact_id, text=str(data.get('invalid_message') or 'Valor inválido.\nTente novamente.'), metadata={'node_type': 'data_collection', 'attempt': waiting['attempts'], 'retry': auto_retry})
+            if auto_retry and waiting['attempts'] < int(waiting['max_attempts']): return NodeExecutionResult(actions=(action,), status='wait', next_node_id=node_id)
+            if auto_retry and data.get('attempts_exceeded_behavior') == 'end':
+                self._clear_wait(context, session)
+                return NodeExecutionResult(actions=(action,), status='complete', next_source_handle='invalid')
             finished = self._finish(db, snapshot, session, context, node_id, data, 'invalid', 'data_collection_completed')
             return NodeExecutionResult(actions=(action,), next_node_id=finished.next_node_id, next_source_handle='invalid')
         name = str(data.get('variable_name') or ''); variables = dict(session.variables or {}); variables[name] = result.normalized_value; session.variables = variables
@@ -67,7 +74,13 @@ class RuntimeV2DataCollectionExecutor(BaseNodeExecutor):
         return self._finish(db, snapshot, session, context, node_id, data, 'success', 'data_collection_completed')
 
     def _finish(self, db, snapshot, session, context, node_id, data, handle, event):
-        context.pop('waiting_for', None); context.pop('waiting_node_id', None); context.pop('data_collection', None); session.context = context
+        self._clear_wait(context, session)
         target = self._next(db, snapshot, session, node_id, handle)
         logger.info('event=%s tenant_id=%s flow_version_id=%s session_id=%s node_id=%s variable_name=%s data_type=%s result=%s next_node_id=%s', event, session.tenant_id, session.flow_version_id, session.id, node_id, data.get('variable_name'), data.get('data_type'), handle, target)
         return NodeExecutionResult(next_node_id=target, next_source_handle=handle)
+
+    @staticmethod
+    def _clear_wait(context, session):
+        for key in ('waiting_for', 'waiting_node_id', 'data_collection', 'attempts', 'waiting_for_input', 'current_node', 'variable_name', 'retry_mode', 'state'):
+            context.pop(key, None)
+        session.context = context
