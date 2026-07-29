@@ -41,3 +41,35 @@ def test_http_contract_keeps_legacy_detail_but_primary_errors_are_structured():
     assert detail["error"]["code"] == "CONDITION_EMPTY"
     assert detail["errors"]
     assert detail["legacy_detail"] == "VALIDATION_ERROR: CONDITION_EMPTY"
+
+
+def test_data_collection_retry_validation_adapts_to_exhausted_behavior():
+    base_data = {
+        "isStart": True,
+        "variable_name": "email",
+        "data_type": "email",
+        "max_attempts": 3,
+        "timeout_seconds": 0,
+        "cancel_keywords": [],
+        "auto_retry_invalid": True,
+    }
+    success_edge = {"source": "collection-1", "target": "end-1", "sourceHandle": "success"}
+    end_node = {"id": "end-1", "type": "message", "data": {"content": "Fim", "isEnd": True}}
+
+    end_issues = validate_builder_graph(
+        [{"id": "collection-1", "type": "data_collection", "data": {**base_data, "attempts_exceeded_behavior": "end"}}, end_node],
+        [success_edge],
+    )
+    assert not any(issue["field"] == "connections" and "Tentativas esgotadas" in issue["message"] for issue in end_issues)
+
+    follow_issues = validate_builder_graph(
+        [{"id": "collection-1", "type": "data_collection", "data": {**base_data, "attempts_exceeded_behavior": "invalid"}}, end_node],
+        [success_edge],
+    )
+    assert any(issue["field"] == "connections" and "Tentativas esgotadas" in issue["message"] for issue in follow_issues)
+
+    connected_issues = validate_builder_graph(
+        [{"id": "collection-1", "type": "data_collection", "data": {**base_data, "attempts_exceeded_behavior": "invalid"}}, end_node],
+        [success_edge, {"source": "collection-1", "target": "end-1", "sourceHandle": "invalid"}],
+    )
+    assert not any(issue["field"] == "connections" and "Tentativas esgotadas" in issue["message"] for issue in connected_issues)

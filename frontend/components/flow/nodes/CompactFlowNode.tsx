@@ -7,6 +7,7 @@ import { Handle, Position } from 'reactflow';
 type SourceHandle = {
   id?: string;
   label?: string;
+  title?: string;
   color?: string;
   optionValue?: string;
 };
@@ -166,13 +167,13 @@ function CompactFlowNode({
                 className="choice-option-row nodrag nopan"
                 style={{ '--flow-handle-color': handle.color || accent } as CSSProperties}
               >
-                <span className="choice-option-content" title={handle.label}>{handle.label || 'Opção'}</span>
+                <span className="choice-option-content" title={handle.title || handle.label}>{handle.label || 'Opção'}</span>
                 <span className="choice-option-handle-slot">
                   <Handle
                     id={handle.id}
                     type="source"
                     position={Position.Right}
-                    title={handle.label}
+                    title={handle.title || handle.label}
                     className="flow-node-handle flow-node-source-handle choice-option-handle nodrag nopan"
                     isConnectable={isConnectable}
                     data-option-value={handle.optionValue}
@@ -216,13 +217,13 @@ function CompactFlowNode({
             '--flow-handle-color': handle.color || accent,
           } as CSSProperties}
         >
-          {handle.label ? <span className="flow-node-source-label">{handle.label}</span> : null}
+          {handle.label ? <span className="flow-node-source-label" title={handle.title || handle.label}>{handle.label}</span> : null}
           <Handle
             key={handle.id || 'default'}
             id={handle.id}
             type="source"
             position={Position.Right}
-            title={handle.label}
+            title={handle.title || handle.label}
             className="flow-node-handle flow-node-source-handle nodrag nopan"
             isConnectable={isConnectable}
             data-option-value={handle.optionValue}

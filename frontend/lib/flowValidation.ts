@@ -36,7 +36,7 @@ export function validateFlowLocally(nodes: Node[], edges: Edge[]): FlowValidatio
       if (Number(data.timeout_seconds || 0) > 0 && !handles.has('timeout')) issues.push(issue('DATA_COLLECTION_TIMEOUT_REQUIRED', 'Conecte a saída Timeout.', node, 'connections'));
       if (Array.isArray(data.cancel_keywords) && data.cancel_keywords.length && !handles.has('cancel')) issues.push(issue('DATA_COLLECTION_CANCEL_REQUIRED', 'Conecte a saída Cancelar.', node, 'connections'));
       const followsInvalid = data.auto_retry_invalid !== true || String(data.attempts_exceeded_behavior || 'invalid') === 'invalid';
-      if (followsInvalid && !handles.has('invalid')) issues.push(issue('DATA_COLLECTION_INVALID_REQUIRED', 'Conecte a saída Inválido ou selecione Encerrar após exceder tentativas.', node, 'connections'));
+      if (followsInvalid && !handles.has('invalid')) issues.push(issue('DATA_COLLECTION_INVALID_REQUIRED', data.auto_retry_invalid === true ? 'Conecte a saída Tentativas esgotadas ou selecione Encerrar após exceder tentativas.' : 'Conecte a saída Inválido.', node, 'connections'));
     }
   }); return issues;
 }

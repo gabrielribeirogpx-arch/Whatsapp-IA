@@ -4,12 +4,20 @@ import { useEffect } from 'react';
 import { NodeProps, useUpdateNodeInternals } from 'reactflow';
 import CompactFlowNode from './CompactFlowNode';
 
-const HANDLES = [
+const CLASSIC_HANDLES = [
   { id: 'success', label: 'Sucesso', color: '#16a34a' },
   { id: 'invalid', label: 'Inválido', color: '#dc2626' },
   { id: 'cancel', label: 'Cancelar', color: '#64748b' },
   { id: 'timeout', label: 'Timeout', color: '#d97706' },
 ];
+
+const RETRY_HANDLES = CLASSIC_HANDLES.filter((handle) => handle.id !== 'invalid');
+const ATTEMPTS_EXHAUSTED_HANDLE = {
+  id: 'invalid',
+  label: 'Tentativas esgotadas',
+  color: '#dc2626',
+  title: 'Executada apenas após atingir o número máximo de tentativas configurado.',
+};
 
 const TYPE_LABELS: Record<string, string> = {
   text: 'Texto', number: 'Número', email: 'E-mail', phone: 'Telefone', date: 'Data',
@@ -23,6 +31,7 @@ type DataCollectionNodeData = {
   required?: boolean;
   max_attempts?: number;
   auto_retry_invalid?: boolean;
+  attempts_exceeded_behavior?: string;
   timeout_seconds?: number;
   running?: boolean;
   isStart?: boolean;
@@ -43,7 +52,12 @@ export default function DataCollectionNode({ id, data, selected, isConnectable }
   const variableName = String(nodeData.variable_name || '').trim();
   const attempts = Number(nodeData.max_attempts || 3);
   const timeout = Number(nodeData.timeout_seconds || 0);
-  const structuralSignature = [variableName, dataType, nodeData.required, attempts, timeout].join('|');
+  const autoRetry = nodeData.auto_retry_invalid === true;
+  const followsFlowAfterRetry = autoRetry && nodeData.attempts_exceeded_behavior !== 'end';
+  const handles = autoRetry
+    ? [...RETRY_HANDLES, ...(followsFlowAfterRetry ? [ATTEMPTS_EXHAUSTED_HANDLE] : [])]
+    : CLASSIC_HANDLES;
+  const structuralSignature = [variableName, dataType, nodeData.required, attempts, timeout, autoRetry, nodeData.attempts_exceeded_behavior].join('|');
 
   useEffect(() => {
     const frame = requestAnimationFrame(() => updateNodeInternals(id));
@@ -52,7 +66,8 @@ export default function DataCollectionNode({ id, data, selected, isConnectable }
 
   const summaryParts = [
     nodeData.required === false ? 'Opcional' : 'Obrigatório',
-    nodeData.auto_retry_invalid === true ? `${attempts} tentativa${attempts === 1 ? '' : 's'} automáticas` : 'Retry manual',
+    autoRetry ? `${attempts} tentativa${attempts === 1 ? '' : 's'} automáticas` : 'Retry manual',
+    autoRetry ? (followsFlowAfterRetry ? 'Esgotadas: segue o fluxo' : 'Esgotadas: encerra') : '',
     formatTimeout(timeout),
   ].filter(Boolean);
 
@@ -79,7 +94,7 @@ export default function DataCollectionNode({ id, data, selected, isConnectable }
       statusLabel="Aguarda resposta"
       statusActive={!nodeData.hasValidationError}
       isConnectable={isConnectable}
-      sourceHandles={HANDLES}
+      sourceHandles={handles}
     />
   );
 }
