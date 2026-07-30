@@ -409,9 +409,24 @@ def _is_terminal_message_node(data: dict[str, Any]) -> bool:
     return bool(
         data.get("is_terminal")
         or data.get("isTerminal")
+        or data.get("terminal")
+        or data.get("is_final")
+        or data.get("isFinal")
+        or data.get("end")
         or data.get("endFlow")
         or data.get("isEnd")
     )
+
+
+def _node_is_terminal(node_type: str, data: dict[str, Any]) -> bool:
+    if _is_terminal_message_node(data):
+        return True
+    if node_type in {"end", "ending", "close", "closure", "transfer", "handoff", "human_transfer"}:
+        return True
+    if node_type == "action":
+        behavior = str(data.get("after_action") or data.get("behavior") or data.get("action") or "").lower()
+        return behavior in {"end", "end_flow", "finish", "close", "transfer", "handoff"}
+    return False
 
 
 def _ai_system_has_terminal_internal_node(data: dict[str, Any]) -> bool:
@@ -482,7 +497,9 @@ def _ai_allows_missing_output(data: dict[str, Any]) -> bool:
 
 
 def validate_flow_graph(nodes: list[dict[str, Any]] | None, edges: list[dict[str, Any]] | None, mode: str = "draft") -> dict[str, Any]:
-    strict_mode = str(mode).lower() in {"published", "publish", "simulate"}
+    validation_mode = str(mode).lower()
+    strict_mode = validation_mode in {"published", "publish"}
+    simulate_mode = validation_mode == "simulate"
     nodes_payload = nodes if isinstance(nodes, list) else []
     edges_payload = edges if isinstance(edges, list) else []
     errors: list[dict[str, str | None]] = []
@@ -500,6 +517,7 @@ def validate_flow_graph(nodes: list[dict[str, Any]] | None, edges: list[dict[str
     incoming: dict[str, int] = {}
     condition_handles: dict[str, set[str]] = {}
     start_nodes: list[str] = []
+    invalid_edge_sources: list[str | None] = []
 
     for node in nodes_payload:
         node_id = str(_node_id(node)).strip()
@@ -531,7 +549,7 @@ def validate_flow_graph(nodes: list[dict[str, Any]] | None, edges: list[dict[str
             edge,
         )
         if source not in node_ids or target not in node_ids:
-            add_issue(errors, "EDGE_REFERENCE_NOT_FOUND", None, "Edge referencia node inexistente")
+            invalid_edge_sources.append(source if source in node_ids else None)
             continue
         outgoing[source] += 1
         incoming[target] += 1
@@ -539,6 +557,7 @@ def validate_flow_graph(nodes: list[dict[str, Any]] | None, edges: list[dict[str
         if source_handle:
             condition_handles[source].add(source_handle)
 
+    reachable: set[str] = set(node_map) if not simulate_mode else set()
     if start_nodes:
         reachable=set(); stack=[start_nodes[0]]; adj={k:[] for k in node_map}
         for edge in edges_payload:
@@ -550,12 +569,25 @@ def validate_flow_graph(nodes: list[dict[str, Any]] | None, edges: list[dict[str
             reachable.add(cur); stack.extend(adj.get(cur,[]))
         for nid in node_map:
             if nid not in reachable:
-                add_issue(errors if strict_mode else warnings, "ORPHAN_NODE", nid, "Node órfão fora do caminho do start.")
+                add_issue(
+                    errors if strict_mode else warnings,
+                    "ORPHAN_NODE",
+                    nid,
+                    "Este node não participa da simulação." if simulate_mode else "Node órfão fora do caminho do start.",
+                )
+
+    for source in invalid_edge_sources:
+        bucket = warnings if simulate_mode and (source is None or source not in reachable) else errors
+        add_issue(bucket, "EDGE_REFERENCE_NOT_FOUND", source, "Edge referencia node inexistente")
 
     for node_id,node in node_map.items():
+        # Simulation is deliberately scoped to the executable graph. Draft work
+        # left elsewhere on the canvas must neither be executed nor block it.
+        if simulate_mode and node_id not in reachable:
+            continue
         data = node.get("data") if isinstance(node.get("data"), dict) else {}
         node_type = str(node.get("type") or "").strip().lower()
-        is_terminal = _is_terminal_message_node(data)
+        is_terminal = _node_is_terminal(node_type, data)
 
         if node_type == "message":
             text = data.get("text") if isinstance(data.get("text"), str) else data.get("content")
@@ -598,13 +630,13 @@ def validate_flow_graph(nodes: list[dict[str, Any]] | None, edges: list[dict[str
             if _ai_allows_missing_output(data):
                 logger.info("[FLOW VALIDATION AI NO_OUTPUT OK] node_id=%s node_type=%s behavior=%s", node_id, node_type, _ai_after_answer_behavior(data))
             else:
-                add_issue(errors if strict_mode else warnings, "NODE_WITHOUT_OUTPUT", node_id, "Este node não tem saída. Conecte a outro node ou marque como final.")
+                add_issue(errors if strict_mode or simulate_mode else warnings, "NODE_WITHOUT_OUTPUT", node_id, "Conecte este node a outro ou marque-o como final.")
         elif node_type == "message" and missing_output and is_terminal:
             logger.info("[FLOW VALIDATION TERMINAL MESSAGE OK] node_id=%s", node_id)
         elif node_type == "ai_system" and missing_output and _is_terminal_ai_system_node(data):
             logger.info("[FLOW VALIDATION TERMINAL AI_SYSTEM OK] node_id=%s", node_id)
         elif not is_terminal and missing_output:
-            add_issue(errors if strict_mode else warnings, "NODE_WITHOUT_OUTPUT", node_id, "Este node não tem saída. Conecte a outro node ou marque como final.")
+            add_issue(errors if strict_mode or simulate_mode else warnings, "NODE_WITHOUT_OUTPUT", node_id, "Conecte este node a outro ou marque-o como final.")
 
     logger.info("[FLOW VALIDATION] mode=%s valid=%s errors=%s warnings=%s", mode, len(errors)==0, len(errors), len(warnings))
     for issue in errors:

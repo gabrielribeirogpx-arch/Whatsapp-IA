@@ -3526,7 +3526,16 @@ async def simulate_tenant_flow(
 
         validation = validate_flow_graph(nodes, edges, mode="simulate")
         if validation["errors"]:
-            raise HTTPException(status_code=422, detail=validation)
+            return JSONResponse(
+                status_code=422,
+                content={
+                    "ok": False,
+                    "code": "FLOW_VALIDATION_FAILED",
+                    "message": "Não foi possível iniciar a simulação.",
+                    "errors": validation["errors"],
+                    "warnings": validation["warnings"],
+                },
+            )
 
         start_node = next((n for n in nodes if isinstance(n, dict) and isinstance(n.get("data"), dict) and n.get("data", {}).get("isStart")), None)
         if not start_node and nodes:
@@ -3538,6 +3547,33 @@ async def simulate_tenant_flow(
                 status_code=422,
                 detail=f"Nenhum node encontrado na fonte {graph_source}",
             )
+
+        # Keep runtime semantics unchanged while ensuring the simulator never
+        # sees unrelated draft nodes. Only valid edges reachable from start are
+        # included in the execution graph.
+        node_by_id = {str(node.get("id")): node for node in nodes if isinstance(node, dict)}
+        adjacency: dict[str, list[str]] = {node_id: [] for node_id in node_by_id}
+        for edge in edges:
+            if not isinstance(edge, dict):
+                continue
+            source, target = str(edge.get("source") or ""), str(edge.get("target") or "")
+            if source in node_by_id and target in node_by_id:
+                adjacency[source].append(target)
+        reachable_ids: set[str] = set()
+        pending = [str(start_node.get("id"))]
+        while pending:
+            node_id = pending.pop()
+            if node_id in reachable_ids:
+                continue
+            reachable_ids.add(node_id)
+            pending.extend(adjacency.get(node_id, []))
+        nodes = [node for node in nodes if str(node.get("id")) in reachable_ids]
+        edges = [
+            edge for edge in edges
+            if isinstance(edge, dict)
+            and str(edge.get("source")) in reachable_ids
+            and str(edge.get("target")) in reachable_ids
+        ]
 
         session_id = (payload.session_id or "").strip() or "default"
         message = (payload.message or "").strip()
@@ -3667,7 +3703,11 @@ async def simulate_tenant_flow(
 
         db.commit()
         result = {
+            "ok": True,
             "success": True,
+            "session_id": session_id,
+            "message": {"text": reply},
+            "warnings": validation["warnings"],
             "reply": reply,
             "messages": messages,
             "current_node_id": current_node_id,
