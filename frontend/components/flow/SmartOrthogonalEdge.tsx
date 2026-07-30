@@ -1,7 +1,7 @@
 'use client';
 
 import { BaseEdge, EdgeLabelRenderer, EdgeProps, getBezierPath, useStore } from 'reactflow';
-import { EdgeRoutingPreference, NodeBox, orthogonalWaypoints, pointsToPath, selectEdgeRoutingMode } from '@/lib/edgeRouting';
+import { EdgeRoutingPreference, externalRouteCandidates, NodeBox, orthogonalWaypoints, pointsToPath, routeLabelPoint, selectEdgeRoutingMode } from '@/lib/edgeRouting';
 
 const debugEnabled = process.env.NEXT_PUBLIC_EDGE_ROUTING_DEBUG === 'true' || process.env.EDGE_ROUTING_DEBUG === 'true';
 
@@ -20,15 +20,23 @@ export default function SmartOrthogonalEdge(props: EdgeProps) {
   if (decision.mode === 'simple') {
     [path, labelX, labelY] = getBezierPath({ sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition });
   } else if (decision.mode === 'orthogonal') {
-    path = pointsToPath(orthogonalWaypoints(start, end, nodes, new Set([source, target])));
+    const points = orthogonalWaypoints(start, end, nodes, new Set([source, target]));
+    path = pointsToPath(points); ({ x: labelX, y: labelY } = routeLabelPoint(points));
   } else if (source === target) {
     const right = sourceNode.x + sourceNode.width + 56; const top = sourceNode.y - 48;
     path = pointsToPath([start, { x: right, y: start.y }, { x: right, y: top }, { x: targetX, y: top }, end]);
     labelX = right; labelY = top;
-  } else {
+  } else if (decision.mode === 'loop_external') {
     const graphLeft = Math.min(...nodes.map((node) => node.x), sourceNode.x, targetNode.x) - 72;
     path = pointsToPath([start, { x: sourceX + 28, y: sourceY }, { x: sourceX + 28, y: sourceY + 36 }, { x: graphLeft, y: sourceY + 36 }, { x: graphLeft, y: targetY - 36 }, { x: targetX - 28, y: targetY - 36 }, { x: targetX - 28, y: targetY }, end]);
     labelX = graphLeft; labelY = (sourceY + targetY) / 2;
+  } else {
+    const externalIds = graph.edges.filter((candidate) => candidate.id !== id && candidate.target === target).map((candidate) => candidate.id).sort();
+    const laneIndex = [...externalIds, id].sort().indexOf(id);
+    const candidates = externalRouteCandidates(start, end, nodes, new Set([source, target]), { id, source, target, data }, graph.edges, laneIndex, sourcePosition, targetPosition);
+    const selected = candidates[0];
+    path = pointsToPath(selected.points); ({ x: labelX, y: labelY } = routeLabelPoint(selected.points));
+    if (debugEnabled) console.debug('[edge-routing]', { edge_id: id, source, target, routing_mode: decision.mode, reason: decision.reason, candidate_routes: candidates.map(({ lane, totalCost, nodeIntersections, nearNodeCount, edgeCrossings, bendCount, pathLength }) => ({ lane, totalCost, nodeIntersections, nearNodeCount, edgeCrossings, bendCount, pathLength })), selected_lane: selected.lane, external_lane_index: laneIndex, path_length: selected.pathLength, node_intersections: selected.nodeIntersections, near_node_count: selected.nearNodeCount, edge_crossings: selected.edgeCrossings, bend_count: selected.bendCount, total_cost: selected.totalCost });
   }
 
   const debug = `routing_mode=${decision.mode}\nreason=${decision.reason}\nintersections_count=${decision.intersectionsCount}\nis_loop=${decision.isLoop}\npath_cost=${decision.pathCost}`;
