@@ -54,6 +54,8 @@ import { AGENT_SYSTEM_TEMPLATES, ENABLE_AGENT_SYSTEM_TEMPLATES, instantiateAgent
 import { extractValidationIssues, validateFlowLocally } from '@/lib/flowValidation';
 import type { FlowValidationIssue } from '@/lib/flowValidation';
 import type { EdgeRoutingPreference } from '@/lib/edgeRouting';
+import { parseSimulatorError } from '@/lib/simulatorError';
+import type { SimulatorError, SimulatorIssue } from '@/lib/simulatorError';
 
 const FETCH_TIMEOUT_MS = 8000;
 const INVALID_UPLOAD_PUBLIC_URL_MESSAGE = 'Upload concluído, mas a URL pública gerada é inválida.';
@@ -1702,6 +1704,9 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
   const [mediaUploadError, setMediaUploadError] = useState<string | null>(null);
   const [activeEdgeIds, setActiveEdgeIds] = useState<string[]>([]);
   const [isSimulatorOpen, setIsSimulatorOpen] = useState(false);
+  const [simulatorError, setSimulatorError] = useState<SimulatorError | null>(null);
+  const [simulatorWarnings, setSimulatorWarnings] = useState<SimulatorIssue[]>([]);
+  const [lastSimulatorInput, setLastSimulatorInput] = useState('');
   const [edgeRoutingPreference, setEdgeRoutingPreference] = useState<EdgeRoutingPreference>('automatic');
   const [isEdgeRoutingOpen, setIsEdgeRoutingOpen] = useState(false);
   const [isSidebarExpanded, setIsSidebarExpanded] = useState(false);
@@ -2665,6 +2670,8 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
     const playbackId = playbackIdRef.current + 1;
     playbackIdRef.current = playbackId;
     setMessages((prev) => [...prev, { type: 'user', text: userMessage }]);
+    setLastSimulatorInput(userMessage);
+    setSimulatorError(null);
     const hasAiSystem = nodesRef.current.some((node) => node.type === 'ai_system');
     if (hasAiSystem) console.info('AI_SYSTEM_RUNTIME_STARTED', { flow_id: selectedFlowId, session_id: simulationSessionIdRef.current });
     setIsProcessing(true);
@@ -2679,28 +2686,19 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
       });
 
       if (!response.ok) {
-        let backendMessage: string | null = null;
-        let rawBody = '';
-
+        let errorPayload: unknown = null;
         try {
-          const errorJson = await response.json() as { error?: string; detail?: string; type?: string };
-          backendMessage = [errorJson.error, errorJson.type, errorJson.detail].filter(Boolean).join(": ") || null;
+          errorPayload = await response.json();
         } catch {
-          rawBody = await response.text();
-          backendMessage = rawBody || null;
+          // An empty/non-JSON response is handled as an unexpected response.
         }
-
-        const friendlyMessage = backendMessage
-          ? `Não foi possível iniciar o simulador: ${backendMessage}`
-          : 'Não foi possível iniciar o simulador';
-        const statusBadge = `[HTTP ${response.status}]`;
-
-        console.error('[SIMULATOR ERROR]', response.status, backendMessage || rawBody);
-        setMessages((prev) => [...prev, { type: 'bot', text: `${statusBadge} ${friendlyMessage}` }]);
+        console.error('[SIMULATOR ERROR]', response.status, errorPayload);
+        setSimulatorError(parseSimulatorError(errorPayload || { response: { data: null } }));
         return;
       }
 
       const data = await parseApiResponse<any>(response);
+      setSimulatorWarnings(Array.isArray(data?.warnings) ? data.warnings : []);
       const events = Array.isArray(data?.events) ? data.events : [];
       const backendMessages = Array.isArray(data?.messages)
         ? data.messages.map((item: unknown) => (typeof item === 'string' ? item.trim() : '')).filter(Boolean)
@@ -2721,7 +2719,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
     } catch (error) {
       console.error('[SIMULATOR ERROR] failed to fetch', error);
       if (isMountedRef.current && playbackIdRef.current === playbackId) {
-        setMessages((prev) => [...prev, { type: 'bot', text: 'Não foi possível iniciar o simulador' }]);
+        setSimulatorError(parseSimulatorError(error));
       }
     } finally {
       if (nodesRef.current.some((node) => node.type === 'ai_system')) console.info('AI_SYSTEM_RUNTIME_FINISHED', { flow_id: selectedFlowId, session_id: simulationSessionIdRef.current });
@@ -2730,6 +2728,26 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
       }
     }
   }, [flow.edges, isProcessing, playBotResponses, selectedFlowId]);
+
+  const locateSimulatorNode = useCallback((nodeId: string | null | undefined) => {
+    if (!nodeId) return;
+    const node = nodesRef.current.find((item) => item.id === nodeId);
+    if (!node) return;
+    setIsSimulatorOpen(false);
+    selectedNodeIdRef.current = nodeId;
+    setSelectedNodeId(nodeId);
+    setNodes((current) => current.map((item) => item.id === nodeId
+      ? { ...item, selected: true, style: { ...item.style, boxShadow: '0 0 0 5px rgba(239,68,68,.35)' } }
+      : { ...item, selected: false }));
+    requestAnimationFrame(() => rfInstance?.setCenter(
+      node.position.x + (node.width || 240) / 2,
+      node.position.y + (node.height || 100) / 2,
+      { zoom: Math.max(rfInstance.getZoom(), 1), duration: 500 },
+    ));
+    window.setTimeout(() => setNodes((current) => current.map((item) => item.id === nodeId
+      ? { ...item, style: { ...item.style, boxShadow: undefined } }
+      : item)), 2200);
+  }, [rfInstance, setNodes]);
 
   const handleChoiceClick = useCallback((handleId: string, label: string) => {
     void runFlowStep(label);
@@ -4206,6 +4224,32 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
             <div style={{ textAlign: 'center', color: '#a8b0a0', fontSize: 12, marginTop: 32 }}>
               Nenhuma mensagem ainda.<br />Clique em “Simular fluxo” para iniciar.
             </div>
+          )}
+          {simulatorError && (
+            <section role="alert" style={{ background: '#fff', border: '1px solid #fecaca', borderRadius: 12, padding: 14, color: '#7f1d1d' }}>
+              <strong style={{ display: 'block', fontSize: 14 }}>{simulatorError.title}</strong>
+              {simulatorError.errors.length > 0 ? (
+                <>
+                  <p style={{ margin: '8px 0', fontSize: 12 }}>
+                    Encontramos {simulatorError.errors.length} {simulatorError.errors.length === 1 ? 'problema' : 'problemas'} no caminho principal:
+                  </p>
+                  {simulatorError.errors.map((item, index) => (
+                    <div key={`${item.code}-${item.node_id || index}`} style={{ marginTop: 8, fontSize: 12 }}>
+                      <div>• {item.message}</div>
+                      {item.node_id && <button type="button" onClick={() => locateSimulatorNode(item.node_id)} style={{ marginTop: 5, color: '#b91c1c', textDecoration: 'underline', background: 'none', border: 0, cursor: 'pointer', padding: 0 }}>Localizar no fluxo</button>}
+                    </div>
+                  ))}
+                  <p style={{ margin: '10px 0 0', fontSize: 12 }}>Corrija no fluxo ou marque a etapa como final.</p>
+                </>
+              ) : <p style={{ margin: '8px 0 0', fontSize: 12 }}>{simulatorError.message}</p>}
+              {simulatorError.retryable && <button type="button" onClick={() => void runFlowStep(lastSimulatorInput)} style={{ marginTop: 10, border: '1px solid #ef4444', borderRadius: 7, background: '#fff', padding: '5px 9px', cursor: 'pointer' }}>Tentar novamente</button>}
+            </section>
+          )}
+          {simulatorWarnings.length > 0 && (
+            <section style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 10, padding: 10, color: '#78350f', fontSize: 12 }}>
+              Existem {simulatorWarnings.length} {simulatorWarnings.length === 1 ? 'node' : 'nodes'} fora do caminho inicial. {simulatorWarnings.length === 1 ? 'Ele foi ignorado' : 'Eles foram ignorados'} nesta simulação.
+              <button type="button" onClick={() => locateSimulatorNode(simulatorWarnings[0]?.node_id)} style={{ display: 'block', marginTop: 5, color: '#92400e', textDecoration: 'underline', background: 'none', border: 0, cursor: 'pointer', padding: 0 }}>Revisar nodes</button>
+            </section>
           )}
           {messages.map((message, index) => (
             <div
