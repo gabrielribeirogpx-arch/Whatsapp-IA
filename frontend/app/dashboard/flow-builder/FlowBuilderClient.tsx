@@ -18,7 +18,7 @@ import ReactFlow, {
 } from 'reactflow';
 import type { Connection, Edge, EdgeChange, Node, NodeChange, ReactFlowInstance } from 'reactflow';
 import 'reactflow/dist/style.css';
-import { BookOpen, CalendarDays, ChevronDown, Clock, ExternalLink, FileDown, FileImage, FileText, GitBranch, HelpCircle, History, ListChecks, MessageSquare, RotateCcw, Sparkles, Tags, Zap, AlertTriangle, ChevronRight, Plus, Save, MoreHorizontal, Play, GitFork } from 'lucide-react';
+import { BookOpen, CalendarDays, Check, ChevronDown, Clock, CornerDownRight, ExternalLink, FileDown, FileImage, FileText, GitBranch, HelpCircle, History, ListChecks, MessageSquare, RotateCcw, Route, Sparkles, Tags, Zap, AlertTriangle, ChevronRight, Plus, Save, MoreHorizontal, Play, GitFork, Waves } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 
 import ActionNode from '@/components/flow/nodes/ActionNode';
@@ -93,6 +93,12 @@ const nodeTypes = {
 };
 
 const edgeTypes = { smart: SmartOrthogonalEdge };
+
+const EDGE_ROUTING_OPTIONS: Array<{ value: EdgeRoutingPreference; label: string; description: string; icon: LucideIcon }> = [
+  { value: 'automatic', label: 'Automático', description: 'O sistema escolhe o melhor caminho.', icon: Route },
+  { value: 'curved', label: 'Curvo', description: 'Conexões suaves com curvas otimizadas.', icon: Waves },
+  { value: 'orthogonal', label: 'Ortogonal', description: 'Conexões em ângulos retos.', icon: CornerDownRight },
+];
 
 type FlowNodeKind = 'message' | 'data_collection' | 'choice' | 'condition' | 'delay' | 'action' | 'media' | 'cta_url' | 'ai_rag' | 'ai_response' | 'ai_classification' | 'ai_extraction' | 'ai_summary' | 'ai_agent' | 'ai_supervisor' | 'ai_dispatcher' | 'ai_greeting' | 'ai_calendar_agent' | 'ai_safe_fallback' | 'ai_system';
 type FlowConnection = Connection & { sourceHandle?: string | null };
@@ -1697,6 +1703,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
   const [activeEdgeIds, setActiveEdgeIds] = useState<string[]>([]);
   const [isSimulatorOpen, setIsSimulatorOpen] = useState(false);
   const [edgeRoutingPreference, setEdgeRoutingPreference] = useState<EdgeRoutingPreference>('automatic');
+  const [isEdgeRoutingOpen, setIsEdgeRoutingOpen] = useState(false);
   const [isSidebarExpanded, setIsSidebarExpanded] = useState(false);
   const [openNodeGroups, setOpenNodeGroups] = useState<Record<NodePaletteGroup['id'], boolean>>(NODE_GROUPS_DEFAULT_OPEN);
   const [isMobileViewport, setIsMobileViewport] = useState(false);
@@ -1754,6 +1761,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
   const isMountedRef = useRef(true);
 
   const flowSelectRef = useRef<HTMLDivElement | null>(null);
+  const edgeRoutingRef = useRef<HTMLDivElement | null>(null);
   const flowCanvasRef = useRef<HTMLElement | null>(null);
   const renameInputRef = useRef<HTMLInputElement | null>(null);
   const renameTriggerRef = useRef<HTMLButtonElement | null>(null);
@@ -1761,6 +1769,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
     () => normalizedFlows.find((flow) => flow.id === selectedFlowId) || null,
     [normalizedFlows, selectedFlowId],
   );
+  const selectedEdgeRouting = EDGE_ROUTING_OPTIONS.find((option) => option.value === edgeRoutingPreference) || EDGE_ROUTING_OPTIONS[0];
   const selectedNode = useMemo(
     () => nodes.find((node) => node.id === selectedNodeId) || null,
     [nodes, selectedNodeId],
@@ -1780,6 +1789,21 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
     update();
     media.addEventListener('change', update);
     return () => media.removeEventListener('change', update);
+  }, []);
+
+  useEffect(() => {
+    const closeRoutingMenu = (event: MouseEvent | KeyboardEvent) => {
+      if (event instanceof KeyboardEvent && event.key !== 'Escape') return;
+      if (event instanceof MouseEvent && event.target instanceof HTMLElement && edgeRoutingRef.current?.contains(event.target)) return;
+      setIsEdgeRoutingOpen(false);
+    };
+
+    document.addEventListener('mousedown', closeRoutingMenu);
+    document.addEventListener('keydown', closeRoutingMenu);
+    return () => {
+      document.removeEventListener('mousedown', closeRoutingMenu);
+      document.removeEventListener('keydown', closeRoutingMenu);
+    };
   }, []);
 
   useEffect(() => {
@@ -3771,14 +3795,59 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
 
               <div className="flow-toolbar-section flow-toolbar-center" aria-label="Ações do flow">
                 <div className="flow-toolbar-group flow-toolbar-group-secondary-actions">
-                  <label className="flow-editor-field" title="Define apenas a geometria visual; não altera a execução ou a persistência das conexões.">
-                    Edge routing
-                    <select aria-label="Edge routing" value={edgeRoutingPreference} onChange={(event) => setEdgeRoutingPreference(event.target.value as EdgeRoutingPreference)}>
-                      <option value="automatic">Automático</option>
-                      <option value="curved">Curvo</option>
-                      <option value="orthogonal">Ortogonal</option>
-                    </select>
-                  </label>
+                  <div className="edge-routing-control" ref={edgeRoutingRef}>
+                    <button
+                      type="button"
+                      className={`edge-routing-trigger${isEdgeRoutingOpen ? ' edge-routing-trigger-open' : ''}`}
+                      onClick={() => setIsEdgeRoutingOpen((open) => !open)}
+                      aria-haspopup="listbox"
+                      aria-expanded={isEdgeRoutingOpen}
+                      aria-controls="edge-routing-menu"
+                      title="Configura a geometria visual das conexões no canvas"
+                    >
+                      <span className="edge-routing-trigger-icon" aria-hidden="true"><Route size={17} /></span>
+                      <span className="edge-routing-trigger-copy">
+                        <span className="edge-routing-trigger-label">Roteamento de arestas</span>
+                        <strong>{selectedEdgeRouting.label}</strong>
+                      </span>
+                      <ChevronDown className="edge-routing-chevron" size={15} aria-hidden="true" />
+                    </button>
+                    {isEdgeRoutingOpen && (
+                      <div className="edge-routing-menu" id="edge-routing-menu" role="listbox" aria-label="Roteamento de arestas">
+                        <div className="edge-routing-menu-heading">
+                          <span>Roteamento de arestas</span>
+                          <HelpCircle size={14} aria-hidden="true" />
+                        </div>
+                        <div className="edge-routing-options">
+                          {EDGE_ROUTING_OPTIONS.map((option) => {
+                            const OptionIcon = option.icon;
+                            const isSelected = option.value === edgeRoutingPreference;
+                            return (
+                              <button
+                                key={option.value}
+                                type="button"
+                                role="option"
+                                aria-selected={isSelected}
+                                className={`edge-routing-option${isSelected ? ' edge-routing-option-selected' : ''}`}
+                                onClick={() => {
+                                  setEdgeRoutingPreference(option.value);
+                                  setIsEdgeRoutingOpen(false);
+                                }}
+                              >
+                                <span className="edge-routing-option-icon" aria-hidden="true"><OptionIcon size={18} /></span>
+                                <span className="edge-routing-option-copy">
+                                  <strong>{option.label}</strong>
+                                  <small>{option.description}</small>
+                                </span>
+                                <span className="edge-routing-check" aria-hidden="true">{isSelected && <Check size={16} />}</span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                        <div className="edge-routing-menu-note">Apenas a aparência das conexões é alterada.</div>
+                      </div>
+                    )}
+                  </div>
                   <button
                     type="button"
                     className="flow-top-btn flow-top-btn-secondary"
