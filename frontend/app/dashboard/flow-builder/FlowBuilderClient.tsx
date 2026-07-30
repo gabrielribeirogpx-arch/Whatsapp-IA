@@ -3601,7 +3601,8 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
           />
         </div>
 
-        <div className="flow-node-palette" aria-label="Paleta de nodes do Flow Builder">
+        <div className="dash-sidebar-scroll-area flow-builder-sidebar-scroll-area">
+          <div className="flow-node-palette" aria-label="Paleta de nodes do Flow Builder">
           {ENABLE_AGENT_SYSTEM_TEMPLATES ? (
             <button
               type="button"
@@ -3654,26 +3655,27 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
               </div>
             );
           })}
-        </div>
+          </div>
 
-        <div style={{ marginTop: 'auto' }}>
-          <div className="dash-nav-divider" />
-          <Link href="/dashboard/flows" className="dash-nav-item active" title="Lista de fluxos" style={{ textDecoration: 'none' }}>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <polyline points="15 18 9 12 15 6"/>
-            </svg>
-            <span className="dash-nav-label">Fluxos</span>
-          </Link>
-          {selectedFlowId && (
-            <Link href={`/dashboard/flows/${selectedFlowId}/analytics`} className="dash-nav-item" title="Analytics do fluxo" style={{ textDecoration: 'none' }}>
+          <div style={{ marginTop: 'auto' }}>
+            <div className="dash-nav-divider" />
+            <Link href="/dashboard/flows" className="dash-nav-item active" title="Lista de fluxos" style={{ textDecoration: 'none' }}>
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <line x1="18" y1="20" x2="18" y2="10"/>
-                <line x1="12" y1="20" x2="12" y2="4"/>
-                <line x1="6" y1="20" x2="6" y2="14"/>
+                <polyline points="15 18 9 12 15 6"/>
               </svg>
-              <span className="dash-nav-label">Analytics</span>
+              <span className="dash-nav-label">Fluxos</span>
             </Link>
-          )}
+            {selectedFlowId && (
+              <Link href={`/dashboard/flows/${selectedFlowId}/analytics`} className="dash-nav-item" title="Analytics do fluxo" style={{ textDecoration: 'none' }}>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="18" y1="20" x2="18" y2="10"/>
+                  <line x1="12" y1="20" x2="12" y2="4"/>
+                  <line x1="6" y1="20" x2="6" y2="14"/>
+                </svg>
+                <span className="dash-nav-label">Analytics</span>
+              </Link>
+            )}
+          </div>
         </div>
       </nav>
 

@@ -196,6 +196,7 @@ input {
   min-width: 56px !important;
   max-width: 56px !important;
   flex-shrink: 0;
+  height: 100vh;
   overflow: hidden;
   transition:
     width 300ms cubic-bezier(0.22, 1, 0.36, 1),
@@ -204,6 +205,11 @@ input {
     box-shadow 250ms ease,
     background-color 250ms ease;
   will-change: width, min-width, max-width;
+}
+
+.flow-builder-sidebar-scroll-area {
+  scroll-behavior: smooth;
+  -webkit-overflow-scrolling: touch;
 }
 
 .flow-builder-page .flow-builder-sidebar.is-expanded {
