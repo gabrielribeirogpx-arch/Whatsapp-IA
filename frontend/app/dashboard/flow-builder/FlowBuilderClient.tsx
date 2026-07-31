@@ -33,6 +33,7 @@ import AiSpecializedAgentNode from '@/components/flow/nodes/AiSpecializedAgentNo
 import AiSystemNode from '@/components/flow/nodes/AiSystemNode';
 import ChoiceNode from '@/components/flow/nodes/ChoiceNode';
 import DataCollectionNode from '@/components/flow/nodes/DataCollectionNode';
+import { DATA_COLLECTION_HANDLES, normalizeDataCollectionEdges } from '@/lib/dataCollectionHandles';
 import SmartOrthogonalEdge from '@/components/flow/SmartOrthogonalEdge';
 import ConditionNode from '@/components/flow/nodes/ConditionNode';
 import CtaUrlNode from '@/components/flow/nodes/CtaUrlNode';
@@ -159,6 +160,8 @@ const getNodeAvailableHandles = (node: Pick<Node, 'type' | 'data'> | FlowNodePay
     choices.forEach((choice: Record<string, unknown>, index: number) => {
       source.add(toBuilderHandleId(choice?.handleId || choice?.handle_id || choice?.value || choice?.id || choice?.label, `option_${index + 1}`));
     });
+  } else if (nodeType === 'data_collection') {
+    DATA_COLLECTION_HANDLES.forEach((handle) => source.add(handle));
   }
 
   return { source, target };
@@ -620,7 +623,8 @@ const normalizeDelayNodePayload = (node: FlowNodePayload): FlowNodePayload => {
 };
 
 const serializeFlowGraph = (nodes: Node[], edges: Edge[]) => {
-  const sanitizedGraph = sanitizeAiSystemCanvasGraph(nodes, syncChoiceEdgeLabels(nodes, edges));
+  const normalizedEdges = normalizeDataCollectionEdges(nodes, syncChoiceEdgeLabels(nodes, edges));
+  const sanitizedGraph = sanitizeAiSystemCanvasGraph(nodes, normalizedEdges);
   const cleanCanvasNodes = sanitizedGraph.nodes;
   const cleanCanvasEdges = sanitizedGraph.edges;
   const payloadNodes: FlowNodePayload[] = cleanCanvasNodes.map((node) => {
@@ -2483,7 +2487,10 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
         return;
       }
 
-      const sanitizedLoadedGraph = sanitizeAiSystemCanvasGraph(formattedNodes, formattedEdges);
+      // Preserve the persisted routing contract exactly, except for documented
+      // legacy aliases (for example retry_exhausted -> invalid).
+      const migratedFormattedEdges = normalizeDataCollectionEdges(formattedNodes, formattedEdges);
+      const sanitizedLoadedGraph = sanitizeAiSystemCanvasGraph(formattedNodes, migratedFormattedEdges);
       if (sanitizedLoadedGraph.removedIds.size > 0) {
         console.info('FLOW_EDITOR_RUNTIME_NODES_FILTERED', {
           source: 'editor_graph_sanitizer',
@@ -2813,6 +2820,11 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
     const source = safeString(params.source);
     const target = safeString(params.target);
     const targetHandle = safeString(params.targetHandle);
+    const sourceNode = nodesRef.current.find((node) => node.id === source);
+    if (sourceNode?.type === 'data_collection' && !sourceHandle) {
+      console.error('[DATA COLLECTION EDGE REJECTED]', { node: source, reason: 'sourceHandle ausente', source, target, sourceHandle, targetHandle });
+      return;
+    }
     const choiceDebug = getChoiceHandleDebug(source, sourceHandle, 'source');
     const visibleLabel = choiceDebug?.optionValue || safeString(sourceHandle);
     if (choiceDebug) {
@@ -3308,6 +3320,14 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
         removed_edges_by_sanitization: publishSanitizationStats.removedEdgesCount,
       });
       console.info('[FLOW PUBLISH NODE IDS]', { flow_id: selectedFlowId, node_ids: publishSnapshot.nodes.map((node) => node.id) });
+      publishSnapshot.nodes.filter((node) => node.type === 'data_collection').forEach((node) => {
+        const nodeEdges = publishSnapshot.edges.filter((edge) => edge.source === node.id);
+        console.info('[DATA COLLECTION PUBLISH CONTRACT]', {
+          node: 'Coleta de Dados', node_id: node.id,
+          handles_found: nodeEdges.map((edge) => edge.sourceHandle),
+          edges_found: nodeEdges.map((edge) => ({ id: edge.id, source: edge.source, target: edge.target, sourceHandle: edge.sourceHandle, targetHandle: edge.targetHandle })),
+        });
+      });
       const response = await apiFetch(`/api/flows/${selectedFlowId}/publish`, { method: 'POST', body: JSON.stringify({}) });
       if (!response.ok) {
         const body = await response.text();

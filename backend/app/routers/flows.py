@@ -1652,6 +1652,9 @@ def _available_flow_handles_by_node(nodes: list[dict[str, Any]]) -> dict[str, di
                         continue
                     handle = option.get("handleId") or option.get("handle_id") or option.get("value") or option.get("id") or option.get("label")
                     source_handles.add(_builder_flow_handle_id(handle, f"option_{index + 1}"))
+        elif node_type == "data_collection":
+            from app.flow_v2.data_collection_handles import HANDLES
+            source_handles.update(HANDLES)
         handles[node_id] = {
             "source": sorted(handle for handle in source_handles if handle is not None),
             "target": sorted(handle for handle in target_handles if handle is not None),
@@ -1689,6 +1692,20 @@ def validate_flow_payload_or_400(
         )
         return normalized_nodes, normalized_edges
 
+    from app.flow_v2.data_collection_handles import normalize_data_collection_edges
+    edges = normalize_data_collection_edges(nodes, edges)
+    for collection_node in (
+        node for node in nodes
+        if str(node.get("type") or "").lower() == "data_collection"
+    ):
+        collection_id = str(collection_node.get("id"))
+        collection_edges = [edge for edge in edges if str(edge.get("source")) == collection_id]
+        logger.info(
+            "[DATA COLLECTION VALIDATION CONTRACT] node=Coleta de Dados node_id=%s handles_found=%s edges_found=%s",
+            collection_id,
+            [edge.get("sourceHandle") for edge in collection_edges],
+            [{key: edge.get(key) for key in ("id", "source", "target", "sourceHandle", "targetHandle")} for edge in collection_edges],
+        )
     canonical_issues = validate_builder_graph(nodes, edges)
     if canonical_issues:
         logger.warning("event=flow_validation_failed error_count=%s codes=%s node_ids=%s", len(canonical_issues), [i["code"] for i in canonical_issues], [i["node_id"] for i in canonical_issues if i["node_id"]])

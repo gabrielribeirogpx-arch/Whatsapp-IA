@@ -7,6 +7,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.flow_v2.data_collection_handles import normalize_data_collection_handle
+
 
 MESSAGES = {
     "START_MISSING": ("Defina um node inicial.", "Marque um node como início do fluxo."),
@@ -105,7 +107,13 @@ def validate_builder_graph(nodes: list[dict[str, Any]], edges: list[dict[str, An
             ids = [str(option.get("id") or "") for option in options if isinstance(option, dict)]; values = [str(option.get("value") or "") for option in options if isinstance(option, dict)]
             if any(not value for value in ids): issues.append(_issue("DATA_COLLECTION_INVALID", node, field="options", message="Todas as opções precisam de um identificador."))
             if len(ids) != len(set(ids)) or len(values) != len(set(values)): issues.append(_issue("DATA_COLLECTION_INVALID", node, field="options", message="IDs e valores das opções devem ser únicos."))
-            handles = {str(edge.get("sourceHandle") or "") for edge in outgoing[node_id]}
+            handles = {
+                normalize_data_collection_handle(
+                    edge.get("sourceHandle") or edge.get("source_handle")
+                    or (edge.get("data") or {}).get("sourceHandle")
+                    or (edge.get("data") or {}).get("source_handle")
+                ) for edge in outgoing[node_id]
+            }
             if "success" not in handles: issues.append(_issue("DATA_COLLECTION_INVALID", node, field="connections", message="A saída Sucesso precisa estar conectada."))
             if int(data.get("timeout_seconds") or 0) > 0 and "timeout" not in handles: issues.append(_issue("DATA_COLLECTION_INVALID", node, field="connections", message="Conecte a saída Timeout."))
             if data.get("cancel_keywords") and "cancel" not in handles: issues.append(_issue("DATA_COLLECTION_INVALID", node, field="connections", message="Conecte a saída Cancelar."))
