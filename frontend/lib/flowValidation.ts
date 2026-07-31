@@ -1,4 +1,5 @@
 import type { Edge, Node } from 'reactflow';
+import { normalizeDataCollectionHandle } from './dataCollectionHandles';
 
 export type FlowValidationIssue = { code: string; message: string; summary?: string; node_id?: string | null; node_type?: string | null; node_label?: string | null; field?: string | null; focus_field?: string | null; severity?: 'error' | 'warning'; suggestion?: string; metadata?: Record<string, unknown> };
 const issue = (code: string, message: string, node?: Node, field?: string): FlowValidationIssue => ({ code, message, node_id: node?.id || null, node_type: String(node?.type || ''), node_label: String(node?.data?.label || node?.data?.title || node?.type || 'Fluxo'), field, focus_field: field, severity: 'error' });
@@ -31,7 +32,7 @@ export function validateFlowLocally(nodes: Node[], edges: Edge[]): FlowValidatio
       if (Number(data.max_attempts || 0) < 1) issues.push(issue('DATA_COLLECTION_ATTEMPTS_INVALID', 'O máximo de tentativas deve ser maior que zero.', node, 'max_attempts'));
       const options = Array.isArray(data.options) ? data.options as Array<Record<string, unknown>> : [];
       if (data.data_type === 'choice' && !options.length) issues.push(issue('DATA_COLLECTION_OPTIONS_REQUIRED', 'Adicione pelo menos uma opção.', node, 'options'));
-      const handles = new Set(next.map((edge) => String(edge.sourceHandle || '')));
+      const handles = new Set(next.map((edge) => normalizeDataCollectionHandle(edge.sourceHandle ?? edge.data?.sourceHandle ?? edge.data?.source_handle)));
       if (!handles.has('success')) issues.push(issue('DATA_COLLECTION_SUCCESS_REQUIRED', 'A saída Sucesso precisa estar conectada.', node, 'connections'));
       if (Number(data.timeout_seconds || 0) > 0 && !handles.has('timeout')) issues.push(issue('DATA_COLLECTION_TIMEOUT_REQUIRED', 'Conecte a saída Timeout.', node, 'connections'));
       if (Array.isArray(data.cancel_keywords) && data.cancel_keywords.length && !handles.has('cancel')) issues.push(issue('DATA_COLLECTION_CANCEL_REQUIRED', 'Conecte a saída Cancelar.', node, 'connections'));

@@ -3,6 +3,7 @@
 import { useEffect } from 'react';
 import { NodeProps, useUpdateNodeInternals } from 'reactflow';
 import CompactFlowNode from './CompactFlowNode';
+import { DATA_COLLECTION_HANDLES } from '@/lib/dataCollectionHandles';
 
 const CLASSIC_HANDLES = [
   { id: 'success', label: 'Sucesso', color: '#16a34a' },
@@ -10,6 +11,12 @@ const CLASSIC_HANDLES = [
   { id: 'cancel', label: 'Cancelar', color: '#64748b' },
   { id: 'timeout', label: 'Timeout', color: '#d97706' },
 ];
+
+// Keep a compile-time dependency on the serializer's canonical contract.
+const CANONICAL_HANDLE_IDS: readonly string[] = DATA_COLLECTION_HANDLES;
+if (CLASSIC_HANDLES.some(({ id }) => !CANONICAL_HANDLE_IDS.includes(id))) {
+  throw new Error('Data Collection renderer uses a non-canonical handle');
+}
 
 const RETRY_HANDLES = CLASSIC_HANDLES.filter((handle) => handle.id !== 'invalid');
 const ATTEMPTS_EXHAUSTED_HANDLE = {
