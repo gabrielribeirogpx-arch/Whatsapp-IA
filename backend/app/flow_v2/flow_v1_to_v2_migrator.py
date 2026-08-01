@@ -4,9 +4,11 @@ from dataclasses import dataclass
 from typing import Any, Iterable
 
 from app.flow_v2.publisher import FlowV2Publisher
+from app.flow_v2.node_registry import MIGRATABLE_NODE_TYPES
 
 
-SUPPORTED_V2_NODE_TYPES: frozenset[str] = frozenset({"message", "choice", "delay", "condition", "action"})
+# Backward-compatible public name; the canonical list lives in node_registry.
+SUPPORTED_V2_NODE_TYPES = MIGRATABLE_NODE_TYPES
 
 
 @dataclass(frozen=True)
