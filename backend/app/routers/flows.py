@@ -782,6 +782,16 @@ def _get_published_snapshot_for_activate(db: Session, flow: Flow) -> FlowVersion
     ).scalars().first()
 
 
+def _get_published_version_for_simulation(db: Session, flow: Flow) -> FlowVersion | None:
+    """Resolve the simulator's immutable graph from ``flow_versions``.
+
+    ``published_version_id`` is the canonical pointer.  The fallback handles
+    older rows whose pointer was not backfilled, without accepting drafts or a
+    version belonging to another flow/tenant.
+    """
+    return _get_published_snapshot_for_activate(db=db, flow=flow)
+
+
 def _ensure_published_snapshot_on_activate(db: Session, flow: Flow) -> None:
     # Activation must consume the immutable runtime snapshot produced by /publish.
     # Keep the legacy behavior only for flows that have never been published.
@@ -3512,28 +3522,18 @@ async def simulate_tenant_flow(
         if not flow:
             raise HTTPException(status_code=404, detail="Flow não encontrado")
 
-        graph = get_flow_graph(db=db, tenant_id=tenant_uuid, flow_id=str(flow.id))
-        nodes = graph.get("nodes") if isinstance(graph, dict) else []
-        edges = graph.get("edges") if isinstance(graph, dict) else []
-        graph_source = str(graph.get("source") or "unknown") if isinstance(graph, dict) else "unknown"
-        nodes = nodes if isinstance(nodes, list) else []
-        edges = edges if isinstance(edges, list) else []
+        published_version = _get_published_version_for_simulation(db=db, flow=flow)
+        if published_version is None:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "FLOW_PUBLISHED_VERSION_NOT_FOUND",
+                    "message": "Publique o fluxo antes de iniciar a simulação.",
+                },
+            )
 
-        has_any_version = db.execute(
-            select(FlowVersion.id)
-            .where(FlowVersion.flow_id == flow.id, FlowVersion.tenant_id == tenant_uuid)
-            .limit(1)
-        ).scalar_one_or_none() is not None
-
-        if not has_any_version and not nodes:
-            draft_nodes = flow.nodes_json if isinstance(flow.nodes_json, list) else flow.nodes if isinstance(flow.nodes, list) else []
-            draft_edges = flow.edges_json if isinstance(flow.edges_json, list) else flow.edges if isinstance(flow.edges, list) else []
-            if draft_nodes:
-                nodes = draft_nodes
-                edges = draft_edges if isinstance(draft_edges, list) else []
-                graph_source = "flows_json_draft"
-            else:
-                raise HTTPException(status_code=422, detail="Salve o fluxo antes de simular")
+        nodes, edges = _published_runtime_graph_from_version(published_version)
+        graph_source = "flow_versions"
         logger.info("[GRAPH SOURCE] %s", graph_source)
         print("[SIMULATOR GRAPH LOADED]")
         print("[SIMULATOR GRAPH SOURCE]", graph_source)
@@ -3679,6 +3679,7 @@ async def simulate_tenant_flow(
             sim_session = FlowSession(
                 tenant_id=tenant_uuid,
                 flow_id=flow.id,
+                flow_version_id=published_version.id,
                 user_identifier=simulator_user_identifier,
                 conversation_id=None,
                 current_node_id=next_node_id,
