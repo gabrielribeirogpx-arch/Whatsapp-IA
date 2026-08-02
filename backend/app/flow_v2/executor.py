@@ -682,6 +682,23 @@ class FlowV2Executor:
             self._track_analytics(db, session=session, flow_id=flow_id, event_type="choice_selected", node_id=node_id, node_type=node_type, event_key=str(result.next_node_id), metadata={"target_node_id": result.next_node_id})
             self._track_analytics(db, session=session, flow_id=flow_id, event_type="transition_taken", node_id=node_id, node_type=node_type, event_key=str(result.next_node_id), metadata={"source_handle": result.next_source_handle or "default", "target_node_id": result.next_node_id, "target_node_type": None})
             self.session_manager.move_to(db, session=session, node_id=result.next_node_id, status=FlowV2SessionStatus.RUNNING)
+            selected_transition = self._selected_transition(
+                snapshot=snapshot,
+                source_node_id=node_id,
+                source_handle=result.next_source_handle,
+                target_node_id=result.next_node_id,
+            )
+            logger.info(
+                "event=RUNTIME_V2_EXECUTOR_TRANSITION session_id=%s node_id=%s "
+                "selected_source_handle=%s next_transition_id=%s next_node_id=%s "
+                "is_default_transition=%s",
+                session.id,
+                node_id,
+                result.next_source_handle,
+                (selected_transition or {}).get("id") or (selected_transition or {}).get("edge_id"),
+                result.next_node_id,
+                result.next_source_handle is None,
+            )
             logger.info(
                 "event=runtime_v2_choice_trace stage=next_node_selected status=success reason=session_pointer_advanced "
                 "session_id=%s from_node_id=%s next_node_id=%s next_node_exists=%s runtime_choice_key=%s",
@@ -709,6 +726,25 @@ class FlowV2Executor:
             session.id, current_node_id, MAX_RUNTIME_STEPS, runtime_input.metadata.get("runtime_choice_key"),
         )
         raise FlowV2ExecutionError(f"Runtime V2 exceeded max_steps={MAX_RUNTIME_STEPS}")
+
+    @staticmethod
+    def _selected_transition(*, snapshot, source_node_id, source_handle, target_node_id):
+        """Return the exact transition already selected by a node executor for tracing."""
+        transitions = TransitionResolver._snapshot_transitions(snapshot)
+        matches = TransitionResolver._matches(
+            transitions=transitions,
+            source_node_id=source_node_id,
+            source_handle=source_handle,
+        )
+        return next(
+            (
+                transition
+                for transition in matches
+                if str(transition.get("target_node_id") or transition.get("target") or transition.get("to"))
+                == str(target_node_id)
+            ),
+            None,
+        )
 
     @staticmethod
     def _without_choice_reply(runtime_input: RuntimeInput) -> RuntimeInput:

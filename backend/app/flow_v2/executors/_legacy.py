@@ -953,17 +953,42 @@ class ConditionNodeExecutor(BaseNodeExecutor):
         logger.info("[V2 CONDITION SNAPSHOT NODE] node_id=%s node=%s", node_id, node)
         logger.info("[V2 CONDITION NODE DATA] node_id=%s data=%s", node_id, data)
 
+        # Values produced by Runtime V2 nodes live in the persisted session
+        # context.  Ingress metadata is still available for legacy conditions,
+        # but must not hide values (such as ``intent_category``) written by a
+        # node earlier in this same synchronous execution.
+        condition_context = dict(runtime_input.metadata or {})
+        if isinstance(getattr(session, "context", None), dict):
+            condition_context.update(session.context)
+
         if keywords:
             result = self._evaluate_builder_keywords(
                 message=message, keywords=keywords, match_type=match_type
             )
         else:
             result = bool(conditions) and all(
-                self._evaluate(condition, runtime_input.metadata)
+                self._evaluate(condition, condition_context)
                 for condition in conditions
             )
 
         handle = "true" if result else "false"
+        condition = conditions[0] if conditions and isinstance(conditions[0], dict) else {}
+        variable = condition.get("left") or condition.get("field") or condition.get("path")
+        operator = condition.get("operator") or condition.get("op") or (match_type if keywords else "==")
+        expected = condition.get("right") if "right" in condition else condition.get("value")
+        intent_category = self._get_path(condition_context, "intent_category")
+        logger.info(
+            "event=RUNTIME_V2_CONDITION_EVALUATED node_id=%s intent_category=%r "
+            "condition.variable=%r condition.operator=%r condition.value=%r "
+            "condition.result=%s selected_source_handle=%s",
+            node_id,
+            intent_category,
+            variable,
+            operator,
+            expected,
+            result,
+            handle,
+        )
         resolution = self.transition_resolver.resolve(
             db,
             snapshot=snapshot,
@@ -972,6 +997,21 @@ class ConditionNodeExecutor(BaseNodeExecutor):
             source_handle=handle,
         )
         next_node_id = resolution.target_node_id
+        next_transition_id = resolution.edge.get("id") or resolution.edge.get("edge_id")
+        logger.info(
+            "event=RUNTIME_V2_CONDITION_TRANSITION node_id=%s intent_category=%r "
+            "condition.variable=%r condition.operator=%r condition.value=%r "
+            "condition.result=%s selected_source_handle=%s next_transition_id=%s next_node_id=%s",
+            node_id,
+            intent_category,
+            variable,
+            operator,
+            expected,
+            result,
+            handle,
+            next_transition_id,
+            next_node_id,
+        )
         logger.info(
             "[V2 CONDITION] node_id=%s message=%s keywords=%s match_type=%s result=%s source_handle=%s target_node_id=%s",
             node_id,
@@ -2540,7 +2580,15 @@ class AiClassificationNodeExecutor(AiStructuredNodeExecutor):
                     "category": str(data.get("fallback") or "outro"),
                     "reason": result.get("reason") or "classification_fallback",
                 }
-            self._save_result(db, session=session, output_variable=str(data.get("output_variable") or data.get("outputVariable") or "ai.classification"), result=result)
+            output_variable = str(data.get("output_variable") or data.get("outputVariable") or "ai.classification")
+            self._save_result(db, session=session, output_variable=output_variable, result=result)
+            logger.info(
+                "event=RUNTIME_V2_AI_CLASSIFICATION_PERSISTED node_id=%s output_variable=%s intent_category=%r confidence=%r",
+                node_id,
+                output_variable,
+                self._get_path(session.context, "intent_category") if isinstance(getattr(session, "context", None), dict) else None,
+                result.get("confidence"),
+            )
             record_ai_execution(db, tenant_id=session.tenant_id, conversation_id=runtime_input.conversation_id, session_id=session.id, flow_id=get_flow_id(db, snapshot, session), flow_version_id=session.flow_version_id, node_id=node_id, node_type="ai_classification", provider=ai_config.get("provider"), model=ai_config.get("model"), started_at=ai_started_at, status="success", input_text=input_text, output_text=result.get("category"), confidence=result.get("confidence"), fallback_used=str(result.get("category")) == "outro" or float(result.get("confidence") or 0) < float(threshold or 0), metadata={"category": result.get("category"), "threshold": threshold})
             self.event_store.append(db, session=session, event_type=FlowV2EventType.OUTPUT_EMITTED, node_id=node_id, payload={"analytics_event": "ai_classification_completed", "category": result.get("category"), "confidence": result.get("confidence")})
             actions = ()
