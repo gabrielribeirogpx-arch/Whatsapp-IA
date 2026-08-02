@@ -10,6 +10,7 @@ type SourceHandle = {
   title?: string;
   color?: string;
   optionValue?: string;
+  optional?: boolean;
 };
 
 type NodeMetric = {
@@ -167,7 +168,10 @@ function CompactFlowNode({
                 className="choice-option-row nodrag nopan"
                 style={{ '--flow-handle-color': handle.color || accent } as CSSProperties}
               >
-                <span className="choice-option-content" title={handle.title || handle.label}>{handle.label || 'Opção'}</span>
+                <span className="choice-option-content" title={handle.title || handle.label}>
+                  {handle.label || 'Opção'}
+                  {handle.optional ? <small className="flow-node-automatic-badge">Automático</small> : null}
+                </span>
                 <span className="choice-option-handle-slot">
                   <Handle
                     id={handle.id}

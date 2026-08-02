@@ -6,10 +6,10 @@ import CompactFlowNode from './CompactFlowNode';
 import { DATA_COLLECTION_HANDLES } from '@/lib/dataCollectionHandles';
 
 const CLASSIC_HANDLES = [
-  { id: 'success', label: 'Sucesso', color: '#16a34a' },
-  { id: 'invalid', label: 'Inválido', color: '#dc2626' },
-  { id: 'cancel', label: 'Cancelar', color: '#64748b' },
-  { id: 'timeout', label: 'Timeout', color: '#d97706' },
+  { id: 'success', label: '✓ Sucesso', color: '#16a34a' },
+  { id: 'invalid', label: 'Inválido', color: '#dc2626', optional: true, title: 'Esta saída é opcional. Caso nenhuma conexão seja criada, o Wazza executará automaticamente o comportamento padrão.' },
+  { id: 'cancel', label: 'Cancelar', color: '#64748b', optional: true, title: 'Esta saída é opcional. Caso nenhuma conexão seja criada, o Wazza executará automaticamente o comportamento padrão.' },
+  { id: 'timeout', label: 'Timeout', color: '#d97706', optional: true, title: 'Esta saída é opcional. Caso nenhuma conexão seja criada, o Wazza executará automaticamente o comportamento padrão.' },
 ];
 
 // Keep a compile-time dependency on the serializer's canonical contract.
@@ -23,7 +23,8 @@ const ATTEMPTS_EXHAUSTED_HANDLE = {
   id: 'invalid',
   label: 'Tentativas esgotadas',
   color: '#dc2626',
-  title: 'Executada apenas após atingir o número máximo de tentativas configurado.',
+  optional: true,
+  title: 'Esta saída é opcional. Caso nenhuma conexão seja criada, o Wazza executará automaticamente o comportamento padrão.',
 };
 
 const TYPE_LABELS: Record<string, string> = {

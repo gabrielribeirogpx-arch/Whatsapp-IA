@@ -8196,7 +8196,17 @@ input {
      * which made the desktop board read like a vertical list instead of a
      * Kanban. Columns grow to use available desktop width and overflow only
      * the dedicated Kanban viewport when there are more stages than fit.
-     */
+*/
+.flow-node-automatic-badge {
+  margin-left: 6px;
+  border-radius: 999px;
+  background: #f1f5f9;
+  color: #64748b;
+  font-size: 8px;
+  font-weight: 700;
+  padding: 2px 5px;
+  text-transform: uppercase;
+}
     display: flex;
     align-items: flex-start;
     gap: 12px;

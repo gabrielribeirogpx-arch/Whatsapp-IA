@@ -66,7 +66,7 @@ def test_data_collection_retry_validation_adapts_to_exhausted_behavior():
         [{"id": "collection-1", "type": "data_collection", "data": {**base_data, "attempts_exceeded_behavior": "invalid"}}, end_node],
         [success_edge],
     )
-    assert any(issue["field"] == "connections" and "Tentativas esgotadas" in issue["message"] for issue in follow_issues)
+    assert not any(issue["field"] == "connections" for issue in follow_issues)
 
     connected_issues = validate_builder_graph(
         [{"id": "collection-1", "type": "data_collection", "data": {**base_data, "attempts_exceeded_behavior": "invalid"}}, end_node],
