@@ -47,6 +47,7 @@ class _FakeSession:
         self.external_user_id = "whatsapp:+5511999999999"
         self.contact_id = None
         self.conversation_id = None
+        self.context = {}
 
 
 class _FakeSnapshotRepository:
@@ -332,6 +333,54 @@ def test_condition_not_equals_executes_only_true_classification_branch() -> None
         and event["node_id"] == "condition"
     ]
     assert transitions == [{"source_handle": "true", "target_node_id": "choice"}]
+
+
+def test_condition_reads_intent_category_persisted_in_session_and_traces_route(caplog) -> None:
+    executor, snapshot, event_store, session, db = _executor(
+        {
+            "schema_version": 1,
+            "start_node_id": "condition",
+            "nodes": [
+                {
+                    "id": "condition",
+                    "type": "condition",
+                    "data": {
+                        "conditions": [
+                            {"field": "intent_category", "operator": "!=", "value": "outro"}
+                        ]
+                    },
+                },
+                {"id": "true-message", "type": "message", "content": "Ramo true"},
+                {"id": "false-message", "type": "message", "content": "Ramo false"},
+            ],
+            "edges": [
+                {"id": "condition-true", "source": "condition", "sourceHandle": "true", "target": "true-message"},
+                {"id": "condition-false", "source": "condition", "sourceHandle": "false", "target": "false-message"},
+            ],
+        }
+    )
+    session.context = {"intent_category": "Implante"}
+
+    with caplog.at_level(logging.INFO):
+        output = executor.handle_input(db, _input(snapshot, metadata={}))
+
+    assert output.effects == ({"type": "send_message", "text": "Ramo true"},)
+    condition_event = next(
+        event for event in event_store.events
+        if event["event_type"] == str(FlowV2EventType.CONDITION_EVALUATED)
+    )
+    assert condition_event["payload"] == {
+        "node_id": "condition",
+        "conditions": [{"field": "intent_category", "operator": "!=", "value": "outro"}],
+        "message": "oi",
+        "keywords": [],
+        "match_type": "equals",
+        "result": True,
+        "source_handle": "true",
+        "target_node_id": "true-message",
+    }
+    assert "intent_category='Implante'" in caplog.text
+    assert "selected_source_handle=true next_transition_id=condition-true next_node_id=true-message" in caplog.text
 
 
 def test_runtime_generates_send_message_action() -> None:
