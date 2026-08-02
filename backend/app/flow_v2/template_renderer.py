@@ -11,7 +11,10 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_RENDER_TIMEZONE = ZoneInfo("America/Sao_Paulo")
 
-_PLACEHOLDER_RE = re.compile(r"{{\s*([a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)*)\s*}}")
+_PLACEHOLDER_RE = re.compile(
+    r"{{\s*([a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)*)\s*}}"
+    r"|(?<!{){\s*([a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)*)\s*}(?!})"
+)
 MAX_TEMPLATE_LENGTH = 20_000
 MAX_RENDERED_LENGTH = 50_000
 
@@ -29,12 +32,14 @@ class FlowRenderContext:
     today: str | None = None
     flow: Any | None = None
     session: Any | None = None
+    node_id: str | None = None
+    node_outputs: dict[str, Any] | None = None
 
     def values(self) -> dict[str, Any]:
         now = self.now or datetime.now(DEFAULT_RENDER_TIMEZONE)
         now_br = _localized_datetime(now)
         phone = self.phone or _phone_from_external_user_id(self.external_user_id)
-        return {
+        safe_metadata = {
             "tenant_id": self.tenant_id,
             "external_user_id": self.external_user_id,
             "phone": phone,
@@ -48,33 +53,67 @@ class FlowRenderContext:
             "today_iso": now_br.date().isoformat(),
             "flow": _object_map(self.flow, ("id", "name")),
             "session": _object_map(self.session, ("id",)),
-            **(_public_context_values(getattr(self.session, "context", None))),
         }
+        legacy = _public_context_values(getattr(self.session, "context", None))
+        variables = _public_context_values(getattr(self.session, "variables", None))
+        node_outputs = _public_context_values(self.node_outputs)
+        # Persisted variables are the canonical source and intentionally win over
+        # safe metadata and legacy context. Outputs from the current node win last.
+        values = {**legacy, **safe_metadata, **variables, **node_outputs}
+        values["variables"] = {**variables, **node_outputs}
+        return values
 
 
 def render_template(value: Any, context: FlowRenderContext) -> Any:
     if not isinstance(value, str):
         return value
-    if "{{" not in value:
+    if "{" not in value:
         return value
     if len(value) > MAX_TEMPLATE_LENGTH:
         logger.warning("[FLOW TEMPLATE] template too large length=%s", len(value))
         value = value[:MAX_TEMPLATE_LENGTH]
     values = context.values()
 
+    resolved_keys: list[str] = []
+    missing_keys: list[str] = []
+
     def replace(match: re.Match[str]) -> str:
-        path = match.group(1)
+        path = match.group(1) or match.group(2)
         resolved = _resolve_path(values, path)
         if resolved is None:
-            logger.warning("[FLOW TEMPLATE] unknown placeholder tenant_id=%s placeholder=%s", context.tenant_id, path)
-            return ""
+            missing_keys.append(path)
+            return match.group(0) if _missing_variable_behavior() == "preserve" else ""
+        resolved_keys.append(path)
         return str(resolved)
 
     rendered = _PLACEHOLDER_RE.sub(replace, value)
+    logger.log(
+        logging.WARNING if missing_keys else logging.INFO,
+        "event=runtime_v2_template_render node_id=%s session_id=%s template=%r "
+        "resolved_keys=%s missing_keys=%s rendered_preview=%r",
+        context.node_id,
+        getattr(context.session, "id", None),
+        _redacted_preview(value),
+        sorted(set(resolved_keys)),
+        sorted(set(missing_keys)),
+        _redacted_preview(rendered),
+    )
     if len(rendered) > MAX_RENDERED_LENGTH:
         logger.warning("[FLOW TEMPLATE] rendered value too large tenant_id=%s length=%s", context.tenant_id, len(rendered))
         return rendered[:MAX_RENDERED_LENGTH]
     return rendered
+
+
+def _missing_variable_behavior() -> str:
+    # Empty preserves the renderer's historical production contract. Operators
+    # may opt into literal placeholders while still receiving structured logs.
+    import os
+
+    return "preserve" if os.getenv("FLOW_V2_MISSING_VARIABLE", "empty").lower() == "preserve" else "empty"
+
+
+def _redacted_preview(value: str) -> str:
+    return re.sub(r"\b[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}\b|\b\+?\d{10,15}\b", "[REDACTED]", value[:240])
 
 
 def _resolve_path(values: dict[str, Any], path: str) -> Any:
