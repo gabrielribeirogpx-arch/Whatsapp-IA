@@ -46,15 +46,15 @@ def test_all_rendered_outputs_use_the_canonical_contract():
     assert _connection_messages(nodes, _edges(*HANDLES)) == []
 
 
-def test_automatic_retry_requires_exhausted_route_only_when_flow_continues():
+def test_automatic_retry_allows_default_fallback_when_exhausted_route_is_missing():
     continuing = _nodes(auto_retry_invalid=True, attempts_exceeded_behavior="invalid")
-    assert any("Tentativas esgotadas" in message for message in _connection_messages(continuing, _edges("success")))
+    assert _connection_messages(continuing, _edges("success")) == []
     assert _connection_messages(continuing, _edges("success", "invalid")) == []
 
 
 def test_manual_retry_routes_invalid_input():
     nodes = _nodes(auto_retry_invalid=False)
-    assert any("Inválido" in message for message in _connection_messages(nodes, _edges("success")))
+    assert _connection_messages(nodes, _edges("success")) == []
     assert _connection_messages(nodes, _edges("success", "invalid")) == []
 
 

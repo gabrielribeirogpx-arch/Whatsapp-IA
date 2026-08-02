@@ -36,7 +36,7 @@ class RuntimeV2DataCollectionExecutor(BaseNodeExecutor):
             logger.info('event=data_collection_wait_started tenant_id=%s flow_version_id=%s session_id=%s node_id=%s variable_name=%s data_type=%s result=wait', session.tenant_id, session.flow_version_id, session.id, node_id, data.get('variable_name'), data.get('data_type'))
             return NodeExecutionResult(actions=tuple(actions), status='wait', next_node_id=node_id)
         if runtime_input.metadata.get('event_type') == 'data_collection_timeout':
-            return self._finish(db, snapshot, session, context, node_id, data, 'timeout', 'data_collection_timeout')
+            return self._finish(db, snapshot, session, context, node_id, data, 'timeout', 'data_collection_timeout', runtime_input)
         key = str(runtime_input.input_message_id or runtime_input.message_id or runtime_input.event_id or runtime_input.webhook_id or '')
         processed = list(waiting.get('processed_message_ids') or [])
         if key and key in processed: return NodeExecutionResult(status='wait', next_node_id=node_id)
@@ -46,7 +46,7 @@ class RuntimeV2DataCollectionExecutor(BaseNodeExecutor):
         logger.info('event=data_collection_input_received session_id=%s node_id=%s variable_name=%s data_type=%s attempt=%s', session.id, node_id, data.get('variable_name'), data.get('data_type'), waiting.get('attempts', 0))
         cancel = {str(w).strip().casefold() for w in data.get('cancel_keywords', []) if str(w).strip()}
         if str(raw or '').strip().casefold() in cancel:
-            return self._finish(db, snapshot, session, context, node_id, data, 'cancel', 'data_collection_cancelled')
+            return self._finish(db, snapshot, session, context, node_id, data, 'cancel', 'data_collection_cancelled', runtime_input)
         result = validate_data_collection(data, raw, runtime_input.metadata)
         if not result.valid:
             waiting['attempts'] = int(waiting.get('attempts') or 0) + 1
@@ -59,8 +59,8 @@ class RuntimeV2DataCollectionExecutor(BaseNodeExecutor):
             if auto_retry and data.get('attempts_exceeded_behavior') == 'end':
                 self._clear_wait(context, session)
                 return NodeExecutionResult(actions=(action,), status='complete', next_source_handle='invalid')
-            finished = self._finish(db, snapshot, session, context, node_id, data, 'invalid', 'data_collection_completed')
-            return NodeExecutionResult(actions=(action,), next_node_id=finished.next_node_id, next_source_handle='invalid')
+            finished = self._finish(db, snapshot, session, context, node_id, data, 'invalid', 'data_collection_completed', runtime_input)
+            return NodeExecutionResult(actions=(action, *finished.actions), status=finished.status, next_node_id=finished.next_node_id, next_source_handle='invalid')
         name = str(data.get('variable_name') or ''); variables = dict(session.variables or {}); variables[name] = result.normalized_value; session.variables = variables
         metadata = dict(context.get('variable_metadata') or {}); metadata[name] = {'raw_value': result.raw_value, 'normalized_value': result.normalized_value, 'data_type': data.get('data_type'), 'collected_at': now.isoformat(), 'node_id': node_id}; context['variable_metadata'] = metadata
         if data.get('save_to_contact') and runtime_input.contact_id:
@@ -71,13 +71,49 @@ class RuntimeV2DataCollectionExecutor(BaseNodeExecutor):
         if data.get('save_to_lead'):
             fields = dict(context.get('lead_custom_fields') or {}); fields[name] = result.normalized_value; context['lead_custom_fields'] = fields
         logger.info('event=data_collection_value_saved session_id=%s node_id=%s variable_name=%s data_type=%s result=saved', session.id, node_id, name, data.get('data_type'))
-        return self._finish(db, snapshot, session, context, node_id, data, 'success', 'data_collection_completed')
+        return self._finish(db, snapshot, session, context, node_id, data, 'success', 'data_collection_completed', runtime_input)
 
-    def _finish(self, db, snapshot, session, context, node_id, data, handle, event):
+    def _finish(self, db, snapshot, session, context, node_id, data, handle, event, runtime_input):
         self._clear_wait(context, session)
+        if handle != 'success' and not self._has_edge(snapshot, node_id, handle):
+            return self.executeDefaultBehavior(handle, session=session, data=data, runtime_input=runtime_input)
         target = self._next(db, snapshot, session, node_id, handle)
         logger.info('event=%s tenant_id=%s flow_version_id=%s session_id=%s node_id=%s variable_name=%s data_type=%s result=%s next_node_id=%s', event, session.tenant_id, session.flow_version_id, session.id, node_id, data.get('variable_name'), data.get('data_type'), handle, target)
         return NodeExecutionResult(next_node_id=target, next_source_handle=handle)
+
+    def _has_edge(self, snapshot, node_id, handle):
+        """Check optional output presence without asking the resolver to emit an error."""
+        snapshot_transitions = getattr(self.transition_resolver, '_snapshot_transitions', None)
+        transition_matches = getattr(self.transition_resolver, '_matches', None)
+        if not snapshot_transitions or not transition_matches:
+            # Test/custom resolvers traditionally own the complete routing contract.
+            return True
+        transitions = snapshot_transitions(snapshot)
+        return bool(transition_matches(transitions=transitions, source_node_id=node_id, source_handle=handle))
+
+    def executeDefaultBehavior(self, event, *, session, data, runtime_input):
+        """Execute the workspace/node fallback for an unconnected optional output."""
+        canonical_event = 'retry_exhausted' if event == 'invalid' else event
+        context = dict(session.context or {})
+        workspace_policies = context.get('data_collection_default_behaviors') or {}
+        node_policies = data.get('default_behaviors') or {}
+        policy = node_policies.get(canonical_event) or workspace_policies.get(canonical_event) or {}
+        message = policy.get('message') if isinstance(policy, dict) else None
+        if canonical_event == 'timeout' and not message:
+            message = 'O tempo para responder terminou. Este atendimento será encerrado.'
+        actions = ()
+        if message:
+            actions = (SendMessageAction(
+                tenant_id=session.tenant_id, session_id=session.id,
+                external_user_id=runtime_input.external_user_id,
+                conversation_id=runtime_input.conversation_id,
+                contact_id=runtime_input.contact_id, text=str(message),
+                metadata={'node_type': 'data_collection', 'default_behavior': canonical_event},
+            ),)
+        context['data_collection_default_behavior'] = canonical_event
+        session.context = context
+        logger.info('event=data_collection_default_behavior session_id=%s result=%s', session.id, canonical_event)
+        return NodeExecutionResult(actions=actions, status='complete', next_source_handle=event)
 
     @staticmethod
     def _clear_wait(context, session):

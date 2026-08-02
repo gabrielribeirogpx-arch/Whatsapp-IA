@@ -9,6 +9,16 @@ class Resolver:
         return SimpleNamespace(target_node_id=f"next-{kwargs['source_handle']}")
 
 
+class MissingOptionalResolver(Resolver):
+    @staticmethod
+    def _snapshot_transitions(snapshot):
+        return snapshot.get('transitions', [])
+
+    @staticmethod
+    def _matches(*, transitions, source_node_id, source_handle):
+        return [item for item in transitions if item['source_node_id'] == source_node_id and item['source_handle'] == source_handle]
+
+
 def runtime_input(text=None, message_id=None):
     return SimpleNamespace(
         metadata={}, message_text=text, input_message_id=message_id,
@@ -61,3 +71,20 @@ def test_end_behavior_finishes_without_following_invalid_edge():
     result = executor.execute(None, snapshot={}, session=current, node=node, runtime_input=runtime_input('inválido', 'last'))
     assert result.status == 'complete'
     assert result.next_node_id is None
+
+
+def test_missing_timeout_edge_executes_default_behavior_without_resolution_error():
+    executor = RuntimeV2DataCollectionExecutor(event_store=None, transition_resolver=MissingOptionalResolver())
+    current = session()
+    node = {'id': 'collect', 'data': {'variable_name': 'email', 'data_type': 'email', 'timeout_seconds': 30}}
+    executor.execute(None, snapshot={'transitions': []}, session=current, node=node, runtime_input=runtime_input())
+    timeout_input = runtime_input()
+    timeout_input.metadata = {'event_type': 'data_collection_timeout'}
+
+    result = executor.execute(None, snapshot={'transitions': []}, session=current, node=node, runtime_input=timeout_input)
+
+    assert result.status == 'complete'
+    assert result.next_node_id is None
+    assert result.next_source_handle == 'timeout'
+    assert result.actions[0].metadata['default_behavior'] == 'timeout'
+    assert current.context['data_collection_default_behavior'] == 'timeout'
