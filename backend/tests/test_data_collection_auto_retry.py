@@ -38,6 +38,9 @@ def test_invalid_answers_remain_in_same_node_until_limit_then_use_invalid_output
 
     started = executor.execute(None, snapshot={}, session=current, node=node, runtime_input=runtime_input())
     assert started.status == 'wait' and started.next_node_id == 'collect-period'
+    assert current.context['waiting_variable'] == 'preferred_period'
+    assert current.context['waiting_input'] is True
+    assert current.context['waiting_retry'] is False
 
     for attempt in (1, 2):
         result = executor.execute(None, snapshot={}, session=current, node=node, runtime_input=runtime_input('inválido', f'msg-{attempt}'))
@@ -46,6 +49,8 @@ def test_invalid_answers_remain_in_same_node_until_limit_then_use_invalid_output
         assert current.context['waiting_for_input'] is True
         assert current.context['current_node'] == 'collect-period'
         assert current.context['state'] == 'waiting_retry'
+        assert current.context['waiting_input'] is False
+        assert current.context['waiting_retry'] is True
 
     exceeded = executor.execute(None, snapshot={}, session=current, node=node, runtime_input=runtime_input('inválido', 'msg-3'))
     assert exceeded.next_node_id == 'next-invalid'
