@@ -383,6 +383,76 @@ def test_condition_reads_intent_category_persisted_in_session_and_traces_route(c
     assert "selected_source_handle=true next_transition_id=condition-true next_node_id=true-message" in caplog.text
 
 
+def test_ai_classification_condition_enqueues_and_executes_only_true_message(
+    monkeypatch, caplog
+) -> None:
+    """A true Condition decision must never fall through to its false sibling."""
+    executor, snapshot, event_store, session, db = _executor(
+        {
+            "schema_version": 1,
+            "start_node_id": "classification",
+            "nodes": [
+                {
+                    "id": "classification",
+                    "type": "ai_classification",
+                    "data": {
+                        "input_template": "{{last_message}}",
+                        "categories": ["Aparelho", "Limpeza"],
+                        "output_variable": "intent_category",
+                    },
+                },
+                {
+                    "id": "condition",
+                    "type": "condition",
+                    "data": {"conditions": [{"field": "intent_category", "operator": "equals", "value": "Aparelho"}]},
+                },
+                {"id": "message-true", "type": "message", "content": "Ramo True"},
+                {"id": "message-false", "type": "message", "content": "Ramo False"},
+            ],
+            "edges": [
+                {"id": "classification-condition", "source": "classification", "target": "condition"},
+                {"id": "condition-true", "source": "condition", "sourceHandle": "true", "target": "message-true"},
+                {"id": "condition-false", "source": "condition", "sourceHandle": "false", "target": "message-false"},
+            ],
+        }
+    )
+    adapter = WhatsAppAdapter()
+    monkeypatch.setattr("app.flow_v2.executors._legacy.resolve_ai_config", lambda *_args: {})
+    monkeypatch.setattr(
+        "app.flow_v2.executors._legacy.classify_for_tenant",
+        lambda *_args, **_kwargs: {"category": "Aparelho", "confidence": 0.99},
+    )
+    monkeypatch.setattr("app.flow_v2.executors._legacy.record_ai_execution", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr("app.flow_v2.executors._legacy.get_flow_id", lambda *_args, **_kwargs: "flow-1")
+
+    with caplog.at_level(logging.INFO):
+        result = FlowV2RuntimeWorker(executor=executor, channel_adapter=adapter).process(
+            db, _input(snapshot, message_text="Quero um aparelho")
+        )
+
+    condition_transitions = [
+        event["payload"]
+        for event in event_store.events
+        if event["event_type"] == str(FlowV2EventType.TRANSITION_SELECTED)
+        and event["node_id"] == "condition"
+    ]
+    entered_messages = [
+        event["node_id"]
+        for event in event_store.events
+        if event["event_type"] == str(FlowV2EventType.NODE_ENTERED)
+        and event["node_id"] in {"message-true", "message-false"}
+    ]
+
+    assert session.variables["intent_category"] == "Aparelho"
+    assert condition_transitions == [{"source_handle": "true", "target_node_id": "message-true"}]
+    assert entered_messages == ["message-true"]
+    assert [action.text for action in result.actions] == ["Ramo True"]
+    assert len(adapter.sent_actions) == 1
+    assert "Ramo False" not in [action.text for action in adapter.sent_actions]
+    assert "selected_source_handle=true queued_transition_count=1" in caplog.text
+    assert "queued_next_node_ids=['message-true'] default_transitions_revisited=false" in caplog.text
+
+
 def test_runtime_generates_send_message_action() -> None:
     executor, snapshot, _, _, db = _executor(
         {

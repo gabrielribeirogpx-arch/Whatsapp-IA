@@ -688,6 +688,27 @@ class FlowV2Executor:
                 source_handle=result.next_source_handle,
                 target_node_id=result.next_node_id,
             )
+            # Conditions are exclusive decision points.  Do not let the generic
+            # continuation path silently degrade a selected true/false edge to
+            # a default traversal (which can execute the sibling branch).
+            if node_type.strip().lower() == "condition":
+                if result.next_source_handle not in {"true", "false"} or selected_transition is None:
+                    raise FlowV2ExecutionError(
+                        "Condition node did not enqueue exactly one selected branch: "
+                        f"node_id={node_id} source_handle={result.next_source_handle} "
+                        f"next_node_id={result.next_node_id}"
+                    )
+                logger.info(
+                    "event=RUNTIME_V2_CONDITION_ENQUEUE session_id=%s node_id=%s "
+                    "selected_source_handle=%s queued_transition_count=1 "
+                    "queued_transition_ids=%s queued_next_node_ids=%s "
+                    "default_transitions_revisited=false",
+                    session.id,
+                    node_id,
+                    result.next_source_handle,
+                    [(selected_transition.get("id") or selected_transition.get("edge_id"))],
+                    [result.next_node_id],
+                )
             logger.info(
                 "event=RUNTIME_V2_EXECUTOR_TRANSITION session_id=%s node_id=%s "
                 "selected_source_handle=%s next_transition_id=%s next_node_id=%s "
