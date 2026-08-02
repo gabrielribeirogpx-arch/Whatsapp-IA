@@ -1,7 +1,15 @@
+import logging
 from types import SimpleNamespace
 
+from app.flow_v2.contracts import RuntimeInput
 from app.flow_v2.template_renderer import FlowRenderContext, render_template
-from app.flow_v2.executors._legacy import AiClassificationNodeExecutor
+from app.flow_v2.executors._legacy import (
+    ActionNodeExecutor,
+    AiClassificationNodeExecutor,
+    ConditionNodeExecutor,
+    MessageNodeExecutor,
+)
+from app.flow_v2.executors.data_collection_executor import RuntimeV2DataCollectionExecutor
 
 
 def context(*, variables=None, legacy=None):
@@ -43,3 +51,93 @@ def test_ai_classification_persists_configured_output_in_variables():
 
     assert session.variables["intent_category"] == "Limpeza"
     assert session.context["intent_category"] == "Limpeza"
+
+
+def test_data_collection_classification_condition_message_interpolates_output(
+    monkeypatch, caplog
+):
+    """Regression for the real Runtime V2 node sequence reported in production."""
+    routes = {
+        ("collection", "success"): "classification",
+        ("classification", None): "condition",
+        ("condition", "true"): "message",
+    }
+
+    class Resolver:
+        def resolve(self, _db, *, source_node_id, source_handle=None, **_kwargs):
+            target = routes[(source_node_id, source_handle)]
+            return SimpleNamespace(target_node_id=target, edge={"id": f"{source_node_id}-{target}"})
+
+    class EventStore:
+        def append(self, *_args, **_kwargs):
+            return None
+
+    session = SimpleNamespace(
+        id="session-flow",
+        tenant_id="tenant-1",
+        flow_version_id="version-1",
+        context={
+            "waiting_for": "data_collection",
+            "waiting_node_id": "collection",
+            "data_collection": {
+                "attempts": 0,
+                "max_attempts": 1,
+                "processed_message_ids": [],
+                "retry_mode": False,
+            },
+        },
+        variables={},
+    )
+    nodes = {
+        "collection": {"id": "collection", "type": "data_collection", "data": {"variable_name": "treatment_request", "data_type": "text"}},
+        "classification": {"id": "classification", "type": "ai_classification", "data": {"input_template": "{{treatment_request}}", "categories": ["Implante", "Limpeza"], "confidence_threshold": 0.6, "output_variable": "intent_category"}},
+        "condition": {"id": "condition", "type": "condition", "data": {"conditions": [{"field": "intent_category", "operator": "equals", "value": "Implante"}]}},
+        "message": {"id": "message", "type": "message", "content": "Categoria classificada: {{intent_category}}"},
+    }
+    snapshot = SimpleNamespace(
+        node_by_id=nodes,
+        transitions=tuple(
+            {"source_node_id": source, "source_handle": handle, "target_node_id": target}
+            for (source, handle), target in routes.items()
+        ),
+        edges=(),
+        start_node_id="collection",
+        flow_id="flow-1",
+        name="Regression flow",
+    )
+    runtime_input = RuntimeInput(
+        tenant_id="tenant-1",
+        flow_version_id="version-1",
+        external_user_id="whatsapp:+5511999999999",
+        message_text="Quero colocar um implante",
+        input_message_id="input-1",
+        metadata={},
+    )
+    db = SimpleNamespace(add=lambda _value: None)
+    event_store, resolver = EventStore(), Resolver()
+
+    monkeypatch.setattr("app.flow_v2.executors._legacy.resolve_ai_config", lambda *_args: {})
+    monkeypatch.setattr("app.flow_v2.executors._legacy.classify_for_tenant", lambda *_args, **_kwargs: {"category": "Implante", "confidence": 0.98, "reason": "pedido explícito"})
+    monkeypatch.setattr("app.flow_v2.executors._legacy.record_ai_execution", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr("app.flow_v2.executors._legacy.get_flow_id", lambda *_args, **_kwargs: "flow-1")
+    monkeypatch.setattr(ActionNodeExecutor, "_resolve_contact", staticmethod(lambda *_args, **_kwargs: None))
+    monkeypatch.setattr(ActionNodeExecutor, "_resolve_conversation", staticmethod(lambda *_args, **_kwargs: None))
+    monkeypatch.setattr(ActionNodeExecutor, "_resolve_lead", staticmethod(lambda *_args, **_kwargs: None))
+
+    collection = RuntimeV2DataCollectionExecutor(event_store=event_store, transition_resolver=resolver)
+    classification = AiClassificationNodeExecutor(event_store=event_store, transition_resolver=resolver)
+    condition = ConditionNodeExecutor(event_store=event_store, transition_resolver=resolver)
+    message = MessageNodeExecutor(event_store=event_store, transition_resolver=resolver)
+
+    with caplog.at_level(logging.INFO):
+        assert collection.execute(db, snapshot=snapshot, session=session, node=nodes["collection"], runtime_input=runtime_input).next_node_id == "classification"
+        assert classification.execute(db, snapshot=snapshot, session=session, node=nodes["classification"], runtime_input=runtime_input).next_node_id == "condition"
+        assert session.variables["intent_category"] == "Implante"
+        assert condition.execute(db, snapshot=snapshot, session=session, node=nodes["condition"], runtime_input=runtime_input).next_node_id == "message"
+        result = message.execute(db, snapshot=snapshot, session=session, node=nodes["message"], runtime_input=runtime_input)
+
+    assert result.actions[0].text == "Categoria classificada: Implante"
+    assert "{{intent_category}}" not in result.actions[0].text
+    assert "output_variable=intent_category" in caplog.text
+    assert "session.variables={'treatment_request': 'Quero colocar um implante', 'intent_category': 'Implante'}" in caplog.text
+    assert "resolved_keys=['intent_category'] missing_keys=[]" in caplog.text
