@@ -35,7 +35,16 @@ class FlowV2GraphValidator:
     """Validates Flow Publisher V2 graphs before immutable snapshot creation."""
 
     SUPPORTED_NODE_TYPES = PUBLISHABLE_NODE_TYPES
-    SUPPORTED_CONDITION_OPERATORS = {"==", "eq", "equals"}
+    SUPPORTED_CONDITION_OPERATORS = {
+        "==",
+        "eq",
+        "equals",
+        "!=",
+        "ne",
+        "neq",
+        "not_equals",
+        "not equals",
+    }
     SUPPORTED_BUILDER_MATCH_TYPES = {"contains", "equals", "eq", "=="}
 
     def validate(

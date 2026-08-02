@@ -998,7 +998,13 @@ class ConditionNodeExecutor(BaseNodeExecutor):
                 "target_node_id": next_node_id,
             },
         )
-        return NodeExecutionResult(next_node_id=next_node_id)
+        # Keep the selected branch in the execution contract.  The target is
+        # already resolved above, but carrying the handle prevents callers from
+        # treating a conditional result as an ordinary/default transition.
+        return NodeExecutionResult(
+            next_node_id=next_node_id,
+            next_source_handle=handle,
+        )
 
     @classmethod
     def _evaluate(cls, condition: Any, metadata: dict[str, Any]) -> bool:
@@ -1008,10 +1014,20 @@ class ConditionNodeExecutor(BaseNodeExecutor):
         expected = (
             condition.get("right") if "right" in condition else condition.get("value")
         )
-        operator = condition.get("operator") or condition.get("op") or "=="
-        if operator not in {"==", "eq", "equals"} or not left:
+        operator = str(condition.get("operator") or condition.get("op") or "==").strip().lower()
+        if not left:
             return False
-        return cls._get_path(metadata, str(left)) == expected
+        actual = cls._get_path(metadata, str(left))
+        # AI classification stores the complete structured result at
+        # ``ai.classification``.  Builder conditions historically address that
+        # path as the category itself, so preserve that public contract.
+        if isinstance(actual, dict) and "category" in actual and not isinstance(expected, dict):
+            actual = actual.get("category")
+        if operator in {"==", "eq", "equals"}:
+            return actual == expected
+        if operator in {"!=", "ne", "neq", "not_equals", "not equals"}:
+            return actual != expected
+        return False
 
     @classmethod
     def _evaluate_builder_keywords(

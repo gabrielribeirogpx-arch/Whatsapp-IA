@@ -273,6 +273,67 @@ def test_condition_builder_keywords_contains_routes_negative_for_klm(caplog) -> 
     )
 
 
+def test_condition_not_equals_executes_only_true_classification_branch() -> None:
+    executor, snapshot, event_store, _, db = _executor(
+        {
+            "schema_version": 1,
+            "start_node_id": "condition",
+            "nodes": [
+                {
+                    "id": "condition",
+                    "type": "condition",
+                    "data": {
+                        "conditions": [
+                            {
+                                "field": "ai.classification",
+                                "operator": "!=",
+                                "value": "outro",
+                            }
+                        ]
+                    },
+                },
+                {"id": "choice", "type": "message", "content": "Escolha uma opção"},
+                {
+                    "id": "fallback",
+                    "type": "message",
+                    "content": "Não consegui identificar...",
+                },
+            ],
+            "edges": [
+                {
+                    "id": "e-true",
+                    "source": "condition",
+                    "sourceHandle": "true",
+                    "target": "choice",
+                },
+                {
+                    "id": "e-false",
+                    "source": "condition",
+                    "sourceHandle": "false",
+                    "target": "fallback",
+                },
+            ],
+        }
+    )
+
+    output = executor.handle_input(
+        db,
+        _input(
+            snapshot,
+            metadata={"ai": {"classification": {"category": "Limpeza"}}},
+        ),
+    )
+
+    assert output.effects == ({"type": "send_message", "text": "Escolha uma opção"},)
+    transitions = [
+        event["payload"]
+        for event in event_store.events
+        if event["event_type"] == str(FlowV2EventType.TRANSITION_SELECTED)
+        and event["node_id"] == "condition"
+    ]
+    assert transitions == [{"source_handle": "true", "target_node_id": "choice"}]
+
+
 def test_runtime_generates_send_message_action() -> None:
     executor, snapshot, _, _, db = _executor(
         {
