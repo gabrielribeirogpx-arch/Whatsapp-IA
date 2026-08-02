@@ -674,10 +674,13 @@ class FlowV2Executor:
                 session=session,
                 event_type=FlowV2EventType.TRANSITION_SELECTED,
                 node_id=node_id,
-                payload={"target_node_id": result.next_node_id},
+                payload={
+                    "source_handle": result.next_source_handle,
+                    "target_node_id": result.next_node_id,
+                },
             )
             self._track_analytics(db, session=session, flow_id=flow_id, event_type="choice_selected", node_id=node_id, node_type=node_type, event_key=str(result.next_node_id), metadata={"target_node_id": result.next_node_id})
-            self._track_analytics(db, session=session, flow_id=flow_id, event_type="transition_taken", node_id=node_id, node_type=node_type, event_key=str(result.next_node_id), metadata={"source_handle": "default", "target_node_id": result.next_node_id, "target_node_type": None})
+            self._track_analytics(db, session=session, flow_id=flow_id, event_type="transition_taken", node_id=node_id, node_type=node_type, event_key=str(result.next_node_id), metadata={"source_handle": result.next_source_handle or "default", "target_node_id": result.next_node_id, "target_node_type": None})
             self.session_manager.move_to(db, session=session, node_id=result.next_node_id, status=FlowV2SessionStatus.RUNNING)
             logger.info(
                 "event=runtime_v2_choice_trace stage=next_node_selected status=success reason=session_pointer_advanced "

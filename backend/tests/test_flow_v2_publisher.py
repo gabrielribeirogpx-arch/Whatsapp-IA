@@ -156,6 +156,21 @@ def test_marketplace_condition_evaluates_intent_category(intent_category, expect
     assert ConditionNodeExecutor._evaluate(rule, metadata) is expected
 
 
+def test_condition_not_equals_is_valid_runtime_v2_configuration() -> None:
+    nodes = _valid_nodes()
+    nodes[3] = {
+        "id": "condition",
+        "type": "condition",
+        "conditions": [
+            {"field": "ai.classification", "operator": "!=", "value": "outro"}
+        ],
+    }
+
+    result = FlowV2GraphValidator().validate(nodes=nodes, edges=_valid_edges())
+
+    assert result.status == GraphValidationStatus.VALID
+
+
 def test_invalid_condition_config_is_invalid() -> None:
     nodes = _valid_nodes()
     nodes[3] = {
