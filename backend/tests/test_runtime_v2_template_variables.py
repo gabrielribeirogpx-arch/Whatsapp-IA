@@ -1,6 +1,8 @@
 import logging
 from types import SimpleNamespace
 
+import pytest
+
 from app.flow_v2.contracts import RuntimeInput
 from app.flow_v2.template_renderer import FlowRenderContext, render_template
 from app.flow_v2.executors._legacy import (
@@ -53,8 +55,9 @@ def test_ai_classification_persists_configured_output_in_variables():
     assert session.context["intent_category"] == "Limpeza"
 
 
+@pytest.mark.parametrize("classified_category", ["Limpeza", "Implante"])
 def test_data_collection_classification_condition_message_interpolates_output(
-    monkeypatch, caplog
+    monkeypatch, caplog, classified_category
 ):
     """Regression for the real Runtime V2 node sequence reported in production."""
     routes = {
@@ -91,7 +94,7 @@ def test_data_collection_classification_condition_message_interpolates_output(
     nodes = {
         "collection": {"id": "collection", "type": "data_collection", "data": {"variable_name": "treatment_request", "data_type": "text"}},
         "classification": {"id": "classification", "type": "ai_classification", "data": {"input_template": "{{treatment_request}}", "categories": ["Implante", "Limpeza"], "confidence_threshold": 0.6, "output_variable": "intent_category"}},
-        "condition": {"id": "condition", "type": "condition", "data": {"conditions": [{"field": "intent_category", "operator": "equals", "value": "Implante"}]}},
+        "condition": {"id": "condition", "type": "condition", "data": {"conditions": [{"field": "intent_category", "operator": "equals", "value": classified_category}]}},
         "message": {"id": "message", "type": "message", "content": "Categoria classificada: {{intent_category}}"},
     }
     snapshot = SimpleNamespace(
@@ -117,7 +120,7 @@ def test_data_collection_classification_condition_message_interpolates_output(
     event_store, resolver = EventStore(), Resolver()
 
     monkeypatch.setattr("app.flow_v2.executors._legacy.resolve_ai_config", lambda *_args: {})
-    monkeypatch.setattr("app.flow_v2.executors._legacy.classify_for_tenant", lambda *_args, **_kwargs: {"category": "Implante", "confidence": 0.98, "reason": "pedido explícito"})
+    monkeypatch.setattr("app.flow_v2.executors._legacy.classify_for_tenant", lambda *_args, **_kwargs: {"category": classified_category, "confidence": 0.98, "reason": "pedido explícito"})
     monkeypatch.setattr("app.flow_v2.executors._legacy.record_ai_execution", lambda *_args, **_kwargs: None)
     monkeypatch.setattr("app.flow_v2.executors._legacy.get_flow_id", lambda *_args, **_kwargs: "flow-1")
     monkeypatch.setattr(ActionNodeExecutor, "_resolve_contact", staticmethod(lambda *_args, **_kwargs: None))
@@ -132,12 +135,15 @@ def test_data_collection_classification_condition_message_interpolates_output(
     with caplog.at_level(logging.INFO):
         assert collection.execute(db, snapshot=snapshot, session=session, node=nodes["collection"], runtime_input=runtime_input).next_node_id == "classification"
         assert classification.execute(db, snapshot=snapshot, session=session, node=nodes["classification"], runtime_input=runtime_input).next_node_id == "condition"
-        assert session.variables["intent_category"] == "Implante"
+        assert session.variables["intent_category"] == classified_category
         assert condition.execute(db, snapshot=snapshot, session=session, node=nodes["condition"], runtime_input=runtime_input).next_node_id == "message"
         result = message.execute(db, snapshot=snapshot, session=session, node=nodes["message"], runtime_input=runtime_input)
 
-    assert result.actions[0].text == "Categoria classificada: Implante"
+    assert result.actions[0].text == f"Categoria classificada: {classified_category}"
     assert "{{intent_category}}" not in result.actions[0].text
     assert "output_variable=intent_category" in caplog.text
-    assert "session.variables={'treatment_request': 'Quero colocar um implante', 'intent_category': 'Implante'}" in caplog.text
+    assert f"'intent_category': '{classified_category}'" in caplog.text
     assert "resolved_keys=['intent_category'] missing_keys=[]" in caplog.text
+    assert "event=RUNTIME_V2_MESSAGE_RENDER" in caplog.text
+    assert "template_original='Categoria classificada: {{intent_category}}'" in caplog.text
+    assert f"rendered_text='Categoria classificada: {classified_category}' missing_keys=[]" in caplog.text

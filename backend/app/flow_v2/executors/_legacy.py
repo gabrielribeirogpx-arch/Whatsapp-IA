@@ -54,7 +54,12 @@ from app.services.ai_execution_service import get_flow_id, record_ai_execution, 
 from app.services.execution_budget_service import ExecutionBudgetExceeded, get_or_create_budget, persist_budget
 from app.flow_v2.snapshot import FlowV2Snapshot, build_transitions_from_edges
 from app.flow_v2.transition_resolver import TransitionResolver
-from app.flow_v2.template_renderer import FlowRenderContext, render_template
+from app.flow_v2.template_renderer import (
+    FlowRenderContext,
+    render_template,
+    session_runtime_values,
+    template_keys,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -191,7 +196,30 @@ class MessageNodeExecutor(BaseNodeExecutor):
     ) -> NodeExecutionResult:
         node_id = str(node["id"])
         data = self._node_data(node)
-        message = self._render(extract_message_text_from_node(node), db, snapshot=snapshot, session=session, runtime_input=runtime_input, node_id=node_id)
+        template = extract_message_text_from_node(node)
+        render_context = self._render_context(
+            db,
+            snapshot=snapshot,
+            session=session,
+            runtime_input=runtime_input,
+            node_id=node_id,
+        )
+        effective_render_context = render_context.values()
+        _resolved_keys, missing_keys = template_keys(template, effective_render_context)
+        message = render_template(template, render_context)
+        logger.info(
+            "event=RUNTIME_V2_MESSAGE_RENDER node_id=%s session_id=%s "
+            "session.variables=%r session.context=%r render_context=%r "
+            "template_original=%r rendered_text=%r missing_keys=%s",
+            node_id,
+            getattr(session, "id", None),
+            getattr(session, "variables", None),
+            getattr(session, "context", None),
+            effective_render_context,
+            template,
+            message,
+            missing_keys,
+        )
         is_start = bool(node.get("isStart") or data.get("isStart"))
         logger.info(
             "[MESSAGE EXECUTED] node_id=%s is_start=%s message_preview=%s",
@@ -959,10 +987,7 @@ class ConditionNodeExecutor(BaseNodeExecutor):
         # but must not hide values (such as ``intent_category``) written by a
         # node earlier in this same synchronous execution.
         condition_context = dict(runtime_input.metadata or {})
-        if isinstance(getattr(session, "context", None), dict):
-            condition_context.update(session.context)
-        if isinstance(getattr(session, "variables", None), dict):
-            condition_context.update(session.variables)
+        condition_context.update(session_runtime_values(session))
 
         if keywords:
             result = self._evaluate_builder_keywords(

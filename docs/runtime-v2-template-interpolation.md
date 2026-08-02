@@ -14,6 +14,11 @@ novamente. Runtime V1 e simulador legado têm pipeline próprio e não foram alt
 simulação que seleciona Runtime V2 usa o mesmo executor e renderer da produção. O
 preview do editor é somente visual e preserva o template salvo pelo builder.
 
+A divergência foi confirmada comparando os contextos: a Condição combinava
+`session.context` e `session.variables`, enquanto `FlowRenderContext.values()` expunha
+somente `session.context`. Agora ambos constroem a parcela persistida do contexto por
+`session_runtime_values()`, impedindo que os dois executores voltem a divergir.
+
 ## Contrato
 
 O contexto é composto, da menor para a maior precedência, por contexto legado,
@@ -25,3 +30,8 @@ Variáveis ausentes continuam vazias por padrão, preservando o contrato anterio
 `FLOW_V2_MISSING_VARIABLE=preserve` mantém o placeholder literal. Nos dois modos é
 emitido `event=runtime_v2_template_render` com node/sessão, chaves resolvidas e
 ausentes e previews com e-mail/telefone redigidos.
+
+Além do evento do renderer, `event=RUNTIME_V2_MESSAGE_RENDER` registra no ponto de
+chamada os dois campos persistidos da sessão, o contexto efetivo, o template original,
+o texto final e `missing_keys`. Isso permite verificar em um único ciclo de execução
+se `intent_category` chegou ao `MessageNodeExecutor` e ao renderer.
