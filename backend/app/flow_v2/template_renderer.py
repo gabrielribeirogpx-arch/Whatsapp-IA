@@ -54,12 +54,12 @@ class FlowRenderContext:
             "flow": _object_map(self.flow, ("id", "name")),
             "session": _object_map(self.session, ("id",)),
         }
-        legacy = _public_context_values(getattr(self.session, "context", None))
+        session_values = session_runtime_values(self.session)
         variables = _public_context_values(getattr(self.session, "variables", None))
         node_outputs = _public_context_values(self.node_outputs)
         # Persisted variables are the canonical source and intentionally win over
         # safe metadata and legacy context. Outputs from the current node win last.
-        values = {**legacy, **safe_metadata, **variables, **node_outputs}
+        values = {**session_values, **safe_metadata, **variables, **node_outputs}
         values["variables"] = {**variables, **node_outputs}
         return values
 
@@ -74,7 +74,7 @@ def render_template(value: Any, context: FlowRenderContext) -> Any:
         value = value[:MAX_TEMPLATE_LENGTH]
     values = context.values()
 
-    resolved_keys, missing_keys = _template_keys(value, values)
+    resolved_keys, missing_keys = template_keys(value, values)
     logger.log(
         logging.WARNING if missing_keys else logging.INFO,
         "event=RUNTIME_V2_TEMPLATE_RENDER_INPUT node_id=%s session_id=%s "
@@ -119,7 +119,7 @@ def render_template(value: Any, context: FlowRenderContext) -> Any:
     return rendered
 
 
-def _template_keys(value: str, values: dict[str, Any]) -> tuple[list[str], list[str]]:
+def template_keys(value: str, values: dict[str, Any]) -> tuple[list[str], list[str]]:
     """Report renderability without mutating the template."""
     keys = [match.group(1) or match.group(2) for match in _PLACEHOLDER_RE.finditer(value)]
     resolved = sorted({key for key in keys if _resolve_path(values, key) is not None})
@@ -172,3 +172,14 @@ def _localized_datetime(value: datetime) -> datetime:
 
 def _public_context_values(context: Any) -> dict[str, Any]:
     return context if isinstance(context, dict) else {}
+
+
+def session_runtime_values(session: Any) -> dict[str, Any]:
+    """Return the persisted values visible to both conditions and templates.
+
+    ``variables`` is the Runtime V2 canonical store, so it must override the
+    legacy ``context`` when both contain the same key.
+    """
+    legacy = _public_context_values(getattr(session, "context", None))
+    variables = _public_context_values(getattr(session, "variables", None))
+    return {**legacy, **variables}
