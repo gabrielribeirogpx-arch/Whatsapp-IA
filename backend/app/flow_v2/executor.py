@@ -435,6 +435,26 @@ class FlowV2Executor:
 
         for step in range(MAX_RUNTIME_STEPS):
             dequeued_transition = transition_queue.pop(0) if transition_queue else None
+            incoming_source_node_id = (dequeued_transition or {}).get("source_node_id")
+            incoming_source_node = snapshot.node_by_id.get(str(incoming_source_node_id)) if incoming_source_node_id else None
+            incoming_source_data = self._node_data(incoming_source_node) if isinstance(incoming_source_node, dict) else {}
+            incoming_source_node_type = (
+                str(incoming_source_node.get("type") or incoming_source_data.get("type") or "").strip().lower()
+                if isinstance(incoming_source_node, dict)
+                else None
+            )
+            # Node executors do not receive the transition queue. Expose only the
+            # current hop as ephemeral runtime metadata so a Message can distinguish
+            # newly collected input from a prompt that genuinely needs a new reply.
+            node_runtime_input = replace(
+                runtime_input,
+                metadata={
+                    **runtime_input.metadata,
+                    "_runtime_v2_incoming_source_node_id": incoming_source_node_id,
+                    "_runtime_v2_incoming_source_node_type": incoming_source_node_type,
+                    "_runtime_v2_incoming_source_handle": (dequeued_transition or {}).get("source_handle"),
+                },
+            )
             logger.info(
                 "event=RUNTIME_V2_TRANSITION_DEQUEUED session_id=%s step=%s "
                 "queue_count_after=%s transition_id=%s source_node_id=%s "
@@ -510,7 +530,7 @@ class FlowV2Executor:
                     snapshot=snapshot,
                     session=session,
                     node=node,
-                    runtime_input=runtime_input,
+                    runtime_input=node_runtime_input,
                 )
                 logger.info(
                     "event=RUNTIME_V2_NODE_EXECUTOR_RESULT session_id=%s step=%s "

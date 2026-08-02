@@ -236,7 +236,12 @@ class MessageNodeExecutor(BaseNodeExecutor):
                 node_id=node_id,
                 payload=payload,
             )
-            action_metadata = {**runtime_input.metadata, "node_id": node_id}
+            action_metadata = {
+                key: value
+                for key, value in runtime_input.metadata.items()
+                if not key.startswith("_runtime_v2_")
+            }
+            action_metadata["node_id"] = node_id
             action = SendMessageAction(
                 tenant_id=session.tenant_id,
                 session_id=session.id,
@@ -289,13 +294,27 @@ class MessageNodeExecutor(BaseNodeExecutor):
             if "wait_for_reply" in node
             else data.get("wait_for_reply", data.get("waitForReply", data.get("await_reply", data.get("awaitReply"))))
         )
+        incoming_source_node_type = str(
+            runtime_input.metadata.get("_runtime_v2_incoming_source_node_type") or ""
+        ).strip().lower()
+        incoming_source_handle = str(
+            runtime_input.metadata.get("_runtime_v2_incoming_source_handle") or ""
+        ).strip().lower()
+        continues_with_collected_input = (
+            incoming_source_node_type == "data_collection"
+            and incoming_source_handle == "success"
+        )
         status = (
             "complete"
             if next_node_id is None
-            else ("wait" if wait_for_reply or wait_after_user_input_next_node else "continue")
+            else (
+                "wait"
+                if wait_for_reply or (wait_after_user_input_next_node and not continues_with_collected_input)
+                else "continue"
+            )
         )
         logger.info(
-            "[MESSAGE AUTO CONTINUE] node_id=%s next_node_id=%s next_node_type=%s status=%s auto_continue=%s legacy_wait_after_start_condition=%s wait_after_start_condition=%s wait_after_user_input_next_node=%s wait_for_reply=%s next_node_is_interactive=%s blocking_condition=%s",
+            "[MESSAGE AUTO CONTINUE] node_id=%s next_node_id=%s next_node_type=%s status=%s auto_continue=%s legacy_wait_after_start_condition=%s wait_after_start_condition=%s wait_after_user_input_next_node=%s wait_for_reply=%s next_node_is_interactive=%s incoming_source_node_type=%s incoming_source_handle=%s continues_with_collected_input=%s blocking_condition=%s",
             node_id,
             next_node_id,
             next_node_type,
@@ -306,7 +325,10 @@ class MessageNodeExecutor(BaseNodeExecutor):
             wait_after_user_input_next_node,
             wait_for_reply,
             next_node_is_interactive,
-            "none",
+            incoming_source_node_type or None,
+            incoming_source_handle or None,
+            continues_with_collected_input,
+            "explicit_wait_for_reply" if wait_for_reply else ("condition_requires_new_input" if status == "wait" else "none"),
         )
         return NodeExecutionResult(
             actions=actions,

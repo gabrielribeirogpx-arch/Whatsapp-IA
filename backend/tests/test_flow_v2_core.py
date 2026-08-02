@@ -808,6 +808,52 @@ def test_message_to_condition_waits_before_evaluating_condition() -> None:
     assert "session.waiting" in _event_types(event_store)
 
 
+def test_data_collection_success_message_continues_to_condition_with_collected_input(caplog) -> None:
+    raw_snapshot = {
+        "schema_version": 1,
+        "start_node_id": "collect",
+        "nodes": [
+            {"id": "collect", "type": "data_collection", "data": {"variable_name": "answer", "data_type": "text", "required": True}},
+            {"id": "ack", "type": "message", "content": "Resposta recebida"},
+            {"id": "check", "type": "condition", "data": {"keywords": ["yes"]}},
+            {"id": "accepted", "type": "message", "content": "Aceito"},
+            {"id": "rejected", "type": "message", "content": "Recusado"},
+        ],
+        "edges": [
+            {"id": "collect-success", "source": "collect", "sourceHandle": "success", "target": "ack"},
+            {"id": "ack-default", "source": "ack", "target": "check"},
+            {"id": "check-true", "source": "check", "sourceHandle": "true", "target": "accepted"},
+            {"id": "check-false", "source": "check", "sourceHandle": "false", "target": "rejected"},
+        ],
+    }
+    executor, snapshot, event_store, session, db = _executor(raw_snapshot)
+    session.current_node_id = "collect"
+    session.variables = {}
+
+    waiting = executor.handle_input(db, _input_with_text(snapshot, "wamid.collect.start", "start"))
+    assert waiting.status == FlowV2SessionStatus.WAITING
+    assert waiting.current_node_id == "collect"
+
+    with caplog.at_level("INFO"):
+        completed = executor.handle_input(db, _input_with_text(snapshot, "wamid.collect.answer", "yes"))
+
+    assert completed.status == FlowV2SessionStatus.COMPLETED
+    assert completed.effects == (
+        {"type": "send_message", "text": "Resposta recebida"},
+        {"type": "send_message", "text": "Aceito"},
+    )
+    assert [event["node_id"] for event in event_store.events if event["event_type"] == "NODE_ENTERED"] == [
+        "collect", "collect", "ack", "check", "accepted",
+    ]
+    assert any(
+        "[MESSAGE AUTO CONTINUE]" in record.message
+        and "node_id=ack" in record.message
+        and "incoming_source_node_type=data_collection" in record.message
+        and "continues_with_collected_input=True" in record.message
+        for record in caplog.records
+    )
+
+
 def test_waiting_message_to_condition_resumes_with_next_user_message() -> None:
     raw_snapshot = {
         "schema_version": 1,
