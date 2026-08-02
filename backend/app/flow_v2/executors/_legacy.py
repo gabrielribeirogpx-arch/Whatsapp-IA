@@ -96,7 +96,7 @@ class BaseNodeExecutor:
 
 
     @staticmethod
-    def _render_context(db, *, snapshot: FlowV2Snapshot, session: Any, runtime_input: RuntimeInput) -> FlowRenderContext:
+    def _render_context(db, *, snapshot: FlowV2Snapshot, session: Any, runtime_input: RuntimeInput, node_id: str | None = None) -> FlowRenderContext:
         contact = ActionNodeExecutor._resolve_contact(db, runtime_input=runtime_input)
         conversation = ActionNodeExecutor._resolve_conversation(db, runtime_input=runtime_input)
         lead = ActionNodeExecutor._resolve_lead(
@@ -115,10 +115,11 @@ class BaseNodeExecutor:
             last_message=runtime_input.message_text,
             flow={"id": getattr(snapshot, "flow_id", None), "name": getattr(snapshot, "name", None)},
             session=session,
+            node_id=node_id,
         )
 
-    def _render(self, value: Any, db, *, snapshot: FlowV2Snapshot, session: Any, runtime_input: RuntimeInput) -> Any:
-        return render_template(value, self._render_context(db, snapshot=snapshot, session=session, runtime_input=runtime_input))
+    def _render(self, value: Any, db, *, snapshot: FlowV2Snapshot, session: Any, runtime_input: RuntimeInput, node_id: str | None = None) -> Any:
+        return render_template(value, self._render_context(db, snapshot=snapshot, session=session, runtime_input=runtime_input, node_id=node_id))
 
     def _default_next(
         self, db, *, snapshot: FlowV2Snapshot, session: Any, node_id: str
@@ -190,7 +191,7 @@ class MessageNodeExecutor(BaseNodeExecutor):
     ) -> NodeExecutionResult:
         node_id = str(node["id"])
         data = self._node_data(node)
-        message = self._render(extract_message_text_from_node(node), db, snapshot=snapshot, session=session, runtime_input=runtime_input)
+        message = self._render(extract_message_text_from_node(node), db, snapshot=snapshot, session=session, runtime_input=runtime_input, node_id=node_id)
         is_start = bool(node.get("isStart") or data.get("isStart"))
         logger.info(
             "[MESSAGE EXECUTED] node_id=%s is_start=%s message_preview=%s",
@@ -960,6 +961,8 @@ class ConditionNodeExecutor(BaseNodeExecutor):
         condition_context = dict(runtime_input.metadata or {})
         if isinstance(getattr(session, "context", None), dict):
             condition_context.update(session.context)
+        if isinstance(getattr(session, "variables", None), dict):
+            condition_context.update(session.variables)
 
         if keywords:
             result = self._evaluate_builder_keywords(
@@ -2548,6 +2551,16 @@ class AiStructuredNodeExecutor(BaseNodeExecutor):
             _set_nested_value(context, "ai.extraction.missing_fields", result.get("missing_fields"))
             _set_nested_value(context, "ai.extraction.confidence", result.get("confidence"))
         session.context = context
+        variables = dict(session.variables or {}) if isinstance(getattr(session, "variables", None), dict) else {}
+        persisted_value: Any = context
+        for part in output_variable.split("."):
+            persisted_value = persisted_value.get(part) if isinstance(persisted_value, dict) else None
+        _set_nested_value(
+            variables,
+            output_variable,
+            persisted_value,
+        )
+        session.variables = variables
         if hasattr(db, "add") and sqlalchemy_inspect(session, raiseerr=False) is not None:
             db.add(session)
 
