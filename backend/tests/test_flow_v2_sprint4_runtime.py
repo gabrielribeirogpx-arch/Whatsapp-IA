@@ -430,6 +430,24 @@ def test_ai_classification_condition_enqueues_and_executes_only_true_message(
             db, _input(snapshot, message_text="Quero um aparelho")
         )
 
+    transition_trace_markers = (
+        "event=RUNTIME_V2_CONDITION_EXECUTOR_RETURN",
+        "event=RUNTIME_V2_NODE_EXECUTOR_RESULT",
+        "event=RUNTIME_V2_ENQUEUE_TRANSITION_CALL",
+        "event=RUNTIME_V2_TRANSITION_QUEUE_STATE",
+        "event=RUNTIME_V2_TRANSITION_DEQUEUED",
+        "event=RUNTIME_V2_MESSAGE_EXECUTOR_EXECUTED",
+    )
+    transition_trace_records = [
+        record
+        for record in caplog.records
+        if any(marker in record.getMessage() for marker in transition_trace_markers)
+    ]
+    assert {marker for marker in transition_trace_markers if marker in caplog.text} == set(
+        transition_trace_markers
+    )
+    assert all(record.levelno == logging.INFO for record in transition_trace_records)
+
     condition_transitions = [
         event["payload"]
         for event in event_store.events
