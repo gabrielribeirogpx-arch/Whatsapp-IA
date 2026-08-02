@@ -42,6 +42,7 @@ class FlowV2Session(Base):
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="running", server_default="running", index=True)
     current_node_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     context: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict, server_default="{}")
+    variables: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict, server_default="{}")
     last_event_index: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     started_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow, index=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)

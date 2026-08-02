@@ -13,6 +13,7 @@ from app.flow_v2.channel_adapter import WhatsAppAdapter
 from app.flow_v2.contracts import resolve_runtime_choice_key
 from app.observability.runtime_choice_trace import runtime_exit, runtime_trace
 from app.flow_v2.runtime_worker import FlowV2InputEvent, FlowV2RuntimeWorker, FlowV2WorkerResult
+from app.flow_v2.models import FlowV2Session
 from app.models import Conversation
 from app.models.flow import Flow
 from app.services.queue import enqueue_send_message
@@ -248,6 +249,28 @@ class FlowRuntimeSelector:
         runtime_metadata.setdefault("conversation_id", str(conversation.id) if conversation else None)
         runtime_metadata.setdefault("contact_id", str(contact_id) if contact_id else None)
         runtime_metadata.setdefault("flow_runtime_selector", FLOW_RUNTIME_SELECTOR)
+        # Carry the durable wait checkpoint into the worker explicitly.  Besides
+        # avoiding an unnecessary second identity lookup, this makes ordinary
+        # text replies resume DataCollection just like interactive replies.
+        active_session = None
+        if hasattr(db, "execute"):
+            active_session = db.execute(
+                select(FlowV2Session)
+                .where(
+                    FlowV2Session.tenant_id == tenant_id,
+                    FlowV2Session.flow_version_id == flow.published_version_id,
+                    FlowV2Session.external_user_id == phone,
+                    FlowV2Session.status.in_(["running", "waiting"]),
+                )
+                .order_by(FlowV2Session.updated_at.desc())
+                .limit(1)
+            ).scalar_one_or_none()
+        if active_session is not None:
+            runtime_metadata.setdefault("_flow_v2_session_id", str(active_session.id))
+            runtime_metadata.setdefault("current_node_id", active_session.current_node_id)
+            wait_context = active_session.context if isinstance(active_session.context, dict) else {}
+            runtime_metadata.setdefault("current_wait_node", wait_context.get("waiting_node_id"))
+            runtime_metadata.setdefault("waiting_variable", wait_context.get("waiting_variable"))
         runtime_choice_key = resolve_runtime_choice_key(runtime_metadata)
         if runtime_choice_key:
             # Materialize the canonical provider-independent key before the
