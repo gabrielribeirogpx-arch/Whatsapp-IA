@@ -1044,10 +1044,21 @@ class ConditionNodeExecutor(BaseNodeExecutor):
         # Keep the selected branch in the execution contract.  The target is
         # already resolved above, but carrying the handle prevents callers from
         # treating a conditional result as an ordinary/default transition.
-        return NodeExecutionResult(
+        execution_result = NodeExecutionResult(
             next_node_id=next_node_id,
             next_source_handle=handle,
         )
+        logger.info(
+            "event=RUNTIME_V2_CONDITION_EXECUTOR_RETURN session_id=%s node_id=%s "
+            "status=%s next_transition_id=%s source_handle=%s next_node_id=%s",
+            session.id,
+            node_id,
+            execution_result.status,
+            next_transition_id,
+            execution_result.next_source_handle,
+            execution_result.next_node_id,
+        )
+        return execution_result
 
     @classmethod
     def _evaluate(cls, condition: Any, metadata: dict[str, Any]) -> bool:
