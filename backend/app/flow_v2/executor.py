@@ -431,8 +431,22 @@ class FlowV2Executor:
         self, db: Session, *, snapshot: FlowV2Snapshot, session: Any, runtime_input: RuntimeInput
     ) -> list[RuntimeAction]:
         actions: list[RuntimeAction] = []
+        transition_queue: list[dict[str, Any]] = []
 
         for step in range(MAX_RUNTIME_STEPS):
+            dequeued_transition = transition_queue.pop(0) if transition_queue else None
+            logger.info(
+                "event=RUNTIME_V2_TRANSITION_DEQUEUED session_id=%s step=%s "
+                "queue_count_after=%s transition_id=%s source_node_id=%s "
+                "source_handle=%s next_node_id=%s",
+                session.id,
+                step + 1,
+                len(transition_queue),
+                (dequeued_transition or {}).get("transition_id"),
+                (dequeued_transition or {}).get("source_node_id"),
+                (dequeued_transition or {}).get("source_handle"),
+                (dequeued_transition or {}).get("next_node_id"),
+            )
             runtime_trace(logger, "RuntimeV2Executor.step", metadata=runtime_input.metadata,
                           correlation_id=runtime_input.input_message_id, conversation_id=runtime_input.conversation_id,
                           session_id=session.id, flow_version_id=runtime_input.flow_version_id,
@@ -498,6 +512,33 @@ class FlowV2Executor:
                     node=node,
                     runtime_input=runtime_input,
                 )
+                logger.info(
+                    "event=RUNTIME_V2_NODE_EXECUTOR_RESULT session_id=%s step=%s "
+                    "node_id=%s node_type=%s status=%s next_node_id=%s "
+                    "next_source_handle=%s actions_count=%s",
+                    session.id,
+                    step + 1,
+                    node_id,
+                    node_type,
+                    result.status,
+                    result.next_node_id,
+                    result.next_source_handle,
+                    len(result.actions),
+                )
+                if node_type.strip().lower() == "message":
+                    logger.info(
+                        "event=RUNTIME_V2_MESSAGE_EXECUTOR_EXECUTED session_id=%s step=%s "
+                        "node_id=%s incoming_transition_id=%s incoming_source_node_id=%s "
+                        "incoming_source_handle=%s status=%s next_node_id=%s",
+                        session.id,
+                        step + 1,
+                        node_id,
+                        (dequeued_transition or {}).get("transition_id"),
+                        (dequeued_transition or {}).get("source_node_id"),
+                        (dequeued_transition or {}).get("source_handle"),
+                        result.status,
+                        result.next_node_id,
+                    )
                 self.event_store.append(
                     db,
                     session=session,
@@ -681,13 +722,21 @@ class FlowV2Executor:
             )
             self._track_analytics(db, session=session, flow_id=flow_id, event_type="choice_selected", node_id=node_id, node_type=node_type, event_key=str(result.next_node_id), metadata={"target_node_id": result.next_node_id})
             self._track_analytics(db, session=session, flow_id=flow_id, event_type="transition_taken", node_id=node_id, node_type=node_type, event_key=str(result.next_node_id), metadata={"source_handle": result.next_source_handle or "default", "target_node_id": result.next_node_id, "target_node_type": None})
-            self.session_manager.move_to(db, session=session, node_id=result.next_node_id, status=FlowV2SessionStatus.RUNNING)
             selected_transition = self._selected_transition(
                 snapshot=snapshot,
                 source_node_id=node_id,
                 source_handle=result.next_source_handle,
                 target_node_id=result.next_node_id,
             )
+            transition_queue = self._enqueue_transition(
+                transition_queue,
+                session_id=session.id,
+                source_node_id=node_id,
+                source_handle=result.next_source_handle,
+                next_node_id=result.next_node_id,
+                selected_transition=selected_transition,
+            )
+            self.session_manager.move_to(db, session=session, node_id=result.next_node_id, status=FlowV2SessionStatus.RUNNING)
             # Conditions are exclusive decision points.  Do not let the generic
             # continuation path silently degrade a selected true/false edge to
             # a default traversal (which can execute the sibling branch).
@@ -766,6 +815,51 @@ class FlowV2Executor:
             ),
             None,
         )
+
+    @staticmethod
+    def _enqueue_transition(
+        queue: list[dict[str, Any]],
+        *,
+        session_id: Any,
+        source_node_id: str,
+        source_handle: str | None,
+        next_node_id: str,
+        selected_transition: dict[str, Any] | None,
+    ) -> list[dict[str, Any]]:
+        """Record the executor's synchronous continuation as an observable queue item.
+
+        Runtime V2 advances one node at a time; this one-item queue makes the exact
+        creation and consumption point visible without resolving another edge.
+        """
+        transition_id = (selected_transition or {}).get("id") or (selected_transition or {}).get("edge_id")
+        item = {
+            "transition_id": transition_id,
+            "source_node_id": source_node_id,
+            "source_handle": source_handle,
+            "next_node_id": next_node_id,
+        }
+        logger.info(
+            "event=RUNTIME_V2_ENQUEUE_TRANSITION_CALL session_id=%s queue_count_before=%s "
+            "transition_id=%s source_node_id=%s source_handle=%s next_node_id=%s",
+            session_id,
+            len(queue),
+            transition_id,
+            source_node_id,
+            source_handle,
+            next_node_id,
+        )
+        updated_queue = [*queue, item]
+        logger.info(
+            "event=RUNTIME_V2_TRANSITION_QUEUE_STATE session_id=%s queue_count=%s "
+            "transition_ids=%s source_handles=%s next_node_ids=%s queue=%s",
+            session_id,
+            len(updated_queue),
+            [entry["transition_id"] for entry in updated_queue],
+            [entry["source_handle"] for entry in updated_queue],
+            [entry["next_node_id"] for entry in updated_queue],
+            updated_queue,
+        )
+        return updated_queue
 
     @staticmethod
     def _without_choice_reply(runtime_input: RuntimeInput) -> RuntimeInput:

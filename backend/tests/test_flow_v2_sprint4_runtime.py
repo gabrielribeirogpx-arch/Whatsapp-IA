@@ -451,6 +451,35 @@ def test_ai_classification_condition_enqueues_and_executes_only_true_message(
     assert "Ramo False" not in [action.text for action in adapter.sent_actions]
     assert "selected_source_handle=true queued_transition_count=1" in caplog.text
     assert "queued_next_node_ids=['message-true'] default_transitions_revisited=false" in caplog.text
+    assert (
+        "event=RUNTIME_V2_CONDITION_EXECUTOR_RETURN " in caplog.text
+        and "next_transition_id=condition-true source_handle=true next_node_id=message-true" in caplog.text
+    )
+    assert (
+        "event=RUNTIME_V2_NODE_EXECUTOR_RESULT " in caplog.text
+        and "node_id=condition node_type=condition status=continue "
+        "next_node_id=message-true next_source_handle=true" in caplog.text
+    )
+    assert (
+        "event=RUNTIME_V2_ENQUEUE_TRANSITION_CALL " in caplog.text
+        and "transition_id=condition-true source_node_id=condition "
+        "source_handle=true next_node_id=message-true" in caplog.text
+    )
+    assert (
+        "event=RUNTIME_V2_TRANSITION_QUEUE_STATE " in caplog.text
+        and "transition_ids=['condition-true'] source_handles=['true'] "
+        "next_node_ids=['message-true']" in caplog.text
+    )
+    assert (
+        "event=RUNTIME_V2_TRANSITION_DEQUEUED " in caplog.text
+        and "transition_id=condition-true source_node_id=condition "
+        "source_handle=true next_node_id=message-true" in caplog.text
+    )
+    assert (
+        "event=RUNTIME_V2_MESSAGE_EXECUTOR_EXECUTED " in caplog.text
+        and "node_id=message-true incoming_transition_id=condition-true "
+        "incoming_source_node_id=condition incoming_source_handle=true" in caplog.text
+    )
 
 
 def test_runtime_generates_send_message_action() -> None:
