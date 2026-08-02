@@ -74,34 +74,57 @@ def render_template(value: Any, context: FlowRenderContext) -> Any:
         value = value[:MAX_TEMPLATE_LENGTH]
     values = context.values()
 
-    resolved_keys: list[str] = []
-    missing_keys: list[str] = []
+    resolved_keys, missing_keys = _template_keys(value, values)
+    logger.log(
+        logging.WARNING if missing_keys else logging.INFO,
+        "event=RUNTIME_V2_TEMPLATE_RENDER_INPUT node_id=%s session_id=%s "
+        "render_context=%r session.variables=%r session.context=%r "
+        "resolved_keys=%s missing_keys=%s",
+        context.node_id,
+        getattr(context.session, "id", None),
+        values,
+        getattr(context.session, "variables", None),
+        getattr(context.session, "context", None),
+        resolved_keys,
+        missing_keys,
+    )
+
+    rendered_resolved_keys: list[str] = []
+    rendered_missing_keys: list[str] = []
 
     def replace(match: re.Match[str]) -> str:
         path = match.group(1) or match.group(2)
         resolved = _resolve_path(values, path)
         if resolved is None:
-            missing_keys.append(path)
+            rendered_missing_keys.append(path)
             return match.group(0) if _missing_variable_behavior() == "preserve" else ""
-        resolved_keys.append(path)
+        rendered_resolved_keys.append(path)
         return str(resolved)
 
     rendered = _PLACEHOLDER_RE.sub(replace, value)
     logger.log(
-        logging.WARNING if missing_keys else logging.INFO,
+        logging.WARNING if rendered_missing_keys else logging.INFO,
         "event=runtime_v2_template_render node_id=%s session_id=%s template=%r "
         "resolved_keys=%s missing_keys=%s rendered_preview=%r",
         context.node_id,
         getattr(context.session, "id", None),
         _redacted_preview(value),
-        sorted(set(resolved_keys)),
-        sorted(set(missing_keys)),
+        sorted(set(rendered_resolved_keys)),
+        sorted(set(rendered_missing_keys)),
         _redacted_preview(rendered),
     )
     if len(rendered) > MAX_RENDERED_LENGTH:
         logger.warning("[FLOW TEMPLATE] rendered value too large tenant_id=%s length=%s", context.tenant_id, len(rendered))
         return rendered[:MAX_RENDERED_LENGTH]
     return rendered
+
+
+def _template_keys(value: str, values: dict[str, Any]) -> tuple[list[str], list[str]]:
+    """Report renderability without mutating the template."""
+    keys = [match.group(1) or match.group(2) for match in _PLACEHOLDER_RE.finditer(value)]
+    resolved = sorted({key for key in keys if _resolve_path(values, key) is not None})
+    missing = sorted({key for key in keys if _resolve_path(values, key) is None})
+    return resolved, missing
 
 
 def _missing_variable_behavior() -> str:
