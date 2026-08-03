@@ -5053,6 +5053,75 @@ input {
   box-shadow: 0 0 0 2px rgba(37, 211, 102, 0.18), 0 1px 2px rgba(17, 27, 33, 0.08);
 }
 
+.wa-message-bubble:has(.wa-interactive-message) {
+  min-width: min(290px, 78vw);
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid rgba(17, 27, 33, 0.1);
+}
+
+.wa-interactive-message--conversation {
+  padding: 13px 15px 10px;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.52), rgba(245, 252, 249, 0.78));
+}
+
+.wa-interactive-message-kind {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: #54656f;
+  font-size: 0.72rem;
+  letter-spacing: 0.01em;
+}
+
+.wa-interactive-message-kind span { font-size: 1rem; }
+
+.wa-interactive-message-title {
+  margin: 9px 0 0;
+  color: #111b21;
+  font-size: 0.98rem;
+  font-weight: 650;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.wa-interactive-message-details {
+  margin-top: 11px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(17, 27, 33, 0.08);
+  color: #54656f;
+  font-size: 0.72rem;
+}
+
+.wa-interactive-message-details summary {
+  width: fit-content;
+  cursor: pointer;
+  color: #008069;
+  font-weight: 650;
+  list-style: none;
+}
+
+.wa-interactive-message-details summary::-webkit-details-marker { display: none; }
+.wa-interactive-message-details > div { display: grid; gap: 5px; margin-top: 9px; }
+.wa-interactive-message-details > div > span { font-weight: 650; }
+.wa-interactive-message-details code { overflow-wrap: anywhere; color: #34434b; }
+.wa-interactive-message-details dl { display: grid; gap: 4px; margin: 5px 0 0; }
+.wa-interactive-message-details dl div { display: grid; grid-template-columns: 42px minmax(0, 1fr); gap: 6px; }
+.wa-interactive-message-details dt { font-weight: 650; }
+.wa-interactive-message-details dd { min-width: 0; margin: 0; overflow-wrap: anywhere; }
+
+.wa-interactive-message--preview { min-width: 0; margin-top: 4px; }
+.wa-interactive-message--preview .wa-interactive-message-kind { font-size: 0.68rem; }
+.wa-interactive-message--preview .wa-interactive-message-kind span { font-size: 0.82rem; }
+.wa-interactive-message--preview .wa-interactive-message-title {
+  overflow: hidden;
+  margin-top: 2px;
+  font-size: 0.8rem;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .wa-message-status {
   margin-left: 5px;
   color: #8696a0;

@@ -106,6 +106,9 @@ def _conversation_out(
     conversation: Conversation,
     *,
     last_message: str = "",
+    last_message_type: str | None = None,
+    last_message_payload: str | None = None,
+    last_message_from_me: bool | None = None,
     assigned_users_by_id: dict | None = None,
 ) -> ConversationOut:
     phone = str(getattr(conversation, "phone", None) or conversation.phone_number or "").strip() or "desconhecido"
@@ -128,6 +131,9 @@ def _conversation_out(
         assigned_user_id=getattr(conversation, "assigned_user_id", None),
         assigned_user_name=_conversation_assigned_user_name(conversation, assigned_users_by_id),
         last_message=last_message or "",
+        last_message_type=last_message_type,
+        last_message_payload=last_message_payload,
+        last_message_from_me=last_message_from_me,
         updated_at=conversation.updated_at or datetime.utcnow(),
     )
 
@@ -240,6 +246,9 @@ def list_conversations(
                 _conversation_out(
                     conversation,
                     last_message=last_message,
+                    last_message_type=getattr(last_message_item, "interactive_type", None),
+                    last_message_payload=getattr(last_message_item, "technical_payload", None),
+                    last_message_from_me=getattr(last_message_item, "from_me", None),
                     assigned_users_by_id=assigned_users_by_id,
                 )
             )

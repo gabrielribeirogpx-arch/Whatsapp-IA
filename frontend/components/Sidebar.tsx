@@ -5,6 +5,7 @@ import { MobileHeader } from './layout/MobileHeader';
 import Avatar from './Avatar';
 import { Contact } from '../lib/types';
 import { CONVERSATION_FILTERS, ConversationFilterId, matchesConversationFilter } from '../lib/conversationFilters';
+import InteractiveMessageBubble, { normalizeInteractiveType } from './InteractiveMessageBubble';
 
 type SidebarProps = {
   contacts: Contact[];
@@ -192,7 +193,16 @@ export default function Sidebar({
                     <strong>{displayName}</strong>
                     <span className="wa-contact-time">{relativeTime}</span>
                   </div>
-                  <p className="wa-contact-preview">{contact.lastMessage || 'Sem mensagens ainda.'}</p>
+                  {normalizeInteractiveType(contact.lastMessageType) || contact.lastMessagePayload ? (
+                    <InteractiveMessageBubble
+                      variant="preview"
+                      title={contact.lastMessage || contact.lastMessagePayload || 'Resposta interativa'}
+                      type={contact.lastMessageType}
+                      payload={contact.lastMessagePayload}
+                    />
+                  ) : (
+                    <p className="wa-contact-preview">{contact.lastMessageFromMe ? '🤖' : '⌨️'} {contact.lastMessage || 'Sem mensagens ainda.'}</p>
+                  )}
                   <div className="wa-contact-meta">
                     <div className={`wa-contact-temp ${temp}`}>{temp === 'hot' ? 'Quente' : temp === 'warm' ? 'Morno' : 'Frio'}</div>
                     {awaitingHuman ? <div className="wa-contact-badge handoff">🔴 Aguardando Atendente</div> : null}

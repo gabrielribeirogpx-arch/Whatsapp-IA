@@ -46,6 +46,12 @@ class Message(TenantMixin, Base):
         return self.text if self.interactive_title else None
 
     @property
+    def interactive_type(self) -> str | None:
+        # The database intentionally stores no presentation subtype.  Older and
+        # current interactive replies therefore use the safe generic treatment.
+        return "interactive" if self.interactive_title else None
+
+    @property
     def role(self) -> str:
         return "assistant" if self.from_me else "user"
 

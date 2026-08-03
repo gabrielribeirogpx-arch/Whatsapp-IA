@@ -1,3 +1,5 @@
+export type InteractiveMessageType = 'button_reply' | 'list_reply' | 'interactive';
+
 export type Conversation = {
   id: string;
   tenant_id: string;
@@ -13,6 +15,9 @@ export type Conversation = {
   status?: string | null;
   unread_count?: number;
   last_message: string;
+  last_message_type?: InteractiveMessageType | null;
+  last_message_payload?: string | null;
+  last_message_from_me?: boolean | null;
   updated_at: string;
 };
 
@@ -24,6 +29,7 @@ export type Message = {
   role: string;
   created_at: string;
   technical_payload?: string | null;
+  interactive_type?: InteractiveMessageType | null;
   media_url?: string | null;
   media_type?: string | null;
   attachment_url?: string | null;
@@ -155,6 +161,9 @@ export type Contact = {
   score?: number;
   lastMessageAt?: string | null;
   lastMessage: string;
+  lastMessageType?: InteractiveMessageType | null;
+  lastMessagePayload?: string | null;
+  lastMessageFromMe?: boolean | null;
   status?: string;
   assignedUserId?: string | null;
   assignedUserName?: string | null;
@@ -169,6 +178,7 @@ export type ChatMessage = {
   time: string;
   createdAt?: string;
   technicalPayload?: string | null;
+  interactiveType?: InteractiveMessageType | null;
   status?: 'sent' | 'delivered' | 'read';
   mediaType?: 'image' | 'document' | string;
   mediaUrl?: string | null;
