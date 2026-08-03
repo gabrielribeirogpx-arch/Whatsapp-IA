@@ -132,7 +132,7 @@ class FlowV2GraphValidator:
             for node in nodes
             if isinstance(node, dict)
             and node.get("id") not in (None, "")
-            and self._node_type(node) == "choice"
+            and self._node_type(node) in {"choice", "choice_dynamic"}
         }
         if not choice_node_ids:
             return
@@ -216,11 +216,11 @@ class FlowV2GraphValidator:
     ) -> None:
         node_type = self._node_type(node)
         data = self._node_data(node)
-        if node_type == "choice":
+        if node_type in {"choice", "choice_dynamic"}:
             display_mode = str(node.get("display_mode") or data.get("display_mode") or data.get("displayMode") or "buttons").strip().lower()
             if display_mode not in {"buttons", "list"}:
                 errors.append(f"FLOW_V2_CHOICE_DISPLAY_MODE_INVALID:{node_id}")
-            dynamic = str(data.get("options_mode") or data.get("option_mode") or "fixed").lower() == "dynamic"
+            dynamic = node_type == "choice_dynamic" or str(data.get("options_mode") or data.get("option_mode") or "fixed").lower() == "dynamic"
             if dynamic:
                 if not str(data.get("options_variable") or data.get("source_variable") or "").strip():
                     errors.append(f"FLOW_V2_DYNAMIC_CHOICE_VARIABLE_REQUIRED:{node_id}")

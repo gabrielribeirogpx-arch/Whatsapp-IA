@@ -84,7 +84,10 @@ def validate_builder_graph(nodes: list[dict[str, Any]], edges: list[dict[str, An
             elif any(not isinstance(r, dict) or not str(r.get("field") or r.get("left") or r.get("path") or "").strip() or not str(r.get("operator") or r.get("op") or "").strip() or (r.get("value") if "value" in r else r.get("right")) in (None, "") for r in rules): issues.append(_issue("CONDITION_INCOMPLETE", node, field="conditions"))
             handles = {str(e.get("sourceHandle") or (e.get("data") or {}).get("sourceHandle") or "").lower() for e in outgoing[node_id]}
             if not {"true", "false"}.issubset(handles): issues.append(_issue("CONDITION_NEEDS_BOTH_BRANCHES", node, field="connections"))
-        elif kind == "choice":
+        elif kind in {"choice", "choice_dynamic"}:
+            dynamic = kind == "choice_dynamic" or str(data.get("options_mode") or data.get("option_mode") or "fixed").lower() == "dynamic"
+            if dynamic:
+                continue
             options = data.get("options") or data.get("buttons") or node.get("options")
             if not isinstance(options, list) or not options: issues.append(_issue("CHOICE_EMPTY", node, field="options")); continue
             handles = []

@@ -4,6 +4,39 @@ import { normalizeDataCollectionHandle } from './dataCollectionHandles';
 export type FlowValidationIssue = { code: string; message: string; summary?: string; node_id?: string | null; node_type?: string | null; node_label?: string | null; field?: string | null; focus_field?: string | null; severity?: 'error' | 'warning'; suggestion?: string; metadata?: Record<string, unknown> };
 const issue = (code: string, message: string, node?: Node, field?: string): FlowValidationIssue => ({ code, message, node_id: node?.id || null, node_type: String(node?.type || ''), node_label: String(node?.data?.label || node?.data?.title || node?.type || 'Fluxo'), field, focus_field: field, severity: 'error' });
 
+/** Node kinds understood by the editor-side validator. */
+export const VALID_BUILDER_NODE_TYPES = new Set([
+  'start', 'message', 'data_collection', 'choice', 'choice_dynamic', 'condition',
+  'delay', 'action', 'mcp_tool', 'media', 'cta_url', 'cta_link', 'ai_rag',
+  'ai_response', 'ai_classification', 'ai_extraction', 'ai_summary', 'ai_agent',
+  'ai_supervisor', 'ai_dispatcher', 'ai_greeting', 'ai_calendar_agent',
+  'ai_safe_fallback', 'ai_system',
+]);
+
+/**
+ * Calculates reachability from Start using the graph itself as the authority.
+ * Every valid edge whose source is the current node is traversed; handles and
+ * node kinds intentionally have no bearing on graph connectivity.
+ */
+export function calculateReachableNodeIds(nodes: Node[], edges: Edge[]): Set<string> {
+  const nodeIds = new Set(nodes.map((node) => node.id));
+  const adjacency = new Map<string, string[]>();
+  edges.forEach((edge) => {
+    if (!nodeIds.has(edge.source) || !nodeIds.has(edge.target)) return;
+    adjacency.set(edge.source, [...(adjacency.get(edge.source) || []), edge.target]);
+  });
+  const starts = nodes.filter((node) => Boolean(node.data?.isStart));
+  const pending = starts.length === 1 ? [starts[0].id] : [];
+  const reachable = new Set<string>();
+  while (pending.length) {
+    const current = pending.pop()!;
+    if (reachable.has(current)) continue;
+    reachable.add(current);
+    pending.push(...(adjacency.get(current) || []));
+  }
+  return reachable;
+}
+
 /** Fast, conservative checks before publish. The backend remains authoritative. */
 export function validateFlowLocally(nodes: Node[], edges: Edge[]): FlowValidationIssue[] {
   const issues: FlowValidationIssue[] = []; const outgoing = new Map<string, Edge[]>();
@@ -11,8 +44,10 @@ export function validateFlowLocally(nodes: Node[], edges: Edge[]): FlowValidatio
   const starts = nodes.filter((node) => Boolean(node.data?.isStart));
   if (!starts.length) issues.push(issue('START_MISSING', 'Defina um node inicial.'));
   if (starts.length > 1) issues.push(issue('MULTIPLE_STARTS', 'O fluxo deve ter apenas um node inicial.'));
+  const reachable = calculateReachableNodeIds(nodes, edges);
   nodes.forEach((node) => {
     const data = (node.data || {}) as Record<string, unknown>; const type = String(node.type || data.type || '').toLowerCase(); const next = outgoing.get(node.id) || [];
+    if (starts.length === 1 && !reachable.has(node.id)) issues.push(issue('NODE_ORPHAN', 'Este node não está conectado ao caminho iniciado pelo Start.', node, 'connections'));
     const terminal = ['is_terminal', 'isEnd', 'isFinal', 'endFlow'].some((key) => Boolean(data[key]));
     if (type === 'message' || type === 'start') {
       if (!String(data.content || data.text || data.message || '').trim()) issues.push(issue('MESSAGE_EMPTY', 'Adicione o conteúdo da mensagem.', node, 'content'));
@@ -25,7 +60,7 @@ export function validateFlowLocally(nodes: Node[], edges: Edge[]): FlowValidatio
       const handles = new Set(next.map((edge) => String(edge.sourceHandle || edge.data?.sourceHandle || '').toLowerCase()));
       if (!handles.has('true') || !handles.has('false')) issues.push(issue('CONDITION_NEEDS_BOTH_BRANCHES', 'Conecte as saídas Sim e Não.', node, 'connections'));
     }
-    if (type === 'choice' && String(data.options_mode || data.option_mode || 'fixed') === 'dynamic') {
+    if ((type === 'choice' && String(data.options_mode || data.option_mode || 'fixed') === 'dynamic') || type === 'choice_dynamic') {
       if (!String(data.options_variable || data.source_variable || '').trim()) issues.push(issue('DYNAMIC_CHOICE_VARIABLE_REQUIRED', 'Selecione a variável de origem.', node, 'options_variable'));
       if (!String(data.label_field || '').trim()) issues.push(issue('DYNAMIC_CHOICE_LABEL_REQUIRED', 'Defina o campo do título.', node, 'label_field'));
       if (!String(data.value_field || '').trim()) issues.push(issue('DYNAMIC_CHOICE_VALUE_REQUIRED', 'Defina o campo do valor.', node, 'value_field'));

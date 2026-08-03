@@ -70,6 +70,7 @@ const nodeTypes = {
   start: MessageNode,
   message: MessageNode,
   choice: ChoiceNode,
+  choice_dynamic: ChoiceNode,
   data_collection: DataCollectionNode,
   condition: ConditionNode,
   delay: DelayNode,
@@ -107,7 +108,7 @@ const EDGE_ROUTING_OPTIONS: Array<{ value: EdgeRoutingPreference; label: string;
   { value: 'orthogonal', label: 'Ortogonal', description: 'Conexões em ângulos retos.', icon: CornerDownRight },
 ];
 
-type FlowNodeKind = 'message' | 'data_collection' | 'choice' | 'condition' | 'delay' | 'action' | 'mcp_tool' | 'media' | 'cta_url' | 'ai_rag' | 'ai_response' | 'ai_classification' | 'ai_extraction' | 'ai_summary' | 'ai_agent' | 'ai_supervisor' | 'ai_dispatcher' | 'ai_greeting' | 'ai_calendar_agent' | 'ai_safe_fallback' | 'ai_system';
+type FlowNodeKind = 'message' | 'data_collection' | 'choice' | 'choice_dynamic' | 'condition' | 'delay' | 'action' | 'mcp_tool' | 'media' | 'cta_url' | 'ai_rag' | 'ai_response' | 'ai_classification' | 'ai_extraction' | 'ai_summary' | 'ai_agent' | 'ai_supervisor' | 'ai_dispatcher' | 'ai_greeting' | 'ai_calendar_agent' | 'ai_safe_fallback' | 'ai_system';
 type FlowConnection = Connection & { sourceHandle?: string | null };
 type NodePaletteItem = { kind: FlowNodeKind; label: string; icon: LucideIcon; description?: string };
 type NodePaletteGroup = { id: 'communication' | 'ai' | 'logic' | 'actions' | 'integrations'; title: string; icon: LucideIcon; nodes: NodePaletteItem[] };
@@ -510,6 +511,7 @@ const NODE_PRESETS: Record<FlowNodeKind, { label: string; type: string; data: Re
       ],
     },
   },
+  choice_dynamic: { label: 'Escolha Dinâmica', type: 'choice_dynamic', data: { content: '', options_mode: 'dynamic', options_variable: '', label_field: 'label', value_field: 'id', description_field: 'description', icon_field: 'icon', max_options: 10, result_variable: 'selected_slot', display_mode: 'buttons' } },
   condition: { label: 'Condição', type: 'condition', data: { condition: '' } },
   delay: { label: 'Delay', type: 'delay', data: { seconds: 3, show_typing: false } },
   action: { label: 'Ação', type: 'action', data: { action_type: 'create_lead', action: 'create_lead', params: {} } },

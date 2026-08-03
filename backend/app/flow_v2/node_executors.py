@@ -58,6 +58,7 @@ for _node_type, _executor in {
     "message": MessageNodeExecutor,
     "data_collection": RuntimeV2DataCollectionExecutor,
     "choice": ChoiceNodeExecutor,
+    "choice_dynamic": ChoiceNodeExecutor,
     "delay": DelayNodeExecutor,
     "condition": ConditionNodeExecutor,
     "action": ActionNodeExecutor,
