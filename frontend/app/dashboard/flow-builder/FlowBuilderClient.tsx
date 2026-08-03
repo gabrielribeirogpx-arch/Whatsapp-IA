@@ -57,7 +57,7 @@ import { FlowAnalytics, FlowEdgePayload, FlowNodePayload, FlowVersionItem } from
 import { AGENT_SYSTEM_TEMPLATES, ENABLE_AGENT_SYSTEM_TEMPLATES, instantiateAgentSystemTemplate } from '@/lib/agentSystemTemplates';
 import { extractValidationIssues, validateFlowLocally } from '@/lib/flowValidation';
 import type { FlowValidationIssue } from '@/lib/flowValidation';
-import { diagnoseFlowEdges } from '@/lib/flowEdgeDiagnostics';
+import { diagnoseFlowEdges, sanitizeEdges, sanitizeNodes } from '@/lib/flowEdgeDiagnostics';
 import type { EdgeDiagnostic } from '@/lib/flowEdgeDiagnostics';
 import type { EdgeRoutingPreference } from '@/lib/edgeRouting';
 import { parseSimulatorError } from '@/lib/simulatorError';
@@ -644,8 +644,9 @@ const normalizeDelayNodePayload = (node: FlowNodePayload): FlowNodePayload => {
 };
 
 const serializeFlowGraph = (nodes: Node[], edges: Edge[]) => {
-  const normalizedEdges = normalizeDataCollectionEdges(nodes, syncChoiceEdgeLabels(nodes, edges));
-  const sanitizedGraph = sanitizeAiSystemCanvasGraph(nodes, normalizedEdges);
+  const currentNodes = sanitizeNodes(nodes) as Node[];
+  const normalizedEdges = sanitizeEdges(currentNodes, normalizeDataCollectionEdges(currentNodes, syncChoiceEdgeLabels(currentNodes, edges))) as Edge[];
+  const sanitizedGraph = sanitizeAiSystemCanvasGraph(currentNodes, normalizedEdges);
   const cleanCanvasNodes = sanitizedGraph.nodes;
   const cleanCanvasEdges = sanitizedGraph.edges;
   const payloadNodes: FlowNodePayload[] = cleanCanvasNodes.map((node) => {
@@ -1998,6 +1999,15 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
     setEdges(sanitizedGraph.edges as Edge[]);
   }, [edges, nodes, setEdges, setNodes]);
 
+  // This is the final state invariant: every path that changes nodes or edges
+  // (including React Flow changes, conversion, delete, paste and history restore)
+  // is checked against handles derived from the current node data.
+  useEffect(() => {
+    const sanitizedEdges = sanitizeEdges(nodes, edges) as Edge[];
+    if (sanitizedEdges === edges) return;
+    setEdges(sanitizedEdges);
+  }, [edges, nodes, setEdges]);
+
   useEffect(() => {
     nodesRef.current = nodes;
     logFlowEditorSetGraph('react_flow_editor_nodes_state', nodes, edgesRef.current, selectedFlowId);
@@ -3341,16 +3351,25 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
     return issues;
   }, [focusEdgeDiagnostic, rfInstance, toast]);
 
+  const handleAutoFixEdges = useCallback(() => {
+    const currentNodes = rfInstance?.getNodes?.() || nodesRef.current;
+    setEdges((currentEdges) => sanitizeEdges(currentNodes, currentEdges) as Edge[]);
+    setEdgeDiagnostics([]);
+    toast.success('Conexões inválidas corrigidas automaticamente.');
+  }, [rfInstance, setEdges, toast]);
+
   const handleActivateFlow = useCallback(async () => {
     if (!selectedFlowId) return;
 
     const currentNodes = rfInstance?.getNodes?.() || [];
-    const currentEdges = rfInstance?.getEdges?.() || [];
+    let currentEdges = rfInstance?.getEdges?.() || [];
     const structuralIssues = diagnoseFlowEdges(currentNodes, currentEdges);
     if (structuralIssues.length > 0) {
-      setEdgeDiagnostics(structuralIssues);
-      focusEdgeDiagnostic(structuralIssues[0], currentNodes, currentEdges);
-      return;
+      const publishSafeEdges = sanitizeEdges(currentNodes, currentEdges) as Edge[];
+      setEdges(publishSafeEdges);
+      edgesRef.current = publishSafeEdges;
+      currentEdges = publishSafeEdges;
+      setEdgeDiagnostics([]);
     }
     setEdgeDiagnostics([]);
     const localIssues = validateFlowLocally(currentNodes, currentEdges);
@@ -4143,13 +4162,22 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
         )}
         {edgeDiagnostics.length > 0 && (() => {
           const issue = edgeDiagnostics[0];
+          const reasonLabels: Record<string, string> = {
+            source_not_found: 'Node removido', target_not_found: 'Node removido',
+            source_handle_not_found: 'Handle inexistente', target_handle_not_found: 'Handle inexistente',
+            duplicate_edge: 'Edge duplicada', self_loop: 'Conexão com o próprio node',
+          };
+          const summaries = Array.from(new Set(edgeDiagnostics.map((item) => reasonLabels[item.reason] || item.reason)));
           return (
             <div className="flow-edge-diagnostic" role="alert" aria-label="Edge inválida">
+              <strong>{edgeDiagnostics.length} conexões inválidas encontradas</strong>
+              {summaries.map((summary) => <span key={summary}>✓ {summary}</span>)}
               <strong>Edge inválida</strong>
               <span>source: {issue.source}</span>
               <span>target: {issue.target}</span>
               <span>handle: {issue.handle}</span>
               <span>motivo: {issue.reason}</span>
+              <button type="button" onClick={handleAutoFixEdges}>Corrigir automaticamente</button>
             </div>
           );
         })()}

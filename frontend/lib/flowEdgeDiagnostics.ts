@@ -20,7 +20,8 @@ export type EdgeDiagnosticReason =
   | 'target_not_found'
   | 'source_handle_not_found'
   | 'target_handle_not_found'
-  | 'duplicate_edge';
+  | 'duplicate_edge'
+  | 'self_loop';
 
 export type EdgeDiagnostic = {
   edgeId: string;
@@ -46,14 +47,22 @@ export const getNodeAvailableHandles = (node: FlowDiagnosticNode) => {
   if (node.type === 'condition') {
     source.add('true');
     source.add('false');
-  } else if (node.type === 'choice' || node.type === 'choice_dynamic') {
+  } else if (node.type === 'choice_dynamic' || (node.type === 'choice' && data.options_mode === 'dynamic')) {
+    source.clear();
+    source.add('default');
+  } else if (node.type === 'choice') {
+    source.clear();
     const choices = Array.isArray(data.buttons) ? data.buttons : Array.isArray(data.options) ? data.options : [];
     choices.forEach((choice: Record<string, unknown>, index: number) => {
       source.add(builderHandleId(choice.handleId || choice.handle_id || choice.value || choice.id || choice.label, `option_${index + 1}`));
     });
   } else if (node.type === 'data_collection') {
-    DATA_COLLECTION_HANDLES.forEach((handle) => source.add(handle));
+    source.clear();
+    DATA_COLLECTION_HANDLES.forEach((handle) => {
+      if (handle !== 'invalid' || data.auto_retry_invalid !== true || data.attempts_exceeded_behavior !== 'end') source.add(handle);
+    });
   } else if (node.type === 'mcp_tool') {
+    source.clear();
     ['success', 'error', 'timeout'].forEach((handle) => source.add(handle));
   }
 
@@ -63,15 +72,8 @@ export const getNodeAvailableHandles = (node: FlowDiagnosticNode) => {
 /** Validates the persisted edge list without silently dropping stale references. */
 export const diagnoseFlowEdges = (nodes: FlowDiagnosticNode[], edges: FlowDiagnosticEdge[]): EdgeDiagnostic[] => {
   const nodesById = new Map(nodes.map((node) => [String(node.id), node]));
-  const signatureCounts = new Map<string, number>();
 
-  edges.forEach((edge) => {
-    const sourceHandle = edge.sourceHandle ?? edge.data?.sourceHandle ?? edge.data?.source_handle;
-    const targetHandle = edge.targetHandle ?? edge.data?.targetHandle ?? edge.data?.target_handle;
-    const signature = [edge.source, edge.target, normalizeHandle(sourceHandle), normalizeHandle(targetHandle)].join('\u0000');
-    signatureCounts.set(signature, (signatureCounts.get(signature) || 0) + 1);
-  });
-
+  const seenSignatures = new Set<string>();
   return edges.flatMap((edge, edgeIndex) => {
     const source = String(edge.source || '');
     const target = String(edge.target || '');
@@ -85,14 +87,39 @@ export const diagnoseFlowEdges = (nodes: FlowDiagnosticNode[], edges: FlowDiagno
 
     if (!sourceNode) reason = 'source_not_found';
     else if (!targetNode) reason = 'target_not_found';
+    else if (source === target) reason = 'self_loop';
     else if (!getNodeAvailableHandles(sourceNode).source.has(sourceHandle)) {
       reason = 'source_handle_not_found';
       handle = sourceHandle || 'default';
     } else if (!getNodeAvailableHandles(targetNode).target.has(targetHandle)) {
       reason = 'target_handle_not_found';
       handle = targetHandle || 'default';
-    } else if ((signatureCounts.get(signature) || 0) > 1) reason = 'duplicate_edge';
+    } else if (seenSignatures.has(signature)) reason = 'duplicate_edge';
+
+    seenSignatures.add(signature);
 
     return reason ? [{ edgeId: String(edge.id || `edge-${edgeIndex}`), edgeIndex, source, target, handle, reason }] : [];
   });
+};
+
+/**
+ * Rebuilds handle availability from the current nodes and returns the same edge
+ * array when it is already valid. Keeping this function pure makes it safe for
+ * React state setters, hydration, history restoration, paste and publishing.
+ */
+export const sanitizeEdges = <T extends FlowDiagnosticEdge>(nodes: FlowDiagnosticNode[], edges: T[]): T[] => {
+  const invalidIndexes = new Set(diagnoseFlowEdges(nodes, edges).map((issue) => issue.edgeIndex));
+  return invalidIndexes.size === 0 ? edges : edges.filter((_, index) => !invalidIndexes.has(index));
+};
+
+/** Removes malformed and duplicate node identities before graph serialization. */
+export const sanitizeNodes = <T extends FlowDiagnosticNode>(nodes: T[]): T[] => {
+  const seen = new Set<string>();
+  const sanitized = nodes.filter((node) => {
+    const id = String(node?.id || '').trim();
+    if (!id || seen.has(id)) return false;
+    seen.add(id);
+    return true;
+  });
+  return sanitized.length === nodes.length ? nodes : sanitized;
 };
