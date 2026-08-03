@@ -59,7 +59,7 @@ import { extractValidationIssues, validateFlowLocally } from '@/lib/flowValidati
 import type { FlowValidationIssue } from '@/lib/flowValidation';
 import { diagnoseFlowEdges, sanitizeEdges, sanitizeNodes } from '@/lib/flowEdgeDiagnostics';
 import type { EdgeDiagnostic } from '@/lib/flowEdgeDiagnostics';
-import { getNodeHandleContract, migrateEdgeHandles } from '@/lib/nodeHandleContract';
+import { getNodeHandleContract, migrateEdgeHandles, validateNodeConnection } from '@/lib/nodeHandleContract';
 import type { EdgeRoutingPreference } from '@/lib/edgeRouting';
 import { parseSimulatorError } from '@/lib/simulatorError';
 import type { SimulatorError, SimulatorIssue } from '@/lib/simulatorError';
@@ -1798,6 +1798,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
   const nodesRef = useRef<Node[]>([]);
   const edgesRef = useRef<Edge[]>([]);
   const choiceConnectDebugRef = useRef<ChoiceConnectDebug | null>(null);
+  const lastConnectionRejectionRef = useRef<string | null>(null);
   const isSavingRef = useRef(false);
   const lastPersistedFlowSignatureRef = useRef<string | null>(null);
   const lastEditorHadAiSystemRef = useRef(false);
@@ -2868,11 +2869,32 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
     choiceConnectDebugRef.current = null;
   }, []);
 
+  const isValidConnection = useCallback((params: Connection) => {
+    const diagnostic = validateNodeConnection(nodesRef.current, params);
+    console.debug('[FLOW CONNECTION VALIDATION]', diagnostic);
+    if (!diagnostic.accepted) {
+      const signature = `${diagnostic.source}:${diagnostic.sourceHandle}->${diagnostic.target}:${diagnostic.targetHandle}:${diagnostic.rejectionReason}`;
+      if (lastConnectionRejectionRef.current !== signature) {
+        lastConnectionRejectionRef.current = signature;
+        toast.error(`Não foi possível conectar: a saída ${diagnostic.sourceHandle} não é aceita pela entrada ${diagnostic.targetHandle}.`);
+      }
+    } else {
+      lastConnectionRejectionRef.current = null;
+    }
+    return diagnostic.accepted;
+  }, [toast]);
+
   const onConnect = useCallback((params: FlowConnection) => {
-    const sourceHandle = params.sourceHandle?.toString() || null;
+    const diagnostic = validateNodeConnection(nodesRef.current, params);
+    console.debug('[FLOW CONNECTION ATTEMPT]', diagnostic);
+    if (!diagnostic.accepted) {
+      toast.error(`Não foi possível conectar: a saída ${diagnostic.sourceHandle} não é aceita pela entrada ${diagnostic.targetHandle}.`);
+      return;
+    }
+    const sourceHandle = diagnostic.sourceHandle;
     const source = safeString(params.source);
     const target = safeString(params.target);
-    const targetHandle = safeString(params.targetHandle);
+    const targetHandle = diagnostic.targetHandle;
     const sourceNode = nodesRef.current.find((node) => node.id === source);
     if (sourceNode?.type === 'data_collection' && !sourceHandle) {
       console.error('[DATA COLLECTION EDGE REJECTED]', { node: source, reason: 'sourceHandle ausente', source, target, sourceHandle, targetHandle });
@@ -2908,11 +2930,12 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
       // Routing is a render-only concern; keep the persisted edge contract unchanged.
       type: 'default',
       data: {
-        sourceHandle: sourceHandle || undefined,
+        sourceHandle,
+        targetHandle,
       },
     }, eds));
     markFlowDirty('edge_added', { source, target, source_handle: sourceHandle });
-  }, [getChoiceHandleDebug, markFlowDirty, setEdges]);
+  }, [getChoiceHandleDebug, markFlowDirty, setEdges, toast]);
 
 
   const addNode = useCallback(
@@ -4246,6 +4269,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
           onNodesChange={handleNodesChange}
           onEdgesChange={handleEdgesChange}
           onConnect={onConnect}
+          isValidConnection={isValidConnection}
           onConnectStart={onConnectStart}
           onConnectEnd={onConnectEnd}
           onNodeDoubleClick={handleReactFlowNodeDoubleClick}

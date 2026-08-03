@@ -19,7 +19,7 @@ const require = (id) => {
   throw new Error(`Unexpected import: ${id}`);
 };
 vm.runInNewContext(compiled, { module, exports: module.exports, require });
-const { getNodeHandleContract, migrateEdgeHandles } = module.exports;
+const { getNodeHandleContract, migrateEdgeHandles, validateNodeConnection } = module.exports;
 const expected = {
   mcp_tool: [['success', 'error', 'timeout'], ['default']],
   choice_dynamic: [['selected'], ['default']],
@@ -37,4 +37,30 @@ assert.deepEqual(migrated.map((edge) => edge.sourceHandle), ['success', 'error',
 assert.ok(migrated.every((edge) => edge.targetHandle == null || edge.targetHandle === 'default'));
 const legacy = migrateEdgeHandles([{ id: 'collection', type: 'data_collection' }], [{ source: 'collection', target: 'target', sourceHandle: 'retry_exhausted' }]);
 assert.equal(legacy[0].sourceHandle, 'invalid');
+
+const connectionNodes = [
+  { id: 'dynamic', type: 'choice_dynamic', data: {} },
+  { id: 'collection', type: 'data_collection', data: {} },
+  { id: 'static', type: 'choice', data: { buttons: [{ handleId: 'yes' }] } },
+  { id: 'mcp', type: 'mcp_tool', data: {} },
+];
+const dynamicToCollection = validateNodeConnection(connectionNodes, {
+  source: 'dynamic', sourceHandle: 'selected', target: 'collection', targetHandle: 'default',
+});
+assert.equal(dynamicToCollection.accepted, true);
+assert.deepEqual([...dynamicToCollection.validSourceHandles], ['selected']);
+assert.deepEqual([...dynamicToCollection.validTargetHandles], ['default']);
+
+// onConnect persists the normalized values; JSON round-tripping models save,
+// reload and publication payload boundaries without changing either handle.
+const state = [{ id: 'edge-dynamic-collection', source: 'dynamic', target: 'collection', sourceHandle: dynamicToCollection.sourceHandle, targetHandle: dynamicToCollection.targetHandle }];
+const reloaded = JSON.parse(JSON.stringify({ nodes: connectionNodes, edges: state }));
+assert.equal(reloaded.edges[0].sourceHandle, 'selected');
+assert.equal(reloaded.edges[0].targetHandle, 'default');
+assert.equal(validateNodeConnection(reloaded.nodes, reloaded.edges[0]).accepted, true);
+
+assert.equal(validateNodeConnection(connectionNodes, { source: 'dynamic', sourceHandle: 'default', target: 'collection', targetHandle: 'default' }).accepted, false);
+assert.equal(validateNodeConnection(connectionNodes, { source: 'static', sourceHandle: 'yes', target: 'collection', targetHandle: 'default' }).accepted, true);
+assert.equal(validateNodeConnection(connectionNodes, { source: 'mcp', sourceHandle: 'success', target: 'dynamic', targetHandle: null }).accepted, true);
+assert.equal(validateNodeConnection(connectionNodes, { source: 'collection', sourceHandle: 'success', target: 'mcp', targetHandle: 'default' }).accepted, true);
 console.log('node handle contract regression checks passed');

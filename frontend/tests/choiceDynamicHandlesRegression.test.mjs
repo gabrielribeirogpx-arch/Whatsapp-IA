@@ -91,13 +91,15 @@ assert.equal(snapshot.edges.find((item) => item.sourceHandle === option3.handleI
 assert.match(editorSource, /createChoiceButton\(node\.id, nextIndex\)/);
 assert.match(editorSource, /next\[index\] = \{ \.\.\.next\[index\], label, value: label \}/);
 assert.match(editorSource, /key=\{button\.id \|\| button\.handleId\}/);
-assert.match(editorSource, /data:\s*\{\s*sourceHandle: sourceHandle \|\| undefined,/s);
+assert.match(editorSource, /data:\s*\{\s*sourceHandle,\s*targetHandle,/s);
 assert.match(editorSource, /setEdges\(\(currentEdges\) => syncChoiceEdgeLabels\(\[updatedChoiceNode\], currentEdges\)\)/);
-assert.match(editorSource, /sanitizeAiSystemCanvasGraph\(nodes, syncChoiceEdgeLabels\(nodes, edges\)\)/);
+assert.match(editorSource, /syncChoiceEdgeLabels\(currentNodes, edges\)/);
 assert.match(editorSource, /label: visibleLabel/);
 assert.match(choiceNodeSource, /useUpdateNodeInternals/);
 assert.match(choiceNodeSource, /requestAnimationFrame\(\(\) => updateNodeInternals\(id\)\)/);
-assert.match(choiceNodeSource, /sourceHandles=\{buttons\.map/);
+assert.match(choiceNodeSource, /: buttons\.map\(\(button\)/);
+assert.match(choiceNodeSource, /\{ id: 'selected', label: 'Selecionado'/);
+assert.match(compactNodeSource, /id="default"\s*type="target"/);
 assert.match(compactNodeSource, /id=\{handle\.id\}[\s\S]*?type="source"/);
 assert.match(compactNodeSource, /pointerEvents: isConnectable \? 'auto' : 'none'/);
 

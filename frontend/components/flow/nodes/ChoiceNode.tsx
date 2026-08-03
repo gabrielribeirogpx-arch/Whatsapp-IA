@@ -77,7 +77,7 @@ export default function ChoiceNode({ id, data, selected, isConnectable }: NodePr
       analytics={(nodeData as any).analytics}
       statusLabel={nodeData.options_mode === 'dynamic' ? 'Opções via variável' : `${buttons.length} opções de saída`}
       isConnectable={isConnectable}
-      sourceHandles={nodeData.options_mode === 'dynamic' ? [{ id: 'default', label: 'Selecionado', color: '#f97316' }] : buttons.map((button) => ({ id: button.handleId, label: button.label, color: '#f97316', optionValue: button.value }))}
+      sourceHandles={nodeData.options_mode === 'dynamic' ? [{ id: 'selected', label: 'Selecionado', color: '#f97316' }] : buttons.map((button) => ({ id: button.handleId, label: button.label, color: '#f97316', optionValue: button.value }))}
     />
   );
 }

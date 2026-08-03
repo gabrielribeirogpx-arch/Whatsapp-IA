@@ -41,6 +41,28 @@ def test_action_declared_handles_override_default():
     assert contract["sourceHandles"] == ["done", "failed"]
 
 
+def test_dynamic_choice_selected_to_data_collection_default_is_publishable():
+    nodes = [
+        {"id": "start", "type": "start", "data": {}},
+        {"id": "dynamic", "type": "choice_dynamic", "data": {"options_variable": "slots", "label_field": "label", "value_field": "id"}},
+        {"id": "collection", "type": "data_collection", "data": {}},
+    ]
+    edge = {
+        "id": "dynamic-collection",
+        "source": "dynamic",
+        "sourceHandle": "selected",
+        "target": "collection",
+        "targetHandle": "default",
+    }
+    saved = migrate_edge_handles(nodes, [{"id": "start-dynamic", "source": "start", "target": "dynamic"}, edge])
+    reloaded = migrate_edge_handles(nodes, saved)
+    result = FlowV2GraphValidator().validate(nodes=nodes, edges=reloaded)
+
+    assert result.is_valid
+    assert reloaded[1]["sourceHandle"] == "selected"
+    assert reloaded[1]["targetHandle"] == "default"
+
+
 def test_two_mcps_publish_contract_accepts_every_branch():
     nodes = [
         {"id": "start", "type": "message", "data": {"isStart": True, "content": "start"}},
