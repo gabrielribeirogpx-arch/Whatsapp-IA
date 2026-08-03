@@ -42,7 +42,7 @@ def test_success_and_timeout_connected():
 
 def test_all_rendered_outputs_use_the_canonical_contract():
     nodes = _nodes(timeout_seconds=30, cancel_keywords=["cancelar"], attempts_exceeded_behavior="invalid")
-    assert HANDLES == {"success", "invalid", "cancel", "timeout"}
+    assert HANDLES == ("success", "cancel", "timeout", "invalid")
     assert _connection_messages(nodes, _edges(*HANDLES)) == []
 
 

@@ -3,12 +3,15 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
+import logging
 import re
 from urllib.parse import urlparse
 import ipaddress
 
 from app.flow_v2.node_registry import PUBLISHABLE_NODE_TYPES
 from app.flow_v2.node_handle_contract import get_node_handle_contract, migrate_edge_handles, normalize_handle
+
+logger = logging.getLogger(__name__)
 
 
 class GraphValidationStatus(StrEnum):
@@ -54,6 +57,16 @@ class FlowV2GraphValidator:
         errors: list[str] = []
         nodes_payload = nodes if isinstance(nodes, list) else []
         edges_payload = migrate_edge_handles(nodes_payload, edges) if isinstance(edges, list) else []
+
+        logger.info(
+            "event=flow_graph_pre_validation node=%s sourceHandle=%s targetHandle=%s edges=%s payload_published=%s payload_received=%s",
+            [node.get("id") for node in nodes_payload if isinstance(node, dict)],
+            [edge.get("sourceHandle") for edge in edges_payload if isinstance(edge, dict)],
+            [edge.get("targetHandle") for edge in edges_payload if isinstance(edge, dict)],
+            edges_payload,
+            {"nodes": nodes_payload, "edges": edges_payload},
+            {"nodes": nodes, "edges": edges},
+        )
 
         node_ids = self._validate_nodes(nodes_payload, errors)
         self._validate_edges(edges_payload, node_ids, errors, nodes_payload)

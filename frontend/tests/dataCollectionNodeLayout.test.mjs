@@ -8,7 +8,8 @@ const css = fs.readFileSync(new URL('../app/globals.css', import.meta.url), 'utf
 assert.match(node, /variableName \|\| 'Variável não definida'/);
 assert.ok(!node.includes('summary={`{{'), 'must not format the variable as a technical placeholder');
 assert.match(node, /choice: 'Escolha'/);
-assert.deepEqual([...node.matchAll(/id: '(success|invalid|cancel|timeout)'/g)].map(match => match[1]), ['success', 'invalid', 'cancel', 'timeout']);
+assert.match(node, /DATA_COLLECTION_HANDLES\.map\(\(id\)/, 'React Flow handles must be derived from the canonical contract');
+assert.ok(!node.includes("const CANONICAL_HANDLE_IDS"), 'the renderer must not maintain a second handle list');
 assert.match(node, /selected=\{selected\}/);
 assert.match(node, /hasValidationError=\{nodeData\.hasValidationError\}/);
 assert.match(node, /structuralSignature/);

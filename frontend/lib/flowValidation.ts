@@ -40,6 +40,14 @@ export function calculateReachableNodeIds(nodes: Node[], edges: Edge[]): Set<str
 
 /** Fast, conservative checks before publish. The backend remains authoritative. */
 export function validateFlowLocally(nodes: Node[], edges: Edge[]): FlowValidationIssue[] {
+  console.info('[FLOW GRAPH PRE VALIDATION]', {
+    node: nodes.map((node) => node.id),
+    sourceHandle: edges.map((edge) => edge.sourceHandle),
+    targetHandle: edges.map((edge) => edge.targetHandle),
+    edges,
+    payloadPublicado: { nodes, edges },
+    payloadRecebido: { nodes, edges },
+  });
   const issues: FlowValidationIssue[] = []; const outgoing = new Map<string, Edge[]>();
   const byId = new Map(nodes.map((node) => [node.id, node]));
   edges.forEach((edge) => {

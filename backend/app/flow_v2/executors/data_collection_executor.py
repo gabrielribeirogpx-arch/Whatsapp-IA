@@ -126,7 +126,7 @@ class RuntimeV2DataCollectionExecutor(BaseNodeExecutor):
 
     def executeDefaultBehavior(self, event, *, session, data, runtime_input):
         """Execute the workspace/node fallback for an unconnected optional output."""
-        canonical_event = 'retry_exhausted' if event == 'invalid' else event
+        canonical_event = event
         context = dict(session.context or {})
         workspace_policies = context.get('data_collection_default_behaviors') or {}
         node_policies = data.get('default_behaviors') or {}

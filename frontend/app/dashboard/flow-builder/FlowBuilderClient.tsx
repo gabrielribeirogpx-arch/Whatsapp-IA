@@ -643,29 +643,22 @@ const serializeFlowGraph = (nodes: Node[], edges: Edge[]) => {
   });
 
   const nodeIds = new Set(cleanCanvasNodes.map((node) => node.id));
-  const nodeTypeById = new Map(cleanCanvasNodes.map((node) => [node.id, node.type]));
   const cleanEdges: FlowEdgePayload[] = cleanCanvasEdges
     .filter((edge) => edge.source && edge.target && nodeIds.has(edge.source) && nodeIds.has(edge.target))
     .map((edge) => {
-      const sourceNodeType = nodeTypeById.get(edge.source);
-      const normalizedSourceHandle =
-        sourceNodeType === 'condition'
-          ? edge.sourceHandle === 'false'
-            ? 'false'
-            : 'true'
-          : edge.sourceHandle ?? 'default';
+      const normalizedSourceHandle = edge.sourceHandle;
 
       return {
         id: edge.id,
         source: edge.source,
         target: edge.target,
-        sourceHandle: normalizedSourceHandle,
-        targetHandle: edge.targetHandle ?? 'default',
+        sourceHandle: normalizedSourceHandle ?? null,
+        targetHandle: edge.targetHandle ?? null,
         type: edge.type ?? 'default',
-        label: safeString(edge.label ?? normalizedSourceHandle),
+        label: safeString(edge.label ?? normalizedSourceHandle ?? ''),
         data: {
           ...(edge.data || {}),
-          condition: edge.data?.condition ?? safeString(edge.label ?? normalizedSourceHandle),
+          condition: edge.data?.condition ?? safeString(edge.label ?? normalizedSourceHandle ?? ''),
           sourceHandle: normalizedSourceHandle,
         },
       };

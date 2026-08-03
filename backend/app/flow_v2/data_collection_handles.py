@@ -7,7 +7,8 @@ SUCCESS = "success"
 INVALID = "invalid"
 CANCEL = "cancel"
 TIMEOUT = "timeout"
-HANDLES = frozenset({SUCCESS, INVALID, CANCEL, TIMEOUT})
+HANDLES = (SUCCESS, CANCEL, TIMEOUT, INVALID)
+HANDLE_SET = frozenset(HANDLES)
 LEGACY_ALIASES = {"retry_exhausted": INVALID}
 
 
