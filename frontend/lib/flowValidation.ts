@@ -1,5 +1,6 @@
 import type { Edge, Node } from 'reactflow';
 import { normalizeDataCollectionHandle } from './dataCollectionHandles';
+import { getNodeHandleContract, normalizeLegacyHandle } from './nodeHandleContract';
 
 export type FlowValidationIssue = { code: string; message: string; summary?: string; node_id?: string | null; node_type?: string | null; node_label?: string | null; field?: string | null; focus_field?: string | null; severity?: 'error' | 'warning'; suggestion?: string; metadata?: Record<string, unknown> };
 const issue = (code: string, message: string, node?: Node, field?: string): FlowValidationIssue => ({ code, message, node_id: node?.id || null, node_type: String(node?.type || ''), node_label: String(node?.data?.label || node?.data?.title || node?.type || 'Fluxo'), field, focus_field: field, severity: 'error' });
@@ -40,6 +41,14 @@ export function calculateReachableNodeIds(nodes: Node[], edges: Edge[]): Set<str
 /** Fast, conservative checks before publish. The backend remains authoritative. */
 export function validateFlowLocally(nodes: Node[], edges: Edge[]): FlowValidationIssue[] {
   const issues: FlowValidationIssue[] = []; const outgoing = new Map<string, Edge[]>();
+  const byId = new Map(nodes.map((node) => [node.id, node]));
+  edges.forEach((edge) => {
+    const source = byId.get(edge.source); const target = byId.get(edge.target);
+    const sourceHandle = normalizeLegacyHandle(edge.sourceHandle ?? edge.data?.sourceHandle ?? edge.data?.source_handle);
+    const targetHandle = normalizeLegacyHandle(edge.targetHandle ?? edge.data?.targetHandle ?? edge.data?.target_handle);
+    if (source && !getNodeHandleContract(source).sourceHandles.includes(sourceHandle)) issues.push(issue('EDGE_SOURCE_HANDLE_INVALID', `A saída “${sourceHandle || 'default'}” não existe neste node.`, source, 'connections'));
+    if (target && !getNodeHandleContract(target).targetHandles.includes(targetHandle)) issues.push(issue('EDGE_TARGET_HANDLE_INVALID', `A entrada “${targetHandle || 'default'}” não existe neste node.`, target, 'connections'));
+  });
   edges.forEach((edge) => outgoing.set(edge.source, [...(outgoing.get(edge.source) || []), edge]));
   const starts = nodes.filter((node) => Boolean(node.data?.isStart));
   if (!starts.length) issues.push(issue('START_MISSING', 'Defina um node inicial.'));

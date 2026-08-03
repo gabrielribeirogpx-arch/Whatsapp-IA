@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 import { getCanonicalNodeHandles, normalizeLegacyHandle } from './nodeHandleContract';
+=======
+import { getNodeHandleContract, normalizeLegacyHandle } from './nodeHandleContract';
+>>>>>>> origin/main
 
 export type FlowDiagnosticNode = {
   id: string;
@@ -32,9 +36,16 @@ export type EdgeDiagnostic = {
   reason: EdgeDiagnosticReason;
 };
 
+<<<<<<< HEAD
 const normalizeHandle = (value: unknown) => String(value ?? '').trim().toLowerCase();
 
 export const getNodeAvailableHandles = getCanonicalNodeHandles;
+=======
+export const getNodeAvailableHandles = (node: FlowDiagnosticNode) => {
+  const contract = getNodeHandleContract(node);
+  return { source: new Set(contract.sourceHandles), target: new Set(contract.targetHandles) };
+};
+>>>>>>> origin/main
 
 /** Validates the persisted edge list without silently dropping stale references. */
 export const diagnoseFlowEdges = (nodes: FlowDiagnosticNode[], edges: FlowDiagnosticEdge[]): EdgeDiagnostic[] => {
@@ -46,8 +57,15 @@ export const diagnoseFlowEdges = (nodes: FlowDiagnosticNode[], edges: FlowDiagno
     const target = String(edge.target || '');
     const sourceNode = nodesById.get(source);
     const targetNode = nodesById.get(target);
+<<<<<<< HEAD
     const sourceHandle = normalizeLegacyHandle(edge.sourceHandle ?? edge.data?.sourceHandle ?? edge.data?.source_handle) || 'default';
     const targetHandle = normalizeLegacyHandle(edge.targetHandle ?? edge.data?.targetHandle ?? edge.data?.target_handle) || 'default';
+=======
+    let sourceHandle = normalizeLegacyHandle(edge.sourceHandle ?? edge.data?.sourceHandle ?? edge.data?.source_handle);
+    let targetHandle = normalizeLegacyHandle(edge.targetHandle ?? edge.data?.targetHandle ?? edge.data?.target_handle);
+    if (!sourceHandle && sourceNode && getNodeHandleContract(sourceNode).sourceHandles.join() === 'default') sourceHandle = 'default';
+    if (!targetHandle && targetNode && getNodeHandleContract(targetNode).targetHandles.join() === 'default') targetHandle = 'default';
+>>>>>>> origin/main
     const signature = [source, target, sourceHandle, targetHandle].join('\u0000');
     let reason: EdgeDiagnosticReason | null = null;
     let handle = sourceHandle || targetHandle || 'default';

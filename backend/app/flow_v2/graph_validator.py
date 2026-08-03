@@ -8,7 +8,11 @@ from urllib.parse import urlparse
 import ipaddress
 
 from app.flow_v2.node_registry import PUBLISHABLE_NODE_TYPES
+<<<<<<< HEAD
 from app.flow_v2.node_handle_contract import canonical_node_handles, normalize_handle
+=======
+from app.flow_v2.node_handle_contract import get_node_handle_contract, migrate_edge_handles, normalize_handle
+>>>>>>> origin/main
 
 
 class GraphValidationStatus(StrEnum):
@@ -53,10 +57,14 @@ class FlowV2GraphValidator:
     ) -> GraphValidationResult:
         errors: list[str] = []
         nodes_payload = nodes if isinstance(nodes, list) else []
-        edges_payload = edges if isinstance(edges, list) else []
+        edges_payload = migrate_edge_handles(nodes_payload, edges) if isinstance(edges, list) else []
 
         node_ids = self._validate_nodes(nodes_payload, errors)
+<<<<<<< HEAD
         self._validate_edges(edges_payload, nodes_payload, node_ids, errors)
+=======
+        self._validate_edges(edges_payload, node_ids, errors, nodes_payload)
+>>>>>>> origin/main
         self._validate_choice_edges(nodes_payload, edges_payload, errors)
         self._validate_ai_answer_edges(nodes_payload, edges_payload, errors)
         start_node_ids = self._start_node_ids(nodes_payload)
@@ -98,9 +106,15 @@ class FlowV2GraphValidator:
         return node_ids
 
     def _validate_edges(
+<<<<<<< HEAD
         self, edges: list[dict[str, Any]], nodes: list[dict[str, Any]], node_ids: set[str], errors: list[str]
     ) -> None:
         nodes_by_id = {str(node.get("id")): node for node in nodes if isinstance(node, dict) and node.get("id") not in (None, "")}
+=======
+        self, edges: list[dict[str, Any]], node_ids: set[str], errors: list[str], nodes: list[dict[str, Any]]
+    ) -> None:
+        by_id = {str(node.get("id")): node for node in nodes if isinstance(node, dict) and node.get("id") not in (None, "")}
+>>>>>>> origin/main
         for index, edge in enumerate(edges):
             if not isinstance(edge, dict):
                 errors.append(f"FLOW_V2_EDGE_{index}_INVALID")
@@ -122,6 +136,7 @@ class FlowV2GraphValidator:
             ):
                 edge_id = edge.get("id", index)
                 errors.append(f"FLOW_V2_BROKEN_EDGE:{edge_id}")
+<<<<<<< HEAD
             if str(source) in nodes_by_id and str(target) in nodes_by_id:
                 edge_id = edge.get("id", index)
                 source_handle = normalize_handle(edge.get("sourceHandle") if edge.get("sourceHandle") is not None else edge.get("source_handle")) or "default"
@@ -132,6 +147,22 @@ class FlowV2GraphValidator:
                     errors.append(f"FLOW_V2_EDGE_SOURCE_HANDLE_NOT_FOUND:{edge_id}:{source}:{source_handle}")
                 if target_handle not in valid_targets:
                     errors.append(f"FLOW_V2_EDGE_TARGET_HANDLE_NOT_FOUND:{edge_id}:{target}:{target_handle}")
+=======
+            if str(source) in by_id and str(target) in by_id:
+                data = edge.get("data") if isinstance(edge.get("data"), dict) else {}
+                source_handle = normalize_handle(edge.get("sourceHandle", edge.get("source_handle", data.get("sourceHandle", data.get("source_handle")))))
+                target_handle = normalize_handle(edge.get("targetHandle", edge.get("target_handle", data.get("targetHandle", data.get("target_handle")))))
+                source_contract = get_node_handle_contract(by_id[str(source)])["sourceHandles"]
+                target_contract = get_node_handle_contract(by_id[str(target)])["targetHandles"]
+                if not source_handle and source_contract == ["default"]:
+                    source_handle = "default"
+                if not target_handle and target_contract == ["default"]:
+                    target_handle = "default"
+                if source_handle not in source_contract:
+                    errors.append(f"FLOW_V2_EDGE_SOURCE_HANDLE_NOT_FOUND:{edge.get('id', index)}:{source_handle}")
+                if target_handle not in target_contract:
+                    errors.append(f"FLOW_V2_EDGE_TARGET_HANDLE_NOT_FOUND:{edge.get('id', index)}:{target_handle}")
+>>>>>>> origin/main
 
     def _validate_choice_edges(
         self,

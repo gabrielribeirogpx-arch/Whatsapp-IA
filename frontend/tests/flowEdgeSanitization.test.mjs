@@ -14,7 +14,11 @@ vm.runInNewContext(compiled, {
   module,
   exports: module.exports,
   require: (id) => {
+<<<<<<< HEAD
     if (id === './nodeHandleContract') return contractModule.exports;
+=======
+    if (id === './nodeHandleContract') { const aliases = { sucesso: 'success', erro: 'error', tempo_esgotado: 'timeout' }; return { normalizeLegacyHandle: (v) => aliases[String(v ?? '').toLowerCase()] || String(v ?? '').toLowerCase(), getNodeHandleContract: (node) => ({ sourceHandles: node.type === 'mcp_tool' ? ['success', 'error', 'timeout'] : node.type === 'choice_dynamic' ? ['selected'] : node.type === 'data_collection' ? ['success', 'cancel', 'timeout', 'invalid'] : node.type === 'condition' ? ['true', 'false'] : node.type === 'choice' ? (node.data.buttons || []).map((b) => b.handleId) : ['default'], targetHandles: ['default'] }) }; }
+>>>>>>> origin/main
     throw new Error(`Unexpected import: ${id}`);
   },
 });
@@ -43,10 +47,10 @@ for (const staleHandle of ['error', 'success', 'timeout', 'selected', 'invalid']
 for (const handle of ['success', 'error', 'timeout']) {
   assert.equal(sanitizeEdges([node('source', 'mcp_tool'), target], [edge(handle, 'source', 'target', handle)]).length, 1);
 }
-// Choice -> Dynamic Choice removes option handles and accepts only its current default output.
+// Dynamic Choice uses its canonical selected output.
 const dynamic = node('source', 'choice_dynamic', { buttons: [{ handleId: 'selected' }] });
-assert.deepEqual([...sanitizeEdges([dynamic, target], [edge('selected', 'source', 'target', 'selected')])], []);
-assert.equal(sanitizeEdges([dynamic, target], [edge('default', 'source', 'target')]).length, 1);
+assert.equal(sanitizeEdges([dynamic, target], [edge('selected', 'source', 'target', 'selected')]).length, 1);
+assert.deepEqual([...sanitizeEdges([dynamic, target], [edge('default', 'source', 'target')])], []);
 
 // Handle removal, undo/redo snapshots, export/import and pre-publish sanitization all use the same pure invariant.
 const choiceBefore = node('source', 'choice', { buttons: [{ handleId: 'selected' }] });

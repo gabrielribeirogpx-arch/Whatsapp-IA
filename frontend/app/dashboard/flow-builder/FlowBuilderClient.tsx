@@ -59,6 +59,7 @@ import { extractValidationIssues, validateFlowLocally } from '@/lib/flowValidati
 import type { FlowValidationIssue } from '@/lib/flowValidation';
 import { diagnoseFlowEdges, migrateLegacyEdgeHandles, sanitizeEdges, sanitizeNodes } from '@/lib/flowEdgeDiagnostics';
 import type { EdgeDiagnostic } from '@/lib/flowEdgeDiagnostics';
+import { getNodeHandleContract, migrateEdgeHandles } from '@/lib/nodeHandleContract';
 import type { EdgeRoutingPreference } from '@/lib/edgeRouting';
 import { parseSimulatorError } from '@/lib/simulatorError';
 import type { SimulatorError, SimulatorIssue } from '@/lib/simulatorError';
@@ -149,32 +150,9 @@ const AI_SYSTEM_CARDS = MARKETPLACE_CATALOG;
 
 const normalizeFlowHandleId = (value: unknown) => String(value ?? '').trim().toLowerCase();
 
-const toBuilderHandleId = (value: unknown, fallback: string) => {
-  const normalized = String(value ?? '').toLowerCase().trim().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
-  return normalized || fallback;
-};
-
 const getNodeAvailableHandles = (node: Pick<Node, 'type' | 'data'> | FlowNodePayload) => {
-  const data = (node.data || {}) as Record<string, any>;
-  const nodeType = String(node.type || 'message');
-  const source = new Set(['', 'default']);
-  const target = new Set(['', 'default']);
-
-  if (nodeType === 'condition') {
-    source.add('true');
-    source.add('false');
-  } else if (nodeType === 'choice') {
-    const choices = Array.isArray(data.buttons) ? data.buttons : Array.isArray(data.options) ? data.options : [];
-    choices.forEach((choice: Record<string, unknown>, index: number) => {
-      source.add(toBuilderHandleId(choice?.handleId || choice?.handle_id || choice?.value || choice?.id || choice?.label, `option_${index + 1}`));
-    });
-  } else if (nodeType === 'data_collection') {
-    DATA_COLLECTION_HANDLES.forEach((handle) => source.add(handle));
-  } else if (nodeType === 'mcp_tool') {
-    ['success', 'error', 'timeout'].forEach((handle) => source.add(handle));
-  }
-
-  return { source, target };
+  const contract = getNodeHandleContract(node);
+  return { source: new Set(contract.sourceHandles), target: new Set(contract.targetHandles) };
 };
 
 const flowHandleExists = (available: Set<string>, handle: unknown) => available.has(normalizeFlowHandleId(handle));
@@ -645,7 +623,11 @@ const normalizeDelayNodePayload = (node: FlowNodePayload): FlowNodePayload => {
 
 const serializeFlowGraph = (nodes: Node[], edges: Edge[]) => {
   const currentNodes = sanitizeNodes(nodes) as Node[];
+<<<<<<< HEAD
   const normalizedEdges = migrateLegacyEdgeHandles(normalizeDataCollectionEdges(currentNodes, syncChoiceEdgeLabels(currentNodes, edges))) as Edge[];
+=======
+  const normalizedEdges = sanitizeEdges(currentNodes, migrateEdgeHandles(currentNodes, normalizeDataCollectionEdges(currentNodes, syncChoiceEdgeLabels(currentNodes, edges)))) as Edge[];
+>>>>>>> origin/main
   const sanitizedGraph = sanitizeAiSystemCanvasGraph(currentNodes, normalizedEdges);
   const cleanCanvasNodes = sanitizedGraph.nodes;
   const cleanCanvasEdges = sanitizedGraph.edges;
@@ -3358,9 +3340,22 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
     if (structuralIssues.length > 0) {
       setEdgeDiagnostics(structuralIssues);
       focusEdgeDiagnostic(structuralIssues[0], currentNodes, currentEdges);
+<<<<<<< HEAD
       toast.error('Corrija as conexões inválidas antes de publicar.');
+=======
+>>>>>>> origin/main
       return;
     }
+    currentEdges.forEach((edge) => {
+      const sourceNode = currentNodes.find((node) => node.id === edge.source);
+      const targetNode = currentNodes.find((node) => node.id === edge.target);
+      console.info('FLOW_EDGE_PUBLISH_CONTRACT', {
+        edge_id: edge.id, source_node_id: edge.source, source_node_type: sourceNode?.type || sourceNode?.data?.type,
+        sourceHandle: edge.sourceHandle, valid_source_handles: sourceNode ? getNodeHandleContract(sourceNode).sourceHandles : [],
+        target_node_id: edge.target, target_node_type: targetNode?.type || targetNode?.data?.type,
+        targetHandle: edge.targetHandle, valid_target_handles: targetNode ? getNodeHandleContract(targetNode).targetHandles : [],
+      });
+    });
     setEdgeDiagnostics([]);
     const localIssues = validateFlowLocally(currentNodes, currentEdges);
     if (localIssues.length > 0) {
@@ -4161,11 +4156,22 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
             <div className="flow-edge-diagnostic" role="alert" aria-label="Edge inválida">
               <strong>{edgeDiagnostics.length} conexões inválidas encontradas</strong>
               {summaries.map((summary) => <span key={summary}>✓ {summary}</span>)}
+<<<<<<< HEAD
               <table><thead><tr><th>Edge</th><th>Nodes</th><th>Handle</th><th>Motivo</th></tr></thead><tbody>
                 {edgeDiagnostics.map((issue) => <tr key={`${issue.edgeId}-${issue.edgeIndex}`} onClick={() => focusEdgeDiagnostic(issue, nodesRef.current, edgesRef.current)}>
                   <td>{issue.edgeId}</td><td>source: {issue.source}<br />target: {issue.target}</td><td>{issue.handle}</td><td>{issue.reason}</td>
                 </tr>)}
               </tbody></table>
+=======
+              <table><thead><tr><th>Edge</th><th>Source node</th><th>Source handle</th><th>Target node</th><th>Target handle</th><th>Motivo</th></tr></thead>
+                <tbody>{edgeDiagnostics.map((issue) => {
+                  const edge = (rfInstance?.getEdges?.() || []).find((item) => item.id === issue.edgeId);
+                  const sourceNode = nodesRef.current.find((node) => node.id === issue.source);
+                  const targetNode = nodesRef.current.find((node) => node.id === issue.target);
+                  return <tr key={`${issue.edgeId}-${issue.reason}`} onClick={() => focusEdgeDiagnostic(issue)}><td>{issue.edgeId}</td><td>{String(sourceNode?.data?.label || sourceNode?.type || issue.source)}</td><td>{edge?.sourceHandle || 'default'}</td><td>{String(targetNode?.data?.label || targetNode?.type || issue.target)}</td><td>{edge?.targetHandle || 'default'}</td><td>{issue.reason}</td></tr>;
+                })}</tbody>
+              </table>
+>>>>>>> origin/main
               <button type="button" onClick={handleAutoFixEdges}>Corrigir automaticamente</button>
             </div>
           );
