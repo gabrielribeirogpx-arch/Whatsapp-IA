@@ -15,6 +15,7 @@ type ChoiceNodeData = {
   isStart?: boolean;
   onToggleStart?: (nodeId: string) => void;
   hasValidationError?: boolean;
+  options_mode?: 'fixed' | 'dynamic';
 };
 
 const toHandleId = (value: string, fallback: string) => value.toLowerCase().trim().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '') || fallback;
@@ -58,7 +59,7 @@ export default function ChoiceNode({ id, data, selected, isConnectable }: NodePr
       running={nodeData.running}
       title="Escolha"
       emoji="🧭"
-      badge={displayMode === 'list' ? 'LISTA' : 'BOTÕES'}
+      badge={nodeData.options_mode === 'dynamic' ? 'DINÂMICO' : displayMode === 'list' ? 'LISTA' : 'BOTÕES'}
       badgeTone={{ background: '#fff7ed', color: '#c2410c' }}
       accent="linear-gradient(90deg, #f97316, #fb923c)"
       summary={truncateText(nodeData.content, 50, 'Escolha uma opção')}
@@ -68,9 +69,9 @@ export default function ChoiceNode({ id, data, selected, isConnectable }: NodePr
       hasValidationError={nodeData.hasValidationError}
       onToggleStart={nodeData.onToggleStart}
       analytics={(nodeData as any).analytics}
-      statusLabel={`${buttons.length} opções de saída`}
+      statusLabel={nodeData.options_mode === 'dynamic' ? 'Opções via variável' : `${buttons.length} opções de saída`}
       isConnectable={isConnectable}
-      sourceHandles={buttons.map((button) => ({ id: button.handleId, label: button.label, color: '#f97316', optionValue: button.value }))}
+      sourceHandles={nodeData.options_mode === 'dynamic' ? [{ id: 'default', label: 'Selecionado', color: '#f97316' }] : buttons.map((button) => ({ id: button.handleId, label: button.label, color: '#f97316', optionValue: button.value }))}
     />
   );
 }

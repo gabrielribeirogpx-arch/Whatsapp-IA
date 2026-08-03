@@ -25,6 +25,11 @@ export function validateFlowLocally(nodes: Node[], edges: Edge[]): FlowValidatio
       const handles = new Set(next.map((edge) => String(edge.sourceHandle || edge.data?.sourceHandle || '').toLowerCase()));
       if (!handles.has('true') || !handles.has('false')) issues.push(issue('CONDITION_NEEDS_BOTH_BRANCHES', 'Conecte as saídas Sim e Não.', node, 'connections'));
     }
+    if (type === 'choice' && String(data.options_mode || data.option_mode || 'fixed') === 'dynamic') {
+      if (!String(data.options_variable || data.source_variable || '').trim()) issues.push(issue('DYNAMIC_CHOICE_VARIABLE_REQUIRED', 'Selecione a variável de origem.', node, 'options_variable'));
+      if (!String(data.label_field || '').trim()) issues.push(issue('DYNAMIC_CHOICE_LABEL_REQUIRED', 'Defina o campo do título.', node, 'label_field'));
+      if (!String(data.value_field || '').trim()) issues.push(issue('DYNAMIC_CHOICE_VALUE_REQUIRED', 'Defina o campo do valor.', node, 'value_field'));
+    }
     if (type === 'data_collection') {
       const variable = String(data.variable_name || '');
       if (!variable) issues.push(issue('DATA_COLLECTION_VARIABLE_REQUIRED', 'Defina o nome da variável.', node, 'variable_name'));

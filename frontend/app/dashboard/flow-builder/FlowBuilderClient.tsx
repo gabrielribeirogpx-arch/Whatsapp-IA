@@ -500,6 +500,8 @@ const NODE_PRESETS: Record<FlowNodeKind, { label: string; type: string; data: Re
     type: 'choice',
     data: {
       content: '',
+      options_mode: 'fixed',
+      options_variable: '', label_field: 'label', value_field: 'id', description_field: 'description', icon_field: 'icon', max_options: 10, result_variable: 'selected_slot',
       display_mode: 'buttons',
       buttons: [
         { id: 'choice-1', label: 'Quero planos', handleId: 'quero_planos', next: '' },
@@ -1055,6 +1057,10 @@ function FlowNodeEditorPanel({
         {kind === 'choice' && (
           <>
             <div className="flow-editor-info-card"><strong>Tipo:</strong> Decisão WhatsApp <span>CHOICE</span></div>
+            <fieldset className="flow-editor-field"><legend>Modo das opções</legend>
+              <label className="flow-editor-radio"><input type="radio" name={`options-mode-${node.id}`} checked={(draft.options_mode || 'fixed') === 'fixed'} onChange={() => onDraftChange({ options_mode: 'fixed' })} />Opções fixas</label>
+              <label className="flow-editor-radio"><input type="radio" name={`options-mode-${node.id}`} checked={draft.options_mode === 'dynamic'} onChange={() => onDraftChange({ options_mode: 'dynamic', label_field: toText(draft.label_field || 'label'), value_field: toText(draft.value_field || 'id'), result_variable: toText(draft.result_variable || 'selected_slot') })} />Opções dinâmicas</label>
+            </fieldset>
             <fieldset className="flow-editor-field">
               <legend>Tipo de exibição</legend>
               <label className="flow-editor-radio">
@@ -1070,7 +1076,16 @@ function FlowNodeEditorPanel({
               Texto
               <textarea value={toText(draft.content || draft.body_text)} onChange={(event) => onDraftChange({ content: event.target.value, body_text: event.target.value })} placeholder="Escolha uma opção" />
             </label>
-            <div className="flow-editor-repeatable">
+            {draft.options_mode === 'dynamic' ? <div className="flow-editor-repeatable"><strong>Origem das opções</strong>
+              <label className="flow-editor-field">Variável<input value={toText(draft.options_variable)} onChange={e => onDraftChange({ options_variable: e.target.value })} placeholder="appointments" /></label>
+              <label className="flow-editor-field">Campo do título<input value={toText(draft.label_field)} onChange={e => onDraftChange({ label_field: e.target.value })} placeholder="label" /></label>
+              <label className="flow-editor-field">Campo do valor<input value={toText(draft.value_field)} onChange={e => onDraftChange({ value_field: e.target.value })} placeholder="id" /></label>
+              <label className="flow-editor-field">Descrição (opcional)<input value={toText(draft.description_field)} onChange={e => onDraftChange({ description_field: e.target.value })} placeholder="description" /></label>
+              <label className="flow-editor-field">Ícone (opcional)<input value={toText(draft.icon_field)} onChange={e => onDraftChange({ icon_field: e.target.value })} placeholder="icon" /></label>
+              <label className="flow-editor-field">Máximo de opções<input type="number" min="1" max="10" value={Number(draft.max_options || 10)} onChange={e => onDraftChange({ max_options: Math.min(10, Math.max(1, Number(e.target.value) || 1)) })} /></label>
+              <strong>Resultado</strong><label className="flow-editor-field">Salvar seleção em<input value={toText(draft.result_variable)} onChange={e => onDraftChange({ result_variable: e.target.value })} placeholder="selected_slot" /></label>
+              <div className="flow-editor-info-card"><strong>Preview</strong>{(Array.isArray(draft.preview_options) ? draft.preview_options as Array<Record<string, unknown>> : []).slice(0, Number(draft.max_options || 10)).length ? (draft.preview_options as Array<Record<string, unknown>>).slice(0, Number(draft.max_options || 10)).map((item, index) => <p key={index}>{toText(item[toText(draft.icon_field)])} {toText(item[toText(draft.label_field)])}</p>) : <p>Nenhuma opção disponível.</p>}</div>
+            </div> : <div className="flow-editor-repeatable">
               <strong>Opções {displayMode === 'buttons' ? `(${buttons.length}/3)` : `(${buttons.length})`}</strong>
               {buttons.map((button, index) => (
                 <div key={button.id || button.handleId} className="flow-editor-row">
@@ -1079,7 +1094,7 @@ function FlowNodeEditorPanel({
                 </div>
               ))}
               <button type="button" className="flow-editor-secondary-btn" onClick={addButton} disabled={displayMode === 'buttons' && buttons.length >= 3}>+ Adicionar opção</button>
-            </div>
+            </div>}
           </>
         )}
 

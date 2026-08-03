@@ -389,6 +389,38 @@ def test_message_initial_then_choice_emits_real_interactive_buttons_action() -> 
     assert "CHOICE_SHOWN" in _event_types(event_store)
 
 
+@pytest.mark.parametrize("items", [[], [{"id": "slot1", "label": "09:00"}], [
+    {"id": "slot1", "label": "09:00", "description": "Dr. João", "icon": "📅"},
+    {"id": "slot2", "label": "11:00", "description": "Dr. João"},
+]])
+def test_dynamic_choice_materializes_mcp_array_and_saves_selection(items) -> None:
+    raw_snapshot = {
+        "schema_version": 1, "start_node_id": "choice",
+        "nodes": [
+            {"id": "choice", "type": "choice", "data": {"isStart": True, "content": "Horários", "options_mode": "dynamic", "options_variable": "appointments", "label_field": "label", "value_field": "id", "description_field": "description", "icon_field": "icon", "result_variable": "selected_slot"}},
+            {"id": "end", "type": "message", "data": {"text": "{{selected_slot}} {{selected_slot_title}} {{selected_slot_object.label}}"}},
+        ],
+        "edges": [{"id": "next", "source": "choice", "sourceHandle": "default", "target": "end"}],
+    }
+    executor, snapshot, _events, session, db = _executor(raw_snapshot)
+    session.current_node_id = "choice"
+    # This is the same canonical variables store populated by MCPToolNodeExecutor.
+    session.variables["appointments"] = items
+    initial = executor.handle_input(db, _input_with_id(snapshot, f"initial-{len(items)}"))
+    action = initial.actions[-1]
+    assert isinstance(action, SendChoiceButtonsAction)
+    assert len(action.options) == len(items)
+    if not items:
+        return
+    selected = executor.handle_input(db, _input_with_id(snapshot, f"selected-{len(items)}", {"interactive_type": "list_reply", "interactive_reply_id": items[-1]["id"]}))
+    assert session.variables["selected_slot"] == items[-1]["id"]
+    assert session.variables["selected_slot_title"] == items[-1]["label"]
+    assert session.variables["selected_slot_index"] == len(items) - 1
+    assert session.variables["selected_slot_object"] == items[-1]
+    assert items[-1]["id"] in selected.actions[-1].text
+    assert items[-1]["label"] in selected.actions[-1].text
+
+
 @pytest.mark.parametrize("intent_category", ["Aparelho", "Limpeza", "Implante"])
 @pytest.mark.parametrize(
     "placeholder", ["{{intent_category}}", "{{variables.intent_category}}"]

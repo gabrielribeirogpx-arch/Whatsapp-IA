@@ -458,6 +458,38 @@ def _choice_display_mode(node: dict[str, Any], data: dict[str, Any]) -> str:
     return "list" if mode == "list" else "buttons"
 
 
+def _dynamic_choice_options(data: dict[str, Any], render_context: FlowRenderContext) -> list[dict[str, Any]]:
+    """Materialize channel-safe options from an array stored by any previous node."""
+    source = str(data.get("options_variable") or data.get("source_variable") or "").strip()
+    current: Any = render_context.values()
+    for part in source.split(".") if source else ():
+        current = current.get(part) if isinstance(current, dict) else None
+    if not isinstance(current, list):
+        return []
+    label_field = str(data.get("label_field") or "label").strip()
+    value_field = str(data.get("value_field") or "id").strip()
+    description_field = str(data.get("description_field") or "description").strip()
+    icon_field = str(data.get("icon_field") or "icon").strip()
+    try:
+        maximum = min(max(int(data.get("max_options") or 10), 1), 10)
+    except (TypeError, ValueError):
+        maximum = 10
+    options: list[dict[str, Any]] = []
+    for index, item in enumerate(current[:maximum]):
+        if not isinstance(item, dict):
+            continue
+        value, label = item.get(value_field), item.get(label_field)
+        if value is None or label is None or not str(label).strip():
+            continue
+        icon = item.get(icon_field) if icon_field else None
+        title = f"{icon} {label}".strip() if icon else str(label)
+        option = {"id": str(value), "label": title, "dynamic_title": str(label), "dynamic_index": index, "dynamic_object": item}
+        if description_field and item.get(description_field) is not None:
+            option["description"] = str(item[description_field])
+        options.append(option)
+    return options
+
+
 def _choice_options_payload(options: Any) -> tuple[dict[str, Any], ...]:
     if not isinstance(options, list):
         return ()
@@ -478,7 +510,6 @@ class ChoiceNodeExecutor(BaseNodeExecutor):
     ) -> NodeExecutionResult:
         node_id = str(node["id"])
         data = self._node_data(node)
-        options = node.get("options") or data.get("options") or []
         render_context = self._render_context(
             db,
             snapshot=snapshot,
@@ -486,6 +517,8 @@ class ChoiceNodeExecutor(BaseNodeExecutor):
             runtime_input=runtime_input,
             node_id=node_id,
         )
+        dynamic = str(data.get("options_mode") or data.get("option_mode") or "fixed").lower() == "dynamic"
+        options = _dynamic_choice_options(data, render_context) if dynamic else (node.get("options") or data.get("options") or [])
         template_original = _choice_prompt(node, data)
         rendered_text = str(render_template(template_original, render_context))
         effective_render_context = render_context.values()
@@ -539,6 +572,8 @@ class ChoiceNodeExecutor(BaseNodeExecutor):
             missing_keys,
         )
         display_mode = _choice_display_mode(node, data)
+        if dynamic and len(options) > 3:
+            display_mode = "list"
         option_ids = [
             str(option["id"])
             for option in options
@@ -720,6 +755,16 @@ class ChoiceNodeExecutor(BaseNodeExecutor):
             option for option in options
             if isinstance(option, dict) and str(option.get("id")) == row_id
         )
+        if dynamic:
+            variable = str(data.get("result_variable") or data.get("save_selection_to") or "selected_slot").strip()
+            variables = dict(getattr(session, "variables", None) or {})
+            variables[variable] = matched_option["id"]
+            variables[f"{variable}_title"] = matched_option.get("dynamic_title", matched_option.get("label", ""))
+            variables[f"{variable}_index"] = matched_option.get("dynamic_index")
+            variables[f"{variable}_object"] = matched_option.get("dynamic_object")
+            session.variables = variables
+            if hasattr(db, "add"):
+                db.add(session)
         option_source_handle = str(
             matched_option.get("source_handle")
             or matched_option.get("sourceHandle")
@@ -751,7 +796,7 @@ class ChoiceNodeExecutor(BaseNodeExecutor):
             snapshot=snapshot,
             session=session,
             source_node_id=node_id,
-            source_handle=row_id,
+            source_handle="default" if dynamic else row_id,
         )
         next_node_id = transition_resolution.target_node_id
         runtime_trace(logger, "transition_resolution", metadata=runtime_input.metadata,
