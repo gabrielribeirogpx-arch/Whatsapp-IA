@@ -220,6 +220,15 @@ class FlowV2GraphValidator:
             display_mode = str(node.get("display_mode") or data.get("display_mode") or data.get("displayMode") or "buttons").strip().lower()
             if display_mode not in {"buttons", "list"}:
                 errors.append(f"FLOW_V2_CHOICE_DISPLAY_MODE_INVALID:{node_id}")
+            dynamic = str(data.get("options_mode") or data.get("option_mode") or "fixed").lower() == "dynamic"
+            if dynamic:
+                if not str(data.get("options_variable") or data.get("source_variable") or "").strip():
+                    errors.append(f"FLOW_V2_DYNAMIC_CHOICE_VARIABLE_REQUIRED:{node_id}")
+                if not str(data.get("label_field") or "").strip():
+                    errors.append(f"FLOW_V2_DYNAMIC_CHOICE_LABEL_REQUIRED:{node_id}")
+                if not str(data.get("value_field") or "").strip():
+                    errors.append(f"FLOW_V2_DYNAMIC_CHOICE_VALUE_REQUIRED:{node_id}")
+                return
             options = node.get("options") or data.get("options") or []
             if not isinstance(options, list) or not options:
                 errors.append(f"FLOW_V2_CHOICE_OPTIONS_INVALID:{node_id}")

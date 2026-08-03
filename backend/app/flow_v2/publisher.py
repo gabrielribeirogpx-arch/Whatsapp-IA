@@ -582,6 +582,8 @@ def _runtime_v2_node_payload(node: dict[str, Any]) -> dict[str, Any]:
         return normalize_delay_nodes([node])[0]
 
     data = _node_data(node)
+    if str(data.get("options_mode") or data.get("option_mode") or "fixed").lower() == "dynamic":
+        return node
     if _has_non_empty_options(node.get("options")) or _has_non_empty_options(
         data.get("options")
     ):
