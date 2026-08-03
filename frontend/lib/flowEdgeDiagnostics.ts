@@ -1,4 +1,4 @@
-import { DATA_COLLECTION_HANDLES } from './dataCollectionHandles';
+import { getCanonicalNodeHandles, normalizeLegacyHandle } from './nodeHandleContract';
 
 export type FlowDiagnosticNode = {
   id: string;
@@ -34,40 +34,7 @@ export type EdgeDiagnostic = {
 
 const normalizeHandle = (value: unknown) => String(value ?? '').trim().toLowerCase();
 
-const builderHandleId = (value: unknown, fallback: string) => {
-  const normalized = normalizeHandle(value).replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
-  return normalized || fallback;
-};
-
-export const getNodeAvailableHandles = (node: FlowDiagnosticNode) => {
-  const data = (node.data || {}) as Record<string, any>;
-  const source = new Set(['', 'default']);
-  const target = new Set(['', 'default']);
-
-  if (node.type === 'condition') {
-    source.add('true');
-    source.add('false');
-  } else if (node.type === 'choice_dynamic' || (node.type === 'choice' && data.options_mode === 'dynamic')) {
-    source.clear();
-    source.add('default');
-  } else if (node.type === 'choice') {
-    source.clear();
-    const choices = Array.isArray(data.buttons) ? data.buttons : Array.isArray(data.options) ? data.options : [];
-    choices.forEach((choice: Record<string, unknown>, index: number) => {
-      source.add(builderHandleId(choice.handleId || choice.handle_id || choice.value || choice.id || choice.label, `option_${index + 1}`));
-    });
-  } else if (node.type === 'data_collection') {
-    source.clear();
-    DATA_COLLECTION_HANDLES.forEach((handle) => {
-      if (handle !== 'invalid' || data.auto_retry_invalid !== true || data.attempts_exceeded_behavior !== 'end') source.add(handle);
-    });
-  } else if (node.type === 'mcp_tool') {
-    source.clear();
-    ['success', 'error', 'timeout'].forEach((handle) => source.add(handle));
-  }
-
-  return { source, target };
-};
+export const getNodeAvailableHandles = getCanonicalNodeHandles;
 
 /** Validates the persisted edge list without silently dropping stale references. */
 export const diagnoseFlowEdges = (nodes: FlowDiagnosticNode[], edges: FlowDiagnosticEdge[]): EdgeDiagnostic[] => {
@@ -79,8 +46,8 @@ export const diagnoseFlowEdges = (nodes: FlowDiagnosticNode[], edges: FlowDiagno
     const target = String(edge.target || '');
     const sourceNode = nodesById.get(source);
     const targetNode = nodesById.get(target);
-    const sourceHandle = normalizeHandle(edge.sourceHandle ?? edge.data?.sourceHandle ?? edge.data?.source_handle);
-    const targetHandle = normalizeHandle(edge.targetHandle ?? edge.data?.targetHandle ?? edge.data?.target_handle);
+    const sourceHandle = normalizeLegacyHandle(edge.sourceHandle ?? edge.data?.sourceHandle ?? edge.data?.source_handle) || 'default';
+    const targetHandle = normalizeLegacyHandle(edge.targetHandle ?? edge.data?.targetHandle ?? edge.data?.target_handle) || 'default';
     const signature = [source, target, sourceHandle, targetHandle].join('\u0000');
     let reason: EdgeDiagnosticReason | null = null;
     let handle = sourceHandle || targetHandle || 'default';
@@ -101,6 +68,16 @@ export const diagnoseFlowEdges = (nodes: FlowDiagnosticNode[], edges: FlowDiagno
     return reason ? [{ edgeId: String(edge.id || `edge-${edgeIndex}`), edgeIndex, source, target, handle, reason }] : [];
   });
 };
+
+/** Migrate only named legacy aliases. Missing MCP handles remain missing/default. */
+export const migrateLegacyEdgeHandles = <T extends FlowDiagnosticEdge>(edges: T[]): T[] => edges.map((edge) => {
+  const rawSource = edge.sourceHandle ?? edge.data?.sourceHandle ?? edge.data?.source_handle;
+  const rawTarget = edge.targetHandle ?? edge.data?.targetHandle ?? edge.data?.target_handle;
+  const sourceHandle = normalizeLegacyHandle(rawSource);
+  const targetHandle = normalizeLegacyHandle(rawTarget);
+  if (sourceHandle === normalizeHandle(rawSource) && targetHandle === normalizeHandle(rawTarget)) return edge;
+  return { ...edge, ...(sourceHandle ? { sourceHandle } : {}), ...(targetHandle ? { targetHandle } : {}), data: { ...(edge.data || {}), ...(sourceHandle ? { sourceHandle } : {}), ...(targetHandle ? { targetHandle } : {}) } };
+});
 
 /**
  * Rebuilds handle availability from the current nodes and returns the same edge

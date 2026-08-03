@@ -4,13 +4,17 @@ import vm from 'node:vm';
 import ts from 'typescript';
 
 const source = readFileSync(new URL('../lib/flowEdgeDiagnostics.ts', import.meta.url), 'utf8');
+const contractSource = readFileSync(new URL('../lib/nodeHandleContract.ts', import.meta.url), 'utf8');
+const contractCompiled = ts.transpileModule(contractSource, { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText;
+const contractModule = { exports: {} };
+vm.runInNewContext(contractCompiled, { module: contractModule, exports: contractModule.exports });
 const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText;
 const module = { exports: {} };
 vm.runInNewContext(compiled, {
   module,
   exports: module.exports,
   require: (id) => {
-    if (id === './dataCollectionHandles') return { DATA_COLLECTION_HANDLES: ['success', 'invalid', 'cancel', 'timeout'] };
+    if (id === './nodeHandleContract') return contractModule.exports;
     throw new Error(`Unexpected import: ${id}`);
   },
 });

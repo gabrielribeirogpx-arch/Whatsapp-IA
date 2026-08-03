@@ -57,7 +57,7 @@ import { FlowAnalytics, FlowEdgePayload, FlowNodePayload, FlowVersionItem } from
 import { AGENT_SYSTEM_TEMPLATES, ENABLE_AGENT_SYSTEM_TEMPLATES, instantiateAgentSystemTemplate } from '@/lib/agentSystemTemplates';
 import { extractValidationIssues, validateFlowLocally } from '@/lib/flowValidation';
 import type { FlowValidationIssue } from '@/lib/flowValidation';
-import { diagnoseFlowEdges, sanitizeEdges, sanitizeNodes } from '@/lib/flowEdgeDiagnostics';
+import { diagnoseFlowEdges, migrateLegacyEdgeHandles, sanitizeEdges, sanitizeNodes } from '@/lib/flowEdgeDiagnostics';
 import type { EdgeDiagnostic } from '@/lib/flowEdgeDiagnostics';
 import type { EdgeRoutingPreference } from '@/lib/edgeRouting';
 import { parseSimulatorError } from '@/lib/simulatorError';
@@ -645,7 +645,7 @@ const normalizeDelayNodePayload = (node: FlowNodePayload): FlowNodePayload => {
 
 const serializeFlowGraph = (nodes: Node[], edges: Edge[]) => {
   const currentNodes = sanitizeNodes(nodes) as Node[];
-  const normalizedEdges = sanitizeEdges(currentNodes, normalizeDataCollectionEdges(currentNodes, syncChoiceEdgeLabels(currentNodes, edges))) as Edge[];
+  const normalizedEdges = migrateLegacyEdgeHandles(normalizeDataCollectionEdges(currentNodes, syncChoiceEdgeLabels(currentNodes, edges))) as Edge[];
   const sanitizedGraph = sanitizeAiSystemCanvasGraph(currentNodes, normalizedEdges);
   const cleanCanvasNodes = sanitizedGraph.nodes;
   const cleanCanvasEdges = sanitizedGraph.edges;
@@ -1998,15 +1998,6 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
     setNodes(sanitizedGraph.nodes as Node[]);
     setEdges(sanitizedGraph.edges as Edge[]);
   }, [edges, nodes, setEdges, setNodes]);
-
-  // This is the final state invariant: every path that changes nodes or edges
-  // (including React Flow changes, conversion, delete, paste and history restore)
-  // is checked against handles derived from the current node data.
-  useEffect(() => {
-    const sanitizedEdges = sanitizeEdges(nodes, edges) as Edge[];
-    if (sanitizedEdges === edges) return;
-    setEdges(sanitizedEdges);
-  }, [edges, nodes, setEdges]);
 
   useEffect(() => {
     nodesRef.current = nodes;
@@ -3362,14 +3353,13 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
     if (!selectedFlowId) return;
 
     const currentNodes = rfInstance?.getNodes?.() || [];
-    let currentEdges = rfInstance?.getEdges?.() || [];
+    const currentEdges = rfInstance?.getEdges?.() || [];
     const structuralIssues = diagnoseFlowEdges(currentNodes, currentEdges);
     if (structuralIssues.length > 0) {
-      const publishSafeEdges = sanitizeEdges(currentNodes, currentEdges) as Edge[];
-      setEdges(publishSafeEdges);
-      edgesRef.current = publishSafeEdges;
-      currentEdges = publishSafeEdges;
-      setEdgeDiagnostics([]);
+      setEdgeDiagnostics(structuralIssues);
+      focusEdgeDiagnostic(structuralIssues[0], currentNodes, currentEdges);
+      toast.error('Corrija as conexões inválidas antes de publicar.');
+      return;
     }
     setEdgeDiagnostics([]);
     const localIssues = validateFlowLocally(currentNodes, currentEdges);
@@ -4161,7 +4151,6 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
           </div>
         )}
         {edgeDiagnostics.length > 0 && (() => {
-          const issue = edgeDiagnostics[0];
           const reasonLabels: Record<string, string> = {
             source_not_found: 'Node removido', target_not_found: 'Node removido',
             source_handle_not_found: 'Handle inexistente', target_handle_not_found: 'Handle inexistente',
@@ -4172,11 +4161,11 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
             <div className="flow-edge-diagnostic" role="alert" aria-label="Edge inválida">
               <strong>{edgeDiagnostics.length} conexões inválidas encontradas</strong>
               {summaries.map((summary) => <span key={summary}>✓ {summary}</span>)}
-              <strong>Edge inválida</strong>
-              <span>source: {issue.source}</span>
-              <span>target: {issue.target}</span>
-              <span>handle: {issue.handle}</span>
-              <span>motivo: {issue.reason}</span>
+              <table><thead><tr><th>Edge</th><th>Nodes</th><th>Handle</th><th>Motivo</th></tr></thead><tbody>
+                {edgeDiagnostics.map((issue) => <tr key={`${issue.edgeId}-${issue.edgeIndex}`} onClick={() => focusEdgeDiagnostic(issue, nodesRef.current, edgesRef.current)}>
+                  <td>{issue.edgeId}</td><td>source: {issue.source}<br />target: {issue.target}</td><td>{issue.handle}</td><td>{issue.reason}</td>
+                </tr>)}
+              </tbody></table>
               <button type="button" onClick={handleAutoFixEdges}>Corrigir automaticamente</button>
             </div>
           );
