@@ -409,6 +409,7 @@ def _choice_prompt(node: dict[str, Any], data: dict[str, Any]) -> str:
         or data.get("content")
         or data.get("text")
         or data.get("message")
+        or node.get("body_text")
         or data.get("body_text")
         or data.get("title")
     )
@@ -478,6 +479,65 @@ class ChoiceNodeExecutor(BaseNodeExecutor):
         node_id = str(node["id"])
         data = self._node_data(node)
         options = node.get("options") or data.get("options") or []
+        render_context = self._render_context(
+            db,
+            snapshot=snapshot,
+            session=session,
+            runtime_input=runtime_input,
+            node_id=node_id,
+        )
+        template_original = _choice_prompt(node, data)
+        rendered_text = str(render_template(template_original, render_context))
+        effective_render_context = render_context.values()
+        # Header and footer are not currently first-class fields in the channel
+        # action, but rendering them here keeps every user-facing Choice string
+        # on the canonical pipeline and makes them available to channel adapters.
+        header_template = (
+            node.get("header")
+            or node.get("title")
+            or data.get("header")
+            or data.get("title")
+        )
+        footer_template = node.get("footer") or data.get("footer")
+        rendered_templates = [
+            template
+            for template in (template_original, header_template, footer_template)
+            if isinstance(template, str)
+        ]
+        key_sets = [
+            template_keys(template, effective_render_context)
+            for template in rendered_templates
+        ]
+        resolved_keys = sorted(
+            {key for resolved, _missing in key_sets for key in resolved}
+        )
+        missing_keys = sorted(
+            {key for _resolved, missing in key_sets for key in missing}
+        )
+        rendered_header = (
+            str(render_template(header_template, render_context))
+            if header_template is not None
+            else None
+        )
+        rendered_footer = (
+            str(render_template(footer_template, render_context))
+            if footer_template is not None
+            else None
+        )
+        logger.log(
+            logging.WARNING if missing_keys else logging.INFO,
+            "event=RUNTIME_V2_CHOICE_RENDER node_id=%s session_id=%s "
+            "session.variables=%r session.context=%r template_original=%r "
+            "rendered_text=%r resolved_keys=%s missing_keys=%s",
+            node_id,
+            getattr(session, "id", None),
+            getattr(session, "variables", None),
+            getattr(session, "context", None),
+            template_original,
+            rendered_text,
+            resolved_keys,
+            missing_keys,
+        )
         display_mode = _choice_display_mode(node, data)
         option_ids = [
             str(option["id"])
@@ -564,6 +624,10 @@ class ChoiceNodeExecutor(BaseNodeExecutor):
                 "display_mode": display_mode,
                 "interactive_type": "list" if display_mode == "list" else "button",
             }
+            if rendered_header is not None:
+                action_metadata["header"] = rendered_header
+            if rendered_footer is not None:
+                action_metadata["footer"] = rendered_footer
             logger.info(
                 "[V2 CHOICE EXECUTED]\nnode_id=%s\ndisplay_mode=%s\noptions=%s\nbuttons=%s",
                 node_id,
@@ -577,7 +641,7 @@ class ChoiceNodeExecutor(BaseNodeExecutor):
                 external_user_id=runtime_input.external_user_id,
                 conversation_id=runtime_input.conversation_id,
                 contact_id=runtime_input.contact_id,
-                text=_choice_prompt(node, data),
+                text=rendered_text,
                 node_id=node_id,
                 options=_choice_options_payload(options),
                 buttons=buttons,

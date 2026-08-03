@@ -98,6 +98,7 @@ class _FakeSession:
         self.status = FlowV2SessionStatus.RUNNING
         self.last_event_index = 0
         self.context = {}
+        self.variables = {}
 
 
 class _FakeSnapshotRepository:
@@ -386,6 +387,83 @@ def test_message_initial_then_choice_emits_real_interactive_buttons_action() -> 
         },
     }
     assert "CHOICE_SHOWN" in _event_types(event_store)
+
+
+@pytest.mark.parametrize("intent_category", ["Aparelho", "Limpeza", "Implante"])
+@pytest.mark.parametrize(
+    "placeholder", ["{{intent_category}}", "{{variables.intent_category}}"]
+)
+def test_choice_renders_canonical_session_variables_in_interactive_payload(
+    intent_category, placeholder, caplog
+) -> None:
+    raw_snapshot = {
+        "schema_version": 1,
+        "start_node_id": "choice",
+        "nodes": [
+            {
+                "id": "choice",
+                "type": "choice",
+                "content": f"Tratamento: {placeholder}",
+                "header": "Categoria: {{variables.intent_category}}",
+                "footer": "Selecionado: {intent_category}",
+                "options": [
+                    {"id": "continuar", "label": "Continuar"},
+                    {"id": "voltar", "label": "Voltar"},
+                ],
+            }
+        ],
+        "edges": [],
+    }
+    executor, snapshot, _event_store, session, db = _executor(raw_snapshot)
+    session.variables = {"intent_category": intent_category}
+    session.current_node_id = "choice"
+
+    with caplog.at_level(logging.INFO):
+        output = executor.handle_input(db, _input(snapshot))
+
+    action = output.actions[0]
+    assert isinstance(action, SendChoiceButtonsAction)
+    assert action.text == f"Tratamento: {intent_category}"
+    assert action.as_effect()["interactive"]["body"]["text"] == action.text
+    assert list(action.buttons) == [
+        {"id": "continuar", "title": "Continuar"},
+        {"id": "voltar", "title": "Voltar"},
+    ]
+    assert action.metadata["header"] == f"Categoria: {intent_category}"
+    assert action.metadata["footer"] == f"Selecionado: {intent_category}"
+    assert "event=RUNTIME_V2_CHOICE_RENDER" in caplog.text
+    assert "missing_keys=[]" in caplog.text
+
+
+@pytest.mark.parametrize(
+    ("missing_behavior", "expected"),
+    [("empty", "Tratamento: "), ("preserve", "Tratamento: {{missing}}")],
+)
+def test_choice_honors_missing_variable_behavior(
+    missing_behavior, expected, monkeypatch, caplog
+) -> None:
+    monkeypatch.setenv("FLOW_V2_MISSING_VARIABLE", missing_behavior)
+    raw_snapshot = {
+        "schema_version": 1,
+        "start_node_id": "choice",
+        "nodes": [
+            {
+                "id": "choice",
+                "type": "choice",
+                "body_text": "Tratamento: {{missing}}",
+                "options": [{"id": "ok", "label": "OK"}],
+            }
+        ],
+        "edges": [],
+    }
+    executor, snapshot, _event_store, session, db = _executor(raw_snapshot)
+    session.current_node_id = "choice"
+
+    with caplog.at_level(logging.WARNING):
+        output = executor.handle_input(db, _input(snapshot))
+
+    assert output.actions[0].text == expected
+    assert "missing_keys=['missing']" in caplog.text
 
 
 def test_waiting_choice_with_row_id_transitions_to_target_node() -> None:
