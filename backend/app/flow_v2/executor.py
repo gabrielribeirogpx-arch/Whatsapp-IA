@@ -383,6 +383,12 @@ class FlowV2Executor:
         if normalized_node_type in {"ai_rag", "ai_response"}:
             behavior = str(data.get("after_answer_behavior") or data.get("afterAnswerBehavior") or "").strip().lower()
             return behavior == "wait_same_node" and (getattr(result, "next_node_id", None) in (None, str(node.get("id"))))
+        if normalized_node_type == "data_collection":
+            # A collection checkpoint must remain resumable even when a stale
+            # terminal flag is present in the published node payload.  The
+            # success transition is evaluated only after the next inbound
+            # value, so completing the session here makes that reply a no-op.
+            return getattr(result, "next_node_id", None) in (None, str(node.get("id")))
         return False
 
     @staticmethod
@@ -468,6 +474,36 @@ class FlowV2Executor:
                 raise FlowV2ExecutionError("Current node is absent from immutable snapshot")
 
             node_id = str(node["id"])
+            incoming_source_node = snapshot.node_by_id.get(
+                str((dequeued_transition or {}).get("source_node_id") or "")
+            )
+            incoming_source_type = str(
+                (incoming_source_node or {}).get("type")
+                or self._node_data(incoming_source_node or {}).get("type")
+                or ""
+            ).strip().lower()
+            if incoming_source_type == "data_collection":
+                logger.info(
+                    "event=RUNTIME_V2_DATA_COLLECTION_MESSAGE_EXECUTION session_id=%s "
+                    "node_id=%s node_type=%s transition_id=%s source_handle=%s",
+                    session.id,
+                    node_id,
+                    str(node.get("type") or self._node_data(node).get("type") or "message"),
+                    (dequeued_transition or {}).get("transition_id"),
+                    (dequeued_transition or {}).get("source_handle"),
+                )
+            if node_type := str(node.get("type") or self._node_data(node).get("type") or "message"):
+                if node_type.strip().lower() == "data_collection":
+                    wait_context = session.context if isinstance(session.context, dict) else {}
+                    logger.info(
+                        "event=RUNTIME_V2_DATA_COLLECTION_MESSAGE_EXECUTION session_id=%s "
+                        "node_id=%s node_type=%s current_node_id=%s waiting_variable=%s",
+                        session.id,
+                        node_id,
+                        node_type,
+                        session.current_node_id,
+                        wait_context.get("waiting_variable"),
+                    )
             self.event_store.append(db, session=session, event_type=FlowV2EventType.NODE_ENTERED, node_id=node_id)
             flow_id = self._flow_id_for_version(db, tenant_id=session.tenant_id, flow_version_id=session.flow_version_id)
             node_type = str(node.get("type") or self._node_data(node).get("type") or "message")
@@ -614,7 +650,11 @@ class FlowV2Executor:
                 )
                 return actions
 
-            if self._is_terminal_node(node) and not self._result_keeps_terminal_node_waiting(node=node, node_type=node_type, result=result):
+            if (
+                self._is_terminal_node(node)
+                and not result.next_node_id
+                and not self._result_keeps_terminal_node_waiting(node=node, node_type=node_type, result=result)
+            ):
                 logger.info(
                     "[SESSION FINISHED] node_id=%s node_type=%s reason=terminal_node_marked_end_flow actions_count=%s",
                     node_id,
@@ -728,6 +768,7 @@ class FlowV2Executor:
                 source_handle=result.next_source_handle,
                 target_node_id=result.next_node_id,
             )
+            queue_before = list(transition_queue)
             transition_queue = self._enqueue_transition(
                 transition_queue,
                 session_id=session.id,
@@ -736,6 +777,16 @@ class FlowV2Executor:
                 next_node_id=result.next_node_id,
                 selected_transition=selected_transition,
             )
+            if node_type.strip().lower() == "data_collection":
+                logger.info(
+                    "event=RUNTIME_V2_DATA_COLLECTION_ENQUEUE session_id=%s node_id=%s "
+                    "queue_before=%s queue_after=%s next_node_id=%s",
+                    session.id,
+                    node_id,
+                    queue_before,
+                    transition_queue,
+                    result.next_node_id,
+                )
             self.session_manager.move_to(db, session=session, node_id=result.next_node_id, status=FlowV2SessionStatus.RUNNING)
             # Conditions are exclusive decision points.  Do not let the generic
             # continuation path silently degrade a selected true/false edge to

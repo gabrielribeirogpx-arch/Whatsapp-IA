@@ -34,6 +34,10 @@ class RuntimeV2DataCollectionExecutor(BaseNodeExecutor):
                 key = f'data_collection_timeout:{session.id}:{node_id}'
                 actions.append(ScheduleDelayAction(tenant_id=session.tenant_id, session_id=session.id, external_user_id=runtime_input.external_user_id, conversation_id=runtime_input.conversation_id, contact_id=runtime_input.contact_id, job_id=uuid5(NAMESPACE_URL, key), resume_node_id=node_id, run_at=timeout_at, seconds=seconds, metadata={'event_type': 'data_collection_timeout', 'idempotency_key': key, 'node_id': node_id}))
             logger.info('event=data_collection_wait_started tenant_id=%s flow_version_id=%s session_id=%s node_id=%s variable_name=%s data_type=%s result=wait', session.tenant_id, session.flow_version_id, session.id, node_id, data.get('variable_name'), data.get('data_type'))
+            logger.info(
+                'event=RUNTIME_V2_DATA_COLLECTION_RESULT session_id=%s node_id=%s status=wait next_node_id=%s source_handle=%s waiting_variable_before=%s waiting_variable_after=%s current_node_id=%s',
+                session.id, node_id, node_id, None, None, data.get('variable_name'), getattr(session, 'current_node_id', None),
+            )
             return NodeExecutionResult(actions=tuple(actions), status='wait', next_node_id=node_id)
         if runtime_input.metadata.get('event_type') == 'data_collection_timeout':
             return self._finish(db, snapshot, session, context, node_id, data, 'timeout', 'data_collection_timeout', runtime_input)
@@ -43,6 +47,10 @@ class RuntimeV2DataCollectionExecutor(BaseNodeExecutor):
         if key: processed.append(key)
         waiting['processed_message_ids'] = processed[-50:]
         raw = runtime_input.message_text
+        logger.info(
+            'event=RUNTIME_V2_DATA_COLLECTION_RECEIVED session_id=%s node_id=%s waiting_variable=%s incoming_message=%r current_node_id=%s',
+            session.id, node_id, context.get('waiting_variable'), raw, getattr(session, 'current_node_id', None),
+        )
         logger.info('event=data_collection_input_received session_id=%s node_id=%s variable_name=%s data_type=%s attempt=%s', session.id, node_id, data.get('variable_name'), data.get('data_type'), waiting.get('attempts', 0))
         cancel = {str(w).strip().casefold() for w in data.get('cancel_keywords', []) if str(w).strip()}
         if str(raw or '').strip().casefold() in cancel:
@@ -62,6 +70,10 @@ class RuntimeV2DataCollectionExecutor(BaseNodeExecutor):
             finished = self._finish(db, snapshot, session, context, node_id, data, 'invalid', 'data_collection_completed', runtime_input)
             return NodeExecutionResult(actions=(action, *finished.actions), status=finished.status, next_node_id=finished.next_node_id, next_source_handle='invalid')
         name = str(data.get('variable_name') or ''); variables = dict(session.variables or {}); variables[name] = result.normalized_value; session.variables = variables
+        logger.info(
+            'event=RUNTIME_V2_DATA_COLLECTION_SAVE session_id=%s node_id=%s variable=%s value=%r session.variables=%r',
+            session.id, node_id, name, result.normalized_value, session.variables,
+        )
         metadata = dict(context.get('variable_metadata') or {}); metadata[name] = {'raw_value': result.raw_value, 'normalized_value': result.normalized_value, 'data_type': data.get('data_type'), 'collected_at': now.isoformat(), 'node_id': node_id}; context['variable_metadata'] = metadata
         if data.get('save_to_contact') and runtime_input.contact_id:
             from app.models.contact import Contact
@@ -74,12 +86,33 @@ class RuntimeV2DataCollectionExecutor(BaseNodeExecutor):
         return self._finish(db, snapshot, session, context, node_id, data, 'success', 'data_collection_completed', runtime_input)
 
     def _finish(self, db, snapshot, session, context, node_id, data, handle, event, runtime_input):
+        waiting_variable = context.get('waiting_variable')
         self._clear_wait(context, session)
         if handle != 'success' and not self._has_edge(snapshot, node_id, handle):
             return self.executeDefaultBehavior(handle, session=session, data=data, runtime_input=runtime_input)
         target = self._next(db, snapshot, session, node_id, handle)
+        transition = self._transition(snapshot, node_id, handle, target)
+        transition_id = (transition or {}).get('id') or (transition or {}).get('edge_id')
+        logger.info(
+            'event=RUNTIME_V2_DATA_COLLECTION_RESULT session_id=%s node_id=%s status=continue next_node_id=%s source_handle=%s waiting_variable_before=%s waiting_variable_after=%s current_node_id=%s',
+            session.id, node_id, target, handle, waiting_variable, (session.context or {}).get('waiting_variable'), getattr(session, 'current_node_id', None),
+        )
+        logger.info(
+            'event=RUNTIME_V2_DATA_COLLECTION_TRANSITION session_id=%s node_id=%s transition_id=%s source_handle=%s next_node_id=%s',
+            session.id, node_id, transition_id, handle, target,
+        )
         logger.info('event=%s tenant_id=%s flow_version_id=%s session_id=%s node_id=%s variable_name=%s data_type=%s result=%s next_node_id=%s', event, session.tenant_id, session.flow_version_id, session.id, node_id, data.get('variable_name'), data.get('data_type'), handle, target)
         return NodeExecutionResult(next_node_id=target, next_source_handle=handle)
+
+    def _transition(self, snapshot, node_id, handle, target):
+        snapshot_transitions = getattr(self.transition_resolver, '_snapshot_transitions', None)
+        transition_matches = getattr(self.transition_resolver, '_matches', None)
+        if not snapshot_transitions or not transition_matches:
+            return None
+        matches = transition_matches(
+            transitions=snapshot_transitions(snapshot), source_node_id=node_id, source_handle=handle,
+        )
+        return next((item for item in matches if str(item.get('target_node_id') or item.get('target') or item.get('to')) == str(target)), None)
 
     def _has_edge(self, snapshot, node_id, handle):
         """Check optional output presence without asking the resolver to emit an error."""
