@@ -1,15 +1,29 @@
 import { InteractiveMessageType } from '../lib/types';
+import { useDeveloperMode } from '../hooks/useDeveloperMode';
+
+export type InteractiveTechnicalDetails = {
+  payload?: string | null;
+  type?: InteractiveMessageType | null;
+  id?: string | null;
+  flow?: string | null;
+  node?: string | null;
+  origin?: string | null;
+  technicalTimestamp?: string | null;
+  commitSha?: string | null;
+  runtime?: string | null;
+};
 
 type InteractiveMessageBubbleProps = {
   title: string;
   type?: InteractiveMessageType | null;
   payload?: string | null;
+  technicalDetails?: InteractiveTechnicalDetails;
   variant?: 'conversation' | 'preview';
 };
 
 const presentation = {
-  button_reply: { icon: '🖱️', label: 'Botão selecionado' },
-  list_reply: { icon: '📋', label: 'Opção da lista' },
+  button_reply: { icon: '🤖', label: 'Resposta interativa' },
+  list_reply: { icon: '📋', label: 'Resposta da lista' },
   interactive: { icon: '🖱️', label: 'Resposta interativa' },
 } satisfies Record<InteractiveMessageType, { icon: string; label: string }>;
 
@@ -25,10 +39,29 @@ export default function InteractiveMessageBubble({
   title,
   type,
   payload,
+  technicalDetails,
   variant = 'conversation',
 }: InteractiveMessageBubbleProps) {
   const normalizedType = normalizeInteractiveType(type) ?? 'interactive';
   const meta = presentation[normalizedType];
+  const developerMode = useDeveloperMode();
+  const details: InteractiveTechnicalDetails = {
+    payload,
+    type: normalizedType,
+    id: payload,
+    ...technicalDetails,
+  };
+  const technicalFields = [
+    ['Payload', details.payload],
+    ['Tipo', details.type],
+    ['ID', details.id],
+    ['Flow', details.flow],
+    ['Node', details.node],
+    ['Origem', details.origin],
+    ['Timestamp técnico', details.technicalTimestamp],
+    ['Commit SHA', details.commitSha],
+    ['Runtime', details.runtime],
+  ].filter((field): field is [string, string] => Boolean(field[1]));
 
   return (
     <div className={`wa-interactive-message wa-interactive-message--${variant}`}>
@@ -37,17 +70,14 @@ export default function InteractiveMessageBubble({
         <strong>{meta.label}</strong>
       </div>
       <p className="wa-interactive-message-title">{title}</p>
-      {variant === 'conversation' && payload ? (
+      {variant === 'conversation' && developerMode && technicalFields.length > 0 ? (
         <details className="wa-interactive-message-details">
-          <summary>ⓘ Ver detalhes</summary>
-          <div>
-            <span>Payload interno</span>
-            <code>{payload}</code>
-            <dl>
-              <div><dt>Tipo:</dt><dd>{normalizedType}</dd></div>
-              <div><dt>ID:</dt><dd><code>{payload}</code></dd></div>
-            </dl>
-          </div>
+          <summary>🔧 Detalhes técnicos</summary>
+          <dl>
+            {technicalFields.map(([label, value]) => (
+              <div key={label}><dt>{label}</dt><dd><code>{value}</code></dd></div>
+            ))}
+          </dl>
         </details>
       ) : null}
     </div>

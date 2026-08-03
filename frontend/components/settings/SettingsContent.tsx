@@ -28,8 +28,10 @@ import {
   Sparkles,
   UsersRound,
   Workflow,
+  Wrench,
   XCircle,
 } from "lucide-react";
+import { setDeveloperMode, useDeveloperMode } from "@/hooks/useDeveloperMode";
 import ProvidersTab from "@/components/settings/whatsapp-business/ProvidersTab";
 import TemplatesTab from "@/components/settings/whatsapp-business/TemplatesTab";
 import PipelineSettingsTab from "@/components/settings/PipelineSettingsTab";
@@ -357,6 +359,7 @@ function ProfileTab() {
 
 function PreferencesTab() {
   const { data, setData, toast, setToast } = useAccountData();
+  const developerMode = useDeveloperMode();
   const [form, setForm] = useState<AccountPreferences>({
     language: "pt-BR",
     timezone: "America/Sao_Paulo",
@@ -416,6 +419,13 @@ function PreferencesTab() {
           desc="Avisos operacionais e handoffs críticos."
           checked={form.whatsapp_notifications}
           onChange={(v) => setForm({ ...form, whatsapp_notifications: v })}
+        />
+        <Toggle
+          icon={Wrench}
+          title="Modo desenvolvedor"
+          desc="Exibe dados técnicos de mensagens interativas no Inbox. Mantenha desativado para a experiência do operador."
+          checked={developerMode}
+          onChange={setDeveloperMode}
         />
         <button className="inline-flex items-center justify-center gap-2 rounded-2xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white">
           <Save size={16} /> Salvar preferências

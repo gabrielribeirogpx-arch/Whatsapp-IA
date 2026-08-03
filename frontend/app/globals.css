@@ -5102,11 +5102,9 @@ input {
 }
 
 .wa-interactive-message-details summary::-webkit-details-marker { display: none; }
-.wa-interactive-message-details > div { display: grid; gap: 5px; margin-top: 9px; }
-.wa-interactive-message-details > div > span { font-weight: 650; }
 .wa-interactive-message-details code { overflow-wrap: anywhere; color: #34434b; }
-.wa-interactive-message-details dl { display: grid; gap: 4px; margin: 5px 0 0; }
-.wa-interactive-message-details dl div { display: grid; grid-template-columns: 42px minmax(0, 1fr); gap: 6px; }
+.wa-interactive-message-details dl { display: grid; gap: 5px; margin: 9px 0 0; }
+.wa-interactive-message-details dl div { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 8px; }
 .wa-interactive-message-details dt { font-weight: 650; }
 .wa-interactive-message-details dd { min-width: 0; margin: 0; overflow-wrap: anywhere; }
 
