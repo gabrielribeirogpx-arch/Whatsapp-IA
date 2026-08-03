@@ -55,6 +55,8 @@ type CompactFlowNodeProps = {
   statusLabel?: string;
   statusActive?: boolean;
   choiceLayout?: boolean;
+  bodyContent?: ReactNode;
+  className?: string;
 };
 
 function CompactFlowNode({
@@ -82,6 +84,8 @@ function CompactFlowNode({
   statusLabel,
   statusActive = true,
   choiceLayout = false,
+  bodyContent,
+  className = '',
 }: CompactFlowNodeProps) {
   const handles = useMemo(() => (sourceHandles?.length ? sourceHandles : [{ id: undefined, color: accent }]), [accent, sourceHandles]);
   const handleStep = handles.length > 1 ? 30 : 0;
@@ -93,7 +97,7 @@ function CompactFlowNode({
 
   return (
     <div
-      className={`flow-node flow-node-compact ${choiceLayout ? 'choice-node' : ''} ${premium ? 'flow-node-premium' : ''} ${selected ? 'is-selected' : ''} ${running ? 'running' : ''}`}
+      className={`flow-node flow-node-compact ${choiceLayout ? 'choice-node' : ''} ${premium ? 'flow-node-premium' : ''} ${selected ? 'is-selected' : ''} ${running ? 'running' : ''} ${className}`.trim()}
       style={{
         '--flow-node-accent': accent,
         border: hasValidationError ? '2px solid #dc2626' : undefined,
@@ -146,7 +150,7 @@ function CompactFlowNode({
       ) : null}
 
       <div className="flow-node-compact-body">
-        <p className="flow-node-summary">{summary || 'Clique para configurar no painel lateral'}</p>
+        {bodyContent || <p className="flow-node-summary">{summary || 'Clique para configurar no painel lateral'}</p>}
         {metrics.length > 0 ? (
           <div className="flow-node-metric-row">
             {metrics.slice(0, 4).map((metric) => (
