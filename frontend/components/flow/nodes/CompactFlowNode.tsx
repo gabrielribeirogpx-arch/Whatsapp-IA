@@ -106,6 +106,7 @@ function CompactFlowNode({
     >
       <div className="flow-node-header-bar" style={{ background: accent }} />
       <Handle
+        id="default"
         type="target"
         position={Position.Left}
         className="flow-node-handle flow-node-target-handle"
