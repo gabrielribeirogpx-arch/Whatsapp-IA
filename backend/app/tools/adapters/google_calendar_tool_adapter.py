@@ -19,6 +19,8 @@ GOOGLE_CALENDAR_TOOL_IDS = {
     "google_calendar_list_events",
     "google_calendar_check_availability",
     "google_calendar_delete_event",
+    "calendar.get_availability", "calendar.create_appointment", "calendar.get_appointment",
+    "calendar.reschedule_appointment", "calendar.cancel_appointment",
 }
 
 
@@ -35,6 +37,21 @@ def google_calendar_tool_definitions(*, connected: bool) -> list[dict[str, Any]]
         "google_calendar_check_availability": "Verifica disponibilidade no Google Calendar conectado do workspace.",
         "google_calendar_delete_event": "Exclui um evento do Google Calendar conectado do workspace.",
     }
+    labels.update({
+        "calendar.get_availability": "Consultar disponibilidade",
+        "calendar.create_appointment": "Criar compromisso",
+        "calendar.get_appointment": "Consultar compromisso",
+        "calendar.reschedule_appointment": "Reagendar compromisso",
+        "calendar.cancel_appointment": "Cancelar compromisso",
+    })
+    descriptions.update({
+        "calendar.get_availability": "Consulta horários livres dentro de um período.",
+        "calendar.create_appointment": "Cria um evento após confirmação.",
+        "calendar.get_appointment": "Consulta um compromisso pelo identificador.",
+        "calendar.reschedule_appointment": "Altera a data ou horário de um compromisso após confirmação.",
+        "calendar.cancel_appointment": "Cancela um compromisso após confirmação.",
+    })
+    classifications = {"calendar.create_appointment": "WRITE", "calendar.reschedule_appointment": "WRITE", "calendar.cancel_appointment": "DESTRUCTIVE", "google_calendar_create_event": "WRITE", "google_calendar_delete_event": "DESTRUCTIVE"}
     return [
         {
             "id": tool_id,
@@ -47,7 +64,7 @@ def google_calendar_tool_definitions(*, connected: bool) -> list[dict[str, Any]]
             "is_enabled": connected,
             "server_id": None,
             "server_name": "Google Calendar conectado" if connected else "Requer conexão",
-            "metadata": {"kind": "internal", "provider": "google_calendar", "source": "google_calendar_connected", "requires_connection": not connected},
+            "metadata": {"kind": "internal", "provider": "google_calendar", "source": "google_calendar_connected", "requires_connection": not connected, "classification": classifications.get(tool_id, "READ")},
         }
         for tool_id in labels
     ]
@@ -147,21 +164,25 @@ class GoogleCalendarToolAdapter:
             _log_tool("GOOGLE_CALENDAR_ADAPTER_PAYLOAD", tenant_id=context.tenant_id, tool_name=tool_id, input=args, db=db, payload=args)
             _log_tool("GOOGLE_CALENDAR_SERVICE_PAYLOAD", tenant_id=context.tenant_id, tool_name=tool_id, input=args, db=db, payload=args)
             _log_tool("GOOGLE_CALENDAR_SERVICE_CALL", tenant_id=context.tenant_id, tool_name=tool_id, input=args, db=db)
-            if tool_id == "google_calendar_create_event":
+            if tool_id in {"google_calendar_create_event", "calendar.create_appointment"}:
                 create_context = {**_calendar_create_start_context(args), **connection_context}
                 _log_tool("AI_AGENT_CALENDAR_CREATE_START", tenant_id=context.tenant_id, tool_name=tool_id, input=args, db=db, **create_context)
                 _log_tool("GOOGLE_CALENDAR_CREATE_EVENT_INPUT", tenant_id=context.tenant_id, tool_name=tool_id, input=args, db=db, **create_context)
                 result = service.create_event(**args)
                 action = "create_event"
-            elif tool_id == "google_calendar_list_events":
+            elif tool_id in {"google_calendar_list_events", "calendar.get_appointment"}:
                 result = service.list_events(**args)
                 action = "list_events"
-            elif tool_id == "google_calendar_check_availability":
+            elif tool_id in {"google_calendar_check_availability", "calendar.get_availability"}:
                 result = service.check_availability(**args)
                 action = "check_availability"
-            elif tool_id == "google_calendar_delete_event":
+            elif tool_id in {"google_calendar_delete_event", "calendar.cancel_appointment"}:
                 result = service.delete_event(str(args.get("event_id") or args.get("id") or ""))
                 action = "delete_event"
+            elif tool_id == "calendar.reschedule_appointment":
+                event_id = str(args.get("event_id") or args.get("id") or "")
+                result = service.update_event(event_id, **{key: value for key, value in args.items() if key not in {"event_id", "id"}})
+                action = "update_event"
             else:
                 result = {"ok": False, "message": "Ferramenta Google Calendar não encontrada."}
                 action = "unknown"

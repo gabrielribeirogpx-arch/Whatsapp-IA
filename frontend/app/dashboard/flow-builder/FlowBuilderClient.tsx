@@ -114,6 +114,7 @@ type NodePaletteGroup = { id: 'communication' | 'ai' | 'logic' | 'actions' | 'in
 type FlowListOption = { id: string; name?: string | null; created_at?: string | null; is_active?: boolean; status?: string | null; is_published?: boolean | null; published_version_id?: string | null; flow_version_id?: string | null; version_id?: string | null };
 type MCPServerOption = { id: string; name?: string | null; is_enabled?: boolean };
 type MCPToolOption = { id: string; server_id?: string | null; tool_name?: string | null; display_name?: string | null; description?: string | null; input_schema?: Record<string, unknown> | null; is_enabled?: boolean; server_name?: string | null; metadata?: Record<string, unknown> | null };
+type MCPConnectionOption = { id: string; name: string; status: string; supports_mcp_tools: boolean };
 type SubflowToolDraft = Record<string, unknown> & {
   tool_id?: string;
   label?: string;
@@ -2099,14 +2100,22 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
 
     const loadFlows = async () => {
       try {
-        const [data, mcpServersData, mcpToolsData] = await Promise.all([
+        const [data, mcpServersData, mcpToolsData, mcpConnectionsData] = await Promise.all([
           listFlows() as Promise<FlowListOption[]>,
           apiFetch('/api/mcp/servers').then((response) => parseApiResponse<MCPServerOption[]>(response)).catch(() => []),
           apiFetch('/api/mcp/tools').then((response) => parseApiResponse<MCPToolOption[]>(response)).catch(() => []),
+          apiFetch('/api/mcp/connections').then((response) => parseApiResponse<MCPConnectionOption[]>(response)).catch(() => []),
         ]);
         const safeFlows = Array.isArray(data) ? data : [];
         const serverNames = new Map((Array.isArray(mcpServersData) ? mcpServersData : []).map((server) => [server.id, server.name || 'Integração MCP']));
-        const safeMcpTools = filterGoogleSheetsTools((Array.isArray(mcpToolsData) ? mcpToolsData : []).map((tool) => ({ ...tool, server_name: tool.server_name || serverNames.get(String(tool.server_id || '')) || 'Integração MCP' })));
+        const executableTools = (await Promise.all((Array.isArray(mcpConnectionsData) ? mcpConnectionsData : []).map(async (connection) => {
+          try {
+            const rows = await parseApiResponse<MCPToolOption[]>(await apiFetch(`/api/mcp/connections/${encodeURIComponent(connection.id)}/tools`));
+            return rows.map((tool) => ({ ...tool, server_id: connection.id, server_name: connection.name, is_enabled: connection.status === 'connected' && tool.is_enabled !== false }));
+          } catch { return []; }
+        }))).flat();
+        const internalRegistryTools = (Array.isArray(mcpToolsData) ? mcpToolsData : []).filter((tool) => !tool.server_id);
+        const safeMcpTools = filterGoogleSheetsTools([...internalRegistryTools, ...executableTools].map((tool) => ({ ...tool, server_name: tool.server_name || serverNames.get(String(tool.server_id || '')) || 'Integração MCP' })));
         if (!active) return;
         setFlows(safeFlows);
         setMcpTools(safeMcpTools);

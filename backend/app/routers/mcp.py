@@ -25,6 +25,7 @@ from app.tools.adapters.google_drive_tool_adapter import google_drive_tool_defin
 from app.tools.adapters.google_sheets_tool_adapter import google_sheets_tool_definitions
 from app.tools.adapters.suitable_tool_adapter import suitable_tool_definitions
 from app.services.tenant_service import get_current_tenant
+from app.services.executable_connection_service import list_connection_tools, list_executable_connections
 
 router = APIRouter(prefix="/api/mcp", tags=["mcp"])
 
@@ -110,6 +111,22 @@ def _mcp_error(exc: MCPError) -> HTTPException:
 @router.get("/servers")
 def get_servers(tenant: Tenant = Depends(get_current_tenant), db: Session = Depends(get_db)):
     return [_server_out(row) for row in list_mcp_servers(db, tenant.id)]
+
+
+@router.get("/connections")
+def get_executable_connections(tenant: Tenant = Depends(get_current_tenant), db: Session = Depends(get_db)):
+    return list_executable_connections(db, tenant.id)
+
+
+@router.get("/connections/{connection_id}/tools")
+def get_connection_tools(connection_id: str, tenant: Tenant = Depends(get_current_tenant), db: Session = Depends(get_db)):
+    tools = list_connection_tools(db, tenant.id, connection_id)
+    if not tools:
+        # Empty tool lists and foreign/non-existent handles are deliberately indistinguishable.
+        known = any(item["id"] == connection_id for item in list_executable_connections(db, tenant.id))
+        if not known:
+            raise HTTPException(status_code=404, detail="Conexão executável não encontrada.")
+    return tools
 
 
 @router.post("/servers", status_code=201)

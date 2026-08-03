@@ -14,6 +14,9 @@ from sqlalchemy import select
 from app.flow_v2.contracts import FlowV2EventType
 from app.flow_v2.executors.base_executor import BaseNodeExecutor, NodeExecutionResult
 from app.models.tenant_mcp import TenantMCPServer, TenantMCPTool
+from app.models.integration_connection import IntegrationConnection
+from app.tools.adapters.google_calendar_tool_adapter import GoogleCalendarToolAdapter, GOOGLE_CALENDAR_TOOL_IDS, google_calendar_tool_definitions
+from app.tools.context import ToolContext
 from app.services.mcp_service import MCPError, call_mcp_tool
 
 logger = logging.getLogger(__name__)
@@ -78,10 +81,47 @@ class MCPToolNodeExecutor(BaseNodeExecutor):
             connection_id = str(data.get("connection_id") or "")
             if not connection_id:
                 raise MCPNodeError("MCP_CONNECTION_NOT_FOUND", "A conexão MCP não foi encontrada.")
+            connection_kind, separator, raw_connection_id = connection_id.partition(":")
+            if not separator:
+                connection_kind, raw_connection_id = "mcp", connection_id
             try:
-                parsed_connection_id = uuid.UUID(connection_id)
+                parsed_connection_id = uuid.UUID(raw_connection_id)
             except ValueError as exc:
                 raise MCPNodeError("MCP_CONNECTION_NOT_FOUND", "A conexão MCP não foi encontrada.") from exc
+            if connection_kind == "integration":
+                integration = db.execute(select(IntegrationConnection).where(
+                    IntegrationConnection.id == parsed_connection_id,
+                    IntegrationConnection.tenant_id == session.tenant_id,
+                    IntegrationConnection.provider == "google_calendar",
+                    IntegrationConnection.status == "active",
+                )).scalars().first()
+                if integration is None:
+                    raise MCPNodeError("MCP_CONNECTION_UNAUTHORIZED", "A integração não está autorizada para este workspace.")
+                if tool_name not in GOOGLE_CALENDAR_TOOL_IDS:
+                    raise MCPNodeError("MCP_TOOL_NOT_FOUND", "A ferramenta não está disponível nesta integração.")
+                definitions = {item["tool_name"]: item for item in google_calendar_tool_definitions(connected=True)}
+                tool_definition = definitions[tool_name]
+                classification = str(tool_definition["metadata"].get("classification") or "READ").upper()
+                if classification in {"WRITE", "DESTRUCTIVE"} and data.get("allow_external_write") is not True:
+                    raise MCPNodeError("MCP_CONNECTION_UNAUTHORIZED", "Esta ação exige confirmação explícita para alterar dados externos.")
+                if classification == "DESTRUCTIVE" and data.get("destructive_confirmed") is not True:
+                    raise MCPNodeError("MCP_CONNECTION_UNAUTHORIZED", "A ação destrutiva exige confirmação explícita.")
+                arguments = self._render(data.get("arguments") or {}, db, snapshot=snapshot, session=session, runtime_input=runtime_input, node_id=node_id)
+                if not isinstance(arguments, dict):
+                    raise MCPNodeError("MCP_ARGUMENT_VALIDATION_FAILED", "Os argumentos MCP devem formar um objeto JSON.")
+                result = GoogleCalendarToolAdapter(db).execute(tool_name, arguments, ToolContext(tenant_id=session.tenant_id))
+                if not result.success:
+                    raise MCPNodeError("MCP_TOOL_EXECUTION_FAILED", "A integração não concluiu a execução.", True)
+                output = result.structured_content if result.structured_content is not None else result.output
+                output = safe_get_path(output, data.get("result_path")) if data.get("result_path") else output
+                variables = dict(getattr(session, "variables", None) or {})
+                variables[str(data["output_variable"])] = output
+                session.variables = variables
+                db.add(session); db.flush()
+                handle = "success"
+                raise StopIteration
+            if connection_kind != "mcp":
+                raise MCPNodeError("MCP_CONNECTION_NOT_FOUND", "A conexão MCP não foi encontrada.")
             server = db.execute(select(TenantMCPServer).where(TenantMCPServer.id == parsed_connection_id, TenantMCPServer.tenant_id == session.tenant_id)).scalars().first()
             if server is None or not server.is_enabled:
                 raise MCPNodeError("MCP_CONNECTION_UNAUTHORIZED", "A conexão MCP não está autorizada para este workspace.")
@@ -131,6 +171,8 @@ class MCPToolNodeExecutor(BaseNodeExecutor):
                 db.add(session); db.flush()
                 handle = "success"
                 break
+        except StopIteration:
+            pass
         except MCPNodeError as exc:
             handle = "timeout" if exc.code == "MCP_TIMEOUT" else "error"
             variables = dict(getattr(session, "variables", None) or {})
