@@ -35,7 +35,7 @@ type CompactFlowNodeProps = {
   selected?: boolean;
   running?: boolean;
   title: string;
-  emoji: string;
+  emoji: ReactNode;
   badge: string;
   badgeTitle?: string;
   badgeTone: { background: string; color: string };
