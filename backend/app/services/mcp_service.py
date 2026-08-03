@@ -228,7 +228,9 @@ def discover_mcp_tools(db: Session, tenant_id: uuid.UUID, server_id: uuid.UUID) 
 def call_mcp_tool(db: Session, tenant_id: uuid.UUID, tool_id: uuid.UUID | str, arguments: dict[str, Any] | None, timeout_seconds: int = MAX_TIMEOUT_SECONDS, budget: ExecutionBudget | None = None) -> dict[str, Any]:
     started = time.monotonic()
     trace = TraceContext(tenant_id=str(tenant_id))
-    record_event(db, trace, TraceEventType.MCP_CALLED, metadata={"tool_id": str(tool_id), "arguments": arguments})
+    # Arguments can contain clinical/contact data. Observability records only
+    # shape information, never values or credentials.
+    record_event(db, trace, TraceEventType.MCP_CALLED, metadata={"tool_id": str(tool_id), "argument_keys": sorted(str(key)[:80] for key in (arguments or {}).keys())})
     if budget is not None:
         try:
             budget.consume_mcp_call()

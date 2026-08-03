@@ -28,6 +28,7 @@ from app.flow_v2.executors.message_executor import (
 )
 from app.flow_v2.executors.rag_executor import AiRagNodeExecutor
 from app.flow_v2.executors.data_collection_executor import RuntimeV2DataCollectionExecutor
+from app.flow_v2.executors.mcp_tool_executor import MCPToolNodeExecutor
 
 __all__ = [
     "NodeExecutionResult", "NodeExecutor", "BaseNodeExecutor",
@@ -36,4 +37,5 @@ __all__ = [
     "AiResponseNodeExecutor", "AiAgentNodeExecutor", "AiDispatcherNodeExecutor", "AiGreetingNodeExecutor", "AiCalendarAgentNodeExecutor", "AiSafeFallbackNodeExecutor", "AiSupervisorNodeExecutor",
     "AiSummaryNodeExecutor", "AiStructuredNodeExecutor", "AiClassificationNodeExecutor", "AiExtractionNodeExecutor", "AiSystemNodeExecutor",
     "extract_message_text_from_node", "calculate_typing_delay_seconds", "RuntimeV2DataCollectionExecutor",
+    "MCPToolNodeExecutor",
 ]
