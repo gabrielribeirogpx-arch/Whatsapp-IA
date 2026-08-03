@@ -10,6 +10,8 @@ from app.flow_v2.delay_contract import normalize_delay_nodes
 from app.flow_v2.graph_validator import FlowV2GraphValidator, GraphValidationResult
 from app.flow_v2.node_handle_contract import migrate_edge_handles
 from app.flow_v2.snapshot import build_transitions_from_edges, canonical_hash
+from app.flow_v2.node_handle_contract import migrate_legacy_edge_handles
+from app.flow_v2.node_handle_contract import canonical_node_handles, normalize_handle
 
 V2_SNAPSHOT_SCHEMA_VERSION = 1
 
@@ -745,7 +747,7 @@ class FlowV2Publisher:
         self, *, nodes: list[dict[str, Any]] | None, edges: list[dict[str, Any]] | None
     ) -> FlowV2PublishResult:
         source_nodes = copy.deepcopy(nodes if isinstance(nodes, list) else [])
-        source_edges = copy.deepcopy(edges if isinstance(edges, list) else [])
+        source_edges = migrate_legacy_edge_handles(copy.deepcopy(edges if isinstance(edges, list) else []))
         logger.info(
             "[FLOW_V2 PUBLISH INPUT] source_nodes_count=%s source_edges_count=%s source_edge_ids_preview=%s edge_origin=publisher_input",
             len(source_nodes),
@@ -761,6 +763,23 @@ class FlowV2Publisher:
             len(nodes_payload),
             len(edges_payload),
             [str(edge.get("id")) if isinstance(edge, dict) and edge.get("id") is not None else None for edge in edges_payload[:10]],
+        )
+        nodes_by_id = {
+            str(node.get("id")): node
+            for node in nodes_payload
+            if isinstance(node, dict) and node.get("id") not in (None, "")
+        }
+        logger.info(
+            "[FLOW_V2 HANDLE CONTRACT] nodes=%s edges=%s",
+            _compact_json({node_id: {"source": sorted(canonical_node_handles(node)[0]), "target": sorted(canonical_node_handles(node)[1])} for node_id, node in nodes_by_id.items()}),
+            _compact_json([
+                {
+                    "id": edge.get("id"), "source": edge.get("source"), "target": edge.get("target"),
+                    "sourceHandle": normalize_handle(edge.get("sourceHandle") or edge.get("source_handle")) or "default",
+                    "targetHandle": normalize_handle(edge.get("targetHandle") or edge.get("target_handle")) or "default",
+                }
+                for edge in edges_payload if isinstance(edge, dict)
+            ]),
         )
         start_node_ids = self.validator._start_node_ids(nodes_payload)
         logger.info(

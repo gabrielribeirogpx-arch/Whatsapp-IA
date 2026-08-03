@@ -1,4 +1,8 @@
+<<<<<<< HEAD
+import { getCanonicalNodeHandles, normalizeLegacyHandle } from './nodeHandleContract';
+=======
 import { getNodeHandleContract, normalizeLegacyHandle } from './nodeHandleContract';
+>>>>>>> origin/main
 
 export type FlowDiagnosticNode = {
   id: string;
@@ -32,10 +36,16 @@ export type EdgeDiagnostic = {
   reason: EdgeDiagnosticReason;
 };
 
+<<<<<<< HEAD
+const normalizeHandle = (value: unknown) => String(value ?? '').trim().toLowerCase();
+
+export const getNodeAvailableHandles = getCanonicalNodeHandles;
+=======
 export const getNodeAvailableHandles = (node: FlowDiagnosticNode) => {
   const contract = getNodeHandleContract(node);
   return { source: new Set(contract.sourceHandles), target: new Set(contract.targetHandles) };
 };
+>>>>>>> origin/main
 
 /** Validates the persisted edge list without silently dropping stale references. */
 export const diagnoseFlowEdges = (nodes: FlowDiagnosticNode[], edges: FlowDiagnosticEdge[]): EdgeDiagnostic[] => {
@@ -47,10 +57,15 @@ export const diagnoseFlowEdges = (nodes: FlowDiagnosticNode[], edges: FlowDiagno
     const target = String(edge.target || '');
     const sourceNode = nodesById.get(source);
     const targetNode = nodesById.get(target);
+<<<<<<< HEAD
+    const sourceHandle = normalizeLegacyHandle(edge.sourceHandle ?? edge.data?.sourceHandle ?? edge.data?.source_handle) || 'default';
+    const targetHandle = normalizeLegacyHandle(edge.targetHandle ?? edge.data?.targetHandle ?? edge.data?.target_handle) || 'default';
+=======
     let sourceHandle = normalizeLegacyHandle(edge.sourceHandle ?? edge.data?.sourceHandle ?? edge.data?.source_handle);
     let targetHandle = normalizeLegacyHandle(edge.targetHandle ?? edge.data?.targetHandle ?? edge.data?.target_handle);
     if (!sourceHandle && sourceNode && getNodeHandleContract(sourceNode).sourceHandles.join() === 'default') sourceHandle = 'default';
     if (!targetHandle && targetNode && getNodeHandleContract(targetNode).targetHandles.join() === 'default') targetHandle = 'default';
+>>>>>>> origin/main
     const signature = [source, target, sourceHandle, targetHandle].join('\u0000');
     let reason: EdgeDiagnosticReason | null = null;
     let handle = sourceHandle || targetHandle || 'default';
@@ -71,6 +86,16 @@ export const diagnoseFlowEdges = (nodes: FlowDiagnosticNode[], edges: FlowDiagno
     return reason ? [{ edgeId: String(edge.id || `edge-${edgeIndex}`), edgeIndex, source, target, handle, reason }] : [];
   });
 };
+
+/** Migrate only named legacy aliases. Missing MCP handles remain missing/default. */
+export const migrateLegacyEdgeHandles = <T extends FlowDiagnosticEdge>(edges: T[]): T[] => edges.map((edge) => {
+  const rawSource = edge.sourceHandle ?? edge.data?.sourceHandle ?? edge.data?.source_handle;
+  const rawTarget = edge.targetHandle ?? edge.data?.targetHandle ?? edge.data?.target_handle;
+  const sourceHandle = normalizeLegacyHandle(rawSource);
+  const targetHandle = normalizeLegacyHandle(rawTarget);
+  if (sourceHandle === normalizeHandle(rawSource) && targetHandle === normalizeHandle(rawTarget)) return edge;
+  return { ...edge, ...(sourceHandle ? { sourceHandle } : {}), ...(targetHandle ? { targetHandle } : {}), data: { ...(edge.data || {}), ...(sourceHandle ? { sourceHandle } : {}), ...(targetHandle ? { targetHandle } : {}) } };
+});
 
 /**
  * Rebuilds handle availability from the current nodes and returns the same edge

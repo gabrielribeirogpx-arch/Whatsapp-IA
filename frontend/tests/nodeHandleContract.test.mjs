@@ -7,6 +7,22 @@ const source = readFileSync(new URL('../lib/nodeHandleContract.ts', import.meta.
 const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText;
 const module = { exports: {} };
 vm.runInNewContext(compiled, { module, exports: module.exports });
+<<<<<<< HEAD
+const { getCanonicalNodeHandles, normalizeLegacyHandle } = module.exports;
+
+const handles = (type, data = {}) => [...getCanonicalNodeHandles({ type, data }).source].sort();
+assert.deepEqual(handles('mcp_tool'), ['error', 'success', 'timeout']);
+assert.deepEqual(handles('condition'), ['false', 'true']);
+assert.deepEqual(handles('choice_dynamic'), ['default']);
+assert.deepEqual(handles('message'), ['default']);
+assert.deepEqual(handles('action'), ['default']);
+assert.deepEqual(handles('data_collection'), ['cancel', 'invalid', 'success', 'timeout']);
+assert.equal(normalizeLegacyHandle('sucesso'), 'success');
+assert.equal(normalizeLegacyHandle('erro'), 'error');
+assert.equal(normalizeLegacyHandle('tempo_esgotado'), 'timeout');
+assert.equal(normalizeLegacyHandle(undefined), '', 'an absent MCP branch is never guessed as default by migration');
+console.log('canonical node handle contract checks passed');
+=======
 const { getNodeHandleContract, migrateEdgeHandles } = module.exports;
 const expected = {
   mcp_tool: [['success', 'error', 'timeout'], ['default']],
@@ -24,3 +40,4 @@ const migrated = migrateEdgeHandles(nodes, ['sucesso', 'erro', 'tempo_esgotado']
 assert.deepEqual(migrated.map((edge) => edge.sourceHandle), ['success', 'error', 'timeout']);
 assert.ok(migrated.every((edge) => edge.targetHandle == null || edge.targetHandle === 'default'));
 console.log('node handle contract regression checks passed');
+>>>>>>> origin/main

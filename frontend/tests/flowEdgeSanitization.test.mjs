@@ -4,13 +4,21 @@ import vm from 'node:vm';
 import ts from 'typescript';
 
 const source = readFileSync(new URL('../lib/flowEdgeDiagnostics.ts', import.meta.url), 'utf8');
+const contractSource = readFileSync(new URL('../lib/nodeHandleContract.ts', import.meta.url), 'utf8');
+const contractCompiled = ts.transpileModule(contractSource, { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText;
+const contractModule = { exports: {} };
+vm.runInNewContext(contractCompiled, { module: contractModule, exports: contractModule.exports });
 const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText;
 const module = { exports: {} };
 vm.runInNewContext(compiled, {
   module,
   exports: module.exports,
   require: (id) => {
+<<<<<<< HEAD
+    if (id === './nodeHandleContract') return contractModule.exports;
+=======
     if (id === './nodeHandleContract') { const aliases = { sucesso: 'success', erro: 'error', tempo_esgotado: 'timeout' }; return { normalizeLegacyHandle: (v) => aliases[String(v ?? '').toLowerCase()] || String(v ?? '').toLowerCase(), getNodeHandleContract: (node) => ({ sourceHandles: node.type === 'mcp_tool' ? ['success', 'error', 'timeout'] : node.type === 'choice_dynamic' ? ['selected'] : node.type === 'data_collection' ? ['success', 'cancel', 'timeout', 'invalid'] : node.type === 'condition' ? ['true', 'false'] : node.type === 'choice' ? (node.data.buttons || []).map((b) => b.handleId) : ['default'], targetHandles: ['default'] }) }; }
+>>>>>>> origin/main
     throw new Error(`Unexpected import: ${id}`);
   },
 });
