@@ -4,6 +4,7 @@ import { memo } from 'react';
 import type { NodeProps } from 'reactflow';
 import CompactFlowNode, { NodeStatus, truncateText } from './CompactFlowNode';
 import MCPMark from '../MCPMark';
+import { getNodeHandleContract } from '@/lib/nodeHandleContract';
 
 function MCPToolNode({ id, data, selected, isConnectable }: NodeProps) {
   const hasConnection = Boolean(data?.connection_id);
@@ -30,7 +31,10 @@ function MCPToolNode({ id, data, selected, isConnectable }: NodeProps) {
     </div>
   ) : <div className="mcp-node-empty"><span aria-hidden="true">⚠</span><strong>Configure uma conexão MCP</strong></div>;
 
-  return <CompactFlowNode className="mcp-tool-node" id={id} selected={selected} running={state === 'running'} isConnectable={isConnectable} title="MCP Tool" emoji={<MCPMark className="mcp-mark" />} badge="MCP" badgeTone={{ background: '#f5f3ff', color: '#6d5bd0' }} accent="#7667df" summary="" bodyContent={body} statusLabel={statusLabel} statusActive={configured && state !== 'error' && state !== 'timeout'} sourceHandles={[{ id: 'success', label: 'Success', color: '#16a34a' }, { id: 'error', label: 'Error', color: '#dc2626' }, { id: 'timeout', label: 'Timeout', color: '#eab308' }]} footer={<NodeStatus active={configured} label={statusLabel} />} />;
+  const contract = getNodeHandleContract({ type: 'mcp_tool', data });
+  const handleColors: Record<string, string> = { success: '#16a34a', error: '#dc2626', timeout: '#eab308' };
+
+  return <CompactFlowNode className="mcp-tool-node" id={id} selected={selected} running={state === 'running'} isConnectable={isConnectable} title="MCP Tool" emoji={<MCPMark className="mcp-mark" />} badge="MCP" badgeTone={{ background: '#f5f3ff', color: '#6d5bd0' }} accent="#7667df" summary="" bodyContent={body} statusLabel={statusLabel} statusActive={configured && state !== 'error' && state !== 'timeout'} sourceHandles={contract.sourceHandles.map((handle) => ({ id: handle, label: handle[0].toUpperCase() + handle.slice(1), color: handleColors[handle] }))} footer={<NodeStatus active={configured} label={statusLabel} />} />;
 }
 
 export default memo(MCPToolNode);
