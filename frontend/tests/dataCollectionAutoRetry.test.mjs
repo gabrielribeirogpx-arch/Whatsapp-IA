@@ -19,4 +19,4 @@ const validation = fs.readFileSync(new URL('../lib/flowValidation.ts', import.me
 assert.match(node, /autoRetry[\s\S]*RETRY_HANDLES[\s\S]*ATTEMPTS_EXHAUSTED_HANDLE/, 'retry mode selects adaptive handles');
 assert.match(node, /id: 'invalid'[\s\S]*label: 'Tentativas esgotadas'/, 'the persisted invalid handle gets a clearer retry label');
 assert.ok(node.includes('Executada apenas após atingir o número máximo de tentativas configurado.'), 'exhausted attempts output explains when it runs');
-assert.match(validation, /followsInvalid[\s\S]*!handles\.has\('invalid'\)/, 'validation requires the compatible invalid edge only for modes that expose it');
+assert.match(validation, /normalizeDataCollectionHandle[\s\S]*handles\.has\('success'\)/, 'validation uses the canonical migration helper without inventing an invalid edge');

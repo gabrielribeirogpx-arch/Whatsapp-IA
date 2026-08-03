@@ -1,3 +1,5 @@
+import { DATA_COLLECTION_HANDLES, normalizeDataCollectionEdges } from './dataCollectionHandles';
+
 export type HandleContractNode = { type?: string | null; data?: Record<string, unknown> | null };
 export type NodeHandleContract = { sourceHandles: string[]; targetHandles: string[] };
 
@@ -12,7 +14,7 @@ export function getNodeHandleContract(node: HandleContractNode): NodeHandleContr
   let sourceHandles: string[] = ['default'];
   if (type === 'mcp_tool') sourceHandles = ['success', 'error', 'timeout'];
   else if (type === 'choice_dynamic' || (type === 'choice' && data.options_mode === 'dynamic')) sourceHandles = ['selected'];
-  else if (type === 'data_collection') sourceHandles = ['success', 'cancel', 'timeout', 'invalid'];
+  else if (type === 'data_collection') sourceHandles = [...DATA_COLLECTION_HANDLES];
   else if (type === 'condition') sourceHandles = ['true', 'false'];
   else if (type === 'choice') {
     const options = Array.isArray(data.buttons) ? data.buttons : Array.isArray(data.options) ? data.options : [];
@@ -28,7 +30,7 @@ export const normalizeLegacyHandle = (value: unknown) => {
 
 /** Loading/import migration only. Multi-branch handles are never coerced to default. */
 export function migrateEdgeHandles<T extends { source: string; target: string; sourceHandle?: string | null; targetHandle?: string | null; data?: Record<string, unknown> | null }>(nodes: Array<HandleContractNode & { id?: string }>, edges: T[]): T[] {
-  return edges.map((edge) => {
+  return (normalizeDataCollectionEdges(nodes as any[], edges as any[]) as T[]).map((edge) => {
     const rawSource = edge.sourceHandle ?? edge.data?.sourceHandle ?? edge.data?.source_handle;
     const rawTarget = edge.targetHandle ?? edge.data?.targetHandle ?? edge.data?.target_handle;
     const sourceHandle = rawSource == null || rawSource === '' ? rawSource : normalizeLegacyHandle(rawSource);

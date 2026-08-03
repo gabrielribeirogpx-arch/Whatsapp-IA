@@ -1,6 +1,6 @@
 import type { Edge, Node } from 'reactflow';
 
-export const DATA_COLLECTION_HANDLES = ['success', 'invalid', 'cancel', 'timeout'] as const;
+export const DATA_COLLECTION_HANDLES = ['success', 'cancel', 'timeout', 'invalid'] as const;
 export type DataCollectionHandle = typeof DATA_COLLECTION_HANDLES[number];
 
 const LEGACY_ALIASES: Record<string, DataCollectionHandle> = { retry_exhausted: 'invalid' };

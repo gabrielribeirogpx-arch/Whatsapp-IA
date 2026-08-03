@@ -4,6 +4,8 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from app.flow_v2.data_collection_handles import HANDLES as DATA_COLLECTION_HANDLES, normalize_data_collection_edges
+
 LEGACY_HANDLE_ALIASES = {"sucesso": "success", "erro": "error", "tempo_esgotado": "timeout"}
 
 
@@ -25,7 +27,7 @@ def get_node_handle_contract(node: dict[str, Any]) -> dict[str, list[str]]:
     elif node_type == "choice_dynamic" or (node_type == "choice" and data.get("options_mode") == "dynamic"):
         sources = ["selected"]
     elif node_type == "data_collection":
-        sources = ["success", "cancel", "timeout", "invalid"]
+        sources = list(DATA_COLLECTION_HANDLES)
     elif node_type == "condition":
         sources = ["true", "false"]
     elif node_type == "choice":
@@ -39,7 +41,7 @@ def get_node_handle_contract(node: dict[str, Any]) -> dict[str, list[str]]:
 def migrate_edge_handles(nodes: list[dict[str, Any]], edges: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Rewrite legacy aliases at the load/save boundary without changing branch semantics."""
     migrated = []
-    for original in edges:
+    for original in normalize_data_collection_edges(nodes, edges):
         edge = dict(original)
         data = edge.get("data") if isinstance(edge.get("data"), dict) else {}
         source_raw = edge.get("sourceHandle", data.get("sourceHandle", data.get("source_handle")))

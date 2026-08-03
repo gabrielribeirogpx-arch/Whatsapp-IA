@@ -5,18 +5,18 @@ import { NodeProps, useUpdateNodeInternals } from 'reactflow';
 import CompactFlowNode from './CompactFlowNode';
 import { DATA_COLLECTION_HANDLES } from '@/lib/dataCollectionHandles';
 
-const CLASSIC_HANDLES = [
-  { id: 'success', label: '✓ Sucesso', color: '#16a34a' },
-  { id: 'invalid', label: 'Inválido', color: '#dc2626', optional: true, title: 'Esta saída é opcional. Caso nenhuma conexão seja criada, o Wazza executará automaticamente o comportamento padrão.' },
-  { id: 'cancel', label: 'Cancelar', color: '#64748b', optional: true, title: 'Esta saída é opcional. Caso nenhuma conexão seja criada, o Wazza executará automaticamente o comportamento padrão.' },
-  { id: 'timeout', label: 'Timeout', color: '#d97706', optional: true, title: 'Esta saída é opcional. Caso nenhuma conexão seja criada, o Wazza executará automaticamente o comportamento padrão.' },
-];
-
-// Keep a compile-time dependency on the serializer's canonical contract.
-const CANONICAL_HANDLE_IDS: readonly string[] = DATA_COLLECTION_HANDLES;
-if (CLASSIC_HANDLES.some(({ id }) => !CANONICAL_HANDLE_IDS.includes(id))) {
-  throw new Error('Data Collection renderer uses a non-canonical handle');
-}
+const HANDLE_PRESENTATION = {
+  success: { label: '✓ Sucesso', color: '#16a34a' },
+  invalid: { label: 'Inválido', color: '#dc2626' },
+  cancel: { label: 'Cancelar', color: '#64748b' },
+  timeout: { label: 'Timeout', color: '#d97706' },
+} as const;
+const OPTIONAL_TITLE = 'Esta saída é opcional. Caso nenhuma conexão seja criada, o Wazza executará automaticamente o comportamento padrão.';
+const CLASSIC_HANDLES = DATA_COLLECTION_HANDLES.map((id) => ({
+  id,
+  ...HANDLE_PRESENTATION[id],
+  ...(id === 'success' ? {} : { optional: true, title: OPTIONAL_TITLE }),
+}));
 
 const RETRY_HANDLES = CLASSIC_HANDLES.filter((handle) => handle.id !== 'invalid');
 const ATTEMPTS_EXHAUSTED_HANDLE = {
@@ -24,7 +24,7 @@ const ATTEMPTS_EXHAUSTED_HANDLE = {
   label: 'Tentativas esgotadas',
   color: '#dc2626',
   optional: true,
-  title: 'Esta saída é opcional. Caso nenhuma conexão seja criada, o Wazza executará automaticamente o comportamento padrão.',
+  title: 'Executada apenas após atingir o número máximo de tentativas configurado. Caso nenhuma conexão seja criada, o Wazza executará automaticamente o comportamento padrão.',
 };
 
 const TYPE_LABELS: Record<string, string> = {

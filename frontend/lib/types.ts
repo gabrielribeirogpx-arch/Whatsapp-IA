@@ -393,8 +393,8 @@ export type FlowEdgePayload = {
   id: string;
   source: string;
   target: string;
-  sourceHandle?: string;
-  targetHandle?: string;
+  sourceHandle?: string | null;
+  targetHandle?: string | null;
   label?: string;
   data?: {
     condition?: string;
