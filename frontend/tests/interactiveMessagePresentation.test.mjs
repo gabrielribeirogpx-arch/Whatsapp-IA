@@ -6,14 +6,15 @@ const bubble = readFileSync(new URL('../components/MessageBubble.tsx', import.me
 const sidebar = readFileSync(new URL('../components/Sidebar.tsx', import.meta.url), 'utf8');
 const styles = readFileSync(new URL('../app/globals.css', import.meta.url), 'utf8');
 
-assert.match(component, /button_reply: \{ icon: '🖱️', label: 'Botão selecionado' \}/, 'identifies button replies');
-assert.match(component, /list_reply: \{ icon: '📋', label: 'Opção da lista' \}/, 'identifies list replies');
+assert.match(component, /button_reply: \{ icon: '🤖', label: 'Resposta interativa' \}/, 'identifies button replies');
+assert.match(component, /list_reply: \{ icon: '📋', label: 'Resposta da lista' \}/, 'identifies list replies');
 assert.match(component, /interactive: \{ icon: '🖱️', label: 'Resposta interativa' \}/, 'supports generic interactive messages');
 assert.match(component, /<details className="wa-interactive-message-details">/, 'keeps technical data collapsed natively');
-assert.match(component, /<summary>ⓘ Ver detalhes<\/summary>/, 'provides an explicit details affordance');
-assert.match(component, /<span>Payload interno<\/span>[\s\S]*?<code>\{payload\}<\/code>/, 'only renders the payload inside details');
-assert.match(component, /<dt>Tipo:<\/dt>/);
-assert.match(component, /<dt>ID:<\/dt>/);
+assert.match(component, /developerMode && technicalFields\.length > 0/, 'hides technical data unless developer mode is active');
+assert.match(component, /<summary>🔧 Detalhes técnicos<\/summary>/, 'labels the affordance for developers');
+assert.doesNotMatch(component, /Ver detalhes|Payload interno/, 'does not expose the old operator-facing details copy');
+assert.match(component, /\['Flow', details\.flow\]/, 'supports optional flow metadata');
+assert.match(component, /\['Node', details\.node\]/, 'supports optional node metadata');
 assert.match(bubble, /interactiveType \|\| message\.technicalPayload/, 'recognizes current and legacy interactive messages');
 assert.match(bubble, /title=\{visibleText\}/, 'preserves the existing title fallback');
 assert.match(sidebar, /variant="preview"/, 'reuses the interactive component in conversation history');
