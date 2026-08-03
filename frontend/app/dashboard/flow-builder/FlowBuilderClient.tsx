@@ -41,6 +41,7 @@ import DelayNode from '@/components/flow/nodes/DelayNode';
 import MessageNode from '@/components/flow/nodes/MessageNode';
 import MediaNode from '@/components/flow/nodes/MediaNode';
 import MCPToolNode from '@/components/flow/nodes/MCPToolNode';
+import MCPToolEditor from '@/components/flow/MCPToolEditor';
 import CreateFlowModal from '@/components/flows/CreateFlowModal';
 import PublishMarketplaceTemplateModal from '@/components/flows/PublishMarketplaceTemplateModal';
 import AIStoreModal from '@/components/ai-store/AIStoreModal';
@@ -1485,32 +1486,7 @@ function FlowNodeEditorPanel({
           );
         })()}
 
-        {kind === 'mcp_tool' && (() => {
-          const connectionId = toText(draft.connection_id);
-          const serverOptions = Array.from(new Map(mcpTools.filter((tool) => tool.server_id).map((tool) => [String(tool.server_id), tool.server_name || `Servidor ${String(tool.server_id).slice(0, 8)}`])).entries());
-          const availableTools = mcpTools.filter((tool) => String(tool.server_id || '') === connectionId && tool.is_enabled !== false);
-          const selectedTool = availableTools.find((tool) => tool.tool_name === draft.tool_name);
-          const schema = (selectedTool?.input_schema || {}) as { properties?: Record<string, { type?: string; enum?: unknown[]; description?: string }>; required?: string[] };
-          const args = draft.arguments && typeof draft.arguments === 'object' ? draft.arguments as Record<string, unknown> : {};
-          const mode = draft.arguments_mode === 'json' ? 'json' : 'form';
-          return <>
-            <div className="flow-editor-info-card"><strong>MCP Tool</strong><span>Execução determinística de uma ferramenta autorizada.</span></div>
-            <section className="flow-editor-tab-section"><h4>1. Servidor MCP</h4>
-              <label className="flow-editor-field">Conexão MCP<select value={connectionId} onChange={(event) => onDraftChange({ connection_id: event.target.value, server_name: serverOptions.find(([id]) => id === event.target.value)?.[1] || '', tool_name: '', arguments: {} })}><option value="">Selecione uma conexão</option>{serverOptions.map(([id, name]) => <option key={id} value={id}>{name}</option>)}</select></label>
-              <Link href="/dashboard/ai/mcp" target="_blank">+ Adicionar conexão</Link>
-            </section>
-            <section className="flow-editor-tab-section"><h4>2. Ferramenta</h4>
-              <label className="flow-editor-field">Ferramenta<select value={toText(draft.tool_name)} disabled={!connectionId} onChange={(event) => { const tool = availableTools.find((item) => item.tool_name === event.target.value); const classification = String(tool?.metadata?.classification || 'READ').toUpperCase(); onDraftChange({ tool_name: event.target.value, arguments: {}, tool_classification: classification }); }}><option value="">Selecione uma ferramenta</option>{availableTools.map((tool) => <option key={tool.id} value={tool.tool_name || ''}>{tool.display_name || tool.tool_name}</option>)}</select></label>
-              {selectedTool?.description ? <small>{selectedTool.description}</small> : null}
-              {selectedTool ? <span className="flow-node-chip">{String(draft.tool_classification || 'READ') === 'DESTRUCTIVE' ? 'Ação destrutiva' : String(draft.tool_classification || 'READ') === 'WRITE' ? 'Escrita' : 'Leitura'}</span> : null}
-            </section>
-            <section className="flow-editor-tab-section"><h4>3. Argumentos</h4><div className="flow-editor-row"><button type="button" onClick={() => onDraftChange({ arguments_mode: 'form' })}>Formulário visual</button><button type="button" onClick={() => onDraftChange({ arguments_mode: 'json' })}>JSON avançado</button></div>
-              {mode === 'json' ? <label className="flow-editor-field">JSON<textarea value={JSON.stringify(args, null, 2)} onChange={(event) => { try { const value = JSON.parse(event.target.value); if (value && typeof value === 'object' && !Array.isArray(value)) onDraftChange({ arguments: value, arguments_json_error: '' }); } catch { onDraftChange({ arguments_json_error: 'JSON inválido' }); } }} />{draft.arguments_json_error ? <small className="flow-editor-error">{toText(draft.arguments_json_error)}</small> : null}</label> : Object.entries(schema.properties || {}).map(([name, property]) => <label className="flow-editor-field" key={name}>{name}{schema.required?.includes(name) ? ' *' : ''}{property.enum ? <select value={toText(args[name])} onChange={(event) => onDraftChange({ arguments: { ...args, [name]: event.target.value } })}><option value="">Selecione</option>{property.enum.map((value) => <option key={String(value)} value={String(value)}>{String(value)}</option>)}</select> : <input type={property.type === 'number' || property.type === 'integer' ? 'number' : 'text'} value={toText(args[name])} onChange={(event) => onDraftChange({ arguments: { ...args, [name]: property.type === 'number' || property.type === 'integer' ? Number(event.target.value) : event.target.value } })} placeholder={property.description || `{{${name}}}`} />}</label>)}
-            </section>
-            <section className="flow-editor-tab-section"><h4>4. Resultado</h4><label className="flow-editor-field">Variável de saída<input value={toText(draft.output_variable)} onChange={(event) => onDraftChange({ output_variable: event.target.value })} placeholder="available_slots" /></label><label className="flow-editor-field">Caminho do resultado<input value={toText(draft.result_path)} onChange={(event) => onDraftChange({ result_path: event.target.value })} placeholder="result.slots" /></label><label className="flow-editor-checkbox"><input type="checkbox" checked={draft.save_raw_response === true} onChange={(event) => onDraftChange({ save_raw_response: event.target.checked })} />Salvar resposta técnica completa</label></section>
-            <section className="flow-editor-tab-section"><h4>5. Execução</h4><label className="flow-editor-field">Timeout (segundos)<input type="number" min="1" max="60" value={Number(draft.timeout_seconds || 30)} onChange={(event) => onDraftChange({ timeout_seconds: Number(event.target.value) })} /></label><label className="flow-editor-checkbox"><input type="checkbox" checked={(draft.retry as any)?.enabled === true} onChange={(event) => onDraftChange({ retry: { ...((draft.retry as Record<string, unknown>) || {}), enabled: event.target.checked } })} />Retry automático</label><label className="flow-editor-field">Idempotency key<input value={toText(draft.idempotency_key)} onChange={(event) => onDraftChange({ idempotency_key: event.target.value })} placeholder="{{session.id}}:{{selected_slot_id}}" /></label>{['WRITE', 'DESTRUCTIVE'].includes(String(draft.tool_classification || '')) ? <label className="flow-editor-checkbox"><input type="checkbox" checked={draft.allow_external_write === true} onChange={(event) => onDraftChange({ allow_external_write: event.target.checked })} />Permitir que este node altere dados externos.</label> : null}{draft.tool_classification === 'DESTRUCTIVE' ? <label className="flow-editor-checkbox"><input type="checkbox" checked={draft.destructive_confirmed === true} onChange={(event) => onDraftChange({ destructive_confirmed: event.target.checked })} />Confirmo explicitamente esta ação destrutiva.</label> : null}</section>
-          </>;
-        })()}
+        {kind === 'mcp_tool' ? <MCPToolEditor draft={draft} tools={mcpTools} onDraftChange={onDraftChange} /> : null}
 
         {kind === 'action' && (() => {
           const selectedActionType = isActionType(toText(draft.action_type || draft.action)) ? (toText(draft.action_type || draft.action) as ActionType) : 'create_lead';
