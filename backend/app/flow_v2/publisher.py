@@ -8,6 +8,7 @@ from typing import Any
 
 from app.flow_v2.delay_contract import normalize_delay_nodes
 from app.flow_v2.graph_validator import FlowV2GraphValidator, GraphValidationResult
+from app.flow_v2.node_handle_contract import migrate_edge_handles
 from app.flow_v2.snapshot import build_transitions_from_edges, canonical_hash
 
 V2_SNAPSHOT_SCHEMA_VERSION = 1
@@ -47,6 +48,7 @@ def v2_snapshot_hash(nodes: list[dict[str, Any]], edges: list[dict[str, Any]]) -
     source_edges = copy.deepcopy(edges if isinstance(edges, list) else [])
     nodes_payload = _runtime_v2_nodes_payload(source_nodes)
     nodes_payload = _promote_single_root_ai_system_start(nodes_payload, source_edges)
+    source_edges = migrate_edge_handles(nodes_payload, source_edges)
     _assert_no_ai_system_internal_edges_in_canvas_edges(source_edges, ai_system_ids=_ai_system_ids(nodes_payload))
     _log_graph_bfs_before_validation(
         nodes=nodes_payload,
@@ -752,7 +754,7 @@ class FlowV2Publisher:
         )
         nodes_payload = _runtime_v2_nodes_payload(source_nodes)
         nodes_payload = _promote_single_root_ai_system_start(nodes_payload, source_edges)
-        edges_payload = source_edges
+        edges_payload = migrate_edge_handles(nodes_payload, source_edges)
         _assert_no_ai_system_internal_edges_in_canvas_edges(edges_payload, ai_system_ids=_ai_system_ids(nodes_payload))
         logger.info(
             "[FLOW_V2 PUBLISH PRE_VALIDATE] payload_nodes_count=%s payload_edges_count=%s payload_edge_ids_preview=%s edge_origin=runtime_payload",
