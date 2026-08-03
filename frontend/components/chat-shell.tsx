@@ -223,6 +223,7 @@ function toChatMessage(message: Message): ChatMessage {
     fromMe: message.role === "assistant",
     time,
     createdAt: message.created_at,
+    technicalPayload: message.technical_payload,
     status: message.role === "assistant" ? "read" : "delivered",
     mediaType: message.media_type || undefined,
     mediaUrl: message.media_url || undefined,

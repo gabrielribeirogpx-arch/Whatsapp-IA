@@ -234,7 +234,7 @@ def list_conversations(
                 .first()
             )
 
-            last_message = getattr(last_message_item, "text", "") if last_message_item else ""
+            last_message = getattr(last_message_item, "content", "") if last_message_item else ""
 
             response.append(
                 _conversation_out(

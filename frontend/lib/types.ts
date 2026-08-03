@@ -23,6 +23,7 @@ export type Message = {
   content: string;
   role: string;
   created_at: string;
+  technical_payload?: string | null;
   media_url?: string | null;
   media_type?: string | null;
   attachment_url?: string | null;
@@ -167,6 +168,7 @@ export type ChatMessage = {
   fromMe: boolean;
   time: string;
   createdAt?: string;
+  technicalPayload?: string | null;
   status?: 'sent' | 'delivered' | 'read';
   mediaType?: 'image' | 'document' | string;
   mediaUrl?: string | null;

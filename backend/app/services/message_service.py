@@ -131,17 +131,19 @@ def normalize_meta_message(payload: dict[str, Any]) -> list[dict[str, str | None
                 elif message_type == "interactive":
                     interactive = message.get("interactive", {}) if isinstance(message.get("interactive"), dict) else {}
                     interactive_type = sanitize_text(str(interactive.get("type", "")))
-                    if interactive_type == "button_reply":
-                        reply = interactive.get("button_reply", {}) if isinstance(interactive.get("button_reply"), dict) else {}
-                        interactive_reply_id = sanitize_text(str(reply.get("id", "")))
-                        interactive_reply_title = sanitize_text(str(reply.get("title", "")))
-                        text = interactive_reply_id
-                    elif interactive_type == "list_reply":
+                    button_reply = interactive.get("button_reply", {}) if isinstance(interactive.get("button_reply"), dict) else {}
+                    list_reply = interactive.get("list_reply", {}) if isinstance(interactive.get("list_reply"), dict) else {}
+                    # The ID remains the canonical runtime value.  Titles are
+                    # captured separately, in the same priority used by the
+                    # Inbox presentation layer, including less common legacy
+                    # payloads that expose a title directly on interactive.
+                    interactive_reply_id = sanitize_text(str(button_reply.get("id") or list_reply.get("id") or ""))
+                    interactive_reply_title = sanitize_text(str(
+                        button_reply.get("title") or list_reply.get("title") or interactive.get("title") or ""
+                    ))
+                    text = interactive_reply_id
+                    if interactive_type == "list_reply":
                         _log_meta_message_marker("[INTERACTIVE LIST DETECTED]", message=message)
-                        reply = interactive.get("list_reply", {}) if isinstance(interactive.get("list_reply"), dict) else {}
-                        interactive_reply_id = sanitize_text(str(reply.get("id", "")))
-                        interactive_reply_title = sanitize_text(str(reply.get("title", "")))
-                        text = interactive_reply_id
                         _log_meta_message_marker("[INTERACTIVE LIST PARSED]", message=message)
 
                 phone = sanitize_phone(message.get("from", "") or fallback_phone)

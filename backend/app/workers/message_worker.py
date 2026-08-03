@@ -482,6 +482,10 @@ def process_incoming_message(payload: dict[str, Any]) -> None:
             conversation_id=conversation.id,
             tenant_id=tenant.id,
             text=text,
+            interactive_title=(
+                str(parsed.get("interactive_reply_title") or parsed.get("selected_title") or "").strip()
+                or None
+            ),
             from_me=False,
             created_at=datetime.utcnow(),
         )
