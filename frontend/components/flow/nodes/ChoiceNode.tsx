@@ -16,6 +16,11 @@ type ChoiceNodeData = {
   onToggleStart?: (nodeId: string) => void;
   hasValidationError?: boolean;
   options_mode?: 'fixed' | 'dynamic';
+  options_variable?: string;
+  result_variable?: string;
+  label_field?: string;
+  icon_field?: string;
+  preview_options?: Array<Record<string, unknown>>;
 };
 
 const toHandleId = (value: string, fallback: string) => value.toLowerCase().trim().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '') || fallback;
@@ -31,6 +36,7 @@ export default function ChoiceNode({ id, data, selected, isConnectable }: NodePr
   }), [nodeData.buttons]);
 
   const handleSignature = buttons.map((button) => button.handleId).join('|');
+  const preview = (nodeData.preview_options || []).slice(0, 2);
 
   useEffect(() => {
     // React Flow measures handles separately from React's render. Re-measure only
@@ -57,13 +63,13 @@ export default function ChoiceNode({ id, data, selected, isConnectable }: NodePr
       id={id}
       selected={selected}
       running={nodeData.running}
-      title="Escolha"
-      emoji="🧭"
+      title={nodeData.options_mode === 'dynamic' ? 'Escolha Dinâmica' : 'Escolha'}
+      emoji={nodeData.options_mode === 'dynamic' ? '⚡' : '🧭'}
       badge={nodeData.options_mode === 'dynamic' ? 'DINÂMICO' : displayMode === 'list' ? 'LISTA' : 'BOTÕES'}
       badgeTone={{ background: '#fff7ed', color: '#c2410c' }}
       accent="linear-gradient(90deg, #f97316, #fb923c)"
-      summary={truncateText(nodeData.content, 50, 'Escolha uma opção')}
-      meta={displayMode === 'list' ? 'Lista WhatsApp' : 'Botões WhatsApp'}
+      summary={nodeData.options_mode === 'dynamic' ? `Origem: ${nodeData.options_variable || 'não definida'} ↓ Resultado: ${nodeData.result_variable || 'selected_slot'}` : truncateText(nodeData.content, 50, 'Escolha uma opção')}
+      meta={nodeData.options_mode === 'dynamic' ? `${preview.map((item) => `${String(item[nodeData.icon_field || 'icon'] || '📅')} ${String(item[nodeData.label_field || 'label'] || '')}`).join(' · ') || 'Preview após o primeiro retorno'}${(nodeData.preview_options?.length || 0) > 2 ? ` (+${nodeData.preview_options!.length - 2})` : ''}` : displayMode === 'list' ? 'Lista WhatsApp' : 'Botões WhatsApp'}
       choiceLayout
       isStart={nodeData.isStart}
       hasValidationError={nodeData.hasValidationError}
