@@ -17,6 +17,9 @@ class ConversationOut(BaseModel):
     assigned_user_id: uuid.UUID | None = None
     assigned_user_name: str | None = None
     last_message: str
+    last_message_type: str | None = None
+    last_message_payload: str | None = None
+    last_message_from_me: bool | None = None
     updated_at: datetime
 
     class Config:
@@ -29,6 +32,7 @@ class MessageOut(BaseModel):
     role: str
     created_at: datetime
     technical_payload: str | None = None
+    interactive_type: str | None = None
 
     class Config:
         from_attributes = True

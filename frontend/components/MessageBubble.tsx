@@ -1,5 +1,6 @@
 import { ChatMessage } from '../lib/types';
 import MessageMediaPreview, { getMessageMediaInfo, renderLinkedText } from './MessageMediaPreview';
+import InteractiveMessageBubble, { normalizeInteractiveType } from './InteractiveMessageBubble';
 
 type MessageBubbleProps = {
   message: ChatMessage;
@@ -15,17 +16,15 @@ export default function MessageBubble({ message }: MessageBubbleProps) {
   const status = message.status ?? 'sent';
   const media = getMessageMediaInfo(message);
   const visibleText = media?.caption ?? message.text;
+  const interactiveType = normalizeInteractiveType(message.interactiveType);
+  const isInteractive = Boolean(interactiveType || message.technicalPayload);
 
   return (
     <article className={`wa-message-bubble ${message.fromMe ? 'mine' : 'theirs'} ${message.isNew ? 'is-new' : ''}`}>
       {media && media.kind !== 'unknown' ? <MessageMediaPreview media={media} /> : null}
-      {visibleText ? <p>{renderLinkedText(visibleText)}</p> : null}
-      {message.technicalPayload ? (
-        <details className="wa-message-technical-details">
-          <summary>Detalhes</summary>
-          <div><strong>Payload:</strong> <code>{message.technicalPayload}</code></div>
-        </details>
-      ) : null}
+      {isInteractive && visibleText ? (
+        <InteractiveMessageBubble title={visibleText} type={interactiveType} payload={message.technicalPayload} />
+      ) : visibleText ? <p>{renderLinkedText(visibleText)}</p> : null}
       <time>
         {message.time}
         {message.fromMe ? (
