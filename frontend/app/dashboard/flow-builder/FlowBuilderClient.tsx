@@ -3,6 +3,7 @@
 import { FlowBuilderSkeleton } from '@/components/ui/loading';
 import { MobileBottomSheet } from '@/components/layout/MobileBottomSheet';
 import { buildMobileFlowSequence } from '@/lib/mobileFlowSequence';
+import { detectChoiceSchema, dynamicChoiceVariables } from '@/lib/dynamicChoice';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
@@ -781,16 +782,19 @@ function VariableChips({
   targetRef,
   value,
   onChange,
+  variables = [],
 }: {
   targetRef: React.RefObject<VariableInputElement>;
   value: string;
   onChange: (nextValue: string) => void;
+  variables?: string[];
 }) {
+  const dynamicVariables = variables.map((variable) => ({ icon: '⚡', label: variable, value: `{{${variable}}}` }));
   return (
     <div className="flow-variable-chips" aria-label="Variáveis rápidas">
       <span>Variáveis rápidas</span>
       <div className="flow-variable-chip-list">
-        {QUICK_VARIABLES.map((variable) => (
+        {[...QUICK_VARIABLES, ...dynamicVariables].map((variable) => (
           <button
             key={variable.value}
             type="button"
@@ -806,7 +810,7 @@ function VariableChips({
   );
 }
 
-function FlowVariablesHelp({ onClose }: { onClose: () => void }) {
+function FlowVariablesHelp({ onClose, variables = [] }: { onClose: () => void; variables?: string[] }) {
   return (
     <div className="flow-editor-variables-popover" role="dialog" aria-label="Variáveis disponíveis">
       <div className="flow-editor-variables-popover-header">
@@ -814,7 +818,7 @@ function FlowVariablesHelp({ onClose }: { onClose: () => void }) {
         <button type="button" onClick={onClose} aria-label="Fechar ajuda de variáveis">×</button>
       </div>
       <div className="flow-editor-variable-list">
-        {FLOW_TEMPLATE_VARIABLES.map((variable) => (
+        {[...FLOW_TEMPLATE_VARIABLES, ...variables.map((variable) => `{{${variable}}}`)].map((variable) => (
           <code key={variable}>{variable}</code>
         ))}
       </div>
@@ -866,6 +870,26 @@ function FlowNodeEditorPanel({
   const [agentAdvancedView, setAgentAdvancedView] = useState(false);
   const [agentQuickAddOpen, setAgentQuickAddOpen] = useState(false);
   const [agentDrawerItem, setAgentDrawerItem] = useState<{ title: string; icon: string; description: string; config?: unknown; variables?: string; limits?: string } | null>(null);
+
+  const dynamicVariables = useMemo(() => allNodes.flatMap((item) => {
+    const data = (item.data || {}) as Record<string, unknown>;
+    if (data.options_mode !== 'dynamic') return [];
+    const schema = Array.isArray(data.detected_schema) ? data.detected_schema.map(String) : [];
+    return dynamicChoiceVariables(toText(data.result_variable || 'selected_slot'), schema);
+  }), [allNodes]);
+
+  const variableSamples = useMemo(() => new Map(allNodes.flatMap((item) => {
+    const data = (item.data || {}) as Record<string, unknown>;
+    const variable = toText(data.output_variable || data.result_variable || data.variable_name).trim();
+    const sample = data.output_example ?? data.sample_output ?? data.preview_data ?? data.preview_options;
+    return variable && sample !== undefined ? [[variable, sample] as const] : [];
+  })), [allNodes]);
+  const mcpListSource = useMemo(() => allNodes.map((item) => ({ data: (item.data || {}) as Record<string, unknown>, kind: getBuilderNodeKind(item) })).find(({ data, kind }) => kind === 'mcp_tool' && detectChoiceSchema(data.output_example ?? data.sample_output ?? data.preview_data).records.length > 0), [allNodes]);
+
+  const configureDynamicChoice = (variable: string, sample = variableSamples.get(variable)) => {
+    const schema = detectChoiceSchema(sample);
+    onDraftChange({ options_mode: 'dynamic', options_variable: variable, label_field: schema.labelField, value_field: schema.valueField, description_field: schema.descriptionField, icon_field: schema.iconField, result_variable: toText(draft.result_variable || `selected_${variable.replace(/s$/, '') || 'slot'}`), preview_options: schema.records.slice(0, 5), detected_schema: schema.fields });
+  };
 
   useEffect(() => {
     setShowVariablesHelp(false);
@@ -1000,7 +1024,7 @@ function FlowNodeEditorPanel({
           <button type="button" className="flow-node-editor-close-button" onClick={onClose} aria-label="Fechar painel">×</button>
         </div>
       </div>
-      {showVariablesHelp && supportsVariables ? <FlowVariablesHelp onClose={() => setShowVariablesHelp(false)} /> : null}
+      {showVariablesHelp && supportsVariables ? <FlowVariablesHelp variables={dynamicVariables} onClose={() => setShowVariablesHelp(false)} /> : null}
 
       <div className="flow-node-editor-content">
         {isAiSystem ? (
@@ -1027,7 +1051,7 @@ function FlowNodeEditorPanel({
             <label className="flow-editor-field">
               Mensagem
               <textarea ref={messageContentRef} value={toText(draft.content)} onChange={(event) => onDraftChange({ content: event.target.value })} placeholder="Digite a mensagem..." />
-              <VariableChips targetRef={messageContentRef} value={toText(draft.content)} onChange={(next) => onDraftChange({ content: next })} />
+              <VariableChips variables={dynamicVariables} targetRef={messageContentRef} value={toText(draft.content)} onChange={(next) => onDraftChange({ content: next })} />
             </label>
             <label className="flow-editor-radio">
               <input
@@ -1077,14 +1101,18 @@ function FlowNodeEditorPanel({
               <textarea value={toText(draft.content || draft.body_text)} onChange={(event) => onDraftChange({ content: event.target.value, body_text: event.target.value })} placeholder="Escolha uma opção" />
             </label>
             {draft.options_mode === 'dynamic' ? <div className="flow-editor-repeatable"><strong>Origem das opções</strong>
-              <label className="flow-editor-field">Variável<input value={toText(draft.options_variable)} onChange={e => onDraftChange({ options_variable: e.target.value })} placeholder="appointments" /></label>
+              {mcpListSource ? <div className="flow-editor-info-card"><strong>Detectamos que o MCP retorna uma lista.</strong><p>Deseja configurar automaticamente este Choice?</p><button type="button" className="flow-editor-secondary-btn" onClick={() => configureDynamicChoice(toText(mcpListSource.data.output_variable || 'mcp_result'), mcpListSource.data.output_example ?? mcpListSource.data.sample_output ?? mcpListSource.data.preview_data)}>✓ Configurar automaticamente</button></div> : null}
+              <label className="flow-editor-field">Variável<input list={`choice-sources-${node.id}`} value={toText(draft.options_variable)} onChange={e => configureDynamicChoice(e.target.value)} placeholder="appointments" /></label>
+              <datalist id={`choice-sources-${node.id}`}>{Array.from(variableSamples.keys()).map((variable) => <option key={variable} value={variable} />)}</datalist>
               <label className="flow-editor-field">Campo do título<input value={toText(draft.label_field)} onChange={e => onDraftChange({ label_field: e.target.value })} placeholder="label" /></label>
               <label className="flow-editor-field">Campo do valor<input value={toText(draft.value_field)} onChange={e => onDraftChange({ value_field: e.target.value })} placeholder="id" /></label>
               <label className="flow-editor-field">Descrição (opcional)<input value={toText(draft.description_field)} onChange={e => onDraftChange({ description_field: e.target.value })} placeholder="description" /></label>
               <label className="flow-editor-field">Ícone (opcional)<input value={toText(draft.icon_field)} onChange={e => onDraftChange({ icon_field: e.target.value })} placeholder="icon" /></label>
               <label className="flow-editor-field">Máximo de opções<input type="number" min="1" max="10" value={Number(draft.max_options || 10)} onChange={e => onDraftChange({ max_options: Math.min(10, Math.max(1, Number(e.target.value) || 1)) })} /></label>
               <strong>Resultado</strong><label className="flow-editor-field">Salvar seleção em<input value={toText(draft.result_variable)} onChange={e => onDraftChange({ result_variable: e.target.value })} placeholder="selected_slot" /></label>
-              <div className="flow-editor-info-card"><strong>Preview</strong>{(Array.isArray(draft.preview_options) ? draft.preview_options as Array<Record<string, unknown>> : []).slice(0, Number(draft.max_options || 10)).length ? (draft.preview_options as Array<Record<string, unknown>>).slice(0, Number(draft.max_options || 10)).map((item, index) => <p key={index}>{toText(item[toText(draft.icon_field)])} {toText(item[toText(draft.label_field)])}</p>) : <p>Nenhuma opção disponível.</p>}</div>
+              <details className="flow-editor-info-card"><summary><strong>Estrutura detectada</strong></summary><p>Array</p><div><strong>Item</strong>{(Array.isArray(draft.detected_schema) ? draft.detected_schema : []).map((field) => <code key={String(field)}>{String(field)}</code>)}</div></details>
+              <div className="flow-editor-info-card"><strong>Preview</strong>{(Array.isArray(draft.preview_options) ? draft.preview_options as Array<Record<string, unknown>> : []).slice(0, 5).length ? (draft.preview_options as Array<Record<string, unknown>>).slice(0, 5).map((item, index) => <p key={index}><strong>{toText(item[toText(draft.icon_field)]) || '📅'} {toText(item[toText(draft.label_field)])}</strong>{toText(item[toText(draft.description_field)]) ? <><br /><small>{toText(item[toText(draft.description_field)])}</small></> : null}</p>) : <p>Nenhum dado disponível. O preview será exibido após o primeiro retorno do MCP.</p>}</div>
+              <div className="flow-editor-info-card"><strong>Resultado da seleção</strong><p>{toText(draft.result_variable || 'selected_slot')} ↓</p>{dynamicChoiceVariables(toText(draft.result_variable || 'selected_slot'), Array.isArray(draft.detected_schema) ? draft.detected_schema.map(String) : []).map((variable) => <code key={variable}>{variable}</code>)}{Array.isArray(draft.preview_options) && draft.preview_options[1] ? <pre>{JSON.stringify(draft.preview_options[1], null, 2)}</pre> : null}</div>
             </div> : <div className="flow-editor-repeatable">
               <strong>Opções {displayMode === 'buttons' ? `(${buttons.length}/3)` : `(${buttons.length})`}</strong>
               {buttons.map((button, index) => (
