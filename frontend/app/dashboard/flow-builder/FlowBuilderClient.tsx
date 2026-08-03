@@ -57,6 +57,8 @@ import { FlowAnalytics, FlowEdgePayload, FlowNodePayload, FlowVersionItem } from
 import { AGENT_SYSTEM_TEMPLATES, ENABLE_AGENT_SYSTEM_TEMPLATES, instantiateAgentSystemTemplate } from '@/lib/agentSystemTemplates';
 import { extractValidationIssues, validateFlowLocally } from '@/lib/flowValidation';
 import type { FlowValidationIssue } from '@/lib/flowValidation';
+import { diagnoseFlowEdges } from '@/lib/flowEdgeDiagnostics';
+import type { EdgeDiagnostic } from '@/lib/flowEdgeDiagnostics';
 import type { EdgeRoutingPreference } from '@/lib/edgeRouting';
 import { parseSimulatorError } from '@/lib/simulatorError';
 import type { SimulatorError, SimulatorIssue } from '@/lib/simulatorError';
@@ -1804,6 +1806,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
   const [validationWarnings, setValidationWarnings] = useState<FlowValidationIssue[]>([]);
   const [validationErrors, setValidationErrors] = useState<FlowValidationIssue[]>([]);
   const [highlightedNodeId, setHighlightedNodeId] = useState<string | null>(null);
+  const [edgeDiagnostics, setEdgeDiagnostics] = useState<EdgeDiagnostic[]>([]);
   const [operationError, setOperationError] = useState<string | null>(null);
   const [toastMessage, setToastMessage] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const [publishedSnapshot, setPublishedSnapshot] = useState<PublishedSnapshot | null>(null);
@@ -3312,11 +3315,44 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
     return () => window.clearInterval(intervalId);
   }, [loadRuntimeObservability, selectedFlowId]);
 
+  const focusEdgeDiagnostic = useCallback((issue: EdgeDiagnostic, graphNodes?: Node[], graphEdges?: Edge[]) => {
+    const currentNodes = graphNodes || rfInstance?.getNodes?.() || nodesRef.current;
+    const currentEdges = graphEdges || rfInstance?.getEdges?.() || [];
+    const edge = currentEdges.find((item) => item.id === issue.edgeId) || currentEdges[issue.edgeIndex];
+    const sourceNode = currentNodes.find((node) => node.id === edge?.source);
+    const targetNode = currentNodes.find((node) => node.id === edge?.target);
+    const centers = [sourceNode, targetNode].filter((node): node is Node => Boolean(node)).map((node) => ({
+      x: (node.positionAbsolute?.x ?? node.position.x) + ((node.width || 240) / 2),
+      y: (node.positionAbsolute?.y ?? node.position.y) + ((node.height || 120) / 2),
+    }));
+    if (centers.length) {
+      const center = centers.reduce((sum, point) => ({ x: sum.x + point.x, y: sum.y + point.y }), { x: 0, y: 0 });
+      rfInstance?.setCenter(center.x / centers.length, center.y / centers.length, { zoom: 1.35, duration: 400 });
+    }
+  }, [rfInstance]);
+
+  const handleDiagnoseFlow = useCallback(() => {
+    const currentNodes = rfInstance?.getNodes?.() || nodesRef.current;
+    const currentEdges = rfInstance?.getEdges?.() || [];
+    const issues = diagnoseFlowEdges(currentNodes, currentEdges);
+    setEdgeDiagnostics(issues);
+    if (issues.length) focusEdgeDiagnostic(issues[0], currentNodes, currentEdges);
+    else toast.success('Fluxo diagnosticado: nenhuma edge inválida.');
+    return issues;
+  }, [focusEdgeDiagnostic, rfInstance, toast]);
+
   const handleActivateFlow = useCallback(async () => {
     if (!selectedFlowId) return;
 
     const currentNodes = rfInstance?.getNodes?.() || [];
     const currentEdges = rfInstance?.getEdges?.() || [];
+    const structuralIssues = diagnoseFlowEdges(currentNodes, currentEdges);
+    if (structuralIssues.length > 0) {
+      setEdgeDiagnostics(structuralIssues);
+      focusEdgeDiagnostic(structuralIssues[0], currentNodes, currentEdges);
+      return;
+    }
+    setEdgeDiagnostics([]);
     const localIssues = validateFlowLocally(currentNodes, currentEdges);
     if (localIssues.length > 0) {
       setValidationErrors(localIssues);
@@ -3412,7 +3448,21 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
           }
           const detail = parsed?.detail;
           if (detail && typeof detail === 'object') {
-            detailedMessage = `${detail.code || 'VALIDATION_ERROR'}: ${detail.error || 'FLOW_INVALID'} edge=${detail.edge_id ?? detail.edge_index ?? 'n/a'} source=${detail.source ?? 'n/a'} sourceHandle=${detail.sourceHandle ?? 'n/a'} target=${detail.target ?? 'n/a'} targetHandle=${detail.targetHandle ?? 'n/a'} reasons=${Array.isArray(detail.reasons) ? detail.reasons.join(',') : 'n/a'}`;
+            const edgeReason = Array.isArray(detail.reasons) ? detail.reasons[0] : null;
+            if (edgeReason && (detail.edge_id != null || detail.edge_index != null)) {
+              const backendIssue: EdgeDiagnostic = {
+                edgeId: String(detail.edge_id || `edge-${detail.edge_index}`),
+                edgeIndex: Number(detail.edge_index || 0),
+                source: String(detail.source || ''),
+                target: String(detail.target || ''),
+                handle: String(String(edgeReason).startsWith('target_') ? detail.targetHandle || 'default' : detail.sourceHandle || 'default'),
+                reason: String(edgeReason).replace('_node_not_found', '_not_found') as EdgeDiagnostic['reason'],
+              };
+              setEdgeDiagnostics([backendIssue]);
+              focusEdgeDiagnostic(backendIssue);
+              return;
+            }
+            detailedMessage = `${detail.error || detail.message || 'Falha de validação do fluxo'} edge=${detail.edge_id ?? detail.edge_index ?? 'n/a'} source=${detail.source ?? 'n/a'} sourceHandle=${detail.sourceHandle ?? 'n/a'} target=${detail.target ?? 'n/a'} targetHandle=${detail.targetHandle ?? 'n/a'} reasons=${Array.isArray(detail.reasons) ? detail.reasons.join(',') : 'n/a'}`;
           }
         } catch {
           detailedMessage = body;
@@ -3436,7 +3486,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
       const message = error instanceof Error && error.message ? error.message : 'Não foi possível publicar o fluxo.';
       toast.error(`Falha ao publicar: ${message}`);
     }
-  }, [flowDirty, getCurrentSerializedFlow, handleSaveFlow, loadFlow, loadRuntimeObservability, rfInstance, selectedFlowId, toast]);
+  }, [flowDirty, focusEdgeDiagnostic, getCurrentSerializedFlow, handleSaveFlow, loadFlow, loadRuntimeObservability, rfInstance, selectedFlowId, toast]);
 
   const handleDeactivateFlow = useCallback(async () => {
     const response = await apiFetch('/api/flows/deactivate', {
@@ -3613,11 +3663,13 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
       visibleEdges.map((edge) => ({
         ...edge,
         data: { ...(edge.data || {}), __routingPreference: edgeRoutingPreference },
-        className: activeEdgeIds.includes(edge.id) ? 'flow-edge flow-edge-active' : 'flow-edge',
+        className: `${activeEdgeIds.includes(edge.id) ? 'flow-edge flow-edge-active' : 'flow-edge'}${edgeDiagnostics.some((issue) => issue.edgeId === edge.id) ? ' flow-edge-invalid' : ''}`,
         label: analyticsOverlayEnabled ? (() => { const metric = analyticsByEdge.get(`${edge.source}->${edge.target}:${edge.sourceHandle || ''}`) || analyticsByEdge.get(`${edge.source}->${edge.target}:default`) || analyticsByEdge.get(`${edge.source}->${edge.target}:`); return metric ? `${metric.rate_from_source}%` : edge.label; })() : edge.label,
-        style: analyticsOverlayEnabled ? { ...(edge.style || {}), strokeWidth: Math.min(6, 1 + Math.log10(((analyticsByEdge.get(`${edge.source}->${edge.target}:${edge.sourceHandle || ''}`) || analyticsByEdge.get(`${edge.source}->${edge.target}:default`) || analyticsByEdge.get(`${edge.source}->${edge.target}:`))?.count || 1)) * 2), opacity: 0.85 } : edge.style,
+        style: edgeDiagnostics.some((issue) => issue.edgeId === edge.id)
+          ? { ...(edge.style || {}), stroke: '#dc2626', strokeWidth: 4 }
+          : analyticsOverlayEnabled ? { ...(edge.style || {}), strokeWidth: Math.min(6, 1 + Math.log10(((analyticsByEdge.get(`${edge.source}->${edge.target}:${edge.sourceHandle || ''}`) || analyticsByEdge.get(`${edge.source}->${edge.target}:default`) || analyticsByEdge.get(`${edge.source}->${edge.target}:`))?.count || 1)) * 2), opacity: 0.85 } : edge.style,
       })),
-    [activeEdgeIds, analyticsByEdge, analyticsOverlayEnabled, edgeRoutingPreference, visibleEdges],
+    [activeEdgeIds, analyticsByEdge, analyticsOverlayEnabled, edgeDiagnostics, edgeRoutingPreference, visibleEdges],
   );
 
   const activeAiSystemNode = useMemo(() => nodes.find((node) => node.id === activeAiSystemNodeId) || null, [activeAiSystemNodeId, nodes]);
@@ -4053,6 +4105,15 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
                   )}
                   <button
                     type="button"
+                    className="flow-top-btn flow-top-btn-neutral"
+                    onClick={handleDiagnoseFlow}
+                    disabled={!selectedFlowId}
+                  >
+                    <AlertTriangle size={14} />
+                    Diagnosticar fluxo
+                  </button>
+                  <button
+                    type="button"
                     className="flow-top-btn flow-top-btn-primary"
                     onClick={handleActivateFlow}
                     disabled={!selectedFlowId || validationErrors.length > 0}
@@ -4080,6 +4141,18 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
             <div>Status: {runtimeInspector?.status || '—'}</div>
           </div>
         )}
+        {edgeDiagnostics.length > 0 && (() => {
+          const issue = edgeDiagnostics[0];
+          return (
+            <div className="flow-edge-diagnostic" role="alert" aria-label="Edge inválida">
+              <strong>Edge inválida</strong>
+              <span>source: {issue.source}</span>
+              <span>target: {issue.target}</span>
+              <span>handle: {issue.handle}</span>
+              <span>motivo: {issue.reason}</span>
+            </div>
+          );
+        })()}
         {validationErrors.length > 0 && (
           <div role="dialog" aria-label="Não foi possível ativar o fluxo" style={{ margin: '8px 0', padding: 12, border: '1px solid #fecaca', borderRadius: 8, background: '#fff1f2', maxWidth: 460 }}>
             <strong>Não foi possível ativar o fluxo</strong>
