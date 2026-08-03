@@ -510,6 +510,53 @@ def test_waiting_choice_with_row_id_transitions_to_target_node() -> None:
     assert any(event["payload"] == {"node_id": "choice", "row_id": "quero_planos"} for event in event_store.events)
 
 
+def test_terminal_flagged_data_collection_waits_then_consumes_success_transition(caplog) -> None:
+    """Regression: a stale terminal flag must not finish a collection checkpoint."""
+    raw_snapshot = {
+        "schema_version": 1,
+        "start_node_id": "appointment-date",
+        "nodes": [
+            {
+                "id": "appointment-date",
+                "type": "data_collection",
+                "is_terminal": True,
+                "data": {"variable_name": "appointment_date", "data_type": "text"},
+            },
+            {"id": "ask-name", "type": "message", "data": {"text": "Qual o nome da pessoa?"}},
+        ],
+        "edges": [
+            {
+                "id": "appointment-success",
+                "source": "appointment-date",
+                "sourceHandle": "success",
+                "target": "ask-name",
+            }
+        ],
+    }
+    executor, snapshot, _event_store, session, db = _executor(raw_snapshot)
+    session.current_node_id = "appointment-date"
+
+    with caplog.at_level(logging.INFO):
+        waiting = executor.handle_input(db, _input_with_id(snapshot, "wamid.choice"))
+        resumed = executor.handle_input(
+            db,
+            _input_with_text(snapshot, "wamid.appointment", "Segunda-feira às 11:00"),
+        )
+
+    assert waiting.status == FlowV2SessionStatus.WAITING
+    assert waiting.current_node_id == "appointment-date"
+    assert session.variables["appointment_date"] == "Segunda-feira às 11:00"
+    assert resumed.status == FlowV2SessionStatus.COMPLETED
+    assert resumed.effects == ({"type": "send_message", "text": "Qual o nome da pessoa?"},)
+    assert "event=RUNTIME_V2_DATA_COLLECTION_RECEIVED" in caplog.text
+    assert "event=RUNTIME_V2_DATA_COLLECTION_SAVE" in caplog.text
+    assert "event=RUNTIME_V2_DATA_COLLECTION_RESULT" in caplog.text
+    assert "event=RUNTIME_V2_DATA_COLLECTION_TRANSITION" in caplog.text
+    assert "event=RUNTIME_V2_DATA_COLLECTION_ENQUEUE" in caplog.text
+    assert "event=RUNTIME_V2_DATA_COLLECTION_MESSAGE_EXECUTION" in caplog.text
+    assert "transition_id=appointment-success source_handle=success next_node_id=ask-name" in caplog.text
+
+
 @pytest.mark.parametrize("middle_type", ["message", "condition", "action", None])
 def test_choice_reply_is_consumed_before_a_later_choice(middle_type) -> None:
     """A reply to Choice #1 must never be reused as the reply to Choice #2."""
