@@ -25,6 +25,7 @@ NATIVE_NODE_REGISTRY: dict[str, NativeNodeType] = {
     "condition": NativeNodeType(),
     "delay": NativeNodeType(),
     "action": NativeNodeType(),
+    "mcp_tool": NativeNodeType(),
     "media": NativeNodeType(),
     "cta_url": NativeNodeType(),
     "ai_rag": NativeNodeType(),

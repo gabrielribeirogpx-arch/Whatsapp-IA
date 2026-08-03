@@ -39,6 +39,7 @@ from app.flow_v2.executors import (
     calculate_typing_delay_seconds,
     extract_message_text_from_node,
     RuntimeV2DataCollectionExecutor,
+    MCPToolNodeExecutor,
 )
 from app.flow_v2.executors import _legacy as _legacy_executors
 
@@ -60,6 +61,7 @@ for _node_type, _executor in {
     "delay": DelayNodeExecutor,
     "condition": ConditionNodeExecutor,
     "action": ActionNodeExecutor,
+    "mcp_tool": MCPToolNodeExecutor,
     "media": MediaNodeExecutor,
     "cta_url": CtaUrlNodeExecutor,
     "cta_link": CtaUrlNodeExecutor,

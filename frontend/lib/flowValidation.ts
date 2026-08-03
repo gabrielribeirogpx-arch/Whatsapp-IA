@@ -35,6 +35,16 @@ export function validateFlowLocally(nodes: Node[], edges: Edge[]): FlowValidatio
       const handles = new Set(next.map((edge) => normalizeDataCollectionHandle(edge.sourceHandle ?? edge.data?.sourceHandle ?? edge.data?.source_handle)));
       if (!handles.has('success')) issues.push(issue('DATA_COLLECTION_SUCCESS_REQUIRED', 'A saída Sucesso precisa estar conectada.', node, 'connections'));
     }
+    if (type === 'mcp_tool') {
+      if (!String(data.connection_id || '').trim()) issues.push(issue('MCP_CONNECTION_REQUIRED', 'Selecione uma conexão MCP.', node, 'connection_id'));
+      if (!String(data.tool_name || '').trim()) issues.push(issue('MCP_TOOL_REQUIRED', 'Selecione uma ferramenta MCP.', node, 'tool_name'));
+      if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(String(data.output_variable || ''))) issues.push(issue('MCP_OUTPUT_INVALID', 'Defina uma variável de saída válida.', node, 'output_variable'));
+      const timeout = Number(data.timeout_seconds || 0); if (timeout < 1 || timeout > 60) issues.push(issue('MCP_TIMEOUT_INVALID', 'O timeout deve ficar entre 1 e 60 segundos.', node, 'timeout_seconds'));
+      const handles = new Set(next.map((edge) => String(edge.sourceHandle || edge.data?.sourceHandle || '').toLowerCase()));
+      if (!terminal && !handles.has('success')) issues.push(issue('MCP_SUCCESS_REQUIRED', 'Conecte a saída Sucesso ou marque o node como final.', node, 'connections'));
+      if (!terminal && !handles.has('error')) issues.push(issue('MCP_ERROR_REQUIRED', 'Conecte a saída Erro.', node, 'connections'));
+      if (String(data.tool_classification || '').toUpperCase() === 'DESTRUCTIVE' && (data.destructive_confirmed !== true || !String(data.idempotency_key || '').trim())) issues.push(issue('MCP_DESTRUCTIVE_CONFIRMATION_REQUIRED', 'Ação destrutiva exige confirmação e idempotency key.', node, 'destructive_confirmed'));
+    }
   }); return issues;
 }
 

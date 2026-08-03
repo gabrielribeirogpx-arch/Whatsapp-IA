@@ -18,7 +18,7 @@ import ReactFlow, {
 } from 'reactflow';
 import type { Connection, Edge, EdgeChange, Node, NodeChange, ReactFlowInstance } from 'reactflow';
 import 'reactflow/dist/style.css';
-import { BookOpen, CalendarDays, Check, ChevronDown, Clock, CornerDownRight, ExternalLink, FileDown, FileImage, FileText, GitBranch, HelpCircle, History, ListChecks, MessageSquare, RotateCcw, Route, Sparkles, Tags, Zap, AlertTriangle, ChevronRight, Plus, Save, MoreHorizontal, Play, GitFork, Waves } from 'lucide-react';
+import { BookOpen, CalendarDays, Check, ChevronDown, Clock, CornerDownRight, ExternalLink, FileDown, FileImage, FileText, GitBranch, HelpCircle, History, ListChecks, MessageSquare, RotateCcw, Route, Sparkles, Tags, Zap, AlertTriangle, ChevronRight, Plus, Save, MoreHorizontal, Play, GitFork, Waves, Plug } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 
 import ActionNode from '@/components/flow/nodes/ActionNode';
@@ -40,6 +40,7 @@ import CtaUrlNode from '@/components/flow/nodes/CtaUrlNode';
 import DelayNode from '@/components/flow/nodes/DelayNode';
 import MessageNode from '@/components/flow/nodes/MessageNode';
 import MediaNode from '@/components/flow/nodes/MediaNode';
+import MCPToolNode from '@/components/flow/nodes/MCPToolNode';
 import CreateFlowModal from '@/components/flows/CreateFlowModal';
 import PublishMarketplaceTemplateModal from '@/components/flows/PublishMarketplaceTemplateModal';
 import AIStoreModal from '@/components/ai-store/AIStoreModal';
@@ -71,6 +72,7 @@ const nodeTypes = {
   condition: ConditionNode,
   delay: DelayNode,
   action: ActionNode,
+  mcp_tool: MCPToolNode,
   media: MediaNode,
   cta_url: CtaUrlNode,
   ai_rag: AiRagNode,
@@ -103,10 +105,10 @@ const EDGE_ROUTING_OPTIONS: Array<{ value: EdgeRoutingPreference; label: string;
   { value: 'orthogonal', label: 'Ortogonal', description: 'Conexões em ângulos retos.', icon: CornerDownRight },
 ];
 
-type FlowNodeKind = 'message' | 'data_collection' | 'choice' | 'condition' | 'delay' | 'action' | 'media' | 'cta_url' | 'ai_rag' | 'ai_response' | 'ai_classification' | 'ai_extraction' | 'ai_summary' | 'ai_agent' | 'ai_supervisor' | 'ai_dispatcher' | 'ai_greeting' | 'ai_calendar_agent' | 'ai_safe_fallback' | 'ai_system';
+type FlowNodeKind = 'message' | 'data_collection' | 'choice' | 'condition' | 'delay' | 'action' | 'mcp_tool' | 'media' | 'cta_url' | 'ai_rag' | 'ai_response' | 'ai_classification' | 'ai_extraction' | 'ai_summary' | 'ai_agent' | 'ai_supervisor' | 'ai_dispatcher' | 'ai_greeting' | 'ai_calendar_agent' | 'ai_safe_fallback' | 'ai_system';
 type FlowConnection = Connection & { sourceHandle?: string | null };
 type NodePaletteItem = { kind: FlowNodeKind; label: string; icon: LucideIcon; description?: string };
-type NodePaletteGroup = { id: 'communication' | 'ai' | 'logic' | 'actions'; title: string; icon: LucideIcon; nodes: NodePaletteItem[] };
+type NodePaletteGroup = { id: 'communication' | 'ai' | 'logic' | 'actions' | 'integrations'; title: string; icon: LucideIcon; nodes: NodePaletteItem[] };
 
 type FlowListOption = { id: string; name?: string | null; created_at?: string | null; is_active?: boolean; status?: string | null; is_published?: boolean | null; published_version_id?: string | null; flow_version_id?: string | null; version_id?: string | null };
 type MCPServerOption = { id: string; name?: string | null; is_enabled?: boolean };
@@ -162,6 +164,8 @@ const getNodeAvailableHandles = (node: Pick<Node, 'type' | 'data'> | FlowNodePay
     });
   } else if (nodeType === 'data_collection') {
     DATA_COLLECTION_HANDLES.forEach((handle) => source.add(handle));
+  } else if (nodeType === 'mcp_tool') {
+    ['success', 'error', 'timeout'].forEach((handle) => source.add(handle));
   }
 
   return { source, target };
@@ -423,6 +427,12 @@ const NODE_GROUPS: NodePaletteGroup[] = [
     ],
   },
   {
+    id: 'integrations',
+    title: 'Integrações',
+    icon: Plug,
+    nodes: [{ kind: 'mcp_tool', label: 'MCP Tool', icon: Plug, description: 'Executa uma ferramenta MCP autorizada e determinística.' }],
+  },
+  {
     id: 'actions',
     title: 'Ações',
     icon: Zap,
@@ -437,6 +447,7 @@ const NODE_GROUPS_DEFAULT_OPEN: Record<NodePaletteGroup['id'], boolean> = {
   ai: true,
   logic: true,
   actions: true,
+  integrations: true,
 };
 type ChoiceConnectDebug = {
   nodeId: string;
@@ -497,6 +508,7 @@ const NODE_PRESETS: Record<FlowNodeKind, { label: string; type: string; data: Re
   condition: { label: 'Condição', type: 'condition', data: { condition: '' } },
   delay: { label: 'Delay', type: 'delay', data: { seconds: 3, show_typing: false } },
   action: { label: 'Ação', type: 'action', data: { action_type: 'create_lead', action: 'create_lead', params: {} } },
+  mcp_tool: { label: 'MCP Tool', type: 'mcp_tool', data: { connection_id: '', server_name: '', tool_name: '', arguments: {}, arguments_mode: 'form', output_variable: '', result_path: '', timeout_seconds: 30, retry: { enabled: false, max_attempts: 2, backoff_ms: 1000 }, save_raw_response: false, allow_external_write: false, destructive_confirmed: false, is_terminal: false } },
   media: { label: 'Mídia', type: 'media', data: { media_type: 'image', media_url: '', caption: '', filename: '' } },
   cta_url: { label: 'CTA / Link', type: 'cta_url', data: { content: '', text: '', button_text: '', url: '', is_terminal: false } },
   ai_rag: { label: 'IA / RAG', type: 'ai_rag', data: { after_answer_behavior: 'end_flow', instruction: 'Responda como atendente da prefeitura.', question: '{{last_message}}', top_k: 5, use_workspace_ai_settings: true, model_override: '', temperature: 0.2, max_tokens: 1200, knowledge_only: true, memory_enabled: true, memory_max_messages: 10, memory_max_chars: 4000, fallback_message: 'Não encontrei essa informação com segurança na base disponível. Quer que eu encaminhe para um atendente?', is_terminal: false } },
@@ -872,7 +884,7 @@ function FlowNodeEditorPanel({
     if (displayMode === 'buttons' && buttons.length >= 3) return;
     onDraftChange({ buttons: [...buttons, createChoiceButton(node.id, nextIndex)] });
   };
-  const supportsVariables = ['message', 'data_collection', 'choice', 'media', 'cta_url', 'condition', 'action', 'ai_rag', 'ai_response', 'ai_classification', 'ai_extraction', 'ai_summary', 'ai_agent', 'ai_supervisor', 'ai_system'].includes(kind);
+  const supportsVariables = ['message', 'data_collection', 'choice', 'media', 'cta_url', 'condition', 'action', 'mcp_tool', 'ai_rag', 'ai_response', 'ai_classification', 'ai_extraction', 'ai_summary', 'ai_agent', 'ai_supervisor', 'ai_system'].includes(kind);
   const isAiSystem = kind === 'ai_system';
   const publishedSubflowOptions = flows.filter((flow) => flow.id !== currentFlowId && isPublishedFlow(flow));
   const subflowTools = Array.isArray(draft.subflow_tools) ? (draft.subflow_tools as SubflowToolDraft[]) : [];
@@ -1471,6 +1483,33 @@ function FlowNodeEditorPanel({
               )}
             </>
           );
+        })()}
+
+        {kind === 'mcp_tool' && (() => {
+          const connectionId = toText(draft.connection_id);
+          const serverOptions = Array.from(new Map(mcpTools.filter((tool) => tool.server_id).map((tool) => [String(tool.server_id), tool.server_name || `Servidor ${String(tool.server_id).slice(0, 8)}`])).entries());
+          const availableTools = mcpTools.filter((tool) => String(tool.server_id || '') === connectionId && tool.is_enabled !== false);
+          const selectedTool = availableTools.find((tool) => tool.tool_name === draft.tool_name);
+          const schema = (selectedTool?.input_schema || {}) as { properties?: Record<string, { type?: string; enum?: unknown[]; description?: string }>; required?: string[] };
+          const args = draft.arguments && typeof draft.arguments === 'object' ? draft.arguments as Record<string, unknown> : {};
+          const mode = draft.arguments_mode === 'json' ? 'json' : 'form';
+          return <>
+            <div className="flow-editor-info-card"><strong>MCP Tool</strong><span>Execução determinística de uma ferramenta autorizada.</span></div>
+            <section className="flow-editor-tab-section"><h4>1. Servidor MCP</h4>
+              <label className="flow-editor-field">Conexão MCP<select value={connectionId} onChange={(event) => onDraftChange({ connection_id: event.target.value, server_name: serverOptions.find(([id]) => id === event.target.value)?.[1] || '', tool_name: '', arguments: {} })}><option value="">Selecione uma conexão</option>{serverOptions.map(([id, name]) => <option key={id} value={id}>{name}</option>)}</select></label>
+              <Link href="/dashboard/ai/mcp" target="_blank">+ Adicionar conexão</Link>
+            </section>
+            <section className="flow-editor-tab-section"><h4>2. Ferramenta</h4>
+              <label className="flow-editor-field">Ferramenta<select value={toText(draft.tool_name)} disabled={!connectionId} onChange={(event) => { const tool = availableTools.find((item) => item.tool_name === event.target.value); const classification = String(tool?.metadata?.classification || 'READ').toUpperCase(); onDraftChange({ tool_name: event.target.value, arguments: {}, tool_classification: classification }); }}><option value="">Selecione uma ferramenta</option>{availableTools.map((tool) => <option key={tool.id} value={tool.tool_name || ''}>{tool.display_name || tool.tool_name}</option>)}</select></label>
+              {selectedTool?.description ? <small>{selectedTool.description}</small> : null}
+              {selectedTool ? <span className="flow-node-chip">{String(draft.tool_classification || 'READ') === 'DESTRUCTIVE' ? 'Ação destrutiva' : String(draft.tool_classification || 'READ') === 'WRITE' ? 'Escrita' : 'Leitura'}</span> : null}
+            </section>
+            <section className="flow-editor-tab-section"><h4>3. Argumentos</h4><div className="flow-editor-row"><button type="button" onClick={() => onDraftChange({ arguments_mode: 'form' })}>Formulário visual</button><button type="button" onClick={() => onDraftChange({ arguments_mode: 'json' })}>JSON avançado</button></div>
+              {mode === 'json' ? <label className="flow-editor-field">JSON<textarea value={JSON.stringify(args, null, 2)} onChange={(event) => { try { const value = JSON.parse(event.target.value); if (value && typeof value === 'object' && !Array.isArray(value)) onDraftChange({ arguments: value, arguments_json_error: '' }); } catch { onDraftChange({ arguments_json_error: 'JSON inválido' }); } }} />{draft.arguments_json_error ? <small className="flow-editor-error">{toText(draft.arguments_json_error)}</small> : null}</label> : Object.entries(schema.properties || {}).map(([name, property]) => <label className="flow-editor-field" key={name}>{name}{schema.required?.includes(name) ? ' *' : ''}{property.enum ? <select value={toText(args[name])} onChange={(event) => onDraftChange({ arguments: { ...args, [name]: event.target.value } })}><option value="">Selecione</option>{property.enum.map((value) => <option key={String(value)} value={String(value)}>{String(value)}</option>)}</select> : <input type={property.type === 'number' || property.type === 'integer' ? 'number' : 'text'} value={toText(args[name])} onChange={(event) => onDraftChange({ arguments: { ...args, [name]: property.type === 'number' || property.type === 'integer' ? Number(event.target.value) : event.target.value } })} placeholder={property.description || `{{${name}}}`} />}</label>)}
+            </section>
+            <section className="flow-editor-tab-section"><h4>4. Resultado</h4><label className="flow-editor-field">Variável de saída<input value={toText(draft.output_variable)} onChange={(event) => onDraftChange({ output_variable: event.target.value })} placeholder="available_slots" /></label><label className="flow-editor-field">Caminho do resultado<input value={toText(draft.result_path)} onChange={(event) => onDraftChange({ result_path: event.target.value })} placeholder="result.slots" /></label><label className="flow-editor-checkbox"><input type="checkbox" checked={draft.save_raw_response === true} onChange={(event) => onDraftChange({ save_raw_response: event.target.checked })} />Salvar resposta técnica completa</label></section>
+            <section className="flow-editor-tab-section"><h4>5. Execução</h4><label className="flow-editor-field">Timeout (segundos)<input type="number" min="1" max="60" value={Number(draft.timeout_seconds || 30)} onChange={(event) => onDraftChange({ timeout_seconds: Number(event.target.value) })} /></label><label className="flow-editor-checkbox"><input type="checkbox" checked={(draft.retry as any)?.enabled === true} onChange={(event) => onDraftChange({ retry: { ...((draft.retry as Record<string, unknown>) || {}), enabled: event.target.checked } })} />Retry automático</label><label className="flow-editor-field">Idempotency key<input value={toText(draft.idempotency_key)} onChange={(event) => onDraftChange({ idempotency_key: event.target.value })} placeholder="{{session.id}}:{{selected_slot_id}}" /></label>{['WRITE', 'DESTRUCTIVE'].includes(String(draft.tool_classification || '')) ? <label className="flow-editor-checkbox"><input type="checkbox" checked={draft.allow_external_write === true} onChange={(event) => onDraftChange({ allow_external_write: event.target.checked })} />Permitir que este node altere dados externos.</label> : null}{draft.tool_classification === 'DESTRUCTIVE' ? <label className="flow-editor-checkbox"><input type="checkbox" checked={draft.destructive_confirmed === true} onChange={(event) => onDraftChange({ destructive_confirmed: event.target.checked })} />Confirmo explicitamente esta ação destrutiva.</label> : null}</section>
+          </>;
         })()}
 
         {kind === 'action' && (() => {
