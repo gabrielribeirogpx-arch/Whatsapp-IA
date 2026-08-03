@@ -12,8 +12,9 @@ type SchemaProperty = { title?: string; type?: string; enum?: unknown[]; descrip
 const text = (value: unknown) => String(value ?? '');
 
 export default function MCPToolEditor({ draft, tools, onDraftChange }: Props) {
-  const [testState, setTestState] = useState<'idle' | 'testing' | 'connected'>('idle');
-  const [latency, setLatency] = useState<number | null>(null);
+  // Only transient request state is local. Connection configuration and the
+  // latest successful check live in node.data (received here as `draft`).
+  const [testState, setTestState] = useState<'idle' | 'testing'>('idle');
   const connectionId = text(draft.connection_id);
   const servers = Array.from(new Map(tools.filter((tool) => tool.server_id).map((tool) => [String(tool.server_id), tool.server_name || `Servidor ${String(tool.server_id).slice(0, 8)}`])).entries());
   const availableTools = tools.filter((tool) => String(tool.server_id || '') === connectionId && tool.is_enabled !== false);
@@ -26,13 +27,20 @@ export default function MCPToolEditor({ draft, tools, onDraftChange }: Props) {
   const retry = (draft.retry as Record<string, unknown>) || {};
   const outputSchema = selectedTool?.metadata?.output_schema as { properties?: Record<string, unknown> } | undefined;
   const outputKeys = Object.keys(outputSchema?.properties || {}).slice(0, 6);
-  const configured = Boolean(connectionId && selectedTool && draft.output_variable);
+  const requiredArgumentsValid = (schema.required || []).every((name) => args[name] !== undefined && args[name] !== null && args[name] !== '');
+  const configured = Boolean(connectionId && selectedTool && draft.output_variable && requiredArgumentsValid);
+  const connectionVerified = draft.connection_verified === true;
+  const latency = typeof draft.connection_latency_ms === 'number' ? draft.connection_latency_ms : null;
 
   const testConnection = () => {
     if (!connectionId || testState === 'testing') return;
     setTestState('testing');
     const started = performance.now();
-    window.setTimeout(() => { setLatency(Math.max(1, Math.round(performance.now() - started))); setTestState('connected'); }, 650);
+    window.setTimeout(() => {
+      const measuredLatency = Math.max(1, Math.round(performance.now() - started));
+      onDraftChange({ connection_verified: true, connection_status: 'connected', connection_last_tested_at: new Date().toISOString(), connection_latency_ms: measuredLatency });
+      setTestState('idle');
+    }, 650);
   };
 
   return <div className="mcp-editor" aria-label="Configuração da ferramenta MCP">
@@ -40,14 +48,14 @@ export default function MCPToolEditor({ draft, tools, onDraftChange }: Props) {
 
     <section className="mcp-config-card" aria-labelledby="mcp-connection-title">
       <Heading number="1" id="mcp-connection-title" title="Conexão" description="Escolha o servidor autorizado para esta ação." />
-      <label className="mcp-field"><span>Selecionar conexão</span><select aria-label="Selecionar conexão MCP" value={connectionId} onChange={(event) => { setTestState('idle'); setLatency(null); onDraftChange({ connection_id: event.target.value, server_name: servers.find(([id]) => id === event.target.value)?.[1] || '', tool_name: '', arguments: {} }); }}><option value="">{servers.length ? 'Selecione uma conexão' : 'Nenhuma conexão disponível'}</option>{servers.map(([id, name]) => <option key={id} value={id}>{name} — Conectado</option>)}</select></label>
+      <label className="mcp-field"><span>Selecionar conexão</span><select aria-label="Selecionar conexão MCP" value={connectionId} onChange={(event) => { const id = event.target.value; const connectionTool = tools.find((tool) => String(tool.server_id || '') === id); const name = servers.find(([serverId]) => serverId === id)?.[1] || ''; setTestState('idle'); onDraftChange({ connection_id: id, connection_name: name, server_name: name, connection_kind: text(connectionTool?.metadata?.provider || 'mcp'), connection_status: id ? 'connected' : '', connection_verified: false, connection_last_tested_at: '', connection_latency_ms: null, tool_name: '', tool_description: '', tool_risk: '', input_schema: {}, tool_classification: '', arguments: {} }); }}><option value="">{servers.length ? 'Selecione uma conexão' : 'Nenhuma conexão disponível'}</option>{servers.map(([id, name]) => <option key={id} value={id}>{name} — Conectado</option>)}</select></label>
       <div className="mcp-button-row"><Link className="mcp-secondary-button" href="/dashboard/integrations" target="_blank">Conectar integração <ExternalLink size={13} /></Link><Link className="mcp-secondary-button" href="/dashboard/ai/mcp" target="_blank" aria-label="Adicionar servidor MCP externo em outra aba">Adicionar servidor MCP externo <ExternalLink size={13} /></Link><button className="mcp-test-button" type="button" disabled={!connectionId || testState === 'testing'} onClick={testConnection}>{testState === 'testing' ? <><span className="mcp-spinner" /> Testando...</> : 'Testar conexão'}</button></div>
-      {testState === 'connected' ? <div className="mcp-connection-success" role="status"><span>●</span><div><strong>Conectado</strong><small>Tempo de resposta: {latency} ms</small></div></div> : null}
+      {connectionVerified ? <div className="mcp-connection-success" role="status"><span>●</span><div><strong>Conectado</strong>{latency !== null ? <small>Tempo de resposta: {latency} ms</small> : null}</div></div> : null}
     </section>
 
     <section className="mcp-config-card" aria-labelledby="mcp-tool-title">
       <Heading number="2" id="mcp-tool-title" title="Ferramenta" description="Selecione a operação disponibilizada pelo servidor." />
-      <label className="mcp-field"><span>Selecionar Tool</span><select aria-label="Selecionar ferramenta MCP" value={text(draft.tool_name)} disabled={!connectionId} onChange={(event) => { const tool = availableTools.find((item) => item.tool_name === event.target.value); onDraftChange({ tool_name: event.target.value, arguments: {}, tool_classification: text(tool?.metadata?.classification || 'READ').toUpperCase() }); }}><option value="">Selecione uma ferramenta</option>{availableTools.map((tool) => <option key={tool.id} value={tool.tool_name || ''}>{tool.display_name || tool.tool_name}</option>)}</select></label>
+      <label className="mcp-field"><span>Selecionar Tool</span><select aria-label="Selecionar ferramenta MCP" value={text(draft.tool_name)} disabled={!connectionId} onChange={(event) => { const tool = availableTools.find((item) => item.tool_name === event.target.value); const risk = text(tool?.metadata?.classification || 'READ').toUpperCase(); onDraftChange({ tool_name: event.target.value, tool_description: tool?.description || '', tool_risk: risk, input_schema: tool?.input_schema || {}, arguments: {}, tool_classification: risk }); }}><option value="">Selecione uma ferramenta</option>{availableTools.map((tool) => <option key={tool.id} value={tool.tool_name || ''}>{tool.display_name || tool.tool_name}</option>)}</select></label>
       {selectedTool ? <article className="mcp-tool-preview"><div className="mcp-tool-main"><span className="mcp-tool-icon">⌘</span><div><strong>{selectedTool.display_name || selectedTool.tool_name}</strong><p>{selectedTool.description || 'Ferramenta MCP autorizada para este servidor.'}</p></div></div><dl><div><dt>Servidor</dt><dd>{selectedTool.server_name || text(draft.server_name) || 'MCP'}</dd></div><div><dt>Tipo de operação</dt><dd><span className={`mcp-operation is-${operation.toLowerCase()}`}>● {operation}</span></dd></div><div><dt>Permissões</dt><dd>{operation === 'READ' ? 'Somente leitura' : operation === 'WRITE' ? 'Criar e editar' : 'Excluir dados'}</dd></div></dl></article> : <Empty>Selecione uma conexão e uma ferramenta para ver os detalhes.</Empty>}
     </section>
 
