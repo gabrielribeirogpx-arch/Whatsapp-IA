@@ -28,6 +28,7 @@ class MessageOut(BaseModel):
     content: str
     role: str
     created_at: datetime
+    technical_payload: str | None = None
 
     class Config:
         from_attributes = True

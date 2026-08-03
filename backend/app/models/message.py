@@ -19,6 +19,9 @@ class Message(TenantMixin, Base):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     conversation_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("conversations.id"), index=True)
     text: Mapped[str] = mapped_column(String)
+    # Interactive replies keep their stable provider ID in ``text`` so flow
+    # routing remains unchanged.  The optional title is presentation-only.
+    interactive_title: Mapped[str | None] = mapped_column(String, nullable=True)
     from_me: Mapped[bool] = mapped_column(Boolean)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
@@ -36,7 +39,11 @@ class Message(TenantMixin, Base):
 
     @property
     def content(self) -> str:
-        return self.text
+        return self.interactive_title or self.text
+
+    @property
+    def technical_payload(self) -> str | None:
+        return self.text if self.interactive_title else None
 
     @property
     def role(self) -> str:

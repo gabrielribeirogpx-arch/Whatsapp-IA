@@ -442,6 +442,10 @@ async def _process_meta_webhook(request: Request, db: Session) -> dict[str, str]
                 tenant_id=conversation.tenant_id,
                 conversation_id=conversation.id,
                 text=incoming_message,
+                interactive_title=(
+                    str(incoming.get("interactive_reply_title") or incoming.get("selected_title") or "").strip()
+                    or None
+                ),
                 from_me=False,
                 created_at=datetime.utcnow(),
             )
