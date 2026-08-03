@@ -22,6 +22,7 @@ NATIVE_NODE_REGISTRY: dict[str, NativeNodeType] = {
     "message": NativeNodeType(),
     "data_collection": NativeNodeType(),
     "choice": NativeNodeType(),
+    "choice_dynamic": NativeNodeType(),
     "condition": NativeNodeType(),
     "delay": NativeNodeType(),
     "action": NativeNodeType(),

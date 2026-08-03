@@ -73,3 +73,22 @@ def test_data_collection_retry_validation_adapts_to_exhausted_behavior():
         [success_edge, {"source": "collection-1", "target": "end-1", "sourceHandle": "invalid"}],
     )
     assert not any(issue["field"] == "connections" and "Tentativas esgotadas" in issue["message"] for issue in connected_issues)
+
+
+@pytest.mark.parametrize("handle", ["success", "error", "timeout", "default", "selected", "custom-option"])
+def test_reachability_traverses_every_handle_from_mcp_and_dynamic_choice(handle):
+    nodes = [
+        {"id": "start", "type": "message", "data": {"isStart": True, "content": "Início"}},
+        {"id": "tool", "type": "mcp_tool", "data": {}},
+        {"id": "dynamic", "type": "choice_dynamic", "data": {"options_mode": "dynamic"}},
+        {"id": "end", "type": "message", "data": {"content": "Fim", "isEnd": True}},
+    ]
+    edges = [
+        {"source": "start", "target": "tool", "sourceHandle": "default"},
+        {"source": "tool", "target": "dynamic", "sourceHandle": handle},
+        {"source": "dynamic", "target": "end", "sourceHandle": "selected"},
+    ]
+
+    issues = validate_builder_graph(nodes, edges)
+
+    assert not [issue for issue in issues if issue["code"] == "NODE_ORPHAN"]
