@@ -9220,3 +9220,48 @@ button:disabled, input:disabled, select:disabled, textarea:disabled { transition
 .mcp-editor :focus-visible { outline:2px solid #4f46e5;outline-offset:2px }
 @media (min-width: 901px) { .flow-node-editor-panel:has(.mcp-editor){width:480px;max-width:min(480px,100vw)} }
 @media (max-width: 520px) { .mcp-editor{margin:0}.mcp-editor-hero{padding:14px}.mcp-button-row,.mcp-execution-grid{grid-template-columns:1fr}.mcp-config-card{padding:14px}.mcp-state{position:static}.mcp-tool-preview dl div{display:grid;gap:2px}.mcp-tool-preview dd{text-align:left} }
+
+/* MCP Tool node — quiet, legible and purpose-built for the workflow canvas. */
+.flow-builder-page .mcp-tool-node.flow-node-compact {
+  width: 268px;
+  min-width: 268px;
+  border-color: rgba(71, 85, 105, 0.14) !important;
+  border-radius: 20px !important;
+  box-shadow: 0 14px 36px rgba(30, 41, 59, 0.11), 0 2px 8px rgba(30, 41, 59, 0.05) !important;
+}
+.flow-builder-page .mcp-tool-node.flow-node-compact:hover {
+  border-color: rgba(118, 103, 223, 0.32) !important;
+  box-shadow: 0 20px 46px rgba(30, 41, 59, 0.15), 0 0 0 4px rgba(118, 103, 223, 0.045) !important;
+}
+.flow-builder-page .mcp-tool-node.flow-node-compact.is-selected {
+  border-color: rgba(118, 103, 223, 0.52) !important;
+  box-shadow: 0 20px 48px rgba(76, 61, 173, 0.18), 0 0 0 3px rgba(118, 103, 223, 0.08) !important;
+}
+.flow-builder-page .mcp-tool-node .flow-node-header-bar { height: 3px !important; opacity: .9 !important; }
+.flow-builder-page .mcp-tool-node .flow-node-compact-header { padding: 15px 16px 13px !important; gap: 11px !important; }
+.flow-builder-page .mcp-tool-node .flow-node-emoji { width: 36px !important; height: 36px !important; background: #f7f5ff !important; border-color: #e8e4ff !important; }
+.flow-builder-page .mcp-tool-node .mcp-mark { width: 20px; height: 20px; }
+.flow-builder-page .mcp-tool-node .flow-node-badge { padding: 2px 5px !important; color: #7568b5 !important; background: #f7f5ff !important; border-color: #ebe8fa !important; font-size: 7.5px !important; letter-spacing: .06em !important; }
+.flow-builder-page .mcp-tool-node .flow-node-start-button { padding: 3px 6px !important; opacity: .72; }
+.flow-builder-page .mcp-tool-node .flow-node-start-button:hover,
+.flow-builder-page .mcp-tool-node .flow-node-start-button.is-start { opacity: 1; }
+.flow-builder-page .mcp-tool-node .flow-node-compact-body { padding: 15px 16px 16px !important; }
+.mcp-node-details { display: grid; gap: 13px; }
+.mcp-node-detail { display: grid; grid-template-columns: 20px minmax(0, 1fr); align-items: center; gap: 9px; min-width: 0; }
+.mcp-node-detail > span:first-child { display: grid; place-items: center; width: 20px; height: 20px; border-radius: 6px; background: #f8fafc; font-size: 11px; filter: grayscale(.12); }
+.mcp-node-detail > span:last-child { display: grid; gap: 2px; min-width: 0; }
+.mcp-node-detail small { color: #94a3b8; font-size: 8.5px; font-weight: 750; letter-spacing: .055em; line-height: 1; text-transform: uppercase; }
+.mcp-node-detail strong { overflow: hidden; color: #334155; font-size: 11.5px; font-weight: 680; line-height: 1.25; text-overflow: ellipsis; white-space: nowrap; }
+.mcp-node-risk { justify-self: start; margin-top: 1px; padding: 2px 7px; border: 1px solid; border-radius: 999px; font-size: 8px; font-weight: 850; letter-spacing: .08em; line-height: 1.35; }
+.mcp-node-risk.is-read { color: #15803d; background: #f0fdf4; border-color: #bbf7d0; }
+.mcp-node-risk.is-write { color: #b45309; background: #fffbeb; border-color: #fde68a; }
+.mcp-node-risk.is-delete { color: #b91c1c; background: #fff1f2; border-color: #fecdd3; }
+.mcp-node-empty { display: flex; align-items: center; gap: 9px; min-height: 42px; padding: 10px 11px; border: 1px dashed #d8d4ef; border-radius: 11px; background: #faf9ff; color: #655b91; }
+.mcp-node-empty > span { font-size: 13px; color: #c58b25; }
+.mcp-node-empty strong { font-size: 11px; font-weight: 700; }
+.flow-builder-page .mcp-tool-node .flow-node-footer { padding: 10px 16px 12px !important; background: #fbfcfe !important; }
+.flow-builder-page .mcp-tool-node .flow-node-source-label { opacity: 0; visibility: hidden; transform: translateX(5px); transition: opacity 140ms ease, transform 140ms ease, visibility 140ms ease; }
+.flow-builder-page .mcp-tool-node:hover .flow-node-source-label,
+.flow-builder-page .mcp-tool-node.is-selected .flow-node-source-label,
+.flow-builder-page .mcp-tool-node .flow-node-source-slot:has(.react-flow__handle-connecting) .flow-node-source-label,
+.flow-builder-page .mcp-tool-node .flow-node-source-slot:has(.react-flow__handle-valid) .flow-node-source-label { opacity: 1; visibility: visible; transform: translateX(0); }
