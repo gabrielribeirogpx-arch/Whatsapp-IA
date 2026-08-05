@@ -39,6 +39,13 @@ class TransitionResolver:
         transitions = self._snapshot_transitions(snapshot)
         matches = self._matches(transitions=transitions, source_node_id=source_node_id, source_handle=source_handle)
         outgoing = [transition for transition in transitions if str(transition.get("source_node_id")) == source_node_id]
+        candidate_edges = [self._transition_diagnostic(transition) for transition in outgoing]
+        logger.info(
+            "event=RUNTIME_V2_EDGE_LOOKUP node_atual=%s handle_emitido=%s edges_candidatas=%s",
+            source_node_id,
+            source_handle,
+            candidate_edges,
+        )
         logger.info(
             "event=TRANSITION_RESOLUTION_INPUT source_node_id=%s source_handle=%s outgoing_transitions=%s",
             source_node_id,
@@ -54,6 +61,23 @@ class TransitionResolver:
             transitions,
         )
         if not matches:
+            expected_handles = [
+                self._transition_diagnostic(transition).get("sourceHandle")
+                for transition in outgoing
+            ]
+            logger.error("sourceHandle emitido=%s", source_handle)
+            logger.error("sourceHandle esperado nas edges=%s", expected_handles)
+            for transition in outgoing:
+                diagnostic = self._transition_diagnostic(transition)
+                transition_handle = normalize_source_handle(transition.get("source_handle"))
+                requested_handle = normalize_source_handle(source_handle)
+                if str(transition.get("source_node_id")) != source_node_id:
+                    reason = "source_node_id_different"
+                elif transition_handle != requested_handle:
+                    reason = "sourceHandle_different"
+                else:
+                    reason = "unknown"
+                logger.error("edge descartada e motivo edge=%s motivo=%s", diagnostic, reason)
             logger.error(
                 "event=runtime_v2_choice_trace stage=transition_lookup status=failed reason=transition_not_found "
                 "session_id=%s source_node_id=%s source_handle=%s next_node_id=%s outgoing_count=%s",
@@ -153,6 +177,13 @@ class TransitionResolver:
             transition,
         )
         logger.info(
+            "event=RUNTIME_V2_EDGE_LOOKUP_SELECTED node_atual=%s handle_emitido=%s proxima_edge_escolhida=%s proximo_node_executado=%s",
+            source_node_id,
+            source_handle,
+            self._transition_diagnostic(transition),
+            target,
+        )
+        logger.info(
             "[V2 TRANSITION RESOLVER] selected source_node_id=%s source_handle=%s target_node_id=%s transition=%s",
             source_node_id,
             source_handle,
@@ -160,6 +191,15 @@ class TransitionResolver:
             transition,
         )
         return TransitionResolution(target_node_id=str(target), edge=dict(transition))
+
+    @staticmethod
+    def _transition_diagnostic(transition: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "id": transition.get("id") or transition.get("edge_id"),
+            "source": transition.get("source_node_id") or transition.get("source"),
+            "sourceHandle": transition.get("source_handle") or transition.get("sourceHandle"),
+            "target": transition.get("target_node_id") or transition.get("target") or transition.get("to"),
+        }
 
     @staticmethod
     def _snapshot_transitions(snapshot: FlowV2Snapshot) -> list[dict[str, Any]]:
