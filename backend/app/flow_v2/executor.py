@@ -492,6 +492,17 @@ class FlowV2Executor:
                     (dequeued_transition or {}).get("transition_id"),
                     (dequeued_transition or {}).get("source_handle"),
                 )
+                logger.info(
+                    "event=RUNTIME_V2_DATA_COLLECTION_NEXT_NODE_EXECUTED session_id=%s "
+                    "node_atual=%s handle_emitido=%s proxima_edge_escolhida=%s "
+                    "proximo_node_executado=%s proximo_node_type=%s",
+                    session.id,
+                    (dequeued_transition or {}).get("source_node_id"),
+                    (dequeued_transition or {}).get("source_handle"),
+                    (dequeued_transition or {}).get("transition_id"),
+                    node_id,
+                    str(node.get("type") or self._node_data(node).get("type") or "message"),
+                )
             if node_type := str(node.get("type") or self._node_data(node).get("type") or "message"):
                 if node_type.strip().lower() == "data_collection":
                     wait_context = session.context if isinstance(session.context, dict) else {}
