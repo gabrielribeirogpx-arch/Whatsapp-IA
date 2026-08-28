@@ -27,10 +27,22 @@ class DummyAdapter:
         return ToolResult(True, self.tool_type, tool_id=tool_id, output={"ok": True})
 
 
+class MalformedAdapter(DummyAdapter):
+    def execute(self, tool_id, input, context, config=None):
+        return {"ok": False}
+
+
 def test_registry_registers_adapters():
     adapter = DummyAdapter(); registry = ToolRegistry(); registry.register(adapter)
     assert registry.get("dummy") is adapter
     assert registry.execute("dummy", "x", {}, ToolContext(tenant_id="t")).ok is True
+
+
+def test_registry_converts_malformed_adapter_result_to_controlled_failure():
+    registry = ToolRegistry(); registry.register(MalformedAdapter())
+    result = registry.execute("dummy", "x", {}, ToolContext(tenant_id="t"))
+    assert result.ok is False
+    assert result.error_code == "invalid_tool_result"
 
 
 def test_missing_tool_returns_controlled_result():

@@ -5,7 +5,7 @@ import time
 from typing import Any
 
 from app.services.execution_budget_service import ExecutionBudgetExceeded
-from app.tools.base import BaseToolAdapter, NormalizedToolResult, ToolResult
+from app.tools.base import BaseToolAdapter, NormalizedToolResult, ToolResult, require_tool_result
 from app.tools.context import ToolContext, sanitize_metadata
 from app.tools.errors import ToolNotFound, ToolRegistryError
 from app.observability import TraceContext, TraceEventType, record_event
@@ -55,7 +55,11 @@ class ToolRegistry:
                 logger.warning("event=tool_registry_blocked %s", {**safe, "error_code": "tool_not_allowed"})
                 return ToolResult(False, str(tool_type), tool_id=str(tool_id), error_code="tool_not_allowed", metadata=safe, normalized_result=NormalizedToolResult(False, str(tool_id), type=str(tool_type), error={"code": "tool_not_allowed"}))
             logger.info("event=TOOL_REGISTRY_ADAPTER_PAYLOAD %s", sanitize_metadata({**safe, "adapter_class": type(adapter).__name__, "payload": input}))
-            result = adapter.execute(str(tool_id), input, context, config or {})
+            result = require_tool_result(
+                adapter.execute(str(tool_id), input, context, config or {}),
+                tool_type=resolved_tool_type,
+                tool_id=str(tool_id),
+            )
             logger.info("event=TOOL_REGISTRY_ADAPTER_RESULT %s", sanitize_metadata({**safe, "adapter_class": type(adapter).__name__, "ok": result.ok, "error_code": result.error_code, "output": result.output, "structured_content": result.structured_content}))
             if result.normalized_result is None:
                 result.normalized_result = NormalizedToolResult(result.ok, str(result.tool_name or result.tool_id or tool_id), type=str(tool_type), data=result.output if isinstance(result.output, dict) else {}, result_text=str(result.output) if isinstance(result.output, (str, int, float, bool)) else None, error={"code": result.error_code} if result.error_code else None)

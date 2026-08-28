@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import logging
 import traceback
+from datetime import datetime
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from typing import Any, Callable
 
@@ -21,6 +23,16 @@ GOOGLE_CALENDAR_TOOL_IDS = {
     "google_calendar_delete_event",
     "calendar.get_availability", "calendar.create_appointment", "calendar.get_appointment",
     "calendar.reschedule_appointment", "calendar.cancel_appointment",
+}
+
+GOOGLE_CALENDAR_AVAILABILITY_SCHEMA = {
+    "type": "object",
+    "required": ["start", "end", "timezone"],
+    "properties": {
+        "start": {"type": "string", "format": "date-time", "description": "RFC3339 interval start"},
+        "end": {"type": "string", "format": "date-time", "description": "RFC3339 interval end"},
+        "timezone": {"type": "string", "description": "IANA timezone, e.g. America/Sao_Paulo"},
+    },
 }
 
 
@@ -60,7 +72,7 @@ def google_calendar_tool_definitions(*, connected: bool) -> list[dict[str, Any]]
             "display_name": labels[tool_id],
             "name": labels[tool_id],
             "description": descriptions[tool_id],
-            "input_schema": {"type": "object"},
+            "input_schema": GOOGLE_CALENDAR_AVAILABILITY_SCHEMA if tool_id in {"google_calendar_check_availability", "calendar.get_availability"} else {"type": "object"},
             "is_enabled": connected,
             "server_id": None,
             "server_name": "Google Calendar conectado" if connected else "Requer conexão",
@@ -104,6 +116,28 @@ def _calendar_error_data(result: dict[str, Any], tool_result: ToolResult | None 
         message = message.get("message") or message.get("error") or str(message)
     error_type = result.get("error_type") or result.get("code") or result.get("status_code") or (tool_result.error_code if tool_result else None) or "google_calendar_error"
     return {"error_type": str(error_type), "error_message": str(message or error_type)}
+
+
+def _availability_validation_result(tool_id: str, args: dict[str, Any]) -> ToolResult | None:
+    missing = [field for field in ("start", "end", "timezone") if not args.get(field)]
+    if missing:
+        return ToolResult(False, "google_calendar", tool_id=tool_id, tool_name=tool_id,
+            output={"ok": False, "message": "google_calendar_missing_required_fields", "missing_fields": missing},
+            structured_content={"ok": False, "tool": tool_id, "result": {}, "error": "google_calendar_missing_required_fields"},
+            error_code="google_calendar_missing_required_fields", error_message="Missing required calendar availability fields.",
+            normalized_result=NormalizedToolResult(False, tool_id, type="google_calendar.check_availability", error={"code": "google_calendar_missing_required_fields", "missing_fields": missing}))
+    try:
+        ZoneInfo(str(args["timezone"]))
+        values = [datetime.fromisoformat(str(args[field]).replace("Z", "+00:00")) for field in ("start", "end")]
+        if any(value.tzinfo is None for value in values) or values[0] >= values[1]:
+            raise ValueError("invalid availability interval")
+    except (ValueError, TypeError, ZoneInfoNotFoundError):
+        return ToolResult(False, "google_calendar", tool_id=tool_id, tool_name=tool_id,
+            output={"ok": False, "message": "google_calendar_invalid_availability_interval"},
+            structured_content={"ok": False, "tool": tool_id, "result": {}, "error": "google_calendar_invalid_availability_interval"},
+            error_code="google_calendar_invalid_availability_interval", error_message="Availability requires an ordered RFC3339 interval and IANA timezone.",
+            normalized_result=NormalizedToolResult(False, tool_id, type="google_calendar.check_availability", error={"code": "google_calendar_invalid_availability_interval"}))
+    return None
 
 def _connection_log_context(db: Session | None, tenant_id: Any) -> dict[str, Any]:
     payload: dict[str, Any] = {"connection_id": None, "connection_tenant_id": None, "account_email": None, "calendar_id": "primary", "provider": PROVIDER, "connected": False, "status": None, "access_token_encrypted_is_not_null": False, "refresh_token_encrypted_is_not_null": False, "access_token_present": False, "refresh_token_present": False}
@@ -159,6 +193,11 @@ class GoogleCalendarToolAdapter:
         _log_tool("GOOGLE_CALENDAR_TOOL_INPUT", tenant_id=context.tenant_id, tool_name=tool_id, input=args, db=db)
         connection_context = _connection_log_context(db, context.tenant_id)
         _log_tool("GOOGLE_CALENDAR_CONNECTION_FOUND" if connection_context.get("connected") else "GOOGLE_CALENDAR_CONNECTION_NOT_FOUND", tenant_id=context.tenant_id, tool_name=tool_id, input=args, db=db)
+        if tool_id in {"google_calendar_check_availability", "calendar.get_availability"}:
+            invalid = _availability_validation_result(tool_id, args)
+            if invalid is not None:
+                _log_tool("GOOGLE_CALENDAR_TOOL_VALIDATION_FAILED", tenant_id=context.tenant_id, tool_name=tool_id, input={"missing_fields": (invalid.output or {}).get("missing_fields", [])}, db=db)
+                return invalid
         try:
             service = self.service_factory(db, context.tenant_id)
             _log_tool("GOOGLE_CALENDAR_ADAPTER_PAYLOAD", tenant_id=context.tenant_id, tool_name=tool_id, input=args, db=db, payload=args)

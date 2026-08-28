@@ -60,6 +60,30 @@ class ToolResult:
         }
 
 
+def invalid_tool_result(*, tool_type: str, tool_id: str, message: str = "Adapter returned an invalid ToolResult.") -> ToolResult:
+    """Build the canonical failure result for adapters that violate the contract.
+
+    ToolRegistry is the boundary between third-party adapters and callers.  Keeping
+    this conversion here means callers never need to probe arbitrary result
+    attributes (and, consequently, cannot leak an AttributeError into a flow).
+    """
+    return ToolResult(
+        False,
+        tool_type,
+        tool_id=tool_id,
+        error_code="invalid_tool_result",
+        error_message=message,
+        normalized_result=NormalizedToolResult(False, tool_id, type=tool_type, error={"code": "invalid_tool_result"}),
+    )
+
+
+def require_tool_result(result: Any, *, tool_type: str, tool_id: str) -> ToolResult:
+    """Return a contract-compliant result, converting malformed adapter output."""
+    if isinstance(result, ToolResult) and isinstance(result.ok, bool):
+        return result
+    return invalid_tool_result(tool_type=tool_type, tool_id=tool_id)
+
+
 class BaseToolAdapter(Protocol):
     tool_type: str
 

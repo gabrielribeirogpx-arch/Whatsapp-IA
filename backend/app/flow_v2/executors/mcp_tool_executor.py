@@ -17,6 +17,7 @@ from app.models.tenant_mcp import TenantMCPServer, TenantMCPTool
 from app.models.integration_connection import IntegrationConnection
 from app.tools.adapters.google_calendar_tool_adapter import GoogleCalendarToolAdapter, GOOGLE_CALENDAR_TOOL_IDS, google_calendar_tool_definitions
 from app.tools.context import ToolContext
+from app.tools.registry import ToolRegistry
 from app.services.mcp_service import MCPError, call_mcp_tool
 
 logger = logging.getLogger(__name__)
@@ -109,9 +110,11 @@ class MCPToolNodeExecutor(BaseNodeExecutor):
                 arguments = self._render(data.get("arguments") or {}, db, snapshot=snapshot, session=session, runtime_input=runtime_input, node_id=node_id)
                 if not isinstance(arguments, dict):
                     raise MCPNodeError("MCP_ARGUMENT_VALIDATION_FAILED", "Os argumentos MCP devem formar um objeto JSON.")
-                result = GoogleCalendarToolAdapter(db).execute(tool_name, arguments, ToolContext(tenant_id=session.tenant_id))
-                if not result.success:
-                    raise MCPNodeError("MCP_TOOL_EXECUTION_FAILED", "A integração não concluiu a execução.", True)
+                registry = ToolRegistry()
+                registry.register(GoogleCalendarToolAdapter(db))
+                result = registry.execute("google_calendar", tool_name, arguments, ToolContext(tenant_id=session.tenant_id))
+                if not result.ok:
+                    raise MCPNodeError(result.error_code or "MCP_TOOL_EXECUTION_FAILED", result.error_message or "A integração não concluiu a execução.", False)
                 output = result.structured_content if result.structured_content is not None else result.output
                 output = safe_get_path(output, data.get("result_path")) if data.get("result_path") else output
                 variables = dict(getattr(session, "variables", None) or {})
