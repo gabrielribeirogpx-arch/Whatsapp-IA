@@ -97,7 +97,11 @@ class RuntimeV2DataCollectionExecutor(BaseNodeExecutor):
         cancel = {str(w).strip().casefold() for w in data.get('cancel_keywords', []) if str(w).strip()}
         if str(raw or '').strip().casefold() in cancel:
             return self._finish(db, snapshot, session, context, node_id, data, 'cancel', 'data_collection_cancelled', runtime_input)
-        result = validate_data_collection(data, raw, runtime_input.metadata)
+        metadata = dict(runtime_input.metadata or {})
+        if data.get("data_type") == "appointment_period":
+            from app.services.appointment_policy_service import policy_for_tenant
+            metadata["appointment_policy"] = policy_for_tenant(db, session.tenant_id)
+        result = validate_data_collection(data, raw, metadata)
         if not result.valid:
             waiting['attempts'] = int(waiting.get('attempts') or 0) + 1
             auto_retry = waiting.get('retry_mode') is True

@@ -7,6 +7,7 @@ from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any
 from urllib.parse import urlparse
+from app.services.appointment_policy_service import AppointmentPolicyError, normalize_preferred_period
 
 
 @dataclass(frozen=True)
@@ -73,6 +74,10 @@ def validate_data_collection(data: dict[str, Any], raw_value: Any, metadata: dic
             phone = ("+" if value.startswith("+") else "") + _digits(value)
             if not re.fullmatch(r"\+?[1-9]\d{7,14}", phone): raise ValueError("phone")
             normalized = phone
+        elif kind == "appointment_period":
+            policy = (metadata or {}).get("appointment_policy")
+            if not isinstance(policy, dict): raise ValueError("appointment_policy")
+            normalized = normalize_preferred_period(value, policy)
         elif kind == "date": normalized = datetime.strptime(value.replace("-", "/"), "%d/%m/%Y").date().isoformat()
         elif kind == "time": normalized = datetime.strptime(value, "%H:%M").strftime("%H:%M")
         elif kind in {"cpf", "cnpj"}:
@@ -99,5 +104,5 @@ def validate_data_collection(data: dict[str, Any], raw_value: Any, metadata: dic
             else: raise ValueError("choice")
         else: raise ValueError("unsupported_type")
         return ValidationResult(True, raw, normalized)
-    except (ValueError, InvalidOperation, OverflowError):
+    except (ValueError, InvalidOperation, OverflowError, AppointmentPolicyError):
         return ValidationResult(False, raw, None, f"invalid_{kind}")

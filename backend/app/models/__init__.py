@@ -46,3 +46,5 @@ from app.models.contact_event import ContactEvent
 from app.models.password_reset_token import PasswordResetToken
 
 from app.models.product_analytics import ProductEvent, ProductMetricDaily, TenantActivationState
+
+from app.models.tenant_appointment_policy import TenantAppointmentPolicy

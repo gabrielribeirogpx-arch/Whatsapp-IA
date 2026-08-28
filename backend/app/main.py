@@ -32,7 +32,7 @@ from app.routers import dashboard
 from app.routers import tasks
 from app.routers import settings
 from app.routers import account
-from app.routers import ai_settings
+from app.routers import ai_settings, appointment_policy
 from app.routers import ai_executions
 from app.routers import ai_memories
 from app.routers import mcp
@@ -197,6 +197,7 @@ app.include_router(tasks.router, prefix="/api")
 app.include_router(settings.router, prefix="/api")
 app.include_router(account.router, prefix="/api")
 app.include_router(ai_settings.router, prefix="/api")
+app.include_router(appointment_policy.router, prefix="/api")
 app.include_router(ai_executions.router, prefix="/api")
 app.include_router(ai_memories.router, prefix="/api")
 app.include_router(bot_rules.router)

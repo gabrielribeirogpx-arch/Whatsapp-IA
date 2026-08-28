@@ -251,7 +251,11 @@ class FlowV2GraphValidator:
                 errors.append(f"FLOW_V2_CHOICE_DISPLAY_MODE_INVALID:{node_id}")
             dynamic = node_type == "choice_dynamic" or str(data.get("options_mode") or data.get("option_mode") or "fixed").lower() == "dynamic"
             if dynamic:
-                if not str(data.get("options_variable") or data.get("source_variable") or "").strip():
+                source = str(data.get("options_variable") or data.get("source_variable") or "")
+                output = str(data.get("output_variable") or "")
+                if source != source.strip() or (output and output != output.strip()): errors.append(f"FLOW_V2_DYNAMIC_CHOICE_VARIABLE_WHITESPACE:{node_id}")
+                if output and output != source: errors.append(f"FLOW_V2_DYNAMIC_CHOICE_OUTPUT_MISMATCH:{node_id}")
+                if not source.strip():
                     errors.append(f"FLOW_V2_DYNAMIC_CHOICE_VARIABLE_REQUIRED:{node_id}")
                 if not str(data.get("label_field") or "").strip():
                     errors.append(f"FLOW_V2_DYNAMIC_CHOICE_LABEL_REQUIRED:{node_id}")

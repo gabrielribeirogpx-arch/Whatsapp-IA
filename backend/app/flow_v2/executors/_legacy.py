@@ -778,7 +778,7 @@ class ChoiceNodeExecutor(BaseNodeExecutor):
         if dynamic:
             variable = str(data.get("result_variable") or data.get("save_selection_to") or "selected_slot").strip()
             variables = dict(getattr(session, "variables", None) or {})
-            variables[variable] = matched_option["id"]
+            variables[variable] = matched_option.get("dynamic_object") or matched_option["id"]
             variables[f"{variable}_title"] = matched_option.get("dynamic_title", matched_option.get("label", ""))
             variables[f"{variable}_index"] = matched_option.get("dynamic_index")
             variables[f"{variable}_object"] = matched_option.get("dynamic_object")
