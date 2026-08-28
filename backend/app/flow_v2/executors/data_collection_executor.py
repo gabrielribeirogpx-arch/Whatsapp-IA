@@ -8,6 +8,47 @@ from app.flow_v2.data_collection import validate_data_collection
 from app.flow_v2.executors._legacy import BaseNodeExecutor, NodeExecutionResult
 logger = logging.getLogger(__name__)
 
+
+def initialize_data_collection_wait(*, session, node_id, data):
+    """Create the persisted collection checkpoint without consuming an input.
+
+    A preceding Message node can stop at a DataCollection node.  In that case
+    the collection executor is deliberately not entered, so this checkpoint
+    must be created before the Message returns ``wait``.
+    """
+    context = dict(session.context or {})
+    if (
+        context.get("waiting_for") == "data_collection"
+        and context.get("waiting_node_id") == node_id
+        and isinstance(context.get("data_collection"), dict)
+    ):
+        return
+
+    seconds = max(0, int(data.get("timeout_seconds") or 0))
+    timeout_at = datetime.now(timezone.utc) + timedelta(seconds=seconds) if seconds else None
+    retry_mode = data.get("auto_retry_invalid") is True
+    waiting = {
+        "variable_name": data.get("variable_name"),
+        "data_type": data.get("data_type"),
+        "attempts": 0,
+        "max_attempts": max(1, int(data.get("max_attempts") or 1)),
+        "timeout_at": timeout_at.isoformat() if timeout_at else None,
+        "node_id": node_id,
+        "processed_message_ids": [],
+        "retry_mode": retry_mode,
+        "state": "waiting_input",
+    }
+    context.update({
+        "waiting_for": "data_collection", "waiting_node_id": node_id,
+        "waiting_variable": data.get("variable_name"), "data_collection": waiting,
+        "attempts": 0, "waiting_for_input": True, "waiting_input": True,
+        "waiting_retry": False, "current_node": node_id,
+        "variable_name": data.get("variable_name"), "retry_mode": retry_mode,
+        "state": "waiting_input",
+    })
+    session.context = context
+
+
 class RuntimeV2DataCollectionExecutor(BaseNodeExecutor):
     """Persist a wait checkpoint, consume one inbound value, and select a canonical handle."""
     def _next(self, db, snapshot, session, node_id, handle):
@@ -19,10 +60,11 @@ class RuntimeV2DataCollectionExecutor(BaseNodeExecutor):
         waiting = context.get('data_collection') if context.get('waiting_for') == 'data_collection' and context.get('waiting_node_id') == node_id else None
         now = datetime.now(timezone.utc)
         if not isinstance(waiting, dict):
-            seconds = max(0, int(data.get('timeout_seconds') or 0)); timeout_at = now + timedelta(seconds=seconds) if seconds else None
-            retry_mode = data.get('auto_retry_invalid') is True
-            waiting = {'variable_name': data.get('variable_name'), 'data_type': data.get('data_type'), 'attempts': 0, 'max_attempts': max(1, int(data.get('max_attempts') or 1)), 'timeout_at': timeout_at.isoformat() if timeout_at else None, 'node_id': node_id, 'processed_message_ids': [], 'retry_mode': retry_mode, 'state': 'waiting_input'}
-            context.update({'waiting_for': 'data_collection', 'waiting_node_id': node_id, 'waiting_variable': data.get('variable_name'), 'data_collection': waiting, 'attempts': 0, 'waiting_for_input': True, 'waiting_input': True, 'waiting_retry': False, 'current_node': node_id, 'variable_name': data.get('variable_name'), 'retry_mode': retry_mode, 'state': 'waiting_input'}); session.context = context
+            initialize_data_collection_wait(session=session, node_id=node_id, data=data)
+            context = dict(session.context or {})
+            waiting = context['data_collection']
+            seconds = max(0, int(data.get('timeout_seconds') or 0))
+            timeout_at = datetime.fromisoformat(waiting['timeout_at']) if waiting.get('timeout_at') else None
             actions = []
             options = [o for o in data.get('options', []) if isinstance(o, dict) and o.get('id') and o.get('label')]
             if data.get('data_type') == 'choice' and options and data.get('display_mode', 'buttons') != 'text':

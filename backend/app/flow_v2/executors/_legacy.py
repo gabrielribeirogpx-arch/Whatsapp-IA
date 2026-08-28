@@ -317,6 +317,26 @@ class MessageNodeExecutor(BaseNodeExecutor):
             if "wait_for_reply" in node
             else data.get("wait_for_reply", data.get("waitForReply", data.get("await_reply", data.get("awaitReply"))))
         )
+        # A Message configured as a conversational boundary advances the
+        # session pointer to its destination without executing it.  Prime a
+        # following DataCollection checkpoint now, otherwise its first real
+        # user reply would only initialize the collector and be discarded.
+        if wait_for_reply and next_node_type == "data_collection" and next_node_id:
+            from app.flow_v2.executors.data_collection_executor import initialize_data_collection_wait
+
+            initialize_data_collection_wait(
+                session=session,
+                node_id=next_node_id,
+                data=next_node_data,
+            )
+            logger.info(
+                "event=RUNTIME_V2_DATA_COLLECTION_WAIT_INITIALIZED_FROM_MESSAGE "
+                "session_id=%s message_node_id=%s data_collection_node_id=%s waiting_variable=%s",
+                session.id,
+                node_id,
+                next_node_id,
+                (session.context or {}).get("waiting_variable"),
+            )
         status = (
             "complete"
             if next_node_id is None
