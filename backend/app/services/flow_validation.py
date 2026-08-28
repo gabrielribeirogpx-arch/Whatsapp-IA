@@ -29,6 +29,7 @@ MESSAGES = {
     "ACTION_CONFIG_INCOMPLETE": ("Complete os parâmetros obrigatórios da ação.", "Preencha os campos obrigatórios destacados."),
     "NODE_ORPHAN": ("Este node não está conectado ao caminho iniciado pelo Start.", "Conecte o node ao caminho iniciado pelo Start."),
     "EDGE_INVALID": ("Existe uma conexão inválida entre nodes.", "Remova a conexão inválida e conecte os nodes novamente."),
+    "DYNAMIC_CHOICE_INVALID": ("Revise a escolha dinâmica.", "Use uma variável de opções válida e conecte a saída de indisponibilidade."),
     "DATA_COLLECTION_INVALID": ("Revise a configuração da Coleta de Dados.", "Preencha os campos destacados e conecte as saídas necessárias."),
 }
 
@@ -87,6 +88,16 @@ def validate_builder_graph(nodes: list[dict[str, Any]], edges: list[dict[str, An
         elif kind in {"choice", "choice_dynamic"}:
             dynamic = kind == "choice_dynamic" or str(data.get("options_mode") or data.get("option_mode") or "fixed").lower() == "dynamic"
             if dynamic:
+                source = str(data.get("options_variable") or data.get("source_variable") or "")
+                output = str(data.get("output_variable") or "")
+                if source != source.strip() or output != output.strip() or not source:
+                    issues.append(_issue("DYNAMIC_CHOICE_INVALID", node, field="options_variable", message="A variável de opções não pode estar vazia ou conter espaços nas extremidades."))
+                if output and output != source:
+                    issues.append(_issue("DYNAMIC_CHOICE_INVALID", node, field="output_variable", message="output_variable deve ser igual a options_variable."))
+                for field in ("label_field", "value_field"):
+                    if not str(data.get(field) or "").strip(): issues.append(_issue("DYNAMIC_CHOICE_INVALID", node, field=field, message="Defina os campos de label e valor."))
+                handles = {str(e.get("sourceHandle") or "").lower() for e in outgoing[node_id]}
+                if "empty" not in handles and not str(data.get("empty_message") or "").strip(): issues.append(_issue("DYNAMIC_CHOICE_INVALID", node, field="connections", message="Conecte a saída empty ou configure uma mensagem de indisponibilidade."))
                 continue
             options = data.get("options") or data.get("buttons") or node.get("options")
             if not isinstance(options, list) or not options: issues.append(_issue("CHOICE_EMPTY", node, field="options")); continue
@@ -102,7 +113,7 @@ def validate_builder_graph(nodes: list[dict[str, Any]], edges: list[dict[str, An
             variable = str(data.get("variable_name") or "")
             if not variable: issues.append(_issue("DATA_COLLECTION_INVALID", node, field="variable_name", message="Defina o nome da variável."))
             elif not __import__("re").fullmatch(r"[a-zA-Z_][a-zA-Z0-9_]*", variable): issues.append(_issue("DATA_COLLECTION_INVALID", node, field="variable_name", message="Use letras, números e underscore; não comece com número."))
-            if str(data.get("data_type") or "") not in {"text", "number", "email", "phone", "date", "time", "cpf", "cnpj", "url", "currency", "boolean", "choice"}: issues.append(_issue("DATA_COLLECTION_INVALID", node, field="data_type", message="Selecione um tipo de dado válido."))
+            if str(data.get("data_type") or "") not in {"text", "number", "email", "phone", "date", "time", "cpf", "cnpj", "url", "currency", "boolean", "choice", "appointment_period"}: issues.append(_issue("DATA_COLLECTION_INVALID", node, field="data_type", message="Selecione um tipo de dado válido."))
             if int(data.get("max_attempts") or 0) < 1: issues.append(_issue("DATA_COLLECTION_INVALID", node, field="max_attempts", message="O máximo de tentativas deve ser maior que zero."))
             if int(data.get("timeout_seconds") or 0) < 0: issues.append(_issue("DATA_COLLECTION_INVALID", node, field="timeout_seconds", message="O timeout não pode ser negativo."))
             options = data.get("options") or []
