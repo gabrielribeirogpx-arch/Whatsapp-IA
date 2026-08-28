@@ -16,6 +16,7 @@ from app.flow_v2.delay_worker import FlowV2DelayWorker
 from app.flow_v2.executor import FlowV2Executor
 from app.flow_v2.snapshot import FlowV2Snapshot, canonical_hash
 from app.flow_v2.transition_resolver import FlowV2TransitionError
+from app.flow_v2.executors.base_executor import NodeExecutionResult
 
 
 class _FakeDB:
@@ -817,6 +818,78 @@ def test_message_wait_for_reply_pauses_at_next_node_and_does_not_repeat_greeting
         if event["event_type"] == str(FlowV2EventType.MESSAGE_SENT)
     ]
     assert sent_texts == ["Olá! Como posso te ajudar?", "Resposta IA/RAG"]
+
+
+def test_message_wait_for_reply_primes_data_collection_and_consumes_first_reply_after_reload() -> None:
+    """A Message boundary must not make the first collection reply an initializer."""
+    raw_snapshot = {
+        "schema_version": 1,
+        "start_node_id": "ask-period",
+        "nodes": [
+            {
+                "id": "ask-period", "type": "message", "content": "Qual período prefere?",
+                "data": {"wait_for_reply": True},
+            },
+            {
+                "id": "preferred-period", "type": "data_collection",
+                "data": {"variable_name": "preferred_period", "data_type": "text"},
+            },
+            {"id": "check-availability", "type": "mcp_tool", "data": {}},
+        ],
+        "edges": [
+            {"id": "ask-to-collect", "source": "ask-period", "target": "preferred-period"},
+            {
+                "id": "collection-success", "source": "preferred-period",
+                "sourceHandle": "success", "target": "check-availability",
+            },
+        ],
+    }
+    executor, snapshot, event_store, session, db = _executor(raw_snapshot)
+    session.current_node_id = "ask-period"
+
+    class _FakeCheckAvailability:
+        def __init__(self):
+            self.executions = 0
+
+        def execute(self, db, *, snapshot, session, node, runtime_input):
+            self.executions += 1
+            session.variables["availability_checked"] = True
+            return NodeExecutionResult(status="complete")
+
+    fake_check = _FakeCheckAvailability()
+    executor.node_registry._executors["mcp_tool"] = fake_check
+
+    first = executor.handle_input(db, _input_with_text(snapshot, "wamid.ask", "tratamento salvo"))
+
+    assert first.status == FlowV2SessionStatus.WAITING
+    assert first.current_node_id == "preferred-period"
+    assert [action.as_effect()["text"] for action in first.actions] == ["Qual período prefere?"]
+    assert session.context["waiting_variable"] == "preferred_period"
+
+    # Mimic JSON persistence/reload between separate worker deliveries.
+    session.context = dict(session.context)
+    session.context["data_collection"] = dict(session.context["data_collection"])
+    session.context["data_collection"]["processed_message_ids"] = list(
+        session.context["data_collection"]["processed_message_ids"]
+    )
+    session.variables = dict(session.variables)
+
+    second = executor.handle_input(
+        db,
+        _input_with_text(snapshot, "wamid.period", "Tarde do dia 04/09/2026 às 14:30hrs"),
+    )
+
+    assert second.status == FlowV2SessionStatus.COMPLETED
+    assert session.variables["preferred_period"] == "Tarde do dia 04/09/2026 às 14:30hrs"
+    assert session.variables["availability_checked"] is True
+    assert fake_check.executions == 1
+    assert [action.as_effect()["text"] for action in first.actions + second.actions] == ["Qual período prefere?"]
+    assert any(
+        event["event_type"] == "TRANSITION_SELECTED"
+        and event["node_id"] == "preferred-period"
+        and event["payload"] == {"source_handle": "success", "target_node_id": "check-availability"}
+        for event in event_store.events
+    )
 
 
 def test_terminal_marked_node_finishes_even_when_edge_exists() -> None:
