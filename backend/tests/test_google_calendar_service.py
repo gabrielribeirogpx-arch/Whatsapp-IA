@@ -136,6 +136,19 @@ def test_check_availability_calls_freebusy(monkeypatch):
     assert seen["json"]["items"] == [{"id": "primary"}]
 
 
+def test_check_availability_missing_bounds_does_not_call_google(monkeypatch):
+    tenant_id = uuid.uuid4(); db = FakeDb(); _connect(db, tenant_id)
+    called = False
+    def fake_request(*args, **kwargs):
+        nonlocal called
+        called = True
+        raise AssertionError("/freeBusy must not be called without a complete interval")
+    monkeypatch.setattr("app.services.google_calendar_service.requests.request", fake_request)
+    result = GoogleCalendarService(db, tenant_id).check_availability(timezone="America/Sao_Paulo")
+    assert result == {"ok": False, "message": "google_calendar_missing_required_fields", "missing_fields": ["timeMin", "timeMax"]}
+    assert called is False
+
+
 def test_refresh_token_encrypted_attempts_decrypt_before_missing(monkeypatch):
     tenant_id = uuid.uuid4(); db = FakeDb(); conn = _connect(db, tenant_id, expires_at=datetime.utcnow() - timedelta(minutes=1))
     calls = []

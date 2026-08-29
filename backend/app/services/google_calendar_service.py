@@ -436,7 +436,14 @@ class GoogleCalendarService:
             tz = self._tenant_timezone(kwargs.get("timezone"))
             start = kwargs.get("start") or kwargs.get("timeMin") or kwargs.get("time_min")
             end = kwargs.get("end") or kwargs.get("timeMax") or kwargs.get("time_max")
-            body = {"timeMin": self._normalize_datetime(start, tz), "timeMax": self._normalize_datetime(end, tz), "timeZone": tz, "items": [{"id": "primary"}]}
+            normalized_start = self._normalize_datetime(start, tz)
+            normalized_end = self._normalize_datetime(end, tz)
+            missing = [name for name, value in (("timeMin", normalized_start), ("timeMax", normalized_end)) if not value]
+            if missing:
+                result = {"ok": False, "message": "google_calendar_missing_required_fields", "missing_fields": missing}
+                self._log("GOOGLE_CALENDAR_CHECK_AVAILABILITY_VALIDATION_FAILED", tool_name="google_calendar_check_availability", input={"missing_fields": missing}, timezone=tz, **auth_trace)
+                return result
+            body = {"timeMin": normalized_start, "timeMax": normalized_end, "timeZone": tz, "items": [{"id": "primary"}]}
             self._log("GOOGLE_CALENDAR_CHECK_AVAILABILITY_REQUEST", tool_name="google_calendar_check_availability", input=kwargs, timezone=tz, calendar_id="primary", request_body=body, **auth_trace)
             ok, data, _ = self._request("POST", "/freeBusy", json_body=body, auth_trace=auth_trace)
             self._log("GOOGLE_CALENDAR_CHECK_AVAILABILITY_AUTH_READY", tool_name="google_calendar_check_availability", input=kwargs, timezone=tz, calendar_id="primary", **auth_trace)
