@@ -11,6 +11,7 @@
     "test:business-kits": "node tests/businessKits.test.mjs",
     "test:choice-handles": "node tests/choiceDynamicHandlesRegression.test.mjs",
     "test:edge-sanitization": "node tests/flowEdgeSanitization.test.mjs",
+    "test:element-deletion": "node tests/flowElementDeletion.test.mjs",
     "test:dynamic-choice": "node tests/dynamicChoiceLowCode.test.mjs",
     "test:interactive-messages": "node tests/interactiveMessagePresentation.test.mjs",
     "test:data-collection-types": "node tests/dataCollectionAppointmentPeriod.test.mjs"
