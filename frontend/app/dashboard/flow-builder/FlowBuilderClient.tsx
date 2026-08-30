@@ -62,6 +62,7 @@ import { diagnoseFlowEdges, sanitizeEdges, sanitizeNodes } from '@/lib/flowEdgeD
 import type { EdgeDiagnostic } from '@/lib/flowEdgeDiagnostics';
 import { getNodeHandleContract, migrateEdgeHandles, validateNodeConnection } from '@/lib/nodeHandleContract';
 import type { EdgeRoutingPreference } from '@/lib/edgeRouting';
+import { isFlowEditorTextEntryTarget, isFlowElementDeleteKey, removeElementsById, selectedDeletableIds } from '@/lib/flowElementDeletion';
 import { parseSimulatorError } from '@/lib/simulatorError';
 import type { SimulatorError, SimulatorIssue } from '@/lib/simulatorError';
 
@@ -2047,6 +2048,34 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
     }
     onEdgesChange(changes);
   }, [markFlowDirty, onEdgesChange, selectedFlowId]);
+
+  const canvasLocked = isLoadingFlow || isRestoringVersion;
+  const commitEdgeDeletion = useCallback((deleted: Edge[]) => {
+    const deletedIds = new Set(deleted.map((edge) => edge.id));
+    if (deletedIds.size === 0) return;
+    setEdges((currentEdges) => removeElementsById(currentEdges, deletedIds));
+    markFlowDirty('edge_delete_commit', { deleted_edge_ids: Array.from(deletedIds) });
+  }, [markFlowDirty, setEdges]);
+
+  // React Flow normally handles these keys itself. This capture listener is a
+  // deterministic fallback for controlled/custom edges, whose selected state
+  // is held by the builder. It runs once per mount and leaves node deletion to
+  // React Flow so the existing node/connected-edge deletion path is preserved.
+  useEffect(() => {
+    const handleSelectedEdgeDelete = (event: KeyboardEvent) => {
+      if (!isFlowElementDeleteKey(event.key)) return;
+      if (isFlowEditorTextEntryTarget(event.target)) return;
+      const ids = selectedDeletableIds(edgesRef.current, canvasLocked);
+      if (ids.length === 0) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const selectedIds = new Set(ids);
+      commitEdgeDeletion(edgesRef.current.filter((edge) => selectedIds.has(edge.id)));
+    };
+
+    window.addEventListener('keydown', handleSelectedEdgeDelete, true);
+    return () => window.removeEventListener('keydown', handleSelectedEdgeDelete, true);
+  }, [canvasLocked, commitEdgeDeletion]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -4266,9 +4295,10 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
           key={flow?.id || 'no-flow'}
           onInit={setRfInstance}
           nodes={safeNodes}
-          edges={decoratedEdges.map((edge) => ({ ...edge, type: 'smart' }))}
+          edges={decoratedEdges.map((edge) => ({ ...edge, type: 'smart', selectable: !canvasLocked, deletable: !canvasLocked }))}
           onNodesChange={handleNodesChange}
           onEdgesChange={handleEdgesChange}
+          onEdgesDelete={commitEdgeDeletion}
           onConnect={onConnect}
           isValidConnection={isValidConnection}
           onConnectStart={onConnectStart}
@@ -4292,9 +4322,11 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
           nodeTypes={nodeTypes}
           edgeTypes={edgeTypes}
           defaultEdgeOptions={{ type: 'smart' }}
-          nodesDraggable={true}
-          nodesConnectable
-          elementsSelectable
+          nodesDraggable={!canvasLocked}
+          nodesConnectable={!canvasLocked}
+          elementsSelectable={!canvasLocked}
+          edgesFocusable={!canvasLocked}
+          edgesUpdatable={!canvasLocked}
           deleteKeyCode={['Backspace', 'Delete']}
           snapToGrid
           snapGrid={[20, 20]}
