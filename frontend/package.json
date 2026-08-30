@@ -12,7 +12,8 @@
     "test:choice-handles": "node tests/choiceDynamicHandlesRegression.test.mjs",
     "test:edge-sanitization": "node tests/flowEdgeSanitization.test.mjs",
     "test:dynamic-choice": "node tests/dynamicChoiceLowCode.test.mjs",
-    "test:interactive-messages": "node tests/interactiveMessagePresentation.test.mjs"
+    "test:interactive-messages": "node tests/interactiveMessagePresentation.test.mjs",
+    "test:data-collection-types": "node tests/dataCollectionAppointmentPeriod.test.mjs"
   },
   "dependencies": {
     "dagre": "^0.8.5",
