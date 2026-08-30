@@ -5,6 +5,7 @@ import traceback
 
 from typing import Any, Callable
 
+from jsonschema import ValidationError, validate
 from sqlalchemy.orm import Session
 
 from app.services.google_calendar_service import PROVIDER, GoogleCalendarService, _connection_lookup_diagnostics
@@ -21,6 +22,57 @@ GOOGLE_CALENDAR_TOOL_IDS = {
     "google_calendar_delete_event",
     "calendar.get_availability", "calendar.create_appointment", "calendar.get_appointment",
     "calendar.reschedule_appointment", "calendar.cancel_appointment",
+}
+
+GOOGLE_CALENDAR_CREATE_EVENT_INPUT_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "title": {
+            "type": "string",
+            "description": "Título do evento.",
+        },
+        "summary": {
+            "type": "string",
+            "description": "Título alternativo do evento, aceito pelo serviço como alias de title.",
+        },
+        "start": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Início do evento em ISO 8601 (por exemplo, {{selected_slot.start}}).",
+        },
+        "end": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Fim do evento em ISO 8601 (por exemplo, {{selected_slot.end}}).",
+        },
+        "timezone": {
+            "type": "string",
+            "description": "Fuso horário IANA do evento (por exemplo, {{selected_slot.timezone}}).",
+        },
+        "description": {
+            "type": "string",
+            "description": "Descrição opcional do evento.",
+        },
+        "location": {
+            "type": "string",
+            "description": "Local opcional do evento.",
+        },
+        "attendees": {
+            "type": "array",
+            "description": "Lista opcional de participantes, como e-mails ou objetos com o campo email.",
+            "items": {
+                "oneOf": [
+                    {"type": "string", "format": "email"},
+                    {
+                        "type": "object",
+                        "properties": {"email": {"type": "string", "format": "email"}},
+                        "required": ["email"],
+                    },
+                ]
+            },
+        },
+    },
+    "required": ["start", "end"],
 }
 
 
@@ -60,7 +112,7 @@ def google_calendar_tool_definitions(*, connected: bool) -> list[dict[str, Any]]
             "display_name": labels[tool_id],
             "name": labels[tool_id],
             "description": descriptions[tool_id],
-            "input_schema": {"type": "object"},
+            "input_schema": GOOGLE_CALENDAR_CREATE_EVENT_INPUT_SCHEMA if tool_id == "google_calendar_create_event" else {"type": "object"},
             "is_enabled": connected,
             "server_id": None,
             "server_name": "Google Calendar conectado" if connected else "Requer conexão",
@@ -159,6 +211,23 @@ class GoogleCalendarToolAdapter:
         _log_tool("GOOGLE_CALENDAR_TOOL_INPUT", tenant_id=context.tenant_id, tool_name=tool_id, input=args, db=db)
         connection_context = _connection_log_context(db, context.tenant_id)
         _log_tool("GOOGLE_CALENDAR_CONNECTION_FOUND" if connection_context.get("connected") else "GOOGLE_CALENDAR_CONNECTION_NOT_FOUND", tenant_id=context.tenant_id, tool_name=tool_id, input=args, db=db)
+        if tool_id == "google_calendar_create_event":
+            try:
+                validate(instance=args, schema=GOOGLE_CALENDAR_CREATE_EVENT_INPUT_SCHEMA)
+            except ValidationError:
+                message = "google_calendar_invalid_arguments"
+                normalized = NormalizedToolResult(False, tool_id, type="google_calendar.create_event", error={"code": message})
+                return ToolResult(
+                    False,
+                    self.tool_type,
+                    tool_id=tool_id,
+                    tool_name=tool_id,
+                    output={"ok": False, "message": message},
+                    structured_content={"ok": False, "tool": tool_id, "result": {}, "error": message},
+                    error_code=message,
+                    metadata={"provider": "google_calendar", "source": "integration_connections"},
+                    normalized_result=normalized,
+                )
         try:
             service = self.service_factory(db, context.tenant_id)
             _log_tool("GOOGLE_CALENDAR_ADAPTER_PAYLOAD", tenant_id=context.tenant_id, tool_name=tool_id, input=args, db=db, payload=args)
