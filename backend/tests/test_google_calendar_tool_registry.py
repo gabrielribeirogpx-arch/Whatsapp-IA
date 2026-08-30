@@ -13,7 +13,7 @@ from app.routers.mcp import router
 from app.services.integration_connection_service import IntegrationConnectionService
 from app.services.tenant_service import get_current_tenant
 from app.tools import ToolContext, ToolRegistry
-from app.tools.adapters.google_calendar_tool_adapter import GoogleCalendarToolAdapter
+from app.tools.adapters.google_calendar_tool_adapter import GoogleCalendarToolAdapter, google_calendar_tool_definitions
 
 
 class _ScalarResult:
@@ -71,6 +71,12 @@ def test_connected_tenant_sees_real_google_calendar_tools_and_mcp_stays_separate
     assert google_tool["display_name"] == "[Google Calendar] Criar evento"
     assert google_tool["server_name"] == "Google Calendar conectado"
     assert google_tool["metadata"]["kind"] == "internal"
+    assert google_tool["input_schema"]["required"] == ["start", "end"]
+    assert set(google_tool["input_schema"]["properties"]) == {"title", "summary", "start", "end", "timezone", "description", "location", "attendees"}
+    assert google_tool["input_schema"]["properties"]["start"]["format"] == "date-time"
+    assert "{{selected_slot.start}}" in google_tool["input_schema"]["properties"]["start"]["description"]
+    assert "{{selected_slot.end}}" in google_tool["input_schema"]["properties"]["end"]["description"]
+    assert "{{selected_slot.timezone}}" in google_tool["input_schema"]["properties"]["timezone"]["description"]
     assert any(item["tool_name"] == "calendar_create_event" and item["id"] != "google_calendar_create_event" for item in payload)
 
 
@@ -101,3 +107,52 @@ def test_tool_registry_executes_real_google_calendar_with_current_tenant():
     assert calls == [(db, tenant_id)]
     assert result.normalized_result is not None
     assert result.normalized_result.type == "google_calendar.list_events"
+
+
+def test_only_create_event_definition_receives_the_complete_schema():
+    definitions = google_calendar_tool_definitions(connected=True)
+    create = next(item for item in definitions if item["id"] == "google_calendar_create_event")
+    availability = next(item for item in definitions if item["id"] == "calendar.get_availability")
+
+    assert create["input_schema"]["properties"]
+    assert create["input_schema"]["required"] == ["start", "end"]
+    assert availability["input_schema"] == {"type": "object"}
+
+
+def test_create_event_rejects_empty_arguments_without_calling_service():
+    class FakeService:
+        def __init__(self, db, tenant_id):
+            raise AssertionError("invalid input must not reach the service")
+
+    registry = ToolRegistry()
+    registry.register(GoogleCalendarToolAdapter(object(), service_factory=FakeService))
+    result = registry.execute("google_calendar", "google_calendar_create_event", {}, ToolContext(tenant_id=uuid.uuid4()))
+
+    assert result.ok is False
+    assert result.error_code == "google_calendar_invalid_arguments"
+    assert result.structured_content["error"] == "google_calendar_invalid_arguments"
+
+
+def test_create_event_forwards_rendered_slot_arguments_unchanged():
+    calls = []
+
+    class FakeService:
+        def __init__(self, db, tenant_id):
+            pass
+
+        def create_event(self, **kwargs):
+            calls.append(kwargs)
+            return {"ok": True, "event_id": "evt-1", "title": kwargs.get("title"), "start": kwargs["start"], "end": kwargs["end"]}
+
+    arguments = {
+        "title": "Consulta",
+        "start": "2026-09-01T10:00:00-03:00",
+        "end": "2026-09-01T11:00:00-03:00",
+        "timezone": "America/Sao_Paulo",
+    }
+    registry = ToolRegistry()
+    registry.register(GoogleCalendarToolAdapter(object(), service_factory=FakeService))
+    result = registry.execute("google_calendar", "google_calendar_create_event", arguments, ToolContext(tenant_id=uuid.uuid4()))
+
+    assert result.ok is True
+    assert calls == [arguments]
