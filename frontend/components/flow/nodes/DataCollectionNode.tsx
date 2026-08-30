@@ -4,6 +4,8 @@ import { useEffect } from 'react';
 import { NodeProps, useUpdateNodeInternals } from 'reactflow';
 import CompactFlowNode from './CompactFlowNode';
 import { DATA_COLLECTION_HANDLES } from '@/lib/dataCollectionHandles';
+import { getDataCollectionTypeLabel } from '@/lib/dataCollectionTypes';
+import type { DataCollectionType } from '@/lib/dataCollectionTypes';
 
 const HANDLE_PRESENTATION = {
   success: { label: '✓ Sucesso', color: '#16a34a' },
@@ -27,15 +29,9 @@ const ATTEMPTS_EXHAUSTED_HANDLE = {
   title: 'Executada apenas após atingir o número máximo de tentativas configurado. Caso nenhuma conexão seja criada, o Wazza executará automaticamente o comportamento padrão.',
 };
 
-const TYPE_LABELS: Record<string, string> = {
-  text: 'Texto', number: 'Número', email: 'E-mail', phone: 'Telefone', date: 'Data',
-  time: 'Hora', cpf: 'CPF', cnpj: 'CNPJ', url: 'URL', currency: 'Moeda',
-  boolean: 'Sim/Não', choice: 'Escolha',
-};
-
 type DataCollectionNodeData = {
   variable_name?: string;
-  data_type?: string;
+  data_type?: DataCollectionType | string;
   required?: boolean;
   max_attempts?: number;
   auto_retry_invalid?: boolean;
@@ -87,13 +83,13 @@ export default function DataCollectionNode({ id, data, selected, isConnectable }
       title="Coleta de Dados"
       emoji="📥"
       badge={dataType.toUpperCase()}
-      badgeTitle={`Tipo: ${TYPE_LABELS[dataType] || dataType}`}
+      badgeTitle={`Tipo: ${getDataCollectionTypeLabel(dataType)}`}
       badgeTone={{ background: '#ecfdf5', color: '#047857' }}
       accent="linear-gradient(90deg,#10b981,#14b8a6)"
       summary={summaryParts.join(' · ')}
       metrics={[
         { label: 'Variável', value: variableName || 'Variável não definida', title: variableName || 'Variável não definida' },
-        { label: 'Tipo', value: TYPE_LABELS[dataType] || dataType },
+        { label: 'Tipo', value: getDataCollectionTypeLabel(dataType) },
       ]}
       choiceLayout
       isStart={nodeData.isStart}
