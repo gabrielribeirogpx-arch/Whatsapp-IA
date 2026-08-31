@@ -2,7 +2,7 @@ export type EdgeRoutingMode = 'simple' | 'orthogonal' | 'feedback_local' | 'loop
 export type EdgeRoutingPreference = 'automatic' | 'curved' | 'orthogonal';
 export type Point = { x: number; y: number };
 export type NodeBox = { id: string; x: number; y: number; width: number; height: number };
-export type RoutingEdge = { id?: string; source: string; target: string; data?: Record<string, unknown> | null };
+export type RoutingEdge = { id?: string; source: string; target: string; sourceHandle?: string | null; targetHandle?: string | null; data?: Record<string, unknown> | null };
 export type ExternalLane = 'top' | 'bottom' | 'left' | 'right';
 export type RouteMetrics = { pathLength: number; nodeIntersections: number; nearNodeCount: number; edgeCrossings: number; bendCount: number; centerTraversals: number; labelCollisions: number; totalCost: number };
 export type RouteCandidate = RouteMetrics & { lane: ExternalLane; laneIndex: number; points: Point[] };
@@ -42,6 +42,16 @@ function edgeCrossings(path: Point[], edge: RoutingEdge, nodes: NodeBox[], allEd
 }
 function closesGraphCycle(edge: RoutingEdge, allEdges: RoutingEdge[]) { const outgoing = new Map<string, string[]>(); allEdges.forEach(e => { if (e.id && e.id === edge.id) return; outgoing.set(e.source, [...(outgoing.get(e.source) || []), e.target]); }); const pending = [edge.target], visited = new Set<string>(); while (pending.length) { const current = pending.pop()!; if (current === edge.source) return true; if (!visited.has(current)) { visited.add(current); pending.push(...(outgoing.get(current) || [])); } } return false; }
 
+/** Returns a stable lane within one directed connection. Reciprocal edges and
+ * edges attached to different handles belong to different route groups. */
+export function parallelEdgeLaneIndex(edge: RoutingEdge, allEdges: RoutingEdge[], predicate: (candidate: RoutingEdge) => boolean = () => true): number {
+  const sameRouteGroup = (candidate: RoutingEdge) => candidate.source === edge.source
+    && candidate.target === edge.target
+    && (candidate.sourceHandle ?? null) === (edge.sourceHandle ?? null)
+    && (candidate.targetHandle ?? null) === (edge.targetHandle ?? null);
+  return allEdges.filter(candidate => sameRouteGroup(candidate) && predicate(candidate)).map(candidate => candidate.id || '').sort().indexOf(edge.id || '');
+}
+
 export function selectEdgeRoutingMode({ sourceNode, targetNode, allNodes, edge, allEdges = [], graphDirection = 'LR', preference = 'automatic', margin = NODE_CLEARANCE }: { sourceNode: NodeBox; targetNode: NodeBox; allNodes: NodeBox[]; edge: RoutingEdge; allEdges?: RoutingEdge[]; graphDirection?: string; preference?: EdgeRoutingPreference; margin?: number }): RoutingDecision {
   const source = nodeBoundingBox(sourceNode), target = nodeBoundingBox(targetNode), start = boxCenter(source), end = boxCenter(target);
   const distance = Math.hypot(end.x - start.x, end.y - start.y), markerLoop = edge.data?.is_loop === true || edge.data?.isLoop === true || edge.data?.retry === true, selfLoop = edge.source === edge.target, graphCycle = closesGraphCycle(edge, allEdges);
@@ -57,10 +67,9 @@ export function selectEdgeRoutingMode({ sourceNode, targetNode, allNodes, edge, 
   // Keep it local before considering the generic cycle fallback: the old ordering
   // sent even adjacent feedback edges to the bounding box of the whole graph.
   if (backward && !long) return { mode: 'feedback_local', reason: 'return_connection', isLoop: true, ...base };
-  if (graphCycle) return { mode: 'loop_external', reason: 'graph_cycle', isLoop: true, ...base };
   if (preference === 'orthogonal') return { mode: 'orthogonal', reason: 'forced_orthogonal', isLoop: false, ...base };
   if (long && convergenceSignals >= 2) return { mode: 'convergence_external', reason: intersections.length || crossings ? 'long_convergence_with_obstacles' : 'long_convergence_to_shared_target', isLoop: false, ...base };
-  if (backward) return { mode: 'loop_external', reason: 'return_connection', isLoop: true, ...base };
+  if (backward) return { mode: 'loop_external', reason: graphCycle ? 'graph_cycle' : 'return_connection', isLoop: true, ...base };
   if (intersections.length) return { mode: 'orthogonal', reason: 'node_intersection', isLoop: false, ...base };
   if (crossings > 1) return { mode: 'orthogonal', reason: 'edge_crossings', isLoop: false, ...base };
   return { mode: 'simple', reason: 'clear_corridor', isLoop: false, ...base };
