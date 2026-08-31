@@ -1,19 +1,20 @@
 'use client';
 
 import { BaseEdge, EdgeLabelRenderer, EdgeProps, getBezierPath, useStore } from 'reactflow';
-import { EdgeRoutingPreference, externalRouteCandidates, localFeedbackRouteCandidates, NodeBox, orthogonalWaypoints, pointsToPath, routeLabelPoint, selectEdgeRoutingMode } from '@/lib/edgeRouting';
+import { EdgeRoutingPreference, externalRouteCandidates, localFeedbackRouteCandidates, NodeBox, orthogonalWaypoints, parallelEdgeLaneIndex, pointsToPath, routeLabelPoint, selectEdgeRoutingMode } from '@/lib/edgeRouting';
 
 const debugEnabled = process.env.NEXT_PUBLIC_EDGE_ROUTING_DEBUG === 'true' || process.env.EDGE_ROUTING_DEBUG === 'true';
 
 export default function SmartOrthogonalEdge(props: EdgeProps) {
-  const { id, source, target, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, markerEnd, style, label, labelStyle, data } = props;
+  const { id, source, target, sourceHandleId, targetHandleId, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, markerEnd, style, label, labelStyle, data } = props;
   const graph = useStore((state) => ({ nodes: Array.from(state.nodeInternals.values()), edges: state.edges }));
   const nodes: NodeBox[] = graph.nodes.map((node) => ({ id: node.id, x: node.positionAbsolute?.x ?? node.position.x, y: node.positionAbsolute?.y ?? node.position.y, width: node.width || 260, height: node.height || 140 }));
   const byId = new Map(nodes.map((node) => [node.id, node]));
   const sourceNode = byId.get(source) || { id: source, x: sourceX, y: sourceY, width: 1, height: 1 };
   const targetNode = byId.get(target) || { id: target, x: targetX, y: targetY, width: 1, height: 1 };
   const preference = String(data?.__routingPreference || 'automatic') as EdgeRoutingPreference;
-  const decision = selectEdgeRoutingMode({ sourceNode, targetNode, allNodes: nodes, edge: { id, source, target, data }, allEdges: graph.edges, preference });
+  const routingEdge = { id, source, target, sourceHandle: sourceHandleId, targetHandle: targetHandleId, data };
+  const decision = selectEdgeRoutingMode({ sourceNode, targetNode, allNodes: nodes, edge: routingEdge, allEdges: graph.edges, preference });
   const start = { x: sourceX, y: sourceY }; const end = { x: targetX, y: targetY };
   let path: string; let labelX = (sourceX + targetX) / 2; let labelY = (sourceY + targetY) / 2;
 
@@ -31,17 +32,13 @@ export default function SmartOrthogonalEdge(props: EdgeProps) {
     path = pointsToPath([start, { x: sourceX + 28, y: sourceY }, { x: sourceX + 28, y: sourceY + 36 }, { x: graphLeft, y: sourceY + 36 }, { x: graphLeft, y: targetY - 36 }, { x: targetX - 28, y: targetY - 36 }, { x: targetX - 28, y: targetY }, end]);
     labelX = graphLeft; labelY = (sourceY + targetY) / 2;
   } else if (decision.mode === 'feedback_local') {
-    const feedbackIds = graph.edges
-      .filter((candidate) => candidate.id !== id && candidate.target === target && byId.has(candidate.source) && (byId.get(candidate.source)!.x > targetNode.x))
-      .map((candidate) => candidate.id).sort();
-    const laneIndex = [...feedbackIds, id].sort().indexOf(id);
-    const candidates = localFeedbackRouteCandidates(start, end, sourceNode, targetNode, nodes, new Set([source, target]), { id, source, target, data }, graph.edges, laneIndex, sourcePosition, targetPosition);
+    const laneIndex = parallelEdgeLaneIndex(routingEdge, graph.edges, candidate => byId.has(candidate.source) && byId.get(candidate.source)!.x > targetNode.x);
+    const candidates = localFeedbackRouteCandidates(start, end, sourceNode, targetNode, nodes, new Set([source, target]), routingEdge, graph.edges, laneIndex, sourcePosition, targetPosition);
     const selected = candidates[0];
     path = pointsToPath(selected.points); ({ x: labelX, y: labelY } = routeLabelPoint(selected.points));
   } else {
-    const externalIds = graph.edges.filter((candidate) => candidate.id !== id && candidate.target === target).map((candidate) => candidate.id).sort();
-    const laneIndex = [...externalIds, id].sort().indexOf(id);
-    const candidates = externalRouteCandidates(start, end, nodes, new Set([source, target]), { id, source, target, data }, graph.edges, laneIndex, sourcePosition, targetPosition);
+    const laneIndex = parallelEdgeLaneIndex(routingEdge, graph.edges);
+    const candidates = externalRouteCandidates(start, end, nodes, new Set([source, target]), routingEdge, graph.edges, laneIndex, sourcePosition, targetPosition);
     const selected = candidates[0];
     path = pointsToPath(selected.points); ({ x: labelX, y: labelY } = routeLabelPoint(selected.points));
     if (debugEnabled) console.debug('[edge-routing]', { edge_id: id, source, target, routing_mode: decision.mode, reason: decision.reason, candidate_routes: candidates.map(({ lane, totalCost, nodeIntersections, nearNodeCount, edgeCrossings, bendCount, pathLength }) => ({ lane, totalCost, nodeIntersections, nearNodeCount, edgeCrossings, bendCount, pathLength })), selected_lane: selected.lane, external_lane_index: laneIndex, path_length: selected.pathLength, node_intersections: selected.nodeIntersections, near_node_count: selected.nearNodeCount, edge_crossings: selected.edgeCrossings, bend_count: selected.bendCount, total_cost: selected.totalCost });
