@@ -109,14 +109,46 @@ def test_tool_registry_executes_real_google_calendar_with_current_tenant():
     assert result.normalized_result.type == "google_calendar.list_events"
 
 
-def test_only_create_event_definition_receives_the_complete_schema():
+def test_availability_definition_publishes_its_canonical_schema():
     definitions = google_calendar_tool_definitions(connected=True)
     create = next(item for item in definitions if item["id"] == "google_calendar_create_event")
     availability = next(item for item in definitions if item["id"] == "calendar.get_availability")
 
     assert create["input_schema"]["properties"]
     assert create["input_schema"]["required"] == ["start", "end"]
-    assert availability["input_schema"] == {"type": "object"}
+    assert availability["input_schema"]["required"] == ["start", "end"]
+    assert set(availability["input_schema"]["properties"]) == {"start", "end", "timezone", "mode"}
+    assert "{{appointment_period.window_start}}" in availability["input_schema"]["properties"]["start"]["description"]
+    assert "{{appointment_period.window_end}}" in availability["input_schema"]["properties"]["end"]["description"]
+    assert "{{appointment_period.timezone}}" in availability["input_schema"]["properties"]["timezone"]["description"]
+
+
+def test_availability_rejects_missing_dates_without_calling_service():
+    class FakeService:
+        def __init__(self, db, tenant_id):
+            raise AssertionError("invalid input must not reach the service")
+
+    result = GoogleCalendarToolAdapter(object(), service_factory=FakeService).execute(
+        "calendar.get_availability", {"timezone": "America/Sao_Paulo"}, ToolContext(tenant_id=uuid.uuid4())
+    )
+    assert result.ok is False
+    assert result.error_code == "google_calendar_invalid_arguments"
+
+
+def test_availability_forwards_canonical_dates_to_google_calendar_service():
+    calls = []
+    class FakeService:
+        def __init__(self, db, tenant_id): pass
+        def check_availability(self, **kwargs):
+            calls.append(kwargs)
+            return {"ok": True, "busy": [], "appointments": []}
+
+    arguments = {"start": "2026-09-01T13:00:00-03:00", "end": "2026-09-01T18:00:00-03:00", "timezone": "America/Sao_Paulo"}
+    result = GoogleCalendarToolAdapter(object(), service_factory=FakeService).execute(
+        "calendar.get_availability", arguments, ToolContext(tenant_id=uuid.uuid4())
+    )
+    assert result.ok is True
+    assert calls == [arguments]
 
 
 def test_create_event_rejects_empty_arguments_without_calling_service():

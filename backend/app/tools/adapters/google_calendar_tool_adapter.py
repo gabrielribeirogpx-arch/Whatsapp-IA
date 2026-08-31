@@ -75,6 +75,33 @@ GOOGLE_CALENDAR_CREATE_EVENT_INPUT_SCHEMA: dict[str, Any] = {
     "required": ["start", "end"],
 }
 
+GOOGLE_CALENDAR_AVAILABILITY_INPUT_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "start": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Início da janela em ISO 8601 (por exemplo, {{appointment_period.window_start}}).",
+        },
+        "end": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Fim da janela em ISO 8601 (por exemplo, {{appointment_period.window_end}}).",
+        },
+        "timezone": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Fuso horário IANA (por exemplo, {{appointment_period.timezone}}).",
+        },
+        "mode": {
+            "type": "string",
+            "enum": ["period", "exact"],
+            "description": "Modo normalizado do período; quando omitido, usa period.",
+        },
+    },
+    "required": ["start", "end"],
+}
+
 
 def google_calendar_tool_definitions(*, connected: bool) -> list[dict[str, Any]]:
     labels = {
@@ -112,7 +139,11 @@ def google_calendar_tool_definitions(*, connected: bool) -> list[dict[str, Any]]
             "display_name": labels[tool_id],
             "name": labels[tool_id],
             "description": descriptions[tool_id],
-            "input_schema": GOOGLE_CALENDAR_CREATE_EVENT_INPUT_SCHEMA if tool_id == "google_calendar_create_event" else {"type": "object"},
+            "input_schema": (
+                GOOGLE_CALENDAR_CREATE_EVENT_INPUT_SCHEMA if tool_id == "google_calendar_create_event"
+                else GOOGLE_CALENDAR_AVAILABILITY_INPUT_SCHEMA if tool_id == "calendar.get_availability"
+                else {"type": "object"}
+            ),
             "is_enabled": connected,
             "server_id": None,
             "server_name": "Google Calendar conectado" if connected else "Requer conexão",
@@ -211,12 +242,17 @@ class GoogleCalendarToolAdapter:
         _log_tool("GOOGLE_CALENDAR_TOOL_INPUT", tenant_id=context.tenant_id, tool_name=tool_id, input=args, db=db)
         connection_context = _connection_log_context(db, context.tenant_id)
         _log_tool("GOOGLE_CALENDAR_CONNECTION_FOUND" if connection_context.get("connected") else "GOOGLE_CALENDAR_CONNECTION_NOT_FOUND", tenant_id=context.tenant_id, tool_name=tool_id, input=args, db=db)
-        if tool_id == "google_calendar_create_event":
+        input_schema = (
+            GOOGLE_CALENDAR_CREATE_EVENT_INPUT_SCHEMA if tool_id == "google_calendar_create_event"
+            else GOOGLE_CALENDAR_AVAILABILITY_INPUT_SCHEMA if tool_id == "calendar.get_availability"
+            else None
+        )
+        if input_schema is not None:
             try:
-                validate(instance=args, schema=GOOGLE_CALENDAR_CREATE_EVENT_INPUT_SCHEMA)
+                validate(instance=args, schema=input_schema)
             except ValidationError:
                 message = "google_calendar_invalid_arguments"
-                normalized = NormalizedToolResult(False, tool_id, type="google_calendar.create_event", error={"code": message})
+                normalized = NormalizedToolResult(False, tool_id, type=tool_id, error={"code": message})
                 return ToolResult(
                     False,
                     self.tool_type,

@@ -103,6 +103,12 @@ export function validateFlowLocally(nodes: Node[], edges: Edge[]): FlowValidatio
       if (!terminal && !handles.has('success')) issues.push(issue('MCP_SUCCESS_REQUIRED', 'Conecte a saída Sucesso ou marque o node como final.', node, 'connections'));
       if (!terminal && !handles.has('error')) issues.push(issue('MCP_ERROR_REQUIRED', 'Conecte a saída Erro.', node, 'connections'));
       if (String(data.tool_classification || '').toUpperCase() === 'DESTRUCTIVE' && (data.destructive_confirmed !== true || !String(data.idempotency_key || '').trim())) issues.push(issue('MCP_DESTRUCTIVE_CONFIRMATION_REQUIRED', 'Ação destrutiva exige confirmação e idempotency key.', node, 'destructive_confirmed'));
+      const schema = data.input_schema && typeof data.input_schema === 'object' ? data.input_schema as { required?: unknown[] } : {};
+      const args = data.arguments && typeof data.arguments === 'object' ? data.arguments as Record<string, unknown> : {};
+      (Array.isArray(schema.required) ? schema.required : []).forEach((field) => {
+        const name = String(field); const value = args[name];
+        if (value == null || (typeof value === 'string' && !value.trim())) issues.push(issue('MCP_ARGUMENT_REQUIRED', `Preencha o argumento obrigatório ${name}.`, node, `arguments.${name}`));
+      });
     }
   }); return issues;
 }

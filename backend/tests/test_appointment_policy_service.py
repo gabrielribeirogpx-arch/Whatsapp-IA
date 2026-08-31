@@ -11,6 +11,16 @@ def test_normalizes_exact_and_periods_without_fixed_offset():
     assert normalize_preferred_period("07/09/2026 às 14:00",p,now=now)["start"] == "2026-09-07T14:00:00-03:00"
     assert normalize_preferred_period("amanhã de manhã",p,now=now)["mode"] == "period"
     assert normalize_preferred_period("07/09/2026",p,now=now)["window_start"].endswith("08:00:00-03:00")
+    afternoon=normalize_preferred_period("Amanhã à tarde",p,now=now)
+    assert afternoon["window_start"].endswith("13:00:00-03:00")
+    assert afternoon["window_end"].endswith("18:00:00-03:00")
+
+def test_named_afternoon_uses_tenant_scoped_second_business_period():
+    custom=policy(business_hours={"monday":[{"start":"07:15","end":"10:45"},{"start":"15:20","end":"19:10"}]})
+    now=datetime(2026,9,6,10,tzinfo=ZoneInfo("America/Sao_Paulo"))
+    result=normalize_preferred_period("amanhã à tarde",custom,now=now)
+    assert result["window_start"].endswith("15:20:00-03:00")
+    assert result["window_end"].endswith("19:10:00-03:00")
 def test_rejects_bad_dates_closed_days_and_outside_hours():
     p=policy(); now=datetime(2026,9,1,tzinfo=ZoneInfo("America/Sao_Paulo"))
     for raw in ("31/02/2026", "06/09/2026", "07/09/2026 às 19h", "01/01/2020"):

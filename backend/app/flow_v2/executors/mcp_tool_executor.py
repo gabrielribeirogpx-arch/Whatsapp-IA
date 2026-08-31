@@ -109,9 +109,13 @@ class MCPToolNodeExecutor(BaseNodeExecutor):
                 arguments = self._render(data.get("arguments") or {}, db, snapshot=snapshot, session=session, runtime_input=runtime_input, node_id=node_id)
                 if not isinstance(arguments, dict):
                     raise MCPNodeError("MCP_ARGUMENT_VALIDATION_FAILED", "Os argumentos MCP devem formar um objeto JSON.")
+                try:
+                    validate(arguments, tool_definition.get("input_schema") or {"type": "object"})
+                except ValidationError as exc:
+                    raise MCPNodeError("MCP_ARGUMENT_VALIDATION_FAILED", "Os argumentos não correspondem ao schema da ferramenta.") from exc
                 result = GoogleCalendarToolAdapter(db).execute(tool_name, arguments, ToolContext(tenant_id=session.tenant_id))
-                if not result.success:
-                    raise MCPNodeError("MCP_TOOL_EXECUTION_FAILED", "A integração não concluiu a execução.", True)
+                if not result.ok:
+                    raise MCPNodeError(result.error_code or "MCP_TOOL_EXECUTION_FAILED", "A integração não concluiu a execução.", True)
                 output = result.structured_content if result.structured_content is not None else result.output
                 output = safe_get_path(output, data.get("result_path")) if data.get("result_path") else output
                 variables = dict(getattr(session, "variables", None) or {})
