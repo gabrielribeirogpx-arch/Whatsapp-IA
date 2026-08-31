@@ -7,6 +7,7 @@ from app.flow_v2.actions import ScheduleDelayAction, SendChoiceButtonsAction, Se
 from app.flow_v2.data_collection import validate_data_collection
 from app.flow_v2.executors._legacy import BaseNodeExecutor, NodeExecutionResult
 logger = logging.getLogger(__name__)
+LEGACY_DATA_COLLECTION_PROMPT = "Por favor, informe o dado solicitado."
 
 
 def initialize_data_collection_wait(*, session, node_id, data):
@@ -66,12 +67,16 @@ class RuntimeV2DataCollectionExecutor(BaseNodeExecutor):
             seconds = max(0, int(data.get('timeout_seconds') or 0))
             timeout_at = datetime.fromisoformat(waiting['timeout_at']) if waiting.get('timeout_at') else None
             actions = []
+            prompt_template = data.get('prompt') or LEGACY_DATA_COLLECTION_PROMPT
+            prompt = str(self._render(prompt_template, db, snapshot=snapshot, session=session, runtime_input=runtime_input, node_id=node_id) or '').strip() or LEGACY_DATA_COLLECTION_PROMPT
             options = [o for o in data.get('options', []) if isinstance(o, dict) and o.get('id') and o.get('label')]
             if data.get('data_type') == 'choice' and options and data.get('display_mode', 'buttons') != 'text':
                 mode = 'buttons' if data.get('display_mode', 'buttons') == 'buttons' and len(options) <= 3 else 'list'
                 buttons = tuple({'type': 'reply', 'reply': {'id': str(o['id']), 'title': str(o['label'])[:20]}} for o in options[:3])
                 sections = ({'title': 'Opções', 'rows': [{'id': str(o['id']), 'title': str(o['label'])[:24]} for o in options[:10]]},)
-                actions.append(SendChoiceButtonsAction(tenant_id=session.tenant_id, session_id=session.id, external_user_id=runtime_input.external_user_id, conversation_id=runtime_input.conversation_id, contact_id=runtime_input.contact_id, text=str(data.get('prompt') or data.get('label') or 'Escolha uma opção'), node_id=node_id, options=tuple({'id': str(o['id']), 'label': str(o['label'])} for o in options), buttons=buttons, sections=sections, display_mode=mode, metadata={'node_type': 'data_collection'}))
+                actions.append(SendChoiceButtonsAction(tenant_id=session.tenant_id, session_id=session.id, external_user_id=runtime_input.external_user_id, conversation_id=runtime_input.conversation_id, contact_id=runtime_input.contact_id, text=prompt, node_id=node_id, options=tuple({'id': str(o['id']), 'label': str(o['label'])} for o in options), buttons=buttons, sections=sections, display_mode=mode, metadata={'node_type': 'data_collection'}))
+            else:
+                actions.append(SendMessageAction(tenant_id=session.tenant_id, session_id=session.id, external_user_id=runtime_input.external_user_id, conversation_id=runtime_input.conversation_id, contact_id=runtime_input.contact_id, text=prompt, metadata={'node_type': 'data_collection', 'node_id': node_id, 'purpose': 'initial_prompt'}))
             if timeout_at:
                 key = f'data_collection_timeout:{session.id}:{node_id}'
                 actions.append(ScheduleDelayAction(tenant_id=session.tenant_id, session_id=session.id, external_user_id=runtime_input.external_user_id, conversation_id=runtime_input.conversation_id, contact_id=runtime_input.contact_id, job_id=uuid5(NAMESPACE_URL, key), resume_node_id=node_id, run_at=timeout_at, seconds=seconds, metadata={'event_type': 'data_collection_timeout', 'idempotency_key': key, 'node_id': node_id}))

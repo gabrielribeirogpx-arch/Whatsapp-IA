@@ -57,3 +57,11 @@ def test_data_collection_survives_save_conversion_and_publish() -> None:
         "source_handle": "success",
         "target_node_id": "done",
     }.items() <= published.snapshot["transitions"][0].items()
+
+
+def test_prompt_is_preserved_in_migration_and_published_snapshot() -> None:
+    nodes, edges = _graph()
+    migrated = FlowV1ToV2Migrator().migrate_payload(nodes=nodes, edges=edges)
+    assert next(node for node in migrated.snapshot['nodes'] if node['id'] == 'collect')['data']['prompt'] == 'Qual é o seu e-mail?'
+    published = FlowV2Publisher().publish(nodes=nodes, edges=edges)
+    assert next(node for node in published.snapshot['nodes'] if node['id'] == 'collect')['data']['prompt'] == 'Qual é o seu e-mail?'

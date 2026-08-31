@@ -8,7 +8,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from app.flow_v2.actions import SendChoiceButtonsAction, SendCtaUrlAction
+from app.flow_v2.actions import SendChoiceButtonsAction, SendCtaUrlAction, SendMessageAction
 from app.flow_v2.node_executors import calculate_typing_delay_seconds
 from app.services.conversation_mode_service import set_conversation_mode
 from app.flow_v2.contracts import FlowV2EventType, FlowV2SessionStatus, RuntimeInput
@@ -2734,3 +2734,35 @@ def test_ai_system_terminal_canvas_node_waits_and_internal_events_use_unique_ind
     assert len(event_indexes) == len(set(event_indexes))
     assert event_indexes == list(range(1, len(event_indexes) + 1))
     assert "terminal_node_marked_end_flow" not in caplog.text
+
+
+def test_choice_to_data_collection_reply_uses_success_output_without_repeating_prompt(monkeypatch) -> None:
+    monkeypatch.setattr("app.services.appointment_policy_service.policy_for_tenant", lambda db, tenant_id: {})
+    raw_snapshot = {
+        'schema_version': 1,
+        'start_node_id': 'choice',
+        'nodes': [
+            {'id': 'choice', 'type': 'choice', 'data': {'isStart': True, 'content': 'O que deseja?', 'options': [{'id': 'quero_planos', 'label': 'Planos'}]}},
+            {'id': 'collect', 'type': 'data_collection', 'data': {'prompt': 'Qual período?', 'variable_name': 'appointment_period', 'data_type': 'appointment_period'}},
+            {'id': 'done', 'type': 'message', 'data': {'content': 'Período: {{appointment_period}}'}},
+        ],
+        'edges': [
+            {'id': 'choice-collect', 'source': 'choice', 'sourceHandle': 'quero_planos', 'target': 'collect'},
+            {'id': 'collect-done', 'source': 'collect', 'sourceHandle': 'success', 'target': 'done'},
+        ],
+    }
+    executor, snapshot, _events, session, db = _executor(raw_snapshot)
+    session.current_node_id = 'choice'
+    executor.handle_input(db, _input_with_id(snapshot, 'initial-choice'))
+
+    waiting = executor.handle_input(db, _input_with_id(snapshot, 'choice-reply', {'row_id': 'quero_planos'}))
+    prompts = [action for action in waiting.actions if isinstance(action, SendMessageAction) and action.text == 'Qual período?']
+    assert waiting.status == FlowV2SessionStatus.WAITING
+    assert len(prompts) == 1
+    assert session.context['waiting_variable'] == 'appointment_period'
+
+    completed = executor.handle_input(db, _input_with_text(snapshot, 'period-reply', 'amanhã de manhã'))
+    assert all(not isinstance(action, SendMessageAction) or action.text != 'Qual período?' for action in completed.actions)
+    assert session.variables['appointment_period']['mode'] == 'period'
+    assert session.variables['appointment_period']['window_start']
+    assert completed.status == FlowV2SessionStatus.COMPLETED

@@ -248,3 +248,20 @@ def action_from_effect(
             metadata={k: v for k, v in effect.items() if k not in {"type", "media_type", "media_url", "caption", "filename"}},
         )
     return None
+
+
+def is_non_empty_outbound_action(action: RuntimeAction) -> bool:
+    """Whether an action has a non-empty payload when it represents delivery."""
+    if isinstance(action, SendMessageAction):
+        return bool(action.text.strip() or action.media_url)
+    if isinstance(action, SendChoiceButtonsAction):
+        return bool(action.text.strip() and (action.buttons or action.sections or action.options))
+    if isinstance(action, SendCtaUrlAction):
+        return bool(action.text.strip() and action.button_text.strip() and action.url.strip())
+    if isinstance(action, SendMediaAction):
+        return bool(action.media_url.strip())
+    return True
+
+
+def is_message_delivery_action(action: RuntimeAction) -> bool:
+    return isinstance(action, (SendMessageAction, SendChoiceButtonsAction, SendCtaUrlAction, SendMediaAction)) and is_non_empty_outbound_action(action)

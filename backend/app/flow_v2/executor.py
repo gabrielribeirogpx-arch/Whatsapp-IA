@@ -638,7 +638,7 @@ class FlowV2Executor:
             if node_type.strip().lower() == "choice" and result.status == "continue":
                 runtime_input = self._without_choice_reply(runtime_input)
             for action in result.actions:
-                if isinstance(action, SendMessageAction):
+                if isinstance(action, SendMessageAction) and action.text.strip():
                     self._track_analytics(db, session=session, flow_id=flow_id, event_type="message_sent", node_id=node_id, node_type=node_type, metadata={"text": action.text})
 
             dispatcher_wait_node_id = self._ai_system_dispatcher_wait_node_id(snapshot=snapshot, session=session, node=node, result=result)

@@ -479,7 +479,7 @@ const isActionType = (value: string): value is ActionType => ACTION_TYPE_OPTIONS
 
 const NODE_PRESETS: Record<FlowNodeKind, { label: string; type: string; data: Record<string, unknown> }> = {
   message: { label: 'Mensagem', type: 'message', data: { content: '', wait_for_reply: false } },
-  data_collection: { label: 'Coleta de Dados', type: 'data_collection', data: { variable_name: '', data_type: 'text', required: true, normalize_value: true, auto_retry_invalid: true, max_attempts: 3, invalid_message: 'Valor inválido.\nTente novamente.', attempts_exceeded_behavior: 'invalid', timeout_seconds: 1800, cancel_keywords: ['cancelar', 'sair'], save_to_contact: false, save_to_lead: false, display_mode: 'buttons', allow_custom_value: false, options: [] } },
+  data_collection: { label: 'Coleta de Dados', type: 'data_collection', data: { prompt: 'Por favor, informe o dado solicitado.', variable_name: '', data_type: 'text', required: true, normalize_value: true, auto_retry_invalid: true, max_attempts: 3, invalid_message: 'Valor inválido.\nTente novamente.', attempts_exceeded_behavior: 'invalid', timeout_seconds: 1800, cancel_keywords: ['cancelar', 'sair'], save_to_contact: false, save_to_lead: false, display_mode: 'buttons', allow_custom_value: false, options: [] } },
   choice: {
     label: 'Escolha',
     type: 'choice',
@@ -832,6 +832,7 @@ function FlowNodeEditorPanel({
   mcpTools: MCPToolOption[];
 }) {
   const messageContentRef = useRef<HTMLTextAreaElement>(null);
+  const dataCollectionPromptRef = useRef<HTMLTextAreaElement>(null);
   const ctaTextRef = useRef<HTMLTextAreaElement>(null);
   const ctaButtonTextRef = useRef<HTMLInputElement>(null);
   const ctaUrlRef = useRef<HTMLInputElement>(null);
@@ -1048,6 +1049,7 @@ function FlowNodeEditorPanel({
           const options = Array.isArray(draft.options) ? draft.options as Array<Record<string, unknown>> : [];
           const updateOption = (index:number, patch:Record<string,unknown>) => onDraftChange({ options: options.map((option,i)=>i===index?{...option,...patch}:option) });
           return <div className="data-collection-editor">
+            <section className="flow-editor-tab-section"><h4>Mensagem de solicitação</h4><p>Mensagem enviada ao entrar neste node para solicitar o dado.</p><label className="flow-editor-field">Mensagem<textarea ref={dataCollectionPromptRef} value={toText(draft.prompt)} onChange={e=>onDraftChange({prompt:e.target.value})} placeholder="Por favor, informe o dado solicitado." /><VariableChips variables={dynamicVariables} targetRef={dataCollectionPromptRef} value={toText(draft.prompt)} onChange={(next)=>onDraftChange({prompt:next})} /></label></section>
             <section className="flow-editor-tab-section"><h4>1. Variável</h4><p>Nome usado para acessar a resposta no fluxo.</p><label className="flow-editor-field">Nome da variável<input value={toText(draft.variable_name)} onChange={e=>onDraftChange({variable_name:e.target.value})} placeholder="preferred_period" /></label></section>
             <section className="flow-editor-tab-section"><h4>2. Tipo de dado</h4><label className="flow-editor-field">Tipo<select value={toText(draft.data_type||'text')} onChange={e=>onDraftChange({data_type:e.target.value})}>{DATA_COLLECTION_TYPE_OPTIONS.map(type=><option key={type.value} value={type.value}>{type.label}</option>)}</select></label></section>
             <section className="flow-editor-tab-section"><h4>3. Validação</h4><label className="flow-editor-radio"><input type="checkbox" checked={draft.required!==false} onChange={e=>onDraftChange({required:e.target.checked})}/>Obrigatório</label><label className="flow-editor-radio"><input type="checkbox" checked={draft.normalize_value!==false} onChange={e=>onDraftChange({normalize_value:e.target.checked})}/>Normalizar valor</label></section>
