@@ -124,6 +124,8 @@ class FlowV2RuntimeWorker:
             ))
             is not None
         )
+        from app.flow_v2.actions import is_message_delivery_action, is_non_empty_outbound_action
+        actions = tuple(action for action in actions if is_non_empty_outbound_action(action))
         if runtime_input.metadata.get("event_type") == "DELAY_RESUMED":
             logger.info(
                 "[DELAY_RESUMED] worker_after_process session_id=%s status=%s current_node_id=%s runtime_output_actions_count=%s worker_actions_count=%s runtime_output_actions_empty=%s worker_actions_empty=%s",
@@ -155,9 +157,10 @@ class FlowV2RuntimeWorker:
             len(actions),
             len(deliveries),
         )
+        successful_deliveries = [delivery for action, delivery in zip(actions, deliveries) if is_message_delivery_action(action) and delivery and delivery.get("status") not in {"skipped", "failed"}]
         runtime_trace(logger, "enqueue_next_node", metadata=runtime_input.metadata,
                       correlation_id=runtime_input.input_message_id, conversation_id=runtime_input.conversation_id,
                       session_id=runtime_output.session_id, flow_version_id=runtime_input.flow_version_id,
                       current_node_id=runtime_output.current_node_id, node_executed=bool(actions),
-                      message_sent=bool(deliveries))
+                      message_sent=bool(successful_deliveries))
         return FlowV2WorkerResult(runtime_output=runtime_output, actions=tuple(actions), deliveries=tuple(deliveries))

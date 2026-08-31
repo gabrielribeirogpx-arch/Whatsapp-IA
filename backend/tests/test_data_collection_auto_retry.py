@@ -93,3 +93,28 @@ def test_missing_timeout_edge_executes_default_behavior_without_resolution_error
     assert result.next_source_handle == 'timeout'
     assert result.actions[0].metadata['default_behavior'] == 'timeout'
     assert current.context['data_collection_default_behavior'] == 'timeout'
+
+
+def test_first_entry_sends_one_prompt_then_reply_does_not_repeat_it():
+    executor = RuntimeV2DataCollectionExecutor(event_store=None, transition_resolver=Resolver())
+    current = session()
+    node = {'id': 'collect', 'data': {'prompt': 'Qual período, {{preferred_name}}?', 'variable_name': 'period', 'data_type': 'text'}}
+    current.variables = {'preferred_name': 'Ana'}
+
+    started = executor.execute(None, snapshot={}, session=current, node=node, runtime_input=runtime_input())
+    assert started.status == 'wait'
+    assert len(started.actions) == 1
+    assert started.actions[0].text == 'Qual período, Ana?'
+    assert current.context['waiting_variable'] == 'period'
+
+    answered = executor.execute(None, snapshot={}, session=current, node=node, runtime_input=runtime_input('manhã', 'reply-1'))
+    assert answered.actions == ()
+    assert answered.next_source_handle == 'success'
+    assert current.variables['period'] == 'manhã'
+
+
+def test_legacy_node_without_prompt_uses_non_empty_fallback():
+    executor = RuntimeV2DataCollectionExecutor(event_store=None, transition_resolver=Resolver())
+    started = executor.execute(None, snapshot={}, session=session(), node={'id': 'legacy', 'data': {'variable_name': 'email', 'data_type': 'email'}}, runtime_input=runtime_input())
+    assert len(started.actions) == 1
+    assert started.actions[0].text.strip() == 'Por favor, informe o dado solicitado.'
