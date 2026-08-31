@@ -6,6 +6,7 @@ import { buildMobileFlowSequence } from '@/lib/mobileFlowSequence';
 import { detectChoiceSchema, dynamicChoiceVariables } from '@/lib/dynamicChoice';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import ReactFlow, {
@@ -1056,7 +1057,7 @@ function FlowNodeEditorPanel({
           </div>;
         })()}
 
-        {kind === 'choice' && (
+        {(kind === 'choice' || kind === 'choice_dynamic') && (
           <>
             <div className="flow-editor-info-card"><strong>Tipo:</strong> Decisão WhatsApp <span>CHOICE</span></div>
             <fieldset className="flow-editor-field"><legend>Modo das opções</legend>
@@ -1088,6 +1089,11 @@ function FlowNodeEditorPanel({
               <label className="flow-editor-field">Ícone (opcional)<input value={toText(draft.icon_field)} onChange={e => onDraftChange({ icon_field: e.target.value })} placeholder="icon" /></label>
               <label className="flow-editor-field">Máximo de opções<input type="number" min="1" max="10" value={Number(draft.max_options || 10)} onChange={e => onDraftChange({ max_options: Math.min(10, Math.max(1, Number(e.target.value) || 1)) })} /></label>
               <strong>Resultado</strong><label className="flow-editor-field">Salvar seleção em<input value={toText(draft.result_variable)} onChange={e => onDraftChange({ result_variable: e.target.value })} placeholder="selected_slot" /></label>
+              <section className="flow-dynamic-choice-empty" aria-labelledby={`choice-empty-${node.id}`}>
+                <strong id={`choice-empty-${node.id}`}>Quando não houver opções</strong>
+                <p>Configure a mensagem abaixo ou conecte a saída <code>empty</code> do cartão a outro node.</p>
+                <label className="flow-editor-field">Mensagem de indisponibilidade<textarea value={toText(draft.empty_message)} onChange={e => onDraftChange({ empty_message: e.target.value })} placeholder="Não encontrei horários disponíveis para o período informado. Tente escolher outro período ou fale com um atendente." /></label>
+              </section>
               <details className="flow-editor-info-card"><summary><strong>Estrutura detectada</strong></summary><p>Array</p><div><strong>Item</strong>{(Array.isArray(draft.detected_schema) ? draft.detected_schema : []).map((field) => <code key={String(field)}>{String(field)}</code>)}</div></details>
               <div className="flow-editor-info-card"><strong>Preview</strong>{(Array.isArray(draft.preview_options) ? draft.preview_options as Array<Record<string, unknown>> : []).slice(0, 5).length ? (draft.preview_options as Array<Record<string, unknown>>).slice(0, 5).map((item, index) => <p key={index}><strong>{toText(item[toText(draft.icon_field)]) || '📅'} {toText(item[toText(draft.label_field)])}</strong>{toText(item[toText(draft.description_field)]) ? <><br /><small>{toText(item[toText(draft.description_field)])}</small></> : null}</p>) : <p>Nenhum dado disponível. O preview será exibido após o primeiro retorno do MCP.</p>}</div>
               <div className="flow-editor-info-card"><strong>Resultado da seleção</strong><p>{toText(draft.result_variable || 'selected_slot')} ↓</p>{dynamicChoiceVariables(toText(draft.result_variable || 'selected_slot'), Array.isArray(draft.detected_schema) ? draft.detected_schema.map(String) : []).map((variable) => <code key={variable}>{variable}</code>)}{Array.isArray(draft.preview_options) && draft.preview_options[1] ? <pre>{JSON.stringify(draft.preview_options[1], null, 2)}</pre> : null}</div>
@@ -1783,6 +1789,8 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
   const [edgeDiagnostics, setEdgeDiagnostics] = useState<EdgeDiagnostic[]>([]);
   const [operationError, setOperationError] = useState<string | null>(null);
   const [toastMessage, setToastMessage] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+  const [notificationsDismissed, setNotificationsDismissed] = useState(false);
+  const [notificationTop, setNotificationTop] = useState(140);
   const [publishedSnapshot, setPublishedSnapshot] = useState<PublishedSnapshot | null>(null);
   const [runtimeInspector, setRuntimeInspector] = useState<RuntimeInspector | null>(null);
   const [isSnapshotPanelOpen, setIsSnapshotPanelOpen] = useState(false);
@@ -1811,6 +1819,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
   const flowSelectRef = useRef<HTMLDivElement | null>(null);
   const edgeRoutingRef = useRef<HTMLDivElement | null>(null);
   const flowCanvasRef = useRef<HTMLElement | null>(null);
+  const flowHeaderRef = useRef<HTMLDivElement | null>(null);
   const renameInputRef = useRef<HTMLInputElement | null>(null);
   const renameTriggerRef = useRef<HTMLButtonElement | null>(null);
   const selectedFlow = useMemo(
@@ -1882,6 +1891,17 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
       setTimeout(() => setToastMessage(null), 4000);
     },
   }), []);
+
+  useEffect(() => {
+    const header = flowHeaderRef.current;
+    if (!header) return;
+    const updateOffset = () => setNotificationTop(Math.ceil(header.getBoundingClientRect().bottom + 12));
+    updateOffset();
+    const observer = new ResizeObserver(updateOffset);
+    observer.observe(header);
+    window.addEventListener('resize', updateOffset);
+    return () => { observer.disconnect(); window.removeEventListener('resize', updateOffset); };
+  }, []);
 
   const parseHttpStatus = useCallback((error: unknown): number | null => {
     if (!(error instanceof Error)) return null;
@@ -3384,6 +3404,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
 
   const handleActivateFlow = useCallback(async () => {
     if (!selectedFlowId) return;
+    setNotificationsDismissed(false);
 
     const currentNodes = rfInstance?.getNodes?.() || [];
     let currentEdges = rfInstance?.getEdges?.() || [];
@@ -3889,25 +3910,14 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
         </div>
       </nav>
 
-      {flowValidationError && (
-        <div style={{ position: 'absolute', top: showEmptyFlowWarning ? 50 : 12, right: 16, zIndex: 25, background: '#fef2f2', color: '#b91c1c', border: '1px solid #fca5a5', borderRadius: 8, padding: '8px 12px', fontSize: 13 }}>
-          {flowValidationError}
-        </div>
-      )}
-      {validationWarnings.length > 0 && nodes.length > 0 && (
-        <div style={{ position: 'absolute', top: 12, right: 16, zIndex: 25, background: '#fef3c7', color: '#92400e', border: '1px solid #f59e0b', borderRadius: 8, padding: '8px 12px', fontSize: 13 }}>
-          ⚠️ {validationWarnings[0]?.message}
-        </div>
-      )}
-      {validationErrors.length > 0 && (
-        <div style={{ position: 'absolute', top: 50, right: 16, zIndex: 25, background: '#fef2f2', color: '#b91c1c', border: '1px solid #fca5a5', borderRadius: 8, padding: '8px 12px', fontSize: 13 }}>
-          ❌ {validationErrors[0]?.message}
-        </div>
-      )}
-      {operationError && (
-        <div style={{ position: 'absolute', top: showEmptyFlowWarning ? 50 : 12, left: 16, zIndex: 25, background: '#fef2f2', color: '#b91c1c', border: '1px solid #fca5a5', borderRadius: 8, padding: '8px 12px', fontSize: 13 }}>
-          {operationError}
-        </div>
+      {!notificationsDismissed && typeof document !== 'undefined' && (flowValidationError || operationError || validationWarnings.length > 0 || validationErrors.length > 0) && createPortal(
+        <section className="flow-activation-alerts" style={{ top: notificationTop }} role="alert" aria-live="assertive" aria-label="Notificações do Flow Builder">
+          <button type="button" className="flow-activation-alerts__close" onClick={() => setNotificationsDismissed(true)} aria-label="Fechar alertas">×</button>
+          {flowValidationError && <div className="flow-activation-alert is-error">{flowValidationError}</div>}
+          {operationError && <div className="flow-activation-alert is-error">{operationError}</div>}
+          {validationWarnings.map((issue, index) => <div className="flow-activation-alert is-warning" key={`warning-${issue.code}-${index}`}>⚠️ {issue.message}</div>)}
+          {validationErrors.map((issue, index) => <div className="flow-activation-alert is-error" key={`error-${issue.code}-${index}`}><strong>❌ {issue.node_label || issue.node_type || 'Fluxo'}</strong><span>{issue.message}</span>{issue.node_id && <button type="button" onClick={() => focusValidationIssue(issue)}>Ir para o node</button>}</div>)}
+        </section>, document.body,
       )}
       {toastMessage && (
         <div style={{ position: 'fixed', right: 24, bottom: 24, background: toastMessage.type === 'success' ? '#16a34a' : '#dc2626', color: '#fff', padding: '10px 16px', borderRadius: 10, fontSize: 13, boxShadow: '0 8px 24px rgba(0,0,0,0.2)', zIndex: 60 }}>
@@ -3920,7 +3930,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
         </div>
       )}
       <main ref={flowCanvasRef} style={{ flex: 1, background: '#F7F7F5', position: 'relative', minWidth: 0 }}>
-        <div className="flow-builder-header">
+        <div className="flow-builder-header" ref={flowHeaderRef}>
           <div className="flow-builder-breadcrumb" aria-label="Breadcrumb">
             <Link href="/dashboard/flows" aria-label="Voltar para Fluxos">← Fluxos</Link>
             {selectedFlow && (
@@ -4215,18 +4225,6 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
             </div>
           );
         })()}
-        {validationErrors.length > 0 && (
-          <div role="dialog" aria-label="Não foi possível ativar o fluxo" style={{ margin: '8px 0', padding: 12, border: '1px solid #fecaca', borderRadius: 8, background: '#fff1f2', maxWidth: 460 }}>
-            <strong>Não foi possível ativar o fluxo</strong>
-            <p style={{ fontSize: 12 }}>Foram encontrados {validationErrors.length} problema{validationErrors.length === 1 ? '' : 's'}:</p>
-            {validationErrors.map((issue, idx) => (
-              <div key={`${issue.code}-${idx}`} style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 12, marginTop: 6 }}>
-                <span><b>⚠️ {issue.node_label || issue.node_type || 'Fluxo'}</b><br />{issue.message}</span>
-                <button type="button" onClick={() => focusValidationIssue(issue)} style={{ color: '#b91c1c' }}>{issue.code === 'CONDITION_EMPTY' ? 'Adicionar regra' : 'Ir para o node'}</button>
-              </div>
-            ))}
-          </div>
-        )}
         {/* Menu de contexto — botão direito no canvas */}
         {contextMenu && (
           <div

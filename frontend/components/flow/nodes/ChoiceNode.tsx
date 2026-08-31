@@ -20,6 +20,7 @@ type ChoiceNodeData = {
   result_variable?: string;
   label_field?: string;
   icon_field?: string;
+  empty_message?: string;
   preview_options?: Array<Record<string, unknown>>;
 };
 
@@ -77,7 +78,10 @@ export default function ChoiceNode({ id, data, selected, isConnectable }: NodePr
       analytics={(nodeData as any).analytics}
       statusLabel={nodeData.options_mode === 'dynamic' ? 'Opções via variável' : `${buttons.length} opções de saída`}
       isConnectable={isConnectable}
-      sourceHandles={nodeData.options_mode === 'dynamic' ? [{ id: 'selected', label: 'Selecionado', color: '#f97316' }] : buttons.map((button) => ({ id: button.handleId, label: button.label, color: '#f97316', optionValue: button.value }))}
+      sourceHandles={nodeData.options_mode === 'dynamic' ? [
+        { id: 'selected', label: 'Selecionado', color: '#f97316' },
+        { id: 'empty', label: 'Sem opções', color: '#dc2626' },
+      ] : buttons.map((button) => ({ id: button.handleId, label: button.label, color: '#f97316', optionValue: button.value }))}
     />
   );
 }

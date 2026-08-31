@@ -17,5 +17,8 @@ assert.match(editor, /Detectamos que o MCP retorna uma lista/, 'offers MCP one-c
 assert.match(editor, /onChange=\{e => onDraftChange\(\{ label_field:/, 'keeps mappings manually editable');
 assert.match(editor, /Opções \{displayMode === 'buttons'/, 'keeps fixed choices on their existing path');
 assert.match(canvas, /title=\{nodeData\.options_mode === 'dynamic' \? 'Escolha Dinâmica'/, 'enhances only the dynamic canvas card');
+assert.match(editor, /Quando não houver opções/, 'makes empty-list handling discoverable');
+assert.match(editor, /draft\.empty_message/, 'edits the canonical runtime field');
+assert.match(canvas, /\{ id: 'empty', label: 'Sem opções'/, 'renders the canonical empty handle');
 
 console.log('dynamic choice low-code regression: ok');

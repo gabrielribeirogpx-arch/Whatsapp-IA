@@ -22,7 +22,7 @@ vm.runInNewContext(compiled, { module, exports: module.exports, require });
 const { getNodeHandleContract, migrateEdgeHandles, validateNodeConnection } = module.exports;
 const expected = {
   mcp_tool: [['success', 'error', 'timeout'], ['default']],
-  choice_dynamic: [['selected'], ['default']],
+  choice_dynamic: [['selected', 'empty'], ['default']],
   data_collection: [['success', 'cancel', 'timeout', 'invalid'], ['default']],
   condition: [['true', 'false'], ['default']], message: [['default'], ['default']], action: [['default'], ['default']],
 };
@@ -48,7 +48,7 @@ const dynamicToCollection = validateNodeConnection(connectionNodes, {
   source: 'dynamic', sourceHandle: 'selected', target: 'collection', targetHandle: 'default',
 });
 assert.equal(dynamicToCollection.accepted, true);
-assert.deepEqual([...dynamicToCollection.validSourceHandles], ['selected']);
+assert.deepEqual([...dynamicToCollection.validSourceHandles], ['selected', 'empty']);
 assert.deepEqual([...dynamicToCollection.validTargetHandles], ['default']);
 
 // onConnect persists the normalized values; JSON round-tripping models save,

@@ -81,6 +81,8 @@ export function validateFlowLocally(nodes: Node[], edges: Edge[]): FlowValidatio
       if (!String(data.options_variable || data.source_variable || '').trim()) issues.push(issue('DYNAMIC_CHOICE_VARIABLE_REQUIRED', 'Selecione a variável de origem.', node, 'options_variable'));
       if (!String(data.label_field || '').trim()) issues.push(issue('DYNAMIC_CHOICE_LABEL_REQUIRED', 'Defina o campo do título.', node, 'label_field'));
       if (!String(data.value_field || '').trim()) issues.push(issue('DYNAMIC_CHOICE_VALUE_REQUIRED', 'Defina o campo do valor.', node, 'value_field'));
+      const handles = new Set(next.map((edge) => normalizeLegacyHandle(edge.sourceHandle ?? edge.data?.sourceHandle ?? edge.data?.source_handle)));
+      if (!handles.has('empty') && !String(data.empty_message || '').trim()) issues.push(issue('DYNAMIC_CHOICE_EMPTY_REQUIRED', 'Conecte a saída empty ou configure uma mensagem de indisponibilidade.', node, 'empty_message'));
     }
     if (type === 'data_collection') {
       const variable = String(data.variable_name || '');
