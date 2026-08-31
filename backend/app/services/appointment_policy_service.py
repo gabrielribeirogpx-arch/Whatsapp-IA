@@ -69,11 +69,16 @@ def normalize_preferred_period(text: str, policy: dict[str, Any], *, now: dateti
         end=start+timedelta(minutes=policy["default_duration_minutes"])
         if not any(start>=a and end<=b for a,b in intervals): raise AppointmentPolicyError("O horário está fora do funcionamento da clínica.")
         return {"mode":"exact","start":start.isoformat(),"end":end.isoformat(),"timezone":policy["timezone"]}
-    period=next((p for p in ("manhã","manha","tarde","noite") if p in raw),None)
-    windows={"manhã":(6,12),"manha":(6,12),"tarde":(13,18),"noite":(18,22)}
-    if period: requested=(datetime.combine(target,time(windows[period][0]),tz),datetime.combine(target,time(windows[period][1]),tz))
-    else: requested=(intervals[0][0],intervals[-1][1])
-    overlap=[(max(a,requested[0]),min(b,requested[1])) for a,b in intervals if max(a,requested[0])<min(b,requested[1])]
+    # Word boundaries matter: ``amanhã`` contains ``manhã`` but is a date, not
+    # a request for the morning period.
+    period=next((p for p in ("manhã","manha","tarde","noite") if re.search(rf"(?<!\w){p}(?!\w)", raw)),None)
+    # Named periods are the tenant's ordered business-hour periods.  This keeps
+    # their boundaries tenant-scoped instead of maintaining a second clock here.
+    period_index={"manhã":0,"manha":0,"tarde":1,"noite":2}.get(period)
+    if period_index is not None:
+        overlap=[intervals[period_index]] if period_index < len(intervals) else []
+    else:
+        overlap=intervals
     if not overlap: raise AppointmentPolicyError("O período informado está fora do funcionamento da clínica.")
     return {"mode":"period","window_start":overlap[0][0].isoformat(),"window_end":overlap[-1][1].isoformat(),"timezone":policy["timezone"]}
 

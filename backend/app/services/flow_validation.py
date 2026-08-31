@@ -129,4 +129,10 @@ def validate_builder_graph(nodes: list[dict[str, Any]], edges: list[dict[str, An
                 ) for edge in outgoing[node_id]
             }
             if "success" not in handles: issues.append(_issue("DATA_COLLECTION_INVALID", node, field="connections", message="A saída Sucesso precisa estar conectada."))
+        elif kind == "mcp_tool":
+            schema = data.get("input_schema") if isinstance(data.get("input_schema"), dict) else {}
+            arguments = data.get("arguments") if isinstance(data.get("arguments"), dict) else {}
+            for field in schema.get("required", []):
+                if arguments.get(field) is None or (isinstance(arguments.get(field), str) and not arguments[field].strip()):
+                    issues.append(_issue("MCP_ARGUMENT_REQUIRED", node, field=f"arguments.{field}", message=f"Preencha o argumento obrigatório {field}."))
     return issues
