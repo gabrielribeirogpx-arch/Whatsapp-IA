@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { externalRouteCandidates, routeIntersectsNodes, selectEdgeRoutingMode } from '../lib/edgeRouting.ts';
+import { externalRouteCandidates, graphBoundingBox, localFeedbackRouteCandidates, routeIntersectsNodes, selectEdgeRoutingMode } from '../lib/edgeRouting.ts';
 
 const box = (id, x, y, width = 120, height = 80) => ({ id, x, y, width, height });
 const decide = (sourceNode, targetNode, extras = [], edge = { id: `${sourceNode.id}-${targetNode.id}`, source: sourceNode.id, target: targetNode.id }, allEdges = []) =>
@@ -8,7 +8,21 @@ const decide = (sourceNode, targetNode, extras = [], edge = { id: `${sourceNode.
 const a = box('a', 0, 0), b = box('b', 260, 0), c = box('c', 520, 0);
 assert.equal(decide(a, b).mode, 'simple', '1: adjacent clear cards stay simple');
 assert.equal(decide(a, c, [b]).mode, 'orthogonal', '2: an obstacle selects orthogonal');
-assert.equal(decide(c, a, [b]).mode, 'loop_external', '3: a short return is a loop, not convergence');
+assert.equal(decide(c, a, [b]).mode, 'feedback_local', '3: a short return uses a local feedback route');
+
+const feedbackStart = { x: c.x + c.width, y: c.y + 40 }, feedbackEnd = { x: b.x, y: b.y + 40 };
+const local = localFeedbackRouteCandidates(feedbackStart, feedbackEnd, c, b, [a, b, c], new Set(['b', 'c']), { id: 'return-1', source: 'c', target: 'b' })[0];
+const localBounds = graphBoundingBox(local.points.map((point, index) => ({ id: String(index), ...point, width: 1, height: 1 })));
+assert.ok(localBounds.minX >= b.x - 28 && localBounds.maxX <= c.x + c.width + 29, '4: feedback bounding box stays by its endpoints, not the canvas perimeter');
+assert.equal(routeIntersectsNodes(local.points, [b, c], 0, new Set(['b', 'c'])).length, 0, '5: endpoint cards are deliberately approached only through their handles');
+assert.deepEqual(local.points[0], feedbackStart, '6: source handle is preserved');
+assert.deepEqual(local.points.at(-1), feedbackEnd, '6: target handle is preserved');
+assert.ok(local.points.some(point => point.y < b.y), '7: label has a clear horizontal local corridor');
+const localSecond = localFeedbackRouteCandidates(feedbackStart, feedbackEnd, c, b, [a, b, c], new Set(['b', 'c']), { id: 'return-2', source: 'c', target: 'b' }, [], 1)[0];
+assert.notDeepEqual(local.points, localSecond.points, '8: nearby feedback edges use distinct local lanes');
+const moved = box('c', 600, 180);
+const movedRoute = localFeedbackRouteCandidates({ x: 720, y: 220 }, feedbackEnd, moved, b, [a, b, moved], new Set(['b', 'c']), { source: 'c', target: 'b' })[0];
+assert.notDeepEqual(local.points, movedRoute.points, '9: moving an endpoint recomputes feedback waypoints');
 
 const source = box('lower-branch', 1100, 720), target = box('shared', 100, 40);
 const centerNodes = [box('middle-1', 420, 260, 180, 120), box('middle-2', 700, 450, 180, 120)];

@@ -1,4 +1,4 @@
-export type EdgeRoutingMode = 'simple' | 'orthogonal' | 'loop_external' | 'convergence_external';
+export type EdgeRoutingMode = 'simple' | 'orthogonal' | 'feedback_local' | 'loop_external' | 'convergence_external';
 export type EdgeRoutingPreference = 'automatic' | 'curved' | 'orthogonal';
 export type Point = { x: number; y: number };
 export type NodeBox = { id: string; x: number; y: number; width: number; height: number };
@@ -14,6 +14,7 @@ export type RoutingDecision = {
 
 export const NODE_CLEARANCE = 28;
 export const EXTERNAL_LANE_GAP = 32;
+export const LOCAL_FEEDBACK_GAP = 36;
 const DEFAULT_WIDTH = 260;
 const DEFAULT_HEIGHT = 140;
 
@@ -52,6 +53,10 @@ export function selectEdgeRoutingMode({ sourceNode, targetNode, allNodes, edge, 
   if (preference === 'curved') return { mode: 'simple', reason: 'forced_curved', isLoop: selfLoop || markerLoop || graphCycle, ...base };
   if (selfLoop) return { mode: 'loop_external', reason: 'self_loop', isLoop: true, ...base };
   if (markerLoop) return { mode: 'loop_external', reason: 'loop_marker', isLoop: true, ...base };
+  // A backwards connection is the common visual representation of a graph cycle.
+  // Keep it local before considering the generic cycle fallback: the old ordering
+  // sent even adjacent feedback edges to the bounding box of the whole graph.
+  if (backward && !long) return { mode: 'feedback_local', reason: 'return_connection', isLoop: true, ...base };
   if (graphCycle) return { mode: 'loop_external', reason: 'graph_cycle', isLoop: true, ...base };
   if (preference === 'orthogonal') return { mode: 'orthogonal', reason: 'forced_orthogonal', isLoop: false, ...base };
   if (long && convergenceSignals >= 2) return { mode: 'convergence_external', reason: intersections.length || crossings ? 'long_convergence_with_obstacles' : 'long_convergence_to_shared_target', isLoop: false, ...base };
@@ -80,6 +85,26 @@ export function externalRouteCandidates(start: Point, end: Point, nodes: NodeBox
     right: [start, sourceStub, { x: b.maxX + offset, y: sourceStub.y }, { x: b.maxX + offset, y: targetStub.y }, targetStub, end],
   };
   return (Object.keys(raw) as ExternalLane[]).map(lane => metrics(compact(raw[lane]), lane, laneIndex, nodes, excluded, edge, allEdges)).sort((a, b2) => a.totalCost - b2.totalCost);
+}
+
+/** Routes a feedback edge around only its endpoints, rather than around the graph.
+ * Top and bottom corridors are scored with the existing obstacle/crossing metrics,
+ * so the shortest clear local side wins. Parallel feedback edges get separate lanes.
+ */
+export function localFeedbackRouteCandidates(start: Point, end: Point, sourceNode: NodeBox, targetNode: NodeBox, nodes: NodeBox[], excluded: Set<string>, edge: RoutingEdge, allEdges: RoutingEdge[] = [], laneIndex = 0, sourceDirection: HandleDirection = 'right', targetDirection: HandleDirection = 'left'): RouteCandidate[] {
+  const source = nodeBoundingBox(sourceNode), target = nodeBoundingBox(targetNode);
+  const offset = NODE_CLEARANCE + laneIndex * LOCAL_FEEDBACK_GAP;
+  const sourceStub = handleStub(start, sourceDirection, NODE_CLEARANCE);
+  const targetStub = handleStub(end, targetDirection, NODE_CLEARANCE);
+  const top = Math.min(source.y, target.y) - offset;
+  const bottom = Math.max(source.y + source.height, target.y + target.height) + offset;
+  const raw: Pick<Record<ExternalLane, Point[]>, 'top' | 'bottom'> = {
+    top: [start, sourceStub, { x: sourceStub.x, y: top }, { x: targetStub.x, y: top }, targetStub, end],
+    bottom: [start, sourceStub, { x: sourceStub.x, y: bottom }, { x: targetStub.x, y: bottom }, targetStub, end],
+  };
+  return (Object.keys(raw) as Array<'top' | 'bottom'>)
+    .map(lane => metrics(compact(raw[lane]), lane, laneIndex, nodes, excluded, edge, allEdges))
+    .sort((a, b) => a.totalCost - b.totalCost);
 }
 export function orthogonalWaypoints(start: Point, end: Point, nodes: NodeBox[], excluded: Set<string>, margin = NODE_CLEARANCE): Point[] { const mid = (start.x + end.x) / 2, direct = compact([start, { x: mid, y: start.y }, { x: mid, y: end.y }, end]); if (!routeIntersectsNodes(direct, nodes, margin, excluded).length) return direct; return externalRouteCandidates(start, end, nodes, excluded, { source: '', target: '' })[0].points; }
 export function pointsToPath(points: Point[], radius = 12) { if (points.length < 2) return ''; let path = `M ${points[0].x} ${points[0].y}`; for (let i = 1; i < points.length - 1; i += 1) { const prev = points[i - 1], current = points[i], next = points[i + 1], inLen = Math.hypot(current.x - prev.x, current.y - prev.y), outLen = Math.hypot(next.x - current.x, next.y - current.y), r = Math.min(radius, inLen / 2, outLen / 2), before = { x: current.x + (prev.x - current.x) * r / inLen, y: current.y + (prev.y - current.y) * r / inLen }, after = { x: current.x + (next.x - current.x) * r / outLen, y: current.y + (next.y - current.y) * r / outLen }; path += ` L ${before.x} ${before.y} Q ${current.x} ${current.y} ${after.x} ${after.y}`; } const last = points[points.length - 1]; return `${path} L ${last.x} ${last.y}`; }

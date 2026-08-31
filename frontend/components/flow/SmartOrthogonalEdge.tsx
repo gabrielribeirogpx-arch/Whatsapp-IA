@@ -1,7 +1,7 @@
 'use client';
 
 import { BaseEdge, EdgeLabelRenderer, EdgeProps, getBezierPath, useStore } from 'reactflow';
-import { EdgeRoutingPreference, externalRouteCandidates, NodeBox, orthogonalWaypoints, pointsToPath, routeLabelPoint, selectEdgeRoutingMode } from '@/lib/edgeRouting';
+import { EdgeRoutingPreference, externalRouteCandidates, localFeedbackRouteCandidates, NodeBox, orthogonalWaypoints, pointsToPath, routeLabelPoint, selectEdgeRoutingMode } from '@/lib/edgeRouting';
 
 const debugEnabled = process.env.NEXT_PUBLIC_EDGE_ROUTING_DEBUG === 'true' || process.env.EDGE_ROUTING_DEBUG === 'true';
 
@@ -30,6 +30,14 @@ export default function SmartOrthogonalEdge(props: EdgeProps) {
     const graphLeft = Math.min(...nodes.map((node) => node.x), sourceNode.x, targetNode.x) - 72;
     path = pointsToPath([start, { x: sourceX + 28, y: sourceY }, { x: sourceX + 28, y: sourceY + 36 }, { x: graphLeft, y: sourceY + 36 }, { x: graphLeft, y: targetY - 36 }, { x: targetX - 28, y: targetY - 36 }, { x: targetX - 28, y: targetY }, end]);
     labelX = graphLeft; labelY = (sourceY + targetY) / 2;
+  } else if (decision.mode === 'feedback_local') {
+    const feedbackIds = graph.edges
+      .filter((candidate) => candidate.id !== id && candidate.target === target && byId.has(candidate.source) && (byId.get(candidate.source)!.x > targetNode.x))
+      .map((candidate) => candidate.id).sort();
+    const laneIndex = [...feedbackIds, id].sort().indexOf(id);
+    const candidates = localFeedbackRouteCandidates(start, end, sourceNode, targetNode, nodes, new Set([source, target]), { id, source, target, data }, graph.edges, laneIndex, sourcePosition, targetPosition);
+    const selected = candidates[0];
+    path = pointsToPath(selected.points); ({ x: labelX, y: labelY } = routeLabelPoint(selected.points));
   } else {
     const externalIds = graph.edges.filter((candidate) => candidate.id !== id && candidate.target === target).map((candidate) => candidate.id).sort();
     const laneIndex = [...externalIds, id].sort().indexOf(id);
