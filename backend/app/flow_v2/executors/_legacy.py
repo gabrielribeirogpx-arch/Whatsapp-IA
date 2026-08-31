@@ -539,6 +539,34 @@ class ChoiceNodeExecutor(BaseNodeExecutor):
         )
         dynamic = str(data.get("options_mode") or data.get("option_mode") or "fixed").lower() == "dynamic"
         options = _dynamic_choice_options(data, render_context) if dynamic else (node.get("options") or data.get("options") or [])
+        if dynamic and not options:
+            has_empty_transition = any(
+                str(edge.get("source")) == node_id
+                and str(edge.get("sourceHandle") or (edge.get("data") or {}).get("sourceHandle") or "").lower() == "empty"
+                for edge in snapshot.edges
+            )
+            if has_empty_transition:
+                empty_resolution = self.transition_resolver.resolve(
+                    db, snapshot=snapshot, session=session, source_node_id=node_id, source_handle="empty"
+                )
+                if empty_resolution.target_node_id:
+                    return NodeExecutionResult(
+                        next_node_id=empty_resolution.target_node_id,
+                        status="continue",
+                        next_source_handle="empty",
+                    )
+            empty_message = str(render_template(data.get("empty_message") or "", render_context)).strip()
+            if empty_message:
+                action = SendMessageAction(
+                    tenant_id=session.tenant_id,
+                    session_id=session.id,
+                    external_user_id=runtime_input.external_user_id,
+                    conversation_id=runtime_input.conversation_id,
+                    contact_id=runtime_input.contact_id,
+                    text=empty_message,
+                    metadata={**runtime_input.metadata, "node_id": node_id, "node_type": "choice", "source_handle": "empty"},
+                )
+                return NodeExecutionResult(actions=(action,), status="complete", next_source_handle="empty")
         template_original = _choice_prompt(node, data)
         rendered_text = str(render_template(template_original, render_context))
         effective_render_context = render_context.values()

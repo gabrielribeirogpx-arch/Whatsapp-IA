@@ -13,6 +13,7 @@
     "test:edge-sanitization": "node tests/flowEdgeSanitization.test.mjs",
     "test:element-deletion": "node tests/flowElementDeletion.test.mjs",
     "test:dynamic-choice": "node tests/dynamicChoiceLowCode.test.mjs",
+    "test:dynamic-choice-activation": "node tests/dynamicChoiceActivation.test.mjs",
     "test:interactive-messages": "node tests/interactiveMessagePresentation.test.mjs",
     "test:data-collection-types": "node tests/dataCollectionAppointmentPeriod.test.mjs"
   },

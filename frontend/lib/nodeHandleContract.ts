@@ -26,7 +26,7 @@ export function getNodeHandleContract(node: HandleContractNode): NodeHandleContr
   const data = (node.data || {}) as Record<string, any>;
   let sourceHandles: string[] = ['default'];
   if (type === 'mcp_tool') sourceHandles = ['success', 'error', 'timeout'];
-  else if (type === 'choice_dynamic' || (type === 'choice' && data.options_mode === 'dynamic')) sourceHandles = ['selected'];
+  else if (type === 'choice_dynamic' || (type === 'choice' && data.options_mode === 'dynamic')) sourceHandles = ['selected', 'empty'];
   else if (type === 'data_collection') sourceHandles = [...DATA_COLLECTION_HANDLES];
   else if (type === 'condition') sourceHandles = ['true', 'false'];
   else if (type === 'choice') {

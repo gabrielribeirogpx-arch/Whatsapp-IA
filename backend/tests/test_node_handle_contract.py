@@ -4,7 +4,7 @@ from app.flow_v2.graph_validator import FlowV2GraphValidator
 
 EXPECTED = {
     "mcp_tool": (["success", "error", "timeout"], ["default"]),
-    "choice_dynamic": (["selected"], ["default"]),
+    "choice_dynamic": (["selected", "empty"], ["default"]),
     "data_collection": (["success", "cancel", "timeout", "invalid"], ["default"]),
     "condition": (["true", "false"], ["default"]),
     "message": (["default"], ["default"]),

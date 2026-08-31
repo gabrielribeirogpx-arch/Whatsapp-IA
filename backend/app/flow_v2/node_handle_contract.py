@@ -25,7 +25,7 @@ def get_node_handle_contract(node: dict[str, Any]) -> dict[str, list[str]]:
     if node_type == "mcp_tool":
         sources = ["success", "error", "timeout"]
     elif node_type == "choice_dynamic" or (node_type == "choice" and data.get("options_mode") == "dynamic"):
-        sources = ["selected"]
+        sources = ["selected", "empty"]
     elif node_type == "data_collection":
         sources = list(DATA_COLLECTION_HANDLES)
     elif node_type == "condition":

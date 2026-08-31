@@ -422,6 +422,35 @@ def test_dynamic_choice_materializes_mcp_array_and_saves_selection(items) -> Non
     assert items[-1]["label"] in selected.actions[-1].text
 
 
+def test_dynamic_choice_empty_uses_canonical_message() -> None:
+    raw_snapshot = {
+        "schema_version": 1, "start_node_id": "choice",
+        "nodes": [{"id": "choice", "type": "choice_dynamic", "data": {"isStart": True, "options_mode": "dynamic", "options_variable": "appointments", "label_field": "label", "value_field": "id", "empty_message": "Sem horários para {{period}}."}}],
+        "edges": [],
+    }
+    executor, snapshot, _events, session, db = _executor(raw_snapshot)
+    session.current_node_id = "choice"
+    session.variables.update({"appointments": [], "period": "amanhã"})
+    result = executor.handle_input(db, _input_with_id(snapshot, "empty-message"))
+    assert result.actions[0].text == "Sem horários para amanhã."
+
+
+def test_dynamic_choice_empty_routes_canonical_handle() -> None:
+    raw_snapshot = {
+        "schema_version": 1, "start_node_id": "choice",
+        "nodes": [
+            {"id": "choice", "type": "choice_dynamic", "data": {"isStart": True, "options_mode": "dynamic", "options_variable": "appointments", "label_field": "label", "value_field": "id"}},
+            {"id": "fallback", "type": "message", "data": {"content": "Escolha outro período", "is_terminal": True}},
+        ],
+        "edges": [{"id": "empty", "source": "choice", "sourceHandle": "empty", "target": "fallback"}],
+    }
+    executor, snapshot, _events, session, db = _executor(raw_snapshot)
+    session.current_node_id = "choice"
+    session.variables["appointments"] = []
+    result = executor.handle_input(db, _input_with_id(snapshot, "empty-edge"))
+    assert result.actions[0].text == "Escolha outro período"
+
+
 @pytest.mark.parametrize("intent_category", ["Aparelho", "Limpeza", "Implante"])
 @pytest.mark.parametrize(
     "placeholder", ["{{intent_category}}", "{{variables.intent_category}}"]
