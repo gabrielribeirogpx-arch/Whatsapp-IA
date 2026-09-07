@@ -422,6 +422,46 @@ def test_dynamic_choice_materializes_mcp_array_and_saves_selection(items) -> Non
     assert items[-1]["label"] in selected.actions[-1].text
 
 
+def test_dynamic_choice_resolves_nested_options_variable() -> None:
+    raw_snapshot = {
+        "schema_version": 1, "start_node_id": "choice",
+        "nodes": [
+            {"id": "choice", "type": "choice_dynamic", "data": {"isStart": True, "content": "Horários", "options_mode": "dynamic", "options_variable": "availability.appointments", "label_field": "label", "value_field": "id", "result_variable": "selected_slot"}},
+            {"id": "end", "type": "message", "data": {"content": "{{selected_slot}}", "is_terminal": True}},
+        ],
+        "edges": [{"id": "next", "source": "choice", "sourceHandle": "selected", "target": "end"}],
+    }
+    executor, snapshot, _events, session, db = _executor(raw_snapshot)
+    session.current_node_id = "choice"
+    session.variables = {"availability": {"appointments": [
+        {"id": "1", "label": "10:00"},
+        {"id": "2", "label": "11:00"},
+    ]}}
+
+    initial = executor.handle_input(db, _input_with_id(snapshot, "nested-initial"))
+
+    assert len(initial.actions[-1].options) == 2
+    assert initial.actions[-1].options == (
+        {"id": "1", "label": "10:00"},
+        {"id": "2", "label": "11:00"},
+    )
+
+
+def test_dynamic_choice_missing_nested_path_is_empty() -> None:
+    raw_snapshot = {
+        "schema_version": 1, "start_node_id": "choice",
+        "nodes": [{"id": "choice", "type": "choice_dynamic", "data": {"isStart": True, "options_mode": "dynamic", "options_variable": "availability.missing", "label_field": "label", "value_field": "id", "empty_message": "Sem opções"}}],
+        "edges": [],
+    }
+    executor, snapshot, _events, session, db = _executor(raw_snapshot)
+    session.current_node_id = "choice"
+    session.variables = {"availability": {"appointments": [{"id": "1", "label": "10:00"}]}}
+
+    result = executor.handle_input(db, _input_with_id(snapshot, "nested-missing"))
+
+    assert result.actions[0].text == "Sem opções"
+
+
 def test_dynamic_choice_empty_uses_canonical_message() -> None:
     raw_snapshot = {
         "schema_version": 1, "start_node_id": "choice",

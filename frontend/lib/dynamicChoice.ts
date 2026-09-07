@@ -13,6 +13,16 @@ export function choiceRecords(value: unknown): ChoiceRecord[] {
   return [];
 }
 
+export function choiceRecordsPath(value: unknown): string {
+  if (Array.isArray(value)) return '';
+  if (!value || typeof value !== 'object') return '';
+  const object = value as ChoiceRecord;
+  for (const key of ['items', 'data', 'results', 'appointments', 'options']) {
+    if (Array.isArray(object[key])) return key;
+  }
+  return '';
+}
+
 export function detectChoiceSchema(value: unknown) {
   const records = choiceRecords(value);
   const fields = Array.from(new Set(records.slice(0, 5).flatMap((item) => Object.keys(item))));

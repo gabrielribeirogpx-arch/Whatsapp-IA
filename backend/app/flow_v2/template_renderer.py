@@ -98,7 +98,7 @@ def render_template(value: Any, context: FlowRenderContext) -> Any:
 
     def replace(match: re.Match[str]) -> str:
         path = match.group(1) or match.group(2)
-        resolved = _resolve_path(values, path)
+        resolved = resolve_path(values, path)
         if resolved is None:
             rendered_missing_keys.append(path)
             return match.group(0) if _missing_variable_behavior() == "preserve" else ""
@@ -126,8 +126,8 @@ def render_template(value: Any, context: FlowRenderContext) -> Any:
 def template_keys(value: str, values: dict[str, Any]) -> tuple[list[str], list[str]]:
     """Report renderability without mutating the template."""
     keys = [match.group(1) or match.group(2) for match in _PLACEHOLDER_RE.finditer(value)]
-    resolved = sorted({key for key in keys if _resolve_path(values, key) is not None})
-    missing = sorted({key for key in keys if _resolve_path(values, key) is None})
+    resolved = sorted({key for key in keys if resolve_path(values, key) is not None})
+    missing = sorted({key for key in keys if resolve_path(values, key) is None})
     return resolved, missing
 
 
@@ -143,7 +143,8 @@ def _redacted_preview(value: str) -> str:
     return re.sub(r"\b[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}\b|\b\+?\d{10,15}\b", "[REDACTED]", value[:240])
 
 
-def _resolve_path(values: dict[str, Any], path: str) -> Any:
+def resolve_path(values: dict[str, Any], path: str) -> Any:
+    """Resolve a dot-notated path without interpreting or shortening it."""
     current: Any = values
     for part in path.split("."):
         if not isinstance(current, dict) or part not in current:

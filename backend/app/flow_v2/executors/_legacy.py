@@ -57,6 +57,7 @@ from app.flow_v2.transition_resolver import TransitionResolver
 from app.flow_v2.template_renderer import (
     FlowRenderContext,
     render_template,
+    resolve_path,
     session_runtime_values,
     template_keys,
 )
@@ -481,9 +482,7 @@ def _choice_display_mode(node: dict[str, Any], data: dict[str, Any]) -> str:
 def _dynamic_choice_options(data: dict[str, Any], render_context: FlowRenderContext) -> list[dict[str, Any]]:
     """Materialize channel-safe options from an array stored by any previous node."""
     source = str(data.get("options_variable") or data.get("source_variable") or "").strip()
-    current: Any = render_context.values()
-    for part in source.split(".") if source else ():
-        current = current.get(part) if isinstance(current, dict) else None
+    current = resolve_path(render_context.values(), source) if source else None
     if not isinstance(current, list):
         return []
     label_field = str(data.get("label_field") or "label").strip()

@@ -8,6 +8,9 @@ const canvas = fs.readFileSync(new URL('../components/flow/nodes/ChoiceNode.tsx'
 assert.match(helper, /\['label', 'title', 'name', 'text'\]/, 'discovers common title fields');
 assert.match(helper, /records\.slice\(0, 5\).*Object\.keys/, 'updates schema from current examples');
 assert.match(helper, /items', 'data', 'results', 'appointments', 'options'/, 'unwraps complex MCP objects');
+assert.match(helper, /export function choiceRecordsPath/, 'exposes the nested list path detected in MCP output');
+assert.match(editor, /nestedPath \? `\$\{root\}\.\$\{nestedPath\}` : root/, 'keeps the MCP output root when configuring a nested list source');
+assert.match(editor, /options_variable: variable/, 'stores the complete manually entered source without truncating dot notation');
 assert.match(editor, /label_field: schema\.labelField[\s\S]*value_field: schema\.valueField/, 'auto-fills mappings');
 assert.match(editor, /preview_options: schema\.records\.slice\(0, 5\)/, 'limits real preview to five records');
 assert.match(editor, /Nenhum dado disponível\. O preview será exibido após o primeiro retorno do MCP\./, 'explains an empty preview');
