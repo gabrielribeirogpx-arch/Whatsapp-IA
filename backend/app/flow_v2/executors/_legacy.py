@@ -537,6 +537,26 @@ class ChoiceNodeExecutor(BaseNodeExecutor):
             node_id=node_id,
         )
         dynamic = str(data.get("options_mode") or data.get("option_mode") or "fixed").lower() == "dynamic"
+        if dynamic:
+            options_variable = str(data.get("options_variable") or data.get("source_variable") or "").strip()
+            variables = getattr(session, "variables", None)
+            root_variable = options_variable.split(".", 1)[0] if options_variable else ""
+            root_value = variables.get(root_variable) if isinstance(variables, dict) and root_variable else None
+            resolved_options = resolve_path(render_context.values(), options_variable) if options_variable else None
+            logger.info(
+                "event=RUNTIME_V2_DYNAMIC_CHOICE_SOURCE session_id=%s node_id=%s options_variable=%s "
+                "session_variable_keys=%s root_variable=%s root_exists=%s root_keys=%s "
+                "resolved_type=%s resolved_count=%s",
+                getattr(session, "id", None),
+                node_id,
+                options_variable,
+                sorted(variables.keys()) if isinstance(variables, dict) else [],
+                root_variable,
+                root_value is not None,
+                sorted(root_value.keys()) if isinstance(root_value, dict) else None,
+                type(resolved_options).__name__,
+                len(resolved_options) if isinstance(resolved_options, list) else None,
+            )
         options = _dynamic_choice_options(data, render_context) if dynamic else (node.get("options") or data.get("options") or [])
         if dynamic and not options:
             has_empty_transition = any(
