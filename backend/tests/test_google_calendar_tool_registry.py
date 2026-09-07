@@ -109,14 +109,22 @@ def test_tool_registry_executes_real_google_calendar_with_current_tenant():
     assert result.normalized_result.type == "google_calendar.list_events"
 
 
-def test_only_create_event_definition_receives_the_complete_schema():
+def test_create_event_and_availability_definitions_receive_their_own_schemas():
     definitions = google_calendar_tool_definitions(connected=True)
     create = next(item for item in definitions if item["id"] == "google_calendar_create_event")
-    availability = next(item for item in definitions if item["id"] == "calendar.get_availability")
+    availability_tools = [
+        next(item for item in definitions if item["id"] == tool_id)
+        for tool_id in ("google_calendar_check_availability", "calendar.get_availability")
+    ]
 
     assert create["input_schema"]["properties"]
     assert create["input_schema"]["required"] == ["start", "end"]
-    assert availability["input_schema"] == {"type": "object"}
+    assert "title" in create["input_schema"]["properties"]
+    for availability in availability_tools:
+        assert set(availability["input_schema"]["properties"]) == {"start", "end", "timezone", "mode"}
+        assert availability["input_schema"]["required"] == ["start", "end"]
+    assert availability_tools[0]["input_schema"] == availability_tools[1]["input_schema"]
+    assert create["input_schema"] != availability_tools[0]["input_schema"]
 
 
 def test_create_event_rejects_empty_arguments_without_calling_service():
