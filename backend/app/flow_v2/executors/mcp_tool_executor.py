@@ -23,6 +23,30 @@ logger = logging.getLogger(__name__)
 MAX_RESPONSE_BYTES = 512_000
 
 
+def _store_tool_output(db, *, session: Any, output_variable: str, output: Any) -> None:
+    """Store the tool's public output and expose its safe shape for diagnostics."""
+    variables = dict(getattr(session, "variables", None) or {})
+    variables[output_variable] = output
+    session.variables = variables
+    db.add(session)
+    db.flush()
+    collection_lengths = (
+        {key: len(value) for key, value in output.items() if isinstance(value, list)}
+        if isinstance(output, dict)
+        else {}
+    )
+    logger.info(
+        "event=RUNTIME_V2_MCP_OUTPUT_STORED session_id=%s output_variable=%s "
+        "session_variable_keys=%s output_type=%s output_keys=%s collection_lengths=%s",
+        getattr(session, "id", None),
+        output_variable,
+        sorted(variables.keys()),
+        type(output).__name__,
+        sorted(output.keys()) if isinstance(output, dict) else None,
+        collection_lengths,
+    )
+
+
 @dataclass(frozen=True)
 class MCPNodeError(Exception):
     code: str
@@ -119,12 +143,13 @@ class MCPToolNodeExecutor(BaseNodeExecutor):
                         str(error_message or "A integração não concluiu a execução."),
                         True,
                     )
-                output = result.structured_content if result.structured_content is not None else result.output
+                # ``ToolResult.output`` is the adapter's public result.  Its
+                # ``structured_content`` is an observability/protocol envelope
+                # (for example {ok, tool, result}) and must not change the
+                # configured output_variable shape.
+                output = result.output
                 output = safe_get_path(output, data.get("result_path")) if data.get("result_path") else output
-                variables = dict(getattr(session, "variables", None) or {})
-                variables[str(data["output_variable"])] = output
-                session.variables = variables
-                db.add(session); db.flush()
+                _store_tool_output(db, session=session, output_variable=str(data["output_variable"]), output=output)
                 handle = "success"
                 raise StopIteration
             if connection_kind != "mcp":
@@ -170,12 +195,11 @@ class MCPToolNodeExecutor(BaseNodeExecutor):
                 preferred = normalized["structured_content"] if normalized["structured_content"] is not None else normalized["content"]
                 output = safe_get_path(preferred, data.get("result_path")) if data.get("result_path") else preferred
                 variables = dict(getattr(session, "variables", None) or {})
-                variables[str(data["output_variable"])] = output
                 if data.get("save_raw_response") is True:
                     variables[str(data.get("raw_response_variable") or "mcp_raw_response")] = normalized
                 variables.pop(str(data.get("error_variable") or "mcp_error"), None)
                 session.variables = variables
-                db.add(session); db.flush()
+                _store_tool_output(db, session=session, output_variable=str(data["output_variable"]), output=output)
                 handle = "success"
                 break
         except StopIteration:

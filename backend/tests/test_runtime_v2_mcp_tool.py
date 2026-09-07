@@ -139,7 +139,7 @@ def test_calendar_mcp_renders_nested_arguments_and_saves_success(monkeypatch, ca
     }
     assert result.next_source_handle == "success"
     assert result.next_node_id == "after-success"
-    assert session.variables["availability"] == {"ok": True, "result": {"busy": []}}
+    assert session.variables["availability"] == {"ok": True, "busy": []}
     assert session.variables["appointment_period"]["window_start"] == "2026-09-08T13:00:00-03:00"
 
 

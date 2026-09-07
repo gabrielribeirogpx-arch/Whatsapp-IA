@@ -17,6 +17,7 @@ from app.flow_v2.executor import FlowV2Executor
 from app.flow_v2.snapshot import FlowV2Snapshot, canonical_hash
 from app.flow_v2.transition_resolver import FlowV2TransitionError
 from app.flow_v2.executors.base_executor import NodeExecutionResult
+from app.tools.base import ToolResult
 
 
 class _FakeDB:
@@ -27,6 +28,7 @@ class _FakeDB:
         self.conversation = None
         self.contact = None
         self.lead = None
+        self.integration = None
 
     def get(self, model, item_id):
         if self.contact is not None and item_id == getattr(self.contact, "id", None):
@@ -40,6 +42,8 @@ class _FakeDB:
 
     def execute(self, statement, params=None):
         statement_text = str(statement)
+        if "integration_connections" in statement_text:
+            return _FakeResult(values=[self.integration] if self.integration is not None else [])
         if "pg_try_advisory_xact_lock" in statement_text:
             return _FakeResult(scalar_value=True)
         if "DELETE FROM flow_v2_scheduled_jobs" in statement_text:
@@ -445,6 +449,58 @@ def test_dynamic_choice_resolves_nested_options_variable() -> None:
         {"id": "1", "label": "10:00"},
         {"id": "2", "label": "11:00"},
     )
+
+
+def test_mcp_output_is_visible_to_nested_dynamic_choice_in_same_runtime_cycle(monkeypatch) -> None:
+    connection_id = uuid.uuid4()
+    raw_snapshot = {
+        "schema_version": 1,
+        "start_node_id": "mcp",
+        "nodes": [
+            {"id": "mcp", "type": "mcp_tool", "data": {
+                "connection_id": f"integration:{connection_id}",
+                "tool_name": "google_calendar_check_availability",
+                "arguments": {},
+                "output_variable": "availability",
+            }},
+            {"id": "choice", "type": "choice", "data": {
+                "content": "Escolha", "options_mode": "dynamic",
+                "options_variable": "availability.appointments",
+                "label_field": "label", "value_field": "id",
+                "result_variable": "selected_slot", "empty_message": "Sem horários",
+            }},
+        ],
+        "edges": [{"id": "success", "source": "mcp", "sourceHandle": "success", "target": "choice"}],
+    }
+    executor, snapshot, _events, session, db = _executor(raw_snapshot)
+    session.current_node_id = "mcp"
+    db.integration = SimpleNamespace(id=connection_id)
+    tool_output = {
+        "ok": True,
+        "appointments": [{
+            "id": "slot-1", "label": "10:00", "start": "...", "end": "...",
+            "timezone": "America/Sao_Paulo",
+        }],
+    }
+    monkeypatch.setattr(
+        "app.flow_v2.executors.mcp_tool_executor.GoogleCalendarToolAdapter.execute",
+        lambda *_args, **_kwargs: ToolResult(
+            ok=True,
+            tool_type="google_calendar",
+            output=tool_output,
+            structured_content={"ok": True, "tool": "availability", "result": tool_output},
+        ),
+    )
+
+    result = executor.handle_input(db, _input_with_id(snapshot, "mcp-choice-same-cycle"))
+
+    assert session.variables["availability"] == tool_output
+    assert len(result.actions) == 1
+    assert isinstance(result.actions[0], SendChoiceButtonsAction)
+    assert result.actions[0].options == ({"id": "slot-1", "label": "10:00"},)
+    assert result.actions[0].buttons == ({"id": "slot-1", "title": "10:00"},)
+    assert result.status == FlowV2SessionStatus.WAITING
+    assert result.current_node_id == "choice"
 
 
 def test_dynamic_choice_missing_nested_path_is_empty() -> None:
