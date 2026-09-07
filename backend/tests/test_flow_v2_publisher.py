@@ -365,6 +365,26 @@ def test_publisher_does_not_override_existing_choice_options_with_buttons() -> N
     assert choice["data"]["buttons"] == nodes[1]["data"]["buttons"]
 
 
+def test_publisher_preserves_dynamic_choice_nested_variable_path() -> None:
+    nodes = [
+        {"id": "start", "type": "message", "data": {"isStart": True, "content": "Olá"}},
+        {"id": "choice", "type": "choice_dynamic", "data": {"options_mode": "dynamic", "options_variable": "availability.appointments", "label_field": "label", "value_field": "id", "result_variable": "selected_slot", "empty_message": "Sem opções"}},
+        {"id": "end", "type": "message", "data": {"content": "Fim", "is_terminal": True}},
+    ]
+    edges = [
+        {"id": "e1", "source": "start", "target": "choice"},
+        {"id": "e2", "source": "choice", "sourceHandle": "selected", "target": "end"},
+    ]
+
+    result = FlowV2Publisher().publish(nodes=nodes, edges=edges)
+
+    choice = _snapshot_node(result.snapshot, "choice")
+    assert choice["data"]["options_variable"] == "availability.appointments"
+    assert choice["data"]["label_field"] == "label"
+    assert choice["data"]["value_field"] == "id"
+    assert choice["data"]["result_variable"] == "selected_slot"
+
+
 def test_publisher_migrates_legacy_buttons_node_to_choice_display_mode_buttons() -> None:
     nodes = [
         {"id": "start", "type": "message", "data": {"isStart": True, "content": "Olá"}},
