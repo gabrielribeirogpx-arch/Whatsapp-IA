@@ -65,6 +65,10 @@ class FlowRenderContext:
 
 
 def render_template(value: Any, context: FlowRenderContext) -> Any:
+    if isinstance(value, dict):
+        return {key: render_template(item, context) for key, item in value.items()}
+    if isinstance(value, list):
+        return [render_template(item, context) for item in value]
     if not isinstance(value, str):
         return value
     if "{" not in value:
