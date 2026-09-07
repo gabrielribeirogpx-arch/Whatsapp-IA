@@ -75,6 +75,32 @@ GOOGLE_CALENDAR_CREATE_EVENT_INPUT_SCHEMA: dict[str, Any] = {
     "required": ["start", "end"],
 }
 
+GOOGLE_CALENDAR_AVAILABILITY_INPUT_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "start": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Início do período em RFC3339/ISO 8601 (por exemplo, {{appointment_period.window_start}}).",
+        },
+        "end": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Fim do período em RFC3339/ISO 8601 (por exemplo, {{appointment_period.window_end}}).",
+        },
+        "timezone": {
+            "type": "string",
+            "description": "Fuso horário IANA (por exemplo, {{appointment_period.timezone}}).",
+        },
+        "mode": {
+            "type": "string",
+            "enum": ["period", "exact"],
+            "description": "Modo de cálculo da disponibilidade (por exemplo, period).",
+        },
+    },
+    "required": ["start", "end"],
+}
+
 
 def google_calendar_tool_definitions(*, connected: bool) -> list[dict[str, Any]]:
     labels = {
@@ -112,7 +138,13 @@ def google_calendar_tool_definitions(*, connected: bool) -> list[dict[str, Any]]
             "display_name": labels[tool_id],
             "name": labels[tool_id],
             "description": descriptions[tool_id],
-            "input_schema": GOOGLE_CALENDAR_CREATE_EVENT_INPUT_SCHEMA if tool_id == "google_calendar_create_event" else {"type": "object"},
+            "input_schema": (
+                GOOGLE_CALENDAR_CREATE_EVENT_INPUT_SCHEMA
+                if tool_id == "google_calendar_create_event"
+                else GOOGLE_CALENDAR_AVAILABILITY_INPUT_SCHEMA
+                if tool_id in {"google_calendar_check_availability", "calendar.get_availability"}
+                else {"type": "object"}
+            ),
             "is_enabled": connected,
             "server_id": None,
             "server_name": "Google Calendar conectado" if connected else "Requer conexão",
