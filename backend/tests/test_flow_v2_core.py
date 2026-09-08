@@ -337,6 +337,33 @@ def test_choice_navigates_by_option_id_only(row_id, expected) -> None:
     assert any(event["payload"] == {"node_id": expected, "message": expected.upper()} for event in event_store.events)
 
 
+def test_fixed_choice_preserves_configured_option_handle() -> None:
+    raw_snapshot = {
+        "schema_version": 1,
+        "start_node_id": "choice",
+        "nodes": [
+            {"id": "choice", "type": "choice", "options": [
+                {"id": "option-1", "label": "Continuar", "sourceHandle": "continue"},
+            ]},
+            {"id": "end", "type": "message", "content": "Fim"},
+        ],
+        "edges": [
+            {"id": "continue", "source": "choice", "sourceHandle": "continue", "target": "end"},
+        ],
+    }
+    executor, snapshot, events, session, db = _executor(raw_snapshot)
+    session.current_node_id = "choice"
+
+    output = executor.handle_input(db, _input(snapshot, {"row_id": "option-1"}))
+
+    assert output.status == FlowV2SessionStatus.COMPLETED
+    assert any(
+        event["event_type"] == "TRANSITION_SELECTED"
+        and event["payload"]["source_handle"] == "continue"
+        for event in events.events
+    )
+
+
 
 def test_message_initial_then_choice_emits_real_interactive_buttons_action() -> None:
     raw_snapshot = {
@@ -405,7 +432,7 @@ def test_dynamic_choice_materializes_mcp_array_and_saves_selection(items) -> Non
             {"id": "choice", "type": "choice", "data": {"isStart": True, "content": "Horários", "options_mode": "dynamic", "options_variable": "appointments", "label_field": "label", "value_field": "id", "description_field": "description", "icon_field": "icon", "result_variable": "selected_slot"}},
             {"id": "end", "type": "message", "data": {"text": "{{selected_slot}} {{selected_slot_title}} {{selected_slot_object.label}}"}},
         ],
-        "edges": [{"id": "next", "source": "choice", "sourceHandle": "default", "target": "end"}],
+        "edges": [{"id": "next", "source": "choice", "sourceHandle": "selected", "target": "end"}],
     }
     executor, snapshot, _events, session, db = _executor(raw_snapshot)
     session.current_node_id = "choice"
@@ -418,12 +445,66 @@ def test_dynamic_choice_materializes_mcp_array_and_saves_selection(items) -> Non
     if not items:
         return
     selected = executor.handle_input(db, _input_with_id(snapshot, f"selected-{len(items)}", {"interactive_type": "list_reply", "interactive_reply_id": items[-1]["id"]}))
-    assert session.variables["selected_slot"] == items[-1]["id"]
+    assert session.variables["selected_slot"] == items[-1]
     assert session.variables["selected_slot_title"] == items[-1]["label"]
     assert session.variables["selected_slot_index"] == len(items) - 1
     assert session.variables["selected_slot_object"] == items[-1]
     assert items[-1]["id"] in selected.actions[-1].text
     assert items[-1]["label"] in selected.actions[-1].text
+
+
+def test_dynamic_choice_selected_routes_to_mcp_and_saves_complete_object(caplog) -> None:
+    appointment = {
+        "id": "slot-1",
+        "label": "10:00",
+        "start": "2026-09-09T10:00:00-03:00",
+        "end": "2026-09-09T11:00:00-03:00",
+        "timezone": "America/Sao_Paulo",
+    }
+    raw_snapshot = {
+        "schema_version": 1,
+        "start_node_id": "choice",
+        "nodes": [
+            {"id": "choice", "type": "choice_dynamic", "data": {
+                "isStart": True,
+                "content": "Horários",
+                "options_mode": "dynamic",
+                "options_variable": "availability.appointments",
+                "label_field": "label",
+                "value_field": "id",
+                "result_variable": "selected_slot",
+            }},
+            {"id": "mcp", "type": "mcp_tool", "data": {"tool_name": "fake"}},
+        ],
+        "edges": [
+            {"id": "selected", "source": "choice", "sourceHandle": "selected", "target": "mcp"},
+        ],
+    }
+    executor, snapshot, events, session, db = _executor(raw_snapshot)
+    session.current_node_id = "choice"
+    session.variables = {"availability": {"appointments": [appointment]}}
+    executed = []
+
+    class _FakeMCPExecutor:
+        def execute(self, _db, *, node, **_kwargs):
+            executed.append(node["id"])
+            return NodeExecutionResult(status="complete")
+
+    executor.node_registry._executors["mcp_tool"] = _FakeMCPExecutor()
+
+    executor.handle_input(db, _input_with_id(snapshot, "dynamic-choice-initial"))
+    with caplog.at_level(logging.INFO):
+        executor.handle_input(
+            db,
+            _input_with_id(snapshot, "dynamic-choice-selected", {"row_id": "slot-1"}),
+        )
+
+    assert session.variables["selected_slot"] == appointment
+    assert executed == ["mcp"]
+    assert "source_handle=selected" in caplog.text
+    assert "sourceHandle emitido=default" not in caplog.text
+    assert "transition_not_found" not in caplog.text
+    assert "TRANSITION_NOT_FOUND" not in _event_types(events)
 
 
 def test_dynamic_choice_resolves_nested_options_variable() -> None:
@@ -449,6 +530,35 @@ def test_dynamic_choice_resolves_nested_options_variable() -> None:
         {"id": "1", "label": "10:00"},
         {"id": "2", "label": "11:00"},
     )
+
+
+def test_dynamic_choice_unknown_id_keeps_invalid_selection_behavior() -> None:
+    raw_snapshot = {
+        "schema_version": 1,
+        "start_node_id": "choice",
+        "nodes": [{"id": "choice", "type": "choice_dynamic", "data": {
+            "options_mode": "dynamic",
+            "options_variable": "availability.appointments",
+            "label_field": "label",
+            "value_field": "id",
+            "result_variable": "chosen_appointment",
+        }}],
+        "edges": [],
+    }
+    executor, snapshot, events, session, db = _executor(raw_snapshot)
+    session.current_node_id = "choice"
+    session.variables = {
+        "availability": {"appointments": [{"id": "slot-1", "label": "10:00"}]},
+    }
+
+    with pytest.raises(RuntimeError, match="choice option not found"):
+        executor.handle_input(
+            db,
+            _input_with_id(snapshot, "dynamic-choice-invalid", {"row_id": "missing-slot"}),
+        )
+
+    assert "chosen_appointment" not in session.variables
+    assert "TRANSITION_NOT_FOUND" in _event_types(events)
 
 
 def test_mcp_output_is_visible_to_nested_dynamic_choice_in_same_runtime_cycle(monkeypatch) -> None:

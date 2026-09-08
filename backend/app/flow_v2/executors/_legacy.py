@@ -825,7 +825,7 @@ class ChoiceNodeExecutor(BaseNodeExecutor):
         if dynamic:
             variable = str(data.get("result_variable") or data.get("save_selection_to") or "selected_slot").strip()
             variables = dict(getattr(session, "variables", None) or {})
-            variables[variable] = matched_option.get("dynamic_object") or matched_option["id"]
+            variables[variable] = matched_option["dynamic_object"]
             variables[f"{variable}_title"] = matched_option.get("dynamic_title", matched_option.get("label", ""))
             variables[f"{variable}_index"] = matched_option.get("dynamic_index")
             variables[f"{variable}_object"] = matched_option.get("dynamic_object")
@@ -833,7 +833,7 @@ class ChoiceNodeExecutor(BaseNodeExecutor):
             if hasattr(db, "add"):
                 db.add(session)
         option_source_handle = str(
-            matched_option.get("source_handle")
+            "selected" if dynamic else matched_option.get("source_handle")
             or matched_option.get("sourceHandle")
             or matched_option.get("handleId")
             or matched_option.get("handle_id")
@@ -863,7 +863,7 @@ class ChoiceNodeExecutor(BaseNodeExecutor):
             snapshot=snapshot,
             session=session,
             source_node_id=node_id,
-            source_handle="default" if dynamic else row_id,
+            source_handle=option_source_handle,
         )
         next_node_id = transition_resolution.target_node_id
         runtime_trace(logger, "transition_resolution", metadata=runtime_input.metadata,
@@ -881,7 +881,7 @@ class ChoiceNodeExecutor(BaseNodeExecutor):
         logger.info(
             "[CHOICE RESOLVED] option_id=%s source_handle=%s next_node_id=%s",
             row_id,
-            row_id,
+            option_source_handle,
             next_node_id,
         )
         logger.info(
@@ -904,11 +904,14 @@ class ChoiceNodeExecutor(BaseNodeExecutor):
             "[CHOICE NEXT NODE] node_id=%s session_id=%s source_handle=%s next_node_id=%s next_node_exists=%s",
             node_id,
             session.id,
-            row_id,
+            option_source_handle,
             next_node_id,
             next_node_id in snapshot.node_by_id,
         )
-        result = NodeExecutionResult(next_node_id=next_node_id)
+        result = NodeExecutionResult(
+            next_node_id=next_node_id,
+            next_source_handle=option_source_handle,
+        )
         logger.info(
             "[CHOICE EXECUTION COMPLETE] node_id=%s session_id=%s status=%s next_node_id=%s actions_count=%s",
             node_id,
