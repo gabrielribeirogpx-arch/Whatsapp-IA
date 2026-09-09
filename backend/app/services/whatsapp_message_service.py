@@ -72,7 +72,13 @@ def _log_related_meta_provider_resolution(
     )
 
 
-def resolve_active_meta_provider_credentials(db: Session, *, tenant_id: str, conversation_id: str | None = None) -> dict[str, str] | None:
+def resolve_active_meta_provider_credentials(
+    db: Session,
+    *,
+    tenant_id: str,
+    conversation_id: str | None = None,
+    provider_id: str | None = None,
+) -> dict[str, str] | None:
     providers = (
         db.execute(
             select(TenantWhatsAppProvider)
@@ -107,8 +113,27 @@ def resolve_active_meta_provider_credentials(db: Session, *, tenant_id: str, con
         ],
     )
 
-    provider = active_providers[0] if active_providers else None
-    if providers and not provider:
+    requested_provider_id = str(provider_id or "").strip()
+    provider = (
+        next(
+            (
+                item
+                for item in active_providers
+                if str(item.id) == requested_provider_id
+            ),
+            None,
+        )
+        if requested_provider_id
+        else (active_providers[0] if active_providers else None)
+    )
+    if requested_provider_id and not provider:
+        logger.warning(
+            "[PROVIDER RESOLUTION] tenant_id=%s conversation_id=%s provider_id=%s reason=requested_provider_not_active_for_tenant",
+            tenant_id,
+            conversation_id or "n/a",
+            requested_provider_id,
+        )
+    if providers and not provider and not requested_provider_id:
         logger.warning(
             "[PROVIDER RESOLUTION] tenant_id=%s conversation_id=%s provider_id=%s reason=no_active_meta_provider",
             tenant_id,
