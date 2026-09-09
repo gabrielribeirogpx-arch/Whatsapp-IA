@@ -874,8 +874,30 @@ def send_whatsapp_message(*, message_data: dict[str, Any]) -> None:
                 conversation_id = str(conversation) if conversation else None
 
         provider_id: str | None = None
+        requested_provider_id = str(message_data.get("provider_id") or "").strip() or None
         with SessionLocal() as db:
-            active_provider = resolve_active_meta_provider_credentials(db, tenant_id=tenant_id, conversation_id=conversation_id)
+            active_provider = resolve_active_meta_provider_credentials(
+                db,
+                tenant_id=tenant_id,
+                conversation_id=conversation_id,
+                provider_id=requested_provider_id,
+            )
+
+        if requested_provider_id and not active_provider:
+            logger.error(
+                "event=queue_send_error correlation_id=%s tenant_id=%s phone=%s job_id=%s stage=send_worker_resolve reason=requested_provider_not_active provider_id=%s",
+                correlation_id,
+                tenant_id,
+                phone,
+                job_id,
+                requested_provider_id,
+            )
+            logger.error(
+                "[WORKER EXIT FAILURE] job_id=%s reason=requested_provider_not_active provider_id=%s",
+                job_id,
+                requested_provider_id,
+            )
+            return
 
         if active_provider:
             resolved_phone_number_id = active_provider["phone_number_id"]
