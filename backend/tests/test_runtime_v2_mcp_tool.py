@@ -168,6 +168,77 @@ def test_calendar_mcp_tool_result_error_returns_error_handle_without_raising(mon
     assert session.variables["appointment_period"]["window_end"] == "2026-09-08T18:00:00-03:00"
 
 
+def test_calendar_write_is_blocked_without_explicit_external_write_authorization(monkeypatch, calendar_runtime):
+    executor, db, session, node = calendar_runtime
+    node["data"].update({
+        "tool_name": "google_calendar_create_event",
+        "tool_classification": "WRITE",
+        "allow_external_write": False,
+        "arguments": {
+            "start": "2026-09-10T15:30:00-03:00",
+            "end": "2026-09-10T16:00:00-03:00",
+        },
+    })
+    monkeypatch.setattr(
+        "app.flow_v2.executors.mcp_tool_executor.GoogleCalendarToolAdapter.execute",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("adapter must not run")),
+    )
+
+    result = executor.execute(db, snapshot=SimpleNamespace(flow_id=uuid.uuid4()), session=session, node=node, runtime_input=SimpleNamespace())
+
+    assert result.next_source_handle == "error"
+    assert session.variables["calendar_error"]["code"] == "MCP_CONNECTION_UNAUTHORIZED"
+
+
+def test_calendar_write_runs_with_explicit_external_write_authorization(monkeypatch, calendar_runtime):
+    executor, db, session, node = calendar_runtime
+    node["data"].update({
+        "tool_name": "google_calendar_create_event",
+        "tool_classification": "WRITE",
+        "allow_external_write": True,
+        "arguments": {
+            "start": "2026-09-10T15:30:00-03:00",
+            "end": "2026-09-10T16:00:00-03:00",
+        },
+    })
+    calls = []
+
+    def execute(_adapter, tool_name, arguments, context):
+        calls.append((tool_name, arguments, context.tenant_id))
+        return ToolResult(ok=True, tool_type="google_calendar", output={"ok": True, "event_id": "event-1"})
+
+    monkeypatch.setattr("app.flow_v2.executors.mcp_tool_executor.GoogleCalendarToolAdapter.execute", execute)
+
+    result = executor.execute(db, snapshot=SimpleNamespace(flow_id=uuid.uuid4()), session=session, node=node, runtime_input=SimpleNamespace())
+
+    assert result.next_source_handle == "success"
+    assert calls == [("google_calendar_create_event", node["data"]["arguments"], session.tenant_id)]
+
+
+def test_calendar_destructive_tool_requires_separate_confirmation(monkeypatch, calendar_runtime):
+    executor, db, session, node = calendar_runtime
+    node["data"].update({
+        "tool_name": "google_calendar_delete_event",
+        "tool_classification": "DESTRUCTIVE",
+        "allow_external_write": True,
+        "destructive_confirmed": False,
+        "arguments": {"event_id": "event-1"},
+    })
+    monkeypatch.setattr(
+        "app.flow_v2.executors.mcp_tool_executor.GoogleCalendarToolAdapter.execute",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("adapter must not run")),
+    )
+
+    result = executor.execute(db, snapshot=SimpleNamespace(flow_id=uuid.uuid4()), session=session, node=node, runtime_input=SimpleNamespace())
+
+    assert result.next_source_handle == "error"
+    assert session.variables["calendar_error"] == {
+        "code": "MCP_CONNECTION_UNAUTHORIZED",
+        "message": "A ação destrutiva exige confirmação explícita.",
+        "retryable": False,
+    }
+
+
 def test_runtime_v2_mcp_executor_uses_only_canonical_tool_result_ok():
     source = inspect.getsource(MCPToolNodeExecutor.execute)
     assert "result.ok" in source

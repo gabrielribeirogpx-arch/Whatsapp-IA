@@ -817,6 +817,36 @@ def test_ai_system_internal_edges_with_orphans_stay_nested_and_do_not_hit_canvas
     assert len(result.snapshot["nodes"][0]["data"]["internal_edges"]) == 5
 
 
+@pytest.mark.parametrize(
+    ("configured_value", "expected_value"),
+    [(False, False), (True, True), ("true", False), (1, False), (None, False)],
+)
+def test_mcp_external_write_authorization_is_a_strict_boolean_in_snapshot(
+    configured_value, expected_value
+) -> None:
+    result = FlowV2Publisher().publish(
+        nodes=[
+            {"id": "start", "type": "start"},
+            {
+                "id": "write-tool",
+                "type": "mcp_tool",
+                "data": {
+                    "connection_id": "mcp:00000000-0000-0000-0000-000000000001",
+                    "tool_name": "generic_write_tool",
+                    "tool_classification": "WRITE",
+                    "allow_external_write": configured_value,
+                    "output_variable": "tool_result",
+                },
+            },
+        ],
+        edges=[{"id": "e1", "source": "start", "target": "write-tool"}],
+    )
+
+    tool_node = next(node for node in result.snapshot["nodes"] if node["id"] == "write-tool")
+    assert tool_node["data"]["allow_external_write"] is expected_value
+    assert isinstance(tool_node["data"]["allow_external_write"], bool)
+
+
 def test_ai_system_rejects_internal_edge_leaked_to_canvas_edges() -> None:
     system = _ai_system_node()
 

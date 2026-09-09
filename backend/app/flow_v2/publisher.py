@@ -580,6 +580,17 @@ def _runtime_v2_node_payload(node: dict[str, Any]) -> dict[str, Any]:
         return _legacy_interactive_node_to_choice(node, node_type)
     if node_type == "ai_agent":
         return _sanitize_ai_agent_node(node)
+    if node_type == "mcp_tool":
+        next_node = normalize_delay_nodes([node])[0]
+        next_data = dict(_node_data(next_node))
+        # Runtime authorization intentionally accepts only the literal boolean
+        # True. Normalize editor/API input so strings or other truthy values can
+        # never grant an external write in an immutable published snapshot.
+        next_data["allow_external_write"] = next_data.get("allow_external_write") is True
+        next_data["destructive_confirmed"] = next_data.get("destructive_confirmed") is True
+        next_node = dict(next_node)
+        next_node["data"] = next_data
+        return next_node
     if node_type != "choice":
         return normalize_delay_nodes([node])[0]
 
