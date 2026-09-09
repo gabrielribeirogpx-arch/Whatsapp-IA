@@ -27,6 +27,13 @@ assert.match(editor, /connection_verified: true, connection_status: 'connected'/
 assert.match(editor, /connection_last_tested_at: new Date\(\)\.toISOString\(\)/);
 assert.match(editor, /tool_description: tool\?\.description/);
 assert.match(editor, /input_schema: tool\?\.input_schema/);
+assert.match(editor, /Permitir alteração em sistema externo/);
+assert.match(editor, /Esta ferramenta pode criar ou alterar dados em um sistema externo\./);
+assert.match(editor, /checked=\{draft\.allow_external_write === true\}/);
+assert.match(editor, /onDraftChange\(\{ allow_external_write: event\.target\.checked \}\)/);
+assert.match(editor, /tool_classification: risk, allow_external_write: false, destructive_confirmed: false/);
+assert.match(editor, /\['WRITE', 'DESTRUCTIVE', 'DELETE'\]\.includes\(classification\)/);
+assert.match(editor, /Confirmar ação destrutiva/);
 assert.doesNotMatch(editor, /credential|access_token|refresh_token|api_key/i);
 
 // The panel restores verification/latency from node.data instead of local state.
