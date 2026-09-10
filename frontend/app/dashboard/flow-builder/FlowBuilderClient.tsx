@@ -1081,7 +1081,7 @@ function FlowNodeEditorPanel({
               Texto
               <textarea value={toText(draft.content || draft.body_text)} onChange={(event) => onDraftChange({ content: event.target.value, body_text: event.target.value })} placeholder="Escolha uma opção" />
             </label>
-            {draft.options_mode === 'dynamic' ? <div className="flow-editor-repeatable"><strong>Origem das opções</strong>
+            {draft.options_mode === 'dynamic' ? <div className="flow-editor-repeatable flow-editor-choice-dynamic"><strong>Origem das opções</strong>
               {mcpListSource ? <div className="flow-editor-info-card"><strong>Detectamos que o MCP retorna uma lista.</strong><p>Deseja configurar automaticamente este Choice?</p><button type="button" className="flow-editor-secondary-btn" onClick={() => { const sample = mcpListSource.data.output_example ?? mcpListSource.data.sample_output ?? mcpListSource.data.preview_data; const root = toText(mcpListSource.data.output_variable || 'mcp_result'); const nestedPath = choiceRecordsPath(sample); configureDynamicChoice(nestedPath ? `${root}.${nestedPath}` : root, sample); }}>✓ Configurar automaticamente</button></div> : null}
               <label className="flow-editor-field">Variável<input list={`choice-sources-${node.id}`} value={toText(draft.options_variable)} onChange={e => configureDynamicChoice(e.target.value)} placeholder="appointments" /></label>
               <datalist id={`choice-sources-${node.id}`}>{Array.from(variableSamples.keys()).map((variable) => <option key={variable} value={variable} />)}</datalist>

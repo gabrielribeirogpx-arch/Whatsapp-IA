@@ -4273,6 +4273,7 @@ input {
   width: 420px;
   max-width: min(420px, 100vw);
   min-width: 0;
+  overflow: hidden;
   border-left: 1px solid #e2e8f0;
   background: #fff;
   display: flex;
@@ -4412,7 +4413,11 @@ input {
 
 .flow-node-editor-content {
   flex: 1;
-  overflow: auto;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
   padding: 16px 18px;
   display: grid;
   align-content: start;
@@ -4422,6 +4427,9 @@ input {
 .flow-editor-field,
 .flow-editor-repeatable {
   display: grid;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
   gap: 7px;
   color: #334155;
   font-size: 12px;
@@ -4432,6 +4440,9 @@ input {
 .flow-editor-field textarea,
 .flow-editor-row input {
   width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
   border: 1px solid #dbe2ea;
   border-radius: 10px;
   background: #f8fafc;
@@ -4466,8 +4477,36 @@ input {
 
 .flow-editor-row {
   display: grid;
-  grid-template-columns: 1fr auto;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr) auto;
   gap: 8px;
+}
+
+.flow-editor-choice-dynamic,
+.flow-editor-choice-dynamic > * {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.flow-editor-choice-dynamic .flow-editor-info-card {
+  flex-wrap: wrap;
+}
+
+.flow-editor-choice-dynamic p,
+.flow-editor-choice-dynamic strong,
+.flow-editor-choice-dynamic small,
+.flow-editor-choice-dynamic code,
+.flow-editor-choice-dynamic pre {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.flow-editor-choice-dynamic pre {
+  white-space: pre-wrap;
 }
 
 .flow-editor-row button,
@@ -5827,6 +5866,9 @@ input {
 .flow-editor-field select,
 .flow-editor-row select {
   width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
   border: 1px solid #dbe2ea;
   border-radius: 10px;
   background: #f8fafc;
