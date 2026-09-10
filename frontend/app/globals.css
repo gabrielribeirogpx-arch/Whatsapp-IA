@@ -7517,8 +7517,12 @@ input {
 .data-collection-editor {
   display: grid;
   gap: 12px;
+  width: 100%;
+  max-width: 100%;
   min-width: 0;
-  overflow: hidden;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: visible;
 }
 
 .data-collection-editor .flow-editor-tab-section {
