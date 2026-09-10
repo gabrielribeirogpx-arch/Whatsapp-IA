@@ -17,11 +17,40 @@ logger = logging.getLogger(__name__)
 GOOGLE_CALENDAR_TOOL_PREFIX = "google_calendar_"
 GOOGLE_CALENDAR_TOOL_IDS = {
     "google_calendar_create_event",
+    "google_calendar_update_event",
     "google_calendar_list_events",
     "google_calendar_check_availability",
     "google_calendar_delete_event",
     "calendar.get_availability", "calendar.create_appointment", "calendar.get_appointment",
     "calendar.reschedule_appointment", "calendar.cancel_appointment",
+}
+
+GOOGLE_CALENDAR_UPDATE_EVENT_INPUT_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "event_id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Identificador do evento existente (por exemplo, {{event_to_reschedule.id}}).",
+        },
+        "start": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Novo início do evento em ISO 8601 (por exemplo, {{new_selected_slot.start}}).",
+        },
+        "end": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Novo fim do evento em ISO 8601 (por exemplo, {{new_selected_slot.end}}).",
+        },
+        "timezone": {
+            "type": "string",
+            "description": "Fuso horário IANA do novo período (por exemplo, {{new_selected_slot.timezone}}).",
+        },
+        "title": {"type": "string", "description": "Novo título opcional do evento."},
+        "description": {"type": "string", "description": "Nova descrição opcional do evento."},
+    },
+    "required": ["event_id", "start", "end"],
 }
 
 GOOGLE_CALENDAR_CREATE_EVENT_INPUT_SCHEMA: dict[str, Any] = {
@@ -105,12 +134,14 @@ GOOGLE_CALENDAR_AVAILABILITY_INPUT_SCHEMA: dict[str, Any] = {
 def google_calendar_tool_definitions(*, connected: bool) -> list[dict[str, Any]]:
     labels = {
         "google_calendar_create_event": "[Google Calendar] Criar evento",
+        "google_calendar_update_event": "[Google Calendar] Atualizar evento",
         "google_calendar_list_events": "[Google Calendar] Listar eventos",
         "google_calendar_check_availability": "[Google Calendar] Verificar disponibilidade",
         "google_calendar_delete_event": "[Google Calendar] Excluir evento",
     }
     descriptions = {
         "google_calendar_create_event": "Cria um evento no Google Calendar conectado do workspace.",
+        "google_calendar_update_event": "Atualiza um evento existente no Google Calendar conectado do workspace.",
         "google_calendar_list_events": "Lista eventos do Google Calendar conectado do workspace.",
         "google_calendar_check_availability": "Verifica disponibilidade no Google Calendar conectado do workspace.",
         "google_calendar_delete_event": "Exclui um evento do Google Calendar conectado do workspace.",
@@ -129,7 +160,7 @@ def google_calendar_tool_definitions(*, connected: bool) -> list[dict[str, Any]]
         "calendar.reschedule_appointment": "Altera a data ou horário de um compromisso após confirmação.",
         "calendar.cancel_appointment": "Cancela um compromisso após confirmação.",
     })
-    classifications = {"calendar.create_appointment": "WRITE", "calendar.reschedule_appointment": "WRITE", "calendar.cancel_appointment": "DESTRUCTIVE", "google_calendar_create_event": "WRITE", "google_calendar_delete_event": "DESTRUCTIVE"}
+    classifications = {"calendar.create_appointment": "WRITE", "calendar.reschedule_appointment": "WRITE", "calendar.cancel_appointment": "DESTRUCTIVE", "google_calendar_create_event": "WRITE", "google_calendar_update_event": "WRITE", "google_calendar_delete_event": "DESTRUCTIVE"}
     return [
         {
             "id": tool_id,
@@ -141,6 +172,8 @@ def google_calendar_tool_definitions(*, connected: bool) -> list[dict[str, Any]]
             "input_schema": (
                 GOOGLE_CALENDAR_CREATE_EVENT_INPUT_SCHEMA
                 if tool_id == "google_calendar_create_event"
+                else GOOGLE_CALENDAR_UPDATE_EVENT_INPUT_SCHEMA
+                if tool_id == "google_calendar_update_event"
                 else GOOGLE_CALENDAR_AVAILABILITY_INPUT_SCHEMA
                 if tool_id in {"google_calendar_check_availability", "calendar.get_availability"}
                 else {"type": "object"}
@@ -243,12 +276,20 @@ class GoogleCalendarToolAdapter:
         _log_tool("GOOGLE_CALENDAR_TOOL_INPUT", tenant_id=context.tenant_id, tool_name=tool_id, input=args, db=db)
         connection_context = _connection_log_context(db, context.tenant_id)
         _log_tool("GOOGLE_CALENDAR_CONNECTION_FOUND" if connection_context.get("connected") else "GOOGLE_CALENDAR_CONNECTION_NOT_FOUND", tenant_id=context.tenant_id, tool_name=tool_id, input=args, db=db)
-        if tool_id == "google_calendar_create_event":
+        validation_schema = (
+            GOOGLE_CALENDAR_CREATE_EVENT_INPUT_SCHEMA
+            if tool_id == "google_calendar_create_event"
+            else GOOGLE_CALENDAR_UPDATE_EVENT_INPUT_SCHEMA
+            if tool_id == "google_calendar_update_event"
+            else None
+        )
+        if validation_schema is not None:
             try:
-                validate(instance=args, schema=GOOGLE_CALENDAR_CREATE_EVENT_INPUT_SCHEMA)
+                validate(instance=args, schema=validation_schema)
             except ValidationError:
                 message = "google_calendar_invalid_arguments"
-                normalized = NormalizedToolResult(False, tool_id, type="google_calendar.create_event", error={"code": message})
+                action = "update_event" if tool_id == "google_calendar_update_event" else "create_event"
+                normalized = NormalizedToolResult(False, tool_id, type=f"google_calendar.{action}", error={"code": message})
                 return ToolResult(
                     False,
                     self.tool_type,
@@ -280,7 +321,7 @@ class GoogleCalendarToolAdapter:
             elif tool_id in {"google_calendar_delete_event", "calendar.cancel_appointment"}:
                 result = service.delete_event(str(args.get("event_id") or args.get("id") or ""))
                 action = "delete_event"
-            elif tool_id == "calendar.reschedule_appointment":
+            elif tool_id in {"google_calendar_update_event", "calendar.reschedule_appointment"}:
                 event_id = str(args.get("event_id") or args.get("id") or "")
                 result = service.update_event(event_id, **{key: value for key, value in args.items() if key not in {"event_id", "id"}})
                 action = "update_event"

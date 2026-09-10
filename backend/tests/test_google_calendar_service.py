@@ -123,6 +123,39 @@ def test_delete_event_calls_correct_calendar(monkeypatch):
     assert seen == {"method": "DELETE", "url": "https://www.googleapis.com/calendar/v3/calendars/primary/events/evt-delete"}
 
 
+def test_update_event_patches_configured_calendar_and_preserves_timezone(monkeypatch):
+    tenant_id = uuid.uuid4(); db = FakeDb()
+    connection = _connect(db, tenant_id)
+    connection.metadata_json = {"calendar_id": "team/calendar@example.com"}
+    seen = {}
+
+    def fake_request(method, url, **kwargs):
+        seen.update(method=method, url=url, json=kwargs["json"])
+        return Resp(200, {
+            "id": "evt-existing",
+            "summary": "Consulta",
+            "start": {"dateTime": "2026-09-10T10:00:00-03:00", "timeZone": "America/Sao_Paulo"},
+            "end": {"dateTime": "2026-09-10T11:00:00-03:00", "timeZone": "America/Sao_Paulo"},
+        })
+
+    monkeypatch.setattr("app.services.google_calendar_service.requests.request", fake_request)
+    result = GoogleCalendarService(db, tenant_id).update_event(
+        "evt/with/slash",
+        start="2026-09-10T10:00:00-03:00",
+        end="2026-09-10T11:00:00-03:00",
+        timezone="America/Sao_Paulo",
+    )
+
+    assert result["ok"] is True
+    assert result["event_id"] == "evt-existing"
+    assert result["timezone"] == "America/Sao_Paulo"
+    assert seen["method"] == "PATCH"
+    assert seen["url"].endswith("/calendars/team%2Fcalendar%40example.com/events/evt%2Fwith%2Fslash")
+    assert seen["json"]["start"]["timeZone"] == "America/Sao_Paulo"
+    assert seen["json"]["end"]["timeZone"] == "America/Sao_Paulo"
+    assert "summary" not in seen["json"]
+
+
 def test_check_availability_calls_freebusy(monkeypatch):
     tenant_id = uuid.uuid4(); db = FakeDb(); _connect(db, tenant_id)
     seen = {}
