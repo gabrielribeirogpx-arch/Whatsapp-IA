@@ -215,6 +215,33 @@ def test_calendar_write_runs_with_explicit_external_write_authorization(monkeypa
     assert calls == [("google_calendar_create_event", node["data"]["arguments"], session.tenant_id)]
 
 
+def test_calendar_update_requires_explicit_external_write_authorization(monkeypatch, calendar_runtime):
+    executor, db, session, node = calendar_runtime
+    node["data"].update({
+        "tool_name": "google_calendar_update_event",
+        # A stale node-side classification must not weaken the catalog policy.
+        "tool_classification": "READ",
+        "allow_external_write": False,
+        "arguments": {
+            "event_id": "event-1",
+            "start": "2026-09-10T15:30:00-03:00",
+            "end": "2026-09-10T16:00:00-03:00",
+        },
+    })
+    monkeypatch.setattr(
+        "app.flow_v2.executors.mcp_tool_executor.GoogleCalendarToolAdapter.execute",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("adapter must not run")),
+    )
+
+    result = executor.execute(
+        db, snapshot=SimpleNamespace(flow_id=uuid.uuid4()), session=session,
+        node=node, runtime_input=SimpleNamespace(),
+    )
+
+    assert result.next_source_handle == "error"
+    assert session.variables["calendar_error"]["code"] == "MCP_CONNECTION_UNAUTHORIZED"
+
+
 def test_calendar_destructive_tool_requires_separate_confirmation(monkeypatch, calendar_runtime):
     executor, db, session, node = calendar_runtime
     node["data"].update({

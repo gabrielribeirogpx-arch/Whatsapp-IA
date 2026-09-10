@@ -3,6 +3,7 @@ from __future__ import annotations
 import uuid
 from types import SimpleNamespace
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -164,3 +165,100 @@ def test_create_event_forwards_rendered_slot_arguments_unchanged():
 
     assert result.ok is True
     assert calls == [arguments]
+
+
+def test_update_event_definition_publishes_canonical_write_schema():
+    update = next(
+        item for item in google_calendar_tool_definitions(connected=True)
+        if item["id"] == "google_calendar_update_event"
+    )
+
+    assert update["display_name"] == "[Google Calendar] Atualizar evento"
+    assert update["metadata"]["classification"] == "WRITE"
+    assert set(update["input_schema"]["properties"]) == {
+        "event_id", "start", "end", "timezone", "title", "description",
+    }
+    assert update["input_schema"]["required"] == ["event_id", "start", "end"]
+    assert update["input_schema"]["properties"]["start"]["format"] == "date-time"
+    assert update["input_schema"]["properties"]["end"]["format"] == "date-time"
+
+
+@pytest.mark.parametrize("missing", ["event_id", "start", "end"])
+def test_update_event_rejects_each_missing_required_argument_without_calling_service(missing):
+    class FakeService:
+        def __init__(self, db, tenant_id):
+            raise AssertionError("invalid input must not reach the service")
+
+    arguments = {
+        "event_id": "evt-1",
+        "start": "2026-09-10T10:00:00-03:00",
+        "end": "2026-09-10T11:00:00-03:00",
+    }
+    arguments.pop(missing)
+    registry = ToolRegistry()
+    registry.register(GoogleCalendarToolAdapter(object(), service_factory=FakeService))
+
+    result = registry.execute(
+        "google_calendar", "google_calendar_update_event", arguments,
+        ToolContext(tenant_id=uuid.uuid4()),
+    )
+
+    assert result.ok is False
+    assert result.error_code == "google_calendar_invalid_arguments"
+    assert result.structured_content["error"] == "google_calendar_invalid_arguments"
+
+
+def test_update_event_calls_existing_event_and_returns_canonical_success():
+    calls = []
+
+    class FakeService:
+        def __init__(self, db, tenant_id):
+            pass
+
+        def update_event(self, event_id, **kwargs):
+            calls.append((event_id, kwargs))
+            return {"ok": True, "event_id": event_id, **kwargs}
+
+        def create_event(self, **kwargs):
+            raise AssertionError("update must never create an event")
+
+    arguments = {
+        "event_id": "evt-existing",
+        "start": "2026-09-10T10:00:00-03:00",
+        "end": "2026-09-10T11:00:00-03:00",
+        "timezone": "America/Sao_Paulo",
+        "title": "Consulta - Ana",
+    }
+    registry = ToolRegistry()
+    registry.register(GoogleCalendarToolAdapter(object(), service_factory=FakeService))
+
+    result = registry.execute(
+        "google_calendar", "google_calendar_update_event", arguments,
+        ToolContext(tenant_id=uuid.uuid4()),
+    )
+
+    assert result.ok is True
+    assert calls == [("evt-existing", {key: value for key, value in arguments.items() if key != "event_id"})]
+    assert result.output["timezone"] == "America/Sao_Paulo"
+    assert result.normalized_result.type == "google_calendar.update_event"
+
+
+def test_update_event_returns_structured_error_from_service_failure():
+    class FakeService:
+        def __init__(self, db, tenant_id):
+            pass
+
+        def update_event(self, event_id, **kwargs):
+            return {"ok": False, "message": "calendar_update_failed", "status_code": 404}
+
+    registry = ToolRegistry()
+    registry.register(GoogleCalendarToolAdapter(object(), service_factory=FakeService))
+    result = registry.execute("google_calendar", "google_calendar_update_event", {
+        "event_id": "missing", "start": "2026-09-10T10:00:00Z", "end": "2026-09-10T11:00:00Z",
+    }, ToolContext(tenant_id=uuid.uuid4()))
+
+    assert result.ok is False
+    assert result.error_code == "google_calendar_error"
+    assert result.structured_content == {
+        "ok": False, "tool": "google_calendar_update_event", "result": {}, "error": "calendar_update_failed",
+    }

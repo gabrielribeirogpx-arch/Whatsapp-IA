@@ -5,6 +5,7 @@ import os
 import re
 import traceback
 import uuid
+from urllib.parse import quote
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -414,10 +415,20 @@ class GoogleCalendarService:
     def update_event(self, event_id: str, **kwargs: Any) -> dict[str, Any]:
         input_payload = {"event_id": event_id, **kwargs}
         def operation() -> dict[str, Any]:
-            ok, data, _ = self._request("PATCH", f"/calendars/primary/events/{event_id}", json_body=self._event_payload(kwargs))
+            conn = self.connection_service.get_connection(self.tenant_id, PROVIDER)
+            metadata = conn.metadata_json if conn and isinstance(conn.metadata_json, dict) else {}
+            calendar_id = str(metadata.get("calendar_id") or "primary")
+            payload = self._event_payload(kwargs)
+            if not any(kwargs.get(key) is not None for key in ("title", "summary", "name")):
+                payload.pop("summary", None)
+            ok, data, _ = self._request(
+                "PATCH",
+                f"/calendars/{quote(calendar_id, safe='')}/events/{quote(event_id, safe='')}",
+                json_body=payload,
+            )
             if not ok:
                 return {"ok": False, **data}
-            return {"ok": True, "event_id": data.get("id"), "html_link": data.get("htmlLink"), "title": data.get("summary"), "start": (data.get("start") or {}).get("dateTime"), "end": (data.get("end") or {}).get("dateTime")}
+            return {"ok": True, "event_id": data.get("id"), "html_link": data.get("htmlLink"), "title": data.get("summary"), "start": (data.get("start") or {}).get("dateTime"), "end": (data.get("end") or {}).get("dateTime"), "timezone": (data.get("start") or {}).get("timeZone") or kwargs.get("timezone")}
         return self._service_call("google_calendar_update_event", input_payload, operation)
 
     def delete_event(self, event_id: str) -> dict[str, Any]:
