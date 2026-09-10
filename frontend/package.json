@@ -14,6 +14,7 @@
     "test:element-deletion": "node tests/flowElementDeletion.test.mjs",
     "test:dynamic-choice": "node tests/dynamicChoiceLowCode.test.mjs",
     "test:dynamic-choice-layout": "node tests/dynamicChoiceLayout.test.mjs",
+    "test:flow-editor-scroll": "node tests/flowNodeEditorScroll.test.mjs",
     "test:dynamic-choice-activation": "node tests/dynamicChoiceActivation.test.mjs",
     "test:interactive-messages": "node tests/interactiveMessagePresentation.test.mjs",
     "test:data-collection-types": "node tests/dataCollectionAppointmentPeriod.test.mjs"
