@@ -4296,6 +4296,7 @@ input {
 
 .flow-node-editor-header {
   display: flex;
+  flex: 0 0 auto;
   align-items: flex-start;
   justify-content: space-between;
   gap: 16px;
@@ -4412,12 +4413,14 @@ input {
 }
 
 .flow-node-editor-content {
-  flex: 1;
+  flex: 1 1 auto;
+  min-height: 0;
   width: 100%;
   max-width: 100%;
   min-width: 0;
   overflow-x: hidden;
   overflow-y: auto;
+  overscroll-behavior-y: contain;
   padding: 16px 18px;
   display: grid;
   align-content: start;
