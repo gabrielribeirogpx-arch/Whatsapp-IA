@@ -32,6 +32,18 @@ from app.schemas.account import (
 from app.services.tenant_service import get_current_tenant
 from app.services.audit_service import serialize_audit_log, write_audit_log
 from app.services.session_service import hash_session_token, serialize_user_session
+from app.security.workspace_rbac import (
+    ROLE_RANK,
+    AdministrativeAuditAction,
+    WorkspacePermission,
+    WorkspaceRole,
+    WorkspaceUserStatus,
+    authorize_invitation,
+    authorize_user_change,
+    canonical_role,
+    require_permission,
+    require_same_tenant,
+)
 from app.routers.auth import _hash_password, _verify_password, validate_password_policy
 
 router = APIRouter(tags=["account"])
@@ -77,6 +89,8 @@ def get_current_user(
     user = db.execute(select(TenantUser).where(TenantUser.tenant_id == tenant.id, TenantUser.email == email)).scalars().first()
     if not user:
         raise HTTPException(status_code=401, detail="Usuário não encontrado")
+    if user.status != WorkspaceUserStatus.ACTIVE.value:
+        raise HTTPException(status_code=401, detail="Conta inativa")
     token_hash = hash_session_token(raw_token)
     session = db.execute(select(UserSession).where(UserSession.session_token_hash == token_hash)).scalars().first()
     if session and session.revoked_at is not None:
@@ -209,14 +223,35 @@ def update_password(payload: AccountPasswordUpdateIn, db: Session = Depends(get_
     return {"message": "Senha alterada com sucesso."}
 
 
+def _lock_and_require_another_owner(db: Session, tenant_id: UUID, target_id: UUID) -> None:
+    """Serialize owner-loss operations and preserve an active owner."""
+    # This tenant row is the common lock for every owner-loss operation. It avoids
+    # the race where two owners concurrently deactivate/downgrade each other.
+    db.execute(select(Tenant.id).where(Tenant.id == tenant_id).with_for_update()).scalar_one()
+    other_owner = db.execute(
+        select(TenantUser.id).where(
+            TenantUser.tenant_id == tenant_id,
+            TenantUser.id != target_id,
+            TenantUser.role == WorkspaceRole.OWNER.value,
+            TenantUser.status == WorkspaceUserStatus.ACTIVE.value,
+        ).limit(1)
+    ).scalars().first()
+    if other_owner is None:
+        raise HTTPException(status_code=403, detail="O workspace deve manter pelo menos um owner ativo")
+
+
 @router.get("/workspace/users", response_model=list[WorkspaceUserOut])
 def list_workspace_users(tenant: Tenant = Depends(get_current_tenant), user: TenantUser = Depends(get_current_user), db: Session = Depends(get_db)):
+    require_same_tenant(user, tenant.id)
+    require_permission(user, WorkspacePermission.LIST_USERS)
     users = db.execute(select(TenantUser).where(TenantUser.tenant_id == tenant.id).order_by(TenantUser.created_at.asc())).scalars().all()
     return [_workspace_user(item) for item in users]
 
 
 @router.post("/workspace/users", response_model=WorkspaceUserOut)
 def invite_workspace_user(payload: WorkspaceUserInviteIn, db: Session = Depends(get_db), tenant: Tenant = Depends(get_current_tenant), user: TenantUser = Depends(get_current_user)):
+    require_same_tenant(user, tenant.id)
+    authorize_invitation(user, payload.role)
     email = payload.email.strip().lower()
     existing = db.execute(select(TenantUser).where(TenantUser.email == email)).scalars().first()
     if existing:
@@ -226,13 +261,13 @@ def invite_workspace_user(payload: WorkspaceUserInviteIn, db: Session = Depends(
         full_name=payload.name.strip(),
         email=email,
         password_hash=_hash_password(secrets.token_urlsafe(18)),
-        role=payload.role,
+        role=payload.role.value,
         status="invited",
         company=tenant.name,
     )
     db.add(invited)
     db.flush()
-    write_audit_log(db, action="USER_CREATED", tenant_id=tenant.id, user_id=user.id, entity_type="tenant_user", entity_id=invited.id, metadata={"email": email, "role": payload.role})
+    write_audit_log(db, action=AdministrativeAuditAction.USER_INVITED.value, tenant_id=tenant.id, user_id=user.id, entity_type="tenant_user", entity_id=invited.id, metadata={"actor_user_id": str(user.id), "target_user_id": str(invited.id), "workspace_id": str(tenant.id), "new_role": payload.role.value})
     db.commit()
     db.refresh(invited)
     return _workspace_user(invited)
@@ -240,17 +275,37 @@ def invite_workspace_user(payload: WorkspaceUserInviteIn, db: Session = Depends(
 
 @router.patch("/workspace/users/{user_id}", response_model=WorkspaceUserOut)
 def update_workspace_user(user_id: UUID, payload: WorkspaceUserUpdateIn, db: Session = Depends(get_db), tenant: Tenant = Depends(get_current_tenant), user: TenantUser = Depends(get_current_user)):
+    require_same_tenant(user, tenant.id)
+    require_permission(user, WorkspacePermission.MANAGE_USERS)
     target = db.execute(select(TenantUser).where(TenantUser.tenant_id == tenant.id, TenantUser.id == user_id)).scalars().first()
     if not target:
         raise HTTPException(status_code=404, detail="Usuário não encontrado")
+    authorize_user_change(user, target, new_role=payload.role)
+    old_role_raw = target.role
+    old_role = canonical_role(old_role_raw)
+    old_status = target.status
+    loses_active_owner = old_role == WorkspaceRole.OWNER and old_status == "active" and (
+        (payload.role is not None and payload.role != WorkspaceRole.OWNER)
+        or (payload.status is not None and payload.status != WorkspaceUserStatus.ACTIVE)
+    )
+    if loses_active_owner:
+        _lock_and_require_another_owner(db, tenant.id, target.id)
     if payload.name is not None:
         target.full_name = payload.name.strip()
     if payload.role is not None:
-        target.role = payload.role
+        target.role = payload.role.value
     if payload.status is not None:
-        target.status = payload.status
+        target.status = payload.status.value
     db.add(target)
-    write_audit_log(db, action="USER_UPDATED", tenant_id=tenant.id, user_id=user.id, entity_type="tenant_user", entity_id=target.id, metadata={"role": target.role, "status": target.status})
+    audit_metadata = {"actor_user_id": str(user.id), "target_user_id": str(target.id), "workspace_id": str(tenant.id), "old_role": old_role.value if old_role else str(old_role_raw), "new_role": target.role}
+    if payload.role is not None and (old_role is None or payload.role != old_role):
+        write_audit_log(db, action=AdministrativeAuditAction.USER_ROLE_CHANGED.value, tenant_id=tenant.id, user_id=user.id, entity_type="tenant_user", entity_id=target.id, metadata=audit_metadata)
+        if old_role is not None:
+            direction = AdministrativeAuditAction.USER_PROMOTED.value if ROLE_RANK[payload.role] > ROLE_RANK[old_role] else AdministrativeAuditAction.USER_DEMOTED.value
+            write_audit_log(db, action=direction, tenant_id=tenant.id, user_id=user.id, entity_type="tenant_user", entity_id=target.id, metadata=audit_metadata)
+    if payload.status is not None and payload.status.value != old_status:
+        action = AdministrativeAuditAction.USER_ENABLED.value if payload.status == WorkspaceUserStatus.ACTIVE else AdministrativeAuditAction.USER_DISABLED.value
+        write_audit_log(db, action=action, tenant_id=tenant.id, user_id=user.id, entity_type="tenant_user", entity_id=target.id, metadata={**audit_metadata, "old_status": old_status, "new_status": payload.status.value})
     db.commit()
     db.refresh(target)
     return _workspace_user(target)
@@ -258,17 +313,40 @@ def update_workspace_user(user_id: UUID, payload: WorkspaceUserUpdateIn, db: Ses
 
 @router.post("/workspace/users/{user_id}/deactivate", response_model=WorkspaceUserOut)
 def deactivate_workspace_user(user_id: UUID, db: Session = Depends(get_db), tenant: Tenant = Depends(get_current_tenant), user: TenantUser = Depends(get_current_user)):
+    require_same_tenant(user, tenant.id)
+    require_permission(user, WorkspacePermission.MANAGE_USERS)
     target = db.execute(select(TenantUser).where(TenantUser.tenant_id == tenant.id, TenantUser.id == user_id)).scalars().first()
     if not target:
         raise HTTPException(status_code=404, detail="Usuário não encontrado")
+    authorize_user_change(user, target)
     if target.id == user.id:
-        raise HTTPException(status_code=400, detail="Você não pode desativar a própria sessão administrativa")
+        raise HTTPException(status_code=403, detail="Você não pode desativar a própria conta")
+    if canonical_role(target.role) == WorkspaceRole.OWNER and target.status == "active":
+        _lock_and_require_another_owner(db, tenant.id, target.id)
     target.status = "inactive"
     db.add(target)
-    write_audit_log(db, action="USER_DISABLED", tenant_id=tenant.id, user_id=user.id, entity_type="tenant_user", entity_id=target.id)
+    write_audit_log(db, action=AdministrativeAuditAction.USER_DISABLED.value, tenant_id=tenant.id, user_id=user.id, entity_type="tenant_user", entity_id=target.id, metadata={"actor_user_id": str(user.id), "target_user_id": str(target.id), "workspace_id": str(tenant.id), "old_role": target.role, "new_role": target.role})
     db.commit()
     db.refresh(target)
     return _workspace_user(target)
+
+
+@router.delete("/workspace/users/{user_id}", status_code=204)
+def remove_workspace_user(user_id: UUID, db: Session = Depends(get_db), tenant: Tenant = Depends(get_current_tenant), user: TenantUser = Depends(get_current_user)):
+    require_same_tenant(user, tenant.id)
+    require_permission(user, WorkspacePermission.MANAGE_USERS)
+    target = db.execute(select(TenantUser).where(TenantUser.tenant_id == tenant.id, TenantUser.id == user_id)).scalars().first()
+    if not target:
+        raise HTTPException(status_code=404, detail="Usuário não encontrado")
+    authorize_user_change(user, target)
+    if canonical_role(target.role) == WorkspaceRole.OWNER and target.status == WorkspaceUserStatus.ACTIVE.value:
+        _lock_and_require_another_owner(db, tenant.id, target.id)
+    if target.id == user.id:
+        raise HTTPException(status_code=403, detail="Você não pode remover a própria conta")
+    metadata = {"actor_user_id": str(user.id), "target_user_id": str(target.id), "workspace_id": str(tenant.id), "old_role": target.role, "new_role": None}
+    db.delete(target)
+    write_audit_log(db, action=AdministrativeAuditAction.USER_REMOVED.value, tenant_id=tenant.id, user_id=user.id, entity_type="tenant_user", entity_id=target.id, metadata=metadata)
+    db.commit()
 
 
 @router.post("/account/security/sessions/{session_id}/revoke")
@@ -311,6 +389,8 @@ def list_audit_logs(
     tenant: Tenant = Depends(get_current_tenant),
     user: TenantUser = Depends(get_current_user),
 ):
+    require_same_tenant(user, tenant.id)
+    require_permission(user, WorkspacePermission.VIEW_AUDIT_LOG)
     query = select(AuditLog).where(AuditLog.tenant_id == tenant.id).order_by(AuditLog.created_at.desc()).limit(200)
     if user_id:
         query = query.where(AuditLog.user_id == user_id)
