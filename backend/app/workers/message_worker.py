@@ -108,13 +108,13 @@ def _direct_message_debug_fields(payload: dict[str, Any]) -> dict[str, str]:
 def _log_direct_message_marker(marker: str, payload: dict[str, Any]) -> None:
     fields = _direct_message_debug_fields(payload)
     logger.info(
-        "%s message.type=%s interactive.type=%s interactive.list_reply.id=%s interactive.list_reply.title=%s payload=%s source=message_worker_direct_payload",
+        "%s message_type=%s interactive_type=%s message_id=%s has_text=%s has_interactive=%s source=message_worker_direct_payload",
         marker,
         fields["message_type"] or "n/a",
         fields["interactive_type"] or "n/a",
-        fields["interactive_list_reply_id"] or "n/a",
-        fields["interactive_list_reply_title"] or "n/a",
-        _json_log_payload(payload),
+        payload.get("message_id") or payload.get("id") or "n/a",
+        bool(payload.get("text")),
+        fields["message_type"] == "interactive",
     )
 
 
@@ -261,12 +261,12 @@ def _pick_message(payload: dict[str, Any]) -> dict[str, Any] | None:
     if payload.get("phone"):
         _log_direct_message_marker("[MESSAGE TYPE DETECTED]", payload)
     logger.warning(
-        "[MESSAGE PARSE UNSUPPORTED] reason=no_supported_message payload_shape=%s has_phone=%s has_text=%s has_selected_row_id=%s payload=%s",
+        "[MESSAGE PARSE UNSUPPORTED] reason=no_supported_message payload_shape=%s has_phone=%s has_text=%s has_selected_row_id=%s context=%s",
         _payload_shape(payload),
         bool(payload.get("phone")),
         bool(str(payload.get("text") or "").strip()),
         bool(selected_row_id),
-        _json_log_payload(payload),
+        webhook_log_context(payload),
     )
     return None
 

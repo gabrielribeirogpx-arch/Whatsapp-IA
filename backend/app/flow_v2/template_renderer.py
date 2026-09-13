@@ -81,16 +81,15 @@ def render_template(value: Any, context: FlowRenderContext) -> Any:
     resolved_keys, missing_keys = template_keys(value, values)
     logger.log(
         logging.WARNING if missing_keys else logging.INFO,
-        "event=RUNTIME_V2_TEMPLATE_RENDER_INPUT node_id=%s session_id=%s "
-        "render_context=%r session.variables=%r session.context=%r "
-        "resolved_keys=%s missing_keys=%s",
+        "event=RUNTIME_V2_TEMPLATE_RENDER_INPUT flow_id=%s node_id=%s session_id=%s "
+        "resolved_keys=%s missing_keys=%s variable_names=%s variable_count=%s",
+        getattr(context.flow, "id", None),
         context.node_id,
         getattr(context.session, "id", None),
-        values,
-        getattr(context.session, "variables", None),
-        getattr(context.session, "context", None),
         resolved_keys,
         missing_keys,
+        sorted(str(key) for key in (getattr(context.session, "variables", None) or {}).keys()),
+        len(getattr(context.session, "variables", None) or {}),
     )
 
     rendered_resolved_keys: list[str] = []
@@ -108,14 +107,14 @@ def render_template(value: Any, context: FlowRenderContext) -> Any:
     rendered = _PLACEHOLDER_RE.sub(replace, value)
     logger.log(
         logging.WARNING if rendered_missing_keys else logging.INFO,
-        "event=runtime_v2_template_render node_id=%s session_id=%s template=%r "
-        "resolved_keys=%s missing_keys=%s rendered_preview=%r",
+        "event=runtime_v2_template_render flow_id=%s node_id=%s session_id=%s "
+        "resolved_keys=%s missing_keys=%s render_success=%s",
+        getattr(context.flow, "id", None),
         context.node_id,
         getattr(context.session, "id", None),
-        _redacted_preview(value),
         sorted(set(rendered_resolved_keys)),
         sorted(set(rendered_missing_keys)),
-        _redacted_preview(rendered),
+        not rendered_missing_keys,
     )
     if len(rendered) > MAX_RENDERED_LENGTH:
         logger.warning("[FLOW TEMPLATE] rendered value too large tenant_id=%s length=%s", context.tenant_id, len(rendered))

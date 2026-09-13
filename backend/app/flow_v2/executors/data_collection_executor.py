@@ -95,8 +95,8 @@ class RuntimeV2DataCollectionExecutor(BaseNodeExecutor):
         waiting['processed_message_ids'] = processed[-50:]
         raw = runtime_input.message_text
         logger.info(
-            'event=RUNTIME_V2_DATA_COLLECTION_RECEIVED session_id=%s node_id=%s waiting_variable=%s incoming_message=%r current_node_id=%s',
-            session.id, node_id, context.get('waiting_variable'), raw, getattr(session, 'current_node_id', None),
+            'event=RUNTIME_V2_DATA_COLLECTION_RECEIVED session_id=%s node_id=%s waiting_variable=%s message_len=%s current_node_id=%s',
+            session.id, node_id, context.get('waiting_variable'), len(str(raw or '')), getattr(session, 'current_node_id', None),
         )
         logger.info('event=data_collection_input_received session_id=%s node_id=%s variable_name=%s data_type=%s attempt=%s', session.id, node_id, data.get('variable_name'), data.get('data_type'), waiting.get('attempts', 0))
         cancel = {str(w).strip().casefold() for w in data.get('cancel_keywords', []) if str(w).strip()}
@@ -122,8 +122,8 @@ class RuntimeV2DataCollectionExecutor(BaseNodeExecutor):
             return NodeExecutionResult(actions=(action, *finished.actions), status=finished.status, next_node_id=finished.next_node_id, next_source_handle='invalid')
         name = str(data.get('variable_name') or ''); variables = dict(session.variables or {}); variables[name] = result.normalized_value; session.variables = variables
         logger.info(
-            'event=RUNTIME_V2_DATA_COLLECTION_SAVE session_id=%s node_id=%s variable=%s value=%r session.variables=%r',
-            session.id, node_id, name, result.normalized_value, session.variables,
+            'event=RUNTIME_V2_DATA_COLLECTION_SAVE session_id=%s node_id=%s variable_names=%s variable_count=%s render_success=true',
+            session.id, node_id, sorted(str(key) for key in variables), len(variables),
         )
         metadata = dict(context.get('variable_metadata') or {}); metadata[name] = {'raw_value': result.raw_value, 'normalized_value': result.normalized_value, 'data_type': data.get('data_type'), 'collected_at': now.isoformat(), 'node_id': node_id}; context['variable_metadata'] = metadata
         if data.get('save_to_contact') and runtime_input.contact_id:

@@ -5,6 +5,7 @@ from typing import Any
 
 from app.utils.phone import normalize_phone
 from app.observability.runtime_choice_trace import runtime_exit, runtime_trace
+from app.utils.log_sanitizer import webhook_log_context
 
 logger = logging.getLogger(__name__)
 
@@ -39,16 +40,13 @@ def _interactive_debug_fields(message: dict[str, Any]) -> dict[str, str]:
 def _log_meta_message_marker(marker: str, *, message: dict[str, Any], payload: Any | None = None) -> None:
     fields = _interactive_debug_fields(message)
     logger.info(
-        "%s message.type=%s interactive.type=%s interactive.button_reply.id=%s interactive.button_reply.title=%s interactive.list_reply.id=%s interactive.list_reply.title=%s selected_row_id=%s payload=%s",
+        "%s message_type=%s interactive_type=%s message_id=%s has_text=%s has_interactive=%s",
         marker,
         fields["message_type"] or "n/a",
         fields["interactive_type"] or "n/a",
-        fields["interactive_button_reply_id"] or "n/a",
-        fields["interactive_button_reply_title"] or "n/a",
-        fields["interactive_list_reply_id"] or "n/a",
-        fields["interactive_list_reply_title"] or "n/a",
-        fields["selected_row_id"] or "n/a",
-        _json_log_payload(message if payload is None else payload),
+        sanitize_text(str(message.get("id") or "")) or "n/a",
+        fields["message_type"] == "text",
+        fields["message_type"] == "interactive",
     )
 
 
@@ -104,7 +102,7 @@ def extract_whatsapp_messages(payload: dict[str, Any]) -> list[dict[str, str]]:
 
 
 def normalize_meta_message(payload: dict[str, Any]) -> list[dict[str, str | None]]:
-    logger.info("[NORMALIZE_META_MESSAGE INPUT] payload=%s", _json_log_payload(payload))
+    logger.info("[NORMALIZE_META_MESSAGE INPUT] context=%s", webhook_log_context(payload))
     normalized: list[dict[str, str | None]] = []
     entries = payload.get("entry", [])
 
@@ -197,5 +195,5 @@ def normalize_meta_message(payload: dict[str, Any]) -> list[dict[str, str | None
                                  "row_id": interactive_reply_id or None,
                                  "runtime_choice_key": interactive_reply_id or None})
 
-    logger.info("[NORMALIZE_META_MESSAGE COMPLETE] count=%s normalized=%s", len(normalized), _json_log_payload(normalized))
+    logger.info("[NORMALIZE_META_MESSAGE COMPLETE] count=%s context=%s", len(normalized), webhook_log_context(payload))
     return normalized

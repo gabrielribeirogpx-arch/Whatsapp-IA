@@ -210,30 +210,28 @@ class MessageNodeExecutor(BaseNodeExecutor):
         message = render_template(template, render_context)
         logger.info(
             "event=RUNTIME_V2_MESSAGE_RENDER node_id=%s session_id=%s "
-            "session.variables=%r session.context=%r render_context=%r "
-            "template_original=%r rendered_text=%r missing_keys=%s",
+            "resolved_keys=%s missing_keys=%s variable_names=%s variable_count=%s render_success=%s",
             node_id,
             getattr(session, "id", None),
-            getattr(session, "variables", None),
-            getattr(session, "context", None),
-            effective_render_context,
-            template,
-            message,
+            _resolved_keys,
             missing_keys,
+            sorted(str(key) for key in (getattr(session, "variables", None) or {}).keys()),
+            len(getattr(session, "variables", None) or {}),
+            not missing_keys,
         )
         is_start = bool(node.get("isStart") or data.get("isStart"))
         logger.info(
-            "[MESSAGE EXECUTED] node_id=%s is_start=%s message_preview=%s",
+            "[MESSAGE EXECUTED] node_id=%s is_start=%s message_len=%s",
             node_id,
             is_start,
-            message[:120],
+            len(message),
         )
         logger.info(
-            "[MESSAGE NODE EXECUTION] node_id=%s is_start=%s message_present=%s message_preview=%s event_type=%s target_final_node=%s",
+            "[MESSAGE NODE EXECUTION] node_id=%s is_start=%s message_present=%s message_len=%s event_type=%s target_final_node=%s",
             node_id,
             is_start,
             bool(message),
-            message[:120],
+            len(message),
             runtime_input.metadata.get("event_type"),
             node_id == "bccab03d-830a-4dc1-9e67-bcadf5666eee",
         )
@@ -627,16 +625,14 @@ class ChoiceNodeExecutor(BaseNodeExecutor):
         logger.log(
             logging.WARNING if missing_keys else logging.INFO,
             "event=RUNTIME_V2_CHOICE_RENDER node_id=%s session_id=%s "
-            "session.variables=%r session.context=%r template_original=%r "
-            "rendered_text=%r resolved_keys=%s missing_keys=%s",
+            "resolved_keys=%s missing_keys=%s variable_names=%s variable_count=%s render_success=%s",
             node_id,
             getattr(session, "id", None),
-            getattr(session, "variables", None),
-            getattr(session, "context", None),
-            template_original,
-            rendered_text,
             resolved_keys,
             missing_keys,
+            sorted(str(key) for key in (getattr(session, "variables", None) or {}).keys()),
+            len(getattr(session, "variables", None) or {}),
+            not missing_keys,
         )
         display_mode = _choice_display_mode(node, data)
         if dynamic and len(options) > 3:
@@ -2812,12 +2808,11 @@ class AiClassificationNodeExecutor(AiStructuredNodeExecutor):
             self._save_result(db, session=session, output_variable=output_variable, result=result)
             logger.info(
                 "event=RUNTIME_V2_AI_CLASSIFICATION_PERSISTED node_id=%s output_variable=%s "
-                "classification_result=%r session.variables=%r session.context=%r",
+                "variable_names=%s variable_count=%s persisted=true",
                 node_id,
                 output_variable,
-                result,
-                getattr(session, "variables", None),
-                getattr(session, "context", None),
+                sorted(str(key) for key in (getattr(session, "variables", None) or {}).keys()),
+                len(getattr(session, "variables", None) or {}),
             )
             record_ai_execution(db, tenant_id=session.tenant_id, conversation_id=runtime_input.conversation_id, session_id=session.id, flow_id=get_flow_id(db, snapshot, session), flow_version_id=session.flow_version_id, node_id=node_id, node_type="ai_classification", provider=ai_config.get("provider"), model=ai_config.get("model"), started_at=ai_started_at, status="success", input_text=input_text, output_text=result.get("category"), confidence=result.get("confidence"), fallback_used=str(result.get("category")) == "outro" or float(result.get("confidence") or 0) < float(threshold or 0), metadata={"category": result.get("category"), "threshold": threshold})
             self.event_store.append(db, session=session, event_type=FlowV2EventType.OUTPUT_EMITTED, node_id=node_id, payload={"analytics_event": "ai_classification_completed", "category": result.get("category"), "confidence": result.get("confidence")})
