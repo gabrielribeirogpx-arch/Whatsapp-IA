@@ -157,8 +157,8 @@ def test_normalize_meta_message_logs_interactive_list_diagnostics(caplog):
     assert "[MESSAGE NORMALIZED]" in log_text
     assert "message.type=interactive" in log_text
     assert "interactive.type=list_reply" in log_text
-    assert "interactive.list_reply.id=opcao_1" in log_text
-    assert "interactive.list_reply.title=Opção 1" in log_text
+    assert "message_id=wamid.2" in log_text
+    assert "has_interactive=True" in log_text
     assert message["selected_row_id"] == "opcao_1"
 
 
@@ -218,11 +218,11 @@ def test_pick_message_logs_normalize_output_and_raw_payload(caplog):
         parsed = message_worker._pick_message(payload)
 
     log_text = "\n".join(record.getMessage() for record in caplog.records)
-    assert "[META WORKER RAW PAYLOAD]" in log_text
+    assert "event=meta_worker_payload_received context=" in log_text
     assert "[NORMALIZE_META_MESSAGE INPUT]" in log_text
     assert "[NORMALIZE_META_MESSAGE COMPLETE] count=1" in log_text
-    assert "[NORMALIZE_META_MESSAGE OUTPUT] count=1 payload_shape=entry_count=1 message_count=1" in log_text
-    assert '"selected_row_id": "opcao_3"' in log_text
+    assert "event=meta_worker_payload_normalized count=1 payload_shape=entry_count=1 message_count=1" in log_text
+    assert "message_id=wamid.3" in log_text
     assert parsed is not None
     assert parsed["selected_row_id"] == "opcao_3"
 

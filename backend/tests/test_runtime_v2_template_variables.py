@@ -142,8 +142,7 @@ def test_data_collection_classification_condition_message_interpolates_output(
     assert result.actions[0].text == f"Categoria classificada: {classified_category}"
     assert "{{intent_category}}" not in result.actions[0].text
     assert "output_variable=intent_category" in caplog.text
-    assert f"'intent_category': '{classified_category}'" in caplog.text
+    assert "variable_names=['intent_category', 'treatment_request'] variable_count=2" in caplog.text
     assert "resolved_keys=['intent_category'] missing_keys=[]" in caplog.text
     assert "event=RUNTIME_V2_MESSAGE_RENDER" in caplog.text
-    assert "template_original='Categoria classificada: {{intent_category}}'" in caplog.text
-    assert f"rendered_text='Categoria classificada: {classified_category}' missing_keys=[]" in caplog.text
+    assert "render_success=True" in caplog.text

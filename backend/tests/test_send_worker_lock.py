@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 
 os.environ.setdefault("DATABASE_URL", "sqlite:///./test.db")
@@ -88,6 +89,29 @@ def test_release_only_deletes_lock_owned_by_current_job() -> None:
 
     send_worker._release_send_lock(redis, lock_key, "owner-token", tenant_id="tenant-1", phone="5511999999999", job_id="job-1")
     assert redis.get(lock_key) is None
+
+
+def test_lock_release_log_redacts_token_and_phone(caplog) -> None:
+    redis = FakeRedis()
+    lock_key = "wa:send-lock:tenant-1:5516999999999"
+    redis.set(
+        lock_key,
+        send_worker._send_lock_value(**_lock_value_kwargs("job-1", token="SECRET_TOKEN_VALUE")),
+        ex=120,
+        nx=True,
+    )
+
+    with caplog.at_level(logging.INFO):
+        send_worker._release_send_lock(
+            redis, lock_key, "SECRET_TOKEN_VALUE", tenant_id="tenant-1", phone="5516999999999", job_id="job-1"
+        )
+
+    assert "SECRET_TOKEN_VALUE" not in caplog.text
+    assert "5516999999999" not in caplog.text
+    assert "*********9999" in caplog.text
+    assert "tenant_id=tenant-1" in caplog.text
+    assert "job_id=job-1" in caplog.text
+    assert "released=True" in caplog.text
 
 
 def test_second_flow_job_waits_until_previous_lock_is_released(monkeypatch) -> None:

@@ -39,6 +39,12 @@ from app.services.whatsapp_credentials_service import WhatsAppCredentialsNotConf
 from app.integrations.meta.meta_cloud_client import MetaApiError
 from app.services.job_queue_service import unwrap_job_envelope
 from app.observability import TraceContext, TraceEventType, record_event
+from app.utils.log_sanitizer import (
+    mask_phone,
+    outbound_payload_context,
+    provider_response_context,
+    sanitize_lock_key,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -111,7 +117,7 @@ def _flow_media_local_path(media_url: str) -> Path | None:
 
 def _file_diagnostics(path: Path | None) -> dict[str, Any]:
     if path is None:
-        return {"path": None, "exists": None, "size": None}
+        return {"exists": None, "size": None}
     exists = os.path.exists(path)
     size = None
     if exists:
@@ -119,16 +125,14 @@ def _file_diagnostics(path: Path | None) -> dict[str, Any]:
             size = os.path.getsize(path)
         except OSError:
             size = None
-    return {"path": str(path), "exists": exists, "size": size}
+    return {"exists": exists, "size": size}
 
 
 def _response_diagnostics(response: requests.Response) -> dict[str, Any]:
     return {
         "status_code": response.status_code,
-        "url": response.url,
-        "headers": dict(response.headers),
+        "content_type": response.headers.get("content-type"),
         "content_length": len(response.content or b"") if response.content is not None else None,
-        "body_preview_hex": (response.content or b"")[:32].hex(),
     }
 
 
@@ -155,14 +159,14 @@ def _log_video_media_diagnostics(*, stage: str, job_id: str, flow_id: Any, snaps
         "flow_id": str(flow_id) if flow_id is not None else None,
         "snapshot_id": str(snapshot_id) if snapshot_id is not None else None,
         "node_id": str(node_id) if node_id is not None else None,
-        "media_url": media_url,
-        "filename": filename,
+        "has_media_url": bool(media_url),
+        "has_filename": bool(filename),
         "media_type": media_type,
         "local_file": _file_diagnostics(local_path),
         "public_url_probe": _media_url_probe(media_url) if media_url else {"head": None, "range_get": None},
-        "meta_payload": payload,
-        "meta_response": meta_response,
-        "meta_error": meta_error,
+        "payload_context": outbound_payload_context(payload or {}),
+        "provider_response": provider_response_context(meta_response),
+        "meta_error_type": type(meta_error).__name__ if meta_error is not None else None,
     }
     logger.info("[VIDEO MEDIA DIAGNOSTIC] %s", json.dumps(diagnostic, default=str, ensure_ascii=False, sort_keys=True))
 
@@ -307,9 +311,9 @@ def _lock_log_context(
     ttl: int | None,
 ) -> tuple[Any, ...]:
     return (
-        lock_key,
+        sanitize_lock_key(lock_key),
         tenant_id or "n/a",
-        phone or "n/a",
+        mask_phone(phone) or "n/a",
         conversation_id or "n/a",
         ttl if ttl is not None else "n/a",
         job_id or "n/a",
@@ -513,7 +517,7 @@ def _acquire_send_lock(
                     ttl=ttl_after,
                 ),
                 attempt,
-                holder,
+                bool(holder),
             )
             return False
 
@@ -533,7 +537,7 @@ def _acquire_send_lock(
                 ttl=ttl_after,
             ),
             attempt,
-            holder,
+            bool(holder),
         )
         time.sleep(max(0.05, retry_interval_seconds))
 
@@ -562,7 +566,7 @@ def _release_send_lock(
             released = True
         ttl_after = _remaining_lock_ttl(redis_client, lock_key)
         logger.info(
-            "[LOCK RELEASE] lock_key=%s tenant_id=%s phone=%s conversation_id=%s ttl_remaining=%s job_id=%s flow_id=%s flow_version_id=%s session_id=%s node_id=%s sequence_number=%s released=%s ttl_before=%s current_value=%s",
+            "[LOCK RELEASE] lock_key=%s tenant_id=%s phone=%s conversation_id=%s ttl_remaining=%s job_id=%s flow_id=%s flow_version_id=%s session_id=%s node_id=%s sequence_number=%s released=%s ttl_before=%s",
             *_lock_log_context(
                 lock_key=lock_key,
                 tenant_id=tenant_id,
@@ -578,10 +582,9 @@ def _release_send_lock(
             ),
             released,
             ttl_before if ttl_before is not None else "n/a",
-            current,
         )
     except Exception:
-        logger.warning("[LOCK RELEASE] lock_key=%s tenant_id=%s phone=%s conversation_id=%s job_id=%s release_error=true", lock_key, tenant_id, phone, conversation_id or "n/a", job_id, exc_info=True)
+        logger.warning("[LOCK RELEASE] lock_key=%s tenant_id=%s phone=%s conversation_id=%s job_id=%s release_error=true", sanitize_lock_key(lock_key), tenant_id, mask_phone(phone), conversation_id or "n/a", job_id, exc_info=True)
 
 
 def send_whatsapp_message(*, message_data: dict[str, Any]) -> None:
@@ -640,26 +643,26 @@ def send_whatsapp_message(*, message_data: dict[str, Any]) -> None:
     media_status_code, media_content_type, media_content_length = (0, "", 0)
     if is_media_message:
         logger.info(
-            "[MEDIA SEND START] job_id=%s media_type=%s media_url=%s caption=%s phone=%s tenant_id=%s",
+            "[MEDIA SEND START] job_id=%s media_type=%s has_media_url=%s caption_len=%s phone=%s tenant_id=%s",
             job_id,
             media_type,
-            media_url,
-            media_caption,
-            phone,
+            bool(media_url),
+            len(media_caption or ""),
+            mask_phone(phone),
             tenant_id,
         )
         media_status_code, media_content_type, media_content_length = _media_url_headers(media_url) if media_url else (0, "", 0)
         logger.info(
-            "[MEDIA SEND PREFLIGHT] tenant_id=%s provider_id=%s phone=%s job_id=%s flow_id=%s session_id=%s node_id=%s media_type=%s media_url=%s status_code=%s content_type=%s content_length=%s",
+            "[MEDIA SEND PREFLIGHT] tenant_id=%s provider_id=%s phone=%s job_id=%s flow_id=%s session_id=%s node_id=%s media_type=%s has_media_url=%s status_code=%s content_type=%s content_length=%s",
             tenant_id,
             payload_provider_id,
-            phone,
+            mask_phone(phone),
             job_id,
             flow_id,
             session_id,
             node_id,
             media_type,
-            media_url,
+            bool(media_url),
             media_status_code,
             media_content_type,
             media_content_length,
@@ -708,9 +711,9 @@ def send_whatsapp_message(*, message_data: dict[str, Any]) -> None:
         conversation_id,
         message_data.get("contact_id"),
         flow_id,
-        phone,
+        mask_phone(phone),
         sorted(message_data.get("metadata", {}).keys()) if isinstance(message_data.get("metadata"), dict) else [],
-        json.dumps(message_data, default=str, ensure_ascii=False, sort_keys=True),
+        json.dumps(outbound_payload_context(message_data), default=str, sort_keys=True),
     )
     log_message_origin_trace(
         executor=flow_executor or flow_send_source or "send_worker.send_whatsapp_message",
@@ -731,7 +734,7 @@ def send_whatsapp_message(*, message_data: dict[str, Any]) -> None:
         flow_send_source,
         message_type,
         len(options or buttons or []) if isinstance(options or buttons, list) else 0,
-        json.dumps(message_data, default=str, ensure_ascii=False, sort_keys=True),
+        json.dumps(outbound_payload_context(message_data), default=str, sort_keys=True),
     )
     if node_type == "choice":
         logger.info(
@@ -741,11 +744,10 @@ def send_whatsapp_message(*, message_data: dict[str, Any]) -> None:
                     "node_id": node_id,
                     "session_id": session_id,
                     "options_count": len(options or buttons or []) if isinstance(options or buttons, list) else 0,
-                    "options": options or buttons or [],
                     "provider_id": payload_provider_id,
                     "tenant_id": tenant_id,
                     "message_type": message_type,
-                    "payload": message_data,
+                    **outbound_payload_context(message_data),
                 },
                 default=str,
                 ensure_ascii=False,
@@ -761,13 +763,13 @@ def send_whatsapp_message(*, message_data: dict[str, Any]) -> None:
             interactive_type,
             job_id,
             len(options or []),
-            _payload_summary({"text": text, "sections": sections, "options": options}),
+            json.dumps(outbound_payload_context(message_data), sort_keys=True),
         )
 
     logger.info(
-        "[WORKER ENTRY] job_id=%s message=%s flow_id=%s sequence_number=%s",
+        "[WORKER ENTRY] job_id=%s message_len=%s flow_id=%s sequence_number=%s",
         job_id,
-        text,
+        len(text),
         flow_id,
         sequence_number_raw,
     )
@@ -1030,12 +1032,12 @@ def send_whatsapp_message(*, message_data: dict[str, Any]) -> None:
         try:
             if is_media_message:
                 logger.info(
-                    "[MEDIA SEND META CALL] job_id=%s media_type=%s media_url=%s caption=%s phone=%s tenant_id=%s",
+                    "[MEDIA SEND META CALL] job_id=%s media_type=%s has_media_url=%s caption_len=%s phone=%s tenant_id=%s",
                     job_id,
                     media_type,
-                    media_url,
-                    media_caption,
-                    phone,
+                    bool(media_url),
+                    len(media_caption or ""),
+                    mask_phone(phone),
                     tenant_id,
                 )
                 meta_response = send_media_message_via_meta(to=phone, media_type=media_type, media_url=media_url, caption=media_caption, filename=media_filename, token=resolved_token, phone_number_id=resolved_phone_number_id, context={**context, "message_type": "media", "media_type": media_type, "media_url": media_url, "media_content_type": media_content_type, "media_content_length": media_content_length, "media_status_code": media_status_code})
@@ -1071,7 +1073,7 @@ def send_whatsapp_message(*, message_data: dict[str, Any]) -> None:
                     "interactive",
                     "list",
                     len(options or []),
-                    json.dumps({"body_text": text, "sections": sections, "options": options, "interactive": {"type": "list"}}, default=str, ensure_ascii=False, sort_keys=True),
+                    json.dumps(outbound_payload_context(message_data), sort_keys=True),
                 )
                 meta_response = send_interactive_list_via_meta(
                     to=phone,
@@ -1082,14 +1084,14 @@ def send_whatsapp_message(*, message_data: dict[str, Any]) -> None:
                     context=context,
                 )
                 logger.info(
-                    "[CHOICE LIST SENT] session_id=%s node_id=%s flow_id=%s interactive_type=%s options_count=%s meta_response=%s payload_summary=%s",
+                    "[CHOICE LIST SENT] session_id=%s node_id=%s flow_id=%s interactive_type=%s options_count=%s status=%s success=%s",
                     session_id,
                     node_id,
                     flow_id,
                     interactive_type,
                     len(options or []),
-                    _payload_summary(meta_response),
-                    _payload_summary({"text": text, "sections": sections, "options": options}),
+                    provider_response_context(meta_response).get("status"),
+                    provider_response_context(meta_response).get("success"),
                 )
             elif buttons:
                 logger.info(
@@ -1105,7 +1107,7 @@ def send_whatsapp_message(*, message_data: dict[str, Any]) -> None:
                     node_type,
                     "interactive",
                     len(buttons or []) if isinstance(buttons, list) else 0,
-                    json.dumps({"body_text": text, "buttons": buttons, "interactive": {"type": "button"}}, default=str, ensure_ascii=False, sort_keys=True),
+                    json.dumps(outbound_payload_context(message_data), sort_keys=True),
                 )
                 meta_response = send_buttons_message_via_meta(
                     to=phone,
@@ -1124,24 +1126,26 @@ def send_whatsapp_message(*, message_data: dict[str, Any]) -> None:
                     context=context,
                 )
             logger.info(
-                "[WORKER AFTER META] provider_id=%s phone_number_id=%s meta_response=%s",
+                "[WORKER AFTER META] provider_id=%s phone_number_id=%s status=%s message_id_hash=%s success=%s",
                 provider_id,
                 resolved_phone_number_id,
-                meta_response,
+                provider_response_context(meta_response).get("status"),
+                provider_response_context(meta_response).get("message_id_hash"),
+                provider_response_context(meta_response).get("success"),
             )
             if is_media_message and isinstance(meta_response, dict) and str(meta_response.get("status") or "").lower() == "failed":
                 logger.error(
-                    "[MEDIA SEND META FAILED RESPONSE] tenant_id=%s provider_id=%s phone=%s job_id=%s flow_id=%s session_id=%s node_id=%s media_type=%s media_url=%s meta_response_json=%s",
+                    "[MEDIA SEND META FAILED RESPONSE] tenant_id=%s provider_id=%s phone=%s job_id=%s flow_id=%s session_id=%s node_id=%s media_type=%s status=%s success=%s",
                     tenant_id,
                     provider_id,
-                    phone,
+                    mask_phone(phone),
                     job_id,
                     flow_id,
                     session_id,
                     node_id,
                     media_type,
-                    media_url,
-                    json.dumps(meta_response, default=str, ensure_ascii=False, sort_keys=True),
+                    provider_response_context(meta_response).get("status"),
+                    provider_response_context(meta_response).get("success"),
                 )
                 raise RuntimeError("Meta returned failed status for media send")
         except MetaApiError as exc:
@@ -1160,32 +1164,30 @@ def send_whatsapp_message(*, message_data: dict[str, Any]) -> None:
                         meta_error={"status_code": exc.status_code, "payload": exc.payload, "message": str(exc)},
                     )
                 logger.error(
-                    "[MEDIA SEND META ERROR] tenant_id=%s provider_id=%s phone=%s job_id=%s flow_id=%s session_id=%s node_id=%s media_type=%s media_url=%s status_code=%s meta_payload=%s",
+                    "[MEDIA SEND META ERROR] tenant_id=%s provider_id=%s phone=%s job_id=%s flow_id=%s session_id=%s node_id=%s media_type=%s has_media_url=%s status_code=%s",
                     tenant_id,
                     provider_id,
-                    phone,
+                    mask_phone(phone),
                     job_id,
                     flow_id,
                     session_id,
                     node_id,
                     media_type,
-                    media_url,
+                    bool(media_url),
                     exc.status_code,
-                    json.dumps(exc.payload, default=str, ensure_ascii=False, sort_keys=True),
                 )
             if interactive_type == "list":
                 logger.error(
-                    "[CHOICE LIST SEND ERROR] session_id=%s node_id=%s flow_id=%s interactive_type=%s status_code=%s error=%s payload_summary=%s",
+                    "[CHOICE LIST SEND ERROR] session_id=%s node_id=%s flow_id=%s interactive_type=%s status_code=%s error_type=%s",
                     session_id,
                     node_id,
                     flow_id,
                     interactive_type,
                     exc.status_code,
-                    exc,
-                    _payload_summary({"text": text, "sections": sections, "options": options}),
+                    type(exc).__name__,
                 )
             if exc.status_code == 401 and provider_id:
-                logger.error("[WHATSAPP SEND AUTH ERROR] tenant_id=%s provider_id=%s phone=%s", tenant_id, provider_id, phone)
+                logger.error("[WHATSAPP SEND AUTH ERROR] tenant_id=%s provider_id=%s phone=%s", tenant_id, provider_id, mask_phone(phone))
                 with SessionLocal() as db:
                     mark_provider_auth_error(db, provider_id=provider_id, error_message=str(exc))
             logger.error("[WORKER EXIT FAILURE] job_id=%s reason=meta_api_error status_code=%s error=%s", job_id, exc.status_code, exc)
