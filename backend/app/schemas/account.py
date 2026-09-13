@@ -4,6 +4,7 @@ from datetime import datetime
 from uuid import UUID
 
 from pydantic import BaseModel, Field
+from app.security.rbac import WorkspaceRole
 
 
 class AccountProfileOut(BaseModel):
@@ -74,13 +75,13 @@ class WorkspaceUserOut(BaseModel):
 class WorkspaceUserInviteIn(BaseModel):
     name: str = Field(min_length=2, max_length=150)
     email: str = Field(min_length=5, max_length=255)
-    role: str = Field(default="member", max_length=32)
+    role: WorkspaceRole = WorkspaceRole.MEMBER
 
 
 class WorkspaceUserUpdateIn(BaseModel):
     name: str | None = Field(default=None, min_length=2, max_length=150)
-    role: str | None = Field(default=None, max_length=32)
-    status: str | None = Field(default=None, max_length=32)
+    role: WorkspaceRole | None = None
+    status: str | None = Field(default=None, pattern="^(active|inactive|invited)$")
 
 
 class AuditLogOut(BaseModel):
