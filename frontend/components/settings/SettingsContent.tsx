@@ -834,7 +834,6 @@ function UsersTab() {
           >
             <option value="member">Membro</option>
             <option value="admin">Admin</option>
-            <option value="analyst">Analista</option>
             <option value="viewer">Leitura</option>
           </select>
           <button className="inline-flex items-center justify-center gap-2 rounded-2xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white">
@@ -872,7 +871,6 @@ function UsersTab() {
                       <option value="owner">Administrador</option>
                       <option value="admin">Admin</option>
                       <option value="member">Membro</option>
-                      <option value="analyst">Analista</option>
                       <option value="viewer">Leitura</option>
                     </select>
                   </td>

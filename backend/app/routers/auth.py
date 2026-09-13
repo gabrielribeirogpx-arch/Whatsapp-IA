@@ -372,6 +372,10 @@ def login(payload: LoginRequest, request: Request, db: Session = Depends(get_db)
         write_audit_log(db, action="LOGIN_FAILED", tenant_id=user.tenant_id if user else None, user_id=user.id if user else None, entity_type="tenant_user", entity_id=user.id if user else None, metadata={"email_hint": email[:2] + "***"}, request=request, commit=True)
         raise HTTPException(status_code=401, detail="Credenciais inválidas")
 
+    if user.status != "active":
+        write_audit_log(db, action="LOGIN_FAILED", tenant_id=user.tenant_id, user_id=user.id, entity_type="tenant_user", entity_id=user.id, metadata={"reason": "inactive_account"}, request=request, commit=True)
+        raise HTTPException(status_code=401, detail="Credenciais inválidas")
+
     tenant = db.execute(select(Tenant).where(Tenant.id == user.tenant_id)).scalars().first()
     if not tenant:
         raise HTTPException(status_code=401, detail="Credenciais inválidas")
