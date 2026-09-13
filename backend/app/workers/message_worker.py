@@ -225,9 +225,10 @@ def _release_session_lock(redis_client: Any, lock_key: str, lock_token: str) -> 
         logger.warning("event=incoming_worker_lock_release_warning lock_key=%s", lock_key, exc_info=True)
 
 def _pick_message(payload: dict[str, Any]) -> dict[str, Any] | None:
-    logger.info("[META WORKER RAW PAYLOAD] payload=%s", _json_log_payload(payload))
+    from app.utils.log_sanitizer import webhook_log_context
+    logger.info("event=meta_worker_payload_received context=%s", webhook_log_context(payload))
     normalized = normalize_meta_message(payload)
-    logger.info("[NORMALIZE_META_MESSAGE OUTPUT] count=%s payload_shape=%s normalized=%s", len(normalized), _payload_shape(payload), _json_log_payload(normalized))
+    logger.info("event=meta_worker_payload_normalized count=%s payload_shape=%s", len(normalized), _payload_shape(payload))
     if normalized:
         return normalized[0]
 
@@ -310,7 +311,7 @@ def process_incoming_message(payload: dict[str, Any]) -> None:
     logger.info(
         "event=meta_webhook_interactive_pipeline stage=message_worker correlation_id=%s "
         "message.type=%s interactive.type=%s button_reply.id=%s interactive_reply_id=%s "
-        "selected_row_id=%s row_id=%s runtime_choice_key=%s message_text=%s current_node_id=%s next_node_id=%s",
+        "selected_row_id=%s row_id=%s runtime_choice_key=%s message_text_present=%s current_node_id=%s next_node_id=%s",
         correlation_id,
         parsed.get("type") or "n/a",
         parsed.get("interactive_type") or "n/a",
@@ -319,7 +320,7 @@ def process_incoming_message(payload: dict[str, Any]) -> None:
         parsed.get("selected_row_id") or "n/a",
         parsed.get("selected_row_id") or parsed.get("interactive_reply_id") or "n/a",
         parsed.get("selected_row_id") or parsed.get("interactive_reply_id") or "n/a",
-        parsed.get("text") or "n/a",
+        bool(parsed.get("text")),
         "n/a", "n/a",
     )
     runtime_trace(logger, "message_worker", metadata=parsed, correlation_id=correlation_id,

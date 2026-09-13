@@ -83,17 +83,12 @@ def test_send_template(template_id: str, payload: dict[str, Any], db: Session = 
         missing_text = " e ".join([f"{{{{{k}}}}}" for k in missing_placeholders])
         raise HTTPException(status_code=422, detail=f"Template exige variável {missing_text}, mas elas não foram preenchidas.")
 
-    print("[WHATSAPP TEMPLATE TEST SEND]", f"tenant_id={tenant.id}", f"provider_id={provider_id}", f"template_id={template_id}", f"to={to}")
-    print("[WHATSAPP TEMPLATE TEST PAYLOAD]", {"to": to, "type": "template", "template_id": template_id, "variables": ordered_variables})
+    print("[WHATSAPP TEMPLATE TEST SEND]", f"tenant_id={tenant.id}", f"provider_id={provider_id}", f"template_id={template_id}", f"variables_count={len(ordered_variables)}")
     components = [{
         "type": "body",
         "parameters": [{"type": "text", "text": ordered_variables[key]} for key in placeholders]
     }] if placeholders else []
-    print("[WHATSAPP TEMPLATE TEST PAYLOAD_FULL]", {
-        "template": {"name": template.name, "language": template.language or "pt_BR"},
-        "to": to,
-        "components": components,
-    })
+    print("[WHATSAPP TEMPLATE TEST PAYLOAD]", {"template_id": template_id, "language": template.language or "pt_BR", "components_count": len(components)})
 
     try:
         result = send_template_message(
@@ -104,7 +99,7 @@ def test_send_template(template_id: str, payload: dict[str, Any], db: Session = 
             to=to,
             variables=ordered_variables,
         )
-        print("[WHATSAPP TEMPLATE TEST RESPONSE]", {"provider_message_id": result.get("provider_message_id"), "raw": result.get("raw")})
+        print("[WHATSAPP TEMPLATE TEST RESPONSE]", {"provider_message_id": result.get("provider_message_id"), "status": "accepted"})
         return {"ok": True, **result}
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

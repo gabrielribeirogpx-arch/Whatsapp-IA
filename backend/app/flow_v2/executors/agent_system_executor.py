@@ -123,7 +123,7 @@ class AiSystemNodeExecutor(BaseNodeExecutor):
             actions.extend(result.actions)
             for action in result.actions:
                 if isinstance(action, SendMessageAction):
-                    logger.info("event=AI_SYSTEM_INTERNAL_RESPONSE system_node_id=%s node_id=%s text=%s", system_node_id, node_id, action.text[:500])
+                    logger.info("event=AI_SYSTEM_INTERNAL_RESPONSE system_node_id=%s node_id=%s content_length=%s", system_node_id, node_id, len(action.text or ""))
                     self.event_store.append(db, session=session, event_type=FlowV2EventType.OUTPUT_EMITTED, node_id=node_id, payload={"analytics_event": "AI_SYSTEM_INTERNAL_RESPONSE", "ai_system_node_id": system_node_id, "text": action.text})
             if self._looks_like_tool_node(node_type, node, result):
                 logger.info("event=AI_SYSTEM_INTERNAL_TOOL_CALLED system_node_id=%s node_id=%s node_type=%s tenant_id=%s", system_node_id, node_id, node_type, getattr(session, "tenant_id", None))
@@ -216,7 +216,7 @@ class AiSystemNodeExecutor(BaseNodeExecutor):
 
     def _fallback(self, db, *, session: Any, node_id: str, runtime_input, reason: str, message: str | None = None) -> NodeExecutionResult:
         text = message or self.FALLBACK_MESSAGE
-        logger.info("event=AI_SYSTEM_INTERNAL_RESPONSE node_id=%s fallback=true reason=%s text=%s", node_id, reason, text)
+        logger.info("event=AI_SYSTEM_INTERNAL_RESPONSE node_id=%s fallback=true reason=%s content_length=%s", node_id, reason, len(text or ""))
         action = SendMessageAction(tenant_id=session.tenant_id, session_id=session.id, external_user_id=runtime_input.external_user_id, conversation_id=runtime_input.conversation_id, contact_id=runtime_input.contact_id, text=text, metadata={**runtime_input.metadata, "node_id": node_id, "intent": "ai_system_fallback", "fallback_reason": reason})
         self.event_store.append(db, session=session, event_type=FlowV2EventType.OUTPUT_EMITTED, node_id=node_id, payload={"analytics_event": "AI_SYSTEM_INTERNAL_RESPONSE", "fallback": True, "reason": reason, "text": text})
         return NodeExecutionResult(actions=(action,), next_node_id=node_id, status="wait")

@@ -453,7 +453,7 @@ def list_providers(db: Session, tenant_id: UUID):
     return providers
 
 
-def create_provider(db: Session, tenant_id: UUID, payload):
+def create_provider(db: Session, tenant_id: UUID, payload, *, commit: bool = True):
     try:
         data = payload.model_dump(exclude_unset=True)
         _log_provider_create_conflict_check(db, tenant_id=tenant_id, data=data)
@@ -467,8 +467,11 @@ def create_provider(db: Session, tenant_id: UUID, payload):
             tenant_id=tenant_id, **_normalize_secret_fields(data)
         )
         db.add(provider)
-        db.commit()
-        db.refresh(provider)
+        if commit:
+            db.commit()
+            db.refresh(provider)
+        else:
+            db.flush()
         _log_provider_save(provider=provider, action="create")
         return provider
     except Exception:
@@ -476,7 +479,7 @@ def create_provider(db: Session, tenant_id: UUID, payload):
         raise
 
 
-def update_provider(db: Session, tenant_id: UUID, provider_id: UUID, payload):
+def update_provider(db: Session, tenant_id: UUID, provider_id: UUID, payload, *, commit: bool = True):
     provider = _get_provider(db, tenant_id, provider_id)
     incoming = payload.model_dump(exclude_unset=True)
     if "phone_number_id" in incoming:
@@ -506,8 +509,11 @@ def update_provider(db: Session, tenant_id: UUID, provider_id: UUID, payload):
     ):
         _set_provider_connection_status(provider, "disconnected", error_message=None)
     provider.updated_at = datetime.utcnow()
-    db.commit()
-    db.refresh(provider)
+    if commit:
+        db.commit()
+        db.refresh(provider)
+    else:
+        db.flush()
     logger.info(
         "[META TOKEN SOURCE] provider_id=%s is_active=%s updated_at=%s token_updated=%s",
         provider.id,
@@ -519,7 +525,7 @@ def update_provider(db: Session, tenant_id: UUID, provider_id: UUID, payload):
     return provider
 
 
-def set_active_provider(db: Session, tenant_id: UUID, provider_id: UUID):
+def set_active_provider(db: Session, tenant_id: UUID, provider_id: UUID, *, commit: bool = True):
     provider = _get_provider(db, tenant_id, provider_id)
     _assert_phone_number_id_available(
         db,
@@ -535,8 +541,11 @@ def set_active_provider(db: Session, tenant_id: UUID, provider_id: UUID):
     provider.is_active = True
     _set_provider_connection_status(provider, "connected", error_message=None)
     provider.updated_at = datetime.utcnow()
-    db.commit()
-    db.refresh(provider)
+    if commit:
+        db.commit()
+        db.refresh(provider)
+    else:
+        db.flush()
     logger.info(
         "[PROVIDER RESOLUTION] tenant_id=%s conversation_id=%s provider_id=%s phone_number_id=%s action=activate",
         tenant_id,
@@ -735,10 +744,13 @@ def runtime_send_diagnostics(db: Session, tenant_id: UUID) -> dict:
     }
 
 
-def delete_provider(db: Session, tenant_id: UUID, provider_id: UUID):
+def delete_provider(db: Session, tenant_id: UUID, provider_id: UUID, *, commit: bool = True):
     provider = _get_provider(db, tenant_id, provider_id)
     db.delete(provider)
-    db.commit()
+    if commit:
+        db.commit()
+    else:
+        db.flush()
 
 
 def test_provider_connection(db: Session, tenant_id: UUID, provider_id: UUID):

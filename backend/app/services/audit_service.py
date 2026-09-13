@@ -4,6 +4,7 @@ from dataclasses import asdict, is_dataclass
 from datetime import date, datetime
 from decimal import Decimal
 from enum import Enum
+import re
 from typing import Any
 from uuid import UUID
 
@@ -13,6 +14,12 @@ from sqlalchemy.orm import Session
 from app.models.audit_log import AuditLog
 from app.models.user import TenantUser
 from app.security.turnstile import get_client_ip
+
+
+_AUDIT_SECRET_KEY = re.compile(
+    r"(^|_)(password|access_token|refresh_token|api_key|client_secret|authorization|cookie|session_token|jwt|credentials?|secret|app_secret)($|_)",
+    re.IGNORECASE,
+)
 
 
 def to_json_safe(value: Any) -> Any:
@@ -36,7 +43,10 @@ def to_json_safe(value: Any) -> Any:
     if is_dataclass(value) and not isinstance(value, type):
         return to_json_safe(asdict(value))
     if isinstance(value, dict):
-        return {str(key): to_json_safe(item) for key, item in value.items()}
+        return {
+            str(key): "[REDACTED]" if _AUDIT_SECRET_KEY.search(str(key).replace("-", "_")) else to_json_safe(item)
+            for key, item in value.items()
+        }
     if isinstance(value, (list, tuple)):
         return [to_json_safe(item) for item in value]
     raise TypeError(f"Unsupported audit metadata type: {type(value).__name__}")

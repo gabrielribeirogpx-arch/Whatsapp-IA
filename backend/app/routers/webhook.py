@@ -329,7 +329,8 @@ async def _process_meta_webhook(request: Request, db: Session) -> dict[str, str]
         return {"status": "ignored"}
 
     logger.info("event=meta_webhook_received keys=%s", list(payload.keys()))
-    logger.info("[WEBHOOK RAW] payload=%s", str(payload)[:800])
+    from app.utils.log_sanitizer import webhook_log_context
+    logger.info("event=meta_webhook_received context=%s", webhook_log_context(payload))
     messages_data = normalize_meta_message(payload)
 
     if not messages_data:
