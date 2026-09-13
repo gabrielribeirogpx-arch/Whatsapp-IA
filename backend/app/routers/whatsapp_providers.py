@@ -39,7 +39,7 @@ def create_provider(
 ):
     print("[WHATSAPP PROVIDER CREATE]", f"tenant_id={tenant.id}")
     try:
-        provider = whatsapp_provider_service.create_provider(db, tenant.id, payload)
+        provider = whatsapp_provider_service.create_provider(db, tenant.id, payload, commit=False)
         write_audit_log(
             db,
             action="WHATSAPP_PROVIDER_UPDATED",
@@ -51,6 +51,7 @@ def create_provider(
             request=request,
             commit=True,
         )
+        db.refresh(provider)
         return provider
     except DuplicatePhoneNumberProviderError as exc:
         return JSONResponse(status_code=409, content=exc.to_dict())
@@ -79,8 +80,9 @@ def patch_provider(
 ):
     try:
         provider = whatsapp_provider_service.update_provider(
-            db, tenant.id, provider_id, payload
+            db, tenant.id, provider_id, payload, commit=False
         )
+        db.refresh(provider)
         fields = payload.model_dump(exclude_unset=True).keys()
         action = (
             "API_KEY_UPDATED"
@@ -120,8 +122,9 @@ def activate_provider(
     )
     try:
         provider = whatsapp_provider_service.set_active_provider(
-            db, tenant.id, provider_id
+            db, tenant.id, provider_id, commit=False
         )
+        db.refresh(provider)
         write_audit_log(
             db,
             action="WHATSAPP_PROVIDER_UPDATED",
@@ -186,7 +189,7 @@ def remove_provider(
     user: TenantUser = Depends(get_current_user),
 ):
     try:
-        whatsapp_provider_service.delete_provider(db, tenant.id, provider_id)
+        whatsapp_provider_service.delete_provider(db, tenant.id, provider_id, commit=False)
         write_audit_log(
             db,
             action="WHATSAPP_PROVIDER_UPDATED",

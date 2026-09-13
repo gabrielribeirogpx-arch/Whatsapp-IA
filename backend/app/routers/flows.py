@@ -211,7 +211,7 @@ def _graph_edge_pairs(edges: list[dict[str, Any]] | None) -> list[dict[str, str 
 
 def _log_publish_graph_snapshot(*, label: str, flow: Flow, nodes: list[dict[str, Any]], edges: list[dict[str, Any]], version: FlowVersion | None = None) -> None:
     logger.info(
-        "[%s] flow_id=%s tenant_id=%s version_id=%s version=%s nodes_count=%s edges_count=%s checksum=%s start_text_preview=%s",
+        "[%s] flow_id=%s tenant_id=%s version_id=%s version=%s nodes_count=%s edges_count=%s checksum=%s",
         label,
         flow.id,
         getattr(flow, "tenant_id", None),
@@ -220,10 +220,8 @@ def _log_publish_graph_snapshot(*, label: str, flow: Flow, nodes: list[dict[str,
         len(nodes),
         len(edges),
         _graph_checksum(nodes, edges) if nodes or edges else None,
-        _extract_start_preview(nodes),
     )
-    logger.info("[PUBLISHED NODES] flow_id=%s node_ids=%s nodes=%s", flow.id, _graph_node_ids(nodes), nodes)
-    logger.info("[PUBLISHED EDGES] flow_id=%s edge_pairs=%s edges=%s", flow.id, _graph_edge_pairs(edges), edges)
+    logger.info("[PUBLISHED GRAPH IDS] flow_id=%s node_ids=%s edge_pairs=%s", flow.id, _graph_node_ids(nodes), _graph_edge_pairs(edges))
 
 
 def _log_publish_source_divergence(*, flow: Flow, published_version: FlowVersion | None, candidate_nodes: list[dict[str, Any]], candidate_edges: list[dict[str, Any]]) -> None:
@@ -2017,8 +2015,7 @@ async def update_flow_route(
             metadata={"graph_updated": should_update_graph},
         )
         db.commit()
-        logger.info("[FLOW STORED GRAPH] flow_id=%s flow.nodes=%s flow.edges=%s", str(flow.id), getattr(flow, "nodes", None), getattr(flow, "edges", None))
-        logger.info("[FLOW STORED GRAPH JSON] flow_id=%s flow.nodes_json=%s flow.edges_json=%s", str(flow.id), getattr(flow, "nodes_json", None), getattr(flow, "edges_json", None))
+        logger.info("[FLOW STORED GRAPH] flow_id=%s nodes_count=%s edges_count=%s", str(flow.id), len(getattr(flow, "nodes", None) or []), len(getattr(flow, "edges", None) or []))
         db.refresh(flow)
         logger.info("[FLOW UPDATE SAVED] flow_id=%s trigger_type=%s trigger_value=%s", str(flow.id), flow.trigger_type, flow.trigger_value)
         if flow.is_active:
@@ -2354,9 +2351,7 @@ def create_tenant_flow(
             getattr(current_user, "id", None),
         )
         payload_data = payload.model_dump()
-        logger.info("[FLOW CREATE PAYLOAD] %s", payload_data)
-        logger.info("[FLOW CREATE NODES] %s", payload_data.get("nodes"))
-        logger.info("[FLOW CREATE EDGES] %s", payload_data.get("edges"))
+        logger.info("[FLOW CREATE PAYLOAD] name_present=%s nodes_count=%s edges_count=%s", bool(payload_data.get("name")), len(payload_data.get("nodes") or []), len(payload_data.get("edges") or []))
         if not isinstance(payload_data.get("nodes"), list) or not isinstance(payload_data.get("edges"), list):
             raise HTTPException(status_code=400, detail="Payload inválido")
 
@@ -2550,7 +2545,7 @@ async def update_tenant_flow(
         _log_flow_save_request(flow_id=flow_id, tenant_id=tenant_uuid, nodes=payload_data.get("nodes") or [], edges=payload_data.get("edges") or [])
         logger.info("[FLOW SAVE] tenant_id=%s nodes_count=%s edges_count=%s", str(tenant_uuid), len(payload_data.get("nodes") or []), len(payload_data.get("edges") or []))
         payload_model = FlowUpdate(**payload_data)
-        logger.info("FLOW RECEBIDO: %s", payload_model.model_dump())
+        logger.info("[FLOW RECEIVED] flow_id=%s nodes_count=%s edges_count=%s", flow_id, len(payload_model.nodes or []), len(payload_model.edges or []))
         flow_update_fields = {
             "name",
             "description",
@@ -2591,7 +2586,7 @@ async def update_tenant_flow(
         edges_json = _normalize_flow_edges(edges)
         nodes_json = nodes
         logger.info("[FLOW SAVE OK] nodes=%s edges=%s", len(nodes_json), len(edges_json))
-        logger.info("VALIDANDO FLOW: nodes=%s", nodes)
+        logger.info("[FLOW VALIDATING] flow_id=%s nodes_count=%s edges_count=%s", flow_id, len(nodes), len(edges_json))
         
         persisted_nodes = flow.current_version.nodes if flow.current_version and isinstance(flow.current_version.nodes, list) else []
         if len(persisted_nodes) > 2 and len(nodes) <= 1:
@@ -2635,8 +2630,7 @@ async def update_tenant_flow(
         if flow.is_active:
             logger.info("[FLOW ACTIVE]: %s", flow.id)
         db.commit()
-        logger.info("[FLOW STORED GRAPH] flow_id=%s flow.nodes=%s flow.edges=%s", str(flow.id), getattr(flow, "nodes", None), getattr(flow, "edges", None))
-        logger.info("[FLOW STORED GRAPH JSON] flow_id=%s flow.nodes_json=%s flow.edges_json=%s", str(flow.id), getattr(flow, "nodes_json", None), getattr(flow, "edges_json", None))
+        logger.info("[FLOW STORED GRAPH] flow_id=%s nodes_count=%s edges_count=%s", str(flow.id), len(getattr(flow, "nodes", None) or []), len(getattr(flow, "edges", None) or []))
 
         logger.info("[FLOW SAVE] tenant_id=%s flow_id=%s version_id=%s request_id=%s nodes_count=%s edges_count=%s", str(tenant_uuid), str(flow.id), str(nova.id), None, len(nodes_json), len(edges_json))
         db.refresh(flow)
