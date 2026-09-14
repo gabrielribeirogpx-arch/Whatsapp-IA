@@ -21,7 +21,12 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models.tenant import Tenant
+from app.models.user import TenantUser
 from app.models.tenant_whatsapp_provider import TenantWhatsAppProvider
+from app.routers.account import get_current_user
+from app.security.workspace_rbac import WorkspacePermission
+from app.services.administrative_audit import require_administrative_permission
+from app.services.audit_service import write_audit_log
 from app.services.tenant_service import get_current_tenant
 from app.utils.encryption import encrypt_secret
 
@@ -77,6 +82,7 @@ def _persist_nonce(nonce: str, issued_at: int) -> None:
 def create_meta_oauth_state(
     tenant_id: object,
     *,
+    user_id: object | None = None,
     connection_type: ConnectionType = "cloud_api",
     nonce: str | None = None,
     issued_at: int | None = None,
@@ -87,6 +93,7 @@ def create_meta_oauth_state(
     payload = {
         "tenant_id": str(tenant_id),
         "provider": "meta",
+        "user_id": str(user_id) if user_id else None,
         "connection_type": connection_type,
         "nonce": state_nonce,
         "iat": issued,
@@ -289,8 +296,10 @@ async def get_meta_connect_url(
     request: Request,
     db: Session = Depends(get_db),
     tenant: Tenant = Depends(get_current_tenant),
+    user: TenantUser = Depends(get_current_user),
     connection_type: str | None = Query(default=None),
 ):
+    require_administrative_permission(db, user, WorkspacePermission.MANAGE_INTEGRATIONS, request=request, action="integration_oauth_started", resource_type="integration", resource_id="meta")
     body: dict[str, Any] = {}
     if request.method == "POST":
         try:
@@ -305,7 +314,8 @@ async def get_meta_connect_url(
         tenant.id,
         normalized,
     )
-    state = create_meta_oauth_state(tenant.id, connection_type=normalized)
+    state = create_meta_oauth_state(tenant.id, user_id=user.id, connection_type=normalized)
+    write_audit_log(db, action="integration_oauth_started", tenant_id=tenant.id, user_id=user.id, entity_type="integration", entity_id="meta", metadata={"provider": "meta", "connection_type": normalized}, request=request, commit=True)
     url = _connect_url(state)
     logger.info(
         "META_COEX_CONNECT_URL_CREATED tenant_id=%s connection_type=%s state_present=%s",
@@ -496,6 +506,9 @@ def meta_callback(
     # completed.  Users can explicitly choose the active connection later.
     if not existing:
         db.add(provider)
+    db.flush()
+    actor_id = uuid.UUID(str(payload["user_id"])) if payload.get("user_id") else None
+    write_audit_log(db, action="integration_connected", tenant_id=tenant_id, user_id=actor_id, entity_type="integration", entity_id=provider.id, metadata={"provider": "meta", "connection_type": provider.connection_type, "actor_type": "human" if actor_id else "system"})
     db.commit()
     (
         logger.info(
@@ -525,8 +538,9 @@ def meta_callback(
 
 @router.post("/disconnect")
 def disconnect_meta(
-    db: Session = Depends(get_db), tenant: Tenant = Depends(get_current_tenant)
+    request: Request, db: Session = Depends(get_db), tenant: Tenant = Depends(get_current_tenant), user: TenantUser = Depends(get_current_user)
 ):
+    require_administrative_permission(db, user, WorkspacePermission.MANAGE_INTEGRATIONS, request=request, action="integration_disconnected", resource_type="integration", resource_id="meta")
     provider = (
         db.execute(
             select(TenantWhatsAppProvider)
@@ -547,5 +561,7 @@ def disconnect_meta(
         provider.is_active = False
         provider.connection_status = "disconnected"
         provider.status = "disconnected"
-        db.commit()
+    db.flush()
+    write_audit_log(db, action="integration_disconnected", tenant_id=tenant.id, user_id=user.id, entity_type="integration", entity_id=getattr(provider, "id", "meta"), metadata={"provider": "meta", "new_status": "disconnected"}, request=request)
+    db.commit()
     return {"ok": True}

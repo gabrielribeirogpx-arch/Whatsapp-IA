@@ -20,8 +20,13 @@ from sqlalchemy.orm import Session
 from app.core.public_urls import frontend_url, oauth_callback_url, public_api_base_url
 from app.database import get_db
 from app.models.tenant import Tenant
+from app.models.user import TenantUser
+from app.routers.account import get_current_user
 from app.schemas.integration_connection import IntegrationConnectionStatusOut
 from app.services.integration_connection_service import IntegrationConnectionService
+from app.security.workspace_rbac import WorkspacePermission
+from app.services.administrative_audit import require_administrative_permission
+from app.services.audit_service import write_audit_log
 from app.routers.integration_connections import validate_google_connection_status
 from app.services.tenant_service import TenantResolution, get_current_tenant, get_current_tenant_resolution, resolve_current_tenant
 
@@ -122,10 +127,11 @@ def _validate_gmail_connect_config(request: Request) -> None:
     _redirect_uri(request)
 
 
-def create_oauth_state(tenant_id: uuid.UUID, *, nonce: str | None = None, issued_at: int | None = None) -> str:
+def create_oauth_state(tenant_id: uuid.UUID, *, user_id: uuid.UUID | None = None, nonce: str | None = None, issued_at: int | None = None) -> str:
     payload = {
         "tenant_id": str(tenant_id),
         "provider": PROVIDER,
+        "user_id": str(user_id) if user_id else None,
         "nonce": nonce or secrets.token_urlsafe(24),
         "iat": issued_at or int(datetime.utcnow().timestamp()),
     }
@@ -192,7 +198,9 @@ def connect_gmail(
     x_tenant_id: str | None = Header(None, alias="X-Tenant-Id"),
     x_tenant_id_upper: str | None = Header(None, alias="X-Tenant-ID"),
     db: Session = Depends(get_db),
+    user: TenantUser = Depends(get_current_user),
 ):
+    require_administrative_permission(db, user, WorkspacePermission.MANAGE_INTEGRATIONS, request=request, action="integration_oauth_started", resource_type="integration", resource_id=PROVIDER)
     try:
         logger.warning("ENTERED GMAIL CONNECT ENDPOINT")
         redirect_uri = _redirect_uri(request)
@@ -233,7 +241,10 @@ def connect_gmail(
         tenant = resolution.tenant
         if not getattr(tenant, "id", None):
             raise HTTPException(status_code=500, detail="Tenant sem ID")
-        state = create_oauth_state(tenant.id)
+        if str(user.tenant_id) != str(tenant.id):
+            raise HTTPException(status_code=404, detail="Integração não encontrada")
+        state = create_oauth_state(tenant.id, user_id=user.id)
+        write_audit_log(db, action="integration_oauth_started", tenant_id=tenant.id, user_id=user.id, entity_type="integration", entity_id=PROVIDER, metadata={"provider": PROVIDER}, request=request, commit=True)
         params = {
             "client_id": _client_id(),
             "redirect_uri": redirect_uri,
@@ -307,7 +318,7 @@ def gmail_callback(request: Request, code: str | None = None, state: str | None 
         if token_payload.get("expires_in"):
             expires_at = datetime.utcnow() + timedelta(seconds=int(token_payload["expires_in"]))
         scopes = token_payload.get("scope", " ".join(SCOPES)).split()
-        IntegrationConnectionService(db).upsert_connection(
+        connection = IntegrationConnectionService(db).upsert_connection(
             tenant_id=tenant_id,
             provider=PROVIDER,
             auth_type=AUTH_TYPE,
@@ -316,9 +327,15 @@ def gmail_callback(request: Request, code: str | None = None, state: str | None 
             expires_at=expires_at,
             scopes=scopes,
             metadata={"account_email": account_email} if account_email else {},
+            commit=False,
         )
+        db.flush()
+        actor_id = uuid.UUID(str(payload["user_id"])) if payload.get("user_id") else None
+        write_audit_log(db, action="integration_connected", tenant_id=tenant_id, user_id=actor_id, entity_type="integration", entity_id=getattr(connection, "id", PROVIDER), metadata={"provider": PROVIDER, "auth_type": AUTH_TYPE, "actor_type": "human" if actor_id else "system"}, request=request)
+        db.commit()
         return RedirectResponse(_frontend_oauth_result_url("connected"), status_code=302)
     except Exception as exc:
+        db.rollback()
         logger.exception(
             "GMAIL_CALLBACK_EXCEPTION exception_type=%s exception_message=%s",
             type(exc).__name__,
@@ -334,6 +351,11 @@ def gmail_status(tenant: Tenant = Depends(get_current_tenant), db: Session = Dep
 
 
 @router.delete("/disconnect", response_model=IntegrationConnectionStatusOut)
-def gmail_disconnect(tenant: Tenant = Depends(get_current_tenant), db: Session = Depends(get_db)):
+def gmail_disconnect(request: Request, tenant: Tenant = Depends(get_current_tenant), db: Session = Depends(get_db), user: TenantUser = Depends(get_current_user)):
+    require_administrative_permission(db, user, WorkspacePermission.MANAGE_INTEGRATIONS, request=request, action="integration_disconnected", resource_type="integration", resource_id=PROVIDER)
     service = IntegrationConnectionService(db)
-    return service.to_public_status(service.disconnect_connection(tenant.id, PROVIDER), provider=PROVIDER)
+    connection = service.disconnect_connection(tenant.id, PROVIDER, commit=False)
+    db.flush()
+    write_audit_log(db, action="integration_disconnected", tenant_id=tenant.id, user_id=user.id, entity_type="integration", entity_id=getattr(connection, "id", PROVIDER), metadata={"provider": PROVIDER, "new_status": "disconnected"}, request=request)
+    db.commit()
+    return service.to_public_status(connection, provider=PROVIDER)

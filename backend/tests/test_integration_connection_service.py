@@ -9,6 +9,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.models.integration_connection import IntegrationConnection
+from app.models.audit_log import AuditLog
 from app.routers.integration_connections import router
 from app.services.integration_connection_service import IntegrationConnectionService
 from app.services.tenant_service import get_current_tenant
@@ -37,9 +38,15 @@ class _ExecuteResult:
 class FakeDb:
     def __init__(self):
         self.connections: list[IntegrationConnection] = []
+        self.audit_logs: list[AuditLog] = []
         self.commits = 0
 
     def add(self, connection):
+        if isinstance(connection, AuditLog):
+            if connection.id is None:
+                connection.id = uuid.uuid4()
+            self.audit_logs.append(connection)
+            return
         if connection not in self.connections:
             self.connections.append(connection)
 
@@ -49,6 +56,14 @@ class FakeDb:
     def refresh(self, connection):
         if connection.id is None:
             connection.id = uuid.uuid4()
+
+    def flush(self):
+        for connection in self.connections:
+            if connection.id is None:
+                connection.id = uuid.uuid4()
+
+    def rollback(self):
+        pass
 
     def execute(self, statement):
         compiled = statement.compile()
@@ -116,6 +131,25 @@ def test_upsert_creates_and_updates_existing_connection():
     assert IntegrationConnectionService.decrypt_credential(second.access_token_encrypted) == "access-2"
     assert IntegrationConnectionService.decrypt_credential(second.refresh_token_encrypted) == "refresh-1"
     assert db.commits == 2
+
+
+def test_integration_metadata_drops_secret_fields_before_persistence():
+    tenant_id = uuid.uuid4()
+    db = FakeDb()
+    connection = IntegrationConnectionService(db).upsert_connection(
+        tenant_id=tenant_id,
+        provider="suitable",
+        auth_type="api_key",
+        api_key="real-secret",
+        metadata={
+            "workspace": "Wazza",
+            "authorization": "Bearer leaked",
+            "nested": {"client_secret": "leaked", "region": "br"},
+        },
+    )
+
+    assert connection.metadata_json == {"workspace": "Wazza", "nested": {"region": "br"}}
+    assert "leaked" not in str(connection.metadata_json)
 
 
 def test_public_status_does_not_include_decrypted_or_encrypted_tokens():
@@ -202,4 +236,7 @@ def test_status_endpoint_returns_public_payload_without_tokens():
         "expires_at": None,
     }
     assert "secret-api-key" not in response.text
-    assert "api_key" not in response.text
+    # ``api_key`` is the documented auth_type discriminator.  Credential
+    # material is excluded by checking the response keys and the actual secret.
+    assert "api_key_encrypted" not in response.json()
+    assert not ({"access_token", "refresh_token", "authorization", "client_secret"} & response.json().keys())
