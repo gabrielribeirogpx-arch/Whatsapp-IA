@@ -4,6 +4,7 @@ import pytest
 from fastapi import HTTPException
 
 from app.models.tenant_whatsapp_provider import TenantWhatsAppProvider
+from app.models.audit_log import AuditLog
 from app.routers import meta_integration as meta
 
 
@@ -38,13 +39,22 @@ class _Db:
         self.added = None
         self.committed = False
         self.executed = []
+        self.audit_logs = []
 
     def execute(self, query):
         self.executed.append(query)
         return _Result(self.existing)
 
     def add(self, provider):
+        if isinstance(provider, AuditLog):
+            self.audit_logs.append(provider)
+            return
         self.added = provider
+
+    def flush(self):
+        provider = self.existing or self.added
+        if provider is not None and provider.id is None:
+            provider.id = uuid.uuid4()
 
     def commit(self):
         self.committed = True
@@ -217,7 +227,7 @@ def test_callback_updates_existing_provider(monkeypatch):
     monkeypatch.setattr(meta, "encrypt_secret", lambda value: f"encrypted:{value}")
     db = _Db(existing=existing)
     request = type(
-        "Request", (), {"url": "https://api.example.com/api/integrations/meta/callback"}
+        "Request", (), {"url": "https://api.example.com/api/integrations/meta/callback", "headers": {}}
     )()
     meta.meta_callback(request, code="code", state=state, db=db)
     assert db.added is None
@@ -242,7 +252,7 @@ def test_callback_does_not_replace_manual_provider(monkeypatch):
     })
     monkeypatch.setattr(meta, "encrypt_secret", lambda value: f"encrypted:{value}")
     db = _Db(existing=manual)
-    meta.meta_callback(type("Request", (), {"url": "https://api.example.com"})(), code="code", state=state, db=db)
+    meta.meta_callback(type("Request", (), {"url": "https://api.example.com", "headers": {}})(), code="code", state=state, db=db)
     assert manual.phone_number_id == "manual-phone"
     assert manual.auth_type == "manual"
     assert db.added is not None
@@ -291,7 +301,7 @@ def test_connect_url_uses_only_whatsapp_embedded_signup_scopes(monkeypatch):
     assert params["scope"] == [
         "whatsapp_business_management,whatsapp_business_messaging"
     ]
-    assert "business_management" not in params["scope"][0]
+    assert "business_management" not in params["scope"][0].split(",")
     assert params["config_id"] == ["config-123"]
     assert params["response_type"] == ["code"]
     assert '"feature": "whatsapp_embedded_signup"' in params["extras"][0]

@@ -16,6 +16,7 @@ from fastapi.testclient import TestClient
 from app.database import get_db
 from app.models.tenant import Tenant
 from app.routers import google_calendar_integration as router_module
+from app.routers.account import get_current_user
 from app.routers.google_calendar_integration import (
     PROVIDER,
     create_oauth_state,
@@ -44,6 +45,7 @@ def _client(tenant_id: uuid.UUID, db: FakeDb) -> TestClient:
     app.dependency_overrides[get_current_tenant] = lambda: SimpleNamespace(id=tenant_id)
     app.dependency_overrides[get_google_calendar_connect_tenant] = lambda: SimpleNamespace(id=tenant_id)
     app.dependency_overrides[get_db] = lambda: db
+    app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(id=uuid.uuid4(), tenant_id=tenant_id, role="owner")
     return TestClient(app)
 
 
@@ -65,6 +67,8 @@ def _tenant_client(db) -> TestClient:
     app = FastAPI()
     app.include_router(router, prefix="/api")
     app.dependency_overrides[get_db] = lambda: db
+    tenant_id = db.tenants[0].id if db.tenants else uuid.uuid4()
+    app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(id=uuid.uuid4(), tenant_id=tenant_id, role="owner")
     return TestClient(app)
 
 

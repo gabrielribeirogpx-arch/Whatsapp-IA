@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import os
+import re
 import uuid
 from datetime import datetime
 from typing import Any, Literal
@@ -19,6 +20,23 @@ _PREFIX = "oauth:v1:"
 GOOGLE_CONNECTION_PROVIDERS = {"google", "google_calendar", "google_drive", "google_sheets", "gmail"}
 GOOGLE_RECONNECT_MESSAGE = "Conecte sua conta Google novamente para usar esta ferramenta."
 GOOGLE_AUTH_ERROR_TOKENS = {"invalid_grant", "token_revoked", "unauthorized", "invalid_token"}
+_SECRET_METADATA_KEY = re.compile(
+    r"(^|_)(access_token|refresh_token|authorization|client_secret|api_key|oauth_code|code|secret|credentials?)($|_)",
+    re.IGNORECASE,
+)
+
+
+def credential_free_metadata(value: Any) -> Any:
+    """Drop secret-bearing fields before integration metadata reaches storage."""
+    if isinstance(value, dict):
+        return {
+            str(key): credential_free_metadata(item)
+            for key, item in value.items()
+            if not _SECRET_METADATA_KEY.search(str(key).replace("-", "_"))
+        }
+    if isinstance(value, list):
+        return [credential_free_metadata(item) for item in value]
+    return value
 
 
 def is_google_provider(provider: str) -> bool:
@@ -169,7 +187,7 @@ class IntegrationConnectionService:
         connection.status = status
         connection.expires_at = expires_at
         connection.scopes = scopes or []
-        connection.metadata_json = metadata or {}
+        connection.metadata_json = credential_free_metadata(metadata or {})
         connection.updated_at = datetime.utcnow()
         if access_token is not None:
             connection.access_token_encrypted = self.encrypt_credential(access_token)
@@ -208,7 +226,7 @@ class IntegrationConnectionService:
         if scopes is not None:
             connection.scopes = scopes
         if metadata is not None:
-            connection.metadata_json = metadata
+            connection.metadata_json = credential_free_metadata(metadata)
         connection.status = "active"
         connection.updated_at = datetime.utcnow()
         if commit:

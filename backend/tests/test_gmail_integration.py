@@ -17,6 +17,7 @@ from app.database import get_db
 from app.models.integration_connection import IntegrationConnection
 from app.models.pending_action import PendingAction
 from app.routers import gmail_integration as gmail_router_module
+from app.routers.account import get_current_user
 from app.routers.gmail_integration import create_oauth_state, router as gmail_router, verify_oauth_state
 from app.routers.mcp import _gmail_tools_out
 from app.services.ai_agent_service import run_agent_for_tenant
@@ -197,6 +198,7 @@ def _gmail_client(tenant_id: uuid.UUID, db: FakeDb) -> TestClient:
     app.include_router(gmail_router, prefix="/api")
     app.dependency_overrides[get_current_tenant] = lambda: SimpleNamespace(id=tenant_id)
     app.dependency_overrides[get_db] = lambda: db
+    app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(id=uuid.uuid4(), tenant_id=tenant_id, role="owner")
     return TestClient(app)
 
 
