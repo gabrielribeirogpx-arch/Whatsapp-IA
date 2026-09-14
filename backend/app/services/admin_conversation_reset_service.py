@@ -12,12 +12,10 @@ from app.models import (
     FlowEvent,
     FlowExecution,
     FlowExecutionEvent,
-    FlowV2Event,
-    FlowV2ScheduledJob,
-    FlowV2Session,
     Lead,
     Message,
 )
+from app.flow_v2.models import FlowV2Event, FlowV2ScheduledJob, FlowV2Session
 
 
 @dataclass(frozen=True)

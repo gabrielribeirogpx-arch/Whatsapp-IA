@@ -13,7 +13,8 @@ from app.models.marketplace_template import MarketplaceTemplate, MarketplaceTemp
 from app.models.bot_rule import BotRule
 from app.models.conversation_log import ConversationLog
 from app.models.flow import Flow, FlowStep, FlowNode, FlowEdge, FlowVersion, FlowExecution, FlowExecutionEvent
-from app.flow_v2.models import FlowV2DeadLetter, FlowV2Event, FlowV2IdempotencyKey, FlowV2ScheduledJob, FlowV2Session
+# Flow V2 owns its model imports.  Importing that package from this generic model
+# barrel pulled in runtime workers and, eventually, audit_service again.
 from app.models.processed_message import ProcessedMessage
 from app.models.flow_event import FlowEvent
 from app.models.flow_analytics_event import FlowAnalyticsEvent

@@ -84,6 +84,30 @@ def get_current_user(
     raw_token = authorization.split(" ", 1)[1].strip()
     payload = _decode_token(raw_token)
     if str(payload.get("tenant_id")) != str(tenant.id):
+        # Preserve the externally safe authentication failure while recording
+        # the high-value cross-workspace attempt against the actor's workspace.
+        actor = db.execute(
+            select(TenantUser).where(
+                TenantUser.tenant_id == payload.get("tenant_id"),
+                TenantUser.email == str(payload.get("email") or "").strip().lower(),
+            )
+        ).scalars().first()
+        if actor is not None:
+            try:
+                write_audit_log(
+                    db,
+                    action="cross_tenant_access_denied",
+                    tenant_id=actor.tenant_id,
+                    user_id=actor.id,
+                    entity_type="tenant",
+                    metadata={"attempted_action": request.method, "reason_code": "token_tenant_mismatch"},
+                    request=request,
+                    commit=True,
+                )
+            except Exception:
+                db.rollback()
+                # Refusal must not become an availability dependency on audit.
+                print("[SECURITY AUDIT FAILED] reason_code=token_tenant_mismatch")
         raise HTTPException(status_code=401, detail="Token não pertence ao tenant atual")
     email = str(payload.get("email") or "").strip().lower()
     user = db.execute(select(TenantUser).where(TenantUser.tenant_id == tenant.id, TenantUser.email == email)).scalars().first()

@@ -6,6 +6,11 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models import Tenant
+from app.models.user import TenantUser
+from app.routers.account import get_current_user
+from app.security.workspace_rbac import WorkspacePermission
+from app.services.administrative_audit import require_administrative_permission
+from app.services.audit_service import write_audit_log
 from app.schemas.settings import SettingsOut, SettingsUpdateIn
 from app.services.tenant_service import get_current_tenant
 
@@ -35,7 +40,9 @@ def update_settings(
     payload: SettingsUpdateIn,
     db: Session = Depends(get_db),
     tenant: Tenant = Depends(get_current_tenant),
+    user: TenantUser = Depends(get_current_user),
 ):
+    require_administrative_permission(db, user, WorkspacePermission.MANAGE_SETTINGS, request=request, action="tenant_settings_updated", resource_type="tenant_settings", resource_id=tenant.id)
     tenant_id = getattr(request.state, "tenant_id", None)
     provided_fields = getattr(payload, "model_fields_set", getattr(payload, "__fields_set__", set()))
     logger.info(
@@ -86,6 +93,8 @@ def update_settings(
             tenant.workspace_profile = payload.workspace_profile
 
         db.add(tenant)
+        db.flush()
+        write_audit_log(db, action="tenant_settings_updated", tenant_id=tenant.id, user_id=user.id, entity_type="tenant_settings", entity_id=tenant.id, metadata={"changed_fields": sorted(provided_fields), "whatsapp_disconnected": disconnect_whatsapp}, request=request)
         db.commit()
         db.refresh(tenant)
 

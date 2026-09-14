@@ -35,6 +35,8 @@ class WorkspacePermission(str, Enum):
     INVITE_USERS = "invite_users"
     MANAGE_USERS = "manage_users"
     VIEW_AUDIT_LOG = "view_audit_log"
+    MANAGE_SETTINGS = "manage_settings"
+    MANAGE_INTEGRATIONS = "manage_integrations"
 
 
 ROLE_RANK: dict[WorkspaceRole, int] = {
@@ -53,6 +55,8 @@ PERMISSION_MATRIX: dict[WorkspaceRole, frozenset[WorkspacePermission]] = {
             WorkspacePermission.INVITE_USERS,
             WorkspacePermission.MANAGE_USERS,
             WorkspacePermission.VIEW_AUDIT_LOG,
+            WorkspacePermission.MANAGE_SETTINGS,
+            WorkspacePermission.MANAGE_INTEGRATIONS,
         }
     ),
     WorkspaceRole.MEMBER: frozenset(),
