@@ -1,10 +1,15 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models.tenant import Tenant
+from app.models.user import TenantUser
+from app.routers.account import get_current_user
+from app.security.workspace_rbac import WorkspacePermission
+from app.services.administrative_audit import require_administrative_permission
+from app.services.audit_service import write_audit_log
 from app.schemas.integration_connection import IntegrationConnectionStatusOut
 from app.services.integration_connection_service import GOOGLE_CONNECTION_PROVIDERS, IntegrationConnectionService, is_google_auth_error
 from app.services.gmail_service import GmailService
@@ -55,12 +60,17 @@ def get_connection_status(provider: str, tenant: Tenant = Depends(get_current_te
 
 
 @router.delete("/{provider}", response_model=IntegrationConnectionStatusOut)
-def disconnect_connection(provider: str, tenant: Tenant = Depends(get_current_tenant), db: Session = Depends(get_db)):
+def disconnect_connection(provider: str, request: Request, tenant: Tenant = Depends(get_current_tenant), db: Session = Depends(get_db), user: TenantUser = Depends(get_current_user)):
+    require_administrative_permission(db, user, WorkspacePermission.MANAGE_INTEGRATIONS, request=request, action="integration_disconnected", resource_type="integration", resource_id=provider)
     service = IntegrationConnectionService(db)
     normalized_provider = service.normalize_provider(provider)
     if normalized_provider == "google":
-        service.disconnect_google_connections(tenant.id)
+        rows = service.disconnect_google_connections(tenant.id, commit=False)
+        write_audit_log(db, action="integration_disconnected", tenant_id=tenant.id, user_id=user.id, entity_type="integration", entity_id="google", metadata={"provider": "google", "old_status": "active", "new_status": "disconnected", "connections_changed": len(rows)}, request=request)
+        db.commit()
         connection = service.get_connection(tenant.id, "google")
         return service.to_public_status(connection, provider="google")
-    connection = service.disconnect_connection(tenant.id, normalized_provider)
+    connection = service.disconnect_connection(tenant.id, normalized_provider, commit=False)
+    write_audit_log(db, action="integration_disconnected", tenant_id=tenant.id, user_id=user.id, entity_type="integration", entity_id=getattr(connection, "id", normalized_provider), metadata={"provider": normalized_provider, "old_status": getattr(connection, "status", None) and "active", "new_status": "disconnected"}, request=request)
+    db.commit()
     return service.to_public_status(connection, provider=normalized_provider)

@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -12,6 +12,11 @@ from app.core.feature_flags import filter_google_sheets_tools, google_sheets_int
 from app.database import get_db
 from app.models.tenant import Tenant
 from app.models.tenant_mcp import TenantMCPTool
+from app.models.user import TenantUser
+from app.routers.account import get_current_user
+from app.security.workspace_rbac import WorkspacePermission
+from app.services.administrative_audit import require_administrative_permission
+from app.services.audit_service import write_audit_log
 from app.services.google_calendar_service import PROVIDER as GOOGLE_CALENDAR_PROVIDER
 from app.services.gmail_service import PROVIDER as GMAIL_PROVIDER
 from app.services.google_drive_service import PROVIDER as GOOGLE_DRIVE_PROVIDER
@@ -130,34 +135,45 @@ def get_connection_tools(connection_id: str, tenant: Tenant = Depends(get_curren
 
 
 @router.post("/servers", status_code=201)
-def create_server(payload: MCPServerIn, tenant: Tenant = Depends(get_current_tenant), db: Session = Depends(get_db)):
+def create_server(request: Request, payload: MCPServerIn, tenant: Tenant = Depends(get_current_tenant), db: Session = Depends(get_db), user: TenantUser = Depends(get_current_user)):
+    require_administrative_permission(db, user, WorkspacePermission.MANAGE_INTEGRATIONS, request=request, action="mcp_server_created", resource_type="mcp_server")
     server = None
     try:
-        server = create_mcp_server(db, tenant.id, **payload.model_dump())
-        tools = discover_mcp_tools(db, tenant.id, server.id)
+        server = create_mcp_server(db, tenant.id, **payload.model_dump(), commit=False)
+        tools = discover_mcp_tools(db, tenant.id, server.id, commit=False)
+        write_audit_log(db, action="mcp_server_created", tenant_id=tenant.id, user_id=user.id, entity_type="mcp_server", entity_id=server.id, metadata={"endpoint_changed": True, "is_enabled": server.is_enabled, "config_fields": sorted((payload.config or {}).keys())}, request=request)
+        db.commit(); db.refresh(server)
         return {**_server_out(server), "discovery": {"status": "success", "tools_discovered": len(tools)}}
     except MCPError as exc:
         if server is not None:
-            delete_mcp_server(db, tenant.id, server.id)
+            db.rollback()
         raise _mcp_error(exc) from exc
     except Exception as exc:
         if server is not None:
-            delete_mcp_server(db, tenant.id, server.id)
+            db.rollback()
         raise HTTPException(status_code=502, detail="Falha controlada ao descobrir ferramentas MCP; integração não foi cadastrada.") from exc
 
 
 @router.put("/servers/{server_id}")
-def patch_server(server_id: uuid.UUID, payload: MCPServerPatch, tenant: Tenant = Depends(get_current_tenant), db: Session = Depends(get_db)):
+def patch_server(server_id: uuid.UUID, request: Request, payload: MCPServerPatch, tenant: Tenant = Depends(get_current_tenant), db: Session = Depends(get_db), user: TenantUser = Depends(get_current_user)):
+    require_administrative_permission(db, user, WorkspacePermission.MANAGE_INTEGRATIONS, request=request, action="mcp_server_updated", resource_type="mcp_server", resource_id=server_id)
     try:
-        return _server_out(update_mcp_server(db, tenant.id, server_id, **payload.model_dump(exclude_unset=True)))
+        changes = payload.model_dump(exclude_unset=True)
+        row = update_mcp_server(db, tenant.id, server_id, commit=False, **changes)
+        write_audit_log(db, action="mcp_server_updated", tenant_id=tenant.id, user_id=user.id, entity_type="mcp_server", entity_id=server_id, metadata={"changed_fields": sorted(changes), "endpoint_changed": "server_url" in changes, "new_status": row.is_enabled}, request=request)
+        db.commit(); db.refresh(row)
+        return _server_out(row)
     except MCPError as exc:
         raise _mcp_error(exc) from exc
 
 
 @router.delete("/servers/{server_id}", status_code=204)
-def remove_server(server_id: uuid.UUID, tenant: Tenant = Depends(get_current_tenant), db: Session = Depends(get_db)):
+def remove_server(server_id: uuid.UUID, request: Request, tenant: Tenant = Depends(get_current_tenant), db: Session = Depends(get_db), user: TenantUser = Depends(get_current_user)):
+    require_administrative_permission(db, user, WorkspacePermission.MANAGE_INTEGRATIONS, request=request, action="mcp_server_disconnected", resource_type="mcp_server", resource_id=server_id)
     try:
-        delete_mcp_server(db, tenant.id, server_id)
+        delete_mcp_server(db, tenant.id, server_id, commit=False)
+        write_audit_log(db, action="mcp_server_disconnected", tenant_id=tenant.id, user_id=user.id, entity_type="mcp_server", entity_id=server_id, metadata={"new_status": "deleted"}, request=request)
+        db.commit()
     except MCPError as exc:
         raise _mcp_error(exc) from exc
 
@@ -180,7 +196,8 @@ def get_tools(tenant: Tenant = Depends(get_current_tenant), db: Session = Depend
 
 
 @router.put("/tools/{tool_id}")
-def patch_tool(tool_id: uuid.UUID, payload: MCPToolPatch, tenant: Tenant = Depends(get_current_tenant), db: Session = Depends(get_db)):
+def patch_tool(tool_id: uuid.UUID, request: Request, payload: MCPToolPatch, tenant: Tenant = Depends(get_current_tenant), db: Session = Depends(get_db), user: TenantUser = Depends(get_current_user)):
+    require_administrative_permission(db, user, WorkspacePermission.MANAGE_INTEGRATIONS, request=request, action="mcp_tool_updated", resource_type="mcp_tool", resource_id=tool_id)
     row = db.execute(select(TenantMCPTool).where(TenantMCPTool.tenant_id == tenant.id, TenantMCPTool.id == tool_id)).scalars().first()
     if not row:
         raise HTTPException(status_code=404, detail="Ferramenta MCP não encontrada.")
@@ -188,6 +205,8 @@ def patch_tool(tool_id: uuid.UUID, payload: MCPToolPatch, tenant: Tenant = Depen
     for field in ("display_name", "description", "is_enabled", "metadata"):
         if field in changes:
             setattr(row, "metadata_json" if field == "metadata" else field, changes[field])
+    db.flush()
+    write_audit_log(db, action="mcp_tool_updated", tenant_id=tenant.id, user_id=user.id, entity_type="mcp_tool", entity_id=tool_id, metadata={"changed_fields": sorted(changes), "new_status": row.is_enabled}, request=request)
     db.commit(); db.refresh(row)
     return _tool_out(row)
 

@@ -5,14 +5,15 @@ from datetime import date, datetime
 from decimal import Decimal
 from enum import Enum
 import re
-from typing import Any
+from typing import Any, TYPE_CHECKING
 from uuid import UUID
 
 from fastapi import Request
 from sqlalchemy.orm import Session
 
 from app.models.audit_log import AuditLog
-from app.models.user import TenantUser
+if TYPE_CHECKING:
+    from app.models.user import TenantUser
 from app.security.turnstile import get_client_ip
 
 
@@ -96,7 +97,10 @@ def write_audit_log(
 
 
 def serialize_audit_log(row: AuditLog) -> dict[str, Any]:
-    user = row.user if isinstance(row.user, TenantUser) else None
+    # Avoid importing the models package graph at module import time.  Besides
+    # breaking an audit/models/Flow V2 cycle, the relationship is the contract
+    # needed here, not a concrete runtime type check.
+    user = getattr(row, "user", None)
     return {
         "id": str(row.id),
         "tenant_id": str(row.tenant_id) if row.tenant_id else None,

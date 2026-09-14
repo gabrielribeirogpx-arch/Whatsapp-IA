@@ -128,15 +128,19 @@ def list_mcp_servers(db: Session, tenant_id: uuid.UUID) -> list[TenantMCPServer]
     return list(db.execute(select(TenantMCPServer).where(TenantMCPServer.tenant_id == tenant_id).order_by(TenantMCPServer.created_at.desc())).scalars())
 
 
-def create_mcp_server(db: Session, tenant_id: uuid.UUID, *, name: str, description: str | None = None, server_url: str | None = None, transport: str = "http", config: dict[str, Any] | None = None, is_enabled: bool = True) -> TenantMCPServer:
+def create_mcp_server(db: Session, tenant_id: uuid.UUID, *, name: str, description: str | None = None, server_url: str | None = None, transport: str = "http", config: dict[str, Any] | None = None, is_enabled: bool = True, commit: bool = True) -> TenantMCPServer:
     if transport not in ALLOWED_TRANSPORTS or transport != "http":
         raise MCPError("Apenas transporte http/HTTPS está habilitado no MVP.")
     row = TenantMCPServer(tenant_id=tenant_id, name=str(name).strip()[:120], description=description, server_url=_validate_public_https_url(server_url), transport=transport, encrypted_config=_encrypt_config(config), is_enabled=is_enabled)
-    db.add(row); db.commit(); db.refresh(row)
+    db.add(row)
+    if commit:
+        db.commit(); db.refresh(row)
+    else:
+        db.flush()
     return row
 
 
-def update_mcp_server(db: Session, tenant_id: uuid.UUID, server_id: uuid.UUID, **changes: Any) -> TenantMCPServer:
+def update_mcp_server(db: Session, tenant_id: uuid.UUID, server_id: uuid.UUID, *, commit: bool = True, **changes: Any) -> TenantMCPServer:
     row = _server(db, tenant_id, server_id)
     if "name" in changes and changes["name"] is not None:
         row.name = str(changes["name"]).strip()[:120]
@@ -148,13 +152,18 @@ def update_mcp_server(db: Session, tenant_id: uuid.UUID, server_id: uuid.UUID, *
         row.is_enabled = bool(changes["is_enabled"])
     if changes.get("config") is not None:
         row.encrypted_config = _encrypt_config(changes["config"])
-    db.commit(); db.refresh(row)
+    if commit:
+        db.commit(); db.refresh(row)
+    else:
+        db.flush()
     return row
 
 
-def delete_mcp_server(db: Session, tenant_id: uuid.UUID, server_id: uuid.UUID) -> None:
+def delete_mcp_server(db: Session, tenant_id: uuid.UUID, server_id: uuid.UUID, *, commit: bool = True) -> None:
     row = _server(db, tenant_id, server_id)
-    db.delete(row); db.commit()
+    db.delete(row)
+    if commit:
+        db.commit()
 
 
 def _headers(server: TenantMCPServer) -> dict[str, str]:
@@ -167,7 +176,7 @@ def _headers(server: TenantMCPServer) -> dict[str, str]:
     return headers
 
 
-def discover_mcp_tools(db: Session, tenant_id: uuid.UUID, server_id: uuid.UUID) -> list[TenantMCPTool]:
+def discover_mcp_tools(db: Session, tenant_id: uuid.UUID, server_id: uuid.UUID, *, commit: bool = True) -> list[TenantMCPTool]:
     server = _server(db, tenant_id, server_id)
     if not server.is_enabled:
         raise MCPError("Servidor MCP desabilitado.")
@@ -218,7 +227,10 @@ def discover_mcp_tools(db: Session, tenant_id: uuid.UUID, server_id: uuid.UUID) 
     for stale in server_tools:
         if stale.tool_name not in discovered_names:
             stale.metadata_json = sanitize_value({**(stale.metadata_json or {}), "missing_from_last_discovery": True, "last_missing_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())})
-    db.commit()
+    if commit:
+        db.commit()
+    else:
+        db.flush()
     for row in saved: db.refresh(row)
     duration_ms = int((time.monotonic() - started) * 1000)
     record_event(db, trace, TraceEventType.MCP_DISCOVERY_FINISHED, duration_ms=duration_ms, metadata={"server_id": str(server.id), "status": "success", "tools_discovered": len(saved), "tools_new": new_count, "latency_ms": duration_ms})

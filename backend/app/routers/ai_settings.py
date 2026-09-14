@@ -1,12 +1,17 @@
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models.tenant import Tenant
 from app.models.tenant_ai_setting import TenantAISetting
+from app.models.user import TenantUser
+from app.routers.account import get_current_user
+from app.security.workspace_rbac import WorkspacePermission
+from app.services.administrative_audit import require_administrative_permission
+from app.services.audit_service import write_audit_log
 from app.schemas.ai_settings import TenantAISettingsOut, TenantAISettingsTestOut, TenantAISettingsTestRequest, TenantAISettingsUpdate
 from app.services.ai_model_validation import validate_chat_model, validate_embedding_model
 from app.services.llm_service import LLMConfigurationError, LLMGenerationError, test_provider_connection
@@ -43,7 +48,8 @@ def get_ai_settings(tenant: Tenant = Depends(get_current_tenant), db: Session = 
 
 
 @router.put("", response_model=TenantAISettingsOut)
-def update_ai_settings(payload: TenantAISettingsUpdate, tenant: Tenant = Depends(get_current_tenant), db: Session = Depends(get_db)):
+def update_ai_settings(request: Request, payload: TenantAISettingsUpdate, tenant: Tenant = Depends(get_current_tenant), db: Session = Depends(get_db), user: TenantUser = Depends(get_current_user)):
+    require_administrative_permission(db, user, WorkspacePermission.MANAGE_SETTINGS, request=request, action="ai_settings_updated", resource_type="ai_settings", resource_id=tenant.id)
     setting = _get_settings(db, tenant.id)
     if setting is None:
         setting = TenantAISetting(tenant_id=tenant.id)
@@ -60,6 +66,8 @@ def update_ai_settings(payload: TenantAISettingsUpdate, tenant: Tenant = Depends
     setting.is_enabled = payload.is_enabled
     if payload.api_key is not None and payload.api_key.strip():
         setting.encrypted_api_key = encrypt_secret(payload.api_key)
+    db.flush()
+    write_audit_log(db, action="ai_settings_updated", tenant_id=tenant.id, user_id=user.id, entity_type="ai_settings", entity_id=tenant.id, metadata={"provider": setting.provider, "chat_model": setting.chat_model, "embedding_provider": setting.embedding_provider, "embedding_model": setting.embedding_model, "is_enabled": setting.is_enabled, "temperature": float(setting.temperature), "max_tokens": setting.max_tokens, "api_key_changed": payload.api_key is not None}, request=request)
     db.commit(); db.refresh(setting)
     return _to_out(tenant.id, setting)
 
@@ -101,11 +109,18 @@ def test_ai_settings(payload: TenantAISettingsTestRequest, tenant: Tenant = Depe
     return TenantAISettingsTestOut(ok=True, message="Conexão validada com sucesso.")
 
 
+# This is an API handler, not a pytest test function when imported by tests.
+test_ai_settings.__test__ = False
+
+
 @router.delete("/key", response_model=TenantAISettingsOut)
-def delete_ai_key(tenant: Tenant = Depends(get_current_tenant), db: Session = Depends(get_db)):
+def delete_ai_key(request: Request, tenant: Tenant = Depends(get_current_tenant), db: Session = Depends(get_db), user: TenantUser = Depends(get_current_user)):
+    require_administrative_permission(db, user, WorkspacePermission.MANAGE_SETTINGS, request=request, action="ai_credentials_rotated", resource_type="ai_settings", resource_id=tenant.id)
     setting = _get_settings(db, tenant.id)
     if setting is None:
         return _to_out(tenant.id, None)
     setting.encrypted_api_key = None
+    db.flush()
+    write_audit_log(db, action="ai_credentials_rotated", tenant_id=tenant.id, user_id=user.id, entity_type="ai_settings", entity_id=tenant.id, metadata={"credential": "api_key", "new_status": "removed"}, request=request)
     db.commit(); db.refresh(setting)
     return _to_out(tenant.id, setting)
