@@ -8,7 +8,12 @@ const List = ({ title, items }: { title: string; items: readonly string[] }) => 
 export default function AISystemDetailsModal({ card, template, onBack, onClose, onInstall }: { card: AIStoreCardData; template?: AIStoreTemplateMeta; onBack: () => void; onClose: () => void; onInstall: (id: string, variant?: string) => void }) {
   const kit = card.businessKit; const tabs = kit ? kitTabs : standardTabs; const [tab,setTab] = useState<string>('Visão geral'); const [selectedNode,setSelectedNode] = useState(card.nodes[0]); const [version,setVersion] = useState<KitVersion>('Híbrida'); const [installed,setInstalled] = useState(false); const share = automationShare(card); const education = card.nodeEducation[selectedNode];
   // The callback remains the Marketplace installation boundary: onInstall(card.id).
-  const install = () => { onInstall(card.id, kit ? version : undefined); if (kit) setInstalled(true); };
+  const install = () => {
+    console.info(`[MARKETPLACE TRACE] AISystemDetailsModal Install start ${card.id}${kit ? ` variant=${version}` : ''}`);
+    onInstall(card.id, kit ? version : undefined);
+    if (kit) setInstalled(true);
+    console.info(`[MARKETPLACE TRACE] AISystemDetailsModal Install end ${card.id}`);
+  };
   return <div className="ai-store-details-backdrop" role="presentation" onMouseDown={onClose}><section className="ai-system-details-modal" role="dialog" aria-modal="true" aria-label={`Detalhes de ${card.title}`} onMouseDown={(e) => e.stopPropagation()}>
     <header className="ai-system-details-header"><button type="button" className="ai-store-back-button" onClick={onBack}>← Catálogo</button><button type="button" className="ai-store-close-button" onClick={onClose} aria-label="Fechar detalhes">×</button></header>
     <div className="ai-system-details-hero"><div className="ai-system-details-icon">{card.icon}</div><div><span className="ai-store-eyebrow">{card.marketplaceType} · {card.segment}</span><h3>{card.title}</h3><p>{card.subtitle}</p></div></div>
