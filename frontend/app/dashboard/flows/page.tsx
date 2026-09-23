@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import { createPortal } from 'react-dom';
 
 import { createFlow, deleteFlow, duplicateFlow, listFlows, updateFlow, updateFlowStatus } from '@/lib/api';
 import { FlowItem, FlowPayload } from '@/lib/types';
@@ -81,6 +82,17 @@ export default function FlowsPage() {
   };
 
   useEffect(() => { loadFlows(); }, []);
+
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [isOpen]);
 
   const openCreate = () => { setEditingFlow(null); setForm(EMPTY_FORM); setIsOpen(true); };
   const openBuilder = () => {
@@ -460,10 +472,10 @@ export default function FlowsPage() {
       )}
 
       {/* Modal */}
-      {isOpen && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100, backdropFilter: 'blur(4px)' }}>
-          <div style={{ background: '#fff', padding: 28, width: 440, borderRadius: 16, boxShadow: '0 24px 64px rgba(0,0,0,0.15)', display: 'flex', flexDirection: 'column', gap: 16 }}>
-            <h2 style={{ margin: 0, fontSize: 17, fontWeight: 600, color: '#111' }}>{title}</h2>
+      {isOpen && typeof document !== 'undefined' && createPortal(
+        <div className="fixed inset-0 z-[100] flex h-[100dvh] items-center justify-center overflow-y-auto bg-black/40 p-4 backdrop-blur-sm">
+          <div role="dialog" aria-modal="true" aria-labelledby="flow-form-title" className="flex max-h-[calc(100dvh-2rem)] w-full max-w-[440px] flex-col gap-4 overflow-y-auto rounded-2xl bg-white p-7 shadow-[0_24px_64px_rgba(0,0,0,0.15)]">
+            <h2 id="flow-form-title" style={{ margin: 0, fontSize: 17, fontWeight: 600, color: '#111' }}>{title}</h2>
             {(['name', 'description'] as const).map((field) => (
               <div key={field} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                 <label style={{ fontSize: 12, fontWeight: 600, color: '#555', textTransform: 'capitalize' }}>{field === 'name' ? 'Nome' : 'Descrição'}</label>
@@ -486,7 +498,8 @@ export default function FlowsPage() {
               <button onClick={onSave} style={{ background: '#16a34a', color: '#fff', border: 'none', padding: '8px 20px', borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>Salvar</button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
       </div>
     </main>
