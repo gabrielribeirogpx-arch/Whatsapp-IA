@@ -32,17 +32,18 @@ export default function DashboardInsightPanel({ open, title, description, loadin
   }, [open, onClose]);
 
   return (
-    <>
+    <div className="pointer-events-none fixed inset-0 z-[110] overflow-x-clip">
       <div
         onClick={onClose}
-        className={`fixed inset-0 z-[110] bg-slate-950/35 backdrop-blur-sm transition-opacity duration-300 ${open ? 'pointer-events-auto opacity-100' : 'pointer-events-none opacity-0'}`}
+        className={`absolute inset-0 bg-slate-950/35 backdrop-blur-sm transition-opacity duration-300 ${open ? 'pointer-events-auto opacity-100' : 'opacity-0'}`}
       />
 
       <aside
         role="dialog"
         aria-modal="true"
         aria-label={title}
-        className={`fixed right-0 top-0 z-[120] h-full w-full max-w-[720px] border-l border-emerald-100/70 bg-gradient-to-b from-white via-emerald-50/45 to-white shadow-[-16px_0_48px_rgba(15,23,42,0.16)] transition-transform duration-300 ease-out ${open ? 'translate-x-0' : 'translate-x-full'}`}
+        aria-hidden={!open}
+        className={`absolute right-0 top-0 z-10 h-full w-full max-w-[720px] border-l border-emerald-100/70 bg-gradient-to-b from-white via-emerald-50/45 to-white shadow-[-16px_0_48px_rgba(15,23,42,0.16)] transition-transform duration-300 ease-out ${open ? 'pointer-events-auto translate-x-0' : 'translate-x-full'}`}
       >
         <div className="flex h-full flex-col">
           <header className="sticky top-0 z-10 border-b border-emerald-100 bg-white/80 px-5 py-4 backdrop-blur-xl md:px-6">
@@ -75,6 +76,6 @@ export default function DashboardInsightPanel({ open, title, description, loadin
           </div>
         </div>
       </aside>
-    </>
+    </div>
   );
 }
