@@ -19,7 +19,7 @@ function CustomTooltip({ active, payload, label }: TooltipProps) {
   const received = payload.find((entry) => entry.dataKey === 'received')?.value ?? 0;
 
   return (
-    <div className="motion-tooltip rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700 shadow-lg">
+    <div className="motion-tooltip rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700 shadow-[0_8px_24px_rgba(15,23,42,0.10)]">
       <div className="mb-1 font-semibold text-slate-900">{label}</div>
       <div className="flex items-center justify-between gap-4">
         <span className="text-blue-500">Recebidas</span>
@@ -39,35 +39,35 @@ export default function DashboardChart({ data = [], title = 'Mensagens — últi
 
   return (
     <article className="motion-chart h-full overflow-visible">
-      <div className="mb-4 flex items-center justify-between"><h2 className="text-lg font-semibold text-slate-900">{title}</h2><button type="button" className="rounded-lg border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-600 hover:bg-slate-50">Diário</button></div>
-      <div className="motion-chart-legend mb-3 flex items-center gap-4 text-xs">
+      <div className="mb-2 flex items-center justify-between gap-4"><h2 className="m-0 text-[15px] font-semibold tracking-[-0.01em] text-slate-900">{title}</h2><button type="button" className="h-8 rounded-lg border border-slate-200 bg-slate-50 px-3 text-xs font-medium text-slate-600 transition hover:border-slate-300 hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-200">Diário</button></div>
+      <div className="motion-chart-legend mb-3 flex items-center gap-4 text-[11px]">
         <div className="flex items-center gap-2">
           <span className="h-2 w-2 rounded-full bg-blue-500"></span>
-          <span className="text-slate-600">Recebidas</span>
+          <span className="text-slate-500">Recebidas</span>
         </div>
 
         <div className="flex items-center gap-2">
           <span className="h-2 w-2 rounded-full bg-emerald-500"></span>
-          <span className="text-slate-600">Enviadas</span>
+          <span className="text-slate-500">Enviadas</span>
         </div>
       </div>
       <div className="h-[300px] min-h-[300px] w-full overflow-visible">
         <ResponsiveContainer>
           <AreaChart data={chartData} margin={{ top: 8, right: 12, left: 0, bottom: 12 }}>
             <defs>
-              <linearGradient id="receivedGradient" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#3B82F6" stopOpacity={0.22} /><stop offset="95%" stopColor="#3B82F6" stopOpacity={0} /></linearGradient>
-              <linearGradient id="sentGradient" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#16A34A" stopOpacity={0.18} /><stop offset="95%" stopColor="#16A34A" stopOpacity={0} /></linearGradient>
+              <linearGradient id="receivedGradient" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#3B82F6" stopOpacity={0.12} /><stop offset="95%" stopColor="#3B82F6" stopOpacity={0} /></linearGradient>
+              <linearGradient id="sentGradient" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#16A34A" stopOpacity={0.1} /><stop offset="95%" stopColor="#16A34A" stopOpacity={0} /></linearGradient>
             </defs>
-            <CartesianGrid strokeDasharray="4 4" stroke="#e2e8f0" vertical={false} />
+            <CartesianGrid strokeDasharray="3 5" stroke="#eef2f7" vertical={false} />
             <XAxis
               dataKey="date"
               interval={xAxisTickInterval}
-              tick={{ fill: '#64748b', fontSize: 12 }}
+              tick={{ fill: '#94a3b8', fontSize: 11 }}
               axisLine={false}
               tickLine={false}
             />
             <YAxis
-              tick={{ fill: '#94a3b8', fontSize: 12 }}
+              tick={{ fill: '#94a3b8', fontSize: 11 }}
               axisLine={false}
               tickLine={false}
             />
@@ -77,9 +77,9 @@ export default function DashboardChart({ data = [], title = 'Mensagens — últi
               dataKey="received"
               stroke="#3b82f6"
               fill="url(#receivedGradient)"
-              strokeWidth={2.5}
-              dot={{ r: 2 }}
-              activeDot={{ r: 5 }}
+              strokeWidth={2}
+              dot={false}
+              activeDot={{ r: 4, strokeWidth: 2, stroke: '#ffffff' }}
               name="Recebidas"
             />
             <Area
@@ -87,9 +87,9 @@ export default function DashboardChart({ data = [], title = 'Mensagens — últi
               dataKey="sent"
               stroke="#22c55e"
               fill="url(#sentGradient)"
-              strokeWidth={2.5}
-              dot={{ r: 2 }}
-              activeDot={{ r: 5 }}
+              strokeWidth={2}
+              dot={false}
+              activeDot={{ r: 4, strokeWidth: 2, stroke: '#ffffff' }}
               name="Enviadas"
             />
           </AreaChart>
