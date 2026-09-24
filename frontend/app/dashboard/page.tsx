@@ -3,7 +3,7 @@
 import { useEffect, useId, useMemo, useState } from 'react';
 import { Cell, Pie, PieChart } from 'recharts';
 import { useRouter } from 'next/navigation';
-import { AlertTriangle, CheckCircle2, Clock3, Gauge, MessageSquare, RadioTower, Send, Star, TrendingUp, UsersRound, Zap } from "lucide-react";
+import { AlertTriangle, CalendarDays, CheckCircle2, Clock3, Gauge, MessageSquare, RadioTower, Send, Star, TrendingUp, UsersRound, Zap } from "lucide-react";
 import type { LucideIcon } from 'lucide-react';
 
 import DashboardChart from '../../components/DashboardChart';
@@ -129,7 +129,7 @@ function getGreeting() {
 }
 
 const cardClassName =
-  'bg-white rounded-2xl border border-slate-100 shadow-[0_12px_30px_rgba(15,23,42,0.05)] p-5';
+  'rounded-xl border border-slate-200/80 bg-white p-5 shadow-[0_1px_2px_rgba(15,23,42,0.03)]';
 
 function SkeletonLine({ width = '100%', height = 12 }: { width?: string; height?: number }) {
   return <div className="rounded-full bg-gradient-to-r from-emerald-50 via-slate-200 to-emerald-50" style={{ width, height }} />;
@@ -137,7 +137,6 @@ function SkeletonLine({ width = '100%', height = 12 }: { width?: string; height?
 
 const Sparkline = ({ values = [], className = 'h-full w-full overflow-hidden' }: { values?: number[]; className?: string }) => {
   const gradientId = useId();
-  const glowId = useId();
   const safeValues = values.length ? values : [0,0,0,0,0,0,0];
   const maxValue = Math.max(...safeValues, 1);
   const step = safeValues.length > 1 ? 62 / (safeValues.length - 1) : 62;
@@ -151,12 +150,9 @@ const Sparkline = ({ values = [], className = 'h-full w-full overflow-hidden' }:
           <stop offset="60%" stopColor="#22c55e" stopOpacity="0.15" />
           <stop offset="100%" stopColor="#22c55e" stopOpacity="0" />
         </linearGradient>
-        <filter id={glowId} x="-50%" y="-50%" width="200%" height="200%">
-          <feDropShadow dx="0" dy="0" stdDeviation="1.5" floodColor="#22c55e" floodOpacity="0.4" />
-        </filter>
       </defs>
-      <path d={`${linePath} L 63,24 L 1,24 Z`} fill={`url(#${gradientId})`} />
-      <path d={linePath} stroke="#22c55e" fill="none" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" filter={`url(#${glowId})`} />
+      <path d={`${linePath} L 63,24 L 1,24 Z`} fill={`url(#${gradientId})`} opacity="0.55" />
+      <path d={linePath} stroke="#16a34a" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 };
@@ -482,26 +478,26 @@ export default function DashboardPage() {
   }
 
   return (
-    <section className="motion-page w-full min-w-0 px-5 py-6 lg:px-6">
+    <section className="motion-page w-full min-w-0 px-4 py-5 sm:px-5 lg:px-6 lg:py-6">
       {showWelcomeToast ? (
         <div className="fixed right-6 top-6 z-[120] rounded-xl border border-emerald-200 bg-white/95 px-4 py-3 text-sm font-medium text-emerald-700 shadow-[0_12px_30px_rgba(16,185,129,0.18)] backdrop-blur">
           ✅ Conta criada com sucesso. Seu workspace está pronto!
         </div>
       ) : null}
-      <div className="w-full min-w-0 space-y-5">
-      <div className="mb-4 flex items-center justify-between gap-4 md:mb-6">
-        <div>
-          <h1 className="text-xl md:text-2xl font-semibold leading-tight text-gray-900">
+      <div className="mx-auto w-full min-w-0 max-w-[1600px] space-y-5">
+      <div className="flex flex-col gap-4 border-b border-slate-200/70 pb-5 sm:flex-row sm:items-end sm:justify-between">
+        <div className="min-w-0">
+          <h1 className="text-xl font-semibold leading-tight tracking-[-0.02em] text-slate-950 md:text-2xl">
             {greeting}, Gabriel <span className="text-lg">👋</span>
           </h1>
-          <p className="mt-1 text-sm text-gray-500">Aqui está o resumo das suas conversas hoje.</p>
+          <p className="mt-1 text-[13px] leading-5 text-slate-500">Aqui está o resumo das suas conversas hoje.</p>
         </div>
-        <div className="flex items-center gap-3">
-          <span className="text-sm text-slate-500">Período</span>
+        <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:flex-nowrap">
+          <span className="sr-only">Período</span>
           <select
             value={period}
             onChange={(e) => setPeriod(e.target.value as Period)}
-            className="h-11 rounded-xl border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700 outline-none transition focus:border-emerald-300 focus:ring-2 focus:ring-emerald-100"
+            className="h-10 min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-3 text-[13px] font-medium text-slate-700 outline-none transition hover:border-slate-300 focus-visible:border-emerald-500 focus-visible:ring-2 focus-visible:ring-emerald-100 sm:flex-none"
             aria-label="Selecionar período"
           >
             <option value="24h">Últimas 24h</option>
@@ -509,11 +505,11 @@ export default function DashboardPage() {
             <option value="30d">Últimos 30 dias</option>
             <option value="90d">Últimos 90 dias</option>
           </select>
-          <button className="h-11 w-11 rounded-xl border border-slate-200 bg-white text-slate-500">📅</button>
+          <button type="button" aria-label="Abrir calendário" className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-200"><CalendarDays size={17} strokeWidth={1.8} /></button>
           <button
             type="button"
             onClick={() => setIsCreateFlowOpen(true)}
-            className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-emerald-600 px-5 text-sm font-semibold leading-none text-white shadow-[0_12px_24px_rgba(16,185,129,0.22)] transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-70"
+            className="inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-lg bg-emerald-600 px-4 text-[13px] font-semibold leading-none text-white shadow-[0_1px_2px_rgba(5,150,105,0.18)] transition hover:bg-emerald-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-70"
           >
             <span className="text-base leading-none">+</span>
             <span className="leading-none">Novo fluxo</span>
@@ -521,7 +517,7 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      <div className="grid w-full grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">
+      <div className="grid w-full grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
   {safeKpis.map((item) => {
     if (!item) return null;
     const rawValue = viewModel?.[item.key as keyof typeof viewModel];
@@ -530,37 +526,33 @@ export default function DashboardPage() {
     const series = getKpiSeries(item.key, timeseries);
     const sparklineSeries = series.length ? series : [0, 0, 0, 0, 0, 0, 0];
     const delta = getDeltaPercent(sparklineSeries);
-    const trendText = period === '7d' ? 'vs últimos 7 dias' : 'vs período anterior';
+    const trendText = 'vs. período anterior';
     const trendPrefix = delta >= 0 ? '↑' : '↓';
     const Icon = item.icon;
 
     return (
       <div
         key={item.key}
-        className="motion-card motion-enter relative min-h-[110px] overflow-hidden rounded-2xl border border-slate-100 bg-white p-5 shadow-[0_10px_30px_rgba(15,23,42,0.06)]"
+        className="motion-card motion-enter relative flex min-h-[142px] flex-col overflow-hidden rounded-xl border border-slate-200/80 bg-white p-4 shadow-[0_1px_2px_rgba(15,23,42,0.03)]"
         style={{ animationDelay: `${safeKpis.indexOf(item) * 35}ms` }}
       >
-        <div className="absolute inset-0 opacity-[0.03] bg-[radial-gradient(circle_at_top_left,#22c55e,transparent)] pointer-events-none" />
-
-        <div className="relative z-10 flex items-start gap-3">
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-emerald-100 bg-emerald-50">
-            <Icon aria-hidden="true" className="h-5 w-5 text-slate-700" strokeWidth={2} />
-          </div>
-
+        <div className="relative z-10 flex items-start justify-between gap-3">
           <div className="min-w-0 flex-1">
-            <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">{item.label}</span>
-
-            <span className="mt-1 block text-2xl font-bold text-slate-900">
+            <span className="text-xs font-medium text-slate-500">{item.label}</span>
+            <span className="mt-2 block text-[28px] font-semibold leading-none tracking-[-0.035em] text-slate-950">
               <AnimatedNumber value={numericValue} />
               {item.suffix ?? ''}
             </span>
           </div>
+          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-slate-50 text-slate-500">
+            <Icon aria-hidden="true" className="h-4 w-4" strokeWidth={1.8} />
+          </div>
         </div>
 
-        <div className="relative z-10 mt-3 flex w-full items-center justify-between gap-3">
-          <span className="inline-flex items-center gap-1 text-xs leading-none text-emerald-600">
-            {trendPrefix} {Math.abs(delta)}%
-            <span className="font-normal text-slate-500">
+        <div className="relative z-10 mt-auto flex w-full items-end justify-between gap-2 pt-4">
+          <span className="inline-flex min-w-0 flex-wrap items-center gap-x-1 gap-y-0.5 text-[11px] leading-4">
+            <span className={delta >= 0 ? 'font-semibold text-emerald-600' : 'font-semibold text-rose-600'}>{trendPrefix} {Math.abs(delta)}%</span>
+            <span className="font-normal text-slate-400">
               {trendText}
             </span>
           </span>
@@ -573,25 +565,25 @@ export default function DashboardPage() {
     );
   })}
 </div>
-      <div className="grid w-full grid-cols-1 gap-4 items-stretch xl:grid-cols-[minmax(0,2fr)_minmax(320px,0.9fr)]">
+      <div className="grid w-full grid-cols-1 items-stretch gap-4 xl:grid-cols-[minmax(0,2fr)_minmax(320px,0.9fr)]">
         <div className={`${cardClassName} min-h-[390px] p-5`}>{dashboardError ? <p className="m-0 p-3 text-sm text-red-700">{dashboardError}</p> : (
           chartData.length ? <DashboardChart title={`Mensagens — ${periodLabelMap[period]}`} data={chartData.map((item) => ({ date: item.name, received: item.received, sent: item.sent }))} xAxisTickInterval={xAxisTickInterval} /> : null
         )}</div>
 
-        <div className="min-h-[390px] rounded-2xl border border-slate-100 bg-white p-5 shadow-[0_12px_30px_rgba(15,23,42,0.04)]">
+        <div className="min-h-[390px] rounded-xl border border-slate-200/80 bg-white p-5 shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
           <div className="flex items-center justify-between">
             <h3 className="m-0 text-sm font-semibold text-slate-900">Conversas recentes</h3>
             <span className="flex items-center gap-2 text-xs text-slate-500"><span className={`h-1.5 w-1.5 rounded-full ${isActivityLive ? 'bg-emerald-500' : 'bg-slate-300'}`} />{isActivityLive ? 'Ao vivo' : 'Atualizado agora'}</span>
           </div>
           {conversationsError ? <p className="mt-3 rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-700">{conversationsError}</p> : null}
-          {recentConversations.length === 0 ? <div className="mt-4 grid h-[290px] place-items-center rounded-xl border border-dashed border-emerald-200 bg-emerald-50/40 px-6 text-center"><div><p className="m-0 font-semibold text-slate-700">Sem conversas recentes</p><p className="m-0 mt-1 text-sm text-slate-500">Quando novas mensagens chegarem, elas aparecerão aqui.</p></div></div> : <div className="mt-4 overflow-hidden rounded-2xl border border-slate-100 bg-slate-50/40">{recentConversations.map((conversation) => {
+          {recentConversations.length === 0 ? <div className="mt-4 grid h-[290px] place-items-center rounded-lg border border-dashed border-slate-200 bg-slate-50/60 px-6 text-center"><div><p className="m-0 font-semibold text-slate-700">Sem conversas recentes</p><p className="m-0 mt-1 text-sm text-slate-500">Quando novas mensagens chegarem, elas aparecerão aqui.</p></div></div> : <div className="mt-3 divide-y divide-slate-100">{recentConversations.map((conversation) => {
             const displayName = conversation.name?.trim() || conversation.phone?.trim() || 'Conversa';
             const attendantName = conversation.assigned_user_name?.trim() || 'Sem atendente';
             const statusLabel = getConversationStatusLabel(conversation);
             const unreadCount = Number(conversation.unread_count || 0);
             const unreadLabel = unreadCount > 0 ? `${unreadCount} nova${unreadCount > 1 ? 's' : ''}` : null;
             const badges = [`Atendente: ${attendantName}`, statusLabel, unreadLabel].filter(Boolean);
-            return <button type="button" key={conversation.id} onClick={() => router.push(getConversationHref(conversation))} className="group flex w-full items-start gap-3 border-b border-slate-100 bg-white px-3.5 py-3 text-left transition-colors duration-200 last:border-b-0 hover:bg-emerald-50/35 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-emerald-200"><div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-emerald-50 via-white to-slate-100 text-xs font-bold text-emerald-700 ring-1 ring-emerald-100 transition-transform duration-200 group-hover:scale-[1.03]">{getInitials(displayName)}</div><div className="min-w-0 flex-1"><div className="flex items-start justify-between gap-3"><p className="m-0 truncate text-sm font-bold leading-tight text-slate-900">{displayName}</p><span className="shrink-0 text-[11px] font-medium text-slate-400">{formatRelativeTime(conversation.updated_at)}</span></div><p className="m-0 mt-1 truncate text-xs leading-relaxed text-slate-500">{formatLastMessagePreview(conversation.last_message)}</p><div className="mt-2 flex flex-wrap gap-1.5">{badges.map((badge) => <span key={badge} className="inline-flex max-w-full items-center rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-semibold leading-4 text-slate-600">{badge}</span>)}</div></div></button>;
+            return <button type="button" key={conversation.id} onClick={() => router.push(getConversationHref(conversation))} className="group flex w-full items-start gap-3 rounded-lg px-2 py-3 text-left transition-colors duration-150 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-emerald-200"><div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-slate-100 text-[11px] font-semibold text-slate-600 ring-1 ring-inset ring-slate-200">{getInitials(displayName)}</div><div className="min-w-0 flex-1"><div className="flex items-start justify-between gap-3"><p className="m-0 truncate text-[13px] font-semibold leading-tight text-slate-900">{displayName}</p><span className="shrink-0 text-[11px] font-medium text-slate-400">{formatRelativeTime(conversation.updated_at)}</span></div><p className="m-0 mt-1 truncate text-xs leading-relaxed text-slate-500">{formatLastMessagePreview(conversation.last_message)}</p><div className="mt-1.5 flex flex-wrap gap-1">{badges.map((badge) => <span key={badge} className="inline-flex max-w-full items-center rounded-md border border-slate-200/80 bg-slate-50 px-1.5 py-0.5 text-[10px] font-medium leading-3.5 text-slate-500">{badge}</span>)}</div></div></button>;
           })}</div>}
           <div className="mt-4 border-t border-slate-100 pt-4 text-center">
             <button type="button" onClick={() => router.push('/chat')} className="text-sm font-medium text-emerald-600 hover:text-emerald-700">
