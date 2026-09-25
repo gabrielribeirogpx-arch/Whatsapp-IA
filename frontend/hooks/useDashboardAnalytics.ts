@@ -26,8 +26,14 @@ type AnalyticsKpis = {
   messages?: number;
   messages_received?: number;
   messages_sent?: number;
-  response_rate?: number;
+  response_rate?: number | null;
+  response_rate_current?: number | null;
+  response_rate_previous?: number | null;
+  response_rate_delta?: number | null;
   conversions?: number;
+  conversions_current?: number;
+  conversions_previous?: number;
+  conversions_delta?: number | null;
   messages_sent_today?: number;
   messages_received_today?: number;
   messages_sent_current?: number;
@@ -60,7 +66,7 @@ const DEFAULT_KPIS: AnalyticsKpis = {
   messages: 0,
   messages_received: 0,
   messages_sent: 0,
-  response_rate: 0,
+  response_rate: null,
   conversions: 0,
 };
 
@@ -79,13 +85,20 @@ export type DashboardPeriod =
 
 
 type DashboardSummary = {
-  top_flows?: Array<{ flow_id: string; name: string; conversations: number; conversion_rate: number }>;
+  top_flows?: Array<{ flow_id: string; name: string; conversations: number; conversation_count: number; conversion_rate: number | null }>;
   channels?: Array<{ channel: string; count: number; percentage: number }>;
+  channel_conversations_total?: number;
   performance?: {
     avg_response_time_seconds: number | null;
     resolved_conversations: number;
     csat: number | null;
-    abandonment_rate: number;
+    abandonment_rate: number | null;
+    completed_sessions_current: number;
+    completed_sessions_previous: number;
+    completed_sessions_delta: number | null;
+    abandonment_rate_current: number | null;
+    abandonment_rate_previous: number | null;
+    abandonment_rate_delta: number | null;
   };
 };
 
@@ -189,9 +202,11 @@ export function useDashboardAnalytics(period: DashboardPeriod = { preset: '7d' }
       messages_received: Number(kpis.messages_received_current ?? kpis.messages_received ?? kpis.messages_received_today ?? sum(padded.messages_received)),
       messages_sent: Number(kpis.messages_sent_current ?? kpis.messages_sent ?? kpis.messages_sent_today ?? sum(padded.messages_sent)),
       messages_today: Number(kpis.messages_today ?? ((kpis.messages_sent_current ?? kpis.messages_sent ?? kpis.messages_sent_today ?? sum(padded.messages_sent)) + (kpis.messages_received_current ?? kpis.messages_received ?? kpis.messages_received_today ?? sum(padded.messages_received)))),
-      response_rate: Number(kpis.response_rate ?? 0),
-      conversions: Number(kpis.conversions ?? sum(padded.conversions)),
+      response_rate: kpis.response_rate_current ?? kpis.response_rate ?? null,
+      conversions: Number(kpis.conversions_current ?? kpis.conversions ?? sum(padded.conversions)),
       messages_delta: kpis.messages_delta ?? null,
+      response_rate_delta: kpis.response_rate_delta ?? null,
+      conversions_delta: kpis.conversions_delta ?? null,
     };
 
     return { kpis: calculated, timeseries: padded };

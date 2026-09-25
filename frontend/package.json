@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "test": "node --test tests/dashboardPhase1.test.mjs",
+    "test": "node --test tests/dashboardPhase1.test.mjs tests/dashboardPhase2.test.mjs",
     "test:marketplace": "node tests/marketplaceModal.test.mjs",
     "test:business-kits": "node tests/businessKits.test.mjs",
     "test:choice-handles": "node tests/choiceDynamicHandlesRegression.test.mjs",
