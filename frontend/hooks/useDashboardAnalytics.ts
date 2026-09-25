@@ -66,7 +66,9 @@ const DEFAULT_SERIES: NormalizedSeries = {
   conversions: [],
 };
 
-type DashboardPeriod = '24h' | '7d' | '30d' | '90d';
+export type DashboardPeriod =
+  | { preset: '24h' | '7d' | '30d' | '90d'; startDate?: never; endDate?: never }
+  | { preset?: never; startDate: string; endDate: string };
 
 
 type DashboardSummary = {
@@ -80,7 +82,7 @@ type DashboardSummary = {
   };
 };
 
-export function useDashboardAnalytics(period: DashboardPeriod = '7d') {
+export function useDashboardAnalytics(period: DashboardPeriod = { preset: '7d' }) {
   const [data, setData] = useState<AnalyticsResponse | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -89,7 +91,10 @@ export function useDashboardAnalytics(period: DashboardPeriod = '7d') {
   const refetch = useCallback(async () => {
     setIsLoading(true);
     try {
-      const res = await apiFetch(`${process.env.NEXT_PUBLIC_API_URL}/api/dashboard/analytics?period=${period}`);
+      const params = new URLSearchParams(period.preset
+        ? { period: period.preset }
+        : { start_date: period.startDate, end_date: period.endDate });
+      const res = await apiFetch(`${process.env.NEXT_PUBLIC_API_URL}/api/dashboard/analytics?${params}`);
       const payload = await parseApiResponse<AnalyticsResponse>(res);
 
       if (!payload) {
@@ -99,7 +104,7 @@ export function useDashboardAnalytics(period: DashboardPeriod = '7d') {
       }
 
       setData(payload);
-      const summaryRes = await apiFetch(`${process.env.NEXT_PUBLIC_API_URL}/api/dashboard/summary?period=${period}`);
+      const summaryRes = await apiFetch(`${process.env.NEXT_PUBLIC_API_URL}/api/dashboard/summary?${params}`);
       const summaryPayload = await parseApiResponse<DashboardSummary>(summaryRes);
       setSummary(summaryPayload ?? null);
       setError(null);
@@ -110,7 +115,7 @@ export function useDashboardAnalytics(period: DashboardPeriod = '7d') {
     } finally {
       setIsLoading(false);
     }
-  }, [period]);
+  }, [period.endDate, period.preset, period.startDate]);
 
   useEffect(() => {
     void refetch();

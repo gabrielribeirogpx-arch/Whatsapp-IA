@@ -1,8 +1,8 @@
-from datetime import datetime, timedelta
+from datetime import date, datetime, time, timedelta
 
 import asyncio
 import logging
-from fastapi import APIRouter, Depends, Query, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy import case, func, select
@@ -18,6 +18,20 @@ from app.services.tenant_service import get_current_tenant
 router = APIRouter(tags=["dashboard"])
 
 logger = logging.getLogger(__name__)
+
+
+def _dashboard_date_range(period: str, start_date: date | None, end_date: date | None) -> tuple[datetime, datetime, int]:
+    """Return an inclusive UI date range as half-open UTC datetime bounds."""
+    if start_date is not None or end_date is not None:
+        if start_date is None or end_date is None or end_date < start_date:
+            raise ValueError("start_date and end_date must define a valid range")
+        start_datetime = datetime.combine(start_date, time.min)
+        end_datetime = datetime.combine(end_date + timedelta(days=1), time.min)
+        return start_datetime, end_datetime, (end_date - start_date).days + 1
+
+    days = {"24h": 1, "7d": 7, "30d": 30, "90d": 90}.get(period, 7)
+    end_datetime = datetime.utcnow()
+    return end_datetime - timedelta(days=days), end_datetime, days
 
 
 class DashboardTotalsOut(BaseModel):
@@ -258,20 +272,22 @@ def get_dashboard(
 @router.get("/dashboard/analytics", response_model=DashboardAnalyticsOut)
 def get_dashboard_analytics(
     period: str = Query(default="7d"),
+    start_date: date | None = Query(default=None),
+    end_date: date | None = Query(default=None),
     db: Session = Depends(get_db),
     tenant: Tenant = Depends(get_current_tenant),
 ):
-    period_to_days = {"24h": 1, "7d": 7, "30d": 30, "90d": 90}
-    days = period_to_days.get(period, 7)
-
-    now_utc = datetime.utcnow()
-    start_datetime = now_utc - timedelta(days=days)
+    try:
+        start_datetime, end_datetime, days = _dashboard_date_range(period, start_date, end_date)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     conversations_total = db.execute(
         select(func.count(Conversation.id)).where(
             Conversation.tenant_id == tenant.id,
             Conversation.updated_at.isnot(None),
             Conversation.updated_at >= start_datetime,
+            Conversation.updated_at < end_datetime,
         )
     ).scalar() or 0
 
@@ -297,6 +313,7 @@ def get_dashboard_analytics(
             Message.tenant_id == tenant.id,
             Message.created_at.isnot(None),
             Message.created_at >= start_datetime,
+            Message.created_at < end_datetime,
         )
     ).scalar() or 0
 
@@ -306,6 +323,7 @@ def get_dashboard_analytics(
             Message.from_me.is_(True),
             Message.created_at.isnot(None),
             Message.created_at >= start_datetime,
+            Message.created_at < end_datetime,
         )
     ).scalar() or 0
 
@@ -315,6 +333,7 @@ def get_dashboard_analytics(
             Message.from_me.is_(False),
             Message.created_at.isnot(None),
             Message.created_at >= start_datetime,
+            Message.created_at < end_datetime,
         )
     ).scalar() or 0
 
@@ -330,7 +349,7 @@ def get_dashboard_analytics(
 
     messages_last_7_days: list[MessagesByDay] = []
     for day_offset in range(days - 1, -1, -1):
-        target_day = now_utc - timedelta(days=day_offset)
+        target_day = (end_datetime - timedelta(microseconds=1)) - timedelta(days=day_offset)
         start_of_target_day = datetime(target_day.year, target_day.month, target_day.day)
         end_of_target_day = start_of_target_day + timedelta(days=1)
 
@@ -464,13 +483,15 @@ async def ws_dashboard_events(websocket: WebSocket):
 @router.get("/dashboard/summary", response_model=DashboardSummaryOut)
 def get_dashboard_summary(
     period: str = Query(default="7d"),
+    start_date: date | None = Query(default=None),
+    end_date: date | None = Query(default=None),
     db: Session = Depends(get_db),
     tenant: Tenant = Depends(get_current_tenant),
 ):
-    period_to_days = {"24h": 1, "7d": 7, "30d": 30, "90d": 90}
-    days = period_to_days.get(period, 7)
-    now_utc = datetime.utcnow()
-    start_datetime = now_utc - timedelta(days=days)
+    try:
+        start_datetime, end_datetime, _ = _dashboard_date_range(period, start_date, end_date)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     flow_rows = db.execute(
         select(
@@ -481,6 +502,7 @@ def get_dashboard_summary(
         .where(
             FlowEvent.tenant_id == tenant.id,
             FlowEvent.created_at >= start_datetime,
+            FlowEvent.created_at < end_datetime,
             FlowEvent.flow_id.isnot(None),
         )
         .group_by(FlowEvent.flow_id)
@@ -507,7 +529,7 @@ def get_dashboard_summary(
 
     conversations = db.execute(
         select(Conversation.context)
-        .where(Conversation.tenant_id == tenant.id, Conversation.updated_at.isnot(None), Conversation.updated_at >= start_datetime)
+        .where(Conversation.tenant_id == tenant.id, Conversation.updated_at.isnot(None), Conversation.updated_at >= start_datetime, Conversation.updated_at < end_datetime)
     ).scalars().all()
     channel_counts = {"whatsapp": 0, "site_chat": 0, "instagram": 0, "facebook": 0, "outros": 0}
     for context in conversations:
@@ -537,17 +559,19 @@ def get_dashboard_summary(
         select(func.count(func.distinct(FlowSession.conversation_id))).where(
             FlowSession.tenant_id == tenant.id,
             FlowSession.updated_at >= start_datetime,
+            FlowSession.updated_at < end_datetime,
             FlowSession.status.in_(["completed", "converted", "conversion"]),
         )
     ).scalar() or 0
 
     started_sessions = db.execute(
-        select(func.count(FlowSession.id)).where(FlowSession.tenant_id == tenant.id, FlowSession.created_at >= start_datetime)
+        select(func.count(FlowSession.id)).where(FlowSession.tenant_id == tenant.id, FlowSession.created_at >= start_datetime, FlowSession.created_at < end_datetime)
     ).scalar() or 0
     abandoned_sessions = db.execute(
         select(func.count(FlowSession.id)).where(
             FlowSession.tenant_id == tenant.id,
             FlowSession.updated_at >= start_datetime,
+            FlowSession.updated_at < end_datetime,
             FlowSession.status.in_(["abandoned", "expired"]),
         )
     ).scalar() or 0
@@ -555,7 +579,7 @@ def get_dashboard_summary(
 
     response_pairs = db.execute(
         select(Message.conversation_id, Message.created_at, Message.from_me)
-        .where(Message.tenant_id == tenant.id, Message.created_at >= start_datetime)
+        .where(Message.tenant_id == tenant.id, Message.created_at >= start_datetime, Message.created_at < end_datetime)
         .order_by(Message.conversation_id, Message.created_at)
     ).all()
     total_delay = 0.0
