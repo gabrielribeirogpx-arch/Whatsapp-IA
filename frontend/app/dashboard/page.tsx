@@ -9,6 +9,7 @@ import type { LucideIcon } from 'lucide-react';
 import DashboardChart from '../../components/DashboardChart';
 import AnimatedNumber from '../../components/motion/AnimatedNumber';
 import DashboardInsightPanel from '@/components/dashboard/DashboardInsightPanel';
+import DateRangePicker, { DateRange } from '@/components/dashboard/DateRangePicker';
 import CreateFlowModal from '@/components/flows/CreateFlowModal';
 import { getConversations, listFlows } from '../../lib/api';
 import { Conversation, FlowItem } from '../../lib/types';
@@ -269,11 +270,13 @@ const channelLegendColors: Record<string, string> = {
 
 export default function DashboardPage() {
   const [period, setPeriod] = useState<Period>('7d');
+  const [customRange, setCustomRange] = useState<DateRange | null>(null);
+  const [isCalendarOpen, setIsCalendarOpen] = useState(false);
   const [greeting, setGreeting] = useState('Olá');
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [flows, setFlows] = useState<FlowItem[]>([]);
   const router = useRouter();
-  const { data, summary, kpis, timeseries, isLoading, error: dashboardError, refetch: refetchDashboardAnalytics } = useDashboardAnalytics(period);
+  const { data, summary, kpis, timeseries, isLoading, error: dashboardError, refetch: refetchDashboardAnalytics } = useDashboardAnalytics(customRange ?? { preset: period });
   const [conversationsError, setConversationsError] = useState<string | null>(null);
   const [flowsError, setFlowsError] = useState<string | null>(null);
   const [isCreateFlowOpen, setIsCreateFlowOpen] = useState(false);
@@ -419,6 +422,7 @@ export default function DashboardPage() {
   }));
 
   const xAxisTickInterval =
+    customRange ? Math.max(0, Math.ceil(chartData.length / 8) - 1) :
     period === '24h' ? 0 :
     period === '7d' ? 0 :
     period === '30d' ? 3 :
@@ -495,8 +499,8 @@ export default function DashboardPage() {
         <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:flex-nowrap">
           <span className="sr-only">Período</span>
           <select
-            value={period}
-            onChange={(e) => setPeriod(e.target.value as Period)}
+            value={customRange ? 'custom' : period}
+            onChange={(e) => { setCustomRange(null); setPeriod(e.target.value as Period); }}
             className="h-10 min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-3 text-[13px] font-medium text-slate-700 outline-none transition hover:border-slate-300 focus-visible:border-emerald-500 focus-visible:ring-2 focus-visible:ring-emerald-100 sm:flex-none"
             aria-label="Selecionar período"
           >
@@ -504,8 +508,12 @@ export default function DashboardPage() {
             <option value="7d">Últimos 7 dias</option>
             <option value="30d">Últimos 30 dias</option>
             <option value="90d">Últimos 90 dias</option>
+            {customRange ? <option value="custom">{new Date(`${customRange.startDate}T12:00:00`).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' })} – {new Date(`${customRange.endDate}T12:00:00`).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' })}</option> : null}
           </select>
-          <button type="button" aria-label="Abrir calendário" className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-200"><CalendarDays size={17} strokeWidth={1.8} /></button>
+          <div className="relative">
+            <button type="button" aria-label="Selecionar período personalizado" aria-haspopup="dialog" aria-expanded={isCalendarOpen} onClick={() => setIsCalendarOpen((open) => !open)} className="inline-flex h-10 w-10 shrink-0 cursor-pointer items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-200"><CalendarDays size={17} strokeWidth={1.8} /></button>
+            {isCalendarOpen ? <DateRangePicker initialRange={customRange} onCancel={() => setIsCalendarOpen(false)} onApply={(range) => { setCustomRange(range); setIsCalendarOpen(false); }} /> : null}
+          </div>
           <button
             type="button"
             onClick={() => setIsCreateFlowOpen(true)}
@@ -567,7 +575,7 @@ export default function DashboardPage() {
 </div>
       <div className="grid w-full grid-cols-1 items-stretch gap-4 xl:grid-cols-[minmax(0,2fr)_minmax(320px,0.9fr)]">
         <div className={`${cardClassName} min-h-[390px] p-5`}>{dashboardError ? <p className="m-0 p-3 text-sm text-red-700">{dashboardError}</p> : (
-          chartData.length ? <DashboardChart title={`Mensagens — ${periodLabelMap[period]}`} data={chartData.map((item) => ({ date: item.name, received: item.received, sent: item.sent }))} xAxisTickInterval={xAxisTickInterval} /> : null
+          chartData.length ? <DashboardChart title={`Mensagens — ${customRange ? `${new Date(`${customRange.startDate}T12:00:00`).toLocaleDateString('pt-BR')} a ${new Date(`${customRange.endDate}T12:00:00`).toLocaleDateString('pt-BR')}` : periodLabelMap[period]}`} data={chartData.map((item) => ({ date: item.name, received: item.received, sent: item.sent }))} xAxisTickInterval={xAxisTickInterval} /> : null
         )}</div>
 
         <div className="min-h-[390px] rounded-xl border border-slate-200/80 bg-white p-5 shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
