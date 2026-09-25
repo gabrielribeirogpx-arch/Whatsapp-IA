@@ -3,7 +3,7 @@
 import { useEffect, useId, useMemo, useState } from 'react';
 import { Cell, Pie, PieChart } from 'recharts';
 import { useRouter } from 'next/navigation';
-import { AlertTriangle, CalendarDays, CheckCircle2, Clock3, Gauge, MessageSquare, RadioTower, Send, Star, TrendingUp, UsersRound, Zap } from "lucide-react";
+import { AlertTriangle, CalendarDays, CheckCircle2, Clock3, Gauge, MessageSquare, RadioTower, Send, Star, UsersRound, Zap } from "lucide-react";
 import type { LucideIcon } from 'lucide-react';
 
 import DashboardChart from '../../components/DashboardChart';
@@ -20,11 +20,12 @@ type DashboardViewModel = {
   activeConversations: number;
   activeLeads: number;
   messagesToday: number;
-  responseRate: number;
+  responseRate: number | null;
   conversions: number;
   topFlows: Array<{ name: string; value: number }>;
-  channels: Array<{ name: string; value: number }>;
-  performance: { avgResponseTimeSeconds: number | null; resolvedConversations: number; csat: number | null; abandonmentRate: number; };
+  channels: Array<{ name: string; value: number; count: number }>;
+  channelConversationsTotal: number;
+  performance: { avgResponseTimeSeconds: number | null; completedSessions: number; csat: number | null; abandonmentRate: number | null; };
 };
 
 type Period = '24h' | '7d' | '30d' | '90d';
@@ -34,11 +35,12 @@ const FALLBACK_VIEW_MODEL: DashboardViewModel = {
   activeConversations: 0,
   activeLeads: 0,
   messagesToday: 0,
-  responseRate: 0,
+  responseRate: null,
   conversions: 0,
   topFlows: [],
   channels: [],
-  performance: { avgResponseTimeSeconds: null, resolvedConversations: 0, csat: null, abandonmentRate: 0 },
+  channelConversationsTotal: 0,
+  performance: { avgResponseTimeSeconds: null, completedSessions: 0, csat: null, abandonmentRate: null },
 };
 
 
@@ -132,10 +134,6 @@ function getGreeting() {
 const cardClassName =
   'rounded-xl border border-slate-200/80 bg-white p-5 shadow-[0_1px_2px_rgba(15,23,42,0.03)]';
 
-function SkeletonLine({ width = '100%', height = 12 }: { width?: string; height?: number }) {
-  return <div className="rounded-full bg-gradient-to-r from-emerald-50 via-slate-200 to-emerald-50" style={{ width, height }} />;
-}
-
 const Sparkline = ({ values = [], className = 'h-full w-full overflow-hidden' }: { values?: number[]; className?: string }) => {
   const gradientId = useId();
   const safeValues = values.length ? values : [0,0,0,0,0,0,0];
@@ -190,15 +188,7 @@ function getKpiSeries(key: (typeof kpiMeta)[number]['key'], timeseries?: Dashboa
     case 'messagesToday':
       return toSafeArray(safeTimeseries.messages_received);
     case 'responseRate': {
-      const sent = toSafeArray(safeTimeseries.messages_sent);
-      const received = toSafeArray(safeTimeseries.messages_received);
-      const maxLength = Math.max(sent.length, received.length);
-      return Array.from({ length: maxLength }, (_, index) => {
-        const sentValue = sent[index] ?? 0;
-        const receivedValue = received[index] ?? 0;
-        if (receivedValue <= 0) return 0;
-        return (sentValue / receivedValue) * 100;
-      });
+      return [];
     }
     case 'conversions':
       return toSafeArray(safeTimeseries.conversions);
@@ -213,7 +203,7 @@ const kpiMeta: Array<{
   icon: LucideIcon;
   suffix: string;
 }> = [
-  { key: 'activeConversations', label: 'Conversas ativas', icon: MessageSquare, suffix: '' },
+  { key: 'activeConversations', label: 'Conversas movimentadas', icon: MessageSquare, suffix: '' },
   { key: 'activeLeads', label: 'Leads ativos', icon: UsersRound, suffix: '' },
   { key: 'messagesToday', label: 'Mensagens', icon: Send, suffix: '' },
   { key: 'responseRate', label: 'Taxa de resposta', icon: Gauge, suffix: '%' },
@@ -359,20 +349,21 @@ export default function DashboardPage() {
       activeConversations: Number(kpis?.conversations ?? uniqueConversations.length),
       activeLeads: Number(kpis?.leads ?? uniqueConversations.filter((conversation) => conversation.mode === 'human').length),
       messagesToday: Number((kpis as any)?.messages_today ?? (Number(kpis?.messages_received ?? 0) + Number(kpis?.messages_sent ?? 0))),
-      responseRate: Number(kpis?.response_rate ?? 0),
+      responseRate: kpis?.response_rate === null ? null : Number(kpis?.response_rate ?? 0),
       conversions: Number(kpis?.conversions ?? 0),
       topFlows: (summary?.top_flows ?? flowFallback).map((f) => ({ name: f.name, value: Number((f as any).conversations ?? (f as any).value ?? 0) })),
-      channels: (summary?.channels ?? []).map((c) => ({ name: c.channel, value: Number(c.percentage) ?? 0 })),
+      channels: (summary?.channels ?? []).map((c) => ({ name: c.channel, value: Number(c.percentage) || 0, count: Number(c.count) || 0 })),
+      channelConversationsTotal: Number(summary?.channel_conversations_total ?? 0),
       performance: {
         avgResponseTimeSeconds: summary?.performance?.avg_response_time_seconds ?? null,
-        resolvedConversations: Number(summary?.performance?.resolved_conversations ?? 0),
+        completedSessions: Number(summary?.performance?.completed_sessions_current ?? summary?.performance?.resolved_conversations ?? 0),
         csat: summary?.performance?.csat ?? null,
-        abandonmentRate: Number(summary?.performance?.abandonment_rate ?? 0),
+        abandonmentRate: summary?.performance?.abandonment_rate_current ?? summary?.performance?.abandonment_rate ?? null,
       },
     };
   }, [flows, kpis, uniqueConversations, summary]);
 
-  const totalChannels = (viewModel.channels || []).reduce((acc, c) => acc + c.value, 0);
+  const totalChannels = viewModel.channelConversationsTotal;
   const recentConversations = uniqueConversations.slice(0, 5);
   const analyticsSeries = {
     labels: timeseries?.labels ?? [],
@@ -404,17 +395,17 @@ export default function DashboardPage() {
 
   const normalizedChannelItems = useMemo(() => {
     const base = [
-      { name: 'WhatsApp', value: 0 },
-      { name: 'Site / Chat', value: 0 },
-      { name: 'Instagram', value: 0 },
-      { name: 'Facebook', value: 0 },
-      { name: 'Outros', value: 0 },
+      { name: 'WhatsApp', value: 0, count: 0 },
+      { name: 'Site / Chat', value: 0, count: 0 },
+      { name: 'Instagram', value: 0, count: 0 },
+      { name: 'Facebook', value: 0, count: 0 },
+      { name: 'Outros', value: 0, count: 0 },
     ];
     (viewModel.channels || []).forEach((channel) => {
       const key = channel.name.trim().toLowerCase();
       const target = base.find((item) => item.name.toLowerCase() === key);
-      if (target) target.value = channel.value;
-      else base[4].value += channel.value;
+      if (target) { target.value = channel.value; target.count = channel.count; }
+      else { base[4].value += channel.value; base[4].count += channel.count; }
     });
     const total = base.reduce((sum, item) => sum + item.value, 0);
     return total === 0 ? [] : base;
@@ -423,9 +414,9 @@ export default function DashboardPage() {
   const isPanelLoading = (!flows.length && !conversations.length) && (isLoading || !mounted);
   const performanceKpis = [
     { label: 'Resp. méd.', value: viewModel.performance.avgResponseTimeSeconds !== null ? `${viewModel.performance.avgResponseTimeSeconds}s` : 'Sem dados', icon: Clock3, className: 'border-indigo-100/70 bg-indigo-50/50 text-indigo-500 ring-indigo-100/60' },
-    { label: 'Resolvidas', value: viewModel.performance.resolvedConversations, icon: CheckCircle2, className: 'border-emerald-100/70 bg-emerald-50/50 text-emerald-500 ring-emerald-100/60' },
+    { label: 'Sessões concluídas', value: viewModel.performance.completedSessions, icon: CheckCircle2, className: 'border-emerald-100/70 bg-emerald-50/50 text-emerald-500 ring-emerald-100/60' },
     { label: 'CSAT', value: viewModel.performance.csat ?? '—', icon: Star, className: 'border-amber-100/70 bg-amber-50/50 text-amber-500 ring-amber-100/60' },
-    { label: 'Abandono', value: `${viewModel.performance.abandonmentRate}%`, icon: AlertTriangle, className: 'border-orange-100/70 bg-orange-50/50 text-orange-500 ring-orange-100/60' },
+    { label: 'Abandono', value: viewModel.performance.abandonmentRate === null ? '—' : `${viewModel.performance.abandonmentRate}%`, icon: AlertTriangle, className: 'border-orange-100/70 bg-orange-50/50 text-orange-500 ring-orange-100/60' },
   ];
 
   const panelConfig = {
@@ -503,11 +494,13 @@ export default function DashboardPage() {
   {safeKpis.map((item) => {
     if (!item) return null;
     const rawValue = viewModel?.[item.key as keyof typeof viewModel];
-    const value = typeof rawValue === 'number' || typeof rawValue === 'string' ? rawValue : 0;
-    const numericValue = Number(value) ?? 0;
+    const isUnavailable = rawValue === null;
+    const numericValue = typeof rawValue === 'number' ? rawValue : 0;
     const series = getKpiSeries(item.key, timeseries);
-    const sparklineSeries = series.length ? series : [0, 0, 0, 0, 0, 0, 0];
-    const delta = item.key === 'messagesToday' ? (kpis as any)?.messages_delta as number | null | undefined : undefined;
+    const delta = item.key === 'messagesToday' ? (kpis as any)?.messages_delta as number | null | undefined
+      : item.key === 'responseRate' ? (kpis as any)?.response_rate_delta as number | null | undefined
+      : item.key === 'conversions' ? (kpis as any)?.conversions_delta as number | null | undefined
+      : undefined;
     const hasRealDelta = delta !== undefined;
     const trendText = hasRealDelta ? 'vs. período anterior' : '';
     const trendPrefix = typeof delta === 'number' && delta >= 0 ? '↑' : '↓';
@@ -523,8 +516,7 @@ export default function DashboardPage() {
           <div className="min-w-0 flex-1">
             <span className="text-xs font-medium text-slate-500">{item.label}</span>
             <span className="mt-2 block text-[28px] font-semibold leading-none tracking-[-0.035em] text-slate-950">
-              <AnimatedNumber value={numericValue} />
-              {item.suffix ?? ''}
+              {isUnavailable ? '—' : <><AnimatedNumber value={numericValue} />{item.suffix ?? ''}</>}
             </span>
           </div>
           <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-slate-50 text-slate-500">
@@ -541,7 +533,7 @@ export default function DashboardPage() {
           </span>
 
           <div className="flex h-7 w-20 shrink-0 items-center justify-end">
-            <Sparkline values={sparklineSeries} className="h-7 w-20" />
+            {series.length ? <Sparkline values={series} className="h-7 w-20" /> : null}
           </div>
         </div>
       </div>
@@ -580,24 +572,25 @@ export default function DashboardPage() {
         <div className={`${cardClassName} flex min-h-[224px] flex-col p-4 sm:p-5`}>
           <div className="mb-4 flex min-h-8 items-center justify-between gap-3">
             <p className="m-0 text-sm font-semibold text-slate-900">Top fluxos</p>
-            <button type="button" className="rounded-md border border-slate-200/80 bg-white px-2.5 py-1.5 text-[11px] font-medium text-slate-500 transition-colors hover:border-slate-300 hover:bg-slate-50 hover:text-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-200">Por conversas</button>
+            <span className="text-[11px] font-medium text-slate-500">Por conversas</span>
           </div>
           {flowsError ? <p className="text-sm text-red-700">{flowsError}</p> : viewModel.topFlows.length === 0 ? <div className="grid min-h-[116px] flex-1 place-items-center rounded-lg border border-slate-100 bg-slate-50/60 px-5 py-4 text-center"><div><span className="mx-auto inline-flex h-8 w-8 items-center justify-center rounded-lg bg-white text-slate-400 ring-1 ring-inset ring-slate-200"><Zap size={15} strokeWidth={1.8} /></span><p className="m-0 mt-2.5 text-sm font-semibold text-slate-800">Nenhum fluxo ativo ainda</p><p className="m-0 mt-1 max-w-[280px] text-xs leading-5 text-slate-500">Crie seu primeiro fluxo automatizado para começar a coletar métricas.</p></div></div> : <div className="space-y-3">{(viewModel.topFlows.slice(0,5)).map((flow) => {
-            const pct = Math.max(0, Math.min(100, Math.round(flow.value || 0)));
-            return <div key={flow.name} className="grid grid-cols-[20px_1fr_auto_auto] items-center gap-3"><span className="h-5 w-5 rounded bg-emerald-100" /><span className="text-sm font-medium text-slate-700">{flow.name}</span><span className="text-sm font-semibold text-slate-800">{flow.value}</span><span className="text-sm text-slate-500">{pct}%</span><div className="col-span-4 h-2 rounded-full bg-slate-100"><div className="h-2 rounded-full bg-emerald-500" style={{ width: `${pct}%` }} /></div></div>;
+            const maxCount = Math.max(...viewModel.topFlows.map((item) => item.value), 1);
+            const barWidth = Math.round((flow.value / maxCount) * 100);
+            return <div key={flow.name} className="grid grid-cols-[20px_1fr_auto] items-center gap-3"><span className="h-5 w-5 rounded bg-emerald-100" /><span className="text-sm font-medium text-slate-700">{flow.name}</span><span className="text-sm font-semibold text-slate-800">{flow.value} conversas</span><div className="col-span-3 h-2 rounded-full bg-slate-100"><div className="h-2 rounded-full bg-emerald-500" style={{ width: `${barWidth}%` }} /></div></div>;
           })}</div>}
           <button type="button" onClick={() => setActivePanel('flows')} className="mt-3 inline-flex min-h-8 items-end justify-center border-t border-slate-100 pt-2.5 text-xs font-medium text-slate-500 transition-colors hover:text-emerald-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-200">Ver todos os fluxos <span aria-hidden="true" className="ml-1">→</span></button>
         </div>
 
         <div className={`${cardClassName} flex min-h-[224px] flex-col p-4 sm:p-5`}>
           <div className="mb-4 flex min-h-8 items-center"><p className="m-0 text-sm font-semibold text-slate-900">Canais de entrada</p></div>
-          {normalizedChannelItems.length === 0 ? <div className="grid min-h-[116px] flex-1 place-items-center rounded-lg border border-slate-100 bg-slate-50/60 px-5 py-4 text-center"><div><span className="mx-auto inline-flex h-8 w-8 items-center justify-center rounded-lg bg-white text-slate-400 ring-1 ring-inset ring-slate-200"><RadioTower size={15} strokeWidth={1.8} /></span><p className="m-0 mt-2.5 text-sm font-semibold text-slate-800">Nenhum canal conectado</p><p className="m-0 mt-1 text-xs leading-5 text-slate-500">Conecte WhatsApp, Instagram ou Webchat.</p></div></div> : <div className="flex items-center justify-between gap-4"><div className="relative flex min-h-[190px] items-center justify-center overflow-visible"><PieChart width={190} height={190}><Pie data={normalizedChannelItems} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={52} outerRadius={74} paddingAngle={2} stroke="none">{normalizedChannelItems.map((item) => <Cell key={item.name} fill={channelLegendColors[item.name.toLowerCase()] ?? '#94A3B8'} />)}</Pie></PieChart><div className="pointer-events-none absolute grid h-24 w-24 place-items-center rounded-full bg-white text-center"><p className="m-0 text-xs text-slate-500">Total</p><p className="m-0 text-2xl font-bold">{totalChannels}</p></div></div><div className="space-y-2 text-sm flex-1">{normalizedChannelItems.map((ch) => <div key={ch.name} className="flex items-center justify-between gap-3"><span className="inline-flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: channelLegendColors[ch.name.toLowerCase()] ?? '#94A3B8' }} />{ch.name}</span><span className="font-semibold text-slate-700">{ch.value}%</span></div>)}</div></div>}
+          {normalizedChannelItems.length === 0 ? <div className="grid min-h-[116px] flex-1 place-items-center rounded-lg border border-slate-100 bg-slate-50/60 px-5 py-4 text-center"><div><span className="mx-auto inline-flex h-8 w-8 items-center justify-center rounded-lg bg-white text-slate-400 ring-1 ring-inset ring-slate-200"><RadioTower size={15} strokeWidth={1.8} /></span><p className="m-0 mt-2.5 text-sm font-semibold text-slate-800">Sem conversas no período</p><p className="m-0 mt-1 text-xs leading-5 text-slate-500">A distribuição aparecerá quando houver conversas movimentadas.</p></div></div> : <div className="flex items-center justify-between gap-4"><div className="relative flex min-h-[190px] items-center justify-center overflow-visible"><PieChart width={190} height={190}><Pie data={normalizedChannelItems} dataKey="count" nameKey="name" cx="50%" cy="50%" innerRadius={52} outerRadius={74} paddingAngle={2} stroke="none">{normalizedChannelItems.map((item) => <Cell key={item.name} fill={channelLegendColors[item.name.toLowerCase()] ?? '#94A3B8'} />)}</Pie></PieChart><div className="pointer-events-none absolute grid h-24 w-24 place-items-center rounded-full bg-white text-center"><p className="m-0 text-xs text-slate-500">Conversas</p><p className="m-0 text-2xl font-bold">{totalChannels}</p></div></div><div className="space-y-2 text-sm flex-1">{normalizedChannelItems.filter((ch) => ch.count > 0).map((ch) => <div key={ch.name} className="flex items-center justify-between gap-3"><span className="inline-flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: channelLegendColors[ch.name.toLowerCase()] ?? '#94A3B8' }} />{ch.name}</span><span className="font-semibold text-slate-700">{ch.count} · {ch.value}%</span></div>)}</div></div>}
           <button type="button" onClick={() => setActivePanel('channels')} className="mt-3 inline-flex min-h-8 items-end justify-center border-t border-slate-100 pt-2.5 text-xs font-medium text-slate-500 transition-colors hover:text-emerald-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-200">Ver todos os canais <span aria-hidden="true" className="ml-1">→</span></button>
         </div>
 
         <div className={`${cardClassName} flex min-h-[224px] flex-col p-4 sm:p-5`}>
           <div className="mb-4 flex min-h-8 items-center"><p className="m-0 text-sm font-semibold text-slate-900">Desempenho geral</p></div>
-          {viewModel.performance.avgResponseTimeSeconds === null && viewModel.performance.resolvedConversations === 0 && viewModel.performance.csat === null ? <div className="flex-1 rounded-lg bg-slate-50/60 px-3 py-3"><div className="mb-2.5 flex items-center gap-2"><span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-white text-slate-400 ring-1 ring-inset ring-slate-200"><TrendingUp size={14} strokeWidth={1.8} /></span><p className="m-0 text-xs font-medium leading-4 text-slate-600">Dados aparecerão aqui conforme as conversas acontecerem.</p></div><div className="grid grid-cols-2">{[1,2,3,4].map((item) => <div key={item} className={`px-3 py-2.5 ${item % 2 === 1 ? 'border-r border-slate-200/80' : ''} ${item <= 2 ? 'border-b border-slate-200/80' : ''}`}><SkeletonLine width="52%" height={13} /><div className="mt-2"><SkeletonLine width="42%" height={8} /></div></div>)}</div></div> : <div className="grid flex-1 grid-cols-2 rounded-lg bg-slate-50/40">{performanceKpis.map((item, index) => { const Icon = item.icon; return <div key={item.label} className={`flex min-h-[82px] items-center gap-3.5 px-3.5 py-3 ${index % 2 === 0 ? 'border-r border-slate-200/50' : ''} ${index < 2 ? 'border-b border-slate-200/50' : ''}`}><span className={`inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border ring-1 ring-inset ${item.className}`}><Icon size={13} strokeWidth={1.7} /></span><div className="min-w-0"><p className={`m-0 text-lg font-medium leading-none tracking-[-0.015em] ${item.label === 'CSAT' && item.value === '—' ? 'text-slate-400' : 'text-slate-900'}`}>{item.value}</p><p className="m-0 mt-1.5 text-[10px] font-normal leading-tight tracking-[0.01em] text-slate-500">{item.label}</p></div></div>; })}</div>}
+          <div className="grid flex-1 grid-cols-2 rounded-lg bg-slate-50/40">{performanceKpis.map((item, index) => { const Icon = item.icon; return <div key={item.label} className={`flex min-h-[82px] items-center gap-3.5 px-3.5 py-3 ${index % 2 === 0 ? 'border-r border-slate-200/50' : ''} ${index < 2 ? 'border-b border-slate-200/50' : ''}`}><span className={`inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border ring-1 ring-inset ${item.className}`}><Icon size={13} strokeWidth={1.7} /></span><div className="min-w-0"><p className={`m-0 text-lg font-medium leading-none tracking-[-0.015em] ${item.value === '—' ? 'text-slate-400' : 'text-slate-900'}`}>{item.value}</p><p className="m-0 mt-1.5 text-[10px] font-normal leading-tight tracking-[0.01em] text-slate-500">{item.label}</p></div></div>; })}</div>
           <div className="mt-auto pt-3"><button type="button" onClick={() => setActivePanel('report')} className="inline-flex min-h-8 w-full items-end justify-center border-t border-slate-100 pt-2.5 text-xs font-medium text-slate-500 transition-colors hover:text-emerald-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-200">Ver relatório completo <span aria-hidden="true" className="ml-1">→</span></button></div>
         </div>
       </div>
@@ -628,14 +621,10 @@ export default function DashboardPage() {
             </div>
           ) : <div className="grid min-h-[260px] place-items-center rounded-2xl border border-dashed border-emerald-200 bg-white/70 p-6 text-center"><p className="text-sm font-medium text-slate-600">Sem fluxos por enquanto. Crie um novo fluxo para visualizar detalhes aqui.</p></div>
         ) : null}
-        {activePanel === 'channels' ? (
-          <div className="space-y-3">
-            {['WhatsApp', 'Instagram', 'Webchat'].map((channel) => <div key={channel} className="flex items-center justify-between rounded-2xl border border-emerald-100 bg-white/90 p-4"><div><p className="m-0 text-sm font-semibold text-slate-900">{channel}</p><p className="mt-1 text-xs text-slate-500">Canal conectado ao dashboard</p></div><span className="rounded-full bg-emerald-100 px-2 py-1 text-[11px] font-semibold text-emerald-700">Ativo</span></div>)}
-          </div>
-        ) : null}
+        {activePanel === 'channels' ? <div className="space-y-3">{normalizedChannelItems.filter((channel) => channel.count > 0).map((channel) => <div key={channel.name} className="flex items-center justify-between rounded-2xl border border-emerald-100 bg-white/90 p-4"><div><p className="m-0 text-sm font-semibold text-slate-900">{channel.name}</p><p className="mt-1 text-xs text-slate-500">Conversas movimentadas no período</p></div><span className="text-sm font-semibold text-slate-700">{channel.count} · {channel.value}%</span></div>)}</div> : null}
         {activePanel === 'report' ? (
           <div className="space-y-4">
-            <div className="grid gap-3 sm:grid-cols-2">{[{ label: 'Conversões', value: viewModel.conversions }, { label: 'Taxa de resposta', value: `${viewModel.responseRate}%` }, { label: 'CSAT', value: viewModel.performance.csat ?? 'Sem dados' }, { label: 'Abandono', value: `${viewModel.performance.abandonmentRate}%` }].map((item) => <div key={item.label} className="rounded-2xl border border-emerald-100 bg-white p-4"><p className="m-0 text-xs uppercase tracking-wide text-slate-500">{item.label}</p><p className="mt-2 text-xl font-bold text-slate-900">{item.value}</p></div>)}</div>
+            <div className="grid gap-3 sm:grid-cols-2">{[{ label: 'Conversões', value: viewModel.conversions }, { label: 'Taxa de resposta', value: viewModel.responseRate === null ? 'Sem dados' : `${viewModel.responseRate}%` }, { label: 'CSAT', value: viewModel.performance.csat ?? 'Sem dados' }, { label: 'Abandono', value: viewModel.performance.abandonmentRate === null ? 'Sem dados' : `${viewModel.performance.abandonmentRate}%` }].map((item) => <div key={item.label} className="rounded-2xl border border-emerald-100 bg-white p-4"><p className="m-0 text-xs uppercase tracking-wide text-slate-500">{item.label}</p><p className="mt-2 text-xl font-bold text-slate-900">{item.value}</p></div>)}</div>
             <div className="rounded-2xl border border-emerald-100 bg-white p-4"><p className="m-0 text-sm font-semibold text-slate-900">Tendências</p><p className="mt-1 text-sm text-slate-500">As conversões seguiram estáveis no período e a taxa de resposta apresentou melhor consistência nas últimas interações.</p></div>
           </div>
         ) : null}
