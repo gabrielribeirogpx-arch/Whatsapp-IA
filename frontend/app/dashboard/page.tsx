@@ -207,27 +207,6 @@ function getKpiSeries(key: (typeof kpiMeta)[number]['key'], timeseries?: Dashboa
   }
 }
 
-function getDeltaPercent(series: number[]): number {
-  const safeSeries = toSafeArray(series);
-  if (!safeSeries.length) return 0;
-
-  const midpoint = Math.floor(safeSeries.length / 2);
-  if (midpoint <= 0) return 0;
-
-  const firstHalf = safeSeries.slice(0, midpoint);
-  const secondHalf = safeSeries.slice(midpoint);
-
-  const firstSum = firstHalf.reduce((sum, value) => sum + value, 0);
-  const secondSum = secondHalf.reduce((sum, value) => sum + value, 0);
-
-  if (firstSum <= 0) {
-    if (secondSum <= 0) return 0;
-    return 100;
-  }
-
-  const delta = ((secondSum - firstSum) / firstSum) * 100;
-  return Number.isFinite(delta) ? Math.round(delta) : 0;
-}
 const kpiMeta: Array<{
   key: keyof Pick<DashboardViewModel, 'activeConversations' | 'activeLeads' | 'messagesToday' | 'responseRate' | 'conversions'>;
   label: string;
@@ -236,7 +215,7 @@ const kpiMeta: Array<{
 }> = [
   { key: 'activeConversations', label: 'Conversas ativas', icon: MessageSquare, suffix: '' },
   { key: 'activeLeads', label: 'Leads ativos', icon: UsersRound, suffix: '' },
-  { key: 'messagesToday', label: 'Mensagens hoje', icon: Send, suffix: '' },
+  { key: 'messagesToday', label: 'Mensagens', icon: Send, suffix: '' },
   { key: 'responseRate', label: 'Taxa de resposta', icon: Gauge, suffix: '%' },
   { key: 'conversions', label: 'Conversões', icon: CheckCircle2, suffix: '' },
 ];
@@ -376,27 +355,22 @@ export default function DashboardPage() {
   const viewModel = useMemo<DashboardViewModel>(() => {
     const activeFlows = flows.filter((flow) => flow.is_active);
     const flowFallback = activeFlows.length ? activeFlows.slice(0, 5).map((flow) => ({ name: flow.name, value: 0 })) : FALLBACK_VIEW_MODEL.topFlows;
-    const msgsToday = uniqueConversations.filter((c) => {
-      const d = new Date(c.updated_at);
-      const now = new Date();
-      return !Number.isNaN(d.getTime()) && d.getDate() === now.getDate() && d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
-    }).length;
     return {
-      activeConversations: Number(kpis?.conversations) || uniqueConversations.length || 0,
-      activeLeads: Number(kpis?.leads) || uniqueConversations.filter((conversation) => conversation.mode === 'human').length || 0,
-      messagesToday: Number((kpis as any)?.messages_today) || Number(kpis?.messages_received || 0) + Number(kpis?.messages_sent || 0) || msgsToday || 0,
-      responseRate: Number(kpis?.response_rate) || 0,
-      conversions: Number(kpis?.conversions) || 0,
-      topFlows: (summary?.top_flows || flowFallback).map((f) => ({ name: f.name, value: Number((f as any).conversations ?? (f as any).value ?? 0) })),
-      channels: (summary?.channels || []).map((c) => ({ name: c.channel, value: Number(c.percentage) || 0 })),
+      activeConversations: Number(kpis?.conversations ?? uniqueConversations.length),
+      activeLeads: Number(kpis?.leads ?? uniqueConversations.filter((conversation) => conversation.mode === 'human').length),
+      messagesToday: Number((kpis as any)?.messages_today ?? (Number(kpis?.messages_received ?? 0) + Number(kpis?.messages_sent ?? 0))),
+      responseRate: Number(kpis?.response_rate ?? 0),
+      conversions: Number(kpis?.conversions ?? 0),
+      topFlows: (summary?.top_flows ?? flowFallback).map((f) => ({ name: f.name, value: Number((f as any).conversations ?? (f as any).value ?? 0) })),
+      channels: (summary?.channels ?? []).map((c) => ({ name: c.channel, value: Number(c.percentage) ?? 0 })),
       performance: {
         avgResponseTimeSeconds: summary?.performance?.avg_response_time_seconds ?? null,
-        resolvedConversations: Number(summary?.performance?.resolved_conversations) || 0,
+        resolvedConversations: Number(summary?.performance?.resolved_conversations ?? 0),
         csat: summary?.performance?.csat ?? null,
-        abandonmentRate: Number(summary?.performance?.abandonment_rate) || 0,
+        abandonmentRate: Number(summary?.performance?.abandonment_rate ?? 0),
       },
     };
-  }, [conversations, flows, kpis, uniqueConversations, summary]);
+  }, [flows, kpis, uniqueConversations, summary]);
 
   const totalChannels = (viewModel.channels || []).reduce((acc, c) => acc + c.value, 0);
   const recentConversations = uniqueConversations.slice(0, 5);
@@ -417,8 +391,8 @@ export default function DashboardPage() {
 
   const chartData = safeSeries.labels.map((label, i) => ({
     name: label,
-    sent: safeSeries.messages_sent[i] || 0,
-    received: safeSeries.messages_received[i] || 0,
+    sent: safeSeries.messages_sent[i] ?? 0,
+    received: safeSeries.messages_received[i] ?? 0,
   }));
 
   const xAxisTickInterval =
@@ -530,12 +504,13 @@ export default function DashboardPage() {
     if (!item) return null;
     const rawValue = viewModel?.[item.key as keyof typeof viewModel];
     const value = typeof rawValue === 'number' || typeof rawValue === 'string' ? rawValue : 0;
-    const numericValue = Number(value) || 0;
+    const numericValue = Number(value) ?? 0;
     const series = getKpiSeries(item.key, timeseries);
     const sparklineSeries = series.length ? series : [0, 0, 0, 0, 0, 0, 0];
-    const delta = getDeltaPercent(sparklineSeries);
-    const trendText = 'vs. período anterior';
-    const trendPrefix = delta >= 0 ? '↑' : '↓';
+    const delta = item.key === 'messagesToday' ? (kpis as any)?.messages_delta as number | null | undefined : undefined;
+    const hasRealDelta = delta !== undefined;
+    const trendText = hasRealDelta ? 'vs. período anterior' : '';
+    const trendPrefix = typeof delta === 'number' && delta >= 0 ? '↑' : '↓';
     const Icon = item.icon;
 
     return (
@@ -559,7 +534,7 @@ export default function DashboardPage() {
 
         <div className="relative z-10 mt-auto flex w-full items-end justify-between gap-2 pt-4">
           <span className="inline-flex min-w-0 flex-wrap items-center gap-x-1 gap-y-0.5 text-[11px] leading-4">
-            <span className={delta >= 0 ? 'font-semibold text-emerald-600' : 'font-semibold text-rose-600'}>{trendPrefix} {Math.abs(delta)}%</span>
+            {hasRealDelta ? <span className={typeof delta === 'number' && delta >= 0 ? 'font-semibold text-emerald-600' : typeof delta === 'number' ? 'font-semibold text-rose-600' : 'font-semibold text-slate-400'}>{typeof delta === 'number' ? `${trendPrefix} ${Math.abs(delta)}%` : '—'}</span> : null}
             <span className="font-normal text-slate-400">
               {trendText}
             </span>
