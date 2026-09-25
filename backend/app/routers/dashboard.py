@@ -11,6 +11,11 @@ from sqlalchemy.orm import Session
 from app.db.session import SessionLocal, get_db
 from app.models import AuditLog, Contact, Conversation, Flow, FlowEvent, FlowSession, Lead, Message, PipelineStage, Product, Tenant
 from app.models.lead import LeadStatus
+from app.services.dashboard_time import (
+    iter_daily_buckets,
+    percentage_delta,
+    resolve_dashboard_time_range,
+)
 from app.services.realtime_service import sse_broker
 from app.services.websocket_auth import authenticate_ws_user
 from app.services.tenant_service import get_current_tenant
@@ -21,17 +26,9 @@ logger = logging.getLogger(__name__)
 
 
 def _dashboard_date_range(period: str, start_date: date | None, end_date: date | None) -> tuple[datetime, datetime, int]:
-    """Return an inclusive UI date range as half-open UTC datetime bounds."""
-    if start_date is not None or end_date is not None:
-        if start_date is None or end_date is None or end_date < start_date:
-            raise ValueError("start_date and end_date must define a valid range")
-        start_datetime = datetime.combine(start_date, time.min)
-        end_datetime = datetime.combine(end_date + timedelta(days=1), time.min)
-        return start_datetime, end_datetime, (end_date - start_date).days + 1
-
-    days = {"24h": 1, "7d": 7, "30d": 30, "90d": 90}.get(period, 7)
-    end_datetime = datetime.utcnow()
-    return end_datetime - timedelta(days=days), end_datetime, days
+    """Backward-compatible adapter; new code should use the canonical resolver."""
+    window = resolve_dashboard_time_range(period, start_date, end_date)
+    return window.current_start, window.current_end, window.bucket_count
 
 
 class DashboardTotalsOut(BaseModel):
@@ -78,6 +75,20 @@ class DashboardAnalyticsKpisOut(BaseModel):
     messages_sent_today: int
     messages_received_today: int
     conversions: int
+    messages_sent_current: int
+    messages_received_current: int
+    messages_sent_previous: int
+    messages_received_previous: int
+    messages_delta: float | None
+
+
+class DashboardTimeMetaOut(BaseModel):
+    current_start: datetime
+    current_end: datetime
+    previous_start: datetime
+    previous_end: datetime
+    timezone: str
+    mode: str
 
 
 class DashboardAnalyticsTimeseriesOut(BaseModel):
@@ -87,6 +98,7 @@ class DashboardAnalyticsTimeseriesOut(BaseModel):
 class DashboardAnalyticsOut(BaseModel):
     kpis: DashboardAnalyticsKpisOut
     timeseries: DashboardAnalyticsTimeseriesOut
+    meta: DashboardTimeMetaOut | None = None
 
 
 class DashboardTopFlowOut(BaseModel):
@@ -155,6 +167,7 @@ class DashboardSummaryOut(BaseModel):
     top_flows: list[DashboardTopFlowOut]
     channels: list[DashboardChannelOut]
     performance: DashboardPerformanceOut
+    meta: DashboardTimeMetaOut | None = None
 
 
 @router.get("/dashboard", response_model=DashboardOut)
@@ -278,10 +291,11 @@ def get_dashboard_analytics(
     tenant: Tenant = Depends(get_current_tenant),
 ):
     try:
-        start_datetime, end_datetime, days = _dashboard_date_range(period, start_date, end_date)
+        window = resolve_dashboard_time_range(period, start_date, end_date, now=datetime.utcnow())
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
+    start_datetime, end_datetime = window.current_start, window.current_end
     conversations_total = db.execute(
         select(func.count(Conversation.id)).where(
             Conversation.tenant_id == tenant.id,
@@ -337,6 +351,25 @@ def get_dashboard_analytics(
         )
     ).scalar() or 0
 
+    messages_sent_previous = db.execute(
+        select(func.count(Message.id)).where(
+            Message.tenant_id == tenant.id,
+            Message.from_me.is_(True),
+            Message.created_at.isnot(None),
+            Message.created_at >= window.previous_start,
+            Message.created_at < window.previous_end,
+        )
+    ).scalar() or 0
+    messages_received_previous = db.execute(
+        select(func.count(Message.id)).where(
+            Message.tenant_id == tenant.id,
+            Message.from_me.is_(False),
+            Message.created_at.isnot(None),
+            Message.created_at >= window.previous_start,
+            Message.created_at < window.previous_end,
+        )
+    ).scalar() or 0
+
     conversions_total = db.execute(
         select(func.count(Lead.id))
         .join(PipelineStage, Lead.stage_id == PipelineStage.id)
@@ -348,10 +381,7 @@ def get_dashboard_analytics(
     ).scalar() or 0
 
     messages_last_7_days: list[MessagesByDay] = []
-    for day_offset in range(days - 1, -1, -1):
-        target_day = (end_datetime - timedelta(microseconds=1)) - timedelta(days=day_offset)
-        start_of_target_day = datetime(target_day.year, target_day.month, target_day.day)
-        end_of_target_day = start_of_target_day + timedelta(days=1)
+    for start_of_target_day, end_of_target_day in iter_daily_buckets(window):
 
         sent_count = db.execute(
             select(func.count(Message.id)).where(
@@ -381,12 +411,18 @@ def get_dashboard_analytics(
             )
         )
 
-    print("[DASHBOARD METRICS]", f"tenant_id={tenant.id}", f"active_conversations={conversations_total}", f"active_leads={leads_total}", f"messages_today={messages_sent_period + messages_received_period}", f"conversions={conversions_total}")
+    current_messages = messages_sent_period + messages_received_period
+    previous_messages = messages_sent_previous + messages_received_previous
+    logger.debug(
+        "dashboard_analytics_window tenant_id=%s current_start=%s current_end=%s previous_start=%s previous_end=%s current_messages=%s previous_messages=%s",
+        tenant.id, window.current_start, window.current_end, window.previous_start,
+        window.previous_end, current_messages, previous_messages,
+    )
     return DashboardAnalyticsOut(
         kpis=DashboardAnalyticsKpisOut(
             active_conversations=conversations_total,
             active_leads=leads_total,
-            messages_today=messages_sent_period + messages_received_period,
+            messages_today=current_messages,
             conversations=conversations_total,
             contacts=contacts_total,
             leads=leads_total,
@@ -396,10 +432,16 @@ def get_dashboard_analytics(
             messages_sent_today=messages_sent_period,
             messages_received_today=messages_received_period,
             conversions=conversions_total,
+            messages_sent_current=messages_sent_period,
+            messages_received_current=messages_received_period,
+            messages_sent_previous=messages_sent_previous,
+            messages_received_previous=messages_received_previous,
+            messages_delta=percentage_delta(current_messages, previous_messages),
         ),
         timeseries=DashboardAnalyticsTimeseriesOut(
             messages_last_7_days=messages_last_7_days,
         ),
+        meta=DashboardTimeMetaOut(**window.__dict__),
     )
 
 
@@ -489,10 +531,11 @@ def get_dashboard_summary(
     tenant: Tenant = Depends(get_current_tenant),
 ):
     try:
-        start_datetime, end_datetime, _ = _dashboard_date_range(period, start_date, end_date)
+        window = resolve_dashboard_time_range(period, start_date, end_date, now=datetime.utcnow())
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
+    start_datetime, end_datetime = window.current_start, window.current_end
     flow_rows = db.execute(
         select(
             FlowEvent.flow_id,
@@ -619,4 +662,5 @@ def get_dashboard_summary(
             csat=None,
             abandonment_rate=abandonment_rate,
         ),
+        meta=DashboardTimeMetaOut(**window.__dict__),
     )

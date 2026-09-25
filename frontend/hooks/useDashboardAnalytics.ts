@@ -28,6 +28,13 @@ type AnalyticsKpis = {
   messages_sent?: number;
   response_rate?: number;
   conversions?: number;
+  messages_sent_today?: number;
+  messages_received_today?: number;
+  messages_sent_current?: number;
+  messages_received_current?: number;
+  messages_sent_previous?: number;
+  messages_received_previous?: number;
+  messages_delta?: number | null;
 };
 
 type AnalyticsResponse = {
@@ -44,7 +51,7 @@ type NormalizedSeries = {
   conversions: number[];
 };
 
-const DEFAULT_KPIS = {
+const DEFAULT_KPIS: AnalyticsKpis = {
   active_conversations: 0,
   active_leads: 0,
   messages_today: 0,
@@ -129,8 +136,8 @@ export function useDashboardAnalytics(period: DashboardPeriod = { preset: '7d' }
     if (rawSeries?.messages_last_7_days) {
       adaptedSeries = {
         labels: rawSeries.messages_last_7_days.map((d) => d.date),
-        messages_sent: rawSeries.messages_last_7_days.map((d) => Number(d.sent) || 0),
-        messages_received: rawSeries.messages_last_7_days.map((d) => Number(d.received) || 0),
+        messages_sent: rawSeries.messages_last_7_days.map((d) => Number(d.sent) ?? 0),
+        messages_received: rawSeries.messages_last_7_days.map((d) => Number(d.received) ?? 0),
         conversations: [],
         leads: [],
         conversions: [],
@@ -151,7 +158,7 @@ export function useDashboardAnalytics(period: DashboardPeriod = { preset: '7d' }
     const kpis = data?.kpis ?? DEFAULT_KPIS;
 
     const ensure = (values?: number[]) => {
-      const source = Array.isArray(values) ? (values || []).map((item) => Number(item) || 0) : [];
+      const source = Array.isArray(values) ? values.map((item) => Number(item) ?? 0) : [];
       if (source.length) return source;
       if (labels.length) return Array.from({ length: labels.length }, () => 0);
       return Array.from({ length: 7 }, () => 0);
@@ -177,16 +184,14 @@ export function useDashboardAnalytics(period: DashboardPeriod = { preset: '7d' }
 
     const sum = (arr: number[]) => arr.reduce((acc, value) => acc + value, 0);
     const calculated = {
-      conversations: Number(kpis.active_conversations ?? kpis.conversations) || sum(padded.conversations),
-      leads: Number(kpis.active_leads ?? kpis.leads) || sum(padded.leads),
-      messages_received: Number(kpis.messages_received ?? kpis.messages_today ?? kpis.messages) || sum(padded.messages_received),
-      messages_sent: Number(kpis.messages_sent) || sum(padded.messages_sent),
-      messages_today: Number(kpis.messages_today) || Number(kpis.messages_sent || 0) + Number(kpis.messages_received || 0) || sum(padded.messages_sent) + sum(padded.messages_received),
-      response_rate: Number(kpis.response_rate)
-        || (padded.messages_received.some((item) => item > 0)
-          ? Number(((sum(padded.messages_sent) / Math.max(sum(padded.messages_received), 1)) * 100).toFixed(1))
-          : 0),
-      conversions: Number(kpis.conversions) || sum(padded.conversions),
+      conversations: Number(kpis.active_conversations ?? kpis.conversations ?? sum(padded.conversations)),
+      leads: Number(kpis.active_leads ?? kpis.leads ?? sum(padded.leads)),
+      messages_received: Number(kpis.messages_received_current ?? kpis.messages_received ?? kpis.messages_received_today ?? sum(padded.messages_received)),
+      messages_sent: Number(kpis.messages_sent_current ?? kpis.messages_sent ?? kpis.messages_sent_today ?? sum(padded.messages_sent)),
+      messages_today: Number(kpis.messages_today ?? ((kpis.messages_sent_current ?? kpis.messages_sent ?? kpis.messages_sent_today ?? sum(padded.messages_sent)) + (kpis.messages_received_current ?? kpis.messages_received ?? kpis.messages_received_today ?? sum(padded.messages_received)))),
+      response_rate: Number(kpis.response_rate ?? 0),
+      conversions: Number(kpis.conversions ?? sum(padded.conversions)),
+      messages_delta: kpis.messages_delta ?? null,
     };
 
     return { kpis: calculated, timeseries: padded };
