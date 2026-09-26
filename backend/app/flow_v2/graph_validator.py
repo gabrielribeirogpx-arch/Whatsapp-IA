@@ -71,6 +71,7 @@ class FlowV2GraphValidator:
         node_ids = self._validate_nodes(nodes_payload, errors)
         self._validate_edges(edges_payload, node_ids, errors, nodes_payload)
         self._validate_choice_edges(nodes_payload, edges_payload, errors)
+        self._validate_choice_terminal_consistency(nodes_payload, edges_payload, errors)
         self._validate_ai_answer_edges(nodes_payload, edges_payload, errors)
         start_node_ids = self._start_node_ids(nodes_payload)
         if len(start_node_ids) != 1:
@@ -178,6 +179,24 @@ class FlowV2GraphValidator:
             )
             if source_handle in (None, ""):
                 errors.append(f"FLOW_V2_CHOICE_SOURCE_HANDLE_REQUIRED:{source}:{index}")
+
+    def _validate_choice_terminal_consistency(
+        self,
+        nodes: list[dict[str, Any]],
+        edges: list[dict[str, Any]],
+        errors: list[str],
+    ) -> None:
+        outgoing_sources = {
+            str(self._edge_source(edge))
+            for edge in edges
+            if isinstance(edge, dict) and self._edge_source(edge) not in (None, "")
+        }
+        for node in nodes:
+            if not isinstance(node, dict) or self._node_type(node) not in {"choice", "choice_dynamic"}:
+                continue
+            node_id = str(node.get("id") or "")
+            if node_id in outgoing_sources and self._is_terminal_node(node):
+                errors.append(f"FLOW_V2_CHOICE_TERMINAL_WITH_OUTGOING_EDGE:{node_id}")
 
 
     def _validate_ai_answer_edges(
