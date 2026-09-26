@@ -22,6 +22,16 @@ class ValidationResult:
     error: str | None = None
 
 
+APPOINTMENT_ERROR_MESSAGES = {
+    "invalid_period_format": "Não consegui entender a data ou período. Você pode tentar, por exemplo: 'segunda à tarde' ou 'dia 10 às 14h'.",
+    "invalid_date": "Essa data não parece válida. Pode informar outra data?",
+    "past_date": "Essa data ou horário já passou. Pode escolher uma nova data?",
+    "closed_day": "Entendi 😊 Nesse dia não temos atendimento. Escolha outro dia ou período para continuarmos.",
+    "outside_business_hours": "Esse horário está fora do nosso período de atendimento. Pode escolher outro horário?",
+    "no_available_window": "Não temos atendimento nesse período. Pode escolher outro período ou horário?",
+}
+
+
 def _digits(value: str) -> str:
     return re.sub(r"\D", "", value)
 
@@ -112,5 +122,7 @@ def validate_data_collection(data: dict[str, Any], raw_value: Any, metadata: dic
             else: raise ValueError("choice")
         else: raise ValueError("unsupported_type")
         return ValidationResult(True, raw, normalized)
-    except (ValueError, InvalidOperation, OverflowError, AppointmentPolicyError):
+    except AppointmentPolicyError as exc:
+        return ValidationResult(False, raw, None, exc.code)
+    except (ValueError, InvalidOperation, OverflowError):
         return ValidationResult(False, raw, None, f"invalid_{kind}")
