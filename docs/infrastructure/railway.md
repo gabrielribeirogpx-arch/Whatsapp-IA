@@ -64,6 +64,7 @@ Conclusão operacional: a versão Python versionada no repositório está em `ru
 | `PHONE_NUMBER_ID` | Conforme tenant/configuração | Identificador fallback global do número WhatsApp. |
 | `OPENAI_API_KEY` | Sim para IA | Chave de API da OpenAI. |
 | `OPENAI_MODEL` | Não | Modelo usado pela IA; padrão documentado no README é `gpt-4o-mini`. |
+| `EXTERNAL_IDENTITY_SECRET` | Quando referências externas forem derivadas | Segredo dedicado com pelo menos 32 bytes para derivar referências opacas. Não reutilizar secrets de OAuth, JWT ou criptografia; a derivação falha de forma fechada quando ausente ou fraco. |
 | `TURNSTILE_SECRET_KEY` | Sim em staging/produção | Secret server-side do Cloudflare Turnstile. |
 | `TURNSTILE_ENABLED` | Não | Controla validação Turnstile; padrão esperado `true`. |
 | `TURNSTILE_DISABLED` | Não | Somente para local/testes controlados. Não usar em produção. |
