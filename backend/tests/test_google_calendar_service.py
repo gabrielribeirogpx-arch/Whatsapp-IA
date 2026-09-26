@@ -316,3 +316,35 @@ def test_check_availability_logs_auth_diagnostics(monkeypatch, caplog):
     assert "refresh_attempted" in caplog.text
     assert "refresh_success" in caplog.text
     assert "refresh_failed_reason" in caplog.text
+
+
+def test_find_managed_appointments_uses_configured_calendar_filters_and_pagination(monkeypatch):
+    tenant_id = uuid.uuid4(); db = FakeDb(); connection = _connect(db, tenant_id)
+    connection.metadata_json = {"calendar_id": "clinic/team@example.com", "timezone": "America/Sao_Paulo"}
+    calls = []
+
+    def fake_request(self, method, path, *, params=None, **kwargs):
+        calls.append((method, path, params))
+        if len(calls) == 1:
+            return True, {"items": [{"id": "later"}], "nextPageToken": "page-2"}, 200
+        return True, {"items": [{"id": "earlier"}]}, 200
+
+    monkeypatch.setattr(GoogleCalendarService, "_request", fake_request)
+    result = GoogleCalendarService(db, tenant_id).find_managed_appointments(
+        start="2026-10-01T00:00:00-03:00", end="2026-11-01T00:00:00-03:00",
+        timezone="America/Sao_Paulo", patient_ref="asa:v1:opaque", metadata_schema="appointment-v1",
+    )
+
+    assert result["ok"] is True
+    assert result["events"] == [{"id": "later"}, {"id": "earlier"}]
+    assert len(calls) == 2
+    assert calls[0][1] == "/calendars/clinic%2Fteam%40example.com/events"
+    assert calls[0][2]["privateExtendedProperty"] == [
+        "asa_managed=true", "asa_patient_ref=asa:v1:opaque",
+    ]
+    assert calls[0][2]["timeMin"] == "2026-10-01T00:00:00-03:00"
+    assert calls[0][2]["timeMax"] == "2026-11-01T00:00:00-03:00"
+    assert calls[0][2]["singleEvents"] is True
+    assert calls[0][2]["orderBy"] == "startTime"
+    assert calls[0][2]["showDeleted"] is False
+    assert calls[1][2]["pageToken"] == "page-2"

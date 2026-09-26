@@ -25,6 +25,9 @@ BASE_URL = "https://www.googleapis.com/calendar/v3"
 TOKEN_URL = "https://oauth2.googleapis.com/token"
 NOT_CONNECTED_MESSAGE = "Google Calendar não está conectado para este workspace."
 DEFAULT_TIMEZONE = "America/Sao_Paulo"
+MANAGED_APPOINTMENTS_PAGE_SIZE = 50
+MANAGED_APPOINTMENTS_MAX_RESULTS = 100
+MANAGED_APPOINTMENTS_MAX_PAGES = 10
 
 class GoogleCalendarTokenDecryptError(RuntimeError):
     """Raised when an encrypted Google Calendar credential cannot be decrypted."""
@@ -394,6 +397,76 @@ class GoogleCalendarService:
             events = [{"event_id": e.get("id"), "html_link": e.get("htmlLink"), "title": e.get("summary"), "start": (e.get("start") or {}).get("dateTime") or (e.get("start") or {}).get("date"), "end": (e.get("end") or {}).get("dateTime") or (e.get("end") or {}).get("date")} for e in data.get("items", [])]
             return {"ok": True, "events": events}
         return self._service_call("google_calendar_list_events", kwargs, operation)
+
+    def find_managed_appointments(
+        self,
+        *,
+        start: str,
+        end: str,
+        timezone: str | None,
+        patient_ref: str,
+        metadata_schema: str,
+    ) -> dict[str, Any]:
+        """Find a bounded set of appointments using server-controlled identity.
+
+        Google performs the first authorization filter.  The adapter still
+        validates every returned event before exposing it to the flow.
+        """
+        input_payload = {"start": start, "end": end, "timezone": timezone}
+
+        def operation() -> dict[str, Any]:
+            tz = self._tenant_timezone(timezone)
+            conn = self.connection_service.get_connection(self.tenant_id, PROVIDER)
+            metadata = conn.metadata_json if conn and isinstance(conn.metadata_json, dict) else {}
+            calendar_id = str(metadata.get("calendar_id") or "primary")
+            path = f"/calendars/{quote(calendar_id, safe='')}/events"
+            base_params: dict[str, Any] = {
+                "timeMin": start,
+                "timeMax": end,
+                "timeZone": tz,
+                "singleEvents": True,
+                "orderBy": "startTime",
+                "showDeleted": False,
+                "maxResults": MANAGED_APPOINTMENTS_PAGE_SIZE,
+                "privateExtendedProperty": [
+                    "asa_managed=true",
+                    f"asa_patient_ref={patient_ref}",
+                ],
+            }
+            events: list[dict[str, Any]] = []
+            page_token: str | None = None
+            seen_tokens: set[str] = set()
+            pages = 0
+            while (
+                len(events) < MANAGED_APPOINTMENTS_MAX_RESULTS
+                and pages < MANAGED_APPOINTMENTS_MAX_PAGES
+            ):
+                pages += 1
+                params = dict(base_params)
+                if page_token:
+                    params["pageToken"] = page_token
+                ok, data, _ = self._request("GET", path, params=params)
+                if not ok:
+                    return {"ok": False, **data}
+                items = data.get("items") if isinstance(data, dict) else []
+                if isinstance(items, list):
+                    remaining = MANAGED_APPOINTMENTS_MAX_RESULTS - len(events)
+                    events.extend(item for item in items[:remaining] if isinstance(item, dict))
+                next_token = data.get("nextPageToken") if isinstance(data, dict) else None
+                if not next_token or next_token in seen_tokens:
+                    break
+                seen_tokens.add(str(next_token))
+                page_token = str(next_token)
+            return {
+                "ok": True,
+                "events": events,
+                "timezone": tz,
+                "metadata_schema": metadata_schema,
+            }
+
+        return self._service_call(
+            "google_calendar_find_managed_appointments", input_payload, operation
+        )
 
     def create_event(
         self,

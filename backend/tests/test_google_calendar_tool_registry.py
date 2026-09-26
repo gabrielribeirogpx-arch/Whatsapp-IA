@@ -398,3 +398,111 @@ def test_update_event_returns_structured_error_from_service_failure():
     assert result.structured_content == {
         "ok": False, "tool": "google_calendar_update_event", "result": {}, "error": "calendar_update_failed",
     }
+
+
+def test_find_managed_appointments_filters_untrusted_results_and_returns_minimal_dto(monkeypatch):
+    monkeypatch.setenv("EXTERNAL_IDENTITY_SECRET", "s" * 32)
+    tenant_id, contact_id = uuid.uuid4(), uuid.uuid4()
+    current_ref = derive_external_reference(
+        tenant_id=tenant_id, subject_id=contact_id, purpose=APPOINTMENT_PATIENT,
+    )
+    other_ref = derive_external_reference(
+        tenant_id=tenant_id, subject_id=uuid.uuid4(), purpose=APPOINTMENT_PATIENT,
+    )
+    other_tenant_ref = derive_external_reference(
+        tenant_id=uuid.uuid4(), subject_id=contact_id, purpose=APPOINTMENT_PATIENT,
+    )
+    calls = []
+
+    def event(event_id, metadata=None, status="confirmed"):
+        payload = {
+            "id": event_id, "status": status, "summary": "PII",
+            "description": "private", "attendees": [{"email": "x@example.com"}],
+            "start": {"dateTime": "2026-10-10T14:30:00-03:00", "timeZone": "America/Sao_Paulo"},
+            "end": {"dateTime": "2026-10-10T15:00:00-03:00", "timeZone": "America/Sao_Paulo"},
+        }
+        if metadata is not None:
+            payload["extendedProperties"] = {"private": metadata}
+        return payload
+
+    valid = {"asa_managed": "true", "asa_schema": "appointment-v1", "asa_patient_ref": current_ref}
+    returned = [
+        event("valid", valid),
+        event("other-patient", {**valid, "asa_patient_ref": other_ref}),
+        event("other-tenant", {**valid, "asa_patient_ref": other_tenant_ref}),
+        event("unknown-schema", {**valid, "asa_schema": "appointment-v999"}),
+        event("manual", {}), event("legacy"), event("cancelled", valid, "cancelled"),
+    ]
+
+    class FakeService:
+        def __init__(self, db, service_tenant_id):
+            assert service_tenant_id == tenant_id
+
+        def find_managed_appointments(self, **kwargs):
+            calls.append(kwargs)
+            return {"ok": True, "events": returned, "timezone": "America/Sao_Paulo"}
+
+    result = GoogleCalendarToolAdapter(object(), service_factory=FakeService).execute(
+        "google_calendar_find_managed_appointments",
+        {"start": "2026-10-01T00:00:00-03:00", "end": "2026-10-31T23:59:00-03:00", "timezone": "America/Sao_Paulo"},
+        ToolContext(tenant_id=tenant_id, contact_id=contact_id),
+    )
+
+    assert result.ok is True
+    assert result.output == [{
+        "id": "valid", "label": "10/10 às 14:30",
+        "start": "2026-10-10T14:30:00-03:00", "end": "2026-10-10T15:00:00-03:00",
+        "timezone": "America/Sao_Paulo",
+    }]
+    assert set(result.output[0]) == {"id", "label", "start", "end", "timezone"}
+    assert calls[0]["patient_ref"] == current_ref
+    assert calls[0]["metadata_schema"] == "appointment-v1"
+
+
+@pytest.mark.parametrize("arguments,code", [
+    ({"start": "bad", "end": "2026-10-02T00:00:00Z"}, "google_calendar_invalid_start"),
+    ({"start": "2026-10-02T00:00:00Z", "end": "bad"}, "google_calendar_invalid_end"),
+    ({"start": "2026-10-02T00:00:00Z", "end": "2026-10-01T00:00:00Z"}, "google_calendar_invalid_time_range"),
+    ({"start": "2026-01-01T00:00:00Z", "end": "2026-05-01T00:00:00Z"}, "google_calendar_time_range_too_large"),
+    ({"start": "2026-10-01T00:00:00Z", "end": "2026-10-02T00:00:00Z", "timezone": "Mars/Olympus"}, "google_calendar_invalid_timezone"),
+])
+def test_find_managed_appointments_rejects_invalid_window_before_google(monkeypatch, arguments, code):
+    monkeypatch.setenv("EXTERNAL_IDENTITY_SECRET", "s" * 32)
+    result = GoogleCalendarToolAdapter(
+        object(), service_factory=lambda *_: (_ for _ in ()).throw(AssertionError("Google must not be called")),
+    ).execute(
+        "google_calendar_find_managed_appointments", arguments,
+        ToolContext(tenant_id=uuid.uuid4(), contact_id=uuid.uuid4()),
+    )
+    assert result.ok is False
+    assert result.error_code == code
+
+
+def test_find_managed_appointments_requires_contact_and_secret_before_google(monkeypatch):
+    arguments = {"start": "2026-10-01T00:00:00Z", "end": "2026-10-02T00:00:00Z"}
+    factory = lambda *_: (_ for _ in ()).throw(AssertionError("Google must not be called"))
+    missing_contact = GoogleCalendarToolAdapter(object(), service_factory=factory).execute(
+        "google_calendar_find_managed_appointments", arguments, ToolContext(tenant_id=uuid.uuid4()),
+    )
+    assert missing_contact.error_code == "google_calendar_contact_identity_required"
+    monkeypatch.delenv("EXTERNAL_IDENTITY_SECRET", raising=False)
+    missing_secret = GoogleCalendarToolAdapter(object(), service_factory=factory).execute(
+        "google_calendar_find_managed_appointments", arguments,
+        ToolContext(tenant_id=uuid.uuid4(), contact_id=uuid.uuid4()),
+    )
+    assert missing_secret.error_code == "google_calendar_external_identity_unavailable"
+
+
+def test_find_managed_appointments_schema_has_no_identity_or_calendar_escape_hatches():
+    definition = next(item for item in google_calendar_tool_definitions(connected=True)
+                      if item["id"] == "google_calendar_find_managed_appointments")
+    assert definition["input_schema"] == {
+        "type": "object",
+        "properties": {
+            "start": {"type": "string", "format": "date-time"},
+            "end": {"type": "string", "format": "date-time"},
+            "timezone": {"type": "string", "minLength": 1},
+        },
+        "required": ["start", "end"],
+        "additionalProperties": False,
+    }
