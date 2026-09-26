@@ -13,6 +13,7 @@ class Settings:
     whatsapp_phone_id: str = os.getenv("WHATSAPP_PHONE_ID", "")
     whatsapp_verify_token: str = os.getenv("WHATSAPP_VERIFY_TOKEN", "")
     oauth_token_encryption_key: str = os.getenv("OAUTH_TOKEN_ENCRYPTION_KEY", "")
+    external_identity_secret: str = os.getenv("EXTERNAL_IDENTITY_SECRET", "")
     billing_enforcement_enabled: bool = os.getenv("BILLING_ENFORCEMENT_ENABLED", "false").lower() in {"1", "true", "yes", "on"}
     # The boolean remains the emergency/master switch.  A mode is deliberately
     # required as the second switch so production can observe decisions before
