@@ -43,6 +43,65 @@ def test_preserves_supported_natural_periods_and_rejects_invalid_text():
     with pytest.raises(AppointmentPolicyError): normalize_preferred_period("qualquer coisa",p,now=now)
 
 
+@pytest.mark.parametrize("raw", (
+    "amanhã à tarde", "amanhã a tarde", "amanha a tarde", "amanhã de tarde",
+    "amanha de tarde", "amanhã pela tarde", "Amanhã a tarde", "AMANHÃ À TARDE",
+))
+def test_real_incident_and_afternoon_language_variants(raw):
+    p=policy(business_hours={day:[{"start":"08:00","end":"12:00"},{"start":"13:00","end":"18:00"}] for day in DAYS})
+    now=datetime(2026,9,6,10,tzinfo=ZoneInfo("America/Sao_Paulo"))
+
+    result=normalize_preferred_period(raw,p,now=now)
+
+    assert result == {
+        "mode":"period", "window_start":"2026-09-07T13:00:00-03:00",
+        "window_end":"2026-09-07T18:00:00-03:00", "timezone":"America/Sao_Paulo",
+    }
+
+
+@pytest.mark.parametrize(("raw", "start", "end"), (
+    ("amanhã de manhã", "08:00:00-03:00", "12:00:00-03:00"),
+    ("amanha de manha", "08:00:00-03:00", "12:00:00-03:00"),
+    ("amanhã pela manhã", "08:00:00-03:00", "12:00:00-03:00"),
+    ("amanhã à noite", "18:00:00-03:00", "22:00:00-03:00"),
+    ("amanha a noite", "18:00:00-03:00", "22:00:00-03:00"),
+    ("amanhã de noite", "18:00:00-03:00", "22:00:00-03:00"),
+))
+def test_morning_and_night_language_variants(raw, start, end):
+    hours={day:[{"start":"08:00","end":"12:00"},{"start":"13:00","end":"22:00"}] for day in DAYS}
+    p=policy(business_hours=hours); now=datetime(2026,9,6,10,tzinfo=ZoneInfo("America/Sao_Paulo"))
+    result=normalize_preferred_period(raw,p,now=now)
+    assert result["window_start"].endswith(start)
+    assert result["window_end"].endswith(end)
+
+
+@pytest.mark.parametrize("raw", (
+    "segunda de manhã", "segunda à tarde", "terça a tarde",
+    "próxima terça à tarde", "proxima terca a tarde",
+))
+def test_weekday_language_variants(raw):
+    p=policy(business_hours={day:[{"start":"08:00","end":"12:00"},{"start":"13:00","end":"18:00"}] for day in DAYS})
+    now=datetime(2026,9,6,10,tzinfo=ZoneInfo("America/Sao_Paulo"))
+    result=normalize_preferred_period(raw,p,now=now)
+    assert result["mode"] == "period"
+    assert datetime.fromisoformat(result["window_start"]).tzinfo is not None
+
+
+@pytest.mark.parametrize("raw", ("dia 10 depois das 14h", "dia 10 às 14h", "10/10 à tarde"))
+def test_explicit_date_and_time_formats_remain_supported(raw):
+    p=policy(business_hours={day:[{"start":"08:00","end":"12:00"},{"start":"13:00","end":"18:00"}] for day in DAYS})
+    now=datetime(2026,9,6,10,tzinfo=ZoneInfo("America/Sao_Paulo"))
+    assert normalize_preferred_period(raw,p,now=now)["timezone"] == "America/Sao_Paulo"
+
+
+def test_lookup_period_uses_the_same_language_normalization():
+    p=policy(business_hours={day:[{"start":"08:00","end":"12:00"},{"start":"13:00","end":"18:00"}] for day in DAYS})
+    now=datetime(2026,9,6,10,tzinfo=ZoneInfo("America/Sao_Paulo"))
+    preferred=normalize_preferred_period("próxima terça à tarde",p,now=now)
+    lookup=normalize_appointment_lookup_period("proxima terca a tarde",p,now=now)
+    assert lookup == preferred
+
+
 def test_lookup_period_resolves_explicit_relative_and_weekday_in_local_timezone():
     p=policy(business_hours={day:[{"start":"08:00","end":"12:00"},{"start":"13:00","end":"18:00"}] for day in DAYS})
     now=datetime(2026,9,26,10,tzinfo=ZoneInfo("America/Sao_Paulo"))

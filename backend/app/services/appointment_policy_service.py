@@ -6,13 +6,14 @@ RFC3339 values that have already been normalized here.
 from __future__ import annotations
 from datetime import datetime, date, time, timedelta
 import re
+import unicodedata
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 DAYS = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
 WEEKDAYS_PT = {
-    "segunda": 0, "terça": 1, "terca": 1, "quarta": 2,
-    "quinta": 3, "sexta": 4, "sábado": 5, "sabado": 5, "domingo": 6,
+    "segunda": 0, "terca": 1, "quarta": 2,
+    "quinta": 3, "sexta": 4, "sabado": 5, "domingo": 6,
 }
 DEFAULT_BUSINESS_HOURS = {day: ([{"start":"08:00","end":"12:00"},{"start":"13:00","end":"18:00"}] if day in DAYS[:5] else []) for day in DAYS}
 DEFAULT_POLICY = {"timezone":"America/Sao_Paulo", "default_duration_minutes":60, "slot_interval_minutes":60, "input_mode":"exact_or_period", "business_hours":DEFAULT_BUSINESS_HOURS}
@@ -51,11 +52,17 @@ def intervals_for_day(day: date, policy: dict[str, Any]) -> list[tuple[datetime,
     tz=ZoneInfo(policy["timezone"])
     return [(datetime.combine(day, datetime.strptime(p["start"], "%H:%M").time(), tz), datetime.combine(day, datetime.strptime(p["end"], "%H:%M").time(), tz)) for p in policy["business_hours"][DAYS[day.weekday()]]]
 
+def _normalize_period_text(value: Any) -> str:
+    """Canonicalize Portuguese prose without changing date/time punctuation."""
+    folded = unicodedata.normalize("NFKD", str(value).strip().casefold())
+    without_marks = "".join(char for char in folded if not unicodedata.combining(char))
+    return " ".join(without_marks.split())
+
 def _target_date(raw: str, base: datetime) -> tuple[date, bool]:
     """Resolve supported Portuguese date expressions and flag weekday matches."""
     if re.search(r"\bhoje\b", raw):
         return base.date(), False
-    if "amanhã" in raw or "amanha" in raw:
+    if "amanha" in raw:
         return base.date()+timedelta(days=1), False
     match=re.search(r"\b(\d{1,2})/(\d{1,2})(?:/(\d{4}))?\b",raw)
     if match:
@@ -77,19 +84,19 @@ def _target_date(raw: str, base: datetime) -> tuple[date, bool]:
     if match:
         weekday=WEEKDAYS_PT[match.group(1)]
         offset=(weekday-base.weekday()) % 7
-        if re.search(r"\bpr[oó]xim[ao]\b", raw) and offset == 0:
+        if re.search(r"\bproxim[ao]\b", raw) and offset == 0:
             offset=7
         return base.date()+timedelta(days=offset), True
     raise AppointmentPolicyError("Use uma data, dia da semana ou período válido.")
 
 def normalize_preferred_period(text: str, policy: dict[str, Any], *, now: datetime | None=None) -> dict[str, Any]:
-    policy=validate_policy(policy); tz=ZoneInfo(policy["timezone"]); raw=" ".join(str(text).strip().casefold().split())
+    policy=validate_policy(policy); tz=ZoneInfo(policy["timezone"]); raw=_normalize_period_text(text)
     base=(now.astimezone(tz) if now and now.tzinfo else (now.replace(tzinfo=tz) if now else datetime.now(tz)))
     if not raw: raise AppointmentPolicyError("Informe uma data ou período válido.")
     target, from_weekday=_target_date(raw,base)
     if target < base.date(): raise AppointmentPolicyError("Não é possível agendar em uma data passada.")
     # Never treat the day in dd/mm as a clock: an explicit marker or a time suffix is mandatory.
-    clock=re.search(r"\b(?:às|as)\s*(\d{1,2})(?:\s*[:h]\s*(\d{2}))?\s*(?:h|hora|horas)?\b",raw) or re.search(r"\b(\d{1,2})(?::(\d{2})|h)\b",raw)
+    clock=re.search(r"\bas\s*(\d{1,2})(?:\s*[:h]\s*(\d{2}))?\s*(?:h|hora|horas)?\b",raw) or re.search(r"\b(\d{1,2})(?::(\d{2})|h)\b",raw)
     if from_weekday and target == base.date() and clock:
         candidate=datetime.combine(target,time(int(clock.group(1)),int(clock.group(2) or 0)),tz)
         if candidate <= base: target+=timedelta(days=7)
@@ -106,9 +113,9 @@ def normalize_preferred_period(text: str, policy: dict[str, Any], *, now: dateti
         end=start+timedelta(minutes=policy["default_duration_minutes"])
         if not any(start>=a and end<=b for a,b in intervals): raise AppointmentPolicyError("O horário está fora do funcionamento da clínica.")
         return {"mode":"exact","start":start.isoformat(),"end":end.isoformat(),"timezone":policy["timezone"]}
-    period_match=re.search(r"\b(manhã|manha|tarde|noite)\b",raw)
+    period_match=re.search(r"\b(manha|tarde|noite)\b",raw)
     period=period_match.group(1) if period_match else None
-    windows={"manhã":(6,12),"manha":(6,12),"tarde":(13,18),"noite":(18,22)}
+    windows={"manha":(6,12),"tarde":(13,18),"noite":(18,22)}
     if period: requested=(datetime.combine(target,time(windows[period][0]),tz),datetime.combine(target,time(windows[period][1]),tz))
     else: requested=(intervals[0][0],intervals[-1][1])
     overlap=[(max(a,requested[0]),min(b,requested[1])) for a,b in intervals if max(a,requested[0])<min(b,requested[1])]
@@ -127,7 +134,7 @@ def normalize_appointment_lookup_period(
     """
     policy = validate_policy(policy)
     tz = ZoneInfo(policy["timezone"])
-    raw = " ".join(str(text).strip().casefold().split())
+    raw = _normalize_period_text(text)
     if not raw:
         raise AppointmentPolicyError("Informe a data da consulta atual.")
     base = now.astimezone(tz) if now and now.tzinfo else (
@@ -137,13 +144,13 @@ def normalize_appointment_lookup_period(
     if target < base.date():
         raise AppointmentPolicyError("A data da consulta já passou.")
 
-    period_match = re.search(r"\b(manhã|manha|tarde|noite)\b", raw)
+    period_match = re.search(r"\b(manha|tarde|noite)\b", raw)
     if not period_match:
         start = datetime.combine(target, time.min, tz)
         end = datetime.combine(target + timedelta(days=1), time.min, tz)
     else:
         period = period_match.group(1)
-        windows = {"manhã": (6, 12), "manha": (6, 12), "tarde": (13, 18), "noite": (18, 22)}
+        windows = {"manha": (6, 12), "tarde": (13, 18), "noite": (18, 22)}
         requested = (
             datetime.combine(target, time(windows[period][0]), tz),
             datetime.combine(target, time(windows[period][1]), tz),

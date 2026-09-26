@@ -112,7 +112,10 @@ class RuntimeV2DataCollectionExecutor(BaseNodeExecutor):
             auto_retry = waiting.get('retry_mode') is True
             waiting['state'] = 'waiting_retry' if auto_retry else 'invalid'
             context.update({'data_collection': waiting, 'attempts': waiting['attempts'], 'waiting_for_input': auto_retry, 'waiting_input': False, 'waiting_retry': auto_retry, 'waiting_variable': data.get('variable_name'), 'current_node': node_id, 'variable_name': data.get('variable_name'), 'retry_mode': auto_retry, 'state': waiting['state']}); session.context = context
-            logger.info('event=data_collection_validation_failed session_id=%s node_id=%s attempt=%s result=invalid', session.id, node_id, waiting['attempts'])
+            logger.info(
+                'event=data_collection_validation_failed session_id=%s node_id=%s data_type=%s reason=%s attempt=%s result=invalid',
+                session.id, node_id, data.get('data_type'), result.error, waiting['attempts'],
+            )
             action = SendMessageAction(tenant_id=session.tenant_id, session_id=session.id, external_user_id=runtime_input.external_user_id, conversation_id=runtime_input.conversation_id, contact_id=runtime_input.contact_id, text=str(data.get('invalid_message') or 'Valor inválido.\nTente novamente.'), metadata={'node_type': 'data_collection', 'attempt': waiting['attempts'], 'retry': auto_retry})
             if auto_retry and waiting['attempts'] < int(waiting['max_attempts']): return NodeExecutionResult(actions=(action,), status='wait', next_node_id=node_id)
             if auto_retry and data.get('attempts_exceeded_behavior') == 'end':
