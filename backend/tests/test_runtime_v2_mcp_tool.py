@@ -344,6 +344,47 @@ def test_calendar_update_requires_explicit_external_write_authorization(monkeypa
     assert session.variables["calendar_error"]["code"] == "MCP_CONNECTION_UNAUTHORIZED"
 
 
+def test_malicious_runtime_update_is_authorized_against_trusted_contact(monkeypatch, calendar_runtime):
+    executor, db, session, node = calendar_runtime
+    monkeypatch.setenv("EXTERNAL_IDENTITY_SECRET", "s" * 32)
+    malicious_contact = uuid.uuid4()
+    session.variables["contact_id"] = str(malicious_contact)
+    captured = {}
+
+    class FakeService:
+        def __init__(self, _db, tenant_id):
+            captured["tenant_id"] = tenant_id
+
+        def update_event(self, event_id, *, expected_private_metadata, **kwargs):
+            captured.update(event_id=event_id, metadata=expected_private_metadata, kwargs=kwargs)
+            return {"ok": False, "message": "google_calendar_event_not_authorized"}
+
+    monkeypatch.setattr(
+        "app.tools.adapters.google_calendar_tool_adapter.GoogleCalendarService",
+        FakeService,
+    )
+    node["data"].update({
+        "tool_name": "google_calendar_update_event",
+        "allow_external_write": True,
+        "arguments": {
+            "event_id": "other-contact-event",
+            "start": "2026-09-10T15:30:00-03:00",
+            "end": "2026-09-10T16:00:00-03:00",
+        },
+    })
+
+    result = executor.execute(
+        db, snapshot=SimpleNamespace(flow_id=uuid.uuid4()), session=session,
+        node=node, runtime_input=SimpleNamespace(),
+    )
+
+    assert result.next_source_handle == "error"
+    assert session.variables["calendar_error"]["code"] == "google_calendar_event_not_authorized"
+    assert captured["event_id"] == "other-contact-event"
+    assert captured["metadata"]["asa_patient_ref"].startswith("asa:v1:")
+    assert str(malicious_contact) not in str(captured)
+
+
 def test_calendar_destructive_tool_requires_separate_confirmation(monkeypatch, calendar_runtime):
     executor, db, session, node = calendar_runtime
     node["data"].update({

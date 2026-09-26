@@ -15,6 +15,12 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models.integration_connection import IntegrationConnection
+from app.core.appointment_metadata import (
+    APPOINTMENT_METADATA_SCHEMA,
+    ASA_MANAGED_KEY,
+    ASA_PATIENT_REF_KEY,
+    ASA_SCHEMA_KEY,
+)
 from app.services.integration_connection_service import GOOGLE_RECONNECT_MESSAGE, IntegrationConnectionService, is_google_auth_error
 from app.tools.context import sanitize_metadata
 
@@ -158,6 +164,12 @@ class GoogleCalendarService:
                 except ZoneInfoNotFoundError:
                     continue
         return DEFAULT_TIMEZONE
+
+    def _trusted_calendar_id(self) -> str:
+        """Resolve the calendar solely from the tenant's integration connection."""
+        conn = self.connection_service.get_connection(self.tenant_id, PROVIDER)
+        metadata = conn.metadata_json if conn and isinstance(conn.metadata_json, dict) else {}
+        return str(metadata.get("calendar_id") or "primary")
 
     def _normalize_datetime(self, value: Any, tz_name: str) -> str | None:
         if value in (None, ""):
@@ -416,9 +428,7 @@ class GoogleCalendarService:
 
         def operation() -> dict[str, Any]:
             tz = self._tenant_timezone(timezone)
-            conn = self.connection_service.get_connection(self.tenant_id, PROVIDER)
-            metadata = conn.metadata_json if conn and isinstance(conn.metadata_json, dict) else {}
-            calendar_id = str(metadata.get("calendar_id") or "primary")
+            calendar_id = self._trusted_calendar_id()
             path = f"/calendars/{quote(calendar_id, safe='')}/events"
             base_params: dict[str, Any] = {
                 "timeMin": start,
@@ -504,22 +514,52 @@ class GoogleCalendarService:
             return {"ok": True, "event_id": data.get("id"), "html_link": data.get("htmlLink"), "title": data.get("summary"), "start": (data.get("start") or {}).get("dateTime") or (data.get("start") or {}).get("date"), "end": (data.get("end") or {}).get("dateTime") or (data.get("end") or {}).get("date")}
         return self._service_call("google_calendar_create_event", kwargs, operation)
 
-    def update_event(self, event_id: str, **kwargs: Any) -> dict[str, Any]:
+    def update_event(
+        self,
+        event_id: str,
+        *,
+        expected_private_metadata: dict[str, str] | None = None,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
         input_payload = {"event_id": event_id, **kwargs}
         def operation() -> dict[str, Any]:
-            conn = self.connection_service.get_connection(self.tenant_id, PROVIDER)
-            metadata = conn.metadata_json if conn and isinstance(conn.metadata_json, dict) else {}
-            calendar_id = str(metadata.get("calendar_id") or "primary")
+            calendar_id = self._trusted_calendar_id()
+            path = (
+                f"/calendars/{quote(calendar_id, safe='')}/events/"
+                f"{quote(event_id, safe='')}"
+            )
+            if expected_private_metadata is not None:
+                ok, existing, status = self._request("GET", path)
+                if not ok:
+                    if status == 404:
+                        return {"ok": False, "message": "google_calendar_event_not_found"}
+                    if status == 0 and existing.get("message") == NOT_CONNECTED_MESSAGE:
+                        return {"ok": False, "message": "google_calendar_integration_unavailable"}
+                    return {"ok": False, "message": "google_calendar_api_error"}
+                private = (
+                    (existing.get("extendedProperties") or {}).get("private") or {}
+                    if isinstance(existing, dict) else {}
+                )
+                authorized = (
+                    isinstance(private, dict)
+                    and existing.get("status") != "cancelled"
+                    and private.get(ASA_MANAGED_KEY) == "true"
+                    and private.get(ASA_SCHEMA_KEY) == APPOINTMENT_METADATA_SCHEMA
+                    and private.get(ASA_PATIENT_REF_KEY)
+                    == expected_private_metadata.get(ASA_PATIENT_REF_KEY)
+                )
+                if not authorized:
+                    return {"ok": False, "message": "google_calendar_event_not_authorized"}
             payload = self._event_payload(kwargs)
             if not any(kwargs.get(key) is not None for key in ("title", "summary", "name")):
                 payload.pop("summary", None)
             ok, data, _ = self._request(
                 "PATCH",
-                f"/calendars/{quote(calendar_id, safe='')}/events/{quote(event_id, safe='')}",
+                path,
                 json_body=payload,
             )
             if not ok:
-                return {"ok": False, **data}
+                return {"ok": False, "message": "google_calendar_api_error"}
             return {"ok": True, "event_id": data.get("id"), "html_link": data.get("htmlLink"), "title": data.get("summary"), "start": (data.get("start") or {}).get("dateTime"), "end": (data.get("end") or {}).get("dateTime"), "timezone": (data.get("start") or {}).get("timeZone") or kwargs.get("timezone")}
         return self._service_call("google_calendar_update_event", input_payload, operation)
 

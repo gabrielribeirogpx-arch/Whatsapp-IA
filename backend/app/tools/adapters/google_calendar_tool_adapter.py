@@ -62,6 +62,7 @@ GOOGLE_CALENDAR_UPDATE_EVENT_INPUT_SCHEMA: dict[str, Any] = {
         "description": {"type": "string", "description": "Nova descrição opcional do evento."},
     },
     "required": ["event_id", "start", "end"],
+    "additionalProperties": False,
 }
 
 GOOGLE_CALENDAR_CREATE_EVENT_INPUT_SCHEMA: dict[str, Any] = {
@@ -424,7 +425,10 @@ class GoogleCalendarToolAdapter:
                     normalized_result=normalized,
                 )
         appointment_metadata: dict[str, str] | None = None
-        if tool_id == "google_calendar_find_managed_appointments":
+        if tool_id in {
+            "google_calendar_find_managed_appointments",
+            "google_calendar_update_event",
+        }:
             validation_error = _validate_managed_appointment_window(args)
             if validation_error:
                 return _calendar_failure(tool_id, validation_error)
@@ -511,14 +515,29 @@ class GoogleCalendarToolAdapter:
                 action = "delete_event"
             elif tool_id in {"google_calendar_update_event", "calendar.reschedule_appointment"}:
                 event_id = str(args.get("event_id") or args.get("id") or "")
-                result = service.update_event(event_id, **{key: value for key, value in args.items() if key not in {"event_id", "id"}})
+                update_kwargs = {
+                    key: value for key, value in args.items()
+                    if key not in {"event_id", "id"}
+                }
+                if tool_id == "google_calendar_update_event":
+                    # Authorization material comes only from trusted ToolContext.
+                    result = service.update_event(
+                        event_id,
+                        expected_private_metadata=appointment_metadata,
+                        **update_kwargs,
+                    )
+                else:
+                    result = service.update_event(event_id, **update_kwargs)
                 action = "update_event"
             else:
                 result = {"ok": False, "message": "Ferramenta Google Calendar não encontrada."}
                 action = "unknown"
         except Exception as exc:
             _log_tool("GOOGLE_CALENDAR_SERVICE_EXCEPTION", tenant_id=context.tenant_id, tool_name=tool_id, input=args, db=db, exception=exc)
-            if tool_id == "google_calendar_find_managed_appointments":
+            if tool_id in {
+                "google_calendar_find_managed_appointments",
+                "google_calendar_update_event",
+            }:
                 return _calendar_failure(tool_id, "google_calendar_api_error")
             raise
         _log_tool("GOOGLE_CALENDAR_SERVICE_RESULT", tenant_id=context.tenant_id, tool_name=tool_id, input=args, db=db, result=result)
@@ -530,6 +549,18 @@ class GoogleCalendarToolAdapter:
                 else "google_calendar_api_error"
             )
             return _calendar_failure(tool_id, code)
+        if tool_id == "google_calendar_update_event" and result.get("ok") is not True:
+            code = str(result.get("message") or "google_calendar_api_error")
+            allowed_codes = {
+                "google_calendar_event_not_found",
+                "google_calendar_event_not_authorized",
+                "google_calendar_integration_unavailable",
+                "google_calendar_api_error",
+            }
+            return _calendar_failure(
+                tool_id,
+                code if code in allowed_codes else "google_calendar_api_error",
+            )
         if tool_id == "google_calendar_create_event":
             _log_tool("AI_AGENT_CALENDAR_CREATE_RAW_RESULT", tenant_id=context.tenant_id, tool_name=tool_id, input=args, db=db, raw_response=result)
         ok = result.get("ok") is True
