@@ -118,3 +118,52 @@ def test_legacy_node_without_prompt_uses_non_empty_fallback():
     started = executor.execute(None, snapshot={}, session=session(), node={'id': 'legacy', 'data': {'variable_name': 'email', 'data_type': 'email'}}, runtime_input=runtime_input())
     assert len(started.actions) == 1
     assert started.actions[0].text.strip() == 'Por favor, informe o dado solicitado.'
+
+
+def test_appointment_semantic_default_preserves_retry_and_invalid_handle(monkeypatch):
+    monkeypatch.setattr(
+        'app.services.appointment_policy_service.policy_for_tenant',
+        lambda db, tenant_id: {'timezone': 'America/Sao_Paulo'},
+    )
+    monkeypatch.setattr(
+        'app.flow_v2.data_collection.normalize_preferred_period',
+        lambda value, policy: (_ for _ in ()).throw(
+            __import__('app.services.appointment_policy_service', fromlist=['AppointmentPolicyError'])
+            .AppointmentPolicyError('closed_day', 'internal detail')
+        ),
+    )
+    executor = RuntimeV2DataCollectionExecutor(event_store=None, transition_resolver=Resolver())
+    current = session()
+    node = {'id': 'period', 'data': {
+        'variable_name': 'period', 'data_type': 'appointment_period',
+        'auto_retry_invalid': True, 'max_attempts': 1,
+    }}
+    executor.execute(None, snapshot={}, session=current, node=node, runtime_input=runtime_input())
+    result = executor.execute(None, snapshot={}, session=current, node=node, runtime_input=runtime_input('amanhã à tarde', 'period-1'))
+    assert result.next_source_handle == 'invalid'
+    assert result.actions[0].text.startswith('Entendi 😊')
+    assert result.actions[0].metadata['reason'] == 'closed_day'
+    assert result.actions[0].metadata['attempt'] == 1
+
+
+def test_custom_invalid_message_takes_precedence_over_semantic_default(monkeypatch):
+    monkeypatch.setattr(
+        'app.services.appointment_policy_service.policy_for_tenant',
+        lambda db, tenant_id: {'timezone': 'America/Sao_Paulo'},
+    )
+    monkeypatch.setattr(
+        'app.flow_v2.data_collection.normalize_preferred_period',
+        lambda value, policy: (_ for _ in ()).throw(
+            __import__('app.services.appointment_policy_service', fromlist=['AppointmentPolicyError'])
+            .AppointmentPolicyError('closed_day', 'internal detail')
+        ),
+    )
+    executor = RuntimeV2DataCollectionExecutor(event_store=None, transition_resolver=Resolver())
+    current = session()
+    node = {'id': 'period', 'data': {
+        'variable_name': 'period', 'data_type': 'appointment_period',
+        'invalid_message': 'Escolha outra opção.',
+    }}
+    executor.execute(None, snapshot={}, session=current, node=node, runtime_input=runtime_input())
+    result = executor.execute(None, snapshot={}, session=current, node=node, runtime_input=runtime_input('amanhã', 'period-custom'))
+    assert result.actions[0].text == 'Escolha outra opção.'

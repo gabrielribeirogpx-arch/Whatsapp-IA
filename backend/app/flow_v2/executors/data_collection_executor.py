@@ -4,7 +4,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 from uuid import NAMESPACE_URL, uuid5
 from app.flow_v2.actions import ScheduleDelayAction, SendChoiceButtonsAction, SendMessageAction
-from app.flow_v2.data_collection import validate_data_collection
+from app.flow_v2.data_collection import APPOINTMENT_ERROR_MESSAGES, validate_data_collection
 from app.flow_v2.executors._legacy import BaseNodeExecutor, NodeExecutionResult
 logger = logging.getLogger(__name__)
 LEGACY_DATA_COLLECTION_PROMPT = "Por favor, informe o dado solicitado."
@@ -116,7 +116,8 @@ class RuntimeV2DataCollectionExecutor(BaseNodeExecutor):
                 'event=data_collection_validation_failed session_id=%s node_id=%s data_type=%s reason=%s attempt=%s result=invalid',
                 session.id, node_id, data.get('data_type'), result.error, waiting['attempts'],
             )
-            action = SendMessageAction(tenant_id=session.tenant_id, session_id=session.id, external_user_id=runtime_input.external_user_id, conversation_id=runtime_input.conversation_id, contact_id=runtime_input.contact_id, text=str(data.get('invalid_message') or 'Valor inválido.\nTente novamente.'), metadata={'node_type': 'data_collection', 'attempt': waiting['attempts'], 'retry': auto_retry})
+            message = data.get('invalid_message') or APPOINTMENT_ERROR_MESSAGES.get(result.error) or 'Valor inválido.\nTente novamente.'
+            action = SendMessageAction(tenant_id=session.tenant_id, session_id=session.id, external_user_id=runtime_input.external_user_id, conversation_id=runtime_input.conversation_id, contact_id=runtime_input.contact_id, text=str(message), metadata={'node_type': 'data_collection', 'attempt': waiting['attempts'], 'retry': auto_retry, 'reason': result.error})
             if auto_retry and waiting['attempts'] < int(waiting['max_attempts']): return NodeExecutionResult(actions=(action,), status='wait', next_node_id=node_id)
             if auto_retry and data.get('attempts_exceeded_behavior') == 'end':
                 self._clear_wait(context, session)

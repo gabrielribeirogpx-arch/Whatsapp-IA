@@ -15,6 +15,28 @@ def test_rejects_bad_dates_closed_days_and_outside_hours():
     p=policy(); now=datetime(2026,9,1,tzinfo=ZoneInfo("America/Sao_Paulo"))
     for raw in ("31/02/2026", "06/09/2026", "07/09/2026 às 19h", "01/01/2020"):
         with pytest.raises(AppointmentPolicyError): normalize_preferred_period(raw,p,now=now)
+
+
+@pytest.mark.parametrize(("raw", "code"), (
+    ("qualquer coisa", "invalid_period_format"),
+    ("31/02/2026", "invalid_date"),
+    ("01/01/2020", "past_date"),
+    ("06/09/2026", "closed_day"),
+    ("07/09/2026 às 23h", "outside_business_hours"),
+))
+def test_preferred_period_exposes_structured_failure_codes(raw, code):
+    p=policy(); now=datetime(2026,9,1,tzinfo=ZoneInfo("America/Sao_Paulo"))
+    with pytest.raises(AppointmentPolicyError) as failure:
+        normalize_preferred_period(raw,p,now=now)
+    assert failure.value.code == code
+
+
+def test_named_period_without_business_hours_intersection_has_specific_code():
+    p=policy(business_hours={"monday":[{"start":"13:00","end":"18:00"}]})
+    now=datetime(2026,9,6,10,tzinfo=ZoneInfo("America/Sao_Paulo"))
+    with pytest.raises(AppointmentPolicyError) as failure:
+        normalize_preferred_period("segunda de manhã",p,now=now)
+    assert failure.value.code == "no_available_window"
 def test_slots_exclude_lunch_busy_and_overlap():
     p=policy(slot_interval_minutes=30)
     slots=appointments_for_availability(start="2026-09-07T08:00:00-03:00",end="2026-09-07T18:00:00-03:00",timezone="America/Sao_Paulo",busy=[{"start":"2026-09-07T09:00:00-03:00","end":"2026-09-07T10:00:00-03:00"}],policy=p)
@@ -57,6 +79,14 @@ def test_real_incident_and_afternoon_language_variants(raw):
         "mode":"period", "window_start":"2026-09-07T13:00:00-03:00",
         "window_end":"2026-09-07T18:00:00-03:00", "timezone":"America/Sao_Paulo",
     }
+
+
+def test_real_incident_remains_invalid_as_closed_day_when_tomorrow_has_no_hours():
+    p=policy(business_hours={day:[] for day in DAYS})
+    now=datetime(2026,9,6,10,tzinfo=ZoneInfo("America/Sao_Paulo"))
+    with pytest.raises(AppointmentPolicyError) as failure:
+        normalize_preferred_period("Amanhã a tarde",p,now=now)
+    assert failure.value.code == "closed_day"
 
 
 @pytest.mark.parametrize(("raw", "start", "end"), (
@@ -130,6 +160,14 @@ def test_lookup_period_preserves_canonical_day_period_and_rejects_ambiguity():
     for raw in ("um dia desses", "a consulta antiga", "quando marquei"):
         with pytest.raises(AppointmentPolicyError):
             normalize_appointment_lookup_period(raw,p,now=now)
+
+
+def test_lookup_named_period_does_not_apply_current_business_hours():
+    p=policy(business_hours={day:[] for day in DAYS})
+    now=datetime(2026,9,26,10,tzinfo=ZoneInfo("America/Sao_Paulo"))
+    result=normalize_appointment_lookup_period("terça à tarde",p,now=now)
+    assert result["window_start"] == "2026-09-29T13:00:00-03:00"
+    assert result["window_end"] == "2026-09-29T18:00:00-03:00"
 
 
 def test_next_weekday_on_same_weekday_means_following_week():

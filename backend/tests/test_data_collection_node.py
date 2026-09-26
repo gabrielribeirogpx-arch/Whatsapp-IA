@@ -63,3 +63,19 @@ def test_appointment_lookup_period_requires_policy_and_persists_structured_windo
     )
     assert not missing_policy.valid
     assert result.valid and result.normalized_value == expected
+
+
+def test_appointment_policy_reason_is_not_flattened(monkeypatch):
+    from app.services.appointment_policy_service import AppointmentPolicyError
+
+    def closed_day(value, policy):
+        raise AppointmentPolicyError('closed_day', 'internal policy detail')
+
+    monkeypatch.setattr('app.flow_v2.data_collection.normalize_preferred_period', closed_day)
+    result = validate_data_collection(
+        {'data_type': 'appointment_period', 'required': True},
+        'amanhã à tarde',
+        {'appointment_policy': {'timezone': 'America/Sao_Paulo'}},
+    )
+    assert not result.valid
+    assert result.error == 'closed_day'

@@ -18,27 +18,32 @@ WEEKDAYS_PT = {
 DEFAULT_BUSINESS_HOURS = {day: ([{"start":"08:00","end":"12:00"},{"start":"13:00","end":"18:00"}] if day in DAYS[:5] else []) for day in DAYS}
 DEFAULT_POLICY = {"timezone":"America/Sao_Paulo", "default_duration_minutes":60, "slot_interval_minutes":60, "input_mode":"exact_or_period", "business_hours":DEFAULT_BUSINESS_HOURS}
 
-class AppointmentPolicyError(ValueError): pass
+class AppointmentPolicyError(ValueError):
+    """A deterministic, machine-readable temporal or scheduling-policy failure."""
+
+    def __init__(self, code: str, message: str):
+        self.code = code
+        super().__init__(message)
 
 def validate_policy(value: dict[str, Any] | None) -> dict[str, Any]:
     value = value or {}
     result = {**DEFAULT_POLICY, **{k:v for k,v in value.items() if k != "business_hours"}}
     result["business_hours"] = {d: list((value.get("business_hours") or {}).get(d, DEFAULT_BUSINESS_HOURS[d])) for d in DAYS}
     try: ZoneInfo(str(result["timezone"]))
-    except (ZoneInfoNotFoundError, TypeError) as exc: raise AppointmentPolicyError("Timezone IANA inválido.") from exc
+    except (ZoneInfoNotFoundError, TypeError) as exc: raise AppointmentPolicyError("invalid_policy", "Timezone IANA inválido.") from exc
     for field in ("default_duration_minutes", "slot_interval_minutes"):
         try: result[field] = int(result[field])
-        except (TypeError, ValueError) as exc: raise AppointmentPolicyError(f"{field} deve ser um inteiro.") from exc
-        if result[field] <= 0: raise AppointmentPolicyError(f"{field} deve ser maior que zero.")
-    if result["input_mode"] != "exact_or_period": raise AppointmentPolicyError("input_mode inválido.")
+        except (TypeError, ValueError) as exc: raise AppointmentPolicyError("invalid_policy", f"{field} deve ser um inteiro.") from exc
+        if result[field] <= 0: raise AppointmentPolicyError("invalid_policy", f"{field} deve ser maior que zero.")
+    if result["input_mode"] != "exact_or_period": raise AppointmentPolicyError("invalid_policy", "input_mode inválido.")
     for day, periods in result["business_hours"].items():
         previous = None
-        if not isinstance(periods, list): raise AppointmentPolicyError(f"Horários de {day} inválidos.")
+        if not isinstance(periods, list): raise AppointmentPolicyError("invalid_policy", f"Horários de {day} inválidos.")
         normalized=[]
         for period in periods:
             try: start=datetime.strptime(str(period["start"]), "%H:%M").time(); end=datetime.strptime(str(period["end"]), "%H:%M").time()
-            except (KeyError, ValueError) as exc: raise AppointmentPolicyError(f"Intervalo inválido em {day}.") from exc
-            if start >= end or (previous and start < previous): raise AppointmentPolicyError(f"Intervalos inválidos ou sobrepostos em {day}.")
+            except (KeyError, ValueError) as exc: raise AppointmentPolicyError("invalid_policy", f"Intervalo inválido em {day}.") from exc
+            if start >= end or (previous and start < previous): raise AppointmentPolicyError("invalid_policy", f"Intervalos inválidos ou sobrepostos em {day}.")
             previous=end; normalized.append({"start":start.strftime("%H:%M"),"end":end.strftime("%H:%M")})
         result["business_hours"][day]=normalized
     return result
@@ -67,17 +72,17 @@ def _target_date(raw: str, base: datetime) -> tuple[date, bool]:
     match=re.search(r"\b(\d{1,2})/(\d{1,2})(?:/(\d{4}))?\b",raw)
     if match:
         try: return date(int(match.group(3) or base.year),int(match.group(2)),int(match.group(1))), False
-        except ValueError as exc: raise AppointmentPolicyError("A data informada não existe.") from exc
+        except ValueError as exc: raise AppointmentPolicyError("invalid_date", "A data informada não existe.") from exc
     match=re.search(r"\bdia\s+(\d{1,2})\b",raw)
     if match:
         day=int(match.group(1)); year,month=base.year,base.month
         try: target=date(year,month,day)
-        except ValueError as exc: raise AppointmentPolicyError("A data informada não existe.") from exc
+        except ValueError as exc: raise AppointmentPolicyError("invalid_date", "A data informada não existe.") from exc
         if target < base.date():
             month += 1
             if month == 13: year,month=year+1,1
             try: target=date(year,month,day)
-            except ValueError as exc: raise AppointmentPolicyError("A data informada não existe.") from exc
+            except ValueError as exc: raise AppointmentPolicyError("invalid_date", "A data informada não existe.") from exc
         return target, False
     weekday_pattern="|".join(WEEKDAYS_PT)
     match=re.search(rf"\b({weekday_pattern})(?:-feira)?\b",raw)
@@ -87,31 +92,31 @@ def _target_date(raw: str, base: datetime) -> tuple[date, bool]:
         if re.search(r"\bproxim[ao]\b", raw) and offset == 0:
             offset=7
         return base.date()+timedelta(days=offset), True
-    raise AppointmentPolicyError("Use uma data, dia da semana ou período válido.")
+    raise AppointmentPolicyError("invalid_period_format", "Use uma data, dia da semana ou período válido.")
 
 def normalize_preferred_period(text: str, policy: dict[str, Any], *, now: datetime | None=None) -> dict[str, Any]:
     policy=validate_policy(policy); tz=ZoneInfo(policy["timezone"]); raw=_normalize_period_text(text)
     base=(now.astimezone(tz) if now and now.tzinfo else (now.replace(tzinfo=tz) if now else datetime.now(tz)))
-    if not raw: raise AppointmentPolicyError("Informe uma data ou período válido.")
+    if not raw: raise AppointmentPolicyError("invalid_period_format", "Informe uma data ou período válido.")
     target, from_weekday=_target_date(raw,base)
-    if target < base.date(): raise AppointmentPolicyError("Não é possível agendar em uma data passada.")
+    if target < base.date(): raise AppointmentPolicyError("past_date", "Não é possível agendar em uma data passada.")
     # Never treat the day in dd/mm as a clock: an explicit marker or a time suffix is mandatory.
     clock=re.search(r"\bas\s*(\d{1,2})(?:\s*[:h]\s*(\d{2}))?\s*(?:h|hora|horas)?\b",raw) or re.search(r"\b(\d{1,2})(?::(\d{2})|h)\b",raw)
     if from_weekday and target == base.date() and clock:
         candidate=datetime.combine(target,time(int(clock.group(1)),int(clock.group(2) or 0)),tz)
         if candidate <= base: target+=timedelta(days=7)
     intervals=intervals_for_day(target, policy)
-    if not intervals: raise AppointmentPolicyError("A clínica está fechada nesta data.")
+    if not intervals: raise AppointmentPolicyError("closed_day", "A clínica está fechada nesta data.")
     if clock:
         hour, minute=int(clock.group(1)),int(clock.group(2) or 0)
         try: start=datetime.combine(target,time(hour,minute),tz)
-        except ValueError as exc: raise AppointmentPolicyError("Horário inválido.") from exc
+        except ValueError as exc: raise AppointmentPolicyError("invalid_period_format", "Horário inválido.") from exc
         if re.search(r"\bdepois\s+d(?:as|e)\b",raw):
             overlap=[(max(a,start),b) for a,b in intervals if max(a,start)<b]
-            if not overlap: raise AppointmentPolicyError("O período informado está fora do funcionamento da clínica.")
+            if not overlap: raise AppointmentPolicyError("outside_business_hours", "O período informado está fora do funcionamento da clínica.")
             return {"mode":"period","window_start":overlap[0][0].isoformat(),"window_end":overlap[-1][1].isoformat(),"timezone":policy["timezone"]}
         end=start+timedelta(minutes=policy["default_duration_minutes"])
-        if not any(start>=a and end<=b for a,b in intervals): raise AppointmentPolicyError("O horário está fora do funcionamento da clínica.")
+        if not any(start>=a and end<=b for a,b in intervals): raise AppointmentPolicyError("outside_business_hours", "O horário está fora do funcionamento da clínica.")
         return {"mode":"exact","start":start.isoformat(),"end":end.isoformat(),"timezone":policy["timezone"]}
     period_match=re.search(r"\b(manha|tarde|noite)\b",raw)
     period=period_match.group(1) if period_match else None
@@ -119,7 +124,7 @@ def normalize_preferred_period(text: str, policy: dict[str, Any], *, now: dateti
     if period: requested=(datetime.combine(target,time(windows[period][0]),tz),datetime.combine(target,time(windows[period][1]),tz))
     else: requested=(intervals[0][0],intervals[-1][1])
     overlap=[(max(a,requested[0]),min(b,requested[1])) for a,b in intervals if max(a,requested[0])<min(b,requested[1])]
-    if not overlap: raise AppointmentPolicyError("O período informado está fora do funcionamento da clínica.")
+    if not overlap: raise AppointmentPolicyError("no_available_window", "O período informado está fora do funcionamento da clínica.")
     return {"mode":"period","window_start":overlap[0][0].isoformat(),"window_end":overlap[-1][1].isoformat(),"timezone":policy["timezone"]}
 
 
@@ -129,20 +134,20 @@ def normalize_appointment_lookup_period(
     """Resolve the narrow local-time window used to find an existing appointment.
 
     This deliberately reuses the canonical Portuguese date resolver. A date without
-    a named day period covers that local calendar day; named periods keep the same
-    business-hours intersection used by ``normalize_preferred_period``.
+    a named day period covers only that period. Lookup intentionally does not apply
+    current business hours because it searches appointments that already exist.
     """
     policy = validate_policy(policy)
     tz = ZoneInfo(policy["timezone"])
     raw = _normalize_period_text(text)
     if not raw:
-        raise AppointmentPolicyError("Informe a data da consulta atual.")
+        raise AppointmentPolicyError("invalid_period_format", "Informe a data da consulta atual.")
     base = now.astimezone(tz) if now and now.tzinfo else (
         now.replace(tzinfo=tz) if now else datetime.now(tz)
     )
     target, _ = _target_date(raw, base)
     if target < base.date():
-        raise AppointmentPolicyError("A data da consulta já passou.")
+        raise AppointmentPolicyError("past_date", "A data da consulta já passou.")
 
     period_match = re.search(r"\b(manha|tarde|noite)\b", raw)
     if not period_match:
@@ -155,14 +160,9 @@ def normalize_appointment_lookup_period(
             datetime.combine(target, time(windows[period][0]), tz),
             datetime.combine(target, time(windows[period][1]), tz),
         )
-        overlap = [
-            (max(a, requested[0]), min(b, requested[1]))
-            for a, b in intervals_for_day(target, policy)
-            if max(a, requested[0]) < min(b, requested[1])
-        ]
-        if not overlap:
-            raise AppointmentPolicyError("O período informado está fora do funcionamento da clínica.")
-        start, end = overlap[0][0], overlap[-1][1]
+        # Lookup searches historical/existing events. Current opening hours must
+        # not hide an appointment after a tenant changes its schedule.
+        start, end = requested
     return {
         "mode": "period",
         "window_start": start.isoformat(),
