@@ -103,7 +103,7 @@ class RuntimeV2DataCollectionExecutor(BaseNodeExecutor):
         if str(raw or '').strip().casefold() in cancel:
             return self._finish(db, snapshot, session, context, node_id, data, 'cancel', 'data_collection_cancelled', runtime_input)
         metadata = dict(runtime_input.metadata or {})
-        if data.get("data_type") == "appointment_period":
+        if data.get("data_type") in {"appointment_period", "appointment_lookup_period"}:
             from app.services.appointment_policy_service import policy_for_tenant
             metadata["appointment_policy"] = policy_for_tenant(db, session.tenant_id)
         result = validate_data_collection(data, raw, metadata)

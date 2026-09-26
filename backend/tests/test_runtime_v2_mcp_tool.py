@@ -207,11 +207,17 @@ def test_find_managed_appointments_runtime_persists_array_using_trusted_contact(
     trusted_contact = session.contact_id
     malicious_contact = uuid.uuid4()
     session.variables["contact_id"] = str(malicious_contact)
+    session.variables["current_appointment_period"] = {
+        "window_start": "2026-09-08T00:00:00-03:00",
+        "window_end": "2026-09-09T00:00:00-03:00",
+        "timezone": "America/Sao_Paulo",
+    }
     node["data"].update({
         "tool_name": "google_calendar_find_managed_appointments",
         "arguments": {
-            "start": "2026-09-01T00:00:00-03:00",
-            "end": "2026-10-01T00:00:00-03:00",
+            "start": "{{current_appointment_period.window_start}}",
+            "end": "{{current_appointment_period.window_end}}",
+            "timezone": "{{current_appointment_period.timezone}}",
         },
         "output_variable": "managed_appointments",
     })
@@ -231,6 +237,11 @@ def test_find_managed_appointments_runtime_persists_array_using_trusted_contact(
     assert received["contact_id"] == trusted_contact
     assert received["contact_id"] != malicious_contact
     assert "contact_id" not in received["arguments"]
+    assert received["arguments"] == {
+        "start": "2026-09-08T00:00:00-03:00",
+        "end": "2026-09-09T00:00:00-03:00",
+        "timezone": "America/Sao_Paulo",
+    }
     assert session.variables["managed_appointments"] == appointments
 
 

@@ -113,7 +113,7 @@ def validate_builder_graph(nodes: list[dict[str, Any]], edges: list[dict[str, An
             variable = str(data.get("variable_name") or "")
             if not variable: issues.append(_issue("DATA_COLLECTION_INVALID", node, field="variable_name", message="Defina o nome da variável."))
             elif not __import__("re").fullmatch(r"[a-zA-Z_][a-zA-Z0-9_]*", variable): issues.append(_issue("DATA_COLLECTION_INVALID", node, field="variable_name", message="Use letras, números e underscore; não comece com número."))
-            if str(data.get("data_type") or "") not in {"text", "number", "email", "phone", "date", "time", "cpf", "cnpj", "url", "currency", "boolean", "choice", "appointment_period"}: issues.append(_issue("DATA_COLLECTION_INVALID", node, field="data_type", message="Selecione um tipo de dado válido."))
+            if str(data.get("data_type") or "") not in {"text", "number", "email", "phone", "date", "time", "cpf", "cnpj", "url", "currency", "boolean", "choice", "appointment_period", "appointment_lookup_period"}: issues.append(_issue("DATA_COLLECTION_INVALID", node, field="data_type", message="Selecione um tipo de dado válido."))
             if int(data.get("max_attempts") or 0) < 1: issues.append(_issue("DATA_COLLECTION_INVALID", node, field="max_attempts", message="O máximo de tentativas deve ser maior que zero."))
             if int(data.get("timeout_seconds") or 0) < 0: issues.append(_issue("DATA_COLLECTION_INVALID", node, field="timeout_seconds", message="O timeout não pode ser negativo."))
             options = data.get("options") or []

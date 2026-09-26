@@ -1,7 +1,7 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 import pytest
-from app.services.appointment_policy_service import DAYS, AppointmentPolicyError, appointments_for_availability, normalize_preferred_period, validate_policy
+from app.services.appointment_policy_service import DAYS, AppointmentPolicyError, appointments_for_availability, normalize_appointment_lookup_period, normalize_preferred_period, validate_policy
 
 def policy(**overrides):
     base={"timezone":"America/Sao_Paulo","default_duration_minutes":60,"slot_interval_minutes":60,"input_mode":"exact_or_period","business_hours":{"monday":[{"start":"08:00","end":"12:00"},{"start":"13:00","end":"18:00"}],"tuesday":[],"wednesday":[],"thursday":[],"friday":[],"saturday":[],"sunday":[]}}
@@ -41,3 +41,40 @@ def test_preserves_supported_natural_periods_and_rejects_invalid_text():
     after=normalize_preferred_period("dia 10 depois das 14h",p,now=now)
     assert (after["mode"],after["window_start"],after["window_end"]) == ("period","2026-09-10T14:00:00-03:00","2026-09-10T18:00:00-03:00")
     with pytest.raises(AppointmentPolicyError): normalize_preferred_period("qualquer coisa",p,now=now)
+
+
+def test_lookup_period_resolves_explicit_relative_and_weekday_in_local_timezone():
+    p=policy(business_hours={day:[{"start":"08:00","end":"12:00"},{"start":"13:00","end":"18:00"}] for day in DAYS})
+    now=datetime(2026,9,26,10,tzinfo=ZoneInfo("America/Sao_Paulo"))
+
+    explicit=normalize_appointment_lookup_period("28/09/2026",p,now=now)
+    tomorrow=normalize_appointment_lookup_period("amanhã",p,now=now)
+    weekday=normalize_appointment_lookup_period("próxima terça",p,now=now)
+
+    assert explicit == {
+        "mode":"period", "window_start":"2026-09-28T00:00:00-03:00",
+        "window_end":"2026-09-29T00:00:00-03:00", "timezone":"America/Sao_Paulo",
+    }
+    assert tomorrow["window_start"] == "2026-09-27T00:00:00-03:00"
+    assert weekday["window_start"] == "2026-09-29T00:00:00-03:00"
+    assert datetime.fromisoformat(explicit["window_start"]) < datetime.fromisoformat(explicit["window_end"])
+    assert datetime.fromisoformat(explicit["window_end"]) - datetime.fromisoformat(explicit["window_start"]) < timedelta(days=90)
+
+
+def test_lookup_period_preserves_canonical_day_period_and_rejects_ambiguity():
+    p=policy(business_hours={day:[{"start":"08:00","end":"12:00"},{"start":"13:00","end":"18:00"}] for day in DAYS})
+    now=datetime(2026,9,26,10,tzinfo=ZoneInfo("America/Sao_Paulo"))
+
+    afternoon=normalize_appointment_lookup_period("terça à tarde",p,now=now)
+    assert afternoon["window_start"] == "2026-09-29T13:00:00-03:00"
+    assert afternoon["window_end"] == "2026-09-29T18:00:00-03:00"
+    for raw in ("um dia desses", "a consulta antiga", "quando marquei"):
+        with pytest.raises(AppointmentPolicyError):
+            normalize_appointment_lookup_period(raw,p,now=now)
+
+
+def test_next_weekday_on_same_weekday_means_following_week():
+    p=policy(business_hours={day:[{"start":"08:00","end":"18:00"}] for day in DAYS})
+    now=datetime(2026,9,29,10,tzinfo=ZoneInfo("America/Sao_Paulo"))
+    result=normalize_appointment_lookup_period("próxima terça",p,now=now)
+    assert result["window_start"] == "2026-10-06T00:00:00-03:00"
