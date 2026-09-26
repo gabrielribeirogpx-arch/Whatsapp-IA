@@ -2,13 +2,21 @@ from __future__ import annotations
 
 import logging
 import traceback
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from typing import Any, Callable
 
 from jsonschema import ValidationError, validate
 from sqlalchemy.orm import Session
 
-from app.core.appointment_metadata import build_appointment_private_metadata
+from app.core.appointment_metadata import (
+    APPOINTMENT_METADATA_SCHEMA,
+    ASA_MANAGED_KEY,
+    ASA_PATIENT_REF_KEY,
+    ASA_SCHEMA_KEY,
+    build_appointment_private_metadata,
+)
 from app.core.external_identity import ExternalReferenceError
 from app.services.google_calendar_service import PROVIDER, GoogleCalendarService, _connection_lookup_diagnostics
 from app.tools.base import NormalizedToolResult, ToolResult
@@ -21,6 +29,7 @@ GOOGLE_CALENDAR_TOOL_IDS = {
     "google_calendar_create_event",
     "google_calendar_update_event",
     "google_calendar_list_events",
+    "google_calendar_find_managed_appointments",
     "google_calendar_check_availability",
     "google_calendar_delete_event",
     "calendar.get_availability", "calendar.create_appointment", "calendar.get_appointment",
@@ -132,12 +141,114 @@ GOOGLE_CALENDAR_AVAILABILITY_INPUT_SCHEMA: dict[str, Any] = {
     "required": ["start", "end"],
 }
 
+GOOGLE_CALENDAR_FIND_MANAGED_APPOINTMENTS_INPUT_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "start": {"type": "string", "format": "date-time"},
+        "end": {"type": "string", "format": "date-time"},
+        "timezone": {"type": "string", "minLength": 1},
+    },
+    "required": ["start", "end"],
+    "additionalProperties": False,
+}
+
+MANAGED_APPOINTMENTS_MAX_WINDOW = timedelta(days=90)
+
+
+def _calendar_failure(tool_id: str, code: str) -> ToolResult:
+    normalized = NormalizedToolResult(
+        False, tool_id, type="google_calendar.find_managed_appointments",
+        error={"code": code},
+    )
+    return ToolResult(
+        False, "google_calendar", tool_id=tool_id, tool_name=tool_id,
+        output={"ok": False, "message": code},
+        structured_content={"ok": False, "tool": tool_id, "result": {}, "error": code},
+        error_code=code, error_message=code,
+        metadata={"provider": "google_calendar", "source": "integration_connections"},
+        normalized_result=normalized,
+    )
+
+
+def _parse_window_datetime(value: Any, timezone_name: str | None) -> datetime | None:
+    try:
+        parsed = datetime.fromisoformat(str(value).strip().replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=ZoneInfo(timezone_name or "America/Sao_Paulo"))
+        return parsed
+    except (ValueError, TypeError, ZoneInfoNotFoundError):
+        return None
+
+
+def _validate_managed_appointment_window(args: dict[str, Any]) -> str | None:
+    timezone_name = args.get("timezone")
+    if timezone_name:
+        try:
+            ZoneInfo(str(timezone_name))
+        except ZoneInfoNotFoundError:
+            return "google_calendar_invalid_timezone"
+    start = _parse_window_datetime(args.get("start"), timezone_name)
+    if start is None:
+        return "google_calendar_invalid_start"
+    end = _parse_window_datetime(args.get("end"), timezone_name)
+    if end is None:
+        return "google_calendar_invalid_end"
+    if end <= start:
+        return "google_calendar_invalid_time_range"
+    if end - start > MANAGED_APPOINTMENTS_MAX_WINDOW:
+        return "google_calendar_time_range_too_large"
+    return None
+
+
+def _managed_appointment_dtos(
+    events: Any, patient_ref: str, fallback_timezone: str
+) -> list[dict[str, str]]:
+    appointments: list[dict[str, str]] = []
+    for event in events if isinstance(events, list) else []:
+        if not isinstance(event, dict) or event.get("status") == "cancelled":
+            continue
+        private = ((event.get("extendedProperties") or {}).get("private") or {})
+        if not isinstance(private, dict) or (
+            private.get(ASA_MANAGED_KEY) != "true"
+            or private.get(ASA_SCHEMA_KEY) != APPOINTMENT_METADATA_SCHEMA
+            or private.get(ASA_PATIENT_REF_KEY) != patient_ref
+        ):
+            continue
+        start_data = event.get("start") if isinstance(event.get("start"), dict) else {}
+        end_data = event.get("end") if isinstance(event.get("end"), dict) else {}
+        start = start_data.get("dateTime") or start_data.get("date")
+        end = end_data.get("dateTime") or end_data.get("date")
+        event_id = event.get("id")
+        if not event_id or not start or not end:
+            continue
+        timezone_name = str(start_data.get("timeZone") or end_data.get("timeZone") or fallback_timezone)
+        parsed_start = _parse_window_datetime(start, timezone_name)
+        if parsed_start is None:
+            continue
+        try:
+            local_start = parsed_start.astimezone(ZoneInfo(timezone_name))
+        except ZoneInfoNotFoundError:
+            timezone_name = fallback_timezone
+            local_start = parsed_start.astimezone(ZoneInfo(fallback_timezone))
+        appointments.append({
+            "id": str(event_id),
+            "label": local_start.strftime("%d/%m às %H:%M"),
+            "start": str(start),
+            "end": str(end),
+            "timezone": timezone_name,
+        })
+    appointments.sort(key=lambda item: (
+        _parse_window_datetime(item["start"], item["timezone"]).timestamp(), item["id"]
+    ))
+    return appointments
+
 
 def google_calendar_tool_definitions(*, connected: bool) -> list[dict[str, Any]]:
     labels = {
         "google_calendar_create_event": "[Google Calendar] Criar evento",
         "google_calendar_update_event": "[Google Calendar] Atualizar evento",
         "google_calendar_list_events": "[Google Calendar] Listar eventos",
+        "google_calendar_find_managed_appointments": "[Google Calendar] Localizar agendamentos gerenciados",
         "google_calendar_check_availability": "[Google Calendar] Verificar disponibilidade",
         "google_calendar_delete_event": "[Google Calendar] Excluir evento",
     }
@@ -145,6 +256,7 @@ def google_calendar_tool_definitions(*, connected: bool) -> list[dict[str, Any]]
         "google_calendar_create_event": "Cria um evento no Google Calendar conectado do workspace.",
         "google_calendar_update_event": "Atualiza um evento existente no Google Calendar conectado do workspace.",
         "google_calendar_list_events": "Lista eventos do Google Calendar conectado do workspace.",
+        "google_calendar_find_managed_appointments": "Localiza agendamentos Asa do contato atual em uma janela de até 90 dias.",
         "google_calendar_check_availability": "Verifica disponibilidade no Google Calendar conectado do workspace.",
         "google_calendar_delete_event": "Exclui um evento do Google Calendar conectado do workspace.",
     }
@@ -178,6 +290,8 @@ def google_calendar_tool_definitions(*, connected: bool) -> list[dict[str, Any]]
                 if tool_id == "google_calendar_update_event"
                 else GOOGLE_CALENDAR_AVAILABILITY_INPUT_SCHEMA
                 if tool_id in {"google_calendar_check_availability", "calendar.get_availability"}
+                else GOOGLE_CALENDAR_FIND_MANAGED_APPOINTMENTS_INPUT_SCHEMA
+                if tool_id == "google_calendar_find_managed_appointments"
                 else {"type": "object"}
             ),
             "is_enabled": connected,
@@ -283,6 +397,8 @@ class GoogleCalendarToolAdapter:
             if tool_id == "google_calendar_create_event"
             else GOOGLE_CALENDAR_UPDATE_EVENT_INPUT_SCHEMA
             if tool_id == "google_calendar_update_event"
+            else GOOGLE_CALENDAR_FIND_MANAGED_APPOINTMENTS_INPUT_SCHEMA
+            if tool_id == "google_calendar_find_managed_appointments"
             else None
         )
         if validation_schema is not None:
@@ -290,7 +406,11 @@ class GoogleCalendarToolAdapter:
                 validate(instance=args, schema=validation_schema)
             except ValidationError:
                 message = "google_calendar_invalid_arguments"
-                action = "update_event" if tool_id == "google_calendar_update_event" else "create_event"
+                action = (
+                    "find_managed_appointments"
+                    if tool_id == "google_calendar_find_managed_appointments"
+                    else "update_event" if tool_id == "google_calendar_update_event" else "create_event"
+                )
                 normalized = NormalizedToolResult(False, tool_id, type=f"google_calendar.{action}", error={"code": message})
                 return ToolResult(
                     False,
@@ -304,6 +424,18 @@ class GoogleCalendarToolAdapter:
                     normalized_result=normalized,
                 )
         appointment_metadata: dict[str, str] | None = None
+        if tool_id == "google_calendar_find_managed_appointments":
+            validation_error = _validate_managed_appointment_window(args)
+            if validation_error:
+                return _calendar_failure(tool_id, validation_error)
+            if context.contact_id is None:
+                return _calendar_failure(tool_id, "google_calendar_contact_identity_required")
+            try:
+                appointment_metadata = build_appointment_private_metadata(
+                    tenant_id=context.tenant_id, contact_id=context.contact_id
+                )
+            except ExternalReferenceError:
+                return _calendar_failure(tool_id, "google_calendar_external_identity_unavailable")
         if tool_id == "google_calendar_create_event" and context.contact_id is not None:
             try:
                 appointment_metadata = build_appointment_private_metadata(
@@ -359,6 +491,15 @@ class GoogleCalendarToolAdapter:
                         asa_private_metadata=appointment_metadata,
                     )
                 action = "create_event"
+            elif tool_id == "google_calendar_find_managed_appointments":
+                result = service.find_managed_appointments(
+                    start=args["start"],
+                    end=args["end"],
+                    timezone=args.get("timezone"),
+                    patient_ref=appointment_metadata[ASA_PATIENT_REF_KEY],
+                    metadata_schema=APPOINTMENT_METADATA_SCHEMA,
+                )
+                action = "find_managed_appointments"
             elif tool_id in {"google_calendar_list_events", "calendar.get_appointment"}:
                 result = service.list_events(**args)
                 action = "list_events"
@@ -377,11 +518,37 @@ class GoogleCalendarToolAdapter:
                 action = "unknown"
         except Exception as exc:
             _log_tool("GOOGLE_CALENDAR_SERVICE_EXCEPTION", tenant_id=context.tenant_id, tool_name=tool_id, input=args, db=db, exception=exc)
+            if tool_id == "google_calendar_find_managed_appointments":
+                return _calendar_failure(tool_id, "google_calendar_api_error")
             raise
         _log_tool("GOOGLE_CALENDAR_SERVICE_RESULT", tenant_id=context.tenant_id, tool_name=tool_id, input=args, db=db, result=result)
+        if tool_id == "google_calendar_find_managed_appointments" and result.get("ok") is not True:
+            message = str(result.get("message") or "")
+            code = (
+                "google_calendar_integration_unavailable"
+                if "não está conectado" in message
+                else "google_calendar_api_error"
+            )
+            return _calendar_failure(tool_id, code)
         if tool_id == "google_calendar_create_event":
             _log_tool("AI_AGENT_CALENDAR_CREATE_RAW_RESULT", tenant_id=context.tenant_id, tool_name=tool_id, input=args, db=db, raw_response=result)
         ok = result.get("ok") is True
+        if tool_id == "google_calendar_find_managed_appointments" and ok:
+            appointments = _managed_appointment_dtos(
+                result.get("events"), appointment_metadata[ASA_PATIENT_REF_KEY],
+                str(result.get("timezone") or args.get("timezone") or "America/Sao_Paulo"),
+            )
+            normalized = NormalizedToolResult(
+                True, tool_id, type="google_calendar.find_managed_appointments",
+                summary="Agendamentos gerenciados localizados", data={"appointments": appointments},
+            )
+            return ToolResult(
+                True, self.tool_type, tool_id=tool_id, tool_name=tool_id,
+                output=appointments,
+                structured_content={"ok": True, "tool": tool_id, "result": appointments, "error": None},
+                metadata={"provider": "google_calendar", "source": "integration_connections"},
+                normalized_result=normalized,
+            )
         event_data = _calendar_event_result_data(result) if tool_id == "google_calendar_create_event" else {}
         create_ok = ok and bool(event_data.get("event_id")) if tool_id == "google_calendar_create_event" else ok
         if tool_id == "google_calendar_create_event" and ok and not event_data.get("event_id"):

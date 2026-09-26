@@ -202,6 +202,38 @@ def test_calendar_mcp_receives_trusted_session_identity_not_variables_or_argumen
     assert received["arguments"]["contact_id"] == str(malicious_contact_id)
 
 
+def test_find_managed_appointments_runtime_persists_array_using_trusted_contact(monkeypatch, calendar_runtime):
+    executor, db, session, node = calendar_runtime
+    trusted_contact = session.contact_id
+    malicious_contact = uuid.uuid4()
+    session.variables["contact_id"] = str(malicious_contact)
+    node["data"].update({
+        "tool_name": "google_calendar_find_managed_appointments",
+        "arguments": {
+            "start": "2026-09-01T00:00:00-03:00",
+            "end": "2026-10-01T00:00:00-03:00",
+        },
+        "output_variable": "managed_appointments",
+    })
+    received = {}
+    appointments = [{"id": "evt-1", "label": "08/09 às 13:00", "start": "s", "end": "e", "timezone": "America/Sao_Paulo"}]
+
+    def execute(_adapter, tool_name, arguments, context):
+        received.update(tool_name=tool_name, arguments=arguments, contact_id=context.contact_id)
+        return ToolResult(ok=True, tool_type="google_calendar", output=appointments)
+
+    monkeypatch.setattr("app.flow_v2.executors.mcp_tool_executor.GoogleCalendarToolAdapter.execute", execute)
+    result = executor.execute(db, snapshot=SimpleNamespace(flow_id=uuid.uuid4()), session=session,
+                              node=node, runtime_input=SimpleNamespace())
+
+    assert result.next_source_handle == "success"
+    assert received["tool_name"] == "google_calendar_find_managed_appointments"
+    assert received["contact_id"] == trusted_contact
+    assert received["contact_id"] != malicious_contact
+    assert "contact_id" not in received["arguments"]
+    assert session.variables["managed_appointments"] == appointments
+
+
 def test_calendar_mcp_tool_result_error_returns_error_handle_without_raising(monkeypatch, calendar_runtime):
     executor, db, session, node = calendar_runtime
 
