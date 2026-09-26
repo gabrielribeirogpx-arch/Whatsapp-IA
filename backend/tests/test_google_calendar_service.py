@@ -59,6 +59,95 @@ def test_tenant_with_connection_creates_event(monkeypatch, caplog):
     assert "access-token" not in caplog.text and "refresh-token" not in caplog.text
 
 
+@pytest.mark.parametrize(
+    "event",
+    [
+        {"id": "evt", "extendedProperties": {"private": {}}},
+        {"id": "evt"},
+        {"id": "evt", "status": "cancelled", "extendedProperties": {"private": {"asa_managed": "true", "asa_schema": "appointment-v1", "asa_patient_ref": "current"}}},
+        {"id": "evt", "extendedProperties": {"private": {"asa_managed": "true", "asa_schema": "appointment-v999", "asa_patient_ref": "current"}}},
+        {"id": "evt", "extendedProperties": {"private": {"asa_managed": "true", "asa_schema": "appointment-v1", "asa_patient_ref": "other"}}},
+    ],
+)
+def test_managed_update_fails_closed_without_patch(monkeypatch, event):
+    tenant_id = uuid.uuid4(); db = FakeDb(); conn = _connect(db, tenant_id)
+    conn.metadata_json = {"calendar_id": "clinic@example.com"}
+    calls = []
+    def fake_request(method, url, **kwargs):
+        calls.append((method, url, kwargs.get("json")))
+        return Resp(200, event)
+    monkeypatch.setattr("app.services.google_calendar_service.requests.request", fake_request)
+    result = GoogleCalendarService(db, tenant_id).update_event(
+        "evt", expected_private_metadata={"asa_patient_ref": "current"},
+        start="2026-09-10T10:00:00Z", end="2026-09-10T11:00:00Z",
+    )
+    assert result == {"ok": False, "message": "google_calendar_event_not_authorized"}
+    assert [call[0] for call in calls] == ["GET"]
+    assert "/calendars/clinic%40example.com/events/evt" in calls[0][1]
+
+
+def test_managed_update_gets_then_patches_trusted_calendar_and_preserves_metadata(monkeypatch):
+    tenant_id = uuid.uuid4(); db = FakeDb(); conn = _connect(db, tenant_id)
+    conn.metadata_json = {"calendar_id": "clinic@example.com"}
+    private = {"asa_managed": "true", "asa_schema": "appointment-v1", "asa_patient_ref": "current"}
+    calls = []
+    def fake_request(method, url, **kwargs):
+        calls.append((method, url, kwargs.get("json")))
+        if method == "GET":
+            return Resp(200, {"id": "evt", "status": "confirmed", "extendedProperties": {"private": private}})
+        return Resp(200, {"id": "evt", "start": kwargs["json"]["start"], "end": kwargs["json"]["end"], "extendedProperties": {"private": private}})
+    monkeypatch.setattr("app.services.google_calendar_service.requests.request", fake_request)
+    result = GoogleCalendarService(db, tenant_id).update_event(
+        "evt", expected_private_metadata={"asa_patient_ref": "current"},
+        start="2026-09-10T10:00:00Z", end="2026-09-10T11:00:00Z",
+        timezone="America/Sao_Paulo",
+    )
+    assert result["ok"] is True
+    assert [call[0] for call in calls] == ["GET", "PATCH"]
+    assert calls[0][1] == calls[1][1]
+    assert calls[1][2]["start"]["timeZone"] == "America/Sao_Paulo"
+    assert "extendedProperties" not in calls[1][2]
+
+
+@pytest.mark.parametrize(
+    ("get_status", "expected"),
+    [(404, "google_calendar_event_not_found"), (403, "google_calendar_api_error"), (500, "google_calendar_api_error")],
+)
+def test_managed_update_get_failure_never_patches(monkeypatch, get_status, expected):
+    tenant_id = uuid.uuid4(); db = FakeDb(); _connect(db, tenant_id)
+    methods = []
+    def fake_request(method, _url, **_kwargs):
+        methods.append(method)
+        return Resp(get_status, {"error": {"message": "sensitive upstream detail"}})
+    monkeypatch.setattr("app.services.google_calendar_service.requests.request", fake_request)
+    result = GoogleCalendarService(db, tenant_id).update_event(
+        "unknown", expected_private_metadata={"asa_patient_ref": "current"},
+        start="2026-09-10T10:00:00Z", end="2026-09-10T11:00:00Z",
+    )
+    assert result == {"ok": False, "message": expected}
+    assert methods == ["GET"]
+    assert "sensitive" not in str(result)
+
+
+def test_managed_update_patch_failure_is_sanitized(monkeypatch):
+    tenant_id = uuid.uuid4(); db = FakeDb(); _connect(db, tenant_id)
+    private = {"asa_managed": "true", "asa_schema": "appointment-v1", "asa_patient_ref": "current"}
+    methods = []
+    def fake_request(method, _url, **_kwargs):
+        methods.append(method)
+        if method == "GET":
+            return Resp(200, {"id": "evt", "extendedProperties": {"private": private}})
+        return Resp(500, {"error": {"message": "sensitive upstream detail"}})
+    monkeypatch.setattr("app.services.google_calendar_service.requests.request", fake_request)
+    result = GoogleCalendarService(db, tenant_id).update_event(
+        "evt", expected_private_metadata={"asa_patient_ref": "current"},
+        start="2026-09-10T10:00:00Z", end="2026-09-10T11:00:00Z",
+    )
+    assert result == {"ok": False, "message": "google_calendar_api_error"}
+    assert methods == ["GET", "PATCH"]
+    assert "sensitive" not in str(result)
+
+
 def test_create_event_sends_minimal_private_asa_metadata_without_exposing_it(monkeypatch):
     tenant_id = uuid.uuid4(); db = FakeDb(); _connect(db, tenant_id)
     contact_id = uuid.uuid4()
