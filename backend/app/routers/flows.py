@@ -43,6 +43,7 @@ from app.services.flow_session_service import FlowSessionService
 from app.services.flow_service import FlowService, create_flow, delete_flow, duplicate_flow, get_flow, get_flows, update_flow
 from app.services.flow_activation_service import activate_flow_exclusively, deactivate_tenant_flows_exclusively
 from app.services.flow_validation import validate_builder_graph
+from app.services.flow_export_service import FlowExportError, build_flow_export, safe_export_filename
 from app.services.runtime_flow_diagnostics import assert_flow_matches_whatsapp_tenant
 from app.services.delay_queue_service import clear_delays_for_runtime_reset
 from app.flow_v2.delay_contract import normalize_delay_nodes
@@ -2490,6 +2491,55 @@ def get_tenant_flow_by_id(
         edges=edges,
         version_id=flow.current_version_id,
         version=version,
+    )
+
+
+@crud_router.get("/{flow_id}/export")
+def export_tenant_flow(
+    flow_id: str,
+    request: Request,
+    x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
+    db: Session = Depends(get_db),
+    current_user: TenantUser = Depends(get_current_user),
+):
+    """Download the current editor definition without publishing or activating it."""
+
+    tenant_uuid = _resolve_tenant_header(x_tenant_id)
+    # Authentication normally enforces this already.  Keep an explicit fail-closed
+    # guard here because export is a data-exfiltration boundary.
+    if str(current_user.tenant_id) != str(tenant_uuid):
+        raise HTTPException(status_code=404, detail="Flow não encontrado")
+    if str(getattr(current_user, "role", "")).lower() not in {"owner", "admin", "member", "viewer"}:
+        raise HTTPException(status_code=403, detail="Permissão insuficiente")
+
+    flow = _get_flow_by_identifier(db=db, flow_id=flow_id, tenant_id=tenant_uuid)
+    if not flow:
+        # The same response is used for absent and cross-tenant IDs to prevent IDOR.
+        raise HTTPException(status_code=404, detail="Flow não encontrado")
+    resolved = FlowService(db).get_flow_with_version(flow)
+    try:
+        payload = build_flow_export(flow, nodes=resolved["nodes"], edges=resolved["edges"])
+    except FlowExportError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    _write_flow_audit_log(
+        db,
+        action="FLOW_EXPORTED",
+        tenant_id=tenant_uuid,
+        flow=flow,
+        current_user=current_user,
+        request=request,
+        metadata={"schema_version": payload["schema_version"]},
+    )
+    db.commit()
+    filename = safe_export_filename(flow.name)
+    return JSONResponse(
+        content=payload,
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "X-Content-Type-Options": "nosniff",
+            "Cache-Control": "private, no-store",
+        },
     )
 
 

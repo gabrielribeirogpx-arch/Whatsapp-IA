@@ -50,7 +50,7 @@ import PublishMarketplaceTemplateModal from '@/components/flows/PublishMarketpla
 import AIStoreModal from '@/components/ai-store/AIStoreModal';
 import { MARKETPLACE_CATALOG } from '@/components/ai-store/catalog';
 import AISystemModal from '@/components/flow/AISystemModal';
-import { apiFetch, getFlowAnalytics, getFlowGraph, getTenantSessionFromStorage, listFlowVersions, parseApiResponse, restoreFlowVersion, listFlows } from '@/lib/api';
+import { apiFetch, exportFlow, getFlowAnalytics, getFlowGraph, getTenantSessionFromStorage, listFlowVersions, parseApiResponse, restoreFlowVersion, listFlows } from '@/lib/api';
 import { getLayoutedElements } from '@/lib/autoLayout';
 import { orderChoiceChildrenEdges } from '@/lib/flowChoiceOrdering';
 import { normalizeFlow } from '@/lib/flowNormalization';
@@ -1893,6 +1893,16 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
       setTimeout(() => setToastMessage(null), 4000);
     },
   }), []);
+
+  const handleExportFlow = useCallback(async () => {
+    if (!selectedFlowId) return;
+    try {
+      await exportFlow(selectedFlowId);
+      toast.success('Fluxo exportado com segurança.');
+    } catch {
+      toast.error('Não foi possível exportar o fluxo. Tente novamente.');
+    }
+  }, [selectedFlowId, toast]);
 
   useEffect(() => {
     const header = flowHeaderRef.current;
@@ -4117,6 +4127,16 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
                     disabled={!selectedFlowId}
                   >
                     Snapshot
+                  </button>
+                  <button
+                    type="button"
+                    className="flow-top-btn flow-top-btn-neutral"
+                    onClick={() => void handleExportFlow()}
+                    disabled={!selectedFlowId}
+                    title="Baixar uma definição portátil e sem credenciais"
+                  >
+                    <FileDown size={14} />
+                    Exportar fluxo
                   </button>
                   <button
                     type="button"
