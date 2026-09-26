@@ -59,6 +59,61 @@ def test_tenant_with_connection_creates_event(monkeypatch, caplog):
     assert "access-token" not in caplog.text and "refresh-token" not in caplog.text
 
 
+def test_create_event_sends_minimal_private_asa_metadata_without_exposing_it(monkeypatch):
+    tenant_id = uuid.uuid4(); db = FakeDb(); _connect(db, tenant_id)
+    contact_id = uuid.uuid4()
+    private_metadata = {
+        "asa_managed": "true",
+        "asa_schema": "appointment-v1",
+        "asa_patient_ref": "asa:v1:" + "x" * 43,
+    }
+    seen = {}
+
+    def fake_request(method, url, **kwargs):
+        seen.update(method=method, url=url, json=kwargs["json"])
+        return Resp(200, {
+            "id": "evt-managed",
+            "summary": "Consulta",
+            "start": {"dateTime": "2026-12-01T10:00:00-03:00"},
+            "end": {"dateTime": "2026-12-01T11:00:00-03:00"},
+            "extendedProperties": {"private": private_metadata},
+        })
+
+    monkeypatch.setattr("app.services.google_calendar_service.requests.request", fake_request)
+    result = GoogleCalendarService(db, tenant_id).create_event(
+        title="Consulta",
+        description="Paciente Maria",
+        location="Sala 2",
+        attendees=["medico@example.com"],
+        start="2026-12-01T10:00:00-03:00",
+        end="2026-12-01T11:00:00-03:00",
+        timezone="America/Sao_Paulo",
+        asa_private_metadata=private_metadata,
+    )
+
+    assert result == {
+        "ok": True,
+        "event_id": "evt-managed",
+        "html_link": None,
+        "title": "Consulta",
+        "start": "2026-12-01T10:00:00-03:00",
+        "end": "2026-12-01T11:00:00-03:00",
+    }
+    assert seen["json"]["extendedProperties"]["private"] == private_metadata
+    assert set(seen["json"]["extendedProperties"]["private"]) == {
+        "asa_managed", "asa_schema", "asa_patient_ref",
+    }
+    assert str(tenant_id) not in str(seen["json"]["extendedProperties"])
+    assert str(contact_id) not in str(seen["json"]["extendedProperties"])
+    assert seen["json"]["summary"] == "Consulta"
+    assert seen["json"]["description"] == "Paciente Maria"
+    assert seen["json"]["location"] == "Sala 2"
+    assert seen["json"]["attendees"] == [{"email": "medico@example.com"}]
+    assert seen["json"]["start"]["timeZone"] == "America/Sao_Paulo"
+    assert seen["json"]["end"]["timeZone"] == "America/Sao_Paulo"
+    assert "extendedProperties" not in result
+
+
 def test_list_events_isolates_tenant(monkeypatch):
     tenant_a = uuid.uuid4(); tenant_b = uuid.uuid4(); db = FakeDb(); _connect(db, tenant_a, access="a"); _connect(db, tenant_b, access="b")
     auths = []

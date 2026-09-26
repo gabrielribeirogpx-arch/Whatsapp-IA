@@ -7,6 +7,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from app.core.external_identity import APPOINTMENT_PATIENT, derive_external_reference, is_valid_external_reference
 from app.database import get_db
 from app.models.integration_connection import IntegrationConnection
 from app.models.tenant_mcp import TenantMCPTool
@@ -162,6 +163,141 @@ def test_create_event_forwards_rendered_slot_arguments_unchanged():
     registry = ToolRegistry()
     registry.register(GoogleCalendarToolAdapter(object(), service_factory=FakeService))
     result = registry.execute("google_calendar", "google_calendar_create_event", arguments, ToolContext(tenant_id=uuid.uuid4()))
+
+    assert result.ok is True
+    assert calls == [arguments]
+
+
+def _execute_identified_create(monkeypatch, *, tenant_id, contact_id, arguments=None):
+    monkeypatch.setenv("EXTERNAL_IDENTITY_SECRET", "s" * 32)
+    calls = []
+
+    class FakeService:
+        def __init__(self, db, service_tenant_id):
+            assert service_tenant_id == tenant_id
+
+        def create_event(self, **kwargs):
+            calls.append(kwargs)
+            return {
+                "ok": True,
+                "event_id": "evt-1",
+                "title": kwargs.get("title"),
+                "start": kwargs["start"],
+                "end": kwargs["end"],
+            }
+
+    payload = {
+        "title": "Consulta de Maria",
+        "description": "Retorno da paciente",
+        "location": "Sala 2",
+        "attendees": ["medico@example.com"],
+        "start": "2026-12-01T10:00:00-03:00",
+        "end": "2026-12-01T11:00:00-03:00",
+        "timezone": "America/Sao_Paulo",
+        **(arguments or {}),
+    }
+    result = GoogleCalendarToolAdapter(object(), service_factory=FakeService).execute(
+        "google_calendar_create_event",
+        payload,
+        ToolContext(tenant_id=tenant_id, contact_id=contact_id),
+    )
+    return result, calls
+
+
+def test_identified_create_uses_exact_trusted_patient_reference_and_preserves_fields(monkeypatch):
+    tenant_id = uuid.uuid4()
+    contact_id = uuid.uuid4()
+    result, calls = _execute_identified_create(
+        monkeypatch, tenant_id=tenant_id, contact_id=contact_id,
+    )
+
+    assert result.ok is True
+    assert len(calls) == 1
+    metadata = calls[0].pop("asa_private_metadata")
+    assert metadata == {
+        "asa_managed": "true",
+        "asa_schema": "appointment-v1",
+        "asa_patient_ref": derive_external_reference(
+            tenant_id=tenant_id,
+            subject_id=contact_id,
+            purpose=APPOINTMENT_PATIENT,
+        ),
+    }
+    assert is_valid_external_reference(metadata["asa_patient_ref"])
+    assert calls[0] == {
+        "title": "Consulta de Maria",
+        "description": "Retorno da paciente",
+        "location": "Sala 2",
+        "attendees": ["medico@example.com"],
+        "start": "2026-12-01T10:00:00-03:00",
+        "end": "2026-12-01T11:00:00-03:00",
+        "timezone": "America/Sao_Paulo",
+    }
+    assert "asa_patient_ref" not in result.output
+
+
+def test_identified_create_isolates_tenants_contacts_and_ignores_spoofed_arguments(monkeypatch):
+    tenant_a, tenant_b = uuid.uuid4(), uuid.uuid4()
+    contact_a, contact_b = uuid.uuid4(), uuid.uuid4()
+    spoof = {
+        "tenant_id": str(uuid.uuid4()),
+        "contact_id": str(uuid.uuid4()),
+        "asa_patient_ref": "fake",
+        "asa_managed": "false",
+        "asa_private_metadata": {"asa_managed": "false", "asa_patient_ref": "fake"},
+    }
+
+    _, first = _execute_identified_create(monkeypatch, tenant_id=tenant_a, contact_id=contact_a, arguments=spoof)
+    _, other_tenant = _execute_identified_create(monkeypatch, tenant_id=tenant_b, contact_id=contact_a)
+    _, other_contact = _execute_identified_create(monkeypatch, tenant_id=tenant_a, contact_id=contact_b)
+    refs = {
+        first[0]["asa_private_metadata"]["asa_patient_ref"],
+        other_tenant[0]["asa_private_metadata"]["asa_patient_ref"],
+        other_contact[0]["asa_private_metadata"]["asa_patient_ref"],
+    }
+    assert len(refs) == 3
+    assert first[0]["asa_private_metadata"]["asa_managed"] == "true"
+    assert first[0]["asa_private_metadata"]["asa_patient_ref"] != "fake"
+
+
+@pytest.mark.parametrize("secret", [None, "too-short"])
+def test_identified_create_fails_closed_before_service_when_secret_is_invalid(monkeypatch, secret):
+    if secret is None:
+        monkeypatch.delenv("EXTERNAL_IDENTITY_SECRET", raising=False)
+    else:
+        monkeypatch.setenv("EXTERNAL_IDENTITY_SECRET", secret)
+
+    class FakeService:
+        def __init__(self, db, tenant_id):
+            raise AssertionError("Google service must not be constructed")
+
+    result = GoogleCalendarToolAdapter(object(), service_factory=FakeService).execute(
+        "google_calendar_create_event",
+        {"start": "2026-12-01T10:00:00Z", "end": "2026-12-01T11:00:00Z"},
+        ToolContext(tenant_id=uuid.uuid4(), contact_id=uuid.uuid4()),
+    )
+
+    assert result.ok is False
+    assert result.error_code == "google_calendar_external_identity_unavailable"
+    assert result.error_message == "google_calendar_external_identity_unavailable"
+
+
+def test_legacy_create_without_contact_remains_unmanaged(monkeypatch):
+    monkeypatch.delenv("EXTERNAL_IDENTITY_SECRET", raising=False)
+    calls = []
+
+    class FakeService:
+        def __init__(self, db, tenant_id):
+            pass
+
+        def create_event(self, **kwargs):
+            calls.append(kwargs)
+            return {"ok": True, "event_id": "legacy-1"}
+
+    arguments = {"start": "2026-12-01T10:00:00Z", "end": "2026-12-01T11:00:00Z"}
+    result = GoogleCalendarToolAdapter(object(), service_factory=FakeService).execute(
+        "google_calendar_create_event", arguments, ToolContext(tenant_id=uuid.uuid4()),
+    )
 
     assert result.ok is True
     assert calls == [arguments]
