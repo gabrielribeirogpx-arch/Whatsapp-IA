@@ -207,6 +207,32 @@ export async function parseApiResponse<T>(res: Response): Promise<T> {
   return JSON.parse(body) as T;
 }
 
+/** Downloads a portable, server-sanitized definition of the current Flow. */
+export async function exportFlow(flowId: string): Promise<string> {
+  const response = await apiFetch(`/api/flows/${encodeURIComponent(flowId)}/export`, {
+    method: 'GET',
+    headers: { Accept: 'application/json' },
+  });
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`HTTP ${response.status}: ${body}`);
+  }
+
+  const disposition = response.headers.get('Content-Disposition') || '';
+  const filename = disposition.match(/filename="([^"]+)"/i)?.[1] || 'fluxo.wazza-flow.json';
+  const blob = await response.blob();
+  const objectUrl = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = objectUrl;
+  anchor.download = filename;
+  anchor.style.display = 'none';
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(objectUrl);
+  return filename;
+}
+
 export type MarketplaceTemplatePublishPayload = {
   name: string;
   description: string;
