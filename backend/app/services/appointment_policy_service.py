@@ -53,6 +53,8 @@ def intervals_for_day(day: date, policy: dict[str, Any]) -> list[tuple[datetime,
 
 def _target_date(raw: str, base: datetime) -> tuple[date, bool]:
     """Resolve supported Portuguese date expressions and flag weekday matches."""
+    if re.search(r"\bhoje\b", raw):
+        return base.date(), False
     if "amanhã" in raw or "amanha" in raw:
         return base.date()+timedelta(days=1), False
     match=re.search(r"\b(\d{1,2})/(\d{1,2})(?:/(\d{4}))?\b",raw)
@@ -74,7 +76,10 @@ def _target_date(raw: str, base: datetime) -> tuple[date, bool]:
     match=re.search(rf"\b({weekday_pattern})(?:-feira)?\b",raw)
     if match:
         weekday=WEEKDAYS_PT[match.group(1)]
-        return base.date()+timedelta(days=(weekday-base.weekday()) % 7), True
+        offset=(weekday-base.weekday()) % 7
+        if re.search(r"\bpr[oó]xim[ao]\b", raw) and offset == 0:
+            offset=7
+        return base.date()+timedelta(days=offset), True
     raise AppointmentPolicyError("Use uma data, dia da semana ou período válido.")
 
 def normalize_preferred_period(text: str, policy: dict[str, Any], *, now: datetime | None=None) -> dict[str, Any]:
@@ -109,6 +114,54 @@ def normalize_preferred_period(text: str, policy: dict[str, Any], *, now: dateti
     overlap=[(max(a,requested[0]),min(b,requested[1])) for a,b in intervals if max(a,requested[0])<min(b,requested[1])]
     if not overlap: raise AppointmentPolicyError("O período informado está fora do funcionamento da clínica.")
     return {"mode":"period","window_start":overlap[0][0].isoformat(),"window_end":overlap[-1][1].isoformat(),"timezone":policy["timezone"]}
+
+
+def normalize_appointment_lookup_period(
+    text: str, policy: dict[str, Any], *, now: datetime | None = None
+) -> dict[str, Any]:
+    """Resolve the narrow local-time window used to find an existing appointment.
+
+    This deliberately reuses the canonical Portuguese date resolver. A date without
+    a named day period covers that local calendar day; named periods keep the same
+    business-hours intersection used by ``normalize_preferred_period``.
+    """
+    policy = validate_policy(policy)
+    tz = ZoneInfo(policy["timezone"])
+    raw = " ".join(str(text).strip().casefold().split())
+    if not raw:
+        raise AppointmentPolicyError("Informe a data da consulta atual.")
+    base = now.astimezone(tz) if now and now.tzinfo else (
+        now.replace(tzinfo=tz) if now else datetime.now(tz)
+    )
+    target, _ = _target_date(raw, base)
+    if target < base.date():
+        raise AppointmentPolicyError("A data da consulta já passou.")
+
+    period_match = re.search(r"\b(manhã|manha|tarde|noite)\b", raw)
+    if not period_match:
+        start = datetime.combine(target, time.min, tz)
+        end = datetime.combine(target + timedelta(days=1), time.min, tz)
+    else:
+        period = period_match.group(1)
+        windows = {"manhã": (6, 12), "manha": (6, 12), "tarde": (13, 18), "noite": (18, 22)}
+        requested = (
+            datetime.combine(target, time(windows[period][0]), tz),
+            datetime.combine(target, time(windows[period][1]), tz),
+        )
+        overlap = [
+            (max(a, requested[0]), min(b, requested[1]))
+            for a, b in intervals_for_day(target, policy)
+            if max(a, requested[0]) < min(b, requested[1])
+        ]
+        if not overlap:
+            raise AppointmentPolicyError("O período informado está fora do funcionamento da clínica.")
+        start, end = overlap[0][0], overlap[-1][1]
+    return {
+        "mode": "period",
+        "window_start": start.isoformat(),
+        "window_end": end.isoformat(),
+        "timezone": policy["timezone"],
+    }
 
 def appointments_for_availability(*, start: str, end: str, timezone: str, busy: list[dict[str,Any]], policy: dict[str,Any], mode: str="period") -> list[dict[str,Any]]:
     policy=validate_policy(policy); tz=ZoneInfo(timezone)

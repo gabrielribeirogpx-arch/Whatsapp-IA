@@ -12,6 +12,7 @@ export const DATA_COLLECTION_TYPE_OPTIONS = [
   { value: 'boolean', label: 'Sim/Não' },
   { value: 'choice', label: 'Escolha' },
   { value: 'appointment_period', label: 'Período de agendamento' },
+  { value: 'appointment_lookup_period', label: 'Data/período de agendamento existente' },
 ] as const;
 
 export type DataCollectionType = typeof DATA_COLLECTION_TYPE_OPTIONS[number]['value'];

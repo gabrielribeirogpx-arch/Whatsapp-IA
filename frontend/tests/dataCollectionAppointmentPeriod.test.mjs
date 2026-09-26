@@ -11,6 +11,7 @@ for (const value of expectedLegacyTypes) {
 }
 
 assert.match(types, /value: 'appointment_period', label: 'Período de agendamento'/, 'appointment_period is shown with its product label');
+assert.match(types, /value: 'appointment_lookup_period', label: 'Data\/período de agendamento existente'/, 'appointment lookup period is available for secure rescheduling');
 assert.match(editor, /DATA_COLLECTION_TYPE_OPTIONS\.map\(type=><option key=\{type\.value\} value=\{type\.value\}>\{type\.label\}<\/option>\)/, 'the dropdown persists the canonical option value');
 assert.match(editor, /value=\{toText\(draft\.data_type\|\|'text'\)\}/, 'reopening binds the select to the persisted data_type and keeps text as the legacy fallback');
 assert.match(editor, /onDraftChange\(\{data_type:e\.target\.value\}\)/, 'selection is saved to the canonical data_type field');

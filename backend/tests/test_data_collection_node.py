@@ -43,3 +43,23 @@ def test_choice_prefers_stable_interactive_id_and_custom_text_is_exact():
     assert result.valid and result.normalized_value == 'manha'
     assert validate_data_collection({'data_type': 'choice', 'allow_custom_value': True, **data}, 'Manhã').normalized_value == 'manha'
     assert not validate_data_collection({'data_type': 'choice', **data}, 'manha').valid
+
+
+def test_appointment_lookup_period_requires_policy_and_persists_structured_window(monkeypatch):
+    expected = {
+        'mode': 'period',
+        'window_start': '2026-09-28T00:00:00-03:00',
+        'window_end': '2026-09-29T00:00:00-03:00',
+        'timezone': 'America/Sao_Paulo',
+    }
+    monkeypatch.setattr(
+        'app.flow_v2.data_collection.normalize_appointment_lookup_period',
+        lambda value, policy: expected if value == '28/09/2026' and policy == {'timezone': 'America/Sao_Paulo'} else None,
+    )
+    data = {'data_type': 'appointment_lookup_period', 'required': True}
+    missing_policy = validate_data_collection(data, '28/09/2026')
+    result = validate_data_collection(
+        data, '28/09/2026', {'appointment_policy': {'timezone': 'America/Sao_Paulo'}},
+    )
+    assert not missing_policy.valid
+    assert result.valid and result.normalized_value == expected
