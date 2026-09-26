@@ -89,6 +89,49 @@ def test_real_incident_remains_invalid_as_closed_day_when_tomorrow_has_no_hours(
     assert failure.value.code == "closed_day"
 
 
+@pytest.mark.parametrize("raw", (
+    "depois de amanhã", "depois de amanhã de manhã", "depois de amanhã à tarde",
+    "depois de amanhã a tarde", "depois de amanhã de noite", "depois de amanha",
+    "depois de amanha de manha", "depois de amanha a tarde",
+    "Depois de amanhã de manhã", "DEPOIS DE AMANHÃ DE MANHÃ",
+    "  depois   de   amanhã   de manhã  ",
+))
+def test_day_after_tomorrow_language_variants_resolve_two_days_ahead(raw):
+    hours={day:[{"start":"00:00","end":"23:59"}] for day in DAYS}
+    p=policy(business_hours=hours)
+    now=datetime(2026,9,26,10,tzinfo=ZoneInfo("America/Sao_Paulo"))
+
+    result=normalize_preferred_period(raw,p,now=now)
+
+    assert result["window_start"].startswith("2026-09-28T")
+    assert result["timezone"] == "America/Sao_Paulo"
+
+
+def test_day_after_tomorrow_incident_keeps_tomorrow_closed_and_uses_open_monday():
+    p=policy()
+    now=datetime(2026,9,26,10,tzinfo=ZoneInfo("America/Sao_Paulo"))
+
+    with pytest.raises(AppointmentPolicyError) as failure:
+        normalize_preferred_period("Amanhã de manhã",p,now=now)
+    monday=normalize_preferred_period("Depois de amanhã de manhã",p,now=now)
+
+    assert failure.value.code == "closed_day"
+    assert monday == {
+        "mode":"period", "window_start":"2026-09-28T08:00:00-03:00",
+        "window_end":"2026-09-28T12:00:00-03:00", "timezone":"America/Sao_Paulo",
+    }
+
+
+def test_relative_date_words_require_boundaries():
+    p=policy()
+    now=datetime(2026,9,26,10,tzinfo=ZoneInfo("America/Sao_Paulo"))
+
+    with pytest.raises(AppointmentPolicyError) as failure:
+        normalize_appointment_lookup_period("superamanha",p,now=now)
+
+    assert failure.value.code == "invalid_period_format"
+
+
 @pytest.mark.parametrize(("raw", "start", "end"), (
     ("amanhã de manhã", "08:00:00-03:00", "12:00:00-03:00"),
     ("amanha de manha", "08:00:00-03:00", "12:00:00-03:00"),
@@ -138,6 +181,7 @@ def test_lookup_period_resolves_explicit_relative_and_weekday_in_local_timezone(
 
     explicit=normalize_appointment_lookup_period("28/09/2026",p,now=now)
     tomorrow=normalize_appointment_lookup_period("amanhã",p,now=now)
+    day_after_tomorrow=normalize_appointment_lookup_period("depois de amanhã",p,now=now)
     weekday=normalize_appointment_lookup_period("próxima terça",p,now=now)
 
     assert explicit == {
@@ -145,6 +189,7 @@ def test_lookup_period_resolves_explicit_relative_and_weekday_in_local_timezone(
         "window_end":"2026-09-29T00:00:00-03:00", "timezone":"America/Sao_Paulo",
     }
     assert tomorrow["window_start"] == "2026-09-27T00:00:00-03:00"
+    assert day_after_tomorrow["window_start"] == "2026-09-28T00:00:00-03:00"
     assert weekday["window_start"] == "2026-09-29T00:00:00-03:00"
     assert datetime.fromisoformat(explicit["window_start"]) < datetime.fromisoformat(explicit["window_end"])
     assert datetime.fromisoformat(explicit["window_end"]) - datetime.fromisoformat(explicit["window_start"]) < timedelta(days=90)

@@ -67,7 +67,9 @@ def _target_date(raw: str, base: datetime) -> tuple[date, bool]:
     """Resolve supported Portuguese date expressions and flag weekday matches."""
     if re.search(r"\bhoje\b", raw):
         return base.date(), False
-    if "amanha" in raw:
+    if re.search(r"\bdepois\s+de\s+amanha\b", raw):
+        return base.date()+timedelta(days=2), False
+    if re.search(r"\bamanha\b", raw):
         return base.date()+timedelta(days=1), False
     match=re.search(r"\b(\d{1,2})/(\d{1,2})(?:/(\d{4}))?\b",raw)
     if match:
