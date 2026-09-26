@@ -96,6 +96,7 @@ def _lead(*, tenant_id: uuid.UUID, lead_id: uuid.UUID | None = None, stage_id: u
         last_interaction=None,
         entered_stage_at=datetime.utcnow(),
         updated_at=datetime.utcnow(),
+        converted_at=None,
     )
 
 
@@ -127,6 +128,32 @@ def test_move_lead_to_valid_stage_persists_stage_and_audit_log() -> None:
     assert audit_log.tenant_id == tenant.id
     assert audit_log.metadata_json["from_stage_id"] == str(origin_stage_id)
     assert audit_log.metadata_json["to_stage_id"] == str(target_stage.id)
+
+
+def test_move_lead_to_final_stage_captures_first_conversion_once() -> None:
+    tenant = _tenant()
+    target_stage = _stage(tenant_id=tenant.id, is_final_stage=True)
+    lead = _lead(tenant_id=tenant.id, stage_id=uuid.uuid4())
+    db = _FakeDb(lead, target_stage)
+
+    leads_router.move_lead(lead.id, LeadMoveRequest(stage_id=target_stage.id), tenant=tenant, db=db)
+
+    assert lead.status == LeadStatus.CONVERTED.value
+    assert isinstance(lead.converted_at, datetime)
+    assert db.added[0].action == "LEAD_CONVERTED"
+
+
+def test_reconversion_does_not_rewrite_first_conversion_timestamp() -> None:
+    tenant = _tenant()
+    first_conversion = datetime(2026, 8, 1, 12)
+    target_stage = _stage(tenant_id=tenant.id, is_final_stage=True)
+    lead = _lead(tenant_id=tenant.id, stage_id=uuid.uuid4())
+    lead.converted_at = first_conversion
+    db = _FakeDb(lead, target_stage)
+
+    leads_router.move_lead(lead.id, LeadMoveRequest(stage_id=target_stage.id), tenant=tenant, db=db)
+
+    assert lead.converted_at == first_conversion
 
 
 def test_move_lead_refuses_lead_from_another_tenant() -> None:

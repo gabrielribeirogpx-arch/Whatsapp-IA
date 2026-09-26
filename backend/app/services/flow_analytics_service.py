@@ -291,6 +291,9 @@ def _complete_flow_crm_integration(
         lead.stage_id = final_stage.id
         lead.stage = final_stage.name
         lead.entered_stage_at = occurred_at
+        lead.status = LeadStatus.CONVERTED.value
+        if lead.converted_at is None:
+            lead.converted_at = occurred_at
     if contact_id and not lead.contact_id:
         lead.contact_id = contact_id
     if conversation_id and not lead.conversation_id:
