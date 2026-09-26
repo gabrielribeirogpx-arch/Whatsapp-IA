@@ -364,34 +364,6 @@ class FlowV2Executor:
 
 
     @staticmethod
-    def _result_keeps_terminal_node_waiting(*, node: dict[str, Any], node_type: str, result: Any) -> bool:
-        if str(getattr(result, "status", "") or "") != "wait":
-            return False
-        data = FlowV2Executor._node_data(node)
-        normalized_node_type = str(node_type or "").strip().lower()
-        if normalized_node_type == "ai_agent":
-            behavior = str(
-                data.get("after_agent_behavior")
-                or data.get("afterAgentBehavior")
-                or data.get("after_answer_behavior")
-                or data.get("afterAnswerBehavior")
-                or ""
-            ).strip().lower()
-            return behavior == "wait_same_node" and (getattr(result, "next_node_id", None) in (None, str(node.get("id"))))
-        if normalized_node_type == "ai_system":
-            return getattr(result, "next_node_id", None) in (None, str(node.get("id")))
-        if normalized_node_type in {"ai_rag", "ai_response"}:
-            behavior = str(data.get("after_answer_behavior") or data.get("afterAnswerBehavior") or "").strip().lower()
-            return behavior == "wait_same_node" and (getattr(result, "next_node_id", None) in (None, str(node.get("id"))))
-        if normalized_node_type == "data_collection":
-            # A collection checkpoint must remain resumable even when a stale
-            # terminal flag is present in the published node payload.  The
-            # success transition is evaluated only after the next inbound
-            # value, so completing the session here makes that reply a no-op.
-            return getattr(result, "next_node_id", None) in (None, str(node.get("id")))
-        return False
-
-    @staticmethod
     def _bind_numeric_choice_if_waiting(*, snapshot: FlowV2Snapshot, session: Any, runtime_input: RuntimeInput) -> None:
         current_node_id = str(getattr(session, "current_node_id", "") or "")
         node = snapshot.node_by_id.get(current_node_id) if current_node_id else None
@@ -661,22 +633,6 @@ class FlowV2Executor:
                 )
                 return actions
 
-            if (
-                self._is_terminal_node(node)
-                and not result.next_node_id
-                and not self._result_keeps_terminal_node_waiting(node=node, node_type=node_type, result=result)
-            ):
-                logger.info(
-                    "[SESSION FINISHED] node_id=%s node_type=%s reason=terminal_node_marked_end_flow actions_count=%s",
-                    node_id,
-                    node_type,
-                    len(actions),
-                )
-                self.event_store.append(db, session=session, event_type=FlowV2EventType.SESSION_COMPLETED, node_id=node_id)
-                self._track_analytics(db, session=session, flow_id=flow_id, event_type="flow_completed", node_id=node_id, node_type=node_type)
-                self.session_manager.move_to(db, session=session, node_id=None, status=FlowV2SessionStatus.COMPLETED)
-                return actions
-
             if result.status == "scheduled":
                 logger.info(
                     "[SESSION WAITING] node_id=%s node_type=%s waiting_node_id=%s reason=scheduled",
@@ -702,6 +658,7 @@ class FlowV2Executor:
                     len(actions),
                 )
                 return actions
+
             if result.status == "wait":
                 waiting_node_id = result.next_node_id or node_id
                 wait_reason = "ai_rag_wait_same_node" if node_type == "ai_rag" and waiting_node_id == node_id else "executor_result_wait"
@@ -739,6 +696,21 @@ class FlowV2Executor:
                     wait_reason,
                     len(actions),
                 )
+                return actions
+
+            # WAIT is authoritative for this execution cycle. Only a result
+            # that is no longer awaiting an external event may honor a stale
+            # terminal flag from an immutable published snapshot.
+            if self._is_terminal_node(node) and not result.next_node_id:
+                logger.info(
+                    "[SESSION FINISHED] node_id=%s node_type=%s reason=terminal_node_marked_end_flow actions_count=%s",
+                    node_id,
+                    node_type,
+                    len(actions),
+                )
+                self.event_store.append(db, session=session, event_type=FlowV2EventType.SESSION_COMPLETED, node_id=node_id)
+                self._track_analytics(db, session=session, flow_id=flow_id, event_type="flow_completed", node_id=node_id, node_type=node_type)
+                self.session_manager.move_to(db, session=session, node_id=None, status=FlowV2SessionStatus.COMPLETED)
                 return actions
             if result.status == "complete":
                 self.event_store.append(db, session=session, event_type=FlowV2EventType.SESSION_COMPLETED, node_id=node_id)

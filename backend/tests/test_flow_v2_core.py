@@ -569,6 +569,58 @@ def test_dynamic_choice_selected_routes_to_mcp_and_saves_complete_object(caplog)
     assert "TRANSITION_NOT_FOUND" not in _event_types(events)
 
 
+def test_terminal_dynamic_choice_waits_then_resumes_selected_edge_with_complete_object(caplog) -> None:
+    appointment = {
+        "id": "evt-1",
+        "label": "28/09 às 09:00",
+        "start": "2026-09-28T09:00:00-03:00",
+        "end": "2026-09-28T10:00:00-03:00",
+        "timezone": "America/Sao_Paulo",
+    }
+    raw_snapshot = {
+        "schema_version": 1,
+        "start_node_id": "choice",
+        "nodes": [
+            {"id": "choice", "type": "choice", "is_terminal": True, "data": {
+                "isStart": True,
+                "content": "Escolha o agendamento",
+                "options_mode": "dynamic",
+                "options_variable": "appointments",
+                "label_field": "label",
+                "value_field": "id",
+                "result_variable": "selected_appointment",
+            }},
+            {"id": "next", "type": "message", "data": {"content": "Próximo node"}},
+        ],
+        "edges": [{"id": "selected", "source": "choice", "sourceHandle": "selected", "target": "next"}],
+    }
+    executor, snapshot, events, session, db = _executor(raw_snapshot)
+    session.current_node_id = "choice"
+    session.variables = {"appointments": [appointment]}
+
+    with caplog.at_level(logging.INFO):
+        waiting = executor.handle_input(db, _input_with_id(snapshot, "terminal-dynamic-initial"))
+
+    assert waiting.status == FlowV2SessionStatus.WAITING
+    assert waiting.current_node_id == "choice"
+    assert session.status == FlowV2SessionStatus.WAITING
+    assert "SESSION_COMPLETED" not in _event_types(events)
+    assert "terminal_node_marked_end_flow" not in caplog.text
+
+    resumed = executor.handle_input(
+        db,
+        _input_with_id(snapshot, "terminal-dynamic-selected", {"row_id": "evt-1"}),
+    )
+
+    assert session.variables["selected_appointment"] == appointment
+    assert resumed.effects == ({"type": "send_message", "text": "Próximo node"},)
+    assert any(
+        event["event_type"] == "TRANSITION_SELECTED"
+        and event["payload"] == {"source_handle": "selected", "target_node_id": "next"}
+        for event in events.events
+    )
+
+
 def test_dynamic_choice_resolves_nested_options_variable() -> None:
     raw_snapshot = {
         "schema_version": 1, "start_node_id": "choice",
@@ -875,6 +927,7 @@ def test_terminal_flagged_data_collection_waits_then_consumes_success_transition
 
     assert waiting.status == FlowV2SessionStatus.WAITING
     assert waiting.current_node_id == "appointment-date"
+    assert "terminal_node_marked_end_flow" not in caplog.text
     assert session.variables["appointment_date"] == "Segunda-feira às 11:00"
     assert resumed.status == FlowV2SessionStatus.COMPLETED
     assert resumed.effects == ({"type": "send_message", "text": "Qual o nome da pessoa?"},)
@@ -1189,7 +1242,7 @@ def test_message_wait_for_reply_primes_data_collection_and_consumes_first_reply_
     )
 
 
-def test_terminal_marked_node_finishes_even_when_edge_exists() -> None:
+def test_terminal_marked_node_finishes_even_when_edge_exists(caplog) -> None:
     raw_snapshot = {
         "schema_version": 1,
         "start_node_id": "start",
@@ -1206,7 +1259,8 @@ def test_terminal_marked_node_finishes_even_when_edge_exists() -> None:
     executor, snapshot, event_store, _session, db = _executor(raw_snapshot)
 
     initial = executor.handle_input(db, _input_with_text(snapshot, "wamid.terminal.start", "oi"))
-    resumed = executor.handle_input(db, _input_with_text(snapshot, "wamid.terminal.rag", "qual o prazo?"))
+    with caplog.at_level(logging.INFO):
+        resumed = executor.handle_input(db, _input_with_text(snapshot, "wamid.terminal.rag", "qual o prazo?"))
 
     assert initial.status == FlowV2SessionStatus.WAITING
     assert resumed.status == FlowV2SessionStatus.COMPLETED
@@ -1218,6 +1272,7 @@ def test_terminal_marked_node_finishes_even_when_edge_exists() -> None:
         if event["event_type"] == str(FlowV2EventType.MESSAGE_SENT)
     ]
     assert sent_texts == ["Olá", "Resposta IA/RAG"]
+    assert "terminal_node_marked_end_flow" in caplog.text
 
 
 def test_delay_scheduling_creates_scheduled_job_and_does_not_execute_next_node() -> None:

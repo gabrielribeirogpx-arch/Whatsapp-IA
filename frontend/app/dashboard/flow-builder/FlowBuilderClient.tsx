@@ -817,6 +817,7 @@ function FlowNodeEditorPanel({
   flows,
   currentFlowId,
   allNodes,
+  allEdges,
   mcpTools,
 }: {
   node: Node | null;
@@ -829,6 +830,7 @@ function FlowNodeEditorPanel({
   flows: FlowListOption[];
   currentFlowId: string | null;
   allNodes: Node[];
+  allEdges: Edge[];
   mcpTools: MCPToolOption[];
 }) {
   const messageContentRef = useRef<HTMLTextAreaElement>(null);
@@ -877,6 +879,7 @@ function FlowNodeEditorPanel({
 
   if (!node) return null;
   const kind = getBuilderNodeKind(node);
+  const hasOutgoingEdges = allEdges.some((edge) => edge.source === node.id);
   const title = getBuilderNodeTitle(node);
   const displayMode = toText(draft.display_mode || 'buttons') === 'list' ? 'list' : 'buttons';
   const buttons = ((draft.buttons as EditorButton[] | undefined) || []).slice(0, displayMode === 'buttons' ? 3 : undefined);
@@ -1690,9 +1693,10 @@ function FlowNodeEditorPanel({
         })()}
 
         {!isAiSystem ? (
-          <label className="flow-editor-checkbox">
-            <input type="checkbox" checked={!!draft.is_terminal} onChange={(event) => onDraftChange({ is_terminal: event.target.checked })} />
+          <label className="flow-editor-checkbox" title={hasOutgoingEdges && !draft.is_terminal ? 'Remova as saídas antes de marcar este node como fim do fluxo.' : undefined}>
+            <input type="checkbox" checked={!!draft.is_terminal} disabled={hasOutgoingEdges && !draft.is_terminal} onChange={(event) => onDraftChange({ is_terminal: event.target.checked })} />
             Este é o fim do fluxo
+            {hasOutgoingEdges ? <small>Nodes com saídas conectadas não podem ser marcados como fim. Desmarque esta opção se o flow for legado.</small> : null}
           </label>
         ) : null}
         {uploadError ? <div className="flow-editor-error">{uploadError}</div> : null}
@@ -3821,7 +3825,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
         <MobileBottomSheet open={isMobileAddOpen} onClose={() => setIsMobileAddOpen(false)} title="Adicionar node">{NODE_GROUPS.map((group) => <section className="flow-mobile-palette" key={group.id}><h2>{group.title}</h2>{group.nodes.map(({ kind, label, icon: Icon }) => <button type="button" key={kind} onClick={() => { const node = addNode(kind); setIsMobileAddOpen(false); if (node) selectMobileNode(node); }}><Icon size={18}/>{label}</button>)}</section>)}</MobileBottomSheet>
         <MobileBottomSheet open={Boolean(mobileConnectSource)} onClose={() => setMobileConnectSource(null)} title="Definir próximo node">{mobileConnectSource && <div className="flow-mobile-connect"><p>Escolha o destino para <strong>{getBuilderNodeTitle(mobileConnectSource)}</strong>. As conexões existentes desse node serão preservadas.</p>{(() => { const data = mobileConnectSource.data as Record<string, unknown>; const handles = mobileConnectSource.type === 'condition' ? [{ id: 'true', label: 'Sim' }, { id: 'false', label: 'Não' }] : mobileConnectSource.type === 'choice' ? (Array.isArray(data.buttons) ? data.buttons : []).map((item: Record<string, unknown>, index: number) => ({ id: String(item.handleId || item.id || `option_${index + 1}`), label: String(item.label || item.value || `Opção ${index + 1}`) })) : []; return handles.length ? <label>Saída<select value={mobileConnectHandle} onChange={(event) => setMobileConnectHandle(event.target.value)}>{handles.map((handle) => <option key={handle.id} value={handle.id}>{handle.label}</option>)}</select></label> : null; })()}{nodes.filter((node) => node.id !== mobileConnectSource.id).map((target) => <button type="button" key={target.id} onClick={() => { onConnect({ source: mobileConnectSource.id, target: target.id, sourceHandle: mobileConnectHandle || null, targetHandle: null }); setMobileConnectSource(null); }}><span>{getBuilderNodeTitle(target)}</span><strong>{String((target.data as Record<string, unknown>).label || getBuilderNodeTitle(target))}</strong></button>)}</div>}</MobileBottomSheet>
         <MobileBottomSheet open={isMobileValidationOpen} onClose={() => setIsMobileValidationOpen(false)} title="Validação do fluxo"><p className="flow-mobile-validation-count">{validationErrors.length} erros · {validationWarnings.length} avisos</p>{[...validationErrors, ...validationWarnings].map((issue, index) => <button type="button" className="flow-mobile-validation-item" key={`${issue.code}-${index}`} onClick={() => { const node = nodes.find((item) => item.id === issue.node_id); if (node) selectMobileNode(node); setIsMobileValidationOpen(false); }}><AlertTriangle size={16}/><span>{issue.message}</span></button>)}</MobileBottomSheet>
-        <MobileBottomSheet open={Boolean(selectedNode)} onClose={closeMobileNodeEditor} title={selectedNode ? getBuilderNodeTitle(selectedNode) : 'Editar node'} fullScreen closeOnBackdrop={!isMediaUploading}><div className="flow-mobile-editor">{selectedNode && <FlowNodeEditorPanel node={selectedNode} draft={nodeEditorDraft} onDraftChange={handleNodeEditorDraftChange} onClose={closeMobileNodeEditor} onUpload={(file, mediaType) => { void uploadEditorMedia(file, mediaType); }} isUploading={isMediaUploading} uploadError={mediaUploadError} flows={normalizedFlows} currentFlowId={selectedFlowId} allNodes={nodes} mcpTools={mcpTools} />}</div></MobileBottomSheet>
+        <MobileBottomSheet open={Boolean(selectedNode)} onClose={closeMobileNodeEditor} title={selectedNode ? getBuilderNodeTitle(selectedNode) : 'Editar node'} fullScreen closeOnBackdrop={!isMediaUploading}><div className="flow-mobile-editor">{selectedNode && <FlowNodeEditorPanel node={selectedNode} draft={nodeEditorDraft} onDraftChange={handleNodeEditorDraftChange} onClose={closeMobileNodeEditor} onUpload={(file, mediaType) => { void uploadEditorMedia(file, mediaType); }} isUploading={isMediaUploading} uploadError={mediaUploadError} flows={normalizedFlows} currentFlowId={selectedFlowId} allNodes={nodes} allEdges={edges} mcpTools={mcpTools} />}</div></MobileBottomSheet>
       </main>
     );
   }
@@ -4406,6 +4410,7 @@ export default function FlowBuilderClient({ flowId: _initialFlowId }: FlowBuilde
             flows={normalizedFlows}
             currentFlowId={selectedFlowId}
             allNodes={nodes}
+            allEdges={edges}
             mcpTools={mcpTools}
           />
         </>

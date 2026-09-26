@@ -84,6 +84,16 @@ def test_choice_without_option_id_or_source_handle_is_invalid() -> None:
     assert "FLOW_V2_CHOICE_SOURCE_HANDLE_REQUIRED:choice:1" in result.errors
 
 
+def test_terminal_choice_with_outgoing_edge_is_rejected() -> None:
+    nodes = _valid_nodes()
+    nodes[1]["is_terminal"] = True
+
+    result = FlowV2GraphValidator().validate(nodes=nodes, edges=_valid_edges())
+
+    assert result.status == GraphValidationStatus.INVALID
+    assert "FLOW_V2_CHOICE_TERMINAL_WITH_OUTGOING_EDGE:choice" in result.errors
+
+
 def test_legacy_delay_content_is_promoted_to_seconds_before_validation() -> None:
     nodes = _valid_nodes()
     nodes[2] = {"id": "delay", "type": "delay", "data": {"content": "5"}}

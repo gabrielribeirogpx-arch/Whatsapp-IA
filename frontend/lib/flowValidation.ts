@@ -66,6 +66,7 @@ export function validateFlowLocally(nodes: Node[], edges: Edge[]): FlowValidatio
     const data = (node.data || {}) as Record<string, unknown>; const type = String(node.type || data.type || '').toLowerCase(); const next = outgoing.get(node.id) || [];
     if (starts.length === 1 && !reachable.has(node.id)) issues.push(issue('NODE_ORPHAN', 'Este node não está conectado ao caminho iniciado pelo Start.', node, 'connections'));
     const terminal = ['is_terminal', 'isEnd', 'isFinal', 'endFlow'].some((key) => Boolean(data[key]));
+    if ((type === 'choice' || type === 'choice_dynamic') && terminal && next.length) issues.push(issue('CHOICE_TERMINAL_WITH_OUTGOING_EDGE', 'Uma escolha com saídas conectadas não pode ser marcada como fim do fluxo.', node, 'is_terminal'));
     if (type === 'message' || type === 'start') {
       if (!String(data.content || data.text || data.message || '').trim()) issues.push(issue('MESSAGE_EMPTY', 'Adicione o conteúdo da mensagem.', node, 'content'));
       if (!next.length && !terminal) issues.push(issue('MESSAGE_REQUIRES_OUTPUT', 'Conecte esta mensagem a outro node ou marque-a como fim do fluxo.', node, 'connections'));
