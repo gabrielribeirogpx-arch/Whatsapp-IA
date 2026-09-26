@@ -14,6 +14,19 @@ def test_mcp_tool_is_an_official_runtime_executor():
     assert "mcp_tool" in EXECUTOR_REGISTRY
 
 
+def test_trusted_tool_context_keeps_legacy_sessions_without_contact_id_compatible():
+    tenant_id = uuid.uuid4()
+    context = MCPToolNodeExecutor._trusted_tool_context(
+        snapshot=SimpleNamespace(),
+        session=SimpleNamespace(tenant_id=tenant_id),
+        node_id="legacy-node",
+    )
+
+    assert context.tenant_id == tenant_id
+    assert context.contact_id is None
+    assert context.node_id == "legacy-node"
+
+
 def test_normalize_prefers_structured_content():
     normalized = normalize_mcp_response({"ok": True, "result": {"content": [{"type": "text", "text": "ignored"}], "structuredContent": {"result": {"slots": ["09:00"]}}}})
     assert normalized == {"ok": True, "content": [{"type": "text", "text": "ignored"}], "structured_content": {"result": {"slots": ["09:00"]}}, "is_error": False}
@@ -81,6 +94,10 @@ def calendar_runtime(monkeypatch):
     session = SimpleNamespace(
         id=uuid.uuid4(),
         tenant_id=uuid.uuid4(),
+        contact_id=uuid.uuid4(),
+        conversation_id=uuid.uuid4(),
+        flow_version_id=uuid.uuid4(),
+        external_user_id="5511999999999",
         variables={
             "appointment_period": {
                 "window_start": "2026-09-08T13:00:00-03:00",
@@ -141,6 +158,48 @@ def test_calendar_mcp_renders_nested_arguments_and_saves_success(monkeypatch, ca
     assert result.next_node_id == "after-success"
     assert session.variables["availability"] == {"ok": True, "busy": []}
     assert session.variables["appointment_period"]["window_start"] == "2026-09-08T13:00:00-03:00"
+
+
+def test_calendar_mcp_receives_trusted_session_identity_not_variables_or_arguments(monkeypatch, calendar_runtime):
+    executor, db, session, node = calendar_runtime
+    malicious_contact_id = uuid.uuid4()
+    malicious_tenant_id = uuid.uuid4()
+    session.variables.update({"contact_id": malicious_contact_id, "tenant_id": malicious_tenant_id})
+    node["data"]["arguments"].update({
+        "contact_id": str(malicious_contact_id),
+        "tenant_id": str(malicious_tenant_id),
+    })
+    flow_id = uuid.uuid4()
+    received = {}
+
+    def execute(_adapter, _tool_name, arguments, context):
+        received.update({"arguments": arguments, "context": context})
+        return ToolResult(ok=True, tool_type="google_calendar", output={"ok": True, "busy": []})
+
+    monkeypatch.setattr("app.flow_v2.executors.mcp_tool_executor.GoogleCalendarToolAdapter.execute", execute)
+
+    result = executor.execute(
+        db,
+        snapshot=SimpleNamespace(flow_id=flow_id),
+        session=session,
+        node=node,
+        runtime_input=SimpleNamespace(),
+    )
+
+    context = received["context"]
+    assert result.next_source_handle == "success"
+    assert context.tenant_id == session.tenant_id
+    assert context.contact_id == session.contact_id
+    assert context.conversation_id == session.conversation_id
+    assert context.session_id == session.id
+    assert context.flow_id == flow_id
+    assert context.flow_version_id == session.flow_version_id
+    assert context.node_id == node["id"]
+    assert context.external_user_id == session.external_user_id
+    assert context.tenant_id != malicious_tenant_id
+    assert context.contact_id != malicious_contact_id
+    assert received["arguments"]["tenant_id"] == str(malicious_tenant_id)
+    assert received["arguments"]["contact_id"] == str(malicious_contact_id)
 
 
 def test_calendar_mcp_tool_result_error_returns_error_handle_without_raising(monkeypatch, calendar_runtime):

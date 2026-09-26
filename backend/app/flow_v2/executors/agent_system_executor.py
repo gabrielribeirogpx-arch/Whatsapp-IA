@@ -152,7 +152,7 @@ class AiSystemNodeExecutor(BaseNodeExecutor):
         edges = [dict(edge) for edge in internal_edges if isinstance(edge, dict)]
         start_node_id = cls._find_start_node_id(nodes, edges)
         payload = {"nodes": nodes, "edges": edges, "start_node_id": start_node_id, "transitions": build_transitions_from_edges(edges)}
-        return FlowV2Snapshot(flow_version_id=outer_snapshot.flow_version_id, tenant_id=outer_snapshot.tenant_id, hash=canonical_hash(payload), nodes=tuple(nodes), edges=tuple(edges), transitions=tuple(payload["transitions"]), start_node_id=start_node_id, snapshot_schema_version=outer_snapshot.snapshot_schema_version)
+        return FlowV2Snapshot(flow_version_id=outer_snapshot.flow_version_id, tenant_id=outer_snapshot.tenant_id, hash=canonical_hash(payload), nodes=tuple(nodes), edges=tuple(edges), transitions=tuple(payload["transitions"]), start_node_id=start_node_id, snapshot_schema_version=outer_snapshot.snapshot_schema_version, flow_id=outer_snapshot.flow_id)
 
     @staticmethod
     def _normalize_internal_node(node: dict[str, Any], *, system_node_id: str, system_type: str) -> dict[str, Any]:

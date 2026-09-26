@@ -91,6 +91,20 @@ def safe_get_path(value: Any, path: str | None) -> Any:
 class MCPToolNodeExecutor(BaseNodeExecutor):
     """Executes exactly one tenant-authorized tool and selects one branch."""
 
+    @staticmethod
+    def _trusted_tool_context(*, snapshot: Any, session: Any, node_id: str) -> ToolContext:
+        """Build tool identity exclusively from server-owned runtime objects."""
+        return ToolContext(
+            tenant_id=session.tenant_id,
+            contact_id=getattr(session, "contact_id", None),
+            conversation_id=getattr(session, "conversation_id", None),
+            session_id=getattr(session, "id", None),
+            flow_id=getattr(snapshot, "flow_id", None),
+            flow_version_id=getattr(session, "flow_version_id", None),
+            node_id=node_id,
+            external_user_id=getattr(session, "external_user_id", None),
+        )
+
     def execute(self, db, *, snapshot, session, node, runtime_input) -> NodeExecutionResult:
         data = self._node_data(node)
         node_id = str(node.get("id") or "")
@@ -133,7 +147,8 @@ class MCPToolNodeExecutor(BaseNodeExecutor):
                 arguments = self._render(data.get("arguments") or {}, db, snapshot=snapshot, session=session, runtime_input=runtime_input, node_id=node_id)
                 if not isinstance(arguments, dict):
                     raise MCPNodeError("MCP_ARGUMENT_VALIDATION_FAILED", "Os argumentos MCP devem formar um objeto JSON.")
-                result = GoogleCalendarToolAdapter(db).execute(tool_name, arguments, ToolContext(tenant_id=session.tenant_id))
+                context = self._trusted_tool_context(snapshot=snapshot, session=session, node_id=node_id)
+                result = GoogleCalendarToolAdapter(db).execute(tool_name, arguments, context)
                 if not result.ok:
                     error_message = result.error_message
                     if not error_message and isinstance(result.output, dict):
