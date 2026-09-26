@@ -1090,7 +1090,6 @@ function FlowNodeEditorPanel({
               <label className="flow-editor-field">Descrição (opcional)<input value={toText(draft.description_field)} onChange={e => onDraftChange({ description_field: e.target.value })} placeholder="description" /></label>
               <label className="flow-editor-field">Ícone (opcional)<input value={toText(draft.icon_field)} onChange={e => onDraftChange({ icon_field: e.target.value })} placeholder="icon" /></label>
               <label className="flow-editor-field">Máximo de opções<input type="number" min="1" max="10" value={Number(draft.max_options || 10)} onChange={e => onDraftChange({ max_options: Math.min(10, Math.max(1, Number(e.target.value) || 1)) })} /></label>
-              <strong>Resultado</strong><label className="flow-editor-field">Salvar seleção em<input value={toText(draft.result_variable)} onChange={e => onDraftChange({ result_variable: e.target.value })} placeholder="selected_slot" /></label>
               <section className="flow-dynamic-choice-empty" aria-labelledby={`choice-empty-${node.id}`}>
                 <strong id={`choice-empty-${node.id}`}>Quando não houver opções</strong>
                 <p>Configure a mensagem abaixo ou conecte a saída <code>empty</code> do cartão a outro node.</p>
@@ -1109,6 +1108,17 @@ function FlowNodeEditorPanel({
               ))}
               <button type="button" className="flow-editor-secondary-btn" onClick={addButton} disabled={displayMode === 'buttons' && buttons.length >= 3}>+ Adicionar opção</button>
             </div>}
+            <label className="flow-editor-field">
+              Salvar resposta em
+              <input
+                value={toText(draft.result_variable)}
+                onChange={(event) => onDraftChange({ result_variable: event.target.value })}
+                placeholder="Ex.: appointment_type"
+                pattern="[A-Za-z_][A-Za-z0-9_]*"
+                title="Use letras, números e underscore; não comece com número."
+              />
+              <small>Variável que receberá a opção escolhida.</small>
+            </label>
           </>
         )}
 

@@ -818,13 +818,20 @@ class ChoiceNodeExecutor(BaseNodeExecutor):
             option for option in options
             if isinstance(option, dict) and str(option.get("id")) == row_id
         )
-        if dynamic:
-            variable = str(data.get("result_variable") or data.get("save_selection_to") or "selected_slot").strip()
+        variable = str(
+            data.get("result_variable")
+            or (data.get("save_selection_to") if dynamic else "")
+            or ("selected_slot" if dynamic else "")
+        ).strip()
+        if variable:
             variables = dict(getattr(session, "variables", None) or {})
-            variables[variable] = matched_option["dynamic_object"]
-            variables[f"{variable}_title"] = matched_option.get("dynamic_title", matched_option.get("label", ""))
-            variables[f"{variable}_index"] = matched_option.get("dynamic_index")
-            variables[f"{variable}_object"] = matched_option.get("dynamic_object")
+            if dynamic:
+                variables[variable] = matched_option["dynamic_object"]
+                variables[f"{variable}_title"] = matched_option.get("dynamic_title", matched_option.get("label", ""))
+                variables[f"{variable}_index"] = matched_option.get("dynamic_index")
+                variables[f"{variable}_object"] = matched_option.get("dynamic_object")
+            else:
+                variables[variable] = matched_option.get("value", matched_option.get("label", row_id))
             session.variables = variables
             if hasattr(db, "add"):
                 db.add(session)

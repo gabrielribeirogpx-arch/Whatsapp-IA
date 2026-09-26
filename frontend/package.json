@@ -11,6 +11,7 @@
     "test:marketplace": "node tests/marketplaceModal.test.mjs",
     "test:business-kits": "node tests/businessKits.test.mjs",
     "test:choice-handles": "node tests/choiceDynamicHandlesRegression.test.mjs",
+    "test:choice-result-variable": "node tests/choiceResultVariable.test.mjs",
     "test:edge-sanitization": "node tests/flowEdgeSanitization.test.mjs",
     "test:element-deletion": "node tests/flowElementDeletion.test.mjs",
     "test:dynamic-choice": "node tests/dynamicChoiceLowCode.test.mjs",
