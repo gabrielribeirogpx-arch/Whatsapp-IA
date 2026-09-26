@@ -30,6 +30,7 @@ class Tenant(Base):
     webhook_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     webhook_status: Mapped[str] = mapped_column(String(32), default="inactive")
     language: Mapped[str] = mapped_column(String(16), default="pt-BR")
+    timezone: Mapped[str] = mapped_column(String(64), nullable=False, default="UTC", server_default="UTC")
     plan: Mapped[str] = mapped_column(String(32), default="starter")
     max_monthly_messages: Mapped[int] = mapped_column(Integer, default=1000)
     usage_month: Mapped[str] = mapped_column(String(7), default=lambda: datetime.utcnow().strftime("%Y-%m"))

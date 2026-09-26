@@ -7,7 +7,10 @@ type DashboardChartProps = { data?: ChartPoint[]; title?: string; xAxisTickInter
 type TooltipProps = { active?: boolean; payload?: { value: number; dataKey?: string }[]; label?: string };
 
 function formatDateLabel(dateValue: string) {
-  const parsed = new Date(dateValue);
+  // API labels are civil dates, not UTC instants. Noon avoids browser timezone drift.
+  const parsed = /^\d{4}-\d{2}-\d{2}$/.test(dateValue)
+    ? new Date(`${dateValue}T12:00:00`)
+    : new Date(dateValue);
   if (Number.isNaN(parsed.getTime())) return dateValue;
   return parsed.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' });
 }

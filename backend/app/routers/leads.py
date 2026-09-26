@@ -362,6 +362,8 @@ def move_lead(
         action = "LEAD_CONVERTED" if target_stage.is_final_stage else "LEAD_MOVED"
         if target_stage.is_final_stage:
             lead.status = LeadStatus.CONVERTED.value
+            if lead.converted_at is None:
+                lead.converted_at = datetime.utcnow()
         else:
             lead.status = LeadStatus.ACTIVE.value
         write_audit_log(

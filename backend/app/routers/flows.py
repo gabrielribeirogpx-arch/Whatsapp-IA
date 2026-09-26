@@ -16,7 +16,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from app.schemas.flow import FlowUpdate
-from sqlalchemy import String, cast, inspect, or_, select, text
+from sqlalchemy import String, cast, func, inspect, or_, select, text
 from sqlalchemy.orm import Session
 from sqlalchemy.orm import load_only
 
@@ -672,7 +672,11 @@ def _publish_fresh_snapshot(db: Session, flow: Flow, *, reason: str) -> FlowVers
     flow.version = fresh_version.version
     _persist_builder_graph(flow, nodes, edges)
     db.query(FlowSession).filter(FlowSession.flow_id == flow.id).update(
-        {FlowSession.status: "completed", FlowSession.current_node_id: None},
+        {
+            FlowSession.status: "completed",
+            FlowSession.current_node_id: None,
+            FlowSession.completed_at: func.coalesce(FlowSession.completed_at, datetime.utcnow()),
+        },
         synchronize_session=False,
     )
     db.add(flow)

@@ -2463,8 +2463,6 @@ def _finalize_runtime_flow_session(db: Session, conversation: Conversation, flow
                 "executed_node_id": str(end_node_id) if end_node_id else None,
             },
         )
-        if hasattr(flow_session, "completed_at"):
-            setattr(flow_session, "completed_at", datetime.utcnow())
         if isinstance(flow_session.context, dict):
             flow_session.context.pop("pending_input", None)
             flow_session.context.pop("last_condition", None)

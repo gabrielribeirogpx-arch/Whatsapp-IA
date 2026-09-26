@@ -13,7 +13,7 @@ from typing import Any
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, aliased
 
-from app.models import AuditLog, Conversation, Flow, FlowEvent, FlowSession, Lead, Message
+from app.models import Conversation, Flow, FlowEvent, FlowSession, Lead, Message
 from app.models.lead import LeadStatus
 from app.services.dashboard_time import percentage_delta
 
@@ -37,12 +37,11 @@ def get_active_leads(db: Session, tenant_id: Any) -> int:
 
 
 def get_conversions(db: Session, tenant_id: Any, start: datetime, end: datetime) -> int:
-    """Append-only lead conversion events created inside the window."""
-    return int(db.execute(select(func.count(AuditLog.id)).where(
-        AuditLog.tenant_id == tenant_id,
-        AuditLog.action == "LEAD_CONVERTED",
-        AuditLog.created_at >= start,
-        AuditLog.created_at < end,
+    """Leads whose immutable first-conversion timestamp belongs to the window."""
+    return int(db.execute(select(func.count(Lead.id)).where(
+        Lead.tenant_id == tenant_id,
+        Lead.converted_at >= start,
+        Lead.converted_at < end,
     )).scalar() or 0)
 
 
@@ -50,10 +49,9 @@ def get_response_rate(db: Session, tenant_id: Any, start: datetime, end: datetim
     """Responded inbound conversations / inbound conversations.
 
     A response is any ``from_me`` message after an eligible inbound.  Message
-    authorship does not currently distinguish a human from bot/AI.  Replies may
-    occur after ``end`` so historical cohorts can be completed.
+    authorship does not currently distinguish a human from bot/AI. Replies are
+    observed only before ``end``, freezing historical results at the period edge.
     """
-    observed_at = datetime.utcnow()
     inbound = aliased(Message)
     outbound = aliased(Message)
     inbound_conversations = select(inbound.conversation_id).where(
@@ -73,7 +71,7 @@ def get_response_rate(db: Session, tenant_id: Any, start: datetime, end: datetim
             outbound.conversation_id == inbound.conversation_id,
             outbound.from_me.is_(True),
             outbound.created_at > inbound.created_at,
-            outbound.created_at <= observed_at,
+            outbound.created_at < end,
         ).exists(),
     ).distinct().subquery()
     numerator = int(db.execute(select(func.count()).select_from(responded)).scalar() or 0)
@@ -133,7 +131,7 @@ def response_cycle_delays(rows: list[tuple[Any, datetime, bool]], start: datetim
     pending: dict[Any, datetime] = {}
     delays: list[float] = []
     for conversation_id, created_at, from_me in rows:
-        if from_me:
+        if from_me and created_at < end:
             inbound_at = pending.pop(conversation_id, None)
             if inbound_at is not None and created_at > inbound_at:
                 delays.append((created_at - inbound_at).total_seconds())
@@ -146,7 +144,7 @@ def get_average_response_time(db: Session, tenant_id: Any, start: datetime, end:
     rows = db.execute(select(Message.conversation_id, Message.created_at, Message.from_me).where(
         Message.tenant_id == tenant_id,
         Message.created_at >= start,
-        Message.created_at <= datetime.utcnow(),
+        Message.created_at < end,
     ).order_by(Message.conversation_id, Message.created_at, Message.id)).all()
     delays = response_cycle_delays(rows, start, end)
     return (round(sum(delays) / len(delays), 2), len(delays)) if delays else (None, 0)
@@ -156,8 +154,8 @@ def get_completed_sessions(db: Session, tenant_id: Any, start: datetime, end: da
     return int(db.execute(select(func.count(FlowSession.id)).where(
         FlowSession.tenant_id == tenant_id,
         FlowSession.status == "completed",
-        FlowSession.updated_at >= start,
-        FlowSession.updated_at < end,
+        FlowSession.completed_at >= start,
+        FlowSession.completed_at < end,
     )).scalar() or 0)
 
 

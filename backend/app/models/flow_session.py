@@ -5,7 +5,7 @@ import os
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, JSON, String, event
+from sqlalchemy import DateTime, ForeignKey, Index, JSON, String, event
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.orm.attributes import NEVER_SET, NO_VALUE
@@ -35,6 +35,7 @@ FINAL_SESSION_STATUSES = {"completed", "converted", "abandoned", "expired"}
 
 class FlowSession(Base):
     __tablename__ = "flow_sessions"
+    __table_args__ = (Index("ix_flow_sessions_tenant_completed_at", "tenant_id", "completed_at"),)
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     tenant_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     flow_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
@@ -47,6 +48,7 @@ class FlowSession(Base):
     variables: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
 
@@ -67,3 +69,10 @@ def _log_current_node_id_write(target: FlowSession, value, oldvalue, initiator) 
         getattr(target, "flow_id", None),
         _worker_id(),
     )
+
+
+@event.listens_for(FlowSession.status, "set", retval=False)
+def _capture_completed_at(target: FlowSession, value, oldvalue, initiator) -> None:
+    """Capture the first completion; later updates or reopening preserve it."""
+    if str(value).lower() == "completed" and getattr(target, "completed_at", None) is None:
+        target.completed_at = datetime.utcnow()

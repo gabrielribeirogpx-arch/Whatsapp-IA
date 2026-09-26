@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from enum import StrEnum
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -41,7 +41,10 @@ class LeadStatus(StrEnum):
 
 class Lead(TenantMixin, Base):
     __tablename__ = "leads"
-    __table_args__ = (UniqueConstraint("tenant_id", "phone", name="uq_leads_tenant_phone"),)
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "phone", name="uq_leads_tenant_phone"),
+        Index("ix_leads_tenant_converted_at", "tenant_id", "converted_at"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     phone: Mapped[str] = mapped_column(String, nullable=False, index=True)
@@ -62,3 +65,4 @@ class Lead(TenantMixin, Base):
     entered_stage_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+    converted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

@@ -13,6 +13,7 @@ from app.models import AuditLog, Contact, Conversation, Lead, Message, Product, 
 from app.models.lead import LeadStatus
 from app.services.dashboard_time import (
     iter_daily_buckets,
+    local_date_for_utc,
     percentage_delta,
     resolve_dashboard_time_range,
 )
@@ -101,6 +102,12 @@ class DashboardAnalyticsKpisOut(BaseModel):
     response_rate_delta: float | None
     responded_conversations_current: int
     inbound_conversations_current: int
+    response_rate_details: "PercentageDetailsOut | None" = None
+
+
+class PercentageDetailsOut(BaseModel):
+    numerator: int
+    denominator: int
 
 
 class DashboardTimeMetaOut(BaseModel):
@@ -149,6 +156,7 @@ class DashboardPerformanceOut(BaseModel):
     abandonment_rate_delta: float | None
     abandoned_sessions_current: int
     started_sessions_current: int
+    abandonment_rate_details: PercentageDetailsOut | None = None
 
 
 
@@ -322,7 +330,10 @@ def get_dashboard_analytics(
     tenant: Tenant = Depends(get_current_tenant),
 ):
     try:
-        window = resolve_dashboard_time_range(period, start_date, end_date, now=datetime.utcnow())
+        window = resolve_dashboard_time_range(
+            period, start_date, end_date, now=datetime.utcnow(),
+            timezone_name=getattr(tenant, "timezone", None) or "UTC",
+        )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
@@ -423,7 +434,7 @@ def get_dashboard_analytics(
 
         messages_last_7_days.append(
             MessagesByDay(
-                date=start_of_target_day.strftime("%Y-%m-%d"),
+                date=local_date_for_utc(start_of_target_day, window.timezone).isoformat(),
                 sent=sent_count,
                 received=received_count,
             )
@@ -432,9 +443,9 @@ def get_dashboard_analytics(
     current_messages = messages_sent_period + messages_received_period
     previous_messages = messages_sent_previous + messages_received_previous
     logger.debug(
-        "dashboard_analytics_window tenant_id=%s current_start=%s current_end=%s previous_start=%s previous_end=%s current_messages=%s previous_messages=%s",
-        tenant.id, window.current_start, window.current_end, window.previous_start,
-        window.previous_end, current_messages, previous_messages,
+        "dashboard_kpi tenant_id=%s timezone=%s current_start=%s current_end=%s previous_start=%s previous_end=%s metric=response_rate numerator=%s denominator=%s result=%s",
+        tenant.id, window.timezone, window.current_start, window.current_end, window.previous_start,
+        window.previous_end, responded_conversations, inbound_conversations, response_rate,
     )
     return DashboardAnalyticsOut(
         kpis=DashboardAnalyticsKpisOut(
@@ -464,6 +475,9 @@ def get_dashboard_analytics(
             response_rate_delta=metric_delta(response_rate, response_rate_previous),
             responded_conversations_current=responded_conversations,
             inbound_conversations_current=inbound_conversations,
+            response_rate_details=PercentageDetailsOut(
+                numerator=responded_conversations, denominator=inbound_conversations,
+            ),
         ),
         timeseries=DashboardAnalyticsTimeseriesOut(
             messages_last_7_days=messages_last_7_days,
@@ -558,7 +572,10 @@ def get_dashboard_summary(
     tenant: Tenant = Depends(get_current_tenant),
 ):
     try:
-        window = resolve_dashboard_time_range(period, start_date, end_date, now=datetime.utcnow())
+        window = resolve_dashboard_time_range(
+            period, start_date, end_date, now=datetime.utcnow(),
+            timezone_name=getattr(tenant, "timezone", None) or "UTC",
+        )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
@@ -590,6 +607,13 @@ def get_dashboard_summary(
         db, tenant.id, start_datetime, end_datetime
     )
 
+    logger.debug(
+        "dashboard_kpi tenant_id=%s timezone=%s current_start=%s current_end=%s previous_start=%s previous_end=%s metric=abandonment_rate numerator=%s denominator=%s result=%s",
+        tenant.id, window.timezone, window.current_start, window.current_end,
+        window.previous_start, window.previous_end, abandoned_current, started_current,
+        abandonment_current,
+    )
+
     logger.info(
         "[DASHBOARD SUMMARY] tenant_id=%s period=%s top_flows_count=%s channels_count=%s",
         tenant.id,
@@ -615,6 +639,9 @@ def get_dashboard_summary(
             abandonment_rate_delta=metric_delta(abandonment_current, abandonment_previous),
             abandoned_sessions_current=abandoned_current,
             started_sessions_current=started_current,
+            abandonment_rate_details=PercentageDetailsOut(
+                numerator=abandoned_current, denominator=started_current,
+            ),
         ),
         meta=DashboardTimeMetaOut(**window.__dict__),
     )

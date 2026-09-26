@@ -56,7 +56,12 @@ def test_response_cycles_keep_first_inbound_and_ignore_outbound_without_wait():
         ("a", END + timedelta(minutes=5), True),
     ]
 
-    assert response_cycle_delays(rows, START, END) == [300.0, (END + timedelta(minutes=5) - (START + timedelta(minutes=10))).total_seconds()]
+    assert response_cycle_delays(rows, START, END) == [300.0]
+
+
+def test_response_at_exclusive_period_end_is_not_observed():
+    rows = [("a", END - timedelta(minutes=1), False), ("a", END, True)]
+    assert response_cycle_delays(rows, START, END) == []
 
 
 def test_inbound_after_window_does_not_start_response_cycle():
