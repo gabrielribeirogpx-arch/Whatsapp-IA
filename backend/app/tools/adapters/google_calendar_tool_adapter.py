@@ -8,6 +8,8 @@ from typing import Any, Callable
 from jsonschema import ValidationError, validate
 from sqlalchemy.orm import Session
 
+from app.core.appointment_metadata import build_appointment_private_metadata
+from app.core.external_identity import ExternalReferenceError
 from app.services.google_calendar_service import PROVIDER, GoogleCalendarService, _connection_lookup_diagnostics
 from app.tools.base import NormalizedToolResult, ToolResult
 from app.tools.context import ToolContext, sanitize_metadata
@@ -301,6 +303,41 @@ class GoogleCalendarToolAdapter:
                     metadata={"provider": "google_calendar", "source": "integration_connections"},
                     normalized_result=normalized,
                 )
+        appointment_metadata: dict[str, str] | None = None
+        if tool_id == "google_calendar_create_event" and context.contact_id is not None:
+            try:
+                appointment_metadata = build_appointment_private_metadata(
+                    tenant_id=context.tenant_id,
+                    contact_id=context.contact_id,
+                )
+            except ExternalReferenceError as exc:
+                message = "google_calendar_external_identity_unavailable"
+                normalized = NormalizedToolResult(
+                    False,
+                    tool_id,
+                    type="google_calendar.create_event",
+                    error={"code": message},
+                )
+                _log_tool(
+                    "GOOGLE_CALENDAR_EXTERNAL_IDENTITY_FAILED",
+                    tenant_id=context.tenant_id,
+                    tool_name=tool_id,
+                    input=args,
+                    db=db,
+                    exception=exc,
+                )
+                return ToolResult(
+                    False,
+                    self.tool_type,
+                    tool_id=tool_id,
+                    tool_name=tool_id,
+                    output={"ok": False, "message": message},
+                    structured_content={"ok": False, "tool": tool_id, "result": {}, "error": message},
+                    error_code=message,
+                    error_message=message,
+                    metadata={"provider": "google_calendar", "source": "integration_connections"},
+                    normalized_result=normalized,
+                )
         try:
             service = self.service_factory(db, context.tenant_id)
             _log_tool("GOOGLE_CALENDAR_ADAPTER_PAYLOAD", tenant_id=context.tenant_id, tool_name=tool_id, input=args, db=db, payload=args)
@@ -310,7 +347,17 @@ class GoogleCalendarToolAdapter:
                 create_context = {**_calendar_create_start_context(args), **connection_context}
                 _log_tool("AI_AGENT_CALENDAR_CREATE_START", tenant_id=context.tenant_id, tool_name=tool_id, input=args, db=db, **create_context)
                 _log_tool("GOOGLE_CALENDAR_CREATE_EVENT_INPUT", tenant_id=context.tenant_id, tool_name=tool_id, input=args, db=db, **create_context)
-                result = service.create_event(**args)
+                # This explicit parameter is derived from trusted ToolContext and
+                # cannot be supplied or overridden by rendered flow arguments.
+                if appointment_metadata is None:
+                    # LEGACY UNMANAGED EVENT: preserve the historical call when
+                    # no trusted patient identity is available.
+                    result = service.create_event(**args)
+                else:
+                    result = service.create_event(
+                        **{key: value for key, value in args.items() if key != "asa_private_metadata"},
+                        asa_private_metadata=appointment_metadata,
+                    )
                 action = "create_event"
             elif tool_id in {"google_calendar_list_events", "calendar.get_appointment"}:
                 result = service.list_events(**args)

@@ -176,7 +176,12 @@ class GoogleCalendarService:
             dt = dt.replace(tzinfo=ZoneInfo(tz_name))
         return dt.isoformat()
 
-    def _event_payload(self, data: dict[str, Any]) -> dict[str, Any]:
+    def _event_payload(
+        self,
+        data: dict[str, Any],
+        *,
+        asa_private_metadata: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
         tz = self._tenant_timezone(data.get("timezone") or data.get("timeZone"))
         title = data.get("title") or data.get("summary") or "Evento"
         start = data.get("start") or data.get("start_time") or data.get("startTime")
@@ -194,6 +199,8 @@ class GoogleCalendarService:
         attendees = data.get("attendees") or []
         if isinstance(attendees, list) and attendees:
             payload["attendees"] = [{"email": str(a.get("email") if isinstance(a, dict) else a)} for a in attendees]
+        if asa_private_metadata:
+            payload["extendedProperties"] = {"private": dict(asa_private_metadata)}
         return payload
 
     def refresh_access_token_if_needed(self, force: bool = False) -> dict[str, Any]:
@@ -388,7 +395,12 @@ class GoogleCalendarService:
             return {"ok": True, "events": events}
         return self._service_call("google_calendar_list_events", kwargs, operation)
 
-    def create_event(self, **kwargs: Any) -> dict[str, Any]:
+    def create_event(
+        self,
+        *,
+        asa_private_metadata: dict[str, str] | None = None,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
         def operation() -> dict[str, Any]:
             tz = self._tenant_timezone(kwargs.get("timezone") or kwargs.get("timeZone"))
             start_raw = kwargs.get("start") or kwargs.get("start_time") or kwargs.get("startTime")
@@ -406,7 +418,14 @@ class GoogleCalendarService:
                         return {"ok": False, "message": "calendar_past_date_requires_confirmation", "start": start_dt.isoformat(), "timezone": tz}
                 except Exception:
                     pass
-            ok, data, _ = self._request("POST", "/calendars/primary/events", json_body=self._event_payload(kwargs))
+            ok, data, _ = self._request(
+                "POST",
+                "/calendars/primary/events",
+                json_body=self._event_payload(
+                    kwargs,
+                    asa_private_metadata=asa_private_metadata,
+                ),
+            )
             if not ok:
                 return {"ok": False, **data}
             return {"ok": True, "event_id": data.get("id"), "html_link": data.get("htmlLink"), "title": data.get("summary"), "start": (data.get("start") or {}).get("dateTime") or (data.get("start") or {}).get("date"), "end": (data.get("end") or {}).get("dateTime") or (data.get("end") or {}).get("date")}
