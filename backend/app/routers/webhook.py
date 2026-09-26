@@ -448,6 +448,7 @@ async def _process_meta_webhook(request: Request, db: Session) -> dict[str, str]
                     or None
                 ),
                 from_me=False,
+                sender_type="customer",
                 created_at=datetime.utcnow(),
             )
             db.add(inbound_message)

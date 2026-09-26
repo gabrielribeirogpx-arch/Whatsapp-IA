@@ -270,12 +270,13 @@ def _match_score(rule: BotRule, incoming_text: str) -> tuple[int, int] | None:
     return None
 
 
-def _create_outbound_message(db: Session, conversation_id, tenant_id, text: str) -> Message:
+def _create_outbound_message(db: Session, conversation_id, tenant_id, text: str, *, sender_type: str = "automation") -> Message:
     reply_message = Message(
         conversation_id=conversation_id,
         tenant_id=tenant_id,
         text=text,
         from_me=True,
+        sender_type=sender_type,
         created_at=datetime.utcnow(),
     )
     db.add(reply_message)
