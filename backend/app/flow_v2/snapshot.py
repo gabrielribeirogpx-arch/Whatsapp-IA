@@ -30,6 +30,7 @@ class FlowV2Snapshot:
     start_node_id: str
     snapshot_schema_version: int = 1
     transitions: tuple[dict[str, Any], ...] = ()
+    flow_id: UUID | None = None
 
     @property
     def node_by_id(self) -> dict[str, dict[str, Any]]:
@@ -245,6 +246,7 @@ class FlowV2SnapshotRepository:
 
         loaded_snapshot = FlowV2Snapshot(
             flow_version_id=version.id,
+            flow_id=version.flow_id,
             tenant_id=tenant_id,
             hash=expected_hash,
             nodes=tuple(dict(node) for node in nodes),
