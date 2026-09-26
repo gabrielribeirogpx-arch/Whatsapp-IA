@@ -35,7 +35,10 @@ FINAL_SESSION_STATUSES = {"completed", "converted", "abandoned", "expired"}
 
 class FlowSession(Base):
     __tablename__ = "flow_sessions"
-    __table_args__ = (Index("ix_flow_sessions_tenant_completed_at", "tenant_id", "completed_at"),)
+    __table_args__ = (
+        Index("ix_flow_sessions_tenant_completed_at", "tenant_id", "completed_at"),
+        Index("ix_flow_sessions_tenant_abandoned_at", "tenant_id", "abandoned_at"),
+    )
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     tenant_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     flow_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
@@ -49,6 +52,7 @@ class FlowSession(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    abandoned_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
 
@@ -76,3 +80,10 @@ def _capture_completed_at(target: FlowSession, value, oldvalue, initiator) -> No
     """Capture the first completion; later updates or reopening preserve it."""
     if str(value).lower() == "completed" and getattr(target, "completed_at", None) is None:
         target.completed_at = datetime.utcnow()
+
+
+@event.listens_for(FlowSession.status, "set", retval=False)
+def _capture_abandoned_at(target: FlowSession, value, oldvalue, initiator) -> None:
+    """Capture the first explicit abandoned/expired transition, including resets."""
+    if str(value).lower() in {"abandoned", "expired"} and getattr(target, "abandoned_at", None) is None:
+        target.abandoned_at = datetime.utcnow()

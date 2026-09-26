@@ -18,6 +18,9 @@ from app.models.lead import LeadStatus
 from app.services.dashboard_time import percentage_delta
 
 
+RESPONSE_SENDER_TYPES = ("human_agent", "ai", "automation")
+
+
 def get_moved_conversations(db: Session, tenant_id: Any, start: datetime, end: datetime) -> int:
     """Conversations whose last mutation belongs to the selected window."""
     return int(db.execute(select(func.count(Conversation.id)).where(
@@ -48,28 +51,28 @@ def get_conversions(db: Session, tenant_id: Any, start: datetime, end: datetime)
 def get_response_rate(db: Session, tenant_id: Any, start: datetime, end: datetime) -> tuple[float | None, int, int]:
     """Responded inbound conversations / inbound conversations.
 
-    A response is any ``from_me`` message after an eligible inbound.  Message
-    authorship does not currently distinguish a human from bot/AI. Replies are
-    observed only before ``end``, freezing historical results at the period edge.
+    A response is a canonically-authored human, AI, or automation message after
+    a canonical customer inbound. System and unknown legacy messages do not
+    count. Replies are observed only before ``end``.
     """
     inbound = aliased(Message)
     outbound = aliased(Message)
     inbound_conversations = select(inbound.conversation_id).where(
         inbound.tenant_id == tenant_id,
-        inbound.from_me.is_(False),
+        inbound.sender_type == "customer",
         inbound.created_at >= start,
         inbound.created_at < end,
     ).distinct().subquery()
     denominator = int(db.execute(select(func.count()).select_from(inbound_conversations)).scalar() or 0)
     responded = select(inbound.conversation_id).where(
         inbound.tenant_id == tenant_id,
-        inbound.from_me.is_(False),
+        inbound.sender_type == "customer",
         inbound.created_at >= start,
         inbound.created_at < end,
         select(outbound.id).where(
             outbound.tenant_id == tenant_id,
             outbound.conversation_id == inbound.conversation_id,
-            outbound.from_me.is_(True),
+            outbound.sender_type.in_(RESPONSE_SENDER_TYPES),
             outbound.created_at > inbound.created_at,
             outbound.created_at < end,
         ).exists(),
@@ -126,22 +129,24 @@ def get_channel_distribution(db: Session, tenant_id: Any, start: datetime, end: 
     return items, total
 
 
-def response_cycle_delays(rows: list[tuple[Any, datetime, bool]], start: datetime, end: datetime) -> list[float]:
+def response_cycle_delays(rows: list[tuple], start: datetime, end: datetime) -> list[float]:
     """Return delays for first-inbound/first-response cycles initiated in window."""
     pending: dict[Any, datetime] = {}
     delays: list[float] = []
-    for conversation_id, created_at, from_me in rows:
-        if from_me and created_at < end:
+    for row in rows:
+        conversation_id, created_at, from_me = row[:3]
+        sender_type = row[3] if len(row) > 3 else ("automation" if from_me else "customer")
+        if sender_type in RESPONSE_SENDER_TYPES and created_at < end:
             inbound_at = pending.pop(conversation_id, None)
             if inbound_at is not None and created_at > inbound_at:
                 delays.append((created_at - inbound_at).total_seconds())
-        elif start <= created_at < end and conversation_id not in pending:
+        elif sender_type == "customer" and start <= created_at < end and conversation_id not in pending:
             pending[conversation_id] = created_at
     return delays
 
 
 def get_average_response_time(db: Session, tenant_id: Any, start: datetime, end: datetime) -> tuple[float | None, int]:
-    rows = db.execute(select(Message.conversation_id, Message.created_at, Message.from_me).where(
+    rows = db.execute(select(Message.conversation_id, Message.created_at, Message.from_me, Message.sender_type).where(
         Message.tenant_id == tenant_id,
         Message.created_at >= start,
         Message.created_at < end,
@@ -160,7 +165,7 @@ def get_completed_sessions(db: Session, tenant_id: Any, start: datetime, end: da
 
 
 def get_abandonment_rate(db: Session, tenant_id: Any, start: datetime, end: datetime) -> tuple[float | None, int, int]:
-    """Final observed abandoned/expired status among sessions created in window.
+    """Sessions abandoned in-time among sessions created in the window.
 
     Open sessions remain in the denominator.  This makes the cohort explicit and
     ensures the numerator is always a subset of the denominator.
@@ -174,7 +179,8 @@ def get_abandonment_rate(db: Session, tenant_id: Any, start: datetime, end: date
         FlowSession.tenant_id == tenant_id,
         FlowSession.created_at >= start,
         FlowSession.created_at < end,
-        FlowSession.status.in_(["abandoned", "expired"]),
+        FlowSession.abandoned_at >= start,
+        FlowSession.abandoned_at < end,
     )).scalar() or 0)
     return (round(numerator / denominator * 100, 2) if denominator else None, numerator, denominator)
 

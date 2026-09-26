@@ -241,7 +241,7 @@ def _runtime_commit() -> str:
     return completed.stdout.strip() or "unknown"
 
 
-def _record_outbound_message(*, db, tenant_id: uuid.UUID, phone: str, text: str, message_id: str, flow_id: Any = None, flow_version_id: Any = None, flow_session_id: Any = None, node_id: Any = None) -> None:
+def _record_outbound_message(*, db, tenant_id: uuid.UUID, phone: str, text: str, message_id: str, flow_id: Any = None, flow_version_id: Any = None, flow_session_id: Any = None, node_id: Any = None, sender_type: str | None = None) -> None:
     if not register_processed_message(db=db, tenant_id=tenant_id, message_id=message_id):
         logger.info("[OUTBOUND MESSAGE RECORD SKIPPED_DUPLICATE] tenant_id=%s conversation_id=%s flow_id=%s node_id=%s", tenant_id, "n/a", flow_id, node_id)
         return
@@ -264,6 +264,7 @@ def _record_outbound_message(*, db, tenant_id: uuid.UUID, phone: str, text: str,
         conversation_id=conversation.id,
         text=text,
         from_me=True,
+        sender_type=sender_type,
     )
     conversation.updated_at = outbound.created_at
     db.add(outbound)
@@ -1232,6 +1233,13 @@ def send_whatsapp_message(*, message_data: dict[str, Any]) -> None:
                 flow_version_id=flow_version_id,
                 flow_session_id=flow_session_id,
                 node_id=node_id,
+                # Flow metadata proves automation. Generic queued sends remain
+                # unknown unless their producer supplied canonical authorship.
+                sender_type=(message_data.get("sender_type") or (
+                    "ai" if str(message_data.get("node_type") or "").lower().startswith("ai_")
+                    else "automation" if any((flow_id, flow_version_id, flow_session_id, node_id))
+                    else None
+                )),
             )
         _record_observability_event_best_effort(trace, TraceEventType.MESSAGE_SENT, metadata={"job_id": job_id, "message_type": message_type, "node_id": node_id, "provider_id": provider_id})
         logger.info("[WORKER EXIT SUCCESS] job_id=%s", job_id)

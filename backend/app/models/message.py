@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Index, String
+from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, Index, String
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship, validates
 
@@ -14,6 +14,11 @@ class Message(TenantMixin, Base):
     __table_args__ = (
         Index("idx_messages_conversation_time", "conversation_id", "created_at"),
         Index("idx_messages_tenant_time", "tenant_id", "created_at"),
+        Index("ix_messages_tenant_sender_created_at", "tenant_id", "sender_type", "created_at"),
+        CheckConstraint(
+            "sender_type IS NULL OR sender_type IN ('customer', 'human_agent', 'ai', 'automation', 'system')",
+            name="ck_messages_sender_type",
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -23,6 +28,9 @@ class Message(TenantMixin, Base):
     # routing remains unchanged.  The optional title is presentation-only.
     interactive_title: Mapped[str | None] = mapped_column(String, nullable=True)
     from_me: Mapped[bool] = mapped_column(Boolean)
+    # Nullable by design: legacy rows and send paths without positive evidence
+    # must remain unknown rather than receiving inferred authorship.
+    sender_type: Mapped[str | None] = mapped_column(String(24), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     conversation = relationship("Conversation", back_populates="messages", lazy="select")

@@ -539,6 +539,7 @@ async def send_message(
             text=message_text,
             created_at=datetime.utcnow(),
             from_me=True,
+            sender_type="human_agent",
         )
         print("[SEND_MESSAGE STEP 9]")
         db.add(message)

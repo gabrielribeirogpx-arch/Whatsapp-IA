@@ -488,6 +488,7 @@ def process_incoming_message(payload: dict[str, Any]) -> None:
                 or None
             ),
             from_me=False,
+            sender_type="customer",
             created_at=datetime.utcnow(),
         )
         db.add(inbound)

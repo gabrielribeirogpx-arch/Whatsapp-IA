@@ -64,6 +64,19 @@ def test_response_at_exclusive_period_end_is_not_observed():
     assert response_cycle_delays(rows, START, END) == []
 
 
+def test_canonical_authorship_excludes_system_and_distinguishes_responders():
+    rows = [
+        ("a", START, False, "customer"),
+        ("a", START + timedelta(seconds=1), True, "system"),
+        ("a", START + timedelta(seconds=2), True, "human_agent"),
+        ("b", START, False, "customer"),
+        ("b", START + timedelta(seconds=3), True, "ai"),
+        ("c", START, False, "customer"),
+        ("c", START + timedelta(seconds=4), True, "automation"),
+    ]
+    assert response_cycle_delays(rows, START, END) == [2.0, 3.0, 4.0]
+
+
 def test_inbound_after_window_does_not_start_response_cycle():
     rows = [("a", END, False), ("a", END + timedelta(minutes=2), True)]
     assert response_cycle_delays(rows, START, END) == []
@@ -76,6 +89,7 @@ def test_abandonment_uses_one_created_at_cohort_and_never_exceeds_100():
     assert (rate, abandoned, started) == (100.0, 4, 4)
     statements = [str(statement) for statement in db.statements]
     assert all("created_at" in statement and "tenant_id" in statement for statement in statements)
+    assert "abandoned_at" in statements[1]
 
 
 def test_abandonment_without_sessions_is_unavailable():
