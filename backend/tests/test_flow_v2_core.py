@@ -421,6 +421,68 @@ def test_message_initial_then_choice_emits_real_interactive_buttons_action() -> 
     assert "CHOICE_SHOWN" in _event_types(event_store)
 
 
+def test_fixed_choice_saves_option_value_without_changing_handle_routing() -> None:
+    raw_snapshot = {
+        "schema_version": 1,
+        "start_node_id": "choice",
+        "nodes": [
+            {"id": "choice", "type": "choice", "data": {
+                "isStart": True,
+                "content": "Escolha o tipo",
+                "options_mode": "fixed",
+                "result_variable": "appointment_type",
+                "options": [
+                    {"id": "consulta-id", "label": "Consulta", "value": "Consulta", "source_handle": "consulta-handle"},
+                    {"id": "avaliacao-id", "label": "Avaliação", "value": "Avaliação", "source_handle": "avaliacao-handle"},
+                ],
+            }},
+            {"id": "end", "type": "message", "data": {"content": "{{appointment_type}}", "is_terminal": True}},
+        ],
+        "edges": [
+            {"id": "avaliacao", "source": "choice", "sourceHandle": "avaliacao-handle", "target": "end"},
+        ],
+    }
+    executor, snapshot, events, session, db = _executor(raw_snapshot)
+    session.current_node_id = "choice"
+
+    executor.handle_input(db, _input_with_id(snapshot, "fixed-choice-initial"))
+    selected = executor.handle_input(
+        db,
+        _input_with_id(snapshot, "fixed-choice-selected", {"row_id": "avaliacao-id"}),
+    )
+
+    assert session.variables["appointment_type"] == "Avaliação"
+    assert selected.actions[-1].text == "Avaliação"
+    assert any(
+        event["event_type"] == "TRANSITION_SELECTED"
+        and event["payload"]["source_handle"] == "avaliacao-handle"
+        for event in events.events
+    )
+
+
+def test_fixed_choice_without_result_variable_preserves_legacy_no_write_behavior() -> None:
+    raw_snapshot = {
+        "schema_version": 1,
+        "start_node_id": "choice",
+        "nodes": [
+            {"id": "choice", "type": "choice", "data": {
+                "isStart": True,
+                "content": "Escolha",
+                "options": [{"id": "consulta", "label": "Consulta", "value": "Consulta"}],
+            }},
+            {"id": "end", "type": "message", "data": {"content": "Fim", "is_terminal": True}},
+        ],
+        "edges": [{"id": "next", "source": "choice", "sourceHandle": "consulta", "target": "end"}],
+    }
+    executor, snapshot, _events, session, db = _executor(raw_snapshot)
+    session.current_node_id = "choice"
+
+    executor.handle_input(db, _input_with_id(snapshot, "legacy-fixed-initial"))
+    executor.handle_input(db, _input_with_id(snapshot, "legacy-fixed-selected", {"row_id": "consulta"}))
+
+    assert session.variables == {}
+
+
 @pytest.mark.parametrize("items", [[], [{"id": "slot1", "label": "09:00"}], [
     {"id": "slot1", "label": "09:00", "description": "Dr. João", "icon": "📅"},
     {"id": "slot2", "label": "11:00", "description": "Dr. João"},
